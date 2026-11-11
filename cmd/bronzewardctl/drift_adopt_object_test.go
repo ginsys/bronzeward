@@ -347,6 +347,59 @@ func TestDriftAdoptObject_PausedThenSaveFails(t *testing.T) {
 	}
 }
 
+// wantReadCommand fails where s is unknown with an accepted write and its command is not a read of what
+// the write started: import status or operation show, never the repeat of the write (contract lines
+// 940-941). A write that was never confirmed accepted keeps the keyed repeat, which is not covered here.
+func wantReadCommand(t *testing.T, s compositeStep) {
+	t.Helper()
+	if s.State != stateUnknown {
+		t.Errorf("step %d is %v; want unknown", s.Step, s.State)
+	}
+	if !strings.HasPrefix(s.Command, "bronzewardctl import status ") && !strings.HasPrefix(s.Command, "bronzewardctl operation show ") {
+		t.Errorf("step %d is unknown with the command %q; want import status or operation show, never the repeat of the write", s.Step, s.Command)
+	}
+}
+
+// TestDriftAdoptObject_LapsedClaim: contract lines 924-929 and 940-941: an import whose claim lapsed
+// while its operation still runs is unknown with exit 3, and its command is import status, which reads
+// the claim, never the drift adopt repeat, which would start another import.
+func TestDriftAdoptObject_LapsedClaim(t *testing.T) {
+	f := adoptChainServer(t)
+	f.imp.set("held", 1, -time.Hour, "running", "", "", ev("started", `{"type":"started"}`))
+	code, obj, _, errOut := adoptObject(t)
+	wantStates(t, obj, stateUnknown, stateNotRun, stateNotRun)
+	wantReadCommand(t, obj.Steps[0])
+	if code != 3 || obj.Steps[0].Command != "bronzewardctl import status 'ing_BWSYNTH'" {
+		t.Errorf("exit %d, step 1 %+v, stderr %q; want 3 and the import status command", code, obj.Steps[0], errOut)
+	}
+}
+
+// TestDriftAdopt_TableSaveFailsKeepsTheTextOutput: the table output of drift adopt does not change
+// (operator-experience.md §5.8, the first paragraph): a client that cannot keep the epoch after the
+// import ended prints the later steps as before, and does not read the import again, which only the
+// structured object needs to state step 1.
+func TestDriftAdopt_TableSaveFailsKeepsTheTextOutput(t *testing.T) {
+	f := adoptChainServer(t)
+	f.moveInFollow = true
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward")
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	old := f.imp.onIngested
+	f.imp.onIngested = func() {
+		old()
+		if err := os.Chmod(dir, 0o500); err != nil {
+			t.Errorf("the configuration directory stays writable: %v", err)
+		}
+	}
+	code, out, errOut := runDrift(t, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH")
+	f.mu.Lock()
+	rereads := f.rereads
+	f.mu.Unlock()
+	if code == 0 || !strings.Contains(errOut, "keeping the epoch") || !strings.Contains(out, "The later steps:\n") ||
+		strings.Contains(out, "the context could not be saved") || rereads != 1 {
+		t.Errorf("exit %d, stdout %q, stderr %q, reads of the import %d; want a nonzero exit, the later steps, no reread and no recovery text", code, out, errOut, rereads)
+	}
+}
+
 // TestDriftAdoptObject_RereadFails: contract lines 924-929 and 940-941: when the read of an accepted
 // import that step 1 ends with fails, step 1 is unknown and its command is the one the table output
 // names, import status, never the drift adopt repeat, which would write again.
@@ -355,6 +408,7 @@ func TestDriftAdoptObject_RereadFails(t *testing.T) {
 	f.failReread = true
 	code, obj, _, errOut := adoptObject(t)
 	wantStates(t, obj, stateUnknown, stateNotRun, stateNotRun)
+	wantReadCommand(t, obj.Steps[0])
 	if code == 0 || obj.Steps[0].Command != "bronzewardctl import status 'ing_BWSYNTH'" || obj.Steps[0].Answer == nil {
 		t.Errorf("exit %d, step 1 %+v, stderr %q; want a nonzero exit, the import status command and the accepted answer", code, obj.Steps[0], errOut)
 	}
@@ -368,6 +422,7 @@ func TestDriftAdoptObject_OperationNotRead(t *testing.T) {
 	f.failIngOp = true
 	code, obj, _, errOut := adoptObject(t)
 	wantStates(t, obj, stateUnknown, stateNotRun, stateNotRun)
+	wantReadCommand(t, obj.Steps[0])
 	if code == 0 || obj.Steps[0].Command != "bronzewardctl operation show 'op_BWSYNTH-ing'" {
 		t.Errorf("import: exit %d, step 1 %+v, stderr %q; want a nonzero exit and the operation show command", code, obj.Steps[0], errOut)
 	}
@@ -376,6 +431,7 @@ func TestDriftAdoptObject_OperationNotRead(t *testing.T) {
 	g.failPubOp = true
 	code, obj, _, errOut = adoptObject(t)
 	wantStates(t, obj, stateDone, stateUnknown, stateNotRun)
+	wantReadCommand(t, obj.Steps[1])
 	if code == 0 || obj.Steps[1].Command != "bronzewardctl operation show 'op_BWSYNTH-pub'" {
 		t.Errorf("publication: exit %d, step 2 %+v, stderr %q; want a nonzero exit and the operation show command", code, obj.Steps[1], errOut)
 	}

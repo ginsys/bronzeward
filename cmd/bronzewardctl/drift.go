@@ -416,9 +416,10 @@ func (e *env) driftAdopt(args []string) (err error) {
 	co.begin(1)
 	c, a, err := e.ingest("drift adopt", "drift-adoption", importArgs)
 	// A client that could not save its context after the import ended well or paused leaves the state of
-	// the import to be read: it is read here as after any follow, so a paused import stays paused.
+	// the import to be read: it is read here as after any follow, so a paused import stays paused. Only
+	// the object needs that state; the table output stays as it was and prints the later steps (§5.8).
 	var lost saveFailed
-	if err != nil && !(errors.As(err, &lost) && c != nil && a.Ingestion != "") {
+	if err != nil && !(e.output != "table" && errors.As(err, &lost) && c != nil && a.Ingestion != "") {
 		co.settle(1, err)
 		return errors.Join(err, e.say(append([]string{"The later steps:"}, from(2, "")...)...))
 	}

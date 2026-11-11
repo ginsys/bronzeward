@@ -212,7 +212,9 @@ func (co *collector) release(r string) {
 func (co *collector) command(n int, c string) { co.obj.Steps[n-1].Command = c }
 
 // object is the object to print: a step that is not done has a command, the default one unless it was
-// set, and a done step has none.
+// set, and a done step has none. A step that is unknown after an accepted write never gets the default,
+// which is the repeat of that write: its command is the read of what the write started, whatever error
+// left it unknown (§5.8, the command).
 func (co *collector) object() adoption {
 	out := co.obj
 	out.Steps = append([]compositeStep(nil), co.obj.Steps...)
@@ -221,9 +223,31 @@ func (co *collector) object() adoption {
 		switch {
 		case s.State == stateDone:
 			s.Command = ""
+		case s.Command == "" && s.State == stateUnknown && co.accepted[i]:
+			s.Command = readCommand(i+1, s.Answer)
 		case s.Command == "":
 			s.Command = strings.TrimSpace(adoptStep(i+1, out.Machine, out.Draft, "")[1])
 		}
 	}
 	return out
+}
+
+// readCommand is the command that reads what the accepted write of step n started, from the answer the
+// server gave to it: import status for the import, operation show for the publication or the plan. An
+// answer that names nothing to read, such as one that cannot be nested, gives the list of the operations,
+// which is still a read.
+func readCommand(n int, answer json.RawMessage) string {
+	var a struct{ Ingestion, Operation, ID string }
+	_ = json.Unmarshal(answer, &a)
+	switch {
+	case n == 1 && a.Ingestion != "":
+		return "bronzewardctl import status " + client.ShellWord(a.Ingestion)
+	case a.Operation != "":
+		return "bronzewardctl operation show " + client.ShellWord(a.Operation)
+	case n == 2 && a.ID != "":
+		return "bronzewardctl operation show " + client.ShellWord(a.ID)
+	case n == 2:
+		return "bronzewardctl operation list --kind publish"
+	}
+	return "bronzewardctl operation list"
 }
