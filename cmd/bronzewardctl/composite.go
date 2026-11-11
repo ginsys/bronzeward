@@ -75,6 +75,13 @@ type afterEnd struct{ error }
 
 func (e afterEnd) Unwrap() error { return e.error }
 
+// saveFailed is the afterEnd of a client that could not save its context after a follow that ended well
+// or paused for review. The import ended in a state the server answered, so drift adopt reads that state
+// again before it settles step 1; a paused import stays paused (operator-experience.md §5.8).
+type saveFailed struct{ afterEnd }
+
+func (e saveFailed) Unwrap() error { return e.afterEnd }
+
 // classify is the state a step's error gives it, by the type of the error alone. accepted says that the
 // server answered the step's write with success, which tells a refused write from a refused later read.
 //
@@ -160,7 +167,12 @@ func (co *collector) settle(n int, err error) {
 	s.State = classify(err, co.accepted[n-1])
 	// A done step keeps the error that left its result unread (§5.8, the error member).
 	if err != nil {
-		s.Error = client.Shown(err)
+		// The note that the answer cannot be read, which record set, stays beside the later error.
+		shown := client.Shown(err)
+		if s.Error != "" {
+			shown = s.Error + "\n" + shown
+		}
+		s.Error = shown
 	}
 	// A run that recorded resume-failed is read with import status, not restarted (§5.8, the failed state).
 	var resume resumeFailedErr

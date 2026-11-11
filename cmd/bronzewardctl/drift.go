@@ -409,7 +409,10 @@ func (e *env) driftAdopt(args []string) (err error) {
 	}
 	co.begin(1)
 	c, a, err := e.ingest("drift adopt", "drift-adoption", importArgs)
-	if err != nil {
+	// A client that could not save its context after the import ended well or paused leaves the state of
+	// the import to be read: it is read here as after any follow, so a paused import stays paused.
+	var lost saveFailed
+	if err != nil && !(errors.As(err, &lost) && c != nil && a.Ingestion != "") {
 		co.settle(1, err)
 		return errors.Join(err, e.say(append([]string{"The later steps:"}, from(2, "")...)...))
 	}
@@ -417,6 +420,9 @@ func (e *env) driftAdopt(args []string) (err error) {
 	// failed read leaves the steps unrun, so they are printed.
 	b, bind, err := readIngestionBound(c, a.Ingestion)
 	saved := c.Save()
+	if saved == nil && lost.afterEnd.error != nil {
+		saved = lost
+	}
 	// The step's state is what the server answered: a failed read leaves it unknown, and a client that
 	// cannot save changes no state (§5.8, the exit codes).
 	switch {

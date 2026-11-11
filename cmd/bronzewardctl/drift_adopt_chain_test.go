@@ -33,6 +33,9 @@ type adoptChain struct {
 	// other answer does: the epoch changed and came back. rereads counts those GETs.
 	moveOnReread bool
 	rereads      int
+	// moveInFollow makes the first GET of the ingestion, the one the follow of step 1 makes, answer
+	// ep_BWSYNTH-2, so the client has an epoch to save when that follow ends.
+	moveInFollow bool
 	// moveInPreflight makes the server read after that reread, which is the preflight of the
 	// publication, answer a retryable 503 at ep_BWSYNTH-2 once. The retry answers ep_BWSYNTH-1, so the
 	// epoch moved and came back between the read of the import and the send. preMoved says it did.
@@ -55,7 +58,7 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	moved := f.moved
 	if r.Method == http.MethodGet && path == "/ingestions/ing_BWSYNTH" {
 		f.rereads++
-		moved = moved || (f.moveOnReread && f.rereads == 2)
+		moved = moved || (f.moveOnReread && f.rereads == 2) || (f.moveInFollow && f.rereads == 1)
 	}
 	if f.moveInPreflight && !f.preMoved && f.rereads >= 2 && r.Method == http.MethodGet && path == "/server" {
 		// A retryable 503 that carries the other epoch: the client reads again and gets the first one.
