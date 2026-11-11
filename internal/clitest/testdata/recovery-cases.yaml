@@ -10,7 +10,7 @@
 # Each entry is recovery enter --restored family=database,... --stopped-at ... --reason ..., with
 # enter typed back, signed in as h-recovery through the oidc context "human".
 # REC-04 (b), the server losing its own COMMIT reply, needs a server-side fault hook the server
-# binary does not have; its client side waits for that hook (#263).
+# binary does not have; its client side waits for that hook (#366).
 
 - id: REC-02
   setup: 'first: serve started normally; second: serve started with -recovery-start, after REC-04 committed its entry under another key'

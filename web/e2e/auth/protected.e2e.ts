@@ -1,7 +1,7 @@
 // The protected import review (ginsys/bronzeward#341, client contracts §11 and the cases PROT-01,
 // PROT-03, PROT-04, PROT-05 and PROT-06 cases 1 to 3) against the disposable deployment, whose
 // provider is mise run dev-bao's OpenBao behind the proxy of bao.ts. PROT-06 case 4 waits for a
-// server-side fault hook (ginsys/bronzeward#263) and is not run here.
+// server-side fault hook (ginsys/bronzeward#366) and is not run here.
 // Nothing here reads, prints or keeps a review: the page holds the review text in its memory, and a
 // case asks the page only whether it holds one. A document never crosses WebDriver, whose log the
 // artifact scan reads: the page fetches it from the synthetic provider (putDocument). The marks are
