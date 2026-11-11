@@ -203,15 +203,19 @@ func (co *collector) pause(ingestion string) {
 
 // reread settles step 1 by the state the re-read of the import answered, where that state is not
 // released and not paused: held and resumed leave the outcome unknown, abandoned is failed, and the
-// command is import status, which reads the import (operator-experience.md §5.8, the re-read). The exit
-// and the error are not touched: they stay those of the text output.
-func (co *collector) reread(ingestion, state string) {
+// command is import status, which reads the import (operator-experience.md §5.8, the re-read). The
+// exit is not touched: it stays the one of the text output. The error of the step is the line the
+// command prints for the failed save, where there is one.
+func (co *collector) reread(ingestion, state string, saved error) {
 	s := &co.obj.Steps[0]
 	s.State = stateUnknown
 	if state == "abandoned" {
 		s.State = stateFailed
 	}
 	s.Command = "bronzewardctl import status " + client.ShellWord(ingestion)
+	if saved != nil {
+		s.Error = client.Shown(saved)
+	}
 }
 
 // release names the release a done publication made; the plan step's command carries it from then on.

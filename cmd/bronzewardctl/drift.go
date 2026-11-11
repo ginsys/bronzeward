@@ -448,7 +448,7 @@ func (e *env) driftAdopt(args []string) (err error) {
 		co.pause(b.Id)
 	default:
 		// Held, resumed or abandoned: the import changed after the follow ended, so it is not paused.
-		co.reread(b.Id, b.State)
+		co.reread(b.Id, b.State, saved)
 	}
 	if err != nil || saved != nil {
 		// A failed read leaves the state unknown; a read that worked and a save that did not leaves it known.

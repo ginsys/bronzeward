@@ -374,6 +374,10 @@ func TestDriftAdoptObject_ImportChangedBeforeTheReread(t *testing.T) {
 			if code == 0 || !strings.Contains(errOut, "keeping the epoch") || obj.Steps[0].Command != "bronzewardctl import status 'ing_BWSYNTH'" {
 				t.Errorf("exit %d, step 1 %+v, stderr %q; want a nonzero exit naming the epoch that could not be kept, and the import status command", code, obj.Steps[0], errOut)
 			}
+			// A step that is not done carries the error (§5.8, the error member): here the failed save.
+			if !strings.Contains(obj.Steps[0].Error, "keeping the epoch") {
+				t.Errorf("step 1 error %q; want the failed save, which standard error names", obj.Steps[0].Error)
+			}
 		})
 	}
 }
