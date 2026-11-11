@@ -13,6 +13,7 @@ import { Id, Ref, short, useItem, usePending, useReads } from "./list.tsx";
 import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action } from "./shell.tsx";
 import { Status } from "./states.tsx";
+import type { Outcome } from "./write.ts";
 
 type S = components["schemas"];
 type Draft = S["DraftBody"];
@@ -69,8 +70,9 @@ function Progress({ op, draft }: { op: string; draft: string }) {
       if (!terminal(r.operation.state)) return show({ type: "end", text: notEstablished(op) });
       if (r.epoch === undefined || r.epoch !== client.currentEpoch) return show({ type: "end", text: notEstablished(op) });
       const e = publishEnd(r.operation);
-      // A published draft takes no write: its ETag is forgotten once the operation is known to have succeeded.
-      if ("release" in e) forgetETag(draft);
+      // A published draft takes no write: its ETag is forgotten once the operation is known to have succeeded,
+      // whether or not its result names the release (the CLI does the same).
+      if (r.operation.state === "succeeded") forgetETag(draft);
       show({ type: "end", text: "release" in e ? <>Publication succeeded: release <Id id={e.release} /> was published. {SENT_NOTHING}</> : e.text });
     });
     return () => abort.abort();
@@ -113,7 +115,9 @@ function Publish({ id }: { id: string }) {
   const publish = () => {
     const ifMatch = keptETag(id, epoch);
     setNote(ifMatch === undefined ? NO_ETAG : undefined);
-    if (ifMatch !== undefined) send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, ifMatch, resource: `/drafts/${id}` });
+    // A 412 says the kept ETag is stale: it is forgotten, so Publish sends nothing until the draft is read again.
+    const settled = (s: Outcome) => void (s.kind === "refused" && s.status === 412 && forgetETag(id));
+    if (ifMatch !== undefined) send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, ifMatch, resource: `/drafts/${id}`, settled });
   };
   const busy = w !== undefined && (o === undefined || o.kind === "done" || o.kind === "unknown");
   return (
