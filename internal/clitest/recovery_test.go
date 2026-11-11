@@ -110,6 +110,33 @@ func TestRecovery(t *testing.T) {
 		t.Errorf("--no-input: sent %v", seen)
 	}
 
+	// REC-01's recovery acts, before the entry (#362): a recovery start serves only the entry, so each
+	// act shows the process's restriction, names no scope and sends no write.
+	beforeActs := f.actCount()
+	for _, args := range [][]string{
+		{"recovery", "takeover", "op_1", "--reason", "BWSYNTH drill"},
+		{"recovery", "resolve", "op_1", "--reason", "BWSYNTH drill"},
+		{"recovery", "scope-account", s.machine, "--start", "obs_s", "--end", "obs_e"},
+		{"recovery", "account", "op_1", "att_1", "--start", "obs_s", "--end", "obs_e"},
+		{"recovery", "mark", s.machine},
+		{"recovery", "release", s.machine},
+	} {
+		in.set(nil, nil)
+		r := ctl("", args...)
+		f.want(r, 1, "409", "Recovery mode: the server was started for recovery:", "A restriction of the process, not of one scope")
+		if strings.Contains(r.err, "the scope of machine") {
+			t.Errorf("%s: the process's refusal names a scope:\n%s", args[1], r.err)
+		}
+		for _, req := range in.requests() {
+			if strings.HasPrefix(req, "POST ") {
+				t.Errorf("%s: sent %s", args[1], req)
+			}
+		}
+	}
+	if n := f.actCount(); n != beforeActs {
+		t.Errorf("the refused recovery acts recorded %d acts, want none", n-beforeActs)
+	}
+
 	// REC-04 (a): the entry commits and the injector drops its 201.
 	var posts sent
 	in.set(posts.posting(func(n int, w http.ResponseWriter, r *http.Request) {
@@ -149,6 +176,16 @@ func TestRecovery(t *testing.T) {
 	f.want(ctl("", "recovery", "status"), 0, "Recovery mode", "on", "BWSYNTH drill",
 		s.machine, "pre-restore-unaccounted", "recovery scope-account '"+s.machine+"'")
 	f.want(ctl("", "recovery", "exit"), 1, "409", "The first scope not released: machine '"+s.machine+"', 'pre-restore-unaccounted'.")
+	// REC-01's recovery acts, after the entry (#362): a mark and a release of the pre-restore-unaccounted
+	// scope are refused for that scope, with the accounting as the next step and no process restriction.
+	for _, verb := range []string{"mark", "release"} {
+		r := ctl("", "recovery", verb, s.machine)
+		f.want(r, 1, "409", "Recovery mode: the scope of machine "+s.machine+" is pre-restore-unaccounted.",
+			"Next: account the scope first: recovery scope-account '"+s.machine+"'.")
+		if strings.Contains(r.err, "started for recovery") {
+			t.Errorf("recovery %s: the scope's refusal holds the process's restriction:\n%s", verb, r.err)
+		}
+	}
 	// A token without recovery-admin: the three commands that send a recovery write show the 403
 	// and the role they need (client-contracts.md §9.6). Typed confirmations are given, so the
 	// refusal is the server's. The accountings read observations first; a seeded machine has none,

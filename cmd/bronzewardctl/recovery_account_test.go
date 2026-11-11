@@ -27,7 +27,8 @@ func accAnswers(post string) map[string]string {
 			`{"id":"obs_s","purpose":"routine","resourceVersion":"7","startedAt":"2026-11-01T09:00:00Z","at":"2026-11-01T09:00:02Z"},` +
 			`{"id":"obs_e","purpose":"recovery","resourceVersion":"7","startedAt":"2026-11-01T09:01:00Z","at":"2026-11-01T09:01:02Z"},` +
 			`{"id":"obs_m","purpose":"recovery","resourceVersion":"8","startedAt":"2026-11-01T09:01:00Z","at":"2026-11-01T09:01:02Z"},` +
-			`{"id":"obs_n","purpose":"routine","resourceVersion":"7","startedAt":"2026-11-01T09:01:00Z","at":"2026-11-01T09:01:02Z"}]}`,
+			`{"id":"obs_n","purpose":"routine","resourceVersion":"7","startedAt":"2026-11-01T09:01:00Z","at":"2026-11-01T09:01:02Z"},` +
+			`{"id":"obs_v","purpose":"recovery","startedAt":"2026-11-01T09:01:00Z","at":"2026-11-01T09:01:02Z"}]}`,
 		"GET /api/v1/operations/op_1": `{"id":"op_1","kind":"apply-config","state":"unresolved","subject":{"machine":"mch_a"},` +
 			`"attempts":[{"id":"att_1","number":1,"generation":2,"transportDeadline":"2026-11-01T08:50:00Z"}]}`,
 		"GET /api/v1/machines/mch_a/timeline?order=newest": `{"items":[{"kind":"scope-state","revision":9,"epoch":"ep_BWSYNTH-1","entry":{"to":"blocked",` +
@@ -75,6 +76,8 @@ func TestAccountRefusals(t *testing.T) {
 		{"end is not a recovery observation", "its purpose is routine, not recovery", []string{"recovery", "scope-account", "mch_a", "--start", "obs_s", "--end", "obs_n"}},
 		{"same observation", "are the same observation", []string{"recovery", "scope-account", "mch_a", "--start", "obs_e", "--end", "obs_e"}},
 		{"unknown start", "no such observation of machine mch_a", []string{"recovery", "account", "op_1", "att_1", "--start", "obs_x", "--end", "obs_e"}},
+		{"no version at the start", "--start obs_v: it read no machine-configuration resource version", []string{"recovery", "scope-account", "mch_a", "--start", "obs_v", "--end", "obs_e"}},
+		{"no version at the end", "--end obs_v: it read no machine-configuration resource version", []string{"recovery", "account", "op_1", "att_1", "--start", "obs_s", "--end", "obs_v"}},
 		{"moved without explanation", "moved from 7 to 8", []string{"recovery", "scope-account", "mch_a", "--start", "obs_s", "--end", "obs_m"}},
 		{"explanation too long", "at most 1024 bytes", append(slices.Clone(scopeArgs), "--explanation", strings.Repeat("x", 1025))},
 	} {
@@ -174,6 +177,8 @@ func TestAccountSettleCauses(t *testing.T) {
 	}{
 		{"the start observation obs_s is not the first successful read of the machine after the transport deadline", "machine observations 'mch_a'"},
 		{"the end observation obs_e is not a recovery observation", "give a recovery observation as --end"},
+		{"the observation obs_e was not read at both ends of the settle: the machine-configuration resource version is missing", "give observations that both read the machine-configuration resource version"},
+		{"the end observation obs_e did not begin after the start observation was recorded", "give an --end observation that began after --start was recorded"},
 		{"the end observation began before the settle floor of 30s had elapsed since 2026-11-01T08:51:00Z", "wait until the floor has passed"},
 		{"the machine-configuration resource version changed during the settle and no explanation is recorded", "--explanation <text>"},
 		{"the attempt is already accounted for", "machine timeline 'mch_a'"},

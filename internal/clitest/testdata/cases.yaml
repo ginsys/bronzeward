@@ -90,7 +90,7 @@
 
 - id: REC-01
   setup: context trusted; the PAGE-01 machines
-  action: 'status; then machine show <machine>, twice; then (variants, run by recovery_test.go TestRecovery on a real server) machine freeze <machine>, and machine unfreeze <machine> on a recovery start and on a normal start of the same database'
+  action: 'status; then machine show <machine>, twice; then (variants, run by recovery_test.go TestRecovery on a real server) machine freeze <machine>, and machine unfreeze <machine> on a recovery start and on a normal start of the same database; then the recovery acts (variants, same test): recovery takeover, resolve, scope-account, account, mark and release on a recovery start before the entry, and recovery mark and release of the pre-restore-unaccounted scope after the entry'
   exchange:
     - GET /api/v1/server
     - GET /api/v1/recovery
@@ -98,11 +98,12 @@
     - GET /api/v1/operations?state=unresolved
     - GET /api/v1/machines/<machine>
     - POST /api/v1/machines/<machine>/freezes and /unfreezes (variants)
-  fault: 'status: the injector adds "Bronzeward-Recovery-Mode: true" and rewrites GET /recovery to recovery mode on with one ready scope; machine show: 409 recovery-mode-active, first with machine and scope members, then without. Variants: none; the server refuses the unfreeze itself, with no scope member on a recovery start and with the machine''s scope on a normal start after the entry'
+    - 'the recovery acts (variants): the read each act makes first, refused by the server; no POST'
+  fault: 'status: the injector adds "Bronzeward-Recovery-Mode: true" and rewrites GET /recovery to recovery mode on with one ready scope; machine show: 409 recovery-mode-active, first with machine and scope members, then without. Variants: none; the server refuses the unfreeze itself, with no scope member on a recovery start and with the machine''s scope on a normal start after the entry. Recovery acts: none; the server refuses them itself, with no scope member before the entry, and a mark or release with the machine''s scope after it'
   expect:
     client: shows the recovery banner and the scopes; names the scope, or the process restriction when there is none; an unfreeze says why it is refused, and the scope's reason never follows the process''s refusal
     server: answers the status reads; the injector refuses the machine reads
-    shown: '"RECOVERY MODE is on in trusted", "Scopes: 1: <machine> ready", exit 0; then "the scope of machine <machine> is pre-restore-unaccounted" and "the server was started for recovery", "A restriction of the process, not of one scope" and "record the recovery entry first, then restart the server without the flag to end it", exit 1; variants: the freeze answers "Frozen." and exit 0; the unfreeze on a recovery start shows "Why: a server started for recovery refuses every request but the recovery entry" and "Next: if the recovery entry is not recorded yet, record it with recovery enter", on a normal start "Why: a restore can erase the record of a request" and "Next: recovery status names the next step of each scope", exit 1 each, no act, the machine still frozen'
+    shown: '"RECOVERY MODE is on in trusted", "Scopes: 1: <machine> ready", exit 0; then "the scope of machine <machine> is pre-restore-unaccounted" and "the server was started for recovery", "A restriction of the process, not of one scope" and "record the recovery entry first, then restart the server without the flag to end it", exit 1; variants: the freeze answers "Frozen." and exit 0; the unfreeze on a recovery start shows "Why: a server started for recovery refuses every request but the recovery entry" and "Next: if the recovery entry is not recorded yet, record it with recovery enter", on a normal start "Why: a restore can erase the record of a request" and "Next: recovery status names the next step of each scope", exit 1 each, no act, the machine still frozen; each recovery act before the entry shows "Recovery mode: the server was started for recovery:" and "A restriction of the process, not of one scope", never a scope, exit 1; a mark or release after the entry shows "Recovery mode: the scope of machine <machine> is pre-restore-unaccounted." and "Next: account the scope first: recovery scope-account", never the process''s restriction, exit 1; no act recorded'
     absent: [token in stdout, stderr, argv]
 
 - id: AUTH-02
