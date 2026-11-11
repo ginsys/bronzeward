@@ -16,6 +16,7 @@ import (
 
 	"github.com/cosi-project/runtime/pkg/safe"
 	"github.com/cosi-project/runtime/pkg/state"
+	"github.com/ginsys/bronzeward/internal/clusterid"
 	"github.com/siderolabs/talos/pkg/machinery/client"
 	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
 	"github.com/siderolabs/talos/pkg/machinery/resources/cluster"
@@ -215,7 +216,7 @@ func (r *reader) Identity(ctx context.Context) (Identity, error) {
 	// The cluster ID is read in the spelling its Talos version prints; the server compares one, the
 	// standard spelling (persistence-api.md §7.3). A value that is no cluster ID stays as read, so the
 	// caller's form check refuses it and nothing here repairs it.
-	if c, ok := CanonicalClusterID(id.ClusterID); ok {
+	if c, ok := clusterid.Canonical(id.ClusterID); ok {
 		id.ClusterID = c
 	}
 	return id, nil

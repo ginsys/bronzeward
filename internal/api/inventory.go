@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ginsys/bronzeward/internal/clusterid"
 	"github.com/ginsys/bronzeward/internal/compile"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/talos"
@@ -96,7 +97,7 @@ func (in *clusterInput) check(*API) error {
 	if in.Contract != supported {
 		return fmt.Errorf("contract %s is not supported: this server renders only %s", in.Contract, supported)
 	}
-	if _, ok := talos.CanonicalClusterID(in.TalosClusterID); !ok {
+	if _, ok := clusterid.Canonical(in.TalosClusterID); !ok {
 		return errors.New("talosClusterId must be the cluster ID `talosctl get info` prints: 32 bytes in padded base64, in the standard or the URL-safe alphabet (persistence-api.md §7.3)")
 	}
 	return nil
@@ -153,7 +154,7 @@ type clusterBody struct {
 // so the URL-safe spelling of a recorded ID names the same cluster.
 func createCluster(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*clusterInput)
-	clusterID, ok := talos.CanonicalClusterID(in.TalosClusterID)
+	clusterID, ok := clusterid.Canonical(in.TalosClusterID)
 	if !ok {
 		return result{}, errors.New("the Talos cluster ID passed the check and is no cluster ID")
 	}
