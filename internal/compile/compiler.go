@@ -331,7 +331,7 @@ func explain(step string, err error, cause string, sources []Source, ts []traced
 		}
 	}
 	unmarked := slices.ContainsFunc(ts, func(t traced) bool {
-		return (t.Kind() == ingest.TraceBoolean || t.Member() >= 0 || t.Unmarkable()) && t.source <= upto
+		return (t.Kind() == ingest.TraceBoolean || t.Member() >= 0 || t.Unmarkable(copyFloor)) && t.source <= upto
 	})
 	e.Message, _ = redactMessage(step, cause, tc, ts, unmarked, newRedactor(sources))
 	return err
