@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -241,5 +244,29 @@ func TestDriftAdoptObject_PrintsNothingBeforeTheIdentityRead(t *testing.T) {
 		if code := run([]string{"-o", o, "drift", "adopt", "mch_BWSYNTH", "--draft", "drf_BWSYNTH"}, &out, &errb); code == 0 || out.Len() != 0 || errb.Len() == 0 {
 			t.Errorf("-o %s, identity read failing: exit %d, stdout %q, stderr %q; want a failure with nothing on standard output", o, code, out.String(), errb.String())
 		}
+	}
+}
+
+// Contract lines 959 to 961: a client failure after the last step leaves every step as it ended and
+// the exit code nonzero. Here the plan's answer carries a new epoch, the client must keep it, and
+// the configuration directory cannot be written.
+func TestDriftAdoptObject_SaveFailsAfterStep3(t *testing.T) {
+	f := adoptChainServer(t)
+	f.plan.post = func(w http.ResponseWriter, _ string) {
+		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2")
+		dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward")
+		if err := os.Chmod(dir, 0o500); err != nil {
+			t.Errorf("the configuration directory stays writable: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+		w.WriteHeader(http.StatusCreated)
+		f.plan.mu.Unlock()
+		fmt.Fprint(w, f.plan.plan())
+		f.plan.mu.Lock()
+	}
+	code, obj, out, errOut := adoptObject(t)
+	wantStates(t, obj, stateDone, stateDone, stateDone)
+	if code == 0 || !strings.Contains(errOut, "keeping the epoch") {
+		t.Errorf("exit %d, stderr %q, stdout %q; want a nonzero exit naming the epoch that could not be kept, with the object printed", code, errOut, out)
 	}
 }
