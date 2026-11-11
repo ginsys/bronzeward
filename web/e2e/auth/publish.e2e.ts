@@ -67,6 +67,8 @@ describe("the publication page (#342)", () => {
     // at its node evidence check: the page names the operation, then says nothing was sent.
     await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Publishing draft \S+ revision \d+ \(operation \S+\)\.$/), { wait: 60_000 });
     await expect($('[data-testid="ended"]')).toHaveText(expect.stringMatching(/^Publication operation \S+ (failed|rejected)(: .+)?\. Nothing has been sent to any machine\.$/), { wait: 120_000 });
+    // The operation failed and left the draft open, so Publish is available again.
+    await expect($("main").$("button=Publish")).toBeEnabled({ wait: 20_000 });
     expect((await writes()).filter(([m]) => m === "POST").map(([, r]) => r)).toEqual([`/drafts/${id}/publications`]);
     // Nothing reached any machine: no release, no apply-config or adopt operation, no Applied release.
     const releases = await api("h-viewer", "GET", "/releases");
