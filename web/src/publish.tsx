@@ -10,7 +10,7 @@ import { forgetETag, keepETag, keptETag, lastGood, NO_ETAG, WriteResult } from "
 import { useSend, useWrites } from "./forms.tsx";
 import { settledReads, watchView } from "./imports.tsx";
 import { Id, Ref, short, useItem, usePending, useReads } from "./list.tsx";
-import { eventLine, refusalOf, refusalText, terminal, watch } from "./progress.ts";
+import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action } from "./shell.tsx";
 import { Status } from "./states.tsx";
 
@@ -33,8 +33,8 @@ export function publishEnd(o: Operation): Ended {
     if (r === null || typeof r.release !== "string" || r.release === "") return { text: `Publication operation ${short(o.id)} succeeded without naming its release.` };
     return { release: r.release };
   }
-  const why = refusalText(refusalOf({ problem: o.error }));
-  return { text: `Publication operation ${short(o.id)} ${o.state}${why === "" ? "" : `: ${why}`}. ${SENT_NOTHING}` };
+  const code = refusalOf({ problem: o.error }).code;
+  return { text: `Publication operation ${short(o.id)} ${o.state}${code === undefined ? "" : `: ${code}`}. ${SENT_NOTHING}` };
 }
 
 // The id of the operation a publication's answer names, when it can be read and names one.
