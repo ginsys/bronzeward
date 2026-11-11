@@ -16,14 +16,25 @@ const ARTIFACT_CALL = /\b(saveScreenshot|saveElementScreenshot|takeScreenshot|ta
 
 export const artifactCalls = (source: string): string[] => [...source.matchAll(ARTIFACT_CALL)].map((m) => m[1]!.replace(/\s+/g, ""));
 
-// A relative specifier of a static import, a re-export, a side-effect import or a dynamic import, read by
-// the TypeScript scanner, so a comment, a string or a template cannot hide one or make a false one. A
-// template specifier with an interpolation names no file and is not returned.
-export const localImports = (source: string): string[] =>
-  ts
-    .preProcessFile(source, true, true)
-    .importedFiles.map((f) => f.fileName)
-    .filter((name) => name.startsWith("./") || name.startsWith("../"));
+// A relative specifier of a static import, an import equals, a re-export (named or namespace), a side-effect
+// import, a dynamic import or an import type, read from the TypeScript parse tree. A comment, a string, a
+// regular expression or a template cannot hide one or make a false one. A template specifier with an
+// interpolation names no file and is not returned.
+export const localImports = (source: string): string[] => {
+  const found: string[] = [];
+  const add = (node: ts.Node | undefined) => {
+    if (node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))) found.push(node.text);
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier);
+    else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) add(node.moduleReference.expression);
+    else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) add(node.arguments[0]);
+    else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) add(node.argument.literal);
+    ts.forEachChild(node, visit);
+  };
+  visit(ts.createSourceFile("source.ts", source, ts.ScriptTarget.Latest, true));
+  return found.filter((name) => name.startsWith("./") || name.startsWith("../"));
+};
 
 const here = (name: string) => fileURLToPath(new URL(`./${name}`, import.meta.url));
 
@@ -78,6 +89,10 @@ test("the positive control: the read finds the local imports of a source and ski
     import "./$nine.ts";
     const j = await import(\`./ten\${name}.ts\`);
     // import "./commented.ts";
+    export * as helper from "./eleven.ts";
+    const k = /"/; import "./twelve.ts";
+    import thirteen = require("./thirteen.ts");
+    type T = import("./fourteen.ts").Fourteen;
     import { e } from "node:fs";
     import { f } from "@wdio/globals";`;
   expect(localImports(sample)).toEqual([
@@ -90,6 +105,10 @@ test("the positive control: the read finds the local imports of a source and ski
     "./seven.ts",
     "./eight.ts",
     "./$nine.ts",
+    "./eleven.ts",
+    "./twelve.ts",
+    "./thirteen.ts",
+    "./fourteen.ts",
   ]);
 });
 
