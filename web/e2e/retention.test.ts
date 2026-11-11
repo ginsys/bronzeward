@@ -17,22 +17,29 @@ const ARTIFACT_CALL = /\b(saveScreenshot|saveElementScreenshot|takeScreenshot|ta
 export const artifactCalls = (source: string): string[] => [...source.matchAll(ARTIFACT_CALL)].map((m) => m[1]!.replace(/\s+/g, ""));
 
 // A relative specifier of a static import, an import equals, a re-export (named or namespace), a side-effect
-// import, a dynamic import or an import type, read from the TypeScript parse tree. A comment, a string, a
-// regular expression or a template cannot hide one or make a false one. A template specifier with an
-// interpolation names no file and is not returned.
-export const localImports = (source: string): string[] => {
+// import, a dynamic import, a literal require or an import type, read from the TypeScript parse tree in the
+// language mode of the file name (so .tsx parses as TSX). A comment, a string, a regular expression or a
+// template cannot hide one or make a false one. A template specifier with an interpolation names no file and
+// is not returned. A literal inside parentheses or a type assertion counts as that literal.
+export const localImports = (source: string, fileName = "source.ts"): string[] => {
   const found: string[] = [];
   const add = (node: ts.Node | undefined) => {
+    while (
+      node &&
+      (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node) || ts.isNonNullExpression(node))
+    ) {
+      node = node.expression;
+    }
     if (node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))) found.push(node.text);
   };
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier);
     else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) add(node.moduleReference.expression);
-    else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) add(node.arguments[0]);
+    else if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === "require"))) add(node.arguments[0]);
     else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) add(node.argument.literal);
     ts.forEachChild(node, visit);
   };
-  visit(ts.createSourceFile("source.ts", source, ts.ScriptTarget.Latest, true));
+  visit(ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true));
   return found.filter((name) => name.startsWith("./") || name.startsWith("../"));
 };
 
@@ -48,7 +55,7 @@ const sources = (roots: string[], read: Reader = (file) => readFileSync(file, "u
     if (seen.has(file)) continue;
     const source = read(file);
     seen.set(file, source);
-    for (const spec of localImports(source)) todo.push(resolve(dirname(file), spec));
+    for (const spec of localImports(source, file)) todo.push(resolve(dirname(file), spec));
   }
   return seen;
 };
@@ -93,6 +100,9 @@ test("the positive control: the read finds the local imports of a source and ski
     const k = /"/; import "./twelve.ts";
     import thirteen = require("./thirteen.ts");
     type T = import("./fourteen.ts").Fourteen;
+    const l = require("./fifteen.cjs");
+    const m = await import("./sixteen.ts" as const);
+    const n = await import(("./seventeen.ts"));
     import { e } from "node:fs";
     import { f } from "@wdio/globals";`;
   expect(localImports(sample)).toEqual([
@@ -109,7 +119,15 @@ test("the positive control: the read finds the local imports of a source and ski
     "./twelve.ts",
     "./thirteen.ts",
     "./fourteen.ts",
+    "./fifteen.cjs",
+    "./sixteen.ts",
+    "./seventeen.ts",
   ]);
+});
+
+test("the positive control: the read parses a .tsx file as TSX, so an import after a JSX element is found", () => {
+  const sample = `const view = <div>{import("./inside.ts")}</div>; import "./after.ts";`;
+  expect(localImports(sample, "view.tsx")).toEqual(["./inside.ts", "./after.ts"]);
 });
 
 test("the positive control: the walk reaches a file only a transitive import names and reads it to the end", () => {
