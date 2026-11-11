@@ -36,10 +36,12 @@ Not run here: Safari, whose WebDriver needs a macOS runner; previous major versi
 
 ## Screen reader
 
-| Pass | T1 | T2 |
-| --- | --- | --- |
-| VoiceOver with Safari | pending: owner or designated tester | pending: owner or designated tester |
-| NVDA with Firefox | pending: owner or designated tester | pending: owner or designated tester |
-| NVDA with Chrome | pending: owner or designated tester | pending: owner or designated tester |
+| Pass | T1 | T2 | T3 (to publication) | T4 | T5 | T6 | T7 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| VoiceOver with Safari | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed |
+| NVDA with Firefox | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed |
+| NVDA with Chrome | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed |
+
+T3 to T7 are the tasks of [journeys §13](../docs/spec/operator-experience.md#13-usability-and-accessibility-acceptance). Their passes are owed by [#342](https://github.com/ginsys/bronzeward/issues/342), which closes on its automated acceptance.
 
 [#447](https://github.com/ginsys/bronzeward/issues/447) holds these passes and closes when they run. [#334](https://github.com/ginsys/bronzeward/issues/334) closes on its automated acceptance, by the owner's decision of 1 November 2026.

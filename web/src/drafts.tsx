@@ -28,6 +28,8 @@ type Embedded = S["Embedded"];
 export { LAYERS };
 export const KINDS = ["string", "integer", "boolean", "mapping"] as const;
 export const NOT_RENDERED = "Not rendered yet. A machine's configuration exists only after publication (gap G5).";
+// The publication page of a draft (publish.tsx).
+export const publishPath = (draft: string) => `/publications/new?${new URLSearchParams({ draft })}`;
 export const NO_ETAG = "Not sent: this page has not read the draft under the current epoch. Read it again first.";
 
 // §8.3: the last ETag seen per draft, in this page's memory, valid only under the epoch it was
@@ -266,6 +268,7 @@ export function DraftItem({ id }: { id: string }) {
             <AssignmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
           <Status testid="not-rendered">{NOT_RENDERED}</Status>
+          {d.state === "open" && <p><Ref to={publishPath(d.id)} id={d.id}>Publish this draft</Ref></p>}
           {d.state === "open" && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}
         </>
       )}
