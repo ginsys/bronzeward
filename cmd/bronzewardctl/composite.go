@@ -82,6 +82,16 @@ type saveFailed struct{ afterEnd }
 
 func (e saveFailed) Unwrap() error { return e.afterEnd }
 
+// unreadOperation marks the error of an accepted write whose operation could not be read. It names the
+// operation, so that the step's command is the read of it and never the repeat of the write
+// (operator-experience.md §5.8, the command).
+type unreadOperation struct {
+	error
+	operation string
+}
+
+func (e unreadOperation) Unwrap() error { return e.error }
+
 // classify is the state a step's error gives it, by the type of the error alone. accepted says that the
 // server answered the step's write with success, which tells a refused write from a refused later read.
 //
@@ -173,6 +183,10 @@ func (co *collector) settle(n int, err error) {
 			shown = s.Error + "\n" + shown
 		}
 		s.Error = shown
+	}
+	var unread unreadOperation
+	if errors.As(err, &unread) {
+		s.Command = "bronzewardctl operation show " + client.ShellWord(unread.operation)
 	}
 	// A run that recorded resume-failed is read with import status, not restarted (§5.8, the failed state).
 	var resume resumeFailedErr
