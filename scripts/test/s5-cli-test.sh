@@ -86,6 +86,8 @@ run fail "cli_unseen refuses an approval output without the warning" \
 role='Needs one of the roles [approver].'
 run pass "unfreeze_refused_cli accepts exit 1 with the approver-role refusal and a frozen scope" \
   "$role" 1 t unfreeze_refused_cli h-viewer
+run pass "unfreeze_refused_cli accepts the refusal as the CLI prints it, with the signed-in suffix on its line" \
+  "$role You are signed in as h-viewer." 1 t unfreeze_refused_cli h-viewer
 run fail "unfreeze_refused_cli refuses exit 2 with the same text" \
   "$role" 2 t unfreeze_refused_cli h-viewer
 run fail "unfreeze_refused_cli refuses a command that succeeded (exit 0) with the same text" \
