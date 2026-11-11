@@ -36,6 +36,9 @@ type adoptChain struct {
 	// moveInFollow makes the first GET of the ingestion, the one the follow of step 1 makes, answer
 	// ep_BWSYNTH-2, so the client has an epoch to save when that follow ends.
 	moveInFollow bool
+	// failReread makes the reread of the ingestion that step 1 ends with, the second GET of it, answer
+	// a problem document the client cannot go on from: the state of the accepted import is not read.
+	failReread bool
 	// moveInPreflight makes the server read after that reread, which is the preflight of the
 	// publication, answer a retryable 503 at ep_BWSYNTH-2 once. The retry answers ep_BWSYNTH-1, so the
 	// epoch moved and came back between the read of the import and the send. preMoved says it did.
@@ -56,8 +59,10 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.read = true
 	}
 	moved := f.moved
+	failNow := false
 	if r.Method == http.MethodGet && path == "/ingestions/ing_BWSYNTH" {
 		f.rereads++
+		failNow = f.failReread && f.rereads == 2
 		moved = moved || (f.moveOnReread && f.rereads == 2) || (f.moveInFollow && f.rereads == 1)
 	}
 	if f.moveInPreflight && !f.preMoved && f.rereads >= 2 && r.Method == http.MethodGet && path == "/server" {
@@ -73,6 +78,13 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	f.log = append(f.log, fmt.Sprintf("%s %s moved=%v", r.Method, path, moved))
 	f.mu.Unlock()
+	if failNow {
+		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"type":"urn:bronzeward:problem:not-found","title":"Not Found","status":404}`)
+		return
+	}
 	if moved {
 		w = movedTo{w, "ep_BWSYNTH-2"}
 	}

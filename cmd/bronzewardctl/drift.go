@@ -427,7 +427,10 @@ func (e *env) driftAdopt(args []string) (err error) {
 	// cannot save changes no state (§5.8, the exit codes).
 	switch {
 	case err != nil:
+		// The import was accepted and its state is not read: the command is the one the table output
+		// names, a read of it, never the drift adopt repeat, which would write again (§5.8, the command).
 		co.settle(1, err)
+		co.command(1, "bronzewardctl import status "+client.ShellWord(a.Ingestion))
 	case b.State != "released":
 		co.pause(b.Id)
 	default:
