@@ -185,6 +185,7 @@ func TestRecovery(t *testing.T) {
 	f.want(ctl("", "recovery", "exit"), 1, "409", "The first scope not released: machine '"+s.machine+"', 'pre-restore-unaccounted'.")
 	// REC-01's recovery acts, after the entry (#362): a mark and a release of the pre-restore-unaccounted
 	// scope are refused for that scope, with the accounting as the next step and no process restriction.
+	beforeScopeActs := actRows()
 	for _, verb := range []string{"mark", "release"} {
 		r := ctl("", "recovery", verb, s.machine)
 		f.want(r, 1, "409", "Recovery mode: the scope of machine "+s.machine+" is pre-restore-unaccounted.",
@@ -192,6 +193,9 @@ func TestRecovery(t *testing.T) {
 		if strings.Contains(r.err, "started for recovery") {
 			t.Errorf("recovery %s: the scope's refusal holds the process's restriction:\n%s", verb, r.err)
 		}
+	}
+	if n := actRows(); n != beforeScopeActs {
+		t.Errorf("the refused mark and release recorded %d acts, want none", n-beforeScopeActs)
 	}
 	// A token without recovery-admin: the three commands that send a recovery write show the 403
 	// and the role they need (client-contracts.md §9.6). Typed confirmations are given, so the
