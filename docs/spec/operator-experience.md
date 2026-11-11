@@ -918,9 +918,10 @@ Each step has `step` (1 to 3), `name` (`import`, `publish` or `plan`), the `role
   `cancelled`. The step did nothing that stands. The exit and the `command` are those the text
   output gives for that step. One case differs: step 1 is `failed` when its run recorded
   `resume-failed` (its staged input could not be decrypted, which a repeated step 1 can meet). The
-  claim then stays held and the operation still runs. The exit is 1 and the `command` is `import
-  status`; the author then runs `import takeover` once the lease lapsed, or `import abandon`, both
-  with the `author` role.
+  claim then stays held and the operation still runs. In this case only, the exit is 1 and the
+  `command` is `import status`; the author then runs `import takeover` once the lease lapsed, or
+  `import abandon`, both with the `author` role. Every other `failed` step keeps the exit and the
+  `command` of the text output: a publication whose operation ended `failed` exits 4.
 - `unknown`: the write was accepted or may have been, and the outcome is not known. This is exit
   3, a Ctrl-C that cut the step's wait short, or a read of the step's operation that the server
   refused or that gave no answer (exit 1 or 3, as in the text output). For an ambiguous write the
