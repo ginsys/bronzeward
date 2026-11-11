@@ -72,6 +72,8 @@ run pass "cli_unseen accepts the same line when the table's padding surrounds it
   "  $warning  " 0 1 cli_unseen plan_x s
 run fail "cli_unseen refuses a warning that sits inside a longer line" \
   "Note: $warning" 0 1 cli_unseen plan_x s
+run fail "cli_unseen refuses a warning that is followed by more text on its line" \
+  "$warning NOT APPROVED" 0 1 cli_unseen plan_x s
 run fail "cli_unseen refuses the whole line when the approval entry is not marked" \
   "$warning" 0 0 cli_unseen plan_x s
 run fail "cli_unseen refuses an approval output without the warning" \
