@@ -62,7 +62,15 @@
     - GET /api/v1/ingestions/ing_..., once the lease the client last read passed by its margin
   fault: >-
     serve is killed once the run holds its decrypt, then started again on the same database and
-    port (test-only); the claim is left with no heartbeat
+    port (test-only); the claim is left with no heartbeat. Fourth case: import continue ing_...
+    against the interrupt build of the server, whose control file names draft-commit stall: the
+    run releases the claim and writes the draft, then stalls before its COMMIT, the process
+    running on. The heartbeat waits on the claim's lock, so the lease lapses and GET
+    /api/v1/ingestions/ing_... answers held with leaseUntil passed. The client ends as in the
+    second case, exit 3, the outcome unknown. Once the control file is removed the COMMIT lands:
+    the claim is released, its envelope cleared, the operation succeeded, and import status shows
+    it. An abandoned read is not reachable on a continuation: an encrypted claim is not due until
+    its absolute expiry
   expect:
     client: >-
       reads the ingestion once its leaseUntil passed; held (continuation) or resumed (takeover)
@@ -74,14 +82,6 @@
       "import ing_...: its claim is held (resumed) and its lease lapsed ..., while operation op_...
       still runs: the outcome is unknown.", the three commands; exit 3
     absent: [token and sentinels in stdout, stderr, argv]
-  fourth case: >-
-    import continue ing_... against the interrupt build of the server, whose control file names
-    draft-commit stall: the run releases the claim and writes the draft, then stalls before its
-    COMMIT, the process running on. The heartbeat waits on the claim's lock, so the lease lapses
-    and GET /api/v1/ingestions/ing_... answers held with leaseUntil passed. The client ends as
-    in the second case, exit 3, the outcome unknown. Once the control file is removed the COMMIT lands: the claim is released, its envelope
-    cleared, the operation succeeded, and import status shows it. An abandoned read is not
-    reachable on a continuation: an encrypted claim is not due until its absolute expiry
   not run: the first case (a mark) is protected-cases.yaml's (#350)
   unit: >-
     cmd/bronzewardctl TestImportLifecycle covers a lapsed lease with exit 3, history before this
