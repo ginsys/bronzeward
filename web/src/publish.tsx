@@ -157,7 +157,7 @@ function Publish({ id }: { id: string }) {
       <WriteResult
         w={w}
         done={(data): ReactNode => accepted(id, data)}
-        conflict={<Status testid="write-result">Not published: someone changed this draft since this page read it. <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
+        conflict={<Status testid="write-result" role="alert">Not published: someone changed this draft since this page read it. <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
       />
       {o?.kind === "done" && typeof o.data === "object" && op === undefined && <Status testid="no-operation">The publication was accepted without naming its operation. Find it in the operations list, kind publish.</Status>}
       {op !== undefined && <Progress key={op} op={op} draft={id} onFailed={setFailed} />}

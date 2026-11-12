@@ -141,10 +141,12 @@ describe("the shell", () => {
     expect(status(h(Failure, { res: forbidden({ plan: "pln_1", detail: "only the plan's creator may cancel it" }), sub: "h-publisher" }))).toBe("only the plan's creator may cancel it; you are signed in as h-publisher");
     // Each of the three 403 lines is a refusal, so it is announced as an alert (ginsys/bronzeward#815).
     for (const extra of [{ roles: ["author"] }, { humanOnly: true }, { plan: "pln_1", detail: "only the creator" }]) {
-      expect(html(h(Failure, { res: forbidden(extra), sub: "u" }))).toMatch(/<p role="alert" data-testid="status">/);
+      const shown = html(h(Failure, { res: forbidden(extra), sub: "u" }));
+      expect(shown).toMatch(/<p role="alert" data-testid="status">/);
+      expect(shown).toContain('<p role="alert" data-testid="problem">');
     }
     // §8.2: each row's problem fields under it.
-    const fields = '<p data-testid="problem">Not read: Forbidden (needs author). Request req-1.</p>';
+    const fields = '<p role="alert" data-testid="problem">Not read: Forbidden (needs author). Request req-1.</p>';
     expect(html(h(Failure, { res: forbidden({ roles: ["author"], detail: "needs author", instance: "req-1" }), sub: "u" }))).toContain(fields);
     expect(html(h(Failure, { res: forbidden({ humanOnly: true, detail: "needs author", instance: "req-1" }), sub: "u" }))).toContain(fields);
     expect(status(h(Failure, { res: { kind: "transport" }, sub: "" }))).toBe(TRANSPORT_FAILURE);

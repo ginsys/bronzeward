@@ -8,7 +8,7 @@ import { leaving, signingOut, startsNew, unsaved, WritesProvider } from "./forms
 import { type Load, type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import { ShellContext } from "./shell.tsx";
-import { CUT_OFF } from "./states.tsx";
+import { Conflict, CUT_OFF } from "./states.tsx";
 import { Write, Writes } from "./write.ts";
 
 type Source = components["schemas"]["SourceEntry"];
@@ -1275,6 +1275,18 @@ test("ginsys/bronzeward#517 H15: a Discard's 412 says the draft changed and offe
   const markup = renderToStaticMarkup(h(DiscardRefused, { onShow: () => {} }));
   expect(markup).toContain(NOT_DISCARDED);
   expect(markup).toContain(">Show their change</button>");
+  expect(markup).toContain('<p role="alert" data-testid="write-result">');
+});
+
+test("ginsys/bronzeward#815: a refused write's conflict view is an alert, the editor's own conflict a status", () => {
+  const w = new Write({ method: "PUT", path: "/drafts/drf_1/sources/f", body: {}, resource: "/drafts/drf_1" });
+  const conflict = h(Conflict, { what: "draft", revision: 3, onShow: () => {} });
+  w.outcome = { kind: "refused", status: 412, problem: null, replayed: false, cut: true };
+  const shown = renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(WriteResult, { w, done: () => "DONE", conflict })));
+  expect(shown).toContain("Someone changed this draft (revision 3)");
+  expect(shown).toContain('<p role="alert"');
+  expect(shown).not.toContain('role="status"');
+  expect(renderToStaticMarkup(conflict)).toContain('<p role="status"');
 });
 
 test("§8.4 item 8: a 412 or 422 refusal whose answer was cut off says so; a 412 still shows its conflict view, a 422 no field view", () => {

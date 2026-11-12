@@ -120,10 +120,10 @@ export function problemFields(res: ReadResult<unknown>): string | undefined {
 }
 
 // The problem fields under a message of their own (a 403 row, W1, a revocation).
-export const ProblemFields = ({ text }: { text: string | undefined }) => (text === undefined ? null : <p data-testid="problem">{text}</p>);
+export const ProblemFields = ({ text, role }: { text: string | undefined; role?: "alert" }) => (text === undefined ? null : <p role={role} data-testid="problem">{text}</p>);
 
-export const Conflict = ({ what, revision, onShow }: { what: string; revision: number; onShow: () => void }) => (
-  <Status actions={button("Show their change", onShow)}>Someone changed this {what} (revision {revision}). Your text is not saved.</Status>
+export const Conflict = ({ what, revision, onShow, role }: { what: string; revision: number; onShow: () => void; role?: "status" | "alert" }) => (
+  <Status role={role} actions={button("Show their change", onShow)}>Someone changed this {what} (revision {revision}). Your text is not saved.</Status>
 );
 
 // A write's notice (B11): `detail` names its key, route and the resource to read, and `onDismiss`
