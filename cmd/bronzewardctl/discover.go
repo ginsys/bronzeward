@@ -58,7 +58,7 @@ func (e *env) clusterDiscover(args []string) error {
 		res, err = discoverCluster(ctx, b, endpoint)
 		return err
 	}); errors.Is(err, discover.ErrNoEndpoint) {
-		return usageError{errors.New("the talosconfig names no endpoint: give --endpoint <ip[:port]>")}
+		return usageError{errors.New("the talosconfig names no endpoint: give --endpoint <host|ip[:port]>")}
 	} else if err != nil {
 		return err
 	}
@@ -87,6 +87,9 @@ func unwrapPath(err error) error {
 // contract has none for the cluster either, because the server would refuse it.
 func discoverLines(res discover.Result, file string) []string {
 	out := []string{sf("Talos cluster ID %s, Talos %s, contract %s.", res.ClusterID, res.Version, res.Contract)}
+	if res.ResolvedFrom != "" {
+		out = append(out, sf("Dialled %s: the address that %s resolved to, once. Every later read used that address.", res.Endpoint, res.ResolvedFrom))
+	}
 	if res.KubernetesEndpoint != "" {
 		out = append(out, sf("Kubernetes endpoint %s, proposed from the first control-plane member: replace it if a VIP or a DNS name fronts the API server.", res.KubernetesEndpoint))
 	} else {

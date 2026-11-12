@@ -446,6 +446,22 @@ accepts a connection and says nothing does not hold the command. A cluster whose
 cluster either, because the server refuses it. The proposed contract is the minor of the Talos
 version and the proposed Kubernetes endpoint is a guess for the operator to replace.
 
+`--endpoint` and the talosconfig's first endpoint are each an IP address or a DNS name, with an
+optional port. If the endpoint is a DNS name, the command resolves it once and dials the address it
+got. It never looks the name up again, so no later read can reach another node. The output names that
+address:
+
+```text
+$ bronzewardctl cluster discover --talosconfig ./talosconfig --endpoint cp-1.lab.example
+Talos cluster ID 7c1…, Talos v1.13.6, contract v1.13.
+Dialled 10.5.0.2:50000: the address that cp-1.lab.example resolved to, once. Every later read used that address.
+```
+
+The `--talos-endpoint` values in the printed commands stay IP addresses, because the server stores
+an IP address only (below). If the name does not resolve, the command stops before any dial. The
+refusal names where the value came from, `--endpoint` or the talosconfig's first endpoint, and
+quotes neither the name nor the talosconfig.
+
 Recording a machine is a human `author` act, with the node's Talos identity read beforehand
 ([acceptance plan S1](acceptance-plan.md#s1-adoption-of-the-existing-cluster)):
 
