@@ -129,7 +129,7 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
   };
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (typed.trim() === p.id) send({ method: "POST", path: `/plans/${enc(p.id)}/approvals`, body: {}, resource: `/plans/${enc(p.id)}` });
+    if (!done && typed.trim() === p.id) send({ method: "POST", path: `/plans/${enc(p.id)}/approvals`, body: {}, resource: `/plans/${enc(p.id)}` });
   };
   if (p.state !== "proposed") return <Result w={w} done={recorded} />;
   const over = overwrites(p);
@@ -167,7 +167,7 @@ export function RevokeControl({ p, reread }: { p: Plan; reread: () => void }) {
     const reason = String(new FormData(e.currentTarget).get("reason") ?? "");
     const bad = reasonProblem(reason);
     setNote(bad);
-    if (bad === undefined) send({ method: "POST", path: `/approvals/${enc(approval)}/revocations`, body: { reason }, resource: `/plans/${enc(p.id)}` });
+    if (bad === undefined && !done) send({ method: "POST", path: `/approvals/${enc(approval)}/revocations`, body: { reason }, resource: `/plans/${enc(p.id)}` });
   };
   const busy = (w !== undefined && !startsNew(writes, w)) || done;
   return (
