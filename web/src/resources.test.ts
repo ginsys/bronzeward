@@ -95,7 +95,7 @@ describe("the read-only views", () => {
     const plan = (over: Partial<components["schemas"]["PlanBody"]>, diff: components["schemas"]["PlanDiff"] | null) =>
       ({ operation: "apply-config", evidence: { diff, validation: {}, dryRun: { available: false, reason: "none" } }, ...over }) as components["schemas"]["PlanBody"];
     const diff = { from: "rel_a", to: "rel_b", withheld: false, unified: "-team: a\n+team: <b>storage</b>" };
-    expect(html(h(Change, { p: plan({}, diff) }))).toContain('<pre data-testid="diff">-team: a\n+team: &lt;b&gt;storage&lt;/b&gt;</pre>');
+    expect(html(h(Change, { p: plan({}, diff) }))).toContain('<pre class="diff" data-testid="diff" tabindex="0" aria-label="Change">-team: a\n+team: &lt;b&gt;storage&lt;/b&gt;</pre>');
     expect(html(h(Change, { p: plan({}, { ...diff, withheld: true }) }))).toBe("<p>The change cannot be shown.</p>");
     expect(html(h(Change, { p: plan({}, null) }))).toBe("<p>No change recorded.</p>");
     expect(html(h(Change, { p: plan({ operation: "adopt" }, null) }))).toBe("<p>Sends nothing. Records the machine&#x27;s current configuration as applied.</p>");
