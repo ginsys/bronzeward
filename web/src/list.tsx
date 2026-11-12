@@ -161,11 +161,15 @@ export function useList<T>(path: string, query: string, all: boolean, keep?: Kee
 
 // An item read each time its path changes, showing loading, and each time the view changes or the
 // page reads again, keeping what it shows until the read answers. A change of `n` reads it again.
-export function useItem<T>(path: string, keep?: Keep, n = 0): Load<T> {
+// `onSettled` is told each time a read settles while it is live, whatever it found, a read the shell
+// kept the old data for included; a read a newer one superseded does not tell it (ginsys/bronzeward#820).
+export function useItem<T>(path: string, keep?: Keep, n = 0, onSettled?: () => void): Load<T> {
   const { client, settle, undropped, again, view } = useReads();
   const [item, put, own] = useHeld<T>();
   const [held, lost] = useKeep(keep, own);
   const key = useRef<string | undefined>(undefined);
+  const told = useRef(onSettled);
+  told.current = onSettled;
   useEffect(() => {
     const ok = undropped();
     let live = true;
@@ -173,7 +177,10 @@ export function useItem<T>(path: string, keep?: Keep, n = 0): Load<T> {
       key.current = path;
       put({ kind: "loading" });
     }
-    void client.read<T>(path).then((res) => settleKept(settle, lost, res, put, () => live && ok(), held));
+    void client.read<T>(path).then((res) => {
+      settleKept(settle, lost, res, put, () => live && ok(), held);
+      if (live && ok()) told.current?.();
+    });
     return () => void (live = false);
   }, [client, settle, undropped, put, held, lost, view, path, again, n]);
   return item;
