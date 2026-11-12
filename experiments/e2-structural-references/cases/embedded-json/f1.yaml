@@ -1,7 +1,6 @@
-machine:
-  files:
-    - path: /var/etc/e2/config.json
-      op: create
-      permissions: 0o644
-      content: |
-        {"endpoint": "https://e2.example.test", "token": !ref app-token}
+apiVersion: v1alpha1
+kind: EtcFileConfig
+name: e2/config.json
+mode: 0o644
+contents: |
+  {"endpoint": "https://e2.example.test", "token": !ref app-token}
