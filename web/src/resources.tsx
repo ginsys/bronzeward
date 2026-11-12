@@ -63,8 +63,8 @@ function ListOf<T>({ label, path, query = "", cols, empty, keyOf = byId, head }:
 }
 
 // `n` is bumped to read the item again.
-function ItemOf<T>({ path, what, title, children, n }: { path: string; what: string; title: (t: T | undefined) => ReactNode; children: (t: T) => ReactNode; n?: number }) {
-  const item = useItem<T>(path, undefined, n);
+function ItemOf<T>({ path, what, title, children, n, onSettled }: { path: string; what: string; title: (t: T | undefined) => ReactNode; children: (t: T) => ReactNode; n?: number; onSettled?: () => void }) {
+  const item = useItem<T>(path, undefined, n, onSettled);
   const pending = usePending(item, what);
   const t = item.kind === "ok" ? item.data : undefined;
   return <><h2>{title(t)}</h2>{t === undefined ? pending : children(t)}</>;
@@ -325,14 +325,16 @@ export function PlanItem({ id }: { id: string }) {
   const [proposed] = useState(() => takeFresh(id));
   const [n, setN] = useState(0);
   const reread = useCallback(() => setN((x) => x + 1), []);
+  const [answers, setAnswers] = useState(0);
+  const settled = useCallback(() => setAnswers((x) => x + 1), []);
   return (
-    <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" n={n} title={(p) => `Plan ${short(id)}${p === undefined ? "" : `: ${p.state}`}`}>
+    <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" n={n} onSettled={settled} title={(p) => `Plan ${short(id)}${p === undefined ? "" : `: ${p.state}`}`}>
       {(p) => {
         const { validation: v, dryRun, baseline } = p.evidence;
         return (
           <>
             {proposed && p.state === "proposed" && <Status testid="plan-proposed">{PROPOSED}</Status>}
-            <PlanState p={p} reread={reread} />
+            <PlanState p={p} reread={reread} answers={answers} />
             <Fields rows={[
               ["State", `${p.state}; expires ${when(p.expiresAt)}`],
               ["Target", <>machine <Id id={p.machine} />, cluster <Id id={p.cluster} />, route {p.route}</>],

@@ -3,7 +3,7 @@
 // each left out when blank so the configured default applies, and goes to the new plan. It sends no
 // approval and no apply: "Plan proposed. It is not approved, and nothing runs until an approver approves."
 
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { type Load, Id, Ref, short, usePending, useReads, useSettled } from "./list.tsx";
@@ -172,27 +172,27 @@ type Machine = components["schemas"]["MachineBody"];
 type Reads = { approval: Load<Approval>; now: Load<Identity>; machine: Load<Machine> };
 const LOADING: Reads = { approval: { kind: "loading" }, now: { kind: "loading" }, machine: { kind: "loading" } };
 
-// Read again after `first`, and every `every` after that until stopped. A new answer of the plan restarts the effect that
-// calls this. When the plan read got no answer, the plan object stays the same and nothing restarts it, so the repeat is
-// what keeps the poll alive; it is slower than a slow answer, which a quicker one would drop.
-export function poll(reread: () => void, first = 5000, every = 15000): () => void {
-  let timer = setTimeout(function tick() {
-    reread();
-    timer = setTimeout(tick, every);
-  }, first);
-  return () => clearTimeout(timer);
+// The plan is read again `wait` after `settled()`, and never before: the timer starts only when the last read settled,
+// so a slow answer is not cancelled by the next read (ginsys/bronzeward#820). A second `settled()` restarts the one
+// timer; `stop()` clears it.
+export function poll(reread: () => void, wait = 5000) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stop = () => clearTimeout(timer);
+  return { settled: () => { stop(); timer = setTimeout(reread, wait); }, stop };
 }
 
-// The approved plan's own reads, and the poll. One chain, so nothing is superseded while it is in flight: each answer
-// of the plan starts the three reads, and five seconds after they are all answered the plan is read again. A read the
-// shell did not answer (offline, a transport failure) keeps what is shown, and the poll goes on, for the supporting
-// reads and for the plan's own.
-function Approved({ p, reread }: { p: Plan; reread: () => void }) {
+// The approved plan's own reads, and the poll. One chain, so nothing is superseded while it is in flight: each settled
+// read of the plan (`answers` counts them, so a read the shell did not answer counts too) starts the three reads, and
+// five seconds after they are all answered the plan is read again. A read the shell did not answer (offline, a
+// transport failure) keeps what is shown, and the poll goes on, for the supporting reads and for the plan's own.
+function Approved({ p, reread, answers }: { p: Plan; reread: () => void; answers: number }) {
   const settled = useSettled();
   const [seen, setSeen] = useState<Reads>(LOADING);
+  const timer = useMemo(() => poll(reread), [reread]);
+  useEffect(() => timer.stop, [timer]);
   useEffect(() => {
     let live = true;
-    let stop: (() => void) | undefined;
+    timer.stop();
     void (async () => {
       const [approval, now, machine] = await Promise.all([
         settled<Approval>(`/approvals/${enc(p.approval ?? "")}`, () => live),
@@ -201,13 +201,10 @@ function Approved({ p, reread }: { p: Plan; reread: () => void }) {
       ]);
       if (!live) return;
       setSeen((s) => ({ approval: approval ?? s.approval, now: now ?? s.now, machine: machine ?? s.machine }));
-      stop = poll(reread);
+      timer.settled();
     })();
-    return () => {
-      live = false;
-      stop?.();
-    };
-  }, [p, settled, reread]);
+    return () => void (live = false);
+  }, [p, answers, settled, timer]);
   const { approval, now, machine } = seen;
   const pending = [usePending(approval, "the approval"), usePending(machine, "the machine")];
   const reasons = machine.kind === "ok" ? staleReasons(p, machine.data) : [];
@@ -229,12 +226,12 @@ function Approved({ p, reread }: { p: Plan; reread: () => void }) {
   );
 }
 
-export function PlanState({ p, reread }: { p: Plan; reread: () => void }) {
+export function PlanState({ p, reread, answers = 0 }: { p: Plan; reread: () => void; answers?: number }) {
   const terminal = TERMINAL[p.state];
   return (
     <>
       {terminal !== undefined && <Status testid="plan-terminal"><span className="badge">{p.state}</span> {terminal(p)}{again(p)}</Status>}
-      {p.state === "approved" && <Approved p={p} reread={reread} />}
+      {p.state === "approved" && <Approved p={p} reread={reread} answers={answers} />}
       {p.state === "committed" && p.committedOperation !== null && <Status testid="plan-committed">Committed: operation <Id id={p.committedOperation} />.</Status>}
     </>
   );

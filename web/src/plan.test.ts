@@ -115,24 +115,59 @@ describe("the plan page's state lines (ginsys/bronzeward#357, B20, B22)", () => 
     expect(CANCEL_NOTE).toBe("Cancelling after the controller commits ends the operation only while no attempt is recorded.");
   });
 
-  test("the poll reads again after 5 seconds and every 15 after that, so a plan read without answer is tried again, until stopped", () => {
+  test("a plan read slower than the repeat is not followed by another read before it settles (ginsys/bronzeward#820)", () => {
     vi.useFakeTimers();
     try {
       const reread = vi.fn();
-      const stop = poll(reread);
+      const timer = poll(reread);
+      timer.settled();
+      vi.advanceTimersByTime(5000);
+      expect(reread).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(600000);
+      expect(reread).toHaveBeenCalledTimes(1);
+      timer.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("the poll reads again 5 seconds after each settled read, once, so a read without answer is tried again", () => {
+    vi.useFakeTimers();
+    try {
+      const reread = vi.fn();
+      const timer = poll(reread);
+      vi.advanceTimersByTime(60000);
+      expect(reread).toHaveBeenCalledTimes(0);
+      timer.settled();
       vi.advanceTimersByTime(4999);
       expect(reread).toHaveBeenCalledTimes(0);
       vi.advanceTimersByTime(1);
       expect(reread).toHaveBeenCalledTimes(1);
-      vi.advanceTimersByTime(14999);
-      expect(reread).toHaveBeenCalledTimes(1);
-      vi.advanceTimersByTime(1);
+      timer.settled();
+      vi.advanceTimersByTime(5000);
       expect(reread).toHaveBeenCalledTimes(2);
-      vi.advanceTimersByTime(15000);
-      expect(reread).toHaveBeenCalledTimes(3);
-      stop();
+      timer.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a second settled read restarts the one timer, and stop clears it", () => {
+    vi.useFakeTimers();
+    try {
+      const reread = vi.fn();
+      const timer = poll(reread);
+      timer.settled();
+      vi.advanceTimersByTime(3000);
+      timer.settled();
+      vi.advanceTimersByTime(4999);
+      expect(reread).toHaveBeenCalledTimes(0);
+      vi.advanceTimersByTime(1);
+      expect(reread).toHaveBeenCalledTimes(1);
+      timer.settled();
+      timer.stop();
       vi.advanceTimersByTime(60000);
-      expect(reread).toHaveBeenCalledTimes(3);
+      expect(reread).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
