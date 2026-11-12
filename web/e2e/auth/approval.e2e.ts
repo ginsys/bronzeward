@@ -47,6 +47,14 @@ describe("approval and revocation (#358)", () => {
   const approval = (reasons: string[] = [], more: Record<string, unknown> = {}) => ({ id: APR, plan: PLAN, approver: { principal: "prn_synthetic_approver", role: "approver" }, epoch: "ep_synthetic", selfApproval: { marked: reasons.length > 0, reasons }, unseenOverwrite: false, ...more });
   const revocation = { approval: APR, plan: PLAN, machine, revokedBy: "prn_synthetic_approver", role: "approver", reason: "synthetic reason", act: `act_${"v".repeat(26)}`, epoch: "ep_synthetic", at: T0 };
 
+  // The identity the server answers `human`, with a principal: a human with no row yet has none, and the
+  // prediction then claims nothing. The roles and the epoch stay the server's own.
+  async function identity(human: string): Promise<Record<string, unknown>> {
+    const res = await fetch(`${at}/api/v1/identity`, { headers: { Authorization: `Bearer ${mint(human)}` } });
+    expect(res.ok).toBe(true);
+    return { ...((await res.json()) as Record<string, unknown>), principal: "prn_synthetic_me" };
+  }
+
   // Signs in as `human` with these bodies and opens the plan page.
   async function open(human: string, bodies: Record<string, unknown>, state = "proposed", more: Faults = {}) {
     expect(await fixtureSignIn(human, {}, { upstream: at, bodies, ...more })).toMatch(SERVER);
@@ -59,7 +67,7 @@ describe("approval and revocation (#358)", () => {
 
   it("a proposed plan shows its prediction; [Approve] waits for the typed plan ID, and a second click sends nothing new", async function () {
     this.timeout(120_000);
-    await open("h-all", { [`/plans/${PLAN}`]: plan("proposed"), [`/releases/${REL}`]: release, [`/drafts/${DRAFT}`]: draft, [approvals]: approval(["created-plan"]) });
+    await open("h-all", { "/identity": await identity("h-all"), [`/plans/${PLAN}`]: plan("proposed"), [`/releases/${REL}`]: release, [`/drafts/${DRAFT}`]: draft, [approvals]: approval(["created-plan"]) });
     await expect($('[data-testid="self-approval"]')).toHaveText(
       `Self-approval, predicted: you did not create this plan or publish this release, and you authored no fragment, profile or assignment revision in it. ${UNPREDICTED}`,
       { wait: 20_000 },
@@ -83,7 +91,7 @@ describe("approval and revocation (#358)", () => {
 
   it("a release that was not read leaves the prediction partial, never clear of self-approval", async function () {
     this.timeout(60_000);
-    await open("h-all", { [`/plans/${PLAN}`]: plan("proposed") });
+    await open("h-all", { "/identity": await identity("h-all"), [`/plans/${PLAN}`]: plan("proposed") });
     await expect($('[data-testid="self-approval"]')).toHaveText(
       expect.stringContaining(`Self-approval, predicted: you did not create this plan. Not predicted, since this read failed: release ${short(REL)}.`),
       { wait: 20_000 },

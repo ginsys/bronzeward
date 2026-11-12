@@ -108,7 +108,8 @@ describe("the plan creation page (#357)", () => {
     await $("main").$("button=Cancel plan").click();
     await expect($('[data-testid="cancel-input"]')).toHaveText("Give a reason.");
     expect(await writes()).toEqual([]);
-    await $("main").$('input[name="reason"]').setValue("synthetic reason");
+    // The page also carries the revocation's reason field, so the cancellation's own form is named.
+    await $('main form[aria-label="Cancel plan"] input[name="reason"]').setValue("synthetic reason");
     await $("main").$("button=Cancel plan").click();
     await expect($('[data-testid="write-result"]')).toHaveText("Cancellation recorded.", { wait: 60_000 });
     expect(await writes()).toEqual([`POST /plans/${PLAN}/cancellations`]);
