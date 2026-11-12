@@ -3,10 +3,10 @@
 // resource has its path (B3) and every identifier links to its view where it has one. The release
 // review, plan and drift actions, and the operation watch come with their own tickets.
 
-import { Fragment as Group, type ReactNode, useRef, useState } from "react";
+import { Fragment as Group, type ReactNode, useCallback, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
-import { PlanNew, PROPOSED, takeFresh } from "./plan.tsx";
+import { CancelPlan, PlanNew, PlanState, PROPOSED, takeFresh } from "./plan.tsx";
 import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
@@ -62,8 +62,9 @@ function ListOf<T>({ label, path, query = "", cols, empty, keyOf = byId, head }:
   );
 }
 
-function ItemOf<T>({ path, what, title, children }: { path: string; what: string; title: (t: T | undefined) => ReactNode; children: (t: T) => ReactNode }) {
-  const item = useItem<T>(path);
+// `n` is bumped to read the item again.
+function ItemOf<T>({ path, what, title, children, n }: { path: string; what: string; title: (t: T | undefined) => ReactNode; children: (t: T) => ReactNode; n?: number }) {
+  const item = useItem<T>(path, undefined, n);
   const pending = usePending(item, what);
   const t = item.kind === "ok" ? item.data : undefined;
   return <><h2>{title(t)}</h2>{t === undefined ? pending : children(t)}</>;
@@ -315,19 +316,23 @@ export function Change({ p }: { p: S["PlanBody"] }) {
   if (p.operation === "adopt") return <p>Sends nothing. Records the machine's current configuration as applied.</p>;
   if (d == null) return <p>No change recorded.</p>;
   if (d.withheld) return <p>The change cannot be shown.</p>;
-  return <><p>Whole redacted configuration, applied <Id id={d.from} /> → <Id id={d.to} />:</p><pre data-testid="diff">{d.unified}</pre></>;
+  if (d.unified === "") return <p>No differences in the redacted configurations (applied <Id id={d.from} />, release <Id id={d.to} />).</p>;
+  return <><p>Change shown below: the whole redacted configuration, applied <Id id={d.from} /> → <Id id={d.to} />.</p><pre className="diff" data-testid="diff" tabIndex={0} aria-label="Change">{d.unified}</pre></>;
 }
 
 export function PlanItem({ id }: { id: string }) {
   // The line that answers the creation this browser just sent, shown with the plan's first view only.
   const [proposed] = useState(() => takeFresh(id));
+  const [n, setN] = useState(0);
+  const reread = useCallback(() => setN((x) => x + 1), []);
   return (
-    <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" title={(p) => `Plan ${short(id)}${p === undefined ? "" : `: ${p.state}`}`}>
+    <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" n={n} title={(p) => `Plan ${short(id)}${p === undefined ? "" : `: ${p.state}`}`}>
       {(p) => {
         const { validation: v, dryRun, baseline } = p.evidence;
         return (
           <>
             {proposed && p.state === "proposed" && <Status testid="plan-proposed">{PROPOSED}</Status>}
+            <PlanState p={p} reread={reread} />
             <Fields rows={[
               ["State", `${p.state}; expires ${when(p.expiresAt)}`],
               ["Target", <>machine <Id id={p.machine} />, cluster <Id id={p.cluster} />, route {p.route}</>],
@@ -347,6 +352,7 @@ export function PlanItem({ id }: { id: string }) {
               ["Change", <Change p={p} />],
             ]} />
             <p><Ref to={`/operations?plan=${p.id}`} id={p.id}>Operations of this plan</Ref></p>
+            {(p.state === "proposed" || p.state === "approved" || p.state === "committed") && <CancelPlan id={p.id} reread={reread} />}
           </>
         );
       }}

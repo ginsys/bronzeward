@@ -6,13 +6,14 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
-import { Id, Ref, useReads } from "./list.tsx";
+import { Id, Ref, short, useItem, usePending, useReads } from "./list.tsx";
 import type { Problem } from "./request.ts";
 import { Action } from "./shell.tsx";
-import { Status } from "./states.tsx";
+import { Status, when } from "./states.tsx";
 
 type PlanInput = components["schemas"]["PlanInput"];
 type Operation = PlanInput["operation"];
+type Plan = components["schemas"]["PlanBody"];
 
 const enc = encodeURIComponent;
 
@@ -139,5 +140,97 @@ export function PlanNew({ query }: { query: string }) {
       <h2>Create a plan</h2>
       <Create key={`${release}/${machine}/${first}`} release={release} machine={machine} first={first} />
     </>
+  );
+}
+
+// The plan page's lines about the plan's state (decisions B20 and B22 of ginsys/bronzeward#259, journeys §5.6).
+// None of them sends anything: a link opens the creation page, which sends nothing until the operator submits it.
+export const STALE_AFTER_RECOVERY = "This approval is from before the last recovery entry and authorizes nothing. An approver may approve again.";
+export const CANCEL_NOTE = "Cancelling after the controller commits ends the operation only while no attempt is recorded.";
+export const REASON_MAX = 1024;
+
+const again = (p: Plan) => <> <Ref to={planPath(p.release, p.machine, p.operation as Operation)} id={p.id}>Create a new plan</Ref>.</>;
+const TERMINAL: Record<string, (p: Plan) => ReactNode> = {
+  expired: (p) => <>Expired at {when(p.expiresAt)}. Nothing runs from it.</>,
+  cancelled: () => <>Cancelled. Nothing runs from it.</>,
+  revoked: () => <>Its approval was revoked. Nothing runs from it.</>,
+};
+
+// What differs between the plan and the machine now: the Desired release and the drift record the plan was made on.
+export function staleReasons(p: Pick<Plan, "desiredRelease" | "driftRecord">, m: Pick<components["schemas"]["MachineBody"], "desired" | "openDrift">): string[] {
+  const out: string[] = [];
+  const name = (id: string | null) => (id === null ? "none" : short(id));
+  if (m.desired !== p.desiredRelease) out.push(`the machine's Desired release is now ${name(m.desired)}, and it was ${name(p.desiredRelease)}`);
+  const drift = m.openDrift?.revision ?? null;
+  if (drift !== p.driftRecord) out.push(`the machine's drift record is now ${drift ?? "none"}, and it was ${p.driftRecord ?? "none"}`);
+  return out;
+}
+
+function Approved({ p }: { p: Plan }) {
+  const approval = useItem<components["schemas"]["ApprovalBody"]>(`/approvals/${enc(p.approval ?? "")}`);
+  const now = useItem<components["schemas"]["IdentityBody"]>("/identity");
+  const machine = useItem<components["schemas"]["MachineBody"]>(`/machines/${enc(p.machine)}`);
+  const pending = [usePending(approval, "the approval"), usePending(machine, "the machine")];
+  const reasons = machine.kind === "ok" ? staleReasons(p, machine.data) : [];
+  return (
+    <>
+      {approval.kind === "ok" && now.kind === "ok" && approval.data.epoch !== now.data.epoch && <Status testid="plan-old-approval">{STALE_AFTER_RECOVERY}</Status>}
+      {reasons.length > 0 && (
+        <Status testid="plan-stale">
+          Predicted stale: {reasons.join(", and ")}. The controller reads the machine again when it commits and refuses a plan whose terms no longer hold.{again(p)}
+        </Status>
+      )}
+      {pending}
+    </>
+  );
+}
+
+// An approved plan is read again at most every five seconds while it is on screen.
+function Every({ ms, run }: { ms: number; run: () => void }) {
+  useEffect(() => {
+    const t = setInterval(run, ms);
+    return () => clearInterval(t);
+  }, [ms, run]);
+  return null;
+}
+
+export function PlanState({ p, reread }: { p: Plan; reread: () => void }) {
+  const terminal = TERMINAL[p.state];
+  return (
+    <>
+      {terminal !== undefined && <Status testid="plan-terminal"><span className="badge">{p.state}</span> {terminal(p)}{again(p)}</Status>}
+      {p.state === "approved" && <><Approved p={p} /><Every ms={5000} run={reread} /></>}
+      {p.state === "committed" && p.committedOperation !== null && <Status testid="plan-committed">Committed: operation <Id id={p.committedOperation} />.</Status>}
+    </>
+  );
+}
+
+export const reasonProblem = (text: string): string | undefined =>
+  text.trim() === "" ? "Give a reason." : new TextEncoder().encode(text).length > REASON_MAX ? `The reason must be at most ${REASON_MAX} bytes.` : undefined;
+
+// [Cancel plan] (B22): a reason of 1 to 1024 bytes, and the limit of a cancellation stated on the control.
+export function CancelPlan({ id, reread }: { id: string; reread: () => void }) {
+  const writes = useWrites()!;
+  const [note, setNote] = useState<string | undefined>();
+  const [w, send] = useSend();
+  const done = w?.outcome?.kind === "done";
+  useEffect(() => {
+    if (done) reread();
+  }, [done, reread]);
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const reason = String(new FormData(e.currentTarget).get("reason") ?? "");
+    const bad = reasonProblem(reason);
+    setNote(bad);
+    if (bad === undefined) send({ method: "POST", path: `/plans/${enc(id)}/cancellations`, body: { reason }, resource: `/plans/${enc(id)}` });
+  };
+  const busy = (w !== undefined && !startsNew(writes, w)) || done;
+  return (
+    <form onSubmit={submit} aria-label="Cancel plan">
+      <p><label>Reason <input name="reason" autoComplete="off" disabled={busy} /></label></p>
+      <p><Action label="Cancel plan" needs={["publisher", "approver", "recovery-admin"]} submit busy={busy} /> {CANCEL_NOTE}</p>
+      {note !== undefined && <p role="alert" data-testid="cancel-input">{note}</p>}
+      <Result w={w} done={() => "Cancellation recorded."} />
+    </form>
   );
 }
