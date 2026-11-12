@@ -75,7 +75,7 @@ describe("the plan page's state lines (ginsys/bronzeward#357, B20, B22)", () => 
     for (const state of ["expired", "cancelled", "revoked"]) {
       const out = html(h(PlanState, { p: plan(state), reread: () => {} }));
       expect(out).toContain(`<span class="badge">${state}</span>`);
-      expect(out).toContain(`href="${planPath("rel_a", "mch_a", "apply-config")}"`);
+      expect(out).toContain(`href="${planPath("rel_a", "mch_a", "apply-config").replaceAll("&", "&amp;")}"`);
       expect(out).toContain(">Create a new plan</a>");
       expect(out).not.toContain("<form");
     }
