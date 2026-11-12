@@ -16,6 +16,13 @@ the native composition of the same fragments written with literal values.
 It answers a feasibility question. It selects no syntax and establishes nothing about how v1 will
 be built.
 
+## Cases moved for Talos v1.14
+
+The `embedded-json`, `bool` and `int` cases now use the v1.14 documents (`EtcFileConfig`,
+`KubeNodeConfig` and `KubePrismConfig`) because v1.14 deprecates the v1alpha1 fields they used.
+This experiment's own recorded results are from the earlier v1.13.6 run and are not re-measured
+here. The C10 gate re-measured the moved cases on v1.14.5 (see its README).
+
 ## What is here
 
 - `cases/<name>/` — one case each: `case.yaml` (the values, the fragment order, the declared

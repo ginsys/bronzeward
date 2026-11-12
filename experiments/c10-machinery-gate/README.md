@@ -68,9 +68,9 @@ scanned text, so a clean scan is not vacuous.
 - `generated`: `talosctl gen secrets` and `gen config` output for a metal node, without docs and
   examples, metal mode.
 
-Both are re-read through talosctl's no-op patch, as SR did. talosctl is the pinned v1.13.6 from
+Both are re-read through talosctl's no-op patch, as SR did. talosctl is the pinned v1.14.5 from
 [`fixtures/versions.env`](../../fixtures/versions.env), digest-checked; the machinery is the
-root module's v1.13.6. `evidence/run.txt` records the commit and every version. The SP half's
+root module's v1.14.5. `evidence/run.txt` records the commit and every version. The SP half's
 base secrets are each bundle's key, secret and token scalars, as SP reads them.
 
 ## Running it
@@ -135,4 +135,6 @@ any cell.
   versions and output paths only.
 - Composition is in process; the compiler process's other surfaces (publications, their
   temporary files, the publish worker's log) are not scanned here (§15).
-- One machinery minor (v1.13.6).
+- One machinery minor (v1.14.5). The evidence was re-measured on it after the cases moved off the
+  deprecated v1alpha1 fields (SR 30 rows and SP 112 rows, none unexpected); the tables match the
+  earlier v1.13.6 run, and only `evidence/run.txt` differs.
