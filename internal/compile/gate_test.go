@@ -375,10 +375,12 @@ func caseValue(t *testing.T, n yaml.Node) (provider.Kind, any) {
 	return provider.KindMapping, m
 }
 
-// embeddedPath converts an SR embedded path (a document name, then keys and name[field=value]
+// embeddedPath converts an SR embedded path (a document name, which is v1alpha1, a kind or
+// kind/name for a named document such as EtcFileConfig, then keys and name[field=value]
 // list selectors) into a compilation.md §2.2 path in text, if text holds it.
 func embeddedPath(t *testing.T, text []byte, docName, srPath string) (string, bool) {
 	t.Helper()
+	wantKind, wantName, named := strings.Cut(docName, "/")
 	dec := yaml.NewDecoder(bytes.NewReader(text))
 	for doc := 0; ; doc++ {
 		var d yaml.Node
@@ -387,7 +389,8 @@ func embeddedPath(t *testing.T, text []byte, docName, srPath string) (string, bo
 		}
 		n := d.Content[0]
 		kind := mappingValue(n, "kind")
-		if docName == "v1alpha1" && kind != nil || docName != "v1alpha1" && (kind == nil || kind.Value != docName) {
+		name := mappingValue(n, "name")
+		if docName == "v1alpha1" && kind != nil || docName != "v1alpha1" && (kind == nil || kind.Value != wantKind || named && (name == nil || name.Value != wantName)) {
 			continue
 		}
 		p := fmt.Sprintf("doc[%d]", doc)

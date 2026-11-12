@@ -178,6 +178,7 @@ func TestSensitivityGate(t *testing.T) {
 			for _, c := range []spCell{fc, bc} {
 				if c.unexpected() {
 					unexpected++
+					t.Logf("unexpected cell: %s %s %s (native mismatch %v, machinery disagrees %v, not applicable %v)", c.base, c.name, c.cell, c.nativeMismatch, c.machineryDisagrees, c.notApplicable)
 				}
 				if c.cell == "base-ref" {
 					if c.notApplicable {
