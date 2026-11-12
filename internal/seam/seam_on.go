@@ -9,10 +9,29 @@ import (
 	"time"
 )
 
-// Control is the file the fixture writes to choose the point: one line, "<step> kill" or
-// "<step> stall". It is read at every call, so the fixture changes it between runs without
-// restarting the instance.
-var Control = "/etc/bronzeward/interrupt"
+// Control is the file the fixture writes to choose the point: one line, "<step> kill",
+// "<step> stall" or "<step> lose-reply". It is read at every call, so the fixture changes it between
+// runs without restarting the instance. A process test, which cannot write under /etc, names its
+// own file in BW_INTERRUPT_CONTROL.
+var Control = controlFile()
+
+func controlFile() string {
+	if f := os.Getenv("BW_INTERRUPT_CONTROL"); f != "" {
+		return f
+	}
+	return "/etc/bronzeward/interrupt"
+}
+
+// Lost reports whether Control names step with lose-reply: the step's work is done and committed,
+// and the caller answers as if the reply to its COMMIT was lost. The recovery entry is the one step
+// that asks.
+func Lost(step string) bool {
+	action, ok := wanted(step)
+	if ok && action == "lose-reply" {
+		fmt.Fprintf(os.Stderr, "fixture interrupt: lose-reply at %s\n", step)
+	}
+	return ok && action == "lose-reply"
+}
 
 // At interrupts the process at step when Control names it: kill ends the process at once with
 // status 137, nothing deferred run and no shutdown begun, as an operator's kill -9 would end it
@@ -21,7 +40,7 @@ var Control = "/etc/bronzeward/interrupt"
 // the file no longer names the step. Each says where on stderr first.
 func At(step string) {
 	action, ok := wanted(step)
-	if !ok {
+	if !ok || action == "lose-reply" { // lose-reply is read by Lost, not here
 		return
 	}
 	fmt.Fprintf(os.Stderr, "fixture interrupt: %s at %s\n", action, step)
@@ -44,7 +63,7 @@ func wanted(step string) (string, bool) {
 		return "", false
 	}
 	f := strings.Fields(string(b))
-	if len(f) != 2 || f[0] != step || (f[1] != "kill" && f[1] != "stall") {
+	if len(f) != 2 || f[0] != step || (f[1] != "kill" && f[1] != "stall" && f[1] != "lose-reply") {
 		return "", false
 	}
 	return f[1], true
