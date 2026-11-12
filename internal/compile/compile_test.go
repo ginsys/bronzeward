@@ -11,6 +11,8 @@ import (
 	"maps"
 	"strings"
 	"testing"
+	"testing/cryptotest"
+	"time"
 
 	coreconfig "github.com/siderolabs/talos/pkg/machinery/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/config"
@@ -37,16 +39,18 @@ func shows(rendered, s string) bool {
 		strings.Contains(rendered, strings.Trim(fmt.Sprint([]byte(s)), "[]"))
 }
 
-// generatedConfig is the machinery's own controlplane configuration for a fresh cluster.
+// generatedConfig is the machinery's own controlplane configuration for a fresh cluster. Its
+// material is the same on every call and every run: the ingest guard scans every scalar for the
+// short stand-ins these tests plant, so a random id, key or certificate that held one would fail a
+// test on a rare run. The seed fixes the randomness and the clock fixes the certificate dates.
+// Tests that call this must not run in parallel (SetGlobalRandom is process-wide).
 func generatedConfig(t *testing.T) coreconfig.Provider {
 	t.Helper()
-	bundle, err := secrets.NewBundle(secrets.NewClock(), nil)
+	cryptotest.SetGlobalRandom(t, 1)
+	bundle, err := secrets.NewBundle(secrets.NewFixedClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A random cluster id is a base64url scalar the guard scans like any other, so a test that
-	// plants a short stand-in ("abc") would sometimes find it inside the id and be refused there.
-	bundle.Cluster.ID = "compile-test-cluster-id"
 	in, err := generate.NewInput("compile-test", "https://192.0.2.20:6443", constants.DefaultKubernetesVersion,
 		generate.WithInstallDisk("/dev/sda"), generate.WithSecretsBundle(bundle))
 	if err != nil {
