@@ -983,7 +983,7 @@ old_refused() {
 # generation reads 404 and alerts at once, once. B, restarted normally with recovery mode still on,
 # refuses a publication pinning them. The run ends in recovery mode with B running.
 old_bao() {
-  local ref='S7 older OpenBao'
+  local ref='S7 older OpenBao' label_mark_s2
   machines
   must "$ref" 'C stopped' kill_if_up C "$BW_C"
   must "$ref" 'B-recovery stopped' kill_if_up B-recovery "$BW_B_RECOVERY"
@@ -1001,8 +1001,9 @@ old_bao() {
   must "$ref" 'inject bao-snapshot s7-old' "$bin/inject" bao-snapshot s7-old
   must "$ref" 'h-author opens a draft: 201' draft_by h-author old
   fresh_author
+  label_mark_s2=$(label_mark "$TALOS_WORKER_IP" bw-s2) || die "s7: the worker's configuration holds no one KubeNodeConfig document, which S2's label needs"
   must "$ref" "h-author imports the worker into it, its file secret and S2's label holding it marked: the claim released, the draft's ETag moved" \
-    ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" --arg l "$(label_mark "$TALOS_WORKER_IP" bw-s2)" '[$p, $l]')" old
+    ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" --arg l "$label_mark_s2" '[$p, $l]')" old
   ing_old=${ingested[-1]}
   must "$ref" "the import's generations written to OpenBao after its snapshot" has_generations "$ing_old"
   if ! selects_workers; then
