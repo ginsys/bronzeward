@@ -164,7 +164,7 @@ artifact() {
   w_talos get machineconfig v1alpha1 -o jsonpath='{.spec}' >"$base" ||
     die "row $ROW_ID: could not read the worker's configuration"
   talosctl_timed 20 machineconfig patch "$base" --output "$ART_FILE" \
-    --patch "{\"machine\":{\"nodeLabels\":{\"bronzeward.test/e4x\":\"$ROW_N-$name\"}}}" >/dev/null ||
+    --patch "{\"apiVersion\":\"v1alpha1\",\"kind\":\"KubeNodeConfig\",\"labels\":{\"bronzeward.test/e4x\":\"$ROW_N-$name\"}}" >/dev/null ||
     die "row $ROW_ID: could not make artifact $name"
   ART[$name]=$(sha256sum <"$ART_FILE" | cut -d' ' -f1)
 }

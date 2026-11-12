@@ -280,7 +280,7 @@ artifact() {
   mkdir -p -- "$(dirname -- "$ART_FILE")"
   w_config >"$base" || die "row $ROW_ID: could not read the worker's configuration"
   talosctl_timed 20 machineconfig patch "$base" --output "$ART_FILE" \
-    --patch "{\"machine\":{\"nodeLabels\":{\"bronzeward.test/e3\":\"$ROW_N-$1\"}}}" >/dev/null ||
+    --patch "{\"apiVersion\":\"v1alpha1\",\"kind\":\"KubeNodeConfig\",\"labels\":{\"bronzeward.test/e3\":\"$ROW_N-$1\"}}" >/dev/null ||
     die "row $ROW_ID: could not make artifact $1"
   rm -f -- "$base"
   ART_DIGEST=$(digest "$ART_FILE")

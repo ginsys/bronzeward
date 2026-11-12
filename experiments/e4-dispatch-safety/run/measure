@@ -204,7 +204,7 @@ capture() {
   d_talos get machineconfig v1alpha1 -o jsonpath='{.spec}' >"$ROW_PARTS/base.yaml" ||
     die "capture $ROW_N: could not read the worker's configuration"
   talosctl_timed 20 machineconfig patch "$ROW_PARTS/base.yaml" --output "$ROW_PARTS/art.yaml" \
-    --patch "{\"machine\":{\"nodeLabels\":{\"bronzeward.test/e4m\":\"$ROW_N\"}}}" >/dev/null ||
+    --patch "{\"apiVersion\":\"v1alpha1\",\"kind\":\"KubeNodeConfig\",\"labels\":{\"bronzeward.test/e4m\":\"$ROW_N\"}}" >/dev/null ||
     die "capture $ROW_N: could not make the artifact"
   read -r pre_v pre_u < <(d_resource) || die "capture $ROW_N: could not read the worker's resource"
   # A landing after the previous capture's window shows here, as a version it did not end on.
