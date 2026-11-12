@@ -1,6 +1,5 @@
-machine:
-  files:
-    - path: /var/etc/e2sp/run.sh
-      op: create
-      permissions: 0o755
-      content: !ref script
+apiVersion: v1alpha1
+kind: EtcFileConfig
+name: e2sp/run.sh
+mode: 0o755
+contents: !ref script

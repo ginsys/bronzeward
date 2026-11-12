@@ -1,4 +1,4 @@
-description: A reference that is a machine file's whole multi-line content, with no embedded document declared. talosctl writes it as a block, indented; value matching finds its lines, not the whole value.
+description: A reference that is an EtcFileConfig document's whole multi-line contents, with no embedded document declared. talosctl writes it as a block, indented; value matching finds its lines, not the whole value.
 transformation: resolution
 fragments:
   - file: f1.yaml

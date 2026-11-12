@@ -1,4 +1,4 @@
-description: One reference in a boolean field (install wipe). No sentinel can tell a boolean from a literal.
+description: One reference in a boolean field (KubeNodeConfig registerWithFQDN). No sentinel can tell a boolean from a literal.
 native: pass
 fragments:
   - file: f1.yaml

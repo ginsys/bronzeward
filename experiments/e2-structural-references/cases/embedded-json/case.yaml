@@ -1,11 +1,11 @@
-description: A reference inside an identified embedded JSON document (a machine file's content).
+description: A reference inside an identified embedded JSON document (an EtcFileConfig document's contents).
 native: pass
 fragments:
   - file: f1.yaml
     marked: true
 embedded:
-  - doc: v1alpha1
-    path: machine/files[path=/var/etc/e2/config.json]/content
+  - doc: EtcFileConfig/e2/config.json
+    path: contents
     format: json
     identified: true
 values:
