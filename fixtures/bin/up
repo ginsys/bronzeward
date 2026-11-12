@@ -172,7 +172,7 @@ server_template=$(cat -- "$FIXTURES/server.yaml.in") || die "cannot read $FIXTUR
 # The OpenBao policies too, the files internal/baotest also writes (fixtures/openbao/policies):
 # read once here, written to OpenBao from this reading, held below to the files the tree check sees.
 declare -A policies
-for policy in bw-ingestion bw-compiler bw-executor bw-metadata bw-metadata-only bw-orphan-report; do
+for policy in bw-ingestion bw-compiler bw-executor bw-metadata bw-metadata-only bw-orphan-report bw-onboard; do
   policies[$policy]=$(cat -- "$FIXTURES/openbao/policies/$policy.hcl") ||
     die "cannot read $FIXTURES/openbao/policies/$policy.hcl"
 done

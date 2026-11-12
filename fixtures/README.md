@@ -292,6 +292,8 @@ the files in [`openbao/policies`](openbao/policies):
   also lists and reads no value.
 - `bw-orphan-report`: the orphan report's identity (persistence-api §6.4): lists and reads metadata
   under `secret/metadata/gen/`, nothing else.
+- `bw-onboard`: the onboarding operator's identity for `bronzewardctl cluster onboard`: creates
+  `secret/data/access/talos/<cluster>` and nothing else, so it cannot read the secret back.
 
 `bin/up` writes them from those files, which `mise run go-db` also writes into a dev-mode OpenBao
 for the policy tests (`internal/provider`), so the fixture and the tests hold the same policies.
