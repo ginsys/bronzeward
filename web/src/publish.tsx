@@ -7,7 +7,7 @@
 import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag, lastGood, NO_ETAG, WriteResult } from "./drafts.tsx";
-import { useSend, useWrites } from "./forms.tsx";
+import { startsNew, useSend, useWrites } from "./forms.tsx";
 import { settledReads, watchView } from "./imports.tsx";
 import { Id, Ref, short, useItem, usePending, useReads } from "./list.tsx";
 import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
@@ -56,6 +56,16 @@ export const operationId = (data: unknown): string | undefined => {
 // the installation was restored or entered recovery mode after it, so the state is not established.
 export const notEstablished = (op: string) =>
   `Publication operation ${short(op)} ended when it was read, but the installation was restored or entered recovery mode after that, so its outcome is not established. Read the operation again.`;
+
+// Whether Publish stays locked. A write still open (in flight, or unknown with its notice not yet dismissed)
+// locks it. An accepted one keeps it locked until its operation is known to have failed, because only then
+// has the draft stayed open. A dismissed unknown outcome locks nothing: the write is no longer open.
+export function publishLocked(open: boolean, o: Outcome | undefined, failed: string | undefined): boolean {
+  if (open) return true;
+  if (o?.kind !== "done") return false;
+  const op = operationId(o.data);
+  return op === undefined || failed !== op;
+}
 
 function Progress({ op, draft, onFailed }: { op: string; draft: string; onFailed: (op: string) => void }) {
   const client = useWrites()?.client;
@@ -131,7 +141,7 @@ function Publish({ id }: { id: string }) {
     if (ifMatch !== undefined) send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, ifMatch, resource: `/drafts/${id}`, settled });
   };
   const [failed, setFailed] = useState<string | undefined>();
-  const busy = w !== undefined && (o === undefined || (o.kind === "done" && (op === undefined || failed !== op)) || o.kind === "unknown");
+  const busy = publishLocked(writes !== undefined && w !== undefined && !startsNew(writes, w), o, failed);
   return (
     <>
       <h2>Publish draft {short(id)}{d !== undefined && <> "{d.title}" {d.state}, revision {d.revision}, cluster <Id id={d.cluster} /></>}</h2>
