@@ -1,0 +1,60 @@
+$ bronzewardctl recovery status
+RECOVERY MODE is on in human (https://127.0.0.1:<port>) (start mode: recovery).
+Epoch            ep_…
+Recovery mode    on
+Start mode       recovery (GET /server)
+Entered          <local time> by idn_…: BWSYNTH drill
+Restore stopped  <local time>
+Restored         database backup BWSYNTH-pg taken at <local time>
+
+MACHINE                         SCOPE STATE              NEXT
+mch_…  pre-restore-unaccounted  account the scope: recovery scope-account 'mch_…'
+[exit 0]
+
+$ bronzewardctl recovery scope-account mch_… --start obs_… --end obs_…
+RECOVERY MODE is on in human (https://127.0.0.1:<port>) (start mode: recovery).
+Scope accounting of machine mch_… in human (https://127.0.0.1:<port>)
+  restore stopped: <local time>
+  Start must be the first successful read after the latest of that stop plus the maximum transport deadline and any restored unaccounted attempt's deadline.
+  End must be a recovery observation begun at least the settle floor after the latest of that point and the start.
+  Settle floor 30s, maximum transport deadline 5m, as GET /server serves them.
+  start: obs_…, purpose drift, began <local time>, recorded <local time>, resource version 7
+  end:   obs_…, purpose recovery, began <local time>, recorded <local time>, resource version 7
+  Explanation: none
+This records your judgment that no request sent before the restore, from any attempt the restored journal shows or one it lost, can still land on this machine. It may already have landed; nothing here shows whether it did.
+The settle floor is a minimum wait, not a proven bound: a request landing after this can overwrite work admitted once the scope is released, and would be seen only as drift at a later observation.
+Type the machine ID to send it, or press Enter to stop:
+Recorded. Scope mch_… is now blocked until it is marked.
+Attempts accounted: none.
+Settle floor 30s, counted from <time>.
+Recorded by idn_… (recovery-admin): act act_….
+Next: recovery mark 'mch_…'.
+[exit 0]
+
+$ bronzewardctl recovery mark mch_… --fact evidence=BWSYNTH restore drill read
+RECOVERY MODE is on in human (https://127.0.0.1:<port>) (start mode: recovery).
+Scope mch_… marked ready, was blocked (act act_…). Observation obs_….
+Next: recovery release 'mch_…'.
+[exit 0]
+
+$ bronzewardctl recovery release mch_… --fact evidence=BWSYNTH restore drill read
+RECOVERY MODE is on in human (https://127.0.0.1:<port>) (start mode: recovery).
+Scope mch_… released, was ready (act act_…).
+A release is not an approval: it approves no plan and sends nothing. A plan still needs its own approval.
+Next: recovery status.
+[exit 0]
+
+$ bronzewardctl recovery status
+RECOVERY MODE is on in human (https://127.0.0.1:<port>) (start mode: recovery).
+Epoch            ep_…
+Recovery mode    on
+Start mode       recovery (GET /server)
+Entered          <local time> by idn_…: BWSYNTH drill
+Restore stopped  <local time>
+Restored         database backup BWSYNTH-pg taken at <local time>
+
+MACHINE                         SCOPE STATE  NEXT
+mch_…  released     none
+
+Every scope is released: recovery exit leaves recovery mode.
+[exit 0]
