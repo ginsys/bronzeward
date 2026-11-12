@@ -114,8 +114,12 @@ func (me *machineEnv) wantNodeFailed(t *testing.T, op, claim, etagBefore string,
 		r.error["instance"] != op || r.error[subject] != id {
 		t.Fatalf("error %v; want %s naming %s %s", r.error, code, subject, id)
 	}
-	if _, ok := r.error["cause"]; ok {
-		t.Fatalf("the problem carries the cause: %v", r.error)
+	// The problem names a cause only for a machine-identity-mismatch whose cause is one of the three
+	// identity field names. Any other cause, identity-read and the access causes included, stays in the
+	// terminal event, so no provider or node text can reach the document through it.
+	named := code == "machine-identity-mismatch" && slices.Contains([]string{"smbios-uuid", "node-id", "cluster-id"}, cause)
+	if got, ok := r.error["cause"]; named && got != cause || !named && ok {
+		t.Fatalf("the problem's cause is %v (present %v); want %q named %v: %v", got, ok, cause, named, r.error)
 	}
 	evs := events(t, me.db, op)
 	want := []string{"started", "failed"}
