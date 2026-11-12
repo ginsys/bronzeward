@@ -124,7 +124,7 @@ func TestClusterDiscoverNamesTheResolvedAddress(t *testing.T) {
 	if len(c.given) != 1 || c.given[0] != "aquarak.office.ginsys.net" {
 		t.Errorf("the discovery was given endpoints %q", c.given)
 	}
-	if want := "Dialled 172.31.104.11:50000: the address that aquarak.office.ginsys.net resolved to, once."; !strings.Contains(out, want) {
+	if want := "Dialled 172.31.104.11:50000: the address that aquarak.office.ginsys.net resolved to, once. The first reads used that address. Each member was read at its own listed address."; !strings.Contains(out, want) {
 		t.Errorf("no %q in:\n%s", want, out)
 	}
 	ip := discoverFixture(t, twoMembers, nil)
