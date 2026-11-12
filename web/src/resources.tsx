@@ -13,6 +13,7 @@ import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, us
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
 import { RecoveryConsole } from "./recovery.tsx";
+import { ReviewItem } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { when } from "./states.tsx";
 
@@ -262,8 +263,11 @@ export function Changes() {
 const BUILT: readonly Col<S["ReleaseSourceBody"]>[] = [
   ["Kind", (s) => s.kind], ["Source", (s) => <Id id={s.head} />], ["Revision", (s) => <Id id={s.revision} none="removed" />],
 ];
-const COVERED: readonly Col<S["ReleaseMachineBody"]>[] = [
+// A covered machine's rendered review has its own page: /releases/<release>/machines/<machine>.
+export const reviewPath = (release: string, machine: string) => `/releases/${release}/machines/${machine}`;
+const covered = (release: string): readonly Col<S["ReleaseMachineBody"]>[] => [
   ["Machine", (m) => <Id id={m.machine} />], ["Mode", (m) => m.mode], ["Publication observation", (m) => <Id id={m.publicationObservation} />],
+  ["Rendered configuration", (m) => <Ref to={reviewPath(release, m.machine)} id={m.machine}>Rendered configuration of {short(m.machine)}</Ref>],
 ];
 
 export function ReleaseItem({ id }: { id: string }) {
@@ -279,7 +283,7 @@ export function ReleaseItem({ id }: { id: string }) {
           <h3>Source revisions this release was built from (these are not configuration)</h3>
           <Rows label="Source revisions" cols={BUILT} items={r.sources} keyOf={(s) => `${s.kind}:${s.head}`} />
           <h3>Machines covered ({r.machines.length})</h3>
-          <Rows label="Machines covered" cols={COVERED} items={r.machines} keyOf={(m) => m.machine} />
+          <Rows label="Machines covered" cols={covered(r.id)} items={r.machines} keyOf={(m) => m.machine} />
         </>
       )}
     </ItemOf>
@@ -435,6 +439,8 @@ export function DependencyItem({ id }: { id: string }) {
 // the machine list, the hub of the journeys (§6). An identifier is never percent-encoded; one that
 // is answers 404 once the view encodes it again.
 export function view(path: string, query: string, go: (to: string) => void): ReactNode | undefined {
+  const review = /^\/releases\/([^/]+)\/machines\/([^/]+)$/.exec(path);
+  if (review !== null) return <ReviewItem key={`${review[1]}/${review[2]}`} release={review[1]!} machine={review[2]!} />;
   const [, kind, id] = /^\/([a-z-]+)(?:\/([^/]+))?$/.exec(path === "/" ? "/machines" : path) ?? [];
   const source = /^(fragment|profile|assignment)s$/.exec(kind ?? "")?.[1] as Kind | undefined;
   const revision = /^(fragment|profile|assignment)-revisions$/.exec(kind ?? "")?.[1] as Kind | undefined;
