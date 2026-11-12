@@ -10,7 +10,7 @@ import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
 const html = (e: ReactElement) => renderToStaticMarkup(e);
 // The status message's text, and that it is announced as one.
 function status(e: ReactElement): string {
-  const m = /<p role="status" data-testid="[a-z]+">(.*?)<\/p>/.exec(html(e));
+  const m = /<p role="(?:status|alert)" data-testid="[a-z]+">(.*?)<\/p>/.exec(html(e));
   expect(m, html(e)).not.toBeNull();
   return m![1]!.replace(/<!-- -->/g, "").replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
 }
@@ -33,6 +33,13 @@ describe("W11 state catalogue: every text a status message", () => {
     expect(status(h(Refused, { problem, status: 422, verb: "saved" }))).toBe('Not saved: validation-failed (rule unknown-reference). Validation failed: "registry/x" has no declaration. Request req-7.');
     expect(status(h(Refused, { problem: { type: problem.type, title: problem.title, status: 422 }, status: 422, verb: "read" }))).toBe("Not read: validation-failed. Validation failed");
     expect(status(h(Refused, { problem: null, status: 502, verb: "read" }))).toBe("Not read: the server answered 502.");
+  });
+
+  test("a server refusal is announced as an alert, every other state as a status message (ginsys/bronzeward#815)", () => {
+    const problem = { type: "urn:bronzeward:problem:forbidden", title: "Forbidden", status: 403 };
+    expect(html(h(Refused, { problem, status: 403, verb: "saved", testid: "write-result" }))).toContain('<p role="alert" data-testid="write-result">');
+    expect(html(h(Refused, { problem: null, status: 502, verb: "read" }))).toContain('<p role="alert" data-testid="status">');
+    expect(html(h(Loading, { what: "machines" }))).toContain('<p role="status" data-testid="status">');
   });
 
   test("a write's 403 names what the route accepts, as a read's does (§8.2 403 row)", () => {
@@ -132,6 +139,10 @@ describe("the shell", () => {
     expect(status(h(Failure, { res: forbidden({ roles: ["author", "publisher"] }), sub: "h-viewer" }))).toBe("Needs author or publisher; you are signed in as h-viewer");
     expect(status(h(Failure, { res: forbidden({ humanOnly: true, roles: ["approver"] }), sub: "svc" }))).toBe(HUMAN_ONLY);
     expect(status(h(Failure, { res: forbidden({ plan: "pln_1", detail: "only the plan's creator may cancel it" }), sub: "h-publisher" }))).toBe("only the plan's creator may cancel it; you are signed in as h-publisher");
+    // Each of the three 403 lines is a refusal, so it is announced as an alert (ginsys/bronzeward#815).
+    for (const extra of [{ roles: ["author"] }, { humanOnly: true }, { plan: "pln_1", detail: "only the creator" }]) {
+      expect(html(h(Failure, { res: forbidden(extra), sub: "u" }))).toMatch(/<p role="alert" data-testid="status">/);
+    }
     // §8.2: each row's problem fields under it.
     const fields = '<p data-testid="problem">Not read: Forbidden (needs author). Request req-1.</p>';
     expect(html(h(Failure, { res: forbidden({ roles: ["author"], detail: "needs author", instance: "req-1" }), sub: "u" }))).toContain(fields);

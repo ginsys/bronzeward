@@ -70,9 +70,9 @@ export function Failure({ res, sub }: { res: Exclude<ReadResult<unknown>, { kind
     const p = res.problem;
     const row = (text: ReactNode) => <>{text}<ProblemFields text={problemFields(res)} /></>;
     if (p?.["humanOnly"] === true) return row(<HumanOnly />);
-    if (p?.["plan"] !== undefined && typeof p.detail === "string") return row(<Status>{p.detail}; you are signed in as {sub}</Status>);
+    if (p?.["plan"] !== undefined && typeof p.detail === "string") return row(<Status role="alert">{p.detail}; you are signed in as {sub}</Status>);
     const roles = p?.["roles"];
-    if (Array.isArray(roles) && roles.every((r) => typeof r === "string")) return row(<Status>Needs {roles.join(" or ")}; you are signed in as {sub}</Status>);
+    if (Array.isArray(roles) && roles.every((r) => typeof r === "string")) return row(<Status role="alert">Needs {roles.join(" or ")}; you are signed in as {sub}</Status>);
   }
   return <Refused problem={"problem" in res ? res.problem : null} status={"status" in res ? res.status : 0} verb="read" />;
 }

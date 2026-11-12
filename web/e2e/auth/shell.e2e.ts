@@ -30,8 +30,9 @@ async function load(f: Faults) {
 
 // Shown as a status message, which assistive technology announces without moving focus. Looked up
 // again on each try: one state's message replaces the one before it. A failure the shell keeps
-// above a page shows beside the page's own statuses, so any element with the id may carry it.
-async function announced(id: string, text: string | RegExp) {
+// above a page shows beside the page's own statuses, so any element with the id may carry it. A
+// server refusal is announced as an alert instead (ginsys/bronzeward#815).
+async function announced(id: string, text: string | RegExp, role: "status" | "alert" = "status") {
   const match = (t: string) => (typeof text === "string" ? t === text : text.test(t));
   const shown = async () => {
     for (const el of await $$(`[data-testid="${id}"]`)) {
@@ -40,7 +41,7 @@ async function announced(id: string, text: string | RegExp) {
     return undefined;
   };
   await browser.waitUntil(async () => (await shown()) !== undefined, { timeout: 20_000, timeoutMsg: `${id} did not show ${String(text)}` });
-  expect(await (await shown())?.getAttribute("role")).toBe("status");
+  expect(await (await shown())?.getAttribute("role")).toBe(role);
 }
 
 describe("the shell", () => {
@@ -183,7 +184,7 @@ describe("the state catalogue", () => {
     await announced("offline", /^Offline since /);
     await faults({ missing: "/identity" });
     await nav("Changes").click();
-    await announced("status", "Not read: not-found. Not found: injected Request req-injected.");
+    await announced("status", "Not read: not-found. Not found: injected Request req-injected.", "alert");
     expect(await testid("offline").isExisting()).toBe(false);
   });
 
@@ -191,7 +192,7 @@ describe("the state catalogue", () => {
     await fixtureSignIn("h-viewer");
     await faults({ missing: "/identity" });
     await nav("Changes").click();
-    await announced("status", "Not read: not-found. Not found: injected Request req-injected.");
+    await announced("status", "Not read: not-found. Not found: injected Request req-injected.", "alert");
     // The page's two lists have answered, and the online event's reads of them are held: an answer
     // to either would end the banner before the case looks at it.
     await browser.waitUntil(async () => (await answered("/drafts", 1)) && (await answered("/releases", 1)), { timeout: 10_000, timeoutMsg: "the lists were not read" });
@@ -210,7 +211,7 @@ describe("the state catalogue", () => {
     await announced("offline", /^Offline since /);
     await faults({ missing: "/identity" });
     await nav("Changes").click();
-    await announced("status", "Not read: not-found. Not found: injected Request req-injected.");
+    await announced("status", "Not read: not-found. Not found: injected Request req-injected.", "alert");
     expect(await testid("offline").isExisting()).toBe(true);
     await faults({});
     await event("online");
@@ -225,7 +226,7 @@ describe("the state catalogue", () => {
     await fixtureSignIn("h-viewer");
     await faults({ missing: "/identity" });
     await event("online");
-    await announced("status", "Not read: not-found. Not found: injected Request req-injected.");
+    await announced("status", "Not read: not-found. Not found: injected Request req-injected.", "alert");
     // The first online event read the machine list and its cluster filter again with the identity.
     // The refusal does not unmount the page, so this one reads the three again: 7 reads, then 3 more.
     await faults({ held: "/identity", missing: "/identity" });

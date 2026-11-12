@@ -239,6 +239,10 @@ describe("the write views (#338)", () => {
     expect(await seen()).toEqual(["409"]);
     expect(await writeAnswers()).toEqual([]);
     expect(await notice().isExisting()).toBe(false);
+    // A server refusal is announced as an alert, with at most one status message beside it
+    // (ginsys/bronzeward#815).
+    expect(await result().getAttribute("role")).toBe("alert");
+    expect((await $$('main [role="status"]')).length).toBeLessThanOrEqual(1);
     // The scope's refusal showed the page no recovery start: no banner, no start-mode text.
     expect(await $('[data-testid="recovery"]').isExisting()).toBe(false);
     const body = await $("body").getText();

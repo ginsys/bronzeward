@@ -1,5 +1,5 @@
 // The state catalogue (journeys §8, wireframe W11). Every state text is a status message, announced
-// without moving focus. The write states (unknown, set aside, replayed, conflict) are exercised from
+// without moving focus, except a server refusal, which is an alert. The write states (unknown, set aside, replayed, conflict) are exercised from
 // the first write view (#257) on.
 
 import type { ReactNode } from "react";
@@ -24,10 +24,11 @@ export const clock = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit
 // A recorded instant in a list or record, 26 Oct 2026, 10:12; none when absent.
 export const when = (at: string | null | undefined) => (at == null ? "none" : new Date(at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }));
 
-export function Status({ children, actions, testid = "status" }: { children: ReactNode; actions?: ReactNode; testid?: string | undefined }) {
+// `role` is "alert" for a server refusal, which a screen reader then announces at once.
+export function Status({ children, actions, testid = "status", role = "status" }: { children: ReactNode; actions?: ReactNode; testid?: string | undefined; role?: "status" | "alert" }) {
   return (
     <div>
-      <p role="status" data-testid={testid}>{children}</p>
+      <p role={role} data-testid={testid}>{children}</p>
       {actions}
     </div>
   );
@@ -93,12 +94,12 @@ export function scopeRefusal(code: string, problem: Problem): string {
 
 export function Refused({ problem, status, verb, testid, replayed = false, cut = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean; cut?: boolean }) {
   const earlier = replayed && `${REPLAYED} `;
-  if (problem === null) return <Status testid={testid}>{earlier}Not {verb}: the server answered {status}.{cut && ` ${CUT_OFF}`}</Status>;
+  if (problem === null) return <Status testid={testid} role="alert">{earlier}Not {verb}: the server answered {status}.{cut && ` ${CUT_OFF}`}</Status>;
   const code = problem.type.slice("urn:bronzeward:problem:".length);
   const rule = typeof problem["rule"] === "string" ? ` (rule ${problem["rule"]})` : "";
   const at = refusedAt(problem);
   return (
-    <Status testid={testid}>
+    <Status testid={testid} role="alert">
       {earlier}Not {verb}: {code}{rule}.{at}{needs(status, problem)}{scopeRefusal(code, problem)} {problem.title}{problem.detail !== undefined && at === "" && `: ${problem.detail}`}
       {problem.instance !== undefined && ` Request ${problem.instance}.`}
     </Status>
@@ -160,7 +161,7 @@ export const Offline = ({ since, readAt }: { since: Date; readAt: Date | undefin
 // No answer at all: the network, or a redirect the page refuses (client contracts §6 item 7).
 export const Disconnected = ({ testid }: { testid?: string }) => <Status testid={testid}>{TRANSPORT_FAILURE}</Status>;
 
-export const HumanOnly = () => <Status>{HUMAN_ONLY}</Status>;
+export const HumanOnly = () => <Status role="alert">{HUMAN_ONLY}</Status>;
 
 // Text the operator has not sent stays on the page; signing in again is the operator's choice.
 export const NotAccepted = ({ onSignIn }: { onSignIn: () => void }) => (
