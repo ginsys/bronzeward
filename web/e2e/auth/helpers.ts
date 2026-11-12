@@ -70,6 +70,23 @@ export async function disposable(query: string): Promise<string> {
   return res.text();
 }
 
+// The identifiers of the records a seeded deployment holds (internal/api/e2eseed_test.go): one
+// release and two machines of one cluster, and one plan in each state a plan page shows. `machine`
+// is the committed plan's, which has an operation with its first attempt; the other plans are on
+// `machine2`.
+export type Seed = {
+  cluster: string; release: string; machine: string; machine2: string; operation: string;
+  plans: { proposed: string; approved: string; committed: string; expired: string; cancelled: string; revoked: string };
+};
+
+// Starts a disposable deployment with the seeded records and returns its URL and their identifiers.
+export async function seeded(): Promise<{ at: string; seed: Seed }> {
+  const at = await disposable("start=normal&seed");
+  const res = await fetch(`${CONTROL}/seeded`);
+  expect(res.status).toBe(200);
+  return { at, seed: (await res.json()) as Seed };
+}
+
 // One API call to the disposable deployment at `at`, as `human`, under the epoch it reports now.
 export async function api(at: string, human: string, method: string, path: string, body?: unknown) {
   const auth = { Authorization: `Bearer ${mint(human)}` };

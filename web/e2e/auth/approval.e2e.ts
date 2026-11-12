@@ -1,8 +1,11 @@
 // Approval and revocation on the plan page (ginsys/bronzeward#358), against the disposable
-// deployment. It has no release and no plan, so the plan, the release and the approval are bodies the
-// injector serves, and what the page sends is asserted at the injector (one POST, its route, its
-// answer). Real server bodies for a release and plans come with ginsys/bronzeward#822, and the cases
-// that need a committed approval (AMB-05, AMB-07) wait for them. REC-03's first case is real: the
+// deployment. A plain one has no release and no plan, so the cases of the first describe serve the
+// plan, the release and the approval as bodies of the injector, and assert what the page sends at the
+// injector (one POST, its route, its answer): they need a read that fails, a drift record or a plan
+// that stays proposed after its approval, none of which a seeded record is. The cases of the seeded
+// describe read the records a seeded deployment holds (ginsys/bronzeward#822, made by the API tests'
+// own helpers) and send to the real routes: the forced submit of a viewer, the faulted approvals
+// (AMB-05, AMB-07, AMB-12, REC-03's scope variant) and a revoked plan. REC-03's first case is real: the
 // deployment restarts for recovery on the same database, its entry is made outside the page, and the
 // plan creation page, still open, sends its write. The refusal carries the entry's epoch, whose
 // re-read remounts the page (client contracts section 8.5 item 1); the refusal must still be shown.
@@ -14,7 +17,7 @@ import { RECOVERY_START } from "../../src/recovery.tsx";
 import { SCOPE_NO_MODE, SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, type Step } from "../injector.ts";
-import { answers, disposable, faults, fixtureSignIn, mint, storageEmpty, syntheticMachine, writes } from "./helpers.ts";
+import { answers, api, disposable, faults, fixtureSignIn, mint, type Seed, seeded, storageEmpty, syntheticMachine, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 const PLAN = `pln_${"q".repeat(26)}`;
@@ -55,11 +58,11 @@ describe("approval and revocation (#358)", () => {
     return { ...((await res.json()) as Record<string, unknown>), principal: "prn_synthetic_me" };
   }
 
-  // Signs in as `human` with these bodies and opens the plan page.
-  async function open(human: string, bodies: Record<string, unknown>, state = "proposed", more: Faults = {}) {
-    expect(await fixtureSignIn(human, {}, { upstream: at, bodies, ...more })).toMatch(SERVER);
-    await browser.url(`${FIXTURE_PAGE}/plans/${PLAN}`);
-    await expect($("main h2")).toHaveText(`Plan ${short(PLAN)}: ${state}`, { wait: 20_000 });
+  // Signs in as `human` with these bodies (none: the server's own) and opens the plan page of `id`.
+  async function open(human: string, bodies: Record<string, unknown> | undefined, state = "proposed", more: Faults = {}, id = PLAN) {
+    expect(await fixtureSignIn(human, {}, { upstream: at, ...(bodies === undefined ? {} : { bodies }), ...more })).toMatch(SERVER);
+    await browser.url(`${FIXTURE_PAGE}/plans/${id}`);
+    await expect($("main h2")).toHaveText(`Plan ${short(id)}: ${state}`, { wait: 20_000 });
   }
   const approve = () => $('main form[aria-label="Approve plan"]').$("button=Approve");
   const typed = () => $('main form[aria-label="Approve plan"] input[name="plan"]');
@@ -105,18 +108,6 @@ describe("approval and revocation (#358)", () => {
     await expect($('[data-testid="unseen-overwrite"]')).toHaveText(expect.stringContaining("Overwrites the drifted configuration of drift record 4, which no reviewer has seen."), { wait: 20_000 });
   });
 
-  it("h-viewer: [Approve] is disabled with its reason; a forced submit reaches the server, whose refusal is shown", async function () {
-    this.timeout(60_000);
-    await open("h-viewer", { [`/plans/${PLAN}`]: plan("proposed") });
-    await typed().setValue(PLAN);
-    expect(await approve().isEnabled()).toBe(false);
-    await expect($('main form[aria-label="Approve plan"]')).toHaveText(expect.stringContaining("Needs approver"));
-    await browser.execute(() => document.querySelector<HTMLFormElement>('main form[aria-label="Approve plan"]')!.requestSubmit());
-    await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Not saved: /), { wait: 20_000 });
-    expect(await posts()).toEqual([`POST ${approvals}`]);
-    expect((await answers()).filter((a) => a.startsWith(`${approvals} `))).toEqual([`${approvals} 403`]);
-  });
-
   it("an approved plan: a reason is required; [Revoke approval] sends one revocation and states the limit on the control", async function () {
     this.timeout(120_000);
     // The identity's epoch equals the approval's, so the approval is current and the page offers no new one.
@@ -131,43 +122,6 @@ describe("approval and revocation (#358)", () => {
     await $("main").$("button=Revoke approval").click();
     await expect($("main")).toHaveText(expect.stringContaining(`recorded by ${short("prn_synthetic_approver")}`), { wait: 20_000 });
     expect(await posts()).toEqual([`POST ${revocations}`]);
-  });
-
-  it("a revoked plan shows the reason its revocation recorded on the machine's timeline", async function () {
-    this.timeout(60_000);
-    const entry = { revision: 9, epoch: "ep_synthetic", at: T0, kind: "approval-revocation", entry: { approval: APR, plan: PLAN, principal: "prn_synthetic_approver", role: "approver", reason: "synthetic reason" } };
-    await open("h-all", { [`/plans/${PLAN}`]: plan("revoked", { approval: APR }), [`/approvals/${APR}`]: approval(), [`/machines/${machine}/timeline`]: { items: [entry] } }, "revoked");
-    await expect($('[data-testid="revocation-reason"]')).toHaveText(`Revoked by ${short("prn_synthetic_approver")}: synthetic reason`, { wait: 20_000 });
-  });
-
-  // The first send of an approval is dropped, then the epoch changes: the repeat carries the epoch it
-  // was made under and the server refuses it 412, so the write is set aside, unrepeated (AMB-12). The
-  // dropped send never committed anything, so no approval record exists and the repeat is refused.
-  async function approving(take: Step[]) {
-    await open("h-all", { [`/plans/${PLAN}`]: plan("proposed"), [`/releases/${REL}`]: release, [`/drafts/${DRAFT}`]: draft }, "proposed", { steps: { path: approvals, take } });
-    await typed().setValue(PLAN);
-    await approve().click();
-  }
-
-  it("AMB-12 on the approval: no record of the first attempt, the repeat is refused 412 and set aside", async function () {
-    this.timeout(90_000);
-    await approving(["drop", "epoch"]);
-    await expect($('[data-testid="write-notice"]')).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 30_000 });
-    expect((await answers()).filter((a) => a.startsWith(`${approvals} `))).toEqual([`${approvals} 412`]);
-    // The raw sends, each "<method> <route> <key> <epoch>": the repeat carries the first attempt's key and epoch.
-    const sent = ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).filter((w) => w.startsWith(`POST ${approvals} `));
-    expect(sent).toHaveLength(2);
-    expect(sent[0]).toMatch(/^POST \S+ [A-Za-z0-9_-]{22} \S+$/);
-    expect(sent[1]).toBe(sent[0]);
-  });
-
-  it("REC-03 (scope): an approval refused 409 recovery-mode-active with a scope names that scope and says nothing about the start mode; sent once", async function () {
-    this.timeout(60_000);
-    await approving(["scope-refused"]);
-    await expect($('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`Scope ${INJECTED_SCOPE} refuses this request. ${SCOPE_NO_MODE}`), { wait: 20_000 });
-    expect(await posts()).toEqual([`POST ${approvals}`]);
-    expect(await $('[data-testid="recovery"]').isExisting()).toBe(false);
-    expect(await $("body").getText()).not.toContain(RECOVERY_START);
   });
 
   it("REC-03, first case: plan creation on a recovery start after its entry is refused without a scope and read as a recovery start", async function () {
@@ -195,6 +149,102 @@ describe("approval and revocation (#358)", () => {
     await expect($("body")).toHaveText(expect.stringContaining("Not saved: the server answered 409. Recovery mode refuses the act on this scope"), { wait: 20_000 });
     expect((await answers()).filter((a) => a.startsWith("/plans "))).toEqual(["/plans 409"]);
     await expect($('[data-testid="recovery"]')).toHaveText(expect.stringContaining(RECOVERY_START), { wait: 20_000 });
+  });
+
+  // The same page against the records a seeded deployment holds (ginsys/bronzeward#822): the server's
+  // own bodies, and the write goes to the real route. Each case gets its own deployment, because a
+  // faulted write changes the epoch and an approval changes the plan.
+  describe("on the seeded records (#822)", () => {
+    let seed: Seed;
+
+    beforeEach(async () => {
+      ({ at, seed } = await seeded());
+    });
+
+    // A new proposed plan of the seeded release, made by the publisher, so that a human sign-in other
+    // than its creator may approve it; opened as h-approver with its ID typed and [Approve] clicked,
+    // the first send of the approval taking `take`. Returns the plan and its approval route.
+    async function approving(take: Step[]) {
+      const made = await api(at, "h-publisher", "POST", "/plans", { releaseId: seed.release, machine: seed.machine2, operation: "apply-config", mode: "no-reboot" });
+      expect(made.status).toBe(201);
+      const id = made.body!["id"] as string;
+      const route = `/plans/${id}/approvals`;
+      await open("h-approver", undefined, "proposed", { steps: { path: route, take } }, id);
+      await typed().setValue(id);
+      await approve().click();
+      return { id, route };
+    }
+    // The raw sends of the approval, each "<method> <route> <key> <epoch>".
+    const sends = async (route: string) => ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).filter((w) => w.startsWith(`POST ${route} `));
+    const notice = () => $('[data-testid="write-notice"]');
+
+    it("h-viewer: [Approve] is disabled with its reason; a forced submit reaches the server, whose refusal is shown", async function () {
+      this.timeout(60_000);
+      const route = `/plans/${seed.plans.proposed}/approvals`;
+      await open("h-viewer", undefined, "proposed", {}, seed.plans.proposed);
+      await typed().setValue(seed.plans.proposed);
+      expect(await approve().isEnabled()).toBe(false);
+      await expect($('main form[aria-label="Approve plan"]')).toHaveText(expect.stringContaining("Needs approver"));
+      await browser.execute(() => document.querySelector<HTMLFormElement>('main form[aria-label="Approve plan"]')!.requestSubmit());
+      await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Not saved: /), { wait: 20_000 });
+      expect(await posts()).toEqual([`POST ${route}`]);
+      expect((await answers()).filter((a) => a.startsWith(`${route} `))).toEqual([`${route} 403`]);
+    });
+
+    it("a revoked plan shows the reason its revocation recorded on the machine's timeline", async function () {
+      this.timeout(60_000);
+      await open("h-all", undefined, "revoked", {}, seed.plans.revoked);
+      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by \S+: seeded$/), { wait: 20_000 });
+    });
+
+    // AMB-05: the first send is committed and its answer dropped, then the epoch changes. The repeat
+    // is never sent: the page reads the recovery state first, sees another epoch and sets the write aside.
+    it("AMB-05 on the approval: committed, its reply lost, a new epoch: set aside unrepeated, and the server holds the approval", async function () {
+      this.timeout(90_000);
+      const { id, route } = await approving(["commit-drop-epoch"]);
+      await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 30_000 });
+      expect(await posts()).toEqual([`POST ${route}`]);
+      expect((await answers()).filter((a) => a.startsWith(`${route} `))).toEqual([`${route} 201`]);
+      expect(await notice().parentElement().$("button=Repeat exactly").isEnabled()).toBe(false);
+      expect((await api(at, "h-viewer", "GET", `/plans/${id}`)).body!["state"]).toBe("approved");
+    });
+
+    // AMB-07: the first send is committed and its answer dropped, and the epoch changes after the
+    // confirming read. The repeat carries the first attempt's key and meets its record: 409.
+    it("AMB-07 on the approval: a repeat after the commit and a new epoch meets the earlier record: 409, set aside, no new key", async function () {
+      this.timeout(90_000);
+      const { route } = await approving(["commit-drop", "epoch"]);
+      await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 30_000 });
+      await expect(notice()).toHaveText(expect.stringMatching(/The key's earlier record: request \S+, epoch \S+\./));
+      expect((await answers()).filter((a) => a.startsWith(`${route} `))).toEqual([`${route} 201`, `${route} 409`]);
+      const sent = await sends(route);
+      expect(sent).toHaveLength(2);
+      expect(sent[0]).toMatch(/^POST \S+ [A-Za-z0-9_-]{22} \S+$/);
+      expect(sent[1]!.split(" ")[2]).toBe(sent[0]!.split(" ")[2]);
+    });
+
+    // AMB-12: the first send is dropped before the server read it, then the epoch changes: the repeat
+    // carries the epoch it was made under and the server refuses it 412, so the write is set aside.
+    it("AMB-12 on the approval: no record of the first attempt, the repeat is refused 412 and set aside", async function () {
+      this.timeout(90_000);
+      const { route } = await approving(["drop", "epoch"]);
+      await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 30_000 });
+      expect((await answers()).filter((a) => a.startsWith(`${route} `))).toEqual([`${route} 412`]);
+      // The repeat carries the first attempt's key and epoch.
+      const sent = await sends(route);
+      expect(sent).toHaveLength(2);
+      expect(sent[0]).toMatch(/^POST \S+ [A-Za-z0-9_-]{22} \S+$/);
+      expect(sent[1]).toBe(sent[0]);
+    });
+
+    it("REC-03 (scope): an approval refused 409 recovery-mode-active with a scope names that scope and says nothing about the start mode; sent once", async function () {
+      this.timeout(60_000);
+      const { route } = await approving(["scope-refused"]);
+      await expect($('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`Scope ${INJECTED_SCOPE} refuses this request. ${SCOPE_NO_MODE}`), { wait: 20_000 });
+      expect(await posts()).toEqual([`POST ${route}`]);
+      expect(await $('[data-testid="recovery"]').isExisting()).toBe(false);
+      expect(await $("body").getText()).not.toContain(RECOVERY_START);
+    });
   });
 });
 
