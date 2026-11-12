@@ -61,8 +61,10 @@ func TestRecoveryJourney(t *testing.T) {
 	if n := f.actCount(); n != before+3 {
 		t.Errorf("%d acts recorded by the accounting, the mark and the release, want 3", n-before)
 	}
-	for _, line := range strings.Split(out.String(), "\n") {
-		if strings.Contains(line, "approv") && !strings.Contains(line, "not an approval") {
+	// Only the release's own disclaimer may name an approval, and the match ignores case.
+	const disclaimer = "a release is not an approval: it approves no plan and sends nothing."
+	for _, line := range strings.Split(strings.ToLower(out.String()), "\n") {
+		if strings.Contains(line, "approv") && !strings.HasPrefix(line, disclaimer) {
 			t.Errorf("a line of the output calls a release an approval: %q", line)
 		}
 	}
