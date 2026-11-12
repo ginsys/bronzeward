@@ -491,7 +491,7 @@ func TestPlanCreationRefusals(t *testing.T) {
 		{name: "adopt with Applied", body: adoptBody(p.target.rel, p.machine, ""), status: 409, code: "conflict"},
 		{name: "assignment moved", body: applyBody(p.target.rel, p.machine, ""), setup: "move-head", status: 409, code: "conflict"},
 		{name: "pre-restore unaccounted", body: applyBody(p.target.rel, p.machine, ""), setup: "unaccounted", status: 409,
-			code: "recovery-mode-active"},
+			code: "recovery-mode-active", member: [2]string{"scope", "pre-restore-unaccounted"}},
 	}
 	for i, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -526,6 +526,14 @@ func TestPlanCreationRefusals(t *testing.T) {
 			doc := wantProblem(t, rec, c.status, c.code)
 			if c.member[0] != "" && doc[c.member[0]] != c.member[1] {
 				t.Fatalf("problem %v, want %s %s", doc, c.member[0], c.member[1])
+			}
+			// A scope's refusal is not a recovery start: the process still reports the start mode it
+			// was started in, so a client reads a scope member as that scope's and nothing more.
+			if c.code == "recovery-mode-active" {
+				got := p.do(p.api, call{method: "GET", path: prefix + "/server", token: p.human("h-viewer")})
+				if mode := decode[map[string]any](t, got, http.StatusOK)["startMode"]; mode != "normal" {
+					t.Fatalf("startMode %v after a scope's refusal, want normal", mode)
+				}
 			}
 			var after int64
 			if err := p.db.QueryRow(`SELECT revision_counter FROM machine WHERE id = $1`, p.machine).Scan(&after); err != nil {
