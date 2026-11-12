@@ -4,7 +4,7 @@
 // as If-Match (client contracts §8.3). A document is typed into a plain textarea (B12) and lives in
 // this page's state only: never stored, and guarded while unsaved (§11.4).
 
-import { cloneElement, isValidElement, type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { AssignmentPane, ProfilePane } from "./composition.tsx";
 import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
@@ -698,10 +698,6 @@ export function where(p: Problem | null, marks: string): string | undefined {
   return paths.length === 0 ? undefined : `At ${paths.join(", ")}.`;
 }
 
-// The conflict view of a refused write is announced as an alert, wherever else the same view shows
-// as the editor's own state (ginsys/bronzeward#815).
-const asAlert = (c: ReactNode) => (isValidElement<{ role?: "alert" }>(c) ? cloneElement(c, { role: "alert" }) : c);
-
 // A write's line: 412 and 422 here, every other state as the forms show it.
 export function WriteResult({ w, done, conflict, goTo, marks = "" }: { w: Write | undefined; done: (data: unknown) => ReactNode; conflict?: ReactNode; goTo?: () => void; marks?: string }) {
   const o: Outcome | undefined = w?.outcome;
@@ -712,11 +708,11 @@ export function WriteResult({ w, done, conflict, goTo, marks = "" }: { w: Write 
     return (
       <>
         <Result w={w} done={done} />
-        {o.status === 412 && asAlert(conflict)}
+        {o.status === 412 && conflict}
       </>
     );
   }
-  if (o?.kind === "refused" && o.status === 412 && conflict !== undefined) return asAlert(conflict);
+  if (o?.kind === "refused" && o.status === 412 && conflict !== undefined) return conflict;
   if (o?.kind === "refused" && o.status === 422) {
     const at = where(o.problem, marks);
     return (
@@ -895,9 +891,9 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
     const at = selection(spot);
     into.setSelectionRange(at.start, at.end);
   };
-  const conflictView = conflict !== undefined && (
+  const conflictView = (role?: "alert") => conflict !== undefined && (
     <>
-      <Conflict what="draft" revision={conflict.revision ?? draft.revision} onShow={() => {
+      <Conflict what="draft" role={role} revision={conflict.revision ?? draft.revision} onShow={() => {
         if (conflict.awaits === true) retry((x) => x + 1);
         act({ kind: "show" });
         seeChange();
@@ -955,8 +951,8 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       )}
       {note !== undefined && <Status testid="editor-note">{note}</Status>}
       {/* A conflict a done write kept stays shown, with its Copy my text. */}
-      {!(o?.kind === "refused" && o.status === 412) && conflictView}
-      <WriteResult w={w} conflict={conflictView || undefined} goTo={() => void goTo()} marks={sent?.text.marks ?? ""} done={(data) => {
+      {!(o?.kind === "refused" && o.status === 412) && conflictView()}
+      <WriteResult w={w} conflict={conflictView("alert") || undefined} goTo={() => void goTo()} marks={sent?.text.marks ?? ""} done={(data) => {
         if (w?.spec.method === "DELETE") return `Fragment ${name} removed from draft ${short(draft.id)}.`;
         const r = (data as Partial<S["SourceUpdate"]>).entry?.revision;
         return `Fragment ${name} saved in draft ${short(draft.id)}${typeof r === "string" ? ` (revision ${short(r)})` : ""}.`;

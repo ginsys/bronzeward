@@ -122,7 +122,7 @@ export function problemFields(res: ReadResult<unknown>): string | undefined {
 // The problem fields under a message of their own (a 403 row, W1, a revocation).
 export const ProblemFields = ({ text, role }: { text: string | undefined; role?: "alert" }) => (text === undefined ? null : <p role={role} data-testid="problem">{text}</p>);
 
-export const Conflict = ({ what, revision, onShow, role }: { what: string; revision: number; onShow: () => void; role?: "status" | "alert" }) => (
+export const Conflict = ({ what, revision, onShow, role }: { what: string; revision: number; onShow: () => void; role?: "status" | "alert" | undefined }) => (
   <Status role={role} actions={button("Show their change", onShow)}>Someone changed this {what} (revision {revision}). Your text is not saved.</Status>
 );
 
