@@ -53,12 +53,12 @@ const calleeName = (callee: ts.Expression): string | undefined => {
 };
 
 // The capture a callee names, or undefined: a capture name, tracing.start, or either one reached through
-// .call or .apply (page.pdf.call(page) makes the same PDF as page.pdf()).
-const captureOf = (callee: ts.Expression): string | undefined => {
+// .call or .apply once (page.pdf.call(page) makes the same PDF as page.pdf(); page.pdf.call.call(f) runs f).
+const captureOf = (callee: ts.Expression, viaCall = false): string | undefined => {
   callee = unwrap(callee);
   const name = calleeName(callee);
   if (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) {
-    if (name === "call" || name === "apply") return captureOf(callee.expression);
+    if (!viaCall && (name === "call" || name === "apply")) return captureOf(callee.expression, true);
     if (name === "start" && calleeName(unwrap(callee.expression)) === "tracing") return "tracing.start";
   }
   return name !== undefined && ARTIFACT_NAMES.has(name) ? name : undefined;
@@ -175,7 +175,8 @@ test("the positive control: the read flags a capture reached through call or app
 test("the negative control: a capture name in a comment, a string, a variable or a plain call makes no call", () => {
   const sample = `// await browser.saveScreenshot("a.png");
     const text = "browser.savePDF()"; const key = browser["saveScreenshot"]; const f = page.pdf;
-    await browser.url("x"); await tracing.stop(); const o = { screenshot: 1 };`;
+    await browser.url("x"); await tracing.stop(); const o = { screenshot: 1 };
+    page.pdf.call.call(() => 42);`;
   expect(artifactCalls(sample)).toEqual([]);
 });
 
