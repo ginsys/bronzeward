@@ -448,8 +448,10 @@ version and the proposed Kubernetes endpoint is a guess for the operator to repl
 
 `--endpoint` and the talosconfig's first endpoint are each an IP address or a DNS name, with an
 optional port. If the endpoint is a DNS name, the command resolves it once and dials the address it
-got. It never looks the name up again, so no later read can reach another node. The members are read
-at the addresses in the member list, as before. The output names the address of the first reads:
+got. It never looks the name up again, so a DNS change cannot redirect the first reads to another
+node. The first reads are the version, the cluster information and the member list. The members are
+read at the addresses in the member list, as before. The output names the address of the first
+reads:
 
 ```text
 $ bronzewardctl cluster discover --talosconfig ./talosconfig --endpoint cp-1.lab.example
