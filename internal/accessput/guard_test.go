@@ -20,6 +20,8 @@ import (
 const (
 	secretFunc = "secretPath"
 	idPackage  = "github.com/ginsys/bronzeward/internal/id"
+	// accessPrefix is the one /v1/ literal secretPath may hold.
+	accessPrefix = "/v1/secret/data/access/talos/"
 )
 
 // check returns one line per violation in the given sources.
@@ -63,6 +65,8 @@ func check(t *testing.T, files map[string]string) []string {
 						out = append(out, name+": names the method "+s)
 					case strings.Contains(low, "metadata") || strings.Contains(low, "destroy") || strings.Contains(low, "undelete") || strings.Contains(low, "list="):
 						out = append(out, name+": names a KV operation other than the create")
+					case strings.Contains(s, "/v1/") && s != accessPrefix:
+						out = append(out, name+": "+secretFunc+" holds a path other than the access path")
 					}
 				}
 				return true
@@ -160,23 +164,24 @@ func send(u string) { http.NewRequest(http.MethodPost, u, nil) }
 		return strings.Replace(clean, `func send(u string) { http.NewRequest(http.MethodPost, u, nil) }`, "func send(u string) { "+call+" }", 1)
 	}
 	for name, tc := range map[string]struct{ src, want string }{
-		"GET":                 {withSend(`http.NewRequest(http.MethodGet, u, nil)`), "http.MethodGet"},
-		"DELETE":              {withSend(`http.NewRequest(http.MethodDelete, u, nil)`), "http.MethodDelete"},
-		"LIST by method":      {withSend(`http.NewRequest("LIST", u, nil)`), `names the method LIST`},
-		"LIST by query":       {strings.Replace(clean, "/talos/", "/talos/?list=true#", 1), "KV operation"},
-		"PUT":                 {withSend(`http.NewRequest(http.MethodPut, u, nil)`), "http.MethodPut"},
-		"helper Get":          {withSend(`http.Get(u)`), "http.Get"},
-		"helper Post":         {withSend(`http.Post(u, "", nil)`), "http.Post"},
-		"default client":      {withSend(`http.DefaultClient.Do(nil)`), "http.DefaultClient"},
-		"client Get":          {withSend(`c.Get(u)`), "calls .Get"},
-		"another path":        {withSend(`http.NewRequest(http.MethodPost, "/v1/sys/seal", nil)`), "a /v1/ path outside"},
-		"metadata path":       {strings.Replace(clean, "/data/", "/metadata/", 1), "KV operation"},
-		"destroy path":        {strings.Replace(clean, "/data/", "/destroy/", 1), "KV operation"},
-		"provider import":     {withImport(`"github.com/ginsys/bronzeward/internal/provider"`), "internal/provider"},
-		"talos import":        {withImport(`"github.com/ginsys/bronzeward/internal/talos"`), "internal/talos"},
-		"OpenBao library":     {withImport(`"github.com/openbao/openbao/api/v2"`), "openbao/openbao/api"},
-		"Vault library":       {withImport(`"github.com/hashicorp/vault/api"`), "hashicorp/vault/api"},
-		"cluster not checked": {strings.Replace(clean, "id.MustHave(cluster, id.Cluster)", "error(nil)", 1), "does not check the cluster"},
+		"GET":                         {withSend(`http.NewRequest(http.MethodGet, u, nil)`), "http.MethodGet"},
+		"DELETE":                      {withSend(`http.NewRequest(http.MethodDelete, u, nil)`), "http.MethodDelete"},
+		"LIST by method":              {withSend(`http.NewRequest("LIST", u, nil)`), `names the method LIST`},
+		"LIST by query":               {strings.Replace(clean, "/talos/", "/talos/?list=true#", 1), "KV operation"},
+		"PUT":                         {withSend(`http.NewRequest(http.MethodPut, u, nil)`), "http.MethodPut"},
+		"helper Get":                  {withSend(`http.Get(u)`), "http.Get"},
+		"helper Post":                 {withSend(`http.Post(u, "", nil)`), "http.Post"},
+		"default client":              {withSend(`http.DefaultClient.Do(nil)`), "http.DefaultClient"},
+		"client Get":                  {withSend(`c.Get(u)`), "calls .Get"},
+		"another path":                {withSend(`http.NewRequest(http.MethodPost, "/v1/sys/seal", nil)`), "a /v1/ path outside"},
+		"another path in the builder": {strings.Replace(clean, "/v1/secret/data/access/talos/", "/v1/secret/data/gen/", 1), "other than the access path"},
+		"metadata path":               {strings.Replace(clean, "/data/", "/metadata/", 1), "KV operation"},
+		"destroy path":                {strings.Replace(clean, "/data/", "/destroy/", 1), "KV operation"},
+		"provider import":             {withImport(`"github.com/ginsys/bronzeward/internal/provider"`), "internal/provider"},
+		"talos import":                {withImport(`"github.com/ginsys/bronzeward/internal/talos"`), "internal/talos"},
+		"OpenBao library":             {withImport(`"github.com/openbao/openbao/api/v2"`), "openbao/openbao/api"},
+		"Vault library":               {withImport(`"github.com/hashicorp/vault/api"`), "hashicorp/vault/api"},
+		"cluster not checked":         {strings.Replace(clean, "id.MustHave(cluster, id.Cluster)", "error(nil)", 1), "does not check the cluster"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			v := check(t, map[string]string{"bad.go": tc.src})

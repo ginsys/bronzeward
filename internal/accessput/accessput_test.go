@@ -158,8 +158,7 @@ func TestPutRefusesBeforeSending(t *testing.T) {
 		tok     Token
 		cluster string
 	}{
-		"zero token":               {srv.URL, Token{}, cluster()},
-		"no cluster":               {srv.URL, testToken(t), ""},
+		"zero token": {srv.URL, Token{}, cluster()}, "no cluster": {srv.URL, testToken(t), ""},
 		"machine identifier":       {srv.URL, testToken(t), id.New(id.Machine)},
 		"path in cluster":          {srv.URL, testToken(t), cluster() + "/../../sys/seal"},
 		"query in cluster":         {srv.URL, testToken(t), cluster() + "?x=1"},
@@ -176,6 +175,22 @@ func TestPutRefusesBeforeSending(t *testing.T) {
 				t.Errorf("the error carries input: %v", err)
 			}
 		})
+	}
+	if hits.Load() != 0 {
+		t.Errorf("%d requests were sent", hits.Load())
+	}
+}
+
+// An empty document is refused before sending: the server refuses an empty talosconfig, and a
+// create-only token cannot repair a path the empty write occupied.
+func TestPutRefusesEmptyDocument(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+	defer srv.Close()
+	for name, doc := range map[string][]byte{"nil": nil, "empty": {}} {
+		if err := Put(context.Background(), srv.URL, testToken(t), cluster(), doc); err == nil {
+			t.Errorf("%s document: no error", name)
+		}
 	}
 	if hits.Load() != 0 {
 		t.Errorf("%d requests were sent", hits.Load())
@@ -216,6 +231,14 @@ func TestTokenNeverPrints(t *testing.T) {
 	for _, out := range []string{fmt.Sprint(tok), fmt.Sprintf("%v %+v %#v %s %q %x", tok, tok, tok, tok, tok, tok)} {
 		if strings.Contains(out, "planted") || strings.Contains(out, "s.") {
 			t.Errorf("the token prints: %q", out)
+		}
+	}
+	// A struct holding the token in an unexported field is printed by reflection, which no method
+	// intercepts; the pointer-backed value must still not show the string.
+	nested := struct{ tok Token }{tok}
+	for _, out := range []string{fmt.Sprintf("%v", nested), fmt.Sprintf("%+v", nested), fmt.Sprintf("%#v", nested)} {
+		if strings.Contains(out, "planted") || strings.Contains(out, "s.p") {
+			t.Errorf("the nested token prints: %q", out)
 		}
 	}
 	b, err := json.Marshal(struct{ T Token }{tok})
@@ -267,7 +290,7 @@ func TestReadTokenFile(t *testing.T) {
 		}
 		return p
 	}
-	if tok, err := ReadTokenFile(write("ok", "s.abc\n", 0o600)); err != nil || tok.v != "s.abc" {
+	if tok, err := ReadTokenFile(write("ok", "s.abc\n", 0o600)); err != nil || tok.value() != "s.abc" {
 		t.Errorf("owner-only file: %v", err)
 	}
 	for name, p := range map[string]string{

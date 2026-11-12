@@ -47,10 +47,19 @@ const (
 	MaxTokenFile = 4 << 10
 )
 
-// Token is an OpenBao token. Every formatting of it prints the same words.
-type Token struct{ v string }
+// Token is an OpenBao token. Every formatting of it prints the same words. It holds the value
+// behind a pointer: a struct holding a Token in an unexported field is printed by reflection,
+// which no method can intercept, and then shows the pointer and not the string.
+type Token struct{ p *string }
 
 const hidden = "accessput.Token(redacted)"
+
+func (t Token) value() string {
+	if t.p == nil {
+		return ""
+	}
+	return *t.p
+}
 
 func (Token) String() string                 { return hidden }
 func (Token) GoString() string               { return hidden }
@@ -68,7 +77,7 @@ func ParseToken(b []byte) (Token, error) {
 			return Token{}, errors.New("accessput: the token holds a character outside printable ASCII, or more than one line")
 		}
 	}
-	return Token{s}, nil
+	return Token{&s}, nil
 }
 
 // ReadTokenStdin reads the token from r, at most MaxTokenFile bytes.
@@ -153,8 +162,13 @@ func Put(ctx context.Context, addr string, tok Token, cluster string, document [
 	if err != nil {
 		return err
 	}
-	if tok.v == "" {
+	if tok.value() == "" {
 		return errors.New("accessput: no token")
+	}
+	// The server refuses an empty talosconfig, and a create-only token cannot repair the path
+	// once it is occupied.
+	if len(document) == 0 {
+		return errors.New("accessput: the document is empty")
 	}
 	path, err := secretPath(cluster)
 	if err != nil {
@@ -177,7 +191,7 @@ func Put(ctx context.Context, addr string, tok Token, cluster string, document [
 	if err != nil {
 		return errors.New("accessput: the request could not be built")
 	}
-	req.Header.Set("X-Vault-Token", tok.v)
+	req.Header.Set("X-Vault-Token", tok.value())
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient(u).Do(req)
 	if err != nil {
