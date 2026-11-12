@@ -90,9 +90,9 @@ describe("the plan page's state lines (ginsys/bronzeward#357, B20, B22)", () => 
   });
 
   test("an approved plan is predicted stale when the machine's Desired release or drift record moved", () => {
-    const p = { desiredRelease: "rel_a", driftRecord: "drr_1" };
-    expect(staleReasons(p, { desired: "rel_a", openDrift: { revision: "drr_1" } } as never)).toEqual([]);
-    expect(staleReasons(p, { desired: "rel_b", openDrift: { revision: "drr_1" } } as never)).toHaveLength(1);
+    const p = { desiredRelease: "rel_a", driftRecord: 7 };
+    expect(staleReasons(p, { desired: "rel_a", openDrift: { revision: 7 } } as never)).toEqual([]);
+    expect(staleReasons(p, { desired: "rel_b", openDrift: { revision: 7 } } as never)).toHaveLength(1);
     expect(staleReasons(p, { desired: "rel_a", openDrift: null } as never)).toHaveLength(1);
     expect(staleReasons({ desiredRelease: "rel_a", driftRecord: null }, { desired: "rel_a", openDrift: null } as never)).toEqual([]);
     expect(staleReasons(p, { desired: "rel_b", openDrift: null } as never)).toHaveLength(2);

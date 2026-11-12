@@ -166,18 +166,23 @@ export function staleReasons(p: Pick<Plan, "desiredRelease" | "driftRecord">, m:
   return out;
 }
 
-function Approved({ p }: { p: Plan }) {
-  const approval = useItem<components["schemas"]["ApprovalBody"]>(`/approvals/${enc(p.approval ?? "")}`);
-  const now = useItem<components["schemas"]["IdentityBody"]>("/identity");
-  const machine = useItem<components["schemas"]["MachineBody"]>(`/machines/${enc(p.machine)}`);
+function Approved({ p, n }: { p: Plan; n: number }) {
+  const approval = useItem<components["schemas"]["ApprovalBody"]>(`/approvals/${enc(p.approval ?? "")}`, undefined, n);
+  const now = useItem<components["schemas"]["IdentityBody"]>("/identity", undefined, n);
+  const machine = useItem<components["schemas"]["MachineBody"]>(`/machines/${enc(p.machine)}`, undefined, n);
   const pending = [usePending(approval, "the approval"), usePending(machine, "the machine")];
   const reasons = machine.kind === "ok" ? staleReasons(p, machine.data) : [];
+  const old = approval.kind === "ok" && now.kind === "ok" && approval.data.epoch !== now.data.epoch;
   return (
     <>
-      {approval.kind === "ok" && now.kind === "ok" && approval.data.epoch !== now.data.epoch && <Status testid="plan-old-approval">{STALE_AFTER_RECOVERY}</Status>}
-      {reasons.length > 0 && (
-        <Status testid="plan-stale">
-          Predicted stale: {reasons.join(", and ")}. The controller reads the machine again when it commits and refuses a plan whose terms no longer hold.{again(p)}
+      {(old || reasons.length > 0) && (
+        <Status testid="plan-state">
+          {old && <span data-testid="plan-old-approval">{STALE_AFTER_RECOVERY} </span>}
+          {reasons.length > 0 && (
+            <span data-testid="plan-stale">
+              Predicted stale: {reasons.join(", and ")}. The controller reads the machine again when it commits and refuses a plan whose terms no longer hold.{again(p)}
+            </span>
+          )}
         </Status>
       )}
       {pending}
@@ -185,21 +190,22 @@ function Approved({ p }: { p: Plan }) {
   );
 }
 
-// An approved plan is read again at most every five seconds while it is on screen.
-function Every({ ms, run }: { ms: number; run: () => void }) {
+// An approved plan is read again five seconds after its last answer, never while that read is in flight: a read
+// that outlasts the interval would otherwise be dropped by the next tick and the page would never update.
+function Every({ p, ms, run }: { p: Plan; ms: number; run: () => void }) {
   useEffect(() => {
-    const t = setInterval(run, ms);
-    return () => clearInterval(t);
-  }, [ms, run]);
+    const t = setTimeout(run, ms);
+    return () => clearTimeout(t);
+  }, [p, ms, run]);
   return null;
 }
 
-export function PlanState({ p, reread }: { p: Plan; reread: () => void }) {
+export function PlanState({ p, n = 0, reread }: { p: Plan; n?: number; reread: () => void }) {
   const terminal = TERMINAL[p.state];
   return (
     <>
       {terminal !== undefined && <Status testid="plan-terminal"><span className="badge">{p.state}</span> {terminal(p)}{again(p)}</Status>}
-      {p.state === "approved" && <><Approved p={p} /><Every ms={5000} run={reread} /></>}
+      {p.state === "approved" && <><Approved p={p} n={n} /><Every p={p} ms={5000} run={reread} /></>}
       {p.state === "committed" && p.committedOperation !== null && <Status testid="plan-committed">Committed: operation <Id id={p.committedOperation} />.</Status>}
     </>
   );
