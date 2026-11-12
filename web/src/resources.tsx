@@ -471,7 +471,7 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   // ETag or editor text (ginsys/bronzeward#517 H2).
   const items: Record<string, () => ReactNode> = {
     machines: () => <MachineItem id={id} />, clusters: () => <ClusterItem id={id} />, releases: () => <ReleaseItem id={id} />, drafts: () => <DraftItem key={id} id={id} />,
-    plans: () => <PlanItem id={id} />, operations: () => <OperationItem id={id} />, dependencies: () => <DependencyItem id={id} />,
+    plans: () => <PlanItem key={id} id={id} />, operations: () => <OperationItem id={id} />, dependencies: () => <DependencyItem id={id} />,
     ingestions: () => <IngestionItem id={id} />,
   };
   return kind !== undefined && Object.hasOwn(items, kind) ? items[kind]!() : undefined;
