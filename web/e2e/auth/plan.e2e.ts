@@ -58,6 +58,9 @@ describe("the plan creation page (#357)", () => {
     await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Not saved: /), { wait: 60_000 });
     // The refusal is shown with the server's own words and the button stays available for a corrected plan.
     await expect($("main").$("button=Create plan")).toBeEnabled();
+    // The refusal belongs to apply-config: choosing adopt hides it.
+    await $("main").$("select").selectByAttribute("value", "adopt");
+    await expect($('[data-testid="write-result"]')).not.toBeExisting();
     expect((await writes()).filter((w) => w.startsWith("POST "))).toEqual(["POST /plans"]);
     const plans = await api("h-viewer", "GET", "/plans");
     expect(plans.status).toBe(200);

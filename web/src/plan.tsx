@@ -78,6 +78,8 @@ function Create({ release, machine, first }: { release: string; machine: string;
   const { go } = useReads();
   const [operation, setOperation] = useState<Operation>(first);
   const [note, setNote] = useState<string | undefined>();
+  // The operation the last submit was for: what that submit's answer says is shown only under it.
+  const [sentFor, setSentFor] = useState<Operation | undefined>();
   const [w, send] = useSend();
   const o = w?.outcome;
   const id = o?.kind === "done" && typeof o.data === "object" && o.data !== null ? (o.data as { id?: unknown }).id : undefined;
@@ -93,16 +95,20 @@ function Create({ release, machine, first }: { release: string; machine: string;
     const typed = Object.fromEntries([...new FormData(e.currentTarget)].map(([k, v]) => [k, String(v)]));
     const made = planBody(release, machine, operation, typed);
     setNote("error" in made ? made.error : undefined);
-    if ("body" in made) send({ method: "POST", path: "/plans", body: made.body, resource: "/plans" });
+    if ("body" in made) {
+      setSentFor(operation);
+      send({ method: "POST", path: "/plans", body: made.body, resource: "/plans" });
+    }
   };
-  const next = o?.kind === "refused" && o.status === 409 ? nextAfter(o.problem, release, machine) : null;
+  const mine = sentFor === operation;
+  const next = mine && o?.kind === "refused" && o.status === 409 ? nextAfter(o.problem, release, machine) : null;
   const busy = (w !== undefined && !startsNew(writes, w)) || o?.kind === "done";
   return (
     <form onSubmit={submit} aria-label="Create plan">
       <p>Plan for machine <Id id={machine} /> and release <Id id={release} />.</p>
       <p>
         <label>Operation{" "}
-          <select value={operation} onChange={(e) => setOperation(e.target.value as Operation)} disabled={busy}>
+          <select value={operation} onChange={(e) => (setOperation(e.target.value as Operation), setNote(undefined))} disabled={busy}>
             <option value="apply-config">apply-config (send this release, mode no-reboot)</option>
             <option value="adopt">adopt (hand over: sends nothing to the machine)</option>
           </select>
@@ -116,7 +122,7 @@ function Create({ release, machine, first }: { release: string; machine: string;
       ))}
       <p><Action label="Create plan" needs={["publisher"]} submit busy={busy} /></p>
       {note !== undefined && <p role="alert" data-testid="plan-input">{note}</p>}
-      <Result w={w} done={(): ReactNode => (planned === undefined ? <>The plan was created, but the answer named no plan. Find it in <Ref to="/plans" id="plans">the plans list</Ref>.</> : <>{PROPOSED} <Ref to={`/plans/${enc(planned)}`} id={planned} /></>)} />
+      {mine && <Result w={w} done={(): ReactNode => (planned === undefined ? <>The plan was created, but the answer named no plan. Find it in <Ref to="/plans" id="plans">the plans list</Ref>.</> : <>{PROPOSED} <Ref to={`/plans/${enc(planned)}`} id={planned} /></>)} />}
       {next !== null && <p data-testid="plan-next">{next}</p>}
     </form>
   );
