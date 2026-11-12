@@ -55,7 +55,7 @@ func seedPlans(t *testing.T, ae *attemptEnv) seeded {
 	s.Plans.Expired = fresh("expired")
 	ae.expirePlan(t, s.Plans.Expired, 0)
 	s.Plans.Cancelled = fresh("cancelled")
-	if rec := ae.cancel(ae.robot, "k-seed-cancel-0123456789", s.Plans.Cancelled, `{"reason":"seeded"}`); rec.Code != http.StatusCreated {
+	if rec := ae.cancel(ae.robot, "k-seed-cancel-0123456789", s.Plans.Cancelled, `{"reason":"seeded"}`); rec.Code != http.StatusOK { // a cancellation answers 200, a revocation 201
 		t.Fatalf("cancel: %d %s", rec.Code, rec.Body)
 	}
 	s.Plans.Revoked = fresh("revoked")
