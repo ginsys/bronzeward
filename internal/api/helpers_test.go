@@ -44,7 +44,7 @@ func newEnv(t *testing.T, o options) *env {
 // newEnvWith is newEnv with ingestion's dependencies.
 func newEnvWith(t *testing.T, d deps, o options) *env {
 	t.Helper()
-	e := &env{t: t, db: migrated(t), d: d}
+	e := &env{t: t, db: testDB(t), d: d}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -178,6 +178,11 @@ func wantProblem(t *testing.T, rec *httptest.ResponseRecorder, status int, code 
 	}
 	return doc
 }
+
+// testDB is the database newEnvWith opens: a fresh, migrated one, except while the e2e seed tests
+// point it at another, so that the helpers every API test uses write the records the browser cases
+// read (e2eseed_test.go). Only a test that does not run in parallel may set it.
+var testDB = migrated
 
 // migrated returns a fresh database at the binary's schema, installed.
 func migrated(t *testing.T) *sql.DB {
