@@ -144,14 +144,14 @@ describe("approval and revocation (#358)", () => {
     });
 
     // A new proposed plan of the seeded release, made by the publisher, so that a human sign-in other
-    // than its creator may approve it; opened as h-approver with its ID typed and [Approve] clicked,
+    // than its creator may approve it; opened as h-all (the deployment denies h-approver, AUTH-10) with its ID typed and [Approve] clicked,
     // the first send of the approval taking `take`. Returns the plan and its approval route.
     async function approving(take: Step[]) {
       const made = await api(at, "h-publisher", "POST", "/plans", { releaseId: seed.release, machine: seed.machine2, operation: "apply-config", mode: "no-reboot" });
       expect(made.status).toBe(201);
       const id = made.body!["id"] as string;
       const route = `/plans/${id}/approvals`;
-      await open("h-approver", undefined, "proposed", { steps: { path: route, take } }, id);
+      await open("h-all", undefined, "proposed", { steps: { path: route, take } }, id);
       await typed().setValue(id);
       await approve().click();
       return { id, route };
