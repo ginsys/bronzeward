@@ -4,7 +4,7 @@
 // as If-Match (client contracts §8.3). A document is typed into a plain textarea (B12) and lives in
 // this page's state only: never stored, and guarded while unsaved (§11.4).
 
-import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { cloneElement, isValidElement, type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { AssignmentPane, ProfilePane } from "./composition.tsx";
 import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
@@ -283,7 +283,7 @@ export const NOT_DISCARDED = "Not discarded: someone changed this draft since th
 // with unsaved text is saved or left first.
 export const EDITOR_FIRST = "Not read: the fragment editor holds unsaved text. Save it or switch entries first.";
 export const DiscardRefused = ({ onShow }: { onShow: () => void }) => (
-  <Status testid="write-result" actions={<button type="button" onClick={onShow}>Show their change</button>}>{NOT_DISCARDED}</Status>
+  <Status testid="write-result" role="alert" actions={<button type="button" onClick={onShow}>Show their change</button>}>{NOT_DISCARDED}</Status>
 );
 
 function DiscardDraft({ draft, written, seeChange }: { draft: Draft; written: () => void; seeChange: () => void }) {
@@ -698,6 +698,10 @@ export function where(p: Problem | null, marks: string): string | undefined {
   return paths.length === 0 ? undefined : `At ${paths.join(", ")}.`;
 }
 
+// The conflict view of a refused write is announced as an alert, wherever else the same view shows
+// as the editor's own state (ginsys/bronzeward#815).
+const asAlert = (c: ReactNode) => (isValidElement<{ role?: "alert" }>(c) ? cloneElement(c, { role: "alert" }) : c);
+
 // A write's line: 412 and 422 here, every other state as the forms show it.
 export function WriteResult({ w, done, conflict, goTo, marks = "" }: { w: Write | undefined; done: (data: unknown) => ReactNode; conflict?: ReactNode; goTo?: () => void; marks?: string }) {
   const o: Outcome | undefined = w?.outcome;
@@ -708,11 +712,11 @@ export function WriteResult({ w, done, conflict, goTo, marks = "" }: { w: Write 
     return (
       <>
         <Result w={w} done={done} />
-        {o.status === 412 && conflict}
+        {o.status === 412 && asAlert(conflict)}
       </>
     );
   }
-  if (o?.kind === "refused" && o.status === 412 && conflict !== undefined) return conflict;
+  if (o?.kind === "refused" && o.status === 412 && conflict !== undefined) return asAlert(conflict);
   if (o?.kind === "refused" && o.status === 422) {
     const at = where(o.problem, marks);
     return (

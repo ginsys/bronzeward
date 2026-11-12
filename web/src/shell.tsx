@@ -68,7 +68,7 @@ export function Failure({ res, sub }: { res: Exclude<ReadResult<unknown>, { kind
   if (res.kind === "defect") return <Status>Not read: {res.message}.</Status>;
   if (res.kind === "refused" && res.status === 403) {
     const p = res.problem;
-    const row = (text: ReactNode) => <>{text}<ProblemFields text={problemFields(res)} /></>;
+    const row = (text: ReactNode) => <>{text}<ProblemFields text={problemFields(res)} role="alert" /></>;
     if (p?.["humanOnly"] === true) return row(<HumanOnly />);
     if (p?.["plan"] !== undefined && typeof p.detail === "string") return row(<Status role="alert">{p.detail}; you are signed in as {sub}</Status>);
     const roles = p?.["roles"];
