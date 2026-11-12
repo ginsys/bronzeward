@@ -44,7 +44,7 @@ operator reads it (S8).
 **Fixture.** The disposable environment in [`fixtures/`](../../fixtures/README.md) at the pins of
 `fixtures/versions.env`
 ([Fx §3](../design/research/20260919-investigation-fixtures.md#3-what-was-built)): Talos v1.14.5
-(the pin after ginsys/bronzeward#713; v1.13.6 until it lands) with one control plane and one worker in Docker, PostgreSQL 17 and a single-node OpenBao 2.6.1 with
+with one control plane and one worker in Docker, PostgreSQL 17 and a single-node OpenBao 2.6.1 with
 KV v2 and Transit. `bin/up` creates it; `bin/inject` kills, pauses and partitions the database,
 OpenBao and either node, snapshots and restores the database and OpenBao under a name, soft-deletes and destroys KV versions and deletes
 Transit keys; `bin/evidence` records digests and scans for synthetic secrets with a positive

@@ -80,7 +80,7 @@ nid_w=$($T -e $TALOS_WORKER_IP -n $TALOS_WORKER_IP get identity -o json | jq -r 
 
 ```sh
 cluster=$(call POST /clusters "$author" "$(jq -nc --arg c "$cid" --arg e "https://$TALOS_CONTROLPLANE_IP:6443" \
-  '{name: "bw-fixture", endpoint: $e, contract: "v1.13", talosClusterId: $c}')" walkthrough-cluster | jq -r .id)
+  '{name: "bw-fixture", endpoint: $e, contract: "v1.14", talosClusterId: $c}')" walkthrough-cluster | jq -r .id)
 machine_cp=$(call POST /machines "$author" "$(jq -nc --arg c "$cluster" --arg n "$nid_cp" --arg e "$TALOS_CONTROLPLANE_IP:50000" \
   '{cluster: $c, talosNodeId: $n, platform: "container", talosEndpoint: $e}')" walkthrough-machine-cp | jq -r .id)
 machine_w=$(call POST /machines "$author" "$(jq -nc --arg c "$cluster" --arg n "$nid_w" --arg e "$TALOS_WORKER_IP:50000" \
