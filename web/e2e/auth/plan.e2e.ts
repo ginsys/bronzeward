@@ -9,7 +9,7 @@
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
-import { CONTROL } from "../auth.conf.ts";
+import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { fixtureSignIn, mint, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
@@ -54,7 +54,7 @@ describe("the plan creation page (#357)", () => {
     this.timeout(120_000);
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at })).toMatch(SERVER);
     const unknown = `rel_${"y".repeat(26)}`;
-    await browser.url(`/plans/new?${new URLSearchParams({ release: unknown, machine, operation: "apply-config" })}`);
+    await browser.url(`${FIXTURE_PAGE}/plans/new?${new URLSearchParams({ release: unknown, machine, operation: "apply-config" })}`);
     await expect($("main h2")).toHaveText("Create a plan", { wait: 20_000 });
     await $("main").$("button=Create plan").click();
     await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Not saved: /), { wait: 60_000 });
@@ -80,7 +80,7 @@ describe("the plan creation page (#357)", () => {
     };
     const bodies = { "/plans": plan, [`/plans/${PLAN}`]: plan };
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies })).toMatch(SERVER);
-    await browser.url(`/plans/new?${new URLSearchParams({ release: REL, machine, operation: "adopt" })}`);
+    await browser.url(`${FIXTURE_PAGE}/plans/new?${new URLSearchParams({ release: REL, machine, operation: "adopt" })}`);
     await expect($("main h2")).toHaveText("Create a plan", { wait: 20_000 });
     // An adopt plan is offered no deadline and no attempt limit.
     await expect($("main").$("label*=Transport deadline")).not.toBeExisting();
