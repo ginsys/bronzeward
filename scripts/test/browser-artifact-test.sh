@@ -96,6 +96,21 @@ else
   if [ "$rc" -ne 0 ] && [ "$(cat "$case/dev/status")" = withheld ] && ! grep -qF -- "$value" "$root/err"; then ok; else bad "unreadable file named with the value: rc=$rc status=$(cat "$case/dev/status" 2>/dev/null) log=$(cat "$root/err")"; fi
 fi
 
+# 4b'. An unreadable directory named with the value: the listing cannot be completed, so nothing is
+# uploaded, and neither the scan nor find may put the name in the log.
+fresh unreadable-dir
+mkdir "$case/out/$value"
+echo "clean" >"$case/out/$value/page.html"
+chmod 000 "$case/out/$value"
+if [ -r "$case/out/$value" ]; then
+  ok
+else
+  scan
+  publish
+  if [ "$rc" -ne 0 ] && [ "$(cat "$case/dev/status")" = withheld ] && [ "$(find "$up" -type f | wc -l)" -eq 0 ] && ! grep -qF -- "$value" "$root/err"; then ok; else bad "unreadable directory named with the value: rc=$rc status=$(cat "$case/dev/status" 2>/dev/null) log=$(cat "$root/err")"; fi
+fi
+chmod 700 "$case/out/$value"
+
 # 4c. A value that the control files' own names hold ("planted-0.log") must not break the control's count.
 fresh control-name
 rc=0
