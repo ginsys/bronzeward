@@ -81,7 +81,7 @@ function server(o: {
   return { client, opened, urls };
 }
 
-function recorder(until?: (shown: OpEvent[]) => boolean, clock = { t: 0 }) {
+function recorder(until?: (shown: OpEvent[]) => boolean | Promise<boolean>, clock = { t: 0 }) {
   const shown: OpEvent[] = [];
   const log: string[] = [];
   const sleeps: number[] = [];
@@ -749,6 +749,48 @@ describe("a callback that aborts its own watch", () => {
     const r = recorder(() => { r.abort.abort(); return false; });
     expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
     expect(r.log).toEqual([]);
+  });
+
+  // ginsys/bronzeward#814: an until that makes reads of its own answers after a turn, and the watch waits for it.
+  const turn = () => new Promise<void>((done) => setTimeout(done, 0));
+  test("an until that answers false after a turn at a keep-alive does not end the watch: the event behind it is shown", async () => {
+    const s = server({ streams: [{ chunks: [": keep-alive\n\n" + frame(ev("e1:1"))] }], states: ["running"] });
+    const r = recorder(async (shown) => { await turn(); return shown.length >= 1; });
+    expect(await watch(s.client, OP, r.w, r.pace)).toMatchObject({ kind: "ended" });
+    expect(r.log).toEqual(["show e1:1"]);
+  });
+
+  test("an until that answers true after a turn at a keep-alive ends the watch there", async () => {
+    const s = server({ streams: [{ chunks: [": keep-alive\n\n" + frame(ev("e1:1"))] }], states: ["running"] });
+    const r = recorder(async () => { await turn(); return true; });
+    expect(await watch(s.client, OP, r.w, r.pace)).toMatchObject({ kind: "ended" });
+    expect(r.log).toEqual([]);
+  });
+
+  test("an until that rejects at a keep-alive ends the watch as an until answering true does, and the watch does not hang or reject", async () => {
+    const s = server({ streams: [{ chunks: [": keep-alive\n\n" + frame(ev("e1:1"))] }], states: ["running"] });
+    const r = recorder(async () => { await turn(); throw new Error("synthetic defect"); });
+    expect(await watch(s.client, OP, r.w, r.pace)).toMatchObject({ kind: "ended" });
+    expect(r.log).toEqual([]);
+  });
+
+  test("an until still pending when the page leaves does not hold the watch: it stops at once", async () => {
+    const s = server({ streams: [{ chunks: [": keep-alive\n\n" + frame(ev("e1:1"))] }], states: ["running"] });
+    const r = recorder(() => new Promise<boolean>(() => {}));
+    setTimeout(() => r.abort.abort(), 50);
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual([]);
+  });
+
+  test("an abort queued by a show before the deferred until runs: until is not asked after it", async () => {
+    const s = server({ streams: [{ chunks: [frame(ev("e1:1")) + ": keep-alive\n\n"] }], states: ["running"] });
+    const asked: number[] = [];
+    const r = recorder(async (shown) => { asked.push(shown.length); return false; });
+    const show = r.w.show;
+    r.w.show = (e) => { show(e); queueMicrotask(() => r.abort.abort()); };
+    expect(await watch(s.client, OP, r.w, r.pace)).toEqual({ kind: "stopped" });
+    expect(r.log).toEqual(["show e1:1"]);
+    expect(asked).toEqual([]);
   });
 
   test("a show in the JSON pages stops the watch before the rest of the batch", async () => {

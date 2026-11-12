@@ -1582,7 +1582,13 @@ The review is served to any human `author`, not only the one who started the ing
    the `leaseUntil` it last read has passed by its own clock, plus a margin for clock difference
    (`internal/api/ingestions.go:238`). A read that still shows `held` or `resumed` with
    `leaseUntil` passed ends the watch, with the operation still `running`, but the mark's
-   outcome is reported as unknown, not as not applied. The run's closing transaction checks the
+   outcome is reported as unknown, not as not applied. The client acts on that read in the same
+   turn. The read must have begun after the margin passed, so the bound counts from the delivery
+   of that read. While the stream is open, the watch ends within one keep-alive interval (15 s,
+   section 8.6 item 5) after that delivery, plus the time of the reads it makes in that turn.
+   On the JSON fallback the turns come at the poll delay, which is 30 s at most when pages stay
+   empty. The bound is then that delay and not 15 s. The run's
+   closing transaction checks the
    lease once, under the claim's row lock, not again at `COMMIT`: a mark's is its pause,
    `mark-refused` pause or abandonment; a continuation's is its draft transaction releasing the
    claim, or an abandonment; a takeover's is either of those, or a pause while the claim's review
