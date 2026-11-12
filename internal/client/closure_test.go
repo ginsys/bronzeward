@@ -10,10 +10,11 @@ import (
 
 // The client's packages, whose dependency closure must hold none of the server's packages
 // listed in forbidden (decision T2 of the client's ticket), so bronzewardctl never links the
-// server's API, database, provider or Talos packages, or the PostgreSQL driver. T2 has one
-// exception: internal/talos/discover, the read-only package behind `cluster discover`, which has
-// its own dial and does not import internal/talos (this test proves that, since the parent stays
-// excluded).
+// server's API, database, provider or Talos packages, or the PostgreSQL driver. T2 has two
+// exceptions: internal/talos/discover, a read-only package, and internal/accessput, a write-only
+// package that sends one KV create to OpenBao with the operator's own token. Neither imports
+// internal/talos, internal/provider or a client library (this test proves that for the first,
+// since the parent stays excluded, and TestAccessputClosureExcludesServerPackages for the second).
 var clientPatterns = []string{
 	"github.com/ginsys/bronzeward/cmd/bronzewardctl/...",
 	"github.com/ginsys/bronzeward/internal/client/...",
@@ -106,6 +107,21 @@ func TestClientClosureIncludesDiscoverOnly(t *testing.T) {
 	for _, p := range pkgs {
 		if strings.HasPrefix(p, "github.com/ginsys/bronzeward/internal/talos") && p != discover {
 			t.Errorf("the client's closure holds %s", p)
+		}
+	}
+}
+
+// internal/accessput holds none of the excluded packages in its own closure, so linking it
+// brings none of them into the CLI. Its own source guard names the imports it may have.
+func TestAccessputClosureExcludesServerPackages(t *testing.T) {
+	const accessput = "github.com/ginsys/bronzeward/internal/accessput"
+	pkgs := closure(t, accessput)
+	if !slices.Contains(pkgs, accessput) {
+		t.Fatalf("go list -deps %s: the package is missing from its own closure", accessput)
+	}
+	for _, p := range pkgs {
+		if forbidden(p) {
+			t.Errorf("internal/accessput's closure holds %s", p)
 		}
 	}
 }

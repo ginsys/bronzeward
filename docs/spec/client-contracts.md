@@ -81,9 +81,11 @@ Kept unchanged, as the issue requires:
   administration.
 
 Excluded: a server session or backend-for-frontend, direct provider or Talos access from a
-client (the one exception is `cluster discover`, [§3.3](#33-client-actions-with-no-route): it reads
-a cluster with the operator's own talosconfig and the client links only its own read-only package,
-`internal/talos/discover`, never the server's Talos packages), a new credential policy, the decisions of
+client (two exceptions, [§3.3](#33-client-actions-with-no-route): `cluster discover` reads
+a cluster with the operator's own talosconfig through `internal/talos/discover`, a read-only
+package, and `internal/accessput` is a write-only package that sends one KV create to OpenBao
+with the operator's own token; neither imports `internal/talos` or `internal/provider`, so the
+client never links the server's Talos or provider packages), a new credential policy, the decisions of
 [#265](https://github.com/ginsys/bronzeward/issues/265) and
 [#266](https://github.com/ginsys/bronzeward/issues/266), and any client implementation.
 [#162](https://github.com/ginsys/bronzeward/issues/162) concerns Talos access and does not supply
