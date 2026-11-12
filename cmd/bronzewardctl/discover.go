@@ -88,7 +88,7 @@ func unwrapPath(err error) error {
 func discoverLines(res discover.Result, file string) []string {
 	out := []string{sf("Talos cluster ID %s, Talos %s, contract %s.", res.ClusterID, res.Version, res.Contract)}
 	if res.ResolvedFrom != "" {
-		out = append(out, sf("Dialled %s: the address that %s resolved to, once. Every later read used that address.", res.Endpoint, res.ResolvedFrom))
+		out = append(out, sf("Dialled %s: the address that %s resolved to, once. The first reads used that address. Each member was read at its own listed address.", res.Endpoint, res.ResolvedFrom))
 	}
 	if res.KubernetesEndpoint != "" {
 		out = append(out, sf("Kubernetes endpoint %s, proposed from the first control-plane member: replace it if a VIP or a DNS name fronts the API server.", res.KubernetesEndpoint))
