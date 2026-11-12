@@ -14,6 +14,6 @@ expect:
   absent: [token in the harness log, retained artifacts or browser storage]
 runs:
   web:
-    check: web/e2e/auth/writes.e2e.ts, mise run browser-auth
+    check: web/e2e/auth/writes.e2e.ts and, for the approval write, web/e2e/auth/approval.e2e.ts, mise run browser-auth
     browsers: [chrome, edge, firefox, firefox-esr]
-    covers: the first attempt that never committed; a restore that removed its record is not run
+    covers: the first attempt that never committed, for Add cluster and for Approve; a restore that removed its record is not run

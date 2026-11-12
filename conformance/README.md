@@ -52,6 +52,7 @@ cases recorded in its file. `recovery-scope-cases.yaml` holds AMB-05, AMB-07 and
 | [PROT-06](cases/PROT-06.yaml) | web, cases 1 to 4, case 4 on the interrupt build's draft-commit stall (ginsys/bronzeward#366): `mise run browser-auth` with `BW_SPECS=protected` |
 | [REC-01](cases/REC-01.yaml) | web, the banner, the process's refusal and a write's scope refusal: `mise run browser-auth` |
 | [REC-02](cases/REC-02.yaml) | web, both refusals of the entry: `mise run browser-auth` |
+| [REC-03](cases/REC-03.yaml) | web, plan creation on a real recovery start and an approval's scope refusal: `mise run browser-auth` |
 | [REC-04](cases/REC-04.yaml) | web, (a) the dropped `201` and (b) the server's lost COMMIT reply, on the interrupt build (ginsys/bronzeward#366): `mise run browser-auth` |
 | [TLS-02](cases/TLS-02.yaml) | web: `mise run browser` |
 | [TLS-03](cases/TLS-03.yaml) | web, the read case: `mise run browser`; the write case: `mise run browser-auth` |

@@ -10,7 +10,7 @@
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { api, fixtureSignIn, storageEmpty, syntheticMachine } from "./helpers.ts";
+import { api, fixtureSignIn, storageEmpty, syntheticMachine, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // Canonical identifiers (internal/id/id.go): 26 base32 characters whose last one has two zero low bits.
@@ -20,9 +20,6 @@ const T0 = "2026-11-12T08:00:00Z";
 
 let at = "";
 let machine = "";
-
-// A write is logged as "METHOD route key epoch": the method and the route are what a case compares.
-const writes = async (): Promise<string[]> => ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).map((w) => w.split(" ").slice(0, 2).join(" "));
 
 describe("the plan creation page (#357)", () => {
   before(async () => {
@@ -100,7 +97,7 @@ describe("the plan creation page (#357)", () => {
     const approval = `apr_${"a".repeat(26)}`;
     const bodies = {
       [`/plans/${PLAN}`]: synthetic("approved", { approval }),
-      [`/approvals/${approval}`]: { id: approval, plan: PLAN, approver: { principal: "h-approver", role: "approver" }, epoch: "ep_before", selfApproval: "none", unseenOverwrite: false },
+      [`/approvals/${approval}`]: { id: approval, plan: PLAN, approver: { principal: "h-approver", role: "approver" }, epoch: "ep_before", selfApproval: { marked: false, reasons: [] }, unseenOverwrite: false },
       [`/plans/${PLAN}/cancellations`]: { plan: PLAN, machine, cancelledBy: "h-publisher", role: "publisher", reason: "synthetic reason", act: "cancel", epoch: "ep_synthetic", at: T0 },
     };
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies })).toMatch(SERVER);
