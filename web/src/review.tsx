@@ -38,10 +38,11 @@ export function reviewIds(path: string): [release: string, machine: string] | un
 
 // compilation §8.3: `<redacted:REF@VERSION>`, `<redacted:REF@VERSION#N>`, `<redacted:schema>`, `<redacted:value>`,
 // `<redacted:paired>` and `<redacted>`. A name is segments of lowercase letters, digits and hyphens joined by `/`
-// (compilation §5.1), so text outside that grammar stays text. A token inside a JSON string reaches the page with
-// both angle brackets written as Unicode escapes.
+// (compilation §5.1), so text outside that grammar stays text. A token inside embedded JSON has its angle brackets
+// written as Unicode escapes (§8.3); the page cannot tell that from a YAML value that spells the same characters,
+// so it shows the escaped form as the text it is and never as a badge.
 const SEGMENT = "[a-z0-9](?:[a-z0-9-]*[a-z0-9])?";
-const TOKEN = new RegExp(`(?:<|\\\\u003c)redacted(?::(?:(schema|value|paired)|(${SEGMENT}(?:/${SEGMENT})*)@([1-9][0-9]*)(?:#([0-9]+))?))?(?:>|\\\\u003e)`, "g");
+const TOKEN = new RegExp(`<redacted(?::(?:(schema|value|paired)|(${SEGMENT}(?:/${SEGMENT})*)@([1-9][0-9]*)(?:#([0-9]+))?))?>`, "g");
 
 export type Part = { text: string } | { token: string; label: string };
 
