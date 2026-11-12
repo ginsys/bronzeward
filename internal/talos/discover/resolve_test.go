@@ -61,7 +61,7 @@ func ctx20(t *testing.T) context.Context {
 func TestDiscoverResolvesTheEndpointFlag(t *testing.T) {
 	c := newCluster(t)
 	asked := names(t, map[string][]string{"node.test": {"127.0.0.1"}})
-	got, err := Discover(ctx20(t), c.p.Talosconfig(c.a.Endpoint, "", ""), "node.test:"+portOf(t, c.a.Endpoint))
+	got, err := Discover(ctx20(t), c.p.Talosconfig(c.a.Endpoint, "", ""), "", "node.test:"+portOf(t, c.a.Endpoint))
 	if err != nil || got.ClusterID != "c-1" {
 		t.Fatalf("a name from --endpoint: %+v, %v", got, err)
 	}
@@ -78,7 +78,7 @@ func TestDiscoverResolvesTheEndpointFlag(t *testing.T) {
 func TestDiscoverResolvesTheFilesFirstEndpoint(t *testing.T) {
 	c := newCluster(t)
 	asked := names(t, map[string][]string{"node.test": {"127.0.0.1"}})
-	got, err := Discover(ctx20(t), c.p.Talosconfig("node.test:"+portOf(t, c.a.Endpoint)+", "+c.closed, "", ""), "")
+	got, err := Discover(ctx20(t), c.p.Talosconfig("node.test:"+portOf(t, c.a.Endpoint)+", "+c.closed, "", ""), "", "")
 	if err != nil || got.ClusterID != "c-1" {
 		t.Fatalf("a name from the file: %+v, %v", got, err)
 	}
@@ -116,7 +116,7 @@ func TestDiscoverNameThatDoesNotResolve(t *testing.T) {
 		{"flag", "gone.test:" + portOf(t, c.a.Endpoint), c.a.Endpoint, "--endpoint"},
 		{"file", "", "gone.test:" + portOf(t, c.a.Endpoint), "the talosconfig's first endpoint"},
 	} {
-		_, err := Discover(ctx20(t), c.p.Talosconfig(tc.file, "", ""), tc.endpoint)
+		_, err := Discover(ctx20(t), c.p.Talosconfig(tc.file, "", ""), "", tc.endpoint)
 		if err == nil || !strings.Contains(err.Error(), tc.source) {
 			t.Errorf("%s: %v, want a refusal that names %q", tc.name, err, tc.source)
 			continue
@@ -141,7 +141,7 @@ func TestDiscoverRefusesAnUnusableAnswer(t *testing.T) {
 		"empty.test": {}, "any.test": {"0.0.0.0", "::"}, "multi.test": {"224.0.0.1"}, "zone.test": {"fe80::1%eth0"},
 	})
 	for _, name := range []string{"empty.test", "any.test", "multi.test", "zone.test"} {
-		if _, err := Discover(ctx20(t), c.p.Talosconfig(c.a.Endpoint, "", ""), name+":50000"); err == nil || !strings.Contains(err.Error(), "--endpoint") {
+		if _, err := Discover(ctx20(t), c.p.Talosconfig(c.a.Endpoint, "", ""), "", name+":50000"); err == nil || !strings.Contains(err.Error(), "--endpoint") {
 			t.Errorf("%s: %v, want a refusal that names --endpoint", name, err)
 		}
 	}
@@ -152,7 +152,7 @@ func TestDiscoverRefusesAnUnusableAnswer(t *testing.T) {
 func TestDiscoverUsesTheFirstUsableAddress(t *testing.T) {
 	c := newCluster(t)
 	names(t, map[string][]string{"node.test": {"0.0.0.0", "::ffff:127.0.0.1", "10.9.9.9"}})
-	got, err := Discover(ctx20(t), c.p.Talosconfig(c.a.Endpoint, "", ""), "node.test:"+portOf(t, c.a.Endpoint))
+	got, err := Discover(ctx20(t), c.p.Talosconfig(c.a.Endpoint, "", ""), "", "node.test:"+portOf(t, c.a.Endpoint))
 	if err != nil || got.Endpoint != c.a.Endpoint {
 		t.Fatalf("%+v, %v", got, err)
 	}

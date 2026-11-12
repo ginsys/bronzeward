@@ -87,12 +87,13 @@ var startTimeout = 15 * time.Second
 // ErrNoEndpoint is Discover's refusal when it is given no endpoint and the talosconfig names none.
 var ErrNoEndpoint = errors.New("discover: the talosconfig names no endpoint")
 
-// Discover dials endpoint (an IP literal or a DNS name, with an optional port; the talosconfig's first
-// endpoint when empty) with the talosconfig's current context and reads the cluster. A DNS name is
-// resolved once and the address it gave is dialled (resolveEndpoint). A member that does not answer is
-// listed as such, not an error.
-func Discover(ctx context.Context, talosconfig []byte, endpoint string) (Result, error) {
-	creds, first, err := credentials(talosconfig)
+// Discover dials endpoint (an IP literal or a DNS name, with an optional port; the first endpoint of
+// the context when empty) with the talosconfig's context called contextName (its current context when
+// "") and reads the cluster. No other context is used. A name that the file does not hold is
+// ErrUnknownContext, before any dial. A DNS name is resolved once and the address it gave is dialled
+// (resolveEndpoint). A member that does not answer is listed as such, not an error.
+func Discover(ctx context.Context, talosconfig []byte, contextName, endpoint string) (Result, error) {
+	creds, first, err := credentials(talosconfig, contextName)
 	if err != nil {
 		return Result{}, err
 	}
