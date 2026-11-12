@@ -6,7 +6,7 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
-import { Id, Ref, short, useItem, usePending, useReads } from "./list.tsx";
+import { type Load, Id, Ref, short, usePending, useReads, useSettled } from "./list.tsx";
 import type { Problem } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
@@ -166,10 +166,37 @@ export function staleReasons(p: Pick<Plan, "desiredRelease" | "driftRecord">, m:
   return out;
 }
 
-function Approved({ p, n }: { p: Plan; n: number }) {
-  const approval = useItem<components["schemas"]["ApprovalBody"]>(`/approvals/${enc(p.approval ?? "")}`, undefined, n);
-  const now = useItem<components["schemas"]["IdentityBody"]>("/identity", undefined, n);
-  const machine = useItem<components["schemas"]["MachineBody"]>(`/machines/${enc(p.machine)}`, undefined, n);
+type Approval = components["schemas"]["ApprovalBody"];
+type Identity = components["schemas"]["IdentityBody"];
+type Machine = components["schemas"]["MachineBody"];
+type Reads = { approval: Load<Approval>; now: Load<Identity>; machine: Load<Machine> };
+const LOADING: Reads = { approval: { kind: "loading" }, now: { kind: "loading" }, machine: { kind: "loading" } };
+
+// The approved plan's own reads, and the poll. One chain, so nothing is superseded while it is in flight: each answer
+// of the plan starts the three reads, and five seconds after they are all answered the plan is read again. A read the
+// shell invalidated (a view change, a refused credential) ends the chain until the shell's own read-again.
+function Approved({ p, reread }: { p: Plan; reread: () => void }) {
+  const settled = useSettled();
+  const [seen, setSeen] = useState<Reads>(LOADING);
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    void (async () => {
+      const [approval, now, machine] = await Promise.all([
+        settled<Approval>(`/approvals/${enc(p.approval ?? "")}`, () => live),
+        settled<Identity>("/identity", () => live),
+        settled<Machine>(`/machines/${enc(p.machine)}`, () => live),
+      ]);
+      if (!live || approval === undefined || now === undefined || machine === undefined) return;
+      setSeen({ approval, now, machine });
+      timer = setTimeout(reread, 5000);
+    })();
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [p, settled, reread]);
+  const { approval, now, machine } = seen;
   const pending = [usePending(approval, "the approval"), usePending(machine, "the machine")];
   const reasons = machine.kind === "ok" ? staleReasons(p, machine.data) : [];
   const old = approval.kind === "ok" && now.kind === "ok" && approval.data.epoch !== now.data.epoch;
@@ -190,22 +217,12 @@ function Approved({ p, n }: { p: Plan; n: number }) {
   );
 }
 
-// An approved plan is read again five seconds after its last answer, never while that read is in flight: a read
-// that outlasts the interval would otherwise be dropped by the next tick and the page would never update.
-function Every({ p, ms, run }: { p: Plan; ms: number; run: () => void }) {
-  useEffect(() => {
-    const t = setTimeout(run, ms);
-    return () => clearTimeout(t);
-  }, [p, ms, run]);
-  return null;
-}
-
-export function PlanState({ p, n = 0, reread }: { p: Plan; n?: number; reread: () => void }) {
+export function PlanState({ p, reread }: { p: Plan; reread: () => void }) {
   const terminal = TERMINAL[p.state];
   return (
     <>
       {terminal !== undefined && <Status testid="plan-terminal"><span className="badge">{p.state}</span> {terminal(p)}{again(p)}</Status>}
-      {p.state === "approved" && <><Approved p={p} n={n} /><Every p={p} ms={5000} run={reread} /></>}
+      {p.state === "approved" && <Approved p={p} reread={reread} />}
       {p.state === "committed" && p.committedOperation !== null && <Status testid="plan-committed">Committed: operation <Id id={p.committedOperation} />.</Status>}
     </>
   );
