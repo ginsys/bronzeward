@@ -387,6 +387,7 @@ jobs:
         with:
           name: browser-auth-linux-${{ matrix.browser }}
           path: ${{ steps.publish.outputs.path }}
+          include-hidden-files: true
           retention-days: 14
       - if: always()
         run: mise run dev-down
