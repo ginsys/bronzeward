@@ -18,7 +18,7 @@ import (
 // defaultPort is the Talos API port an endpoint without one is dialled on.
 const defaultPort = "50000"
 
-var errEndpoint = errors.New("discover: an endpoint is an IP literal (an IPv6 literal in brackets) with an optional port from 1 to 65535")
+var errEndpoint = errors.New("discover: an endpoint is an IP literal (an IPv6 literal in brackets) or a DNS name, with an optional port from 1 to 65535")
 
 // parseEndpoint is internal/talos.ParseEndpoint's grammar, copied because this package must not
 // import internal/talos (it would link the machine configuration reader into the CLI);

@@ -41,8 +41,11 @@ type Member struct {
 // a proposal from the first control-plane member, for the operator to replace.
 type Result struct {
 	ClusterID, Version, Contract, KubernetesEndpoint string
-	Supported                                        bool
-	Members                                          []Member
+	// Endpoint is the address Discover dialled, as host:port. ResolvedFrom is the DNS name it was
+	// resolved from, or "" when the endpoint was an IP literal.
+	Endpoint, ResolvedFrom string
+	Supported              bool
+	Members                []Member
 }
 
 // memberEndpoint is where a member is dialled; a test points it at a stand-in.
@@ -84,34 +87,36 @@ var startTimeout = 15 * time.Second
 // ErrNoEndpoint is Discover's refusal when it is given no endpoint and the talosconfig names none.
 var ErrNoEndpoint = errors.New("discover: the talosconfig names no endpoint")
 
-// Discover dials endpoint (an IP literal with an optional port; the talosconfig's first endpoint
-// when empty) with the talosconfig's current context and reads the cluster. A member that does not
-// answer is listed as such, not an error.
+// Discover dials endpoint (an IP literal or a DNS name, with an optional port; the talosconfig's first
+// endpoint when empty) with the talosconfig's current context and reads the cluster. A DNS name is
+// resolved once and the address it gave is dialled (resolveEndpoint). A member that does not answer is
+// listed as such, not an error.
 func Discover(ctx context.Context, talosconfig []byte, endpoint string) (Result, error) {
 	creds, first, err := credentials(talosconfig)
 	if err != nil {
 		return Result{}, err
 	}
+	source := sourceFlag
 	if endpoint == "" {
-		endpoint = first
+		endpoint, source = first, sourceFile
 	}
 	if endpoint == "" {
 		return Result{}, ErrNoEndpoint
 	}
-	ep, err := parseEndpoint(endpoint)
+	// The name lookup, the dial and the reads from the endpoint share one deadline; the members are
+	// read under the caller's context, each address under its own.
+	startCtx, stop := context.WithTimeout(ctx, startTimeout)
+	defer stop()
+	ep, name, err := resolveEndpoint(startCtx, endpoint, source)
 	if err != nil {
 		return Result{}, err
 	}
-	// The reads from the endpoint have their own deadline; the members are read under the caller's
-	// context, each address under its own.
-	startCtx, stop := context.WithTimeout(ctx, startTimeout)
-	defer stop()
 	n, err := dial(startCtx, creds, ep)
 	if err != nil {
 		return Result{}, err
 	}
 	defer n.close()
-	var res Result
+	res := Result{Endpoint: ep, ResolvedFrom: name}
 	if res.Version, err = version(startCtx, n); err != nil {
 		return Result{}, err
 	}

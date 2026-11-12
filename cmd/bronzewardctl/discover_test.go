@@ -110,6 +110,29 @@ func TestClusterDiscoverPrintsCommands(t *testing.T) {
 	}
 }
 
+// TestClusterDiscoverNamesTheResolvedAddress: when the endpoint was a DNS name, the output names the
+// address that was dialled and the name it came from, and passes the name on unchanged. With an IP
+// literal there is no such line.
+func TestClusterDiscoverNamesTheResolvedAddress(t *testing.T) {
+	res := twoMembers
+	res.Endpoint, res.ResolvedFrom = "172.31.104.11:50000", "aquarak.office.ginsys.net"
+	c := discoverFixture(t, res, nil)
+	code, out, errOut := runCtl(t, "cluster", "discover", "--talosconfig", c.file, "--endpoint", "aquarak.office.ginsys.net")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	if len(c.given) != 1 || c.given[0] != "aquarak.office.ginsys.net" {
+		t.Errorf("the discovery was given endpoints %q", c.given)
+	}
+	if want := "Dialled 172.31.104.11:50000: the address that aquarak.office.ginsys.net resolved to, once."; !strings.Contains(out, want) {
+		t.Errorf("no %q in:\n%s", want, out)
+	}
+	ip := discoverFixture(t, twoMembers, nil)
+	if _, out, _ := runCtl(t, "cluster", "discover", "--talosconfig", ip.file, "--endpoint", "10.0.0.1"); strings.Contains(out, "Dialled") {
+		t.Errorf("an IP literal prints a resolution line:\n%s", out)
+	}
+}
+
 // TestClusterDiscoverRecordsNoMemberItCannotName: a member that did not answer, one that reported
 // no platform, and an unsupported contract each get no command.
 func TestClusterDiscoverRecordsNoMemberItCannotName(t *testing.T) {
