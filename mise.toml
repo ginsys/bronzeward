@@ -459,6 +459,9 @@ run = '''
 # BW_DEV_PG_PORT, BW_DEV_BAO_ADDR and BW_DEV_IDP_DIR reach web/e2e/auth.conf.ts, which takes the
 # database, OpenBao and the provider's variables from the instance (scripts/dev/instance.sh); the
 # browser ports are its own.
+# First, so that a run that fails in any later step leaves no status of an earlier run behind (the
+# upload of the last step's artifact reads it, ginsys/bronzeward#782).
+rm -rf .dev/browser-auth
 . scripts/dev/instance.sh || exit 1
 [ -f "$BW_DEV_IDP_DIR/idp.env" ] || { echo "browser-auth: no $BW_DEV_IDP_DIR/idp.env; run ${BW_DEV_PFX}mise run dev-idp first" >&2; exit 1; }
 go build -o bin/webhost ./fixtures/webhost
@@ -467,7 +470,7 @@ go build -o bin/webhost ./fixtures/webhost
 go build -tags fixtureinterrupt -o bin/bronzeward-interrupt ./cmd/bronzeward
 canary="BWSYNTH-web-$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
 password=$(. "./$BW_DEV_IDP_DIR/idp.env" && printf %s "$BW_TEST_IDP_PASSWORD")
-rm -rf web/e2e/out .dev/browser-auth
+rm -rf web/e2e/out
 mkdir -p web/e2e/out
 cd web
 # The run's console goes to a file the scan reads, not to the job log: a failing expect prints its

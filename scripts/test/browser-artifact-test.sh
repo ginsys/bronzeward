@@ -84,6 +84,27 @@ elif holds "$up" || grep -qF -- "$value" "$root/err"; then bad "planted value in
 elif holds "$case/out"; then ok
 else bad "the control's planted name is not in the original tree"; fi
 
+# 4b. An unreadable file whose name holds the value: a filesystem error would quote the path, so the
+# log must not hold it. (Skipped when the user can read it anyway, as root can.)
+fresh unreadable-name
+echo "clean" >"$case/out/sub/$value.log"
+chmod 000 "$case/out/sub/$value.log"
+if [ -r "$case/out/sub/$value.log" ]; then
+  ok
+else
+  scan
+  if [ "$rc" -ne 0 ] && [ "$(cat "$case/dev/status")" = withheld ] && ! grep -qF -- "$value" "$root/err"; then ok; else bad "unreadable file named with the value: rc=$rc status=$(cat "$case/dev/status" 2>/dev/null) log=$(cat "$root/err")"; fi
+fi
+
+# 4c. A value that the control files' own names hold ("planted-0.log") must not break the control's count.
+fresh control-name
+rc=0
+"$tool" scan "$case/dev/status" "$case/dev/listing" "$case/out" "planted-0" 2>"$root/err" >/dev/null || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$case/dev/status")" = passed ]; then ok; else bad "a value held by the control's file names: rc=$rc $(cat "$root/err")"; fi
+
+# 4d. The upload of a passed scan carries hidden files, which the scan read.
+if sed -n '/^  browser-auth:/,/^  package:/p' "$here/../../.github/workflows/ci.yml" | grep -q 'include-hidden-files: true'; then ok; else bad "ci.yml's browser-auth upload does not set include-hidden-files: true"; fi
+
 # 5. A run that never reached the scan, or left an odd status: nothing is uploaded, never the files.
 fresh no-status
 publish
