@@ -3,9 +3,10 @@
 // resource has its path (B3) and every identifier links to its view where it has one. The release
 // review, plan and drift actions, and the operation watch come with their own tickets.
 
-import { Fragment as Group, type ReactNode, useRef } from "react";
+import { Fragment as Group, type ReactNode, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
+import { PlanNew, PROPOSED, takeFresh } from "./plan.tsx";
 import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
@@ -15,7 +16,7 @@ import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
 import { RecoveryConsole } from "./recovery.tsx";
 import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
-import { when } from "./states.tsx";
+import { Status, when } from "./states.tsx";
 
 type S = components["schemas"];
 type Col<T> = readonly [string, (t: T) => ReactNode];
@@ -318,12 +319,15 @@ export function Change({ p }: { p: S["PlanBody"] }) {
 }
 
 export function PlanItem({ id }: { id: string }) {
+  // The line that answers the creation this browser just sent, shown with the plan's first view only.
+  const [proposed] = useState(() => takeFresh(id));
   return (
     <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" title={(p) => `Plan ${short(id)}${p === undefined ? "" : `: ${p.state}`}`}>
       {(p) => {
         const { validation: v, dryRun, baseline } = p.evidence;
         return (
           <>
+            {proposed && p.state === "proposed" && <Status testid="plan-proposed">{PROPOSED}</Status>}
             <Fields rows={[
               ["State", `${p.state}; expires ${when(p.expiresAt)}`],
               ["Target", <>machine <Id id={p.machine} />, cluster <Id id={p.cluster} />, route {p.route}</>],
@@ -451,6 +455,7 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   if (id === "new" && kind === "drafts") return <CreateDraft />;
   if (id === "new" && kind === "ingestions") return <StartImport query={query} />;
   if (id === "new" && kind === "publications") return <PublishDraft query={query} />;
+  if (id === "new" && kind === "plans") return <PlanNew query={query} />;
   if (id === undefined) {
     const pages: Record<string, () => ReactNode> = {
       machines: () => <Machines query={query} go={go} />, clusters: () => <Clusters />, changes: () => <Changes />,
