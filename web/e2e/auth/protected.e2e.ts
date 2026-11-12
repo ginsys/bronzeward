@@ -371,14 +371,15 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     const began = Date.now();
     await claimShows("The import continues in operation", 30_000);
     await unknownOutcome("during the stall");
-    // The read of the operation answers while the commit stalls (ginsys/bronzeward#803). The watch stops
-    // only at an event or at the stream's 15 s keep-alive (internal/api/operations.go:215, web/src/progress.ts:50).
-    // The lease lapses about 17 s in, and the page reads again at LEASE_MARGIN, 10 s later (web/src/imports.tsx:30).
-    // The beat at 30 s asks and only starts the check, whose answer the next ask uses (imports.tsx:272, :321-325).
-    // So the watch stops at the beat at 45 s, and at 55 s at the latest. A read that blocks again waits for the
-    // page's 30 s bound on response headers (AMB-14) inside that check, so the watch stops at 75 s at the earliest.
-    // 60 s separates the two. The CLI decides in one call and stops near 27 s (cmd/bronzewardctl/imports.go:455-482).
-    expect(Date.now() - began).toBeLessThan(60_000);
+    // The read of the operation answers while the commit stalls (ginsys/bronzeward#803). The lease lapses about
+    // 17 s in, and the page reads again at LEASE_MARGIN, 10 s later (web/src/imports.tsx:30). The watch then ends
+    // within one 15 s keep-alive beat of that read (client contracts §11.3, internal/api/operations.go:215), so
+    // 42 s, and 45 s with the time of the reads. A read that blocks again waits for the page's 30 s bound on
+    // response headers (AMB-14) inside the check at the 30 s beat, so it stops at about 60 s at the earliest.
+    // 45 s separates the two. The CLI decides in one call and stops near 27 s (cmd/bronzewardctl/imports.go:455-482).
+    const stopped = Date.now() - began;
+    console.log(`PROT-06 case 4: the watch stopped ${stopped} ms after the click`);
+    expect(stopped).toBeLessThan(45_000);
     expect(await $('[data-testid="offline"]').isExisting()).toBe(false);
     // The commit goes: the claim is released and the import is in the draft. The page's watch ended on the
     // unknown outcome, so the state is read by reload.
