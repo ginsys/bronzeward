@@ -81,6 +81,36 @@ func TestNoInterruption(t *testing.T) {
 	}
 }
 
+// lose-reply is read by Lost and never by At, and says so on stderr; another step or action is no
+// loss.
+func TestLost(t *testing.T) {
+	Control = control(t, "entry lose-reply\n")
+	At("entry") // returns at once: lose-reply is no stop
+	if !Lost("entry") {
+		t.Fatal("Lost is false for the step the file names")
+	}
+	if Lost("other") {
+		t.Fatal("Lost is true for another step")
+	}
+	Control = control(t, "entry kill\n")
+	if Lost("entry") {
+		t.Fatal("Lost is true for a kill")
+	}
+}
+
+// BW_INTERRUPT_CONTROL, set before the process starts, names the control file; with none set the
+// fixture's path stays.
+func TestControlFile(t *testing.T) {
+	t.Setenv("BW_INTERRUPT_CONTROL", "/run/x/ctl")
+	if got := controlFile(); got != "/run/x/ctl" {
+		t.Fatalf("controlFile %q", got)
+	}
+	t.Setenv("BW_INTERRUPT_CONTROL", "")
+	if got := controlFile(); got != "/etc/bronzeward/interrupt" {
+		t.Fatalf("controlFile %q", got)
+	}
+}
+
 // stall blocks at the step until the file no longer names it.
 func TestStall(t *testing.T) {
 	Control = control(t, "staged stall\n")
