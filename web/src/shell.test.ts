@@ -47,6 +47,7 @@ describe("W11 state catalogue: every text a status message", () => {
     const page = html(h(StatusPage, null, h(Loading, { what: "machines" }), h(Empty, { text: "No machines." }), h(Refused, { problem, status: 403, verb: "saved" })));
     expect(page.match(/role="status"/g)).toHaveLength(1);
     expect(page.match(/data-testid="page-status"/g)).toHaveLength(1);
+    expect(page).toContain('role="status" aria-atomic="false"');
     expect(page.match(/role="alert"/g)).toHaveLength(1);
     expect(page.match(/<p data-testid="status">/g)).toHaveLength(2);
   });

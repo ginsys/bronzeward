@@ -195,6 +195,8 @@ describe("the state catalogue", () => {
       return held.includes("No drafts.") && held.includes("No releases published yet.");
     }, { timeout: 10_000, timeoutMsg: "the status region did not mirror both empty lists" });
     expect((await $$('[role="status"]')).length).toBe(1);
+    // A change to one message must not announce them all again.
+    expect(await $('[role="status"]').getAttribute("aria-atomic")).toBe("false");
     for (const el of await $$('main [data-testid="status"]')) expect(await el.getAttribute("role")).toBeNull();
   });
 
