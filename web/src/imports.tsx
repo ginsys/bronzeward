@@ -71,6 +71,14 @@ const code = (error: unknown) => {
   return t.replace(/^urn:bronzeward:problem:/, "");
 };
 
+// The identity field a machine-identity-mismatch names in its `cause` member. Only the three field names of
+// the persistence and API §9.4 contract are shown, so no other text of the answer reaches the page.
+const IDENTITY_FIELDS = ["smbios-uuid", "node-id", "cluster-id"];
+const differing = (error: unknown) => {
+  const cause = typeof error === "object" && error !== null && "cause" in error ? error.cause : undefined;
+  return code(error) === "machine-identity-mismatch" && typeof cause === "string" && IDENTITY_FIELDS.includes(cause) ? ` The node's ${cause} is not the recorded one.` : "";
+};
+
 // Why a mark was not applied although its operation succeeded: refused at its pause, its staged input
 // not decryptable, or no pause at its generation at all.
 const notApplied = (last: string, run: Pick<RunState, "refused" | "replacedBy">, o: Operation) =>
@@ -108,7 +116,7 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
       "precondition-failed": " The draft changed after this import started, so the import was not applied and its claim is abandoned.",
       "ingestion-abandoned": " The ingestion was abandoned, so nothing of it reached the draft.",
     };
-    const why = reasons[code(o.error)] ?? "";
+    const why = (reasons[code(o.error)] ?? "") + differing(o.error);
     return <>Import {short(b.id)} (operation {short(o.id)}) {o.state}: {code(o.error) || "no code"}.{why} <ImportAgain b={b} /></>;
   }
   // An abandoned claim whose operation has no recorded end: the pause the events replay is not current.
