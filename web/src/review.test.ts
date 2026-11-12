@@ -55,13 +55,14 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
     expect(tokenLabel("app/str", "3", undefined)).toBe("secret app/str, version 3");
   });
 
-  test("a token inside a JSON string, written \\u003c…\\u003e, is a badge too", () => {
-    const ps = parts('"password":"\\u003credacted:app/json@1\\u003e"');
-    expect(ps).toEqual([{ text: '"password":"' }, { token: "\\u003credacted:app/json@1\\u003e", label: "secret app/json, version 1" }, { text: '"' }]);
+  test("an escaped token, written \\u003c…\\u003e, stays text: the page cannot tell embedded JSON from a YAML value that spells it", () => {
+    for (const text of ['"password":"\\u003credacted:app/json@1\\u003e"', "NOTE: '\\u003credacted:schema\\u003e'", "x: <redacted:schema\\u003e"]) {
+      expect(parts(text), text).toEqual([{ text }]);
+    }
   });
 
   test("text that only looks like a token stays text, and an empty value is never a badge", () => {
-    // The last four are outside compilation §8.3: an unknown kind, a name outside the §5.1 grammar, a missing or zero version.
+    // The ones after the empty string are outside compilation §8.3: an unknown kind, a name outside the §5.1 grammar, a missing or zero version.
     const outside = ["note: <redacted:example>", "x: <redacted:invalid_name@1>", "x: <redacted:Upper/case@1>", "x: <redacted:app/x@>", "x: <redacted:app/x@0>", "x: <redacted:app//x@1>", "x: <redacted:-a@1>"];
     for (const text of ["team: \"\"", "note: <redacted", "a: redacted:schema", "x: <redact:value>", "", ...outside]) {
       expect(parts(text), text).toEqual(text === "" ? [] : [{ text }]);
