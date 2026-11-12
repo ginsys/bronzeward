@@ -74,6 +74,10 @@ describe("approval and revocation (#358)", () => {
     // The reasons are the returned approval's, and the controller's next step is named.
     await expect($("main")).toHaveText(expect.stringContaining("Recorded self-approval reasons: created-plan."), { wait: 20_000 });
     await expect($("main")).toHaveText(expect.stringContaining(`Applied becomes ${short(REL)} (adoption) once it does.`));
+    // The injected plan still reads as proposed after the reread, so the form stays: a forced submit
+    // now, after the approval was recorded, must send nothing.
+    await browser.execute(() => document.querySelector<HTMLFormElement>('main form[aria-label="Approve plan"]')?.requestSubmit());
+    await browser.pause(500);
     expect(await posts()).toEqual([`POST ${approvals}`]);
   });
 
