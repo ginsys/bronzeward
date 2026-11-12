@@ -48,6 +48,14 @@
 #                                and released; it leaves recovery mode on, the control plane's scope
 #                                pre-restore unaccounted and every instance stopped, for usability
 #                                task T11, fixtures/participants)
+#        scenarios/s7 cli       (as run, after scenarios/s4 cli on the same up; the recovery-admin's acts
+#                                of steps 6 to 10 made through bronzewardctl as h-recovery, built from
+#                                this checkout and run on the host against B: step 6's takeover of held,
+#                                step 7's two scope accountings (one decision per scope, not one for both),
+#                                the three marks and step 8's and step 10's two releases, each with the
+#                                output kept as cli-<name>.txt in the evidence directory. The entry and the
+#                                exit stay the API's, as ginsys/bronzeward#361 owns them. Steps 1 to 5 and
+#                                the checks of each state are as in run.)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -55,7 +63,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s7_mode=${1:-}
-case $s7_mode in run | closing | no-entry | transit | old-bao | t11) ;; *) die "usage: scenarios/s7 run|closing|no-entry|transit|old-bao|t11" ;; esac
+case $s7_mode in run | cli | closing | no-entry | transit | old-bao | t11) ;; *) die "usage: scenarios/s7 run|cli|closing|no-entry|transit|old-bao|t11" ;; esac
 need docker curl jq timeout id sleep date awk wc sha256sum
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
@@ -282,10 +290,38 @@ scope_reads() {
 both_settled() {
   scope_reads "$machine_cp" && cp_start=$s_start cp_end=$s_end && scope_reads "$machine_w" && w_start=$s_start w_end=$s_end
 }
+# The recovery-admin's acts of steps 6 to 10, by the API in the other modes and through bronzewardctl
+# in mode cli (ginsys/bronzeward#362). The CLI's contexts name B, which serves them from step 2 on:
+# first B-recovery, then B again. cli_ready adds them at the first command, when B answers.
+# cli_account_scope <name> <machine> <start> <end> <state text>: h-recovery accounts one scope with the
+# machine ID typed back, and the output says the scope is now in that state.
+cli_account_scope() {
+  cli_ready "$mutation_ref" h-recovery
+  ctl "$1" h-recovery recovery scope-account "$2" --start "$3" --end "$4" \
+    --explanation "$mutation_ref: the scope's settle reads" <<<"$2" &&
+    cli_kept "$1" "^Recorded\. Scope $2 is now $5\."
+}
+# takeover_held: h-recovery takes held over through B-recovery from generation 2: unresolved at 3. The
+# CLI reads the generation itself.
+takeover_held() {
+  if [ "$s7_mode" = cli ]; then
+    cli_ready "$mutation_ref" h-recovery
+    ctl takeover h-recovery recovery takeover "$held" --reason "$ds_ref 6" &&
+      cli_kept takeover "^Operation $held taken over \(act [a-z]+_[a-z2-7]+\): unresolved at generation 3\."
+  else
+    take_over "$held" 6 2
+  fi
+}
 # account_both: h-recovery accounts both scopes with one decision on call_port: 201, the control
 # plane's scope blocked and the worker's unresolved, which held holds, each on the observations sent.
+# In mode cli it is one decision per scope, the control plane's first, as recovery scope-account takes one.
 account_both() {
   local body
+  if [ "$s7_mode" = cli ]; then
+    cli_account_scope account-controlplane "$machine_cp" "$cp_start" "$cp_end" 'blocked until it is marked' &&
+      cli_account_scope account-worker "$machine_w" "$w_start" "$w_end" 'unresolved: a restored operation still holds it'
+    return
+  fi
   fresh h-recovery
   body=$(jq -nc --arg c "$machine_cp" --arg cs "$cp_start" --arg ce "$cp_end" --arg w "$machine_w" --arg ws "$w_start" --arg we "$w_end" \
     '{scopes: [{machine: $c, start: $cs, end: $ce}, {machine: $w, start: $ws, end: $we}], facts: {}}') || return 1
@@ -299,15 +335,39 @@ held_cancelled() {
   same "$(sql "SELECT o.state || ' ' || count(a.id) FROM operation o LEFT JOIN attempt a ON a.operation = o.id
     WHERE o.id = '$held' GROUP BY o.state")" 'cancelled 0'
 }
-# mark_as <machine> <jq filter> <name>: h-recovery marks the scope on call_port: 201, its answer
-# matching the filter; its restoration observation in marked.
+# mark_cli <machine> <name> <state> <missing item or ->: recovery mark prints the scope marked in that
+# state, with that one item missing or none; its restoration observation in marked.
+mark_cli() {
+  cli_ready "$mutation_ref" h-recovery
+  ctl "mark-$2" h-recovery recovery mark "$1" || return 1
+  cli_kept "mark-$2" "^Scope $1 marked $3, was [a-z-]+ \(act [a-z]+_[a-z2-7]+\)\. Observation [^ ]+\.$" || return 1
+  if [ "$4" = - ]; then
+    ! cli_kept "mark-$2" '^  missing '
+  else
+    cli_kept "mark-$2" "^  missing $4: "
+  fi || return 1
+  marked=$(sed -n -E 's/^Scope .* Observation ([^ ]+)\.$/\1/p' "$EV/cli-mark-$2.txt") && [ -n "$marked" ]
+}
+# mark_as <machine> <jq filter> <name> [<state> <missing item or ->]: h-recovery marks the scope on
+# call_port: 201, its answer matching the filter; its restoration observation in marked. In mode cli,
+# where the call gives a state and a missing item, the CLI marks it and the filter is not read.
 mark_as() {
+  if [ "$s7_mode" = cli ] && [ "$#" -ge 5 ]; then
+    mark_cli "$1" "$3" "$4" "$5"
+    return
+  fi
   fresh h-recovery
   answers_with "$2" 201 - POST "/api/v1/recovery/scopes/$1/marks" "$tok" '{"facts": {}}' "$(key "mark-$3")" || return 1
   marked=$(jq -er '.observation' "$EV/last.body")
 }
 # release_scope <machine> <name>: h-recovery releases the scope on call_port: 201, released.
 release_scope() {
+  if [ "$s7_mode" = cli ]; then
+    cli_ready "$mutation_ref" h-recovery
+    ctl "release-$2" h-recovery recovery release "$1" &&
+      cli_kept "release-$2" "^Scope $1 released, was [a-z-]+ \(act [a-z]+_[a-z2-7]+\)\."
+    return
+  fi
   fresh h-recovery
   answers_with '.state == "released"' 201 - POST "/api/v1/recovery/scopes/$1/releases" "$tok" '{"facts": {}}' "$(key "release-$2")"
 }
@@ -449,6 +509,9 @@ preconditions() {
   must "$ref" 'C running' running "$BW_C"
   call_port=$SERVER_C_PORT
   check "$ref" 'C answers /livez' within 30 answers 204 - GET /livez ''
+  # Mode cli's acts run against B from step 2 on, always on this port. B is stopped here: the CLI's
+  # contexts are added at its first command (cli_ready), when B-recovery answers.
+  cli_port=$SERVER_B_PORT
   evidence_to pre || die "no pre-state: bin/evidence failed"
   check "$ref" 'the pre-state bundle: complete, no fixture secret but the scan control' scan_clean pre
   cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
@@ -678,7 +741,7 @@ s7() {
   must "$ref" 'the automation token reissued with the server-side tool under h-recovery' reissue
   check "$ref" 'the reissued token: 200' answers 200 - GET /api/v1/acts "$robot_new"
   check "$ref" 'the seed token after the reissue: 401' answers 401 unauthenticated GET /api/v1/acts "$robot"
-  check "$ref" "h-recovery takes held over through B-recovery from generation 2: 201, unresolved at generation 3" take_over "$held" 6 2
+  check "$ref" "h-recovery takes held over through B-recovery from generation 2: 201, unresolved at generation 3" takeover_held
   check "$ref" 'held unresolved at generation 3, the new epoch its owner epoch, by one ownership transition in that epoch' held_retaken
   fresh_author
   check "$ref" "h-author starts an import of the worker into the second draft under step 3's ETag: 202, its claim in the new epoch" \
@@ -697,12 +760,12 @@ s7() {
   must "$ref" "h-recovery accounts both scopes with one decision: 201, the control plane's blocked, the worker's unresolved" account_both
   must "$ref" "held, its journal holding no attempt, reclassified: cancelled with no attempt" within 120 held_cancelled
   must "$ref" 'inject pause controlplane' "$bin/inject" pause controlplane
-  must "$ref" "the worker's mark: 201, ready, nothing missing" mark_as "$machine_w" '.state == "ready" and .missing == []' worker
+  must "$ref" "the worker's mark: 201, ready, nothing missing" mark_as "$machine_w" '.state == "ready" and .missing == []' worker ready -
   w_mark=$marked
   must "$ref" "its restoration observation opened the worker's one open drift record, of the held release's artifact" landing_drift
   call_limit=90
   check "$ref" "the control plane's mark, its node paused: 201, blocked on the observation" \
-    mark_as "$machine_cp" '.state == "blocked" and (.missing | index("observation")) != null' controlplane-paused
+    mark_as "$machine_cp" '.state == "blocked" and (.missing | index("observation")) != null' controlplane-paused blocked observation
   call_limit=10
   if [ "$s7_mode" = closing ]; then
     check 'S7 negative controls' "a release of the control plane's scope, blocked, not ready: 409 conflict" release_refused "$machine_cp"
@@ -751,7 +814,7 @@ s7() {
   ref='S7 step 10'
   outcome_bundle 'S7 step 9' ds-9
   check 'S7 step 9' "the worker's digest is the release's artifact and its resource version moved" ds_landed
-  must "$ref" "the control plane's mark: 201, ready, nothing missing" mark_as "$machine_cp" '.state == "ready" and .missing == []' controlplane
+  must "$ref" "the control plane's mark: 201, ready, nothing missing" mark_as "$machine_cp" '.state == "ready" and .missing == []' controlplane ready -
   must "$ref" 'h-recovery releases the control plane scope: 201, released' release_scope "$machine_cp" controlplane
 
   # Step 11.
@@ -1216,6 +1279,8 @@ case $s7_mode in
     ;;
 esac
 rm -f -- "$EV/last.body" "$EV/last.headers"
+# The CLI's token files hold tokens this run minted: removed before the scan, as S6's are.
+[ "$s7_mode" != cli ] || rm -f -- "$cli_dir"/h-*.json
 # The final bundle: the evidence directory and the run directory scanned, as S1's step 5 does.
 ev_log=$(mktemp)
 if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
