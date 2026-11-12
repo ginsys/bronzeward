@@ -189,10 +189,12 @@ describe("the state catalogue", () => {
     await fixtureSignIn("h-viewer");
     await nav("Changes").click();
     await expect($("main h2")).toHaveText("Changes");
-    await browser.waitUntil(async () => (await $$('main [data-testid="status"]')).length >= 2, { timeout: 10_000, timeoutMsg: "Changes did not show two status messages" });
+    // Both lists have answered: each shows its own empty text, and the region holds both.
+    await browser.waitUntil(async () => {
+      const held = await mirrored();
+      return held.includes("No drafts.") && held.includes("No releases published yet.");
+    }, { timeout: 10_000, timeoutMsg: "the status region did not mirror both empty lists" });
     expect((await $$('[role="status"]')).length).toBe(1);
-    await browser.waitUntil(async () => (await mirrored()).length >= 2, { timeout: 10_000, timeoutMsg: "the status region did not mirror both messages" });
-    expect(await mirrored()).toContain("No releases published yet.");
     for (const el of await $$('main [data-testid="status"]')) expect(await el.getAttribute("role")).toBeNull();
   });
 

@@ -12,7 +12,7 @@ import { PRE_ENTRY, RECOVERY_START } from "../../src/recovery.tsx";
 import { REPEATING, REPLAYED, SCOPE_NO_MODE, SET_ASIDE, UNKNOWN, unknown } from "../../src/states.tsx";
 import { CONTROL } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, REDIRECTED, type Step } from "../injector.ts";
-import { answers, faults, fixtureSignIn, holding, release, storageEmpty } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, holding, mirrored, release, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
@@ -242,7 +242,8 @@ describe("the write views (#338)", () => {
     // A server refusal is announced as an alert, and no status message carries its text
     // (ginsys/bronzeward#815).
     expect(await result().getAttribute("role")).toBe("alert");
-    for (const el of await $$('[role="status"]')) expect(await el.getText()).not.toContain("Not saved");
+    // The region is clipped, so its text is read as text content, never as visible text.
+    for (const line of await mirrored()) expect(line).not.toContain("Not saved");
     // The scope's refusal showed the page no recovery start: no banner, no start-mode text.
     expect(await $('[data-testid="recovery"]').isExisting()).toBe(false);
     const body = await $("body").getText();
