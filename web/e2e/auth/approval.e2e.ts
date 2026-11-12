@@ -119,9 +119,11 @@ describe("approval and revocation (#358)", () => {
 
   it("an approved plan: a reason is required; [Revoke approval] sends one revocation and states the limit on the control", async function () {
     this.timeout(120_000);
-    const bodies = { [`/plans/${PLAN}`]: plan("approved", { approval: APR }), [`/approvals/${APR}`]: approval(), [revocations]: revocation };
+    // The identity's epoch equals the approval's, so the approval is current and the page offers no new one.
+    const bodies = { [`/plans/${PLAN}`]: plan("approved", { approval: APR }), [`/approvals/${APR}`]: approval(), [revocations]: revocation, "/identity": { ...(await identity("h-all")), epoch: "ep_synthetic" } };
     await open("h-all", bodies, "approved");
     await expect($('[data-testid="revoke-limit"]')).toHaveText(REVOKE_LIMIT);
+    await expect($('main form[aria-label="Approve plan"]')).not.toBeExisting();
     await $("main").$("button=Revoke approval").click();
     await expect($('[data-testid="revoke-input"]')).toHaveText("Give a reason.");
     expect(await posts()).toEqual([]);
