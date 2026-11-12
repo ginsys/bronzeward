@@ -672,17 +672,15 @@ describe("a lapsed lease decides only after the operation's newest event was sho
     if (r.kind !== "ended") throw new Error(`the watch did not end: ${r.kind}`);
     expect(text(await ended(client, b, r.operation, f.settled() ?? "", at("07:05:20"), r.epoch))).toContain("could not be decrypted (resume-failed)");
   });
-  test("the check reads the claim again: a lease renewed since the page's read keeps the watch, and a claim still lapsed stops it", async () => {
+  test("the check reads the claim again: a lease renewed since the page's read keeps the watch, and a claim still lapsed stops it in the ask that started the check (ginsys/bronzeward#814)", async () => {
     const b = ing({ ownerGeneration: 2 });
-    const settleTick = () => new Promise<void>((r) => setTimeout(r, 0));
     const follow = async (claim: Ingestion) => {
       const f = followRun({
         client: serving(1, claim), ingestion: b.id, op: OPID, generation: 2, signal: new AbortController().signal,
         latest: () => ({ b, at: at("07:05:15") }), abandonedAt: () => undefined, now: () => at("07:05:20"), view: () => {},
       });
       f.w.show({ id: "e1:1", type: "started", data: {}, at: "2026-11-01T06:56:00Z" } as never);
-      expect(f.w.until!()).toBe(false);
-      await settleTick();
+      // One ask: the check's own answer decides, with no second beat.
       return f.w.until!();
     };
     // The same lease, read again: nothing renewed it, and the newest event was shown.
@@ -692,7 +690,6 @@ describe("a lapsed lease decides only after the operation's newest event was sho
   });
   describe("the check's reads (Copilot threads on web/src/imports.tsx:280 and :282)", () => {
     const b = ing({ ownerGeneration: 2 });
-    const tick = () => new Promise<void>((r) => setTimeout(r, 0));
     const okClaim = { kind: "ok", data: ing({ ownerGeneration: 2 }) } as const;
     const okOp = { kind: "ok", data: op({ lastEvent: 1 }) } as const;
     const refused = { kind: "refused", status: 403, problem: null } as const;
@@ -712,11 +709,10 @@ describe("a lapsed lease decides only after the operation's newest event was sho
         latest: () => ({ b, at: at("07:05:15") }), abandonedAt: () => undefined, now: () => at("07:05:20"), view: () => {},
       });
       f.w.show({ id: "e1:1", type: "started", data: {}, at: "2026-11-01T06:56:00Z" } as never);
-      f.w.until!();
-      await tick();
-      // The reads of the first check; the ask that follows can start another where the first found no answer.
+      // One ask makes the first check and waits for its reads.
+      const stops = await f.w.until!();
       const first = [...paths];
-      return { paths: first, stops: f.w.until!(), failure: f.failure(), reads: first.length };
+      return { paths: first, stops, failure: f.failure(), reads: first.length };
     };
     test("a watch that left during the claim's read sends no read of the operation, and a claim with no answer sends none either", async () => {
       expect((await check(okClaim, okOp, true)).paths).toEqual([`/ingestions/${b.id}`]);
@@ -731,18 +727,20 @@ describe("a lapsed lease decides only after the operation's newest event was sho
       expect(operation).toMatchObject({ stops: true, failure: refused, reads: 2 });
     });
     test("a clear takes back a refusal recorded before it: the reset watch is not ended by it", async () => {
-      const client = { readWithEpoch: async <T,>(p: string) => ({ result: (p.startsWith("/ingestions/") ? refused : okOp) as ReadResult<T>, epoch: "e1" }) };
+      let claim: ReadResult<unknown> = refused;
+      const client = { readWithEpoch: async <T,>(p: string) => ({ result: (p.startsWith("/ingestions/") ? claim : okOp) as ReadResult<T>, epoch: "e1" }) };
       const f = followRun({
         client, ingestion: b.id, op: OPID, generation: 2, signal: new AbortController().signal,
         latest: () => ({ b, at: at("07:05:15") }), abandonedAt: () => undefined, now: () => at("07:05:20"), view: () => {},
       });
       f.w.show({ id: "e1:1", type: "started", data: {}, at: "2026-11-01T06:56:00Z" } as never);
-      f.w.until!();
-      await tick();
+      expect(await f.w.until!()).toBe(true);
       expect(f.failure()).toBe(refused);
       f.w.clear("restored");
       expect(f.failure()).toBeUndefined();
-      expect(f.w.until!()).toBe(false);
+      // Nothing is shown after the clear, so no lapsed lease decides, and the server no longer refuses.
+      claim = okClaim;
+      expect(await f.w.until!()).toBe(false);
     });
     test("a refusal recorded by a catch-up read is shown only while the operation read last is not terminal (Copilot review of 3f52f6c6 on web/src/imports.tsx:439)", () => {
       const ended = (state: Operation["state"]) => ({ kind: "ended", operation: op({ state }), epoch: "e1" }) as const;
@@ -781,8 +779,7 @@ describe("a lapsed lease decides only after the operation's newest event was sho
 
 describe("a renewed lease reaches the page, and a confirmation belongs to the snapshot it checked (ginsys/bronzeward#734)", () => {
   const OPID = "op_zcfw5mcm";
-  const tick = () => new Promise<void>((r) => setTimeout(r, 0));
-  const lease = (s: string, ownerGeneration = 2) => ing({ ownerGeneration, leaseUntil: `2026-11-01T${s}Z` });
+  const lease =(s: string, ownerGeneration = 2) => ing({ ownerGeneration, leaseUntil: `2026-11-01T${s}Z` });
   // A watch of generation 2 over a server that serves the claim `serve` sets, with the page's snapshot `page` sets.
   // A snapshot is read 15 s after its lease and the check runs 5 s later.
   const rig = (first: Ingestion, served?: () => Promise<Ingestion>, refusal?: Promise<void>) => {
@@ -790,6 +787,8 @@ describe("a renewed lease reaches the page, and a confirmation belongs to the sn
     const paths: string[] = [];
     const acts: string[] = [];
     let renewed = 0;
+    // Runs where the check asks the page to read again, just before it sets its answer.
+    let onRenewed = () => {};
     let cur = { b: first, at: Date.parse(first.leaseUntil) + 15_000 };
     let t = cur.at + 5_000;
     const client = {
@@ -806,11 +805,12 @@ describe("a renewed lease reaches the page, and a confirmation belongs to the sn
     };
     const f = followRun({
       client, ingestion: first.id, op: OPID, generation: 2, signal: new AbortController().signal,
-      latest: () => cur, abandonedAt: () => undefined, now: () => t, view: (a) => acts.push(a.type), renewed: () => { renewed++; },
+      latest: () => cur, abandonedAt: () => undefined, now: () => t, view: (a) => acts.push(a.type), renewed: () => { renewed++; onRenewed(); },
     });
     f.w.show({ id: "e1:1", type: "started", data: {}, at: "2026-11-01T06:56:00Z" } as never);
     return {
       f, paths, acts, renewed: () => renewed,
+      whenRenewed: (h: () => void) => { onRenewed = h; },
       serve: (b: Ingestion) => { claim = b; },
       page: (b: Ingestion) => { cur = { b, at: Date.parse(b.leaseUntil) + 15_000 }; t = cur.at + 5_000; },
     };
@@ -818,95 +818,101 @@ describe("a renewed lease reaches the page, and a confirmation belongs to the sn
   test("a claim read with a strictly later lease under the watch's generation asks the page to read again, once per snapshot, and the watch goes on without a restart", async () => {
     const r = rig(lease("07:05:00"));
     r.serve(lease("07:10:00"));
-    expect(r.f.w.until!()).toBe(false);
-    await tick();
+    expect(await r.f.w.until!()).toBe(false);
     expect(r.renewed()).toBe(1);
     // Checks made before the page's read arrives do not ask again.
-    expect(r.f.w.until!()).toBe(false);
-    await tick();
-    expect(r.f.w.until!()).toBe(false);
+    expect(await r.f.w.until!()).toBe(false);
+    expect(await r.f.w.until!()).toBe(false);
     expect(r.renewed()).toBe(1);
     // The events stay as they were: nothing was cleared or replayed, and the run did not settle.
     expect(r.acts).toEqual(["show"]);
     expect(r.f.settled()).toBeUndefined();
-    // The page's new snapshot shows the renewed lease; when it lapses, a check for it decides. The check the
-    // old snapshot left in flight ends first and keeps nothing.
+    // The page's new snapshot shows the renewed lease; when it lapses, a check for it decides in its own ask.
     r.page(lease("07:10:00"));
-    expect(r.f.w.until!()).toBe(false);
-    await tick();
-    expect(r.f.w.until!()).toBe(false);
-    await tick();
-    expect(r.f.w.until!()).toBe(true);
+    expect(await r.f.w.until!()).toBe(true);
   });
   test("a lease that is not later does not ask the page to read again", async () => {
     for (const read of [lease("07:05:00"), lease("07:04:00")]) {
       const r = rig(lease("07:05:00"));
       r.serve(read);
-      r.f.w.until!();
-      await tick();
+      await r.f.w.until!();
       expect(r.renewed()).toBe(0);
     }
   });
   test("a later lease under another owner generation is a takeover, not a renewal: it does not ask the page to read again", async () => {
     const r = rig(lease("07:05:00"));
     r.serve(lease("07:10:00", 3));
-    r.f.w.until!();
-    await tick();
+    await r.f.w.until!();
     expect(r.renewed()).toBe(0);
   });
   test("a confirmation made for one snapshot is not used for a newer one: the claim and the operation are read again", async () => {
     const r = rig(lease("07:05:00"));
-    r.f.w.until!();
-    await tick();
-    expect(r.f.w.until!()).toBe(true);
+    expect(await r.f.w.until!()).toBe(true);
     expect(r.paths).toHaveLength(2);
     // The lease was renewed, the page read it and it lapsed again: the older confirmation says nothing about it.
     r.serve(lease("07:10:00"));
     r.page(lease("07:10:00"));
-    expect(r.f.w.until!()).toBe(false);
-    await tick();
+    expect(await r.f.w.until!()).toBe(true);
     expect(r.paths).toHaveLength(4);
-    expect(r.f.w.until!()).toBe(true);
   });
   test("a check still in flight when a newer snapshot arrives sets nothing and asks nothing of the page", async () => {
     let release!: () => void;
     const gate = new Promise<void>((res) => { release = res; });
     const r = rig(lease("07:05:00"), async () => (await gate, lease("07:10:00")));
-    r.f.w.until!();
+    const overtaken = r.f.w.until!();
     // The page reads the renewal while the check waits for its claim read.
     r.page(lease("07:10:00"));
     release();
-    await tick();
+    expect(await overtaken).toBe(false);
     expect(r.renewed()).toBe(0);
     // The overtaken check read no further than its claim.
     expect(r.paths).toHaveLength(1);
-    // The newer snapshot gets its own check, which decides.
-    expect(r.f.w.until!()).toBe(false);
-    await tick();
+    // The newer snapshot gets its own check, which decides in its own ask.
+    expect(await r.f.w.until!()).toBe(true);
     expect(r.paths).toHaveLength(3);
-    expect(r.f.w.until!()).toBe(true);
+  });
+  test("a newer snapshot that arrives after the check set its answer and before the ask resumes: the answer is not used for it", async () => {
+    const r = rig(lease("07:05:00"));
+    // A claim lease one second later is a renewal the page does not show, and it is lapsed for the check's own clock.
+    r.serve(lease("07:05:01"));
+    // The page's renewed snapshot lands in the turn between the check's answer and the ask's use of it.
+    r.whenRenewed(() => r.page(lease("07:10:00")));
+    expect(await r.f.w.until!()).toBe(false);
+    expect(r.f.settled()).toBeUndefined();
+    // The newer snapshot gets its own check, which decides in its own ask.
+    r.whenRenewed(() => {});
+    r.serve(lease("07:10:00"));
+    expect(await r.f.w.until!()).toBe(true);
   });
   test("a refusal that reaches a check after a newer snapshot took its place is discarded: it does not stop the watch", async () => {
     let release!: () => void;
     const gate = new Promise<void>((res) => { release = res; });
     const r = rig(lease("07:05:00"), undefined, gate);
-    r.f.w.until!();
+    const overtaken = r.f.w.until!();
     // The page reads the renewal while the check waits for its claim read, which then ends in a refusal.
     r.page(lease("07:10:00"));
     release();
-    await tick();
+    expect(await overtaken).toBe(false);
     expect(r.f.failure()).toBeUndefined();
-    expect(r.f.w.until!()).toBe(false);
     expect(r.f.settled()).toBeUndefined();
   });
   test("a refusal for the snapshot the page still shows ends the watch", async () => {
     let release!: () => void;
     const gate = new Promise<void>((res) => { release = res; });
     const r = rig(lease("07:05:00"), undefined, gate);
-    r.f.w.until!();
+    const asked = r.f.w.until!();
     release();
-    await tick();
+    // The refusal ends the watch in the ask that met it.
+    expect(await asked).toBe(true);
     expect(r.f.failure()).toMatchObject({ kind: "refused", status: 403 });
+  });
+  test("a check that rejects ends the watch and is not left floating (the unknown outcome, never a hang)", async () => {
+    const r = rig(lease("07:05:00"), async () => { throw new Error("synthetic defect"); });
+    // `until` itself rejects. The watch's Run.stop() turns that into an end of the watch (progress.test.ts).
+    await expect(r.f.w.until!()).rejects.toThrow("synthetic defect");
+    // The check released its busy flag: the next ask makes a new check instead of waiting for the failed one.
+    await expect(r.f.w.until!()).rejects.toThrow("synthetic defect");
+    expect(r.paths).toHaveLength(2);
   });
 });
 

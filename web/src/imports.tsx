@@ -276,8 +276,9 @@ export interface FollowOptions {
 }
 // The callbacks of one watch of an import's operation, and the run it settled. A lapsed lease read
 // starts one check: the claim and the operation are read again, and the lease decides only when the
-// last event number shown reaches the operation's `lastEvent` (the CLI's Until). The check's answer is
-// used at the next ask, which the watch makes after each event, keep-alive and operation read.
+// last event number shown reaches the operation's `lastEvent` (the CLI's Until). The ask that starts the
+// check waits for its reads and uses the answer, and the watch asks after each event, keep-alive and
+// operation read.
 export type Refused = Extract<ReadResult<unknown>, { kind: "refused" }>;
 // An answer that will not change on a new try: a refusal other than 408 and 429.
 const final = (res: ReadResult<unknown>): res is Refused => res.kind === "refused" && res.status !== 408 && res.status !== 429;
@@ -326,10 +327,10 @@ export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState
       busy = false;
     }
   };
-  const ask = (snap: Ingestion) => {
-    const held = caught && caughtFor === snap;
-    if (!held && !busy && (behind === undefined || (shown?.n ?? 0) >= behind)) void check(snap);
-    return held;
+  // The check's reads are awaited, so its answer decides in the ask that started it, as the CLI's Until does.
+  const ask = async (snap: Ingestion) => {
+    if (!(caught && caughtFor === snap) && !busy && (behind === undefined || (shown?.n ?? 0) >= behind)) await check(snap);
+    return caught && caughtFor === snap;
   };
   return {
     settled: () => run.settled,
@@ -338,9 +339,15 @@ export function followRun(o: FollowOptions): { w: Watch; settled: () => RunState
     w: {
       show: (e) => { shown = seenOf(e.id); run = onEvent(run, e.type, e.data); o.view({ type: "show", line: eventLine(e) }); },
       clear: (why) => { run = startRun(o.generation); shown = undefined; caught = false; caughtFor = undefined; renewedFor = undefined; behind = undefined; failure = undefined; epoch++; o.view({ type: "clear", why }); },
-      until: () => {
+      until: async () => {
+        if (failure !== undefined) return true;
         const read = o.latest();
-        return failure !== undefined || stopsWatch(run.settled, read, o.now(), o.abandonedAt(), run.settled === undefined && lapsedRead(read, o.now()) && ask(read.b));
+        const asked = run.settled === undefined && lapsedRead(read, o.now()) && (await ask(read.b));
+        // A newer page snapshot can arrive while the reads are pending: the answer was for the older one, so
+        // the newer one is judged on its own, and its own ask decides.
+        const now = o.latest();
+        const held = asked && now.b === read.b;
+        return failure !== undefined || stopsWatch(run.settled, now, o.now(), o.abandonedAt(), held);
       },
       signal: o.signal,
     },
