@@ -237,9 +237,9 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
     hold(withPin(pins, pick));
     setPick("");
   };
-  const conflictView = conflict !== undefined && (
+  const conflictView = (role?: "alert") => conflict !== undefined && (
     <>
-      <Conflict what="draft" revision={conflict.revision ?? draft.revision} onShow={() => {
+      <Conflict what="draft" role={role} revision={conflict.revision ?? draft.revision} onShow={() => {
         if (conflict.awaits === true) retry((x) => x + 1);
         act({ kind: "show" });
         seeChange();
@@ -297,8 +297,8 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
         </p>
       )}
       {note !== undefined && <Status testid="editor-note">{note}</Status>}
-      {!(o?.kind === "refused" && o.status === 412) && conflictView}
-      <WriteResult w={w} conflict={conflictView || undefined} done={(data) => {
+      {!(o?.kind === "refused" && o.status === 412) && conflictView()}
+      <WriteResult w={w} conflict={conflictView("alert") || undefined} done={(data) => {
         if (w?.spec.method === "DELETE") return `Profile ${name} removed from draft ${short(draft.id)}.`;
         const r = (data as Partial<S["SourceUpdate"]>).entry?.revision;
         return `Profile ${name} saved in draft ${short(draft.id)}${typeof r === "string" ? ` (revision ${short(r)})` : ""}.`;
@@ -701,9 +701,9 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   // composition, which is never changed after it is set: the rows follow it, not the read counter.
   const refLines = useMemo(() => composed === undefined ? [] : referenceLines(composed), [composed]);
 
-  const conflictView = conflict !== undefined && (
+  const conflictView = (role?: "alert") => conflict !== undefined && (
     <>
-      <Conflict what="draft" revision={conflict.revision ?? draft.revision} onShow={() => {
+      <Conflict what="draft" role={role} revision={conflict.revision ?? draft.revision} onShow={() => {
         if (conflict.awaits === true) retry((x) => x + 1);
         act({ kind: "show" });
         seeChange();
@@ -759,8 +759,8 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
         </p>
       )}
       {note !== undefined && <Status testid="editor-note">{note}</Status>}
-      {!(o?.kind === "refused" && o.status === 412) && conflictView}
-      <WriteResult w={w} conflict={conflictView || undefined} done={(data) => {
+      {!(o?.kind === "refused" && o.status === 412) && conflictView()}
+      <WriteResult w={w} conflict={conflictView("alert") || undefined} done={(data) => {
         if (w?.spec.method === "DELETE") return `Assignment of machine ${short(machine)} removed from draft ${short(draft.id)}.`;
         const r = (data as Partial<S["SourceUpdate"]>).entry?.revision;
         return `Assignment of machine ${short(machine)} saved in draft ${short(draft.id)}${typeof r === "string" ? ` (revision ${short(r)})` : ""}.`;
