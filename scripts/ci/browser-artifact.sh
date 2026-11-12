@@ -30,13 +30,18 @@ case ${1:-} in
       rc=$?
     fi
     mkdir -p "$listing"
+    # find quotes the path of an entry it cannot read, and that name may hold a flagged value, so its
+    # diagnostics are dropped and a listing that did not complete is withheld.
+    names=
+    complete=1
+    if [ -d "$out" ]; then
+      names=$(find "$out" -mindepth 1 ! -type d -printf '%y %s %P\n' 2>/dev/null | LC_ALL=C sort) || complete=
+    fi
     {
       echo "withheld: the artifact scan did not pass, so this lists names and sizes only (type size path)"
-      if [ -d "$out" ]; then
-        find "$out" -mindepth 1 ! -type d -printf '%y %s %P\n' | LC_ALL=C sort
-      fi
+      if [ -n "$names" ]; then printf '%s\n' "$names"; fi
     } >"$listing/files.txt"
-    if scan "$listing" "${@:2}" >/dev/null 2>&1; then
+    if [ -n "$complete" ] && scan "$listing" "${@:2}" >/dev/null 2>&1; then
       echo listed >"$status"
     else
       rm -rf "$listing"
