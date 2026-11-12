@@ -4,13 +4,20 @@
 // here: the draft's page links to the publication page, Publish sends the write with the kept ETag,
 // the operation is followed to its end, and its end says that nothing was sent to any machine. It then
 // reads the API: no release exists, no apply-config or adopt operation exists, and the machine's
-// Applied release is unchanged. A succeeded publication is the unit tests' (publish.test.ts) and the
-// CLI's Go test, which has a Talos stand-in. The case signs in as h-publisher.
+// Applied release is unchanged. A second case follows a succeeded publication through the injector: the
+// POST's answer and the operation's reads are synthetic bodies (the deployment cannot produce a success),
+// and the page must still send nothing but the one POST. The server's own proof that a publication sends
+// nothing to a machine is TestPublication, subtest "no mutation", in internal/clitest/publication_test.go.
+// The cases sign in as h-publisher.
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, syntheticDocument } from "../auth.conf.ts";
 import { fixtureSignIn, mint, storageEmpty } from "./helpers.ts";
+
+// Synthetic identifiers of a publication the deployment cannot produce.
+const OP = `op_${"w".repeat(26)}`;
+const REL = `rel_${"h".repeat(26)}`;
 
 const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
@@ -80,6 +87,36 @@ describe("the publication page (#342)", () => {
     const m = await api("h-viewer", "GET", `/machines/${machine}`);
     expect(m.status).toBe(200);
     expect(m.body!["applied"]).toBeNull();
+  });
+
+  it("a succeeded publication, served by the injector, names its release and sends nothing but the one POST", async function () {
+    this.timeout(180_000);
+    const d = await api("h-author", "POST", "/drafts", { cluster, title: `synthetic ${hex()}` });
+    expect(d.status).toBe(201);
+    const id = d.body!["id"] as string;
+    const name = `pub-${hex()}`;
+    const f = await api("h-author", "PUT", `/drafts/${id}/fragments/${name}`, { layer: "role", document: syntheticDocument(name), marks: null, declarations: null }, d.etag);
+    expect(f.status).toBe(200);
+    const at0 = "2026-11-11T22:00:00Z";
+    const accepted = { id: OP, kind: "publish", state: "queued", epoch: "ep_synthetic", lastEvent: 0, subject: { draft: id, draftRevision: 2 }, createdBy: null, createdAt: at0, result: null, error: null };
+    const bodies = {
+      [`/drafts/${id}/publications`]: accepted,
+      [`/operations/${OP}`]: { ...accepted, state: "succeeded", lastEvent: 1, result: { release: REL } },
+      [`/operations/${OP}/events`]: { items: [] },
+    };
+    expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies })).toMatch(SERVER);
+    await $('nav[aria-label="Main"]').$("a=Changes").click();
+    await $(`main a[title="${id}"]`).click();
+    await $("main").$("a=Publish this draft").click();
+    await expect($("main h2")).toHaveText(expect.stringContaining(`Publish draft ${short(id)}`), { wait: 20_000 });
+    await $("main").$("button=Publish").click();
+    await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
+    await expect($('[data-testid="ended"]')).toHaveText(`Publication succeeded: release ${short(REL)} was published. Nothing has been sent to any machine.`, { wait: 120_000 });
+    await expect($(`main a[title="${REL}"]`)).toBeExisting();
+    // A published draft takes no second write: Publish stays disabled.
+    await expect($("main").$("button=Publish")).toBeDisabled();
+    // The page sent the one POST and reads: no apply-config, adopt or other write came from the client.
+    expect((await writes()).map(([m, r]) => `${m} ${r}`)).toEqual([`POST /drafts/${id}/publications`]);
   });
 });
 

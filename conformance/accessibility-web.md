@@ -9,7 +9,7 @@ browser; screen reader on VoiceOver with Safari, and on NVDA with Firefox and wi
 
 An automated check is evidence for what it measures, not conformance (§13). Items whose views
 come with later tickets (the YAML editor, approval, the plan evidence's focus order, errors at a
-field, redaction badges, reflow of the diff in review) are recorded by those tickets.
+field, reflow of the diff in review) are recorded by those tickets.
 
 ## Keyboard and measured checks
 
@@ -31,6 +31,18 @@ ESR 153 on Linux.
 | 2.5.8 Target size | every button, select and navigation link at least 24 by 24 px | pass | pass | pass | pass |
 | 1.4.1 Use of colour | drift, freeze, staleness and failure are words; the views set no colour with meaning | by construction; the words in `web/src/*.test.ts` | | | |
 | 3.3.1 Error identification | these views have no input field | not applicable | | | |
+
+The release page and the rendered review of one of its machines
+([#342](https://github.com/ginsys/bronzeward/issues/342)) have their own cases in the same file
+("the rendered review of a release's machine"), run by the same command on the same browsers:
+
+| Item | What is checked on the release page and its rendered review |
+| --- | --- |
+| 2.1.1 Keyboard, 2.4.7 Focus visible | Tab reaches the release in the list, then the link to a machine's rendered configuration; Enter opens it and focus moves to the page |
+| 1.4.3 Contrast, 1.4.11 Non-text contrast | the lowest contrast of any shown text, redaction badges included, is at least 4.5:1; the badge border is `#1a4fc4` on white, 6.9:1 |
+| 1.4.1 Use of colour | a redaction token shows as `[secret registry/example-pass, version 1]`: its kind is words inside a border, never colour alone |
+| 1.4.10 Reflow | at 320 CSS pixels neither page scrolls sideways; the provenance table scrolls in its own labelled region |
+| 2.5.8 Target size | every button, select and navigation link at least 24 by 24 px |
 
 Not run here: Safari, whose WebDriver needs a macOS runner; previous major versions (B6).
 

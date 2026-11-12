@@ -11,6 +11,8 @@ import { short } from "../../src/list.tsx";
 import { FROZEN, HEALTH, type Observation, sentences } from "../../src/machine.tsx";
 import type { Machine } from "../../src/machines.tsx";
 import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
+import { EMPTY_NOTE, NO_PROVENANCE, PROVENANCE_LIMIT } from "../../src/review.tsx";
+import { WITHHELD } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { answers, faults, fixtureSignIn, holding, mint, param, release, seen, storageEmpty, where } from "./helpers.ts";
 
@@ -713,7 +715,8 @@ describe("the read-only lists and items", () => {
     await expect($("main")).toHaveText(expect.stringContaining("Source revisions this release was built from (these are not configuration)"));
     await expect($("main")).toHaveText(expect.stringContaining("contract v1.13 · machinery v1.13.6 · Kubernetes v1.34.1"));
     await expect($$(`main a[title="${s.frg.id}"]`)).toBeElementsArrayOfSize(1);
-    await expect($$(`main a[title="${m}"]`)).toBeElementsArrayOfSize(1);
+    // The machine's own link, and the link to its rendered configuration (ginsys/bronzeward#342).
+    await expect($$(`main a[title="${m}"]`)).toBeElementsArrayOfSize(2);
     await nav("Plans");
     await $(`a[title="${s.plan.id}"]`).click();
     await expect($("main h2")).toHaveText(`Plan ${short(s.plan.id)}: proposed`);
@@ -770,6 +773,111 @@ describe("the read-only lists and items", () => {
       await $(`main tbody a[title="${s.frv.id}"]`).click();
       await expect($('[data-testid="document"]')).toBeExisting();
       expect(["the fragment revision", await overflows()]).toEqual(["the fragment revision", 0]);
+    } finally {
+      await browser.setViewport({ width: 1280, height: 800 });
+    }
+  });
+});
+
+// The rendered review of a machine of a release (ginsys/bronzeward#342). The deployment has no Talos node, so no
+// release exists on it: the release, the review and the machine are synthetic bodies the injector serves.
+describe("the rendered review of a release's machine", () => {
+  const DOC = [
+    "machine:", "  registries:", "    config:", "      registry.example.test:", "        auth:", "          username: ci-pull",
+    "          password: <redacted:registry/example-pass@1>", "  nodeLabels:", '    team: ""', "  token: <redacted:schema>",
+  ].join("\n");
+  async function served(over: Partial<S["ReviewBody"]> = {}, applied: Machine["applied"] = null) {
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    const [m] = await machines(at, cl.id, 1);
+    const s = synthetic(cl.id, m!);
+    const path = reviewOf(s.rel.id, m!);
+    const review: S["ReviewBody"] = {
+      release: s.rel.id, machine: m!, mode: "metal", configuration: DOC,
+      provenance: [{ reference: "registry/example-pass", version: 1, member: null, source: { revision: s.frv.id, digest: "sha256:synthetic", path: "doc[0]/machine/registries/config/registry.example.test/auth/password", occurrence: 0 }, output: "doc[0]/machine/registries/config/registry.example.test/auth/password" }],
+      ...over,
+    };
+    const machine: Machine = {
+      id: m!, cluster: cl.id, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
+      desired: s.rel.id, applied, pendingConvergence: true, observed: null, frozen: false, scopeState: "normal", openDrift: null,
+    };
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: { ...s.bodies, [path]: review, [`/machines/${m}`]: machine } })).toMatch(SERVER);
+    return { s, m: m! };
+  }
+  const reviewOf = (rel: string, machine: string) => `/releases/${rel}/machines/${machine}/review`;
+  // From the Changes list to the release, and from its covered machines to the machine's review.
+  async function open(rel: string, m: string) {
+    await nav("Changes");
+    await $(`a[title="${rel}"]`).click();
+    await expect($("main h2")).toHaveText(`Release ${short(rel)}`);
+    await $("main").$(`a=Rendered configuration of ${short(m)}`).click();
+    await expect($("main h2")).toHaveText(`Rendered configuration of ${short(m)} in release ${short(rel)}`);
+  }
+
+  it("T6, T7: a redaction token is a badge with its kind in words, an empty value stays empty, provenance and the next step are served", async () => {
+    const { s, m } = await served();
+    await open(s.rel.id, m);
+    expect(await where()).toBe(`${FIXTURE_PAGE}/releases/${s.rel.id}/machines/${m}`);
+    await expect($('[data-testid="document"]')).toHaveText(expect.stringContaining('team: ""'));
+    expect(await texts("main pre .badge")).toEqual(["[secret registry/example-pass, version 1]", "[secret, marked by the pinned machinery]"]);
+    await expect($('[data-testid="document"]')).not.toHaveText(expect.stringContaining("<redacted"));
+    await expect($("main")).toHaveText(expect.stringContaining(EMPTY_NOTE));
+    await expect($('[data-testid="provenance"]')).toHaveText(expect.stringContaining("registry/example-pass"));
+    await expect($('[data-testid="provenance"]')).toHaveText(expect.stringContaining("doc[0]/machine/registries/config/registry.example.test/auth/password"));
+    await expect($("main")).toHaveText(expect.stringContaining(PROVENANCE_LIMIT));
+    await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("Hand it over first (an adopt plan)"));
+    // The page reads and sends nothing: no write left the browser.
+    expect(await (await fetch(`${CONTROL}/writes`)).json()).toEqual([]);
+  });
+
+  it("a machine with an Applied configuration is told an apply-config plan sends the release", async () => {
+    const { s, m } = await served({}, { release: `rel_${"a".repeat(26)}`, source: "operation" });
+    await open(s.rel.id, m);
+    await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("An apply-config plan sends this release to it"));
+  });
+
+  it("a withheld review is a state of its own: no document area, no empty-value note", async () => {
+    const { s, m } = await served({ configuration: null, notice: "no redacted form could be produced", provenance: [] });
+    await open(s.rel.id, m);
+    await expect($('main [data-testid="status"]')).toHaveText(WITHHELD);
+    await expect($('[data-testid="document"]')).not.toBeExisting();
+    await expect($("main")).not.toHaveText(expect.stringContaining(EMPTY_NOTE));
+    await expect($("main")).toHaveText(expect.stringContaining(NO_PROVENANCE));
+  });
+
+  it("keyboard only: Tab reaches the review link and Enter opens it; contrast and target size hold on the page", async () => {
+    const { s, m } = await served();
+    await nav("Changes");
+    await loaded();
+    await tabTo((f) => f.title === s.rel.id, "the release");
+    await browser.keys("Enter");
+    await expect($("main h2")).toHaveText(`Release ${short(s.rel.id)}`);
+    expect(await focused()).toBe("main");
+    await loaded();
+    await tabTo((f) => f.text === `Rendered configuration of ${short(m)}`, "the review link");
+    await browser.keys("Enter");
+    await expect($("main h2")).toHaveText(`Rendered configuration of ${short(m)} in release ${short(s.rel.id)}`);
+    expect(await focused()).toBe("main");
+    await expect($('[data-testid="document"]')).toBeExisting();
+    await loaded();
+    const seen = await measure();
+    expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(seen.small).toBe(0);
+  });
+
+  it("reflow at 320 CSS pixels: neither the release nor its review scrolls the page sideways", async () => {
+    const { s, m } = await served();
+    await browser.setViewport({ width: 320, height: 640 });
+    try {
+      await nav("Changes");
+      await $(`a[title="${s.rel.id}"]`).click();
+      await expect($("main h2")).toHaveText(`Release ${short(s.rel.id)}`);
+      await loaded();
+      expect(["the release", await overflows()]).toEqual(["the release", 0]);
+      await $("main").$(`a=Rendered configuration of ${short(m)}`).click();
+      await expect($('[data-testid="document"]')).toBeExisting();
+      await loaded();
+      expect(["the review", await overflows()]).toEqual(["the review", 0]);
     } finally {
       await browser.setViewport({ width: 1280, height: 800 });
     }
