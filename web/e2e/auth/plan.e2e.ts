@@ -7,11 +7,10 @@
 // and that a plan is created only for a Desired release with an Applied configuration, is
 // internal/api/plans_test.go; the page's next steps are unit tests in plan.test.ts.
 // The cases sign in as h-publisher.
-import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { fixtureSignIn, mint, storageEmpty } from "./helpers.ts";
+import { api, fixtureSignIn, storageEmpty, syntheticMachine } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // Canonical identifiers (internal/id/id.go): 26 base32 characters whose last one has two zero low bits.
@@ -22,33 +21,15 @@ const T0 = "2026-11-12T08:00:00Z";
 let at = "";
 let machine = "";
 
-const hex = () => randomBytes(4).toString("hex");
 // A write is logged as "METHOD route key epoch": the method and the route are what a case compares.
 const writes = async (): Promise<string[]> => ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).map((w) => w.split(" ").slice(0, 2).join(" "));
-
-async function api(human: string, method: string, path: string, body?: unknown) {
-  const auth = { Authorization: `Bearer ${mint(human)}` };
-  const server = await fetch(`${at}/api/v1/server`, { headers: auth });
-  const epoch = server.headers.get("Bronzeward-Epoch") ?? "";
-  const r = await fetch(`${at}/api/v1${path}`, {
-    method,
-    headers: { ...auth, "Content-Type": "application/json", "Idempotency-Key": randomBytes(16).toString("base64url"), "Bronzeward-Expected-Epoch": epoch },
-    body: body === undefined ? null : JSON.stringify(body),
-  });
-  return { status: r.status, body: (await r.json().catch(() => undefined)) as Record<string, unknown> | undefined };
-}
 
 describe("the plan creation page (#357)", () => {
   before(async () => {
     const res = await fetch(`${CONTROL}/disposable?start=normal`, { method: "POST" });
     expect(res.status).toBe(200);
     at = await res.text();
-    const name = `synthetic-${hex()}`;
-    const c = await api("h-author", "POST", "/clusters", { name, endpoint: `https://${name}.example.test:6443`, contract: "v1.14", talosClusterId: `${randomBytes(32).toString("base64url")}=` });
-    expect(c.status).toBe(201);
-    const m = await api("h-author", "POST", "/machines", { cluster: c.body!["id"], talosNodeId: `synthetic-node-${hex()}`, platform: "metal", talosEndpoint: `192.0.2.${1 + (randomBytes(1)[0]! % 254)}` });
-    expect(m.status).toBe(201);
-    machine = m.body!["id"] as string;
+    machine = await syntheticMachine(at);
   });
 
   it("a plan for a release the server does not know is refused and saved nowhere", async function () {
@@ -65,7 +46,7 @@ describe("the plan creation page (#357)", () => {
     await $("main").$("select").selectByAttribute("value", "adopt");
     await expect($('[data-testid="write-result"]')).not.toBeExisting();
     expect((await writes()).filter((w) => w.startsWith("POST "))).toEqual(["POST /plans"]);
-    const plans = await api("h-viewer", "GET", "/plans");
+    const plans = await api(at, "h-viewer", "GET", "/plans");
     expect(plans.status).toBe(200);
     expect(plans.body!["items"]).toEqual([]);
   });
