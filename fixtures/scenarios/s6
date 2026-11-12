@@ -112,6 +112,7 @@ resolve() {
 # accounts for op's first attempt on start and end with the machine ID typed back on standard input.
 cli_account() {
   local attempt
+  cli_ready "$mutation_ref" h-recovery h-approver
   attempt=$(sql "SELECT id FROM attempt WHERE operation = '$op' AND number = 1") && [ -n "$attempt" ] || return 1
   ctl "$1" "$2" recovery account "$op" "$attempt" --start "$start" --end "$end" \
     --explanation "$mutation_ref: the node was cut off" <<<"$machine_w"
@@ -137,6 +138,7 @@ account_refused() {
 # resolve_held <reason>: h-recovery resolves held cancelled on the reason.
 resolve_held() {
   if [ "$s6_mode" = cli ]; then
+    cli_ready "$mutation_ref" h-recovery h-approver
     ctl resolve h-recovery recovery resolve "$held" --reason "$1" && cli_kept resolve '^Operation [a-z]+_[a-z2-7]+ resolved \(act [a-z]+_[a-z2-7]+\): cancelled\.'
   else
     resolve "$1"
@@ -205,11 +207,9 @@ preconditions() {
   must "$ref" 'inject kill B' "$bin/inject" kill B
   call_port=$SERVER_C_PORT
   check "$ref" 'C answers /livez' answers 204 - GET /livez ''
-  if [ "$s6_mode" = cli ]; then
-    # The acts run against B, which takes over and serves them; B is stopped and started again, always on this port.
-    cli_port=$SERVER_B_PORT
-    cli_prepare "$ref" h-recovery h-approver
-  fi
+  # The acts run against B, which takes over and serves them, always on this port. B is stopped here,
+  # and a context is added only once its server answers: the first command prepares them (cli_ready).
+  cli_port=$SERVER_B_PORT
   evidence_to pre || die "no pre-state: bin/evidence failed"
   check "$ref" 'the pre-state bundle: complete, no fixture secret but the scan control' scan_clean pre
   cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
