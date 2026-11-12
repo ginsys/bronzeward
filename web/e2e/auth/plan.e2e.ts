@@ -123,7 +123,8 @@ describe("the plan pages on a seeded deployment (#822)", () => {
   it("an approved plan: a reason is required, and [Cancel plan] sends one cancellation the server records", async function () {
     this.timeout(120_000);
     const route = `/plans/${seed.plans.approved}/cancellations`;
-    expect(await fixtureSignIn("h-publisher", {}, { upstream: sat })).toMatch(SERVER);
+    // The automation identity made the seeded plan, and a publisher cancels only its own plans.
+    expect(await fixtureSignIn("h-all", {}, { upstream: sat })).toMatch(SERVER);
     await browser.url(`${FIXTURE_PAGE}/plans/${seed.plans.approved}`);
     await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: approved$/), { wait: 20_000 });
     // The approval is of the current epoch, so the page offers no new approval.

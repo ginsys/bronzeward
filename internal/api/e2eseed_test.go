@@ -175,6 +175,15 @@ func TestE2ESeedSurvivesARunningController(t *testing.T) {
 			t.Errorf("plan %s reads %s, want %s", plan, got.State, state)
 		}
 	}
+	// The snapshot above was taken after the seed, so a takeover between the two would sit in both:
+	// the operation must still be its seeded owner's and not unresolved.
+	var owner, state string
+	if err := db.QueryRow(`SELECT coalesce(owner, ''), state FROM operation WHERE id = $1`, s.Operation).Scan(&owner, &state); err != nil {
+		t.Fatal(err)
+	}
+	if owner == d.owner.ID || state == "unresolved" {
+		t.Errorf("the controller took over the seeded operation: owner %s, state %s", owner, state)
+	}
 	if n := count(t, db, `SELECT count(*) FROM attempt WHERE operation = $1`, s.Operation); n != 1 {
 		t.Errorf("the operation has %d attempts, want 1", n)
 	}
