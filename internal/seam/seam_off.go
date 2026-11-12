@@ -7,3 +7,6 @@ package seam
 
 // At does nothing: this build has no interruption seam.
 func At(string) {}
+
+// Lost is false: this build has no interruption seam.
+func Lost(string) bool { return false }

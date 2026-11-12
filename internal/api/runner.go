@@ -440,9 +440,13 @@ func (a *API) commitImport(ctx context.Context, j job, imp imported) (*refusal, 
 			j.draft, etagToken()); err != nil {
 			return err
 		}
-		return a.finish(ctx, tx, j, "succeeded",
+		if err := a.finish(ctx, tx, j, "succeeded",
 			map[string]any{"draft": j.draft, "draftRevision": rev + 1, "importBaseRevision": ibr}, nil,
-			map[string]any{"type": "succeeded", "importBaseRevision": ibr})
+			map[string]any{"type": "succeeded", "importBaseRevision": ibr}); err != nil {
+			return err
+		}
+		seam.At("draft-commit") // every write done after the claim's release, the transaction not committed
+		return nil
 	})
 	if errors.Is(err, errRefused) {
 		return ref, nil

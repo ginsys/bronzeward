@@ -19,6 +19,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/seam"
 	"github.com/ginsys/bronzeward/internal/staging"
 )
 
@@ -266,6 +267,11 @@ func (a *API) attempt(ctx context.Context, q *request, n int) (*record, bool, er
 	}
 	if err := commit(tx); err != nil {
 		return a.resolveCommit(q, rec, err)
+	}
+	// The fixture's lost reply (internal/seam; empty in every build but instance C's): the entry
+	// committed, and the request answers as if the COMMIT's reply and the read-back were both lost.
+	if q.route.action == "recovery.enter" && seam.Lost("recovery-entry-commit") {
+		return nil, false, fmt.Errorf("%w: the reply was lost (fixture interrupt)", errUnknownOutcome)
 	}
 	return rec, true, nil
 }
