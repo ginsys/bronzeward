@@ -20,6 +20,16 @@ for the read and sign-in cases, and one file per command family for the others, 
 cases recorded in its file. `recovery-scope-cases.yaml` holds AMB-05, AMB-07 and AMB-12 with
 `recovery scope-account` as the dropped write.
 
+A web case that needs a real release or plan asks for a seeded deployment with
+`POST /disposable?seed` on the browser harness's control server, and reads the identifiers from
+`GET /seeded`. `mise run browser-auth` compiles `TestE2ESeed` of `internal/api` for this. The test
+writes, with the helpers the API tests use, one release, two machines, and one plan in each state
+a plan page shows (proposed, approved, committed, expired, cancelled, revoked). The committed plan
+has an operation with its first attempt. Both routes belong to the harness process, and the server
+has none for tests. The seed is written after the deployment's controller has started, an order
+that `TestE2ESeedSurvivesARunningController` proves leaves the records as they are; the harness
+header in `web/e2e/auth.conf.ts` has the details.
+
 | Record | Runs |
 | --- | --- |
 | [AUTH-01](cases/AUTH-01.yaml) | web, sign-in and the server read: `mise run browser-auth` |
