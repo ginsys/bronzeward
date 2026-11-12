@@ -36,14 +36,14 @@ run_key=$(date -u +%s%N)
 
 cluster=''
 # The marked label every update carries: one generation when its ingestion gets that far.
-LABEL_MARK='doc[0]/machine/nodeLabels/tier'
+LABEL_MARK='doc[0]/labels/tier'
 # update_input <name>: a fragment document. Each holds the canary, a scan pattern, so a problem, a
 # log or a row that quoted it would fail the scan.
 update_input() {
   case $1 in
-    marked) printf 'machine:\n  nodeLabels:\n    tier: %s\n' "$BW_CANARY" ;;
-    parse) printf 'machine:\n  nodeLabels:\n    tier: %s\n  certSANs: [\n' "$BW_CANARY" ;;
-    guard) printf 'machine:\n  nodeLabels:\n    tier: %s\n    copy: %s\n' "$BW_CANARY" "$BW_CANARY" ;;
+    marked) printf 'apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  tier: %s\n' "$BW_CANARY" ;;
+    parse) printf 'apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  tier: %s\n  broken: [\n' "$BW_CANARY" ;;
+    guard) printf 'apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  tier: %s\n  copy: %s\n' "$BW_CANARY" "$BW_CANARY" ;;
     # The machine token, a reference of the worker's import base (a schema-listed secret): a
     # publication's compilation refuses the fragment that overrides it (C §6 step 7).
     override) printf 'machine:\n  token: %s\n' "$BW_CANARY" ;;
@@ -612,7 +612,7 @@ applied_reference() {
 # label_body: the worker fragment of step 1: one node label whose value is a !bwref to that
 # reference, declared at its kind and version; no value of its own, so no mark.
 label_body() {
-  printf 'machine:\n  nodeLabels:\n    %s: !bwref %s\n' "$S2_LABEL" "$ref_name" |
+  printf 'apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  %s: !bwref %s\n' "$S2_LABEL" "$ref_name" |
     jq -Rsc --arg n "$ref_name" --argjson v "$ref_version" \
       '{layer: "role", document: ., marks: [], declarations: {references: {($n): {kind: "string", version: $v}}}}'
 }
@@ -679,30 +679,34 @@ only_publish_since() {
 }
 # review_redacted: step 4's review of the worker: the label present with its value redacted as the
 # reference at its declared version, the provenance of that reference and version naming the
-# fragment revision at exactly doc[N]/machine/nodeLabels/<label>. The label's line is then looked
-# for in document N of the configuration and compared whole (a quoted scalar either way), its
-# parent line by indentation nodeLabels: and that one's machine:, so the marker under another key,
-# in another document, under another label ending in the name, or at another version, does not
-# match.
+# fragment revision at exactly doc[N]/labels/<label>, N being the position of the one KubeNodeConfig
+# document in the node's stream: it is measured here, from the configuration, and recorded in
+# $EV/label-doc-index. The label's line is then looked for in that document and compared whole (a
+# quoted scalar either way), its parent line by indentation labels:, so the marker under another
+# key, in another document, under another label ending in the name, or at another version, does
+# not match.
 review_redacted() {
+  local n
   answers 200 - GET "/api/v1/releases/$s2_release/machines/$machine_w/review" "$author" || return 1
-  jq -e --arg l "$S2_LABEL" --arg n "$ref_name" --argjson v "$ref_version" --arg f "$frv" '
+  n=$(jq -er --arg l "$S2_LABEL" --arg n "$ref_name" --argjson v "$ref_version" --arg f "$frv" '
     def ind: capture("^(?<s> *)").s | length;
     def trim: sub("^ +"; "");
     def parent($ls; $i): ($ls[$i] | ind) as $k
       | [range($i - 1; -1; -1) | select(($ls[.] | test("^ *$") | not) and ($ls[.] | ind) < $k)] | first;
     "<redacted:\($n)@\($v)>" as $m
-    | [.provenance[] | select(.reference == $n and .version == $v and .source.revision == $f
-        and .output == "doc[\(.output | capture("^doc\\[(?<d>[0-9]+)\\]").d)]/machine/nodeLabels/\($l)")] as $p
-    | if ($p | length) != 1 then false else
-        ($p[0].output | capture("^doc\\[(?<d>[0-9]+)\\]").d | tonumber) as $d
-        | (.configuration | split("\n---\n") | .[$d] // "" | split("\n")) as $ls
+    | (.configuration | split("\n---\n")) as $docs
+    | [range(0; $docs | length) | select($docs[.] | split("\n") | any(. == "kind: KubeNodeConfig"))] as $k
+    | if ($k | length) != 1 then false else
+        $k[0] as $d
+        | ($docs[$d] | split("\n")) as $ls
+        | [.provenance[] | select(.reference == $n and .version == $v and .source.revision == $f
+            and .output == "doc[\($d)]/labels/\($l)")] as $p
         | [range(0; $ls | length) as $i
            | select($ls[$i] | trim | IN("\($l): \($m)", "\($l): '"'"'\($m)'"'"'", "\($l): \"\($m)\""))
-           | parent($ls; $i) as $a | select($a != null and ($ls[$a] | trim) == "nodeLabels:")
-           | parent($ls; $a) as $b | select($b != null and $ls[$b] == "machine:")]
-        | length == 1
-      end' "$EV/last.body" >/dev/null
+           | parent($ls; $i) as $a | select($a != null and $ls[$a] == "labels:")]
+        | if ($p | length) == 1 and length == 1 then $d else false end
+      end' "$EV/last.body") || return 1
+  printf '%s\n' "$n" >"$EV/label-doc-index"
 }
 # machinery_pin: the machinery module's version (go.mod) and its go.sum checksum at the commit
 # up-build records for the image, tab-separated.
@@ -1214,7 +1218,7 @@ update_and_publication_matrices() {
     refused parse parse '[]' parse -
   outcome_bundle 'S2 negative controls, C §15' refusal-parse
   check 'S2 negative controls, C §15' 'the marked value also an unmarked label: 422 guard-value naming the label, the claim abandoned, no generation, ETag unchanged' \
-    refused guard guard "$(jq -nc --arg p "$LABEL_MARK" '[$p]')" guard-value '["doc[0]/machine/nodeLabels/copy"]'
+    refused guard guard "$(jq -nc --arg p "$LABEL_MARK" '[$p]')" guard-value '["doc[0]/labels/copy"]'
   outcome_bundle 'S2 negative controls, C §15' refusal-guard
 
   # The interruption matrix on C.

@@ -521,7 +521,7 @@ t6() {
 }
 t7() {
   setup t7
-  echo "names: empty field machine.nodeLabels.bw-note, redacted field machine.nodeLabels.bw-s2"
+  echo "names: empty field labels.bw-note, redacted field labels.bw-s2 (both in the KubeNodeConfig document)"
   read_ok "T6's draft is published" \
     test "$(sql "SELECT count(*) FROM draft WHERE title = 'participants t6' AND state = 'published'")" = 1
 }

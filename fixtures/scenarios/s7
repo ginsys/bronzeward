@@ -76,7 +76,8 @@ ds_ref='S7'
 WORKER_MARK='doc[0]/machine/files/0/content'
 # S2's label on the worker holds the file secret's value (s2's !bwref), so an import that must
 # release its claim marks it too, as s5's adoption does; marking the file alone is refused there.
-LABEL_MARK='doc[0]/machine/nodeLabels/bw-s2'
+# The label is a KubeNodeConfig document of the node's stream: its mark is measured on the worker
+# where the import takes it (label_mark).
 # shellcheck source-path=SCRIPTDIR source=review.sh
 . "$here/review.sh"
 
@@ -1001,7 +1002,7 @@ old_bao() {
   must "$ref" 'h-author opens a draft: 201' draft_by h-author old
   fresh_author
   must "$ref" "h-author imports the worker into it, its file secret and S2's label holding it marked: the claim released, the draft's ETag moved" \
-    ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" --arg l "$LABEL_MARK" '[$p, $l]')" old
+    ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" --arg l "$(label_mark "$TALOS_WORKER_IP" bw-s2)" '[$p, $l]')" old
   ing_old=${ingested[-1]}
   must "$ref" "the import's generations written to OpenBao after its snapshot" has_generations "$ing_old"
   if ! selects_workers; then

@@ -156,7 +156,7 @@ claims_added() {
 refused_input() {
   case $1 in
     parse) printf 'machine:\n  token: %s\n  certSANs: [\n' "$BW_CANARY" ;;
-    guard) printf 'machine:\n  token: %s\n  nodeLabels:\n    copy: %s\n' "$BW_CANARY" "$BW_CANARY" ;;
+    guard) printf 'machine:\n  token: %s\n---\napiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  copy: %s\n' "$BW_CANARY" "$BW_CANARY" ;;
   esac
 }
 # import_refused <name> <body> <operation filter> <cause or -> [fault]: POST /ingestions under
@@ -893,7 +893,7 @@ controls() {
     refused parse "$machine_w" '[]' parse - document
   outcome_bundle 'S1 refusal' refusal-parse
   check 'S1 refusal' 'source document, the extracted token also an unmarked label: abandoned, 422 guard-value naming the label, no secret in the problem, ETag and gen/ unchanged' \
-    refused guard "$machine_w" '[]' guard-value '["doc[0]/machine/nodeLabels/copy"]' document
+    refused guard "$machine_w" '[]' guard-value '["doc[1]/labels/copy"]' document
   outcome_bundle 'S1 refusal' refusal-guard
   local robot
   robot=$(cat -- "$STATE/automation-token") || die "no automation token in $STATE"

@@ -116,14 +116,14 @@ case $step in
   labels)
     check "$ref" 'h-author opens a draft: 201' draft_by h-author labels
     check "$ref" 'h-author puts the role fragment participants-labels, bw-team: blue: 200' \
-      labels_put h-author labels $'machine:\n  nodeLabels:\n    bw-team: blue\n'
+      labels_put h-author labels $'apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  bw-team: blue\n'
     check "$ref" 'h-author lists it in the workers profile: 200' profile_with h-author labels
     check "$ref" "h-publisher publishes it: 202, one release, the worker's Desired" publish_by h-publisher labels
     ;;
   t6-draft)
     check "$ref" 'h-author opens the draft "participants t6": 201' draft_by h-author t6
     check "$ref" 'h-author changes bw-team to green and adds the empty label bw-note: 200' \
-      labels_put h-author t6 $'machine:\n  nodeLabels:\n    bw-team: green\n    bw-note: ""\n'
+      labels_put h-author t6 $'apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  bw-team: green\n  bw-note: ""\n'
     check "$ref" 'h-author lists the new revision in the workers profile: 200' profile_with h-author t6
     ;;
   t7-publish)
