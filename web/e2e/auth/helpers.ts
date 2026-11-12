@@ -1,6 +1,7 @@
 // What the AUTH specs share. Only the parts of a URL a case needs cross WebDriver, so the harness
 // log never records a token (Zitadel's logout page carries one in its query).
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { $, browser, expect } from "@wdio/globals";
@@ -57,6 +58,39 @@ export async function fixtureSignIn(human: string, flags: Record<string, string>
   await leaveUnasked();
   await browser.url(`${FIXTURE_PAGE}/`);
   return settled(FIXTURE_PAGE);
+}
+
+export const hex = () => randomBytes(4).toString("hex");
+
+// Starts the disposable deployment as the control server's query says ("start=recovery&keep": for
+// recovery, on the earlier one's database) and returns its URL.
+export async function disposable(query: string): Promise<string> {
+  const res = await fetch(`${CONTROL}/disposable?${query}`, { method: "POST" });
+  expect(res.status).toBe(200);
+  return res.text();
+}
+
+// One API call to the disposable deployment at `at`, as `human`, under the epoch it reports now.
+export async function api(at: string, human: string, method: string, path: string, body?: unknown) {
+  const auth = { Authorization: `Bearer ${mint(human)}` };
+  const server = await fetch(`${at}/api/v1/server`, { headers: auth });
+  const epoch = server.headers.get("Bronzeward-Epoch") ?? "";
+  const r = await fetch(`${at}/api/v1${path}`, {
+    method,
+    headers: { ...auth, "Content-Type": "application/json", "Idempotency-Key": randomBytes(16).toString("base64url"), "Bronzeward-Expected-Epoch": epoch },
+    body: body === undefined ? null : JSON.stringify(body),
+  });
+  return { status: r.status, body: (await r.json().catch(() => undefined)) as Record<string, unknown> | undefined };
+}
+
+// A synthetic cluster and one machine on it, made as h-author; returns the machine's id.
+export async function syntheticMachine(at: string): Promise<string> {
+  const name = `synthetic-${hex()}`;
+  const c = await api(at, "h-author", "POST", "/clusters", { name, endpoint: `https://${name}.example.test:6443`, contract: "v1.14", talosClusterId: `${randomBytes(32).toString("base64url")}=` });
+  expect(c.status).toBe(201);
+  const m = await api(at, "h-author", "POST", "/machines", { cluster: c.body!["id"], talosNodeId: `synthetic-node-${hex()}`, platform: "metal", talosEndpoint: `192.0.2.${1 + (randomBytes(1)[0]! % 254)}` });
+  expect(m.status).toBe(201);
+  return m.body!["id"] as string;
 }
 
 export const counts = async (): Promise<Counts> => (await fetch(`${CONTROL}/counts`)).json() as never;
