@@ -172,15 +172,27 @@ type Machine = components["schemas"]["MachineBody"];
 type Reads = { approval: Load<Approval>; now: Load<Identity>; machine: Load<Machine> };
 const LOADING: Reads = { approval: { kind: "loading" }, now: { kind: "loading" }, machine: { kind: "loading" } };
 
+// Read again after `first`, and every `every` after that until stopped. A new answer of the plan restarts the effect that
+// calls this. When the plan read got no answer, the plan object stays the same and nothing restarts it, so the repeat is
+// what keeps the poll alive; it is slower than a slow answer, which a quicker one would drop.
+export function poll(reread: () => void, first = 5000, every = 15000): () => void {
+  let timer = setTimeout(function tick() {
+    reread();
+    timer = setTimeout(tick, every);
+  }, first);
+  return () => clearTimeout(timer);
+}
+
 // The approved plan's own reads, and the poll. One chain, so nothing is superseded while it is in flight: each answer
 // of the plan starts the three reads, and five seconds after they are all answered the plan is read again. A read the
-// shell did not answer (offline, a transport failure) keeps what is shown, and the poll goes on.
+// shell did not answer (offline, a transport failure) keeps what is shown, and the poll goes on, for the supporting
+// reads and for the plan's own.
 function Approved({ p, reread }: { p: Plan; reread: () => void }) {
   const settled = useSettled();
   const [seen, setSeen] = useState<Reads>(LOADING);
   useEffect(() => {
     let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let stop: (() => void) | undefined;
     void (async () => {
       const [approval, now, machine] = await Promise.all([
         settled<Approval>(`/approvals/${enc(p.approval ?? "")}`, () => live),
@@ -189,11 +201,11 @@ function Approved({ p, reread }: { p: Plan; reread: () => void }) {
       ]);
       if (!live) return;
       setSeen((s) => ({ approval: approval ?? s.approval, now: now ?? s.now, machine: machine ?? s.machine }));
-      timer = setTimeout(reread, 5000);
+      stop = poll(reread);
     })();
     return () => {
       live = false;
-      clearTimeout(timer);
+      stop?.();
     };
   }, [p, settled, reread]);
   const { approval, now, machine } = seen;
