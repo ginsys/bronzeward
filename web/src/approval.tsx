@@ -131,20 +131,31 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
     e.preventDefault();
     if (!done && typed.trim() === p.id) send({ method: "POST", path: `/plans/${enc(p.id)}/approvals`, body: {}, resource: `/plans/${enc(p.id)}` });
   };
-  if (p.state !== "proposed") return <Result w={w} done={recorded} />;
   const over = overwrites(p);
   const busy = (w !== undefined && !startsNew(writes, w)) || done;
-  return (
+  const result = <Result w={w} done={recorded} />;
+  const form = (
     <section aria-label="Approval">
       <Prediction p={p} />
       {over !== undefined && <Status testid="unseen-overwrite">{over}</Status>}
       <form onSubmit={submit} aria-label="Approve plan">
         <p><label>To approve, type the plan ID ({p.id}): <input name="plan" autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} disabled={busy} /></label> Approval is for a human sign-in only.</p>
         <p><Action label="Approve" needs={["approver"]} submit busy={busy || typed.trim() !== p.id} /></p>
-        <Result w={w} done={recorded} />
+        {result}
       </form>
     </section>
   );
+  if (p.state === "proposed") return form;
+  if (p.state !== "approved" || p.approval === null) return result;
+  // An approved plan whose approval is from an earlier epoch authorizes nothing, and the page offers a new approval.
+  return <EarlierEpoch approval={p.approval}>{(earlier) => (earlier ? form : result)}</EarlierEpoch>;
+}
+
+// Whether an approval was recorded in an epoch before the current one; false until both reads answer.
+function EarlierEpoch({ approval, children }: { approval: string; children: (earlier: boolean) => ReactNode }) {
+  const a = useItem<Approval>(`/approvals/${enc(approval)}`);
+  const me = useItem<{ epoch: string }>("/identity");
+  return <>{children(a.kind === "ok" && me.kind === "ok" && a.data.epoch !== me.data.epoch)}</>;
 }
 
 // [Revoke approval] (B22): approver or recovery-admin, for an approved or committed plan's approval.

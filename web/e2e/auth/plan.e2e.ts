@@ -103,6 +103,8 @@ describe("the plan creation page (#357)", () => {
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies })).toMatch(SERVER);
     await browser.url(`${FIXTURE_PAGE}/plans/${PLAN}`);
     await expect($('[data-testid="plan-old-approval"]')).toHaveText("This approval is from before the last recovery entry and authorizes nothing. An approver may approve again.", { wait: 20_000 });
+    // The approval is from an earlier epoch, so the page offers a new approval.
+    await expect($('main form[aria-label="Approve plan"]')).toBeExisting();
     await expect($("main").$("p*=Cancelling after the controller commits ends the operation only while no attempt is recorded.")).toBeExisting();
     // A reason is required: an empty one sends nothing.
     await $("main").$("button=Cancel plan").click();
