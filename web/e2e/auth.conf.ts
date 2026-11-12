@@ -156,10 +156,12 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // a plain POST /disposable seeds nothing, and ?keep reuses the earlier seed with the database.
 // The seed is written after the deployment's controller has started, never before: its first pass
 // takes over every operation another process owned, and TestE2ESeedSurvivesARunningController proves
-// that a running controller then leaves the seeded records as they are. The first pass starts with
-// the process, before it listens, and reads at once; /livez answers after that, so the seed is
-// written after the pass's first read unless that read fails and is repeated, in which case the
-// seed's own writes to the same database fail too.
+// that a running controller then leaves the seeded records as they are after its first pass. Nothing
+// here tells the harness that pass has ended: /livez answers once the process listens, and the pass
+// reads at once, so it has read before the seed unless that read failed and is repeated on the
+// heartbeat. A seed written in that gap has its committed operation taken over, which moves the
+// operation only (to unresolved) and no plan. No case reads the operation yet; one that does must
+// read its state first.
 export interface Chaos {
   fault: (mode: string) => void;
   decryptHold: (ms: number) => void;
@@ -374,7 +376,9 @@ async function prepare() {
     await ready(`${DISPOSABLE_API}/livez`, disposable.p);
     if (seed) {
       const out = `${state}/seeded.json`;
+      // From the package's own directory: the API tests read the OpenAPI description by a path relative to it.
       execFileSync(`${root}bin/e2eseed.test`, ["-test.run", "^TestE2ESeed$", "-test.count=1"], {
+        cwd: `${root}internal/api`,
         stdio: "inherit",
         env: { ...process.env, BW_E2E_SEED_DSN: `postgres://bronzeward@127.0.0.1:${PG_PORT}/${disposable.db}?sslmode=disable`, BW_E2E_SEED_OUT: out },
       });
