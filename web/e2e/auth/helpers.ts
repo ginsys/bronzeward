@@ -93,6 +93,9 @@ export async function syntheticMachine(at: string): Promise<string> {
   return m.body!["id"] as string;
 }
 
+// Every write the injector received since the sign-in, as "<method> <route>"; the key and the epoch are
+// left to the cases that compare them.
+export const writes = async (): Promise<string[]> => ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).map((w) => w.split(" ").slice(0, 2).join(" "));
 export const counts = async (): Promise<Counts> => (await fetch(`${CONTROL}/counts`)).json() as never;
 export const seen = async (): Promise<string[]> => (await fetch(`${CONTROL}/seen`)).json() as never;
 // The server's answers the injector passed on, as "<route><query> <status>".

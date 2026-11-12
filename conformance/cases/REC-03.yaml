@@ -1,0 +1,19 @@
+id: REC-03
+setup: 'first: as AUTH-02, the injector passing every request to the disposable deployment, a normal start with one synthetic machine; signed in as h-publisher with the plan creation page open, the deployment is restarted with -recovery-start on the same database and its entry made as h-recovery outside the page (one synthetic database backup). Second: the normal start, signed in as h-all on a plan the injector serves as proposed, the injector answering the approval with a scope refusal'
+action: 'first: send Create plan for an adopt plan; second: send Approve with the plan ID typed'
+exchange:
+  - request: POST /api/v1/plans
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+  - request: POST /api/v1/plans/<plan>/approvals
+    headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]
+fault: 'first: none, the recovery start refuses plan creation after its entry; second: the injector answers 409 recovery-mode-active with scope pre-restore-unaccounted, as internal/api/plans.go:226 does for plan creation and internal/api/approvals.go:80 for approval, without forwarding the write'
+expect:
+  server: 'first: 409 recovery-mode-active without scope (internal/api/api.go:355); second: nothing reaches it. The server''s own scope member and an unchanged start mode: TestPlanCreationRefusals, case pre-restore unaccounted'
+  client: 'first: the write refused, and the start mode read as a recovery start from that refusal (write.ts onRecoveryStart); the refusal carries the entry''s new epoch, whose re-read remounts the page (§8.5 item 1), and the refusal stays shown in the set-aside notice outside the page; second: the write refused, the start mode unchanged'
+  shown: 'first: "Not saved: the server answered 409. Recovery mode refuses the act on this scope", then the recovery banner with "Server started for recovery: plan creation, approval and unfreeze wait for its normal restart, and publications it accepts complete only then. Imports complete here."; second: the refusal line naming the scope, and no recovery start text'
+  absent: [token in the harness log, retained artifacts or browser storage]
+runs:
+  web:
+    check: web/e2e/auth/approval.e2e.ts, mise run browser-auth; the start mode from a write's refusal in web/src/write.test.ts, mise run web
+    browsers: [chrome, edge, firefox, firefox-esr]
+    covers: the first case on a real recovery start; the second case injected, since no setup step of a disposable deployment leaves a machine's scope pre-restore unaccounted, and its real round trip is ginsys/bronzeward#261's
