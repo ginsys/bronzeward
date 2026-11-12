@@ -30,6 +30,23 @@ func syntheticProvider(t *testing.T) string {
 	return block + "ingestion: {instance: a, heartbeat: 5s, lease: 15s, absoluteExpiry: 10m, sweep: 15s}\n"
 }
 
+// enter is recovery enter with one synthetic restored backup.
+var enter = []string{"recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z",
+	"--stopped-at", "2026-11-01T08:31:00Z", "--reason", "BWSYNTH drill"}
+
+// humanContext adds the oidc context "human" of f's fixture issuer behind a TLS injector that lets
+// writes through, and returns the injector and a runner of bronzewardctl commands in that context.
+func humanContext(f *fixture) (*injector, func(stdin string, args ...string) result) {
+	f.t.Helper()
+	in := newInjector(f.t, f.base)
+	in.writing = true
+	f.want(f.ctl(nil, "", "context", "add", "human", "--server", in.URL, "--certificate-authority", in.ca,
+		"--issuer", f.iss.URL, "--client-id", "BWSYNTH-cli", "--audience", "bronzeward", "--oidc-token-file", f.humanFile()), 0, "credential oidc")
+	return in, func(stdin string, args ...string) result {
+		return f.scan(f.exec(nil, stdin, append([]string{"--context", "human"}, args...)...), args)
+	}
+}
+
 // recoveryCases are the client-contracts.md §12 recovery cases bronzewardctl's recovery enter runs;
 // testdata/recovery-cases.yaml holds their records, and TestRecovery runs exactly those, in order.
 var recoveryCases = []string{"REC-02", "REC-04"}
@@ -57,15 +74,7 @@ func TestRecovery(t *testing.T) {
 
 	f := startConfig(t, "viewer", "", "bronzeward", syntheticProvider(t))
 	s := f.seed()
-	in := newInjector(t, f.base)
-	in.writing = true
-	f.want(f.ctl(nil, "", "context", "add", "human", "--server", in.URL, "--certificate-authority", in.ca,
-		"--issuer", f.iss.URL, "--client-id", "BWSYNTH-cli", "--audience", "bronzeward", "--oidc-token-file", f.humanFile()), 0, "credential oidc")
-	ctl := func(stdin string, args ...string) result {
-		return f.scan(f.exec(nil, stdin, append([]string{"--context", "human"}, args...)...), args)
-	}
-	enter := []string{"recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z",
-		"--stopped-at", "2026-11-01T08:31:00Z", "--reason", "BWSYNTH drill"}
+	in, ctl := humanContext(f)
 	contexts := func() string { return ctl("", "context", "list", "-o", "json").out }
 	epoch := func() string {
 		var e string
@@ -249,6 +258,42 @@ func TestRecovery(t *testing.T) {
 	}
 	if n := f.actCount(); n != acts || !frozen() {
 		t.Errorf("refused unfreezes recorded %d acts, frozen %v; want none and still frozen", n-acts, frozen())
+	}
+	f.scanFiles()
+}
+
+// REC-04 (b): the server commits the entry and loses its own reply, which it answers 500 with the
+// outcome unknown, still gated, so the confirming read is refused. The client repeats under the
+// same key with no epoch check and shows the replayed result as its own, as in (a). The server is
+// the interrupt build, steered by a control file of this test.
+func TestRecoveryLostReply(t *testing.T) {
+	f := startConfig(t, "viewer", "", "bronzeward", syntheticProvider(t))
+	f.seed()
+	f.interrupt("recovery-entry-commit lose-reply", "-recovery-start")
+	in, ctl := humanContext(f)
+	f.store(f.humanFile(), f.mint("h-recovery", ""), "")
+	epoch := func() string {
+		var e string
+		if err := f.db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&e); err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	before, previous := f.actCount(), epoch()
+	in.set(nil, nil)
+	r := ctl("enter\n", enter...)
+	minted := epoch()
+	f.want(r, 0, "repeat 1 of 3 with the same key", "already done earlier; showing that result",
+		"Recovery mode entered (act act_", "Epoch "+minted+", was "+previous+".")
+	if want := []string{"GET /api/v1/server", "POST /api/v1/recovery/entries", "GET /api/v1/recovery", "POST /api/v1/recovery/entries", "GET /api/v1/server"}; !slices.Equal(in.requests(), want) {
+		t.Errorf("REC-04 (b): the injector saw %v, want %v", in.requests(), want)
+	}
+	if minted == previous || f.actCount() != before+1 {
+		t.Errorf("REC-04 (b): epoch %s, was %s; %d acts recorded, want 1", minted, previous, f.actCount()-before)
+	}
+	f.srv.stop() // the log is read only after the process ended
+	if n := strings.Count(f.srv.log.String(), "fixture interrupt: lose-reply at recovery-entry-commit"); n != 1 {
+		t.Errorf("REC-04 (b): the server lost %d replies, want 1:\n%s", n, f.srv.log.String())
 	}
 	f.scanFiles()
 }

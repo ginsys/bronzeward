@@ -9,8 +9,9 @@
 # server takes from that configuration, and contacts no provider.
 # Each entry is recovery enter --restored family=database,... --stopped-at ... --reason ..., with
 # enter typed back, signed in as h-recovery through the oidc context "human".
-# REC-04 (b), the server losing its own COMMIT reply, needs a server-side fault hook the server
-# binary does not have; its client side waits for that hook (#366).
+# REC-04 (b), the server losing its own COMMIT reply, runs the interrupt build of the server on a
+# database of its own (TestRecoveryLostReply): its control file names recovery-entry-commit
+# lose-reply, and the entry's retry replays the entry the first send committed.
 
 - id: REC-02
   setup: 'first: serve started normally; second: serve started with -recovery-start, after REC-04 committed its entry under another key'
@@ -34,7 +35,10 @@
     - GET /api/v1/recovery, the confirming read
     - POST /api/v1/recovery/entries, the same key
     - GET /api/v1/server, after the entry committed
-  fault: (a) the first POST reaches the server, which commits it; the injector drops its 201
+  fault: >-
+    (a) the first POST reaches the server, which commits it; the injector drops its 201.
+    (b) the first POST commits and the server loses its own reply: it answers 500 internal-error,
+    still gated, so the confirming read is refused 409 recovery-mode-active
   expect:
     client: repeats with the same key and no epoch check; shows the replayed result as its own; keeps the minted epoch and a recovery start; does not set the entry aside
     server: answers the confirming read 200 with the new epoch and the repeat 201 with Idempotent-Replayed true; one act
