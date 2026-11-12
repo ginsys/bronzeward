@@ -5,7 +5,9 @@
 
 import { Fragment as Group, type ReactNode } from "react";
 import type { components } from "./api/v1";
-import { Head, Id, Ref, Scroll, short, useItem, usePending, viewOf } from "./list.tsx";
+import { Head, Id, Ref, Scroll, short, useItem, usePending, useReads, viewOf } from "./list.tsx";
+import { planPath } from "./plan.tsx";
+import { Action } from "./shell.tsx";
 import { Withheld } from "./states.tsx";
 
 type S = components["schemas"];
@@ -88,6 +90,14 @@ export function nextStep(release: string, m: Pick<Machine, "desired" | "applied"
     : `This release carries this machine's Applied configuration (release ${short(m.applied.release)}) unchanged. Nothing is left to send.`;
 }
 
+// The plan this machine's state offers for this release (B18): a handover for a machine with no Applied, an
+// apply-config plan while the configuration differs. None where the text says nothing is left to send.
+export function planFor(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence">): "adopt" | "apply-config" | undefined {
+  if (m.desired !== release) return undefined;
+  if (m.applied === null) return "adopt";
+  return m.pendingConvergence ? "apply-config" : undefined;
+}
+
 export const EMPTY_NOTE = "A field that shows as empty is empty in the rendered review. A redacted field shows as a badge, so an empty one was not redacted.";
 export const PROVENANCE_LIMIT = "Provenance covers secret references only; other fields are not traced.";
 export const NO_PROVENANCE = "No secret reference was rendered into this configuration.";
@@ -153,6 +163,14 @@ export function ReviewBody({ r }: { r: Review }) {
   );
 }
 
+// [Plan adopt (handover)] or [Plan apply]: opens the creation page for this release and machine. It sends nothing.
+function PlanButton({ release, machine, m }: { release: string; machine: string; m: Machine }) {
+  const { go } = useReads();
+  const op = planFor(release, m);
+  if (op === undefined) return null;
+  return <p><Action label={op === "adopt" ? "Plan adopt (handover)" : "Plan apply"} needs={["publisher"]} onClick={() => go(planPath(release, machine, op))} /></p>;
+}
+
 export function ReviewItem({ release, machine }: { release: string; machine: string }) {
   const review = useItem<Review>(`/releases/${enc(release)}/machines/${enc(machine)}/review`);
   const pending = usePending(review, "the rendered review");
@@ -165,6 +183,7 @@ export function ReviewItem({ release, machine }: { release: string; machine: str
       {review.kind === "ok" ? <ReviewBody r={review.data} /> : pending}
       <h3>Next step</h3>
       {mach.kind === "ok" ? <p data-testid="next-step">{nextStep(release, mach.data)}</p> : machinePending}
+      {mach.kind === "ok" && <PlanButton release={release} machine={machine} m={mach.data} />}
     </>
   );
 }
