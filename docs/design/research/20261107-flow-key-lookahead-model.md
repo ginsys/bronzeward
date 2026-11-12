@@ -396,4 +396,12 @@ fixes the defect makes the port refuse documents that go-yaml accepts.
 
 If the owner finds the size of the port too high for a hint in an editor, the known gap is a safe
 choice. The scanner lists a name in a document that go-yaml refuses, and the server reads no
-reference from it. Either way, #689 stays a separate issue.
+reference from it. Either way, ginsys/bronzeward#689 stays a separate issue.
+
+## Outcome
+
+ginsys/bronzeward#657 took the known-gap branch, so the port is not built. The scanner keeps listing
+a name in the documents of this class. `web/src/position.test.ts` pins 16 documents of the class.
+Five are documents that go-yaml refuses and eleven are documents that it accepts. Reopen the port
+after a go-yaml release that fixes the defect, or after an owner decision to port. The CI
+differential check comes first.
