@@ -144,13 +144,24 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // "<step> <action>" writes the file that build reads at every step (recovery-entry-commit lose-reply,
 // draft-commit stall), and POST /interrupt with no point removes it, which ends a stall. The next
 // sign-in removes it too.
+// The seeding step (ginsys/bronzeward#822): POST /disposable?seed, once the deployment answers, runs
+// bin/e2eseed.test (mise run browser-auth builds it from internal/api's TestE2ESeed) against its fresh
+// database. That test writes with the helpers the API tests use (internal/api/e2eseed_test.go): a
+// release, two machines, and one plan in each state a plan page shows (proposed, approved, committed,
+// expired, cancelled, revoked), the committed one with an operation and its first attempt. GET /seeded
+// answers their identifiers as JSON, and 404 when the deployment was not started with ?seed. Both
+// routes belong to this harness process, not to the bronzeward server, which has no route for tests;
+// a plain POST /disposable seeds nothing, and ?keep reuses the earlier seed with the database.
+// The seed is written after the deployment's controller has started, never before: its first pass
+// takes over every operation another process owned, and TestE2ESeedSurvivesARunningController proves
+// that a running controller then leaves the seeded records as they are.
 export interface Chaos {
   fault: (mode: string) => void;
   decryptHold: (ms: number) => void;
   kill: () => Promise<void>;
   interrupt: (line: string) => void;
 }
-function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean, short: boolean) => Promise<string>, kv: (ms: number) => void, chaos: Chaos): Server {
+function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean, short: boolean, seed: boolean) => Promise<string>, seeded: () => string | undefined, kv: (ms: number) => void, chaos: Chaos): Server {
   let go: string | undefined;
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", CONTROL);
@@ -204,8 +215,12 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     if (url.pathname === "/bao/retire" && req.method === "POST") return void injector.retire().then(() => res.end(), (e: unknown) => res.writeHead(500).end(String(e)));
     if (url.pathname === "/release" && req.method === "POST") return void injector.release().then(() => res.end());
     if (url.pathname === "/disposable" && req.method === "POST") {
-      const started = disposable(url.searchParams.get("start") === "recovery", url.searchParams.has("keep"), url.searchParams.get("expiry") === "short");
+      const started = disposable(url.searchParams.get("start") === "recovery", url.searchParams.has("keep"), url.searchParams.get("expiry") === "short", url.searchParams.has("seed"));
       return void started.then((at) => res.end(at), (e: unknown) => res.writeHead(500).end(String(e)));
+    }
+    if (url.pathname === "/seeded" && req.method === "GET") {
+      const doc = seeded();
+      return doc === undefined ? res.writeHead(404).end() : res.writeHead(200, { "Content-Type": "application/json" }).end(doc);
     }
     if (req.method === "POST" && (url.pathname === "/go" || url.pathname === "/faults")) {
       let body = "";
@@ -344,12 +359,25 @@ async function prepare() {
       });
     },
   };
-  const ctl = control(provider, next, injector, async (recovery, keep, short) => {
+  // The identifiers of the records bin/e2eseed.test wrote into the disposable deployment's database.
+  let seeded: string | undefined;
+  const ctl = control(provider, next, injector, async (recovery, keep, short, seed) => {
+    if (seed && keep) throw new Error("a seed is written once, into a fresh database: give ?seed or ?keep, not both");
     if (disposable !== undefined) await stop(disposable.p);
+    if (!keep) seeded = undefined;
     disposable = server("disposable", DISPOSABLE_API.slice(7), fixtureOidc, short ? deploymentWith("45s") : disposableDeployment, recovery ? ["-recovery-start"] : [], keep ? disposable?.db : undefined, true);
     await ready(`${DISPOSABLE_API}/livez`, disposable.p);
+    if (seed) {
+      const out = `${state}/seeded.json`;
+      execFileSync(`${root}bin/e2eseed.test`, ["-test.run", "^TestE2ESeed$", "-test.count=1"], {
+        stdio: "inherit",
+        env: { ...process.env, BW_E2E_SEED_DSN: `postgres://bronzeward@127.0.0.1:${PG_PORT}/${disposable.db}?sslmode=disable`, BW_E2E_SEED_OUT: out },
+      });
+      seeded = readFileSync(out, "utf8");
+      rmSync(out);
+    }
     return DISPOSABLE_API;
-  }, kv, chaos);
+  }, () => seeded, kv, chaos);
   await new Promise<void>((resolve, reject) => {
     ctl.once("error", reject);
     ctl.listen(Number(new URL(CONTROL).port), "127.0.0.1", resolve);
