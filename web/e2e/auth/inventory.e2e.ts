@@ -14,7 +14,7 @@ import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { EMPTY_NOTE, NO_PROVENANCE, PROVENANCE_LIMIT } from "../../src/review.tsx";
 import { WITHHELD } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, holding, mint, param, release, seen, storageEmpty, where } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, holding, mint, mirrored, param, release, seen, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -61,7 +61,8 @@ describe("the machines", () => {
     const at = await disposable();
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
     await expect($('[data-testid="status"]')).toHaveText("No machines recorded yet.");
-    expect(await $('[data-testid="status"]').getAttribute("role")).toBe("status");
+    expect(await $('[data-testid="status"]').getAttribute("role")).toBeNull();
+    expect(await mirrored()).toContain("No machines recorded yet.");
     await expect($("main h2")).toHaveText("Machines");
   });
 

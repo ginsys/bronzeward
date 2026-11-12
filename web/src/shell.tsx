@@ -10,7 +10,7 @@ import { Entered, PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type St
 import { Client, type ClientOptions, EPOCH_CHANGED, type Problem, type ReadResult } from "./request.ts";
 import { view } from "./resources.tsx";
 import { follow, PAGES, usePath } from "./router.ts";
-import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status } from "./states.tsx";
+import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status, StatusPage } from "./states.tsx";
 import { type Ending, EPOCH_CHANGED_ASIDE, type Writes } from "./write.ts";
 import type { components } from "./api/v1";
 
@@ -480,6 +480,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const id = identity.load.kind === "ok" ? identity.load.data : undefined;
   return (
     <ShellContext value={{ roles: id?.roles ?? [], offline: offline !== undefined, kept, mode, recoveryMode }}>
+      <StatusPage>
       <a className="skip" href="#main">Skip to the page</a>
       <header>
         <h1>Bronzeward</h1>
@@ -508,6 +509,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
       </header>
       <ReadsProvider value={{ client, settle: settlePage, undropped: reads.since, view: JSON.stringify([path, query]), again, regained, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main id="main" ref={page} tabIndex={-1}>{holding && (failedRead.kind === "loading" || failedRead.kind === "discarded" || failedRead.kind === "ok" ? <Loading what="the server and your identity under the new epoch" /> : <Failure res={failedRead} sub={sub} />)}{main}</main></ReadsProvider>
       <VersionFooter server={server.kind === "ok" ? server.data : undefined} />
+      </StatusPage>
     </ShellContext>
   );
 }

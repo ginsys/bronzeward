@@ -3,7 +3,7 @@ import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import { Action, connection, Deprecations, deprecated, ending, Failure, heldPage, type Identity, identityMain, incompatible, KEPT_PAGE, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
-import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SCOPE_NO_MODE, SET_ASIDE, SetAside, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
+import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SCOPE_NO_MODE, SET_ASIDE, SetAside, StatusPage, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
 import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
 
@@ -39,7 +39,16 @@ describe("W11 state catalogue: every text a status message", () => {
     const problem = { type: "urn:bronzeward:problem:forbidden", title: "Forbidden", status: 403 };
     expect(html(h(Refused, { problem, status: 403, verb: "saved", testid: "write-result" }))).toContain('<p role="alert" data-testid="write-result">');
     expect(html(h(Refused, { problem: null, status: 502, verb: "read" }))).toContain('<p role="alert" data-testid="status">');
-    expect(html(h(Loading, { what: "machines" }))).toContain('<p role="status" data-testid="status">');
+    expect(html(h(Loading, { what: "machines" }))).toContain('<p data-testid="status">');
+  });
+
+  test("a page has one status region however many status messages it shows, and an alert is no second one (ginsys/bronzeward#830)", () => {
+    const problem = { type: "urn:bronzeward:problem:forbidden", title: "Forbidden", status: 403 };
+    const page = html(h(StatusPage, null, h(Loading, { what: "machines" }), h(Empty, { text: "No machines." }), h(Refused, { problem, status: 403, verb: "saved" })));
+    expect(page.match(/role="status"/g)).toHaveLength(1);
+    expect(page.match(/data-testid="page-status"/g)).toHaveLength(1);
+    expect(page.match(/role="alert"/g)).toHaveLength(1);
+    expect(page.match(/<p data-testid="status">/g)).toHaveLength(2);
   });
 
   test("a write's 403 names what the route accepts, as a read's does (§8.2 403 row)", () => {
@@ -200,7 +209,7 @@ describe("the shell", () => {
 
   test("§7 item 4: the deprecation notices render once each, as status messages", () => {
     const shown = html(h(Deprecations, { routes: ["/api/v1/server", "/api/v1/identity"] }));
-    expect(shown.match(/role="status" data-testid="deprecation"/g)).toHaveLength(2);
+    expect(shown.match(/<p data-testid="deprecation"/g)).toHaveLength(2);
     expect(shown).toContain(deprecated("/api/v1/server"));
   });
 

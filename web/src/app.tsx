@@ -10,7 +10,7 @@ import { navigate, PageState, renewals } from "./page.ts";
 import { type Channel, Renewer } from "./renewer.ts";
 import { TRANSPORT_FAILURE } from "./request.ts";
 import { Deprecations, SignedIn, type SignedInProps, VersionFooter } from "./shell.tsx";
-import { NOT_ACCEPTED, ProblemFields, problemFields } from "./states.tsx";
+import { NOT_ACCEPTED, ProblemFields, problemFields, Status, StatusPage } from "./states.tsx";
 import { SIGN_IN_CHANGED, Writes } from "./write.ts";
 
 // §9.6 texts. The server says only `401`, so the page never names a cause it cannot read.
@@ -233,14 +233,14 @@ export function Screen({ view, notices = [] }: { view: View; notices?: readonly 
     case "blank":
       return null;
     case "loading":
-      return <Page><p role="status" data-testid="status">Loading</p></Page>;
+      return <Page><Status>Loading</Status></Page>;
     case "signing-out":
       // The unload guard can stop the move to the provider: the notices stay until the page goes (B11).
-      return <Page><p role="status" data-testid="status">{SIGNING_OUT}</p><PageNotices /></Page>;
+      return <Page><Status>{SIGNING_OUT}</Status><PageNotices /></Page>;
     case "signed-out":
       return (
         <Page>
-          <p role="status" data-testid="status">{SIGNED_OUT}</p>
+          <Status>{SIGNED_OUT}</Status>
           <p><a href="/">Sign in</a></p>
         </Page>
       );
@@ -269,12 +269,12 @@ export function Screen({ view, notices = [] }: { view: View; notices?: readonly 
 // (client contracts §7 item 5).
 function Page({ children }: { children: ReactNode }) {
   return (
-    <>
+    <StatusPage>
       <main>
         <h1>Bronzeward</h1>
         {children}
       </main>
       <VersionFooter />
-    </>
+    </StatusPage>
   );
 }

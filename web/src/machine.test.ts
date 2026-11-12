@@ -192,7 +192,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
   });
 
   test("#424 item 1: the timeline and the observations each show the shared restart notice after a restart (PAGE-02), and not before", () => {
-    const notice = (testid: string) => `<p role="status" data-testid="${testid}">${RESTARTED.replace(/'/g, "&#x27;")}</p>`;
+    const notice = (testid: string) => `<p data-testid="${testid}">${RESTARTED.replace(/'/g, "&#x27;")}</p>`;
     const rows = (restarted: boolean) => renderToStaticMarkup(createElement(TimelineRows, { tl: { ...UNREAD, read: true, restarted }, older: undefined, busy: false }));
     const observations = (restarted: boolean) => renderToStaticMarkup(createElement(Observations, { read: { items: [], next: undefined, restarted } }));
     expect(rows(true)).toContain(notice("timeline-restarted"));
@@ -327,7 +327,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       km: { view: "v", data: machine({}), restarted: false }, ko: { view: "v", data: undefined, restarted: false },
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
-    expect(out).toMatch(/<\/h2>FAILED<div><p role="status" data-testid="restarted">/);
+    expect(out).toMatch(/<\/h2>FAILED<div><p data-testid="restarted">/);
   });
 
   test("#443: an observations read again that fails shows its failure after the heading, and the observations kept still show", () => {
