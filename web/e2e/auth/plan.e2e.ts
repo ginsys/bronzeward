@@ -133,7 +133,8 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     expect(await writes()).toEqual([]);
     await $('main form[aria-label="Cancel plan"] input[name="reason"]').setValue("seeded reason");
     await $("main").$("button=Cancel plan").click();
-    await expect($('[data-testid="write-result"]')).toHaveText("Cancellation recorded.", { wait: 60_000 });
+    // The page reads the plan again and shows it cancelled, which removes the write's own result.
+    await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: cancelled$/), { wait: 60_000 });
     expect(await writes()).toEqual([`POST ${route}`]);
     expect((await api(sat, "h-viewer", "GET", `/plans/${seed.plans.approved}`)).body!["state"]).toBe("cancelled");
   });

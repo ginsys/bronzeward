@@ -23,9 +23,11 @@ cases recorded in its file. `recovery-scope-cases.yaml` holds AMB-05, AMB-07 and
 A web case that needs a real release or plan asks for a seeded deployment with
 `POST /disposable?seed` on the browser harness's control server, and reads the identifiers from
 `GET /seeded`. `mise run browser-auth` compiles `TestE2ESeed` of `internal/api` for this. The test
-writes, with the helpers the API tests use, one release, two machines, and one plan in each state
-a plan page shows (proposed, approved, committed, expired, cancelled, revoked). The committed plan
-has an operation with its first attempt. Both routes belong to the harness process, and the server
+writes, with the helpers the API tests use, the target release and one plan in each state a plan
+page shows (proposed, approved, committed, expired, cancelled, revoked), and `GET /seeded` names
+them with the committed plan's machine and the other plans' machine. The committed plan has an
+operation with its first attempt. The helpers also write supporting records that `GET /seeded`
+does not name, such as the release the plans are applied from. Both routes belong to the harness process, and the server
 has none for tests. The seed is written after the deployment's controller has started, an order
 that `TestE2ESeedSurvivesARunningController` proves leaves the records as they are; the harness
 header in `web/e2e/auth.conf.ts` has the details.

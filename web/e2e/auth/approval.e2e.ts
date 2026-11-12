@@ -4,8 +4,8 @@
 // injector (one POST, its route, its answer): they need a read that fails, a drift record or a plan
 // that stays proposed after its approval, none of which a seeded record is. The cases of the seeded
 // describe read the records a seeded deployment holds (ginsys/bronzeward#822, made by the API tests'
-// own helpers) and send to the real routes: the forced submit of a viewer, the faulted approvals
-// (AMB-05, AMB-07, AMB-12, REC-03's scope variant) and a revoked plan. REC-03's first case is real: the
+// own helpers) and send to the real routes: the forced submit of a viewer, a revocation, the faulted
+// approvals (AMB-05, AMB-07, AMB-12, REC-03's scope variant) and a revoked plan. REC-03's first case is real: the
 // deployment restarts for recovery on the same database, its entry is made outside the page, and the
 // plan creation page, still open, sends its write. The refusal carries the entry's epoch, whose
 // re-read remounts the page (client contracts section 8.5 item 1); the refusal must still be shown.
@@ -26,7 +26,6 @@ const DRAFT = `drf_${"d".repeat(26)}`;
 const APR = `apr_${"a".repeat(26)}`;
 const T0 = "2026-11-12T08:00:00Z";
 const approvals = `/plans/${PLAN}/approvals`;
-const revocations = `/approvals/${APR}/revocations`;
 
 describe("approval and revocation (#358)", () => {
   let at = "";
@@ -48,7 +47,6 @@ describe("approval and revocation (#358)", () => {
   const release = { id: REL, cluster: `cls_${"c".repeat(26)}`, draft: DRAFT, draftRevision: 1, operation: "adopt", publishedBy: { principal: "prn_synthetic_publisher", role: "publisher" }, publishedAt: T0, renderer: {}, sources: [], machines: [] };
   const draft = { id: DRAFT, cluster: `cls_${"c".repeat(26)}`, title: "synthetic", state: "published", revision: 3, entries: [] };
   const approval = (reasons: string[] = [], more: Record<string, unknown> = {}) => ({ id: APR, plan: PLAN, approver: { principal: "prn_synthetic_approver", role: "approver" }, epoch: "ep_synthetic", selfApproval: { marked: reasons.length > 0, reasons }, unseenOverwrite: false, ...more });
-  const revocation = { approval: APR, plan: PLAN, machine, revokedBy: "prn_synthetic_approver", role: "approver", reason: "synthetic reason", act: `act_${"v".repeat(26)}`, epoch: "ep_synthetic", at: T0 };
 
   // The identity the server answers `human`, with a principal: a human with no row yet has none, and the
   // prediction then claims nothing. The roles and the epoch stay the server's own.
@@ -106,22 +104,6 @@ describe("approval and revocation (#358)", () => {
     this.timeout(60_000);
     await open("h-all", { [`/plans/${PLAN}`]: plan("proposed", { operation: "apply-config", mode: "auto", driftRecord: 4, transportDeadlineSeconds: 60, verificationDeadlineSeconds: 120, maxAttempts: 3 }) });
     await expect($('[data-testid="unseen-overwrite"]')).toHaveText(expect.stringContaining("Overwrites the drifted configuration of drift record 4, which no reviewer has seen."), { wait: 20_000 });
-  });
-
-  it("an approved plan: a reason is required; [Revoke approval] sends one revocation and states the limit on the control", async function () {
-    this.timeout(120_000);
-    // The identity's epoch equals the approval's, so the approval is current and the page offers no new one.
-    const bodies = { [`/plans/${PLAN}`]: plan("approved", { approval: APR }), [`/approvals/${APR}`]: approval(), [revocations]: revocation, "/identity": { ...(await identity("h-all")), epoch: "ep_synthetic" } };
-    await open("h-all", bodies, "approved");
-    await expect($('[data-testid="revoke-limit"]')).toHaveText(REVOKE_LIMIT);
-    await expect($('main form[aria-label="Approve plan"]')).not.toBeExisting();
-    await $("main").$("button=Revoke approval").click();
-    await expect($('[data-testid="revoke-input"]')).toHaveText("Give a reason.");
-    expect(await posts()).toEqual([]);
-    await $('main form[aria-label="Revoke approval"] input[name="reason"]').setValue("synthetic reason");
-    await $("main").$("button=Revoke approval").click();
-    await expect($("main")).toHaveText(expect.stringContaining(`recorded by ${short("prn_synthetic_approver")}`), { wait: 20_000 });
-    expect(await posts()).toEqual([`POST ${revocations}`]);
   });
 
   it("REC-03, first case: plan creation on a recovery start after its entry is refused without a scope and read as a recovery start", async function () {
@@ -189,6 +171,24 @@ describe("approval and revocation (#358)", () => {
       await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Not saved: /), { wait: 20_000 });
       expect(await posts()).toEqual([`POST ${route}`]);
       expect((await answers()).filter((a) => a.startsWith(`${route} `))).toEqual([`${route} 403`]);
+    });
+
+    it("an approved plan: a reason is required; [Revoke approval] sends one revocation, states the limit on the control, and the server revokes the plan", async function () {
+      this.timeout(120_000);
+      await open("h-all", undefined, "approved", {}, seed.plans.approved);
+      await expect($('[data-testid="revoke-limit"]')).toHaveText(REVOKE_LIMIT);
+      // The approval is of the current epoch, so the page offers no new one.
+      await expect($('main form[aria-label="Approve plan"]')).not.toBeExisting();
+      await $("main").$("button=Revoke approval").click();
+      await expect($('[data-testid="revoke-input"]')).toHaveText("Give a reason.");
+      expect(await posts()).toEqual([]);
+      await $('main form[aria-label="Revoke approval"] input[name="reason"]').setValue("seeded reason");
+      await $("main").$("button=Revoke approval").click();
+      // The page reads the plan again and shows it revoked, with the reason on the machine's timeline.
+      await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: revoked$/), { wait: 20_000 });
+      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by \S+: seeded reason$/), { wait: 20_000 });
+      expect(await posts()).toEqual([expect.stringMatching(/^POST \/approvals\/apr_\w+\/revocations$/)]);
+      expect((await api(at, "h-viewer", "GET", `/plans/${seed.plans.approved}`)).body!["state"]).toBe("revoked");
     });
 
     it("a revoked plan shows the reason its revocation recorded on the machine's timeline", async function () {

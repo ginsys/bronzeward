@@ -146,15 +146,20 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // sign-in removes it too.
 // The seeding step (ginsys/bronzeward#822): POST /disposable?seed, once the deployment answers, runs
 // bin/e2eseed.test (mise run browser-auth builds it from internal/api's TestE2ESeed) against its fresh
-// database. That test writes with the helpers the API tests use (internal/api/e2eseed_test.go): a
-// release, two machines, and one plan in each state a plan page shows (proposed, approved, committed,
-// expired, cancelled, revoked), the committed one with an operation and its first attempt. GET /seeded
-// answers their identifiers as JSON, and 404 when the deployment was not started with ?seed. Both
+// database. That test writes with the helpers the API tests use (internal/api/e2eseed_test.go): the
+// target release and one plan in each state a plan page shows (proposed, approved, committed,
+// expired, cancelled, revoked), the committed one with an operation and its first attempt. The
+// helpers also write supporting records (another release, a third machine) that /seeded does not
+// name. GET /seeded answers the identifiers as JSON (the release, the committed plan's machine and
+// the other plans' machine), and 404 when the deployment was not started with ?seed. Both
 // routes belong to this harness process, not to the bronzeward server, which has no route for tests;
 // a plain POST /disposable seeds nothing, and ?keep reuses the earlier seed with the database.
 // The seed is written after the deployment's controller has started, never before: its first pass
 // takes over every operation another process owned, and TestE2ESeedSurvivesARunningController proves
-// that a running controller then leaves the seeded records as they are.
+// that a running controller then leaves the seeded records as they are. The first pass starts with
+// the process, before it listens, and reads at once; /livez answers after that, so the seed is
+// written after the pass's first read unless that read fails and is repeated, in which case the
+// seed's own writes to the same database fail too.
 export interface Chaos {
   fault: (mode: string) => void;
   decryptHold: (ms: number) => void;
