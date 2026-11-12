@@ -1135,10 +1135,10 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references(text)).toEqual(["x/foo"]);
   });
 
-  // ginsys/bronzeward#654 leaves a flow key of only `?` items unrefused. go-yaml refuses some of these
-  // documents ("did not find expected key") and accepts others by token timing. The scanner lists them
-  // all, as it did before. The rule moved to ginsys/bronzeward#657. Each document here is one go-yaml
-  // accepts, and a refusal rule for this key must not blank it.
+  // A flow key of only `?` items. go-yaml refuses some of these documents ("did not find expected
+  // key") and accepts others by token timing. The scanner lists them all. ginsys/bronzeward#657 kept
+  // that as a known gap, see the five rows below. Each document here is one go-yaml accepts, and a
+  // refusal rule for this key must not blank it.
   test.each([
     ["a sibling key after an explicit entry", "? a\n: b\n[? c]: !bwref x/foo\n"],
     ["a sibling key after a blank line", "? a\n: b\n\n[? c]: !bwref x/foo\n"],
@@ -1155,15 +1155,23 @@ describe("a tag is resolved the way go-yaml does", () => {
     expect(references(text)).toEqual(["x/foo"]);
   });
 
-  // The two shapes of the issue that stay unrefused. go-yaml refuses both, and the scanner lists them
-  // as it did before ginsys/bronzeward#657 settles the rule.
+  // Known gap (ginsys/bronzeward#657). go-yaml v3.0.5 refuses these five documents and the scanner
+  // lists the name anyway. The cause is a go-yaml defect: when a flow collection whose entries all
+  // start with `?` or `:` closes, `yaml_parser_decrease_flow_level` (scannerc.go, line 983) deletes
+  // the lookahead registration of the outer key. `yaml_parser_fetch_more_tokens` (scannerc.go, lines
+  // 664-675) can then read `[` before it reads `:`. The server reads no reference from a refused
+  // document, so the editor lists a name that nothing stores. A port needs about 490 lines of go-yaml
+  // scanner state and ties the rule to this go-yaml version, so it was not taken. The model and its
+  // measurements are in docs/design/research/20261107-flow-key-lookahead-model.md
+  // (ginsys/bronzeward#688). Do not read these rows as the wanted result. If a row changes, the
+  // known gap has moved.
   test.each([
     ["a flow sequence key", "a:\n  [? b]: !bwref x/foo\n"],
     ["a flow mapping key", "a:\n  {? b}: !bwref x/foo\n"],
     ["a sibling key after an implicit entry", "a: b\n[? c]: !bwref x/foo\n"],
     ["a sibling key after two entries", "? a\n: b\nd: e\n[? c]: !bwref x/foo\n"],
     ["a key after a sequence entry", "- ? a\n  : b\n- [? c]: !bwref x/foo\n"],
-  ])("a flow key of only ? items that go-yaml refuses is not refused yet: %s", (_, text) => {
+  ])("a flow key of only ? items that go-yaml refuses is a known gap: %s", (_, text) => {
     expect(references(text)).toEqual(["x/foo"]);
   });
 
