@@ -5,9 +5,23 @@ package api
 import (
 	"bytes"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
+
+// The default build's own build information lists no fixtureinterrupt tag. This reads the tag list
+// the toolchain records, where the scan below reads strings. The tagged build's counterpart,
+// TestInterruptBuildListsItsTag, is the positive control: it shows the same read does find the tag.
+func TestDefaultBuildListsNoInterruptTag(t *testing.T) {
+	tags, haveSettings := buildTags(t)
+	if !haveSettings {
+		t.Fatal("the build information holds no settings, so its tag list reads nothing")
+	}
+	if slices.Contains(tags, "fixtureinterrupt") {
+		t.Errorf("the default build lists the fixtureinterrupt tag: %v", tags)
+	}
+}
 
 // The default build carries no fault hook: its test binary, which links this package and
 // internal/seam, holds none of the strings the interrupt build prints or reads. The needles are
