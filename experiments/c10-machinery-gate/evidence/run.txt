@@ -1,6 +1,6 @@
-commit	07fa6c1ceb8dc164872e4f2e533093a4e6796ce6
+commit	29ef40222ce2672003c1eadf8ca23fcb5d7583e3
 uncommitted-inputs	0
-talosctl	Client: Talos v1.13.6
-talosctl-sha256	540c5e7cb0d3fa3a9b2e1c717ced212727b73bcaf0cf9cf9ba2472ec381041d4
-machinery	v1.13.6
+talosctl	Client: Talos v1.14.5
+talosctl-sha256	ff432b68986709e6b69c563a08a2ced4232d5196b0dccd6d2e783e9d714d7d7d
+machinery	v1.14.5
 go	go version go1.27.1 linux/amd64

@@ -17,6 +17,13 @@ Resolution is early (per fragment, before composition), as issue 3 found; `talos
 patch` (strategic merge, the pinned version from [`fixtures/versions.env`](../../fixtures/versions.env))
 is the only thing that composes. Nothing here merges.
 
+## Cases moved for Talos v1.14
+
+The `whole-content` and `duplicate-literal` cases, and the issue-3 cases they reuse, now use the
+v1.14 documents (`EtcFileConfig` and `KubeNodeConfig`) because v1.14 deprecates the v1alpha1 fields
+they used. This experiment's own recorded results are from the earlier v1.13.6 run and are not
+re-measured here. The C10 gate re-measured the moved cases on v1.14.5 (see its README).
+
 ## What is here
 
 - `cases/<name>/case.yaml` — one case each: either `from: <issue-3 case>` or its own fragments, and
