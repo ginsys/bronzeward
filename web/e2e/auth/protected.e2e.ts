@@ -187,7 +187,11 @@ const pageShows = (text: string) =>
 // run of this step stays unknown. With no takeover before it, the page has no "not applied" text at all.
 async function unknownOutcome(what: string, takeover?: number) {
   await expect(ended()).toHaveText(holds("the outcome is unknown"), { wait: 90_000 });
-  const notApplied = await browser.execute(() => (document.body.innerText.match(/not applied/g) ?? []).length);
+  // The page's hidden status region mirrors each status message, so its copy is not counted (ginsys/bronzeward#830).
+  const notApplied = await browser.execute(() => {
+    const count = (text: string) => (text.match(/not applied/g) ?? []).length;
+    return count(document.body.innerText) - count(document.querySelector('[data-testid="page-status"]')?.textContent ?? "");
+  });
   if (takeover === undefined) {
     expect(notApplied).toBe(0);
   } else {
