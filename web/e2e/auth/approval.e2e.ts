@@ -12,7 +12,7 @@ import { REVOKE_LIMIT, UNPREDICTED } from "../../src/approval.tsx";
 import { short } from "../../src/list.tsx";
 import { RECOVERY_START } from "../../src/recovery.tsx";
 import { SCOPE_NO_MODE, SET_ASIDE } from "../../src/states.tsx";
-import { FIXTURE_PAGE } from "../auth.conf.ts";
+import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, type Step } from "../injector.ts";
 import { answers, disposable, faults, fixtureSignIn, mint, storageEmpty, syntheticMachine, writes } from "./helpers.ts";
 
@@ -144,8 +144,11 @@ describe("approval and revocation (#358)", () => {
     await approving(["drop", "epoch"]);
     await expect($('[data-testid="write-notice"]')).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 30_000 });
     expect((await answers()).filter((a) => a.startsWith(`${approvals} `))).toEqual([`${approvals} 412`]);
-    const sent = (await writes()).filter((w) => w === `POST ${approvals}`);
+    // The raw sends, each "<method> <route> <key> <epoch>": the repeat carries the first attempt's key and epoch.
+    const sent = ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).filter((w) => w.startsWith(`POST ${approvals} `));
     expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatch(/^POST \S+ [A-Za-z0-9_-]{22} \S+$/);
+    expect(sent[1]).toBe(sent[0]);
   });
 
   it("REC-03 (scope): an approval refused 409 recovery-mode-active with a scope names that scope and says nothing about the start mode; sent once", async function () {

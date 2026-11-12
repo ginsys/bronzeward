@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { afterApproval, overwrites, predict, recordedReasons, REVOKE_LIMIT, type Source, UNPREDICTED } from "./approval.tsx";
-import type { Load } from "./list.tsx";
+import { afterApproval, findRevocation, overwrites, predict, recordedReasons, REVOKE_LIMIT, type Source, UNPREDICTED } from "./approval.tsx";
+import type { Load, Reads } from "./list.tsx";
+import type { ReadResult } from "./request.ts";
 
 type P = Parameters<typeof predict>;
 const REL = `rel_${"i".repeat(26)}`;
@@ -71,5 +72,32 @@ describe("the approval's other lines", () => {
 
   test("the revoke limit is B22's sentence", () => {
     expect(REVOKE_LIMIT).toBe("Revoking after the controller commits does not stop an attempt already recorded.");
+  });
+});
+
+describe("the revocation's reason on the machine's timeline (ginsys/bronzeward#358, B22)", () => {
+  const entry = (approval: string, reason: string) => ({ kind: "approval-revocation", entry: { approval, reason, principal: "prn_x" } });
+  const other = { kind: "observation", entry: {} };
+  // Serves the pages by cursor and records each path read.
+  const timeline = (pages: Record<string, { items: unknown[]; next?: string }>) => {
+    const paths: string[] = [];
+    const reads: Pick<Reads, "client" | "settle" | "undropped"> = {
+      client: { read: <T,>(path: string) => (paths.push(path), Promise.resolve({ kind: "ok", data: pages[new URL(path, "http://x").searchParams.get("cursor") ?? ""] } as ReadResult<T>)) },
+      settle: (res, set) => (set(res as never), false),
+      undropped: () => () => true,
+    };
+    return { reads, paths };
+  };
+
+  test("a match on the second page is found, and the reading stops there", async () => {
+    const { reads, paths } = timeline({ "": { items: [other, entry("apr_other", "no")], next: "c2" }, c2: { items: [entry("apr_1", "second page"), other], next: "c3" }, c3: { items: [] } });
+    expect(await findRevocation(reads, "mch_1", "apr_1", () => true)).toEqual({ kind: "ok", data: { approval: "apr_1", reason: "second page", principal: "prn_x" } });
+    expect(paths).toEqual(["/machines/mch_1/timeline?order=newest", "/machines/mch_1/timeline?order=newest&cursor=c2"]);
+  });
+
+  test("a timeline without the entry is read to its end and answers no entry", async () => {
+    const { reads, paths } = timeline({ "": { items: [other], next: "c2" }, c2: { items: [entry("apr_other", "no")] } });
+    expect(await findRevocation(reads, "mch_1", "apr_1", () => true)).toEqual({ kind: "ok", data: undefined });
+    expect(paths).toHaveLength(2);
   });
 });
