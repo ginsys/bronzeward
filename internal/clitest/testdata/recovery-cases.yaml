@@ -41,6 +41,6 @@
     still gated, so the confirming read is refused 409 recovery-mode-active
   expect:
     client: repeats with the same key and no epoch check; shows the replayed result as its own; keeps the minted epoch and a recovery start; does not set the entry aside
-    server: answers the confirming read 200 with the new epoch and the repeat 201 with Idempotent-Replayed true; one act
+    server: 'answers the confirming read 200 with the new epoch in (a) and 409 recovery-mode-active in (b), still gated; the repeat 201 with Idempotent-Replayed true in both; one act'
     shown: '"repeat 1 of 3 with the same key", "already done earlier; showing that result", "Recovery mode entered (act act_...). Epoch ep_..., was ep_..."; exit 0'
     absent: [token in stdout, stderr, argv, state directory]
