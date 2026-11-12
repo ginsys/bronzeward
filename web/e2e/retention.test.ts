@@ -12,9 +12,66 @@ import { expect, test } from "vitest";
 
 // WebdriverIO commands, the WebDriver and BiDi print and capture commands, and the Puppeteer calls that
 // getPuppeteer reaches (screenshot, pdf, createPDFStream, screencast, tracing.start).
-const ARTIFACT_CALL = /\b(saveScreenshot|saveElementScreenshot|takeScreenshot|takeElementScreenshot|saveRecordingScreen|startRecordingScreen|stopRecordingScreen|startTracing|stopTracing|startHar|saveHar|savePDF|printPage|browsingContextCaptureScreenshot|browsingContextPrint|screenshot|screencast|pdf|createPDFStream|tracing\s*\.\s*start)\s*\(/g;
+const ARTIFACT_NAMES = new Set([
+  "saveScreenshot",
+  "saveElementScreenshot",
+  "takeScreenshot",
+  "takeElementScreenshot",
+  "saveRecordingScreen",
+  "startRecordingScreen",
+  "stopRecordingScreen",
+  "startTracing",
+  "stopTracing",
+  "startHar",
+  "saveHar",
+  "savePDF",
+  "printPage",
+  "browsingContextCaptureScreenshot",
+  "browsingContextPrint",
+  "screenshot",
+  "screencast",
+  "pdf",
+  "createPDFStream",
+]);
 
-export const artifactCalls = (source: string): string[] => [...source.matchAll(ARTIFACT_CALL)].map((m) => m[1]!.replace(/\s+/g, ""));
+const unwrap = (node: ts.Expression): ts.Expression => {
+  while (ts.isParenthesizedExpression(node) || ts.isNonNullExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)) {
+    node = node.expression;
+  }
+  return node;
+};
+
+// The name a callee ends in: an identifier, a property (a.b, a?.b) or a literal element (a["b"], a?.["b"]).
+const calleeName = (callee: ts.Expression): string | undefined => {
+  if (ts.isIdentifier(callee)) return callee.text;
+  if (ts.isPropertyAccessExpression(callee)) return callee.name.text;
+  if (ts.isElementAccessExpression(callee)) {
+    const key = unwrap(callee.argumentExpression);
+    if (ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key)) return key.text;
+  }
+  return undefined;
+};
+
+// The capture calls of a source, in source order, read from the TypeScript parse tree in the language mode
+// of the file name. A call counts in every syntax that makes it: a.b(), a?.b(), a.b?.(), a["b"](), a?.["b"]()
+// and a callee inside parentheses, a non-null assertion or a type assertion. A comment or a string makes no call.
+export const artifactCalls = (source: string, fileName = "source.ts"): string[] => {
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const callee = unwrap(node.expression);
+      const name = calleeName(callee);
+      if (name === "start" && (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) && calleeName(unwrap(callee.expression)) === "tracing") {
+        found.push("tracing.start");
+      } else if (name !== undefined && ARTIFACT_NAMES.has(name)) {
+        found.push(name);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true));
+  return found;
+};
 
 // A relative specifier of a static import, an import equals, a re-export (named or namespace), a side-effect
 // import, a dynamic import, a literal require or an import type, read from the TypeScript parse tree in the
@@ -80,6 +137,31 @@ test("the positive control: the read flags the WebDriver print, the BiDi capture
     "screencast",
     "tracing.start",
   ]);
+});
+
+test("the positive control: the read flags an optional call, a bracket call and a wrapped callee", () => {
+  const sample = `await browser.saveScreenshot?.("a.png"); await p.tracing?.start(); await browser["saveScreenshot"]("b.png");
+    await browser?.["savePDF"]?.("c.pdf"); await p["tracing"]["start"](); await (browser.takeScreenshot)(); await browser.startHar!();
+    await browser[\`saveHar\`]("d.har"); await (page as Page).screenshot?.(); await page?.pdf();`;
+  expect(artifactCalls(sample)).toEqual([
+    "saveScreenshot",
+    "tracing.start",
+    "saveScreenshot",
+    "savePDF",
+    "tracing.start",
+    "takeScreenshot",
+    "startHar",
+    "saveHar",
+    "screenshot",
+    "pdf",
+  ]);
+});
+
+test("the negative control: a capture name in a comment, a string, a variable or a plain call makes no call", () => {
+  const sample = `// await browser.saveScreenshot("a.png");
+    const text = "browser.savePDF()"; const key = browser["saveScreenshot"]; const f = page.pdf;
+    await browser.url("x"); await tracing.stop(); const o = { screenshot: 1 };`;
+  expect(artifactCalls(sample)).toEqual([]);
 });
 
 test("the positive control: the read finds the local imports of a source and skips a package import", () => {
@@ -155,6 +237,6 @@ test("the protected import spec, the files it imports and the auth configuration
     // The control for this file: the read returned every byte of it, so a call near the end cannot hide.
     expect(Buffer.byteLength(source), file).toBe(statSync(file).size);
     expect(source.trim().length, file).toBeGreaterThan(0);
-    expect(artifactCalls(source), file).toEqual([]);
+    expect(artifactCalls(source, file), file).toEqual([]);
   }
 });
