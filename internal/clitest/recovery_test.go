@@ -279,7 +279,14 @@ func TestRecoveryLostReply(t *testing.T) {
 		}
 		return e
 	}
-	before, previous := f.actCount(), epoch()
+	// The acts are counted in the database: the gated server refuses every read but the entry.
+	acts := func() (n int) {
+		if err := f.db.QueryRow(`SELECT count(*) FROM act`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before, previous := acts(), epoch()
 	in.set(nil, nil)
 	r := ctl("enter\n", enter...)
 	minted := epoch()
@@ -288,8 +295,8 @@ func TestRecoveryLostReply(t *testing.T) {
 	if want := []string{"GET /api/v1/server", "POST /api/v1/recovery/entries", "GET /api/v1/recovery", "POST /api/v1/recovery/entries", "GET /api/v1/server"}; !slices.Equal(in.requests(), want) {
 		t.Errorf("REC-04 (b): the injector saw %v, want %v", in.requests(), want)
 	}
-	if minted == previous || f.actCount() != before+1 {
-		t.Errorf("REC-04 (b): epoch %s, was %s; %d acts recorded, want 1", minted, previous, f.actCount()-before)
+	if after := acts(); minted == previous || after != before+1 {
+		t.Errorf("REC-04 (b): epoch %s, was %s; %d acts recorded, want 1", minted, previous, after-before)
 	}
 	f.srv.stop() // the log is read only after the process ended
 	if n := strings.Count(f.srv.log.String(), "fixture interrupt: lose-reply at recovery-entry-commit"); n != 1 {
