@@ -43,7 +43,7 @@ type refusal struct {
 	code   string
 	detail string
 	extra  map[string]any
-	cause  string // a failed node read's cause, for its terminal event only; never in the document
+	cause  string // a failed node read's cause, for its terminal event; the document names it only through extra, and only the identity field names of machine-identity-mismatch
 }
 
 func refuse(status int, code, detail string) *refusal {

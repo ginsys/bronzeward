@@ -148,6 +148,12 @@ func (a *API) mismatch(j job, cause string, err error) *refusal {
 	r := refuse(http.StatusConflict, "machine-identity-mismatch",
 		"the node read is not the recorded machine; the claim is abandoned and nothing read is kept").with("machine", j.claim.Machine)
 	r.cause = cause
+	// The problem names the cause only when it is one of the three identity field names, a closed set that
+	// carries no node value. Any other cause (identity-read) and any provider text stay out of the document.
+	switch cause {
+	case "smbios-uuid", "node-id", "cluster-id":
+		r.with("cause", cause)
+	}
 	return r
 }
 
