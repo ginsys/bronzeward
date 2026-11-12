@@ -8,7 +8,7 @@ import { deprecated, incompatible } from "../../src/shell.tsx";
 import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_API, FIXTURE_PAGE } from "../auth.conf.ts";
 import type { Faults } from "../injector.ts";
-import { answered, faults, fixtureSignIn, mint, release, seen, settled, storageEmpty, where } from "./helpers.ts";
+import { answered, faults, fixtureSignIn, mint, mirrored, release, seen, settled, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 const testid = (id: string) => $(`[data-testid="${id}"]`);
@@ -28,10 +28,11 @@ async function load(f: Faults) {
   await browser.url(`${FIXTURE_PAGE}/`);
 }
 
-// Shown as a status message, which assistive technology announces without moving focus. Looked up
-// again on each try: one state's message replaces the one before it. A failure the shell keeps
-// above a page shows beside the page's own statuses, so any element with the id may carry it. A
-// server refusal is announced as an alert instead (ginsys/bronzeward#815).
+// Shown as a status message, which assistive technology announces without moving focus: the message
+// carries no role of its own, and the page's one status region holds its text. Looked up again on
+// each try: one state's message replaces the one before it. A failure the shell keeps above a page
+// shows beside the page's own statuses, so any element with the id may carry it. A server refusal
+// is announced as an alert on its own element instead (ginsys/bronzeward#815).
 async function announced(id: string, text: string | RegExp, role: "status" | "alert" = "status") {
   const match = (t: string) => (typeof text === "string" ? t === text : text.test(t));
   const shown = async () => {
@@ -41,7 +42,12 @@ async function announced(id: string, text: string | RegExp, role: "status" | "al
     return undefined;
   };
   await browser.waitUntil(async () => (await shown()) !== undefined, { timeout: 20_000, timeoutMsg: `${id} did not show ${String(text)}` });
-  expect(await (await shown())?.getAttribute("role")).toBe(role);
+  if (role === "alert") {
+    expect(await (await shown())?.getAttribute("role")).toBe("alert");
+    return;
+  }
+  expect(await (await shown())?.getAttribute("role")).toBeNull();
+  await browser.waitUntil(async () => (await mirrored()).some(match), { timeout: 10_000, timeoutMsg: `the status region did not mirror ${String(text)}` });
 }
 
 describe("the shell", () => {
@@ -144,7 +150,8 @@ describe("the state catalogue", () => {
 
   it("disconnected: no answer the page can read, the server's version unknown", async () => {
     expect(await fixtureSignIn("h-viewer", {}, { redirect: "/server" })).toBe(TRANSPORT_FAILURE);
-    expect(await testid("status").getAttribute("role")).toBe("status");
+    expect(await testid("status").getAttribute("role")).toBeNull();
+    expect(await mirrored()).toContain(TRANSPORT_FAILURE);
     expect(await testid("server").getText()).toBe("Server unknown");
   });
 
@@ -174,6 +181,19 @@ describe("the state catalogue", () => {
     // Changes shows the drafts list's own status too, before the releases list's.
     await browser.waitUntil(async () => (await $$('main [data-testid="status"]').map((e) => e.getText())).includes("No releases published yet."),
       { timeout: 10_000, timeoutMsg: "Changes did not show its empty releases list" });
+  });
+
+  // ginsys/bronzeward#830 (design B25, B37): one role="status" region per page, whatever the number of
+  // messages. Changes shows the drafts list's status and the releases list's.
+  it("a page that shows two status messages has one status region, which holds both", async () => {
+    await fixtureSignIn("h-viewer");
+    await nav("Changes").click();
+    await expect($("main h2")).toHaveText("Changes");
+    await browser.waitUntil(async () => (await $$('main [data-testid="status"]')).length >= 2, { timeout: 10_000, timeoutMsg: "Changes did not show two status messages" });
+    expect((await $$('[role="status"]')).length).toBe(1);
+    await browser.waitUntil(async () => (await mirrored()).length >= 2, { timeout: 10_000, timeoutMsg: "the status region did not mirror both messages" });
+    expect(await mirrored()).toContain("No releases published yet.");
+    for (const el of await $$('main [data-testid="status"]')) expect(await el.getAttribute("role")).toBeNull();
   });
 
   it("offline: a refusal the server answers ends the banner too, and is shown", async () => {
@@ -283,7 +303,7 @@ describe("recovery", () => {
     // The entry form (#364) has a heading, so the page settles on its footer.
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toBe("Server unknown");
     await announced("status", PRE_ENTRY);
-    expect(await testid("status").getAttribute("role")).toBe("status");
+    expect(await testid("status").getAttribute("role")).toBeNull();
     // §8.2: the refusal's own title, detail and request ID stay shown under the restriction.
     expect(await testid("problem").getText()).toMatch(/^Not read: .+\. Request \S+\.$/);
     expect(await testid("principal").isExisting()).toBe(false);

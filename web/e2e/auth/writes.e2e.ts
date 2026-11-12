@@ -242,7 +242,7 @@ describe("the write views (#338)", () => {
     // A server refusal is announced as an alert, and no status message carries its text
     // (ginsys/bronzeward#815).
     expect(await result().getAttribute("role")).toBe("alert");
-    for (const el of await $$('main [role="status"]')) expect(await el.getText()).not.toContain("Not saved");
+    for (const el of await $$('[role="status"]')) expect(await el.getText()).not.toContain("Not saved");
     // The scope's refusal showed the page no recovery start: no banner, no start-mode text.
     expect(await $('[data-testid="recovery"]').isExisting()).toBe(false);
     const body = await $("body").getText();

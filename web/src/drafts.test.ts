@@ -1281,7 +1281,8 @@ test("ginsys/bronzeward#517 H15: a Discard's 412 says the draft changed and offe
 test("ginsys/bronzeward#815: the conflict view is an alert for a refused write and a status for the editor's own conflict", () => {
   const view = (role?: "alert") => renderToStaticMarkup(h(Conflict, { what: "draft", revision: 3, onShow: () => {}, ...(role !== undefined ? { role } : {}) }));
   expect(view("alert")).toContain('<p role="alert"');
-  expect(view()).toContain('<p role="status"');
+  expect(view()).toContain('<p data-testid="status"');
+  expect(view()).not.toContain('role=');
   // The editors give WriteResult the alert form and show the status form on their own.
   for (const file of ["drafts.tsx", "composition.tsx"]) {
     const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");

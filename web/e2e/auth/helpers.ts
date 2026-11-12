@@ -14,6 +14,9 @@ const root = fileURLToPath(new URL("../../..", import.meta.url));
 export const where = () => browser.execute(() => location.origin + location.pathname);
 export const param = (name: string) => browser.execute((n: string) => new URLSearchParams(location.search).get(n), name);
 export const status = () => $('[data-testid="status"]').getText();
+// The text of every message the page's one role="status" region holds: each status message is
+// mirrored into it and carries no role of its own (ginsys/bronzeward#830).
+export const mirrored = () => browser.execute(() => [...document.querySelectorAll('[role="status"] > p')].map((p) => p.textContent ?? ""));
 
 // Waits until the page is back on `page`/ with its reads settled: the footer's server versions once
 // the shell shows a page, which may hold a state of its own (an empty list), else the state text.

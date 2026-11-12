@@ -2,7 +2,7 @@
 // without moving focus, except a server refusal, which is an alert. The write states (unknown, set aside, replayed, conflict) are exercised from
 // the first write view (#257) on.
 
-import type { ReactNode } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import { type Problem, type ReadResult, TRANSPORT_FAILURE, WRITE_TRANSPORT_FAILURE } from "./request.ts";
 
 export const WITHHELD = "Configuration not shown: it could not be redacted.";
@@ -24,11 +24,45 @@ export const clock = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit
 // A recorded instant in a list or record, 26 Oct 2026, 10:12; none when absent.
 export const when = (at: string | null | undefined) => (at == null ? "none" : new Date(at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }));
 
-// `role` is "alert" for a server refusal, which a screen reader then announces at once.
+// A page has one role="status" region, for progress and outcomes (design B25, B37). It is hidden
+// from sight and mirrors the text of every status message the page shows, so a screen reader hears
+// each message once through it. A reader going through the page in order meets the text twice: the
+// accepted cost of a mirrored live region.
+const Mirror = createContext<((id: string, text: string | undefined) => void) | undefined>(undefined);
+
+export function StatusPage({ children }: { children: ReactNode }) {
+  const [lines, setLines] = useState<Readonly<Record<string, string>>>({});
+  const set = useCallback((id: string, text: string | undefined) => {
+    setLines((was) => {
+      if (was[id] === text || (text === undefined && !(id in was))) return was;
+      const { [id]: _gone, ...rest } = was;
+      return text === undefined ? rest : { ...rest, [id]: text };
+    });
+  }, []);
+  return (
+    <Mirror value={set}>
+      <div role="status" data-testid="page-status" className="sr-only">
+        {Object.entries(lines).map(([id, text]) => <p key={id}>{text}</p>)}
+      </div>
+      {children}
+    </Mirror>
+  );
+}
+
+// `role` is "alert" for a server refusal, which a screen reader then announces at once. Any other
+// message carries no role: the page's one status region mirrors it.
 export function Status({ children, actions, testid = "status", role = "status" }: { children: ReactNode; actions?: ReactNode; testid?: string | undefined; role?: "status" | "alert" | undefined }) {
+  const mirror = useContext(Mirror);
+  const id = useId();
+  const shown = useRef<HTMLParagraphElement>(null);
+  // Every render: the text can change without the message going.
+  useEffect(() => {
+    mirror?.(id, role === "status" ? (shown.current?.textContent ?? "") : undefined);
+  });
+  useEffect(() => () => mirror?.(id, undefined), [mirror, id]);
   return (
     <div>
-      <p role={role} data-testid={testid}>{children}</p>
+      <p ref={shown} role={role === "alert" ? "alert" : undefined} data-testid={testid}>{children}</p>
       {actions}
     </div>
   );
