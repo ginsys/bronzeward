@@ -40,11 +40,12 @@ describe("plan creation (ginsys/bronzeward#357, B19, T19)", () => {
   test("each refusal names its next step and acts on none; an unknown refusal names none", () => {
     const desired = html(nextAfter(problem("an apply-config plan is for the machine's Desired release", { desired: "rel_other" }), "rel_a", "mch_b"));
     expect(desired).toContain("Plan the machine&#x27;s Desired release");
+    expect(desired).toContain("A published draft cannot be published again");
     expect(desired).toContain(">rel_othe");
     const none = html(nextAfter(problem("the machine has no Applied configuration to plan an apply-config from; adopt it first"), "rel_a", "mch_b"));
     expect(none).toContain("create an adopt plan");
     expect(none).toContain("operation=adopt");
-    expect(html(nextAfter(problem("the machine's assignment has moved since the release was compiled"), "rel_a", "mch_b"))).toContain("Publish the draft again");
+    expect(html(nextAfter(problem("the machine's assignment has moved since the release was compiled"), "rel_a", "mch_b"))).toContain("publish it, so a release is compiled");
     expect(html(nextAfter(problem("the machine has an Applied configuration and no open drift record; adopt only a drifted machine or one with none"), "rel_a", "mch_b"))).toContain("nothing to adopt");
     expect(nextAfter(problem("something else"), "rel_a", "mch_b")).toBeNull();
     expect(nextAfter(null, "rel_a", "mch_b")).toBeNull();

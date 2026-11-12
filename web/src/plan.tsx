@@ -63,12 +63,12 @@ export function nextAfter(p: Problem | null, release: string, machine: string): 
   const d = p?.detail ?? "";
   if (d.includes("is for the machine's Desired release")) {
     const desired = typeof p?.["desired"] === "string" ? p["desired"] : undefined;
-    return <>Plan the machine's Desired release{desired !== undefined && <> <Id id={desired} /></>} instead, or publish again to make this release Desired.</>;
+    return <>Plan the machine's Desired release{desired !== undefined && <> <Id id={desired} /></>} instead. A published draft cannot be published again: to send this release's changes, change a new draft and publish it, then plan the release it makes.</>;
   }
   if (d.includes("has no Applied configuration")) {
     return <>Hand the machine over first: <Ref to={planPath(release, machine, "adopt")} id={machine}>create an adopt plan</Ref> for it. Nothing has been sent.</>;
   }
-  if (d.includes("assignment has moved")) return <>Publish the draft again, so a release is compiled from the machine's current assignment, then plan that release.</>;
+  if (d.includes("assignment has moved")) return <>Change a new draft and publish it, so a release is compiled from the machine's current assignment, then plan that release.</>;
   if (d.includes("adopt only a drifted machine")) return <>There is nothing to adopt. To send this release, create an apply-config plan for it.</>;
   return null;
 }
