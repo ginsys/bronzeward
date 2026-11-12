@@ -8,9 +8,9 @@ import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
 import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
 
 const html = (e: ReactElement) => renderToStaticMarkup(e);
-// The status message's text, and that it is announced as one.
+// The status message's text. It carries no role of its own, except a refusal's alert (ginsys/bronzeward#830).
 function status(e: ReactElement): string {
-  const m = /<p role="(?:status|alert)" data-testid="[a-z]+">(.*?)<\/p>/.exec(html(e));
+  const m = /<p(?: role="alert")? data-testid="[a-z]+">(.*?)<\/p>/.exec(html(e));
   expect(m, html(e)).not.toBeNull();
   return m![1]!.replace(/<!-- -->/g, "").replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
 }
