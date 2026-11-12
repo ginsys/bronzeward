@@ -332,7 +332,7 @@ export function PlanItem({ id }: { id: string }) {
         return (
           <>
             {proposed && p.state === "proposed" && <Status testid="plan-proposed">{PROPOSED}</Status>}
-            <PlanState p={p} reread={reread} />
+            <PlanState p={p} n={n} reread={reread} />
             <Fields rows={[
               ["State", `${p.state}; expires ${when(p.expiresAt)}`],
               ["Target", <>machine <Id id={p.machine} />, cluster <Id id={p.cluster} />, route {p.route}</>],
