@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +14,15 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/seam"
 )
+
+// The positive control of TestDefaultBuildListsNoInterruptTag: the same build-information read finds
+// the tag when the build carries it, so an empty result in the default build is a real absence.
+func TestInterruptBuildListsItsTag(t *testing.T) {
+	tags, _ := buildTags(t)
+	if !slices.Contains(tags, "fixtureinterrupt") {
+		t.Fatalf("the interrupt build does not list its tag: %v", tags)
+	}
+}
 
 // interruptControl points seam.Control at a file holding line for the test's length.
 func interruptControl(t *testing.T, line string) string {
