@@ -71,8 +71,8 @@ let bao: Bao | undefined;
 // Set once this run has made the state directory; before that it may be another run's.
 let ownState = false;
 
-function start(bin: string, args: string[]): ChildProcess {
-  const p = spawn(`${root}bin/${bin}`, args, { stdio: "inherit" });
+function start(bin: string, args: string[], env: Record<string, string> = {}): ChildProcess {
+  const p = spawn(`${root}bin/${bin}`, args, { stdio: "inherit", env: { ...process.env, ...env } });
   procs.push(p);
   return p;
 }
@@ -85,8 +85,12 @@ async function ready(url: string, p?: ChildProcess) {
   }
 }
 
+// The file the interrupt build reads at every step (internal/seam): one line, "<step> <action>".
+const interruptFile = `${state}/interrupt`;
+
 // One server, started with the serve flags given, on the database named or a fresh, migrated one.
-function server(name: string, listen: string, oidc: string, extra: string, flags: string[] = [], on?: string) {
+// `interrupt` runs the build that holds the fixture interrupt seam, reading interruptFile.
+function server(name: string, listen: string, oidc: string, extra: string, flags: string[] = [], on?: string, interrupt = false) {
   const db = on ?? `bw_auth_${name}_${randomBytes(4).toString("hex")}`;
   if (on === undefined) {
     execFileSync("createdb", [...PG, db]);
@@ -109,7 +113,7 @@ function server(name: string, listen: string, oidc: string, extra: string, flags
     "",
   ].join("\n"));
   if (on === undefined) execFileSync(`${root}bin/bronzeward`, ["migrate", "-config", file], { stdio: "inherit" });
-  return { db, p: start("bronzeward", ["serve", "-config", file, ...flags]) };
+  return { db, p: interrupt ? start("bronzeward-interrupt", ["serve", "-config", file, ...flags], { BW_INTERRUPT_CONTROL: interruptFile }) : start("bronzeward", ["serve", "-config", file, ...flags]) };
 }
 
 function host(listen: string, clientConfig: object, issuer: string, api: string) {
@@ -136,10 +140,15 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // writes of a generation or to the Transit decrypt of the staged envelope, POST /bao/decrypt-hold?ms=
 // holds each such decrypt, and POST /disposable/kill ends its process at once with no restart; POST
 // /disposable?expiry=short starts it with an absolute expiry of 45 s, for an expired claim.
+// The disposable deployment runs the interrupt build (ginsys/bronzeward#366): POST /interrupt?point=
+// "<step> <action>" writes the file that build reads at every step (recovery-entry-commit lose-reply,
+// draft-commit stall), and POST /interrupt with no point removes it, which ends a stall. The next
+// sign-in removes it too.
 export interface Chaos {
   fault: (mode: string) => void;
   decryptHold: (ms: number) => void;
   kill: () => Promise<void>;
+  interrupt: (line: string) => void;
 }
 function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean, short: boolean) => Promise<string>, kv: (ms: number) => void, chaos: Chaos): Server {
   let go: string | undefined;
@@ -178,6 +187,14 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     if (url.pathname === "/bao/decrypt-hold" && req.method === "POST") {
       try {
         chaos.decryptHold(Number(url.searchParams.get("ms") ?? 0));
+      } catch (e) {
+        return res.writeHead(500).end(String(e));
+      }
+      return res.end();
+    }
+    if (url.pathname === "/interrupt" && req.method === "POST") {
+      try {
+        chaos.interrupt(url.searchParams.get("point") ?? "");
       } catch (e) {
         return res.writeHead(500).end(String(e));
       }
@@ -232,6 +249,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       injector.writes.length = 0;
       injector.redirected = 0;
       if (bao !== undefined) (bao.hold = 0), (bao.fail = "none"), (bao.decryptHold = 0);
+      rmSync(interruptFile, { force: true });
       res.end();
     });
   });
@@ -308,6 +326,12 @@ async function prepare() {
       if (!Number.isInteger(ms) || ms < 0 || ms > 120_000) throw new Error(`a decrypt hold of ${ms} ms: give 0 to 120000`);
       bao!.decryptHold = ms;
     },
+    interrupt: (line) => {
+      owned("an interrupt is set");
+      if (line === "") return rmSync(interruptFile, { force: true });
+      if (!/^[a-z-]+ (kill|stall|lose-reply)$/.test(line)) throw new Error(`an interrupt of "${line}": give "<step> kill", "<step> stall" or "<step> lose-reply"`);
+      writeFileSync(interruptFile, `${line}\n`);
+    },
     // The process ends by SIGKILL, as a crash does, so nothing it held is released; the database stays,
     // and POST /disposable?keep starts the deployment again on it.
     kill: async () => {
@@ -322,7 +346,7 @@ async function prepare() {
   };
   const ctl = control(provider, next, injector, async (recovery, keep, short) => {
     if (disposable !== undefined) await stop(disposable.p);
-    disposable = server("disposable", DISPOSABLE_API.slice(7), fixtureOidc, short ? deploymentWith("45s") : disposableDeployment, recovery ? ["-recovery-start"] : [], keep ? disposable?.db : undefined);
+    disposable = server("disposable", DISPOSABLE_API.slice(7), fixtureOidc, short ? deploymentWith("45s") : disposableDeployment, recovery ? ["-recovery-start"] : [], keep ? disposable?.db : undefined, true);
     await ready(`${DISPOSABLE_API}/livez`, disposable.p);
     return DISPOSABLE_API;
   }, kv, chaos);
