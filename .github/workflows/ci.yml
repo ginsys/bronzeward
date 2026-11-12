@@ -355,7 +355,9 @@ jobs:
     # owner decided on 2026-11-01 to require browser-auth and idp, after this split. The job's
     # result is success only when all four legs succeed. fail-fast stays off so that one failing
     # browser does not hide another's result. Not on macOS: its hosted runner has no Docker for the
-    # provider. Each leg uploads only if its scan passes, under its own artifact name.
+    # provider. Each leg uploads under its own artifact name, after a failed run too: the run's
+    # files when its scan passed, and only a scanned listing of their names and sizes, or nothing,
+    # when it did not.
     strategy:
       fail-fast: false
       matrix:
@@ -375,10 +377,16 @@ jobs:
       - run: mise run dev-bao
       - run: mise run dev-idp
       - run: mise run browser-auth
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      # After a failed run too. The task writes the scan's own status; the whole directory goes up
+      # only when the scan passed, otherwise only the listing the task scanned does, if it passed.
+      - id: publish
+        if: always()
+        run: bash scripts/ci/browser-artifact.sh publish web/e2e/out .dev/browser-auth/scan.status .dev/browser-auth/listing >> "$GITHUB_OUTPUT"
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-auth-linux-${{ matrix.browser }}
-          path: web/e2e/out
+          path: ${{ steps.publish.outputs.path }}
           retention-days: 14
       - if: always()
         run: mise run dev-down

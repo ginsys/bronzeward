@@ -1,5 +1,5 @@
-// Client contracts §11.5 item 2: every retained artifact of the browser run is scanned for the
-// run's synthetic values. A positive control planted in a nested directory inside the artifact
+// Client contracts §11.5 item 2: every retained artifact of the browser run, its name included, is
+// scanned for the run's synthetic values. A positive control planted in a nested directory inside the artifact
 // directory must be found by the same walk, and is removed before anything is uploaded. Any
 // JWT-shaped text is a finding too: the AUTH cases' tokens are minted during the run.
 // Usage: node e2e/scan.ts <artifact dir> <synthetic value | @file holding one>...
@@ -15,22 +15,28 @@ function scan(dir: string, values: string[]): { files: number; found: string[]; 
   const found: string[] = [];
   const unscannable: string[] = [];
   let files = 0;
+  // The upload carries a file's name as well as its bytes, so a name is read like the bytes. A path that
+  // holds a value or a JWT never goes to the log: the log names that file by its number.
+  const named = (path: string): boolean => values.some((v) => path.includes(v)) || JWT.test(path);
   for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
     if (entry.isDirectory()) continue;
+    const path = join(entry.parentPath, entry.name);
     // The upload follows symlinks, so a link (or any other non-regular entry) would ship bytes
     // this walk never read: it fails the scan instead of being skipped.
     if (!entry.isFile()) {
-      unscannable.push(join(entry.parentPath, entry.name));
+      unscannable.push(named(path) ? `entry ${unscannable.length + 1}, a name that holds a flagged value` : path);
       continue;
     }
     files++;
-    const path = join(entry.parentPath, entry.name);
+    const label = named(path) ? `file ${files}, a name that holds a flagged value` : path;
     const bytes = readFileSync(path);
     // The value's position, never the value itself, goes to the log.
     for (const [i, v] of values.entries()) {
-      if (bytes.includes(v) || bytes.includes(Buffer.from(v, "utf16le"))) found.push(`${path}: value ${i + 1}`);
+      if (bytes.includes(v) || bytes.includes(Buffer.from(v, "utf16le"))) found.push(`${label}: value ${i + 1}`);
+      if (path.includes(v)) found.push(`${label}: value ${i + 1} in its name`);
     }
-    if (JWT.test(bytes.toString("latin1")) || JWT.test(bytes.toString("utf16le"))) found.push(`${path}: a JWT`);
+    if (JWT.test(bytes.toString("latin1")) || JWT.test(bytes.toString("utf16le"))) found.push(`${label}: a JWT`);
+    if (JWT.test(path)) found.push(`${label}: a JWT in its name`);
   }
   return { files, found, unscannable };
 }

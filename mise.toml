@@ -30,8 +30,8 @@ env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/dev-idp fixtures/b
 """
 
 [tasks.test]
-description = "Fixture tests for scripts/ci/commit-lint.sh, scripts/ci/needs-check.sh, scripts/ci/report-safari.sh, scripts/ci/browser-tmp.sh, scripts/dev/instance.sh, fixtures/dev-idp's web-origin check, the participant session and its t5 leak scan, scenarios/s5 cli's unseen-overwrite and unfreeze-refusal checks, and scripts/release/compare-sums.sh, render-caddy.py, guard.sh and fixtures/lib.sh's isolated_run"
-run = ["bash scripts/test/commit-lint-test.sh", "bash scripts/test/needs-check-test.sh", "bash scripts/test/report-safari-test.sh", "bash scripts/test/browser-tmp-test.sh", "bash scripts/test/dev-instance-test.sh", "bash scripts/test/dev-idp-origin-test.sh", "bash scripts/test/participant-session-test.sh", "bash scripts/test/scenario-ctl-env-test.sh", "bash scripts/test/s5-cli-test.sh", "node --test scripts/test/collide-scan-test.mjs", "bash scripts/test/compare-sums-test.sh", "python3 scripts/test/render-caddy-test.py", "bash scripts/test/release-guard-test.sh", "bash scripts/test/isolated-run-test.sh"]
+description = "Fixture tests for scripts/ci/commit-lint.sh, scripts/ci/needs-check.sh, scripts/ci/report-safari.sh, scripts/ci/browser-tmp.sh, scripts/ci/browser-artifact.sh (with a planted value), scripts/dev/instance.sh, fixtures/dev-idp's web-origin check, the participant session and its t5 leak scan, scenarios/s5 cli's unseen-overwrite and unfreeze-refusal checks, and scripts/release/compare-sums.sh, render-caddy.py, guard.sh and fixtures/lib.sh's isolated_run"
+run = ["bash scripts/test/commit-lint-test.sh", "bash scripts/test/needs-check-test.sh", "bash scripts/test/report-safari-test.sh", "bash scripts/test/browser-tmp-test.sh", "bash scripts/test/browser-artifact-test.sh","bash scripts/test/dev-instance-test.sh", "bash scripts/test/dev-idp-origin-test.sh", "bash scripts/test/participant-session-test.sh", "bash scripts/test/scenario-ctl-env-test.sh", "bash scripts/test/s5-cli-test.sh", "node --test scripts/test/collide-scan-test.mjs", "bash scripts/test/compare-sums-test.sh", "python3 scripts/test/render-caddy-test.py", "bash scripts/test/release-guard-test.sh", "bash scripts/test/isolated-run-test.sh"]
 
 [tasks.package]
 description = "Build the release archives at BW_VERSION into dist/ (ginsys/bronzeward#262 P3, P6): the web tarball and notices, then GoReleaser in snapshot mode; publishes nothing"
@@ -467,11 +467,15 @@ go build -o bin/webhost ./fixtures/webhost
 go build -tags fixtureinterrupt -o bin/bronzeward-interrupt ./cmd/bronzeward
 canary="BWSYNTH-web-$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
 password=$(. "./$BW_DEV_IDP_DIR/idp.env" && printf %s "$BW_TEST_IDP_PASSWORD")
-rm -rf web/e2e/out
+rm -rf web/e2e/out .dev/browser-auth
 mkdir -p web/e2e/out
 cd web
 # The run's console goes to a file the scan reads, not to the job log: a failing expect prints its
 # received value. The scan runs after a failed run too, and the console is shown only once it passes.
+# The scan's own status goes to .dev/browser-auth/scan.status, and the workflow uploads web/e2e/out
+# only when it reads `passed` there, after a failed run too. After a failed scan it uploads a
+# listing of names and sizes that the same scan cleared, or nothing (scripts/ci/browser-artifact.sh,
+# ginsys/bronzeward#782).
 rc=0
 # As in browser: a TMPDIR of its own (scripts/ci/browser-tmp.sh, #430).
 export BW_WDIO_CACHE=${BW_WDIO_CACHE:-${TMPDIR:-/tmp}}
@@ -479,7 +483,7 @@ run_tmp=$(bash ../scripts/ci/browser-tmp.sh start browser-auth)
 TMPDIR=$run_tmp BW_WEB_CANARY=$canary npx wdio run e2e/auth.conf.ts > e2e/out/console.log 2>&1 || rc=$?
 left=
 bash ../scripts/ci/browser-tmp.sh finish browser-auth "$run_tmp" || left=1
-node e2e/scan.ts e2e/out "$canary" "$password" "@../$BW_DEV_IDP_DIR/login.pat" || exit 1
+bash ../scripts/ci/browser-artifact.sh scan ../.dev/browser-auth/scan.status ../.dev/browser-auth/listing e2e/out "$canary" "$password" "@../$BW_DEV_IDP_DIR/login.pat" || exit 1
 cat e2e/out/console.log
 [ -z "$left" ] || [ "$rc" -ne 0 ] || rc=1
 exit "$rc"

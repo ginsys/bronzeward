@@ -235,6 +235,17 @@ trusts the fixture issuer, which the synthetic provider serves on `B+3` with the
 included, the next sign-in receives. The servers listen on `B+7` and `B+8`.
 The scan also looks for the provider's synthetic password and login token.
 
+In CI, each `browser-auth` leg uploads after a failed run too. The task writes the scan's own exit
+status to `.dev/browser-auth/scan.status`. The scan reads file contents and file names. If the
+status is `passed`, the leg uploads all of `web/e2e/out/`, whether the browser cases passed or
+failed. The scan cleared those bytes. After a failed scan, the task writes `files.txt`, with the
+type, size and path of each file the run left, and runs the same scan on it. If it passes, the leg
+uploads `files.txt` and none of the files. If it does not, because a file name holds a flagged
+value, the leg uploads nothing. A task that ended before the scan also uploads nothing. The upload
+needs no reading of the job's outcome. `scripts/test/browser-artifact-test.sh` (run by
+`mise run test`) plants a synthetic value in a file and in a file name, runs the real scan and
+reads every file in the upload set, and every name, for it.
+
 ## Instance C and the interruption seam
 
 Instance C runs `/bronzeward-interrupt`, the server built with the `fixtureinterrupt` tag, from the
