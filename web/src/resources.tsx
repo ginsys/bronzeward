@@ -5,6 +5,7 @@
 
 import { Fragment as Group, type ReactNode, useCallback, useRef, useState } from "react";
 import type { components } from "./api/v1";
+import { ApprovalRecord, ApproveControl, RevocationReason, RevokeControl } from "./approval.tsx";
 import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { CancelPlan, PlanNew, PlanState, PROPOSED, takeFresh } from "./plan.tsx";
 import { PublishDraft } from "./publish.tsx";
@@ -352,6 +353,10 @@ export function PlanItem({ id }: { id: string }) {
               ["Change", <Change p={p} />],
             ]} />
             <p><Ref to={`/operations?plan=${p.id}`} id={p.id}>Operations of this plan</Ref></p>
+            <ApproveControl p={p} reread={reread} />
+            <ApprovalRecord p={p} />
+            {p.state === "revoked" && <RevocationReason p={p} />}
+            <RevokeControl p={p} reread={reread} />
             {(p.state === "proposed" || p.state === "approved" || p.state === "committed") && <CancelPlan id={p.id} reread={reread} />}
           </>
         );
