@@ -718,7 +718,7 @@ export function WriteResult({ w, done, conflict, goTo, marks = "" }: { w: Write 
     return (
       <>
         <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" />
-        {at !== undefined && <Status testid="write-where">{at}</Status>}
+        {at !== undefined && <Status testid="write-where" role="alert">{at}</Status>}
         {goTo !== undefined && <button type="button" onClick={goTo}>Go to field</button>}
       </>
     );

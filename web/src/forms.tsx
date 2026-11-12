@@ -63,7 +63,7 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
     const o = w.outcome;
     const { named, to } = record(w);
     const props = { onShow: () => go(to), detail: named + detail(w, to), onDismiss: () => writes.dismiss(w), testid: "write-notice" };
-    if (o !== undefined && w.kept) return <Repeated key={w.key} line={settled(o)} {...props} detail={`${named} Key ${w.key}, ${w.route}. Read ${to}.`} />;
+    if (o !== undefined && w.kept) return <Repeated key={w.key} line={settled(o)} role={o.kind === "refused" ? "alert" : "status"} {...props} detail={`${named} Key ${w.key}, ${w.route}. Read ${to}.`} />;
     if (o?.kind === "unknown") return <Unknown key={w.key} why={o.why} problem={o.problem} onRepeat={writes.repeatable(w) && !offline ? () => void writes.submit(w) : undefined} {...props} />;
     if (o?.kind === "set-aside") return <SetAside key={w.key} why={o.why} problem={o.problem} {...props} />;
     // While the run is in flight, the latest state that made the outcome unknown: an attempt of
@@ -198,7 +198,7 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
       return (
         <>
           <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" replayed={o.replayed} cut={o.cut === true} />
-          {named !== undefined && <Status testid="write-existing">The {named.kind} already recorded: <Ref to={named.to} id={named.id}>{named.id}</Ref>.</Status>}
+          {named !== undefined && <Status testid="write-existing" role="alert">The {named.kind} already recorded: <Ref to={named.to} id={named.id}>{named.id}</Ref>.</Status>}
         </>
       );
     }

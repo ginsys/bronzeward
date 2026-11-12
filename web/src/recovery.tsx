@@ -152,7 +152,7 @@ export function Entered() {
     return <Status testid="entered" actions={dismiss}>Recovery entry saved (the server answered), but its answer could not be read. Read the Recovery page.</Status>;
   }
   if ("refused" in entered) {
-    return <Status testid="entered" actions={dismiss}>{reading(entered.refused)}{problemTail(entered.refused)}</Status>;
+    return <Status testid="entered" role="alert" actions={dismiss}>{reading(entered.refused)}{problemTail(entered.refused)}</Status>;
   }
   return (
     <Status testid="entered" actions={dismiss}>
@@ -248,7 +248,7 @@ export function EnterRecovery({ onRead }: { onRead?: () => void }) {
       {p === undefined || o?.kind !== "refused" ? <Result w={w} done={() => "Recovery mode entered."} /> : (
         <>
           <Refused testid="write-result" problem={p} status={o.status} verb="saved" replayed={o.replayed} />
-          <Status testid="write-reading">{reading(p)}</Status>
+          <Status testid="write-reading" role="alert">{reading(p)}</Status>
         </>
       )}
     </form>

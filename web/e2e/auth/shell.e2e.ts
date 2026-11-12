@@ -156,7 +156,7 @@ describe("the state catalogue", () => {
 
   it("error: the problem's code, detail and instance", async () => {
     expect(await fixtureSignIn("h-viewer", {}, { missing: "/identity" })).toBe("Not read: not-found. Not found: injected Request req-injected.");
-    expect(await testid("status").getAttribute("role")).toBe("status");
+    expect(await testid("status").getAttribute("role")).toBe("alert");
     expect(await testid("server").getText()).toMatch(SERVER);
   });
 
