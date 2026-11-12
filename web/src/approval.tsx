@@ -6,7 +6,7 @@
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
-import { type Load, Id, short, useItem, useReads } from "./list.tsx";
+import { type Load, Id, type Reads, settledRead, short, useItem, useReads } from "./list.tsx";
 import { REASON_MAX, reasonProblem } from "./plan.tsx";
 import { Action } from "./shell.tsx";
 import { Status } from "./states.tsx";
@@ -188,12 +188,37 @@ function Recorded({ id }: { id: string }) {
   return <Status testid="approval-record">{recordedReasons(a.data)}{a.data.unseenOverwrite && " It approved overwriting the drifted configuration, which no reviewer has seen."}</Status>;
 }
 
+type Revocation = { reason?: string; principal?: string };
+
+// The timeline entry of one approval's revocation: reads the pages newest first, on through each
+// `next`, and stops at the entry or at the end of the timeline. Each page is settled through the shell.
+// The answer is the entry's own members, or undefined inside an ok answer when the timeline holds none.
+export async function findRevocation(reads: Pick<Reads, "client" | "settle" | "undropped">, machine: string, approval: string, live: () => boolean): Promise<Load<Revocation | undefined> | undefined> {
+  const path = `/machines/${enc(machine)}/timeline`;
+  for (let cursor: string | undefined; ; ) {
+    const q = new URLSearchParams({ order: "newest", ...(cursor === undefined ? {} : { cursor }) });
+    const page = await settledRead<{ items: S["TimelineEntry"][]; next?: string }>(reads, `${path}?${q}`, live);
+    if (page === undefined || page.kind !== "ok") return page;
+    const hit = page.data.items.find((x) => x.kind === "approval-revocation" && (x.entry as { approval?: string }).approval === approval);
+    if (hit !== undefined || page.data.next === undefined) return { kind: "ok", data: hit?.entry as Revocation | undefined };
+    cursor = page.data.next;
+  }
+}
+
 // A revoked plan's reason: the plan carries none, so the machine's timeline entry for the revocation
-// is read (one read of the newest page). Where it is not on that page, the line says so.
+// is read, page after page until it is found. Where the timeline holds none, the line says so.
 export const RevocationReason = ({ p }: { p: Plan }): ReactNode => (p.approval === null ? null : <Reason machine={p.machine} approval={p.approval} />);
 function Reason({ machine, approval }: { machine: string; approval: string }) {
-  const t = useItem<{ items: S["TimelineEntry"][] }>(`/machines/${enc(machine)}/timeline?order=newest`);
-  if (t.kind !== "ok") return null;
-  const e = t.data.items.find((x) => x.kind === "approval-revocation" && (x.entry as { approval?: string }).approval === approval)?.entry as { reason?: string; principal?: string } | undefined;
-  return <Status testid="revocation-reason">{e?.reason === undefined ? "The revocation's reason is not on the newest page of the machine's timeline." : `Revoked by ${e.principal === undefined ? "an approver" : short(e.principal)}: ${e.reason}`}</Status>;
+  const { client, settle, undropped, again, view } = useReads();
+  const [e, setE] = useState<Load<Revocation | undefined>>({ kind: "loading" });
+  useEffect(() => {
+    let live = true;
+    void findRevocation({ client, settle, undropped }, machine, approval, () => live).then((r) => {
+      if (live && r !== undefined) setE(r);
+    });
+    return () => void (live = false);
+  }, [client, settle, undropped, again, view, machine, approval]);
+  if (e.kind !== "ok") return null;
+  const r = e.data;
+  return <Status testid="revocation-reason">{r?.reason === undefined ? "The machine's timeline holds no reason for this revocation." : `Revoked by ${r.principal === undefined ? "an approver" : short(r.principal)}: ${r.reason}`}</Status>;
 }
