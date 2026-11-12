@@ -27,7 +27,8 @@ export const when = (at: string | null | undefined) => (at == null ? "none" : ne
 // A page has one role="status" region, for progress and outcomes (design B25, B37). It is hidden
 // from sight and mirrors the text of every status message the page shows, so a screen reader hears
 // each message once through it. A reader going through the page in order meets the text twice: the
-// accepted cost of a mirrored live region.
+// accepted cost of a mirrored live region. The region sets aria-atomic to false, because a status
+// role implies true and a change to one message would then announce every message again.
 const Mirror = createContext<((id: string, text: string | undefined) => void) | undefined>(undefined);
 
 export function StatusPage({ children }: { children: ReactNode }) {
@@ -41,7 +42,7 @@ export function StatusPage({ children }: { children: ReactNode }) {
   }, []);
   return (
     <Mirror value={set}>
-      <div role="status" data-testid="page-status" className="sr-only">
+      <div role="status" aria-atomic="false" data-testid="page-status" className="sr-only">
         {Object.entries(lines).map(([id, text]) => <p key={id}>{text}</p>)}
       </div>
       {children}
