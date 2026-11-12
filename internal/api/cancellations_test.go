@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -216,6 +217,34 @@ func TestPlanCancellationRefusals(t *testing.T) {
 	}
 	if n := count(t, p.db, `SELECT count(*) FROM plan_state WHERE plan = $1 AND state = 'proposed'`, expired.ID); n != 1 {
 		t.Fatal("the refused cancellation wrote the expired plan's state")
+	}
+}
+
+// A cancellation after commitment ends the operation only while no attempt is recorded
+// (execution-recovery.md §2). With an attempt recorded and the operation sending, the cancellation
+// is recorded and the plan stays committed, and the operation and its attempt continue: the
+// operation is still sending, its one attempt is intact, and no cancellation or refusal reaches
+// the machine's timeline for it.
+func TestPlanCancellationAfterAnAttemptContinues(t *testing.T) {
+	t.Parallel()
+	ae := newAttemptEnv(t, "")
+	r, err := ae.a.recordAttempt(context.Background(), ae.op, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decode[cancellationBody](t, ae.cancel(ae.robot, "k-cancel-attempt-012345", ae.pid, `{"reason":"superseded"}`), http.StatusOK)
+	ae.wantCancelled(t, ae.pid, ae.robotID, "publisher", "committed", 3)
+	if n := count(t, ae.db, `SELECT count(*) FROM operation WHERE id = $1 AND state = 'sending' AND plan = $2`, ae.op, ae.pid); n != 1 {
+		t.Fatal("the operation is not still sending after the cancellation")
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM attempt WHERE id = $1 AND operation = $2 AND number = 1`, r.Attempt, ae.op); n != 1 {
+		t.Fatal("the recorded attempt is gone after the cancellation")
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM attempt WHERE operation = $1`, ae.op); n != 1 {
+		t.Fatalf("%d attempts after the cancellation", n)
+	}
+	if n := count(t, ae.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind IN ('refusal', 'operation-state')`, ae.machine); n != 0 {
+		t.Fatalf("%d refusal or operation state entries after the cancellation", n)
 	}
 }
 
