@@ -15,36 +15,47 @@ import (
 // holds a colon and a space reads as a one-key mapping, not as a string, so a list entry written
 // that way fails the strict decode below instead of passing unread (#787).
 type shapeRecord struct {
-	ID       text   `yaml:"id"`
-	Setup    text   `yaml:"setup"`
-	Action   text   `yaml:"action"`
-	Exchange []text `yaml:"exchange"`
-	Fault    text   `yaml:"fault"`
+	ID       string   `yaml:"id"`
+	Setup    string   `yaml:"setup"`
+	Action   string   `yaml:"action"`
+	Exchange []string `yaml:"exchange"`
+	Fault    string   `yaml:"fault"`
 	Expect   struct {
-		Client text   `yaml:"client"`
-		Server text   `yaml:"server"`
-		Shown  text   `yaml:"shown"`
-		Absent []text `yaml:"absent"`
+		Client string   `yaml:"client"`
+		Server string   `yaml:"server"`
+		Shown  string   `yaml:"shown"`
+		Absent []string `yaml:"absent"`
 	} `yaml:"expect"`
-	Test   text `yaml:"test"`
-	Unit   text `yaml:"unit"`
-	NotRun text `yaml:"not run"`
+	Test   string `yaml:"test"`
+	Unit   string `yaml:"unit"`
+	NotRun string `yaml:"not run"`
 }
 
-// text is a string member. The decoder turns a number or a boolean into a Go string without a
-// complaint, so text accepts only a scalar the YAML core schema tags as a string.
-type text string
-
-func (s *text) UnmarshalYAML(n *yaml.Node) error {
-	if n.Kind != yaml.ScalarNode || n.ShortTag() != "!!str" {
-		return fmt.Errorf("line %d: want a string, found %s", n.Line, n.ShortTag())
+// onlyStrings fails on the first scalar the YAML core schema does not tag as a string. The typed decode
+// turns a number or a boolean into a Go string and skips a null, so it cannot check this itself. Every
+// scalar in a record file is a string, so one walk over the node tree ends the class.
+func onlyStrings(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode && n.ShortTag() != "!!str" {
+		return fmt.Errorf("line %d: want a string, found %s %q", n.Line, n.ShortTag(), n.Value)
 	}
-	*s = text(n.Value)
+	for _, c := range n.Content {
+		if err := onlyStrings(c); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-// decodeShape decodes one record file strictly: an unknown member or a member of the wrong type is an error.
+// decodeShape decodes one record file strictly: a scalar that is not a string, an unknown member or a
+// member of the wrong type is an error.
 func decodeShape(b []byte) ([]shapeRecord, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		return nil, err
+	}
+	if err := onlyStrings(&doc); err != nil {
+		return nil, err
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
 	var records []shapeRecord
@@ -75,6 +86,10 @@ func TestRecordShape(t *testing.T) {
 		"an unknown expect member":     "- id: X-01\n  expect:\n    extra: x\n",
 		"a mapping in absent":          "- id: X-01\n  expect:\n    absent:\n      - a: b\n",
 		"a mapping where text belongs": "- id: X-01\n  setup:\n    a: b\n",
+		"a null in a text member":      "- id: X-01\n  setup: null\n",
+		"a blank text member":          "- id: X-01\n  setup:\n",
+		"a tilde in a text member":     "- id: X-01\n  setup: ~\n",
+		"a null in exchange":           "- id: X-01\n  exchange: [null]\n",
 	} {
 		if _, err := decodeShape([]byte(doc)); err == nil {
 			t.Fatalf("the control %q decoded, so the check below proves nothing", name)
