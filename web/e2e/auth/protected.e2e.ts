@@ -386,8 +386,8 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await browser.waitUntil(async () => {
       await browser.refresh();
       const heading = await $("main h2").getText();
-      return heading.startsWith(`Import ${short(id)}: `) && !heading.endsWith(": paused") && !heading.endsWith(": running");
-    }, { timeout: 60_000, interval: 3_000, timeoutMsg: "the import still shows its claim held after the commit went" });
+      return heading === `Import ${short(id)}: released`;
+    }, { timeout: 60_000, interval: 3_000, timeoutMsg: "the import does not show its claim released after the commit went" });
     expect(await $("button=Abandon import").isExisting()).toBe(false);
   });
 });
