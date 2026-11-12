@@ -730,9 +730,10 @@ observation_stale() {
 # issuer is on the Compose network only, and no command here reads the issuer. The caller's
 # configuration and credential store are never read: XDG directories are the run directory's and
 # the session bus is disabled. A scenario that runs the CLI calls cli_prepare once, then ctl.
-cli_dir='' ctl_bin=''
+cli_dir='' ctl_bin='' cli_port=''
 # cli_prepare <reference> <human>...: builds the CLI and adds a context for each human, as checks
-# of the reference.
+# of the reference. The contexts name instance A, or the instance on cli_port when a scenario sets
+# it first (S6 and S7 run on B, with A paused or stopped).
 cli_prepare() {
   local ref=$1 who
   shift
@@ -744,7 +745,7 @@ cli_prepare() {
   for who in "$@"; do
     : >"$cli_dir/$who.json"
     chmod 600 -- "$cli_dir/$who.json"
-    check "$ref" "a context for $who with its token file" ctl_env context add "$who" --server "http://127.0.0.1:$SERVER_A_PORT" \
+    check "$ref" "a context for $who with its token file" ctl_env context add "$who" --server "http://127.0.0.1:${cli_port:-$SERVER_A_PORT}" \
       --issuer http://127.0.0.1:5556 --client-id fixture-cli --oidc-token-file "$cli_dir/$who.json"
   done
 }

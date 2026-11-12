@@ -16,21 +16,30 @@
 # operation, state, classifications, scope, outcome.
 # Each check writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s6.tsv
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
-# Usage: scenarios/s6 run   (after scenarios/s4 run and s4 ds on the same up)
+# Mode cli (ginsys/bronzeward#362): the same run with the recovery-admin's three acts made through
+# bronzewardctl as h-recovery and h-approver, built from this checkout and run on the host against
+# B: the accounting of point 020 and of the lost response (recovery account, the machine ID typed
+# back), h-approver's refused accounting, and the step 7 resolution (recovery resolve). The takeover
+# stays the server's, made at B's start (ER 3.4). The kept output is cli-<name>.txt in the evidence
+# directory s6-cli-<utc>, which s8 does not read. The DS rows are S4's and are not read in this mode:
+# each is a SKIP naming that.
+# Usage: scenarios/s6 run|cli   (run after scenarios/s4 run and s4 ds on the same up; cli after
+# scenarios/s4 cli on the same up, with no s4 ds)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
 # shellcheck source-path=SCRIPTDIR source=../lib.sh
 . "$here/../lib.sh"
 
-[ "${1:-}" = run ] || die "usage: scenarios/s6 run"
+s6_mode=${1:-}
+case $s6_mode in run | cli) ;; *) die "usage: scenarios/s6 run|cli" ;; esac
 need docker curl jq timeout id sleep date awk wc
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
 umask 077
 image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
 image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
-EV=$STATE/evidence/s6-run-$(date -u +%Y%m%dT%H%M%SZ)
+EV=$STATE/evidence/s6-$s6_mode-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p -- "$EV" "$EV/http"
 scenario=s6
 # shellcheck source-path=SCRIPTDIR source=common.sh
@@ -99,6 +108,40 @@ resolve() {
     '.operation == $o and .state == "cancelled" and .resolvedBy == $w and .role == "recovery-admin" and .reason == $r' \
     "$EV/last.body" >/dev/null
 }
+# The recovery-admin's acts, by the API in mode run and through bronzewardctl in mode cli. The CLI
+# accounts for op's first attempt on start and end with the machine ID typed back on standard input.
+cli_account() {
+  local attempt
+  attempt=$(sql "SELECT id FROM attempt WHERE operation = '$op' AND number = 1") && [ -n "$attempt" ] || return 1
+  ctl "$1" "$2" recovery account "$op" "$attempt" --start "$start" --end "$end" \
+    --explanation "$mutation_ref: the node was cut off" <<<"$machine_w"
+}
+# account_ok <name>: h-recovery's accounting of op's first attempt is recorded.
+account_ok() {
+  if [ "$s6_mode" = cli ]; then
+    cli_account "$1" h-recovery && cli_kept "$1" '^Recorded\. Attempt [a-z]+_[a-z2-7]+ of operation [a-z]+_[a-z2-7]+ is accounted for by decision\.'
+  else
+    account "$1" 201 - '.attempt | type == "string"'
+  fi
+}
+# account_refused <name>: h-approver's accounting is refused for its role, nothing recorded.
+account_refused() {
+  local rc=0
+  if [ "$s6_mode" = cli ]; then
+    cli_account "$1" h-approver || rc=$?
+    [ "$rc" = 1 ] && cli_kept "$1" 'Needs one of the roles' && cli_kept "$1" 'recovery-admin' && cli_kept "$1" 'You are signed in as h-approver\.'
+  else
+    account "$1" 403 forbidden true h-approver
+  fi
+}
+# resolve_held <reason>: h-recovery resolves held cancelled on the reason.
+resolve_held() {
+  if [ "$s6_mode" = cli ]; then
+    ctl resolve h-recovery recovery resolve "$held" --reason "$1" && cli_kept resolve '^Operation [a-z]+_[a-z2-7]+ resolved \(act [a-z]+_[a-z2-7]+\): cancelled\.'
+  else
+    resolve "$1"
+  fi
+}
 # resolution_recorded <reason>: held cancelled with no attempt; its entry to cancelled names the
 # resolution by h-recovery as recovery-admin, the reason, and the evidence relied on: no attempt,
 # and the worker's latest observation.
@@ -162,6 +205,11 @@ preconditions() {
   must "$ref" 'inject kill B' "$bin/inject" kill B
   call_port=$SERVER_C_PORT
   check "$ref" 'C answers /livez' answers 204 - GET /livez ''
+  if [ "$s6_mode" = cli ]; then
+    # The acts run against B, which takes over and serves them; B is stopped and started again, always on this port.
+    cli_port=$SERVER_B_PORT
+    cli_prepare "$ref" h-recovery h-approver
+  fi
   evidence_to pre || die "no pre-state: bin/evidence failed"
   check "$ref" 'the pre-state bundle: complete, no fixture secret but the scan control' scan_clean pre
   cp_log=$(apid_log "$TALOS_CONTROLPLANE_IP") || die "cannot read the control plane's apid log"
@@ -229,7 +277,7 @@ s6() {
   check "$ref" 'the request landed, yet the operation is still unresolved and its attempt unaccounted: the scope held until the decision' \
     op_unaccounted
   check "$ref" 'h-recovery accounts for the attempt by decision on the first read and that observation: 201' \
-    account 020 201 - '.attempt | type == "string"'
+    account_ok 020
   check "$ref" 'the attempt accounted by that decision' accounted_by_decision
   ds_done 020 1 0
   check "$ref" "its completion names a completion observation" completed_by_observation
@@ -300,9 +348,9 @@ s6() {
   check "$ref" 'step 6: the first operation still unresolved, its attempt unaccounted' op_unaccounted
   check "$ref" "step 6: h-approver revokes the newer plan's approval: 201" revoke_approval s6newer
   check "$ref" 'a recovery observation begun a settle floor after the deadline, the takeover and the first read' within 120 floor_read
-  check "$ref" "negative control: h-approver's accounting of the attempt: 403 forbidden" account send-approver 403 forbidden true h-approver
+  check "$ref" "negative control: h-approver's accounting of the attempt: 403 forbidden" account_refused send-approver
   check "$ref" 'h-recovery accounts for the attempt by decision on the first read and that observation: 201' \
-    account send 201 - '.attempt | type == "string"'
+    account_ok send
   check "$ref" 'the attempt accounted by that decision' accounted_by_decision
   ds_done send 2
   check "$ref" "the second attempt names B's classification safe to retry, after the accounting" retried_after_accounting
@@ -337,7 +385,7 @@ s6() {
   sleep 16
   check "$ref" 'three heartbeats on, B has not classified it: unresolved, no attempt, no classification' unclassified
   reason='S6.1 step 7: the worker cannot be read, and the release is not needed'
-  check "$ref" 'h-recovery resolves it cancelled on a recorded reason: 201, by h-recovery as recovery-admin' resolve "$reason"
+  check "$ref" 'h-recovery resolves it cancelled on a recorded reason: 201, by h-recovery as recovery-admin' resolve_held "$reason"
   check "$ref" "cancelled with no attempt; the entry names h-recovery, recovery-admin, the reason and the evidence relied on" \
     resolution_recorded "$reason"
   check "$ref" 'the scope released' scope_released
@@ -348,7 +396,9 @@ s6() {
 
   # The negative controls no request reaches, and the settle floor, are S4's DS rows on this up.
   ref='S6.1 negative control'
-  if last_ds_table; then
+  if [ "$s6_mode" = cli ]; then
+    result SKIP "$ref" 'mode cli: the DS rows 013, 008, 010, 011 and 023 are S4 ds rows of the run mode, not read here'
+  elif last_ds_table; then
     check "$ref" "accounting before the settle floor refused (DS row 013, live)" ds_passed 013
     check "$ref" "the fence without its owner and generation comparison: the stale owner records an attempt (DS row 008)" ds_passed 008
     check "$ref" "the newer plan refused by comparison 4 (DS row 010)" ds_passed 010
@@ -373,6 +423,7 @@ withheld+=("$BW_CANARY")
 preconditions
 s6
 rm -f -- "$EV/last.body" "$EV/last.headers"
+[ "$s6_mode" != cli ] || rm -f -- "$cli_dir"/h-*.json
 # The final bundle: the evidence directory and the run directory scanned, as S1's step 5 does.
 ev_log=$(mktemp)
 if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
