@@ -71,18 +71,21 @@ export function parts(configuration: string): Part[] {
   return out;
 }
 
-// What the machine needs next for this release (B18), from its Desired and Applied alone.
+// What the machine needs next for this release (B18), from its Desired, Applied and pendingConvergence.
 export function nextStep(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence">): string {
   if (m.desired !== release) {
     return `This release is not the Desired release of this machine${m.desired === null ? "" : ` (Desired is ${short(m.desired)})`}, so it needs no step for this release.`;
   }
   if (m.applied === null) return "This machine has no Applied configuration. Hand it over first (an adopt plan): an apply-config plan is refused until then. Nothing has been sent to it.";
-  if (m.applied.release === release) {
-    // After an adoption the Applied release can equal the Desired one while the node's bytes differ (operator-experience §2.4).
-    if (m.pendingConvergence) return "This release is Desired and Applied on this machine, but its configuration is pending convergence: it differs from what Bronzeward applied. An apply-config plan sends this release to it. Nothing has been sent yet.";
-    return "This release is the one Applied on this machine. Nothing is left to send.";
+  // The server's pendingConvergence says whether the node's configuration differs from this release's (operator-experience §2.4).
+  // After an adoption Applied can equal Desired while it does; after a publication Applied can name another release while it does not.
+  const same = m.applied.release === release;
+  if (m.pendingConvergence) {
+    return `${same ? "This release is Desired and Applied on this machine, but its configuration is pending convergence: it differs from what Bronzeward applied." : `This machine has an Applied configuration (release ${short(m.applied.release)}) that differs from this release.`} An apply-config plan sends this release to it. Nothing has been sent yet.`;
   }
-  return `This machine has an Applied configuration (release ${short(m.applied.release)}). An apply-config plan sends this release to it. Nothing has been sent yet.`;
+  return same
+    ? "This release is the one Applied on this machine. Nothing is left to send."
+    : `This release carries this machine's Applied configuration (release ${short(m.applied.release)}) unchanged. Nothing is left to send.`;
 }
 
 export const EMPTY_NOTE = "A field that shows as empty is empty in the rendered review. A redacted field shows as a badge, so an empty one was not redacted.";
