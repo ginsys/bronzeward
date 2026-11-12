@@ -100,27 +100,42 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
 
   test("the next step comes from the machine's Desired and Applied, and sends nothing", () => {
     const rel = "rel_BWSYNTH-h7rt2bd";
-    expect(nextStep(rel, { desired: rel, applied: null })).toContain("Hand it over first (an adopt plan)");
-    expect(nextStep(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward" } })).toContain("An apply-config plan sends this release to it");
-    expect(nextStep(rel, { desired: rel, applied: { release: rel, source: "bronzeward" } })).toContain("Nothing is left to send");
-    expect(nextStep(rel, { desired: "rel_BWSYNTH-other", applied: null })).toContain(`Desired is ${short("rel_BWSYNTH-other")}`);
-    expect(nextStep(rel, { desired: null, applied: null })).toContain("needs no step");
+    const pc = false;
+    expect(nextStep(rel, { desired: rel, applied: null, pendingConvergence: true })).toContain("Hand it over first (an adopt plan)");
+    expect(nextStep(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward" }, pendingConvergence: pc })).toContain("An apply-config plan sends this release to it");
+    expect(nextStep(rel, { desired: rel, applied: { release: rel, source: "bronzeward" }, pendingConvergence: pc })).toContain("Nothing is left to send");
+    expect(nextStep(rel, { desired: "rel_BWSYNTH-other", applied: null, pendingConvergence: pc })).toContain(`Desired is ${short("rel_BWSYNTH-other")}`);
+    expect(nextStep(rel, { desired: null, applied: null, pendingConvergence: pc })).toContain("needs no step");
+  });
+
+  test("after an adoption, Desired equal to Applied is not 'nothing left to send' while the machine is pending convergence", () => {
+    const rel = "rel_BWSYNTH-h7rt2bd";
+    const text = nextStep(rel, { desired: rel, applied: { release: rel, source: "adoption" }, pendingConvergence: true });
+    expect(text).toContain("pending convergence");
+    expect(text).toContain("An apply-config plan sends this release to it");
+    expect(text).not.toContain("Nothing is left to send");
   });
 
   test("the page reads before it shows anything, and the release page links to it by both identifiers", () => {
     const page = html(h(ReviewItem, { release: "rel_a", machine: "mch_b" }));
     expect(page).toContain("Rendered configuration of mch_b in release rel_a");
     expect(page).toContain("Loading the rendered review");
-    expect(reviewPath("rel_a", "mch_b")).toBe("/releases/rel_a/machines/mch_b");
   });
 
   test("an identifier is one path segment: a crafted one cannot change which review is read", () => {
     const crafted = "mch_x/../../../rel_b/machines/mch_y";
-    const path = reviewPath("rel_a", crafted);
+    const path = reviewPath("rel_a", crafted)!;
     expect(path).toBe("/releases/rel_a/machines/mch_x%2F..%2F..%2F..%2Frel_b%2Fmachines%2Fmch_y");
     expect(new URL(path, "https://bronzeward.test").pathname).toBe(path);
     expect(reviewIds(path)).toEqual(["rel_a", crafted]);
-    expect(reviewIds(reviewPath("rel a?#", "mch&b"))).toEqual(["rel a?#", "mch&b"]);
+    // Dot-only and unprefixed identifiers make no path at all: a browser would read them as path steps.
+    expect(reviewPath("..", "mch_b")).toBeUndefined();
+    expect(reviewPath("rel_a", "..")).toBeUndefined();
+    expect(reviewPath("rel_a", "mch_b")).toBe("/releases/rel_a/machines/mch_b");
+    expect(reviewPath("mch_b", "rel_a")).toBeUndefined();
+    expect(reviewIds("/releases/%2E%2E/machines/mch_b")).toBeUndefined();
+    expect(reviewIds("/releases/rel_a/machines/%2E")).toBeUndefined();
+    expect(reviewIds(reviewPath("rel_a?#", "mch_b&c")!)).toEqual(["rel_a?#", "mch_b&c"]);
     expect(reviewIds("/releases/rel_a/machines/%E0%A4%A")).toBeUndefined();
     expect(reviewIds("/releases/rel_a/machines/mch_b/extra")).toBeUndefined();
     expect(reviewIds("/releases/rel_a")).toBeUndefined();
