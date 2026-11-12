@@ -733,12 +733,15 @@ observation_stale() {
 cli_dir='' ctl_bin='' cli_port=''
 # cli_prepare <reference> <human>...: builds the CLI and adds a context for each human, as checks
 # of the reference. The contexts name instance A, or the instance on cli_port when a scenario sets
-# it first (S6 and S7 run on B, with A paused or stopped).
+# it first (S6 and S7 run on B, with A paused or stopped). A context is added only once its server
+# answers /livez, so that instance must run. The contexts of an earlier run on this up are removed
+# first: context add refuses a name that exists.
 cli_prepare() {
   local ref=$1 who
   shift
   cli_dir=$STATE/cli
   ctl_bin=$cli_dir/bronzewardctl
+  rm -rf -- "$cli_dir/config"
   mkdir -p -- "$cli_dir/config" "$cli_dir/state" "$cli_dir/cache"
   check "$ref" 'bronzewardctl built from this checkout' go -C "$here/../.." build -o "$ctl_bin" ./cmd/bronzewardctl
   # The client ID is not BWSYNTH-: that prefix is a leak-scan pattern, and commands.tsv keeps it.
@@ -749,6 +752,9 @@ cli_prepare() {
       --issuer http://127.0.0.1:5556 --client-id fixture-cli --oidc-token-file "$cli_dir/$who.json"
   done
 }
+# cli_ready <reference> <human>...: cli_prepare once per run, at the first command, when the instance
+# on cli_port runs (S6 and S7 start B after their preconditions).
+cli_ready() { [ -n "$cli_dir" ] || cli_prepare "$@"; }
 # ctl_env <args>...: bronzewardctl with the run directory's configuration and no session bus. The caller's
 # BRONZEWARD_TOKEN_FILE and BRONZEWARD_CONTEXT are removed: the first takes precedence over each context's
 # token file and would send the caller's own credentials to the fixture.
