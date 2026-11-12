@@ -18,8 +18,8 @@
 # up s1 s8controls s8revocation down; up s1 s3h s2 s4cli down (the CLI's safe apply);
 # up s1 s3h s2 s3r s4 s5cli down (S5's drift adoption and revert through bronzewardctl);
 # up s1p s3h s2p s4cli s6cli down (S6.1's accounting and resolution through bronzewardctl);
-# up s1p s3h s2p s3rp s4cli s7cli down (S7's takeover, scope accounting, marks and releases through
-# bronzewardctl, from S7's own preconditions: the state s3rp and s4cli leave, as run's s3rp and s4).
+# up s1p s3h s2p s4cli s7cli down (S7's takeover, scope accounting, marks and releases through
+# bronzewardctl; s4cli replaces s3 run, so there is no s3rp).
 # Steps: up down s0 s0p s0walk s1 s1p s1nid s3h s3hc s2 s2p s3r s3rp s4 s4c s4x s4ds s4cli s5 s5p
 # s5cli s5roles s6 s6cli s7 s7cli s7c s7n s7t s7o s8 s8controls s8revocation; a step ending in p is that
 # scenario's pass mode. A step appears once per list: its log is <step>.log.
