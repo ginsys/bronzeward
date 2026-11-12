@@ -15,15 +15,13 @@ The fixture pins, in [`fixtures/versions.env`](../../fixtures/versions.env):
 
 | Component | Version |
 |---|---|
-| Talos | v1.13.6 |
+| Talos | v1.14.5 |
 | Kubernetes | 1.36.2 |
 | OpenBao | 2.6.1, by digest |
 | PostgreSQL | `postgres:17-alpine`, by digest |
 
 Its cluster is one control plane and one worker, in containers: no reboot, no disks, no installer.
-Results hold for that topology and Talos v1.13.6 only.
-
-The design baseline is Talos v1.14 (v1.14.5). The Talos pin above moves to v1.14 in ginsys/bronzeward#713.
+Results hold for that topology and Talos v1.14.5 only.
 
 ## Not covered
 
