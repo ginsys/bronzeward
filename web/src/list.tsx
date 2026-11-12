@@ -221,7 +221,7 @@ export const viewOf = (id: string) => {
 export function Id({ id, none = "none" }: { id: string | null | undefined; none?: string }) {
   if (id == null) return none;
   const view = viewOf(id);
-  return view === undefined ? <span title={id}>{short(id)}</span> : <Ref to={`/${view}/${id}`} id={id} />;
+  return view === undefined ? <span title={id}>{short(id)}</span> : <Ref to={`/${view}/${encodeURIComponent(id)}`} id={id} />;
 }
 
 export const Head = ({ cols }: { cols: readonly string[] }) => <thead><tr>{cols.map((c) => <th key={c} scope="col">{c}</th>)}</tr></thead>;

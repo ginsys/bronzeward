@@ -5,7 +5,7 @@
 
 import { Fragment as Group, type ReactNode } from "react";
 import type { components } from "./api/v1";
-import { Head, Id, Ref, Scroll, short, useItem, usePending } from "./list.tsx";
+import { Head, Id, Ref, Scroll, short, useItem, usePending, viewOf } from "./list.tsx";
 import { Withheld } from "./states.tsx";
 
 type S = components["schemas"];
@@ -15,15 +15,22 @@ type Prov = S["ProvenanceRecord"];
 
 const enc = encodeURIComponent;
 
-// A rendered review's path. Each identifier is one encoded segment, so no identifier can change the path.
-export const reviewPath = (release: string, machine: string) => `/releases/${enc(release)}/machines/${enc(machine)}`;
+// A rendered review's path, or undefined when either identifier is not of its kind (a release `rel_…`, a machine
+// `mch_…`). That also refuses a dot-only identifier, which a browser would read as a path step. Each identifier
+// is one encoded segment, so no identifier can change the path.
+export function reviewPath(release: string, machine: string): string | undefined {
+  if (viewOf(release) !== "releases" || viewOf(machine) !== "machines") return undefined;
+  return `/releases/${enc(release)}/machines/${enc(machine)}`;
+}
 
-// The release and the machine a path names, decoded; undefined when it is no review path or a segment is not valid encoding.
+// The release and the machine a path names, decoded; undefined when it is no review path, a segment is not valid
+// encoding, or an identifier is not of its kind.
 export function reviewIds(path: string): [release: string, machine: string] | undefined {
   const m = /^\/releases\/([^/]+)\/machines\/([^/]+)$/.exec(path);
   if (m === null) return undefined;
   try {
-    return [decodeURIComponent(m[1]!), decodeURIComponent(m[2]!)];
+    const ids: [string, string] = [decodeURIComponent(m[1]!), decodeURIComponent(m[2]!)];
+    return reviewPath(...ids) === undefined ? undefined : ids;
   } catch {
     return undefined;
   }
@@ -64,12 +71,16 @@ export function parts(configuration: string): Part[] {
 }
 
 // What the machine needs next for this release (B18), from its Desired and Applied alone.
-export function nextStep(release: string, m: Pick<Machine, "desired" | "applied">): string {
+export function nextStep(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence">): string {
   if (m.desired !== release) {
     return `This release is not the Desired release of this machine${m.desired === null ? "" : ` (Desired is ${short(m.desired)})`}, so it needs no step for this release.`;
   }
   if (m.applied === null) return "This machine has no Applied configuration. Hand it over first (an adopt plan): an apply-config plan is refused until then. Nothing has been sent to it.";
-  if (m.applied.release === release) return "This release is the one Applied on this machine. Nothing is left to send.";
+  if (m.applied.release === release) {
+    // After an adoption the Applied release can equal the Desired one while the node's bytes differ (operator-experience §2.4).
+    if (m.pendingConvergence) return "This release is Desired and Applied on this machine, but its configuration is pending convergence: it differs from what Bronzeward applied. An apply-config plan sends this release to it. Nothing has been sent yet.";
+    return "This release is the one Applied on this machine. Nothing is left to send.";
+  }
   return `This machine has an Applied configuration (release ${short(m.applied.release)}). An apply-config plan sends this release to it. Nothing has been sent yet.`;
 }
 

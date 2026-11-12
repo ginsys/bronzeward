@@ -265,7 +265,10 @@ const BUILT: readonly Col<S["ReleaseSourceBody"]>[] = [
 ];
 const covered = (release: string): readonly Col<S["ReleaseMachineBody"]>[] => [
   ["Machine", (m) => <Id id={m.machine} />], ["Mode", (m) => m.mode], ["Publication observation", (m) => <Id id={m.publicationObservation} />],
-  ["Rendered configuration", (m) => <Ref to={reviewPath(release, m.machine)} id={m.machine}>Rendered configuration of {short(m.machine)}</Ref>],
+  ["Rendered configuration", (m) => {
+    const to = reviewPath(release, m.machine);
+    return to === undefined ? "none" : <Ref to={to} id={m.machine}>Rendered configuration of {short(m.machine)}</Ref>;
+  }],
 ];
 
 export function ReleaseItem({ id }: { id: string }) {
