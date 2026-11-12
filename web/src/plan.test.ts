@@ -1,8 +1,8 @@
 import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { type Reads, ReadsProvider } from "./list.tsx";
-import { CANCEL_NOTE, nextAfter, NO_TARGET, PlanNew, PlanState, planBody, planPath, reasonProblem, REASON_MAX, staleReasons, STALE_AFTER_RECOVERY, takeFresh } from "./plan.tsx";
+import { CANCEL_NOTE, nextAfter, NO_TARGET, PlanNew, PlanState, planBody, planPath, poll, reasonProblem, REASON_MAX, staleReasons, STALE_AFTER_RECOVERY, takeFresh } from "./plan.tsx";
 import { Change } from "./resources.tsx";
 import { planFor } from "./review.tsx";
 
@@ -113,6 +113,29 @@ describe("the plan page's state lines (ginsys/bronzeward#357, B20, B22)", () => 
 
   test("the cancel control states that a cancellation after commitment ends the operation only while no attempt is recorded", () => {
     expect(CANCEL_NOTE).toBe("Cancelling after the controller commits ends the operation only while no attempt is recorded.");
+  });
+
+  test("the poll reads again after 5 seconds and every 15 after that, so a plan read without answer is tried again, until stopped", () => {
+    vi.useFakeTimers();
+    try {
+      const reread = vi.fn();
+      const stop = poll(reread);
+      vi.advanceTimersByTime(4999);
+      expect(reread).toHaveBeenCalledTimes(0);
+      vi.advanceTimersByTime(1);
+      expect(reread).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(14999);
+      expect(reread).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      expect(reread).toHaveBeenCalledTimes(2);
+      vi.advanceTimersByTime(15000);
+      expect(reread).toHaveBeenCalledTimes(3);
+      stop();
+      vi.advanceTimersByTime(60000);
+      expect(reread).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
