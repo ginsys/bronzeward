@@ -54,9 +54,8 @@ func TestRecoveryEntryLoseReplySeam(t *testing.T) {
 
 // PROT-06 case 4: a continuation stalled at draft-commit has released its claim and written the
 // draft, the operation and its terminal event, and commits nothing. Its heartbeat waits on the
-// claim's lock, so the lease lapses and a read of the ingestion answers held, past leaseUntil. The
-// operation's own read waits for the commit (ginsys/bronzeward#799), so it is read after the
-// release: succeeded, with the claim released.
+// claim's lock, so the lease lapses and a read of the ingestion answers held, past leaseUntil.
+// After the release the operation reads succeeded and the claim released.
 func TestDraftCommitStallSeam(t *testing.T) {
 	ie := newIngestEnv(t, options{})
 	op, j, _ := ie.pausedForContinue(t)
