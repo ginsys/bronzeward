@@ -1,4 +1,4 @@
-description: Issue 3's bool case. A boolean cannot carry a tracer; its flip pass attributes it. The base's own value beside it in a diff discloses it unless the diff pairs the redaction.
+description: Issue 3's bool case (KubeNodeConfig registerWithFQDN). A boolean cannot carry a tracer; its flip pass attributes it. The recorded v1.13.6 result also showed a base value beside it in a diff disclosing it unless the diff pairs the redaction. The gate's two bases leave this field unset, so that pairing control is no longer exercised here.
 transformation: resolution
 from: bool
 values:
