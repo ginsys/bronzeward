@@ -21,7 +21,7 @@ The fixture pins, in [`fixtures/versions.env`](../../fixtures/versions.env):
 | PostgreSQL | `postgres:17-alpine`, by digest |
 
 Its cluster is one control plane and one worker, in containers: no reboot, no disks, no installer.
-Results hold for that topology and Talos v1.14.5 only.
+Results hold for that topology only. Recorded results are from Talos v1.13.6 until they are rerun on v1.14.5.
 
 ## Not covered
 
