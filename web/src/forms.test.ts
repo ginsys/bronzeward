@@ -116,7 +116,10 @@ describe("the notice (B11)", () => {
     const [writes, w] = scripted(() => (page!.setAside(EPOCH_CHANGED_ASIDE), { status: 403, headers: new Headers(), data: p }));
     page = writes;
     expect(await writes.submit(w)).toMatchObject({ kind: "refused", status: 403 });
-    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain("Not saved: the server answered 403. Needs author. forbidden: not allowed. Request req-1. Key");
+    const shown = html(writes, h(WriteNotices, { go: () => {} }));
+    expect(shown).toContain("Not saved: the server answered 403. Needs author. forbidden: not allowed. Request req-1. Key");
+    // A retained refusal is announced as an alert, as the form's own refusal was (ginsys/bronzeward#815).
+    expect(shown).toContain('<p role="alert" data-testid="write-notice">');
   });
 
   test("§8.4 item 8: a kept notice settled by a cut-off refusal says the answer was cut off", async () => {

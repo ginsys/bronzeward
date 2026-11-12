@@ -25,7 +25,7 @@ export const clock = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit
 export const when = (at: string | null | undefined) => (at == null ? "none" : new Date(at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }));
 
 // `role` is "alert" for a server refusal, which a screen reader then announces at once.
-export function Status({ children, actions, testid = "status", role = "status" }: { children: ReactNode; actions?: ReactNode; testid?: string | undefined; role?: "status" | "alert" }) {
+export function Status({ children, actions, testid = "status", role = "status" }: { children: ReactNode; actions?: ReactNode; testid?: string | undefined; role?: "status" | "alert" | undefined }) {
   return (
     <div>
       <p role={role} data-testid={testid}>{children}</p>
@@ -145,8 +145,8 @@ export const SetAside = ({ why, problem = null, onShow, detail, onDismiss, testi
 );
 
 // A [Repeat exactly] that settled: its result, until dismissed.
-export const Repeated = ({ line, onShow, detail, onDismiss, testid }: Notice & { line: string }) => (
-  <Status testid={testid} actions={<>{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{line}{detail}</Status>
+export const Repeated = ({ line, onShow, detail, onDismiss, testid, role }: Notice & { line: string; role?: "status" | "alert" }) => (
+  <Status testid={testid} role={role} actions={<>{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{line}{detail}</Status>
 );
 
 export const Replayed = () => <Status>{REPLAYED}</Status>;
