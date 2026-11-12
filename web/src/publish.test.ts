@@ -4,7 +4,8 @@ import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { publishPath } from "./drafts.tsx";
 import { type Reads, ReadsProvider, short } from "./list.tsx";
-import { accepted, NO_DRAFT, NOT_OPEN, notEstablished, operationId, PublishDraft, publishEnd, SENT_NOTHING } from "./publish.tsx";
+import { accepted, NO_DRAFT, NOT_OPEN, notEstablished, operationId, PublishDraft, publishEnd, publishLocked, SENT_NOTHING } from "./publish.tsx";
+import type { Outcome } from "./write.ts";
 
 type Operation = components["schemas"]["OperationBody"];
 const op = (state: string, result: unknown, error: unknown = null) => ({ id: "op_BWSYNTH-pub", state, result, error }) as unknown as Operation;
@@ -62,5 +63,20 @@ describe("the publication page (ginsys/bronzeward#342, journeys §5.5)", () => {
     const page = html(h(PublishDraft, { query: "draft=drf_a" }));
     expect(page).toContain("Loading the draft");
     expect(page).not.toContain(">Publish<");
+  });
+
+  // ginsys/bronzeward#798 review thread: a dismissed unknown outcome left Publish locked for good.
+  test("Publish is locked while a write is open or accepted, and free once an unknown outcome's notice is dismissed", () => {
+    const done = (data: unknown): Outcome => ({ kind: "done", status: 202, data, replayed: false });
+    const unknown: Outcome = { kind: "unknown", why: "the answer was lost", problem: null };
+    expect(publishLocked(true, undefined, undefined), "in flight").toBe(true);
+    expect(publishLocked(true, unknown, undefined), "unknown, notice still open").toBe(true);
+    expect(publishLocked(false, unknown, undefined), "unknown, notice dismissed").toBe(false);
+    expect(publishLocked(false, undefined, undefined), "nothing sent").toBe(false);
+    expect(publishLocked(false, { kind: "refused", status: 412, problem: null, replayed: false }, undefined), "refused").toBe(false);
+    expect(publishLocked(false, done({ id: "op_a" }), undefined), "accepted, operation not ended").toBe(true);
+    expect(publishLocked(false, done({ id: "op_a" }), "op_b"), "another operation failed").toBe(true);
+    expect(publishLocked(false, done({ id: "op_a" }), "op_a"), "accepted operation failed").toBe(false);
+    expect(publishLocked(false, done(null), undefined), "accepted, names no operation").toBe(true);
   });
 });
