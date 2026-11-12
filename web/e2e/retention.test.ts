@@ -52,24 +52,33 @@ const calleeName = (callee: ts.Expression): string | undefined => {
   return undefined;
 };
 
+// The capture a callee names, or undefined: a capture name, tracing.start, or either one reached through
+// .call or .apply (page.pdf.call(page) makes the same PDF as page.pdf()).
+const captureOf = (callee: ts.Expression): string | undefined => {
+  callee = unwrap(callee);
+  const name = calleeName(callee);
+  if (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) {
+    if (name === "call" || name === "apply") return captureOf(callee.expression);
+    if (name === "start" && calleeName(unwrap(callee.expression)) === "tracing") return "tracing.start";
+  }
+  return name !== undefined && ARTIFACT_NAMES.has(name) ? name : undefined;
+};
+
 // The capture calls of a source, in source order, read from the TypeScript parse tree in the language mode
-// of the file name. A call counts in every syntax that makes it: a.b(), a?.b(), a.b?.(), a["b"](), a?.["b"]()
-// and a callee inside parentheses, a non-null assertion or a type assertion. A comment or a string makes no call.
+// of the file name. A call counts in every syntax that makes it: a.b(), a?.b(), a.b?.(), a["b"](), a?.["b"](),
+// a.b.call() and a.b.apply(), and a callee inside parentheses, a non-null assertion or a type assertion. A
+// comment or a string makes no call. The source is parsed as a module, as the real files are, so that a
+// top-level await is an await and not a call of a function named await.
 export const artifactCalls = (source: string, fileName = "source.ts"): string[] => {
   const found: string[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
-      const callee = unwrap(node.expression);
-      const name = calleeName(callee);
-      if (name === "start" && (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) && calleeName(unwrap(callee.expression)) === "tracing") {
-        found.push("tracing.start");
-      } else if (name !== undefined && ARTIFACT_NAMES.has(name)) {
-        found.push(name);
-      }
+      const capture = captureOf(node.expression);
+      if (capture !== undefined) found.push(capture);
     }
     ts.forEachChild(node, visit);
   };
-  visit(ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true));
+  visit(ts.createSourceFile(fileName, `${source}\nexport {};\n`, ts.ScriptTarget.Latest, true));
   return found;
 };
 
@@ -155,6 +164,12 @@ test("the positive control: the read flags an optional call, a bracket call and 
     "screenshot",
     "pdf",
   ]);
+});
+
+test("the positive control: the read flags a capture reached through call or apply", () => {
+  const sample = `await page.pdf.call(page); await page.pdf.apply(page, []); await p.tracing.start.call(p);
+    await browser["saveScreenshot"].call(browser, "a.png"); await page.pdf?.call(page); await (page.screenshot).apply(page);`;
+  expect(artifactCalls(sample)).toEqual(["pdf", "pdf", "tracing.start", "saveScreenshot", "pdf", "screenshot"]);
 });
 
 test("the negative control: a capture name in a comment, a string, a variable or a plain call makes no call", () => {
