@@ -3,8 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { type Reads, ReadsProvider, short } from "./list.tsx";
-import { reviewPath } from "./resources.tsx";
-import { EMPTY_NOTE, nextStep, NO_PROVENANCE, PROVENANCE_LIMIT, ReviewBody, ReviewItem, parts, tokenLabel } from "./review.tsx";
+import { EMPTY_NOTE, nextStep, NO_PROVENANCE, PROVENANCE_LIMIT, ReviewBody, ReviewItem, parts, reviewIds, reviewPath, tokenLabel } from "./review.tsx";
 import { WITHHELD } from "./states.tsx";
 
 type Review = components["schemas"]["ReviewBody"];
@@ -62,7 +61,9 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
   });
 
   test("text that only looks like a token stays text, and an empty value is never a badge", () => {
-    for (const text of ["team: \"\"", "note: <redacted", "a: redacted:schema", "x: <redact:value>", ""]) {
+    // The last four are outside compilation §8.3: an unknown kind, a name outside the §5.1 grammar, a missing or zero version.
+    const outside = ["note: <redacted:example>", "x: <redacted:invalid_name@1>", "x: <redacted:Upper/case@1>", "x: <redacted:app/x@>", "x: <redacted:app/x@0>", "x: <redacted:app//x@1>", "x: <redacted:-a@1>"];
+    for (const text of ["team: \"\"", "note: <redacted", "a: redacted:schema", "x: <redact:value>", "", ...outside]) {
       expect(parts(text), text).toEqual(text === "" ? [] : [{ text }]);
     }
   });
@@ -111,5 +112,17 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
     expect(page).toContain("Rendered configuration of mch_b in release rel_a");
     expect(page).toContain("Loading the rendered review");
     expect(reviewPath("rel_a", "mch_b")).toBe("/releases/rel_a/machines/mch_b");
+  });
+
+  test("an identifier is one path segment: a crafted one cannot change which review is read", () => {
+    const crafted = "mch_x/../../../rel_b/machines/mch_y";
+    const path = reviewPath("rel_a", crafted);
+    expect(path).toBe("/releases/rel_a/machines/mch_x%2F..%2F..%2F..%2Frel_b%2Fmachines%2Fmch_y");
+    expect(new URL(path, "https://bronzeward.test").pathname).toBe(path);
+    expect(reviewIds(path)).toEqual(["rel_a", crafted]);
+    expect(reviewIds(reviewPath("rel a?#", "mch&b"))).toEqual(["rel a?#", "mch&b"]);
+    expect(reviewIds("/releases/rel_a/machines/%E0%A4%A")).toBeUndefined();
+    expect(reviewIds("/releases/rel_a/machines/mch_b/extra")).toBeUndefined();
+    expect(reviewIds("/releases/rel_a")).toBeUndefined();
   });
 });

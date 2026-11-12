@@ -15,9 +15,26 @@ type Prov = S["ProvenanceRecord"];
 
 const enc = encodeURIComponent;
 
+// A rendered review's path. Each identifier is one encoded segment, so no identifier can change the path.
+export const reviewPath = (release: string, machine: string) => `/releases/${enc(release)}/machines/${enc(machine)}`;
+
+// The release and the machine a path names, decoded; undefined when it is no review path or a segment is not valid encoding.
+export function reviewIds(path: string): [release: string, machine: string] | undefined {
+  const m = /^\/releases\/([^/]+)\/machines\/([^/]+)$/.exec(path);
+  if (m === null) return undefined;
+  try {
+    return [decodeURIComponent(m[1]!), decodeURIComponent(m[2]!)];
+  } catch {
+    return undefined;
+  }
+}
+
 // compilation §8.3: `<redacted:REF@VERSION>`, `<redacted:REF@VERSION#N>`, `<redacted:schema>`, `<redacted:value>`,
-// `<redacted:paired>` and `<redacted>`. A token inside a JSON string reaches the page with both angle brackets written as Unicode escapes.
-const TOKEN = /(?:<|\\u003c)redacted(?::([^<>@\s\\]+)(?:@(\d+)(?:#(\d+))?)?)?(?:>|\\u003e)/g;
+// `<redacted:paired>` and `<redacted>`. A name is segments of lowercase letters, digits and hyphens joined by `/`
+// (compilation §5.1), so text outside that grammar stays text. A token inside a JSON string reaches the page with
+// both angle brackets written as Unicode escapes.
+const SEGMENT = "[a-z0-9](?:[a-z0-9-]*[a-z0-9])?";
+const TOKEN = new RegExp(`(?:<|\\\\u003c)redacted(?::(?:(schema|value|paired)|(${SEGMENT}(?:/${SEGMENT})*)@([1-9][0-9]*)(?:#([0-9]+))?))?(?:>|\\\\u003e)`, "g");
 
 export type Part = { text: string } | { token: string; label: string };
 
@@ -39,7 +56,7 @@ export function parts(configuration: string): Part[] {
   for (const m of configuration.matchAll(TOKEN)) {
     const i = m.index as number;
     if (i > at) out.push({ text: configuration.slice(at, i) });
-    out.push({ token: m[0], label: tokenLabel(m[1], m[2], m[3]) });
+    out.push({ token: m[0], label: tokenLabel(m[1] ?? m[2], m[3], m[4]) });
     at = i + m[0].length;
   }
   if (at < configuration.length) out.push({ text: configuration.slice(at) });
@@ -124,7 +141,7 @@ export function ReviewItem({ release, machine }: { release: string; machine: str
   return (
     <>
       <h2>Rendered configuration of {short(machine)} in release {short(release)}</h2>
-      <p><Ref to={`/releases/${release}`} id={release}>Back to the release</Ref></p>
+      <p><Ref to={`/releases/${enc(release)}`} id={release}>Back to the release</Ref></p>
       {review.kind === "ok" ? <ReviewBody r={review.data} /> : pending}
       <h3>Next step</h3>
       {mach.kind === "ok" ? <p data-testid="next-step">{nextStep(release, mach.data)}</p> : machinePending}

@@ -13,7 +13,7 @@ import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, us
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
 import { RecoveryConsole } from "./recovery.tsx";
-import { ReviewItem } from "./review.tsx";
+import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { when } from "./states.tsx";
 
@@ -263,8 +263,6 @@ export function Changes() {
 const BUILT: readonly Col<S["ReleaseSourceBody"]>[] = [
   ["Kind", (s) => s.kind], ["Source", (s) => <Id id={s.head} />], ["Revision", (s) => <Id id={s.revision} none="removed" />],
 ];
-// A covered machine's rendered review has its own page: /releases/<release>/machines/<machine>.
-export const reviewPath = (release: string, machine: string) => `/releases/${release}/machines/${machine}`;
 const covered = (release: string): readonly Col<S["ReleaseMachineBody"]>[] => [
   ["Machine", (m) => <Id id={m.machine} />], ["Mode", (m) => m.mode], ["Publication observation", (m) => <Id id={m.publicationObservation} />],
   ["Rendered configuration", (m) => <Ref to={reviewPath(release, m.machine)} id={m.machine}>Rendered configuration of {short(m.machine)}</Ref>],
@@ -439,8 +437,8 @@ export function DependencyItem({ id }: { id: string }) {
 // the machine list, the hub of the journeys (§6). An identifier is never percent-encoded; one that
 // is answers 404 once the view encodes it again.
 export function view(path: string, query: string, go: (to: string) => void): ReactNode | undefined {
-  const review = /^\/releases\/([^/]+)\/machines\/([^/]+)$/.exec(path);
-  if (review !== null) return <ReviewItem key={`${review[1]}/${review[2]}`} release={review[1]!} machine={review[2]!} />;
+  const review = reviewIds(path);
+  if (review !== undefined) return <ReviewItem key={path} release={review[0]} machine={review[1]} />;
   const [, kind, id] = /^\/([a-z-]+)(?:\/([^/]+))?$/.exec(path === "/" ? "/machines" : path) ?? [];
   const source = /^(fragment|profile|assignment)s$/.exec(kind ?? "")?.[1] as Kind | undefined;
   const revision = /^(fragment|profile|assignment)-revisions$/.exec(kind ?? "")?.[1] as Kind | undefined;
