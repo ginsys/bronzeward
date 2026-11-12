@@ -174,7 +174,7 @@ const LOADING: Reads = { approval: { kind: "loading" }, now: { kind: "loading" }
 
 // The approved plan's own reads, and the poll. One chain, so nothing is superseded while it is in flight: each answer
 // of the plan starts the three reads, and five seconds after they are all answered the plan is read again. A read the
-// shell invalidated (a view change, a refused credential) ends the chain until the shell's own read-again.
+// shell did not answer (offline, a transport failure) keeps what is shown, and the poll goes on.
 function Approved({ p, reread }: { p: Plan; reread: () => void }) {
   const settled = useSettled();
   const [seen, setSeen] = useState<Reads>(LOADING);
@@ -187,8 +187,8 @@ function Approved({ p, reread }: { p: Plan; reread: () => void }) {
         settled<Identity>("/identity", () => live),
         settled<Machine>(`/machines/${enc(p.machine)}`, () => live),
       ]);
-      if (!live || approval === undefined || now === undefined || machine === undefined) return;
-      setSeen({ approval, now, machine });
+      if (!live) return;
+      setSeen((s) => ({ approval: approval ?? s.approval, now: now ?? s.now, machine: machine ?? s.machine }));
       timer = setTimeout(reread, 5000);
     })();
     return () => {
