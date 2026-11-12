@@ -71,7 +71,7 @@ mutation_ref='S5 pass'
 WORKER_MARK='doc[0]/machine/files/0/content'
 # S2's node label is a reference to that secret, so the node carries its value there too, and an
 # unmarked copy of a marked value is refused (compilation's guard).
-LABEL_MARK='doc[0]/machine/nodeLabels/bw-s2'
+LABEL_MARK='' # set by set_adopt_marks: its document position is measured on the node
 REGISTRY=registry.s5.invalid
 REGISTRY_MARK="doc[0]/machine/registries/config/$REGISTRY/auth/password"
 # The interval S5 observes at, and the one every other scenario runs at (server.yaml.in).
@@ -442,12 +442,13 @@ label_unselected() {
   etag=$(etag_of_last)
 }
 
-# node_at <path>: the inline value at that path of the first document on stdin, a trailing comment
-# and plain quotes removed; nothing when the node is absent or its value is not on its key's line. The path is a mark's without its doc[0]/,
-# sequence elements by index. Reads the block style Bronzeward and Talos write: a key per line,
-# sequence items "- " indented under their key.
+# node_at <mark>: the inline value at that mark's path of the mark's document of the stream on
+# stdin (doc[N]/<path>), a trailing comment and plain quotes removed; nothing when the node is
+# absent or its value is not on its key's line. Sequence elements by index. Reads the block style
+# Bronzeward and Talos write: a key per line, sequence items "- " indented under their key.
 node_at() {
-  awk -v want="$1" '
+  local doc=${1#doc[}
+  awk -v want="${1#*/}" -v doc="${doc%%]*}" '
     function path(  i, p) { p = k[1]; for (i = 2; i <= n; i++) p = p "/" k[i]; return p }
     function key(ind, t,  name, v) {
       if (t !~ /^[^ :][^:]*:( |$)/) return
@@ -461,7 +462,8 @@ node_at() {
       if (v ~ /^[|>][-+0-9]*$/) skip = ind
     }
     BEGIN { skip = -1 }
-    /^---/ { exit }
+    /^---/ { if (++d > doc) exit; n = 0; skip = -1; delete cnt; next }
+    d < doc { next }
     /^ *(#.*)?$/ { next }
     {
       match($0, /^ */); ind = RLENGTH; t = substr($0, ind + 1)
@@ -475,7 +477,7 @@ node_at() {
       key(ind + 2, substr(t, 3))
     }'
 }
-# reference_at <path>: the !bwref name at that path of the first document on stdin, nothing when
+# reference_at <mark>: the !bwref name at that mark's path of its document on stdin, nothing when
 # the node is absent or not a reference.
 reference_at() {
   local v
@@ -493,7 +495,7 @@ adopted_references() {
   rev=$(sql "SELECT import_base_revision FROM release_machine WHERE release = '$new_release' AND machine = '$machine_w'") || return 1
   [ -n "$rev" ] && [ "${#ingested[@]}" -ge 1 ] || return 1
   for mark in "$REGISTRY_MARK" "$WORKER_MARK" "$LABEL_MARK"; do
-    name=$(sql "SELECT document FROM import_base_revision WHERE id = '$rev'" | reference_at "${mark#'doc[0]/'}") || return 1
+    name=$(sql "SELECT document FROM import_base_revision WHERE id = '$rev'" | reference_at "$mark") || return 1
     g=$(sql "SELECT generation FROM import_base_reference WHERE revision = '$rev' AND name = '$name'") || return 1
     [ -n "$name" ] && [ "${g#"gen/$cluster/${ingested[-1]}/"}" != "$g" ] || {
       say "s5: the adopted base's $mark is not a reference to a generation of the drift adoption"
@@ -519,7 +521,7 @@ adopted_values() {
     WHERE rm.release = '$new_release' AND rm.machine = '$machine_w'") || return 1
   [ -n "$ct" ] && plain=$(bao write -field=plaintext transit/decrypt/bw-baseline ciphertext="$ct" | base64 -d) || return 1
   for mark in "${!gens[@]}"; do
-    want=$(printf '%s\n' "$plain" | node_at "${mark#'doc[0]/'}") || return 1
+    want=$(printf '%s\n' "$plain" | node_at "$mark") || return 1
     data=$(bao kv get -format=json -mount=secret "${gens[$mark]}" | jq -c '.data.data') || return 1
     [ -n "$want" ] && [ "$(printf '%s' "$data" | jq -r '.kind')" = string ] &&
       [ "$(printf '%s' "$data" | jq -r '.value')" = "$want" ] || {
@@ -536,7 +538,13 @@ adopted_values() {
 # The drift adoption's refusal and interruptions (compilation §15, the acceptance plan's S5 pass
 # criteria), each in the adoption's draft, the refusal before the one that succeeds and the
 # interruptions after it, the record open throughout.
-ADOPT_MARKS=$(jq -nc --arg a "$WORKER_MARK" --arg l "$LABEL_MARK" --arg b "$REGISTRY_MARK" '[$a, $l, $b]')
+ADOPT_MARKS=''
+# set_adopt_marks: S2's label is a KubeNodeConfig document of the node's stream, so its mark is
+# measured on the worker now (label_mark) and the three marks are made from it.
+set_adopt_marks() {
+  LABEL_MARK=$(label_mark "$TALOS_WORKER_IP" bw-s2) || return 1
+  ADOPT_MARKS=$(jq -nc --arg a "$WORKER_MARK" --arg l "$LABEL_MARK" --arg b "$REGISTRY_MARK" '[$a, $l, $b]')
+}
 # adoption_body <marks JSON array>: a drift adoption of the worker into the draft, source machine,
 # transient.
 adoption_body() {
@@ -762,6 +770,7 @@ unfreeze_refused_cli() {
 
 adopt() {
   local ref='S5 step 4' plan_body_json w_after cp_after step
+  set_adopt_marks || die "s5: the worker's configuration holds no one KubeNodeConfig document, which S2's label needs"
   check "$ref" 'h-author opens a new draft: 201' draft_by h-author adopt
   fresh_author
   check "$ref, C §15" "a drift adoption marking the file content and the password, not S2's label of it: the claim abandoned, the operation failed 422 guard-value naming the label, no secret in its problem; the draft's ETag, the revisions and gen/ unchanged, the record open" \

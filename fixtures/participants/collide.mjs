@@ -144,7 +144,7 @@ async function collide(token) {
   const put = await fetch(`${api}/drafts/${draft}/fragments/${fragment}`, {
     method: "PUT",
     headers: { ...auth, "Content-Type": "application/json", "If-Match": etag, "Idempotency-Key": `participants-collide-${Date.now()}` },
-    body: JSON.stringify({ layer: "role", document: `machine:\n  nodeLabels:\n    bw-team: "${value}"\n`, marks: [] }),
+    body: JSON.stringify({ layer: "role", document: `apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  bw-team: "${value}"\n`, marks: [] }),
   });
   if (put.status !== 200) throw new Error(`PUT ${fragment}: ${put.status}`);
   out(`collide: h-all saved bw-team: ${value} into draft ${draft}: 200; the participant's next save is refused for its ETag`);

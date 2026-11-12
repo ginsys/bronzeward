@@ -212,7 +212,7 @@ before=$(worker_digest)
 version_before=$(worker_version)
 worker_talos get machineconfig v1alpha1 -o jsonpath='{.spec}' >"$STATE/data/selftest-worker.yaml"
 talosctl machineconfig patch "$STATE/data/selftest-worker.yaml" \
-  --patch "{\"machine\":{\"nodeLabels\":{\"bronzeward.test/selftest\":\"r$(date -u +%s%N)\"}}}" \
+  --patch "{\"apiVersion\":\"v1alpha1\",\"kind\":\"KubeNodeConfig\",\"labels\":{\"bronzeward.test/selftest\":\"r$(date -u +%s%N)\"}}" \
   --output "$STATE/data/selftest-worker-next.yaml"
 sent=$(sha256sum <"$STATE/data/selftest-worker-next.yaml" | cut -d' ' -f1)
 worker_talos apply-config --mode=no-reboot --file "$STATE/data/selftest-worker-next.yaml" >/dev/null

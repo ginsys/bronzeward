@@ -420,6 +420,16 @@ mutation_ref=''
 
 # node_talos <node ip> <talosctl args...>: talosctl against one node, through that node.
 node_talos() { talosctl_timed 20 -e "$1" -n "$1" "${@:2}"; }
+# label_mark <node ip> <label>: the mark that addresses one node label in that node's configuration,
+# doc[N]/labels/<label>. N is the position of the node's one KubeNodeConfig document, measured on
+# the node now and recorded in $EV/label-doc-index. It fails when the node holds none or several.
+label_mark() {
+  local n
+  n=$(node_talos "$1" get machineconfig v1alpha1 -o jsonpath='{.spec}' |
+    awk '/^---/ { d++; next } /^kind: KubeNodeConfig$/ { c++; at = d + 0 } END { if (c == 1) print at; else exit 1 }') || return 1
+  printf '%s\n' "$n" >"$EV/label-doc-index"
+  printf 'doc[%s]/labels/%s\n' "$n" "$2"
+}
 # digest_of <bundle file> <node ip>: the first field of that node's line.
 digest_of() { awk -v n="$2" '$2 == n {print $1}' "$1"; }
 # apid_log <node ip>: that node's apid log, as its buffer holds it now.
@@ -656,7 +666,7 @@ fragment_by() {
   local body
   fresh "$1"
   body=$(jq -nc --arg n "$3" --arg l "${4:-cluster}" --arg s "$scenario" \
-    '{layer: $l, document: ("machine:\n  nodeLabels:\n    bw-" + $s + "-" + $n + ": \"yes\"\n"), marks: []}') || return 1
+    '{layer: $l, document: ("apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  bw-" + $s + "-" + $n + ": \"yes\"\n"), marks: []}') || return 1
   answers 200 - PUT "/api/v1/drafts/$draft/fragments/$scenario-$3" "$tok" "$body" "$(key "fragment-$2")" "$etag" || return 1
   differ "$(etag_of_last)" "$etag" || return 1
   etag=$(etag_of_last)

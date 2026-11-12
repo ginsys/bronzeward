@@ -101,7 +101,7 @@ publish_import() {
   # has an assignment, and an assignment must select something: one cluster-layer fragment, a
   # single node label, which the release then carries beyond the import (pending convergence).
   local m body
-  body=$(jq -nc '{layer: "cluster", document: "machine:\n  nodeLabels:\n    bw-s3-handover: \"yes\"\n", marks: []}') || return 1
+  body=$(jq -nc '{layer: "cluster", document: "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  bw-s3-handover: \"yes\"\n", marks: []}') || return 1
   answers 200 - PUT "/api/v1/drafts/$import_draft/fragments/s3-handover" "$author" "$body" "$(key fragment-s3-handover)" "$etag" || return 1
   etag=$(etag_of_last)
   [ -n "$etag" ] || return 1
@@ -291,7 +291,7 @@ adopted_again() {
 # patch). Nothing of the patch is kept: the node's answer is a status only.
 digest_patch() {
   local patch=$STATE/s3-label-patch rc=0
-  printf 'machine:\n  nodeLabels:\n    bw-s3-control: digest\n' >"$patch"
+  printf 'apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  bw-s3-control: digest\n' >"$patch"
   node_talos "$TALOS_WORKER_IP" patch machineconfig --mode no-reboot --patch "@$patch" >/dev/null 2>&1 || rc=$?
   rm -f -- "$patch"
   return "$rc"
