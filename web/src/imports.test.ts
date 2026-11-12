@@ -136,6 +136,14 @@ describe("a watch's end", () => {
     const out = text(await ended(reading({ kind: "transport" }).client, ing(), op({ state: "failed", error: { type: "urn:bronzeward:problem:precondition-failed", title: "precondition failed", status: 412, instance: "req_1" } }), "failed", NOW, "e1"));
     expect(out).toBe("Import ing_6fdq2la (operation op_zcfw5mcm) failed: precondition-failed. The draft changed after this import started, so the import was not applied and its claim is abandoned. Import again");
   });
+  test("a machine-identity-mismatch names the differing field, and shows no other cause text", async () => {
+    const c = reading({ kind: "transport" }).client;
+    const failed = (cause: string) => op({ state: "failed", error: { type: "urn:bronzeward:problem:machine-identity-mismatch", title: "mismatch", status: 409, instance: "req_1", machine: "mch_1", cause } });
+    for (const field of ["smbios-uuid", "node-id", "cluster-id"]) {
+      expect(text(await ended(c, ing(), failed(field), "failed", NOW, "e1"))).toBe(`Import ing_6fdq2la (operation op_zcfw5mcm) failed: machine-identity-mismatch. The node's ${field} is not the recorded one. Import again`);
+    }
+    expect(text(await ended(c, ing(), failed("provider said: secret-value"), "failed", NOW, "e1"))).toBe("Import ing_6fdq2la (operation op_zcfw5mcm) failed: machine-identity-mismatch. Import again");
+  });
   test("a pause, a resume-failed and a lapsed lease end the watch on a running operation, the last of unknown outcome", async () => {
     const c = reading({ kind: "transport" }).client;
     expect(text(await ended(c, ing({ state: "paused" }), op({}), "paused", NOW, "e1"))).toMatch(/^Paused for review \(expires /);
