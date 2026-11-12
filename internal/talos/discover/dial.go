@@ -40,29 +40,69 @@ func parseEndpoint(s string) (string, error) {
 	return netip.AddrPortFrom(a, uint16(n)).String(), nil
 }
 
-// credentials are the certificate authority, certificate and key of the talosconfig's current
-// context, and its first endpoint ("" when it names none): its other endpoints, its nodes and its
-// auth block are not used, and nothing is read from or written to disk. The machinery's parser panics on some malformed documents, so a
-// panic is that document's refusal. The errors never quote the talosconfig, which holds the key.
-func credentials(talosconfig []byte) (creds *clientconfig.Context, endpoint string, err error) {
+// ErrUnknownContext is the refusal for a context name that the talosconfig does not hold.
+var ErrUnknownContext = errors.New("discover: the talosconfig has no context of that name")
+
+// chosen is the context of talosconfig called name, or its current context when name is "", and that
+// context's name. The machinery's parser panics on some malformed documents, so a panic is that
+// document's refusal. The errors never quote the talosconfig, which holds the key.
+func chosen(talosconfig []byte, name string) (c *clientconfig.Context, picked string, err error) {
 	notTalosconfig := errors.New("discover: the talosconfig is not a talosconfig document")
 	defer func() {
 		if recover() != nil {
-			creds, endpoint, err = nil, "", notTalosconfig
+			c, picked, err = nil, "", notTalosconfig
 		}
 	}()
 	cfg, err := clientconfig.FromBytes(talosconfig)
 	if err != nil {
 		return nil, "", notTalosconfig
 	}
-	cur := cfg.Contexts[cfg.Context]
-	if cur == nil || cur.CA == "" || cur.Crt == "" || cur.Key == "" {
-		return nil, "", errors.New("discover: the talosconfig's current context has no certificate authority, certificate and key")
+	named := name != ""
+	if !named {
+		name = cfg.Context
 	}
-	if len(cur.Endpoints) > 0 {
-		endpoint = cur.Endpoints[0]
+	c, ok := cfg.Contexts[name]
+	if !ok && named {
+		return nil, "", ErrUnknownContext
 	}
-	return &clientconfig.Context{CA: cur.CA, Crt: cur.Crt, Key: cur.Key}, endpoint, nil
+	if c == nil || c.CA == "" || c.Crt == "" || c.Key == "" {
+		return nil, "", errors.New("discover: the talosconfig's context has no certificate authority, certificate and key")
+	}
+	return c, name, nil
+}
+
+// credentials are the certificate authority, certificate and key of the talosconfig's context called
+// name (the current one when name is ""), and its first endpoint ("" when it names none): its other
+// endpoints, its nodes, its auth block and every other context are not used, and nothing is read from
+// or written to disk.
+func credentials(talosconfig []byte, name string) (creds *clientconfig.Context, endpoint string, err error) {
+	c, _, err := chosen(talosconfig, name)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(c.Endpoints) > 0 {
+		endpoint = c.Endpoints[0]
+	}
+	return &clientconfig.Context{CA: c.CA, Crt: c.Crt, Key: c.Key}, endpoint, nil
+}
+
+// OneContext is a talosconfig of one context: the one called name in talosconfig (the current one when
+// name is ""), with its certificate authority, client certificate and key. Its endpoints, nodes, auth
+// block and every other context are left out, so that no other cluster's key goes where the result goes.
+// The server's reader reads the current context only, and the result names that one. A name that the
+// file does not hold is ErrUnknownContext.
+func OneContext(talosconfig []byte, name string) ([]byte, error) {
+	creds, picked, err := chosen(talosconfig, name)
+	if err != nil {
+		return nil, err
+	}
+	out, err := (&clientconfig.Config{Context: picked, Contexts: map[string]*clientconfig.Context{
+		picked: {CA: creds.CA, Crt: creds.Crt, Key: creds.Key},
+	}}).Bytes()
+	if err != nil {
+		return nil, errors.New("discover: the talosconfig could not be written")
+	}
+	return out, nil
 }
 
 // node is a client for one node. The source guard holds the package to using the client through

@@ -28,10 +28,11 @@ const maxTalosconfig = 1 << 20
 // nothing: the talosconfig never reaches the server (persistence-api.md choice 29). The file is
 // named with --talosconfig and nowhere else is looked at, not $TALOSCONFIG, not a default file.
 func (e *env) clusterDiscover(args []string) error {
-	var file, endpoint string
+	var file, endpoint, talosContext string
 	if _, err := e.parse("cluster discover", args, 0, func(fs *flag.FlagSet) {
 		fs.StringVar(&file, "talosconfig", "", "")
 		fs.StringVar(&endpoint, "endpoint", "", "")
+		fs.StringVar(&talosContext, "talos-context", "", "")
 	}); err != nil {
 		return err
 	}
@@ -55,9 +56,11 @@ func (e *env) clusterDiscover(args []string) error {
 	}
 	var res discover.Result
 	if err := e.cancellable("the cluster's Talos nodes", func(ctx context.Context) (err error) {
-		res, err = discoverCluster(ctx, b, endpoint)
+		res, err = discoverCluster(ctx, b, talosContext, endpoint)
 		return err
-	}); errors.Is(err, discover.ErrNoEndpoint) {
+	}); errors.Is(err, discover.ErrUnknownContext) {
+		return usageError{errors.New("--talos-context names a context that the talosconfig does not hold")}
+	} else if errors.Is(err, discover.ErrNoEndpoint) {
 		return usageError{errors.New("the talosconfig names no endpoint: give --endpoint <host|ip[:port]>")}
 	} else if err != nil {
 		return err

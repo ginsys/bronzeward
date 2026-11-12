@@ -43,7 +43,7 @@ commands:
   status      start mode, recovery mode, open drift and unresolved operations
   cluster list | show <id>
   cluster add --name <name> --endpoint <https url> --contract <v1.x> --talos-cluster-id <id>
-  cluster discover --talosconfig <file> [--endpoint <host|ip[:port]>]   read a cluster, print the commands that record it
+  cluster discover --talosconfig <file> [--talos-context <name>] [--endpoint <host|ip[:port]>]   read a cluster, print the commands that record it
   machine list [--cluster <id>] | show <id> | timeline <id> | observations <id>
   machine timeline <id> --follow [--limit <n>]
               the newest entries, then each new one as the server records it, read every 5s;

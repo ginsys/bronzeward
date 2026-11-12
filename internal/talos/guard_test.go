@@ -232,7 +232,7 @@ const (
 var discoverPolicy = policy{
 	selectors: map[string][]string{
 		machineryClient:  {"Client", "New", "WithConfigContext", "WithEndpoints"},
-		clientConfig:     {"Context", "FromBytes"},
+		clientConfig:     {"Config", "Context", "FromBytes"},
 		cosiSafe:         {"StateGetByID", "StateListAll"},
 		cosiState:        {"IsNotFoundError"},
 		machineryHW:      {"SystemInformation", "SystemInformationID"},
@@ -818,8 +818,8 @@ func TestMachineryCallsAllowlisted(t *testing.T) {
 }
 
 var discoverSurface = []string{
-	"Discover", "ErrNoEndpoint", "Member", "Member.Address", "Member.Answered", "Member.Hostname", "Member.NodeID",
-	"Member.Platform", "Member.Role", "Member.SMBIOSUUID", "Result", "Result.ClusterID", "Result.Contract",
+	"Discover", "ErrNoEndpoint", "ErrUnknownContext", "Member", "Member.Address", "Member.Answered", "Member.Hostname", "Member.NodeID",
+	"Member.Platform", "Member.Role", "Member.SMBIOSUUID", "OneContext", "Result", "Result.ClusterID", "Result.Contract",
 	"Result.Endpoint", "Result.KubernetesEndpoint", "Result.Members", "Result.ResolvedFrom", "Result.Supported", "Result.Version", "node.close",
 }
 

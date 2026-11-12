@@ -22,6 +22,7 @@ const talosconfigMarker = "synthetic-marker-in-the-file"
 type discoverCalls struct {
 	file     string
 	given    []string // the endpoint of each call
+	contexts []string // the context name of each call
 	contents []byte
 }
 
@@ -32,8 +33,8 @@ func discoverFixture(t *testing.T, res discover.Result, err error) *discoverCall
 		t.Fatal(werr)
 	}
 	old := discoverCluster
-	discoverCluster = func(_ context.Context, tc []byte, endpoint string) (discover.Result, error) {
-		c.given, c.contents = append(c.given, endpoint), tc
+	discoverCluster = func(_ context.Context, tc []byte, contextName, endpoint string) (discover.Result, error) {
+		c.given, c.contexts, c.contents = append(c.given, endpoint), append(c.contexts, contextName), tc
 		return res, err
 	}
 	t.Cleanup(func() { discoverCluster = old })
@@ -75,6 +76,29 @@ func TestClusterDiscoverEndpointWhenTheFileNamesNone(t *testing.T) {
 	c := discoverFixture(t, discover.Result{}, discover.ErrNoEndpoint)
 	code, out, errOut := runCtl(t, "cluster", "discover", "--talosconfig", c.file)
 	if code != 2 || !strings.Contains(errOut, "--endpoint") || out != "" {
+		t.Errorf("exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+}
+
+// TestClusterDiscoverTalosContext: --talos-context reaches the discovery as given, and no flag reaches
+// it as the empty name, which is the file's current context. The global --context is the Bronzeward
+// context and never reaches it. A name the file does not hold is a usage error that names the flag.
+func TestClusterDiscoverTalosContext(t *testing.T) {
+	c := discoverFixture(t, twoMembers, nil)
+	for _, args := range [][]string{
+		{"cluster", "discover", "--talosconfig", c.file, "--context", "server-side"},
+		{"cluster", "discover", "--talosconfig", c.file, "--talos-context", "prod"},
+	} {
+		if code, _, errOut := runCtl(t, args...); code != 0 {
+			t.Fatalf("%v: exit %d, stderr %q", args, code, errOut)
+		}
+	}
+	if len(c.contexts) != 2 || c.contexts[0] != "" || c.contexts[1] != "prod" {
+		t.Errorf("the discovery was given contexts %q, want an empty name and \"prod\"", c.contexts)
+	}
+	c = discoverFixture(t, discover.Result{}, discover.ErrUnknownContext)
+	code, out, errOut := runCtl(t, "cluster", "discover", "--talosconfig", c.file, "--talos-context", "nope")
+	if code != 2 || !strings.Contains(errOut, "--talos-context") || out != "" {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, out, errOut)
 	}
 }

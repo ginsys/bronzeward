@@ -464,6 +464,12 @@ an IP address only (below). If the name does not resolve, the command stops befo
 refusal names where the value came from, `--endpoint` or the talosconfig's first endpoint, and
 quotes neither the name nor the talosconfig.
 
+A talosconfig can hold several contexts. By default the command uses the file's current context.
+If you give `--talos-context <name>`, the command uses that talosconfig context and no other.
+The global `--context` keeps its one meaning, the Bronzeward client context, on every command.
+If the file has no context of that name, the command exits 2 before any dial and names the flag.
+The first reads and every member read use the credentials of that one context.
+
 Recording a machine is a human `author` act, with the node's Talos identity read beforehand
 ([acceptance plan S1](acceptance-plan.md#s1-adoption-of-the-existing-cluster)):
 

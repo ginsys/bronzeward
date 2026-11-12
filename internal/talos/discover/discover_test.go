@@ -60,7 +60,7 @@ func (c *stand) discover(t *testing.T) (Result, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	res, err := Discover(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), c.a.Endpoint)
+	res, err := Discover(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint)
 	// A read that has lost its own deadline waits for the caller's, and the reads after it then run on
 	// a context that has ended. The result can look right, so the test asks whether the caller's context
 	// is still alive. A very slow runner can also use up the 20 s, so the message names that cause too.
@@ -109,12 +109,12 @@ func TestDiscoverEndpointFromTheFile(t *testing.T) {
 	c := newCluster(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	got, err := Discover(ctx, c.p.Talosconfig(c.a.Endpoint+", "+c.closed, "", ""), "")
+	got, err := Discover(ctx, c.p.Talosconfig(c.a.Endpoint+", "+c.closed, "", ""), "", "")
 	if err != nil || got.ClusterID != "c-1" {
 		t.Fatalf("the file's first endpoint: %+v, %v", got, err)
 	}
 	seen := len(c.a.Seen())
-	if _, err := Discover(ctx, c.p.Talosconfig("", "", ""), ""); !errors.Is(err, ErrNoEndpoint) {
+	if _, err := Discover(ctx, c.p.Talosconfig("", "", ""), "", ""); !errors.Is(err, ErrNoEndpoint) {
 		t.Fatalf("a file with no endpoint: %v, want ErrNoEndpoint", err)
 	}
 	if len(c.a.Seen()) != seen {
@@ -205,10 +205,10 @@ func TestDiscoverErrorsDoNotQuoteUpstream(t *testing.T) {
 	defer cancel()
 	tc := c.p.Talosconfig(c.a.Endpoint, "", "")
 	for name, call := range map[string]func() error{
-		"members refused": func() error { _, err := Discover(ctx, tc, c.a.Endpoint); return err },
-		"bad endpoint":    func() error { _, err := Discover(ctx, tc, "not an endpoint"); return err },
+		"members refused": func() error { _, err := Discover(ctx, tc, "", c.a.Endpoint); return err },
+		"bad endpoint":    func() error { _, err := Discover(ctx, tc, "", "not an endpoint"); return err },
 		"bad talosconfig": func() error {
-			_, err := Discover(ctx, bytes.ReplaceAll(tc, []byte("key:"), []byte("kex:")), c.a.Endpoint)
+			_, err := Discover(ctx, bytes.ReplaceAll(tc, []byte("key:"), []byte("kex:")), "", c.a.Endpoint)
 			return err
 		},
 	} {
@@ -227,7 +227,7 @@ func TestDiscoverErrorsDoNotQuoteUpstream(t *testing.T) {
 }
 
 func callErr(ctx context.Context, tc []byte, c *stand) error {
-	_, err := Discover(ctx, tc, c.a.Endpoint)
+	_, err := Discover(ctx, tc, "", c.a.Endpoint)
 	return err
 }
 
@@ -362,7 +362,7 @@ func TestDiscoverBoundsTheStartReads(t *testing.T) {
 			shorten(t, 400*time.Millisecond, 1500*time.Millisecond)
 			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 			defer cancel()
-			_, err := Discover(ctx, c.p.Talosconfig(endpoint, "", ""), endpoint)
+			_, err := Discover(ctx, c.p.Talosconfig(endpoint, "", ""), "", endpoint)
 			if err == nil || err.Error() != tc.want {
 				t.Fatalf("error %v, want %q", err, tc.want)
 			}
