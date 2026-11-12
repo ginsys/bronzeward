@@ -1,4 +1,3 @@
-machine:
-  features:
-    kubePrism:
-      port: !ref prism-port
+apiVersion: v1alpha1
+kind: KubePrismConfig
+port: !ref prism-port
