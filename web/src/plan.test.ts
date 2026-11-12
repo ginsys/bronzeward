@@ -2,7 +2,8 @@ import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { type Reads, ReadsProvider } from "./list.tsx";
-import { nextAfter, NO_TARGET, PlanNew, planBody, planPath, takeFresh } from "./plan.tsx";
+import { CANCEL_NOTE, nextAfter, NO_TARGET, PlanNew, PlanState, planBody, planPath, reasonProblem, REASON_MAX, staleReasons, STALE_AFTER_RECOVERY, takeFresh } from "./plan.tsx";
+import { Change } from "./resources.tsx";
 import { planFor } from "./review.tsx";
 
 const go = () => {};
@@ -63,5 +64,74 @@ describe("plan creation (ginsys/bronzeward#357, B19, T19)", () => {
     expect(planFor(rel, machine(rel, "rel_old", false))).toBeUndefined();
     expect(planFor(rel, machine(rel, rel, false))).toBeUndefined();
     expect(planFor(rel, machine("rel_other", null, true))).toBeUndefined();
+  });
+});
+
+const plan = (state: string, more: Record<string, unknown> = {}) =>
+  ({ id: "pln_a", state, release: "rel_a", machine: "mch_a", operation: "apply-config", desiredRelease: "rel_a", driftRecord: null, expiresAt: "2026-11-12T10:00:00Z", approval: null, committedOperation: null, evidence: {}, ...more }) as never;
+
+describe("the plan page's state lines (ginsys/bronzeward#357, B20, B22)", () => {
+  test("an expired, cancelled or revoked plan shows its state and links to a new plan, sending nothing", () => {
+    for (const state of ["expired", "cancelled", "revoked"]) {
+      const out = html(h(PlanState, { p: plan(state), reread: () => {} }));
+      expect(out).toContain(`<span class="badge">${state}</span>`);
+      expect(out).toContain(`href="${planPath("rel_a", "mch_a", "apply-config")}"`);
+      expect(out).toContain(">Create a new plan</a>");
+      expect(out).not.toContain("<form");
+    }
+  });
+
+  test("a proposed plan shows no state line", () => {
+    expect(html(h(PlanState, { p: plan("proposed"), reread: () => {} }))).toBe("");
+  });
+
+  test("a committed plan links to nothing the page invented: it names its operation", () => {
+    expect(html(h(PlanState, { p: plan("committed", { committedOperation: "op_b" }), reread: () => {} }))).toContain("operation");
+  });
+
+  test("an approved plan is predicted stale when the machine's Desired release or drift record moved", () => {
+    const p = { desiredRelease: "rel_a", driftRecord: "drr_1" };
+    expect(staleReasons(p, { desired: "rel_a", openDrift: { revision: "drr_1" } } as never)).toEqual([]);
+    expect(staleReasons(p, { desired: "rel_b", openDrift: { revision: "drr_1" } } as never)).toHaveLength(1);
+    expect(staleReasons(p, { desired: "rel_a", openDrift: null } as never)).toHaveLength(1);
+    expect(staleReasons({ desiredRelease: "rel_a", driftRecord: null }, { desired: "rel_a", openDrift: null } as never)).toEqual([]);
+    expect(staleReasons(p, { desired: "rel_b", openDrift: null } as never)).toHaveLength(2);
+  });
+
+  test("the earlier-epoch line says the approval authorizes nothing and an approver may approve again", () => {
+    expect(STALE_AFTER_RECOVERY).toBe("This approval is from before the last recovery entry and authorizes nothing. An approver may approve again.");
+  });
+
+  test("a cancellation reason is 1 to 1024 bytes, counted in bytes", () => {
+    expect(reasonProblem("")).toBeDefined();
+    expect(reasonProblem("   ")).toBeDefined();
+    expect(reasonProblem("x")).toBeUndefined();
+    expect(reasonProblem("x".repeat(REASON_MAX))).toBeUndefined();
+    expect(reasonProblem("x".repeat(REASON_MAX + 1))).toBeDefined();
+    expect(reasonProblem("é".repeat(REASON_MAX / 2 + 1))).toBeDefined();
+  });
+
+  test("the cancel control states that a cancellation after commitment ends the operation only while no attempt is recorded", () => {
+    expect(CANCEL_NOTE).toBe("Cancelling after the controller commits ends the operation only while no attempt is recorded.");
+  });
+});
+
+describe("the change of a plan (ginsys/bronzeward#357, B20)", () => {
+  const diff = (d: Record<string, unknown> | null, operation = "apply-config") => html(h(Change, { p: { operation, evidence: { diff: d } } as never }));
+  test("a change shows in a read-only block that scrolls in its own region", () => {
+    const out = diff({ from: "rel_a", to: "rel_b", withheld: false, unified: "-a\n+b\n" });
+    expect(out).toContain("Change shown below");
+    expect(out).toContain('<pre class="diff" data-testid="diff" tabindex="0" aria-label="Change">');
+  });
+  test("an empty change says there are no differences, never that the machine is unchanged", () => {
+    const out = diff({ from: "rel_a", to: "rel_b", withheld: false, unified: "" });
+    expect(out).toContain("No differences in the redacted configurations");
+    expect(out).not.toContain("<pre");
+  });
+  test("a withheld change says it cannot be shown", () => {
+    expect(diff({ from: "rel_a", to: "rel_b", withheld: true, unified: "" })).toContain("The change cannot be shown.");
+  });
+  test("an adopt plan sends nothing and records the current configuration as applied", () => {
+    expect(diff(null, "adopt")).toContain("Sends nothing. Records the machine&#x27;s current configuration as applied.");
   });
 });
