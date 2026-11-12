@@ -290,6 +290,8 @@ describe("the form's result", () => {
     expect(result(conflict({ cluster: "cl_SYNTH1" }))).toContain('The cluster already recorded: <a href="/clusters/cl_SYNTH1" title="cl_SYNTH1">cl_SYNTH1</a>.');
     expect(result(conflict({ machine: "mch_SYNTH1" }))).toContain('The machine already recorded: <a href="/machines/mch_SYNTH1" title="mch_SYNTH1">mch_SYNTH1</a>.');
     expect(existing(409, problem({ machine: "mch_SYNTH1" }), "/machines/mch_SYNTH1")).toBeUndefined();
+    // Record machine writes to /machines?cluster=..., and its conflict still names the machine already recorded.
+    expect(existing(409, problem({ machine: "mch_SYNTH1" }), "/machines?cluster=cls_SYNTH1")).toEqual({ kind: "machine", id: "mch_SYNTH1", to: "/machines/mch_SYNTH1" });
     // A plan's or a draft's refusal names the machine it is about, which is no record already saved.
     expect(existing(409, problem({ machine: "mch_SYNTH1" }), "/plans")).toBeUndefined();
     expect(existing(409, problem({ machine: "mch_SYNTH1" }), "/changes")).toBeUndefined();

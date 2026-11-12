@@ -167,7 +167,7 @@ export function existing(status: number, p: Problem | null, resource: string): {
   if (status !== 409 || p?.type !== "urn:bronzeward:problem:conflict") return undefined;
   // Only a write on a cluster or a machine can name one already recorded: a plan's or a draft's refusal
   // names the machine it is about, which is no record to read instead (ginsys/bronzeward#357).
-  if (!/^\/(clusters|machines)(\/|$)/.test(resource)) return undefined;
+  if (!/^\/(clusters|machines)(\/|\?|$)/.test(resource)) return undefined;
   for (const kind of ["cluster", "machine"] as const) {
     const id = p[kind];
     if (typeof id === "string" && `/${kind}s/${id}` !== resource) return { kind, id, to: `/${kind}s/${id}` };

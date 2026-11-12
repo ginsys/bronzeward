@@ -13,15 +13,17 @@ import { CONTROL } from "../auth.conf.ts";
 import { fixtureSignIn, mint, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
+// Canonical identifiers (internal/id/id.go): 26 base32 characters whose last one has two zero low bits.
 const PLAN = `pln_${"q".repeat(26)}`;
-const REL = `rel_${"h".repeat(26)}`;
+const REL = `rel_${"i".repeat(26)}`;
 const T0 = "2026-11-12T08:00:00Z";
 
 let at = "";
 let machine = "";
 
 const hex = () => randomBytes(4).toString("hex");
-const writes = async (): Promise<string[]> => (await (await fetch(`${CONTROL}/writes`)).json()) as string[];
+// A write is logged as "METHOD route key epoch": the method and the route are what a case compares.
+const writes = async (): Promise<string[]> => ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).map((w) => w.split(" ").slice(0, 2).join(" "));
 
 async function api(human: string, method: string, path: string, body?: unknown) {
   const auth = { Authorization: `Bearer ${mint(human)}` };
@@ -51,7 +53,7 @@ describe("the plan creation page (#357)", () => {
   it("a plan for a release the server does not know is refused and saved nowhere", async function () {
     this.timeout(120_000);
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at })).toMatch(SERVER);
-    const unknown = `rel_${"z".repeat(26)}`;
+    const unknown = `rel_${"y".repeat(26)}`;
     await browser.url(`/plans/new?${new URLSearchParams({ release: unknown, machine, operation: "apply-config" })}`);
     await expect($("main h2")).toHaveText("Create a plan", { wait: 20_000 });
     await $("main").$("button=Create plan").click();
