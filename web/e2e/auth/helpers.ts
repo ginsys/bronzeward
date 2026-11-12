@@ -68,6 +68,9 @@ export const faults = async (f: Faults) => expect((await fetch(`${CONTROL}/fault
 export const holding = async (): Promise<string[]> => (await fetch(`${CONTROL}/held`)).json() as never;
 // Lets the answers the `held` fault holds go; returns once the injector has sent each.
 export const release = async () => expect((await fetch(`${CONTROL}/release`, { method: "POST" })).ok).toBe(true);
+// The point the disposable deployment's interrupt build stops at ("<step> <action>", ginsys/bronzeward#366);
+// no point removes it, which ends a stall. Only after a sign-in with the faults' upstream on that deployment.
+export const interrupt = async (point = "") => expect((await fetch(`${CONTROL}/interrupt?point=${encodeURIComponent(point)}`, { method: "POST" })).ok).toBe(true);
 // Whether the page has received every answer to `path` it asked for, by the browser's resource
 // timing: an entry appears once its response has ended.
 export const answered = (path: string, n: number) =>

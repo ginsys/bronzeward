@@ -1,11 +1,12 @@
-// The recovery console's entry (ginsys/bronzeward#364): REC-02 and REC-04 (a) (conformance/cases/)
-// against a disposable recovery start, through the injector. REC-04 (b) waits for the server's
-// COMMIT fault hook (ginsys/bronzeward#366). Every value is synthetic.
+// The recovery console's entry (ginsys/bronzeward#364): REC-02 and REC-04 (conformance/cases/) against
+// a disposable recovery start. (a), the dropped 201, goes through the injector; (b), the server losing
+// its own reply after the COMMIT, through the interrupt build's fault hook (ginsys/bronzeward#366).
+// Every value is synthetic.
 import { $, browser, expect } from "@wdio/globals";
 import { NORMAL_START, PRE_ENTRY } from "../../src/recovery.tsx";
 import { SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_ISSUER } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, holding, mint, release, seen, storageEmpty } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, holding, interrupt, mint, release, seen, storageEmpty } from "./helpers.ts";
 
 const result = () => $('[data-testid="write-result"]');
 const entered = () => $('[data-testid="entered"]');
@@ -104,6 +105,26 @@ describe("the recovery entry (#364)", () => {
     expect((await answers()).filter((a) => a.startsWith("/recovery/entries "))).toEqual(["/recovery/entries 201", "/recovery/entries 201"]);
     expect(await entered().getText()).toMatch(/Epoch \S+, was \S+\./);
     // Not set aside, though the epoch changed under the write.
+    expect(await $("body").getText()).not.toContain(SET_ASIDE);
+  });
+
+  it("REC-04 (b): the server loses its own reply after the commit: the 500 is repeated under the same key, no epoch check, the minted epoch shown", async function () {
+    this.timeout(60_000);
+    await open("recovery");
+    await fill("REC-04 (b) synthetic restore");
+    // The interrupt build commits the entry, then answers 500 with the outcome unknown (ginsys/bronzeward#366).
+    await interrupt("recovery-entry-commit lose-reply");
+    await $("main form").$("button=Enter recovery").click();
+    await expect(entered()).toHaveText(expect.stringContaining("Recovery mode entered (act"), { wait: 30_000 });
+    const sent = await entries();
+    expect(sent).toHaveLength(2);
+    // One key over both sends, and no epoch header on either (§8.4 item 3).
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sent[0]![2]).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(sent[0]![3]).toBe("undefined");
+    // The first send committed and the server lost its answer; the repeat was replayed.
+    expect((await answers()).filter((a) => a.startsWith("/recovery/entries "))).toEqual(["/recovery/entries 500", "/recovery/entries 201"]);
+    expect(await entered().getText()).toMatch(/Epoch \S+, was \S+\./);
     expect(await $("body").getText()).not.toContain(SET_ASIDE);
   });
 

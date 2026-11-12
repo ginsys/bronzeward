@@ -1,7 +1,7 @@
 // The protected import review (ginsys/bronzeward#341, client contracts §11 and the cases PROT-01,
-// PROT-03, PROT-04, PROT-05 and PROT-06 cases 1 to 3) against the disposable deployment, whose
-// provider is mise run dev-bao's OpenBao behind the proxy of bao.ts. PROT-06 case 4 waits for a
-// server-side fault hook (ginsys/bronzeward#366) and is not run here.
+// PROT-03, PROT-04, PROT-05 and PROT-06 cases 1 to 4) against the disposable deployment, whose
+// provider is mise run dev-bao's OpenBao behind the proxy of bao.ts. PROT-06 case 4 stops the
+// deployment's interrupt build at its draft commit (ginsys/bronzeward#366).
 // Nothing here reads, prints or keeps a review: the page holds the review text in its memory, and a
 // case asks the page only whether it holds one. A document never crosses WebDriver, whose log the
 // artifact scan reads: the page fetches it from the synthetic provider (putDocument). The marks are
@@ -14,7 +14,7 @@ import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, FIXTURE_ISSUER } from "../auth.conf.ts";
-import { cacheControl, cacheHolds, faults, fixtureSignIn, mint, storageControl, storageEmpty } from "./helpers.ts";
+import { cacheControl, cacheHolds, faults, fixtureSignIn, interrupt, mint, storageControl, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -205,6 +205,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // A fault or a hold a case left must not reach the next case.
     await post("/bao/fault?mode=none").catch(() => {});
     await post("/bao/decrypt-hold?ms=0").catch(() => {});
+    await interrupt().catch(() => {});
     await leavesNothing();
   });
 
@@ -359,6 +360,32 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await restart();
     await unknownOutcome("after the continuation");
     await abandon();
+  });
+
+  it("PROT-06, case 4: the run releases its claim and its draft commit stalls, so the lease lapses; the read answers at once, the outcome is unknown, and the import is released once the commit goes", async function () {
+    this.timeout(240_000);
+    const id = await pausedImport();
+    // The interrupt build stalls inside the draft transaction, after the claim's release (ginsys/bronzeward#366).
+    await interrupt("draft-commit stall");
+    await $("button=Continue import").click();
+    const began = Date.now();
+    await claimShows("The import continues in operation", 30_000);
+    await unknownOutcome("during the stall");
+    // The read of the operation answers while the commit stalls (ginsys/bronzeward#803): the lease lapses
+    // at 15 s and the page reads again 10 s later, so the reading is at hand well inside 45 s. A read
+    // that blocks again waits for the page's 30 s bound on response headers (AMB-14), ends in the offline
+    // state and misses this.
+    expect(Date.now() - began).toBeLessThan(45_000);
+    expect(await $('[data-testid="offline"]').isExisting()).toBe(false);
+    // The commit goes: the claim is released and the import is in the draft. The page's watch ended on the
+    // unknown outcome, so the state is read by reload.
+    await interrupt();
+    await browser.waitUntil(async () => {
+      await browser.refresh();
+      const heading = await $("main h2").getText();
+      return heading.startsWith(`Import ${short(id)}: `) && !heading.endsWith(": paused") && !heading.endsWith(": running");
+    }, { timeout: 60_000, interval: 3_000, timeoutMsg: "the import still shows its claim held after the commit went" });
+    expect(await $("button=Abandon import").isExisting()).toBe(false);
   });
 });
 

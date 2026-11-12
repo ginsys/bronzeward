@@ -462,6 +462,9 @@ run = '''
 . scripts/dev/instance.sh || exit 1
 [ -f "$BW_DEV_IDP_DIR/idp.env" ] || { echo "browser-auth: no $BW_DEV_IDP_DIR/idp.env; run ${BW_DEV_PFX}mise run dev-idp first" >&2; exit 1; }
 go build -o bin/webhost ./fixtures/webhost
+# The cases' disposable deployment runs this build, which holds the fixture interrupt seam (REC-04 (b),
+# PROT-06 case 4). The other servers run bin/bronzeward, which holds none.
+go build -tags fixtureinterrupt -o bin/bronzeward-interrupt ./cmd/bronzeward
 canary="BWSYNTH-web-$(od -An -tx1 -N8 /dev/urandom | tr -d ' \n')"
 password=$(. "./$BW_DEV_IDP_DIR/idp.env" && printf %s "$BW_TEST_IDP_PASSWORD")
 rm -rf web/e2e/out
