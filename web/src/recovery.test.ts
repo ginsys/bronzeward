@@ -12,7 +12,7 @@ import { Writes } from "./write.ts";
 
 const html = (e: ReactElement) => renderToStaticMarkup(e);
 function status(e: ReactElement): string {
-  const m = /<p role="(?:status|alert)" data-testid="[a-z-]+">(.*?)<\/p>/.exec(html(e));
+  const m = /<p(?: role="alert")? data-testid="[a-z-]+">(.*?)<\/p>/.exec(html(e));
   expect(m, html(e)).not.toBeNull();
   return m![1]!.replace(/<!-- -->/g, "").trim();
 }
