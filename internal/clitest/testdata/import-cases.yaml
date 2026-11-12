@@ -74,9 +74,17 @@
       "import ing_...: its claim is held (resumed) and its lease lapsed ..., while operation op_...
       still runs: the outcome is unknown.", the three commands; exit 3
     absent: [token and sentinels in stdout, stderr, argv]
-  not run: >-
-    the first case (a mark) is protected-cases.yaml's (#350); the fourth needs a server-side hook delaying
-    a draft transaction's COMMIT, which the server binary does not have (#366)
+  fourth case: >-
+    import continue ing_... against the interrupt build of the server, whose control file names
+    draft-commit stall: the run releases the claim and writes the draft, then stalls before its
+    COMMIT, the process running on. The heartbeat waits on the claim's lock, so the lease lapses
+    and GET /api/v1/ingestions/ing_... answers held with leaseUntil passed. The client ends as
+    in the second case, exit 3, the outcome unknown. A read of the operation waits for the COMMIT
+    (ginsys/bronzeward#799), so a client read timeout in that window is expected, not a failure.
+    Once the control file is removed the COMMIT lands: the claim is released, its envelope
+    cleared, the operation succeeded, and import status shows it. An abandoned read is not
+    reachable on a continuation: an encrypted claim is not due until its absolute expiry
+  not run: the first case (a mark) is protected-cases.yaml's (#350)
   unit: >-
     cmd/bronzewardctl TestImportLifecycle covers a lapsed lease with exit 3, history before this
     command's generation ignored, and resume-failed

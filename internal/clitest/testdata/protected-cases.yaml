@@ -117,9 +117,8 @@
     shown: '"the mark on import ing_...: its claim is held and its lease lapsed ..., while operation op_... still runs: the outcome is unknown."; exit 3'
     absent: ['"not applied"', a wait until the absolute expiry]
   not run: >-
-    the second and third cases are import-cases.yaml's (#349); the fourth needs a server-side hook
-    delaying a draft transaction's COMMIT, which the server binary does not have (#366), and
-    no stand-in replaces it
+    the second, third and fourth cases are import-cases.yaml's (#349; the fourth runs the interrupt
+    build of the server, #366)
   unit: >-
     cmd/bronzewardctl TestImportMark covers each outcome against a fake server, an earlier pause
     ignored and a success without the mark's pause read as not applied

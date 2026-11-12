@@ -171,6 +171,7 @@ func TestImports(t *testing.T) {
 	}
 	t.Run("AMB-08", importUnavailable)
 	t.Run("absolute expiry", importExpiry)
+	t.Run("PROT-06, the draft commit delayed", importDraftCommitDelay)
 
 	f, bao := startTimers(t, "viewer", importTimers)
 	e := newImportEnv(t, f, bao)
@@ -309,6 +310,46 @@ func importUnavailable(t *testing.T) {
 	if err := f.db.QueryRow(`SELECT count(*) FROM operation WHERE kind = 'ingest'`).Scan(&n); err != nil || n != 0 {
 		t.Errorf("%d ingest operations (%v); want none", n, err)
 	}
+}
+
+// importDraftCommitDelay is PROT-06's fourth case: a continuation whose run released the claim and
+// wrote the draft, then stalls before its COMMIT, so that its heartbeat, which waits on the claim's
+// lock, lets the lease lapse. The client reads the ingestion, held with its lease passed, and ends
+// as of unknown outcome. Once the COMMIT lands, a later read shows the import succeeded. The
+// server is the interrupt build, its stall named by a control file of this test.
+func importDraftCommitDelay(t *testing.T) {
+	f, bao := startTimers(t, "viewer", importTimers)
+	e := newImportEnv(t, f, bao)
+	r, ing := e.start("prot-06-4", "--review")
+	e.f.want(r, 0, "Paused for review (generation 1")
+	control := f.interrupt("draft-commit stall")
+	defer os.Remove(control) // releases a stall a failure left
+	done := make(chan result, 1)
+	began := time.Now()
+	go func() { done <- e.run("import", "continue", ing) }()
+	r = <-done
+	e.f.want(r, 3, "import "+ing+": its claim is held and its lease lapsed", "still runs: the outcome is unknown",
+		"bronzewardctl import status "+ing)
+	if strings.Contains(r.err, "not applied") {
+		t.Error("the outcome was reported as not applied")
+	}
+	if took := time.Since(began); took > time.Minute {
+		t.Errorf("the wait took %v; it must end once the lease lapsed, not at the absolute expiry", took)
+	}
+	if state, _, op := e.claim(ing); state != "held" || op != "running" {
+		t.Errorf("while the commit is delayed: claim %s, operation %s; want held, running", state, op)
+	}
+	if err := os.Remove(control); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+		if state, staged, op := e.claim(ing); state == "released" && !staged && op == "succeeded" {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("after the release: claim %s (staged %v), operation %s; want released, cleared, succeeded", state, staged, op)
+		}
+	}
+	e.f.want(e.run("import", "status", ing), 0, ing, "released")
 }
 
 // importExpiry is a paused claim past its absolute expiry: the sweep abandons it, the client says

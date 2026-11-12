@@ -59,10 +59,56 @@ func binaries(t *testing.T) string {
 	return binDir
 }
 
+var (
+	interruptOnce sync.Once
+	interruptDir  string
+	interruptErr  error
+)
+
+// interruptServer builds bronzeward once more, with the fixtureinterrupt tag, and returns its
+// directory: the server a fault case starts, which reads BW_INTERRUPT_CONTROL. The CLI under test
+// stays the default build, as an operator's is.
+func interruptServer(t *testing.T) string {
+	t.Helper()
+	interruptOnce.Do(func() {
+		if interruptDir, interruptErr = os.MkdirTemp("", "bw-clitest-interrupt-"); interruptErr != nil {
+			return
+		}
+		out, err := exec.Command("go", "build", "-tags", "fixtureinterrupt", "-o", interruptDir+string(filepath.Separator),
+			"github.com/ginsys/bronzeward/cmd/bronzeward").CombinedOutput()
+		if err != nil {
+			interruptErr = fmt.Errorf("go build -tags fixtureinterrupt: %v\n%s", err, out)
+		}
+	})
+	if interruptErr != nil {
+		t.Fatal(interruptErr)
+	}
+	return interruptDir
+}
+
+// interrupt makes the fixture's server the interrupt build, steered by a control file the test
+// writes (and removes) with line, and restarts it with flags. The control file is the test's own:
+// a process test cannot write under /etc.
+func (f *fixture) interrupt(line string, flags ...string) (control string) {
+	f.t.Helper()
+	control = filepath.Join(f.t.TempDir(), "interrupt")
+	if line != "" {
+		if err := os.WriteFile(control, []byte(line+"\n"), 0o600); err != nil {
+			f.t.Fatal(err)
+		}
+	}
+	f.srv.dir, f.srv.env = interruptServer(f.t), []string{"BW_INTERRUPT_CONTROL=" + control}
+	f.restart(flags...)
+	return control
+}
+
 func TestMain(m *testing.M) {
 	code := m.Run()
 	if binDir != "" {
 		os.RemoveAll(binDir)
+	}
+	if interruptDir != "" {
+		os.RemoveAll(interruptDir)
 	}
 	os.Exit(code)
 }
@@ -147,6 +193,8 @@ func startConfigExec(t *testing.T, roles, issuerURL, audience, execution, extra 
 // every process a restart started.
 type served struct {
 	cfg string
+	dir string   // the directory of the server binary; empty is the fixture's own
+	env []string // added to the server's environment
 	cmd *exec.Cmd
 	log bytes.Buffer
 }
@@ -155,7 +203,12 @@ type served struct {
 // -recovery-start, and waits until it answers.
 func (f *fixture) serveUp(flags ...string) {
 	f.t.Helper()
-	cmd := exec.Command(filepath.Join(f.bin, "bronzeward"), append([]string{"serve", "-config", f.srv.cfg}, flags...)...)
+	dir := f.srv.dir
+	if dir == "" {
+		dir = f.bin
+	}
+	cmd := exec.Command(filepath.Join(dir, "bronzeward"), append([]string{"serve", "-config", f.srv.cfg}, flags...)...)
+	cmd.Env = append(os.Environ(), f.srv.env...)
 	cmd.Stdout, cmd.Stderr = &f.srv.log, &f.srv.log
 	if err := cmd.Start(); err != nil {
 		f.t.Fatal(err)
