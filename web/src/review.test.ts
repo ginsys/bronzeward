@@ -81,6 +81,16 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
     expect(page).not.toContain(NO_PROVENANCE);
   });
 
+  test("a redaction token in a provenance path is a badge too, and the rest of the path is kept", () => {
+    const path = "doc[0]/machine/registries/config/<redacted>/auth/password";
+    const r = served({ provenance: [{ reference: "registry/example-pass", version: 1, member: null, source: { revision: "frv_BWSYNTH-3jnk4ma", digest: "sha256:0", path, occurrence: 0 }, output: path }] });
+    const page = html(h(ReviewBody, { r }));
+    expect(page).not.toContain("&lt;redacted&gt;/auth");
+    expect(page).toContain("registries/config/");
+    expect(page).toContain("/auth/password");
+    expect(page.match(/class="badge"/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
   test("a withheld review is its own state: no document area, no empty-value note", () => {
     const page = html(h(ReviewBody, { r: served({ configuration: null, notice: "server text that is not echoed", provenance: [] }) }));
     expect(page).toContain(WITHHELD);

@@ -92,8 +92,13 @@ export const EMPTY_NOTE = "A field that shows as empty is empty in the rendered 
 export const PROVENANCE_LIMIT = "Provenance covers secret references only; other fields are not traced.";
 export const NO_PROVENANCE = "No secret reference was rendered into this configuration.";
 
+// Text with each redaction token as a badge, so a path with a redacted segment reads as the document does.
+function Marked({ text }: { text: string }) {
+  return <>{parts(text).map((p, i) => ("text" in p ? <Group key={i}>{p.text}</Group> : <span key={i} className="badge" title={p.token}>[{p.label}]</span>))}</>;
+}
+
 const outcome = (r: Prov): ReactNode =>
-  r.overriddenBy == null ? (r.output ?? "none") : <>overridden by <Id id={r.overriddenBy.revision} /></>;
+  r.overriddenBy == null ? (r.output == null ? "none" : <Marked text={r.output} />) : <>overridden by <Id id={r.overriddenBy.revision} /></>;
 
 const COLS = ["Reference", "Version", "Source revision", "Path in the source revision", "Output path or overriding revision"] as const;
 const keyOf = (r: Prov) => `${r.reference}@${r.version}:${r.member ?? ""}:${r.source.revision}:${r.source.occurrence}`;
@@ -111,7 +116,7 @@ function Provenance({ records }: { records: readonly Prov[] }) {
                 <th scope="row">{r.reference}{r.member == null ? "" : ` (member ${r.member})`}</th>
                 <td>{r.version}</td>
                 <td><Id id={r.source.revision} /></td>
-                <td>{r.source.path}</td>
+                <td><Marked text={r.source.path} /></td>
                 <td>{outcome(r)}</td>
               </tr>
             ))}
@@ -127,7 +132,7 @@ export function Document({ configuration }: { configuration: string }) {
   return (
     <section aria-label="Rendered configuration, redacted">
       <pre data-testid="document">
-        {parts(configuration).map((p, i) => ("text" in p ? <Group key={i}>{p.text}</Group> : <span key={i} className="badge" title={p.token}>[{p.label}]</span>))}
+        <Marked text={configuration} />
       </pre>
     </section>
   );
