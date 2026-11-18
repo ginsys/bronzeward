@@ -165,8 +165,7 @@ func positionPlanAt(ctx context.Context, tx *sql.Tx, m *machineBody, clock time.
 		FROM (SELECT p.id, `+planStateAt("$2")+` AS state, p.kind, p.release, p.assignment_revision, p.desired_release,
 				p.baseline_revision, p.drift_record, a.epoch = (SELECT epoch FROM installation_state) AS approval_current,
 				p.created_at, p.expires_at
-			FROM plan p JOIN plan_state s ON s.plan = p.id LEFT JOIN approval a ON a.id = s.approval
-				LEFT JOIN principal ap ON ap.id = a.approver LEFT JOIN identity_revocation r ON r.identity = ap.id
+			`+planFrom+`
 			WHERE p.machine = $1 AND NOT (p.kind = 'adopt' AND EXISTS (SELECT FROM machine_event
 				WHERE machine = $1 AND kind = 'refusal' AND entry->>'plan' = p.id))) c
 		WHERE state IN ('proposed', 'approved') ORDER BY created_at DESC, id DESC`, m.ID, clock)
