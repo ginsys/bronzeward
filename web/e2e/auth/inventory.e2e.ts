@@ -376,7 +376,7 @@ describe("the machine detail (W3)", () => {
     await browser.execute(() => void dispatchEvent(new Event("online")));
     await expect($("main")).toHaveText(expect.stringContaining(refused), { wait: 20_000 });
     // The next read finds no answer; every other read is held, so none ends the banner first.
-    await faults({ upstream: at, redirect: path, held: ["/identity", `${path}/observations`, `${path}/timeline`] });
+    await faults({ upstream: at, redirect: path, held: ["/identity", `${path}/observations`, `${path}/timeline`, `${path}/position`] });
     await browser.execute(() => void dispatchEvent(new Event("online")));
     await $('[data-testid="offline"]').waitForExist({ timeout: 20_000 });
     const shown = await $("main").getText();
