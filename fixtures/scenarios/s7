@@ -1314,7 +1314,7 @@ case $s7_mode in
 esac
 rm -f -- "$EV/last.body" "$EV/last.headers"
 # The CLI's token files hold tokens this run minted: removed before the scan, as S6's are.
-[ "$s7_mode" != cli ] || rm -f -- "$cli_dir"/h-*.json
+[ "$s7_mode" != cli ] || cli_tokens_rm
 # The final bundle: the evidence directory and the run directory scanned, as S1's step 5 does.
 ev_log=$(mktemp)
 if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then

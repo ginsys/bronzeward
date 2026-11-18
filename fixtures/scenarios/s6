@@ -427,7 +427,7 @@ withheld+=("$BW_CANARY")
 preconditions
 s6
 rm -f -- "$EV/last.body" "$EV/last.headers"
-[ "$s6_mode" != cli ] || rm -f -- "$cli_dir"/h-*.json
+[ "$s6_mode" != cli ] || cli_tokens_rm
 # The final bundle: the evidence directory and the run directory scanned, as S1's step 5 does.
 ev_log=$(mktemp)
 if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
