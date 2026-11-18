@@ -18,6 +18,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
 	"github.com/ginsys/bronzeward/internal/talos/discover"
+	"go.yaml.in/yaml/v3"
 )
 
 // The states of cluster onboard's parts, as the object prints them: created or existing for a record,
@@ -69,8 +70,9 @@ type onboarding struct {
 	Secret   onboardPart      `json:"secret"`
 	Draft    *onboardDraft    `json:"draft,omitempty"`
 	Machines []onboardMachine `json:"machines"`
-	// again is the command that carries the run on, once a paused import is continued.
-	again string
+	// again is the command that carries the run on, once a paused import is continued; ctx is the
+	// --context the commands name, so each one reaches the server this run did.
+	again, ctx string
 }
 
 // onboardArgs are the flags of cluster onboard.
@@ -220,10 +222,23 @@ func (e *env) clusterOnboard(args []string) (err error) {
 		obj.Machines = append(obj.Machines, om)
 	}
 	rerun := func() string {
-		return a.rerun(e, obj.Secret.State == obWritten || obj.Secret.State == obPresent || obj.Secret.State == obSkipped)
+		return a.rerun(e, a.skipSecret || obj.Secret.State == obWritten || obj.Secret.State == obPresent || obj.Secret.State == obSkipped)
+	}
+	if e.context != "" {
+		obj.ctx = "--context " + client.ShellWord(e.context) + " "
 	}
 	defer func() {
 		obj.again = rerun()
+		parts := []*onboardPart{&obj.Cluster.onboardPart, &obj.Secret}
+		if obj.Draft != nil {
+			parts = append(parts, &obj.Draft.onboardPart)
+		}
+		for i := range obj.Machines {
+			parts = append(parts, &obj.Machines[i].Add, &obj.Machines[i].Import)
+		}
+		for _, p := range parts {
+			p.Command = obj.q(p.Command)
+		}
 		perr := e.say(onboardLines(obj)...)
 		if e.output != "table" {
 			perr = e.printComposite(obj)
@@ -259,6 +274,8 @@ func (e *env) onboardInputs(a *onboardArgs) (err error) {
 	switch {
 	case a.file == "":
 		return usageError{errors.New("cluster onboard needs --talosconfig <file>: it looks in no default place")}
+	case unprintable(a.file):
+		return usageError{errors.New("--talosconfig names a file whose name holds a byte or character that cannot be printed back in the rerun command: rename the file")}
 	case a.name == "":
 		return usageError{errors.New("cluster onboard needs --name <cluster name>")}
 	case a.kube == "":
@@ -297,6 +314,13 @@ func (e *env) onboardInputs(a *onboardArgs) (err error) {
 		return usageError{errors.New("--talos-context names a context that the talosconfig does not hold")}
 	} else if err != nil {
 		return fmt.Errorf("the talosconfig cannot be used: %w", err)
+	}
+	var ctxs struct {
+		Context  string
+		Contexts map[string]struct{ Endpoints []string }
+	}
+	if a.endpoint == "" && yaml.Unmarshal(a.config, &ctxs) == nil && len(ctxs.Contexts[ctxs.Context].Endpoints) == 0 {
+		return usageError{errors.New("the talosconfig's context names no endpoint: give --endpoint <host|ip[:port]>")}
 	}
 	switch {
 	case a.skipSecret:
@@ -385,17 +409,23 @@ func (e *env) onboardSecret(a *onboardArgs, obj *onboarding, rerun func() string
 		return nil
 	}
 	var err error
-	if cerr := e.cancellable("OpenBao", func(ctx context.Context) error {
+	cerr := e.cancellable("OpenBao", func(ctx context.Context) error {
 		err = accessput.Put(ctx, a.baoAddr, a.tok, obj.Cluster.ID, a.doc)
 		return err
-	}); cerr != nil && !errors.Is(cerr, err) {
-		return cerr
-	}
+	})
+	const maybe = "it is not known whether the secret was written: read it with bao, then run the command again with --skip-secret if it is there"
 	fail := func(state, why string) error {
 		obj.Secret = onboardPart{State: state, Command: rerun(), Error: why}
+		if state == stateUnknown.s() {
+			return outcomeUnknown{errors.New(why)}
+		}
 		return errors.New(why)
 	}
 	switch {
+	case cerr != nil && !errors.Is(cerr, err):
+		// A Ctrl-C after the request was sent: the create may have committed.
+		obj.Secret = onboardPart{State: stateUnknown.s(), Command: rerun(), Error: "stopped while writing: " + maybe}
+		return cerr
 	case err == nil:
 		obj.Secret = onboardPart{State: obWritten}
 	case errors.Is(err, accessput.ErrPresent):
@@ -405,9 +435,9 @@ func (e *env) onboardSecret(a *onboardArgs, obj *onboarding, rerun func() string
 	case errors.Is(err, accessput.ErrAbsent):
 		return fail(stateFailed.s(), "OpenBao has no secret mount at this address, so no secret was written")
 	case errors.Is(err, accessput.ErrUnreachable):
-		return fail(stateFailed.s(), "OpenBao is unreachable at this address, so no secret was written")
+		return fail(stateUnknown.s(), "OpenBao is unreachable or did not answer: "+maybe)
 	case errors.Is(err, accessput.ErrUnexpected):
-		return fail(stateUnknown.s(), "OpenBao gave an unexpected answer, so it is not known whether the secret was written. Read it with bao, then run the command again with --skip-secret if it is there")
+		return fail(stateUnknown.s(), "OpenBao gave an unexpected answer: "+maybe)
 	default:
 		return fail(stateFailed.s(), "the secret was not written: "+client.Shown(err))
 	}
@@ -421,7 +451,7 @@ func (s stepState) s() string { return string(s) }
 // released into this draft is skipped. A paused import ends the command, as drift adopt's does, and so
 // does a held or resumed one, which only import status can read.
 func (e *env) onboardImports(a *onboardArgs, obj *onboarding, rerun func() string) error {
-	title := "onboard " + a.name
+	title, state := "onboard "+a.name, obExisting
 	var draft apitypes.DraftBody
 	err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
 		// GET /drafts takes no filter, so the open draft is picked out here.
@@ -447,6 +477,7 @@ func (e *env) onboardImports(a *onboardArgs, obj *onboarding, rerun func() strin
 		return err
 	})
 	if err == nil && draft.Id == "" {
+		state = obCreated
 		in := apitypes.DraftInput{Cluster: obj.Cluster.ID, Title: title}
 		body, _ := json.Marshal(in)
 		w := &client.Write{Method: http.MethodPost, Path: "/drafts", Body: body, Check: "draft list --cluster " + client.ShellWord(in.Cluster),
@@ -472,7 +503,7 @@ func (e *env) onboardImports(a *onboardArgs, obj *onboarding, rerun func() strin
 		obj.Draft = &onboardDraft{onboardPart: onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}, Title: title}
 		return err
 	}
-	obj.Draft = &onboardDraft{onboardPart: onboardPart{State: obCreated, ID: draft.Id}, Title: title}
+	obj.Draft = &onboardDraft{onboardPart: onboardPart{State: state, ID: draft.Id}, Title: title}
 	for i := range obj.Machines {
 		m := &obj.Machines[i]
 		if m.Machine == "" {
@@ -562,6 +593,13 @@ func onboardImportState(m *onboardMachine, b *apitypes.IngestionBody) (bool, err
 
 // onboardLines is the text summary: the cluster, the secret, the draft and a row per member, then the
 // next step.
+func (o *onboarding) q(cmd string) string {
+	if o.ctx == "" || cmd == "" || strings.Contains(cmd, "--context") {
+		return cmd
+	}
+	return strings.Replace(cmd, "bronzewardctl ", "bronzewardctl "+o.ctx, 1)
+}
+
 func onboardLines(obj *onboarding) []string {
 	c := obj.Cluster
 	out := []string{"Cluster: " + c.State}
@@ -578,7 +616,7 @@ func onboardLines(obj *onboarding) []string {
 	var commands []string
 	add := func(cmds ...string) {
 		for _, c := range cmds {
-			if c != "" && !slices.Contains(commands, c) {
+			if c = obj.q(c); c != "" && !slices.Contains(commands, c) {
 				commands = append(commands, c)
 			}
 		}

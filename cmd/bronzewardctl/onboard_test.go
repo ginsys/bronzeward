@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -236,7 +238,7 @@ func TestOnboardSecondRunWritesNothingNew(t *testing.T) {
 	if len(e.api.clusters) != 1 || len(e.api.machines) != 2 || e.api.draft.rev != rev || len(e.api.ings) != ings || len(e.bao.requests) != bao {
 		t.Errorf("the second run changed state: %d clusters, %d machines, draft revision %d, %d imports, %d OpenBao requests", len(e.api.clusters), len(e.api.machines), e.api.draft.rev, len(e.api.ings), len(e.bao.requests))
 	}
-	for _, want := range []string{"existing", "lab", "skipped", "https://10.0.0.1:6443"} {
+	for _, want := range []string{"existing", "lab", "skipped", "https://10.0.0.1:6443", "(onboard lab): existing"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out)
 		}
@@ -280,8 +282,8 @@ func TestOnboardOpenBaoAnswers(t *testing.T) {
 		imports     int
 	}{
 		{"denied", "403", 1, 0},
-		{"error", "unexpected answer", 1, 0},
-		{"redirect", "unexpected answer", 1, 0},
+		{"error", "unexpected answer", 3, 0},
+		{"redirect", "unexpected answer", 3, 0},
 		{"absent", "no secret mount", 1, 0},
 		{"cas", "present", 0, 2},
 	} {
@@ -309,8 +311,8 @@ func TestOnboardOpenBaoAnswers(t *testing.T) {
 	t.Run("unreachable", func(t *testing.T) {
 		e := newOnboard(t)
 		code, out, errOut := e.runArgs(append(e.base()[:8:8], "--bao-addr", "http://127.0.0.1:1", "--bao-token-file", e.tokenFile)...)
-		if code != 1 || !strings.Contains(out+errOut, "unreachable") {
-			t.Errorf("exit %d, stdout %q, stderr %q; want 1 and the class unreachable", code, out, errOut)
+		if code != 3 || !strings.Contains(out+errOut, "unreachable") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 3 and the class unreachable", code, out, errOut)
 		}
 		e.noneOf(plantedToken, out, errOut)
 	})
@@ -537,5 +539,49 @@ func TestOnboardHeldImportStops(t *testing.T) {
 	code, out, errOut := e.runArgs(args...)
 	if code != 1 || len(e.api.ings) != 1 || !strings.Contains(out+errOut, "import status") {
 		t.Errorf("exit %d, %d imports, stdout %q, stderr %q; want 1, no new import and import status named", code, len(e.api.ings), out, errOut)
+	}
+}
+
+// TestOnboardRecoveryCommandsKeepTheirFlags: the commands a stopped run prints reach the server the run
+// did (the global --context), and a recovery command keeps --skip-secret where the run was given it.
+func TestOnboardRecoveryCommandsKeepTheirFlags(t *testing.T) {
+	e := newOnboard(t)
+	e.api.pauseFirst = true
+	code, out, errOut := e.run("--review", "--context", "lab")
+	if code != 0 {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	for _, cmd := range []string{"import status", "import review", "import continue", "cluster onboard"} {
+		if !strings.Contains(out, "bronzewardctl --context 'lab' "+cmd) {
+			t.Errorf("no %q command with the context in:\n%s", cmd, out)
+		}
+	}
+	e2 := newOnboard(t)
+	e2.api.failPost = map[string]int{"/machines": 1}
+	args := []string{"cluster", "onboard", "--talosconfig", e2.file, "--name", "lab", "--kubernetes-endpoint", "proposed", "--skip-secret"}
+	code, out, errOut = e2.runArgs(args...)
+	if code == 0 || !strings.Contains(out, "--skip-secret") || strings.Contains(out, "--bao-") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want a failure whose recovery command keeps --skip-secret", code, out, errOut)
+	}
+}
+
+// TestOnboardRefusesBeforeAnyRequest: a context with no endpoint and none given, and a file name that
+// cannot be printed back in a command, are exit 2 before the identity read.
+func TestOnboardRefusesBeforeAnyRequest(t *testing.T) {
+	e := newOnboard(t)
+	noEndpoint := strings.ReplaceAll(twoContextTalosconfig(), "endpoints: [10.9.9.9:50000]", "endpoints: []")
+	if err := os.WriteFile(e.file, []byte(noEndpoint), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errOut := e.run(); code != 2 || !strings.Contains(errOut, "--endpoint") || e.requests() != 0 {
+		t.Errorf("no endpoint: exit %d, stdout %q, stderr %q, %d requests", code, out, errOut, e.requests())
+	}
+	tabbed := filepath.Join(filepath.Dir(e.file), "talos\tconfig")
+	if err := os.WriteFile(tabbed, []byte(twoContextTalosconfig()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args := append([]string{"cluster", "onboard", "--talosconfig", tabbed}, e.base()[4:]...)
+	if code, out, errOut := e.runArgs(args...); code != 2 || !strings.Contains(errOut, "rename the file") || e.requests() != 0 {
+		t.Errorf("unprintable name: exit %d, stdout %q, stderr %q, %d requests", code, out, errOut, e.requests())
 	}
 }

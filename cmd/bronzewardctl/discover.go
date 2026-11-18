@@ -42,7 +42,7 @@ func (e *env) clusterDiscover(args []string) error {
 	if e.output != "table" {
 		return usageError{errors.New("cluster discover prints commands as text: use -o table")}
 	}
-	if !utf8.ValidString(file) || strings.IndexFunc(file, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
+	if unprintable(file) {
 		return usageError{errors.New("--talosconfig names a file whose name holds a byte or character that cannot be printed back in the bao command: rename the file")}
 	}
 	b, err := readTalosconfig(file)
@@ -61,6 +61,11 @@ func (e *env) clusterDiscover(args []string) error {
 		return err
 	}
 	return e.say(discoverLines(res, file)...)
+}
+
+// unprintable says that a file name holds a byte or character that a command printed back cannot show.
+func unprintable(file string) bool {
+	return !utf8.ValidString(file) || strings.IndexFunc(file, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0
 }
 
 // readTalosconfig reads the file the operator named, at most maxTalosconfig bytes of it.
