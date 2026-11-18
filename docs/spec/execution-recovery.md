@@ -67,7 +67,7 @@ published, encrypted per-machine artifact to an existing **worker** with Talos
 `apply-config` in `no-reboot` mode, over direct Talos access (DS §2.1, §6.3).
 The artifact's contract minor is the node's running minor (compilation
 contract §10.2); a v1.14 worker running v1.14.5 is the target, and the evidence so far is on a
-v1.13 worker running v1.13.6; the fixture now runs v1.14.5, and the apply activation evidence is tracked in ginsys/bronzeward#714, not yet recorded
+v1.13 worker running v1.13.6; the fixture now runs v1.14.5, where a no-reboot apply of a node label was measured active and no other class is evidenced (ginsys/bronzeward#714)
 ([E3 §4.3](../design/research/20260925-talos-compatibility.md#43-operationrpc-compatibility-against-v1136)).
 Publication, observation, adoption and recovery are separate capabilities that
 send nothing to a machine.

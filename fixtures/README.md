@@ -581,6 +581,10 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
 - Talos runs as containers. Configuration RPCs and `apply-config --mode=no-reboot` work; reboot,
   upgrade, reset, disk and installer behavior do not exist here. This matches the scope of the PoC
   path and the deferred Upgrade/LifecycleClient tests, and nothing more.
+- Activation is evidenced for one class only: a node label applied in no-reboot mode on Talos v1.14.5
+  (ginsys/bronzeward#714). Etcd options, kernel modules, volume encryption keys and workload
+  isolation can need a reboot or a service restart to take effect, which this fixture cannot show,
+  so they stay unknown until a VM or hardware does.
 - Reading a node's machine configuration needs the `os:admin` Talos role. Measured on this fixture
   (`internal/talos` `TestLiveRoleProbe`, Talos v1.14.5 on 18 November 2026; the result is the
   same as on v1.13.6): talosconfigs for `os:reader` and
