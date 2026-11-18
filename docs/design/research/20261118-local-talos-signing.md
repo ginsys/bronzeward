@@ -136,9 +136,13 @@ which from the code.
 
 - Local signing does not retire the operator's access: the operator's own certificate kept
   working beside the local one.
-- Talos has no per-certificate revocation (the [OIDC note](20261021-talosctl-oidc.md),
-  read again against v1.14.5 source: the certificate is checked against the CA and its
-  validity window, not against a list). A certificate stops being accepted on a new
+- No per-certificate revocation was found, and none was tested. The [OIDC
+  note](20261021-talosctl-oidc.md) read the server's authorization middleware at v1.13.6
+  and found none; the server's verification path was not re-read at v1.14.5, because it is
+  not in the pinned machinery module, so "Talos has no per-certificate revocation" is that
+  note's finding at an older version and unverified here. What the fixture shows is
+  consistent with it: a certificate was accepted on its CA, its role and its validity
+  window, and refused outside them. A certificate stops being accepted on a new
   connection at its `NotAfter`. Withdrawing the CA a node trusts would end it earlier,
   but a machine configuration can list further accepted CAs
   (`machine.acceptedCAs`, `config/types/v1alpha1/v1alpha1_types.go:137`), so changing the
@@ -199,11 +203,14 @@ it does to the exposure is in finding 5.
   by choosing `currentTime`.
 - Unknown roles were signed offline and not presented to a node.
 - CA rotation and the effect of replacing the CA on a held connection were not run.
-- A held connection's survival is one sample; the machinery's gRPC server was not read for
-  a deadline that could close it. Because of it, "expiry is the only revocation" holds
-  for new connections only: a design that relies on expiry must bound how long it holds a
-  connection per certificate, and no measurement here covers how a client does that.
+- Revocation was not tested, and the server's verification path at v1.14.5 was not read (it
+  is outside the pinned machinery module): that no per-certificate revocation exists rests
+  on the OIDC note's reading of v1.13.6.
+- A held connection's survival is one sample; the server's connection deadlines were not
+  read. A design that treats expiry as its revocation must therefore bound how long it
+  holds a connection per certificate, and no measurement here covers how a client does
+  that.
 - Whether the machinery's signer is the only signer a node accepts is not claimed: a
   certificate that chains to the CA and carries a role is what the node checked here.
-- Who may supply or replace a first key is a decision for the owner and is not settled by
-  this note.
+- Who may supply or replace a first key is not evidence this note can supply; the owner
+  decides it separately.
