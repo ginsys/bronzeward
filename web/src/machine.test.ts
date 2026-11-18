@@ -1,10 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, lostSince, MachineShown, nextTimeline, NO_KEEP, type Observation, Observations, pacer, POLL_MS, polled, queued, readLater, readOlder, recovery, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
+import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, lostSince, MachineShown, nextTimeline, NO_KEEP, positionShown, type Observation, Observations, pacer, POLL_MS, polled, queued, readLater, readOlder, recovery, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
 import { type Load, type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
+import type { Position } from "./nextstep.tsx";
 import type { ReadResult } from "./request.ts";
 
 // Synthetic machine and observation reads, as the generated types describe them.
@@ -334,6 +335,24 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       `<dt>Import base</dt><dd data-testid="import-base"><a href="/import-base-revisions/${ibr}" title="${ibr}">ibr_2xxaâ€¦qa4m</a></dd>`);
     expect(shown(machine({ applied: { release: "rel_new", source: "operation", importBase: null } }))).toContain('<dt>Import base</dt><dd data-testid="import-base">none</dd>');
     expect(shown(machine({ applied: null }))).toContain('<dt>Import base</dt><dd data-testid="import-base">none</dd>');
+  });
+
+  test("ginsys/bronzeward#879: the next-step line follows the position answer's own recovery mode, and a read without answer draws no line", () => {
+    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const body = { machine: machine({ scopeState: "normal" }), ingestion: null, draft: null, plan: { id: "pln_1", state: "approved", operation: "adopt", release: "rel_new", approvalCurrent: true, createdAt: READ, expiresAt: READ }, operation: null, rolloutHeldBy: null, step: "awaiting-dispatch" } as unknown as Position;
+    const line = (pos: Load<Position>) => {
+      const { position, recovery } = positionShown(pos);
+      return renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
+        id: "mch_a", m: { kind: "ok", data: machine({}) }, obs: { kind: "ok", data: { items: [obsA], next: undefined, restarted: false } },
+        km: { view: "v", data: undefined, restarted: false }, ko: { view: "v", data: undefined, restarted: false },
+        tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false, position, recovery,
+      })));
+    };
+    // The answer served in recovery mode holds a `normal` scope; one served outside it does not, whatever the shell's mode is now.
+    expect(line({ kind: "ok", data: body, recoveryMode: true })).toContain("the server is in recovery mode");
+    expect(line({ kind: "ok", data: body })).not.toContain("recovery mode");
+    expect(line({ kind: "transport" })).not.toContain('data-testid="next-step"');
+    expect(line({ kind: "loading" })).not.toContain('data-testid="next-step"');
   });
 
   test("#424: a machine read again that fails shows its failure even when the observations keep nothing", () => {

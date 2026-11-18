@@ -387,6 +387,11 @@ export function recovery(lost: { current: [boolean, boolean] }, run: () => void,
 // A read that keeps no earlier answer: a failure replaces what it showed.
 export const NO_KEEP: Keep = { held: () => false, lost: () => undefined };
 
+// What the line is drawn from: the position of an answered read and the recovery mode that answer was served
+// under, and nothing otherwise.
+export const positionShown = (pos: Load<Position>): { position: Position | undefined; recovery: boolean } =>
+  pos.kind === "ok" ? { position: pos.data, recovery: pos.recoveryMode === true } : { position: undefined, recovery: false };
+
 // When a read's answer ends the banner and a resource found no answer, the machine and its
 // observations are read again once, as for a timeline advance: one read again at a time, so this
 // read again and the timeline's do not abandon each other, and at most once per POLL_MS from when the
@@ -406,7 +411,7 @@ function MachineState({ id, path, tl, older, busy, readAgain, changed }: { id: s
   useEffect(() => stop, [stop]);
   useEffect(() => observe(view, n, regained));
   const [km, ko, kt] = (k.current = keptW3(k.current, m, obs, tl, view));
-  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} changed={changed} position={pos.kind === "ok" ? pos.data : undefined} recovery={pos.kind === "ok" && pos.recoveryMode === true} />;
+  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} changed={changed} {...positionShown(pos)} />;
 }
 
 // W3 as read: each read's answer, else what it keeps with its failure above it. The machine's rows
