@@ -169,9 +169,17 @@ const storageState = () =>
     caches: "caches" in self ? await caches.keys() : ["unreadable"],
   }));
 
-// Client contracts §11.5 item 3: no browser storage holds a value outside a redirect.
+// Client contracts §11.5 item 3: no browser storage holds a value outside a redirect. The page answers
+// counts and database and cache names only, so a failing read never exports a stored value (a stored
+// document carries the run's canary, which must not reach the WebDriver log).
 export async function storageEmpty() {
-  expect(await storageState()).toEqual({ local: [], session: [], indexedDB: [], caches: [] });
+  const held = await browser.execute(async () => ({
+    local: localStorage.length,
+    session: sessionStorage.length,
+    indexedDB: "databases" in indexedDB ? (await indexedDB.databases()).map((d) => d.name ?? "") : ["unreadable"],
+    caches: "caches" in self ? await caches.keys() : ["unreadable"],
+  }));
+  expect(held).toEqual({ local: 0, session: 0, indexedDB: [], caches: [] });
 }
 
 // The positive control of storageEmpty (ginsys/bronzeward#341, client contracts §11.5): plants a
@@ -311,13 +319,14 @@ export const scrollsOnItsOwn = (sel: string) => browser.execute((s: string) => {
   const r = document.querySelector(s);
   return r !== null && r.scrollWidth > r.clientWidth;
 }, sel);
-// Runs `run` at 320 CSS pixels, and restores the viewport after it.
+// Runs `run` at 320 CSS pixels, and restores the viewport it found.
 export async function narrow<T>(run: () => Promise<T>): Promise<T> {
-  await browser.setViewport({ width: 320, height: 640 });
+  const before = await browser.execute(() => ({ width: innerWidth, height: innerHeight }));
   try {
+    await browser.setViewport({ width: 320, height: 640 });
     expect(await browser.execute(() => innerWidth)).toBe(320);
     return await run();
   } finally {
-    await browser.setViewport({ width: 1280, height: 800 });
+    await browser.setViewport(before);
   }
 }
