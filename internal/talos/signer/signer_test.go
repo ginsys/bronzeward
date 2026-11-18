@@ -226,6 +226,24 @@ func TestTry(t *testing.T) {
 		}
 	})
 
+	t.Run("a node that holds the read open does not outlive the certificate", func(t *testing.T) {
+		defer signer.SetTryLifetime(2 * time.Second)()
+		held := talostest.Serve(t, pki)
+		held.StallVersion(true)
+		k, err := signer.Extract(ctx(t), signer.SecretsBundle, bundle(ca), held.Endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := time.Now()
+		// The caller's context allows far longer than the certificate lives.
+		if err := signer.Try(ctx(t), k, held.Endpoint, start); !errors.Is(err, signer.ErrUnavailable) {
+			t.Fatalf("err %v", err)
+		}
+		if d := time.Since(start); d > 6*time.Second {
+			t.Fatalf("the try lasted %v, past the certificate's two seconds", d)
+		}
+	})
+
 	t.Run("a certificate authority key that cannot sign is refused", func(t *testing.T) {
 		bad := provider.NewCAKey(ca.Crt, []byte("not a key"))
 		if got := rule(t, signer.Try(ctx(t), bad, n.Endpoint, time.Now())); got != signer.RuleUnusable {
