@@ -3,7 +3,7 @@
 // contracts §7 compatibility check, which GET /server answers before any page reads data, and the
 // recovery banner, start mode and epoch-change notice of §8.5.
 
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useReducer, useRef, useState } from "react";
+import { createContext, type ReactNode, type RefObject, useCallback, useContext, useEffect, useId, useReducer, useRef, useState } from "react";
 import { leaving, signingOut, unsaved, WriteNotices } from "./forms.tsx";
 import { type Load, ReadsProvider } from "./list.tsx";
 import { Entered, PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
@@ -59,6 +59,18 @@ export function Action({ label, needs, onClick, submit = false, busy = false }: 
       {reason !== undefined && <span id={id}> {reason}</span>}
     </span>
   );
+}
+
+// Where the keyboard goes after an action: an Action is disabled while it runs and an answer replaces
+// the control that sent it, so focus falls to the page body (WCAG 2.4.3, ginsys/bronzeward#896). The
+// view whose content changes names its new content: `target` takes focus each time `key` takes a new
+// truthy value (a counter, an outcome, or `true` for content that has just appeared).
+export function useFocusOn(key: unknown, target: RefObject<HTMLElement | null>) {
+  const last = useRef<unknown>(undefined);
+  useEffect(() => {
+    if (key && key !== last.current) target.current?.focus();
+    last.current = key;
+  }, [key, target]);
 }
 
 // A read that did not answer with data, as the catalogue shows it; a 403 names what the route

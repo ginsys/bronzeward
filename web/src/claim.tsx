@@ -8,7 +8,7 @@ import { NO_ASSIST } from "./drafts.tsx";
 import { startsNew, useSend, useWrites, Result } from "./forms.tsx";
 import { type Load, short, useReads, useSettled } from "./list.tsx";
 import { markSent, MarksPanel, markSpec } from "./marks.tsx";
-import { Action } from "./shell.tsx";
+import { Action, useFocusOn } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import type { Outcome, Write, WriteSpec } from "./write.ts";
 
@@ -73,13 +73,17 @@ export function ClaimView({ verb, offered, w, send }: { verb: Verb; offered: boo
 // One action: a second click while it runs, or while its outcome is unknown, sends nothing new (B10).
 // Once it is done, or refused with a 409, the ingestion is read again, and the progress watch follows
 // the new claim generation. `sent` tells the section this verb was sent, so that its outcome stays.
-function ClaimAction({ id, verb, offered, again, sent }: { id: string; verb: Verb; offered: boolean; again: () => void; sent: (v: Verb) => void }) {
+function ClaimAction({ id, verb, offered, again, sent, ended }: { id: string; verb: Verb; offered: boolean; again: () => void; sent: (v: Verb) => void; ended: () => void }) {
   const [w, send] = useSend();
   const read = useRef<Write>(undefined);
   const settled = rereads(w?.outcome);
   useEffect(() => {
     read.current = rereadOnce(w, read.current, again);
   }, [w, settled, again]);
+  const outcome = w?.outcome;
+  useEffect(() => {
+    if (outcome !== undefined) ended();
+  }, [outcome, ended]);
   return <ClaimView verb={verb} offered={offered} w={w} send={() => { sent(verb); send(claimSpec(id, verb)); }} />;
 }
 
@@ -137,6 +141,19 @@ type ReviewBody = components["schemas"]["IngestionReviewBody"];
 export const readReview = (read: <T>(path: string, live?: () => boolean) => Promise<Load<T> | undefined>, id: string, live: () => boolean) =>
   read<ReviewBody>(`/ingestions/${enc(id)}/review`, live);
 
+// Closing the review or the document removes the button that held focus: it returns to the section,
+// where the button that opens it again is next.
+function useCloser(drop: () => void) {
+  const [closed, setClosed] = useState(0);
+  const section = useRef<HTMLElement>(null);
+  useFocusOn(closed, section);
+  const close = useCallback(() => {
+    drop();
+    setClosed((n) => n + 1);
+  }, [drop]);
+  return { section, close };
+}
+
 // The review view (W5): read on request, `no-store`, shown read-only as served, with no copy, download
 // or print action. A failed or dropped read keeps nothing, and the review is read again on request.
 function Review({ b, marking }: { b: Ingestion; marking: { send: (marks: string[]) => void; busy: boolean } }) {
@@ -172,9 +189,10 @@ function Review({ b, marking }: { b: Ingestion; marking: { send: (marks: string[
     if ("text" in r) setText(r.text);
     else setWhy(failure(r.why));
   }, [reads, read, failure, b.id]);
+  const { section, close } = useCloser(drop);
   return (
-    <section aria-label="Protected review">
-      {text === undefined ? <Action label="Review import" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={b.id} text={text} close={drop} marking={marking} />}
+    <section ref={section} tabIndex={-1} aria-label="Protected review">
+      {text === undefined ? <Action label="Review import" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={b.id} text={text} close={close} marking={marking} />}
       {why}
     </section>
   );
@@ -215,9 +233,10 @@ export function BaseDocument({ id }: { id: string }) {
     if ("text" in r) setText(r.text);
     else setWhy(failure(r.why));
   }, [reads, read, failure, id]);
+  const { section, close } = useCloser(drop);
   return (
-    <section aria-label="Protected document">
-      {text === undefined ? <Action label="Show document" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={id} text={text} close={drop} kind="document" />}
+    <section ref={section} tabIndex={-1} aria-label="Protected document">
+      {text === undefined ? <Action label="Show document" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={id} text={text} close={close} kind="document" />}
       {why}
     </section>
   );
@@ -228,10 +247,13 @@ export function BaseDocument({ id }: { id: string }) {
 // may disable it.
 export function Shown({ id, text, close, marking, kind = "review" }: { id: string; text: string; close: () => void; marking?: { send: (marks: string[]) => void; busy: boolean }; kind?: "review" | "document" }) {
   const doc = kind === "document";
+  // The button that opened it is gone: focus is on the text, with the marks and Close after it.
+  const area = useRef<HTMLTextAreaElement>(null);
+  useFocusOn(true, area);
   return (
     <>
       <Status testid="review-notice">{doc ? "PROTECTED DOCUMENT" : "PROTECTED REVIEW"}. This may contain secrets nothing has recognised yet. This page stores none of it. Screen capture and copying by hand are outside its control, and browser extensions can read this page.</Status>
-      <p><label>{doc ? "Document of import base" : "Review of import"} {short(id)}<br /><textarea readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
+      <p><label>{doc ? "Document of import base" : "Review of import"} {short(id)}<br /><textarea ref={area} readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
       {marking && <MarksPanel text={text} send={marking.send} busy={marking.busy} />}
       <p><button type="button" onClick={close}>{doc ? "Close document" : "Close review"}</button></p>
     </>
@@ -266,13 +288,23 @@ function ClaimSection({ b, again, now }: { b: Ingestion; again: () => void; now:
   useEffect(() => {
     readMarks.current = rereadOnce(mw, readMarks.current, again);
   }, [mw, markSettled, again]);
+  // An action of the section ended: the button that sent it was disabled while it ran or is gone, so focus goes
+  // to the section, where the outcome is and the next action follows.
+  const [ends, setEnds] = useState(0);
+  const ended = useCallback(() => setEnds((n) => n + 1), []);
+  const marked = mw?.outcome;
+  useEffect(() => {
+    if (marked !== undefined) ended();
+  }, [marked, ended]);
+  const section = useRef<HTMLElement>(null);
+  useFocusOn(ends, section);
   if (!o.review && shown.length === 0 && mw === undefined) return null;
   return (
-    <section aria-label="Claim">
+    <section ref={section} tabIndex={-1} aria-label="Claim">
       <p>{b.state === "paused" ? expiry(b.expiresAt, now) : null}</p>
       {o.review && <Review b={b} marking={{ send: (marks) => msend(markSpec(b.id, marks)), busy: marking }} />}
       <Result w={mw} done={markSent} />
-      {shown.map((v) => <ClaimAction key={v} id={b.id} verb={v} offered={o.verbs.includes(v)} again={again} sent={sentVerb} />)}
+      {shown.map((v) => <ClaimAction key={v} id={b.id} verb={v} offered={o.verbs.includes(v)} again={again} sent={sentVerb} ended={ended} />)}
     </section>
   );
 }

@@ -13,7 +13,7 @@ import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePendi
 import type { Cluster } from "./machines.tsx";
 import { type EmbeddedPath, references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import type { Problem } from "./request.ts";
-import { Action } from "./shell.tsx";
+import { Action, useFocusOn } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
 import type { Outcome, Write } from "./write.ts";
 
@@ -747,6 +747,12 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   const [w, send] = useSend();
   const text = useRef<HTMLTextAreaElement>(null);
   const marks = useRef<HTMLTextAreaElement>(null);
+  // Save, Remove and Copy my text are disabled while they run or once they ran, so focus falls to the page
+  // body (ginsys/bronzeward#896): it goes to the write's answer, and after Copy my text to the text it copied.
+  const answer = useRef<HTMLDivElement>(null);
+  useFocusOn(w?.outcome, answer);
+  const [copied, setCopied] = useState(0);
+  useFocusOn(copied, text);
   // The revision the pane read last, and whether the latest read failed: until it read the revision
   // the draft shown names, the pane takes no edit (H9).
   const [loaded, setLoaded] = useState<string | undefined>();
@@ -904,7 +910,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
           <label>Your text <textarea readOnly value={conflict.mine.document} rows={8} cols={60} {...NO_ASSIST} /></label>
         </div>
       )}
-      <button type="button" onClick={() => act({ kind: "copy" })} disabled={conflict.phase !== "theirs" || conflict.awaits === true || waits || conflict.revision !== draft.revision}>
+      <button type="button" onClick={() => { act({ kind: "copy" }); setCopied((n) => n + 1); }} disabled={conflict.phase !== "theirs" || conflict.awaits === true || waits || conflict.revision !== draft.revision}>
         Copy my text into the new revision
       </button>
     </>
@@ -952,11 +958,13 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       {note !== undefined && <Status testid="editor-note">{note}</Status>}
       {/* A conflict a done write kept stays shown, with its Copy my text. */}
       {!(o?.kind === "refused" && o.status === 412) && conflictView()}
-      <WriteResult w={w} conflict={conflictView("alert") || undefined} goTo={() => void goTo()} marks={sent?.text.marks ?? ""} done={(data) => {
-        if (w?.spec.method === "DELETE") return `Fragment ${name} removed from draft ${short(draft.id)}.`;
-        const r = (data as Partial<S["SourceUpdate"]>).entry?.revision;
-        return `Fragment ${name} saved in draft ${short(draft.id)}${typeof r === "string" ? ` (revision ${short(r)})` : ""}.`;
-      }} />
+      <div ref={answer} tabIndex={-1} data-testid="fragment-write">
+        <WriteResult w={w} conflict={conflictView("alert") || undefined} goTo={() => void goTo()} marks={sent?.text.marks ?? ""} done={(data) => {
+          if (w?.spec.method === "DELETE") return `Fragment ${name} removed from draft ${short(draft.id)}.`;
+          const r = (data as Partial<S["SourceUpdate"]>).entry?.revision;
+          return `Fragment ${name} saved in draft ${short(draft.id)}${typeof r === "string" ? ` (revision ${short(r)})` : ""}.`;
+        }} />
+      </div>
     </section>
   );
 }
