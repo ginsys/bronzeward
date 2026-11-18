@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ginsys/bronzeward/internal/client/apitypes"
 	"github.com/ginsys/bronzeward/internal/talos/discover"
 )
 
@@ -617,5 +619,92 @@ func TestOnboardRefusesBeforeAnyRequest(t *testing.T) {
 	args := append([]string{"cluster", "onboard", "--talosconfig", tabbed}, e.base()[4:]...)
 	if code, out, errOut := e.runArgs(args...); code != 2 || !strings.Contains(errOut, "rename the file") || e.requests() != before {
 		t.Errorf("unprintable name: exit %d, stdout %q, stderr %q, %d new requests", code, out, errOut, e.requests()-before)
+	}
+}
+
+// TestOnboardPrintedCommandsAreShell: no printed command line carries text after the command, so copying
+// a line whole into a shell runs it.
+func TestOnboardPrintedCommandsAreShell(t *testing.T) {
+	e := newOnboard(t)
+	e.api.pauseFirst = true
+	code, out, errOut := e.run("--review")
+	if code != 0 {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "bronzewardctl ") && strings.Contains(l, " (") {
+			t.Errorf("a command line carries text after the command: %q", l)
+		}
+	}
+}
+
+// TestOnboardHeldImportErrorKeepsTheContext: the error text that names import status carries the
+// global --context, like every printed command.
+func TestOnboardHeldImportErrorKeepsTheContext(t *testing.T) {
+	e := newOnboard(t)
+	if code, out, errOut := e.run("--no-import"); code != 0 {
+		t.Fatalf("setup: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	e.api.mu.Lock()
+	e.api.draft.id, e.api.draft.cluster, e.api.draft.title, e.api.draft.state, e.api.draft.rev = "drf_"+strings.Repeat("2", 26), e.api.clusters[0].Id, "onboard lab", "open", 1
+	e.api.ings = append(e.api.ings, obIngestion{id: "ing_" + strings.Repeat("3", 26), machine: e.api.machines[0].id, draft: e.api.draft.id, op: "op_" + strings.Repeat("4", 26), state: "held"})
+	e.api.mu.Unlock()
+	args := []string{"cluster", "onboard", "--talosconfig", e.file, "--name", "lab", "--kubernetes-endpoint", "proposed", "--skip-secret", "--context", "lab"}
+	_, out, errOut := e.runArgs(args...)
+	if !strings.Contains(errOut, "bronzewardctl --context 'lab' import status") {
+		t.Errorf("stderr %q (stdout %q) names import status without the context", errOut, out)
+	}
+}
+
+// TestOnboardSettleAfterASaveFailure: an import whose follow ended well or paused but whose context could
+// not be saved (the afterEnd class classify reads as done) is settled by reading the ingestion, never
+// assumed released. The class is the input the branch decides on, so the test builds it.
+func TestOnboardSettleAfterASaveFailure(t *testing.T) {
+	if got := classify(saveFailed{afterEnd{errors.New("disk full")}}, true); got != stateDone {
+		t.Fatalf("a save failure after an accepted import classifies as %q, not done: the case no longer reaches the branch", got)
+	}
+	id := "ing_" + strings.Repeat("3", 26)
+	for _, c := range []struct {
+		name, state, command string
+		read                 error
+		want                 string
+	}{
+		{"released", "released", "", nil, obReleased},
+		{"paused", "paused", "bronzewardctl --context 'lab' import status", nil, statePaused.s()},
+		{"another state", "held", "bronzewardctl --context 'lab' import status", nil, stateUnknown.s()},
+		{"read failed", "", "bronzewardctl --context 'lab' import status", errors.New("no answer"), stateUnknown.s()},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := &onboardMachine{Machine: "mch_x"}
+			read := func(got string) (*apitypes.IngestionBody, error) {
+				if got != id {
+					t.Errorf("read ingestion %q, want %q", got, id)
+				}
+				if c.read != nil {
+					return nil, c.read
+				}
+				return &apitypes.IngestionBody{Id: id, State: c.state}, nil
+			}
+			onboardSettle(m, id, "--context 'lab' ", read)
+			if m.Import.State != c.want || !strings.HasPrefix(m.Import.Command, c.command) || m.Import.ID != id {
+				t.Errorf("import %+v; want state %q, a command starting %q and id %q", m.Import, c.want, c.command, id)
+			}
+		})
+	}
+}
+
+// TestQualifyNamesTheContextOnce: a command that already names --context is left alone, and so are an
+// empty prefix and an empty command.
+func TestQualifyNamesTheContextOnce(t *testing.T) {
+	const ctx = "--context 'lab' "
+	for _, c := range []struct{ ctx, cmd, want string }{
+		{ctx, "bronzewardctl import status 'i'", "bronzewardctl --context 'lab' import status 'i'"},
+		{ctx, "bronzewardctl --context 'lab' import status 'i'", "bronzewardctl --context 'lab' import status 'i'"},
+		{"", "bronzewardctl import status 'i'", "bronzewardctl import status 'i'"},
+		{ctx, "", ""},
+	} {
+		if got := qualify(c.ctx, c.cmd); got != c.want {
+			t.Errorf("qualify(%q, %q) = %q, want %q", c.ctx, c.cmd, got, c.want)
+		}
 	}
 }

@@ -60,7 +60,7 @@ func (e *env) clusterDiscover(args []string) error {
 	} else if err != nil {
 		return err
 	}
-	return e.say(discoverLines(res, file)...)
+	return e.say(discoverLines(res, file, talosContext, endpoint)...)
 }
 
 // unprintable says that a file name holds a byte or character that a command printed back cannot show.
@@ -102,7 +102,7 @@ func unwrapPath(err error) error {
 // discoverLines is the listing and the commands that record it. A member that did not answer, or
 // reported no platform, has no command: its identity or platform would be a guess. An unsupported
 // contract has none for the cluster either, because the server would refuse it.
-func discoverLines(res discover.Result, file string) []string {
+func discoverLines(res discover.Result, file, talosContext, override string) []string {
 	out := []string{sf("Talos cluster ID %s, Talos %s, contract %s.", res.ClusterID, res.Version, res.Contract)}
 	if res.ResolvedFrom != "" {
 		out = append(out, sf("Dialled %s: the address that %s resolved to, once. The first reads used that address. Each member was read at its own listed address.", res.Endpoint, res.ResolvedFrom))
@@ -157,7 +157,14 @@ func discoverLines(res discover.Result, file string) []string {
 	for _, n := range notRecorded {
 		out = append(out, "", "Not recorded: "+n+" Add it with machine add once it answers.")
 	}
+	selection := ""
+	if talosContext != "" {
+		selection += " --talos-context " + client.ShellWord(talosContext)
+	}
+	if override != "" {
+		selection += " --endpoint " + client.ShellWord(override)
+	}
 	return append(out, "", "Nothing was sent to the server and no secret was written. Until the bao command has run, the first source: machine import fails with talos-access-unavailable.",
-		"cluster onboard does all of this in one run, and imports each machine into a draft: bronzewardctl cluster onboard --talosconfig "+client.ShellWord(file)+
+		"cluster onboard does all of this in one run, and imports each machine into a draft: bronzewardctl cluster onboard --talosconfig "+client.ShellWord(file)+selection+
 			" --name <name> --kubernetes-endpoint proposed --bao-addr <url> --bao-token-file <file>")
 }
