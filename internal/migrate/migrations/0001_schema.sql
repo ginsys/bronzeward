@@ -361,7 +361,7 @@ CREATE TABLE staging_claim (
   continued_by    text REFERENCES principal (id),
   CHECK (payload IS NULL OR (mode = 'encrypted' AND state IN ('held', 'paused', 'resumed'))),
   CHECK (review IS NULL OR mode = 'encrypted'),
-  CHECK (continued_by IS NULL OR review = 'continued'),
+  CHECK (continued_by IS NULL OR review IS NOT DISTINCT FROM 'continued'),
   CHECK (state <> 'paused' OR (review IS NOT DISTINCT FROM 'pending' AND payload IS NOT NULL)),
   -- Only an encrypted claim can be taken over (§3.2, §3.4): transient staging has no recovery owner.
   CHECK (state <> 'resumed' OR mode = 'encrypted'),
