@@ -585,12 +585,14 @@ there.
   stored, logged, returned or quoted in an error (compilation §13); its parse
   failures give a fixed refusal, `422 validation-failed` with a `rule` of
   `first-key-unusable`, `first-key-no-ca-key`, `first-key-role-insufficient`,
-  `first-key-endpoint-no-control-plane` (the talosconfig read at the endpoint
-  found no CA key, as a worker node's answer would) or `first-key-not-trusted`
-  (the node refused the signed certificate), and an endpoint that does not
-  answer, or any other failed Talos read, is `503 talos-access-unavailable`
-  (§3.3, failure). Nothing is written on a refusal, and the stored key stays as
-  it was.
+  or `first-key-endpoint-no-control-plane` (the talosconfig read at the endpoint
+  found no CA key, as a worker node's answer would), and a failed try, or any
+  other failed Talos read, is `503 talos-access-unavailable` (§3.3, failure).
+  A node that refuses the signed certificate and an endpoint that does not
+  answer are not told apart: Talos reports both as `Unavailable` (measured, with
+  the TLS cause not isolated, §3.3), so the problem says only that the try
+  failed, and the author checks the key and the endpoint. Nothing is written on
+  a refusal or a failed try, and the stored key stays as it was.
 - **Authority.** An `author` supplies and replaces a first key, human only, with
   no approval step (owner decision BW-874-first-key-authority-1, 2026-11-18
   17:41 CET: "A"). Every supply and replacement is recorded in the audit trail
@@ -4030,8 +4032,8 @@ each (design §7.7 consequences):
   `endpoint` reaches no control plane, with control plane endpoints embedded in
   the file that are ignored (`first-key-endpoint-no-control-plane`), and a key
   of an unrelated CA supplied as a replacement of a working key
-  (`first-key-not-trusted`, the stored key and its version unchanged) are each
-  refused with nothing written, and that a certificate signed by an unrelated CA
+  (`503 talos-access-unavailable`, the stored key and its version unchanged)
+  are each refused with nothing written, and that a certificate signed by an unrelated CA
   is refused by the node; the roles by use (`os:reader` for an observation that does not read
   the configuration, `os:admin` for the rest) and a lifetime that covers the
   use and no more; no Talos connection kept past its certificate's

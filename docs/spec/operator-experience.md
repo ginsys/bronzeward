@@ -531,7 +531,9 @@ at that address before it stores it, and a failed try stores nothing and leaves 
 printed; a talosconfig is cut to the one context `--talos-context` names (else the current one). It
 answers with the cluster, the kind, whether a key was replaced and the CA key's version; the refusals
 of §3.4 (`first-key-unusable`, `first-key-no-ca-key`, `first-key-role-insufficient`,
-`first-key-endpoint-no-control-plane`, `first-key-not-trusted`) print their rule and nothing from the document. A talosconfig
+`first-key-endpoint-no-control-plane`) print their rule and nothing from the document, and a failed try
+(`talos-access-unavailable`) says only that the key could not be tried at that address, because a node that
+refuses the key and one that does not answer are not told apart. A talosconfig
 whose certificate is `os:reader` is refused: Bronzeward needs the `os:admin` read of a control
 plane's configuration to take the CA key from it.
 
