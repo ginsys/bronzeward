@@ -918,6 +918,31 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/RevocationBody'}
         default: {$ref: '#/components/responses/Problem'}
+  /import-base-revisions/{id}:
+    get:
+      operationId: getImportBaseRevisionsId
+      tags: [import-base-revisions]
+      description: The summary of one import base revision (persistence and API §3.2, choice §17.38). It carries no document
+        text, no digest, no reference name and no generation path.
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImportBaseSummary'}
+        default: {$ref: '#/components/responses/Problem'}
   /ingestions:
     get:
       operationId: getIngestions
@@ -2461,10 +2486,14 @@ components:
       additionalProperties: false
     Applied:
       type: object
-      required: [release, source]
+      required: [release, source, importBase]
       properties:
         release: {type: string}
         source: {type: string}
+        importBase:
+          type: [string, 'null']
+          description: The import base revision of the Applied release for this machine (persistence and API §3.2), the one
+            the summary read answers; null only for a release that does not cover the machine.
       additionalProperties: false
     ApplyFailed:
       type: object
@@ -3052,6 +3081,19 @@ components:
           oneOf:
           - {$ref: '#/components/schemas/Declarations'}
           - {type: 'null'}
+      additionalProperties: false
+    ImportBaseSummary:
+      type: object
+      description: What an import base revision records of itself, without its content (persistence and API §3.2).
+      required: [id, machine, author, createdAt, documentBytes, references, embedded]
+      properties:
+        id: {type: string}
+        machine: {type: string}
+        author: {type: string, description: The principal identifier of the human whose ingestion wrote the revision.}
+        createdAt: {type: string, format: date-time}
+        documentBytes: {type: integer, description: The size in bytes of the stored sanitized document; its text is never served.}
+        references: {type: integer, description: The number of reference declarations the revision holds.}
+        embedded: {type: integer, description: The number of embedded documents the import identified.}
       additionalProperties: false
     IngestionReviewBody:
       type: object

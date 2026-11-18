@@ -805,8 +805,10 @@ type AlertBody struct {
 
 // Applied defines model for Applied.
 type Applied struct {
-	Release string `json:"release"`
-	Source  string `json:"source"`
+	// ImportBase The import base revision of the Applied release for this machine (persistence and API §3.2), the one the summary read answers; null only for a release that does not cover the machine.
+	ImportBase *string `json:"importBase"`
+	Release    string  `json:"release"`
+	Source     string  `json:"source"`
 }
 
 // ApplyFailed An apply-config operation's error once a completion observation contradicted its postconditions (settle.go).
@@ -1227,6 +1229,24 @@ type IdentityBodyKind string
 
 // IdentityBodyRoles defines model for IdentityBody.Roles.
 type IdentityBodyRoles string
+
+// ImportBaseSummary What an import base revision records of itself, without its content (persistence and API §3.2).
+type ImportBaseSummary struct {
+	// Author The principal identifier of the human whose ingestion wrote the revision.
+	Author    string    `json:"author"`
+	CreatedAt time.Time `json:"createdAt"`
+
+	// DocumentBytes The size in bytes of the stored sanitized document; its text is never served.
+	DocumentBytes int `json:"documentBytes"`
+
+	// Embedded The number of embedded documents the import identified.
+	Embedded int    `json:"embedded"`
+	Id       string `json:"id"`
+	Machine  string `json:"machine"`
+
+	// References The number of reference declarations the revision holds.
+	References int `json:"references"`
+}
 
 // IngestResult An ingest operation's result once it succeeded (runner.go finish).
 type IngestResult struct {
