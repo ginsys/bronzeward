@@ -1,0 +1,613 @@
+package main
+
+import (
+	"cmp"
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"slices"
+	"strings"
+
+	"github.com/ginsys/bronzeward/internal/accessput"
+	"github.com/ginsys/bronzeward/internal/client"
+	"github.com/ginsys/bronzeward/internal/client/apitypes"
+	"github.com/ginsys/bronzeward/internal/talos/discover"
+)
+
+// The states of cluster onboard's parts, as the object prints them: created or existing for a record,
+// written, present, skipped or refused for the secret, released or paused for an import; the failure
+// states are those of composite.go.
+const (
+	obCreated     = "created"
+	obExisting    = "existing"
+	obWritten     = "written"
+	obPresent     = "present"
+	obSkipped     = "skipped"
+	obRefused     = "refused"
+	obReleased    = "released"
+	obNotRecorded = "not-recorded"
+)
+
+// onboardPart is one step of the object: its state, the ID it made or found, and for a step that did
+// not finish, the command that carries on and the line the command printed for it.
+type onboardPart struct {
+	State   string `json:"state"`
+	ID      string `json:"id,omitempty"`
+	Command string `json:"command,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type onboardCluster struct {
+	onboardPart
+	Name     string `json:"name,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+}
+
+type onboardDraft struct {
+	onboardPart
+	Title string `json:"title"`
+}
+
+type onboardMachine struct {
+	Node    string      `json:"node"`
+	Host    string      `json:"hostname,omitempty"`
+	Machine string      `json:"machine,omitempty"`
+	Add     onboardPart `json:"add"`
+	Import  onboardPart `json:"import"`
+}
+
+// onboarding is the object cluster onboard prints for -o json and yaml, once, when its last step has
+// settled; the text output is the same facts as lines.
+type onboarding struct {
+	Cluster  onboardCluster   `json:"cluster"`
+	Secret   onboardPart      `json:"secret"`
+	Draft    *onboardDraft    `json:"draft,omitempty"`
+	Machines []onboardMachine `json:"machines"`
+	// again is the command that carries the run on, once a paused import is continued.
+	again string
+}
+
+// onboardArgs are the flags of cluster onboard.
+type onboardArgs struct {
+	file, endpoint, talosContext, name, kube string
+	baoAddr, baoTokenFile                    string
+	baoTokenStdin, skipSecret, noImport      bool
+	review                                   bool
+	staging                                  string
+	// config is the talosconfig as read, doc its one context and tok the OpenBao token: all read
+	// before any request is sent.
+	config, doc []byte
+	tok         accessput.Token
+}
+
+// httpsURL says whether s is an https URL with a host.
+func httpsURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && u.Scheme == "https" && u.Host != ""
+}
+
+// rerun is the command that carries on, from what the run settled: the flags given, with the
+// Kubernetes endpoint as it was resolved, and --skip-secret once the secret needs no write.
+func (a onboardArgs) rerun(e *env, skipSecret bool) string {
+	w := []string{"bronzewardctl"}
+	if e.context != "" {
+		w = append(w, "--context", client.ShellWord(e.context))
+	}
+	w = append(w, "cluster", "onboard", "--talosconfig", client.ShellWord(a.file), "--name", client.ShellWord(a.name),
+		"--kubernetes-endpoint", client.ShellWord(a.kube))
+	for _, f := range [][2]string{{"--endpoint", a.endpoint}, {"--talos-context", a.talosContext}} {
+		if f[1] != "" {
+			w = append(w, f[0], client.ShellWord(f[1]))
+		}
+	}
+	if a.staging != "encrypted" {
+		w = append(w, "--staging", a.staging)
+	}
+	if a.review {
+		w = append(w, "--review")
+	}
+	if a.noImport {
+		w = append(w, "--no-import")
+	}
+	switch {
+	case skipSecret:
+		w = append(w, "--skip-secret")
+	case a.baoTokenStdin:
+		w = append(w, "--bao-addr", client.ShellWord(a.baoAddr), "--bao-token-stdin")
+	default:
+		w = append(w, "--bao-addr", client.ShellWord(a.baoAddr), "--bao-token-file", client.ShellWord(a.baoTokenFile))
+	}
+	return strings.Join(w, " ")
+}
+
+// quietly runs f with standard output discarded: each step's own answer is kept for the one summary.
+func (e *env) quietly(f func() error) error {
+	out := e.out
+	e.out = io.Discard
+	defer func() { e.out = out }()
+	return f()
+}
+
+// conflictID is the record that a 409 conflict names under member, "" when err is none.
+func conflictID(err error, member string) string {
+	var p *client.Problem
+	if errors.As(err, &p) && p.Code() == "conflict" {
+		s, _ := p.Doc[member].(string)
+		return s
+	}
+	return ""
+}
+
+// clusterOnboard records a cluster, its machines and its Talos access, then imports each machine into
+// one draft (operator-experience.md §5.2, §5.9): the steps of cluster discover, cluster add, machine
+// add, the secret write and import start, in that order, each safe to run again. Nothing it does is
+// published: the draft is left for review.
+func (e *env) clusterOnboard(args []string) (err error) {
+	var a onboardArgs
+	var noWait bool
+	var rf repeatFlags
+	if _, err := e.parse("cluster onboard", args, 0, func(fs *flag.FlagSet) {
+		fs.StringVar(&a.file, "talosconfig", "", "")
+		fs.StringVar(&a.endpoint, "endpoint", "", "")
+		fs.StringVar(&a.talosContext, "talos-context", "", "")
+		fs.StringVar(&a.name, "name", "", "")
+		fs.StringVar(&a.kube, "kubernetes-endpoint", "", "")
+		fs.StringVar(&a.baoAddr, "bao-addr", "", "")
+		fs.StringVar(&a.baoTokenFile, "bao-token-file", "", "")
+		fs.BoolVar(&a.baoTokenStdin, "bao-token-stdin", false, "")
+		fs.BoolVar(&a.skipSecret, "skip-secret", false, "")
+		fs.BoolVar(&a.noImport, "no-import", false, "")
+		fs.BoolVar(&a.review, "review", false, "")
+		fs.StringVar(&a.staging, "staging", "encrypted", "")
+		fs.BoolVar(&noWait, "no-wait", false, "")
+		rf.flags(fs)
+	}); err != nil {
+		return err
+	}
+	if noWait {
+		return usageError{errors.New("cluster onboard waits for each import, so --no-wait is not given: import start --no-wait runs one import without waiting")}
+	}
+	for name, g := range map[string]given{"idempotency-key": rf.key, "expect-epoch": rf.epoch, "expect-principal": rf.principal, "if-match": rf.ifMatch} {
+		if g.set {
+			return usageError{fmt.Errorf("cluster onboard sends several writes, so --%s is not given: run it again, which finds what exists, and repeat one write with its own command", name)}
+		}
+	}
+	if err := e.onboardInputs(&a); err != nil {
+		return err
+	}
+	var id apitypes.IdentityBody
+	if err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+		return getJSON(c, "/identity", &id)
+	}); err != nil {
+		return err
+	}
+	if id.Kind != "human" || !slices.Contains(id.Roles, apitypes.IdentityBodyRoles("author")) {
+		return errors.New("cluster onboard needs an author signed in as a person: it records a cluster, machines and imports. Nothing was sent")
+	}
+	var res discover.Result
+	if err := e.cancellable("the cluster's Talos nodes", func(ctx context.Context) (err error) {
+		res, err = discoverCluster(ctx, a.config, a.talosContext, a.endpoint)
+		return err
+	}); errors.Is(err, discover.ErrNoEndpoint) {
+		return usageError{errors.New("the talosconfig names no endpoint: give --endpoint <host|ip[:port]>")}
+	} else if err != nil {
+		return err
+	}
+	if !res.Supported {
+		return fmt.Errorf("contract %s is not the contract of the machinery in this client, so the server would refuse the cluster. Nothing was recorded", client.Printable(res.Contract))
+	}
+	if a.kube == "proposed" {
+		a.kube = res.KubernetesEndpoint
+	}
+	if !httpsURL(a.kube) {
+		return errors.New("no https Kubernetes endpoint to record: the first control-plane member gave none, so give --kubernetes-endpoint <https url>. Nothing was recorded")
+	}
+	obj := &onboarding{Secret: onboardPart{State: stateNotRun.s()}, Cluster: onboardCluster{onboardPart: onboardPart{State: stateNotRun.s()}}}
+	for _, m := range res.Members {
+		om := onboardMachine{Node: m.NodeID, Host: m.Hostname, Add: onboardPart{State: stateNotRun.s()}, Import: onboardPart{State: stateNotRun.s()}}
+		switch {
+		case !m.Answered:
+			om.Add = onboardPart{State: obNotRecorded, Error: "did not answer"}
+		case m.Platform == "":
+			om.Add = onboardPart{State: obNotRecorded, Error: "answered, reported no platform"}
+		}
+		obj.Machines = append(obj.Machines, om)
+	}
+	rerun := func() string {
+		return a.rerun(e, obj.Secret.State == obWritten || obj.Secret.State == obPresent || obj.Secret.State == obSkipped)
+	}
+	defer func() {
+		obj.again = rerun()
+		perr := e.say(onboardLines(obj)...)
+		if e.output != "table" {
+			perr = e.printComposite(obj)
+		}
+		if perr != nil {
+			if err == nil {
+				err = perr
+			} else {
+				fmt.Fprintf(e.err, "bronzewardctl: %s\n", client.Shown(perr))
+			}
+		}
+	}()
+	if err := e.onboardRecords(&a, res, obj, rerun); err != nil {
+		return err
+	}
+	if err := e.onboardSecret(&a, obj, rerun); err != nil {
+		return err
+	}
+	if a.noImport {
+		for i := range obj.Machines {
+			if obj.Machines[i].Machine != "" {
+				obj.Machines[i].Import = onboardPart{State: obSkipped}
+			}
+		}
+		return nil
+	}
+	return e.onboardImports(&a, obj, rerun)
+}
+
+// onboardInputs checks every flag, then reads the talosconfig's one context and the OpenBao token,
+// before any request is sent: a refusal here leaves nothing to undo.
+func (e *env) onboardInputs(a *onboardArgs) (err error) {
+	switch {
+	case a.file == "":
+		return usageError{errors.New("cluster onboard needs --talosconfig <file>: it looks in no default place")}
+	case a.name == "":
+		return usageError{errors.New("cluster onboard needs --name <cluster name>")}
+	case a.kube == "":
+		return usageError{errors.New("cluster onboard needs --kubernetes-endpoint <https url>, or proposed to take the one cluster discover proposes")}
+	}
+	if err := checkStaging(a.staging, a.review); err != nil {
+		return err
+	}
+	if a.kube != "proposed" && !httpsURL(a.kube) {
+		return usageError{errors.New("--kubernetes-endpoint must be an https URL, or proposed")}
+	}
+	if a.skipSecret {
+		if a.baoAddr != "" || a.baoTokenFile != "" || a.baoTokenStdin {
+			return usageError{errors.New("--skip-secret writes no secret, so it takes no --bao-addr, --bao-token-file or --bao-token-stdin")}
+		}
+	} else {
+		if a.baoAddr == "" {
+			a.baoAddr = os.Getenv("BAO_ADDR")
+		}
+		switch {
+		case a.baoAddr == "":
+			return usageError{errors.New("cluster onboard needs --bao-addr (or BAO_ADDR) to write the secret, or --skip-secret where it is already written")}
+		case a.baoTokenStdin == (a.baoTokenFile != ""):
+			return usageError{errors.New("give --bao-token-file or --bao-token-stdin, not both and not neither")}
+		case a.baoTokenStdin && e.tokenStdin:
+			return usageError{errors.New("--bao-token-stdin and --token-stdin read standard input, which only one of them can: give the Bronzeward token with --token-file")}
+		}
+		if _, perr := accessput.ParseAddress(a.baoAddr); perr != nil {
+			return usageError{fmt.Errorf("--bao-addr: %s", strings.TrimPrefix(perr.Error(), "accessput: "))}
+		}
+	}
+	if a.config, err = readTalosconfig(a.file); err != nil {
+		return err
+	}
+	if a.doc, err = discover.OneContext(a.config, a.talosContext); errors.Is(err, discover.ErrUnknownContext) {
+		return usageError{errors.New("--talos-context names a context that the talosconfig does not hold")}
+	} else if err != nil {
+		return fmt.Errorf("the talosconfig cannot be used: %w", err)
+	}
+	switch {
+	case a.skipSecret:
+	case a.baoTokenStdin:
+		a.tok, err = accessput.ReadTokenStdin(stdin)
+	default:
+		a.tok, err = accessput.ReadTokenFile(a.baoTokenFile)
+	}
+	if err != nil {
+		return fmt.Errorf("reading the OpenBao token: %s", strings.TrimPrefix(err.Error(), "accessput: "))
+	}
+	return nil
+}
+
+// onboardRecords records the cluster and each machine, or finds what a 409 names. A machine that is in
+// another cluster stops the command.
+func (e *env) onboardRecords(a *onboardArgs, res discover.Result, obj *onboarding, rerun func() string) error {
+	in := apitypes.ClusterInput{Name: a.name, Endpoint: a.kube, Contract: res.Contract, TalosClusterId: res.ClusterID}
+	var cl apitypes.ClusterBody
+	err := e.quietly(func() error {
+		return e.writeAfter(nil, clusterWrite(in, nil), func(_ *client.Client, r *client.Response) ([]string, error) {
+			return nil, json.Unmarshal(r.Body, &cl)
+		})
+	})
+	state := obCreated
+	if existing := conflictID(err, "cluster"); existing != "" {
+		state = obExisting
+		err = e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+			return getJSON(c, "/clusters/"+url.PathEscape(existing), &cl)
+		})
+	} else if err == nil && cl.Id == "" {
+		err = errors.New("the cluster was recorded, but its answer names no cluster")
+	}
+	if err != nil {
+		obj.Cluster.onboardPart = onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}
+		return err
+	}
+	a.name = cl.Name
+	obj.Cluster = onboardCluster{onboardPart: onboardPart{State: state, ID: cl.Id}, Name: cl.Name, Endpoint: cl.Endpoint}
+	for i, m := range res.Members {
+		om := &obj.Machines[i]
+		if om.Add.State == obNotRecorded {
+			continue
+		}
+		min := apitypes.MachineInput{Cluster: cl.Id, Platform: apitypes.MachineInputPlatform(m.Platform), TalosEndpoint: endpointArg(m.Address)}
+		if m.SMBIOSUUID != "" {
+			min.SmbiosUuid = &m.SMBIOSUUID
+		} else {
+			min.TalosNodeId = &m.NodeID
+		}
+		var mb apitypes.MachineBody
+		err := e.quietly(func() error {
+			return e.writeAfter(nil, machineWrite(min, m.NodeID, m.SMBIOSUUID, nil), func(_ *client.Client, r *client.Response) ([]string, error) {
+				return nil, json.Unmarshal(r.Body, &mb)
+			})
+		})
+		state := obCreated
+		if existing := conflictID(err, "machine"); existing != "" {
+			state = obExisting
+			err = e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+				return getJSON(c, "/machines/"+url.PathEscape(existing), &mb)
+			})
+			if err == nil && mb.Cluster != cl.Id {
+				om.Machine, om.Add = mb.Id, onboardPart{State: obRefused, Error: "in another cluster"}
+				return fmt.Errorf("machine %s (node %s) is recorded in cluster %s, not in cluster %s: nothing after the machines ran. Remove it from that cluster or leave this node out of this one",
+					client.Printable(mb.Id), client.Printable(m.NodeID), client.Printable(mb.Cluster), client.Printable(cl.Id))
+			}
+		} else if err == nil && mb.Id == "" {
+			err = errors.New("the machine was recorded, but its answer names no machine")
+		}
+		if err != nil {
+			om.Add = onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}
+			return err
+		}
+		om.Machine, om.Add = mb.Id, onboardPart{State: state, ID: mb.Id}
+	}
+	return nil
+}
+
+// onboardSecret writes the cluster's one-context talosconfig into OpenBao, once, create-only. A rerun
+// writes nothing with --skip-secret: a create-only token answers 403 for an occupied path and for a
+// missing right alike, so the 403 names both.
+func (e *env) onboardSecret(a *onboardArgs, obj *onboarding, rerun func() string) error {
+	if a.skipSecret {
+		obj.Secret = onboardPart{State: obSkipped}
+		return nil
+	}
+	var err error
+	if cerr := e.cancellable("OpenBao", func(ctx context.Context) error {
+		err = accessput.Put(ctx, a.baoAddr, a.tok, obj.Cluster.ID, a.doc)
+		return err
+	}); cerr != nil && !errors.Is(cerr, err) {
+		return cerr
+	}
+	fail := func(state, why string) error {
+		obj.Secret = onboardPart{State: state, Command: rerun(), Error: why}
+		return errors.New(why)
+	}
+	switch {
+	case err == nil:
+		obj.Secret = onboardPart{State: obWritten}
+	case errors.Is(err, accessput.ErrPresent):
+		obj.Secret = onboardPart{State: obPresent}
+	case errors.Is(err, accessput.ErrDenied):
+		return fail(obRefused, "OpenBao answered 403: the token may not create the secret, or a secret is already there. Where it is already there, run the command again with --skip-secret")
+	case errors.Is(err, accessput.ErrAbsent):
+		return fail(stateFailed.s(), "OpenBao has no secret mount at this address, so no secret was written")
+	case errors.Is(err, accessput.ErrUnreachable):
+		return fail(stateFailed.s(), "OpenBao is unreachable at this address, so no secret was written")
+	case errors.Is(err, accessput.ErrUnexpected):
+		return fail(stateUnknown.s(), "OpenBao gave an unexpected answer, so it is not known whether the secret was written. Read it with bao, then run the command again with --skip-secret if it is there")
+	default:
+		return fail(stateFailed.s(), "the secret was not written: "+client.Shown(err))
+	}
+	return nil
+}
+
+func (s stepState) s() string { return string(s) }
+
+// onboardImports opens the draft titled "onboard <name>" or finds the open one, then imports each
+// recorded machine into it, one after the other, each as import start does. A machine whose import was
+// released into this draft is skipped. A paused import ends the command, as drift adopt's does, and so
+// does a held or resumed one, which only import status can read.
+func (e *env) onboardImports(a *onboardArgs, obj *onboarding, rerun func() string) error {
+	title := "onboard " + a.name
+	var draft apitypes.DraftBody
+	err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+		// GET /drafts takes no filter, so the open draft is picked out here.
+		items, err := c.List("/drafts")
+		if err != nil {
+			return err
+		}
+		for _, raw := range items {
+			var d apitypes.DraftBody
+			if json.Unmarshal(raw, &d) == nil && d.Title == title && d.State == "open" && d.Cluster == obj.Cluster.ID {
+				draft = d
+				break
+			}
+		}
+		if draft.Id == "" {
+			return nil
+		}
+		// An open draft found: its ETag is read and kept, so the first import sends it.
+		r, err := c.Get("/drafts/" + url.PathEscape(draft.Id))
+		if err == nil {
+			keep(e, c, draft.Id, r.Header.Get("ETag"))
+		}
+		return err
+	})
+	if err == nil && draft.Id == "" {
+		in := apitypes.DraftInput{Cluster: obj.Cluster.ID, Title: title}
+		body, _ := json.Marshal(in)
+		w := &client.Write{Method: http.MethodPost, Path: "/drafts", Body: body, Check: "draft list --cluster " + client.ShellWord(in.Cluster),
+			Read: func(c *client.Client) (string, error) {
+				return find(c, "/drafts", "open draft with this title in this cluster", func(d apitypes.DraftBody) string {
+					return map[bool]string{true: "the open draft " + d.Id + " with this title in this cluster"}[d.Cluster == in.Cluster && d.Title == in.Title && d.State == "open"]
+				})
+			}}
+		err = e.quietly(func() error {
+			return e.writeAfter(nil, w, func(c *client.Client, r *client.Response) ([]string, error) {
+				if err := json.Unmarshal(r.Body, &draft); err != nil {
+					return nil, err
+				}
+				keep(e, c, draft.Id, r.Header.Get("ETag"))
+				return nil, nil
+			})
+		})
+		if err == nil && draft.Id == "" {
+			err = errors.New("the draft was opened, but its answer names no draft")
+		}
+	}
+	if err != nil {
+		obj.Draft = &onboardDraft{onboardPart: onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}, Title: title}
+		return err
+	}
+	obj.Draft = &onboardDraft{onboardPart: onboardPart{State: obCreated, ID: draft.Id}, Title: title}
+	for i := range obj.Machines {
+		m := &obj.Machines[i]
+		if m.Machine == "" {
+			continue
+		}
+		stop, err := e.onboardImport(a, m, draft.Id, rerun)
+		if err != nil || stop {
+			return err
+		}
+	}
+	return nil
+}
+
+// onboardImport imports one machine, unless an import of it into this draft already stands. It says
+// whether the run stops here with no error: an import paused for review.
+func (e *env) onboardImport(a *onboardArgs, m *onboardMachine, draft string, rerun func() string) (bool, error) {
+	var found *apitypes.IngestionBody
+	if err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+		items, err := c.List("/ingestions?" + url.Values{"machine": {m.Machine}}.Encode())
+		if err != nil {
+			return err
+		}
+		rank := map[string]int{"released": 4, "paused": 3, "held": 2, "resumed": 2}
+		for _, raw := range items {
+			var b apitypes.IngestionBody
+			if json.Unmarshal(raw, &b) == nil && b.Draft == draft && rank[b.State] > 0 && (found == nil || rank[b.State] > rank[found.State]) {
+				found = &b
+			}
+		}
+		return nil
+	}); err != nil {
+		m.Import = onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}
+		return false, err
+	}
+	if found != nil {
+		return onboardImportState(m, found)
+	}
+	args := []string{"--machine", m.Machine, "--draft", draft, "--staging", a.staging}
+	if a.review {
+		args = append(args, "--review")
+	}
+	var c *client.Client
+	var acc accepted
+	err := e.quietly(func() (err error) {
+		c, acc, err = e.ingest("cluster onboard", "import", args)
+		return err
+	})
+	if err != nil {
+		state, cmd := classify(err, acc.Ingestion != ""), rerun()
+		if acc.Ingestion != "" {
+			cmd = statusCmd(acc.Ingestion)
+		}
+		m.Import = onboardPart{State: state.s(), ID: acc.Ingestion, Command: cmd, Error: client.Shown(err)}
+		if state == stateDone {
+			m.Import.State, m.Import.Command = obReleased, ""
+		}
+		return false, err
+	}
+	b, rerr := readIngestion(c, acc.Ingestion)
+	rerr = errors.Join(rerr, c.Save())
+	if rerr != nil {
+		m.Import = onboardPart{State: stateUnknown.s(), ID: acc.Ingestion, Command: statusCmd(acc.Ingestion), Error: client.Shown(rerr)}
+		return false, rerr
+	}
+	return onboardImportState(m, b)
+}
+
+// statusCmd is the command that reads an import.
+func statusCmd(ingestion string) string {
+	return "bronzewardctl import status " + client.ShellWord(ingestion)
+}
+
+// onboardImportState settles a machine's import by the state the server shows for it.
+func onboardImportState(m *onboardMachine, b *apitypes.IngestionBody) (bool, error) {
+	status := statusCmd(b.Id)
+	switch b.State {
+	case "released":
+		m.Import = onboardPart{State: obReleased, ID: b.Id}
+		return false, nil
+	case "paused":
+		m.Import = onboardPart{State: statePaused.s(), ID: b.Id, Command: status}
+		return true, nil
+	}
+	m.Import = onboardPart{State: stateUnknown.s(), ID: b.Id, Command: status}
+	return false, fmt.Errorf("import %s of machine %s is %s, so it is not run again here: read it with %s", client.Printable(b.Id), client.Printable(m.Machine), client.Printable(b.State), status)
+}
+
+// onboardLines is the text summary: the cluster, the secret, the draft and a row per member, then the
+// next step.
+func onboardLines(obj *onboarding) []string {
+	c := obj.Cluster
+	out := []string{"Cluster: " + c.State}
+	if c.ID != "" {
+		out = []string{sf("Cluster %s: %s (%s, %s)", c.ID, c.State, c.Name, c.Endpoint)}
+	}
+	out = append(out, "Secret: "+obj.Secret.State)
+	if obj.Secret.Error != "" {
+		out = append(out, "  "+pr(obj.Secret.Error))
+	}
+	if d := obj.Draft; d != nil {
+		out = append(out, sf("Draft %s (%s): %s", d.ID, d.Title, d.State))
+	}
+	var commands []string
+	add := func(cmds ...string) {
+		for _, c := range cmds {
+			if c != "" && !slices.Contains(commands, c) {
+				commands = append(commands, c)
+			}
+		}
+	}
+	out = append(out, "Machines:")
+	for _, m := range obj.Machines {
+		if m.Add.State == obNotRecorded {
+			out = append(out, sf("  %s  %s  not recorded: %s", m.Node, m.Host, m.Add.Error))
+			continue
+		}
+		out = append(out, sf("  %s  %s  %s  add %s, import %s", m.Node, m.Host, cmp.Or(m.Machine, "-"), m.Add.State, m.Import.State))
+		add(m.Add.Command, m.Import.Command)
+		if m.Import.State == statePaused.s() {
+			add("bronzewardctl import review "+client.ShellWord(m.Import.ID), "bronzewardctl import continue "+client.ShellWord(m.Import.ID),
+				obj.again+"   (after the continue: imports the machines that follow)")
+		}
+	}
+	add(c.Command, obj.Secret.Command)
+	if obj.Draft != nil {
+		add(obj.Draft.Command)
+	}
+	switch {
+	case len(commands) > 0:
+		out = append(out, "", "Next, one command at a time:")
+		for _, cmd := range commands {
+			out = append(out, "  "+cmd)
+		}
+	case obj.Draft != nil:
+		out = append(out, "", "Next: read the draft, then publish it: bronzewardctl draft show "+client.ShellWord(obj.Draft.ID))
+	}
+	return out
+}

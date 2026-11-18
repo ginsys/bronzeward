@@ -120,6 +120,7 @@ func TestClusterDiscoverPrintsCommands(t *testing.T) {
 		"bao kv put -mount=secret access/talos/<cluster id> 'talosconfig=@" + c.file + "'",
 		"Nothing was sent to the server and no secret was written.",
 		"talos-access-unavailable",
+		"bronzewardctl cluster onboard --talosconfig '" + c.file + "' --name <name> --kubernetes-endpoint proposed --bao-addr <url> --bao-token-file <file>",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)

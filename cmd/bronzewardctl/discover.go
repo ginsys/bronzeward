@@ -45,14 +45,9 @@ func (e *env) clusterDiscover(args []string) error {
 	if !utf8.ValidString(file) || strings.IndexFunc(file, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
 		return usageError{errors.New("--talosconfig names a file whose name holds a byte or character that cannot be printed back in the bao command: rename the file")}
 	}
-	f, err := os.Open(file)
+	b, err := readTalosconfig(file)
 	if err != nil {
-		return fmt.Errorf("reading the talosconfig: %w", unwrapPath(err))
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, maxTalosconfig+1))
-	if err != nil || len(b) > maxTalosconfig {
-		return errors.New("reading the talosconfig: the file cannot be read or is not a talosconfig")
+		return err
 	}
 	var res discover.Result
 	if err := e.cancellable("the cluster's Talos nodes", func(ctx context.Context) (err error) {
@@ -66,6 +61,20 @@ func (e *env) clusterDiscover(args []string) error {
 		return err
 	}
 	return e.say(discoverLines(res, file)...)
+}
+
+// readTalosconfig reads the file the operator named, at most maxTalosconfig bytes of it.
+func readTalosconfig(file string) ([]byte, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, fmt.Errorf("reading the talosconfig: %w", unwrapPath(err))
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxTalosconfig+1))
+	if err != nil || len(b) > maxTalosconfig {
+		return nil, errors.New("reading the talosconfig: the file cannot be read or is not a talosconfig")
+	}
+	return b, nil
 }
 
 // endpointArg is address as the server's endpoint grammar takes it: an IPv6 literal in brackets.
@@ -143,5 +152,7 @@ func discoverLines(res discover.Result, file string) []string {
 	for _, n := range notRecorded {
 		out = append(out, "", "Not recorded: "+n+" Add it with machine add once it answers.")
 	}
-	return append(out, "", "Nothing was sent to the server and no secret was written. Until the bao command has run, the first source: machine import fails with talos-access-unavailable.")
+	return append(out, "", "Nothing was sent to the server and no secret was written. Until the bao command has run, the first source: machine import fails with talos-access-unavailable.",
+		"cluster onboard does all of this in one run, and imports each machine into a draft: bronzewardctl cluster onboard --talosconfig "+client.ShellWord(file)+
+			" --name <name> --kubernetes-endpoint proposed --bao-addr <url> --bao-token-file <file>")
 }
