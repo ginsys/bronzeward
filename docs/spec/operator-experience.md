@@ -714,7 +714,7 @@ Next (mch_b3c…aa2q has an Applied, so apply-config; a machine with none is han
   bronzewardctl plan create --release rel_h7rt…2bd --machine mch_b3c…aa2q --operation apply-config
 $ bronzewardctl release show rel_h7rt…2bd
 Release rel_h7rt…2bd  cluster cl_9fd… (lab-a)  published by ops-ben (publisher) 10:02
-Renderer   contract v1.14, machinery v1.14.5, Kubernetes v1.34.1
+Renderer   contract v1.14, machinery v1.14.5, Kubernetes v1.36.2
 Built from (source revisions, not configuration):
   fragment     cluster-base    frv_5cz…h1ma
   fragment     worker-labels   frv_3jn…k4ma

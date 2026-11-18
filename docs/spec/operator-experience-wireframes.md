@@ -411,7 +411,7 @@ import started; the import was not applied and is abandoned" when the draft move
 
 ```text
 Release rel_h7rt…2bd   cluster cl_9fd… (lab-a)   published 10:02 by ops-ben (publisher)
-Renderer: contract v1.14 · machinery v1.14.5 · Kubernetes v1.34.1
+Renderer: contract v1.14 · machinery v1.14.5 · Kubernetes v1.36.2
 +-------------------------------------------------------------------------------------------+
 | Source revisions this release was built from (these are not configuration)               |
 |   fragment    cluster-base    frv_5cz…h1ma  ▸                                             |
