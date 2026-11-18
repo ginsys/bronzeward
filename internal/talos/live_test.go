@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -202,6 +203,45 @@ func kubeNodeConfigDocument(b []byte) (doc []byte, at, n int) {
 	return b[at:end], at, n
 }
 
+// activationHold reads BW_TEST_ACTIVATION_HOLD: how long the fixture run holds the label, a Go
+// duration, none by default. It is bounded so that the hold, the Read A wait and the restore fit the
+// test timeout and the context of TestLiveApplyLabelDocument.
+func activationHold(v string) (time.Duration, error) {
+	if v == "" {
+		return 0, nil
+	}
+	hold, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("BW_TEST_ACTIVATION_HOLD: %w", err)
+	}
+	if hold < 0 || hold > 2*time.Minute {
+		return 0, fmt.Errorf("BW_TEST_ACTIVATION_HOLD %s is outside 0 to 2m", hold)
+	}
+	return hold, nil
+}
+
+func TestActivationHold(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want time.Duration
+		bad  bool
+	}{
+		{in: ""},
+		{in: "0s"},
+		{in: "60s", want: time.Minute},
+		{in: "2m", want: 2 * time.Minute},
+		{in: "2m1s", bad: true},
+		{in: "-1s", bad: true},
+		{in: "abc", bad: true},
+		{in: "60", bad: true},
+	} {
+		got, err := activationHold(tc.in)
+		if (err != nil) != tc.bad || got != tc.want {
+			t.Errorf("activationHold(%q) = %v, %v; want %v, error %v", tc.in, got, err, tc.want, tc.bad)
+		}
+	}
+}
+
 // TestLiveApplyLabelDocument applies the worker's own configuration with activationLabel added to
 // its KubeNodeConfig document, in no-reboot mode (E1), and reads the machine configuration
 // before and after (Read A, E2). Class accepted is the proof that the node named NO_REBOOT:
@@ -212,6 +252,12 @@ func kubeNodeConfigDocument(b []byte) (doc []byte, at, n int) {
 // node as it was. It needs a worker whose one KubeNodeConfig document holds no labels yet.
 func TestLiveApplyLabelDocument(t *testing.T) {
 	tc, ep := liveTarget(t)
+	// How long the fixture run holds the label for Reads B and C. Read and bounded first, before
+	// anything is dialled or sent, so a bad value fails with the node untouched.
+	hold, err := activationHold(os.Getenv("BW_TEST_ACTIVATION_HOLD"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
 	defer cancel()
 	r, err := Dial(ctx, tc, ep)
@@ -282,20 +328,6 @@ func TestLiveApplyLabelDocument(t *testing.T) {
 	planned = append(planned, original[:at]...)
 	planned = append(planned, labels...)
 	planned = append(planned, original[at:]...)
-	// How long the fixture run holds the label for Reads B and C (BW_TEST_ACTIVATION_HOLD, a Go
-	// duration, none by default). Read and bounded before the apply, so a bad value fails with the
-	// node untouched, and short enough that the hold, the Read A wait and the restore fit the test
-	// timeout and the context below.
-	var hold time.Duration
-	if v := os.Getenv("BW_TEST_ACTIVATION_HOLD"); v != "" {
-		hold, err = time.ParseDuration(v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if hold < 0 || hold > 2*time.Minute {
-			t.Fatalf("BW_TEST_ACTIVATION_HOLD %s is outside 0 to 2m", hold)
-		}
-	}
 	got := send(ctx, planned)
 	t.Logf("apply of the label document answered %+v (accepted means the node named NO_REBOOT, one message, no error)", got)
 	if got.Class != ClassAccepted || !got.Accounts() {
