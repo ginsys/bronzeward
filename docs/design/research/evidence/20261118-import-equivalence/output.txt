@@ -168,12 +168,12 @@ cp1 N4 same base text, one pinned value changed: E0=false (digest over the plain
 
 ### pairs
 == N3: pairs (w1)
-list order (podSubnets reversed): both load=true E0=false E1=false E2=false E3=false
+structural list order (podSubnets reversed, loaded and not validated): both load=true E0=false E1=false E2=false E3=false
 control: the comment-free machine against its re-encoding: both load=true E0=true E1=true E2=true E3=true
 explicit true (as generated) against omitted: different behaviour: both load=true E0=false E1=false E2=false E3=false
 explicit false against omitted: same behaviour: both load=true E0=false E1=false E2=false E3=false
 
 ### what a reference becomes in the redacted form (w1)
-  token: <redacted:s-k6ba7kqw5d65enpizaoav4lpoi@1>
-  token: <redacted:s-vpzqysfsbl7og2jwwna6w2brmi@1>
-clusterSecret: <redacted:s-azc6kymmhjnnpfvhlor4a27h6u@1>
+  token: <redacted:s-ifwigspm7o7yccmtqvru3prkqm@1>
+  token: <redacted:s-fojfnqxdxssfhc4mttzpr4tgl4@1>
+clusterSecret: <redacted:s-uryw6ie37z7l53ipen7ip3lrxy@1>

@@ -10,6 +10,7 @@ OUT=$3
 M=docs/design/research/evidence/20261118-import-equivalence/measure.go
 rc=0
 cd "$R" || exit 1
+: >"$OUT" || { echo "cannot write $OUT"; exit 1; }
 first=1
 run() { # label, then the measurement's arguments; a failure is recorded and the run goes on
   [ "$first" = 1 ] || echo
