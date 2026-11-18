@@ -271,3 +271,13 @@ func TestClusterDiscoverHintKeepsTheSelection(t *testing.T) {
 		}
 	}
 }
+
+// TestClusterDiscoverRefusesATalosContextItCannotQuote: a context name with a control character cannot be
+// printed back in the onboarding command, so it is exit 2 before any discovery.
+func TestClusterDiscoverRefusesATalosContextItCannotQuote(t *testing.T) {
+	c := discoverFixture(t, twoMembers, nil)
+	code, out, errOut := runCtl(t, "cluster", "discover", "--talosconfig", c.file, "--talos-context", "prod\tblue")
+	if code != 2 || !strings.Contains(errOut, "--talos-context") || out != "" || len(c.contexts) != 0 {
+		t.Errorf("exit %d, stdout %q, stderr %q, %d discoveries; want 2, the flag named and no discovery", code, out, errOut, len(c.contexts))
+	}
+}

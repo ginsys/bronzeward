@@ -468,7 +468,7 @@ quotes neither the name nor the talosconfig.
 A talosconfig can hold several contexts. By default the command uses the file's current context.
 If you give `--talos-context <name>`, the command uses that talosconfig context and no other.
 The global `--context` keeps its one meaning, the Bronzeward client context, on every command.
-If the file has no context of that name, the command exits 2 before any dial and names the flag.
+If the file has no context of that name, or the name holds a character that cannot be printed back in a command, the command exits 2 before any dial and names the flag.
 The first reads and every member read use the credentials of that one context. The last line of the
 output is the `cluster onboard` command for the same cluster, and it carries the `--talos-context` and
 `--endpoint` the command was given, so following it reads the cluster that was shown.

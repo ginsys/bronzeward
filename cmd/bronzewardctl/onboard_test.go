@@ -675,7 +675,7 @@ func TestOnboardSettleAfterASaveFailure(t *testing.T) {
 		{"read failed", "", "bronzewardctl --context 'lab' import status", errors.New("no answer"), stateUnknown.s()},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			m := &onboardMachine{Machine: "mch_x"}
+			m := &onboardMachine{Machine: "mch_x", Import: onboardPart{State: stateDone.s(), ID: id, Error: "disk full"}}
 			read := func(got string) (*apitypes.IngestionBody, error) {
 				if got != id {
 					t.Errorf("read ingestion %q, want %q", got, id)
@@ -688,6 +688,9 @@ func TestOnboardSettleAfterASaveFailure(t *testing.T) {
 			onboardSettle(m, id, "--context 'lab' ", read)
 			if m.Import.State != c.want || !strings.HasPrefix(m.Import.Command, c.command) || m.Import.ID != id {
 				t.Errorf("import %+v; want state %q, a command starting %q and id %q", m.Import, c.want, c.command, id)
+			}
+			if m.Import.Error != "disk full" {
+				t.Errorf("the error that stopped the run is %q, want it kept as \"disk full\"", m.Import.Error)
 			}
 		})
 	}

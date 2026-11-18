@@ -45,6 +45,9 @@ func (e *env) clusterDiscover(args []string) error {
 	if unprintable(file) {
 		return usageError{errors.New("--talosconfig names a file whose name holds a byte or character that cannot be printed back in the bao command: rename the file")}
 	}
+	if unprintable(talosContext) {
+		return usageError{errors.New("--talos-context names a context whose name holds a byte or character that cannot be printed back in the onboarding command: rename the context")}
+	}
 	b, err := readTalosconfig(file)
 	if err != nil {
 		return err

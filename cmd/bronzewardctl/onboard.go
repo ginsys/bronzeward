@@ -580,14 +580,16 @@ func (e *env) onboardImport(a *onboardArgs, m *onboardMachine, draft string, rer
 }
 
 // onboardSettle sets the import of m from the ingestion read, for an import whose follow ended well or
-// paused. The error the run returns stays the one that ended it. A failed read leaves the state unknown.
+// paused. The error that ended the run stays on the import. A failed read leaves the state unknown.
 func onboardSettle(m *onboardMachine, id, ctx string, read func(string) (*apitypes.IngestionBody, error)) {
+	stopped := m.Import.Error
 	b, err := read(id)
 	if err != nil {
-		m.Import = onboardPart{State: stateUnknown.s(), ID: id, Command: qualify(ctx, statusCmd(id)), Error: client.Shown(err)}
-		return
+		m.Import = onboardPart{State: stateUnknown.s(), ID: id, Command: qualify(ctx, statusCmd(id))}
+	} else {
+		_, _ = onboardImportState(m, b, ctx)
 	}
-	_, _ = onboardImportState(m, b, ctx)
+	m.Import.Error = stopped
 }
 
 // statusCmd is the command that reads an import.
