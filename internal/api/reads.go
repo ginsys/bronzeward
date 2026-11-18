@@ -18,9 +18,18 @@ import (
 // token and the epoch answered is the one read. The transaction ends before the response is
 // written (§5 rule 1).
 func readIn(a *API, w http.ResponseWriter, q *request, fn func(ctx context.Context, tx *sql.Tx) (etag string, body any, err error)) {
+	readInOn(readTx, a, w, q, fn)
+}
+
+// txRunner runs a read's function in a transaction that holds the installation state FOR SHARE:
+// readTx at the default isolation, readSnapshot at REPEATABLE READ.
+type txRunner func(a *API, q *request, fn func(ctx context.Context, tx *sql.Tx) error) error
+
+// readInOn is readIn over the transaction run opens.
+func readInOn(run txRunner, a *API, w http.ResponseWriter, q *request, fn func(ctx context.Context, tx *sql.Tx) (etag string, body any, err error)) {
 	var etag string
 	var body any
-	err := readTx(a, q, func(ctx context.Context, tx *sql.Tx) (err error) {
+	err := run(a, q, func(ctx context.Context, tx *sql.Tx) (err error) {
 		etag, body, err = fn(ctx, tx)
 		return err
 	})
@@ -41,8 +50,14 @@ func readTx(a *API, q *request, fn func(ctx context.Context, tx *sql.Tx) error) 
 	if a.o.beforeRead != nil {
 		a.o.beforeRead()
 	}
+	return readOnce(a, q, nil, fn)
+}
+
+// readOnce is one attempt of a read: a transaction of the given options whose first statement
+// takes the installation state FOR SHARE.
+func readOnce(a *API, q *request, opts *sql.TxOptions, fn func(ctx context.Context, tx *sql.Tx) error) error {
 	ctx := q.r.Context()
-	tx, err := a.db.BeginTx(ctx, nil)
+	tx, err := a.db.BeginTx(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errUnavailable, err)
 	}
@@ -54,6 +69,35 @@ func readTx(a *API, q *request, fn func(ctx context.Context, tx *sql.Tx) error) 
 		return ref
 	}
 	return fn(ctx, tx)
+}
+
+// readSnapshot is readTx for a read that must show one state: one REPEATABLE READ snapshot, whose
+// first statement is the installation state FOR SHARE, so the snapshot is taken after the share
+// lock is held and its epoch is the one answered. A serialization failure (40001) repeats the whole
+// transaction, up to maxAttempts tries, then answers 503 transient-conflict; it is not declared
+// read-only, because a read-only snapshot would make FOR SHARE fail.
+func readSnapshot(a *API, q *request, fn func(ctx context.Context, tx *sql.Tx) error) error {
+	if a.o.beforeRead != nil {
+		a.o.beforeRead()
+	}
+	opts := &sql.TxOptions{Isolation: sql.LevelRepeatableRead}
+	for n := 1; ; n++ {
+		err := readOnce(a, q, opts, func(ctx context.Context, tx *sql.Tx) error {
+			if a.o.inSnapshot != nil {
+				if err := a.o.inSnapshot(n); err != nil {
+					return err
+				}
+			}
+			return fn(ctx, tx)
+		})
+		if !isSerialization(err) {
+			return err
+		}
+		a.o.logf("%s: snapshot attempt %d failed: %v", q.id, n, err)
+		if n == maxAttempts {
+			return fmt.Errorf("%w: %w", errSnapshot, err)
+		}
+	}
 }
 
 // listPage is a collection's answer (§9.1).
@@ -115,9 +159,14 @@ func pageRows[T any](ctx context.Context, tx *sql.Tx, q *request, limit int, aft
 // are refused). get returns sql.ErrNoRows for an identifier the database does not hold; that, and
 // an identifier of another entity, is 404.
 func item(p id.Prefix, get func(ctx context.Context, tx *sql.Tx, id string) (etag string, body any, err error)) readFunc {
+	return itemOn(readTx, p, get)
+}
+
+// itemOn is item over the transaction run opens.
+func itemOn(run txRunner, p id.Prefix, get func(ctx context.Context, tx *sql.Tx, id string) (etag string, body any, err error)) readFunc {
 	return func(a *API, w http.ResponseWriter, q *request) {
 		v := q.r.PathValue("id")
-		readIn(a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
+		readInOn(run, a, w, q, func(ctx context.Context, tx *sql.Tx) (string, any, error) {
 			if q.r.URL.RawQuery != "" {
 				return "", nil, refuse(http.StatusBadRequest, "invalid-request", "an item read takes no query")
 			}

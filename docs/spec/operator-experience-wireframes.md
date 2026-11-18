@@ -160,8 +160,7 @@ with `Applied`; an observation equal to `Desired` or an older release is still d
 "No release selected", "No configuration read recorded") and shows no time. The status
 sentences are those of [§2.4](operator-experience.md#24-desired-applied-and-observed). One line
 under them, not drawn, names the next step. Its wording and link for each `step` of
-`GET /machines/{id}/position`, and what the page shows until that read is served (the
-not-handed-over line alone, from the machine's own fields), are in
+`GET /machines/{id}/position` are in
 [§2.3](operator-experience.md#23-import-publish-plan-approve-apply).
 
 The timeline opens on its newest page and polls on from its tail, as

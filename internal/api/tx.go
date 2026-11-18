@@ -28,6 +28,7 @@ const maxAttempts = 4
 
 var (
 	errTransient      = errors.New("deadlock retries exhausted")
+	errSnapshot       = errors.New("snapshot retries exhausted")
 	errUnavailable    = errors.New("database unavailable; nothing committed")
 	errUnknownOutcome = errors.New("commit outcome unknown")
 )
@@ -201,6 +202,13 @@ func isDeadlock(err error) bool {
 	return errors.As(err, &pe) && pe.Code == "40P01"
 }
 
+// isSerialization reports a snapshot's serialization failure (40001): a REPEATABLE READ
+// transaction found a row it had to lock changed since its snapshot.
+func isSerialization(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "40001"
+}
+
 func (a *API) attempt(ctx context.Context, q *request, n int) (*record, bool, error) {
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -342,6 +350,8 @@ func (a *API) fail(w http.ResponseWriter, q *request, err error) {
 		ref = refuse(http.StatusServiceUnavailable, "epoch-superseded", "this server started before the current recovery epoch and may issue no ownership; "+notCommitted)
 	case errors.Is(err, errTransient):
 		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the request deadlocked on every attempt; "+notCommitted)
+	case errors.Is(err, errSnapshot):
+		ref = refuse(http.StatusServiceUnavailable, "transient-conflict", "the read could not take one consistent snapshot on any attempt; nothing was written, and the read can be repeated")
 	case errors.Is(err, errUnknownOutcome):
 		ref = refuse(http.StatusInternalServerError, "internal-error", "the outcome is unknown; retrying with the same Idempotency-Key answers it")
 	case errors.Is(err, errUnavailable), connLost(err):

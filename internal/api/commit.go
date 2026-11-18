@@ -217,13 +217,9 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 	// 2: the assignment head, the baseline revision and Desired are the bound ones. The plan row
 	// fixes the artifact, operation, mode and parameters, and keeps its route through an endpoint
 	// change (persistence-api.md §3.3).
-	switch {
-	case !head.Valid || head.String != assignment:
-		return r, machine, refuseCommitment("2", "the machine's assignment revision changed")
-	case msBaseline != baseline:
-		return r, machine, refuseCommitment("2", "the machine's baseline revision changed")
-	case msDesired != desired:
-		return r, machine, refuseCommitment("2", "the machine's Desired release changed")
+	if cause := comparison2(machineBinding{head: head, desired: msDesired, baseline: msBaseline},
+		planBinding{assignment: assignment, desired: desired, baseline: baseline}); cause != "" {
+		return r, machine, refuseCommitment("2", cause)
 	}
 	// 3: the evidence is the latest observation recorded for this plan's dispatch by this process
 	// (§3.1 item 1), begun after the approval and no older than the plan binds (measured from its
@@ -372,17 +368,60 @@ func newerContradiction(ctx context.Context, tx *sql.Tx, machine, plan string, b
 	return newer, err
 }
 
-// scopeGate is §3.2 and §3.3 comparison 6's cause, or "" when the gate passes. open is the drift
+// machineBinding is the three values of a machine that a plan binds (§3.2 comparison 2): the head of
+// its assignment, its Desired release and its baseline revision.
+type machineBinding struct {
+	head, desired sql.NullString
+	baseline      sql.NullInt64
+}
+
+// planBinding is what a plan bound at creation: the machine's assignment revision, its Desired
+// release (none for a handover) and its baseline revision (none without an Applied).
+type planBinding struct {
+	assignment string
+	desired    sql.NullString
+	baseline   sql.NullInt64
+}
+
+// comparison2 is §3.2 comparison 2's cause, or "" when it passes: the machine's assignment head,
+// baseline revision and Desired release are the bound ones. The commitment judges it under the
+// machine's lock and the position read (§9.3) judges it against its snapshot, so a plan the read
+// shows is one this comparison admits, and a term added here reaches both.
+func comparison2(m machineBinding, p planBinding) string {
+	switch {
+	case !m.head.Valid || m.head.String != p.assignment:
+		return "the machine's assignment revision changed"
+	case m.baseline != p.baseline:
+		return "the machine's baseline revision changed"
+	case m.desired != p.desired:
+		return "the machine's Desired release changed"
+	}
+	return ""
+}
+
+// driftCause is the drift part of comparison 6's cause, or "" when it passes. open is the drift
 // record open on the machine and bound the one the plan binds: a revert (§6.4) passes only while
 // its own record is open, every other plan only while none is.
-func scopeGate(frozen bool, open, bound sql.NullInt64, scope string, recovery bool) string {
+func driftCause(open, bound sql.NullInt64) string {
 	switch {
-	case frozen:
-		return "the machine scope is frozen"
 	case open.Valid && open != bound:
 		return "a drift record is open on the machine"
 	case bound.Valid && !open.Valid:
 		return "the drift record the plan binds is closed"
+	}
+	return ""
+}
+
+// scopeGate is §3.2 and §3.3 comparison 6's cause, or "" when the gate passes. open is the drift
+// record open on the machine and bound the one the plan binds (driftCause).
+func scopeGate(frozen bool, open, bound sql.NullInt64, scope string, recovery bool) string {
+	if frozen {
+		return "the machine scope is frozen"
+	}
+	if cause := driftCause(open, bound); cause != "" {
+		return cause
+	}
+	switch {
 	case scope != "normal" && scope != "released":
 		return "the machine scope is " + scope
 	case recovery && scope != "released":

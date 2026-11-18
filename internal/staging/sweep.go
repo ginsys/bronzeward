@@ -10,11 +10,29 @@ import (
 // DueSQL is a live claim past its absolute expiry, or a transient claim past its lease (compilation
 // §3.5). An encrypted claim whose lease lapsed stays live until its expiry: a takeover may resume
 // it (§3.4), and a paused one, whose lease the pause ended, awaits its review (§3.6).
-const DueSQL = `state IN ('held', 'paused', 'resumed') AND (expires_at <= clock_timestamp() OR (mode = 'transient' AND lease_until <= clock_timestamp()))`
+//
+// DueAtSQL judges it at the time the SQL term clock names (a parameter such as "$2", or
+// "clock_timestamp()"): a read that must show several claims at one instant passes that instant, and
+// DueSQL is the same text read at the database's clock when each row is judged.
+func DueAtSQL(clock string) string {
+	return `state IN ('held', 'paused', 'resumed') AND (expires_at <= ` + clock + ` OR (mode = 'transient' AND lease_until <= ` + clock + `))`
+}
 
-// EffectiveStateSQL is a claim's state as every read and transition treats it (compilation
-// §3.5): abandoned once due, whether or not a sweep has written it yet; the stored state otherwise.
-const EffectiveStateSQL = `CASE WHEN ` + DueSQL + ` THEN 'abandoned' ELSE state END`
+// EffectiveStateAtSQL is a claim's state as every read and transition treats it (compilation
+// §3.5) at the time clock names: abandoned once due, whether or not a sweep has written it yet; the
+// stored state otherwise.
+func EffectiveStateAtSQL(clock string) string {
+	return `CASE WHEN ` + DueAtSQL(clock) + ` THEN 'abandoned' ELSE state END`
+}
+
+const now = "clock_timestamp()"
+
+var (
+	// DueSQL is DueAtSQL at the database's clock.
+	DueSQL = DueAtSQL(now)
+	// EffectiveStateSQL is EffectiveStateAtSQL at the database's clock.
+	EffectiveStateSQL = EffectiveStateAtSQL(now)
+)
 
 // AbandonedTitle is the title of the ingestion-abandoned problem (persistence-api §9.4).
 const AbandonedTitle = "The ingestion was abandoned"

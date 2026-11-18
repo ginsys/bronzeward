@@ -212,6 +212,111 @@ func (e PlanInputOperation) Valid() bool {
 	}
 }
 
+// Defines values for PositionBodyStep.
+const (
+	PositionBodyStepAwaitingApproval    PositionBodyStep = "awaiting-approval"
+	PositionBodyStepAwaitingDispatch    PositionBodyStep = "awaiting-dispatch"
+	PositionBodyStepDraftToPublish      PositionBodyStep = "draft-to-publish"
+	PositionBodyStepDriftOpen           PositionBodyStep = "drift-open"
+	PositionBodyStepImportPaused        PositionBodyStep = "import-paused"
+	PositionBodyStepImportRunning       PositionBodyStep = "import-running"
+	PositionBodyStepImportStalled       PositionBodyStep = "import-stalled"
+	PositionBodyStepNeedsPlan           PositionBodyStep = "needs-plan"
+	PositionBodyStepNoStep              PositionBodyStep = "no-step"
+	PositionBodyStepNotHandedOver       PositionBodyStep = "not-handed-over"
+	PositionBodyStepOperationInFlight   PositionBodyStep = "operation-in-flight"
+	PositionBodyStepOperationUnresolved PositionBodyStep = "operation-unresolved"
+)
+
+// Valid indicates whether the value is a known member of the PositionBodyStep enum.
+func (e PositionBodyStep) Valid() bool {
+	switch e {
+	case PositionBodyStepAwaitingApproval:
+		return true
+	case PositionBodyStepAwaitingDispatch:
+		return true
+	case PositionBodyStepDraftToPublish:
+		return true
+	case PositionBodyStepDriftOpen:
+		return true
+	case PositionBodyStepImportPaused:
+		return true
+	case PositionBodyStepImportRunning:
+		return true
+	case PositionBodyStepImportStalled:
+		return true
+	case PositionBodyStepNeedsPlan:
+		return true
+	case PositionBodyStepNoStep:
+		return true
+	case PositionBodyStepNotHandedOver:
+		return true
+	case PositionBodyStepOperationInFlight:
+		return true
+	case PositionBodyStepOperationUnresolved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PositionDraftState.
+const (
+	PositionDraftStateDiscarded PositionDraftState = "discarded"
+	PositionDraftStateOpen      PositionDraftState = "open"
+	PositionDraftStatePublished PositionDraftState = "published"
+)
+
+// Valid indicates whether the value is a known member of the PositionDraftState enum.
+func (e PositionDraftState) Valid() bool {
+	switch e {
+	case PositionDraftStateDiscarded:
+		return true
+	case PositionDraftStateOpen:
+		return true
+	case PositionDraftStatePublished:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PositionPlanOperation.
+const (
+	PositionPlanOperationAdopt       PositionPlanOperation = "adopt"
+	PositionPlanOperationApplyConfig PositionPlanOperation = "apply-config"
+)
+
+// Valid indicates whether the value is a known member of the PositionPlanOperation enum.
+func (e PositionPlanOperation) Valid() bool {
+	switch e {
+	case PositionPlanOperationAdopt:
+		return true
+	case PositionPlanOperationApplyConfig:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PositionPlanState.
+const (
+	PositionPlanStateApproved PositionPlanState = "approved"
+	PositionPlanStateProposed PositionPlanState = "proposed"
+)
+
+// Valid indicates whether the value is a known member of the PositionPlanState enum.
+func (e PositionPlanState) Valid() bool {
+	switch e {
+	case PositionPlanStateApproved:
+		return true
+	case PositionPlanStateProposed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PrincipalBodyKind.
 const (
 	PrincipalBodyKindHuman   PrincipalBodyKind = "human"
@@ -1521,6 +1626,87 @@ type PlanValidation struct {
 	MachineryVersion  string `json:"machineryVersion"`
 	PlatformMode      string `json:"platformMode"`
 	Result            string `json:"result"`
+}
+
+// PositionBody defines model for PositionBody.
+type PositionBody struct {
+	// Draft The draft that ingestion names; null when ingestion is null.
+	Draft *PositionDraft `json:"draft"`
+
+	// Ingestion The machine's newest live ingestion, else its newest of any state; null when it has none.
+	Ingestion *PositionIngestion `json:"ingestion"`
+	Machine   MachineBody        `json:"machine"`
+
+	// Operation The apply-config operation that holds the machine scope; null when none does.
+	Operation *PositionOperation `json:"operation"`
+
+	// Plan The newest proposed or approved plan that would pass comparison 2 of a commitment against the machine now; null when there is none.
+	Plan *PositionPlan `json:"plan"`
+
+	// RolloutHeldBy The operation that holds the machine's cluster rollout scope when it belongs to another machine.
+	RolloutHeldBy *PositionRolloutHolder `json:"rolloutHeldBy"`
+
+	// Step The first row of the position table whose facts hold. A client treats a value it does not know as no-step: a later revision may add one.
+	Step PositionBodyStep `json:"step"`
+}
+
+// PositionBodyStep The first row of the position table whose facts hold. A client treats a value it does not know as no-step: a later revision may add one.
+type PositionBodyStep string
+
+// PositionDraft defines model for PositionDraft.
+type PositionDraft struct {
+	Id       string             `json:"id"`
+	Revision int                `json:"revision"`
+	State    PositionDraftState `json:"state"`
+}
+
+// PositionDraftState defines model for PositionDraft.State.
+type PositionDraftState string
+
+// PositionIngestion defines model for PositionIngestion.
+type PositionIngestion struct {
+	CreatedAt time.Time `json:"createdAt"`
+	Draft     string    `json:"draft"`
+	Id        string    `json:"id"`
+	Kind      string    `json:"kind"`
+
+	// LeaseLapsed true when the claim is held or resumed and its lease has lapsed at the snapshot's clock reading.
+	LeaseLapsed bool    `json:"leaseLapsed"`
+	Operation   *string `json:"operation"`
+	State       string  `json:"state"`
+}
+
+// PositionOperation defines model for PositionOperation.
+type PositionOperation struct {
+	CreatedAt time.Time `json:"createdAt"`
+	Id        string    `json:"id"`
+	Kind      string    `json:"kind"`
+	Plan      string    `json:"plan"`
+	State     string    `json:"state"`
+}
+
+// PositionPlan defines model for PositionPlan.
+type PositionPlan struct {
+	// ApprovalCurrent true when the plan's approval was recorded in the current epoch, false when in an earlier one; null while the plan has no approval.
+	ApprovalCurrent *bool                 `json:"approvalCurrent"`
+	CreatedAt       time.Time             `json:"createdAt"`
+	ExpiresAt       time.Time             `json:"expiresAt"`
+	Id              string                `json:"id"`
+	Operation       PositionPlanOperation `json:"operation"`
+	Release         string                `json:"release"`
+	State           PositionPlanState     `json:"state"`
+}
+
+// PositionPlanOperation defines model for PositionPlan.Operation.
+type PositionPlanOperation string
+
+// PositionPlanState defines model for PositionPlan.State.
+type PositionPlanState string
+
+// PositionRolloutHolder defines model for PositionRolloutHolder.
+type PositionRolloutHolder struct {
+	Id      string `json:"id"`
+	Machine string `json:"machine"`
 }
 
 // PrincipalBody What one principal identifier names (persistence and API §9.2). A member that does not apply to its kind is null. Nothing else of the row is served, its revocation and responsible human included.

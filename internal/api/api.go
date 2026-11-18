@@ -131,6 +131,7 @@ type options struct {
 	afterEffect    func()                                                                               // runs in the transaction, after the effect, act and record
 	beforeRead     func()                                                                               // runs when a read route starts, after routing
 	beforeCommit   func(attempt int) error                                                              // fails an attempt before COMMIT
+	inSnapshot     func(attempt int) error                                                              // fails a snapshot read's attempt after its first statement
 	commit         func(*sql.Tx) error                                                                  // replaces (*sql.Tx).Commit
 	onRunner       func(job)                                                                            // takes each job instead of the runner
 	onPublish      func()                                                                               // runs instead of waking the publish worker
