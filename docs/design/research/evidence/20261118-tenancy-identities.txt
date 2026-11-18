@@ -1,5 +1,5 @@
 Bronzeward #870: observations of user-coupled OpenBao identities and per-tenant layout
-Date: 18 November 2026, about 16:40 to 17:10 CET, one run of each script below, in the order M6, M1 to M3, M4, M5, M7, M8
+Date: 18 November 2026. The observed lines are from one run of the whole chain, about 18:15 to 18:25 CET, after the label fixes of ginsys/bronzeward#878, in the order setup, M6, M1 to M3, M3b, M3c, M3d, M4, M4b, M5, M7, M8, on a fresh container of the image below. The first run (about 16:40 to 17:10 CET) had three mislabelled probes: the expired-JWT expectation of M1 (the 30 s token is inside the default leeway), the leeway label of M3b (the documented 150 s against the observed 60 s of M3d) and the M8 traversal probe (curl removes dot segments unless --path-as-is is given).
 Environment: OpenBao 2.6.1, image ghcr.io/openbao/openbao:2.6.1@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0 (fixtures/versions.env OPENBAO_IMAGE), dev mode on loopback port 18870, one throwaway container, no fixture, no cluster, no browser. Dev mode keeps storage in memory and has no seal. The tool versions of the host are not recorded.
 Inputs: synthetic only. The identity provider is a throwaway RSA key pair; its tokens are signed by the scripts. Tenants are "a" and "b"; every value is synthetic. The dev root token is the string in ROOT; it is used only in steps labelled ADMIN and in setup.sh.
 Rule kept: every measurement call uses a token minted by the method under test (a jwt login), never the root token.
@@ -9,7 +9,8 @@ Procedure: write the files below to one directory (the lines "=== file ===" sepa
 and compare each line with the observed output below. Run them from that directory (lib.sh sets S to the current directory). setup.sh generates idp.key and idp.pub there. The scripts change role and policy state in order, so run them in this order on a fresh container. m3b sets the three leeway fields of the role to -1 and its closing role update does not reset them (an update merges fields), so m3c refuses every expired token for that reason and is not a reading of the default; m3d resets the fields to 0 and is the reading of the default leeway. Remove the container with `docker rm -f bw870-bao` when done.
 
 Limits of the instrument:
-- Each line is one sample. Nothing was repeated, so no line shows variance.
+- Each line is one sample. Nothing was repeated within a run, so no line shows variance. Between the first run and this one, the remaining-TTL readings moved by one second (898 to 899, 900 to 899, 119 to 120), which is the sampling second; request ids and ciphertext differ on every run.
+- The M8 traversal probe is sent with curl --path-as-is. OpenBao answers 307 with a redirect to the cleaned path and does not serve the dot-segment path itself; following the redirect with the tenant-a token gives the same 403 as the tenant-b read.
 - The scripts print status codes and short body prefixes; a 403 carries no reason.
 - jwt auth was configured with a public key (jwt_validation_pubkeys), not with OIDC discovery; no browser sign-in or authorization-code flow was run.
 - Dev mode: no seal, no storage backend, no audit device.
@@ -174,7 +175,9 @@ echo "user in two tenants: expected 200/200; observed: $(code GET secret/data/te
 tnone=$(tok user-none '[]' '"openbao"' 300)
 echo "no group claim: login=$([ -n "$tnone" ] && echo ok || echo refused); expected 403 on a tenant path; observed: $(code GET secret/data/tenants/a/x "$tnone")"
 texp=$(tok user-a '["tenant-a"]' '"openbao"' -30)
-echo "expired JWT: expected login refused; observed: $([ -n "$texp" ] && echo LOGIN-OK || echo refused)"
+echo "JWT expired 30 s ago (inside the default leeway of about 60 s, see m3d): expected accepted; observed: $([ -n "$texp" ] && echo accepted || echo refused)"
+texp=$(tok user-a '["tenant-a"]' '"openbao"' -300)
+echo "JWT expired 300 s ago (outside the default leeway): expected refused; observed: $([ -n "$texp" ] && echo accepted || echo refused)"
 
 echo "== M2: audience and replay"
 tb1=$(tok user-a '["tenant-a"]' '"bronzeward"' 300)
@@ -204,14 +207,15 @@ echo "t1 after revoke: expected 403; observed: $(code GET auth/token/lookup-self
 
 === m3b.sh ===
 #!/bin/bash
-# M3b: expiry leeway of the jwt role (default 150 s) against a JWT already expired.
+# M3b: expiry leeway of the jwt role against a JWT already expired. The API documentation says the default is 150 s;
+# m3d measures where the default stops (about 60 s), and the expectations below name both readings.
 set -u
 . ./lib.sh
 
 t=$(login "$(jwt user-a '["tenant-a"]' '"openbao"' -300)")
-echo "JWT expired 300 s ago (beyond the 150 s default leeway): expected refused; observed: $([ -n "$t" ] && echo LOGIN-OK || echo refused)"
+echo "JWT expired 300 s ago (beyond both the documented 150 s and the observed 60 s): expected refused; observed: $([ -n "$t" ] && echo LOGIN-OK || echo refused)"
 t=$(login "$(jwt user-a '["tenant-a"]' '"openbao"' -120)")
-echo "JWT expired 120 s ago (inside the default leeway): observed: $([ -n "$t" ] && echo LOGIN-OK || echo refused)"
+echo "JWT expired 120 s ago (beyond the observed 60 s of m3d, inside the documented 150 s): expected refused if the default is about 60 s, accepted if it is 150 s; observed: $([ -n "$t" ] && echo LOGIN-OK || echo refused)"
 
 echo "ADMIN step (dev root token): role expiration_leeway=-1, clock_skew_leeway=-1, not_before_leeway=-1, token_ttl=2m"
 api PUT auth/jwt/role/tenant "$ROOT" '{"role_type":"jwt","user_claim":"sub","groups_claim":"groups","bound_audiences":["openbao"],"token_ttl":"2m","token_max_ttl":"2m","expiration_leeway":-1,"clock_skew_leeway":-1,"not_before_leeway":-1}' | cut -c1-60
@@ -390,7 +394,9 @@ t1=$(rl "$(jwt user-t '[]' '"openbao"' 300 '"tenant":"a"')")
 echo "login with tenant=a: $([ -n "$t1" ] && echo ok || echo FAIL)"
 echo "own tenant a read: expected 200; observed: $(code GET secret/data/tenants/a/x "$t1")"
 echo "tenant b read: expected 403; observed: $(code GET secret/data/tenants/b/x "$t1")"
-echo "path traversal attempt tenants/a/../b/x: expected 403; observed: $(code GET 'secret/data/tenants/a/../b/x' "$t1")"
+# curl removes dot segments from the URL unless --path-as-is is given, so api() would send tenants/b/x here
+echo "path traversal tenants/a/../b/x sent as is (curl --path-as-is): expected no read of tenant b (403, or a redirect to the cleaned path); observed: $(curl -s -w ' %{http_code}' --path-as-is -H "X-Vault-Token: $t1" "$BAO/v1/secret/data/tenants/a/../b/x" | tr -d '\n' | cut -c1-80)"
+echo "same, redirect followed (curl -L --path-as-is): expected 403 (the cleaned path is the tenant b read above); observed: $(curl -s -L -w ' %{http_code}' --path-as-is -H "X-Vault-Token: $t1" "$BAO/v1/secret/data/tenants/a/../b/x" | tr -d '\n' | cut -c1-80)"
 
 echo "== claim with a path-like value, tenant=\"*\" and tenant=\"a/../b\""
 for v in '*' 'a/../b' ''; do
@@ -409,16 +415,16 @@ OBSERVED
 === m6.sh output ===
 logins: a=ok b=ok
 --- encrypt under tenant a key with user a (stand-in for the compiler's encryption)
-ciphertext prefix: vault:v1:tuD
+ciphertext prefix: vault:v1:qx3
 --- expected: 200 plaintext back, no plan, no approval, no other check; observed:
-200 {"request_id":"2a90e7e5-7688-57b2-9c10-09d912aa4060","lease_id":"","renewable":false,"lease_duration":0,"data":{"pla
+200 {"request_id":"5199b45b-9b46-99f6-c25c-e7725272b55c","lease_id":"","renewable":false,"lease_duration":0,"data":{"pla
 --- expected: 403 (user a on tenant b's key); observed:
 403 {"errors":["1 error occurred:\n\t* permission denied\n\n"]}
 --- expected: 403 (user b decrypting tenant a's ciphertext under a's key); observed:
 403 {"errors":["1 error occurred:\n\t* permission denied\n\n"]}
 --- decrypt result plaintext matches input: synthetic-artifact-bytes
 --- token facts for user a (lookup-self): policies and identity policies
-{"policies":["default"],"identity_policies":["tenant-a"],"ttl":898,"type":"service","path":"auth/jwt/login"}
+{"policies":["default"],"identity_policies":["tenant-a"],"ttl":899,"type":"service","path":"auth/jwt/login"}
 
 === m1_m3.sh output ===
 == M1: groups to policies
@@ -427,13 +433,14 @@ expected 403 (other tenant read); observed: 403
 expected 403 (other tenant write); observed: 403
 user in two tenants: expected 200/200; observed: 200/200
 no group claim: login=ok; expected 403 on a tenant path; observed: 403
-expired JWT: expected login refused; observed: LOGIN-OK
+JWT expired 30 s ago (inside the default leeway of about 60 s, see m3d): expected accepted; observed: accepted
+JWT expired 300 s ago (outside the default leeway): expected refused; observed: refused
 == M2: audience and replay
 aud=bronzeward only: expected refused; observed: refused
 aud=both: expected accepted; observed: accepted
 same JWT presented twice (replay): expected both accepted, no jti check; observed: ok/ok
 == M3: lifetime and revocation
-JWT exp in 60s: OpenBao token ttl observed: 900s (role token_ttl 15m)
+JWT exp in 60s: OpenBao token ttl observed: 899s (role token_ttl 15m)
 JWT exp in 3600s: OpenBao token ttl observed: 899s (role token_ttl 15m)
 t1 before group removal: expected 200; observed: 200
 new login with no groups: expected 403 on tenant a; observed: 403
@@ -444,12 +451,12 @@ ADMIN step with the synthetic dev root token: revoke-accessor of t1 -> 204
 t1 after revoke: expected 403; observed: 403
 
 === m3b.sh output ===
-JWT expired 300 s ago (beyond the 150 s default leeway): expected refused; observed: refused
-JWT expired 120 s ago (inside the default leeway): observed: refused
+JWT expired 300 s ago (beyond both the documented 150 s and the observed 60 s): expected refused; observed: refused
+JWT expired 120 s ago (beyond the observed 60 s of m3d, inside the documented 150 s): expected refused if the default is about 60 s, accepted if it is 150 s; observed: refused
 ADMIN step (dev root token): role expiration_leeway=-1, clock_skew_leeway=-1, not_before_leeway=-1, token_ttl=2m
 204
 JWT expired 5 s ago with leeway disabled: expected refused; observed: refused
-valid JWT with token_ttl 2m: observed OpenBao token ttl: 119s
+valid JWT with token_ttl 2m: observed OpenBao token ttl: 120s
 ADMIN step: restoring the role to the setup values
 204
 
@@ -481,7 +488,7 @@ ADMIN step: add auth/token/create to the tenant-a policy
 204
 == child with a named policy the parent holds only through an identity group
 observed (child policies [tenant-a-read-x]): 400 {"errors":["child policies must be subset of parent"]}
-observed (child policies [default]): 200 {"request_id":"5f57e9dc-bd69-34b3-ad9e-f7023f640db4","lease_id":"","renewable":false,"lease_duration":0,"data":null,"wrap_info":null,"warnings":null,"auth":
+observed (child policies [default]): 200 {"request_id":"35903300-822d-c0e5-b0d2-93ba0d70bd40","lease_id":"","renewable":false,"lease_duration":0,"data":null,"wrap_info":null,"warnings":null,"auth":
 ADMIN step: a second jwt role whose token_policies are direct, so the parent token itself holds them
 204
 direct-policy parent login: ok
@@ -537,7 +544,7 @@ creator destroys version 1: expected 403; observed: 403
 creator lists gen/: expected 403; observed: 403
 creator writes outside gen/: expected 403; observed: 403
 == reader
-reader reads gen/g1: expected 200 with value one; observed: 200 {"request_id":"cfe39297-5bab-b308-4b35-06051b37f057","le ... value=one
+reader reads gen/g1: expected 200 with value one; observed: 200 {"request_id":"c327c0c6-a644-f601-9481-f5ee4dc1a51d","le ... value=one
 reader writes gen/g2: expected 403; observed: 403
 == version after the refused overwrites (ADMIN read of metadata)
 current_version: 1
@@ -549,7 +556,8 @@ ADMIN: jwt mount accessor read: ok
 login with tenant=a: ok
 own tenant a read: expected 200; observed: 200
 tenant b read: expected 403; observed: 403
-path traversal attempt tenants/a/../b/x: expected 403; observed: 403
+path traversal tenants/a/../b/x sent as is (curl --path-as-is): expected no read of tenant b (403, or a redirect to the cleaned path); observed: <a href="/v1/secret/data/tenants/b/x">Temporary Redirect</a>. 307
+same, redirect followed (curl -L --path-as-is): expected 403 (the cleaned path is the tenant b read above); observed: {"errors":["1 error occurred:\n\t* permission denied\n\n"]} 403
 == claim with a path-like value, tenant="*" and tenant="a/../b"
 tenant claim '*': login=ok; read b/x -> 403; read a/x -> 403
 tenant claim 'a/../b': login=ok; read b/x -> 403; read a/x -> 403
