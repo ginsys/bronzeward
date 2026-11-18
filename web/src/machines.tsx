@@ -4,7 +4,7 @@
 
 import type { components } from "./api/v1";
 import { AddClusterAction, RecordMachineAction } from "./forms.tsx";
-import { EmptyList, Head, Id, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
+import { EmptyList, Head, Id, type Listed, More, Ref, RESTARTED, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { Status } from "./states.tsx";
 
 export type Machine = components["schemas"]["MachineBody"];
@@ -177,6 +177,9 @@ export function machineStates(machines: readonly Machine[]) {
   return { total: machines.length, counts, none: machines.filter((m) => badges(m).length === 0).length };
 }
 
+// A list read again from its start after the server refused its position says so (§8, "Epoch changed").
+export const Restarted = ({ list }: { list: Listed<unknown> }) => (list.restarted ? <Status testid="restarted">{RESTARTED}</Status> : null);
+
 export function MachineSummary({ machines }: { machines: readonly Machine[] }) {
   if (machines.length === 0) return <Status>No machines recorded in this cluster.</Status>;
   const { total, counts, none } = machineStates(machines);
@@ -204,7 +207,7 @@ export function MachineSummary({ machines }: { machines: readonly Machine[] }) {
 function ClusterMachines({ id }: { id: string }) {
   const [list] = useList<Machine>("/machines", new URLSearchParams({ cluster: id }).toString(), true);
   const pending = usePending(list, "machines");
-  return <><h3>Machines</h3>{list.kind === "ok" ? <MachineSummary machines={list.data.items} /> : pending}</>;
+  return <><h3>Machines</h3>{list.kind === "ok" ? <><Restarted list={list.data} /><MachineSummary machines={list.data.items} /></> : pending}</>;
 }
 
 // GET /drafts has no cluster filter, so a cluster's open drafts are picked in the browser from every
@@ -228,5 +231,5 @@ export function OpenDraftsView({ drafts }: { drafts: readonly Draft[] }) {
 function ClusterDrafts({ id }: { id: string }) {
   const [list] = useList<Draft>("/drafts", "", true);
   const pending = usePending(list, "drafts");
-  return <><h3>Open drafts</h3>{list.kind === "ok" ? <OpenDraftsView drafts={openDrafts(list.data.items, id)} /> : pending}</>;
+  return <><h3>Open drafts</h3>{list.kind === "ok" ? <><Restarted list={list.data} /><OpenDraftsView drafts={openDrafts(list.data.items, id)} /></> : pending}</>;
 }
