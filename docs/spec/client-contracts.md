@@ -149,7 +149,7 @@ no role included (`internal/api/api.go:339`).
 | import list / status | `GET /ingestions`, `/ingestions/{id}` | list | no | filters `state`, `machine` (`internal/api/ingestions.go:280-299`) |
 | import review | `GET /ingestions/{id}/review` | no | no | `author`, human; `no-store`; only while `paused` (`internal/api/review.go:30-52`) |
 | import base summary | `GET /import-base-revisions/{id}` | no | no | `author`, human; `no-store`; size and counts only, no text, no digest (choice §17.38) |
-| import base text | `GET /import-base-revisions/{id}/document` | no | no | `author`, human, and the importer who continued the review; `no-store` also on refusals (choice §17.41) |
+| import base text | `GET /import-base-revisions/{id}/document` | no | no | `author`, human, and the importer of a file who continued the review; `no-store` also on refusals (choice §17.41) |
 | release list / show | `GET /releases`, `/releases/{id}` | list | no | |
 | release review, provenance | `GET /releases/{id}/machines/{m}/review` | no | no | redacted |
 | plan list / show | `GET /plans`, `/plans/{id}` | list | no | filters `state`, `machine` (`internal/api/plans.go:429-451`) |
@@ -1641,8 +1641,8 @@ the text. The requirement is proposed with that limit stated.
 §17.41](persistence-api.md#17-choices-for-owner-review)) as item 1 shows the review: only when
 standard input and output are a terminal, through the same in-process pager, after the item 2
 notice, with no `-o json`, `-o yaml`, save or export form, no override, and no marks prompt, since
-a stored document is not marked. The server answers only the author who made the import and
-continued its review; the command shows its refusal (`403 forbidden` with `not-the-importer`, or
+a stored document is not marked. The server answers only the author who made the import from a file
+they provided and continued its review; the command shows its refusal (`403 forbidden` with `not-the-importer`, or
 `409 conflict` with `import-not-reviewed`) as it comes and prints no body.
 
 ### 11.4 Web review and document input

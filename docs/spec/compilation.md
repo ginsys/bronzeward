@@ -557,8 +557,8 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    records the review as `continued`, with the principal that continued it
    (`continued_by`, in the same `UPDATE`; a mark records none). The record
    shows who continued the review, never who read it, and an import base's
-   text is read only by the author who imported it and continued it
-   ([persistence and API §3.2](persistence-api.md#32-the-import-base), choice
+   text is read only by the author who imported it from a file and continued
+   it ([persistence and API §3.2](persistence-api.md#32-the-import-base), choice
    §17.41 there). Its run decrypts the envelope, checks its
    digest and runs the draft transaction, which releases the claim (§3.4). A
    draft that moved while the claim was paused fails the draft transaction as
