@@ -542,6 +542,26 @@ func TestOnboardHeldImportStops(t *testing.T) {
 	}
 }
 
+// TestOnboardActiveImportOutranksAnEarlierRelease: a machine with a released import and a newer held one
+// into the same draft stops the run, as the held one alone does.
+func TestOnboardActiveImportOutranksAnEarlierRelease(t *testing.T) {
+	e := newOnboard(t)
+	if code, out, errOut := e.run("--no-import"); code != 0 {
+		t.Fatalf("setup: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	e.api.mu.Lock()
+	e.api.draft.id, e.api.draft.cluster, e.api.draft.title, e.api.draft.state, e.api.draft.rev = "drf_"+strings.Repeat("2", 26), e.api.clusters[0].Id, "onboard lab", "open", 1
+	for i, state := range []string{"released", "held"} {
+		e.api.ings = append(e.api.ings, obIngestion{id: "ing_" + strings.Repeat(string(rune('3'+i)), 26), machine: e.api.machines[0].id, draft: e.api.draft.id, op: "op_" + strings.Repeat("5", 26), state: state})
+	}
+	e.api.mu.Unlock()
+	args := []string{"cluster", "onboard", "--talosconfig", e.file, "--name", "lab", "--kubernetes-endpoint", "proposed", "--skip-secret"}
+	code, out, errOut := e.runArgs(args...)
+	if code != 1 || len(e.api.ings) != 2 || !strings.Contains(out+errOut, "import status") {
+		t.Errorf("exit %d, %d imports, stdout %q, stderr %q; want 1, no new import and import status named", code, len(e.api.ings), out, errOut)
+	}
+}
+
 // TestOnboardRecoveryCommandsKeepTheirFlags: the commands a stopped run prints reach the server the run
 // did (the global --context), and a recovery command keeps --skip-secret where the run was given it.
 func TestOnboardRecoveryCommandsKeepTheirFlags(t *testing.T) {

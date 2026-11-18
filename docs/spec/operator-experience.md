@@ -497,7 +497,7 @@ an `author` signed in as a person (exit 1 otherwise, with nothing sent) and take
 | `--bao-token-file <file>` or `--bao-token-stdin` | the OpenBao token, from a file with no group or other permission bit or from standard input; never an argument. Exactly one |
 | `--skip-secret` | write no secret: the operator says it is already in OpenBao. It takes no `--bao-*` flag |
 | `--no-import` | stop after the secret: no draft, no import |
-| `--review`, `--staging encrypted|transient` | as `import start`: `--review` pauses the first import for review and needs encrypted staging |
+| `--review`, `--staging encrypted\|transient` | as `import start`: `--review` pauses the first import for review and needs encrypted staging |
 
 `--no-wait`, `--idempotency-key`, `--expect-epoch`, `--expect-principal` and `--if-match` are refused
 with exit 2: the command sends several writes and waits for each import. A missing or refused flag, a

@@ -526,7 +526,7 @@ func (e *env) onboardImport(a *onboardArgs, m *onboardMachine, draft string, rer
 		if err != nil {
 			return err
 		}
-		rank := map[string]int{"released": 4, "paused": 3, "held": 2, "resumed": 2}
+		rank := map[string]int{"released": 1, "held": 2, "resumed": 2, "paused": 3} // a running import outranks an earlier release
 		for _, raw := range items {
 			var b apitypes.IngestionBody
 			if json.Unmarshal(raw, &b) == nil && b.Draft == draft && rank[b.State] > 0 && (found == nil || rank[b.State] > rank[found.State]) {
