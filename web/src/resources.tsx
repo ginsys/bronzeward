@@ -222,6 +222,26 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
   );
 }
 
+// What an import base revision holds, from the one read (persistence and API §9.2): its size and
+// counts, never its document text, digests or reference names (choice §17.38). The operation that
+// wrote it is not recorded on the revision, so none is shown.
+export const ImportBaseRows = ({ r }: { r: S["ImportBaseSummary"] }) => (
+  <>
+    <Fields rows={[
+      ["Identifier", r.id], ["Machine", <Id id={r.machine} />], ["Author", <Id id={r.author} />], ["Created", when(r.createdAt)],
+      ["Document size", `${r.documentBytes} bytes`], ["References", r.references], ["Embedded documents", r.embedded],
+    ]} />
+    <p>The document text and its digests are not shown.</p>
+  </>
+);
+
+export const ImportBaseItem = ({ id }: { id: string }) => (
+  <ItemOf<S["ImportBaseSummary"]> path={`/import-base-revisions/${encodeURIComponent(id)}`} what="the import base revision"
+    title={() => `Import base revision ${short(id)}`}>
+    {(r) => <ImportBaseRows r={r} />}
+  </ItemOf>
+);
+
 const RELEASES: readonly Col<S["ReleaseBody"]>[] = [
   ["Release", (r) => <Id id={r.id} />], CLUSTER, ["Published", (r) => when(r.publishedAt)], ["By", (r) => by(r.publishedBy)],
   ["Sources", (r) => r.sources.length], ["Machines", (r) => r.machines.length],
@@ -485,7 +505,7 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   const items: Record<string, () => ReactNode> = {
     machines: () => <MachineItem id={id} />, clusters: () => <ClusterItem id={id} />, releases: () => <ReleaseItem id={id} />, drafts: () => <DraftItem key={id} id={id} />,
     plans: () => <PlanItem key={id} id={id} />, operations: () => <OperationItem id={id} />, dependencies: () => <DependencyItem id={id} />,
-    ingestions: () => <IngestionItem id={id} />,
+    ingestions: () => <IngestionItem id={id} />, "import-base-revisions": () => <ImportBaseItem id={id} />,
   };
   return kind !== undefined && Object.hasOwn(items, kind) ? items[kind]!() : undefined;
 }

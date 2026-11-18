@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { ChangeEndpoint } from "./forms.tsx";
-import { type Dropped, Head, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
+import { type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, node, release } from "./machines.tsx";
 import { NextStep } from "./nextstep.tsx";
 import type { ReadResult } from "./request.ts";
@@ -424,6 +424,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed 
       <dl>
         <dt>Desired</dt><dd>{release(d.desired)}</dd>
         <dt>Applied</dt><dd>{d.applied === null ? "none" : <>{release(d.applied.release)} by {d.applied.source}</>}</dd>
+        <dt>Import base</dt><dd data-testid="import-base"><Id id={d.applied?.importBase} none="none" /></dd>
         <dt>Observed</dt><dd data-testid="observed">{d.observed === null ? "none" : <>read at {at(d.observed.at)} (<span title={d.observed.observation}>{short(d.observed.observation)}</span>): {attribution(d.observed.release)}</>}</dd>
         <dt>Scope</dt><dd>{d.scopeState}</dd>
       </dl>

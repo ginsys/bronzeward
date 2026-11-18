@@ -23,8 +23,8 @@ const draft = (over: Partial<Draft>): Draft => ({ id: "drf_x", cluster: "cl_a", 
 
 // One machine with three states, one that matches, one that shows none.
 const drifted = machine({ id: "mch_a", openDrift: { revision: 1, observation: "obs_1", lastObservation: "obs_1", lateLanding: null }, frozen: true });
-const matches = machine({ id: "mch_b", desired: "rel_1", applied: { release: "rel_1", source: "operation" }, observed: { observation: "obs_2", release: "rel_1", at: "2026-11-18T10:00:00Z" } });
-const plain = machine({ id: "mch_c", desired: "rel_1", applied: { release: "rel_1", source: "operation" } });
+const matches = machine({ id: "mch_b", desired: "rel_1", applied: { release: "rel_1", source: "operation", importBase: null }, observed: { observation: "obs_2", release: "rel_1", at: "2026-11-18T10:00:00Z" } });
+const plain = machine({ id: "mch_c", desired: "rel_1", applied: { release: "rel_1", source: "operation", importBase: null } });
 
 describe("the Clusters entry in the main navigation", () => {
   test("it follows Machines and goes to the cluster list", () => {

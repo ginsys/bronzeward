@@ -218,7 +218,7 @@ export function Ref({ to, id, children }: { to: string; id: string; children?: R
 const VIEWS: Record<string, string> = {
   cl: "clusters", drf: "drafts", mch: "machines", frg: "fragments", frv: "fragment-revisions", prf: "profiles", prv: "profile-revisions",
   asg: "assignments", asr: "assignment-revisions", rel: "releases", pln: "plans", op: "operations", dep: "dependencies",
-  ing: "ingestions",
+  ing: "ingestions", ibr: "import-base-revisions",
 };
 export const viewOf = (id: string) => {
   const prefix = id.slice(0, Math.max(id.indexOf("_"), 0));

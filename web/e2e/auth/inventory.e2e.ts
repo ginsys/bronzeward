@@ -282,7 +282,7 @@ describe("the machine detail (W3)", () => {
     const p = obs("p", 5, "2026-10-26T08:51:00Z", { configDigest: { code: "unreachable", cause: "node unreachable" } });
     const machine: Machine = {
       id: id!, cluster: cl.id, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
-      desired: rel("b"), applied: { release: rel("a"), source: "operation" }, pendingConvergence: true,
+      desired: rel("b"), applied: { release: rel("a"), source: "operation", importBase: null }, pendingConvergence: true,
       observed: { observation: m1.id, at: m1.at, release: rel("b") }, frozen: true, scopeState: "normal",
       openDrift: { revision: 3, observation: k.id, lastObservation: m1.id, lateLanding: null },
     };
@@ -841,7 +841,7 @@ describe("the rendered review of a release's machine", () => {
   });
 
   it("a machine with an Applied configuration is told an apply-config plan sends the release", async () => {
-    const { s, m } = await served({}, { release: `rel_${"a".repeat(26)}`, source: "operation" });
+    const { s, m } = await served({}, { release: `rel_${"a".repeat(26)}`, source: "operation", importBase: null });
     await open(s.rel.id, m);
     await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("An apply-config plan sends this release to it"));
   });
