@@ -319,7 +319,7 @@ func (e *env) onboardInputs(a *onboardArgs) (err error) {
 		Context  string
 		Contexts map[string]struct{ Endpoints []string }
 	}
-	if a.endpoint == "" && yaml.Unmarshal(a.config, &ctxs) == nil && len(ctxs.Contexts[ctxs.Context].Endpoints) == 0 {
+	if a.endpoint == "" && yaml.Unmarshal(a.config, &ctxs) == nil && len(ctxs.Contexts[cmp.Or(a.talosContext, ctxs.Context)].Endpoints) == 0 {
 		return usageError{errors.New("the talosconfig's context names no endpoint: give --endpoint <host|ip[:port]>")}
 	}
 	switch {
@@ -425,7 +425,7 @@ func (e *env) onboardSecret(a *onboardArgs, obj *onboarding, rerun func() string
 	case cerr != nil && !errors.Is(cerr, err):
 		// A Ctrl-C after the request was sent: the create may have committed.
 		obj.Secret = onboardPart{State: stateUnknown.s(), Command: rerun(), Error: "stopped while writing: " + maybe}
-		return cerr
+		return outcomeUnknown{fmt.Errorf("stopped while writing the secret, and %s", maybe)}
 	case err == nil:
 		obj.Secret = onboardPart{State: obWritten}
 	case errors.Is(err, accessput.ErrPresent):
@@ -645,7 +645,7 @@ func onboardLines(obj *onboarding) []string {
 			out = append(out, "  "+cmd)
 		}
 	case obj.Draft != nil:
-		out = append(out, "", "Next: read the draft, then publish it: bronzewardctl draft show "+client.ShellWord(obj.Draft.ID))
+		out = append(out, "", obj.q("Next: read the draft, then publish it: bronzewardctl draft show "+client.ShellWord(obj.Draft.ID)))
 	}
 	return out
 }
