@@ -100,7 +100,7 @@ describe("the machines", () => {
     await $(`a[title="${id}"]`).click();
     await expect($("main h2")).toHaveText(`Machine ${id}`);
     expect(await where()).toBe(`${FIXTURE_PAGE}/machines/${id}`);
-    // A machine just recorded has no Desired, no Applied and no import: the page says it is not handed over and offers the import.
+    // A machine just recorded has no Desired and no Applied: the page says it is not handed over and offers the import.
     await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("Not handed over"), { wait: 20_000 });
     await expect($('[data-testid="next-step"]').$("a=Import this machine")).toBeDisplayed();
     await $(`a[title="${cl.id}"]`).click();
@@ -376,7 +376,7 @@ describe("the machine detail (W3)", () => {
     await browser.execute(() => void dispatchEvent(new Event("online")));
     await expect($("main")).toHaveText(expect.stringContaining(refused), { wait: 20_000 });
     // The next read finds no answer; every other read is held, so none ends the banner first.
-    await faults({ upstream: at, redirect: path, held: ["/identity", `${path}/observations`, `${path}/timeline`, "/ingestions"] });
+    await faults({ upstream: at, redirect: path, held: ["/identity", `${path}/observations`, `${path}/timeline`] });
     await browser.execute(() => void dispatchEvent(new Event("online")));
     await $('[data-testid="offline"]').waitForExist({ timeout: 20_000 });
     const shown = await $("main").getText();

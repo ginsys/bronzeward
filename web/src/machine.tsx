@@ -8,7 +8,7 @@ import type { components } from "./api/v1";
 import { ChangeEndpoint } from "./forms.tsx";
 import { type Dropped, Head, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, node, release } from "./machines.tsx";
-import { lineMachine, NextStep, OuterSettle } from "./nextstep.tsx";
+import { NextStep } from "./nextstep.tsx";
 import type { ReadResult } from "./request.ts";
 import { clock, Status } from "./states.tsx";
 
@@ -308,11 +308,9 @@ export function MachineItem({ id }: { id: string }) {
   // flight.
   const readAgain = useCallback(() => step("advance"), []);
   return (
-    <OuterSettle.Provider value={reads.settle}>
-      <ReadsProvider value={{ ...reads, settle, again: reads.again + again.n }}>
-        <MachineState id={id} path={path} tl={tl} older={older} busy={busy} readAgain={readAgain} changed={readAgain} />
-      </ReadsProvider>
-    </OuterSettle.Provider>
+    <ReadsProvider value={{ ...reads, settle, again: reads.again + again.n }}>
+      <MachineState id={id} path={path} tl={tl} older={older} busy={busy} readAgain={readAgain} changed={readAgain} />
+    </ReadsProvider>
   );
 }
 
@@ -402,15 +400,13 @@ function MachineState({ id, path, tl, older, busy, readAgain, changed }: { id: s
   useEffect(() => stop, [stop]);
   useEffect(() => observe(view, n, regained));
   const [km, ko, kt] = (k.current = keptW3(k.current, m, obs, tl, view));
-  // A machine read that found no answer (a transport failure) leaves its last answer shown under the banner, and
-  // `m` still reads ok: the next-step line is not drawn from it.
-  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} changed={changed} stale={lost.current[0]} />;
+  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} changed={changed} />;
 }
 
 // W3 as read: each read's answer, else what it keeps with its failure above it. The machine's rows
 // need only the machine: with no observations to show, they show without the latest read's line and
 // the observations' list (client contracts §8.6 item 6, case 5).
-export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed, stale = false }: { id: string; m: Load<Machine>; obs: Load<Listed<Observation>> | Dropped; km: Kept<Machine>; ko: Kept<Listed<Observation>>; tl: Load<Timeline<Entry>> | Dropped; kt: Kept<Timeline<Entry>>; older: (() => void) | undefined; busy: boolean; changed?: () => void; stale?: boolean }) {
+export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed }: { id: string; m: Load<Machine>; obs: Load<Listed<Observation>> | Dropped; km: Kept<Machine>; ko: Kept<Listed<Observation>>; tl: Load<Timeline<Entry>> | Dropped; kt: Kept<Timeline<Entry>>; older: (() => void) | undefined; busy: boolean; changed?: () => void }) {
   const [pm, po, timeline] = [usePending(m, "the machine"), usePending(obs, "the observations"), usePending(tl, "the timeline")];
   const d = m.kind === "ok" ? m.data : km.data;
   const read = obs.kind === "ok" ? obs.data : ko.data;
@@ -424,7 +420,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
       <p>Cluster <Ref to={`/clusters/${d.cluster}`} id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
       {changed !== undefined && <ChangeEndpoint machine={d} onChanged={changed} />}
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list).map((s) => <li key={s}>{s}</li>)}</ul>
-      {lineMachine(m, stale) !== undefined && <NextStep machine={lineMachine(m, stale)!} />}
+      <NextStep machine={d} />
       <dl>
         <dt>Desired</dt><dd>{release(d.desired)}</dd>
         <dt>Applied</dt><dd>{d.applied === null ? "none" : <>{release(d.applied.release)} by {d.applied.source}</>}</dd>
