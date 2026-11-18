@@ -33,7 +33,7 @@ func continueIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (res
 	if a.d.owner.ID == "" || a.d.ing == nil {
 		return result{}, refuse(http.StatusServiceUnavailable, "dependency-unavailable", "ingestion is not configured; nothing was committed")
 	}
-	tk, err := staging.Continue(ctx, tx, a.d.owner, a.d.timers.Lease, claim)
+	tk, err := staging.Continue(ctx, tx, a.d.owner, a.d.timers.Lease, claim, q.principal.ID)
 	conflict := func(detail string) (result, error) {
 		return result{}, refuse(http.StatusConflict, "conflict", detail).with("ingestion", claim)
 	}

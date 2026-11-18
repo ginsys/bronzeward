@@ -943,6 +943,33 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ImportBaseSummary'}
         default: {$ref: '#/components/responses/Problem'}
+  /import-base-revisions/{id}/document:
+    get:
+      operationId: getImportBaseRevisionsIdDocument
+      tags: [import-base-revisions]
+      description: The sanitized document of one import base revision (API revision 7; persistence and API §9.2, choice §17.41), to the author who
+        made the import and only when that author continued its operator review. Another identity is refused 403 forbidden with the
+        rule not-the-importer; an import not continued by its author, a drift adoption and an import made without review are refused
+        409 conflict with the rule import-not-reviewed. The document can still hold a value nobody marked.
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImportBaseDocument'}
+        default: {$ref: '#/components/responses/Problem'}
   /ingestions:
     get:
       operationId: getIngestions
@@ -3118,6 +3145,16 @@ components:
         documentBytes: {type: integer, description: The size in bytes of the stored sanitized document; its text is never served.}
         references: {type: integer, description: The number of reference declarations the revision holds.}
         embedded: {type: integer, description: The number of embedded documents the import identified.}
+      additionalProperties: false
+    ImportBaseDocument:
+      type: object
+      description: The stored sanitized document of an import base revision, the review's document form (persistence and API §9.2).
+        It can still hold a value nobody marked, and carries no declarations, digest, baseline or generation path.
+      required: [id, machine, document]
+      properties:
+        id: {type: string}
+        machine: {type: string}
+        document: {type: string}
       additionalProperties: false
     IngestionReviewBody:
       type: object

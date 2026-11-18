@@ -354,8 +354,14 @@ CREATE TABLE staging_claim (
   -- continues it. Only encrypted staging can request one; a paused claim holds its envelope and
   -- awaits a pending review.
   review          text CHECK (review IN ('pending', 'continued')),
+  -- The principal that continued the review (compilation §3.6 item 5), recorded by the continuation
+  -- itself in the UPDATE that sets review to continued: a mark leaves it null. The import base text
+  -- read answers only the import's author when this names that author (persistence-api §9.2); a
+  -- continuation before the column existed has none, and that read refuses it.
+  continued_by    text REFERENCES principal (id),
   CHECK (payload IS NULL OR (mode = 'encrypted' AND state IN ('held', 'paused', 'resumed'))),
   CHECK (review IS NULL OR mode = 'encrypted'),
+  CHECK (continued_by IS NULL OR review = 'continued'),
   CHECK (state <> 'paused' OR (review IS NOT DISTINCT FROM 'pending' AND payload IS NOT NULL)),
   -- Only an encrypted claim can be taken over (§3.2, §3.4): transient staging has no recovery owner.
   CHECK (state <> 'resumed' OR mode = 'encrypted'),

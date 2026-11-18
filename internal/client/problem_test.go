@@ -24,6 +24,30 @@ func TestRecoveryRefusalWithoutScope(t *testing.T) {
 	}
 }
 
+// TestRuleOfForbiddenAndConflict checks that a 403 forbidden and a 409 conflict name the rule the
+// server refused by, which tells the import base text's two refusals apart, and add nothing when
+// the answer carries none (client-contracts.md §11.3).
+func TestRuleOfForbiddenAndConflict(t *testing.T) {
+	for _, tc := range []struct {
+		code string
+		doc  map[string]any
+		want string
+	}{
+		{"forbidden", map[string]any{"rule": "not-the-importer"}, "\nRefused: rule not-the-importer."},
+		{"conflict", map[string]any{"rule": "import-not-reviewed"}, "\nRefused: rule import-not-reviewed."},
+		{"conflict", map[string]any{"rule": "a\nb"}, "\nRefused: rule a\\x0ab."},
+		{"forbidden", map[string]any{}, ""},
+		{"conflict", map[string]any{}, ""},
+	} {
+		tc.doc["type"], tc.doc["title"], tc.doc["instance"] = problemPrefix+tc.code, "BWSYNTH", "req_BWSYNTH"
+		p := &Problem{Status: 403, Doc: tc.doc}
+		_, after, _ := strings.Cut(p.Error(), "(instance req_BWSYNTH)")
+		if after != tc.want {
+			t.Errorf("%s %v: after the instance %q, want %q", tc.code, tc.doc, after, tc.want)
+		}
+	}
+}
+
 // TestValidationRefusal checks that a validation refusal names the rule and the place in the body
 // the server gives, and nothing for a member it does not give.
 func TestValidationRefusal(t *testing.T) {

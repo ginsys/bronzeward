@@ -37,11 +37,13 @@ type importFake struct {
 	// operation after that many such reads on: the installation was restored. opReads counts them.
 	// lapseOnOp lapses the lease at the first read of the operation, so no clock decides the order.
 	moveAfterOp, opReads int
-	lapseOnOp, noHeader  bool // noHeader leaves the epoch off every answer except the event streams
-	emptyOnMove          bool // the operation has no event at the second epoch
-	ingReads             int  // the reads of the claim
-	streams              int  // the event streams opened
-	reviews              int  // review reads answered
+	lapseOnOp, noHeader  bool   // noHeader leaves the epoch off every answer except the event streams
+	emptyOnMove          bool   // the operation has no event at the second epoch
+	ingReads             int    // the reads of the claim
+	streams              int    // the event streams opened
+	reviews              int    // review reads answered
+	documents            int    // import base document reads answered
+	refuseDocument       string // when set, the problem document the import base document read answers with 409
 	// stall, when set, makes the event stream stall (see stallStream) under the epoch stallEpoch.
 	stall      chan struct{}
 	stallEpoch string
@@ -146,6 +148,16 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case route == "GET /ingestions/ing_BWSYNTH/review":
 		f.reviews++
 		fmt.Fprint(w, `{"ingestion":"ing_BWSYNTH","document":"BWSYNTH","declarations":{"references":{},"embedded":[]}}`)
+	case route == "GET /import-base-revisions/ibr_BWSYNTH/document":
+		f.documents++
+		w.Header().Set("Cache-Control", "no-store")
+		if f.refuseDocument != "" {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusConflict)
+			fmt.Fprint(w, f.refuseDocument)
+			return
+		}
+		fmt.Fprint(w, `{"id":"ibr_BWSYNTH","machine":"mch_BWSYNTH","document":"BWSYNTH-base-text\nsecond: line\n"}`)
 	case route == "POST /ingestions/ing_BWSYNTH/abandonments":
 		record()
 		f.claim = "abandoned"

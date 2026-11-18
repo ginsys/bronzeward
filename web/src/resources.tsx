@@ -6,6 +6,7 @@
 import { Fragment as Group, type ReactNode, useCallback, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { ApprovalRecord, ApproveControl, RevocationReason, RevokeControl } from "./approval.tsx";
+import { BaseDocument } from "./claim.tsx";
 import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { CancelPlan, PlanNew, PlanState, PROPOSED, takeFresh } from "./plan.tsx";
 import { PublishDraft } from "./publish.tsx";
@@ -231,14 +232,14 @@ export const ImportBaseRows = ({ r }: { r: S["ImportBaseSummary"] }) => (
       ["Identifier", r.id], ["Machine", <Id id={r.machine} />], ["Author", <Id id={r.author} />], ["Created", when(r.createdAt)],
       ["Document size", `${r.documentBytes} bytes`], ["References", r.references], ["Embedded documents", r.embedded],
     ]} />
-    <p>The document text and its digests are not shown.</p>
+    <p>The digests and reference names are not shown. The document text is read on request, and only the author who imported it and reviewed it may read it.</p>
   </>
 );
 
 export const ImportBaseItem = ({ id }: { id: string }) => (
   <ItemOf<S["ImportBaseSummary"]> path={`/import-base-revisions/${encodeURIComponent(id)}`} what="the import base revision"
     title={() => `Import base revision ${short(id)}`}>
-    {(r) => <ImportBaseRows r={r} />}
+    {(r) => <><ImportBaseRows r={r} /><BaseDocument id={r.id} /></>}
   </ItemOf>
 );
 
