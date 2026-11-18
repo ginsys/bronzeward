@@ -14,7 +14,7 @@ import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { EMPTY_NOTE, NO_PROVENANCE, PROVENANCE_LIMIT } from "../../src/review.tsx";
 import { WITHHELD } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, holding, mint, mirrored, param, release, seen, storageEmpty, where } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, focused, fromTitle, holding, measure, mint, mirrored, overflows, param, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -592,58 +592,6 @@ const nav = async (title: string) => {
 };
 const loaded = () => browser.waitUntil(async () => !(await texts('main [data-testid="status"]')).some((t) => t.startsWith("Loading")), { timeout: 20_000, timeoutMsg: "a list was still loading" });
 
-// The focused element after one Tab, or Shift+Tab, which must show its focus (WCAG 2.4.7).
-async function tab(back = false) {
-  await browser.keys(back ? ["Shift", "Tab"] : "Tab");
-  const f = await browser.execute(() => {
-    const e = document.activeElement as HTMLElement;
-    const s = getComputedStyle(e);
-    return { tag: e.tagName, text: e.textContent?.trim() ?? "", title: e.getAttribute("title"), outline: s.outlineStyle, width: parseFloat(s.outlineWidth) };
-  });
-  if (f.outline === "none" || f.width < 2) throw new Error(`focus on ${f.tag} "${f.text}" is not visible: outline ${f.outline} ${f.width}px`);
-  return f;
-}
-// Tabs until the match, answering the text of every focus on the way.
-async function tabTo(match: (f: Awaited<ReturnType<typeof tab>>) => boolean, what: string): Promise<string[]> {
-  const passed: string[] = [];
-  for (let i = 0; i < 40; i++) {
-    const f = await tab();
-    if (match(f)) return passed;
-    passed.push(f.text);
-  }
-  throw new Error(`Tab never reached ${what}`);
-}
-const focused = () => browser.execute(() => document.activeElement?.id ?? "");
-// A click on the header's title, which takes no focus, starts the next Tab from there.
-const fromTitle = () => $("header h1").click();
-
-// The lowest contrast of any shown text (WCAG 1.4.3) and the controls under 24 px (2.5.8), measured
-// in the page.
-const measure = () => browser.execute(() => {
-  const lum = (c: string) => {
-    const [r, g, b] = (c.match(/[\d.]+/g) ?? []).slice(0, 3).map((v) => {
-      const s = Number(v) / 255;
-      return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
-  };
-  const back = (e: Element | null): string => {
-    for (; e !== null; e = e.parentElement) {
-      const c = getComputedStyle(e).backgroundColor;
-      if (!/rgba\(.*, 0\)|transparent/.test(c)) return c;
-    }
-    return "rgb(255, 255, 255)";
-  };
-  let low = Infinity;
-  for (const e of document.querySelectorAll("body *")) {
-    if (![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent!.trim() !== "") || e.getClientRects().length === 0) continue;
-    const [a, b] = [lum(getComputedStyle(e).color), lum(back(e))];
-    low = Math.min(low, (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05));
-  }
-  const small = [...document.querySelectorAll("button, select, nav a")].map((e) => e.getBoundingClientRect()).filter((r) => r.width < 24 || r.height < 24).length;
-  return { contrast: low, small };
-});
-const overflows = () => browser.execute(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
 describe("the read-only lists and items", () => {
   it("empty lists are status messages; the audit lists the acts of real writes, principals shortened", async () => {
