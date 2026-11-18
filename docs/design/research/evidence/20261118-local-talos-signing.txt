@@ -1,5 +1,5 @@
 Evidence for docs/design/research/20261118-local-talos-signing.md (ginsys/bronzeward#874).
-All inputs synthetic. No key, token or secret value appears below. Times are CET unless marked Z.
+All inputs synthetic. No key, token or secret value appears below. Times are CET unless marked Z; the bare clock times the program prints (for example 16:44:22.915) are UTC.
 
 == Pinned versions ==
 Talos machinery: github.com/siderolabs/talos/pkg/machinery v1.14.5 (go.mod), the module the program is built with.
