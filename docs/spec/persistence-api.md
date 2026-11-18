@@ -562,7 +562,7 @@ there.
      `machine.ca.key` from the answer (measured: the `os:admin` read returned the
      key and a certificate signed from it was accepted). That read needs
      `os:admin`: a talosconfig whose certificate is `os:reader` is refused, and
-     so is one whose endpoints reach no control plane. There is no admin-only
+     so is a request whose `endpoint` reaches no control plane. There is no admin-only
      mode that keeps the talosconfig as the credential (owner decision, above).
 - **The route.** `POST /clusters/{id}/first-keys` takes `{"kind":
   "machine-config" | "secrets-bundle" | "talosconfig", "document": "<text>",
@@ -4016,7 +4016,8 @@ each (design §7.7 consequences):
   certificate signed from it accepted by the node, with the controls that a
   worker configuration, a configuration with no CA key (`first-key-no-ca-key`),
   an `os:reader` talosconfig (`first-key-role-insufficient`) and a talosconfig
-  whose endpoints reach no control plane
+  request whose `endpoint` reaches no control plane, with control plane
+  endpoints embedded in the file that are ignored
   (`first-key-endpoint-no-control-plane`) are each refused with nothing
   written, and that a certificate signed by an unrelated CA is refused by the
   node; the roles by use (`os:reader` for an observation that does not read
