@@ -5,8 +5,8 @@ import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
-import { ReadsProvider, type Reads } from "./list.tsx";
-import { machineStates, MachineSummary, type Machine, OpenDraftsView, openDrafts } from "./machines.tsx";
+import { ReadsProvider, RESTARTED, type Reads } from "./list.tsx";
+import { machineStates, MachineSummary, type Machine, OpenDraftsView, openDrafts, Restarted } from "./machines.tsx";
 import { PAGES } from "./router.ts";
 
 type Draft = components["schemas"]["DraftBody"];
@@ -52,6 +52,14 @@ describe("a cluster's machines by state", () => {
     expect(out).toContain('href="/machines/mch_a"');
     expect(out).toContain("Drifted, Frozen, Not handed over");
     expect(html(h(MachineSummary, { machines: [] }))).toContain("No machines recorded in this cluster.");
+  });
+});
+
+describe("a list read again from its start", () => {
+  test("says so on either section, and says nothing otherwise", () => {
+    const list = (restarted: boolean) => ({ items: [], next: undefined, restarted });
+    expect(html(h(Restarted, { list: list(true) }))).toContain(RESTARTED.slice(RESTARTED.indexOf("so it was")));
+    expect(html(h(Restarted, { list: list(false) }))).toBe("");
   });
 });
 

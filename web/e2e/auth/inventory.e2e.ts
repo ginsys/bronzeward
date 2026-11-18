@@ -106,8 +106,8 @@ describe("the machines", () => {
     await nav("Clusters");
     await $("a=lab-a").click();
     await expect($("main h2")).toHaveText("Cluster lab-a");
-    await expect($("main h3=Machines")).toBeDisplayed({ wait: 20_000 });
-    await expect($("main h3=Open drafts")).toBeDisplayed();
+    await expect($("main").$("h3=Machines")).toBeDisplayed({ wait: 20_000 });
+    await expect($("main").$("h3=Open drafts")).toBeDisplayed();
     await $("a=Machines in this cluster").click();
     await shows(1);
     expect(await param("cluster")).toBe(cl.id);
