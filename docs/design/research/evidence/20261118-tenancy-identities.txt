@@ -5,7 +5,7 @@ Inputs: synthetic only. The identity provider is a throwaway RSA key pair; its t
 Rule kept: every measurement call uses a token minted by the method under test (a jwt login), never the root token.
 
 Procedure: write the files below to one directory (the lines "=== file ===" separate them), then run
-  bash setup.sh && bash m6.sh && bash m1_m3.sh && bash m3b.sh && bash m3c.sh && bash m3d.sh && bash m4.sh && bash m5.sh && bash m7.sh && bash m8.sh
+  bash setup.sh && bash m6.sh && bash m1_m3.sh && bash m3b.sh && bash m3c.sh && bash m3d.sh && bash m4.sh && bash m4b.sh && bash m5.sh && bash m7.sh && bash m8.sh
 and compare each line with the observed output below. Run them from that directory (lib.sh sets S to the current directory). setup.sh generates idp.key and idp.pub there. The scripts change role and policy state in order, so run them in this order on a fresh container. m3b sets the three leeway fields of the role to -1 and its closing role update does not reset them (an update merges fields), so m3c refuses every expired token for that reason and is not a reading of the default; m3d resets the fields to 0 and is the reading of the default leeway. Remove the container with `docker rm -f bw870-bao` when done.
 
 Limits of the instrument:
@@ -558,3 +558,37 @@ tenant claim '': login=ok; read b/x -> 403; read a/x -> 403
 same sub logs in again with tenant=b; new token reads b: 200
 old token (tenant=a login) reads a: expected 200 if bound to login, 403 if it follows the alias; observed: 403
 old token reads b: observed: 200
+
+=== m4b.sh (a control for m4; run it after m4.sh) ===
+#!/bin/bash
+# M4b: control for M4. Same policy name requested by two parents that differ only in how they hold it
+# (through an identity group, or directly on the role), and a child with num_uses 1.
+set -u
+. ./lib.sh
+rl() { curl -s -X POST -H 'Content-Type: application/json' -d "{\"role\":\"$2\",\"jwt\":\"$1\"}" "$BAO/v1/auth/jwt/login" | jq -r '.auth.client_token // empty'; }
+
+echo "ADMIN: role grp-direct gives tenant-a directly (same policy the group role reaches through identity group tenant-a)"
+api PUT auth/jwt/role/grp-direct "$ROOT" '{"role_type":"jwt","user_claim":"sub","bound_audiences":["openbao"],"token_ttl":"15m","token_max_ttl":"15m","token_policies":["tenant-a"]}' | cut -c1-20
+
+# two different subjects: a login without the group would remove an entity's group membership (M3)
+pg=$(rl "$(jwt user-g '["tenant-a"]' '"openbao"' 300)" tenant)
+pd=$(rl "$(jwt user-d '[]' '"openbao"' 300)" grp-direct)
+echo "parent via identity group: policies=$(curl -s -H "X-Vault-Token: $pg" "$BAO/v1/auth/token/lookup-self" | jq -c '[.data.policies,.data.identity_policies]')"
+echo "parent direct on the role: policies=$(curl -s -H "X-Vault-Token: $pd" "$BAO/v1/auth/token/lookup-self" | jq -c '[.data.policies,.data.identity_policies]')"
+
+echo "child asking for tenant-a, parent via identity group: $(api POST auth/token/create "$pg" '{"policies":["tenant-a"],"ttl":"30s","num_uses":1}' | cut -c1-110)"
+r=$(curl -s -X POST -H "X-Vault-Token: $pd" -H 'Content-Type: application/json' -d '{"policies":["tenant-a"],"ttl":"30s","num_uses":1}' "$BAO/v1/auth/token/create")
+ct=$(printf '%s' "$r" | jq -r '.auth.client_token // empty')
+echo "child asking for tenant-a, parent direct: $([ -n "$ct" ] && echo minted || echo "refused: $(printf '%s' "$r" | cut -c1-100)")"
+echo "child num_uses=1, first use read: expected 200; observed: $(code GET secret/data/tenants/a/x "$ct")"
+echo "child num_uses=1, second use read: expected 403; observed: $(code GET secret/data/tenants/a/x "$ct")"
+
+=== m4b.sh output ===
+ADMIN: role grp-direct gives tenant-a directly (same policy the group role reaches through identity group tenant-a)
+204
+parent via identity group: policies=[["default"],["tenant-a"]]
+parent direct on the role: policies=[["default","tenant-a"],null]
+child asking for tenant-a, parent via identity group: 400 {"errors":["child policies must be subset of parent"]}
+child asking for tenant-a, parent direct: minted
+child num_uses=1, first use read: expected 200; observed: 200
+child num_uses=1, second use read: expected 403; observed: 403
