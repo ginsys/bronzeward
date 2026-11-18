@@ -160,26 +160,20 @@ export async function idpSignIn(human: string): Promise<string> {
 
 export const userId = (human: string) => Object.fromEntries(idpEnv()["BW_TEST_IDP_USERS"]!.split(",").map((p) => p.split("=")))[human] as string;
 
-// What the page's storage holds, read the way client contracts §11.5 item 3 lists it.
-const storageState = () =>
-  browser.execute(async () => ({
-    local: Object.entries(localStorage),
-    session: Object.entries(sessionStorage),
-    indexedDB: "databases" in indexedDB ? (await indexedDB.databases()).map((d) => d.name ?? "") : ["unreadable"],
-    caches: "caches" in self ? await caches.keys() : ["unreadable"],
-  }));
-
-// Client contracts §11.5 item 3: no browser storage holds a value outside a redirect. The page answers
+// What the page's storage holds, read the way client contracts §11.5 item 3 lists it. The page answers
 // counts and database and cache names only, so a failing read never exports a stored value (a stored
 // document carries the run's canary, which must not reach the WebDriver log).
-export async function storageEmpty() {
-  const held = await browser.execute(async () => ({
+const storageState = () =>
+  browser.execute(async () => ({
     local: localStorage.length,
     session: sessionStorage.length,
     indexedDB: "databases" in indexedDB ? (await indexedDB.databases()).map((d) => d.name ?? "") : ["unreadable"],
     caches: "caches" in self ? await caches.keys() : ["unreadable"],
   }));
-  expect(held).toEqual({ local: 0, session: 0, indexedDB: [], caches: [] });
+
+// Client contracts §11.5 item 3: no browser storage holds a value outside a redirect.
+export async function storageEmpty() {
+  expect(await storageState()).toEqual({ local: 0, session: 0, indexedDB: [], caches: [] });
 }
 
 // The positive control of storageEmpty (ginsys/bronzeward#341, client contracts §11.5): plants a
@@ -198,8 +192,8 @@ export async function storageControl() {
       await caches.open("bw-control");
     });
     const s = await storageState();
-    expect(s.local).toEqual([["bw-control", "marker"]]);
-    expect(s.session).toEqual([["bw-control", "marker"]]);
+    expect(s.local).toBe(1);
+    expect(s.session).toBe(1);
     expect(s.indexedDB).toContain("bw-control");
     expect(s.caches).toContain("bw-control");
   } finally {
