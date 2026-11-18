@@ -40,7 +40,10 @@ talosctl gen secrets --output-file secrets.yaml
 talosctl gen config bw-synth https://10.55.0.2:6443 \
   --with-secrets secrets.yaml --output-dir cfg
 # cfg/ now holds controlplane.yaml, worker.yaml and talosconfig
-openssl x509 -noout -subject -dates   # on the talosconfig's crt and ca values
+for k in crt ca; do   # the talosconfig's client and CA certificates, base64 PEM
+  awk -v k="$k:" '$1 == k {print $2}' cfg/talosconfig | base64 -d |
+    openssl x509 -noout -subject -dates
+done
 ```
 
 ## What a talosconfig, a bundle and a configuration hold
