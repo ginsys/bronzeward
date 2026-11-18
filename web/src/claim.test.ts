@@ -337,6 +337,13 @@ describe("the focus check after the offer changes", () => {
     const first = recheckOnOffer(true, was, now);
     expect(recheckOnOffer(first.armed, now, "false takeover,abandon")).toEqual({ check: false, armed: false });
   });
+  test("an action that ended in the commit that changed the offer is armed first: one check, then disarmed for the expiry tick", () => {
+    // The order of the effects in ClaimSection: the end of the action arms, then the offer is read.
+    const armedByTheEnd = true;
+    const same = recheckOnOffer(armedByTheEnd, was, now);
+    expect(same).toEqual({ check: true, armed: false });
+    expect(recheckOnOffer(same.armed, now, "false takeover,abandon")).toEqual({ check: false, armed: false });
+  });
   test("a change of the offer before any action ended moves nothing", () => {
     expect(recheckOnOffer(false, was, now)).toEqual({ check: false, armed: false });
   });
