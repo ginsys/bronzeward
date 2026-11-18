@@ -186,7 +186,7 @@ const activationLabel = "bw-act"
 // node as it was. It needs a worker whose one KubeNodeConfig document holds no labels yet.
 func TestLiveApplyLabelDocument(t *testing.T) {
 	tc, ep := liveTarget(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
 	defer cancel()
 	r, err := Dial(ctx, tc, ep)
 	if err != nil {
@@ -257,6 +257,20 @@ func TestLiveApplyLabelDocument(t *testing.T) {
 	planned = append(planned, original[:at]...)
 	planned = append(planned, labels...)
 	planned = append(planned, original[at:]...)
+	// How long the fixture run holds the label for Reads B and C (BW_TEST_ACTIVATION_HOLD, a Go
+	// duration, none by default). Read and bounded before the apply, so a bad value fails with the
+	// node untouched, and short enough that the hold, the Read A wait and the restore fit the test
+	// timeout and the context below.
+	var hold time.Duration
+	if v := os.Getenv("BW_TEST_ACTIVATION_HOLD"); v != "" {
+		hold, err = time.ParseDuration(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hold < 0 || hold > 2*time.Minute {
+			t.Fatalf("BW_TEST_ACTIVATION_HOLD %s is outside 0 to 2m", hold)
+		}
+	}
 	got := send(ctx, planned)
 	t.Logf("apply of the label document answered %+v (accepted means the node named NO_REBOOT, one message, no error)", got)
 	if got.Class != ClassAccepted || !got.Accounts() {
@@ -280,14 +294,13 @@ func TestLiveApplyLabelDocument(t *testing.T) {
 				t.Fatalf("the label is stored but the resource version did not move: %q", after.ResourceVersion())
 			}
 			// The restore follows at once, so the fixture run reads Reads B and C while the label
-			// is held: BW_TEST_ACTIVATION_HOLD names how long (a Go duration, none by default).
-			if hold := os.Getenv("BW_TEST_ACTIVATION_HOLD"); hold != "" {
-				d, err := time.ParseDuration(hold)
-				if err != nil {
-					t.Fatal(err)
+			// is held. The hold was validated before the apply and ends with the context.
+			if hold > 0 {
+				t.Logf("holding the label for %s", hold)
+				select {
+				case <-time.After(hold):
+				case <-ctx.Done():
 				}
-				t.Logf("holding the label for %s", d)
-				time.Sleep(d)
 			}
 			return
 		}
