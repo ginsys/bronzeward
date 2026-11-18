@@ -33,6 +33,7 @@ var specRoutes = []string{
 	"GET /dependencies/{id}/alerts any", "GET /dependency-alerts any", "GET /identity credential", "GET /principals any",
 	"GET /server any",
 	"POST /ingestions author human if-match", "GET /ingestions/{id}/review author human",
+	"GET /import-base-revisions/{id} author human",
 	"POST /ingestions/{id}/marks author human", "POST /ingestions/{id}/continuations author human",
 	"POST /ingestions/{id}/takeovers author human",
 	"POST /ingestions/{id}/abandonments author human",
