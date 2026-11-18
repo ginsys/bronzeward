@@ -43,6 +43,7 @@ foreign CA os:admin, verified against the cluster CA: O=[os:admin] CN="" isCA=fa
 two signatures with identical inputs: certificates equal=false keys equal=false serials b640000f43ca... / bca9742815e7...
 
 The offline mode was run again after the program's error handling was changed (an error from reading or decoding an input is no longer printed, since a decoder error can quote the input): same outcomes on every line; the only difference is the whole-second rounding of notBefore-call (0s or -1s, 5s or 4s for the ahead case). The node run below was made before that change and not repeated: the change touches the error path only.
+The program then gained input checks (a missing talosconfig context, a missing os CA, a missing PEM block stop it with a fixed line instead of a nil dereference). Offline again: same outcomes. Negative control: a talosconfig whose `context` names an undefined context stops with "fatal: the input lacks the talosconfig's current context". The node run was not repeated for this change either: it replaces inline decode steps with one helper and adds checks before them.
 
 == Commands: fixture node run (heavy run, 2026-11-18T17:42:34 to 17:45:38 CET) ==
 Under the plain heavy-run lock at nice -n 19, load1 8.24 at the start, /home 68907 MiB free, /var/lib/docker 15661 MiB free.
