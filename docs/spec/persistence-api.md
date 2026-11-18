@@ -2378,7 +2378,7 @@ HTTP/1.1 200 OK
              "desired": "rel_fgqvcvz3ck7h7234ljgdbzsj6m", "pendingConvergence": true},
  "ingestion": {"id": "ing_4ycffhy7bf4o2w6pz5b4r75hmu", "kind": "import", "state": "released",
                "draft": "drf_3fh7c2qk5p4zbrw6xjv2ldgnsa", "operation": "op_5ycqp3aw2tmvjh7rk6nbd4xe3u",
-               "createdAt": "2026-11-18T09:12:04Z"},
+               "createdAt": "2026-11-18T09:12:04Z", "leaseLapsed": false},
  "draft": {"id": "drf_3fh7c2qk5p4zbrw6xjv2ldgnsa", "state": "published", "revision": 3},
  "plan": {"id": "pln_wzg3q6hyl7bnf5kd4xj2p7yveq", "state": "proposed", "operation": "apply-config",
           "release": "rel_fgqvcvz3ck7h7234ljgdbzsj6m", "approvalCurrent": null,
@@ -2424,7 +2424,7 @@ unknown machine, and every refusal that applies to a read applies to it
 | Member | Content |
 | --- | --- |
 | `machine` | The body `GET /machines/{id}` answers, from the same snapshot. |
-| `ingestion` | The machine's newest live ingestion (`held`, `paused` or `resumed`, as a read treats the claim, so one past its expiry is `abandoned`, not live); with none live, its newest ingestion of any state; else null. Newest by `createdAt`, then identifier. Members `id`, `kind`, `state`, `draft`, `operation` and `createdAt`, as the ingestion resource names them. |
+| `ingestion` | The machine's newest live ingestion (`held`, `paused` or `resumed`, as a read treats the claim, so one past its expiry is `abandoned`, not live); with none live, its newest ingestion of any state; else null. Newest by `createdAt`, then identifier. Members `id`, `kind`, `state`, `draft`, `operation` and `createdAt`, as the ingestion resource names them, and `leaseLapsed`: `true` when the claim is `held` or `resumed` and its lease has lapsed at the snapshot's clock reading. A transient claim past its lease reads `abandoned`, so this is an encrypted claim whose runner stopped and which waits for a takeover or an abandonment (compilation §3.4); otherwise `false`. |
 | `draft` | The draft that ingestion names, as `id`, `state` (`open`, `published` or `discarded`) and `revision`; null when `ingestion` is null. |
 | `plan` | The newest plan of the machine that reads `proposed` or `approved` at the snapshot (expiry and a revoked approving identity are evaluated as for any plan read, §8.1) and whose `release` equals the machine's `desired`, newest by `createdAt`, then identifier; null with no `desired`. A plan for another release cannot apply the `Desired` release, and a `committed` plan is never picked: its state is final and says nothing of its operation. An `adopt` plan that a refusal entry on the machine names (execution and recovery §6.3: a refused adoption ends its attempts and a new plan is the retry) is not picked either, though its state stays `approved`; a refusal entry on an `apply-config` plan does not exclude it, since that plan is attempted again. Members `id`, `state`, `operation` (the plan's kind, `apply-config` or `adopt`), `release`, `approvalCurrent`, `createdAt` and `expiresAt`. `approvalCurrent` is `true` when the plan's approval was recorded in the current epoch, `false` when it is from an earlier one (§8.1: such a plan stays `approved` but cannot commit until approved again), and null while the plan has no approval. |
 | `operation` | The `apply-config` operation that holds the machine scope (state `committed`, `sending`, `verifying` or `unresolved`), as `id`, `kind`, `state`, `plan` and `createdAt`, or null. At most one exists: the machine-scope unique index of the schema allows one. An `adopt` operation is created `completed` and never holds the scope (§8.1). |
@@ -2441,6 +2441,7 @@ match wins:
 | `awaiting-dispatch` | `plan.state` is `approved` and `plan.approvalCurrent` is `true` |
 | `awaiting-approval` | `plan` is not null (it is `proposed`, or `approved` with `approvalCurrent` `false`) |
 | `import-paused` | `ingestion.state` is `paused` |
+| `import-stalled` | `ingestion.state` is `held` or `resumed` and `ingestion.leaseLapsed` is `true` |
 | `import-running` | `ingestion.state` is `held` or `resumed` |
 | `draft-to-publish` | `ingestion.state` is `released` and `draft.state` is `open` |
 | `drift-open` | `machine.openDrift` is not null |
@@ -2448,7 +2449,7 @@ match wins:
 | `not-handed-over` | `machine.desired` is null and `machine.applied` is null |
 | `no-step` | none of the rows above. It claims nothing: not "nothing to do" and not "unchanged" (operator experience §2.3) |
 
-Five cases fix the order, and each has its own test in the implementing
+Six cases fix the order, and each has its own test in the implementing
 change:
 
 - A `committed` adopt plan whose operation is `completed`: `plan` is null (the
@@ -2460,8 +2461,12 @@ change:
   while the scope is held and never names both.
 - An `approved` plan from an earlier epoch: `awaiting-approval`, not
   `awaiting-dispatch`.
-- An open drift record with a live drift-adoption ingestion: `import-running`
-  or `import-paused`, before `drift-open`.
+- An open drift record with a live drift-adoption ingestion: `import-running`,
+  `import-stalled` or `import-paused`, before `drift-open`.
+- An encrypted claim whose lease lapsed: it stays live until its absolute expiry
+  (compilation §3.5), so its `state` still reads `held` or `resumed` and the step
+  is `import-stalled`, never `import-running`, until a takeover or an
+  abandonment changes it.
 - An `approved` adopt plan whose adoption a refusal entry ended: `plan` is null,
   so the step is never `awaiting-dispatch` for work that will not run; the
   machine reads by its own fields (`needs-plan` for a machine with a `Desired`
@@ -2486,15 +2491,18 @@ transaction does this, as publication's step 1 does (§6.1); it is the one read
 route that leaves rule 3 of §5's default. It writes nothing, but it is not
 declared read-only as publication's is: it first reads the installation state
 with the share lock every read takes (`SELECT … FOR SHARE`), and a read-only
-transaction refuses a locking read. Because it takes that lock first, the
-snapshot starts after it and the epoch cannot change under the read. The headers `Bronzeward-Epoch`
+transaction refuses a locking read. The snapshot starts with that first
+statement, before the statement has the lock. Once it holds the lock, the epoch
+cannot change under the read; where an epoch change committed while the
+statement waited, the locking read fails serialization instead of reading on
+with a stale snapshot, and the retry below takes a fresh one. The headers `Bronzeward-Epoch`
 and `Bronzeward-Recovery-Mode` name the epoch that snapshot read (§9.1). The
 read decides nothing: a client that acts on a position, creating or approving a
 plan, is still held by the server's own comparisons (execution and recovery
 §3), so a position that went stale costs a refusal and never a wrong write. A
-serialization failure of the snapshot's transaction, should one occur, is retried whole, at most
-three times as rule 5 retries a deadlock, then answers `503
-transient-conflict`; no answer mixes two snapshots.
+serialization failure of the snapshot's transaction is retried whole, at most
+three times after the first attempt, four attempts in all as rule 5 allows a
+deadlock, then answers `503 transient-conflict`; no answer mixes two snapshots.
 
 **Cost.** The route needs no new column, view or lock. Each member is one
 lookup, and the two scope members use the unique indexes that enforce the
@@ -3579,7 +3587,7 @@ or Desired change; it does not erase earlier evidence.
 | Plan | A release that does not cover the machine | `422 validation-failed` naming both | nothing |
 | Plan | A duration or attempt limit out of range, or a transport deadline above the maximum or the verification deadline (§9.3) | `400 invalid-request` | nothing |
 | Plan | Approval or identity revocation racing a commitment | the revoker waits for the commitment or precedes it (§1.2 item 3) | the revocation, after or before the commitment |
-| Position | A machine's position read (§9.3, specified, not yet served) whose snapshot fails serialization on every one of three attempts | `503 transient-conflict`; never an answer built from two snapshots | nothing |
+| Position | A machine's position read (§9.3, specified, not yet served) whose snapshot fails serialization on every one of four attempts (the first and three retries) | `503 transient-conflict`; never an answer built from two snapshots | nothing |
 | Recovery | Plan creation, approval, adoption plan or unfreeze on a scope still pre-restore unaccounted | `409 recovery-mode-active` | nothing |
 | Recovery | Commitment, attempt or adoption record on a scope not released in the current epoch | refused by execution and recovery's scope gate | its refusal entry |
 | Recovery | Publication changing the assignment of a scope not released in the current epoch | operation `failed`, `409 recovery-mode-active` (§6.2) | operation, act |

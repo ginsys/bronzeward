@@ -202,6 +202,7 @@ fixes what the line says and links to. A client treats a `step` value it does no
 | `step` | The line says | Link | Who acts |
 | --- | --- | --- | --- |
 | `not-handed-over` | Not handed over: no Desired and no Applied configuration is recorded. Next: import its configuration. An import reads the node and writes nothing to it. | start the import for this machine | `author` |
+| `import-stalled` | An import's runner has stopped: its lease lapsed and its staging is encrypted. Next: take it over to resume it, or abandon it ([§5.3](#53-protected-import-with-review)). | the ingestion | `author` |
 | `import-running` | An import of this machine is running. | the ingestion | nobody yet |
 | `import-paused` | An import waits for review of the staged change. | the protected review ([§5.3](#53-protected-import-with-review)) | `author` |
 | `draft-to-publish` | The import is stored in an open draft. Next: publish it; that makes its release this machine's Desired release. Publishing sends nothing to the machine. | the draft | `publisher` |
