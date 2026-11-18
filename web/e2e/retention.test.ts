@@ -242,8 +242,8 @@ test("the positive control: the walk reaches a file only a transitive import nam
   expect(artifactCalls(walked.get(`${dir}/leaf.ts`)!)).toEqual(["saveScreenshot"]);
 });
 
-test("the protected import spec, the files it imports and the auth configuration make no screenshot, recording, trace, HAR or PDF", () => {
-  const spec = here("auth/protected.e2e.ts");
+test.each(["auth/protected.e2e.ts", "auth/a11y-import.e2e.ts"])("the protected import spec %s, the files it imports and the auth configuration make no screenshot, recording, trace, HAR or PDF", (name) => {
+  const spec = here(name);
   const files = sources([spec, here("auth.conf.ts")]);
   // The control for the spec: it is a real, long file, so an empty read would pass here.
   expect(files.get(spec)!.split("\n").length).toBeGreaterThan(100);
