@@ -327,6 +327,13 @@ publication compiles on changes only when a release carrying a new import base
 becomes `Applied`. Compilation §6 names that base the "latest accepted drift
 adoption"; reading it from `Applied` is this contract's choice.
 
+An author reads what a revision holds with `GET /import-base-revisions/{id}`
+(§9.2): its machine, author and creation time, the size of its document and the
+count of its references and embedded entries. The summary carries no document
+text, which is source text with references, and no digest (choice §17.38). The
+revision does not record the operation or ingestion that wrote it, so the
+summary does not name one.
+
 A draft built from an import or an adoption carries its new import base
 revision as an entry, so the release published from it compiles on the new
 base at once: this is execution and recovery's "the sanitized document becomes
@@ -1822,6 +1829,7 @@ idempotency and conflict behavior.
 | `GET /server` (the version, API revision, features and start mode of the process that answered, and the read-only settings a client shows) | 200 | any role |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
+| `GET /import-base-revisions/{id}` (the summary of an import base revision, §3.2; no query, no ETag): `id`; `machine`; `author`, the principal that wrote it; `createdAt`; `documentBytes`, the size of its sanitized document; `references`, how many reference rows it holds; `embedded`, how many embedded entries it holds. No document text, no digest, no reference name and no generation path **(choice §17.38)**; the read records no act | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/continuations`, `/takeovers` (a further mark on a paused ingestion and its continuation into the draft transaction, compilation §3.6; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation; a mark's also the owner generation it took (§9.3) | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2, a paused ingestion's included), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
 | `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3) | 201 | `author`, human only (§10.3) |
@@ -2355,7 +2363,8 @@ HTTP/1.1 200 OK
  "platform": "metal",
  "talosEndpoint": "10.55.0.3:50000",
  "desired": "rel_fgqvcvz3ck7h7234ljgdbzsj6m",
- "applied": {"release": "rel_uxpkmwd6ckxmj4z75j7y2mcxb4", "source": "operation"},
+ "applied": {"release": "rel_uxpkmwd6ckxmj4z75j7y2mcxb4", "source": "operation",
+             "importBase": "ibr_mjw2k5nh6yb3v7r4d9qxe8fa4u"},
  "pendingConvergence": true,
  "frozen": false, "scopeState": "normal", "openDrift": null}
 ```
@@ -2368,6 +2377,12 @@ digest, or a `Desired` release and no `Applied`; with no `Desired` it is
 adopted machine whose release compiled other bytes is pending although
 `desired` and `applied.release` name the same release. Neither digest is
 served (choice §17.38).
+
+A machine's `applied.importBase` is the identifier of the import base revision
+of its `Applied` release (§3.2), so a client reaches that revision's summary
+(`GET /import-base-revisions/{id}`, §9.2) from the machine with the one read it
+already makes. Both machine reads answer it from the same join, one row per
+machine, and it is an identifier only: the revision's digests stay unserved.
 
 A machine's `openDrift` is its open drift record (execution-recovery.md §6.1,
 choice §10.35), or null: `{"revision", "observation", "lastObservation",
@@ -4142,6 +4157,9 @@ design and evidence do not settle the question. Each is marked in place as
     `apply-config` plan. That plan's diff is withheld while the node holds
     the import base's configuration, which has no redacted whole form; its
     approver relies on the release's validation and this plan's evidence.
+    The same holds for the import base revision's own summary
+    (`GET /import-base-revisions/{id}`, §9.2): it serves the revision's size
+    and counts and neither digest, nor any text of its document.
     Alternatives: the
     two digests in the body, which no read answers and which would let a
     reader confirm a guessed configuration offline; a diff from the import

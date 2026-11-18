@@ -1272,6 +1272,7 @@ so the page reads every page of that list.
 | Machine detail | [W3](operator-experience-wireframes.md#w3-machine-detail) | `GET /machines/{id}`, `/observations`, `/timeline` |
 | Draft editor | [W4](operator-experience-wireframes.md#w4-draft-editor) | `GET /drafts/{id}`, draft `PUT`/`DELETE`, discard |
 | Protected review | [W5](operator-experience-wireframes.md#w5-protected-import-review) | `GET /ingestions/{id}/review`, marks, continuations |
+| Import base summary | none (a summary, linked from the draft and the machine page) | `GET /import-base-revisions/{id}` |
 | Release and rendered review | [W6](operator-experience-wireframes.md#w6-release-and-rendered-review) | `GET /releases/{id}`, `/machines/{m}/review` |
 | Plan and approval | [W7](operator-experience-wireframes.md#w7-plan-and-approval) | `GET /plans/{id}`, approvals, cancellations |
 | Operation timeline | [W8](operator-experience-wireframes.md#w8-operation-timeline) | `GET /operations/{id}`, `/events` |
@@ -1433,6 +1434,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | no |
 | `import start` | `POST /ingestions` | author | yes | draft's |
 | `import review` | `GET /ingestions/{id}/review` | author | yes | no |
+| `import base` (web: the import base summary) | `GET /import-base-revisions/{id}` | author | yes | no |
 | `import mark` / `continue` / `takeover` / `abandon` | `POST /ingestions/{id}/marks` / `continuations` / `takeovers` / `abandonments` | author | yes | no |
 | `import status` | `GET /ingestions/{id}` | any | no | no |
 | `draft create` | `POST /drafts` | author | no | no |
