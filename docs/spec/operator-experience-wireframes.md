@@ -26,7 +26,7 @@ detail. Every screen has the [header](#header-on-every-screen) and the state var
 | RECOVERY MODE since 10:42, epoch ep_r2l…. 4 of 4 scopes not released: none can commit.   |  <- only in recovery mode
 | Drafts editable. Recovery-start server: no plans; publications wait for restart. [Open]  |
 +------------------------------------------------------------------------------------------+
-| Machines | Changes | Plans | Operations | Sources | Audit | Recovery                      |
+| Machines | Clusters | Changes | Plans | Operations | Sources | Audit | Recovery         |
 +------------------------------------------------------------------------------------------+
 ```
 
@@ -111,7 +111,13 @@ All four rows are at one moment: just after `mch_b3c…aa2q` was recorded
 [Add cluster] opens the form of `cluster add`
 ([journeys §10](operator-experience.md#10-action-route-and-role-matrix)). (2026-11-01, lead
 ruling: #338 found no wireframe placing Add cluster; Machines is the hub and already reads
-`GET /clusters`.)
+`GET /clusters`.) The Clusters entry of the navigation lists the clusters (name, Kubernetes
+endpoint, contract and Talos cluster ID, with [Add cluster]). A cluster's page shows those facts,
+then **Machines**: the count of machines and, per state badge above, how many carry it (a machine
+can carry several), with one row per machine (machine, endpoint, node, state), or "No machines
+recorded in this cluster."; then **Open drafts**: one row per open draft of the cluster (draft,
+title, revision), or "No open draft in this cluster." No wireframe draws it; the states of
+[W11](#w11-empty-withheld-error-and-offline-states) apply to each of its two reads.
 
 ## W3. Machine detail
 

@@ -1240,15 +1240,21 @@ refused.
 
 **Proposed** navigation ([§12](#12-alternatives-and-recommendations), C2): a persistent header
 with context, identity, roles, epoch and a recovery-mode banner; a left navigation of
-**Machines**, **Changes**, **Plans**, **Operations**, **Sources**, **Audit** and, for a
+**Machines**, **Clusters**, **Changes**, **Plans**, **Operations**, **Sources**, **Audit** and, for a
 `recovery-admin` or during recovery mode, **Recovery**. The machine page is the hub; a change
 moves through separate pages for draft, release, plan and approval, each with its own button and
-role.
+role. **Clusters** lists the clusters, and a cluster's page shows its machines with a count for
+each state badge of [W2](operator-experience-wireframes.md#w2-machines) (a machine can carry
+several, so the counts can add up to more than the machines) and its open drafts. The browser
+picks the open drafts from the drafts it reads, because `GET /drafts` has no cluster filter
+(the list-filter paragraph of [persistence and API §9.2](persistence-api.md#92-resources-and-routes)),
+so the page reads every page of that list.
 
 | Screen | Wireframe | Main routes |
 | --- | --- | --- |
 | Sign-in and context | [W1](operator-experience-wireframes.md#w1-sign-in-and-context) | (#253) |
 | Machines | [W2](operator-experience-wireframes.md#w2-machines) | `GET /machines`, `GET /clusters` |
+| Clusters and a cluster's page | none (see the note under W2) | `GET /clusters[/{id}]`, `GET /machines?cluster=`, `GET /drafts` |
 | Machine detail | [W3](operator-experience-wireframes.md#w3-machine-detail) | `GET /machines/{id}`, `/observations`, `/timeline` |
 | Draft editor | [W4](operator-experience-wireframes.md#w4-draft-editor) | `GET /drafts/{id}`, draft `PUT`/`DELETE`, discard |
 | Protected review | [W5](operator-experience-wireframes.md#w5-protected-import-review) | `GET /ingestions/{id}/review`, marks, continuations |

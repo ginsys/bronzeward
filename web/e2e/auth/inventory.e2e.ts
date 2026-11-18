@@ -102,6 +102,12 @@ describe("the machines", () => {
     expect(await where()).toBe(`${FIXTURE_PAGE}/machines/${id}`);
     await $(`a[title="${cl.id}"]`).click();
     await expect($("main h2")).toHaveText("Cluster lab-a");
+    // The Clusters entry of the main navigation lists the clusters, and a cluster's page shows its machines and open drafts.
+    await nav("Clusters");
+    await $("a=lab-a").click();
+    await expect($("main h2")).toHaveText("Cluster lab-a");
+    await expect($("main h3=Machines")).toBeDisplayed({ wait: 20_000 });
+    await expect($("main h3=Open drafts")).toBeDisplayed();
     await $("a=Machines in this cluster").click();
     await shows(1);
     expect(await param("cluster")).toBe(cl.id);
