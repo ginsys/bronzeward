@@ -128,8 +128,10 @@ A path names one node of one document of a multi-document stream:
 JSON Pointer inside that document, for example
 `doc[0]/machine/files/0/content`. JSON Pointer escapes `/` as `~1` and `~` as
 `~0`, so a key holding a dot or a bracket, such as a node label or annotation
-key, is addressable: `doc[0]/machine/nodeLabels/example.test~1role`. Every
-document of the stream is addressable. E1 found both gaps in its own path
+key, is addressable: `doc[N]/labels/example.test~1role`. A node label is in
+the node's `KubeNodeConfig` document, not under `machine`, and `N` is the
+position of that document in its stream: read from the stream, never assumed.
+Every document of the stream is addressable. E1 found both gaps in its own path
 syntax ([E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits);
 E1 §8 item 5); this escaping scheme is chosen here **(choice §16.2)**, and §15
 states what tests it.
@@ -1530,9 +1532,10 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 
 1. An operator submits a draft update that adds a node label holding a token
    and a machine file whose script embeds the same token in a command line. The
-   operator marks the label, `doc[0]/machine/nodeLabels/example.test~1token`
-   (§2.2 escaping); the file content is not marked, and the schema does not
-   cover it (§2.4).
+   update's text holds the `v1alpha1` document first, with the file, and the
+   `KubeNodeConfig` document second, with the label. The operator marks the
+   label, `doc[1]/labels/example.test~1token` (§2.2 escaping); the file content
+   is not marked, and the schema does not cover it (§2.4).
 2. Steps 0 to 4 run: the claim is `held`, the label's value is substituted by
    a reference under a newly minted name.
 3. Step 5: the value comparison passes, because no other scalar equals the
