@@ -168,10 +168,13 @@ Changes › Draft drf_8kdq…z6pa "worker labels"   open, revision 6   cluster c
 |  import base  mch_b3c… ibr_… |  changed: base frv_1ab… -> unsaved                           |
 |  fragment worker-labels  *   | +--------------------------------------------------------+ |
 |  fragment cluster-base       | | machine:                                               | |
-|  profile  workers            | |   nodeLabels:                                          | |
-|  assignment mch_b3c…         | |     team: storage                                      | |
-| [Add fragment] [Add profile] | |   registries: …                                        | |
-|                              | |       password: !bwref registry/example-pass  [ref]    | |
+|  profile  workers            | |   registries: …                                        | |
+|  assignment mch_b3c…         | |       password: !bwref registry/example-pass  [ref]    | |
+| [Add fragment] [Add profile] | | ---                                                    | |
+|                              | | apiVersion: v1alpha1                                   | |
+|                              | | kind: KubeNodeConfig                                   | |
+|                              | | labels:                                                | |
+|                              | |   team: storage                                        | |
 |                              | +--------------------------------------------------------+ |
 |                              | References in this document                                |
 |                              |  registry/example-pass   string   version 1   declared     |
@@ -427,8 +430,11 @@ Rendered configuration: mch_b3c…aa2q in rel_h7rt…2bd (redacted)
     registries: … auth:
       username: ci-pull
       password: [secret registry/example-pass, version 1]      <- badge for <redacted:registry/example-pass@1>
-    nodeLabels:
-      team: storage
+  ---
+  apiVersion: v1alpha1
+  kind: KubeNodeConfig
+  labels:
+    team: storage
   Provenance (secret references only)
     registry/example-pass v1  from frv_3jn…k4ma doc[0]/…/password  -> doc[0]/…/password
 ```
@@ -461,7 +467,7 @@ Plan pln_f645…cawy   (•) Proposed — not approved, nothing will run   expir
 |  Validation  passed at publication (contract v1.14)                                       |
 |  Dry run     not available (the PoC has none)                                             |
 |  Change      whole redacted configuration, applied rel_9vbn… -> rel_h7rt…                 |
-|              machine.nodeLabels.team: (absent) -> storage                                 |
+|              KubeNodeConfig labels.team: (absent) -> storage                              |
 +-------------------------------------------------------------------------------------------+
 | (•) Self-approval, predicted: you created this plan and published this release, and you   |
 |     authored no fragment, profile or assignment revision in it. Import-base authorship    |

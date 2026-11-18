@@ -2158,8 +2158,8 @@ Idempotency-Key: 6f1d8b40-2a7e-4c53-b9e1-0d4c7a2f5e36
 If-Match: "6-o3nj2wivrgbpbet4kq43iz4hlq"
 
 {"layer": "cluster",
- "document": "machine:\n  nodeLabels:\n    example.test/token: <value>\n",
- "marks": ["doc[0]/machine/nodeLabels/example.test~1token"]}
+ "document": "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  example.test/token: <value>\n",
+ "marks": ["doc[0]/labels/example.test~1token"]}
 
 HTTP/1.1 200 OK
 ETag: "7-shw6tpirbqvgj3qjuv2hicf6vm"
@@ -2168,13 +2168,15 @@ ETag: "7-shw6tpirbqvgj3qjuv2hicf6vm"
  "entry": {"kind": "fragment", "name": "registries",
            "head": "frg_rgkebwvneg6mxhid62gec5difi", "base": 3,
            "revision": "frv_sqb745zrpl2xltek22ai7sbdue",
-           "document": "machine:\n  nodeLabels:\n    example.test/token: !bwref registry/example-token\n"},
+           "document": "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  example.test/token: !bwref registry/example-token\n"},
  "ingestion": "ing_iehib5tgttedjuggkawygvlnym"}
 ```
 
 `<value>` stands for the value the operator submits; it appears in no stored
 record or response. `DELETE` on the same route proposes the removal, with no
-body. `marks` are compilation §2.2 paths.
+body. `marks` are compilation §2.2 paths: the example's text holds one
+document, the node's `KubeNodeConfig` document, so the label is in `doc[0]`; a
+text with several documents gives each its own position.
 
 The body's optional `declarations` member holds the compilation §5.2
 declarations of the `!bwref` tags the document already carries, as
