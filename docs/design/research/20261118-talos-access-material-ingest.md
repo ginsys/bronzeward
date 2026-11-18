@@ -37,6 +37,7 @@ Reproduction (all offline, under a scratch directory, mode 0700):
 
 ```sh
 talosctl gen secrets --output-file secrets.yaml
+sed 's/:.*$/:/' secrets.yaml   # key names only, values stripped: lists the groups under certs:
 talosctl gen config bw-synth https://10.55.0.2:6443 \
   --with-secrets secrets.yaml --output-dir cfg
 # cfg/ now holds controlplane.yaml, worker.yaml and talosconfig
@@ -54,7 +55,7 @@ every machine configuration.**
 
 | Artifact | Holds | Observed (v1.14.5, synthetic) |
 | --- | --- | --- |
-| Secrets bundle (`secrets.yaml`) | cluster id and secret, bootstrap token, secretbox secret, trustd token, and a certificate and key for each of `etcd`, `k8s`, `k8saggregator`, `k8sserviceaccount` (key only) and `os` | 5 certificate groups; `os` is the Talos API CA |
+| Secrets bundle (`secrets.yaml`) | cluster id and secret, bootstrap token, secretbox secret, trustd token, and a certificate and key for each of `etcd`, `k8s`, `k8saggregator`, `k8sserviceaccount` (key only) and `os` | 4 certificate-and-key groups (`etcd`, `k8s`, `k8saggregator`, `os`) and 1 key-only entry (`k8sserviceaccount`); `os` is the Talos API CA |
 | Control plane `controlplane.yaml` | `machine.ca.key` (the `os` CA key), `machine.token`, `cluster.token`, `cluster.etcd.ca.key`, and one document each of kind `KubeAPIServerCAConfig`, `KubeAggregatorCAConfig`, `KubeServiceAccountConfig`, `KubeEtcdEncryptionConfig`, `DiscoveryIdentityConfig`, each with its secret | the `os` CA key is a non-empty value |
 | Worker `worker.yaml` | `machine.ca.crt`, `machine.token`, `cluster.token`; `machine.ca.key` is present and empty | the worker holds no CA key |
 | `talosconfig` | `Context{Endpoints, Nodes, CA, Crt, Key, Auth, Cluster, ProxyURL}`; `Auth` may hold a Basic password or a SideroV1 identity | the client certificate has subject `O=os:admin`, 1 year validity; the CA certificate subject `O=talos`, 10 years |
