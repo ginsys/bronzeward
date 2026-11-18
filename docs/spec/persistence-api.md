@@ -2426,7 +2426,7 @@ unknown machine, and every refusal that applies to a read applies to it
 | `machine` | The body `GET /machines/{id}` answers, from the same snapshot. |
 | `ingestion` | The machine's newest live ingestion (`held`, `paused` or `resumed`, as a read treats the claim, so one past its expiry is `abandoned`, not live); with none live, its newest ingestion of any state; else null. Newest by `createdAt`, then identifier. Members `id`, `kind`, `state`, `draft`, `operation` and `createdAt`, as the ingestion resource names them. |
 | `draft` | The draft that ingestion names, as `id`, `state` (`open`, `published` or `discarded`) and `revision`; null when `ingestion` is null. |
-| `plan` | The newest plan of the machine that reads `proposed` or `approved` at the snapshot (expiry and a revoked approving identity are evaluated as for any plan read, §8.1) and whose `release` equals the machine's `desired`, newest by `createdAt`, then identifier; null with no `desired`. A plan for another release cannot apply the `Desired` release, and a `committed` plan is never picked: its state is final and says nothing of its operation. Members `id`, `state`, `operation` (the plan's kind, `apply-config` or `adopt`), `release`, `approvalCurrent`, `createdAt` and `expiresAt`. `approvalCurrent` is `true` when the plan's approval was recorded in the current epoch, `false` when it is from an earlier one (§8.1: such a plan stays `approved` but cannot commit until approved again), and null while the plan has no approval. |
+| `plan` | The newest plan of the machine that reads `proposed` or `approved` at the snapshot (expiry and a revoked approving identity are evaluated as for any plan read, §8.1) and whose `release` equals the machine's `desired`, newest by `createdAt`, then identifier; null with no `desired`. A plan for another release cannot apply the `Desired` release, and a `committed` plan is never picked: its state is final and says nothing of its operation. An `adopt` plan that a refusal entry on the machine names (execution and recovery §6.3: a refused adoption ends its attempts and a new plan is the retry) is not picked either, though its state stays `approved`; a refusal entry on an `apply-config` plan does not exclude it, since that plan is attempted again. Members `id`, `state`, `operation` (the plan's kind, `apply-config` or `adopt`), `release`, `approvalCurrent`, `createdAt` and `expiresAt`. `approvalCurrent` is `true` when the plan's approval was recorded in the current epoch, `false` when it is from an earlier one (§8.1: such a plan stays `approved` but cannot commit until approved again), and null while the plan has no approval. |
 | `operation` | The `apply-config` operation that holds the machine scope (state `committed`, `sending`, `verifying` or `unresolved`), as `id`, `kind`, `state`, `plan` and `createdAt`, or null. At most one exists: the machine-scope unique index of the schema allows one. An `adopt` operation is created `completed` and never holds the scope (§8.1). |
 | `rolloutHeldBy` | The operation that holds the machine's cluster rollout scope when it belongs to another machine, as `id` and `machine`, or null. At most one exists, as the rollout-scope index allows one. It says why an approved plan is not dispatched yet. |
 | `step` | One value of the closed list below, chosen by the first row whose facts hold. |
@@ -2448,7 +2448,7 @@ match wins:
 | `not-handed-over` | `machine.desired` is null and `machine.applied` is null |
 | `no-step` | none of the rows above. It claims nothing: not "nothing to do" and not "unchanged" (operator experience §2.3) |
 
-Four cases fix the order, and each has its own test in the implementing
+Five cases fix the order, and each has its own test in the implementing
 change:
 
 - A `committed` adopt plan whose operation is `completed`: `plan` is null (the
@@ -2462,24 +2462,37 @@ change:
   `awaiting-dispatch`.
 - An open drift record with a live drift-adoption ingestion: `import-running`
   or `import-paused`, before `drift-open`.
+- An `approved` adopt plan whose adoption a refusal entry ended: `plan` is null,
+  so the step is never `awaiting-dispatch` for work that will not run; the
+  machine reads by its own fields (`needs-plan` for a machine with a `Desired`
+  release and no `Applied`), and the operator makes the new plan that execution
+  and recovery §6.3 requires.
 
-`machine.frozen` and `machine.scopeState` come from the same snapshot, so a
-client that says an approved plan waits because the machine is frozen or its
-scope is not `normal` (execution and recovery §7.4) reads one answer. A client treats a `step` value
-it does not know as `no-step`: a later revision may add a value (§9.1,
-additions are never breaking).
+`machine.frozen`, `machine.scopeState` and `rolloutHeldBy` come from the same
+snapshot, so a client that says why an approved plan waits reads one answer, and
+the reason depends on `plan.operation`. An `apply-config` plan is held by a frozen
+machine, by a `scopeState` other than `normal` or `released` (and, in recovery
+mode, other than `released`; execution and recovery §7.4) and by `rolloutHeldBy`.
+An `adopt` plan is held only by the machine scope (the `operation` member) and
+by the scope-state and recovery-mode rule: a freeze and another machine's
+rollout holder do not stop an adoption (execution and recovery §6.3). A client
+treats a `step` value it does not know as `no-step`: a later revision may add a
+value (§9.1, additions are never breaking).
 
 **Consistency.** Every member and the time-evaluated states in them (plan
 expiry, a claim past its lease or its absolute expiry) come from one snapshot
-and one clock reading, taken when the read starts. A read-only snapshot at
-`REPEATABLE READ` does this, as publication's step 1 does (§6.1); it is the
-one read route that leaves rule 3 of §5's default, and it reads the
-installation state as every read does. The headers `Bronzeward-Epoch`
+and one clock reading, taken when the read starts. One `REPEATABLE READ`
+transaction does this, as publication's step 1 does (§6.1); it is the one read
+route that leaves rule 3 of §5's default. It writes nothing, but it is not
+declared read-only as publication's is: it first reads the installation state
+with the share lock every read takes (`SELECT … FOR SHARE`), and a read-only
+transaction refuses a locking read. Because it takes that lock first, the
+snapshot starts after it and the epoch cannot change under the read. The headers `Bronzeward-Epoch`
 and `Bronzeward-Recovery-Mode` name the epoch that snapshot read (§9.1). The
 read decides nothing: a client that acts on a position, creating or approving a
 plan, is still held by the server's own comparisons (execution and recovery
 §3), so a position that went stale costs a refusal and never a wrong write. A
-serialization failure of the snapshot's transaction is retried whole, at most
+serialization failure of the snapshot's transaction, should one occur, is retried whole, at most
 three times as rule 5 retries a deadlock, then answers `503
 transient-conflict`; no answer mixes two snapshots.
 
