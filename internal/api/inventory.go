@@ -245,9 +245,12 @@ type hardware struct {
 	Serial      *string `json:"serial"`
 }
 
+// applied is the machine's Applied release and source, with that release's import base revision for
+// the machine (§3.2): one row of release_machine, null only for a release that does not cover it.
 type applied struct {
-	Release string `json:"release"`
-	Source  string `json:"source"`
+	Release    string  `json:"release"`
+	Source     string  `json:"source"`
+	ImportBase *string `json:"importBase"`
 }
 
 // observedBody is the Observed value of a machine (execution-recovery.md §1): the latest

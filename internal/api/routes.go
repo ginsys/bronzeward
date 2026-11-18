@@ -114,6 +114,7 @@ func routes() []*route {
 		batch("/principals", getPrincipals, "id"), read(g("/server"), getServer),
 		ingestionStart().on(ifm(human(m(post, "/ingestions", author)))),
 		read(human(m(http.MethodGet, "/ingestions/{id}/review", author)), getIngestionReview),
+		read(human(m(http.MethodGet, "/import-base-revisions/{id}", author)), getImportBase),
 		ingestionMark().on(human(m(post, "/ingestions/{id}/marks", author))),
 		ingestionContinuation().on(human(m(post, "/ingestions/{id}/continuations", author))),
 		ingestionTakeover().on(human(m(post, "/ingestions/{id}/takeovers", author))),
