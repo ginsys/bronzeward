@@ -401,6 +401,11 @@ func planStateAt(t string) string {
 			WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= ` + t + ` THEN 'expired' ELSE s.state END`
 }
 
+// planFrom defines the aliases planStateAt reads (p, s, a, ap, r): every read of a plan's state joins them
+// here, so a change to the revoked rule changes all of them together.
+const planFrom = `FROM plan p JOIN plan_state s ON s.plan = p.id LEFT JOIN approval a ON a.id = s.approval
+		LEFT JOIN principal ap ON ap.id = a.approver LEFT JOIN identity_revocation r ON r.identity = ap.id`
+
 var (
 	planStateSQL = planStateAt("c.t")
 	selectPlan   = `SELECT p.id, s.revision, ` + planStateSQL + `,
@@ -410,8 +415,7 @@ var (
 		extract(epoch FROM p.check_validity)::bigint, extract(epoch FROM p.transport_deadline)::bigint,
 		extract(epoch FROM p.verification_deadline)::bigint, p.max_attempts, p.rollout_limit, p.approval_policy, p.created_by,
 		p.created_role, p.epoch, p.revision, p.created_at, p.expires_at, p.evidence
-	FROM plan p JOIN plan_state s ON s.plan = p.id LEFT JOIN approval a ON a.id = s.approval
-		LEFT JOIN principal ap ON ap.id = a.approver LEFT JOIN identity_revocation r ON r.identity = ap.id
+	` + planFrom + `
 		CROSS JOIN (SELECT clock_timestamp() AS t) c`
 )
 
