@@ -79,15 +79,32 @@ func (i *Ingestion) TalosAccess(ctx context.Context, cluster string) (TalosAcces
 	return readTalosAccess(ctx, i.c, cluster)
 }
 
-// readTalosAccess is the Talos access read under c's token, for ingestion and the executor alike.
-func readTalosAccess(ctx context.Context, c *client, cluster string) (TalosAccess, error) {
-	p, err := TalosAccessPath(cluster)
-	if err != nil {
-		return TalosAccess{}, err
+// kvLatest is the latest version of a KV v2 secret as read: its number, its created_time and its
+// data. r is the response, for the caller's own ErrProtocol words.
+type kvLatest struct {
+	version int
+	created time.Time
+	data    map[string]json.RawMessage
+	r       *response
+}
+
+// stringMember is the data member name as a non-empty string; any other member shape is ErrProtocol.
+func (l kvLatest) stringMember(name string) (string, error) {
+	raw, ok := l.data[name]
+	var s string
+	if !ok || json.NewDecoder(bytes.NewReader(raw)).Decode(&s) != nil || s == "" {
+		return "", l.r.bad("the data member " + name + " is not a non-empty string")
 	}
-	r, err := c.do(ctx, http.MethodGet, "/v1/secret/data/"+p, nil, false)
+	return s, nil
+}
+
+// readLatest is a KV v2 read of secret/data/<path>: the latest version, which must be live (no
+// version is ErrAbsent). A policy refusal is ErrDenied, and an answer that is not one live version
+// with its metadata is ErrProtocol.
+func readLatest(ctx context.Context, c *client, path string) (kvLatest, error) {
+	r, err := c.do(ctx, http.MethodGet, "/v1/secret/data/"+path, nil, false)
 	if err != nil {
-		return TalosAccess{}, err
+		return kvLatest{}, err
 	}
 	var out struct {
 		Data *struct {
@@ -101,37 +118,48 @@ func readTalosAccess(ctx context.Context, c *client, cluster string) (TalosAcces
 		} `json:"data"`
 	}
 	if err := r.decode(&out); err != nil {
-		return TalosAccess{}, err
+		return kvLatest{}, err
 	}
 	if out.Data == nil || out.Data.Metadata == nil {
-		return TalosAccess{}, r.bad("no data or metadata")
+		return kvLatest{}, r.bad("no data or metadata")
 	}
 	m := out.Data.Metadata
 	if m.Version == nil || *m.Version < 1 {
-		return TalosAccess{}, r.bad("no version")
+		return kvLatest{}, r.bad("no version")
 	}
 	if m.CreatedTime == nil {
-		return TalosAccess{}, r.bad("no created_time")
+		return kvLatest{}, r.bad("no created_time")
 	}
 	created, err := time.Parse(time.RFC3339Nano, *m.CreatedTime)
 	if err != nil || created.IsZero() {
-		return TalosAccess{}, r.bad("the created_time is not a time")
+		return kvLatest{}, r.bad("the created_time is not a time")
 	}
 	// A live version states it: deletion_time "" and destroyed false. Absent or null is not live.
 	if m.DeletionTime == nil || m.Destroyed == nil {
-		return TalosAccess{}, r.bad("no deletion_time or destroyed")
+		return kvLatest{}, r.bad("no deletion_time or destroyed")
 	}
 	if *m.DeletionTime != "" || *m.Destroyed {
-		return TalosAccess{}, r.bad("the version is deleted or destroyed")
+		return kvLatest{}, r.bad("the version is deleted or destroyed")
 	}
-	raw, ok := out.Data.Data["talosconfig"]
-	if !ok || len(out.Data.Data) != 1 {
-		return TalosAccess{}, r.bad("the data is not exactly a talosconfig")
+	return kvLatest{version: *m.Version, created: created, data: out.Data.Data, r: r}, nil
+}
+
+// readTalosAccess is the Talos access read under c's token, for ingestion and the executor alike.
+func readTalosAccess(ctx context.Context, c *client, cluster string) (TalosAccess, error) {
+	p, err := TalosAccessPath(cluster)
+	if err != nil {
+		return TalosAccess{}, err
 	}
-	var tc string
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	if dec.Decode(&tc) != nil || tc == "" {
-		return TalosAccess{}, r.bad("the talosconfig is not a non-empty string")
+	l, err := readLatest(ctx, c, p)
+	if err != nil {
+		return TalosAccess{}, err
 	}
-	return TalosAccess{v: TalosAccessVersion{Path: p, Version: *m.Version, CreatedTime: created}, s: &tc}, nil
+	if len(l.data) != 1 {
+		return TalosAccess{}, l.r.bad("the data is not exactly a talosconfig")
+	}
+	tc, err := l.stringMember("talosconfig")
+	if err != nil {
+		return TalosAccess{}, err
+	}
+	return TalosAccess{v: TalosAccessVersion{Path: p, Version: l.version, CreatedTime: l.created}, s: &tc}, nil
 }

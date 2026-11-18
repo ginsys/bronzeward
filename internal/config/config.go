@@ -95,6 +95,10 @@ type Provider struct {
 	// ReportTokenFile holds the orphan-report identity's static token (persistence-api.md §6.4),
 	// under the same rules. The server does not use it; `bronzeward orphans` requires it.
 	ReportTokenFile string `yaml:"reportTokenFile"`
+	// SignerTokenFile holds the signer identity's static token (persistence-api.md §3.4), under the
+	// same rules: it reads and writes each cluster's CA key and nothing else. Optional until the
+	// server serves first keys.
+	SignerTokenFile string `yaml:"signerTokenFile"`
 }
 
 // ProviderKeys names the Transit keys: the three ingestion uses and the one artifacts are
@@ -303,19 +307,19 @@ func (p *Provider) validate() error {
 		}
 	}
 	// Each identity authenticates with its own token and no other (compilation.md §1,
-	// dependency-monitor.md §4, persistence-api.md §3.3, §6.4). The report's is optional: only
-	// `bronzeward orphans` uses it. Each path is absolute and in clean form, so one file has one
+	// dependency-monitor.md §4, persistence-api.md §3.3, §3.4, §6.4). The report's is optional: only
+	// `bronzeward orphans` uses it. The signer's is optional until the server serves first keys. Each path is absolute and in clean form, so one file has one
 	// spelling here: folding `.`, `..` or a relative path by text would equate files a directory
 	// symlink keeps apart. A symlinked directory or a hard link can still give one file two
 	// spellings; that is not detectable without opening the files.
 	files := []struct{ field, path string }{
 		{"ingestionTokenFile", p.IngestionTokenFile}, {"compilerTokenFile", p.CompilerTokenFile},
 		{"metadataTokenFile", p.MetadataTokenFile}, {"executorTokenFile", p.ExecutorTokenFile},
-		{"reportTokenFile", p.ReportTokenFile},
+		{"reportTokenFile", p.ReportTokenFile}, {"signerTokenFile", p.SignerTokenFile},
 	}
 	for i, f := range files {
 		if f.path == "" {
-			if f.field == "reportTokenFile" {
+			if f.field == "reportTokenFile" || f.field == "signerTokenFile" {
 				continue
 			}
 			return fmt.Errorf("config: provider.%s is required", f.field)

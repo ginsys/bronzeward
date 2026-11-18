@@ -283,6 +283,7 @@ state_files_own() {
     server/a/openbao-compiler.token server/b/openbao-compiler.token server/c/openbao-compiler.token \
     server/a/openbao-metadata.token server/b/openbao-metadata.token server/c/openbao-metadata.token \
     server/a/openbao-executor.token server/b/openbao-executor.token server/c/openbao-executor.token \
+    server/a/openbao-signer.token server/b/openbao-signer.token server/c/openbao-signer.token \
     server/b/interrupt server/c/interrupt issuer/key.json; do
     [ -e "$STATE/$file" ] || [ -L "$STATE/$file" ] || continue
     if [ -L "$STATE/$file" ] || [ ! -f "$STATE/$file" ] || [ "$(stat --format=%h -- "$STATE/$file" 2>/dev/null)" != 1 ]; then
@@ -1289,8 +1290,8 @@ scan_patterns() {
   # Both encodings of the unseal key: they share no substring, and either is the credential.
   bao_keys=$(jq -r '.root_token, .unseal_keys_b64[], .unseal_keys_hex[]' "$STATE/bao-init.json") || return 1
   metadata_token=$(awk -F= '$1 == "BW_BAO_METADATA_TOKEN" {print $2}' "$STATE/secrets.env") || return 1
-  # The instances' OpenBao ingestion, compiler, metadata, executor and orphan-report tokens: a
-  # missing file fails the list, since bin/up writes all fifteen before the list is first made.
+  # The instances' OpenBao ingestion, compiler, metadata, executor, orphan-report and signer tokens: a
+  # missing file fails the list, since bin/up writes all eighteen before the list is first made.
   ingestion_tokens=$(cat -- "$STATE/server/a/openbao-ingestion.token" "$STATE/server/b/openbao-ingestion.token" \
     "$STATE/server/c/openbao-ingestion.token" "$STATE/server/a/openbao-report.token" \
     "$STATE/server/b/openbao-report.token" "$STATE/server/c/openbao-report.token" \
@@ -1298,8 +1299,9 @@ scan_patterns() {
     "$STATE/server/c/openbao-compiler.token" "$STATE/server/a/openbao-metadata.token" \
     "$STATE/server/b/openbao-metadata.token" "$STATE/server/c/openbao-metadata.token" \
     "$STATE/server/a/openbao-executor.token" "$STATE/server/b/openbao-executor.token" \
-    "$STATE/server/c/openbao-executor.token") || return 1
-  if [ "$(wc -l <<<"$ingestion_tokens")" -ne 15 ] || grep --quiet --line-regexp '' <<<"$ingestion_tokens"; then
+    "$STATE/server/c/openbao-executor.token" "$STATE/server/a/openbao-signer.token" \
+    "$STATE/server/b/openbao-signer.token" "$STATE/server/c/openbao-signer.token") || return 1
+  if [ "$(wc -l <<<"$ingestion_tokens")" -ne 18 ] || grep --quiet --line-regexp '' <<<"$ingestion_tokens"; then
     die "the instances' OpenBao tokens are not one line each; they would go unscanned"
   fi
   talos_secrets=$(awk 'tolower($1) ~ /^(key|secret|token|bootstraptoken|secretboxencryptionsecret|aescbcencryptionsecret):$/ {print $2}' \

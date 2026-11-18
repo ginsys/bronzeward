@@ -294,13 +294,16 @@ the files in [`openbao/policies`](openbao/policies):
   also lists and reads no value.
 - `bw-orphan-report`: the orphan report's identity (persistence-api §6.4): lists and reads metadata
   under `secret/metadata/gen/`, nothing else.
+- `bw-signer`: the signer's identity (persistence-api §3.4): reads, creates and updates
+  `secret/data/access/talos-ca/<cluster>`, each cluster's Talos os CA key, and nothing else: no
+  list, delete or metadata read.
 - `bw-onboard`: the onboarding operator's identity for `bronzewardctl cluster onboard`: creates
   `secret/data/access/talos/<cluster>` and nothing else, so it cannot read the secret back.
 
 `bin/up` writes them from those files, which `mise run go-db` also writes into a dev-mode OpenBao
 for the policy tests (`internal/provider`), so the fixture and the tests hold the same policies.
-Ingestion, the compiler, the metadata identity and the orphan report have tokens here, one of
-each per instance, without OpenBao's default policy; executor tokens come with that component.
+Ingestion, the compiler, the metadata identity, the executor, the orphan report and the signer have
+tokens here, one of each per instance, without OpenBao's default policy.
 
 ## Versions
 
@@ -334,6 +337,9 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
   metadata and executor tokens, under `bw-compiler`, `bw-metadata` and `bw-executor` alone, read as
   `/etc/bronzeward/openbao-compiler.token`, `/etc/bronzeward/openbao-metadata.token` and
   `/etc/bronzeward/openbao-executor.token`. A missing one fails the scan-pattern list.
+- `server/a/openbao-signer.token`, `server/b/openbao-signer.token`, `server/c/openbao-signer.token`:
+  each instance's signer token, under `bw-signer` alone, read as
+  `/etc/bronzeward/openbao-signer.token`. A missing one fails the scan-pattern list.
 - `talos-secrets.yaml`, `controlplane.yaml`, `talosconfig`, `kubeconfig`: the cluster's own
   generated secrets bundle and client configs.
 - `scan-patterns.txt`: every one of the above as a fixed string, the client private keys in
@@ -457,7 +463,7 @@ is a symlink, because secrets, or the CLIs, would be read or written outside the
 removal of `.state` would take a link and leave the cluster's credentials at the far end. The files `bin/up` generates
 (`lock`, `secrets.env`, `bao-init.json`, `talosconfig`, `kubeconfig`, `talos-secrets.yaml`,
 `controlplane.yaml`, `scan-patterns.txt`, `injections.log`, the node-volume, node-container,
-node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon`, `up-versions.env`, `up-compose.yaml` and the instances' `openbao-ingestion.token`, `openbao-compiler.token`, `openbao-metadata.token`, `openbao-executor.token` and `openbao-report.token`) must each be
+node-network, Compose-container, Compose-volume and Compose-network records, `up-manifest`, `up-fixtures-diff.txt`, `up-fixture-name`, `up-daemon`, `up-versions.env`, `up-compose.yaml` and the instances' `openbao-ingestion.token`, `openbao-compiler.token`, `openbao-metadata.token`, `openbao-executor.token`, `openbao-report.token` and `openbao-signer.token`) must each be
 the regular file it wrote, with no second name: a symlink or a hard link there stops `inject`,
 `evidence` and `down` before anything is scanned or removed, since the secret would outlive
 teardown under the other name. The same holds for a snapshot about to be replaced by one of the
