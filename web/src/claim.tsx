@@ -297,7 +297,9 @@ function ClaimSection({ b, again, now }: { b: Ingestion; again: () => void; now:
     if (marked !== undefined) ended();
   }, [marked, ended]);
   const section = useRef<HTMLElement>(null);
-  useFocusOn(ends, section);
+  // The read that follows an action can remove the button focus stayed on (a browser keeps focus on a
+  // control that is disabled), so the offer is part of the key: the check runs again when it changes.
+  useFocusOn(ends > 0 && `${ends} ${o.review} ${o.verbs.join()}`, section);
   if (!o.review && shown.length === 0 && mw === undefined) return null;
   return (
     <section ref={section} tabIndex={-1} aria-label="Claim">
