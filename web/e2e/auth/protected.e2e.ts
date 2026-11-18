@@ -15,7 +15,7 @@ import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE } from "../auth.conf.ts";
-import { cacheControl, cacheHolds, faults, fixtureSignIn, interrupt, mint, storageControl, storageEmpty } from "./helpers.ts";
+import { cacheControl, cacheHolds, faults, fixtureSignIn, interrupt, mint, settled, storageControl, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -276,7 +276,10 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
     await shows().$("button=Show document").click();
     await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
-    await browser.url(`${FIXTURE_PAGE}/machines`);
+    // A page load starts a sign-in again, whose state storage holds until it ends, so the page is read
+    // only once it settled signed in (the check below measures storage, not a sign-in in flight).
+    await browser.url(`${FIXTURE_PAGE}/`);
+    await settled(FIXTURE_PAGE);
     expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
     await storageEmpty();
     expect(await cacheHolds(documentPath)).toBe(false);
