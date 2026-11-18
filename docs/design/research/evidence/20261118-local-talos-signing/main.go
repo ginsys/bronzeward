@@ -214,11 +214,16 @@ func node(dir, endpoint string) {
 	// 4. Foreign CA.
 	foreign := must(secrets.NewTalosCA(now))
 	attempt("4 os:admin signed by a foreign CA", signed(&x509.PEMEncodedCertificateAndKey{Crt: foreign.CrtPEM, Key: foreign.KeyPEM}, now, admin, time.Hour), ca, endpoint, true)
-	// 5. NotBefore 5 s ahead: refused now, accepted once the node clock passes it.
-	ahead := signed(cpCA, now.Add(5*time.Second), admin, time.Hour)
-	attempt("5a NotBefore +5 s, presented at +0 s", ahead, ca, endpoint, false)
-	time.Sleep(7 * time.Second)
-	attempt("5b same certificate, presented at +7 s", ahead, ca, endpoint, false)
+	// 5. NotBefore 5 s ahead of a fresh clock read: refused before it, accepted after it. Each
+	// presentation prints its own offset from NotBefore (negative: before it).
+	t5 := time.Now()
+	ahead := signed(cpCA, t5.Add(5*time.Second), admin, time.Hour)
+	nb5, _ := window(ahead)
+	fmt.Printf("5 certificate signed at %s, NotBefore %s\n", t5.UTC().Format("15:04:05.000"), nb5.UTC().Format("15:04:05"))
+	p5a := time.Now()
+	attempt(fmt.Sprintf("5a presented %.1f s from NotBefore (before it)", p5a.Sub(nb5).Seconds()), ahead, ca, endpoint, false)
+	time.Sleep(time.Until(nb5.Add(2 * time.Second)))
+	attempt(fmt.Sprintf("5b same certificate, presented %.1f s after NotBefore", time.Since(nb5).Seconds()), ahead, ca, endpoint, false)
 	// 6. Already expired.
 	attempt("6 expired (signed at now-2h, ttl 1h)", signed(cpCA, now.Add(-2*time.Hour), admin, time.Hour), ca, endpoint, false)
 	// 7. Back-dated, still valid.
@@ -234,13 +239,20 @@ func node(dir, endpoint string) {
 	locR.Close() //nolint:errcheck
 	// 9. A 60 s certificate: used, held past NotAfter, then a new connection.
 	short := signed(cpCA, time.Now(), admin, 60*time.Second)
+	_, na9 := window(short)
 	held := must(talos.Dial(ctx, talosconfigFor(short, ca, endpoint), endpoint))
-	t0 := time.Now()
-	report(ctx, "9a 60 s certificate, first use", held, false)
-	time.Sleep(time.Until(t0.Add(65 * time.Second)))
-	report(ctx, "9b same connection, 5 s past NotAfter", held, false)
-	attempt("9c new connection with the same certificate, 5 s past NotAfter", short, ca, endpoint, false)
+	report(ctx, fmt.Sprintf("9a 60 s certificate, first use %.1f s before NotAfter", time.Until(na9).Seconds()), held, false)
+	time.Sleep(time.Until(na9.Add(5 * time.Second)))
+	report(ctx, fmt.Sprintf("9b same connection, %.1f s after NotAfter", time.Since(na9).Seconds()), held, false)
+	attempt(fmt.Sprintf("9c new connection with the same certificate, %.1f s after NotAfter", time.Since(na9).Seconds()), short, ca, endpoint, false)
 	held.Close() //nolint:errcheck
+}
+
+// window is the validity window the certificate carries (NotBefore and NotAfter, whole seconds).
+func window(p *x509.PEMEncodedCertificateAndKey) (notBefore, notAfter time.Time) {
+	b, _ := pem.Decode(p.Crt)
+	c := must(stdx509.ParseCertificate(b.Bytes))
+	return c.NotBefore, c.NotAfter
 }
 
 func serial(crt []byte) string {

@@ -3,8 +3,10 @@
 18 November 2026. Evidence for [#874](https://github.com/ginsys/bronzeward/issues/874).
 Bronzeward can sign its own Talos admin certificates from a cluster's `os` CA key, and a
 node accepts them: every case run on the fixture behaved as the machinery source says.
-No node refused a locally signed certificate, so the stop condition of the issue did not
-fire. The note records evidence only; the contract changes follow in a second pull
+A node accepted every certificate signed by the cluster's CA with a sufficient role, and
+refused the ones it should refuse (another CA, outside the validity window, a reader asking
+for a configuration). It refused no certificate that was valid, trusted and sufficiently
+privileged, so the stop condition of the issue did not fire. The note records evidence only; the contract changes follow in a second pull
 request.
 
 ## Scope and decision enabled
@@ -87,8 +89,9 @@ worker configuration as a signer must say so in its own words.
 
 ### 2. What a signed certificate carries
 
-Every certificate has subject organisation equal to the role set (sorted), an empty common
-name, `KeyUsage = digitalSignature`, `ExtKeyUsage = clientAuth`, `IsCA = false`, an
+Every certificate carries the role set as its subject organisation (the machinery passes
+the roles sorted; the order read back from the certificate is not promised: one set printed
+`[os:reader os:etcd:backup]`), an empty common name, `KeyUsage = digitalSignature`, `ExtKeyUsage = clientAuth`, `IsCA = false`, an
 Ed25519 key, and a random serial; two signatures with the same inputs differ in
 certificate, key and serial.
 
@@ -102,11 +105,15 @@ certificate, key and serial.
 
 ### 3. Clock
 
-A certificate signed at `now+5 s` did not verify at `now+1 s` and a node refused it
-(`Unavailable`) when presented at once, then accepted it once the node's clock passed
-`NotBefore` (presented 7 s later). A certificate signed with `currentTime = now-1 h` and a
-TTL of 2 h was accepted. So the signer's clock and the node's clock must agree to within
-the margin the signer builds in; back-dating `NotBefore` is possible and works.
+Offline, a certificate signed with `currentTime = now+5 s` did not verify one second later.
+On the node, the same kind of certificate (signed at 16:44:22.9 Z with `NotBefore`
+16:44:27 Z) was refused (`Unavailable`) when presented 4.1 s before its `NotBefore` and
+accepted when presented 2.0 s after it; both offsets are measured per case, against the
+whole-second `NotBefore` the certificate carries. A certificate signed with `currentTime =
+now-1 h` and a TTL of 2 h was accepted. So the signer's clock and the node's clock must
+agree to within the margin the signer builds in; back-dating `NotBefore` is possible and
+works. The fixture's node and the signer share a host clock, so a clock that disagrees
+with a real node's was simulated by `currentTime` and not measured.
 
 ### 4. Node acceptance (fixture, Talos v1.14.5)
 
@@ -116,7 +123,7 @@ the margin the signer builds in; back-dating `NotBefore` is possible and works.
 | `os:admin`, CA key from the secrets bundle | `Version` ok; `MachineConfig` ok |
 | `os:reader` | `Version` ok; `MachineConfig` `PermissionDenied` |
 | `os:admin` signed by an unrelated CA | `Unavailable` |
-| `NotBefore` +5 s, presented at once | `Unavailable`; ok 7 s later |
+| `NotBefore` 5 s ahead, presented 4.1 s before it | `Unavailable`; ok 2.0 s after it |
 | Expired (signed at now-2 h, TTL 1 h) | `Unavailable` |
 | Back-dated (signed at now-1 h, TTL 2 h) | ok |
 | Operator's own certificate and a local one, held at the same moment | both ok, both read `MachineConfig` |
@@ -131,18 +138,29 @@ which from the code.
   working beside the local one.
 - Talos has no per-certificate revocation (the [OIDC note](20261021-talosctl-oidc.md),
   read again against v1.14.5 source: the certificate is checked against the CA and its
-  validity window, not against a list). The only ways to end a certificate's use are its
-  `NotAfter`, or replacing the CA, which ends every certificate and every machine
-  configuration that carries the old one. CA replacement was not run.
-- A held connection outlives `NotAfter`: a connection opened with a 60 s certificate still
-  answered 5 s past it, while a new connection with the same certificate was refused.
-  One sample; it matches the OIDC note's single samples. So a short TTL bounds new
-  connections, and a connection already open stays usable until it closes. Expiry ends
-  a certificate's use only where the holder closes its own connection at or before
-  `NotAfter`; the node does not.
-- An `os:admin` holder, which Bronzeward is once it holds the CA key, can sign any role set
-  for any lifetime. Short lifetimes narrow what a leaked certificate grants. They do not
-  narrow what the CA key grants.
+  validity window, not against a list). A certificate stops being accepted on a new
+  connection at its `NotAfter`. Withdrawing the CA a node trusts would end it earlier,
+  but a machine configuration can list further accepted CAs
+  (`machine.acceptedCAs`, `config/types/v1alpha1/v1alpha1_types.go:137`), so changing the
+  issuing CA need not remove the old trust. Whether and how old trust is removed, and
+  what it does to every machine configuration that carries the old CA, was not run and
+  needs its own verification.
+- A held connection can outlive `NotAfter`: a connection opened with a 60 s certificate,
+  60.0 s before its `NotAfter`, still answered one request 5.0 s after it, while a new
+  connection with the same certificate, at the same moment, was refused (`Unavailable`).
+  One sample, one request on that connection; it matches the OIDC note's single samples.
+  The note does not know how long such a connection stays usable (the node's connection
+  deadlines were not read), so it claims no more than the sample. Where a design relies on
+  expiry, it must not assume the node closes a connection at `NotAfter`: the holder closes
+  its own connection at or before it.
+- An `os:admin` holder can read a control plane's machine configuration, and with it the CA
+  key (finding 1: `MachineConfig` read as `os:admin` returned 18627 bytes on the fixture;
+  the key is in a control plane configuration), then sign any role set for any lifetime.
+  So a short lifetime shortens how long a leaked certificate stays accepted; it does not
+  bound what a leaked `os:admin` certificate can do before it expires. It narrows the
+  window for a non-admin role (`os:reader`, which was refused `MachineConfig`) and does not
+  narrow what the CA key grants. The OIDC note's "administrator reminting" observation is
+  the same point seen from a remote call.
 
 ## Alternatives compared
 
@@ -151,7 +169,8 @@ which from the code.
 | Needs after onboarding | the `os` CA key | a stored admin client key | an admin certificate to start |
 | Created and imported clusters | the same | an admin certificate must exist first | an admin certificate must exist first |
 | Lifetime and roles | the signer's choice, per use | whatever the stored certificate says | up to the caller's `os:admin` role, no maximum |
-| Revocation | expiry, or CA replacement | expiry of the stored certificate | the same |
+| Revocation | expiry on new connections; withdrawing CA trust is unmeasured | expiry of the stored certificate | the same |
+| What a short lifetime bounds | the window of a leaked non-admin certificate; an `os:admin` one can re-mint | the same | the same |
 | Newly held secret | the CA key (ten-year validity) | a one-year client key | none beyond the first certificate |
 
 The owner chose the first column on 17:08 CET. The evidence supports it technically; what
@@ -168,9 +187,9 @@ it does to the exposure is in finding 5.
 | Empty role set | refused | refused |
 | `os:reader` reads `MachineConfig` | refused | `PermissionDenied` |
 | Foreign CA | refused | `Unavailable` |
-| NotBefore ahead of the node clock | refused until it passes | refused, then accepted |
+| NotBefore ahead of the node clock | refused until it passes | refused 4.1 s before, accepted 2.0 s after |
 | Expired certificate on a new connection | refused | refused |
-| Held connection past `NotAfter` | open | open (one sample) |
+| Held connection past `NotAfter` | not predicted | one request answered 5.0 s after (one sample) |
 
 ## Failure cases and limits
 
