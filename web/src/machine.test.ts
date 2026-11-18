@@ -10,7 +10,7 @@ import type { ReadResult } from "./request.ts";
 // Synthetic machine and observation reads, as the generated types describe them.
 const machine = (over: Partial<Machine>): Machine => ({
   id: "mch_a", cluster: "cl_a", hardware: { smbiosUuid: null, talosNodeId: "node-a", serial: null }, platform: "metal", talosEndpoint: "10.5.0.2:50000",
-  desired: "rel_new", applied: { release: "rel_new", source: "operation" }, pendingConvergence: false,
+  desired: "rel_new", applied: { release: "rel_new", source: "operation", importBase: null }, pendingConvergence: false,
   observed: { observation: "obs_a", at: "2026-10-26T09:46:00Z", release: "rel_new" }, frozen: false, scopeState: "normal", openDrift: null, ...over,
 });
 const observation = (id: string, basis: number, at: string, unread: Observation["unread"] = {}): Observation => ({
@@ -30,7 +30,7 @@ describe("journeys §2.4 status sentences, field by field", () => {
   });
 
   test("applied by adoption, with desired = applied.release and without", () => {
-    const adopted = { release: "rel_new", source: "adoption" };
+    const adopted = { release: "rel_new", source: "adoption", importBase: null };
     expect(sentences(machine({ applied: adopted }), [obsA])).toEqual([expect.stringContaining("(by adoption)"), ADOPTED, EITHER, HEALTH]);
     expect(sentences(machine({ applied: adopted, desired: "rel_next" }), [obsA])).toEqual([
       expect.stringContaining("(by adoption)"), ADOPTED, "The selected release rel_next carries this machine's applied configuration unchanged.", HEALTH,
@@ -318,6 +318,20 @@ describe("the timeline: newest page, Load older and the poll (client contracts �
     })));
     expect(out).toContain('data-testid="timeline-restarted"');
     expect(keptW3(after, m, obs, tl(false), "w")[2].restarted).toBe(false);
+  });
+
+  test("ginsys/bronzeward#857: the Applied release's import base links to its summary; a machine with none says none", () => {
+    const ibr = "ibr_2xxaaaaaaaaaaaaaaaaaaaqa4m";
+    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const shown = (m: Machine) => renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
+      id: "mch_a", m: { kind: "ok", data: m }, obs: { kind: "ok", data: { items: [obsA], next: undefined, restarted: false } },
+      km: { view: "v", data: undefined, restarted: false }, ko: { view: "v", data: undefined, restarted: false },
+      tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
+    })));
+    expect(shown(machine({ applied: { release: "rel_new", source: "adoption", importBase: ibr } }))).toContain(
+      `<dt>Import base</dt><dd data-testid="import-base"><a href="/import-base-revisions/${ibr}" title="${ibr}">ibr_2xxa…qa4m</a></dd>`);
+    expect(shown(machine({ applied: { release: "rel_new", source: "operation", importBase: null } }))).toContain('<dt>Import base</dt><dd data-testid="import-base">none</dd>');
+    expect(shown(machine({ applied: null }))).toContain('<dt>Import base</dt><dd data-testid="import-base">none</dd>');
   });
 
   test("#424: a machine read again that fails shows its failure even when the observations keep nothing", () => {

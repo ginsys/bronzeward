@@ -113,19 +113,19 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
     const rel = "rel_BWSYNTH-h7rt2bd";
     const pc = false;
     expect(nextStep(rel, { desired: rel, applied: null, pendingConvergence: true })).toContain("Hand it over first (an adopt plan)");
-    expect(nextStep(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward" }, pendingConvergence: true })).toContain("An apply-config plan sends this release to it");
-    const unchanged = nextStep(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward" }, pendingConvergence: pc });
+    expect(nextStep(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward", importBase: null }, pendingConvergence: true })).toContain("An apply-config plan sends this release to it");
+    const unchanged = nextStep(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward", importBase: null }, pendingConvergence: pc });
     expect(unchanged).toContain("carries this machine's Applied configuration");
     expect(unchanged).toContain("Nothing is left to send");
     expect(unchanged).not.toContain("apply-config");
-    expect(nextStep(rel, { desired: rel, applied: { release: rel, source: "bronzeward" }, pendingConvergence: pc })).toContain("Nothing is left to send");
+    expect(nextStep(rel, { desired: rel, applied: { release: rel, source: "bronzeward", importBase: null }, pendingConvergence: pc })).toContain("Nothing is left to send");
     expect(nextStep(rel, { desired: "rel_BWSYNTH-other", applied: null, pendingConvergence: pc })).toContain(`Desired is ${short("rel_BWSYNTH-other")}`);
     expect(nextStep(rel, { desired: null, applied: null, pendingConvergence: pc })).toContain("needs no step");
   });
 
   test("after an adoption, Desired equal to Applied is not 'nothing left to send' while the machine is pending convergence", () => {
     const rel = "rel_BWSYNTH-h7rt2bd";
-    const text = nextStep(rel, { desired: rel, applied: { release: rel, source: "adoption" }, pendingConvergence: true });
+    const text = nextStep(rel, { desired: rel, applied: { release: rel, source: "adoption", importBase: null }, pendingConvergence: true });
     expect(text).toContain("pending convergence");
     expect(text).toContain("An apply-config plan sends this release to it");
     expect(text).not.toContain("Nothing is left to send");

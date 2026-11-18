@@ -11,7 +11,7 @@ import { PublishDraft } from "./publish.tsx";
 import { RecoveryConsole } from "./recovery.tsx";
 import {
   Audit, Change, Changes, DEPENDENCY_CLASSES, DependencyItem, klass, OPERATION_KINDS, OPERATION_STATES, OperationItem, Operations, PLAN_STATES,
-  PlanItem, Plans, ReleaseItem, RevisionItem, seconds, SourceItem, Sources, view,
+  ImportBaseItem, ImportBaseRows, PlanItem, Plans, ReleaseItem, RevisionItem, seconds, SourceItem, Sources, view,
 } from "./resources.tsx";
 
 const go = () => {};
@@ -115,5 +115,34 @@ describe("the read-only views", () => {
     expect(OPERATION_STATES).toEqual(go("operations.go", "operationStates"));
     expect(OPERATION_KINDS).toEqual(go("operations.go", "operationKinds"));
     expect(DEPENDENCY_CLASSES).toEqual(go("dependencies.go", "dependencyClasses"));
+  });
+});
+
+// ginsys/bronzeward#857: the summary of an import base revision, from the one read at its path.
+describe("the import base summary (ginsys/bronzeward#857)", () => {
+  const ibr = "ibr_2xxaaaaaaaaaaaaaaaaaaaqa4m";
+  const summary: S["ImportBaseSummary"] = { id: ibr, machine: "mch_b3caaaaaaaaaaaaaaaaaaaaa2q", author: "idn_k2pqaaaaaaaaaaaaaaaaaaa7xz", createdAt: "2026-11-18T09:00:00Z", documentBytes: 1234, references: 2, embedded: 1 };
+
+  test("its path is its view, and an identifier with the prefix links to it", () => {
+    expect(at(`/import-base-revisions/${ibr}`)?.type).toBe(ImportBaseItem);
+    expect(at(`/import-base-revisions/${ibr}`)?.props).toEqual({ id: ibr });
+    expect(at("/import-base-revisions")).toBeUndefined();
+    expect(viewOf(ibr)).toBe("import-base-revisions");
+    expect(html(h(Id, { id: ibr }))).toBe(`<a href="/import-base-revisions/${ibr}" title="${ibr}">ibr_2xxa…qa4m</a>`);
+  });
+
+  test("it is loading until the read answers (§8)", () => {
+    const out = html(h(ImportBaseItem, { id: ibr }));
+    expect(out).toContain("Import base revision ibr_2xxa…qa4m");
+    expect(out).toContain("Loading the import base revision");
+  });
+
+  test("it shows the size and counts, and nothing of the document, a digest or a reference", () => {
+    // A read that wrongly carried the text or a digest must still not reach the page: the rows name their fields.
+    const wrong = { ...summary, document: "machine:\n  hostname: bw-sentinel-text", configurationDigest: "ab".repeat(32), baselineDigest: "cd".repeat(32), names: ["registry/secret-name"] };
+    const out = html(h(ImportBaseRows, { r: wrong }));
+    for (const s of ["Identifier", ibr, "Machine", "Author", "Created", "Document size", "1234 bytes", "References", "Embedded documents"]) expect(out).toContain(s);
+    for (const s of ["bw-sentinel-text", "ab".repeat(32), "cd".repeat(32), "registry/secret-name", "Digest</dt>"]) expect(out).not.toContain(s);
+    expect(out).toContain("The document text and its digests are not shown.");
   });
 });
