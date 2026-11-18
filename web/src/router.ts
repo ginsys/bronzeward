@@ -7,6 +7,7 @@ import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react
 // shows it to a recovery-admin, and to every role while recovery mode is on.
 export const PAGES = [
   ["/machines", "Machines"],
+  ["/clusters", "Clusters"],
   ["/changes", "Changes"],
   ["/plans", "Plans"],
   ["/operations", "Operations"],

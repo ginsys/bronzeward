@@ -5,9 +5,11 @@
 import type { components } from "./api/v1";
 import { AddClusterAction, RecordMachineAction } from "./forms.tsx";
 import { EmptyList, Head, Id, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
+import { Status } from "./states.tsx";
 
 export type Machine = components["schemas"]["MachineBody"];
 export type Cluster = components["schemas"]["ClusterBody"];
+type Draft = components["schemas"]["DraftBody"];
 
 // The state filter's values, each a badge text.
 export const STATES = [
@@ -162,6 +164,69 @@ export function ClusterItem({ id }: { id: string }) {
       <h2>Cluster {d.name}</h2>
       <p>{d.id}: Kubernetes endpoint {d.endpoint}, contract {d.contract}, Talos cluster ID {d.talosClusterId}.</p>
       <p><Ref to={`/machines?cluster=${d.id}`} id={d.id}>Machines in this cluster</Ref></p>
+      <ClusterMachines id={d.id} />
+      <ClusterDrafts id={d.id} />
     </>
   );
+}
+
+// How many of a cluster's machines carry each badge (a machine can carry several), and how many show
+// none. Counts follow the order of STATES; a badge no machine carries is left out.
+export function machineStates(machines: readonly Machine[]) {
+  const counts = STATES.map(([, text]) => [text, machines.filter((m) => badges(m).includes(text)).length] as const).filter(([, n]) => n > 0);
+  return { total: machines.length, counts, none: machines.filter((m) => badges(m).length === 0).length };
+}
+
+export function MachineSummary({ machines }: { machines: readonly Machine[] }) {
+  if (machines.length === 0) return <Status>No machines recorded in this cluster.</Status>;
+  const { total, counts, none } = machineStates(machines);
+  const parts = [...counts.map(([text, n]) => `${n} ${text}`), ...(none > 0 ? [`${none} with no state shown`] : [])];
+  return (
+    <>
+      <p>{total} {total === 1 ? "machine" : "machines"}: {parts.join(", ")}. A machine can carry several states, so the counts can add up to more than {total}.</p>
+      <Scroll label="Machines of this cluster">
+        <Head cols={["Machine", "Endpoint", "Node", "State"]} />
+        <tbody>
+          {machines.map((m) => (
+            <tr key={m.id}>
+              <th scope="row"><Ref to={`/machines/${m.id}`} id={m.id} /></th>
+              <td>{m.talosEndpoint}</td>
+              <td>{node(m)}</td>
+              <td>{badges(m).join(", ")}</td>
+            </tr>
+          ))}
+        </tbody>
+      </Scroll>
+    </>
+  );
+}
+
+function ClusterMachines({ id }: { id: string }) {
+  const [list] = useList<Machine>("/machines", new URLSearchParams({ cluster: id }).toString(), true);
+  const pending = usePending(list, "machines");
+  return <><h3>Machines</h3>{list.kind === "ok" ? <MachineSummary machines={list.data.items} /> : pending}</>;
+}
+
+// GET /drafts has no cluster filter, so a cluster's open drafts are picked in the browser from every
+// page of the list, as the Changes page does.
+export const openDrafts = (drafts: readonly Draft[], cluster: string) => drafts.filter((d) => d.cluster === cluster && d.state === "open");
+
+export function OpenDraftsView({ drafts }: { drafts: readonly Draft[] }) {
+  if (drafts.length === 0) return <Status>No open draft in this cluster.</Status>;
+  return (
+    <Scroll label="Open drafts of this cluster">
+      <Head cols={["Draft", "Title", "Revision"]} />
+      <tbody>
+        {drafts.map((d) => (
+          <tr key={d.id}><th scope="row"><Ref to={`/drafts/${d.id}`} id={d.id} /></th><td>{d.title}</td><td>{d.revision}</td></tr>
+        ))}
+      </tbody>
+    </Scroll>
+  );
+}
+
+function ClusterDrafts({ id }: { id: string }) {
+  const [list] = useList<Draft>("/drafts", "", true);
+  const pending = usePending(list, "drafts");
+  return <><h3>Open drafts</h3>{list.kind === "ok" ? <OpenDraftsView drafts={openDrafts(list.data.items, id)} /> : pending}</>;
 }
