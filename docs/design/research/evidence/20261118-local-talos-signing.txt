@@ -42,8 +42,9 @@ currentTime = now-2h, ttl 1h (already expired): O=[os:admin] CN="" isCA=false ke
 foreign CA os:admin, verified against the cluster CA: O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=false
 two signatures with identical inputs: certificates equal=false keys equal=false serials b640000f43ca... / bca9742815e7...
 
-== Commands: fixture node run (heavy run, one at 2026-11-18T17:34:09 to 17:37:57 CET) ==
-Under the plain heavy-run lock at nice -n 19, load1 11.47 at the start, /home 69680 MiB free, /var/lib/docker 15661 MiB free.
+== Commands: fixture node run (heavy run, 2026-11-18T17:42:34 to 17:45:38 CET) ==
+Under the plain heavy-run lock at nice -n 19, load1 8.24 at the start, /home 68907 MiB free, /var/lib/docker 15661 MiB free.
+An earlier run of the same cases (17:34 to 17:37 CET) gave the same outcomes; its timing labels were measured from one clock read at the start of the program, so this run replaces it with a fresh clock per case.
 fixtures/bin/up
 go run docs/design/research/evidence/20261118-local-talos-signing/main.go node <dir> 10.55.0.2
   (<dir> holds the fixture's controlplane.yaml, talos-secrets.yaml as secrets.yaml, and talosconfig)
@@ -51,28 +52,31 @@ fixtures/bin/down
 
 == Output: fixture node run ==
 up rc=0
-run at 2026-11-18T16:36:41Z, endpoint 10.55.0.2
+run at 2026-11-18T16:44:22Z, endpoint 10.55.0.2
 CA certificates equal across control plane config, bundle and talosconfig: true
 1 os:admin, CA from control plane config: Version: ok v1.14.5
-1 os:admin, CA from control plane config: MachineConfig: ok 18623 bytes
+1 os:admin, CA from control plane config: MachineConfig: ok 18627 bytes
 2 os:admin, CA from secrets bundle: Version: ok v1.14.5
-2 os:admin, CA from secrets bundle: MachineConfig: ok 18623 bytes
+2 os:admin, CA from secrets bundle: MachineConfig: ok 18627 bytes
 3 os:reader: Version: ok v1.14.5
 3 os:reader: MachineConfig: talos: reading the machine configuration: PermissionDenied (code PermissionDenied)
 4 os:admin signed by a foreign CA: Version: talos: version: Unavailable (code Unavailable)
 4 os:admin signed by a foreign CA: MachineConfig: talos: reading the machine configuration: Unavailable (code Unavailable)
-5a NotBefore +5 s, presented at +0 s: Version: talos: version: Unavailable (code Unavailable)
-5b same certificate, presented at +7 s: Version: ok v1.14.5
+5 certificate signed at 16:44:22.915, NotBefore 16:44:27
+5a presented -4.1 s from NotBefore (before it): Version: talos: version: Unavailable (code Unavailable)
+5b same certificate, presented 2.0 s after NotBefore: Version: ok v1.14.5
 6 expired (signed at now-2h, ttl 1h): Version: talos: version: Unavailable (code Unavailable)
 7 back-dated (signed at now-1h, ttl 2h): Version: ok v1.14.5
 8 operator's own certificate: Version: ok v1.14.5
-8 operator's own certificate: MachineConfig: ok 18623 bytes
+8 operator's own certificate: MachineConfig: ok 18627 bytes
 8 local certificate, same moment: Version: ok v1.14.5
-8 local certificate, same moment: MachineConfig: ok 18623 bytes
-9a 60 s certificate, first use: Version: ok v1.14.5
-9b same connection, 5 s past NotAfter: Version: ok v1.14.5
-9c new connection with the same certificate, 5 s past NotAfter: Version: talos: version: Unavailable (code Unavailable)
+8 local certificate, same moment: MachineConfig: ok 18627 bytes
+9a 60 s certificate, first use 60.0 s before NotAfter: Version: ok v1.14.5
+9b same connection, 5.0 s after NotAfter: Version: ok v1.14.5
+9c new connection with the same certificate, 5.0 s after NotAfter: Version: talos: version: Unavailable (code Unavailable)
 node run rc=0
+
+The offsets are measured against the whole-second NotBefore and NotAfter the certificate carries (the certificate drops fractions of a second), so 5 s ahead reads as 4.1 s before NotBefore.
 down rc=0 (fixture is down: no containers, networks, volumes or state left)
 
 == Not measured ==
