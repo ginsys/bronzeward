@@ -329,7 +329,8 @@ bronzewardctl
 
   cluster list | show | add
   cluster discover                    --talosconfig required; reads Talos, prints commands, writes nothing
-  cluster onboard                     discover, record, write the Talos secret once, import each machine
+  cluster first-key                   supply or replace the cluster's first key; the server keeps the Talos CA key
+  cluster onboard                     discover, record, supply the first key, import each machine
   machine list | show | add | set-endpoint
   machine timeline | observations    paged; --follow polls (G9)
   machine freeze | unfreeze           --reason required
@@ -469,9 +470,9 @@ Record it with these commands, in this order. The cluster ID is the one cluster 
   bronzewardctl cluster add --name <name> --endpoint 'https://10.5.0.2:6443' --contract 'v1.13' --talos-cluster-id '7c1…'
   bronzewardctl machine add --cluster <cluster id> --smbios-uuid '4c4c…' --platform 'metal' --talos-endpoint '10.5.0.2'
   bronzewardctl machine add --cluster <cluster id> --smbios-uuid '5d1d…' --platform 'metal' --talos-endpoint '10.5.0.5'
-  bao kv put -mount=secret access/talos/<cluster id> 'talosconfig=@./talosconfig'
+  bronzewardctl cluster first-key --cluster <cluster id> --kind talosconfig --file ./talosconfig --endpoint '10.5.0.2'
 
-Nothing was sent to the server and no secret was written. Until the bao command has run, the first source: machine import fails with talos-access-unavailable.
+Nothing was sent to the server and no secret was written. Until the first-key command has run, the first source: machine import fails with talos-access-unavailable.
 ```
 
 A member that does not answer, or reports no platform, gets no command and a "Not recorded" line.
@@ -516,12 +517,23 @@ Recording a machine is a human `author` act, with the node's Talos identity read
 $ bronzewardctl machine add --cluster cl_9fd…m3ka --talos-node-id 9Zs…= --platform metal \
     --talos-endpoint 10.5.0.5
 Machine mch_b3c…aa2q recorded in cluster cl_9fd…m3ka (lab-a). Endpoint 10.5.0.5:50000.
-Next: give Bronzeward the cluster's Talos access in the provider, then import its configuration.
+Next: supply the cluster's first key, then import its configuration.
 ```
 
 `talosEndpoint` is an IP address with an optional port, stored with the default port 50000
-(`internal/talos/endpoint.go:15-19`). Writing the talosconfig to the provider stays outside
-Bronzeward ([persistence and API §3.3](persistence-api.md#33-talos-access)).
+(`internal/talos/endpoint.go:15-19`).
+
+`cluster first-key` supplies or replaces a cluster's first key: a human `author` act, one
+`POST /clusters/{id}/first-keys` ([persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)).
+`--kind` is `talosconfig`, `machine-config` (a control plane configuration) or `secrets-bundle`,
+`--file` names the document, and `--endpoint` is required for the first and the last kind and refused
+for `machine-config`. The file is read with a size limit, sent once and never copied, logged or
+printed; a talosconfig is cut to the one context `--talos-context` names (else the current one). It
+answers with the cluster, the kind, whether a key was replaced and the CA key's version; the refusals
+of §3.4 (`first-key-unusable`, `first-key-no-ca-key`, `first-key-role-insufficient`,
+`first-key-endpoint-no-control-plane`) print their rule and nothing from the document. A talosconfig
+whose certificate is `os:reader` is refused: Bronzeward needs the `os:admin` read of a control
+plane's configuration to take the CA key from it.
 
 `cluster onboard` runs those steps in one command, and imports each machine into one draft. It needs
 an `author` signed in as a person (exit 1 otherwise, with nothing sent) and takes the flags of
@@ -531,52 +543,51 @@ an `author` signed in as a person (exit 1 otherwise, with nothing sent) and take
 | --- | --- |
 | `--name <name>` | the cluster's name; required |
 | `--kubernetes-endpoint <https url>` or `proposed` | the Kubernetes endpoint to record; required. `proposed` takes the one that discovery proposes, and stops with exit 1 if it proposes none or an endpoint that is not https |
-| `--bao-addr <url>`, else `BAO_ADDR` | the OpenBao address: `https`, or plain `http` to a loopback host |
-| `--bao-token-file <file>` or `--bao-token-stdin` | the OpenBao token, from a file with no group or other permission bit or from standard input; never an argument. Exactly one |
-| `--skip-secret` | write no secret: the operator says it is already in OpenBao. It takes no `--bao-*` flag |
-| `--no-import` | stop after the secret: no draft, no import |
+| `--first-key-kind machine-config\|secrets-bundle` with `--first-key-file <file>` | supply that document as the first key instead of the talosconfig. Both or neither; a `secrets-bundle` needs `--endpoint` |
+| `--skip-first-key` | supply no first key: the operator says the cluster already holds one. It takes no `--first-key-*` flag |
+| `--no-import` | stop after the first key: no draft, no import |
 | `--review`, `--staging encrypted\|transient` | as `import start`: `--review` pauses the first import for review and needs encrypted staging |
 
 `--no-wait`, `--idempotency-key`, `--expect-epoch`, `--expect-principal` and `--if-match` are refused
 with exit 2: the command sends several writes and waits for each import. A missing or refused flag, a
-`--talos-context` that the file does not hold, and a plain-http OpenBao address that is not loopback
-are exit 2 before the identity read and before any dial.
+`--talos-context` that the file does not hold, and a `--first-key-*` flag given with `--skip-first-key` or
+only one of the pair are exit 2 before the identity read and before any dial.
 
 The steps run in this order, each only if the one before it succeeded: the identity read; discovery with
 the one context (an unsupported contract, or no https Kubernetes endpoint, is exit 1 with nothing
 sent); `POST /clusters`; `POST /machines` for each member that answered and reported a platform; the
-secret; the draft; one import for each recorded machine, in member order. A member that did not answer,
+first key; the draft; one import for each recorded machine, in member order. A member that did not answer,
 or reported no platform, is listed as not recorded with the reason and gets no machine and no import.
-The secret is the cluster's talosconfig cut to the one chosen context, so no other context's key
-reaches OpenBao, written once with check-and-set 0 and the operator's own token, and never printed.
+The first key, by default the cluster's talosconfig cut to the one chosen context so that no other
+context's key reaches the server, is sent once to `POST /clusters/{id}/first-keys` and never printed.
 
 A second run finds what exists and changes nothing that stands. A `409 conflict` on the cluster or
 on a machine names the existing record, which the command reads and shows as it is recorded (the
 flags are not applied to it). A machine that is recorded in another cluster stops the command, naming
-both cluster IDs, before the secret. The draft is titled `onboard <name>`, and an open draft of that
+both cluster IDs, before the first key. The draft is titled `onboard <name>`, and an open draft of that
 title is reused. A machine whose import was released into that draft is skipped; an import that is
 held, resumed or paused stops the command, with `import status` for it (a paused one is exit 0, as
 with `--review`; the others exit 1), and a machine with no import, or only abandoned ones, is imported.
 
-**The secret is the one write that cannot repeat.** The policy `bw-onboard` lets a token create the
-path and nothing else, and OpenBao answers a create-only token with 403 both when the token has no
-right to create and when the secret is already there. So a rerun with the default flags stops at the
-secret with exit 1, and says so: "OpenBao answered 403: the token may not create the secret, or a
-secret is already there. Where it is already there, run the command again with `--skip-secret`."
-`--skip-secret` is an assertion by the operator: the command never reads the secret back, so it cannot
-tell a stale document from a current one. The other answers are named by class and never quoted: no secret
-mount (nothing was written, exit 1), and OpenBao not answering or giving an unexpected answer, or a Ctrl-C while the
-create was in flight (the write may have happened, so the outcome is unknown, exit 3, and the next step
-is to read the secret with `bao`) and, for a token that may also update, a check-and-set refusal, which reads as present and
-carries on. A redirect is never followed.
+**The first key can be supplied again.** `POST /clusters/{id}/first-keys` replaces a key as it
+supplies one, so a rerun with the default flags supplies the first key again, and the answer says
+`replaced: true` and the audit trail records the replacement ([persistence and API
+§3.4](persistence-api.md#34-first-keys-and-the-talos-signer)). `--skip-first-key` is an assertion by
+the operator that the cluster already holds one: the command never reads the key, so it cannot tell a
+stale key from a current one. The refusals of the route are named by rule and never quoted; a first
+key the server refuses stops the run with exit 1 and nothing after it is sent, and a Talos read that
+failed on the server is exit 1 with `talos-access-unavailable`. An answer that never came (a Ctrl-C
+while the request was in flight) leaves the outcome unknown, exit 3: the next step is to run the
+command again, or to read the cluster's `caKeyVersion` from the audit trail. No OpenBao address or
+token is needed, and no policy of the operator's own is used.
 
 The commands that the run prints name the global `--context` it was given, so each reaches the same
 server. A missing endpoint (none in the context, none given with `--endpoint`) is exit 2 before any
 request, like a file name that cannot be printed back in a command.
 
-The text output lists the cluster, the secret, the draft and one row per member, then the next
+The text output lists the cluster, the first key, the draft and one row per member, then the next
 commands. `-o json` and `-o yaml` print one object once, at the end:
-`{cluster, secret, draft, machines[]}`, each member with `{node, machine, add, import}`, each step
+`{cluster, firstKey, draft, machines[]}`, each member with `{node, machine, add, import}`, each step
 with a `state` and, when it did not finish, the `command` that carries on and the `error` line. The
 answer of an import start is never printed. The exit code is that of the step that stopped the run (the
 usual exit codes: 1 a refusal, 3 an unknown outcome, 4 an import that ended failed). With `--review` the
@@ -1452,7 +1463,8 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `operation watch` | `GET /operations/{id}/events` (SSE) | any | no | no |
 | `cluster add` | `POST /clusters` | author | yes | no |
 | `cluster discover` | none: reads Talos nodes with the operator's talosconfig | none | no | no |
-| `cluster onboard` | `POST /clusters`, `POST /machines`, `POST /drafts`, `POST /ingestions`; one KV create to OpenBao | author | yes | draft's |
+| `cluster first-key` | `POST /clusters/{id}/first-keys` | author (human) | yes | no |
+| `cluster onboard` | `POST /clusters`, `POST /clusters/{id}/first-keys`, `POST /machines`, `POST /drafts`, `POST /ingestions` | author (human) | yes | draft's |
 | `machine add` | `POST /machines` | author | yes | no |
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | no |
 | `import start` | `POST /ingestions` | author | yes | draft's |

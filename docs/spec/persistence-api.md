@@ -230,6 +230,7 @@ statement.
 | Cluster | mutable, revisioned | name, endpoint, Talos cluster ID (unique, §7.3), contract, status | this contract |
 | Machine | mutable, revisioned | `mch` id, identity key: its SMBIOS UUID or, for a machine that reports none, its Talos node ID, fixed at inventory (unique, §7.3), hardware evidence, cluster membership, Talos endpoint (§3.3), platform mode: `metal`, `container` or `cloud`, required at inventory with no default and fixed there, the mode its configuration validates in and its release machines record (compilation §6 step 8; choice §17.32), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
 | MachineEndpointChange | immutable | a machine's previous Talos endpoint and new one, who changed it, role, epoch, time (§3.3) | this contract |
+| FirstKeyAct | immutable | a cluster's first-key supply or replacement: the cluster, the kind, whether it replaced a key, the CA certificate's fingerprint, the CA key's version identity (path, version, `created_time`), who, role, epoch, time; never a value (§3.4) | this contract |
 | Fragment | mutable head | name, layer, scope (a cluster or the library), pointer to the head revision | this contract |
 | FragmentRevision | immutable | sanitized YAML text, canonical parsed form, declarations, reference rows, author | compilation §2, §5 |
 | Profile / ProfileRevision | mutable head / immutable | ordered fragment revision ids | this contract |
@@ -393,48 +394,51 @@ They are held apart **(choice §17.29)**.
   recovery mode (§12.2): it changes nothing on a machine, and a restored
   endpoint may be the one that no longer answers. The column is `NOT NULL`:
   every machine has an endpoint.
-- **The credential is per cluster, in the provider.** Talos authorizes a client
-  certificate signed by the cluster's own certificate authority, so one
-  credential reaches every node of the cluster (design §13.1, "cluster-specific
-  credentials"); a per-machine credential would be the same one copied. Each
-  cluster's Talos client configuration (a `talosconfig` document) is the KV v2
-  secret `secret/data/access/talos/<cluster id>`, data
-  `{"talosconfig": "<document>"}`. Its path is derived from the cluster's id
-  and no request names it, so no request can point a read at another secret.
-  The operator writes it with the provider's own tooling,
-  `bao kv put -mount=secret access/talos/<cluster id> talosconfig=@<file>`
-  (the CLI takes the logical path and adds KV v2's `data/` itself; policies
-  name the API path `secret/data/access/talos/*`; `bronzewardctl cluster discover` prints this
-  command with the file the operator named and runs it never; `bronzewardctl cluster onboard`
-  writes the secret itself, once, with the operator's own token), under
-  an administrative identity, before the cluster's first `source: machine`
-  ingestion; rotating it is writing a new version. No Bronzeward identity
-  writes, lists or deletes it, and no route accepts it: the normal API never
-  carries a secret value (compilation §1). Two exceptions: `internal/talos/discover`,
-  a read-only package with its own dial and source guard, and `internal/accessput`,
-  a write-only package that sends one KV create to OpenBao with the operator's own
-  token. Neither imports `internal/talos`, `internal/provider` or a client library,
-  and the reader of the machine configuration and the apply path stay out of the
-  CLI (client contracts, "Excluded").
-- **Who reads it.** The ingestion identity, for a `source: machine` ingestion,
+- **The credential is a certificate Bronzeward signs per use, from the
+  cluster's Talos CA key held in the provider** (§3.4; reverses the
+  operator-written talosconfig of the decision of 21 October 2026, design §13.2).
+  Talos authorizes a client certificate signed by the cluster's own certificate
+  authority, so one credential reaches every node of the cluster (design §13.1,
+  "cluster-specific credentials"); a per-machine credential would be the same
+  one copied. Each cluster's `os` CA is the KV v2 secret
+  `secret/data/access/talos-ca/<cluster id>`, data
+  `{"ca": "<certificate PEM>", "key": "<private key PEM>"}`, written only by the
+  signer identity when a first key supplies it (§3.4) and replaced the same way.
+  Its path is derived from the cluster's id and no request names it, so no
+  request can point a read at another secret. No operator writes it with the
+  provider's tooling, and `secret/data/access/talos/<cluster id>`, the
+  `bw-onboard` create-only policy and `internal/accessput` are retired. No
+  Bronzeward identity but the signer reads, lists or deletes the key, and the
+  normal API never carries a secret value (compilation §1): a first key enters
+  by the route of §3.4, which extracts the key before anything is persisted
+  (design §7.1). `internal/talos/discover` stays a read-only package with its
+  own dial and source guard, and the reader of the machine configuration and the
+  apply path stay out of the CLI (client contracts, "Excluded").
+- **Who uses it.** The signer identity alone reads the CA key, its latest
+  version, at use. The ingestion identity, for a `source: machine` ingestion,
   and the executor identity, for its observations and dispatch (execution and
-  recovery §3.1 item 2), each read its latest version at use and record that
-  version's identity, never the value: its path, version and `created_time`.
-  The version number alone is not an identity: deleting the path's metadata,
+  recovery §3.1 item 2), each ask the signer for a certificate and record the
+  access's identity, never a value: the CA key's path, version and
+  `created_time`, and the certificate's serial and `NotAfter`. The key version
+  number alone is not an identity: deleting the path's metadata,
   or a provider restore, and writing again issues the same path and version for
   other bytes, which is why compilation §9 and dependency monitor choice §11.13
-  identify a KV version by its `created_time` too. A dispatch reads it once,
-  before its evidence observation: that observation, the use-time check's
-  record and the attempt made on that evidence use that one version, so a
-  rotation between them cannot change the credential the request carries,
-  and a credential Talos refuses fails the observation before anything is
-  committed. A retry gathers new evidence (execution and recovery §3.3),
-  which reads it again, and the retry's attempt uses that new version: each
-  version binds one evidence observation and the attempt made on it, so a
-  rotation before a retry is picked up by that retry. An attempt made again
-  after its attempt transaction failed reads it again too; when that read is
-  not the version the commitment's evidence read, comparison 3 refuses the
-  attempt and the operation is observed again before anything is sent. An ingestion records it,
+  identify a KV version by its `created_time` too. A dispatch obtains one
+  certificate before its evidence observation, signed with a lifetime that
+  covers the observation, the use-time check and the attempt (§3.4): that
+  observation, the use-time check's record and the attempt made on that
+  evidence use that one certificate and one CA key version, so a replacement of
+  the key between them cannot change the credential the request carries, and a
+  credential Talos refuses fails the observation before anything is committed.
+  A retry gathers new evidence (execution and recovery §3.3), which obtains a
+  new certificate from the then-latest key version, and the retry's attempt
+  uses it: each certificate binds one evidence observation and the attempt made
+  on it, so a key replacement before a retry is picked up by that retry. An
+  attempt made again after its attempt transaction failed obtains a certificate
+  again too; when the CA key version is not the one the commitment's evidence
+  read, or the evidence's certificate has passed `NotAfter`, comparison 3
+  refuses the attempt and the operation is observed again before anything is
+  sent. An ingestion records it,
   with the endpoint dialled, as an event of its `ingest` operation (T7, read
   through `GET /operations/{id}/events`), committed once the read returns a
   version and before the node is dialled, so it is kept whether the
@@ -462,18 +466,22 @@ They are held apart **(choice §17.29)**.
   owner decision 2 October 2026). The provider cannot tell these uses apart:
   the executor identity's read grant holds at any time, and the bound is the
   application's, as for ingestion.
-- **What is used.** Only the talosconfig's certificate authority, client
-  certificate and key. Its contexts' `endpoints` and `nodes` are ignored: the
-  client dials only the endpoint chosen above (the machine's, or the plan's
-  route) and sends no `node` metadata, whatever the document names.
-- **What is kept.** The value lives only in the memory of the process that read
-  it, for the use it was read for: an ingestion; one observation outside a
+- **What is used.** Only the cluster's CA certificate and the signed client
+  certificate and key. The client dials only the endpoint chosen above (the
+  machine's, or the plan's route) and sends no `node` metadata. The talosconfig
+  a first key may arrive as (§3.4) is read once for its own CA certificate and
+  endpoints and is never a credential Bronzeward keeps.
+- **What is kept.** The CA key lives only in the signer's memory while it
+  signs. The signed certificate and key live only in the memory of the process
+  that obtained them, for the use they were signed for: an ingestion; one observation outside a
   dispatch's evidence-and-attempt pair (`drift`, `restoration`, `recovery`
   or `completion`, which may follow the last attempt); or an evidence
   observation and the attempt made on it. It is discarded when that use ends
-  or is abandoned; a retry reads afresh (above). It is never stored in the database, logged, returned
-  or quoted in an error (compilation §13), and never written to a file:
-  neither reader passes it to a client as a file path.
+  or is abandoned, and no Talos connection outlives the certificate: it is
+  closed at or before `NotAfter`; a retry obtains a certificate afresh (above).
+  Neither the key nor the certificate is stored in the database, logged,
+  returned or quoted in an error (compilation §13), or written to a file: no
+  client is given either as a file path.
 - **Identity before use.** Before using a configuration read for ingestion, the
   ingestion reads the node's SMBIOS UUID, Talos node ID and Talos cluster ID
   on the same connection and compares them with the machine record (§7.3) and
@@ -488,20 +496,20 @@ They are held apart **(choice §17.29)**.
   none), or a node that accepts
   this credential but reports another Talos cluster ID (possible only where
   clusters share a Talos certificate authority): each fails the ingestion with
-  `409 machine-identity-mismatch`, as below, and nothing read is kept. A node behind another certificate authority, or another cluster's
-  talosconfig under another certificate authority written at this cluster's
-  path, fails the mutual TLS handshake before any read: a credential Talos
-  refuses, below. Under a shared certificate authority, another cluster's
-  talosconfig reaches this cluster's node and reads it; the identity check
-  then passes, since the node is the recorded one, and the ingestion succeeds.
+  `409 machine-identity-mismatch`, as below, and nothing read is kept. A node behind another certificate authority, or a certificate signed from
+  another cluster's CA key stored at this cluster's path, fails the mutual TLS
+  handshake before any read: a credential Talos refuses, below. Under a shared
+  certificate authority, a certificate signed from another cluster's key
+  reaches this cluster's node and reads it; the identity check then passes,
+  since the node is the recorded one, and the ingestion succeeds.
   Dispatch has execution and recovery's own comparison (its §3.2
   comparison 3). The values were read with `talosctl`, not yet through the
   application's read-only client, as that choice states, and a node swapped
   between the identity read and the configuration read is the residual it
   states.
-- **Failure.** An absent secret, one this identity cannot read, a provider
-  that is sealed or does not answer, a document that is not a usable
-  talosconfig, a credential Talos refuses, or an endpoint that does not answer
+- **Failure.** An absent CA key for the cluster, one the signer cannot read, a
+  provider that is sealed or does not answer, a CA key that is not a usable
+  signer, a credential Talos refuses, or an endpoint that does not answer
   is the problem `503 talos-access-unavailable`, naming the cluster or machine
   and never a value or the parser's or client's own text. For an ingestion it arises after `POST /ingestions` has
   committed the claim and its `running` operation (T11; compilation §2.3
@@ -512,15 +520,92 @@ They are held apart **(choice §17.29)**.
   ingestion is not retried in place, as no `ingest` operation is (§8.2): once
   the cause is repaired, the operator starts a new one. For
   dispatch, a provider-side cause (an absent, unreadable or malformed
-  configuration, or a sealed or silent provider) fails the use-time check
+  CA key, or a sealed or silent provider) fails the use-time check
   (execution and recovery §3.1 item 2), and a node-side cause (a credential
   Talos refuses, or a silent endpoint) fails the fresh observation (item 1);
   either way no operation is committed and nothing is dispatched, and the
   timeline keeps the evidence: the observation-started entry and the failed
   observation or use-time check (execution and recovery §4.1). A restore of the provider
-  to an older snapshot can bring back a superseded credential; if Talos no
-  longer accepts it, reads fail the same way until the operator writes a
-  current one.
+  to an older snapshot can bring back a superseded CA key; if Talos no longer
+  trusts that CA, reads fail the same way until an author supplies the
+  cluster's current first key again (§3.4).
+
+### 3.4 First keys and the Talos signer
+
+Design: [§13.2](../design/Talos_Configuration_and_Machine_Management_Design.md#132-provider-access-separation).
+Evidence: [signing locally](../design/research/20261118-local-talos-signing.md) and
+[signing from a key read through a talosconfig](../design/research/20261118-local-talos-signing-extract.md),
+measured on Talos v1.14.5 only.
+
+Owner decision, 2026-11-18 17:08 CET
+([#869](https://github.com/ginsys/bronzeward/issues/869)): "I think we must
+support all "first keys": TALOSCONFIG, controlplane node configs, or even an ip
+\+ secrets.yaml. Whatever the user provides, bw gets access and saves the
+signing keys". Bronzeward holds each cluster's Talos `os` CA key (§3.3) and signs
+its own admin certificates. A first key is what the operator supplies to get
+there.
+
+- **Three first keys, each ending with the CA key held.**
+  1. A **control plane machine configuration** (`machine.ca.key`). The signer
+     takes the CA and key from it. A worker configuration holds no key and is
+     refused.
+  2. An **endpoint and a secrets bundle** (`Certs.OS`). No client certificate
+     exists, so the signer is needed from the start.
+  3. A **talosconfig**. It holds a client certificate and the CA certificate but
+     no CA key, so it is a way in, not a signer: onboarding with it makes one
+     read of a control plane's machine configuration through it and keeps
+     `machine.ca.key` from the answer (measured: the `os:admin` read returned the
+     key and a certificate signed from it was accepted). That read needs
+     `os:admin`: a talosconfig whose certificate is `os:reader` is refused, and
+     so is one whose endpoints reach no control plane. There is no admin-only
+     mode that keeps the talosconfig as the credential (owner decision, above).
+- **The route.** `POST /clusters/{id}/first-keys` takes `{"kind":
+  "machine-config" | "secrets-bundle" | "talosconfig", "document": "<text>",
+  "endpoint": "<§3.3 grammar>"}` and answers `200` with `{"cluster", "kind",
+  "caKeyVersion", "replaced"}`: the version identity of the stored CA key
+  (§3.3) and whether it replaced a key. `endpoint` is required for
+  `secrets-bundle` and `talosconfig` and refused for `machine-config`. The
+  document is extracted before anything is persisted (design §7.1) and is never
+  stored, logged, returned or quoted in an error (compilation §13); its parse
+  failures give a fixed refusal, `422 validation-failed` with a `rule` of
+  `first-key-unusable`, `first-key-no-ca-key`, `first-key-role-insufficient` or
+  `first-key-endpoint-no-control-plane`, and a failed Talos read is
+  `503 talos-access-unavailable` (§3.3, failure). Nothing is written on a refusal.
+- **Authority.** An `author` supplies and replaces a first key, human only, with
+  no approval step (owner decision BW-874-first-key-authority-1, 2026-11-18
+  17:41 CET: "A"). Every supply and replacement is recorded in the audit trail
+  as an act (§10.5) naming the author, the cluster, the kind, whether it
+  replaced a key, the CA certificate's fingerprint and the key's version
+  identity, never a value.
+- **The signer.** One component identity, the signer, reads and writes
+  `secret/data/access/talos-ca/*` and nothing else (create, read and update; no
+  list or delete). It signs in process memory and hands the ingestion and the
+  executor only a certificate and its key. The key is stored per cluster under a
+  path derived from the cluster's id, and the audit records are keyed by cluster,
+  so that a later split by tenant selects paths without rewriting this contract.
+  Whether the signer identity itself splits is a question for the per-tenant
+  design, which waits for a design discussion with the owner. Naming the signer
+  proves no isolation inside the one process (design §13.2).
+- **What it signs.** Per use, never stored: the lowest role the use needs
+  (`os:reader` for an observation that does not read the machine configuration;
+  `os:admin` for the configuration read of an ingestion or a drift, restoration
+  or recovery observation, and for dispatch), for a lifetime that covers the use
+  and no more, below a configured maximum (the value belongs to the
+  implementation, not to this contract). The certificate's `NotBefore` is the
+  signer's clock at signing; the node's clock is not read.
+- **Expiry is the only revocation, and a connection closes with it.** Nothing
+  revokes one certificate: Talos has no per-certificate revocation evidenced
+  (design §13.2) and a held connection answered a request after `NotAfter` in
+  the one sample measured. So Bronzeward closes every Talos connection at or
+  before the `NotAfter` of the certificate it was opened with, and a lifetime
+  bounds only how long a leaked certificate opens new connections. A leaked
+  `os:admin` certificate bounds nothing else: it can read the key. Replacing the
+  CA key stops new connections under the old CA only once the cluster's Talos
+  configuration no longer trusts it; that, and a held connection across it, were
+  not measured.
+- **Replacing a first key** is another `POST` to the same route. The old CA key
+  version stays in the provider as history; a dispatch in flight keeps the
+  version its evidence read (§3.3).
 
 ## 4. Revisions and optimistic concurrency
 
@@ -1830,6 +1915,7 @@ idempotency and conflict behavior.
 | `GET /identity` (the caller's own identity; no query, no ETag): `kind` (`human` or `service`); `issuer` and `subject` for a human, `service`, the service identity's name, for automation, each `null` for the other kind; `principal`, its identifier, `null` for a human with no row yet, which the read does not create (§10); `roles`, those the credential maps to in design §13.7's order, `[]` for none; `expiresAt`, the token's `exp` or the automation token's expiry; `epoch`, the epoch the read held, as its `Bronzeward-Epoch`. Nothing else of the credential, its token ID and claims included | 200 | any authenticated credential, roles or none (§10.3) |
 | `GET /principals?id=…` (what principal identifiers name, for display; no ETag): `items`, one entry per distinct identifier given, in the order first given: `id`; `kind`, `human`, `service` or `unknown`, the last for an identifier no row holds; `issuer`, `subject` and `display`, its display name, `null` when it has none (§10), for a human, `service`, the service identity's name, for a service, each `null` otherwise. Nothing else of the row, its revocation and responsible human included; the read records no act **(choice §17.40)** | 200 | any role |
 | `GET /server` (the version, API revision, features and start mode of the process that answered, and the read-only settings a client shows) | 200 | any role |
+| `POST /clusters/{id}/first-keys` (supply or replace a cluster's first key, §3.4); synchronous, no operation | 200 with `cluster`, `kind`, `caKeyVersion`, `replaced`; an act (§10.5) | `author`, human only (§10.3) |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
 | `GET /import-base-revisions/{id}` (the summary of an import base revision, §3.2; no query, no ETag): `id`; `machine`; `author`, the principal that wrote it; `createdAt`; `documentBytes`, the size of its sanitized document; `references`, how many reference rows it holds; `embedded`, how many embedded entries it holds. No document text, no digest, no reference name and no generation path **(choice §17.38)**; the read records no act | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
@@ -2768,7 +2854,7 @@ counter, not the ETag token, so the token is not named.
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
 | 501 | `not-implemented` | a routed §9.2 route whose handler has not landed yet: routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
 | 503 | `dependency-unavailable` | the provider is sealed or unreachable, or the process has no provider, or no executor, that the route needs; authentication could not reach the identity provider or the database; or the database failed while the request ran: the installation-state read made once it authenticated (§9.1), its first-use principal row (§10) or the row an identity revocation records or reads for the subject it names by `iss` and `sub` (§10, §10.4), its key's lookup or its own transaction, or a connection lost or refused in a transaction its route runs before its own (§7.2); or the provider refused or could not decrypt a staged envelope for a review (§9.3). A request so answered committed nothing of its own transaction; what an earlier one committed stays (§14). A publication also uses this code for missing or unreadable identity, running version or Talos access (§6.1.1), naming the machine, observation, rule and safe cause; later compiler dependency failures name the dependency (§6.1). Publication commits no release or Desired change on refusal, but its operation, act, events and already recorded observations remain. Ingestion and dispatch Talos access failures use `talos-access-unavailable` |
-| 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or the cause recorded by a dispatch's use-time check or fresh observation that failed on it (execution and recovery §3.1): the cluster's Talos access configuration is absent, unreadable by the identity, unreachable behind a sealed or silent provider, not a usable talosconfig or refused by Talos, or the machine's Talos endpoint did not answer (§3.3); or the node answered with a machine configuration this server cannot decode, which gives the cause `machine-config-undecodable` (a document kind newer than the server's Talos machinery; retrying does not help, the machinery has to move); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1). A publication observation also retains this code in its unread values, while the publish operation reports `dependency-unavailable` under §6.1.1 |
+| 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or the cause recorded by a dispatch's use-time check or fresh observation that failed on it (execution and recovery §3.1): the cluster's Talos CA key is absent, unreadable by the signer, unreachable behind a sealed or silent provider, not a usable signer, or the certificate signed from it is refused by Talos, or the machine's Talos endpoint did not answer (§3.3); or the node answered with a machine configuration this server cannot decode, which gives the cause `machine-config-undecodable` (a document kind newer than the server's Talos machinery; retrying does not help, the machinery has to move); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1). A publication observation also retains this code in its unread values, while the publish operation reports `dependency-unavailable` under §6.1.1 |
 | 503 | `transient-conflict` | deadlock retries exhausted in the request's own transaction, or serialization failure on every attempt of the position read's snapshot (§9.3), or, as the error of a failed `publish` operation, in its T3 (§5 rule 5, §6.2); §14 gives the answer when the deadlock is in a transaction the route runs before the request's own |
 | 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing of the request's own transaction was committed, while a draft entry's staging claim, or a scope mark's recorded observation or only its `observation-started` entry, or a principal row, committed before it stays (§7.2, §9.2, §14). Its `Bronzeward-Epoch` can name the epoch the entry replaced (§9.1) |
 | 503 | `schema-mismatch` | never served: the server does not start (§11) |
@@ -3837,13 +3923,13 @@ each (design §7.7 consequences):
   a `paused` claim abandoned by the operator, by the sweep at its absolute
   expiry and by recovery-mode entry, and kept `paused` across a server
   restart;
-- Talos access (§3.3): the ingestion and executor identities each reading
-  `secret/data/access/talos/<cluster id>`, and the compiler, metadata and
-  normal API identities refused it, with a control that grants the compiler
-  the read and must then succeed; the ingestion and executor identities each
-  refused write, list and delete on the access path, with a control that
-  grants one of them `update` and must then succeed; the ingestion identity
-  refused every `secret/data/gen/*` read; a
+- Talos access (§3.3): the signer identity alone reading
+  `secret/data/access/talos-ca/<cluster id>`, and the ingestion, executor,
+  compiler, metadata and normal API identities each refused it, with a control
+  that grants the compiler the read and must then succeed; the signer refused
+  list and delete on the access path, with a control that grants it `delete`
+  and must then succeed; the ingestion identity refused every
+  `secret/data/gen/*` read; a
   `source: machine` ingestion failing `machine-identity-mismatch` with nothing
   kept against a node whose SMBIOS UUID differs, reports none for a machine
   recorded by one, or reports one for a machine recorded by node ID; whose
@@ -3856,12 +3942,11 @@ each (design §7.7 consequences):
   each SMBIOS case against a stubbed Talos
   response, since the fixture's nodes report none (execution and recovery
   choice §10.26); each cause §3.3 lists for
-  `talos-access-unavailable` (an absent secret, the reading identity's read
-  denied, OpenBao sealed and partitioned, a malformed talosconfig carrying a
-  synthetic client key, a well-formed credential Talos refuses, another
-  cluster's talosconfig under a certificate authority the node does not trust
-  at this cluster's path, an endpoint that does not
-  answer), through both readers: for an ingestion, failing with it, the
+  `talos-access-unavailable` (an absent CA key, the signer's read denied,
+  OpenBao sealed and partitioned, a CA key that is not a usable signer
+  carrying a synthetic key, a well-formed credential Talos refuses, another
+  cluster's CA key, one the node does not trust, at this cluster's path, an
+  endpoint that does not answer), through both readers: for an ingestion, failing with it, the
   claim `abandoned` and the operation `failed` with its terminal event and no
   generation; for dispatch, the provider-side causes failing the use-time
   check (execution and recovery §3.1 item 2) and a refused credential or a
@@ -3871,7 +3956,7 @@ each (design §7.7 consequences):
   the access version it read, and on a failed access read none of the node's
   values and its cause, with a control that reuses a credential read before a
   rotation and must then be told apart by its version; for each, no part of the
-  talosconfig in the problem, the timeline, the logs or the
+  CA key or certificate in the problem, the timeline, the logs or the
   scan, with a control that passes the parser's or client's error text through
   and must then be caught; `POST /machines` and the replacement route each
   refusing `invalid-request` with nothing committed for an endpoint with a
@@ -3882,8 +3967,8 @@ each (design §7.7 consequences):
   `created_time`, with a control that deletes the path's metadata and rewrites
   it, whose new version the record must tell apart; an ingestion's access
   version and dialled endpoint read back from its `ingest` operation's events
-  after a success and after a failure following the read (a malformed
-  talosconfig, a refused credential, an identity mismatch); reads of the fixture's worker by its own endpoint with no
+  after a success and after a failure following the read (an unusable CA
+  key, a refused credential, an identity mismatch); reads of the fixture's worker by its own endpoint with no
   `node` metadata, under an explicit port and the default port;
   an endpoint replacement from A to B after a plan was created, the plan
   still bound to A, its evidence and completion observations dialling A and
@@ -3892,9 +3977,9 @@ each (design §7.7 consequences):
   timeline entry and its act all present or all absent, with a control that resolves the
   route from the machine record at dispatch and must then fail; the same
   replacement accepted in recovery mode on a scope still pre-restore
-  unaccounted; a talosconfig whose contexts' `endpoints` and `nodes` name the
-  fixture's other node, every read still reaching the endpoint chosen with no
-  `node` metadata; a rotation between a dispatch's evidence observation
+  unaccounted; a first-key talosconfig whose contexts' `endpoints` and `nodes`
+  name the fixture's other node, every later read still reaching the endpoint
+  chosen with no `node` metadata; a rotation between a dispatch's evidence observation
   and its attempt, the attempt still using the version the observation used,
   with a control that reads the latest version at send and must then fail,
   and a rotation before a retry, the retry's evidence and attempt both using
@@ -3908,9 +3993,28 @@ each (design §7.7 consequences):
   allowlist by test, with a control that adds a mutating call and must then
   fail, a `drift` observation succeeding with no plan, and the mutating
   client refused for a plan whose approval was revoked; and the
-  talosconfig's client key in compilation §15's scan of the database, logs,
-  responses and temporary files, over successful, refused and interrupted
-  ingestions, executor observations and dispatches, with a positive control;
+  CA key and the signed client key in compilation §15's scan of the database,
+  logs, responses and temporary files, over successful, refused and
+  interrupted ingestions, executor observations and dispatches, with a
+  positive control;
+- first keys and the signer (§3.4), on the fixture, synthetic inputs only: each
+  of a control plane configuration, an endpoint with a secrets bundle and an
+  `os:admin` talosconfig supplied through `POST /clusters/{id}/first-keys`,
+  leaving the CA key stored at `secret/data/access/talos-ca/<cluster id>` and a
+  certificate signed from it accepted by the node, with the controls that a
+  worker configuration, a configuration with no CA key (`first-key-no-ca-key`),
+  an `os:reader` talosconfig (`first-key-role-insufficient`) and a talosconfig
+  whose endpoints reach no control plane
+  (`first-key-endpoint-no-control-plane`) are each refused with nothing
+  written, and that a certificate signed by an unrelated CA is refused by the
+  node; the roles by use (`os:reader` for an observation that does not read
+  the configuration, `os:admin` for the rest) and a lifetime that covers the
+  use and no more; no Talos connection kept past its certificate's
+  `NotAfter`, with a control that holds one open past it and must then fail
+  the test; every supply and replacement recorded as an act by an `author`
+  with no approval step, with a control that requires an approval and must
+  then fail; the audit act and every response free of the document and the
+  key, in compilation §15's scan, with a positive control;
 - the orphan report (§6.4): the orphan-report identity's token carrying
   exactly one policy, whose rules, read back from the provider with the
   fixture's administrative token, grant `read` and `list` on
@@ -3919,7 +4023,7 @@ each (design §7.7 consequences):
   does not rest on a list of probes; the identity listing
   `secret/metadata/gen/` and `secret/metadata/gen/<cluster id>/` and a
   claim's directory under it and reading a generation's metadata, and refused
-  each of: a `secret/data/gen/*` read and a `secret/data/access/talos/*` read
+  each of: a `secret/data/gen/*` read and a `secret/data/access/talos-ca/*` read
   (`read`), a `list` of `secret/metadata/access/` (`list`) and a read of an
   access path's metadata under it (`read`), a Transit encrypt and decrypt
   (`update` on the key's `transit/encrypt/` and `transit/decrypt/` paths), and
@@ -4182,23 +4286,33 @@ design and evidence do not settle the question. Each is marked in place as
     another only at that cluster's next publication, reviewed in its plan's
     diff. Alternatives: a library change in a draft of its own; a publication
     that covers every cluster using the changed fragment.
-29. **Talos access: the endpoint per machine in the database, the credential
-    per cluster in the provider at a path derived from the cluster's id,
-    written by the operator and read at use by the ingestion and executor
-    identities** (§3.3). Owner decision, 2026-10-02 (ginsys/bronzeward#22):
-    the secret provider holds management credentials (design §7.1), so the
-    credential gets the provider's versions, audit and backup pairing, and
-    each cluster's credential stays its own. Alternatives: one
-    deployment-wide talosconfig file named in the server's configuration,
+29. **Talos access: the endpoint per machine in the database, the cluster's
+    Talos CA key per cluster in the provider at a path derived from the
+    cluster's id, held by the signer identity, which signs a short-lived
+    certificate per use for the ingestion and executor identities** (§3.3,
+    §3.4). Replaces the choice of 2026-10-02 (ginsys/bronzeward#22): an
+    operator-written, provider-held talosconfig. Owner decision, 2026-11-18
+    17:08 CET (ginsys/bronzeward#869): Bronzeward supports every first key
+    (a control plane configuration, an endpoint with a secrets bundle, a
+    talosconfig) and keeps the signing key. The reasons of the 2026-10-02
+    choice stand where they still apply: the provider holds management
+    credentials (design §7.1), so the key gets the provider's versions, audit
+    and backup pairing, and each cluster's key stays its own. Alternatives:
+    the operator-written talosconfig (a lifetime and rotation the operator
+    owns, and a standing `os:admin` credential in the provider; kept as the
+    decision of 21 October 2026 until the owner reversed it); one
+    deployment-wide credential file named in the server's configuration,
     which keeps a credential for every cluster outside the provider and its
     backups; a credential stored per machine, which Talos does not have (one
-    cluster authority signs for every node); a route accepting the
-    talosconfig, which would carry a secret through the normal API.
-    Executor observations, which may have no plan, use a read-only client
-    and need no approval; only decryption and mutating requests do (§3.3;
-    owner decision, 2026-10-02). Alternatives: a separate observer identity,
-    holding the same mutation-capable credential; observations under the
-    ingestion identity, which can write secret generations.
+    cluster authority signs for every node); a route that accepts the key
+    through the normal API without extraction before persistence; a stored
+    long-lived certificate signed once, which a short lifetime per use
+    avoids holding. Executor observations, which may have no plan, use a
+    read-only client and need no approval; only decryption and mutating
+    requests do (§3.3; owner decision, 2026-10-02). Alternatives: a separate
+    observer identity, holding the same mutation-capable credential;
+    observations under the ingestion identity, which can write secret
+    generations.
 30. **The orphan report lists generation paths under an identity of its own,
     `read` and `list` on `secret/metadata/gen/*` only, with its own token
     file** (§6.4). Owner decision, 2026-10-03 (ginsys/bronzeward#22): a
@@ -4365,7 +4479,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
 | §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31, §17.32 |
-| §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.14.5, the same result as on v1.13.6); the provider read grant on `secret/data/access/talos/*` not measured (choice §17.29) |
+| §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.14.5, the same result as on v1.13.6); signing from a control plane configuration or a secrets bundle, a key read through an `os:admin` talosconfig, and a node accepting the signed certificate: [signing locally](../design/research/20261118-local-talos-signing.md) and [the extraction](../design/research/20261118-local-talos-signing-extract.md), Talos v1.14.5 only; revocation, CA rotation and a held connection across a CA replacement not measured; the provider grants on `secret/data/access/talos-ca/*` not measured (choice §17.29) |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7; bodies and bindings: choice §17.35 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |
 | §5 transactions | §7.2, §7.4 | DB §4.2 rows 059, 061; [DB §6.3](../design/research/20260924-database-semantics.md#63-criterion-3-backend-specific-limitations-and-costs); [DB §7](../design/research/20260924-database-semantics.md#7-limits); [DS §7](../design/research/20260925-dispatch-safety.md#7-limits) |
