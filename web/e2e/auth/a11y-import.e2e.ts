@@ -12,7 +12,7 @@
 // the page is asked only booleans about a review. No case takes a screenshot or a trace
 // (retention.test.ts reads this source). After each case the storage check finds nothing in storage,
 // IndexedDB or caches, and the protected cases find no cached answer of their review.
-import { $, $$, browser, expect } from "@wdio/globals";
+import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
 import { api, cacheControl, cacheHolds, disposable, fixtureSignIn, focusKept, focused, fromTitle, hex, measure, narrow, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
@@ -47,8 +47,9 @@ async function startImport(staging: "encrypted" | "transient", review: boolean, 
   const i = await api(at, "h-author", "POST", "/ingestions", { kind: "import", machine, draft: d.id, source: "document", staging, review, document: syntheticDocument(docName) }, d.etag);
   expect(i.status).toBeLessThan(300);
   const id = i.body!["ingestion"] as string;
-  await browser.waitUntil(async () => (await api(at, "h-author", "GET", `/ingestions/${id}`)).body?.["state"] === state, { timeout: 60_000, interval: 500, timeoutMsg: `the import did not reach ${state}` });
+  // Held before the wait, so the cleanup finds an accepted import whose state never arrives.
   importId = id;
+  await browser.waitUntil(async () => (await api(at, "h-author", "GET", `/ingestions/${id}`)).body?.["state"] === state, { timeout: 60_000, interval: 500, timeoutMsg: `the import did not reach ${state}` });
   return id;
 }
 
@@ -65,6 +66,12 @@ async function leavesNothing() {
   await storageEmpty();
   if (importId !== "") expect(await cacheHolds(`/api/v1/ingestions/${importId}/review`)).toBe(false);
   importId = "";
+}
+
+// ArrowDown on the focused select until it holds `value`: the deployment may offer other drafts and machines.
+async function arrowUntil(sel: string, value: string) {
+  for (let i = 0; i < 20 && (await $(sel).getValue()) !== value; i++) await browser.keys("ArrowDown");
+  expect(await $(sel).getValue()).toBe(value);
 }
 
 // Whether the review text holds the tier label of the document the case staged, answered in the page
@@ -128,10 +135,10 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     // The machine, then the draft the machine's cluster offers: a select takes the arrow keys.
     await $(`select[name="machine"] option[value="${machine}"]`).waitForExist({ timeout: 20_000 });
     await tabTo((f) => f.tag === "SELECT" && f.name === "machine", "the machine select");
-    await browser.keys("ArrowDown");
+    await arrowUntil('select[name="machine"]', machine);
     await $(`select[name="draft"] option[value="${d.id}"]`).waitForExist({ timeout: 20_000 });
     await tabTo((f) => f.tag === "SELECT" && f.name === "draft", "the draft select");
-    await browser.keys("ArrowDown");
+    await arrowUntil('select[name="draft"]', d.id);
     expect(await $('select[name="machine"]').getValue()).toBe(machine);
     expect(await $('select[name="draft"]').getValue()).toBe(d.id);
     // The source radios: Tab enters the group, an arrow key picks the document.
@@ -359,7 +366,9 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await expect($("label*=Their text")).toBeExisting();
       await narrow(async () => {
         expect(["the conflict view", await overflows()]).toEqual(["the conflict view", 0]);
-        expect((await $$("main section textarea")).length).toBeGreaterThanOrEqual(2);
+        // Each comparison label holds its own read-only textarea; the page answers a boolean, never a text.
+        const both = await browser.execute(() => ["Their text", "Your text"].every((t) => [...document.querySelectorAll("main label")].some((l) => l.firstChild?.textContent?.trim() === t && l.querySelector("textarea") !== null)));
+        expect(both).toBe(true);
       });
     });
   });
