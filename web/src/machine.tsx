@@ -8,7 +8,7 @@ import type { components } from "./api/v1";
 import { ChangeEndpoint } from "./forms.tsx";
 import { type Dropped, Head, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, node, release } from "./machines.tsx";
-import { NextStep } from "./nextstep.tsx";
+import { NextStep, OuterSettle } from "./nextstep.tsx";
 import type { ReadResult } from "./request.ts";
 import { clock, Status } from "./states.tsx";
 
@@ -308,9 +308,11 @@ export function MachineItem({ id }: { id: string }) {
   // flight.
   const readAgain = useCallback(() => step("advance"), []);
   return (
-    <ReadsProvider value={{ ...reads, settle, again: reads.again + again.n }}>
-      <MachineState id={id} path={path} tl={tl} older={older} busy={busy} readAgain={readAgain} changed={readAgain} />
-    </ReadsProvider>
+    <OuterSettle.Provider value={reads.settle}>
+      <ReadsProvider value={{ ...reads, settle, again: reads.again + again.n }}>
+        <MachineState id={id} path={path} tl={tl} older={older} busy={busy} readAgain={readAgain} changed={readAgain} />
+      </ReadsProvider>
+    </OuterSettle.Provider>
   );
 }
 

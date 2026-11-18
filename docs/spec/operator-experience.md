@@ -197,8 +197,9 @@ from matching release IDs, names or sources.
 steps above and the next step, with its link. It comes from the machine's `desired` and `applied` and from
 reads that the page makes only in the states that need them, all of them existing list filters:
 `GET /ingestions?machine=` and, for the newest import that stored a draft, `GET /drafts/{id}`; and
-`GET /plans?machine=&state=proposed` and `...&state=approved`. No route is added and `GET /drafts` is not read
-(it has no filter). The states overlap, so the first match of this order wins:
+`GET /plans?machine=&state=proposed`, `...&state=approved` and `...&state=committed`. No route is added and
+`GET /drafts` is not read (it has no filter). These reads keep no earlier answer: one that finds no answer
+removes the line. The states overlap, so the first match of this order wins:
 
 | Order | State | Line says | Link |
 | --- | --- | --- | --- |
@@ -210,9 +211,11 @@ reads that the page makes only in the states that need them, all of them existin
 | 6th | the same, no such plan, and `applied` is null | a publisher creates an adopt plan (handover) | Create plan |
 | 7th | No `desired`, no `applied`, and none of the first two | not handed over: no `Desired` and no `Applied`; import the configuration, which writes nothing to the node | Import this machine |
 
-Any other state shows no line: open drift, a `desired` that `applied` already carries, `applied` with no
-`desired`, a `committed` plan, an operation in flight. So does a state whose read has not answered or failed;
-the line is never "nothing to do" in its place. A plan for another release than `desired` is not counted. A
+Any other state shows no line: open drift (checked before the order), a `desired` that `applied` already
+carries, `applied` with no `desired`, and a `committed` plan for the selected release, which means an
+operation is in flight (checked before the 3rd to 6th rows, so it also removes the line an `approved` or
+`proposed` plan would give). So does a state whose read has not answered or failed; the line is never
+"nothing to do" in its place. A plan for another release than `desired` is not counted. A
 draft found another way than through the machine's import is not shown, since `GET /drafts` has no filter.
 
 ### 2.4 Desired, applied and observed
