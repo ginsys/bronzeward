@@ -1,0 +1,37 @@
+Bronzeward #714: sanitized activation evidence for a node label on Talos v1.14.5
+Date: 18 November 2026, 12:07 to 12:12 CET (second of two fixture runs; the first is described under Findings)
+Test source of the run: 41c681b10c7b385b117c75fac3c3f8a0d58b7d41 (the published test differs only in the hold handling of commit c3ed52fb, which was not rerun on a fixture)
+Environment: fixture of fixtures/versions.env, Talos v1.14.5 on both nodes (talosctl client and node tag v1.14.5, SHA dad8d3ed), kubelet image v1.36.2, containers on one Docker daemon
+Worker: 10.55.0.3. Label: bw-act, value "yes". Mode: no-reboot (design line 845).
+Not included: the machine configuration itself (it holds the cluster's synthetic secrets). Every read below was reduced to the lines that name the label, a resource version or a count.
+
+Procedure (one command per line; talosctl is the pinned copy in fixtures/.cache, run as `talosctl --talosconfig fixtures/.state/talosconfig -e 10.55.0.3 -n 10.55.0.3 ...`)
+1. fixtures/bin/up, then fixtures/bin/evidence (versions above).
+2. get rd, filtered for "label": one line, nodelabelspecs.k8s.talos.dev, alias nls (assumption 1: the resource exists).
+3. Baseline: get machineconfig -o yaml (Read A), get nodelabelspecs -o yaml (Read B), kubectl get node bw-fixture-worker-1 --show-labels (Read C, with the fixture's kubeconfig). Read B printed nothing: no label resource existed. The worker's one KubeNodeConfig document held `nodeIP: {}` and no labels.
+4. A poller reads A, B and C about once a second for 100 seconds and prints, per sample, how many lines of each read name bw-act.
+5. BW_TEST_TALOSCONFIG=fixtures/.state/talosconfig BW_TEST_TALOS_ENDPOINT=10.55.0.3 BW_TEST_ACTIVATION_HOLD=60s go test -count=1 -v -run TestLiveApplyLabelDocument ./internal/talos (E1; the test adds the label to the worker's own KubeNodeConfig document, applies it in no-reboot mode, reads A, holds the label 60 s, then restores the original configuration).
+6. E5: talosctl apply-config --mode=staged -f <the original configuration with the label added to its KubeNodeConfig document>, then the same three reads 5 s later, then the original configuration applied the same way.
+7. fixtures/bin/down.
+
+Observed
+E1 (test log, 12:10:01.705): the apply answered class accepted, code OK, "the node accepted the configuration in no-reboot mode". classifyApply accepts only one message, no error and mode NO_REBOOT, so the node named NO_REBOOT.
+E2 (test log): Read A showed the label 3 ms after the apply. The active machine configuration (the resource the PoC's Reader reads, id v1alpha1) went from resource version 1 to 2; its digest went from c83d3f2a...b4852 to 9d1f41e7...ce626. After the restore: version 3 and the original bytes (cmp equal).
+E3 and E4 (poller, lines that name bw-act as A/B/C):
+  12:09:59.57  A=0 B=0 C=0   before
+  12:10:00.72  A=0 B=0 C=0   last sample before the apply
+  12:10:01.90  A=2 B=2 C=1   first sample after the apply (the apply answered at 12:10:01.705)
+  ... unchanged until ...
+  12:11:01.82  A=2 B=0 C=0   the restore was applied at 12:11:01.71; B and C had cleared, A was read just before
+  12:11:03.02  A=0 B=0 C=0   gone everywhere, and it stayed so to the last sample at 12:11:56
+A, B and C all showed the label in the first sample after the apply, which ended 0.2 s after the apply answered, and the previous sample, 1.2 s earlier, showed none. A=2 is the two machine configuration resources (persistent and v1alpha1); C=1 is the one Node line.
+E5 (staged apply, 12:11:57): the command answered "Staged configuration to be applied after the next reboot". Five seconds later the stored configuration (resource id persistent, version 4) named bw-act on one line; the active configuration (id v1alpha1, version 3) did not; Read B printed nothing; Read C showed no bw-act. The revert, applied the same way, was accepted.
+
+Differences from the plan of #714 (both values)
+- E5 expected "Read A shows the label and Read B does not". Read A as the PoC takes it is the active configuration, and that did not show the label; the stored configuration did. The control is met in the other pair of reads: stored shows it, active, B and C do not.
+- E1 was to log the mode the node named. The test logs the classified answer: accepted proves NO_REBOOT, and any other mode would show as unrecognised with code OK, which fails the test. It does not print the mode itself, because the apply path is held to one send by guard_test.go and Response carries no mode.
+- The label goes into the worker's existing KubeNodeConfig document. A first run appended a second document and stopped on the test's own control; a staged apply of that same text was refused by the node as a duplicate (InvalidArgument, "duplicate document v1alpha1/KubeNodeConfig/ is not allowed").
+- Read C was taken for the worker node only (the fixture's control plane is a second node and was not labelled).
+
+Limits
+One run, one worker; the poller samples about once a second; E5 is one read 5 s after the staged apply, so it shows the state at that moment and no later one. The fixture shows no reboot, service restart or disk behavior, so nothing here evidences any class other than the label patch. A control-plane node was not applied to. The server cannot take Read B (the Reader reads the active machine configuration only): see ginsys/bronzeward#237.
