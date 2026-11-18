@@ -163,21 +163,33 @@ The blast radius of C is smaller than it first reads: the compiler identity has 
 on `secret/data/gen/*` (compilation
 [§1](../../spec/compilation.md#1-scope-roles-and-interfaces)), where adoption already
 puts a control plane's CA keys, so the application already reads them to render
-configurations. What C adds is the same material in the executor path, where
-today a stolen credential expires with its certificate and a stolen CA key does not.
+configurations. What C adds is possession of the CA signing key and a local signing
+capability in the executor path. It does not contrast with an expiry-bounded
+administrator credential, because none exists: design §13.2 rejects that bound and the OIDC note observed
+that an `os:admin` holder can mint a longer-lived certificate before expiry and that an
+established connection survives expiry
+([OIDC note](20261021-talosctl-oidc.md), certificate expiry and administrator reminting
+rows).
 
 ### 5. Rotation and evidence binding
 
 Today a dispatch binds evidence to the credential's path, KV version and `created_time`
 ([execution and recovery §3.1](../../spec/execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction),
 [persistence and API §3.3](../../spec/persistence-api.md#33-talos-access)), because a
-version number alone is not an identity after a metadata delete or a restore. A
-generation is create-only at a path of its own with a random component
-([compilation §2.3](../../spec/compilation.md#23-pipeline) step 6), so its identity is
-the generation's path, and rotation is a new generation with the old one never deleted
+version number alone is not an identity after a metadata delete or a restore.
+
+An access generation is create-only at a path of its own with a random component
+([compilation §2.3](../../spec/compilation.md#23-pipeline) step 6), and rotation is a
+new generation with the old one not deleted by the PoC
 ([design §7.8](../Talos_Configuration_and_Machine_Management_Design.md) item 1). That
-keeps the evidence rule and drops the `created_time` workaround. The cluster record then
-needs a pointer to the current access generation, and history of the pointer is
+makes a path collision on re-creation unlikely, but it does not remove the need for
+`created_time`: an administrator can still delete a version or the metadata, and a
+restore can recreate it, which is why compilation
+[§9](../../spec/compilation.md#9-dependency-records) pins every generation to its
+`created_time`. B keeps that binding: path, version and `created_time` of the access
+generation, read at use as today. Dropping it would be a separate contract change with
+its own safety requirement, and the note does not propose it. What B adds is a pointer
+on the cluster record to the current access generation, and the pointer's history is
 evidence a dispatch can bind.
 
 ### 6. Effect on ginsys/bronzeward#855, ginsys/bronzeward#856 and the held PR ginsys/bronzeward#867
@@ -189,11 +201,18 @@ web console; [#867](https://github.com/ginsys/bronzeward/pull/867) carries the
 specification and is open and idle.
 
 - A: all three stand.
-- B: presence becomes a database fact (an access generation is recorded for the
-  cluster). The route `GET /clusters/{id}/talos-access` survives as a database read;
-  the access-presence identity, the provider read, the deleted-versions answer and the
-  `503 talos-access-unavailable` row are not needed. Most of ginsys/bronzeward#867 is replaced;
-  ginsys/bronzeward#856 is unaffected in what it shows.
+- B: a database record of the access generation says the material was ingested, not
+  that the provider still holds it: an administrative deletion or a provider restore
+  leaves the record intact. ginsys/bronzeward#867 defines presence from current
+  provider metadata, and ginsys/bronzeward#856 asks for distinct present, absent and
+  provider-unreachable displays. So B has two ways to go, an owner choice inside it:
+  keep the provider metadata read for the current generation (the access-presence
+  identity, the deleted-versions answer and the `503` rows of ginsys/bronzeward#867
+  stay, aimed at the generation's path instead of the fixed path), or redefine the
+  display as "ingested" and amend the scope of ginsys/bronzeward#856. Only the second
+  retires most of ginsys/bronzeward#867, and it changes what the console reports. The
+  note recommends keeping the provider read, so B changes ginsys/bronzeward#867's
+  target path and little else.
 - C: as B.
 
 ## Alternatives compared
@@ -204,8 +223,8 @@ specification and is open and idle.
 | Created cluster same as imported | no: a created cluster has no admin talosconfig unless something signs one | no, unless creation also signs one | yes: both end as a bundle plus signing |
 | Newly held by Bronzeward | nothing new | an admin certificate and key, as today, now written by an API | the CA keys in the executor path |
 | Rotation | operator writes a new KV version | new generation by ingestion, old kept | mint a new certificate, no operator step |
-| Evidence binding | path, version, `created_time` | generation path | generation path of the CA key, plus the issue record of each certificate |
-| Contracts changed | none | §3.3, compilation (new input kind, a new create-only identity), `cluster onboard`, ginsys/bronzeward#855 and ginsys/bronzeward#867 shrink | all of B, plus a bundle assembler and a signer, and ginsys/bronzeward#266 reopened |
+| Evidence binding | path, version, `created_time` | the same, on the access generation | the same, on the CA key generation, plus the issue record of each certificate |
+| Contracts changed | none | §3.3, compilation (new input kind, a new create-only identity), `cluster onboard`, and the path that ginsys/bronzeward#855 and ginsys/bronzeward#867 read | all of B, plus a bundle assembler and a signer, and ginsys/bronzeward#266 reopened |
 | Cost | none | a new input kind and identification list; an author-authority decision | B plus new evidence and an owner reopening |
 | First read of an existing cluster | needs the operator's admin talosconfig | needs it (the ingested input) | needs a control plane configuration file or an admin talosconfig once |
 
@@ -228,9 +247,10 @@ Alternative B, with C kept as the follow-on that created clusters
 
 - B tests the hypothesis with the smallest step: the pipeline already extracts and
   forgets; B adds one input kind. It removes the person-with-an-OpenBao-token from
-  access ingestion and turns presence into a database fact, which shrinks
+  access ingestion. It leaves
   [#855](https://github.com/ginsys/bronzeward/issues/855) and
-  [#867](https://github.com/ginsys/bronzeward/pull/867).
+  [#867](https://github.com/ginsys/bronzeward/pull/867) standing with a new target
+  path, unless the owner also wants the display redefined (section 6).
 - It leaves [#266](https://github.com/ginsys/bronzeward/issues/266) standing in its
   second sentence, so no CA signing key joins the executor path on a decision that has
   no signing evidence.
