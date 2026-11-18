@@ -2481,10 +2481,11 @@ change:
   (its bound values equal the machine's), so the step is `awaiting-dispatch`,
   never `not-handed-over`; an adopt plan whose adopted `release` differs from the
   machine's `desired` is picked on the same ground.
-- Two `approved` plans for one `Desired` release, one of which has completed: the
-  other bound the baseline revision from before the completion, so it fails the
-  comparison, `plan` is null and the step falls to the machine's own fields, with
-  nothing said of the stale plan.
+- Two plans approved for one `Desired` release, one of which then commits and
+  completes (it reads `committed` and the machine's baseline revision advances):
+  the other still reads `approved` and bound the baseline revision from before the
+  completion, so it fails the comparison, `plan` is null and the step falls to the
+  machine's own fields, with nothing said of the stale plan.
 
 `machine.frozen`, `machine.scopeState` and `rolloutHeldBy` come from the same
 snapshot, so a client that says why an approved plan waits reads one answer, and
