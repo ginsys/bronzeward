@@ -37,9 +37,9 @@ describe("the line for a machine that is not handed over", () => {
 describe("no line in any other state", () => {
   test("a selected release, an applied one, or both give no line", () => {
     expect(nextStep(machine({ desired: "rel_a" }))).toBeUndefined();
-    expect(nextStep(machine({ applied: { release: "rel_a", source: "adoption" } }))).toBeUndefined();
-    expect(nextStep(machine({ desired: "rel_a", applied: { release: "rel_a", source: "operation" } }))).toBeUndefined();
-    expect(nextStep(machine({ desired: "rel_a", applied: { release: "rel_old", source: "operation" }, pendingConvergence: true }))).toBeUndefined();
+    expect(nextStep(machine({ applied: { release: "rel_a", source: "adoption", importBase: null } }))).toBeUndefined();
+    expect(nextStep(machine({ desired: "rel_a", applied: { release: "rel_a", source: "operation", importBase: null } }))).toBeUndefined();
+    expect(nextStep(machine({ desired: "rel_a", applied: { release: "rel_old", source: "operation", importBase: null }, pendingConvergence: true }))).toBeUndefined();
   });
 
   test("open drift gives no line", () => {
