@@ -15,8 +15,12 @@ The owner decided on 18 November 2026, 17:08 CET, answering the access-model que
 [#869](https://github.com/ginsys/bronzeward/issues/869): "I think we must support all
 "first keys": TALOSCONFIG, controlplane node configs, or even an ip + secrets.yaml.
 Whatever the user provides, bw gets access and saves the signing keys". That reverses the
-2026-10-21 deferral of [#266](https://github.com/ginsys/bronzeward/issues/266) (design
-§13.2), which kept the CA signing key out of Bronzeward for lack of signing evidence.
+2026-10-21 decision of [#266](https://github.com/ginsys/bronzeward/issues/266) (design
+§13.2): Bronzeward keeps the operator-written talosconfig and does not issue Talos
+certificates; native issuance is deferred, not rejected, until new evidence (a lifetime
+cap, a read-only configuration role, or an exposure requirement that rotation cannot
+meet). The owner's direction is a new instruction, and this note does not weigh the
+decision's rationale (the authority and exposure of a held signing key).
 
 This note supplies that evidence: which first keys can yield a signer, what a locally
 signed certificate carries, whether a node accepts it, and what expiry and revocation
@@ -160,11 +164,13 @@ which from the code.
 - An `os:admin` holder can read a control plane's machine configuration, and with it the CA
   key (finding 1: `MachineConfig` read as `os:admin` returned 18627 bytes on the fixture;
   the key is in a control plane configuration), then sign any role set for any lifetime.
-  So a short lifetime shortens how long a leaked certificate stays accepted; it does not
-  bound what a leaked `os:admin` certificate can do before it expires. It narrows the
-  window for a non-admin role (`os:reader`, which was refused `MachineConfig`) and does not
-  narrow what the CA key grants. The OIDC note's "administrator reminting" observation is
-  the same point seen from a remote call.
+  So a short lifetime bounds only how long a leaked certificate can open new connections.
+  It does not bound what a leaked `os:admin` certificate can do, since that can read the
+  CA key and re-mint. It does not end a connection already open either: the OIDC note
+  shows a held connection surviving expiry for an `os:reader` certificate too, and the
+  holder of a leaked credential does not follow Bronzeward's own close policy. It narrows
+  nothing the CA key grants. The OIDC note's "administrator reminting" observation is the
+  same point seen from a remote call.
 
 ## Alternatives compared
 
@@ -174,7 +180,7 @@ which from the code.
 | Created and imported clusters | the same | an admin certificate must exist first | an admin certificate must exist first |
 | Lifetime and roles | the signer's choice, per use | whatever the stored certificate says | up to the caller's `os:admin` role, no maximum |
 | Revocation | expiry on new connections; withdrawing CA trust is unmeasured | expiry of the stored certificate | the same |
-| What a short lifetime bounds | the window of a leaked non-admin certificate; an `os:admin` one can re-mint | the same | the same |
+| What a short lifetime bounds | only new connections with a leaked certificate; not a held connection, and an `os:admin` one can re-mint | the same | the same |
 | Newly held secret | the CA key (ten-year validity) | a one-year client key | none beyond the first certificate |
 
 The owner chose the first column on 17:08 CET. The evidence supports it technically; what
