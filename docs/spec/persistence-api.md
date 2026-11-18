@@ -398,7 +398,8 @@ They are held apart **(choice §17.29)**.
   `bao kv put -mount=secret access/talos/<cluster id> talosconfig=@<file>`
   (the CLI takes the logical path and adds KV v2's `data/` itself; policies
   name the API path `secret/data/access/talos/*`; `bronzewardctl cluster discover` prints this
-  command with the file the operator named and runs it never), under
+  command with the file the operator named and runs it never; `bronzewardctl cluster onboard`
+  writes the secret itself, once, with the operator's own token), under
   an administrative identity, before the cluster's first `source: machine`
   ingestion; rotating it is writing a new version. No Bronzeward identity
   writes, lists or deletes it, and no route accepts it: the normal API never

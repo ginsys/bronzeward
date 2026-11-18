@@ -141,12 +141,14 @@ func (e *env) paged(name string, args []string, n int, l *listing, extra func(*f
 }
 
 func (e *env) clusterCmd(args []string) error {
-	if v, rest, err := e.verb("cluster", args, "list", "show", "add", "discover"); err != nil {
+	if v, rest, err := e.verb("cluster", args, "list", "show", "add", "discover", "onboard"); err != nil {
 		return err
 	} else if v == "add" {
 		return e.clusterAdd(rest)
 	} else if v == "discover" {
 		return e.clusterDiscover(rest)
+	} else if v == "onboard" {
+		return e.clusterOnboard(rest)
 	}
 	var l listing
 	_, pos, err := e.noun("cluster", args, &l, nil)

@@ -204,8 +204,18 @@ func (e *env) clusterAdd(args []string) error {
 	if err != nil {
 		return err
 	}
+	return e.write(clusterWrite(in, rp), func(_ *client.Client, r *client.Response) ([]string, error) {
+		var x apitypes.ClusterBody
+		err := json.Unmarshal(r.Body, &x)
+		return []string{sf("Cluster %s recorded: %s, endpoint %s, contract %s, Talos cluster ID %s.",
+			x.Id, x.Name, x.Endpoint, x.Contract, x.TalosClusterId)}, err
+	})
+}
+
+// clusterWrite is the write that records a cluster, which cluster add and cluster onboard send.
+func clusterWrite(in apitypes.ClusterInput, rp *client.Repeat) *client.Write {
 	body, _ := json.Marshal(in)
-	return e.write(&client.Write{Method: http.MethodPost, Path: "/clusters", Body: body, HumanOnly: true, Repeat: rp,
+	return &client.Write{Method: http.MethodPost, Path: "/clusters", Body: body, HumanOnly: true, Repeat: rp,
 		Check: "cluster list",
 		Read: func(c *client.Client) (string, error) {
 			// The server records the standard spelling of the ID, whichever alphabet the operator typed.
@@ -216,12 +226,7 @@ func (e *env) clusterAdd(args []string) error {
 			return find(c, "/clusters", "cluster with this Talos cluster ID", func(x apitypes.ClusterBody) string {
 				return map[bool]string{true: "the cluster " + x.Id + " (" + x.Name + ") with this Talos cluster ID"}[x.TalosClusterId == want]
 			})
-		}}, func(_ *client.Client, r *client.Response) ([]string, error) {
-		var x apitypes.ClusterBody
-		err := json.Unmarshal(r.Body, &x)
-		return []string{sf("Cluster %s recorded: %s, endpoint %s, contract %s, Talos cluster ID %s.",
-			x.Id, x.Name, x.Endpoint, x.Contract, x.TalosClusterId)}, err
-	})
+		}}
 }
 
 // machineAdd records a machine in a cluster, its Talos endpoint stored with the default port 50000
@@ -255,17 +260,7 @@ func (e *env) machineAdd(args []string) error {
 	if serial != "" {
 		in.Serial = &serial
 	}
-	body, _ := json.Marshal(in)
-	path := "/machines?" + url.Values{"cluster": {in.Cluster}}.Encode()
-	return e.write(&client.Write{Method: http.MethodPost, Path: "/machines", Body: body, HumanOnly: true, Repeat: rp,
-		Check: "machine list --cluster " + client.ShellWord(in.Cluster),
-		Read: func(c *client.Client) (string, error) {
-			return find(c, path, "machine with this identity", func(m apitypes.MachineBody) string {
-				h := m.Hardware
-				same := h.TalosNodeId != nil && *h.TalosNodeId == nodeID || h.SmbiosUuid != nil && strings.EqualFold(*h.SmbiosUuid, uuid)
-				return map[bool]string{true: "the machine " + m.Id + " with this identity"}[same]
-			})
-		}}, func(c *client.Client, r *client.Response) ([]string, error) {
+	return e.write(machineWrite(in, nodeID, uuid, rp), func(c *client.Client, r *client.Response) ([]string, error) {
 		var m apitypes.MachineBody
 		if err := json.Unmarshal(r.Body, &m); err != nil {
 			return nil, err
@@ -282,6 +277,22 @@ func (e *env) machineAdd(args []string) error {
 		return []string{sf("Machine %s recorded in cluster %s. Endpoint %s.", m.Id, cluster, m.TalosEndpoint),
 			"Next: give Bronzeward the cluster's Talos access in the provider, then import its configuration."}, nil
 	})
+}
+
+// machineWrite is the write that records a machine, which machine add and cluster onboard send.
+// nodeID and uuid are the identity in, which the read after an unknown outcome looks for.
+func machineWrite(in apitypes.MachineInput, nodeID, uuid string, rp *client.Repeat) *client.Write {
+	body, _ := json.Marshal(in)
+	path := "/machines?" + url.Values{"cluster": {in.Cluster}}.Encode()
+	return &client.Write{Method: http.MethodPost, Path: "/machines", Body: body, HumanOnly: true, Repeat: rp,
+		Check: "machine list --cluster " + client.ShellWord(in.Cluster),
+		Read: func(c *client.Client) (string, error) {
+			return find(c, path, "machine with this identity", func(m apitypes.MachineBody) string {
+				h := m.Hardware
+				same := h.TalosNodeId != nil && *h.TalosNodeId == nodeID || h.SmbiosUuid != nil && strings.EqualFold(*h.SmbiosUuid, uuid)
+				return map[bool]string{true: "the machine " + m.Id + " with this identity"}[same]
+			})
+		}}
 }
 
 // machineSetEndpoint replaces a machine's Talos endpoint (operator-experience.md §10:

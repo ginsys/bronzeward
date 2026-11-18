@@ -44,6 +44,14 @@ commands:
   cluster list | show <id>
   cluster add --name <name> --endpoint <https url> --contract <v1.x> --talos-cluster-id <id>
   cluster discover --talosconfig <file> [--talos-context <name>] [--endpoint <host|ip[:port]>]   read a cluster, print the commands that record it
+  cluster onboard --talosconfig <file> --name <name> --kubernetes-endpoint <https url>|proposed
+              (--bao-addr <url> (--bao-token-file <file> | --bao-token-stdin) | --skip-secret)
+              [--talos-context <name>] [--endpoint <host|ip[:port]>] [--staging encrypted|transient]
+              [--review] [--no-import]
+              author, a person; discovers the cluster, records it and its machines, writes its Talos
+              access to OpenBao once (create-only), then imports each machine into one draft; run
+              again after a failure: what exists is found, and --skip-secret skips the one write
+              that cannot repeat
   machine list [--cluster <id>] | show <id> | timeline <id> | observations <id>
   machine timeline <id> --follow [--limit <n>]
               the newest entries, then each new one as the server records it, read every 5s;

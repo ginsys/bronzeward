@@ -293,6 +293,7 @@ bronzewardctl
 
   cluster list | show | add
   cluster discover                    --talosconfig required; reads Talos, prints commands, writes nothing
+  cluster onboard                     discover, record, write the Talos secret once, import each machine
   machine list | show | add | set-endpoint
   machine timeline | observations    paged; --follow polls (G9)
   machine freeze | unfreeze           --reason required
@@ -483,6 +484,63 @@ Next: give Bronzeward the cluster's Talos access in the provider, then import it
 `talosEndpoint` is an IP address with an optional port, stored with the default port 50000
 (`internal/talos/endpoint.go:15-19`). Writing the talosconfig to the provider stays outside
 Bronzeward ([persistence and API §3.3](persistence-api.md#33-talos-access)).
+
+`cluster onboard` runs those steps in one command, and imports each machine into one draft. It needs
+an `author` signed in as a person (exit 1 otherwise, with nothing sent) and takes the flags of
+`cluster discover` and these:
+
+| Flag | Meaning |
+| --- | --- |
+| `--name <name>` | the cluster's name; required |
+| `--kubernetes-endpoint <https url>` or `proposed` | the Kubernetes endpoint to record; required. `proposed` takes the one that discovery proposes, and stops with exit 1 if it proposes none or an endpoint that is not https |
+| `--bao-addr <url>`, else `BAO_ADDR` | the OpenBao address: `https`, or plain `http` to a loopback host |
+| `--bao-token-file <file>` or `--bao-token-stdin` | the OpenBao token, from a file with no group or other permission bit or from standard input; never an argument. Exactly one |
+| `--skip-secret` | write no secret: the operator says it is already in OpenBao. It takes no `--bao-*` flag |
+| `--no-import` | stop after the secret: no draft, no import |
+| `--review`, `--staging encrypted|transient` | as `import start`: `--review` pauses the first import for review and needs encrypted staging |
+
+`--no-wait`, `--idempotency-key`, `--expect-epoch`, `--expect-principal` and `--if-match` are refused
+with exit 2: the command sends several writes and waits for each import. A missing or refused flag, a
+`--talos-context` that the file does not hold, and a plain-http OpenBao address that is not loopback
+are exit 2 before the identity read and before any dial.
+
+The steps run in this order, each only if the one before it succeeded: the identity read; discovery with
+the one context (an unsupported contract, or no https Kubernetes endpoint, is exit 1 with nothing
+sent); `POST /clusters`; `POST /machines` for each member that answered and reported a platform; the
+secret; the draft; one import for each recorded machine, in member order. A member that did not answer,
+or reported no platform, is listed as not recorded with the reason and gets no machine and no import.
+The secret is the cluster's talosconfig cut to the one chosen context, so no other context's key
+reaches OpenBao, written once with check-and-set 0 and the operator's own token, and never printed.
+
+A second run finds what exists and changes nothing that stands. A `409 conflict` on the cluster or
+on a machine names the existing record, which the command reads and shows as it is recorded (the
+flags are not applied to it). A machine that is recorded in another cluster stops the command, naming
+both cluster IDs, before the secret. The draft is titled `onboard <name>`, and an open draft of that
+title is reused. A machine whose import was released into that draft is skipped; an import that is
+held, resumed or paused stops the command, with `import status` for it (a paused one is exit 0, as
+with `--review`; the others exit 1), and a machine with no import, or only abandoned ones, is imported.
+
+**The secret is the one write that cannot repeat.** The policy `bw-onboard` lets a token create the
+path and nothing else, and OpenBao answers a create-only token with 403 both when the token has no
+right to create and when the secret is already there. So a rerun with the default flags stops at the
+secret with exit 1, and says so: "OpenBao answered 403: the token may not create the secret, or a
+secret is already there. Where it is already there, run the command again with `--skip-secret`."
+`--skip-secret` is an assertion by the operator: the command never reads the secret back, so it cannot
+tell a stale document from a current one. The other answers are named by class and never quoted: no secret
+mount, OpenBao unreachable, an unexpected answer (the write may have happened, and the outcome is
+unknown) and, for a token that may also update, a check-and-set refusal, which reads as present and
+carries on. A redirect is never followed.
+
+The text output lists the cluster, the secret, the draft and one row per member, then the next
+commands. `-o json` and `-o yaml` print one object once, at the end:
+`{cluster, secret, draft, machines[]}`, each member with `{node, machine, add, import}`, each step
+with a `state` and, when it did not finish, the `command` that carries on and the `error` line. The
+answer of an import start is never printed. The exit code is that of the step that stopped the run (the
+usual exit codes: 1 a refusal, 3 an unknown outcome, 4 an import that ended failed). With `--review` the
+first import pauses and the command exits 0, printing `import review`, `import continue` and the
+command to run again after the continue, which imports the next machine only. The command stops, with no
+retry, when another write moves the draft between two imports (the ETag rule of
+[§5.3](#53-protected-import-with-review) and client contracts §8.3).
 
 ### 5.3 Protected import with review
 
@@ -1343,6 +1401,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `operation watch` | `GET /operations/{id}/events` (SSE) | any | no | no |
 | `cluster add` | `POST /clusters` | author | yes | no |
 | `cluster discover` | none: reads Talos nodes with the operator's talosconfig | none | no | no |
+| `cluster onboard` | `POST /clusters`, `POST /machines`, `POST /drafts`, `POST /ingestions`; one KV create to OpenBao | author | yes | draft's |
 | `machine add` | `POST /machines` | author | yes | no |
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | no |
 | `import start` | `POST /ingestions` | author | yes | draft's |
