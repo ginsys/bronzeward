@@ -300,12 +300,15 @@ instance (the operation does not exist yet; §2):
 2. a use-time check, with its time, of the dependencies dispatch itself needs,
    under the executor identity: decryption of the bound artifact under the
    bound key identity and version, and the operation credentials for the
-   target: its cluster's Talos access configuration, read once at its latest
-   version before item 1's observation, which uses it as the attempt made on
-   that evidence does (a retry's new evidence reads it again, §3.3),
-   whose path, version and `created_time` the evidence records,
-   never the value
-   ([persistence and API §3.3](persistence-api.md#33-talos-access)).
+   target: a certificate the signer signs from its cluster's Talos CA key, at
+   its latest version, once before item 1's observation, with a lifetime that
+   covers that observation, this check and the attempt, which use it as the
+   attempt made on that evidence does (a retry's new evidence obtains a new
+   one, §3.3), whose CA key path, version and `created_time` and whose serial
+   and `NotAfter` the evidence records, never the key or the certificate
+   ([persistence and API §3.3](persistence-api.md#33-talos-access),
+   [§3.4](persistence-api.md#34-first-keys-and-the-talos-signer)). No Talos
+   connection outlives that certificate: it is closed at or before `NotAfter`.
 
 Item 2 is deliberately narrow. The executor holds scoped artifact decryption
 and operation credentials, not compiler-level secret access (compilation
@@ -372,10 +375,12 @@ persistence's (see `persistence-api.md`).
    operation, it may instead equal the bound artifact's digest (DS row 023,
    `TestEvidenceMayShowArtifactOnlyOnRetry`). A commitment whose evidence
    shows another digest is refused, and §6.1 is applied to that evidence
-   (below). The latest use-time check must have read the Talos access version
-   the evidence read (path, version and `created_time`, §3.1 item 2): an
-   attempt made again after its attempt transaction failed to commit reads the
-   access again, and one that moved since the evidence is refused, so the
+   (below). The latest use-time check must have used the Talos access the evidence
+   used (the CA key's path, version and `created_time` and the certificate's
+   serial, §3.1 item 2), and that certificate must not have passed its
+   `NotAfter`: an attempt made again after its attempt transaction failed to
+   commit obtains the access again, and one that moved since the evidence, or
+   whose certificate expired, is refused, so the
    operation is observed and classified again (§5) with the new version and
    never sends on evidence another version read;
 4. this operation takes the machine's coordination scope, and no other
@@ -598,7 +603,9 @@ observation's reads too (the live rows take those reads from the worker); row
 machinery client to the worker's own endpoint directly, since no plan carries
 one.
 
-Both clients are built from the cluster's one talosconfig, which carries
+Both clients are built from certificates the signer signs for the cluster
+(`os:admin` where the use reads a machine configuration or sends a mutating
+request; [persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)), whose key carries
 `os:admin` ([persistence and API §3.3](persistence-api.md#33-talos-access)). Every observation (§4.1), whether
 taken for a plan or not, goes through an **observation client** whose source
 is held to an allowlist of read calls by test, as ingestion's is; `drift`,
@@ -766,7 +773,7 @@ Required entries:
 | Approval | the plan, approver, role, epoch, self-approval mark (§2) |
 | Revocation, identity revocation, cancellation | what it names, who, role |
 | Observation started | purpose, the plan or operation it is taken for, if any, and the Talos endpoint it dials: that plan's route when taken for a plan or its operation, the machine's current endpoint otherwise ([persistence and API §3.3](persistence-api.md#33-talos-access)); recorded before the remote read, its revision is the observation's basis (below) |
-| Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`, `publication`), basis, the Talos access version it read (path, version, `created_time`; [persistence and API §3.3](persistence-api.md#33-talos-access)), identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read and why: a failed access read or connection reads none, and records its `talos-access-unavailable` cause |
+| Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`, `publication`), basis, the Talos access it used (the CA key's path, version and `created_time`, and the signed certificate's serial and `NotAfter`; [persistence and API §3.3](persistence-api.md#33-talos-access)), identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read and why: a failed access read or connection reads none, and records its `talos-access-unavailable` cause |
 | Use-time check | each dependency checked, its result, under which identity |
 | Commitment | the operation created, the §3.1 evidence it links, owner, generation, epoch, comparisons passed |
 | Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) and, for a commitment refused on its evidence's configuration digest, applies §6.1 and §6.5 to that evidence (§3.2) |

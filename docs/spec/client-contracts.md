@@ -83,9 +83,9 @@ Kept unchanged, as the issue requires:
 Excluded: a server session or backend-for-frontend, direct provider or Talos access from a
 client (two exceptions, [§3.3](#33-client-actions-with-no-route): `cluster discover` reads
 a cluster with the operator's own talosconfig through `internal/talos/discover`, a read-only
-package, and `internal/accessput` is a write-only package that sends one KV create to OpenBao
-with the operator's own token; neither imports `internal/talos` or `internal/provider`, so the
-client never links the server's Talos or provider packages), a new credential policy, the decisions of
+package, and the first key goes to the server through `POST /clusters/{id}/first-keys`, never to
+OpenBao from a client; the client imports neither `internal/talos` nor `internal/provider`, so it
+never links the server's Talos or provider packages), a new credential policy, the decisions of
 [#265](https://github.com/ginsys/bronzeward/issues/265) and
 [#266](https://github.com/ginsys/bronzeward/issues/266), and any client implementation.
 [#162](https://github.com/ginsys/bronzeward/issues/162) concerns Talos access and does not supply
@@ -206,8 +206,9 @@ ETag (`internal/api/ingestions.go:153-154`).
 | --- | --- | --- |
 | `login`, `logout` | identity-provider and client concerns; the server keeps no session | [§9](#9-authentication) |
 | `context` | client configuration | [§5](#5-endpoint-discovery-and-context-selection) |
-| `cluster discover` | reads a cluster's nodes with the operator's own talosconfig and calls no Bronzeward route; prints the `cluster add`, `machine add` and `bao kv put` commands that record it and runs none of them | `--talosconfig <file>` is required and nothing else is searched (not `$TALOSCONFIG`, not Talos's default file, not the current directory); table output only; the file is read with a size limit and never copied, logged or printed; errors give the node's gRPC code and never its text |
-| `cluster onboard` | does the same read, then runs those steps and the imports itself ([operator experience §5.2](operator-experience.md#52-inventory)): the one KV create to OpenBao is `internal/accessput`'s, with the operator's own token | the same `--talosconfig` and read rules; `-o json` and `-o yaml` print one object at the end; the talosconfig, cut to one context, is written to OpenBao once and never logged or printed; errors give the node's gRPC code and never its text |
+| `cluster discover` | reads a cluster's nodes with the operator's own talosconfig and calls no Bronzeward route; prints the `cluster add`, `machine add` and `cluster first-key` commands that record it and runs none of them | `--talosconfig <file>` is required and nothing else is searched (not `$TALOSCONFIG`, not Talos's default file, not the current directory); table output only; the file is read with a size limit and never copied, logged or printed; errors give the node's gRPC code and never its text |
+| `cluster first-key` | calls `POST /clusters/{id}/first-keys` with one first key: a talosconfig, a control plane configuration or a secrets bundle ([persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)); it needs a human `author` | `--kind` and `--file`; the file is read with a size limit, sent once and never copied, logged or printed; a talosconfig is cut to one context first; errors name the route's rule and never quote the server's Talos text |
+| `cluster onboard` | does the discover read, then runs those steps, the first key included, and the imports itself ([operator experience §5.2](operator-experience.md#52-inventory)); it holds no OpenBao address or token | the same `--talosconfig` and read rules; `-o json` and `-o yaml` print one object at the end; the first key is sent once and never logged or printed; errors give the node's gRPC code and never its text |
 | automation token issue, rotate, list | server-side command only | not offered by either client |
 | dispatch, apply | the controller dispatches approved plans ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary); [§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy) item 2) | not offered |
 
@@ -1493,6 +1494,7 @@ Plaintext can pass through a client in these places only:
 | The protected review | `GET /ingestions/{id}/review` | can hold a value nobody marked yet | `internal/api/review.go:24-31`; [compilation §3.6](compilation.md#36-operator-review) |
 | Tokens | every request | credentials | [§9](#9-authentication) |
 | The talosconfig file of `cluster discover` | none: it is read from a file the operator names and goes to Talos nodes only | holds the cluster's client key | [§3.3](#33-client-actions-with-no-route) |
+| A first key file of `cluster first-key` or `cluster onboard` | none: it is read from a file the operator names and sent once to `POST /clusters/{id}/first-keys` | may hold the cluster's CA key | [§3.3](#33-client-actions-with-no-route) |
 
 Not protected: rendered release reviews, plan diffs and provenance are redacted by the server
 ([compilation §8.3](compilation.md#83-redaction)) and are handled as ordinary reads.
