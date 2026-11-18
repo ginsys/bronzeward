@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, lostSince, MachineShown, nextTimeline, type Observation, Observations, pacer, POLL_MS, polled, queued, readLater, readOlder, recovery, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
+import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, lostSince, MachineShown, nextTimeline, NO_KEEP, type Observation, Observations, pacer, POLL_MS, polled, queued, readLater, readOlder, recovery, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
 import { type Load, type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
 import type { Machine } from "./machines.tsx";
@@ -392,6 +392,15 @@ describe("the timeline: newest page, Load older and the poll (client contracts ย
       expect(r.lost).toEqual([true, false]);
       // The observations, kept from their own answer, too.
       expect(settled(k, 1, { kind: "transport" }).lost).toEqual([false, true]);
+    });
+
+    test("the position read keeps nothing: a transport failure after an answer replaces it, so no earlier line stays drawn (ยง2.3)", () => {
+      const set = vi.fn();
+      vi.mocked(events.observe).mockClear();
+      expect(NO_KEEP.held()).toBe(false);
+      const lost = shell.settle({ kind: "transport" }, set, undefined, () => true, NO_KEEP.held);
+      expect(lost).toBe(false);
+      expect(set).toHaveBeenCalledWith({ kind: "transport" });
     });
 
     test("in a new view: nothing is kept until the new view first answers, so the read shows the disconnected state", () => {

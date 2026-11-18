@@ -43,11 +43,18 @@ describe("each step", () => {
     expect(nextStep(position("import-stalled", { ingestion: ingestion("held", true) as Position["ingestion"] }))?.text).toContain("take it over");
   });
 
-  test("needs-plan names both plan kinds and links to the machine's plans", () => {
-    const s = nextStep(position("needs-plan"));
-    expect(s?.text).toContain("adopt");
-    expect(s?.text).toContain("apply-config");
-    expect(s?.links[0]?.to).toBe("/plans?machine=mch_x");
+  test("needs-plan names both plan kinds and links to the creation page for the kind the machine's state offers", () => {
+    const adopt = nextStep(position("needs-plan", { machine: machine({ desired: "rel_a", applied: null }) }));
+    expect(adopt?.text).toContain("adopt");
+    expect(adopt?.text).toContain("apply-config");
+    expect(adopt?.links).toEqual([{ to: "/plans/new?release=rel_a&machine=mch_x&operation=adopt", label: "Create the adopt plan", id: "mch_x" }]);
+    const applied = { release: "rel_0", source: "apply", importBase: null } as Machine["applied"];
+    const apply = nextStep(position("needs-plan", { machine: machine({ desired: "rel_a", applied, pendingConvergence: true }) }));
+    expect(apply?.links).toEqual([{ to: "/plans/new?release=rel_a&machine=mch_x&operation=apply-config", label: "Create the apply-config plan", id: "mch_x" }]);
+  });
+
+  test("needs-plan links to the machine's plans where the state offers no plan kind", () => {
+    expect(nextStep(position("needs-plan"))?.links[0]?.to).toBe("/plans?machine=mch_x");
   });
 
   test("awaiting-approval says when the approval is from an earlier epoch", () => {
