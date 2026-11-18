@@ -49,13 +49,13 @@
 #                                pre-restore unaccounted and every instance stopped, for usability
 #                                task T11, fixtures/participants)
 #        scenarios/s7 cli       (as run, after scenarios/s4 cli on the same up; the recovery-admin's acts
-#                                of steps 6 to 10 made through bronzewardctl as h-recovery, built from
-#                                this checkout and run on the host against B: step 6's takeover of held,
-#                                step 7's two scope accountings (one decision per scope, not one for both),
-#                                the three marks and step 8's and step 10's two releases, each with the
-#                                output kept as cli-<name>.txt in the evidence directory. The entry and the
-#                                exit stay the API's, as ginsys/bronzeward#361 owns them. Steps 1 to 5 and
-#                                the checks of each state are as in run.)
+#                                of steps 3 and 6 to 11 made through bronzewardctl as h-recovery, built
+#                                from this checkout and run on the host against B: step 3's entry (the word
+#                                enter typed back), step 6's takeover of held, step 7's two scope
+#                                accountings (one decision per scope, not one for both), the three marks,
+#                                step 8's and step 10's two releases and step 11's exit, each with the
+#                                output kept as cli-<name>.txt in the evidence directory. Steps 1, 2, 4
+#                                and 5 and the checks of each state are as in run.)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
