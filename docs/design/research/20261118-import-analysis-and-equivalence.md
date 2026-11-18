@@ -56,19 +56,22 @@ point 2). Five levels, from strict to blind:
 | Level | Two configurations are equal when | Ignores | Sees a changed secret |
 |---|---|---|---|
 | E0 | `talos.ConfigurationDigest` is equal: SHA-256 of the bytes, trailing newlines folded | nothing but trailing newlines | yes |
-| E1 | both pass through the machinery's encoder without comments first, then E0 | comments | yes |
-| E2 | the parsed documents, matched by kind and name, have equal trees | comments, key order, document order, formatting; **not** list order | yes |
-| E3 | the same documents as typed machinery documents (`configloader`), matched by kind and name, are equal | as E2, plus whatever the typed form normalises | yes |
-| E4 | the redacted forms, with the reference names masked, are equal as E2 | as E2, and the value behind every reference | **no** |
+| E1 | both pass through the machinery's encoder without comments first, then E0 | comments | yes, by construction |
+| E2 | the parsed documents, matched by kind and name, have equal trees | comments, key order, document order, formatting; **not** list order | yes, by construction |
+| E3 | the same documents as typed machinery documents (`configloader`), matched by kind and name, are equal | as E2, plus whatever the typed form normalises | yes, by construction |
+| E4 | the redacted forms, with the reference names masked, are equal as E2 | as E2, and the value behind every reference | **not behind a reference** (measured); a literal secret sits in the tree, so a change shows |
+
+"By construction" means the level reads the plaintext, so a different value is a different tree. N4
+(§5.5) measured it for E0 only: its harness does not change the plaintext columns.
 
 Recommendation: **E3 is the definition**, computed server-side from plaintext, with E0 reported
 beside it. Reasons, each measured below: E0 fails on any move of a document between base and
 fragments (§5.3) and on comments (§5.1); E2 and E3 held for every machine in every composition that
-the compiler accepted; E4 cannot see a changed secret (§5.5). E3 still counts list order, which is
-right for Talos (a reordered `podSubnets` is a different configuration, §5.4), and calls two forms
-that Talos treats alike different (§5.4, explicit default against omitted), so it can refuse a
-refactoring that is in fact equivalent. It accepted no non-equivalent composition in the controls of
-§5.3; that is a result on six machines and four mistakes, not a proof of soundness.
+the compiler accepted; E4 cannot see a changed secret behind a reference (§5.5). E3 still counts
+list order, which is right for Talos (a reordered `podSubnets` is a different configuration, §5.4),
+and calls two forms that Talos treats alike different (§5.4, explicit false against omitted), so it
+can refuse a refactoring that is in fact equivalent. It accepted no non-equivalent composition in the
+controls of §5.3; that is a result on six machines and four mistakes, not a proof of soundness.
 
 ## 4. Method
 
@@ -80,10 +83,13 @@ inputs with the machinery's patcher directly (`plainCompose`); the two digests m
 
 Reproduce:
 
-1. Put the pinned `talosctl` at `bin/talosctl` beside `gen.sh`, then `gen.sh <work dir>`.
-2. `runall.sh <repository checkout> <work dir> <output file>`.
-3. Compare the result with `evidence/20261118-import-equivalence/output.txt`. Random reference
-   names differ between runs; no other line should.
+1. Put the pinned `talosctl` at `bin/talosctl` beside `gen.sh`, then `bash gen.sh <work dir>`.
+2. `bash runall.sh <repository checkout> <work dir> <output file>` (exit status 1 if any
+   measurement failed).
+3. Compare the result with `evidence/20261118-import-equivalence/output.txt`. `gen.sh` makes fresh
+   keys and certificates on every run, so a fresh run differs in the random reference names and in
+   the byte counts (encoded certificate and key lengths vary by a few bytes); the booleans, the
+   leaf counts and the refusals should not. The committed output is the run the note quotes.
 
 ## 5. Measurements
 
@@ -128,39 +134,50 @@ thin base.
 | Variant | Result |
 |---|---|
 | Leaf by leaf | **Refused on every machine.** Control planes: `base-override` at `fragment[0]` (`machine.ca.key`, `cluster.etcd.ca.key`). Workers: "trusted CA certificates are required". A strategic-merge patch merges a mapping as a unit, so a fragment cannot take one leaf of a mapping whose other leaves stay in the base. |
-| Rule R2: a mapping whose direct leaves fall into different classes stays whole in the base; documents emptied by the split are dropped | Every machine composes. **E2 true, E3 true, E4 true; E0 false and E1 false** because document order changed (`docOrderSame=false`). Thin base: 11630 to 4025 bytes (`cp1`), 3341 to 1161 (`w1`). |
+| Rule R2: where the direct leaves of one mapping fall into different classes, all of them stay in the base (a nested mapping below is classified on its own); documents emptied by the split are dropped | Every machine composes. **E2 true, E3 true, E4 true; E0 false and E1 false** because document order changed (`docOrderSame=false`). Thin base: 11630 to 4025 bytes (`cp1`), 3341 to 1161 (`w1`). |
 | R2, emptied documents kept as identity-only shells in the base | **E0 true, E1 true, E2 true, E3 true, E4 true, `docOrderSame=true`** for all six. Thin base: 5160 bytes (`cp1`), 1784 (`w1`). |
 
-Negative controls, each of which must be detected (the shells variant; the others agree except as
-noted): a changed kubelet image in the common fragment (N1) and a dropped `dnsDomain` (N2) give E0
-to E4 false. The role fragment left out (N5) is detected: false at every level for `cp1`, refused as
-invalid for `w1` (`diskSelector.match is required`) and for `cp1` in the shells variant. The
-fragments in reverse order (N6) change nothing: expected, since the two fragments share no leaf,
-so this control shows nothing about order sensitivity.
+Negative controls, each of which must be detected, on `cp1` and `w1`. Under both R2 variants a
+changed kubelet image in the common fragment (N1) and a dropped `dnsDomain` (N2) give E0 to E4
+false. The role fragment left out (N5) is detected: false at every level for `cp1` with the
+emptied documents dropped, and refused as invalid in the other cases (`w1`:
+`diskSelector.match is required`; `cp1` with shells: seven validation errors). Leaf by leaf, all of
+N1, N2 and N5 are refused before any comparison.
 
-Two consequences. A path-level proposal is **not composable as it stands**: the compiler accepts it
-only after a rule about the merge granularity of the patcher, so a proposal that has not been
-composed and compared is not a proposal. And moving a document out of the base is visible to E0 and
-E1: the check must not be a digest of the render.
+The fragments in the reverse order (N6) change nothing under R2, as expected: the common and role
+fragments share no leaf. Leaf by leaf it does matter for `w1`: the forward order is refused, and the
+reverse order composes and compares equal at E2 to E4. Order can therefore decide whether a
+composition is accepted; the cause was not investigated.
 
-### 5.4 N3: pairs that differ in form only (`w1`)
+Two consequences. A path-level proposal is **not composable as it stands**: in these runs the
+compiler accepted it only under R2, a rule about the patcher's merge granularity, so a proposal
+that has not been composed and compared is not a proposal. And moving a document out of the base is
+visible to E0 and E1: the check must not be a digest of the render.
 
-| Pair | E0 | E1 | E2 | E3 |
-|---|---|---|---|---|
-| `podSubnets` reversed | false | false | false | false |
-| the commented generated worker against its comment-free re-encoding | true | true | true | true |
-| `defaultRuntimeSeccompProfileEnabled` explicit against omitted | false | false | false | false |
+### 5.4 N3: pairs (`w1`)
 
-List order counts, which is right. An explicit default and an omitted field are the same to Talos
-and different to every level here, so E3 can call an equivalent pair different. A further level that applies the
-typed defaults would close that, and was not built.
+| Pair | Same behaviour? | E0 | E1 | E2 | E3 |
+|---|---|---|---|---|---|
+| `podSubnets` reversed | no | false | false | false | false |
+| control: the comment-free machine against its re-encoding | yes | true | true | true | true |
+| `defaultRuntimeSeccompProfileEnabled` explicit true (as `gen config` writes it) against omitted | no: omitted reads as false | false | false | false | false |
+| the same field, explicit false against omitted | yes: omitted reads as false | false | false | false | false |
+
+The sources for the last two rows: `config/generate/kubernetes.go:186` in machinery v1.14.5 writes
+`true`, and `config/types/k8s/kubelet.go:201` returns false for an omitted field. The comment case
+is B1 (§5.1), not this table: the control row uses a machine that has no comments.
+
+List order counts, which is right. The last row is the one pair here that Talos treats alike and
+every level calls different, so **E3 can refuse an equivalent refactoring**. A further level that
+applies the typed defaults would close that, and was not built.
 
 ### 5.5 N4: a changed secret behind an unchanged reference
 
 Expected: E0 false, E4 true. Observed: E0 false (the digest covers the plaintext), **E4 true**. The
 redacted form shows `<redacted:NAME@VERSION>`: the reference name and its version, not the value.
 A comparison of redacted forms, or of sanitized sources, cannot see a value that changes behind an
-unchanged reference. Without masking the names, E4 was false for every machine in every variant,
+unchanged reference. Only E0 and E4 were read: the harness feeds the same plaintext to the E1 to E3
+columns, so their detection of this change is an inference from how they are built, not a result. Without masking the names, E4 was false for every machine in every variant,
 because the baseline was ingested a second time and its names differ (B2); the masked form is the
 only one that can be true.
 
@@ -205,11 +222,14 @@ Compilation §8.4 lists what redaction misses: a re-encoded, split or hashed cop
 secret in a field the schema does not mark and nothing references; unidentified embedded text;
 short or integer secrets quoted in a message.
 
-- **The check runs on plaintext and prints paths.** Only E0 to E3 see a changed value behind a
-  reference (N4). They run inside the compiler's process, where both the old base and the new
-  composition resolve to plaintext, and they report a path and a yes or no, never a value. E4,
-  the only level computable from what the API serves, is blind to every item of §8.4 as well as to
-  N4.
+- **The check runs on plaintext and prints paths.** E0 saw a changed value behind a reference
+  (N4); E1 to E3 are built to see it (§5.5). They run inside the compiler's process, where both the
+  old base and the new composition resolve to plaintext, and they report a path and a yes or no,
+  never a value. E4, the only level computable from what the API serves, is blind to a change behind
+  a reference (N4). Compilation §8.4 lists secrets nothing identifies: those are not behind a
+  reference, so a change to one appears in the redacted tree and E4 sees it. What E4 cannot do is
+  recognise such a value as a secret. A change is detectable; a secret that was never marked stays
+  unknown to every level.
 - **A proposal can copy an unmarked secret into a fragment.** The engine reads sanitized documents,
   where an unmarked secret is a plain leaf, so it can put one into a shared fragment as source text.
   Compilation §8.4 says §6 step 7 refuses only exact copies of a secret value, so a re-encoded or
@@ -248,8 +268,11 @@ compiler already produces both (B1, `control=true`).
 - A first split attempt failed twice before R2 (§5.3), and E2 to E4 first compared false for a
   leaf-equal split because document order had changed; both are recorded above, not hidden.
 - E4 is false when the names are not masked (§5.5); the masked form is what §3 defines.
-- N6 shows nothing about order sensitivity (§5.3). A case with two fragments that set the same
-  leaf was not run.
+- Fragment order was observed to matter only in one leaf-by-leaf case (§5.3) and its cause was not
+  investigated. A case with two fragments that set the same leaf was not run.
+- N4 measured E0 and E4 only (§5.5); E1 to E3 detect a changed secret by construction, not by
+  measurement.
+- The fresh-generation byte counts are not reproducible (§4); the committed output is the quoted run.
 - The shells variant keeps documents the split emptied. Whether an identity-only document is valid
   for every document kind was measured on the six machines only.
 - A heavy run (fixture, cluster, browser) was not made; nothing here was applied to a node.

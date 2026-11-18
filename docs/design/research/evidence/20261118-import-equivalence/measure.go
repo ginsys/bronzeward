@@ -824,24 +824,29 @@ func pairs(ms []machine) {
 	a := variant(sub("10.244.0.0/16", "10.245.0.0/16"))
 	b := variant(sub("10.245.0.0/16", "10.244.0.0/16"))
 	report := func(label string, x, y []byte) {
-		xc, err1 := plainCompose(x, nil)
-		yc, err2 := plainCompose(y, nil)
+		_, err1 := plainCompose(x, nil)
+		_, err2 := plainCompose(y, nil)
 		fmt.Printf("%s: both load=%v E0=%v E1=%v E2=%v E3=%v\n", label, err1 == nil && err2 == nil, e0(x, y), e1(x, y), e2(x, y), e3(x, y))
-		_, _ = xc, yc
 	}
-	fmt.Println("== N3: pairs that differ in form only (w1)")
+	fmt.Println("== N3: pairs (w1)")
 	report("list order (podSubnets reversed)", a, b)
-	report("comments and key order (the commented generated worker against its re-encoding)", w1, must(plainCompose(w1, nil)))
-	def := variant(func(ds []*doc) {
+	// A control only: w1 is already comment-free, so this pair says nothing about comments (B1 does).
+	report("control: the comment-free machine against its re-encoding", w1, must(plainCompose(w1, nil)))
+	omit := variant(func(ds []*doc) {
 		for _, d := range ds {
 			if d.key == "KubeletConfig/" {
 				delLeaf(d.root, []string{"defaultRuntimeSeccompProfileEnabled"})
 			}
 		}
 	})
-	report("explicit default against omitted (kubelet defaultRuntimeSeccompProfileEnabled)", w1, def)
-	ds := parseDocs(w1)
-	_ = ds
+	// Omitted reads as false (machinery v1.14.5, config/types/k8s/kubelet.go DefaultRuntimeSeccompProfileEnabled
+	// dereferences a nil pointer to false), and gen config writes true: so the first pair differs in behaviour
+	// and the second does not.
+	explicitFalse := variant(func(ds []*doc) {
+		findLeaf(ds, "KubeletConfig/", []string{"defaultRuntimeSeccompProfileEnabled"}).Value = "false"
+	})
+	report("explicit true (as generated) against omitted: different behaviour", w1, omit)
+	report("explicit false against omitted: same behaviour", explicitFalse, omit)
 }
 
 func commentLines(b []byte) int {
