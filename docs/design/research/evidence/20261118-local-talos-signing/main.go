@@ -11,6 +11,11 @@
 // certificate fields, fingerprints and gRPC codes, and an error from reading or decoding an
 // input is replaced by a fixed line, since a decoder error can quote the rejected input. Not
 // product code.
+//
+// The `extract` mode (ginsys/bronzeward#883) starts from the operator's talosconfig alone: it reads
+// a control plane's machine configuration through it, takes the os CA key from what the node
+// returned, signs a fresh admin certificate from that key and presents it. It prints only
+// fingerprints, sizes and gRPC codes.
 package main
 
 import (
@@ -42,8 +47,10 @@ func main() {
 		offline(os.Args[2])
 	case len(os.Args) == 4 && os.Args[1] == "node":
 		node(os.Args[2], os.Args[3])
+	case len(os.Args) == 4 && os.Args[1] == "extract":
+		extract(os.Args[2], os.Args[3])
 	default:
-		fmt.Fprintln(os.Stderr, "usage: main.go offline <dir> | main.go node <dir> <endpoint ip[:port]>")
+		fmt.Fprintln(os.Stderr, "usage: main.go offline <dir> | main.go node <dir> <endpoint ip[:port]> | main.go extract <dir> <endpoint ip[:port]>")
 		os.Exit(2)
 	}
 }
@@ -176,6 +183,63 @@ func offline(dir string) {
 	b := must(secrets.NewAdminCertificateAndKey(now, cpCA, role.MakeSet(role.Admin), time.Hour))
 	fmt.Printf("two signatures with identical inputs: certificates equal=%v keys equal=%v serials %s / %s\n",
 		string(a.Crt) == string(b.Crt), string(a.Key) == string(b.Key), serial(a.Crt), serial(b.Crt))
+}
+
+// extract starts from the operator's talosconfig and nothing else a first key would give. <dir>
+// holds the fixture's talosconfig, and secrets.yaml only to compare the CA certificate. The key that
+// signs in step 3 comes from the node's answer, never from a local file.
+func extract(dir, endpoint string) {
+	start := time.Now()
+	fmt.Printf("run at %s, endpoint %s\n", start.UTC().Format(time.RFC3339), endpoint)
+	opBytes := must(os.ReadFile(filepath.Join(dir, "talosconfig")))
+	tc := must(clientconfig.FromBytes(opBytes))
+	tcCtx := currentContext(tc)
+	ca := must(base64.StdEncoding.DecodeString(tcCtx.CA))
+	bundle := must(secrets.LoadBundle(filepath.Join(dir, "secrets.yaml")))
+	require(bundle.Certs != nil && bundle.Certs.OS != nil, "an os CA in the bundle")
+	fmt.Printf("operator talosconfig client certificate subject: %s\n", subjectOf(tcCtx.Crt))
+
+	// 1. The one read: the control plane's machine configuration, through the operator's talosconfig.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	r, err := talos.Dial(ctx, opBytes, endpoint)
+	if err != nil {
+		fmt.Println("1 DIAL FAILED with the operator's talosconfig")
+		os.Exit(1)
+	}
+	c, err := r.MachineConfig(ctx)
+	r.Close() //nolint:errcheck
+	if err != nil {
+		fmt.Printf("1 operator talosconfig: MachineConfig failed (code %s)\n", status.Code(err))
+		os.Exit(1)
+	}
+	fmt.Printf("1 operator talosconfig: MachineConfig: ok %d bytes\n", len(c.Bytes()))
+
+	// 2. What the answer carries. Only presence, a size and fingerprints are printed.
+	got := must(configloader.NewFromBytes(c.Bytes())).Machine().Security().IssuingCA()
+	if got == nil || len(got.Crt) == 0 || len(got.Key) == 0 {
+		fmt.Printf("2 STOP: the fetched configuration carries no os CA key (CA present=%v, key present=%v); nothing was signed\n",
+			got != nil && len(got.Crt) > 0, got != nil && len(got.Key) > 0)
+		os.Exit(3)
+	}
+	fmt.Printf("2 fetched configuration: os CA certificate %s, key present=true (%d bytes); CA certificate equals the bundle's=%v, the talosconfig's=%v\n",
+		fp(got.Crt), len(got.Key), fp(got.Crt) == fp(bundle.Certs.OS.Crt), fp(got.Crt) == fp(ca))
+
+	// 3. Sign from the extracted key and present the certificate.
+	now := time.Now()
+	fresh := must(secrets.NewAdminCertificateAndKey(now, got, role.MakeSet(role.Admin), time.Hour))
+	describe("3 os:admin signed from the extracted key", fresh, ca, now)
+	attempt("3 os:admin signed from the extracted key", fresh, ca, endpoint, true)
+
+	// 4. The same read as os:reader, signed from the extracted key.
+	reader := must(secrets.NewAdminCertificateAndKey(now, got, role.MakeSet(role.Reader), time.Hour))
+	attempt("4 os:reader signed from the extracted key, same MachineConfig read", reader, ca, endpoint, true)
+
+	// 5. Negative control: an admin certificate signed by a fresh unrelated CA key, presented the
+	// same way. If the node accepted it, step 3 would not show that the node checks the issuer.
+	foreign := must(secrets.NewTalosCA(now))
+	unrelated := must(secrets.NewAdminCertificateAndKey(now, &x509.PEMEncodedCertificateAndKey{Crt: foreign.CrtPEM, Key: foreign.KeyPEM}, role.MakeSet(role.Admin), time.Hour))
+	attempt("5 os:admin signed by a fresh unrelated CA key (negative control)", unrelated, ca, endpoint, true)
 }
 
 // talosconfigFor is a talosconfig document whose one context holds cert and the cluster CA.

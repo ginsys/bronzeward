@@ -1,0 +1,29 @@
+Evidence for docs/design/research/20261118-local-talos-signing-extract.md (ginsys/bronzeward#883).
+All inputs synthetic. No key, token or secret value appears below. Times are CET unless marked Z; the clock times the program prints (for example 18:20:49Z) are UTC.
+
+== Pinned versions ==
+Talos machinery: github.com/siderolabs/talos/pkg/machinery v1.14.5 (go.mod), the module the program is built with.
+Fixture run: the fixture's pinned Talos v1.14.5 nodes, one control plane (10.55.0.2) and one worker (fixtures/versions.env).
+Bronzeward main at 19c39500, with the extract mode added to the program.
+
+== Commands ==
+fixtures/bin/up
+cp fixtures/.state/controlplane.yaml fixtures/.state/talos-secrets.yaml fixtures/.state/talosconfig <dir>/   (talos-secrets.yaml saved as secrets.yaml)
+go run docs/design/research/evidence/20261118-local-talos-signing/main.go extract <dir> 10.55.0.2
+fixtures/bin/down
+
+The run took the heavy-run lock at nice 19 and started at 19:18:38, the program ran at 19:20:49 (18:20:49Z), the fixture was down at 19:20:52. The fixture build and cluster boot lines are left out; the program's whole output follows.
+
+== Output: extract ==
+run at 2026-11-18T18:20:49Z, endpoint 10.55.0.2
+operator talosconfig client certificate subject: O=[os:admin] validity 2026-11-18T18:19:02Z .. 2027-11-18T18:19:02Z
+1 operator talosconfig: MachineConfig: ok 18627 bytes
+2 fetched configuration: os CA certificate a0e7fae33854f37c, key present=true (135 bytes); CA certificate equals the bundle's=true, the talosconfig's=true
+3 os:admin signed from the extracted key: O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=0s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=true
+3 os:admin signed from the extracted key: Version: ok v1.14.5
+3 os:admin signed from the extracted key: MachineConfig: ok 18627 bytes
+4 os:reader signed from the extracted key, same MachineConfig read: Version: ok v1.14.5
+4 os:reader signed from the extracted key, same MachineConfig read: MachineConfig: talos: reading the machine configuration: PermissionDenied (code PermissionDenied)
+5 os:admin signed by a fresh unrelated CA key (negative control): Version: talos: version: Unavailable (code Unavailable)
+5 os:admin signed by a fresh unrelated CA key (negative control): MachineConfig: talos: reading the machine configuration: Unavailable (code Unavailable)
+node run rc=0
