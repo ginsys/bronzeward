@@ -179,11 +179,34 @@ entry_body() {
     '{restored: [{family: "database", backup: $db, takenAt: $dt}, {family: "provider", backup: $pb, takenAt: $pt}],
       stoppedAt: $s, reason: $r}'
 }
+# enter_cli: the entry of mode cli (ginsys/bronzeward#362), through recovery enter with the word enter typed
+# back. The CLI's answer names the new epoch and the one it fences, the number of machines and the
+# operations taken over; the entry's actor is read from the database. The request names each backup
+# by its identity and the time it was taken, as the API's entry does: the CLI sends no more than that.
+enter_cli() {
+  local who n
+  cli_ready "$mutation_ref" h-recovery
+  ctl enter h-recovery recovery enter --restored "family=database,backup=$db_backup,taken-at=$t_at" \
+    --restored "family=provider,backup=$bao_backup,taken-at=$bao_at" --stopped-at "$stopped_at" \
+    --reason "$entry_reason" <<<enter || return 1
+  n=$(sql "SELECT count(*) FROM machine") && [ -n "$n" ] || return 1
+  cli_kept enter "^Recovery mode entered \(act [a-z]+_[a-z2-7]+\)\. Epoch ep_[a-z2-7]{26}, was $restored_epoch\.$" &&
+    cli_kept enter "^Scopes marked pre-restore-unaccounted: $n machines\. Apply-config operations taken over: " || return 1
+  [ -z "$held" ] || cli_kept enter "Apply-config operations taken over: .*$held" || return 1
+  epoch=$(sed -n -E 's/^Recovery mode entered .* Epoch (ep_[a-z2-7]{26}), was .*/\1/p' "$EV/cli-enter.txt") &&
+    [ -n "$epoch" ] && [ "$epoch" != "$restored_epoch" ] || return 1
+  who=$(who_id h-recovery) && [ -n "$who" ] || return 1
+  same "$(sql "SELECT entered_by FROM recovery_epoch WHERE epoch = '$epoch'")" "$who"
+}
 # enter: h-recovery records the entry on call_port: 201, a new epoch fencing the restored one, by
 # h-recovery as recovery-admin, every machine marked and held, when set, among the operations taken
 # over; the new epoch in epoch.
 enter() {
   local who body
+  if [ "$s7_mode" = cli ]; then
+    enter_cli
+    return
+  fi
   fresh h-recovery
   body=$(entry_body) || return 1
   answers 201 - POST /api/v1/recovery/entries "$tok" "$body" "$(key entry)" || return 1
@@ -393,6 +416,13 @@ desired_is_pub() {
 }
 # exited: h-recovery exits recovery mode on call_port: 201, naming both scopes.
 exited() {
+  if [ "$s7_mode" = cli ]; then
+    cli_ready "$mutation_ref" h-recovery
+    ctl exit h-recovery recovery exit &&
+      cli_kept exit "^Recovery mode left \(act [a-z]+_[a-z2-7]+\) in epoch $epoch\.$" &&
+      cli_kept exit "^Scopes returned to normal: 2: .*$machine_cp" && cli_kept exit "^Scopes returned to normal: 2: .*$machine_w"
+    return
+  fi
   fresh h-recovery
   answers_with "(.scopes | sort) == ([\"$machine_cp\", \"$machine_w\"] | sort)" 201 - POST /api/v1/recovery/exits "$tok" \
     '{"facts": {}}' "$(key exit)"
