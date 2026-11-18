@@ -12,9 +12,9 @@ OpenBao can enforce a tenant boundary from a signed-in user's identity: a login 
 group claim gives that user's tokens access to the tenant's paths and nothing else (M1),
 and a namespace per tenant separates logins, mounts and Transit keys completely (M5). It
 cannot do what Bronzeward needs most from the executor path. A user token that may decrypt,
-decrypts: OpenBao has no approval concept, so nothing checks the plan (M6). Four of the nine
-operations below also run with no user present, and decryption at dispatch runs after
-somebody else's approval and possibly after a restart. So the user-held identity
+decrypts: OpenBao has no approval concept, so nothing checks the plan (M6). Four of the ten
+rows of operations below also run with no user present, and decryption at dispatch runs
+after an approval that may be somebody else's, and possibly after a restart. So the user-held identity
 fits only what a person does with their own hands, writing a talosconfig into their own
 tenant; every other operation keeps a component identity. The recommendation is a
 component identity per tenant on one OpenBao namespace per tenant, with the user-held
@@ -55,16 +55,17 @@ docker run -d --rm --name bw870-bao -e BAO_DEV_ROOT_TOKEN_ID=<synthetic> \
   -e BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200 -p 127.0.0.1:18870:8200 <OPENBAO_IMAGE>
 # then, from a directory holding the scripts of the evidence file:
 bash setup.sh && bash m6.sh && bash m1_m3.sh && bash m3b.sh && bash m3c.sh && bash m3d.sh \
-  && bash m4.sh && bash m5.sh && bash m7.sh && bash m8.sh
+  && bash m4.sh && bash m4b.sh && bash m5.sh && bash m7.sh && bash m8.sh
 ```
 
 ## What Bronzeward does today
 
 Read from the specification and `internal/config/config.go`, not run.
 
-- Humans sign in to Bronzeward with OIDC. Each request is verified on its own: audience
-  `bronzeward`, at most 60 seconds of skew, at most 15 minutes between `iat` and `exp`,
-  roles from group claims evaluated per request
+- Humans sign in to Bronzeward with OIDC. Each request is verified on its own: the
+  configured audience (`bronzeward` in the specification's example), at most 60 seconds of
+  skew, at most the configured maximum lifetime between `iat` and `exp` (15 minutes by
+  default), roles from group claims evaluated per request
   ([persistence and API §10.1](../../spec/persistence-api.md)).
 - Four component identities (ingestion, compiler, metadata, executor) are static token
   files in the server's configuration; the orphan-report identity is a fifth, used by the
@@ -93,7 +94,7 @@ evidence file.
 | M3 | How long does the OpenBao token live against the token's `exp`? | follows the role | `exp` 60 s and 3600 s gave 900 s and 899 s, the role's 15 minutes; a role `token_ttl` of 2 minutes gave 119 s |
 | M3 | Does removing a group reach an existing token? | at the next login | after a login without the group, the old token was refused and its `identity_policies` read null; an admin `revoke-accessor` also stopped it |
 | M3 | Expiry leeway | the documented 150 s default | a token expired 55 s ago logged in, one expired 65 s ago did not (boundary between 55 s and 65 s, cause not established) |
-| M4 | Can a user token mint a narrower one-use child per request? | child policies a subset of the parent's | refused (400, "child policies must be subset of parent") when the parent held its policies only through an identity group; allowed when the role gave them directly: reads on one path 200, another path 403, third use 403; a wrapped child unwrapped once, the second unwrap refused |
+| M4, M4b | Can a user token mint a narrower child per request, and does it matter how the parent holds the policy? | child policies a subset of the parent's | the same policy name `tenant-a`: refused (400, "child policies must be subset of parent") for a parent that held it through an identity group, minted for a parent that held it directly on the role; a direct-role child with `num_uses` 1 read once (200) and was refused the second time (403). In M4 a child of two uses read its one named path (200) and not another (403), and a response-wrapped child unwrapped once and was refused the second time; M4 changed the policy set as well as its source, so M4b is the control |
 | M5 | Does a namespace per tenant separate everything? | yes | user a logged in to namespace `ta` and was refused in `tb`; a `ta` token was refused in `tb` and the root namespace; the same key name in both namespaces gave "message authentication failed" across them; a tenant token could not create a namespace |
 | M7 | Does create-only KV hold for a token from a login? | create once, no overwrite, no read | `cas=0` create 200; second write, write without `cas`, read, metadata read, delete, destroy and list all 403; a reader token read the value |
 | M8 | Does one templated policy serve every tenant? | follows the claim | tenant `a` read own, `b` refused; claim values `*`, `a/../b` and empty logged in and read nothing; a later login of the same subject with tenant `b` made the earlier token lose `a` and gain `b` |
@@ -111,13 +112,15 @@ user's token reaches only the tenant's paths, and a user in two tenants gets bot
 properties limit what it buys Bronzeward:
 
 - **The audience.** OpenBao accepted a token only when `aud` named it (M2). Bronzeward's own
-  API requires the audience `bronzeward`, so one token valid at both has both audiences and
-  is a bearer for either service. It was accepted twice (M2): neither OpenBao nor the check
-  of Bronzeward's contract refuses a replayed token. A separate token for OpenBao needs a
-  second client or a token exchange; no exchange was measured.
+  API requires its configured audience, so one token valid at both names both audiences and
+  is a bearer for either service. It was accepted twice (M2): OpenBao did not refuse a
+  replayed token, and the checks of Bronzeward's contract (§10.1) name none either. A
+  separate token for OpenBao needs a second client or a token exchange; no exchange was
+  measured.
 - **The lifetime.** The OpenBao token lives as long as the role says, not as long as the
-  JWT (M3): a 60-second JWT gave a 15-minute token. Bronzeward's own 15-minute maximum
-  (§10.1) matches only by choice of the role's ttl.
+  JWT (M3): a 60-second JWT gave a 15-minute token. Bronzeward's maximum lifetime is
+  configurable (15 minutes by default, §10.1), so the role's ttl would have to be set to
+  match it.
 - **Revocation.** A removed group reached an existing token at the user's next login, or at
   once by an admin revoking the accessor (M3). A user who never logs in again keeps the
   policies until the token's ttl ends.
@@ -133,21 +136,25 @@ memory beside the component tokens, with the replay and lifetime properties abov
 
 | # | Operation | Runs | A user present? | Needs from OpenBao | Narrowest tenant-scoped identity | Source |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Artifact decryption at dispatch | after approval; queued, retried, after a restore | not necessarily: the approver is not the creator, and a retry comes later | decrypt on the artifact key; read `access/talos/<cluster>` | executor of the tenant | [execution and recovery §3.1](../../spec/execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction) |
+| 1 | Artifact decryption at dispatch | after approval; queued, retried, after a restore | not necessarily: the approver may differ from the creator (self-approval is allowed, §13.7 item 3), and a retry comes later | decrypt on the artifact key; read `access/talos/<cluster>` | executor of the tenant | [execution and recovery §3.1](../../spec/execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction) |
 | 2 | Drift and other observations | every drift interval, on every controller with an executor | no | read `access/talos/<cluster>` | the executor's read-only client, same credential | execution and recovery §6.1; design §13.2 |
 | 3 | Dependency monitor | every pass, on every instance | no | read `secret/metadata/*` and `transit/keys/*` | metadata identity of the tenant | [dependency monitor §4](../../spec/dependency-monitor.md#4-the-metadata-identity), §6.1 |
-| 4 | Staging sweep and takeover | at startup and periodically; takeover by a second ingestion principal | no | staging key encrypt and decrypt | ingestion identity of the tenant | compilation §3.1, §3.5 |
-| 5 | Ingestion | a user's request | yes, but the plaintext passes through the server either way | create-only on `gen/*`; HMAC; staging and baseline key | ingestion identity of the tenant | compilation §1 |
+| 4a | Staging sweep | at startup and periodically | no | nothing from OpenBao: it writes the claim state and clears the payload in the database | none needed | compilation §3.5 |
+| 4b | Staging takeover | on an explicit operator recovery request, by an ingestion principal | an operator | decrypt with the staging key | ingestion identity of the tenant | compilation §3.1, §3.4 |
+| 5 | Ingestion | a user's request | yes, but the plaintext passes through the server either way | create-only on `gen/*`; HMAC; staging and baseline key; for a `source: machine` ingestion, read `access/talos/<cluster>` (an `os:admin` credential used through a read-only client) | ingestion identity of the tenant | compilation §1; persistence and API §3.3 |
 | 6 | Compilation | at publication | the requester, but it runs as a job | read the pinned generations; encrypt with the artifact key | compiler of the tenant | compilation §1 |
 | 7 | Orphan report | an operator's command on the server host | an operator | list and read `secret/metadata/gen/*` | report identity of the tenant | persistence and API §6.4 |
 | 8 | Writing a cluster's talosconfig | the operator's own act | yes | write `access/talos/<cluster>` | the operator's own login, scoped to the tenant | persistence and API §3.3 |
 | 9 | Signing an admin certificate (new, see below) | at observation and dispatch | no | the cluster's CA key | a signer of the tenant | the owner's answer on [#869](https://github.com/ginsys/bronzeward/issues/869), specification [#874](https://github.com/ginsys/bronzeward/issues/874) |
 
 Only row 8 is a person's own act with a person's own token, and it is the one that does not
-go through Bronzeward today. Rows 2 to 4 and 9 have no user at the time they run, so no
-user token exists to use, and row 1 may have none. Row 1 adds the approval: OpenBao cannot check it (M6), and a user
-token that could decrypt would let that user bypass the application check by calling
-OpenBao.
+go through Bronzeward today. Rows 2, 3 and 9 have no user at the time they run, so no user
+token exists to use, and row 1 may have none; row 4a needs no OpenBao identity at all.
+Rows 4b, 5, 6 and 7 have a person present, but giving that person's token the staging key,
+the create path or the metadata would make the person hold what the specification gives
+only a component identity (compilation §3.1, "only ingestion identities can decrypt" the
+staging key). Row 1 adds the approval: OpenBao cannot check it (M6), and a user token that
+could decrypt would let that user bypass the application check by calling OpenBao.
 
 ### 3. Layout per tenant
 
@@ -168,10 +175,11 @@ Two separate choices, measured separately.
   already leaves outside Bronzeward's roles.
 
 **The database.** `cluster` already keys most records, so a `tenant` owning a set of
-clusters would scope rows. A schema per tenant does not fit the singleton
-`installation_state`: a restore and a recovery mode are per installation, so per-tenant
-schemas would need a per-tenant epoch, which is a per-tenant installation (analysis, not
-measured). A separate installation per tenant already gives hard isolation with no change
+clusters would scope rows. A schema per tenant could share the
+singleton `installation_state`, and then a restore and a recovery mode stay per
+installation and reach every tenant; recovery of one tenant alone would need its own epoch,
+which needs a further design and comes close to a per-tenant installation (analysis, not
+measured; [persistence and API §12.1](../../spec/persistence-api.md) holds the epoch). A separate installation per tenant already gives hard isolation with no change
 to the specification, at the cost of running one controller and one database per tenant;
 it is the baseline the three models below are weighed against.
 
@@ -190,10 +198,11 @@ it is the baseline the three models below are weighed against.
   isolation within one process") is unchanged by a component identity per tenant held in
   one process, and worsened by user tokens held there. Per-tenant identities in separate
   processes would change it; that is a deployment choice no model here requires.
-- **Per-request child tokens** (M4) narrow one user's reach to one path and one use, but
-  only when the parent holds its policies directly, not through identity groups, so the
-  group mapping of M1 and the narrowing of M4 do not combine on one role. A child binds
-  nothing to a plan: the plan binding stays the application's.
+- **Per-request child tokens** (M4, M4b) can narrow one user's reach to one policy and one
+  use, but in these samples only a policy the parent holds directly on its role could be
+  named: the same name held through an identity group was refused. The group mapping of M1
+  and a child named after the group's policy therefore do not combine on one role. A child
+  binds nothing to a plan: the plan binding stays the application's.
 
 ### 5. The alternatives compared
 
@@ -205,13 +214,14 @@ Two axes: who holds the identity, and where tenants are separated.
 | Layout | paths and groups, or namespaces | namespaces (paths work with the cost in question 3) | paths as today |
 | OpenBao enforces the tenant | yes (M1, M5) | yes (M5) | no: the application does |
 | Approval before decryption | impossible (M6) | the application, as today | the application, as today |
-| Operations with no user (rows 1 to 4, 9) | cannot serve | serves | serves |
+| Operations with no user (rows 2, 3, 4a, 9) | cannot serve | serves | serves |
 | A leaked or buggy controller reaches | the tokens it holds | the tokens it holds: every tenant, in one process | every tenant and every key |
 | What it needs | a client or exchange for the audience; a ttl policy | a namespace, mounts, policies and tokens per tenant; configuration for many tokens; an OpenBao administrator | nothing |
 | Measured | M1 to M5, M7, M8 | M5, M7 | not new |
 | Change to the specification | high: new token path; §13.7 item 1 and §13.1 reopened | medium: configuration of many token files, `bronzeward orphans` per tenant, §13.2 | none |
 
-U is ruled out for rows 1 to 4 and 9 (M6 and the absence of a user). T is S with the
+U is ruled out for rows 1, 2, 3 and 9 (M6, or no user at the time), and for rows 4b to 7 by
+the specification's own rule that a component identity holds those grants. T is S with the
 tenant boundary also drawn in OpenBao: it adds nothing against a flaw in the controller
 process, and it bounds an operator's mistake in one tenant's policies and gives the audit
 log a tenant per entry.
