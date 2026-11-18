@@ -14,13 +14,25 @@ type Machine = components["schemas"]["MachineBody"];
 type Ingestion = components["schemas"]["IngestionBody"];
 type Plan = components["schemas"]["PlanBody"];
 type Draft = components["schemas"]["DraftBody"];
+type Operation = components["schemas"]["OperationBody"];
 
 export interface Step { text: string; links: { to: string; label: string; id: string }[] }
 
 // What the page has read; undefined is a read not answered (loading or failed), never an empty answer.
-export interface Known { ingestions?: Ingestion[] | undefined; draft?: Draft | undefined; proposed?: Plan[] | undefined; approved?: Plan[] | undefined; committed?: Plan[] | undefined }
+export interface Known {
+  ingestions?: Ingestion[] | undefined; draft?: Draft | undefined; proposed?: Plan[] | undefined; approved?: Plan[] | undefined;
+  committed?: Plan[] | undefined;
+  // The operation of the newest committed plan for the selected release, once read.
+  operation?: Operation | undefined;
+}
 
 const RUNNING = new Set(["held", "paused", "resumed"]);
+// The operation states that still hold the machine's scope; completed, rejected, cancelled and failed are terminal
+// (execution and recovery, the operation state table).
+export const INFLIGHT = new Set(["committed", "sending", "verifying", "unresolved"]);
+
+export const newestCommitted = (plans: readonly Plan[], release: string): Plan | undefined =>
+  plans.filter((p) => p.release === release && p.state === "committed").sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 
 // The draft of the newest import of this machine that stored one (state `released`).
 export const releasedDraft = (ingestions: readonly Ingestion[]): string | undefined =>
@@ -56,8 +68,12 @@ export function nextStep(m: Machine, k: Known): Step | undefined {
   const op = m.desired === null ? undefined : planFor(m.desired, m);
   if (m.desired === null || op === undefined || k.proposed === undefined || k.approved === undefined) return undefined;
   const release = m.desired;
-  // A committed plan for the selected release has an operation in flight (or one that did not finish): no line.
-  if (k.committed === undefined || k.committed.some((p) => p.release === release)) return undefined;
+  // `committed` is a plan's terminal state, not proof of an operation in flight (an adopt plan's operation is
+  // already completed): the newest committed plan of the selected release gives no line only while its
+  // operation holds the scope, and an operation not read gives none either.
+  if (k.committed === undefined) return undefined;
+  const last = newestCommitted(k.committed, release);
+  if (last !== undefined && (k.operation === undefined || INFLIGHT.has(k.operation.state))) return undefined;
   const approved = k.approved.find((p) => p.release === release);
   if (approved !== undefined) {
     return { text: `Plan ${short(approved.id)} for the selected release is approved. Next: the controller commits and applies it. Nothing is left for you to do.`, links: [{ to: `/plans/${approved.id}`, label: "Open the plan", id: approved.id }] };
@@ -110,7 +126,16 @@ function PlanStep({ machine }: { machine: Machine }) {
   const [approved] = useList<Plan>("/plans", q("approved"), true, NO_KEEP);
   const [committed] = useList<Plan>("/plans", q("committed"), true, NO_KEEP);
   const items = (l: typeof proposed) => (l.kind === "ok" ? l.data.items : undefined);
-  return <NextStepLine step={nextStep(machine, { proposed: items(proposed), approved: items(approved), committed: items(committed) })} />;
+  const known: Known = { proposed: items(proposed), approved: items(approved), committed: items(committed) };
+  const last = known.committed === undefined || machine.desired === null ? undefined : newestCommitted(known.committed, machine.desired);
+  return last === undefined ? <NextStepLine step={nextStep(machine, known)} /> : <CommittedOperation machine={machine} known={known} operation={last.committedOperation} />;
+}
+
+// The operation of the newest committed plan for the selected release: one item read. A plan that names none is
+// not known to be finished, so it shows no line.
+function CommittedOperation({ machine, known, operation }: { machine: Machine; known: Known; operation: string | null }) {
+  const item = useItem<Operation>(`/operations/${enc(operation ?? "none")}`, NO_KEEP);
+  return <NextStepLine step={operation === null ? undefined : nextStep(machine, { ...known, operation: item.kind === "ok" ? item.data : undefined })} />;
 }
 
 // The page counts the settled reads of the machine and its observations to decide when to read them again

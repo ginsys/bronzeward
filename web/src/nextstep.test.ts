@@ -8,7 +8,7 @@ import type { components } from "./api/v1";
 import { publishPath } from "./drafts.tsx";
 import { ReadsProvider, type Reads } from "./list.tsx";
 import { planPath } from "./plan.tsx";
-import { type Known, nextStep, NextStepLine, releasedDraft } from "./nextstep.tsx";
+import { type Known, newestCommitted, nextStep, NextStepLine, releasedDraft } from "./nextstep.tsx";
 
 type Machine = components["schemas"]["MachineBody"];
 type Ingestion = components["schemas"]["IngestionBody"];
@@ -117,10 +117,21 @@ describe("no line where the page cannot say", () => {
     expect(nextStep(published, { proposed: [], approved: [] })).toBeUndefined();
   });
 
-  test("a committed plan for the selected release gives no line, even with the plan lists empty: an operation is in flight", () => {
-    const committed = [plan({ id: "pln_c", state: "committed", operation: "apply-config" })];
-    expect(nextStep(behind, { proposed: [], approved: [], committed })).toBeUndefined();
-    expect(nextStep(behind, { proposed: [], approved: [plan({ state: "approved" })], committed })).toBeUndefined();
+  test("a committed plan's operation decides: in flight or not read gives no line, a finished one does not hide the next step", () => {
+    const committed = [plan({ id: "pln_c", state: "committed", operation: "apply-config", committedOperation: "op_c" })];
+    const op = (state: string) => ({ id: "op_c", state }) as components["schemas"]["OperationBody"];
+    const lists = { proposed: [], approved: [plan({ id: "pln_n", state: "approved" })], committed };
+    for (const state of ["committed", "sending", "verifying", "unresolved"]) expect(nextStep(behind, { ...lists, operation: op(state) })).toBeUndefined();
+    expect(nextStep(behind, lists)).toBeUndefined();
+    // A completed adopt plan stays committed; the later plan's step is still shown.
+    for (const state of ["completed", "rejected", "cancelled", "failed"]) expect(links(nextStep(behind, { ...lists, operation: op(state) }))).toEqual(["/plans/pln_n"]);
+  });
+
+  test("the newest committed plan of the selected release is the one whose operation counts", () => {
+    const old = plan({ id: "pln_1", state: "committed", createdAt: "2026-11-17T10:00:00Z" });
+    const recent = plan({ id: "pln_2", state: "committed", createdAt: "2026-11-18T10:00:00Z" });
+    expect(newestCommitted([old, recent, plan({ id: "pln_3", state: "committed", release: "rel_other" })], "rel_a")?.id).toBe("pln_2");
+    expect(newestCommitted([plan({ state: "approved" })], "rel_a")).toBeUndefined();
   });
 
   test("open drift gives no line, whatever the pending state and the plan reads say", () => {
