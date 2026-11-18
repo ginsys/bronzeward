@@ -379,10 +379,12 @@ persistence's (see `persistence-api.md`).
    used (the CA key's path, version and `created_time` and the certificate's
    serial, §3.1 item 2), and that certificate must not have passed its
    `NotAfter`: an attempt made again after its attempt transaction failed to
-   commit obtains the access again, and one that moved since the evidence, or
-   whose certificate expired, is refused, so the
-   operation is observed and classified again (§5) with the new version and
-   never sends on evidence another version read;
+   commit obtains the access again, as a new certificate with a new serial, so
+   it is always refused (the serial moved, whether or not the CA key version
+   did), and the operation is observed and classified again (§5) with the new
+   certificate and never sends on evidence another certificate or key version
+   read; an attempt whose evidence certificate has expired is refused the same
+   way;
 4. this operation takes the machine's coordination scope, and no other
    operation on that scope is `committed`, `sending`, `verifying` or
    `unresolved` (on PostgreSQL, a partial unique index; DS row 010, control row

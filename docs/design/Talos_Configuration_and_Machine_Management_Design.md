@@ -992,7 +992,7 @@ Application audit events explain the human and application intent: draft changed
 
 Items labelled *derived* are the recorder's inferences, not the owner's decision, and remain for the owner to review.
 
-1. **Authentication.** Humans sign in with OIDC against an identity provider the operator runs; no provider product is selected. Automation uses Bronzeward-issued bearer tokens, one per service identity, stored only as hashes, as §13.3 already requires of enrolment tokens. Internal components keep their separate OpenBao identities (§13.2). Bronzeward issues no OpenBao identity to API users in the PoC: identities are shared (owner decision BW-870-tenancy-identity-model-1, 18 November 2026, [#870](https://github.com/ginsys/bronzeward/issues/870)).
+1. **Authentication.** Humans sign in with OIDC against an identity provider the operator runs; no provider product is selected. Automation uses Bronzeward-issued bearer tokens, one per service identity, stored only as hashes, as §13.3 already requires of enrolment tokens. Internal components keep their separate OpenBao identities (§13.2). Bronzeward issues no OpenBao identity to API users in the PoC: identities are shared (owner decision BW-870-tenancy-identity-model-1, 18 November 2026, [ginsys/bronzeward#870](https://github.com/ginsys/bronzeward/issues/870)).
 
    *Derived:* no human or automation identity is given an OpenBao identity. This is stronger than the owner's words and than §13.1, which says only that a client never receives broad OpenBao access.
 2. **Roles.** Five application roles, enforced by the trusted controller (§12.7). No role executes: the controller dispatches approved plans.
@@ -1296,7 +1296,7 @@ This is the eventual version 1 envelope. The first milestone is the narrower exi
 
 - Generic policy engine and plugin marketplace.
 
-- Hard multi-tenant isolation. The per-tenant design, including whether the Talos signer identity of §13.2 splits, takes the note of [#877](https://github.com/ginsys/bronzeward/pull/877) as input and waits for a design discussion with the owner; nothing here decides it.
+- Hard multi-tenant isolation. The per-tenant design, including whether the Talos signer identity of §13.2 splits, takes the note of [ginsys/bronzeward#877](https://github.com/ginsys/bronzeward/pull/877) as input and waits for a design discussion with the owner (owner decision BW-870-tenancy-identity-model-1, 18 November 2026: shared identities for the PoC); nothing here decides it.
 
 - Kubernetes workload deployment or GitOps.
 

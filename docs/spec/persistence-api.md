@@ -408,7 +408,9 @@ They are held apart **(choice §17.29)**.
   request can point a read at another secret. No operator writes it with the
   provider's tooling, and `secret/data/access/talos/<cluster id>`, the
   `bw-onboard` create-only policy and `internal/accessput` are retired. No
-  Bronzeward identity but the signer reads, lists or deletes the key, and the
+  Bronzeward identity but the signer reads, lists or deletes the key at this
+  path (an imported control plane configuration's `machine.ca.key` is also a
+  schema secret, extracted as an ordinary generation, compilation §1), and the
   normal API never carries a secret value (compilation §1): a first key enters
   by the route of §3.4, which extracts the key before anything is persisted
   (design §7.1). `internal/talos/discover` stays a read-only package with its
@@ -435,10 +437,9 @@ They are held apart **(choice §17.29)**.
   uses it: each certificate binds one evidence observation and the attempt made
   on it, so a key replacement before a retry is picked up by that retry. An
   attempt made again after its attempt transaction failed obtains a certificate
-  again too; when the CA key version is not the one the commitment's evidence
-  read, or the evidence's certificate has passed `NotAfter`, comparison 3
-  refuses the attempt and the operation is observed again before anything is
-  sent. An ingestion records it,
+  again too, with a new serial, so comparison 3 (the evidence's certificate
+  serial must be the attempt's) always refuses it and the operation is observed
+  again, with the new certificate, before anything is sent. An ingestion records it,
   with the endpoint dialled, as an event of its `ingest` operation (T7, read
   through `GET /operations/{id}/events`), committed once the read returns a
   version and before the node is dialled, so it is kept whether the
@@ -464,13 +465,15 @@ They are held apart **(choice §17.29)**.
   mutating request is used only by dispatch, after execution and recovery
   §3.1's approval check, which also gates artifact decryption (design §13.1,
   owner decision 2 October 2026). The provider cannot tell these uses apart:
-  the executor identity's read grant holds at any time, and the bound is the
-  application's, as for ingestion.
+  the executor can obtain a certificate from the signer at any time (it holds no
+  provider read of the CA key), and the bound is the application's, as for
+  ingestion.
 - **What is used.** Only the cluster's CA certificate and the signed client
   certificate and key. The client dials only the endpoint chosen above (the
   machine's, or the plan's route) and sends no `node` metadata. The talosconfig
-  a first key may arrive as (§3.4) is read once for its own CA certificate and
-  endpoints and is never a credential Bronzeward keeps.
+  a first key may arrive as (§3.4) is read once, for its own client certificate
+  and CA certificate, and dials only the request's `endpoint`: its own endpoints
+  are ignored. It is never a credential Bronzeward keeps.
 - **What is kept.** The CA key lives only in the signer's memory while it
   signs. The signed certificate and key live only in the memory of the process
   that obtained them, for the use they were signed for: an ingestion; one observation outside a
@@ -497,8 +500,10 @@ They are held apart **(choice §17.29)**.
   this credential but reports another Talos cluster ID (possible only where
   clusters share a Talos certificate authority): each fails the ingestion with
   `409 machine-identity-mismatch`, as below, and nothing read is kept. A node behind another certificate authority, or a certificate signed from
-  another cluster's CA key stored at this cluster's path, fails the mutual TLS
-  handshake before any read: a credential Talos refuses, below. Under a shared
+  another cluster's CA key stored at this cluster's path, is refused by the
+  node (measured on Talos v1.14.5: gRPC `Unavailable`, with the TLS cause not
+  isolated, and no cluster with additional accepted CAs measured), so it is
+  read as a credential Talos refuses, below, and no identity check relies on it. Under a shared
   certificate authority, a certificate signed from another cluster's key
   reaches this cluster's node and reads it; the identity check then passes,
   since the node is the recorded one, and the ingestion succeeds.
@@ -564,7 +569,12 @@ there.
   "endpoint": "<§3.3 grammar>"}` and answers `200` with `{"cluster", "kind",
   "caKeyVersion", "replaced"}`: the version identity of the stored CA key
   (§3.3) and whether it replaced a key. `endpoint` is required for
-  `secrets-bundle` and `talosconfig` and refused for `machine-config`. The
+  `secrets-bundle` and `talosconfig` and refused for `machine-config`; it is the
+  only address dialled, and a talosconfig's own endpoints are ignored. A
+  `machine-config` key is not tried against a node when supplied, so a key that
+  Talos does not trust surfaces at first use as `503 talos-access-unavailable`
+  (§3.3, failure), and an author supplies the cluster's current first key again.
+  The
   document is extracted before anything is persisted (design §7.1) and is never
   stored, logged, returned or quoted in an error (compilation §13); its parse
   failures give a fixed refusal, `422 validation-failed` with a `rule` of
@@ -583,8 +593,10 @@ there.
   executor only a certificate and its key. The key is stored per cluster under a
   path derived from the cluster's id, and the audit records are keyed by cluster,
   so that a later split by tenant selects paths without rewriting this contract.
-  Whether the signer identity itself splits is a question for the per-tenant
-  design, which waits for a design discussion with the owner. Naming the signer
+  The PoC uses shared identities (owner decision BW-870-tenancy-identity-model-1,
+  2026-11-18 19:06 CET); whether the signer identity itself splits, and what a
+  split implies for paths and audit, is a question for the per-tenant design,
+  which waits for a design discussion with the owner. Naming the signer
   proves no isolation inside the one process (design §13.2).
 - **What it signs.** Per use, never stored: the lowest role the use needs
   (`os:reader` for an observation that does not read the machine configuration;
