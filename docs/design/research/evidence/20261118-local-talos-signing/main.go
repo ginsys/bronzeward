@@ -7,7 +7,10 @@
 //	go run docs/design/research/evidence/20261118-local-talos-signing/main.go offline <dir>
 //
 // <dir> holds a synthetic secrets.yaml, controlplane.yaml, worker.yaml and talosconfig made with
-// `talosctl gen secrets` and `talosctl gen config`. No key is ever printed. Not product code.
+// `talosctl gen secrets` and `talosctl gen config`. No key is printed: the program prints public
+// certificate fields, fingerprints and gRPC codes, and an error from reading or decoding an
+// input is replaced by a fixed line, since a decoder error can quote the rejected input. Not
+// product code.
 package main
 
 import (
@@ -20,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -44,9 +48,12 @@ func main() {
 	}
 }
 
+// must stops the program on an error and prints where, never the error: a decoder error can quote
+// the rejected input, and the inputs here hold keys.
 func must[T any](v T, err error) T {
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "fatal:", err)
+		_, _, line, _ := runtime.Caller(1)
+		fmt.Fprintf(os.Stderr, "fatal: the step at main.go:%d failed (error text withheld: it can quote its input)\n", line)
 		os.Exit(1)
 	}
 	return v
