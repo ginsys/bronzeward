@@ -59,6 +59,28 @@ func must[T any](v T, err error) T {
 	return v
 }
 
+// require stops the program with a fixed line when an input lacks something the program reads.
+func require(ok bool, what string) {
+	if !ok {
+		fmt.Fprintln(os.Stderr, "fatal: the input lacks", what)
+		os.Exit(1)
+	}
+}
+
+// certOf parses the first PEM block of crt as a certificate.
+func certOf(crt []byte) *stdx509.Certificate {
+	b, _ := pem.Decode(crt)
+	require(b != nil, "a PEM certificate")
+	return must(stdx509.ParseCertificate(b.Bytes))
+}
+
+// currentContext is the talosconfig's current context.
+func currentContext(tc *clientconfig.Config) *clientconfig.Context {
+	c := tc.Contexts[tc.Context]
+	require(c != nil, "the talosconfig's current context")
+	return c
+}
+
 func fp(crt []byte) string {
 	b, _ := pem.Decode(crt)
 	if b == nil {
@@ -70,8 +92,7 @@ func fp(crt []byte) string {
 
 // describe verifies the certificate against the CA and prints what a node would read from it.
 func describe(label string, p *x509.PEMEncodedCertificateAndKey, ca []byte, call time.Time) {
-	b, _ := pem.Decode(p.Crt)
-	c := must(stdx509.ParseCertificate(b.Bytes))
+	c := certOf(p.Crt)
 	pool := stdx509.NewCertPool()
 	pool.AppendCertsFromPEM(ca)
 	_, verr := c.Verify(stdx509.VerifyOptions{
@@ -101,8 +122,9 @@ func offline(dir string) {
 	cpCA := cp.Machine().Security().IssuingCA()
 	wkCA := wk.Machine().Security().IssuingCA()
 	bundle := must(secrets.LoadBundle(filepath.Join(dir, "secrets.yaml")))
+	require(cpCA != nil && bundle.Certs != nil && bundle.Certs.OS != nil, "an os CA in the control plane configuration and the bundle")
 	tc := must(clientconfig.Open(filepath.Join(dir, "talosconfig")))
-	tcCtx := tc.Contexts[tc.Context]
+	tcCtx := currentContext(tc)
 	tcCA := must(base64.StdEncoding.DecodeString(tcCtx.CA))
 
 	fmt.Printf("source controlplane.yaml: CA certificate %s, key present=%v\n", fp(cpCA.Crt), len(cpCA.Key) > 0)
@@ -203,7 +225,8 @@ func node(dir, endpoint string) {
 	bundle := must(secrets.LoadBundle(filepath.Join(dir, "secrets.yaml")))
 	opBytes := must(os.ReadFile(filepath.Join(dir, "talosconfig")))
 	tc := must(clientconfig.FromBytes(opBytes))
-	tcCtx := tc.Contexts[tc.Context]
+	require(cpCA != nil && bundle.Certs != nil && bundle.Certs.OS != nil, "an os CA in the control plane configuration and the bundle")
+	tcCtx := currentContext(tc)
 	ca := must(base64.StdEncoding.DecodeString(tcCtx.CA))
 	fmt.Printf("CA certificates equal across control plane config, bundle and talosconfig: %v\n",
 		fp(cpCA.Crt) == fp(bundle.Certs.OS.Crt) && fp(ca) == fp(cpCA.Crt))
@@ -257,15 +280,12 @@ func node(dir, endpoint string) {
 
 // window is the validity window the certificate carries (NotBefore and NotAfter, whole seconds).
 func window(p *x509.PEMEncodedCertificateAndKey) (notBefore, notAfter time.Time) {
-	b, _ := pem.Decode(p.Crt)
-	c := must(stdx509.ParseCertificate(b.Bytes))
+	c := certOf(p.Crt)
 	return c.NotBefore, c.NotAfter
 }
 
 func serial(crt []byte) string {
-	b, _ := pem.Decode(crt)
-	c := must(stdx509.ParseCertificate(b.Bytes))
-	s := c.SerialNumber.Text(16)
+	s := certOf(crt).SerialNumber.Text(16)
 	if len(s) > 12 {
 		s = s[:12] + "..."
 	}
@@ -274,7 +294,6 @@ func serial(crt []byte) string {
 
 func subjectOf(b64 string) string {
 	raw := must(base64.StdEncoding.DecodeString(strings.TrimSpace(b64)))
-	blk, _ := pem.Decode(raw)
-	c := must(stdx509.ParseCertificate(blk.Bytes))
+	c := certOf(raw)
 	return fmt.Sprintf("O=%v validity %s .. %s", c.Subject.Organization, c.NotBefore.UTC().Format(time.RFC3339), c.NotAfter.UTC().Format(time.RFC3339))
 }
