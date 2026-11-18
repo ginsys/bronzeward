@@ -70,7 +70,7 @@ to that work:
 | Identity | Needs | Must not have | What PC measured |
 | --- | --- | --- | --- |
 | Ingestion | create-only secret generations; HMAC with the digest key (§4.1); encrypt and decrypt with the staging key (§3); encrypt with the baseline key (§2.3); obtain a certificate from the signer, for a `source: machine` ingestion (below) | every other secret read; artifact and baseline decryption; machine operation | `publisher`: `create` on `secret/data/gen/*` only, and a refused replace ([PC §2](../design/research/20260924-provider-capability-comparison.md#2-candidates-and-identities), [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) rows 001, 002). Staging-key, baseline-key and HMAC use were not measured. |
-| Compiler | read the pinned secret versions; encrypt with the artifact key | artifact, baseline or staging decryption; secret creation; the Talos CA key; machine operation | `compiler`: `read` on `secret/data/*`, encrypt on the artifact key, decrypt refused (PC §4.1 rows 004, 038, 040) |
+| Compiler | read the pinned secret versions; encrypt with the artifact key | artifact, baseline or staging decryption; secret creation; the signer's path `secret/data/access/talos-ca/*`; machine operation | `compiler`: `read` on `secret/data/*`, encrypt on the artifact key, decrypt refused (PC §4.1 rows 004, 038, 040) |
 | Executor | decrypt artifacts, gated by approval; obtain a certificate from the signer (below) | every other secret read; staging and baseline decryption | `executor`: decrypt only, secret read refused (PC §4.1 rows 039, 005); [execution and recovery §3.1](execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction) |
 | Signer | `create`, `read` and `update` on `secret/data/access/talos-ca/*`, for [persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer) | `list`, `delete`, any other path, any decryption; machine operation | not measured; [persistence and API §16](persistence-api.md#16-verification-and-evidence-limits) requires the grants |
 | Metadata | [design §7.6](../design/Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks) classification | any value | `metadata`: KV metadata and Transit key state, no data (PC §4.1) |
@@ -83,9 +83,15 @@ signer identity and supplied by an author through a first key, never written by
 the operator with the provider's tooling ([persistence and API
 §3.3](persistence-api.md#33-talos-access), [§3.4](persistence-api.md#34-first-keys-and-the-talos-signer))
 **(choice §16.29)**. The ingestion and executor identities never read it: each
-obtains a short-lived certificate from the signer. Its path is disjoint from
-`secret/data/gen/*`, so the ingestion identity still never reads a secret it
-creates (choice §16.1). The compiler's grant PC measured, `read` on
+obtains a short-lived certificate from the signer. The signer's path holds the
+only copy Bronzeward uses to sign; a control plane configuration imported from a
+machine carries the same `machine.ca.key` as a schema secret, so §2.3 extracts it
+into an ordinary secret generation like every other secret, and the compiler
+reads that generation to render the configuration. This contract does not change
+that copy and does not claim the compiler never sees the key's value; it claims
+only that the compiler cannot read the signer's path and signs nothing. Its path
+is disjoint from `secret/data/gen/*`, so the ingestion identity still never reads
+a secret it creates (choice §16.1). The compiler's grant PC measured, `read` on
 `secret/data/*`, would cover it; the compiler's grant is `read` on
 `secret/data/gen/*`, as the fixture's compiler policy already has it
 (`fixtures/openbao/policies/bw-compiler.hcl`). No grant on the path was
