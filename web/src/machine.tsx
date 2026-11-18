@@ -8,6 +8,7 @@ import type { components } from "./api/v1";
 import { ChangeEndpoint } from "./forms.tsx";
 import { type Dropped, Head, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, node, release } from "./machines.tsx";
+import { NextStep } from "./nextstep.tsx";
 import type { ReadResult } from "./request.ts";
 import { clock, Status } from "./states.tsx";
 
@@ -419,6 +420,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed 
       <p>Cluster <Ref to={`/clusters/${d.cluster}`} id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
       {changed !== undefined && <ChangeEndpoint machine={d} onChanged={changed} />}
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list).map((s) => <li key={s}>{s}</li>)}</ul>
+      <NextStep machine={d} />
       <dl>
         <dt>Desired</dt><dd>{release(d.desired)}</dd>
         <dt>Applied</dt><dd>{d.applied === null ? "none" : <>{release(d.applied.release)} by {d.applied.source}</>}</dd>

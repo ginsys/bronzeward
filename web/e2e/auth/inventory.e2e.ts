@@ -100,6 +100,9 @@ describe("the machines", () => {
     await $(`a[title="${id}"]`).click();
     await expect($("main h2")).toHaveText(`Machine ${id}`);
     expect(await where()).toBe(`${FIXTURE_PAGE}/machines/${id}`);
+    // A machine just recorded has no Desired, no Applied and no import: the page says it is not handed over and offers the import.
+    await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("Not handed over"), { wait: 20_000 });
+    await expect($('[data-testid="next-step"]').$("a=Import this machine")).toBeDisplayed();
     await $(`a[title="${cl.id}"]`).click();
     await expect($("main h2")).toHaveText("Cluster lab-a");
     // The Clusters entry of the main navigation lists the clusters, and a cluster's page shows its machines and open drafts.
