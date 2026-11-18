@@ -21,18 +21,18 @@ export interface Step { text: string; links: { to: string; label: string; id: st
 // What the page has read; undefined is a read not answered (loading or failed), never an empty answer.
 export interface Known {
   ingestions?: Ingestion[] | undefined; draft?: Draft | undefined; proposed?: Plan[] | undefined; approved?: Plan[] | undefined;
-  committed?: Plan[] | undefined;
-  // The operation of the newest committed plan for the selected release, once read.
-  operation?: Operation | undefined;
+  // The machine's operations that still hold its scope, every state read.
+  held?: Operation[] | undefined;
 }
 
 const RUNNING = new Set(["held", "paused", "resumed"]);
 // The operation states that still hold the machine's scope; completed, rejected, cancelled and failed are terminal
-// (execution and recovery, the operation state table).
-export const INFLIGHT = new Set(["committed", "sending", "verifying", "unresolved"]);
+// (execution and recovery, the operation state table). `committed` is also a plan's terminal state, which says
+// nothing of its operation, so the operations are read themselves.
+export const HOLDING = ["committed", "sending", "verifying", "unresolved"] as const;
 
-export const newestCommitted = (plans: readonly Plan[], release: string): Plan | undefined =>
-  plans.filter((p) => p.release === release && p.state === "committed").sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+// The page shows the line only from a machine read that answered and was not found stale since.
+export const lineMachine = (m: { kind: string; data?: Machine }, stale: boolean): Machine | undefined => (m.kind === "ok" && !stale ? m.data : undefined);
 
 // The draft of the newest import of this machine that stored one (state `released`).
 export const releasedDraft = (ingestions: readonly Ingestion[]): string | undefined =>
@@ -68,12 +68,8 @@ export function nextStep(m: Machine, k: Known): Step | undefined {
   const op = m.desired === null ? undefined : planFor(m.desired, m);
   if (m.desired === null || op === undefined || k.proposed === undefined || k.approved === undefined) return undefined;
   const release = m.desired;
-  // `committed` is a plan's terminal state, not proof of an operation in flight (an adopt plan's operation is
-  // already completed): the newest committed plan of the selected release gives no line only while its
-  // operation holds the scope, and an operation not read gives none either.
-  if (k.committed === undefined) return undefined;
-  const last = newestCommitted(k.committed, release);
-  if (last !== undefined && (k.operation === undefined || INFLIGHT.has(k.operation.state))) return undefined;
+  // An operation that holds the machine's scope, or operations not read: no line.
+  if (k.held === undefined || k.held.length > 0) return undefined;
   const approved = k.approved.find((p) => p.release === release);
   if (approved !== undefined) {
     return { text: `Plan ${short(approved.id)} for the selected release is approved. Next: the controller commits and applies it. Nothing is left for you to do.`, links: [{ to: `/plans/${approved.id}`, label: "Open the plan", id: approved.id }] };
@@ -118,24 +114,20 @@ function ImportStep({ machine }: { machine: Machine }) {
   return stored === undefined ? <NextStepLine step={nextStep(machine, { ingestions })} /> : <StoredDraft machine={machine} ingestions={ingestions} draft={stored} />;
 }
 
-// A machine whose selected release is not what Bronzeward applied: the machine's proposed, approved and
-// committed plans (three lists, by machine and state).
+// A machine whose selected release is not what Bronzeward applied: its proposed and approved plans (two lists,
+// by machine and state) and the operations that hold its scope (four lists, by machine and state; usually empty).
 function PlanStep({ machine }: { machine: Machine }) {
   const q = (state: string) => new URLSearchParams({ machine: machine.id, state }).toString();
   const [proposed] = useList<Plan>("/plans", q("proposed"), true, NO_KEEP);
   const [approved] = useList<Plan>("/plans", q("approved"), true, NO_KEEP);
-  const [committed] = useList<Plan>("/plans", q("committed"), true, NO_KEEP);
-  const items = (l: typeof proposed) => (l.kind === "ok" ? l.data.items : undefined);
-  const known: Known = { proposed: items(proposed), approved: items(approved), committed: items(committed) };
-  const last = known.committed === undefined || machine.desired === null ? undefined : newestCommitted(known.committed, machine.desired);
-  return last === undefined ? <NextStepLine step={nextStep(machine, known)} /> : <CommittedOperation machine={machine} known={known} operation={last.committedOperation} />;
-}
-
-// The operation of the newest committed plan for the selected release: one item read. A plan that names none is
-// not known to be finished, so it shows no line.
-function CommittedOperation({ machine, known, operation }: { machine: Machine; known: Known; operation: string | null }) {
-  const item = useItem<Operation>(`/operations/${enc(operation ?? "none")}`, NO_KEEP);
-  return <NextStepLine step={operation === null ? undefined : nextStep(machine, { ...known, operation: item.kind === "ok" ? item.data : undefined })} />;
+  const [a] = useList<Operation>("/operations", q(HOLDING[0]), true, NO_KEEP);
+  const [b] = useList<Operation>("/operations", q(HOLDING[1]), true, NO_KEEP);
+  const [c] = useList<Operation>("/operations", q(HOLDING[2]), true, NO_KEEP);
+  const [d] = useList<Operation>("/operations", q(HOLDING[3]), true, NO_KEEP);
+  const items = <T,>(l: { kind: string; data?: { items: T[] } }) => (l.kind === "ok" ? l.data?.items : undefined);
+  const ops = [a, b, c, d].map(items);
+  const held = ops.some((o) => o === undefined) ? undefined : ops.flatMap((o) => o ?? []);
+  return <NextStepLine step={nextStep(machine, { proposed: items(proposed), approved: items(approved), held })} />;
 }
 
 // The page counts the settled reads of the machine and its observations to decide when to read them again
