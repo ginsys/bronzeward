@@ -164,6 +164,10 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     expect(await $('input[name="staging"][value="transient"]').isSelected()).toBe(true);
     // A review needs encrypted staging, so the checkbox is disabled and Tab passes it.
     expect(await $('input[name="review"]').isEnabled()).toBe(false);
+    // The filled form is on show: its contrast and the size of its selects and buttons (1.4.3, 2.5.8).
+    const form = await measure();
+    expect(form.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(form.small).toBe(0);
     await tabTo((f) => f.tag === "TEXTAREA", "the marks field");
     await tabTo((f) => f.tag === "BUTTON" && f.text === "Start import", "Start import");
     const sentAt = Date.now();
