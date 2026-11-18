@@ -829,7 +829,9 @@ func pairs(ms []machine) {
 		fmt.Printf("%s: both load=%v E0=%v E1=%v E2=%v E3=%v\n", label, err1 == nil && err2 == nil, e0(x, y), e1(x, y), e2(x, y), e3(x, y))
 	}
 	fmt.Println("== N3: pairs (w1)")
-	report("list order (podSubnets reversed)", a, b)
+	// Structural only: two IPv4 pod subnets are refused by machinery v1.14.5 validation
+	// (config/types/k8s/network.go), and the pair is loaded here, never validated.
+	report("structural list order (podSubnets reversed, loaded and not validated)", a, b)
 	// A control only: w1 is already comment-free, so this pair says nothing about comments (B1 does).
 	report("control: the comment-free machine against its re-encoding", w1, must(plainCompose(w1, nil)))
 	omit := variant(func(ds []*doc) {

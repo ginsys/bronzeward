@@ -56,7 +56,7 @@ point 2). Five levels, from strict to blind:
 | Level | Two configurations are equal when | Ignores | Sees a changed secret |
 |---|---|---|---|
 | E0 | `talos.ConfigurationDigest` is equal: SHA-256 of the bytes, trailing newlines folded | nothing but trailing newlines | yes |
-| E1 | both pass through the machinery's encoder without comments first, then E0 | comments | yes, by construction |
+| E1 | both are loaded and re-encoded by the machinery (typed load, encoder without comments) first, then E0 | comments, key order, formatting and the typed encoding's normalisation | yes, by construction |
 | E2 | the parsed documents, matched by kind and name, have equal trees | comments, key order, document order, formatting; **not** list order | yes, by construction |
 | E3 | the same documents as typed machinery documents (`configloader`), matched by kind and name, are equal | as E2, plus whatever the typed form normalises | yes, by construction |
 | E4 | the redacted forms, with the reference names masked, are equal as E2 | as E2, and the value behind every reference | **not behind a reference** (measured); a literal secret sits in the tree, so a change shows |
@@ -68,7 +68,7 @@ Recommendation: **E3 is the definition**, computed server-side from plaintext, w
 beside it. Reasons, each measured below: E0 fails on any move of a document between base and
 fragments (§5.3) and on comments (§5.1); E2 and E3 held for every machine in every composition that
 the compiler accepted; E4 cannot see a changed secret behind a reference (§5.5). E3 still counts
-list order, which is right for Talos (a reordered `podSubnets` is a different configuration, §5.4),
+list order, a conservative choice that was tested structurally only (§5.4),
 and calls two forms that Talos treats alike different (§5.4, explicit false against omitted), so it
 can refuse a refactoring that is in fact equivalent. It accepted no non-equivalent composition in the
 controls of §5.3; that is a result on six machines and four mistakes, not a proof of soundness.
@@ -149,16 +149,17 @@ fragments share no leaf. Leaf by leaf it does matter for `w1`: the forward order
 reverse order composes and compares equal at E2 to E4. Order can therefore decide whether a
 composition is accepted; the cause was not investigated.
 
-Two consequences. A path-level proposal is **not composable as it stands**: in these runs the
-compiler accepted it only under R2, a rule about the patcher's merge granularity, so a proposal
-that has not been composed and compared is not a proposal. And moving a document out of the base is
+Two consequences. A path-level proposal is **not composable as it stands**: in the forward order the
+compiler accepted the split on all six machines only under R2, a rule about the patcher's merge
+granularity (the one leaf-by-leaf acceptance was `w1` in the reverse order), so a proposal that has
+not been composed and compared is not a proposal. And moving a document out of the base is
 visible to E0 and E1: the check must not be a digest of the render.
 
 ### 5.4 N3: pairs (`w1`)
 
 | Pair | Same behaviour? | E0 | E1 | E2 | E3 |
 |---|---|---|---|---|---|
-| `podSubnets` reversed | no | false | false | false | false |
+| `podSubnets` reversed (a structural list-order test: both variants load, neither was validated, and two IPv4 pod subnets are not a valid Talos configuration) | not tested | false | false | false | false |
 | control: the comment-free machine against its re-encoding | yes | true | true | true | true |
 | `defaultRuntimeSeccompProfileEnabled` explicit true (as `gen config` writes it) against omitted | no: omitted reads as false | false | false | false | false |
 | the same field, explicit false against omitted | yes: omitted reads as false | false | false | false | false |
@@ -167,7 +168,8 @@ The sources for the last two rows: `config/generate/kubernetes.go:186` in machin
 `true`, and `config/types/k8s/kubelet.go:201` returns false for an omitted field. The comment case
 is B1 (§5.1), not this table: the control row uses a machine that has no comments.
 
-List order counts, which is right. The last row is the one pair here that Talos treats alike and
+List order counts at every level: a conservative choice, since which Talos lists are ordered was
+not tested field by field. The last row is the one pair here that Talos treats alike and
 every level calls different, so **E3 can refuse an equivalent refactoring**. A further level that
 applies the typed defaults would close that, and was not built.
 
@@ -186,7 +188,7 @@ only one that can be true.
 | | (a) manual | (b) assisted proposal | (c) automatic split |
 |---|---|---|---|
 | Needs | the operator writes fragments and a thin base | a proposal engine over the imported machines, plus the check | the engine plus the check, with no review |
-| Evidence | N1, N2 and N5 show the check detects the mistakes a manual edit makes (§5.3) | §5.2 sizes the proposal (118 against 320 leaves); §5.3 shows it composes only with R2 | as (b): the check accepted a split on every machine, once R2 and the shells were applied |
+| Evidence | N1, N2 and N5 show the check detects the mistakes a manual edit makes (§5.3) | §5.2 sizes the proposal (118 against 320 leaves); §5.3 shows it composes in the forward order on all six machines only with R2 | as (b): the check accepted a split on every machine, once R2 and the shells were applied |
 | Limits | an edited thin base has to be written somewhere (below) | the engine sees only sanitized documents, so it cannot see shared secrets (B2) and cannot tell an unmarked secret from a plain value (§7) | the check proves equality with the baseline; it does not prove the split is a good one: 118 leaves can still put a machine-specific value into a role fragment |
 | The check | required | required | required, and it is the only review |
 
