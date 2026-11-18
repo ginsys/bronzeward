@@ -33,14 +33,17 @@ import (
 	"github.com/cosi-project/runtime/pkg/state/impl/inmem"
 	"github.com/cosi-project/runtime/pkg/state/impl/namespaced"
 	"github.com/cosi-project/runtime/pkg/state/protobuf/server"
+	cx509 "github.com/siderolabs/crypto/x509"
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	configpb "github.com/siderolabs/talos/pkg/machinery/api/resource/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
+	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	machinecfg "github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/machinery/resources/cluster"
 	cfgres "github.com/siderolabs/talos/pkg/machinery/resources/config"
 	"github.com/siderolabs/talos/pkg/machinery/resources/hardware"
 	"github.com/siderolabs/talos/pkg/machinery/resources/runtime"
+	"github.com/siderolabs/talos/pkg/machinery/role"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -118,6 +121,33 @@ func NewPKI(t testing.TB) PKI {
 	pool := x509.NewCertPool()
 	pool.AddCert(ca)
 	return PKI{CAPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), CrtPEM: crt, KeyPEM: key, Server: srv, Pool: pool}
+}
+
+// NewPKIFromCA is a PKI whose certificate authority is ca, a cluster's os CA as a signer holds it:
+// the CA signs the server's certificate for 127.0.0.1 and an os:admin client certificate, and the
+// node trusts it, so a certificate a signer makes from the same CA key is accepted.
+func NewPKIFromCA(t testing.TB, ca *cx509.PEMEncodedCertificateAndKey) PKI {
+	t.Helper()
+	authority, err := cx509.NewCertificateAuthorityFromCertificateAndKey(ca)
+	if err != nil {
+		t.Fatal("talostest: the certificate authority does not load")
+	}
+	now := time.Now()
+	srv, err := cx509.NewKeyPair(authority, cx509.IPAddresses([]net.IP{net.ParseIP("127.0.0.1")}),
+		cx509.KeyUsage(x509.KeyUsageDigitalSignature), cx509.ExtKeyUsage([]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}),
+		cx509.NotBefore(now.Add(-time.Hour)), cx509.NotAfter(now.Add(time.Hour)))
+	if err != nil {
+		t.Fatal("talostest: the server certificate was not issued")
+	}
+	admin, err := secrets.NewAdminCertificateAndKey(now.Add(-time.Hour), ca, role.MakeSet(role.Admin), 2*time.Hour)
+	if err != nil {
+		t.Fatal("talostest: the client certificate was not issued")
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(ca.Crt) {
+		t.Fatal("talostest: the certificate authority is not PEM")
+	}
+	return PKI{CAPEM: ca.Crt, CrtPEM: admin.Crt, KeyPEM: admin.Key, Server: *srv.Certificate, Pool: pool}
 }
 
 // Talosconfig is a talosconfig document for p whose context names endpoints and nodes (which

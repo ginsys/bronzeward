@@ -322,6 +322,16 @@ func TestProviderBlock(t *testing.T) {
 	if c.Provider.ReportTokenFile != "/etc/bronzeward/openbao-report.token" {
 		t.Fatalf("reportTokenFile %q", c.Provider.ReportTokenFile)
 	}
+	if p.SignerTokenFile != "" {
+		t.Fatalf("an absent signerTokenFile reads %q", p.SignerTokenFile)
+	}
+	c, err = Load(strings.NewReader(base + authBlock + providerBlock + "  signerTokenFile: /etc/bronzeward/openbao-signer.token\n" + ingestionBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Provider.SignerTokenFile != "/etc/bronzeward/openbao-signer.token" {
+		t.Fatalf("signerTokenFile %q", c.Provider.SignerTokenFile)
+	}
 	for name, in := range map[string]string{
 		"loopback http":  strings.Replace(providerBlock, "https://bao.example.test:8200", "http://127.0.0.1:58200", 1),
 		"listed http":    strings.Replace(providerBlock, "https://bao.example.test:8200", "http://openbao:8200", 1) + "  plainHTTPHosts: [openbao]\n",
@@ -364,6 +374,13 @@ func TestProviderBlock(t *testing.T) {
 		"executor shares metadata's":  {strings.Replace(providerBlock, "openbao-executor.token", "openbao-metadata.token", 1), "provider.metadataTokenFile and provider.executorTokenFile name the same file"},
 		"report shares executor's":    {providerBlock + "  reportTokenFile: /etc/bronzeward/openbao-executor.token\n", "provider.executorTokenFile and provider.reportTokenFile name the same file"},
 		"executor relative":           {strings.Replace(providerBlock, "/etc/bronzeward/openbao-executor.token", "openbao-executor.token", 1), "provider.executorTokenFile must be an absolute path in clean form"},
+		"signer shares ingestion's":   {providerBlock + "  signerTokenFile: /etc/bronzeward/openbao-ingestion.token\n", "provider.ingestionTokenFile and provider.signerTokenFile name the same file"},
+		"signer shares compiler's":    {providerBlock + "  signerTokenFile: /etc/bronzeward/openbao-compiler.token\n", "provider.compilerTokenFile and provider.signerTokenFile name the same file"},
+		"signer shares metadata's":    {providerBlock + "  signerTokenFile: /etc/bronzeward/openbao-metadata.token\n", "provider.metadataTokenFile and provider.signerTokenFile name the same file"},
+		"signer shares executor's":    {providerBlock + "  signerTokenFile: /etc/bronzeward/openbao-executor.token\n", "provider.executorTokenFile and provider.signerTokenFile name the same file"},
+		"signer shares report's":      {providerBlock + "  reportTokenFile: /etc/bronzeward/openbao-report.token\n  signerTokenFile: /etc/bronzeward/openbao-report.token\n", "provider.reportTokenFile and provider.signerTokenFile name the same file"},
+		"signer relative":             {providerBlock + "  signerTokenFile: openbao-signer.token\n", "provider.signerTokenFile must be an absolute path in clean form"},
+		"signer unclean":              {providerBlock + "  signerTokenFile: /etc/bronzeward/./openbao-signer.token\n", "provider.signerTokenFile must be an absolute path in clean form"},
 	} {
 		_, err := Load(strings.NewReader(base + authBlock + c.block))
 		if err == nil || !strings.Contains(err.Error(), c.want) {
