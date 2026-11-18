@@ -147,6 +147,7 @@ no role included (`internal/api/api.go:339`).
 | draft list / show | `GET /drafts`, `/drafts/{id}` | list | item | the item's ETag is the one draft writes need |
 | import list / status | `GET /ingestions`, `/ingestions/{id}` | list | no | filters `state`, `machine` (`internal/api/ingestions.go:280-299`) |
 | import review | `GET /ingestions/{id}/review` | no | no | `author`, human; `no-store`; only while `paused` (`internal/api/review.go:30-52`) |
+| import base summary | `GET /import-base-revisions/{id}` | no | no | `author`, human; `no-store`; size and counts only, no text, no digest (choice §17.38) |
 | release list / show | `GET /releases`, `/releases/{id}` | list | no | |
 | release review, provenance | `GET /releases/{id}/machines/{m}/review` | no | no | redacted |
 | plan list / show | `GET /plans`, `/plans/{id}` | list | no | filters `state`, `machine` (`internal/api/plans.go:429-451`) |
