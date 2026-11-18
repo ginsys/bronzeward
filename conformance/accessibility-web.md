@@ -50,30 +50,31 @@ The release page and the rendered review of one of its machines
 The tasks T3 (the import wizard, the import page and the protected review) and T5 (the conflict view of
 the draft editor), from [#894](https://github.com/ginsys/bronzeward/issues/894). Automated, in
 `web/e2e/auth/a11y-import.e2e.ts`, run by `mise run browser-auth` against a disposable deployment
-with synthetic data, on Chrome, Edge, Firefox and Firefox ESR. A result is filled from the run at
-the pull request's head; a cell reading "pending" has no run yet, and a failure names its issue.
+with synthetic data. Recorded on 18 November 2026 with Chrome 157, Edge 157, Firefox 160 and Firefox
+ESR 153 on Linux, from the `browser-auth` jobs of the pull request that added the cases
+([#903](https://github.com/ginsys/bronzeward/pull/903)). A failure names its issue.
 The cases keep nothing protected: the storage check, the HTTP cache check and the artifact scan hold
 after each case.
 
 | Item | Screen and what is checked | chrome | edge | firefox | firefox-esr |
 | --- | --- | --- | --- | --- | --- |
-| 2.1.1 Keyboard, 2.1.2 No keyboard trap | wizard: the Changes and Imports links, Start import, the machine and draft selects and the source and staging radios by arrow keys, a typed document, Start import; Tab leaves every control | pending | pending | pending | pending |
-| 2.1.1 Keyboard, 2.1.2 No keyboard trap | protected review: Review import, a Mark as secret button, Send marks, Continue import, and Abandon import by Enter | pending | pending | pending | pending |
-| 2.1.1 Keyboard, 2.1.2 No keyboard trap | conflict view: the entry, Show their change and Copy my text by Tab and Enter; Save by Enter once focused | pending | pending | pending | pending |
-| 2.1.1 Keyboard | conflict view: a Tab stop on Save in the conflict state (not confirmed: the stop order differed between runs) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) |
-| 2.4.7 Focus visible | wizard, protected review, conflict view: every focus Tab reaches shows an outline of at least 2 px | pending | pending | pending | pending |
-| 2.4.3 Focus order | wizard: a page change moves focus to the new page, and Tab continues there in reading order | pending | pending | pending | pending |
-| 2.4.3 Focus order | protected review: focus after Review import, Send marks, Continue import and Abandon import (it drops to the page body) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) |
-| 2.4.3 Focus order | conflict view: focus after a refused save, Copy my text and the saved text (it drops to the page body); Show their change keeps focus | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) |
-| 4.1.3 Status messages | wizard: the refused start and the released import; protected review: the open review; conflict view: the refused save; each shown in the page's one `role="status"` region or an alert. That focus stays put after each is part of the 2.4.3 rows | pending | pending | pending | pending |
-| 1.4.3 Contrast | wizard, protected review, conflict view: the lowest contrast of any shown text, measured in the page, at least 4.5:1 | pending | pending | pending | pending |
-| 1.4.10 Reflow | at 320 CSS pixels no page scrolls sideways: the import wizard with a long draft title, the import page, the paused import, its open review and marks panel, and the conflict view with their text and mine | pending | pending | pending | pending |
-| 2.5.8 Target size | wizard, protected review, conflict view: every button, select and navigation link at least 24 by 24 px | pending | pending | pending | pending |
-| 3.3.1 Error identification | wizard: a start with no document is refused in text beside the button, "Not sent: paste the document or choose its file." | pending | pending | pending | pending |
+| 2.1.1 Keyboard, 2.1.2 No keyboard trap | wizard: the Changes and Imports links, Start import, the machine and draft selects and the source and staging radios by arrow keys, a typed document, Start import; Tab leaves every control | pass | pass | pass | pass |
+| 2.1.1 Keyboard, 2.1.2 No keyboard trap | protected review: Review import, a Mark as secret button, Send marks, Continue import, and Abandon import by Enter | pass | pass | pass | pass |
+| 2.1.1 Keyboard, 2.1.2 No keyboard trap | conflict view: the entry, Show their change and Copy my text by Tab and Enter; Save by Enter once focused | pass | pass | pass | pass |
+| 2.1.1 Keyboard | conflict view: a Tab stop on Save in the conflict state (not confirmed: the stop order differed between runs) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) (Chrome 139, local) | not run | not run | not run |
+| 2.4.7 Focus visible | wizard, protected review, conflict view: every focus Tab reaches shows an outline of at least 2 px | pass | pass | pass | pass |
+| 2.4.3 Focus order | wizard: a page change moves focus to the new page, and Tab continues there in reading order | pass | pass | pass | pass |
+| 2.4.3 Focus order | protected review: focus after Review import, Send marks, Continue import and Abandon import (it drops to the page body) | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) (Chrome 139, local) | not run | not run | not run |
+| 2.4.3 Focus order | conflict view: focus after a refused save, Copy my text and the saved text (it drops to the page body); Show their change keeps focus | fail, [#896](https://github.com/ginsys/bronzeward/issues/896) (Chrome 139, local) | not run | not run | not run |
+| 4.1.3 Status messages | wizard: the refused start and the released import; protected review: the open review; conflict view: the refused save; each shown in the page's one `role="status"` region or an alert. That focus stays put after each is part of the 2.4.3 rows | pass | pass | pass | pass |
+| 1.4.3 Contrast | wizard, protected review, conflict view: the lowest contrast of any shown text, measured in the page, at least 4.5:1 | pass | pass | pass | pass |
+| 1.4.10 Reflow | at 320 CSS pixels no page scrolls sideways: the import wizard with a long draft title, the import page, the paused import, its open review and marks panel, and the conflict view with their text and mine | pass | pass | pass | pass |
+| 2.5.8 Target size | wizard, protected review, conflict view: every button, select and navigation link at least 24 by 24 px | pass | pass | pass | pass |
+| 3.3.1 Error identification | wizard: a start with no document is refused in text beside the button, "Not sent: paste the document or choose its file." | pass | pass | pass | pass |
 
-The four "fail" rows are product defects found by these runs and tracked in
+The four "fail" rows are product defects found by local runs on Chrome 139 and tracked in
 [#896](https://github.com/ginsys/bronzeward/issues/896); the cases leave those assertions out
-until that issue fixes them. The publish screen of T3 is not run here:
+until that issue fixes them, so no other browser has run them and the cells read "not run". The publish screen of T3 is not run here:
 [#897](https://github.com/ginsys/bronzeward/issues/897).
 
 Not run here: Safari, whose WebDriver needs a macOS runner; previous major versions (B6).
