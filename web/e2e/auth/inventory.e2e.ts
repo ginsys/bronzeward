@@ -14,7 +14,7 @@ import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { EMPTY_NOTE, NO_PROVENANCE, PROVENANCE_LIMIT } from "../../src/review.tsx";
 import { WITHHELD } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, focused, fromTitle, holding, measure, mint, mirrored, overflows, param, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, focused, fromTitle, holding, measure, mint, mirrored, narrow, overflows, param, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -710,9 +710,7 @@ describe("the read-only lists and items", () => {
     const [m] = await machines(at, cl.id, 1);
     const s = synthetic(cl.id, m!);
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: s.bodies })).toMatch(SERVER);
-    await browser.setViewport({ width: 320, height: 640 });
-    try {
-      expect(await browser.execute(() => innerWidth)).toBe(320);
+    await narrow(async () => {
       await expect($("main tbody tr")).toBeExisting();
       // The clusters are a read of their own: measure once the long option is in the filter.
       await expect($(`main option[value="${cl.id}"]`)).toHaveElementProperty("text", long);
@@ -731,9 +729,7 @@ describe("the read-only lists and items", () => {
       await $(`main tbody a[title="${s.frv.id}"]`).click();
       await expect($('[data-testid="document"]')).toBeExisting();
       expect(["the fragment revision", await overflows()]).toEqual(["the fragment revision", 0]);
-    } finally {
-      await browser.setViewport({ width: 1280, height: 800 });
-    }
+    });
   });
 });
 
@@ -825,8 +821,7 @@ describe("the rendered review of a release's machine", () => {
 
   it("reflow at 320 CSS pixels: neither the release nor its review scrolls the page sideways", async () => {
     const { s, m } = await served();
-    await browser.setViewport({ width: 320, height: 640 });
-    try {
+    await narrow(async () => {
       await nav("Changes");
       await $(`a[title="${s.rel.id}"]`).click();
       await expect($("main h2")).toHaveText(`Release ${short(s.rel.id)}`);
@@ -836,9 +831,7 @@ describe("the rendered review of a release's machine", () => {
       await expect($('[data-testid="document"]')).toBeExisting();
       await loaded();
       expect(["the review", await overflows()]).toEqual(["the review", 0]);
-    } finally {
-      await browser.setViewport({ width: 1280, height: 800 });
-    }
+    });
   });
 });
 

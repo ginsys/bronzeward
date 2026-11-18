@@ -98,6 +98,11 @@ const watch = () => {
 // Whether a status or alert shows `text`: announced without moving focus (4.1.3).
 const announced = (text: string) => browser.execute((t: string) => [...document.querySelectorAll('[role="alert"], [role="status"] > p')].some((e) => e.textContent?.includes(t)), text);
 const statusRegions = () => browser.execute(() => document.querySelectorAll('[role="status"]').length);
+// Whether focus is on an element of `selector` or inside it: the new content took it after an action (2.4.3).
+const focusIn = (selector: string) => browser.execute((s: string) => document.activeElement !== document.body && document.activeElement?.closest(s) != null, selector);
+const CLAIM = 'section[aria-label="Claim"]';
+const REVIEW = 'section[aria-label="Protected review"]';
+const WRITE = 'section[aria-label^="Fragment"] [data-testid="fragment-write"]';
 
 describe("the import wizard, the protected review and the conflict view, by keyboard and at 320 CSS pixels (ginsys/bronzeward#894)", () => {
   before(async () => {
@@ -222,12 +227,12 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       const id = await startImport("encrypted", true, "paused");
       await openImport(id, "paused");
       await expect(allowed()).toHaveText("Paused for review. Continue it, or abandon it.", { wait: 20_000 });
-      // Where focus goes after each of the four actions is not asserted: it drops to the page body after Review
-      // import, Send marks, Continue import and Abandon import (ginsys/bronzeward#896 puts the checks back).
       await fromTitle();
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Review import", "Review import");
       await browser.keys("Enter");
       await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
+      // The button that held focus is replaced by the review: focus is on its text.
+      expect(await focusIn('[data-testid="review-text"]')).toBe(true);
       expect(await reviewHolds()).toBe(true);
       expect(await announced("PROTECTED REVIEW")).toBe(true);
       const seen = await measure();
@@ -242,19 +247,29 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await browser.keys("Enter");
       await expect(ended()).toHaveText(holds("The marks were applied: re-staged and paused again"), { wait: 60_000 });
       expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
+      expect(await focusIn(CLAIM)).toBe(true);
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Continue import", "Continue import");
       await browser.keys("Enter");
       await expect(ended()).toHaveText(holds(`Import ${short(id)} released into draft`), { wait: 60_000 });
+      expect(await focusIn(CLAIM)).toBe(true);
     });
 
-    it("keyboard only (T3): a paused import is abandoned", async function () {
+    it("keyboard only (T3): a closed review returns focus to its section, and a paused import is abandoned", async function () {
       this.timeout(180_000);
       const id = await startImport("encrypted", true, "paused");
       await openImport(id, "paused");
       await fromTitle();
+      await tabTo((f) => f.tag === "BUTTON" && f.text === "Review import", "Review import");
+      await browser.keys("Enter");
+      await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
+      await tabTo((f) => f.tag === "BUTTON" && f.text === "Close review", "Close review");
+      await browser.keys("Enter");
+      await expect($('[data-testid="review-text"]')).not.toBeExisting();
+      expect(await focusIn(REVIEW)).toBe(true);
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Abandon import", "Abandon import");
       await browser.keys("Enter");
-      await expect($('section[aria-label="Claim"]')).toHaveText(holds("The import was abandoned. Its staged input is discarded."), { wait: 30_000 });
+      await expect($(CLAIM)).toHaveText(holds("The import was abandoned. Its staged input is discarded."), { wait: 30_000 });
+      expect(await focusIn(CLAIM)).toBe(true);
       importId = "";
     });
 
@@ -308,15 +323,6 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       });
       expect(ok).toBe(true);
     };
-    // Save is focused by the page, as Tab would (drafts.e2e.ts does the same for the profile pane), and then operated
-    // by keyboard. A Tab stop on Save is not asserted: in this state Tab did not reach it in the runs that found
-    // this, and whether that is the product's is open (finding B of ginsys/bronzeward#896, which puts the stop back).
-    // Where focus is after the refused save, Copy my text and the saved text is not asserted either: it drops to the
-    // page body after each (ginsys/bronzeward#896).
-    const focusSave = async () => {
-      const el = await pane().$("button=Save");
-      await browser.execute((e: HTMLElement) => e.focus(), el as unknown as HTMLElement);
-    };
     // Another author's write moves the draft, so the page's ETag is stale.
     async function moveDraft(id: string, etag: string): Promise<number> {
       const other = await api(at, "h-all", "PUT", `/drafts/${id}/fragments/other-${hex()}`, { layer: "role", document: syntheticDocument("other"), marks: null, declarations: null }, etag);
@@ -336,10 +342,12 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await edit();
       await w.after("the text edited");
       const now = await moveDraft(id, etag);
-      await focusSave();
+      await tabTo((f) => f.tag === "BUTTON" && f.text === "Save", "Save");
       await browser.keys("Enter");
       await expect(pane().$('[data-testid="status"]')).toHaveText(holds("Someone changed this draft"), { wait: 20_000 });
       expect(await announced("Someone changed this draft")).toBe(true);
+      // Save was disabled while it ran: focus is on the refusal, where Show their change is next.
+      expect(await focusIn(WRITE)).toBe(true);
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Show their change", "Show their change");
       await browser.keys("Enter");
       await expect($("main h2")).toHaveText(holds(`revision ${now}`), { wait: 20_000 });
@@ -350,9 +358,12 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       expect(seen.small).toBe(0);
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Copy my text into the new revision", "Copy my text into the new revision");
       await browser.keys("Enter");
-      await focusSave();
+      // Copy my text is disabled once it ran: focus is on the text now in the editor.
+      expect(await focusedLabel()).toMatch(/^Document/);
+      await tabTo((f) => f.tag === "BUTTON" && f.text === "Save", "Save");
       await browser.keys("Enter");
       await expect(pane().$('[data-testid="write-result"]')).toHaveText(holds(`Fragment ${name} saved in draft`), { wait: 30_000 });
+      expect(await focusIn(WRITE)).toBe(true);
       expect(w.lost).toEqual([]);
     });
 
