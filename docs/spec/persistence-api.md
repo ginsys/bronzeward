@@ -533,9 +533,15 @@ They are held apart **(choice §17.29)**.
     metadata's `current_version`; `createdTime` is the `created_time` of that
     version in the metadata's `versions` map, not the secret's own
     `created_time` at the top of the answer, which differs after a rotation.
-    A `deletion_time` is compared with the provider's `Date` as dependency
-    monitor §3 compares it: before it the version is deleted, after it (a
-    deletion scheduled by the path's own setting) the version is still present.
+    The rows apply in this order, as dependency monitor §3 orders them, and
+    the first that matches decides: a version with `destroyed: true` is
+    `latest-version-deleted`, whatever `Date` says; a version with no
+    `deletion_time` is present, whatever `Date` says; only a version with a
+    `deletion_time` reads the provider's `Date`, and compares it as that
+    section does: before it the version is deleted, after it (a deletion
+    scheduled by the path's own setting) the version is still present, and in
+    the same second or with no readable `Date` the read cannot decide
+    (below).
   - `{"present": false, "reason": "latest-version-deleted"}`: the latest
     version is `destroyed` or soft-deleted. A use-time read would fail, so
     `present: true` would mislead.
@@ -546,8 +552,9 @@ They are held apart **(choice §17.29)**.
   - `503 dependency-unavailable`: the provider is sealed or does not answer,
     or the process has no provider. `503 talos-access-unavailable`: the
     provider refused the reading identity, answered text that does not parse,
-    or gave a `deletion_time` in the same second as its own `Date` or no
-    readable `Date`, the last with `Retry-After: 1`. This code now also covers
+    or gave the latest version a `deletion_time` (never a destroyed version or
+    one without it) in the same second as its own `Date` or with no readable
+    `Date`, the last two with `Retry-After: 1`. This code now also covers
     "the presence read could not decide", so a client does not read every 503
     of it as a broken credential.
 
@@ -3810,8 +3817,14 @@ each (design §7.7 consequences):
   top-level `created_time`); a path never written and a path whose metadata
   was deleted each get `present: false` with `never-written-or-removed`, the
   two answers equal; a soft-deleted latest version and a destroyed one each
-  get `present: false` with `latest-version-deleted`, with a control that
-  undeletes the version and must then show `present: true`; a version whose
+  get `present: false` with `latest-version-deleted`, the destroyed one also
+  with no readable `Date` (the answer is not `503`), with a control for the
+  soft-deleted one that undeletes the version and must then show
+  `present: true`, and for the destroyed one, which undelete does not restore
+  ([RC §4.1](../design/research/20260924-retention-metadata-classification.md#41-openbao)
+  row 036), a control that writes a new latest version and must then show
+  `present: true` with the new `version`; a latest version with no
+  `deletion_time` and no readable `Date` is `present: true`; a version whose
   deletion is scheduled for a later time is `present: true`, with a control
   that moves the time into the past and must then show `latest-version-deleted`;
   a deletion time in the same second as the provider's `Date` is
