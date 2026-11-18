@@ -29,7 +29,7 @@ The PoC supports one deployment profile
 - PostgreSQL as the database (evidence on 17.11), one server;
 - OpenBao KV v2 and Transit as the secret and artifact-encryption provider (evidence on 2.6.1),
   one node, one unseal share;
-- Talos clusters reached directly through each node's Talos API (design baseline v1.14.5; the fixture runs v1.14.5; the apply activation evidence is tracked in ginsys/bronzeward#714, not yet recorded).
+- Talos clusters reached directly through each node's Talos API (design baseline v1.14.5; the fixture runs v1.14.5; a node label applied in no-reboot mode is evidenced as active on that fixture and no other class is, ginsys/bronzeward#714).
 
 No other database, provider or topology is supported. Replication, failover, auto-unseal and
 several Bronzeward instances behind one address are unmeasured. You run, secure and back up
