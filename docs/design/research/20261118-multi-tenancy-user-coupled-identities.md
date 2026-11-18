@@ -147,8 +147,9 @@ memory beside the component tokens, with the replay and lifetime properties abov
 | 8 | Writing a cluster's talosconfig | the operator's own act | yes | write `access/talos/<cluster>` | the operator's own login, scoped to the tenant | persistence and API §3.3 |
 | 9 | Signing an admin certificate (new, see below) | at observation and dispatch | no | the cluster's CA key | a signer of the tenant | the owner's answer on [#869](https://github.com/ginsys/bronzeward/issues/869), specification [#874](https://github.com/ginsys/bronzeward/issues/874) |
 
-Only row 8 is a person's own act with a person's own token, and it is the one that does not
-go through Bronzeward today. Rows 2, 3 and 9 have no user at the time they run, so no user
+Only row 8 is a person's own act with a person's own token, and it bypasses the Bronzeward
+server and its component identities today: the operator writes with `bao`, or with
+`bronzewardctl cluster onboard`, which writes once with the operator's own token. Rows 2, 3 and 9 have no user at the time they run, so no user
 token exists to use, and row 1 may have none; row 4a needs no OpenBao identity at all.
 Rows 4b, 5, 6 and 7 have a person present, but giving that person's token the staging key,
 the create path or the metadata would make the person hold what the specification gives
@@ -286,7 +287,8 @@ namespace (row 8).
 - The reversal on ginsys/bronzeward#869 makes the per-tenant signer the first reason to build it.
 - §13.7 item 1's derived line needs a clarifying sentence rather than a reversal:
   Bronzeward issues no OpenBao identity to the users of its API, while operators already
-  use their own OpenBao login outside Bronzeward ([persistence and API
+  write with their own OpenBao token, through `bao` or `bronzewardctl cluster onboard`
+  and not through the server ([persistence and API
   §3.3](../../spec/persistence-api.md#33-talos-access)).
 
 What it does not solve: it does not isolate tenants from a flaw in the controller process,
