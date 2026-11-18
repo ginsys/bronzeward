@@ -1784,7 +1784,8 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   keeps the `instance` of the request that stored it. The liveness probe
   carries neither. No answer sets a cookie or a CORS header.
 - **Machine-readable description**: [`api/openapi.yaml`](../../api/openapi.yaml)
-  describes every route of §9.2 in OpenAPI 3.1, with its roles, human-only,
+  describes every served route of §9.2 in OpenAPI 3.1 (a route this contract
+  marks as not yet served is added with the change that serves it, §9.3), with its roles, human-only,
   `If-Match` and start-mode restrictions as `x-bronzeward-*` extension fields.
   `internal/api/openapi_test.go` fails when it and the server's route table
   differ in either direction, in those facts or in an operation's path
@@ -1820,6 +1821,7 @@ idempotency and conflict behavior.
 | Route | Result | Roles |
 | --- | --- | --- |
 | `GET /clusters`, `/clusters/{id}`, `/machines`, `/machines/{id}`, `/machines/{id}/observations`, `/machines/{id}/timeline` | 200 | any role |
+| `GET /machines/{id}/position` (where one machine stands in import, publish, plan, approve and apply, read in one snapshot; no query, no ETag, not paged; **specified here and not yet served**, §9.3) | 200 | any role |
 | `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments | 200 | any role |
 | `GET /drafts[/{id}]`, `/ingestions[/{id}]`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
@@ -2367,6 +2369,23 @@ HTTP/1.1 200 OK
              "importBase": "ibr_mjw2k5nh6yb3v7r4d9qxe8fa4u"},
  "pendingConvergence": true,
  "frozen": false, "scopeState": "normal", "openDrift": null}
+
+GET /api/v1/machines/mch_tqhcznunhyle4hnxru5hkt35uq/position
+
+HTTP/1.1 200 OK
+
+{"machine": {"id": "mch_tqhcznunhyle4hnxru5hkt35uq", "...": "as GET /machines/{id}",
+             "desired": "rel_fgqvcvz3ck7h7234ljgdbzsj6m", "pendingConvergence": true},
+ "ingestion": {"id": "ing_4ycffhy7bf4o2w6pz5b4r75hmu", "kind": "import", "state": "released",
+               "draft": "drf_3fh7c2qk5p4zbrw6xjv2ldgnsa", "operation": "op_5ycqp3aw2tmvjh7rk6nbd4xe3u",
+               "createdAt": "2026-11-18T09:12:04Z"},
+ "draft": {"id": "drf_3fh7c2qk5p4zbrw6xjv2ldgnsa", "state": "published", "revision": 3},
+ "plan": {"id": "pln_wzg3q6hyl7bnf5kd4xj2p7yveq", "state": "proposed", "operation": "apply-config",
+          "release": "rel_fgqvcvz3ck7h7234ljgdbzsj6m", "approvalCurrent": null,
+          "createdAt": "2026-11-18T10:40:31Z", "expiresAt": "2026-11-19T10:40:31Z"},
+ "operation": null,
+ "rolloutHeldBy": null,
+ "step": "awaiting-approval"}
 ```
 
 A machine's `pendingConvergence` is `true` exactly when it has a `Desired`
@@ -2389,6 +2408,87 @@ choice §10.35), or null: `{"revision", "observation", "lastObservation",
 "lateLanding"}`, the revision of its opening timeline entry, the observation
 that opened it, the latest one recorded on it and the operation that latest
 observation may be a late landing of, or null. Its digests are not served.
+
+**A machine's position** (**specified here and not yet served**; a client until
+then reads the separate lists, which can disagree, operator experience §2.3
+and its gap G18, [#868](https://github.com/ginsys/bronzeward/issues/868)).
+`GET /machines/{id}/position` answers where one machine stands in import,
+publish, plan, approve and apply, with every member read in one snapshot. A
+client that drew the same answer from `GET /ingestions`, `GET /plans` and
+`GET /operations` would read them at different moments, and an operation that
+moves between two such reads can be missing from all of them. The route takes
+no query, is not paged and carries no ETag. It is `404 not-found` for an
+unknown machine, and every refusal that applies to a read applies to it
+(§9.1, §12.2). The answer has these members:
+
+| Member | Content |
+| --- | --- |
+| `machine` | The body `GET /machines/{id}` answers, from the same snapshot. |
+| `ingestion` | The machine's newest live ingestion (`held`, `paused` or `resumed`, as a read treats the claim, so one past its expiry is `abandoned`, not live); with none live, its newest ingestion of any state; else null. Newest by `createdAt`, then identifier. Members `id`, `kind`, `state`, `draft`, `operation` and `createdAt`, as the ingestion resource names them. |
+| `draft` | The draft that ingestion names, as `id`, `state` (`open`, `published` or `discarded`) and `revision`; null when `ingestion` is null. |
+| `plan` | The newest plan of the machine that reads `proposed` or `approved` at the snapshot (expiry and a revoked approving identity are evaluated as for any plan read, §8.1) and whose `release` equals the machine's `desired`, newest by `createdAt`, then identifier; null with no `desired`. A plan for another release cannot apply the `Desired` release, and a `committed` plan is never picked: its state is final and says nothing of its operation. Members `id`, `state`, `operation` (the plan's kind, `apply-config` or `adopt`), `release`, `approvalCurrent`, `createdAt` and `expiresAt`. `approvalCurrent` is `true` when the plan's approval was recorded in the current epoch, `false` when it is from an earlier one (§8.1: such a plan stays `approved` but cannot commit until approved again), and null while the plan has no approval. |
+| `operation` | The `apply-config` operation that holds the machine scope (state `committed`, `sending`, `verifying` or `unresolved`), as `id`, `kind`, `state`, `plan` and `createdAt`, or null. At most one exists: the machine-scope unique index of the schema allows one. An `adopt` operation is created `completed` and never holds the scope (§8.1). |
+| `rolloutHeldBy` | The operation that holds the machine's cluster rollout scope when it belongs to another machine, as `id` and `machine`, or null. At most one exists, as the rollout-scope index allows one. It says why an approved plan is not dispatched yet. |
+| `step` | One value of the closed list below, chosen by the first row whose facts hold. |
+
+`step` is decided by the facts of the same answer, in this order, and the first
+match wins:
+
+| `step` | Chosen when |
+| --- | --- |
+| `operation-unresolved` | `operation` is not null and its `state` is `unresolved` |
+| `operation-in-flight` | `operation` is not null (its `state` is `committed`, `sending` or `verifying`) |
+| `awaiting-dispatch` | `plan.state` is `approved` and `plan.approvalCurrent` is `true` |
+| `awaiting-approval` | `plan` is not null (it is `proposed`, or `approved` with `approvalCurrent` `false`) |
+| `import-paused` | `ingestion.state` is `paused` |
+| `import-running` | `ingestion.state` is `held` or `resumed` |
+| `draft-to-publish` | `ingestion.state` is `released` and `draft.state` is `open` |
+| `drift-open` | `machine.openDrift` is not null |
+| `needs-plan` | `machine.desired` is not null and (`machine.applied` is null or `machine.pendingConvergence` is `true`) |
+| `not-handed-over` | `machine.desired` is null and `machine.applied` is null |
+| `no-step` | none of the rows above. It claims nothing: not "nothing to do" and not "unchanged" (operator experience §2.3) |
+
+Four cases fix the order, and each has its own test in the implementing
+change:
+
+- A `committed` adopt plan whose operation is `completed`: `plan` is null (the
+  plan is final) and `operation` is null (an `adopt` operation never holds the
+  scope), so the machine falls through to `needs-plan` or `no-step` by its own
+  fields. The plan's state never says "in flight".
+- An operation that moves from `sending` to `verifying` while the read runs: the
+  snapshot holds exactly one of the two states, so `operation` is never null
+  while the scope is held and never names both.
+- An `approved` plan from an earlier epoch: `awaiting-approval`, not
+  `awaiting-dispatch`.
+- An open drift record with a live drift-adoption ingestion: `import-running`
+  or `import-paused`, before `drift-open`.
+
+`machine.frozen` and `machine.scopeState` come from the same snapshot, so a
+client that says an approved plan waits because the machine is frozen or its
+scope is not `normal` (execution and recovery §7.4) reads one answer. A client treats a `step` value
+it does not know as `no-step`: a later revision may add a value (§9.1,
+additions are never breaking).
+
+**Consistency.** Every member and the time-evaluated states in them (plan
+expiry, a claim past its lease or its absolute expiry) come from one snapshot
+and one clock reading, taken when the read starts. A read-only snapshot at
+`REPEATABLE READ` does this, as publication's step 1 does (§6.1); it is the
+one read route that leaves rule 3 of §5's default, and it reads the
+installation state as every read does. The headers `Bronzeward-Epoch`
+and `Bronzeward-Recovery-Mode` name the epoch that snapshot read (§9.1). The
+read decides nothing: a client that acts on a position, creating or approving a
+plan, is still held by the server's own comparisons (execution and recovery
+§3), so a position that went stale costs a refusal and never a wrong write. A
+serialization failure of the snapshot's transaction is retried whole, at most
+three times as rule 5 retries a deadlock, then answers `503
+transient-conflict`; no answer mixes two snapshots.
+
+**Cost.** The route needs no new column, view or lock. Each member is one
+lookup, and the two scope members use the unique indexes that enforce the
+scopes. Whether the plan and ingestion lookups by machine need an index of
+their own is for the implementing change to measure; this contract states no
+figure. The implementing change adds the route to `api/openapi.yaml` and its
+row to the revision table in the same change (§9.1).
 
 `source` is `machine` to read the configuration from the node, at the
 machine's Talos endpoint with its cluster's Talos access (§3.3), or `document`
@@ -3466,6 +3566,7 @@ or Desired change; it does not erase earlier evidence.
 | Plan | A release that does not cover the machine | `422 validation-failed` naming both | nothing |
 | Plan | A duration or attempt limit out of range, or a transport deadline above the maximum or the verification deadline (§9.3) | `400 invalid-request` | nothing |
 | Plan | Approval or identity revocation racing a commitment | the revoker waits for the commitment or precedes it (§1.2 item 3) | the revocation, after or before the commitment |
+| Position | A machine's position read (§9.3, specified, not yet served) whose snapshot fails serialization on every one of three attempts | `503 transient-conflict`; never an answer built from two snapshots | nothing |
 | Recovery | Plan creation, approval, adoption plan or unfreeze on a scope still pre-restore unaccounted | `409 recovery-mode-active` | nothing |
 | Recovery | Commitment, attempt or adoption record on a scope not released in the current epoch | refused by execution and recovery's scope gate | its refusal entry |
 | Recovery | Publication changing the assignment of a scope not released in the current epoch | operation `failed`, `409 recovery-mode-active` (§6.2) | operation, act |
