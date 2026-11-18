@@ -120,7 +120,7 @@ func TestClusterDiscoverPrintsCommands(t *testing.T) {
 		"bao kv put -mount=secret access/talos/<cluster id> 'talosconfig=@" + c.file + "'",
 		"Nothing was sent to the server and no secret was written.",
 		"talos-access-unavailable",
-		"bronzewardctl cluster onboard --talosconfig '" + c.file + "' --name <name> --kubernetes-endpoint proposed --bao-addr <url> --bao-token-file <file>",
+		"bronzewardctl cluster onboard --talosconfig '" + c.file + "' --endpoint '10.0.0.1:50000' --name <name> --kubernetes-endpoint proposed --bao-addr <url> --bao-token-file <file>",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)
@@ -248,5 +248,26 @@ func TestClusterDiscoverRefusesAFileNameThatIsNotUTF8(t *testing.T) {
 	code, out, errOut := runCtl(t, "cluster", "discover", "--talosconfig", odd)
 	if code != 2 || out != "" || !strings.Contains(errOut, "--talosconfig") || len(c.given) != 0 {
 		t.Errorf("exit %d, stdout %q, stderr %q, %d discoveries", code, out, errOut, len(c.given))
+	}
+}
+
+// TestClusterDiscoverHintKeepsTheSelection: the onboarding command the output ends with carries the
+// --talos-context and --endpoint the discovery was given, so following it reads the same cluster.
+func TestClusterDiscoverHintKeepsTheSelection(t *testing.T) {
+	c := discoverFixture(t, twoMembers, nil)
+	code, out, errOut := runCtl(t, "cluster", "discover", "--talosconfig", c.file, "--talos-context", "prod", "--endpoint", "10.0.0.1:50000")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	var hint string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "bronzewardctl cluster onboard --talosconfig") {
+			hint = l
+		}
+	}
+	for _, want := range []string{"--talos-context 'prod'", "--endpoint '10.0.0.1:50000'"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("the onboarding hint %q lacks %q", hint, want)
+		}
 	}
 }

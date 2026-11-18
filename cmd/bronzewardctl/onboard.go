@@ -224,9 +224,7 @@ func (e *env) clusterOnboard(args []string) (err error) {
 	rerun := func() string {
 		return a.rerun(e, a.skipSecret || obj.Secret.State == obWritten || obj.Secret.State == obPresent || obj.Secret.State == obSkipped)
 	}
-	if e.context != "" {
-		obj.ctx = "--context " + client.ShellWord(e.context) + " "
-	}
+	obj.ctx = e.ctxPrefix()
 	defer func() {
 		obj.again = rerun()
 		parts := []*onboardPart{&obj.Cluster.onboardPart, &obj.Secret}
@@ -539,7 +537,7 @@ func (e *env) onboardImport(a *onboardArgs, m *onboardMachine, draft string, rer
 		return false, err
 	}
 	if found != nil {
-		return onboardImportState(m, found)
+		return onboardImportState(m, found, e.ctxPrefix())
 	}
 	args := []string{"--machine", m.Machine, "--draft", draft, "--staging", a.staging}
 	if a.review {
@@ -558,7 +556,17 @@ func (e *env) onboardImport(a *onboardArgs, m *onboardMachine, draft string, rer
 		}
 		m.Import = onboardPart{State: state.s(), ID: acc.Ingestion, Command: cmd, Error: client.Shown(err)}
 		if state == stateDone {
-			m.Import.State, m.Import.Command = obReleased, ""
+			// The follow ended well or paused, and only the context could not be saved: read which.
+			onboardSettle(m, acc.Ingestion, e.ctxPrefix(), func(id string) (b *apitypes.IngestionBody, err error) {
+				if c != nil {
+					return readIngestion(c, id)
+				}
+				err = e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) (err error) {
+					b, err = readIngestion(c, id)
+					return err
+				})
+				return b, err
+			})
 		}
 		return false, err
 	}
@@ -568,7 +576,18 @@ func (e *env) onboardImport(a *onboardArgs, m *onboardMachine, draft string, rer
 		m.Import = onboardPart{State: stateUnknown.s(), ID: acc.Ingestion, Command: statusCmd(acc.Ingestion), Error: client.Shown(rerr)}
 		return false, rerr
 	}
-	return onboardImportState(m, b)
+	return onboardImportState(m, b, e.ctxPrefix())
+}
+
+// onboardSettle sets the import of m from the ingestion read, for an import whose follow ended well or
+// paused. The error the run returns stays the one that ended it. A failed read leaves the state unknown.
+func onboardSettle(m *onboardMachine, id, ctx string, read func(string) (*apitypes.IngestionBody, error)) {
+	b, err := read(id)
+	if err != nil {
+		m.Import = onboardPart{State: stateUnknown.s(), ID: id, Command: qualify(ctx, statusCmd(id)), Error: client.Shown(err)}
+		return
+	}
+	_, _ = onboardImportState(m, b, ctx)
 }
 
 // statusCmd is the command that reads an import.
@@ -577,8 +596,8 @@ func statusCmd(ingestion string) string {
 }
 
 // onboardImportState settles a machine's import by the state the server shows for it.
-func onboardImportState(m *onboardMachine, b *apitypes.IngestionBody) (bool, error) {
-	status := statusCmd(b.Id)
+func onboardImportState(m *onboardMachine, b *apitypes.IngestionBody, ctx string) (bool, error) {
+	status := qualify(ctx, statusCmd(b.Id))
 	switch b.State {
 	case "released":
 		m.Import = onboardPart{State: obReleased, ID: b.Id}
@@ -593,11 +612,23 @@ func onboardImportState(m *onboardMachine, b *apitypes.IngestionBody) (bool, err
 
 // onboardLines is the text summary: the cluster, the secret, the draft and a row per member, then the
 // next step.
-func (o *onboarding) q(cmd string) string {
-	if o.ctx == "" || cmd == "" || strings.Contains(cmd, "--context") {
+func (o *onboarding) q(cmd string) string { return qualify(o.ctx, cmd) }
+
+// ctxPrefix is the global --context of this run as a command prefix, or empty.
+func (e *env) ctxPrefix() string {
+	if e.context == "" {
+		return ""
+	}
+	return "--context " + client.ShellWord(e.context) + " "
+}
+
+// qualify names the global --context in a printed command, once, so that the command reaches the server
+// this run did. ctx is "--context '<name>' " or empty.
+func qualify(ctx, cmd string) string {
+	if ctx == "" || cmd == "" || strings.Contains(cmd, "--context") {
 		return cmd
 	}
-	return strings.Replace(cmd, "bronzewardctl ", "bronzewardctl "+o.ctx, 1)
+	return strings.Replace(cmd, "bronzewardctl ", "bronzewardctl "+ctx, 1)
 }
 
 func onboardLines(obj *onboarding) []string {
@@ -622,6 +653,7 @@ func onboardLines(obj *onboarding) []string {
 		}
 	}
 	out = append(out, "Machines:")
+	paused := false
 	for _, m := range obj.Machines {
 		if m.Add.State == obNotRecorded {
 			out = append(out, sf("  %s  %s  not recorded: %s", m.Node, m.Host, m.Add.Error))
@@ -630,8 +662,8 @@ func onboardLines(obj *onboarding) []string {
 		out = append(out, sf("  %s  %s  %s  add %s, import %s", m.Node, m.Host, cmp.Or(m.Machine, "-"), m.Add.State, m.Import.State))
 		add(m.Add.Command, m.Import.Command)
 		if m.Import.State == statePaused.s() {
-			add("bronzewardctl import review "+client.ShellWord(m.Import.ID), "bronzewardctl import continue "+client.ShellWord(m.Import.ID),
-				obj.again+"   (after the continue: imports the machines that follow)")
+			paused = true
+			add("bronzewardctl import review "+client.ShellWord(m.Import.ID), "bronzewardctl import continue "+client.ShellWord(m.Import.ID), obj.again)
 		}
 	}
 	add(c.Command, obj.Secret.Command)
@@ -643,6 +675,9 @@ func onboardLines(obj *onboarding) []string {
 		out = append(out, "", "Next, one command at a time:")
 		for _, cmd := range commands {
 			out = append(out, "  "+cmd)
+		}
+		if paused {
+			out = append(out, "", "Run the cluster onboard command after the continue: it imports the machines that follow.")
 		}
 	case obj.Draft != nil:
 		out = append(out, "", obj.q("Next: read the draft, then publish it: bronzewardctl draft show "+client.ShellWord(obj.Draft.ID)))
