@@ -75,6 +75,7 @@ to that work:
 | Signer | `create`, `read` and `update` on `secret/data/access/talos-ca/*`, for [persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer) | `list`, `delete`, any other path, any decryption; machine operation | not measured; [persistence and API §16](persistence-api.md#16-verification-and-evidence-limits) requires the grants |
 | Metadata | [design §7.6](../design/Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks) classification | any value | `metadata`: KV metadata and Transit key state, no data (PC §4.1) |
 | Orphan report | `list` and `read` on `secret/metadata/gen/*`, for [persistence and API §6.4](persistence-api.md#64-orphans)'s report | any value; any other path; Transit | `metadata` listed under one generation path (PC §4 row 065); this identity's grants and refusals measured by [persistence and API §16](persistence-api.md#16-verification-and-evidence-limits)'s check, on the pinned OpenBao only |
+| Access presence | `read` on `secret/metadata/access/talos-ca/*`, for [persistence and API §3.3](persistence-api.md#33-talos-access)'s presence read (choice §17.42 there) | any value; any other path, `list`; Transit | not measured; its grants and refusals are specified in persistence and API §16 |
 | Normal API | metadata and workflow | any secret value, any plaintext input | not measured; design §13.1 |
 
 The Talos CA key is the one management credential in the provider: each
@@ -92,7 +93,8 @@ that copy and does not claim the compiler never sees the key's value; it claims
 only that the compiler cannot read the signer's path and signs nothing
 (whether the compiler needs its own copy is open in ginsys/bronzeward#889). Its path
 is disjoint from `secret/data/gen/*`, so the ingestion identity still never reads
-a secret it creates (choice §16.1). The compiler's grant PC measured, `read` on
+a secret it creates (choice §16.1). The access-presence identity reads only
+the path's metadata, for the presence answer (persistence and API §3.3). The compiler's grant PC measured, `read` on
 `secret/data/*`, would cover it; the compiler's grant is `read` on
 `secret/data/gen/*`, as the fixture's compiler policy already has it
 (`fixtures/openbao/policies/bw-compiler.hcl`). No grant on the path was

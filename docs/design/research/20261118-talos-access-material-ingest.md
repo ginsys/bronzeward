@@ -199,7 +199,7 @@ evidence a dispatch can bind.
 ### 6. Effect on ginsys/bronzeward#855, ginsys/bronzeward#856 and the held PR ginsys/bronzeward#867
 
 [#855](https://github.com/ginsys/bronzeward/issues/855) specified a provider read of
-the credential's metadata through a new narrow identity (choice §17.41, owner answer
+the credential's metadata through a new narrow identity (choice §17.42, owner answer
 "A"); [#856](https://github.com/ginsys/bronzeward/issues/856) shows the result in the
 web console; [#867](https://github.com/ginsys/bronzeward/pull/867) carries the
 specification and is open and idle.
