@@ -1,0 +1,178 @@
+### baseline, machines as written by talosctl machineconfig patch (already comment-free)
+== B1: an unchanged import base, rendered with no fragment, against the node's bytes
+machine  nodeBytes renderBytes commentLines refs  E0(node,render) E1 E2 E3 control(compile==plain)  redactedBytes
+cp1          11630       11630            0    9  true true true true true  6881
+cp2          11634       11634            0    9  true true true true true  6885
+cp3          11670       11670            0    9  true true true true true  6919
+w1            3341        3341            0    3  true true true true true  3252
+w2            3341        3341            0    3  true true true true true  3252
+w3            3389        3389            0    3  true true true true true  3294
+== B2: what a comparison of sanitized bases can see of shared secrets
+cp1/cp2: references 9/9, shared reference names 0, values equal to one in the other 9
+cp1/cp3: references 9/9, shared reference names 0, values equal to one in the other 9
+cp1/w1: references 9/3, shared reference names 0, values equal to one in the other 3
+cp1/w2: references 9/3, shared reference names 0, values equal to one in the other 3
+cp1/w3: references 9/3, shared reference names 0, values equal to one in the other 3
+cp2/cp3: references 9/9, shared reference names 0, values equal to one in the other 9
+cp2/w1: references 9/3, shared reference names 0, values equal to one in the other 3
+cp2/w2: references 9/3, shared reference names 0, values equal to one in the other 3
+cp2/w3: references 9/3, shared reference names 0, values equal to one in the other 3
+cp3/w1: references 9/3, shared reference names 0, values equal to one in the other 3
+cp3/w2: references 9/3, shared reference names 0, values equal to one in the other 3
+cp3/w3: references 9/3, shared reference names 0, values equal to one in the other 3
+w1/w2: references 3/3, shared reference names 0, values equal to one in the other 3
+w1/w3: references 3/3, shared reference names 0, values equal to one in the other 3
+w2/w3: references 3/3, shared reference names 0, values equal to one in the other 3
+
+### baseline, the two commented files as written by talosctl gen config
+== B1: an unchanged import base, rendered with no fragment, against the node's bytes
+machine  nodeBytes renderBytes commentLines refs  E0(node,render) E1 E2 E3 control(compile==plain)  redactedBytes
+controlplane      19226       11509           95    9  false true true true true  6784
+worker        9085        3093           88    3  false true true true true  3058
+== B2: what a comparison of sanitized bases can see of shared secrets
+controlplane/worker: references 9/3, shared reference names 0, values equal to one in the other 3
+
+### shape
+== M2: leaves by class, over the sanitized documents (a list is one leaf)
+machine  role          leaves common role machine  of which references
+cp1      controlplane      72     24   36      12  common=0 role=0 machine=8
+cp2      controlplane      72     24   36      12  common=0 role=0 machine=8
+cp3      controlplane      73     24   36      13  common=0 role=0 machine=8
+w1       worker            34     24    5       5  common=0 role=0 machine=3
+w2       worker            34     24    5       5  common=0 role=0 machine=3
+w3       worker            35     24    5       6  common=0 role=0 machine=3
+leaves over all machines 320; in the proposal (common once, role once per role, machine leaves each) 118
+== machine-specific leaves that are not references
+cp1: 4: main > machine > network > interfaces; UnattendedInstallConfig/ > provisioning > diskSelector > match; KubeEtcdEncryptionConfig/ > config > resources; HostnameConfig/ > hostname
+cp2: 4: main > machine > network > interfaces; UnattendedInstallConfig/ > provisioning > diskSelector > match; KubeEtcdEncryptionConfig/ > config > resources; HostnameConfig/ > hostname
+cp3: 5: main > machine > network > interfaces; UnattendedInstallConfig/ > provisioning > diskSelector > match; KubeNodeConfig/ > labels > topology.kubernetes.io/zone; KubeEtcdEncryptionConfig/ > config > resources; HostnameConfig/ > hostname
+w1: 2: main > machine > network > interfaces; HostnameConfig/ > hostname
+w2: 2: main > machine > network > interfaces; HostnameConfig/ > hostname
+w3: 3: main > machine > network > interfaces; main > machine > sysctls > net.core.somaxconn; HostnameConfig/ > hostname
+
+### split, rule R2 on, emptied documents dropped from the base
+== M3: a split built from the classes: common fragment 1218 bytes, role fragments controlplane 1704 bytes worker 942 bytes
+-- S1: every machine, thin base plus common and role fragments
+cp1     base 11630 ->  4025 bytes: E0=false E1=false E2=true E3=true E4=true docOrderSame=false control=true
+cp2     base 11634 ->  4029 bytes: E0=false E1=false E2=true E3=true E4=true docOrderSame=false control=true
+cp3     base 11670 ->  4223 bytes: E0=false E1=false E2=true E3=true E4=true docOrderSame=false control=true
+w1      base  3341 ->  1161 bytes: E0=false E1=false E2=true E3=true E4=true docOrderSame=false control=true
+w2      base  3341 ->  1161 bytes: E0=false E1=false E2=true E3=true E4=true docOrderSame=false control=true
+w3      base  3389 ->  1203 bytes: E0=false E1=false E2=true E3=true E4=true docOrderSame=false control=true
+-- negative controls on cp1 and w1: each must be detected
+cp1 N1 a changed value in the common fragment (kubelet image): E0=false E1=false E2=false E3=false E4=false docOrderSame=false control=true
+cp1 N2 a key dropped from the common fragment (dnsDomain): E0=false E1=false E2=false E3=false E4=false docOrderSame=false control=true
+cp1 N5 the role fragment left out: E0=false E1=false E2=false E3=false E4=false docOrderSame=false control=true
+cp1 N6 the fragments in the other order (role first): E0=false E1=false E2=true E3=true E4=true docOrderSame=false control=true
+w1  N1 a changed value in the common fragment (kubelet image): E0=false E1=false E2=false E3=false E4=false docOrderSame=false control=true
+w1  N2 a key dropped from the common fragment (dnsDomain): E0=false E1=false E2=false E3=false E4=false docOrderSame=false control=true
+w1  N5 the role fragment left out: refused: compile: compile: refused (invalid): 1 error occurred:
+	* UnattendedInstallConfig: provisioning.diskSelector.match is required
+
+
+w1  N6 the fragments in the other order (role first): E0=false E1=false E2=true E3=true E4=true docOrderSame=false control=true
+-- N4 a changed secret value behind an unchanged reference (cp1 machine.token)
+cp1 N4 same base text, one pinned value changed: E0=false (digest over the plaintext) E4=true (redacted form) note=""
+
+### split, rule R2 off (leaf by leaf)
+== M3: a split built from the classes: common fragment 2020 bytes, role fragments controlplane 4009 bytes worker 975 bytes
+-- S1: every machine, thin base plus common and role fragments
+cp1     base 11630 ->  1210 bytes: refused: compile: compile: refused (base-override) at fragment[0]
+        differs: main > cluster > etcd > ca > key
+        differs: main > machine > ca > key
+cp2     base 11634 ->  1214 bytes: refused: compile: compile: refused (base-override) at fragment[0]
+cp3     base 11670 ->  1302 bytes: refused: compile: compile: refused (base-override) at fragment[0]
+w1      base  3341 ->   387 bytes: refused: compile: compile: refused (invalid): 1 error occurred:
+	* v1alpha1.Config: 1 error occurred:
+	* trusted CA certificates are required on non-controlplane nodes (.machine.ca.crt, .machine.acceptedCAs)
+
+
+
+
+        differs: main > machine > ca > crt
+w2      base  3341 ->   387 bytes: refused: compile: compile: refused (invalid): 1 error occurred:
+	* v1alpha1.Config: 1 error occurred:
+	* trusted CA certificates are required on non-controlplane nodes (.machine.ca.crt, .machine.acceptedCAs)
+
+
+
+
+w3      base  3389 ->   429 bytes: refused: compile: compile: refused (invalid): 1 error occurred:
+	* v1alpha1.Config: 1 error occurred:
+	* trusted CA certificates are required on non-controlplane nodes (.machine.ca.crt, .machine.acceptedCAs)
+
+
+
+
+-- negative controls on cp1 and w1: each must be detected
+cp1 N1 a changed value in the common fragment (kubelet image): refused: compile: compile: refused (base-override) at fragment[0]
+cp1 N2 a key dropped from the common fragment (dnsDomain): refused: compile: compile: refused (base-override) at fragment[0]
+cp1 N5 the role fragment left out: refused: compile: compile: refused (base-override) at fragment[0]
+cp1 N6 the fragments in the other order (role first): refused: compile: compile: refused (base-override) at fragment[0]
+w1  N1 a changed value in the common fragment (kubelet image): refused: compile: compile: refused (invalid): 1 error occurred:
+	* v1alpha1.Config: 1 error occurred:
+	* trusted CA certificates are required on non-controlplane nodes (.machine.ca.crt, .machine.acceptedCAs)
+
+
+
+
+w1  N2 a key dropped from the common fragment (dnsDomain): refused: compile: compile: refused (invalid): 1 error occurred:
+	* v1alpha1.Config: 1 error occurred:
+	* trusted CA certificates are required on non-controlplane nodes (.machine.ca.crt, .machine.acceptedCAs)
+
+
+
+
+w1  N5 the role fragment left out: refused: compile: compile: refused (invalid): 1 error occurred:
+	* UnattendedInstallConfig: provisioning.diskSelector.match is required
+
+
+w1  N6 the fragments in the other order (role first): E0=false E1=false E2=true E3=true E4=true docOrderSame=false control=true
+-- N4 a changed secret value behind an unchanged reference (cp1 machine.token)
+cp1 N4 same base text, one pinned value changed: E0=false (digest over the plaintext) E4=false (redacted form) note="compile: compile: refused (base-override) at fragment[0]"
+
+### split, rule R2 on, emptied documents kept as identity-only shells in the base
+== M3: a split built from the classes: common fragment 1218 bytes, role fragments controlplane 1704 bytes worker 942 bytes
+-- S1: every machine, thin base plus common and role fragments
+cp1     base 11630 ->  5160 bytes: E0=true E1=true E2=true E3=true E4=true docOrderSame=true control=true
+cp2     base 11634 ->  5164 bytes: E0=true E1=true E2=true E3=true E4=true docOrderSame=true control=true
+cp3     base 11670 ->  5312 bytes: E0=true E1=true E2=true E3=true E4=true docOrderSame=true control=true
+w1      base  3341 ->  1784 bytes: E0=true E1=true E2=true E3=true E4=true docOrderSame=true control=true
+w2      base  3341 ->  1784 bytes: E0=true E1=true E2=true E3=true E4=true docOrderSame=true control=true
+w3      base  3389 ->  1826 bytes: E0=true E1=true E2=true E3=true E4=true docOrderSame=true control=true
+-- negative controls on cp1 and w1: each must be detected
+cp1 N1 a changed value in the common fragment (kubelet image): E0=false E1=false E2=false E3=false E4=false docOrderSame=true control=true
+cp1 N2 a key dropped from the common fragment (dnsDomain): E0=false E1=false E2=false E3=false E4=false docOrderSame=true control=true
+cp1 N5 the role fragment left out: refused: compile: compile: refused (invalid): 7 errors occurred:
+	* KubeAuthorizerConfig/node: authorizer type is required
+authorizer type  is not allowed, allowed types are [Node RBAC Webhook]
+	* KubeAuthorizerConfig/rbac: authorizer type is required
+authorizer type  is not allowed, allowed types are [Node RBAC Webhook]
+	* KubeAPIServerConfig: kube-apiserver image cannot be empty
+	* KubeControllerManagerConfig: kube-controller-manager image cannot be empty
+	* KubeSchedulerConfig: scheduler image cannot be empty
+	* KubeProxyConfig: proxy image cannot be empty
+	* KubeFlannelCNIConfig: flannel backend type must be specified
+
+
+cp1 N6 the fragments in the other order (role first): E0=true E1=true E2=true E3=true E4=true docOrderSame=true control=true
+w1  N1 a changed value in the common fragment (kubelet image): E0=false E1=false E2=false E3=false E4=false docOrderSame=true control=true
+w1  N2 a key dropped from the common fragment (dnsDomain): E0=false E1=false E2=false E3=false E4=false docOrderSame=true control=true
+w1  N5 the role fragment left out: refused: compile: compile: refused (invalid): 1 error occurred:
+	* UnattendedInstallConfig: provisioning.diskSelector.match is required
+
+
+w1  N6 the fragments in the other order (role first): E0=true E1=true E2=true E3=true E4=true docOrderSame=true control=true
+-- N4 a changed secret value behind an unchanged reference (cp1 machine.token)
+cp1 N4 same base text, one pinned value changed: E0=false (digest over the plaintext) E4=true (redacted form) note=""
+
+### pairs
+== N3: pairs that differ in form only (w1)
+list order (podSubnets reversed): both load=true E0=false E1=false E2=false E3=false
+comments and key order (the commented generated worker against its re-encoding): both load=true E0=true E1=true E2=true E3=true
+explicit default against omitted (kubelet defaultRuntimeSeccompProfileEnabled): both load=true E0=false E1=false E2=false E3=false
+
+### what a reference becomes in the redacted form (w1)
+  token: <redacted:s-qusvebktucexiiftgziutnjcre@1>
+  token: <redacted:s-hrd56zijktgtu7jqpa7xvxbmra@1>
+clusterSecret: <redacted:s-cxopyhwtrv673wv4vrehesvxie@1>
