@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import { Action, connection, Deprecations, deprecated, ending, Failure, heldPage, type Identity, identityMain, incompatible, KEPT_PAGE, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
+import { Action, connection, Deprecations, deprecated, ending, Failure, focusLost, heldPage, type Identity, identityMain, incompatible, KEPT_PAGE, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
 import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SCOPE_NO_MODE, SET_ASIDE, SetAside, StatusPage, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
 import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
@@ -497,4 +497,18 @@ test("a write's identity-revoked ends the page: another write waiting to repeat 
   go();
   expect(await waiting).toEqual({ kind: "set-aside", why: SHELL_GONE, ambiguous: true, problem: null });
   expect(sent).toBe(2);
+});
+
+// Where focus goes after an action (ginsys/bronzeward#896): the new content takes it only where it was lost.
+describe("focus after an action", () => {
+  const body = {};
+  test("lost: nothing focused, the page body, or a control that is disabled while its action runs", () => {
+    expect(focusLost(null, body)).toBe(true);
+    expect(focusLost(body, body)).toBe(true);
+    expect(focusLost({ disabled: true }, body)).toBe(true);
+  });
+  test("kept: a user who moved on to a field or another control keeps focus", () => {
+    expect(focusLost({ disabled: false }, body)).toBe(false);
+    expect(focusLost({}, body)).toBe(false);
+  });
 });

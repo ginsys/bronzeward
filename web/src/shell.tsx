@@ -64,11 +64,13 @@ export function Action({ label, needs, onClick, submit = false, busy = false }: 
 // Where the keyboard goes after an action: an Action is disabled while it runs and an answer replaces
 // the control that sent it, so focus falls to the page body (WCAG 2.4.3, ginsys/bronzeward#896). The
 // view whose content changes names its new content: `target` takes focus each time `key` takes a new
-// truthy value (a counter, an outcome, or `true` for content that has just appeared).
+// truthy value (a counter, an outcome, or `true` for content that has just appeared), but only where
+// focus was lost. A user who moved on while the action ran, to a field or another control, keeps it.
+export const focusLost = (active: object | null, body: unknown): boolean => active === null || active === body || ("disabled" in active && active.disabled === true);
 export function useFocusOn(key: unknown, target: RefObject<HTMLElement | null>) {
   const last = useRef<unknown>(undefined);
   useEffect(() => {
-    if (key && key !== last.current) target.current?.focus();
+    if (key && key !== last.current && focusLost(document.activeElement, document.body)) target.current?.focus();
     last.current = key;
   }, [key, target]);
 }

@@ -102,7 +102,8 @@ const statusRegions = () => browser.execute(() => document.querySelectorAll('[ro
 const focusIn = (selector: string) => browser.execute((s: string) => document.activeElement !== document.body && document.activeElement?.closest(s) != null, selector);
 const CLAIM = 'section[aria-label="Claim"]';
 const REVIEW = 'section[aria-label="Protected review"]';
-const WRITE = 'section[aria-label^="Fragment"] [data-testid="fragment-write"]';
+// The editor pane: Save is disabled while it runs, and a browser that keeps focus on a disabled control leaves it on Save.
+const PANE = 'section[aria-label^="Fragment"]';
 
 describe("the import wizard, the protected review and the conflict view, by keyboard and at 320 CSS pixels (ginsys/bronzeward#894)", () => {
   before(async () => {
@@ -346,8 +347,8 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await browser.keys("Enter");
       await expect(pane().$('[data-testid="status"]')).toHaveText(holds("Someone changed this draft"), { wait: 20_000 });
       expect(await announced("Someone changed this draft")).toBe(true);
-      // Save was disabled while it ran: focus is on the refusal, where Show their change is next.
-      expect(await focusIn(WRITE)).toBe(true);
+      // Save was disabled while it ran: focus is in the pane, on the refusal or on Save, and Show their change is next.
+      expect(await focusIn(PANE)).toBe(true);
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Show their change", "Show their change");
       await browser.keys("Enter");
       await expect($("main h2")).toHaveText(holds(`revision ${now}`), { wait: 20_000 });
@@ -363,7 +364,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Save", "Save");
       await browser.keys("Enter");
       await expect(pane().$('[data-testid="write-result"]')).toHaveText(holds(`Fragment ${name} saved in draft`), { wait: 30_000 });
-      expect(await focusIn(WRITE)).toBe(true);
+      expect(await focusIn(PANE)).toBe(true);
       expect(w.lost).toEqual([]);
     });
 
