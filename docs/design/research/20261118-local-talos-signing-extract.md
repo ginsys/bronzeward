@@ -31,7 +31,7 @@ compare the CA certificate. The program:
 3. signs a one-hour `os:admin` certificate from that key and presents it;
 4. presents a one-hour `os:reader` certificate signed from the same key for the same read;
 5. presents an `os:admin` certificate signed by a fresh unrelated CA key, as a negative
-   control: without it, step 3 would not show that the node checks the issuer.
+   control for step 3.
 
 No key is printed: the program prints presence, a size, fingerprints of public certificates and
 gRPC codes. Command lines and the whole output are in
@@ -49,14 +49,21 @@ gRPC codes. Command lines and the whole output are in
 
 What this shows: the key that signs came from the node's answer to a read an `os:admin`
 talosconfig is allowed to make, and a node accepts what it signs. A talosconfig whose
-certificate is `os:reader` cannot make that read, so it cannot lead to a signer. The refused
-unrelated-CA certificate shows the node checks the issuer.
+certificate is `os:reader` cannot make that read, so it cannot lead to a signer.
+
+Step 5 recorded `Unavailable`, the gRPC code of a failed connection, which an unreachable
+node also returns. The node had answered step 4 seconds earlier, so a failed TLS handshake is
+the likely cause, but the run recorded neither the TLS alert nor a reachability call after
+step 5. The control is therefore consistent with the node checking the issuer and does not
+isolate it.
 
 ## Limits
 
 - One run, one sample per case, one control plane, Talos v1.14.5, machinery v1.14.5, the
   fixture's synthetic configuration. A cluster with more `machine.acceptedCAs` than the issuing
   CA, a rotated CA or another Talos version is unmeasured.
+- The unrelated-CA control (step 5) has no TLS alert and no reachability call after it, as
+  described under the table.
 - The read returns the key because the node's `MachineConfig` resource is the whole
   configuration. That is the node's behavior at this version and not a stated contract; a later
   Talos version may redact it, which would end the path, so a contract that relies on it names
