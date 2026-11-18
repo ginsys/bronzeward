@@ -193,35 +193,18 @@ configurations", or "Diff withheld: the change cannot be shown". It never infers
 from matching release IDs, names or sources.
 
 **Proposed: "where you are, what next" on the machine page.** Under the status sentences
-([§2.4](#24-desired-applied-and-observed)) the page shows one line that names the machine's place in the
-steps above and the next step, with its link. It comes from the machine's `desired` and `applied` and from
-reads that the page makes only in the states that need them, all of them existing list filters:
-`GET /ingestions?machine=` and, for the newest import that stored a draft, `GET /drafts/{id}`; and
-`GET /plans?machine=&state=proposed` and `...&state=approved`; and `GET /operations?machine=&state=` for each of
-`committed`, `sending`, `verifying` and `unresolved`. No route is added and `GET /drafts` is not read (it has no
-filter). These reads keep no earlier answer: one that finds no answer
-removes the line. The states overlap, so the first match of this order wins:
+([§2.4](#24-desired-applied-and-observed)) the page shows one line when the machine is not handed over: it has no
+`desired`, no `applied` and no open drift. The line says so and names the next step, an import of the machine's
+configuration, which reads the node and writes nothing to it, with the link to start it. It comes from the machine's
+own fields and makes no read of its own, so it is as current as the `Desired` and `Applied` rows beside it. Any
+other state shows no line, and no line says "nothing to do" or "unchanged".
 
-| Order | State | Line says | Link |
-| --- | --- | --- | --- |
-| 1st | No `desired`, no `applied`, and an import of the machine is `held`, `paused` or `resumed` | the import is not finished | the import |
-| 2nd | No `desired`, no `applied`, and the newest import that stored a draft left it `open` | the import is stored in that draft; edit it if needed, then a publisher publishes it, which makes a release the machine's `Desired` and sends nothing | the draft, Publish |
-| 3rd | `desired` selected, not carried by `applied`, and a plan for that release is `approved` | the controller commits and applies it; nothing is left for the operator | the plan |
-| 4th | the same, and a plan for that release is `proposed` | an approver approves it; approving does not apply | the plan |
-| 5th | the same, no such plan, and `applied` is set (pending convergence) | a publisher creates an apply-config plan | Create plan |
-| 6th | the same, no such plan, and `applied` is null | a publisher creates an adopt plan (handover) | Create plan |
-| 7th | No `desired`, no `applied`, and none of the first two | not handed over: no `Desired` and no `Applied`; import the configuration, which writes nothing to the node | Import this machine |
-
-Any other state shows no line: open drift (checked before the order), a `desired` that `applied` already
-carries, `applied` with no `desired`, and an operation of the machine that still holds its scope (`committed`,
-`sending`, `verifying` or `unresolved`; checked before the 3rd to 6th rows, so it also removes the line an
-`approved` or `proposed` plan would give). A plan's `committed` state is terminal and says nothing of its
-operation (an adopt plan stays `committed` with its operation `completed`), so the operations are read, not the
-plans' states: a finished one (`completed`, `rejected`, `cancelled`, `failed`) hides nothing. So does a state whose
-read has not answered or failed, and a machine read that found no answer on a refresh (its last answer stays shown
-under the offline banner, and the line is not drawn from it); the line is never "nothing to do" in its place. A
-plan for another release than `desired` is not counted. A
-draft found another way than through the machine's import is not shown, since `GET /drafts` has no filter.
+The later steps (publish the imported draft, plan, approve) are not shown. The page can read what they need only
+through other lists (`GET /ingestions?machine=`, `GET /plans?machine=&state=`, `GET /operations?machine=&state=`),
+which are separate reads taken at different moments: an operation can move from one state to the next between two
+of them and leave every list empty, and a plan's `committed` state is terminal and says nothing of its operation
+(an adopt plan stays `committed` with its operation `completed`). Showing those steps needs a read that answers
+the machine's whole position at once, which `GET /drafts` and the lists above do not give.
 
 ### 2.4 Desired, applied and observed
 
