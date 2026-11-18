@@ -74,6 +74,7 @@ to that work:
 | Executor | decrypt artifacts, gated by approval; read the cluster's Talos access configuration (below) | every other secret read; staging and baseline decryption | `executor`: decrypt only, secret read refused (PC §4.1 rows 039, 005); [execution and recovery §3.1](execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction) |
 | Metadata | [design §7.6](../design/Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks) classification | any value | `metadata`: KV metadata and Transit key state, no data (PC §4.1) |
 | Orphan report | `list` and `read` on `secret/metadata/gen/*`, for [persistence and API §6.4](persistence-api.md#64-orphans)'s report | any value; any other path; Transit | `metadata` listed under one generation path (PC §4 row 065); this identity's grants and refusals measured by [persistence and API §16](persistence-api.md#16-verification-and-evidence-limits)'s check, on the pinned OpenBao only |
+| Access presence | `read` on `secret/metadata/access/talos/*`, for [persistence and API §3.3](persistence-api.md#33-talos-access)'s presence read (choice §17.41 there) | any value; any other path, `list`; Transit | not measured; its grants and refusals are specified in persistence and API §16 |
 | Normal API | metadata and workflow | any secret value, any plaintext input | not measured; design §13.1 |
 
 The Talos access configuration is the one management credential these

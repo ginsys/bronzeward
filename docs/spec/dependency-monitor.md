@@ -183,7 +183,10 @@ compilation §1 and with nothing else. Its policy grants `read` on
 **(choice §11.9)**: no `list`, no `secret/data/*`, no Transit encrypt,
 decrypt, rewrap or key configuration. It is a credential of its own, not
 shared with the ingestion, compiler or executor identities, and the monitor
-uses no other. Whether the monitor shares a process with components that hold
+uses no other. The presence read of a cluster's Talos credential
+([persistence and API §3.3](persistence-api.md#33-talos-access)) also reads KV
+metadata, and it does not use this identity: it has the access-presence
+identity, `read` on `secret/metadata/access/talos/*` alone. Whether the monitor shares a process with components that hold
 those identities is a deployment choice, as for every role of the trusted
 controller (design §5, figure 2).
 
