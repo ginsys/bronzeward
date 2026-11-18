@@ -212,9 +212,12 @@ removes the line. The states overlap, so the first match of this order wins:
 | 7th | No `desired`, no `applied`, and none of the first two | not handed over: no `Desired` and no `Applied`; import the configuration, which writes nothing to the node | Import this machine |
 
 Any other state shows no line: open drift (checked before the order), a `desired` that `applied` already
-carries, `applied` with no `desired`, and a `committed` plan for the selected release, which means an
-operation is in flight (checked before the 3rd to 6th rows, so it also removes the line an `approved` or
-`proposed` plan would give). So does a state whose read has not answered or failed; the line is never
+carries, `applied` with no `desired`, and a `committed` plan whose operation still holds the machine's scope
+(`committed`, `sending`, `verifying` or `unresolved`; checked before the 3rd to 6th rows, so it also removes the
+line an `approved` or `proposed` plan would give). `committed` is a plan's terminal state and says nothing of the
+operation, so the page reads the newest committed plan's operation (`GET /operations/{id}`): a finished one
+(`completed`, `rejected`, `cancelled`, `failed`), such as an adopt plan's, hides nothing. So does a state whose read
+has not answered or failed, and one whose machine read failed on a refresh; the line is never
 "nothing to do" in its place. A plan for another release than `desired` is not counted. A
 draft found another way than through the machine's import is not shown, since `GET /drafts` has no filter.
 
