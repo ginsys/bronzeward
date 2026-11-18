@@ -47,6 +47,10 @@ scenario=s6
 run_key=$(date -u +%s%N)
 mutation_ref='S6.1'
 ds_ref='S6.1'
+# Mode cli mints a token file for each command; a run that ends early, by a die or a signal, still
+# removes them (the end of the run removes them as well).
+cli_tokens_rm() { [ -z "${cli_dir:-}" ] || rm -f -- "$cli_dir"/h-*.json; }
+trap cli_tokens_rm EXIT
 # shellcheck source-path=SCRIPTDIR source=dispatch.sh
 . "$here/dispatch.sh"
 
@@ -442,7 +446,7 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   # run captured before it, with a control holding the last of them that must be the one file
   # listed (as s4 does).
   local_ctl=$STATE/s6-token-control
-  trap 'rm -f -- "$local_ctl"' EXIT
+  trap 'rm -f -- "$local_ctl"; cli_tokens_rm' EXIT
   if [ "${#secrets[@]}" -gt 0 ]; then printf 'x %s x\n' "${secrets[-1]}" >"$local_ctl"; else : >"$local_ctl"; fi
   earlier=()
   for f in "$EV"/*-bundle; do
@@ -452,7 +456,7 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   hits=$(grep --recursive --files-with-matches --fixed-strings --file=<(printf '%s\n' "${secrets[@]}") -- \
     "$EV" "$final" "${earlier[@]}" "$local_ctl") || hits=
   rm -f -- "$local_ctl"
-  trap - EXIT
+  trap cli_tokens_rm EXIT
   if [ "${#secrets[@]}" -gt 0 ] && [ "$hits" = "$local_ctl" ]; then
     result PASS 'S6 evidence' "none of the ${#secrets[@]} tokens this run minted is in any bundle of the run or the run directory (control found)"
   else
