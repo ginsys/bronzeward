@@ -89,7 +89,8 @@ machine carries the same `machine.ca.key` as a schema secret, so §2.3 extracts 
 into an ordinary secret generation like every other secret, and the compiler
 reads that generation to render the configuration. This contract does not change
 that copy and does not claim the compiler never sees the key's value; it claims
-only that the compiler cannot read the signer's path and signs nothing. Its path
+only that the compiler cannot read the signer's path and signs nothing
+(whether the compiler needs its own copy is open in ginsys/bronzeward#889). Its path
 is disjoint from `secret/data/gen/*`, so the ingestion identity still never reads
 a secret it creates (choice §16.1). The compiler's grant PC measured, `read` on
 `secret/data/*`, would cover it; the compiler's grant is `read` on

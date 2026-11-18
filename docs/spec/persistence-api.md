@@ -552,8 +552,8 @@ there.
 
 - **Three first keys, each ending with the CA key held.**
   1. A **control plane machine configuration** (`machine.ca.key`). The signer
-     takes the CA and key from it. A worker configuration holds no key and is
-     refused.
+     takes the CA and key from it and tries it at the request's `endpoint`
+     before storing it. A worker configuration holds no key and is refused.
   2. An **endpoint and a secrets bundle** (`Certs.OS`). No client certificate
      exists, so the signer is needed from the start.
   3. A **talosconfig**. It holds a client certificate and the CA certificate but
@@ -568,19 +568,29 @@ there.
   "machine-config" | "secrets-bundle" | "talosconfig", "document": "<text>",
   "endpoint": "<§3.3 grammar>"}` and answers `200` with `{"cluster", "kind",
   "caKeyVersion", "replaced"}`: the version identity of the stored CA key
-  (§3.3) and whether it replaced a key. `endpoint` is required for
-  `secrets-bundle` and `talosconfig` and refused for `machine-config`; it is the
-  only address dialled, and a talosconfig's own endpoints are ignored. A
-  `machine-config` key is not tried against a node when supplied, so a key that
-  Talos does not trust surfaces at first use as `503 talos-access-unavailable`
-  (§3.3, failure), and an author supplies the cluster's current first key again.
-  The
+  (§3.3) and whether it replaced a key. `endpoint` is required for every kind;
+  it is the only address dialled, and a talosconfig's own endpoints are ignored.
+  **A key is stored only after a node accepted a certificate signed from it:**
+  once the key is extracted (for a talosconfig, from the one `os:admin`
+  `MachineConfig` read at the endpoint), the signer signs one short `os:reader`
+  certificate from it and makes one `Version` read at the endpoint, and the key
+  is written only if that read is answered. So a replacement cannot overwrite a
+  working key with one Talos does not trust, and one rule holds for all three
+  kinds (lead ruling RULING-20261118-2103-2, 18 November 2026, on the design
+  review of this section). The cost is a reachable endpoint at supply time, so
+  there is no offline first supply; onboarding needs one anyway to ingest. An
+  `endpoint` missing for any kind, or outside the §3.3 grammar, is a malformed
+  body, `400 invalid-request`, with nothing written. The
   document is extracted before anything is persisted (design §7.1) and is never
   stored, logged, returned or quoted in an error (compilation §13); its parse
   failures give a fixed refusal, `422 validation-failed` with a `rule` of
-  `first-key-unusable`, `first-key-no-ca-key`, `first-key-role-insufficient` or
-  `first-key-endpoint-no-control-plane`, and a failed Talos read is
-  `503 talos-access-unavailable` (§3.3, failure). Nothing is written on a refusal.
+  `first-key-unusable`, `first-key-no-ca-key`, `first-key-role-insufficient`,
+  `first-key-endpoint-no-control-plane` (the talosconfig read at the endpoint
+  found no CA key, as a worker node's answer would) or `first-key-not-trusted`
+  (the node refused the signed certificate), and an endpoint that does not
+  answer, or any other failed Talos read, is `503 talos-access-unavailable`
+  (§3.3, failure). Nothing is written on a refusal, and the stored key stays as
+  it was.
 - **Authority.** An `author` supplies and replaces a first key, human only, with
   no approval step (owner decision BW-874-first-key-authority-1, 2026-11-18
   17:41 CET: "A"). Every supply and replacement is recorded in the audit trail
@@ -4010,17 +4020,19 @@ each (design §7.7 consequences):
   interrupted ingestions, executor observations and dispatches, with a
   positive control;
 - first keys and the signer (§3.4), on the fixture, synthetic inputs only: each
-  of a control plane configuration, an endpoint with a secrets bundle and an
-  `os:admin` talosconfig supplied through `POST /clusters/{id}/first-keys`,
-  leaving the CA key stored at `secret/data/access/talos-ca/<cluster id>` and a
-  certificate signed from it accepted by the node, with the controls that a
-  worker configuration, a configuration with no CA key (`first-key-no-ca-key`),
-  an `os:reader` talosconfig (`first-key-role-insufficient`) and a talosconfig
-  request whose `endpoint` reaches no control plane, with control plane
-  endpoints embedded in the file that are ignored
-  (`first-key-endpoint-no-control-plane`) are each refused with nothing
-  written, and that a certificate signed by an unrelated CA is refused by the
-  node; the roles by use (`os:reader` for an observation that does not read
+  of a control plane configuration, a secrets bundle and an `os:admin`
+  talosconfig, each with its `endpoint`, supplied through
+  `POST /clusters/{id}/first-keys`, leaving the CA key stored at
+  `secret/data/access/talos-ca/<cluster id>` and a certificate signed from it
+  accepted by the node, with the controls that a worker configuration, a
+  configuration with no CA key (`first-key-no-ca-key`), an `os:reader`
+  talosconfig (`first-key-role-insufficient`), a talosconfig request whose
+  `endpoint` reaches no control plane, with control plane endpoints embedded in
+  the file that are ignored (`first-key-endpoint-no-control-plane`), and a key
+  of an unrelated CA supplied as a replacement of a working key
+  (`first-key-not-trusted`, the stored key and its version unchanged) are each
+  refused with nothing written, and that a certificate signed by an unrelated CA
+  is refused by the node; the roles by use (`os:reader` for an observation that does not read
   the configuration, `os:admin` for the rest) and a lifetime that covers the
   use and no more; no Talos connection kept past its certificate's
   `NotAfter`, with a control that holds one open past it and must then fail
