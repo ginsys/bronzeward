@@ -156,7 +156,8 @@ func Try(ctx context.Context, ca provider.CAKey, endpoint string, now time.Time)
 	if err != nil {
 		return &Refusal{RuleUnusable}
 	}
-	ctx, cancel := context.WithDeadline(ctx, now.Add(life))
+	// X.509 keeps whole seconds, so the certificate lapses at NotAfter cut to the second.
+	ctx, cancel := context.WithDeadline(ctx, now.Add(life).Truncate(time.Second))
 	defer cancel()
 	doc, err := clientconfig.NewConfig("bronzeward", []string{endpoint}, ca.Crt(), cert).Bytes()
 	if err != nil {

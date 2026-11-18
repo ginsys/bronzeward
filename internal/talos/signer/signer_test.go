@@ -234,13 +234,15 @@ func TestTry(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		start := time.Now()
-		// The caller's context allows far longer than the certificate lives.
+		// A start 900 ms into a second: the certificate lapses at the second below start+2s, not at
+		// start+2s itself. The caller's context allows far longer than the certificate lives.
+		start := time.Now().Truncate(time.Second).Add(900 * time.Millisecond)
+		notAfter := start.Add(2 * time.Second).Truncate(time.Second)
 		if err := signer.Try(ctx(t), k, held.Endpoint, start); !errors.Is(err, signer.ErrUnavailable) {
 			t.Fatalf("err %v", err)
 		}
-		if d := time.Since(start); d > 6*time.Second {
-			t.Fatalf("the try lasted %v, past the certificate's two seconds", d)
+		if over := time.Since(notAfter); over > 500*time.Millisecond {
+			t.Fatalf("the try ended %v after the certificate lapsed", over)
 		}
 	})
 
