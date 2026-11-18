@@ -1,0 +1,560 @@
+Bronzeward #870: observations of user-coupled OpenBao identities and per-tenant layout
+Date: 18 November 2026, about 16:40 to 17:10 CET, one run of each script below, in the order M6, M1 to M3, M4, M5, M7, M8
+Environment: OpenBao 2.6.1, image ghcr.io/openbao/openbao:2.6.1@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0 (fixtures/versions.env OPENBAO_IMAGE), dev mode on loopback port 18870, one throwaway container, no fixture, no cluster, no browser. Dev mode keeps storage in memory and has no seal. The tool versions of the host are not recorded.
+Inputs: synthetic only. The identity provider is a throwaway RSA key pair; its tokens are signed by the scripts. Tenants are "a" and "b"; every value is synthetic. The dev root token is the string in ROOT; it is used only in steps labelled ADMIN and in setup.sh.
+Rule kept: every measurement call uses a token minted by the method under test (a jwt login), never the root token.
+
+Procedure: write the files below to one directory (the lines "=== file ===" separate them), then run
+  bash setup.sh && bash m6.sh && bash m1_m3.sh && bash m3b.sh && bash m3c.sh && bash m3d.sh && bash m4.sh && bash m5.sh && bash m7.sh && bash m8.sh
+and compare each line with the observed output below. Run them from that directory (lib.sh sets S to the current directory). setup.sh generates idp.key and idp.pub there. The scripts change role and policy state in order, so run them in this order on a fresh container. m3b sets the three leeway fields of the role to -1 and its closing role update does not reset them (an update merges fields), so m3c refuses every expired token for that reason and is not a reading of the default; m3d resets the fields to 0 and is the reading of the default leeway. Remove the container with `docker rm -f bw870-bao` when done.
+
+Limits of the instrument:
+- Each line is one sample. Nothing was repeated, so no line shows variance.
+- The scripts print status codes and short body prefixes; a 403 carries no reason.
+- jwt auth was configured with a public key (jwt_validation_pubkeys), not with OIDC discovery; no browser sign-in or authorization-code flow was run.
+- Dev mode: no seal, no storage backend, no audit device.
+
+SCRIPTS
+
+=== lib.sh ===
+#!/bin/bash
+# Helpers for the bw-870 measurements against a throwaway dev-mode OpenBao 2.6.1 (synthetic values only).
+S=$PWD
+BAO_PORT=18870
+BAO=http://127.0.0.1:$BAO_PORT
+# shellcheck disable=SC2034  # read by setup.sh, which sources this file; no measurement uses it
+ROOT=bw870-synthetic-root-token
+ISS=https://idp.synthetic.invalid
+
+b64u() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+# jwt <sub> <groups-json-array> <aud-json> <exp-seconds-from-now> [extra-claims-json-object-body]
+# prints a signed RS256 JWT from the synthetic IdP key
+jwt() {
+  local sub=$1 groups=$2 aud=$3 ttl=$4 extra=${5:-}
+  local now exp hdr pl sig
+  now=$(date +%s)
+  exp=$((now + ttl))
+  hdr=$(printf '{"alg":"RS256","typ":"JWT"}' | b64u)
+  pl=$(printf '{"iss":"%s","sub":"%s","aud":%s,"groups":%s,"iat":%s,"nbf":%s,"exp":%s%s}' \
+    "$ISS" "$sub" "$aud" "$groups" "$now" "$now" "$exp" "${extra:+,$extra}" | b64u)
+  sig=$(printf '%s.%s' "$hdr" "$pl" | openssl dgst -sha256 -sign "$S/idp.key" | b64u)
+  printf '%s.%s.%s' "$hdr" "$pl" "$sig"
+}
+
+# api <method> <path-after-/v1/> <token> [json-body] [namespace]
+# prints "<http status> <body>" on one line
+api() {
+  local m=$1 p=$2 t=$3 d=${4:-} ns=${5:-}
+  local args=(-s -o /dev/stdout -w '\n%{http_code}' -X "$m" -H "X-Vault-Token: $t")
+  [ -n "$ns" ] && args+=(-H "X-Vault-Namespace: $ns")
+  [ -n "$d" ] && args+=(-H 'Content-Type: application/json' -d "$d")
+  local out
+  out=$(curl "${args[@]}" "$BAO/v1/$p")
+  printf '%s %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | tr -d '\n' | cut -c1-300)"
+}
+
+# login <jwt> [mount] [namespace] -> prints the client token ("" on failure)
+login() {
+  local j=$1 mount=${2:-jwt} ns=${3:-}
+  local args=(-s -X POST -H 'Content-Type: application/json' -d "{\"role\":\"tenant\",\"jwt\":\"$j\"}")
+  [ -n "$ns" ] && args+=(-H "X-Vault-Namespace: $ns")
+  curl "${args[@]}" "$BAO/v1/auth/$mount/login" | jq -r '.auth.client_token // empty'
+}
+
+# status-only of an api call
+code() { api "$@" | cut -d' ' -f1; }
+
+=== setup.sh ===
+#!/bin/bash
+# Starts a throwaway dev-mode OpenBao (the pinned image) on loopback and configures synthetic tenants.
+# The synthetic dev root token is used here and only here; measurements log in through jwt auth.
+set -eu
+. ./lib.sh
+IMAGE='ghcr.io/openbao/openbao:2.6.1@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0'
+NAME=bw870-bao
+
+df -m /home | tail -1
+
+if [ ! -f "$S/idp.key" ]; then
+  openssl genrsa -out "$S/idp.key" 2048 2>/dev/null
+  chmod 600 "$S/idp.key"
+  openssl rsa -in "$S/idp.key" -pubout -out "$S/idp.pub" 2>/dev/null
+fi
+
+if [ -n "$(docker ps -aq --filter "name=^$NAME\$")" ]; then docker rm -f "$NAME" >/dev/null; fi
+docker run -d --rm --name "$NAME" -e BAO_DEV_ROOT_TOKEN_ID="$ROOT" -e BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200 \
+  -p "127.0.0.1:$BAO_PORT:8200" "$IMAGE" >/dev/null
+
+ready=no
+for _ in $(seq 30); do
+  if curl -sf "$BAO/v1/sys/health" >/dev/null 2>&1; then ready=yes; break; fi
+  sleep 1
+done
+echo "ready=$ready"
+[ "$ready" = yes ] || exit 1
+
+echo "version: $(curl -s "$BAO/v1/sys/health" | jq -r '.version, .sealed' | tr '\n' ' ')"
+
+# jwt auth against the synthetic IdP key
+api POST sys/auth/jwt "$ROOT" '{"type":"jwt"}'
+pem=$(cat "$S/idp.pub")
+api POST auth/jwt/config "$ROOT" "$(jq -n --arg p "$pem" --arg i "$ISS" '{jwt_validation_pubkeys:$p,bound_issuer:$i}')"
+api PUT auth/jwt/role/tenant "$ROOT" '{"role_type":"jwt","user_claim":"sub","groups_claim":"groups","bound_audiences":["openbao"],"token_ttl":"15m","token_max_ttl":"15m"}'
+
+acc=$(curl -s -H "X-Vault-Token: $ROOT" "$BAO/v1/sys/auth" | jq -r '.data["jwt/"].accessor')
+echo "jwt accessor present: $([ -n "$acc" ] && echo yes || echo no)"
+
+# transit and kv
+api POST sys/mounts/transit "$ROOT" '{"type":"transit"}'
+for t in a b; do
+  api POST "transit/keys/$t-artifact" "$ROOT" '{}'
+  api PUT "secret/data/tenants/$t/x" "$ROOT" "{\"data\":{\"v\":\"$t-synthetic\"}}"
+done
+
+mkpol() {
+  local t=$1
+  jq -n --arg t "$t" '{policy: ("path \"secret/data/tenants/" + $t + "/*\" {capabilities=[\"create\",\"read\",\"update\"]}\npath \"secret/metadata/tenants/" + $t + "/*\" {capabilities=[\"read\",\"list\"]}\npath \"transit/encrypt/" + $t + "-artifact\" {capabilities=[\"update\"]}\npath \"transit/decrypt/" + $t + "-artifact\" {capabilities=[\"update\"]}\n")}'
+}
+for t in a b; do
+  api PUT "sys/policies/acl/tenant-$t" "$ROOT" "$(mkpol "$t")"
+  gid=$(curl -s -X POST -H "X-Vault-Token: $ROOT" -d "{\"name\":\"tenant-$t\",\"type\":\"external\",\"policies\":[\"tenant-$t\"]}" "$BAO/v1/identity/group" | jq -r '.data.id')
+  api POST identity/group-alias "$ROOT" "$(jq -n --arg n "tenant-$t" --arg a "$acc" --arg g "$gid" '{name:$n,mount_accessor:$a,canonical_id:$g}')"
+done
+echo "setup done"
+
+=== m6.sh ===
+#!/bin/bash
+# M6: Transit per-tenant keys, and what a user token that may decrypt can do with no approval check anywhere.
+# Every call uses a token minted by jwt login, never the dev root token.
+set -u
+. ./lib.sh
+
+ta=$(login "$(jwt user-a '["tenant-a"]' '"openbao"' 300)")
+tb=$(login "$(jwt user-b '["tenant-b"]' '"openbao"' 300)")
+echo "logins: a=$([ -n "$ta" ] && echo ok || echo FAIL) b=$([ -n "$tb" ] && echo ok || echo FAIL)"
+pt=$(printf 'synthetic-artifact-bytes' | base64)
+
+echo "--- encrypt under tenant a key with user a (stand-in for the compiler's encryption)"
+enc=$(curl -s -X POST -H "X-Vault-Token: $ta" -d "{\"plaintext\":\"$pt\"}" "$BAO/v1/transit/encrypt/a-artifact")
+ct=$(printf '%s' "$enc" | jq -r '.data.ciphertext // empty')
+echo "ciphertext prefix: ${ct:0:12}"
+
+echo "--- expected: 200 plaintext back, no plan, no approval, no other check; observed:"
+api POST transit/decrypt/a-artifact "$ta" "{\"ciphertext\":\"$ct\"}" | cut -c1-120
+
+echo "--- expected: 403 (user a on tenant b's key); observed:"
+api POST transit/encrypt/b-artifact "$ta" "{\"plaintext\":\"$pt\"}" | cut -c1-100
+
+echo "--- expected: 403 (user b decrypting tenant a's ciphertext under a's key); observed:"
+api POST transit/decrypt/a-artifact "$tb" "{\"ciphertext\":\"$ct\"}" | cut -c1-100
+
+echo "--- decrypt result plaintext matches input: $(curl -s -X POST -H "X-Vault-Token: $ta" -d "{\"ciphertext\":\"$ct\"}" "$BAO/v1/transit/decrypt/a-artifact" | jq -r '.data.plaintext' | base64 -d)"
+
+echo "--- token facts for user a (lookup-self): policies and identity policies"
+curl -s -H "X-Vault-Token: $ta" "$BAO/v1/auth/token/lookup-self" | jq -c '{policies:.data.policies,identity_policies:.data.identity_policies,ttl:.data.ttl,type:.data.type,path:.data.path}'
+
+=== m1_m3.sh ===
+#!/bin/bash
+# M1 (user JWT login, groups to policies), M2 (audience and replay), M3 (lifetime and revocation).
+# Every call uses a token minted by jwt login, never the dev root token, except the one admin revoke in M3,
+# which is labelled.
+set -u
+. ./lib.sh
+
+tok() { login "$(jwt "$@")"; }
+
+echo "== M1: groups to policies"
+ta=$(tok user-a '["tenant-a"]' '"openbao"' 300)
+echo "expected 200 (own tenant read); observed: $(code GET secret/data/tenants/a/x "$ta")"
+echo "expected 403 (other tenant read); observed: $(code GET secret/data/tenants/b/x "$ta")"
+echo "expected 403 (other tenant write); observed: $(code PUT secret/data/tenants/b/x "$ta" '{"data":{"v":"x"}}')"
+tab=$(tok user-ab '["tenant-a","tenant-b"]' '"openbao"' 300)
+echo "user in two tenants: expected 200/200; observed: $(code GET secret/data/tenants/a/x "$tab")/$(code GET secret/data/tenants/b/x "$tab")"
+tnone=$(tok user-none '[]' '"openbao"' 300)
+echo "no group claim: login=$([ -n "$tnone" ] && echo ok || echo refused); expected 403 on a tenant path; observed: $(code GET secret/data/tenants/a/x "$tnone")"
+texp=$(tok user-a '["tenant-a"]' '"openbao"' -30)
+echo "expired JWT: expected login refused; observed: $([ -n "$texp" ] && echo LOGIN-OK || echo refused)"
+
+echo "== M2: audience and replay"
+tb1=$(tok user-a '["tenant-a"]' '"bronzeward"' 300)
+echo "aud=bronzeward only: expected refused; observed: $([ -n "$tb1" ] && echo LOGIN-OK || echo refused)"
+tb2=$(tok user-a '["tenant-a"]' '["bronzeward","openbao"]' 300)
+echo "aud=both: expected accepted; observed: $([ -n "$tb2" ] && echo accepted || echo refused)"
+j=$(jwt user-a '["tenant-a"]' '["bronzeward","openbao"]' 300)
+r1=$(login "$j")
+r2=$(login "$j")
+echo "same JWT presented twice (replay): expected both accepted, no jti check; observed: $([ -n "$r1" ] && echo ok || echo no)/$([ -n "$r2" ] && echo ok || echo no)"
+
+echo "== M3: lifetime and revocation"
+for ttl in 60 3600; do
+  t=$(tok user-a '["tenant-a"]' '"openbao"' "$ttl")
+  echo "JWT exp in ${ttl}s: OpenBao token ttl observed: $(curl -s -H "X-Vault-Token: $t" "$BAO/v1/auth/token/lookup-self" | jq -r '.data.ttl')s (role token_ttl 15m)"
+done
+t1=$(tok user-a '["tenant-a"]' '"openbao"' 300)
+echo "t1 before group removal: expected 200; observed: $(code GET secret/data/tenants/a/x "$t1")"
+t2=$(tok user-a '[]' '"openbao"' 300)
+echo "new login with no groups: expected 403 on tenant a; observed: $(code GET secret/data/tenants/a/x "$t2")"
+echo "old token t1 after the group-less login (same entity): observed: $(code GET secret/data/tenants/a/x "$t1")"
+echo "identity policies of t1 now: $(curl -s -H "X-Vault-Token: $t1" "$BAO/v1/auth/token/lookup-self" | jq -c '.data.identity_policies')"
+echo "t1 after a login with the group again: not run (state shown above is the answer)"
+acc=$(curl -s -H "X-Vault-Token: $t1" "$BAO/v1/auth/token/lookup-self" | jq -r '.data.accessor')
+echo "ADMIN step with the synthetic dev root token: revoke-accessor of t1 -> $(code POST auth/token/revoke-accessor "$ROOT" "{\"accessor\":\"$acc\"}")"
+echo "t1 after revoke: expected 403; observed: $(code GET auth/token/lookup-self "$t1")"
+
+=== m3b.sh ===
+#!/bin/bash
+# M3b: expiry leeway of the jwt role (default 150 s) against a JWT already expired.
+set -u
+. ./lib.sh
+
+t=$(login "$(jwt user-a '["tenant-a"]' '"openbao"' -300)")
+echo "JWT expired 300 s ago (beyond the 150 s default leeway): expected refused; observed: $([ -n "$t" ] && echo LOGIN-OK || echo refused)"
+t=$(login "$(jwt user-a '["tenant-a"]' '"openbao"' -120)")
+echo "JWT expired 120 s ago (inside the default leeway): observed: $([ -n "$t" ] && echo LOGIN-OK || echo refused)"
+
+echo "ADMIN step (dev root token): role expiration_leeway=-1, clock_skew_leeway=-1, not_before_leeway=-1, token_ttl=2m"
+api PUT auth/jwt/role/tenant "$ROOT" '{"role_type":"jwt","user_claim":"sub","groups_claim":"groups","bound_audiences":["openbao"],"token_ttl":"2m","token_max_ttl":"2m","expiration_leeway":-1,"clock_skew_leeway":-1,"not_before_leeway":-1}' | cut -c1-60
+t=$(login "$(jwt user-a '["tenant-a"]' '"openbao"' -5)")
+echo "JWT expired 5 s ago with leeway disabled: expected refused; observed: $([ -n "$t" ] && echo LOGIN-OK || echo refused)"
+t=$(login "$(jwt user-a '["tenant-a"]' '"openbao"' 300)")
+echo "valid JWT with token_ttl 2m: observed OpenBao token ttl: $(curl -s -H "X-Vault-Token: $t" "$BAO/v1/auth/token/lookup-self" | jq -r '.data.ttl')s"
+echo "ADMIN step: restoring the role to the setup values"
+api PUT auth/jwt/role/tenant "$ROOT" '{"role_type":"jwt","user_claim":"sub","groups_claim":"groups","bound_audiences":["openbao"],"token_ttl":"15m","token_max_ttl":"15m"}' | cut -c1-60
+
+=== m3c.sh ===
+#!/bin/bash
+# M3c: where the default expiry leeway of the jwt role actually stops (role at its setup values).
+set -u
+. ./lib.sh
+for s in 30 55 65 90 120 160; do
+  t=$(login "$(jwt user-a '["tenant-a"]' '"openbao"' "-$s")")
+  echo "JWT expired ${s}s ago: $([ -n "$t" ] && echo LOGIN-OK || echo refused)"
+done
+
+=== m3d.sh ===
+#!/bin/bash
+# M3d: reset the role leeway fields to their defaults (0 means default), then probe where expiry stops.
+# The earlier role update left leeway at -1 (an update merges fields), which explains M3c.
+set -u
+. ./lib.sh
+echo "ADMIN step (dev root token): reset leeway fields to 0 (defaults)"
+api PUT auth/jwt/role/tenant "$ROOT" '{"role_type":"jwt","user_claim":"sub","groups_claim":"groups","bound_audiences":["openbao"],"token_ttl":"15m","token_max_ttl":"15m","expiration_leeway":0,"clock_skew_leeway":0,"not_before_leeway":0}' | cut -c1-40
+echo "role leeway now: $(curl -s -H "X-Vault-Token: $ROOT" "$BAO/v1/auth/jwt/role/tenant" | jq -c '.data|{expiration_leeway,clock_skew_leeway,not_before_leeway}')"
+for s in 30 55 65 90 120 160; do
+  t=$(login "$(jwt user-a '["tenant-a"]' '"openbao"' "-$s")")
+  echo "default leeway, JWT expired ${s}s ago: $([ -n "$t" ] && echo LOGIN-OK || echo refused)"
+done
+
+=== m4.sh ===
+#!/bin/bash
+# M4: per-request child tokens and response-wrapped tokens, minted from a user token.
+set -u
+. ./lib.sh
+tok() { login "$(jwt "$@")"; }
+
+echo "ADMIN step (dev root token): named read-only policy for one path"
+api PUT sys/policies/acl/tenant-a-read-x "$ROOT" '{"policy":"path \"secret/data/tenants/a/x\" {capabilities=[\"read\"]}"}' | cut -c1-30
+
+ta=$(tok user-a '["tenant-a"]' '"openbao"' 300)
+echo "== without auth/token/create in the user's policy"
+echo "expected 403; observed: $(api POST auth/token/create "$ta" '{"policies":["default"],"ttl":"30s","num_uses":1}' | cut -c1-120)"
+
+echo "ADMIN step: add auth/token/create to the tenant-a policy"
+api PUT sys/policies/acl/tenant-a "$ROOT" "$(jq -n '{policy: "path \"secret/data/tenants/a/*\" {capabilities=[\"create\",\"read\",\"update\"]}\npath \"secret/metadata/tenants/a/*\" {capabilities=[\"read\",\"list\"]}\npath \"transit/encrypt/a-artifact\" {capabilities=[\"update\"]}\npath \"transit/decrypt/a-artifact\" {capabilities=[\"update\"]}\npath \"auth/token/create\" {capabilities=[\"update\"]}\n"}')" | cut -c1-30
+
+ta=$(tok user-a '["tenant-a"]' '"openbao"' 300)
+echo "== child with a named policy the parent holds only through an identity group"
+echo "observed (child policies [tenant-a-read-x]): $(api POST auth/token/create "$ta" '{"policies":["tenant-a-read-x"],"ttl":"30s","num_uses":1}' | cut -c1-200)"
+echo "observed (child policies [default]): $(api POST auth/token/create "$ta" '{"policies":["default"],"ttl":"30s","num_uses":1}' | cut -c1-160)"
+
+echo "ADMIN step: a second jwt role whose token_policies are direct, so the parent token itself holds them"
+api PUT auth/jwt/role/direct "$ROOT" '{"role_type":"jwt","user_claim":"sub","bound_audiences":["openbao"],"token_ttl":"15m","token_max_ttl":"15m","token_policies":["tenant-a","tenant-a-read-x"]}' | cut -c1-30
+j=$(jwt user-a '[]' '"openbao"' 300)
+pd=$(curl -s -X POST -H 'Content-Type: application/json' -d "{\"role\":\"direct\",\"jwt\":\"$j\"}" "$BAO/v1/auth/jwt/login" | jq -r '.auth.client_token // empty')
+echo "direct-policy parent login: $([ -n "$pd" ] && echo ok || echo FAIL)"
+child=$(curl -s -X POST -H "X-Vault-Token: $pd" -H 'Content-Type: application/json' -d '{"policies":["tenant-a-read-x"],"ttl":"30s","num_uses":2}' "$BAO/v1/auth/token/create")
+ct=$(printf '%s' "$child" | jq -r '.auth.client_token // empty')
+echo "child token minted: $([ -n "$ct" ] && echo yes || echo "NO: $(printf '%s' "$child" | cut -c1-160)")"
+echo "child reads the one path: expected 200; observed: $(code GET secret/data/tenants/a/x "$ct")"
+echo "child reads another path in its parent's reach: expected 403; observed: $(code GET secret/data/tenants/a/y "$ct")"
+echo "child uses left after two calls, third call: expected 403; observed: $(code GET secret/data/tenants/a/x "$ct")"
+echo "child lookup: $(curl -s -H "X-Vault-Token: $pd" -X POST -d "{\"token\":\"$ct\"}" "$BAO/v1/auth/token/lookup" | jq -c '{policies:.data.policies,ttl:.data.ttl,num_uses:.data.num_uses,entity:(.data.entity_id!=null and .data.entity_id!="")}' 2>/dev/null)"
+
+echo "== response wrapping of a child token (single use hand-over)"
+w=$(curl -s -X POST -H "X-Vault-Token: $pd" -H 'X-Vault-Wrap-TTL: 60' -H 'Content-Type: application/json' -d '{"policies":["tenant-a-read-x"],"ttl":"30s"}' "$BAO/v1/auth/token/create")
+wt=$(printf '%s' "$w" | jq -r '.wrap_info.token // empty')
+echo "wrapped: token present=$([ -n "$wt" ] && echo yes || echo no), plain client_token present in response=$(printf '%s' "$w" | jq -r '.auth.client_token // "no"' | cut -c1-6)"
+echo "first unwrap: expected 200 with a client_token; observed: $(curl -s -X POST -H "X-Vault-Token: $wt" "$BAO/v1/sys/wrapping/unwrap" | jq -r 'if .auth.client_token then "200 client_token" else (.errors|tostring) end')"
+echo "second unwrap: expected refused; observed: $(curl -s -X POST -H "X-Vault-Token: $wt" "$BAO/v1/sys/wrapping/unwrap" | jq -r 'if .auth.client_token then "200 client_token" else (.errors|tostring) end' | cut -c1-100)"
+
+=== m5.sh ===
+#!/bin/bash
+# M5: one OpenBao namespace per tenant (ta, tb), each with its own kv, transit and jwt auth mount.
+# Setup steps use the dev root token and are labelled ADMIN; every measurement uses a token from jwt login.
+set -u
+. ./lib.sh
+PUB=$(cat "$S/idp.pub")
+
+echo "ADMIN: create namespaces and per-namespace mounts"
+for n in ta tb; do
+  g="tenant-${n#t}"
+  echo "ns $n create: $(code PUT "sys/namespaces/$n" "$ROOT" '{}')"
+  code POST sys/auth/jwt "$ROOT" '{"type":"jwt"}' "$n" >/dev/null
+  code POST sys/mounts/secret "$ROOT" '{"type":"kv","options":{"version":"2"}}' "$n" >/dev/null
+  code POST sys/mounts/transit "$ROOT" '{"type":"transit"}' "$n" >/dev/null
+  code POST transit/keys/artifact "$ROOT" '{}' "$n" >/dev/null
+  code PUT sys/policies/acl/t "$ROOT" "$(jq -n '{policy: "path \"secret/data/*\" {capabilities=[\"create\",\"read\",\"update\"]}\npath \"transit/encrypt/artifact\" {capabilities=[\"update\"]}\npath \"transit/decrypt/artifact\" {capabilities=[\"update\"]}\n"}')" "$n" >/dev/null
+  code POST auth/jwt/config "$ROOT" "$(jq -n --arg k "$PUB" --arg i "$ISS" '{jwt_validation_pubkeys:$k,bound_issuer:$i}')" "$n" >/dev/null
+  code POST auth/jwt/role/tenant "$ROOT" "$(jq -n --arg g "$g" '{role_type:"jwt",user_claim:"sub",bound_audiences:["openbao"],bound_claims:{groups:[$g]},token_policies:["t"],token_ttl:"15m",token_max_ttl:"15m"}')" "$n" >/dev/null
+done
+
+ua=$(jwt user-a '["tenant-a"]' '"openbao"' 300)
+uab=$(jwt user-ab '["tenant-a","tenant-b"]' '"openbao"' 300)
+echo "== login inside the matching namespace"
+ta=$(login "$ua" jwt ta)
+echo "user a, ns ta: expected token; observed: $([ -n "$ta" ] && echo token || echo refused)"
+echo "user a, ns tb: expected refused (bound_claims); observed: $([ -n "$(login "$ua" jwt tb)" ] && echo TOKEN || echo refused)"
+echo "user a, root namespace (jwt mount from the earlier setup): observed: $([ -n "$(login "$ua" jwt)" ] && echo token || echo refused)"
+
+echo "== use of the ns-ta token"
+echo "write in ta: expected 200; observed: $(code PUT secret/data/x "$ta" '{"data":{"v":"a"}}' ta)"
+echo "read in ta: expected 200; observed: $(code GET secret/data/x "$ta" '' ta)"
+echo "same token, header namespace tb: expected 403; observed: $(code GET secret/data/x "$ta" '' tb)"
+echo "same token, root namespace: expected 403; observed: $(code GET secret/data/tenants/a/x "$ta")"
+echo "same token, no header, path ta/ in URL: observed: $(code GET ta/secret/data/x "$ta")"
+
+echo "== transit keys are separate per namespace even with the same name"
+ca=$(api POST transit/encrypt/artifact "$ta" '{"plaintext":"c2VjcmV0LWE="}' ta | cut -d' ' -f2- | jq -r '.data.ciphertext')
+tab=$(login "$uab" jwt tb)
+echo "user ab login ns tb: $([ -n "$tab" ] && echo token || echo refused)"
+echo "decrypt ta ciphertext under tb key: expected failure; observed: $(api POST transit/decrypt/artifact "$tab" "$(jq -n --arg c "$ca" '{ciphertext:$c}')" tb | cut -c1-140)"
+echo "user ab holds two tokens, one per tenant: ta-token in tb ns -> $(code GET secret/data/x "$(login "$uab" jwt ta)" '' tb)"
+
+echo "== a user with no tenant group"
+un=$(jwt user-none '[]' '"openbao"' 300)
+echo "ns ta: expected refused; observed: $([ -n "$(login "$un" jwt ta)" ] && echo TOKEN || echo refused)"
+
+echo "== can the tenant token manage its own namespace (delegation check, no sys policy given)"
+echo "create sub-namespace as ta token: expected 403; observed: $(code PUT sys/namespaces/x "$ta" '{}' ta)"
+echo "list namespaces as ta token: observed: $(code LIST sys/namespaces "$ta" '' ta)"
+
+=== m7.sh ===
+#!/bin/bash
+# M7: KV v2 create-only policy with cas=0 ("the creator never reads"), called with a token from jwt login.
+set -u
+. ./lib.sh
+
+echo "ADMIN: policies creator (create only on gen/*) and reader (read only), roles for each (direct token_policies)"
+api PUT sys/policies/acl/gen-create "$ROOT" "$(jq -n '{policy:"path \"secret/data/gen/*\" {capabilities=[\"create\"]}\n"}')" | cut -c1-20
+api PUT sys/policies/acl/gen-read "$ROOT" "$(jq -n '{policy:"path \"secret/data/gen/*\" {capabilities=[\"read\"]}\npath \"secret/metadata/gen/*\" {capabilities=[\"read\",\"list\"]}\n"}')" | cut -c1-20
+for r in creator reader; do
+  p=gen-create; [ "$r" = reader ] && p=gen-read
+  api PUT "auth/jwt/role/$r" "$ROOT" "{\"role_type\":\"jwt\",\"user_claim\":\"sub\",\"bound_audiences\":[\"openbao\"],\"token_ttl\":\"15m\",\"token_max_ttl\":\"15m\",\"token_policies\":[\"$p\"]}" | cut -c1-20
+done
+rl() { curl -s -X POST -H 'Content-Type: application/json' -d "{\"role\":\"$2\",\"jwt\":\"$1\"}" "$BAO/v1/auth/jwt/login" | jq -r '.auth.client_token // empty'; }
+c=$(rl "$(jwt svc-ingest '[]' '"openbao"' 300)" creator)
+r=$(rl "$(jwt svc-exec '[]' '"openbao"' 300)" reader)
+echo "creator token: $([ -n "$c" ] && echo ok || echo FAIL); reader token: $([ -n "$r" ] && echo ok || echo FAIL)"
+
+echo "== creator"
+echo "write gen/g1 cas=0 (new): expected 200; observed: $(code PUT secret/data/gen/g1 "$c" '{"options":{"cas":0},"data":{"v":"one"}}')"
+echo "write gen/g1 cas=0 again: expected 403 (update not granted); observed: $(code PUT secret/data/gen/g1 "$c" '{"options":{"cas":0},"data":{"v":"two"}}')"
+echo "write gen/g1 without cas: expected 403; observed: $(code PUT secret/data/gen/g1 "$c" '{"data":{"v":"three"}}')"
+echo "creator reads gen/g1: expected 403; observed: $(code GET secret/data/gen/g1 "$c")"
+echo "creator reads metadata: expected 403; observed: $(code GET secret/metadata/gen/g1 "$c")"
+echo "creator deletes latest version: expected 403; observed: $(code DELETE secret/data/gen/g1 "$c")"
+echo "creator destroys version 1: expected 403; observed: $(code PUT secret/destroy/gen/g1 "$c" '{"versions":[1]}')"
+echo "creator lists gen/: expected 403; observed: $(code LIST secret/metadata/gen "$c")"
+echo "creator writes outside gen/: expected 403; observed: $(code PUT secret/data/other/o1 "$c" '{"options":{"cas":0},"data":{"v":"x"}}')"
+echo "== reader"
+echo "reader reads gen/g1: expected 200 with value one; observed: $(api GET secret/data/gen/g1 "$r" | cut -c1-60) ... value=$(curl -s -H "X-Vault-Token: $r" "$BAO/v1/secret/data/gen/g1" | jq -r '.data.data.v')"
+echo "reader writes gen/g2: expected 403; observed: $(code PUT secret/data/gen/g2 "$r" '{"options":{"cas":0},"data":{"v":"x"}}')"
+echo "== version after the refused overwrites (ADMIN read of metadata)"
+echo "current_version: $(curl -s -H "X-Vault-Token: $ROOT" "$BAO/v1/secret/metadata/gen/g1" | jq -r '.data.current_version')"
+
+=== m8.sh ===
+#!/bin/bash
+# M8: one templated policy for every tenant, driven by an alias-metadata value mapped from a JWT claim.
+set -u
+. ./lib.sh
+
+acc=$(curl -s -H "X-Vault-Token: $ROOT" "$BAO/v1/sys/auth" | jq -r '.data["jwt/"].accessor')
+echo "ADMIN: jwt mount accessor read: $([ -n "$acc" ] && echo ok || echo FAIL)"
+tpl="path \"secret/data/tenants/{{identity.entity.aliases.${acc}.metadata.tenant}}/*\" {capabilities=[\"create\",\"read\",\"update\"]}"
+api PUT sys/policies/acl/tenant-tpl "$ROOT" "$(jq -n --arg p "$tpl" '{policy:$p}')" | cut -c1-20
+api PUT auth/jwt/role/templated "$ROOT" '{"role_type":"jwt","user_claim":"sub","bound_audiences":["openbao"],"token_ttl":"15m","token_max_ttl":"15m","token_policies":["tenant-tpl"],"claim_mappings":{"tenant":"tenant"}}' | cut -c1-20
+rl() { curl -s -X POST -H 'Content-Type: application/json' -d "{\"role\":\"templated\",\"jwt\":\"$1\"}" "$BAO/v1/auth/jwt/login" | jq -r '.auth.client_token // empty'; }
+
+t1=$(rl "$(jwt user-t '[]' '"openbao"' 300 '"tenant":"a"')")
+echo "login with tenant=a: $([ -n "$t1" ] && echo ok || echo FAIL)"
+echo "own tenant a read: expected 200; observed: $(code GET secret/data/tenants/a/x "$t1")"
+echo "tenant b read: expected 403; observed: $(code GET secret/data/tenants/b/x "$t1")"
+echo "path traversal attempt tenants/a/../b/x: expected 403; observed: $(code GET 'secret/data/tenants/a/../b/x' "$t1")"
+
+echo "== claim with a path-like value, tenant=\"*\" and tenant=\"a/../b\""
+for v in '*' 'a/../b' ''; do
+  t=$(rl "$(jwt "user-$RANDOM" '[]' '"openbao"' 300 "\"tenant\":\"$v\"")")
+  echo "tenant claim '$v': login=$([ -n "$t" ] && echo ok || echo refused); read b/x -> $([ -n "$t" ] && code GET secret/data/tenants/b/x "$t" || echo n/a); read a/x -> $([ -n "$t" ] && code GET secret/data/tenants/a/x "$t" || echo n/a)"
+done
+
+echo "== the metadata is the alias's, so a later login changes an earlier token"
+t2=$(rl "$(jwt user-t '[]' '"openbao"' 300 '"tenant":"b"')")
+echo "same sub logs in again with tenant=b; new token reads b: $(code GET secret/data/tenants/b/x "$t2")"
+echo "old token (tenant=a login) reads a: expected 200 if bound to login, 403 if it follows the alias; observed: $(code GET secret/data/tenants/a/x "$t1")"
+echo "old token reads b: observed: $(code GET secret/data/tenants/b/x "$t1")"
+
+OBSERVED
+
+=== m6.sh output ===
+logins: a=ok b=ok
+--- encrypt under tenant a key with user a (stand-in for the compiler's encryption)
+ciphertext prefix: vault:v1:tuD
+--- expected: 200 plaintext back, no plan, no approval, no other check; observed:
+200 {"request_id":"2a90e7e5-7688-57b2-9c10-09d912aa4060","lease_id":"","renewable":false,"lease_duration":0,"data":{"pla
+--- expected: 403 (user a on tenant b's key); observed:
+403 {"errors":["1 error occurred:\n\t* permission denied\n\n"]}
+--- expected: 403 (user b decrypting tenant a's ciphertext under a's key); observed:
+403 {"errors":["1 error occurred:\n\t* permission denied\n\n"]}
+--- decrypt result plaintext matches input: synthetic-artifact-bytes
+--- token facts for user a (lookup-self): policies and identity policies
+{"policies":["default"],"identity_policies":["tenant-a"],"ttl":898,"type":"service","path":"auth/jwt/login"}
+
+=== m1_m3.sh output ===
+== M1: groups to policies
+expected 200 (own tenant read); observed: 200
+expected 403 (other tenant read); observed: 403
+expected 403 (other tenant write); observed: 403
+user in two tenants: expected 200/200; observed: 200/200
+no group claim: login=ok; expected 403 on a tenant path; observed: 403
+expired JWT: expected login refused; observed: LOGIN-OK
+== M2: audience and replay
+aud=bronzeward only: expected refused; observed: refused
+aud=both: expected accepted; observed: accepted
+same JWT presented twice (replay): expected both accepted, no jti check; observed: ok/ok
+== M3: lifetime and revocation
+JWT exp in 60s: OpenBao token ttl observed: 900s (role token_ttl 15m)
+JWT exp in 3600s: OpenBao token ttl observed: 899s (role token_ttl 15m)
+t1 before group removal: expected 200; observed: 200
+new login with no groups: expected 403 on tenant a; observed: 403
+old token t1 after the group-less login (same entity): observed: 403
+identity policies of t1 now: null
+t1 after a login with the group again: not run (state shown above is the answer)
+ADMIN step with the synthetic dev root token: revoke-accessor of t1 -> 204
+t1 after revoke: expected 403; observed: 403
+
+=== m3b.sh output ===
+JWT expired 300 s ago (beyond the 150 s default leeway): expected refused; observed: refused
+JWT expired 120 s ago (inside the default leeway): observed: refused
+ADMIN step (dev root token): role expiration_leeway=-1, clock_skew_leeway=-1, not_before_leeway=-1, token_ttl=2m
+204
+JWT expired 5 s ago with leeway disabled: expected refused; observed: refused
+valid JWT with token_ttl 2m: observed OpenBao token ttl: 119s
+ADMIN step: restoring the role to the setup values
+204
+
+=== m3c.sh output ===
+JWT expired 30s ago: refused
+JWT expired 55s ago: refused
+JWT expired 65s ago: refused
+JWT expired 90s ago: refused
+JWT expired 120s ago: refused
+JWT expired 160s ago: refused
+
+=== m3d.sh output ===
+ADMIN step (dev root token): reset leeway fields to 0 (defaults)
+204
+role leeway now: {"expiration_leeway":0,"clock_skew_leeway":0,"not_before_leeway":0}
+default leeway, JWT expired 30s ago: LOGIN-OK
+default leeway, JWT expired 55s ago: LOGIN-OK
+default leeway, JWT expired 65s ago: refused
+default leeway, JWT expired 90s ago: refused
+default leeway, JWT expired 120s ago: refused
+default leeway, JWT expired 160s ago: refused
+
+=== m4.sh output ===
+ADMIN step (dev root token): named read-only policy for one path
+204
+== without auth/token/create in the user's policy
+expected 403; observed: 403 {"errors":["1 error occurred:\n\t* permission denied\n\n"]}
+ADMIN step: add auth/token/create to the tenant-a policy
+204
+== child with a named policy the parent holds only through an identity group
+observed (child policies [tenant-a-read-x]): 400 {"errors":["child policies must be subset of parent"]}
+observed (child policies [default]): 200 {"request_id":"5f57e9dc-bd69-34b3-ad9e-f7023f640db4","lease_id":"","renewable":false,"lease_duration":0,"data":null,"wrap_info":null,"warnings":null,"auth":
+ADMIN step: a second jwt role whose token_policies are direct, so the parent token itself holds them
+204
+direct-policy parent login: ok
+child token minted: yes
+child reads the one path: expected 200; observed: 200
+child reads another path in its parent's reach: expected 403; observed: 403
+child uses left after two calls, third call: expected 403; observed: 403
+child lookup: {"policies":null,"ttl":null,"num_uses":null,"entity":false}
+== response wrapping of a child token (single use hand-over)
+wrapped: token present=yes, plain client_token present in response=no
+first unwrap: expected 200 with a client_token; observed: 200 client_token
+second unwrap: expected refused; observed: ["wrapping token is not valid or does not exist"]
+
+=== m5.sh output ===
+ADMIN: create namespaces and per-namespace mounts
+ns ta create: 200
+ns tb create: 200
+== login inside the matching namespace
+user a, ns ta: expected token; observed: token
+user a, ns tb: expected refused (bound_claims); observed: refused
+user a, root namespace (jwt mount from the earlier setup): observed: token
+== use of the ns-ta token
+write in ta: expected 200; observed: 200
+read in ta: expected 200; observed: 200
+same token, header namespace tb: expected 403; observed: 403
+same token, root namespace: expected 403; observed: 403
+same token, no header, path ta/ in URL: observed: 200
+== transit keys are separate per namespace even with the same name
+user ab login ns tb: token
+decrypt ta ciphertext under tb key: expected failure; observed: 400 {"errors":["cipher: message authentication failed"]}
+user ab holds two tokens, one per tenant: ta-token in tb ns -> 403
+== a user with no tenant group
+ns ta: expected refused; observed: refused
+== can the tenant token manage its own namespace (delegation check, no sys policy given)
+create sub-namespace as ta token: expected 403; observed: 403
+list namespaces as ta token: observed: 403
+
+=== m7.sh output ===
+ADMIN: policies creator (create only on gen/*) and reader (read only), roles for each (direct token_policies)
+204
+204
+204
+204
+creator token: ok; reader token: ok
+== creator
+write gen/g1 cas=0 (new): expected 200; observed: 200
+write gen/g1 cas=0 again: expected 403 (update not granted); observed: 403
+write gen/g1 without cas: expected 403; observed: 403
+creator reads gen/g1: expected 403; observed: 403
+creator reads metadata: expected 403; observed: 403
+creator deletes latest version: expected 403; observed: 403
+creator destroys version 1: expected 403; observed: 403
+creator lists gen/: expected 403; observed: 403
+creator writes outside gen/: expected 403; observed: 403
+== reader
+reader reads gen/g1: expected 200 with value one; observed: 200 {"request_id":"cfe39297-5bab-b308-4b35-06051b37f057","le ... value=one
+reader writes gen/g2: expected 403; observed: 403
+== version after the refused overwrites (ADMIN read of metadata)
+current_version: 1
+
+=== m8.sh output ===
+ADMIN: jwt mount accessor read: ok
+204
+204
+login with tenant=a: ok
+own tenant a read: expected 200; observed: 200
+tenant b read: expected 403; observed: 403
+path traversal attempt tenants/a/../b/x: expected 403; observed: 403
+== claim with a path-like value, tenant="*" and tenant="a/../b"
+tenant claim '*': login=ok; read b/x -> 403; read a/x -> 403
+tenant claim 'a/../b': login=ok; read b/x -> 403; read a/x -> 403
+tenant claim '': login=ok; read b/x -> 403; read a/x -> 403
+== the metadata is the alias's, so a later login changes an earlier token
+same sub logs in again with tenant=b; new token reads b: 200
+old token (tenant=a login) reads a: expected 200 if bound to login, 403 if it follows the alias; observed: 403
+old token reads b: observed: 200
