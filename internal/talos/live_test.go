@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -176,6 +177,26 @@ func TestLiveApply(t *testing.T) {
 // cannot collide with the scenarios' labels (`tier`, `bw-s2`).
 const activationLabel = "bw-act"
 
+// labelPattern matches activationLabel as a key of a labels map inside one document.
+var labelPattern = regexp.MustCompile(`(?m)^\s+` + activationLabel + `:\s*"?yes"?\s*$`)
+
+// kubeNodeConfigDocument returns the text of the configuration stream's KubeNodeConfig document
+// after its kind line, up to the next document, where that text starts in b, and how many such
+// documents the stream holds (the first is the one returned).
+func kubeNodeConfigDocument(b []byte) (doc []byte, at, n int) {
+	const kindLine = "\nkind: KubeNodeConfig\n"
+	n = bytes.Count(b, []byte(kindLine))
+	if n == 0 {
+		return nil, 0, 0
+	}
+	at = bytes.Index(b, []byte(kindLine)) + len(kindLine)
+	end := len(b)
+	if next := bytes.Index(b[at:], []byte("\n---")); next >= 0 {
+		end = at + next
+	}
+	return b[at:end], at, n
+}
+
 // TestLiveApplyLabelDocument applies the worker's own configuration with activationLabel added to
 // its KubeNodeConfig document, in no-reboot mode (E1), and reads the machine configuration
 // before and after (Read A, E2). Class accepted is the proof that the node named NO_REBOOT:
@@ -198,18 +219,17 @@ func TestLiveApplyLabelDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	original := before.Bytes()
+	// Only a worker is changed: the control plane is on the same fixture and answers the same way.
+	if !bytes.Contains(original, []byte("type: worker")) {
+		t.Fatal("control: the target's machine type is not worker; the endpoint must be the worker's")
+	}
 	// The label goes into the worker's own KubeNodeConfig document: a second one is refused as a
 	// duplicate. The control: exactly one such document, and it holds no labels yet.
-	const kindLine = "\nkind: KubeNodeConfig\n"
-	if n := bytes.Count(original, []byte(kindLine)); n != 1 {
+	doc, at, n := kubeNodeConfigDocument(original)
+	if n != 1 {
 		t.Fatalf("control: the worker's configuration holds %d KubeNodeConfig documents; want exactly one", n)
 	}
-	at := bytes.Index(original, []byte(kindLine)) + len(kindLine)
-	end := len(original)
-	if next := bytes.Index(original[at:], []byte("\n---")); next >= 0 {
-		end = at + next
-	}
-	if bytes.Contains(original[at:end], []byte("labels:")) {
+	if bytes.Contains(doc, []byte("labels:")) {
 		t.Fatal("control: the worker's KubeNodeConfig document already holds labels")
 	}
 	a, err := DialApplier(ctx, tc, ep)
@@ -286,13 +306,15 @@ func TestLiveApplyLabelDocument(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if bytes.Contains(after.Bytes(), []byte(activationLabel)) {
+		// The label must be in the KubeNodeConfig document itself, not anywhere in the text, and the
+		// resource version must have moved; until both hold the read repeats.
+		afterDoc, _, _ := kubeNodeConfigDocument(after.Bytes())
+		shown := labelPattern.Match(afterDoc)
+		moved := after.ResourceVersion() != before.ResourceVersion()
+		if shown && moved {
 			t.Logf("Read A: the label showed %s after the apply; resource version %q to %q, digest %s to %s",
 				time.Since(start).Round(time.Millisecond), before.ResourceVersion(), after.ResourceVersion(),
 				digest(original), digest(after.Bytes()))
-			if after.ResourceVersion() == before.ResourceVersion() {
-				t.Fatalf("the label is stored but the resource version did not move: %q", after.ResourceVersion())
-			}
 			// The restore follows at once, so the fixture run reads Reads B and C while the label
 			// is held. The hold was validated before the apply and ends with the context.
 			if hold > 0 {
@@ -305,7 +327,8 @@ func TestLiveApplyLabelDocument(t *testing.T) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("Read A: the stored configuration holds no %q 30 seconds after an accepted apply", activationLabel)
+			t.Fatalf("Read A: 30 seconds after an accepted apply the KubeNodeConfig document shows %q: %v, and the resource version moved: %v (%q to %q)",
+				activationLabel, shown, moved, before.ResourceVersion(), after.ResourceVersion())
 		}
 		time.Sleep(time.Second)
 	}
