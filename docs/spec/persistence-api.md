@@ -450,7 +450,8 @@ They are held apart **(choice §17.29)**.
   each observation and use-time check (execution and recovery §4.1). The path is disjoint from the secret generations
   under `secret/data/gen/*`, so the ingestion identity still never reads what
   it creates (compilation §1, choice §16.1 there). The compiler, the
-  dependency monitor and the normal API cannot read it.
+  dependency monitor and the normal API cannot read it; only its metadata is
+  read, by the access-presence identity alone, for the presence answer below.
 - **What it can do.** Reading a node's machine configuration needs the
   `os:admin` Talos role, as observed on the fixture (`internal/talos`
   `TestLiveRoleProbe`, Talos v1.14.5, recorded in the fixture README and the same as on v1.13.6:
@@ -536,6 +537,59 @@ They are held apart **(choice §17.29)**.
   to an older snapshot can bring back a superseded CA key; if Talos no longer
   trusts that CA, reads fail the same way until an author supplies the
   cluster's current first key again (§3.4).
+- **Presence.** `GET /clusters/{id}/talos-access` tells a signed-in `author`,
+  a human (§10.3), whether Bronzeward holds the cluster's CA key **(choice
+  §17.42)**. It reads the metadata of the key's path, never the key, under the
+  **access-presence identity** and no other: a static token of its own, in the
+  file the configuration's `provider.presenceTokenFile` names (mode 0600 or
+  tighter, read at use), whose one policy grants `read` on
+  `secret/metadata/access/talos-ca/*` and nothing else: no `list`, no
+  `secret/data/*`, no other metadata path, no Transit. The signer identity is
+  not used for it, because it can read the key; the ingestion, executor,
+  compiler, metadata and orphan-report identities are not used either. The path
+  is built from the cluster's id and no request names it (above). It answers
+  from the latest version alone, the one the signer's read at use would get. A
+  cluster that does not exist is `404 not-found`. For one that does:
+  - `{"present": true, "version": <n>, "createdTime": "<t>"}`: the latest
+    version is neither destroyed nor soft-deleted. `version` is the
+    metadata's `current_version`; `createdTime` is the `created_time` of that
+    version in the metadata's `versions` map, not the secret's own
+    `created_time` at the top of the answer, which differs after a replacement
+    (§3.4). The rows apply in this order, as dependency monitor §3 orders
+    them, and the first that matches decides: a version with `destroyed: true`
+    is `latest-version-deleted`, whatever `Date` says; a version with no
+    `deletion_time` is present, whatever `Date` says; only a version with a
+    `deletion_time` reads the provider's `Date`, and compares it as that
+    section does: before it the version is deleted, after it (a deletion
+    scheduled by the path's own setting) the version is still present, and in
+    the same second or with no readable `Date` the read cannot decide
+    (below).
+  - `{"present": false, "reason": "latest-version-deleted"}`: the latest
+    version is `destroyed` or soft-deleted. The signer's read at use would
+    fail, so `present: true` would mislead. The signer has no delete (§3.4), so
+    this arises only from an action in the provider outside Bronzeward.
+  - `{"present": false, "reason": "never-written-or-removed"}`: the provider
+    answers 404. It answers a path no first key was ever stored at and a path
+    whose metadata was deleted alike, with no tombstone (dependency monitor
+    §3), so the answer says no more than that.
+  - `503 dependency-unavailable`: the provider is sealed or does not answer,
+    or the process has no provider. `503 talos-access-unavailable`: the
+    provider refused the reading identity, answered text that does not parse,
+    or gave the latest version a `deletion_time` (never a destroyed version or
+    one without it) in the same second as its own `Date` or with no readable
+    `Date`, the last two with `Retry-After: 1`. This code now also covers
+    "the presence read could not decide", so a client does not read every 503
+    of it as a broken key.
+
+  "Present" means only that the provider holds a latest version of the CA key
+  that is not deleted. A key is stored only after a node accepted a
+  certificate signed from it (§3.4), so a stored key was trusted when it was
+  supplied; the read does not say Talos trusts it now, which the causes under
+  **Failure** still report at use. The body never carries a key, a path, a
+  policy, a token or the provider's own answer, and the response is
+  `Cache-Control: no-store`. It is a read: it records no act (§10.5) and is not
+  an operation. Who supplied the key and when is the `FirstKeyAct` (§3.4), which
+  this answer does not read.
 
 ### 3.4 First keys and the Talos signer
 
@@ -1945,6 +1999,7 @@ idempotency and conflict behavior.
 | `GET /principals?id=…` (what principal identifiers name, for display; no ETag): `items`, one entry per distinct identifier given, in the order first given: `id`; `kind`, `human`, `service` or `unknown`, the last for an identifier no row holds; `issuer`, `subject` and `display`, its display name, `null` when it has none (§10), for a human, `service`, the service identity's name, for a service, each `null` otherwise. Nothing else of the row, its revocation and responsible human included; the read records no act **(choice §17.40)** | 200 | any role |
 | `GET /server` (the version, API revision, features and start mode of the process that answered, and the read-only settings a client shows) | 200 | any role |
 | `POST /clusters/{id}/first-keys` (supply or replace a cluster's first key, §3.4); synchronous, no operation | 200 with `cluster`, `kind`, `caKeyVersion`, `replaced`; an act (§10.5) | `author`, human only (§10.3) |
+| `GET /clusters/{id}/talos-access` (whether Bronzeward holds the cluster's Talos CA key, §3.3 "Presence"; no query, no ETag): `present`, and `version` and `createdTime` when present, `reason` when not; never a key, a path or a policy | 200, `Cache-Control: no-store`; `404 not-found` for no such cluster | `author`, human only (§10.3) |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
 | `GET /import-base-revisions/{id}` (the summary of an import base revision, §3.2; no query, no ETag): `id`; `machine`; `author`, the principal that wrote it; `createdAt`; `documentBytes`, the size of its sanitized document; `references`, how many reference rows it holds; `embedded`, how many embedded entries it holds. No document text, no digest, no reference name and no generation path **(choice §17.38)**; the read records no act | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
@@ -2884,7 +2939,7 @@ counter, not the ETag token, so the token is not named.
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
 | 501 | `not-implemented` | a routed §9.2 route whose handler has not landed yet: routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
 | 503 | `dependency-unavailable` | the provider is sealed or unreachable, or the process has no provider, or no executor, that the route needs; authentication could not reach the identity provider or the database; or the database failed while the request ran: the installation-state read made once it authenticated (§9.1), its first-use principal row (§10) or the row an identity revocation records or reads for the subject it names by `iss` and `sub` (§10, §10.4), its key's lookup or its own transaction, or a connection lost or refused in a transaction its route runs before its own (§7.2); or the provider refused or could not decrypt a staged envelope for a review (§9.3). A request so answered committed nothing of its own transaction; what an earlier one committed stays (§14). A publication also uses this code for missing or unreadable identity, running version or Talos access (§6.1.1), naming the machine, observation, rule and safe cause; later compiler dependency failures name the dependency (§6.1). Publication commits no release or Desired change on refusal, but its operation, act, events and already recorded observations remain. Ingestion and dispatch Talos access failures use `talos-access-unavailable` |
-| 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or the cause recorded by a dispatch's use-time check or fresh observation that failed on it (execution and recovery §3.1): the cluster's Talos CA key is absent, unreadable by the signer, unreachable behind a sealed or silent provider, not a usable signer, or the certificate signed from it is refused by Talos, or the machine's Talos endpoint did not answer (§3.3); or the node answered with a machine configuration this server cannot decode, which gives the cause `machine-config-undecodable` (a document kind newer than the server's Talos machinery; retrying does not help, the machinery has to move); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1). A publication observation also retains this code in its unread values, while the publish operation reports `dependency-unavailable` under §6.1.1 |
+| 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or the cause recorded by a dispatch's use-time check or fresh observation that failed on it (execution and recovery §3.1): the cluster's Talos CA key is absent, unreadable by the signer, unreachable behind a sealed or silent provider, not a usable signer, or the certificate signed from it is refused by Talos, or the machine's Talos endpoint did not answer (§3.3); or the node answered with a machine configuration this server cannot decode, which gives the cause `machine-config-undecodable` (a document kind newer than the server's Talos machinery; retrying does not help, the machinery has to move); or, as the answer of `GET /clusters/{id}/talos-access` (§3.3, "Presence"), the read of the key's metadata could not decide: the provider refused the reading identity, answered text that does not parse, or gave the latest version (never a destroyed one, nor one with no `deletion_time`) a `deletion_time` in the same second as its own `Date` or with no readable `Date`, each of those two with `Retry-After: 1` (a client does not read every 503 of this code as a broken key); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1). A publication observation also retains this code in its unread values, while the publish operation reports `dependency-unavailable` under §6.1.1 |
 | 503 | `transient-conflict` | deadlock retries exhausted in the request's own transaction, or serialization failure on every attempt of the position read's snapshot (§9.3), or, as the error of a failed `publish` operation, in its T3 (§5 rule 5, §6.2); §14 gives the answer when the deadlock is in a transaction the route runs before the request's own |
 | 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing of the request's own transaction was committed, while a draft entry's staging claim, or a scope mark's recorded observation or only its `observation-started` entry, or a principal row, committed before it stays (§7.2, §9.2, §14). Its `Bronzeward-Epoch` can name the epoch the entry replaced (§9.1) |
 | 503 | `schema-mismatch` | never served: the server does not start (§11) |
@@ -4048,6 +4103,60 @@ each (design §7.7 consequences):
   with no approval step, with a control that requires an approval and must
   then fail; the audit act and every response free of the document and the
   key, in compilation §15's scan, with a positive control;
+- the presence read (§3.3, "Presence"), against the fixture's OpenBao, each
+  state set up on one disposable cluster path: a human `author` reading a
+  stored CA key gets `{"present": true}` with `version` the metadata's
+  `current_version` and `createdTime` the `created_time` of that version, with
+  a control that writes a second version and must then show the new version and
+  its own `createdTime`, not the secret's first one (the top-level
+  `created_time`); a path never written and a path whose metadata was deleted
+  each get `present: false` with `never-written-or-removed`, the two answers
+  equal; a soft-deleted latest version and a destroyed one each get
+  `present: false` with `latest-version-deleted`, the destroyed one also with
+  no readable `Date` (the answer is not `503`), with a control for the
+  soft-deleted one that undeletes the version and must then show
+  `present: true`, and for the destroyed one, which undelete does not restore
+  ([RC §4.1](../design/research/20260924-retention-metadata-classification.md#41-openbao)
+  row 036), a control that writes a new latest version and must then show
+  `present: true` with the new `version`; a latest version with no
+  `deletion_time` and no readable `Date` is `present: true`; a version whose
+  deletion is scheduled for a later time is `present: true`, with a control
+  that moves the time into the past and must then show
+  `latest-version-deleted`; a deletion time in the same second as the
+  provider's `Date` is `503 talos-access-unavailable` with `Retry-After: 1`,
+  driven against a stub that returns that `Date`, since the fixture's clock
+  cannot be held to one second; OpenBao sealed is `503 dependency-unavailable`;
+  a cluster that does not exist is `404 not-found`; a principal with no
+  `author` role, and a service token holding it, are each `403 forbidden`,
+  with a control that gives the human the role and must then succeed; every
+  response `no-store`; and in every response above the synthetic CA key's
+  marker, the secret's path, the provider's token and the provider's raw answer
+  appear nowhere, with a positive control that plants the marker in the key and
+  must then find it in the provider's own data read;
+- the access-presence identity (§3.3, "Presence"): its token carrying exactly
+  one policy, whose rules, read back from the provider with the fixture's
+  administrative token, grant `read` on `secret/metadata/access/talos-ca/*` and
+  no other path or capability, with a control that adds any one other stanza
+  and must then fail; the identity reading one cluster's key metadata, and
+  refused each of: a `secret/data/access/talos-ca/*` read (`read`), a
+  `secret/metadata/gen/*` read (`read`), a `list` of
+  `secret/metadata/access/` (`list`), a Transit key read (`read` on
+  `transit/keys/*`) and a Transit encrypt and decrypt (`update`), and every
+  change under the key path: a create (`create`), an update (`update`), a
+  `PATCH` (`patch`), a `DELETE` of the latest version (`delete`), a metadata
+  update (`update`) and a metadata delete (`delete`), and a
+  `secret/delete/access/*`, `secret/undelete/access/*` and
+  `secret/destroy/access/*` request (`update`); each refusal paired with a
+  control that grants the identity the capability named beside it on that path
+  alone, under which the same request must then succeed (against a disposable
+  path for every change); the metadata identity's policy still `read` on
+  `secret/metadata/*` and `transit/keys/*` and nothing more, and the
+  access-presence token not the one it holds; the signer's token not the
+  access-presence token, with a control that reads the key's data under the
+  signer's token and must then succeed; the server refusing to start on a
+  `provider.presenceTokenFile` with group or other permission bits, one that is
+  a FIFO and one that is a symlink, as it does for each provider token file,
+  naming the field;
 - the orphan report (§6.4): the orphan-report identity's token carrying
   exactly one policy, whose rules, read back from the provider with the
   fixture's administrative token, grant `read` and `list` on
@@ -4529,6 +4638,47 @@ design and evidence do not settle the question. Each is marked in place as
     `act` log, which is not an authorization source and has no index for it;
     refusing a continuation by anyone but the importer, which narrows who may
     continue another author's import and is the owner's call.
+42. **A signed-in `author` may learn whether Bronzeward holds a cluster's
+    Talos CA key, by a metadata read under an identity of its own, the
+    access-presence identity: `read` on `secret/metadata/access/talos-ca/*`
+    only, with its own token file** (§3.3, "Presence"). Owner decisions,
+    2026-11-18 (BW-836-credential-presence-1, 12:21 CET, ginsys/bronzeward#836:
+    the server may tell, by reading metadata, never the value;
+    BW-855-presence-identity-1, 15:12 CET: "a new narrow identity is the best
+    option in current context"). Both were taken for the operator-written
+    credential; ginsys/bronzeward#888 replaced it with the CA key held by the
+    signer. The disclosure decision stands for the new path. The identity
+    choice is kept because its reasons, the containment and audit of a
+    request-driven path, do not depend on what the secret is; the owner may
+    still revisit "current context". The
+    answer is presence, the latest version and its creation time, never a key,
+    a path or a policy, and "present" means only that a latest version exists
+    that is not deleted, not that Talos trusts it now. The route is a
+    sub-resource of the cluster, not new fields on `GET /clusters/{id}`,
+    because that read is open to any role with an ETag and this one is
+    `author`, human only. Alternative: the metadata identity the server already
+    holds for publication and the dependency monitor, passed to the new route.
+    It needs no new credential and it lost on containment and audit, not on
+    protection from a compromised server, which holds that token already: the
+    path is built in a request-driven route, and a bug there would read the
+    metadata (versions, creation times, no values) of any secret and the state
+    of any Transit key under a broad grant, where the narrow identity makes the
+    provider refuse it, and the provider's audit log names the presence read
+    apart from publication and monitoring. The signer identity was not
+    considered: it reads the key itself. The cost of the chosen course is one
+    more token file to hold and rotate. Other alternatives: the answer taken
+    from the cluster's `FirstKeyAct` timeline, which needs no provider read and
+    no identity, and lost because the owner decided on a metadata read, because
+    an act and the provider can differ (a provider write the act never
+    followed, or a key removed in the provider by an operator, the audit
+    coordination point of ginsys/bronzeward#890) and because it cannot tell a
+    deleted latest version from a present one; a route returning the key, which
+    the rule that the normal API never carries a secret value rules out (§3.3);
+    no route, which the owner's decision rules out; the presence reported inside
+    `GET /clusters/{id}`, which would show it to every role. The route name
+    keeps `talos-access` (§3.3 is still "Talos access"); `GET
+    /clusters/{id}/first-keys` would pair with the supply route and read oddly
+    as a collection.
 
 ## 18. Traceability
 
@@ -4537,7 +4687,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
 | §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31, §17.32 |
-| §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.14.5, the same result as on v1.13.6); signing from a control plane configuration or a secrets bundle, a key read through an `os:admin` talosconfig, and a node accepting the signed certificate: [signing locally](../design/research/20261118-local-talos-signing.md) and [the extraction](../design/research/20261118-local-talos-signing-extract.md), Talos v1.14.5 only; revocation, CA rotation and a held connection across a CA replacement not measured; the provider grants on `secret/data/access/talos-ca/*` not measured (choice §17.29) |
+| §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.14.5, the same result as on v1.13.6); signing from a control plane configuration or a secrets bundle, a key read through an `os:admin` talosconfig, and a node accepting the signed certificate: [signing locally](../design/research/20261118-local-talos-signing.md) and [the extraction](../design/research/20261118-local-talos-signing-extract.md), Talos v1.14.5 only; revocation, CA rotation and a held connection across a CA replacement not measured; the provider grants on `secret/data/access/talos-ca/*` not measured (choice §17.29); the presence read's answers for a never-written path and a path whose metadata was deleted (HTTP 404, no tombstone) and for a soft-deleted and a destroyed latest version are [RC §4.1](../design/research/20260924-retention-metadata-classification.md#41-openbao) rows 010, 024, 021 and 022 on OpenBao 2.6.1, and the access-presence identity's grant and the route are not measured (choice §17.42) |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7; bodies and bindings: choice §17.35 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |
 | §5 transactions | §7.2, §7.4 | DB §4.2 rows 059, 061; [DB §6.3](../design/research/20260924-database-semantics.md#63-criterion-3-backend-specific-limitations-and-costs); [DB §7](../design/research/20260924-database-semantics.md#7-limits); [DS §7](../design/research/20260925-dispatch-safety.md#7-limits) |
