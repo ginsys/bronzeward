@@ -226,9 +226,9 @@ jobs:
     # ubuntu-24.04, not ubuntu-latest, while the 26.04 runners cannot resolve the Ubuntu archive
     # (ginsys/bronzeward#791). Back to ubuntu-latest once they can.
     runs-on: ubuntu-24.04
-    # Above mise run go-db's 25 min package timeout plus setup, so that timeout fires first and
-    # names the slow package.
-    timeout-minutes: 30
+    # Above this job's 8 min Secret Service step, mise run go-db's 25 min package timeout and
+    # setup, so the package timeout fires first and names the slow package.
+    timeout-minutes: 35
     services:
       postgres:
         image: docker.io/library/postgres:17-alpine@sha256:f02121de6f74d30d8a94cd1d9584125e2178d7e6c377d8130112d4e52d867995
@@ -261,9 +261,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install the Secret Service for the keyring tests
-        # Takes 15 seconds. A DNS fault made apt retry for 21 minutes (ginsys/bronzeward#791),
-        # so the step fails after 3 minutes and keeps the job red.
-        timeout-minutes: 3
+        # Takes 15 seconds on a quick runner mirror and up to about 3 minutes on a slow one
+        # (2026-11-18: 1 min 41 s to 2 min 57 s passing, and one run cut off at 3 minutes). A DNS
+        # fault made apt retry for 21 minutes (ginsys/bronzeward#791), so the step fails after 8
+        # minutes and keeps the job red.
+        timeout-minutes: 8
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends dbus-daemon dbus-bin gnome-keyring
