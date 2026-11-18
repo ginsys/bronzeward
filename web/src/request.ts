@@ -26,8 +26,9 @@ export interface Problem {
 }
 
 export type ReadResult<T> =
-  // `etag` where the answer carries one (§8.3).
-  | { kind: "ok"; data: T; etag?: string }
+  // `etag` where the answer carries one (§8.3); `recoveryMode` is true only where this answer's own
+  // Bronzeward-Recovery-Mode header is true, and absent otherwise (§8.5).
+  | { kind: "ok"; data: T; etag?: string; recoveryMode?: true }
   // The principal, epoch, route or query changed while the read was in flight: not rendered.
   | { kind: "discarded" }
   // 400 cursor-invalid: drop the cursor and read the list from its start.
@@ -465,7 +466,8 @@ export class Client {
     if (body === CUT) return { kind: "transport" };
     if (body === NOT_JSON) return { kind: "defect", message: "the response is not JSON" };
     const etag = res.headers.get("ETag");
-    return etag === null ? { kind: "ok", data: body as T } : { kind: "ok", data: body as T, etag };
+    const recoveryMode = res.headers.get("Bronzeward-Recovery-Mode") === "true";
+    return { kind: "ok", data: body as T, ...(etag === null ? {} : { etag }), ...(recoveryMode ? { recoveryMode: true as const } : {}) };
   }
 }
 

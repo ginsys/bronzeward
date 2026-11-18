@@ -6,6 +6,8 @@
 
 import type { components } from "./api/v1";
 import { Ref } from "./list.tsx";
+import { planPath } from "./plan.tsx";
+import { planFor } from "./review.tsx";
 
 export type Position = components["schemas"]["PositionBody"];
 
@@ -25,6 +27,15 @@ function holds(p: Position, recovery: boolean): string[] {
   else if (recovery && scope !== "released") out.push("the server is in recovery mode and the machine's scope is not released");
   if (p.plan?.operation === "apply-config" && p.rolloutHeldBy !== null) out.push(`another machine's operation holds the cluster's rollout scope (${p.rolloutHeldBy.id})`);
   return out;
+}
+
+// The creation page for the plan the machine's state offers for its Desired release (the same choice the release
+// page's plan button makes); the machine's plans where it offers none.
+function needsPlanLinks(p: Position): Step["links"] {
+  const m = p.machine.id;
+  const kind = p.machine.desired === null ? undefined : planFor(p.machine.desired, p.machine);
+  if (p.machine.desired === null || kind === undefined) return [{ to: `/plans?machine=${m}`, label: "Plans for this machine", id: m }];
+  return [{ to: planPath(p.machine.desired, m, kind), label: kind === "adopt" ? "Create the adopt plan" : "Create the apply-config plan", id: m }];
 }
 
 // The line for a position, or undefined for `no-step` and for a value this client does not know.
@@ -50,7 +61,7 @@ export function nextStep(p: Position, recovery = false): Step | undefined {
     case "needs-plan":
       return {
         text: "A release is selected and not yet applied. Next: create a plan. With no Applied configuration the plan is an adopt (it accepts the configuration the node already runs, the handover); with an Applied configuration and no open drift it is an apply-config (it sends the release). The server refuses the other kind in each case.",
-        links: [{ to: `/plans?machine=${m}`, label: "Plans for this machine", id: m }],
+        links: needsPlanLinks(p),
       };
     case "awaiting-approval":
       return {

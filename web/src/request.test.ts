@@ -85,6 +85,15 @@ describe("§8.2 read rows", () => {
     expect(await client([r]).c.read("/drafts/drf_1")).toEqual({ kind: "ok", data: { id: "drf_1" }, etag: '"6-t"' });
   });
 
+  test("a success carries recoveryMode true only where its own Bronzeward-Recovery-Mode header is true (§8.5)", async () => {
+    const r = ok({ id: "mch_1" });
+    r.headers.set("Bronzeward-Recovery-Mode", "true");
+    expect(await client([r]).c.read("/machines/mch_1/position")).toEqual({ kind: "ok", data: { id: "mch_1" }, recoveryMode: true });
+    const off = ok({ id: "mch_1" });
+    off.headers.set("Bronzeward-Recovery-Mode", "false");
+    expect(await client([off]).c.read("/machines/mch_1/position")).toEqual({ kind: "ok", data: { id: "mch_1" } });
+  });
+
   test("a success without Bronzeward-Epoch is a defect, not rendered", async () => {
     expect((await client([ok({}, null)]).c.read("/server")).kind).toBe("defect");
   });
@@ -609,7 +618,8 @@ describe("stale-response discard", () => {
     const pending = c.read("/machines"); // in flight in recovery mode
     await c.read("/plans"); // after the exit
     release();
-    expect(await pending).toEqual({ kind: "ok", data: { late: true } });
+    // The late answer still reports the mode it was served under (its own header), and the client's mode stays off.
+    expect(await pending).toEqual({ kind: "ok", data: { late: true }, recoveryMode: true });
     expect(c.recoveryMode).toBe(false);
     expect(onRecoveryModeChange.mock.calls).toEqual([[true], [false]]);
   });

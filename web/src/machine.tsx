@@ -10,7 +10,6 @@ import { type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, R
 import { type Machine, node, release } from "./machines.tsx";
 import { NextStep, type Position } from "./nextstep.tsx";
 import type { ReadResult } from "./request.ts";
-import { useRecoveryState } from "./shell.tsx";
 import { clock, Status } from "./states.tsx";
 
 export type Observation = components["schemas"]["ObservationBody"];
@@ -385,6 +384,9 @@ export function recovery(lost: { current: [boolean, boolean] }, run: () => void,
   return [observe, stop];
 }
 
+// A read that keeps no earlier answer: a failure replaces what it showed.
+export const NO_KEEP: Keep = { held: () => false, lost: () => undefined };
+
 // When a read's answer ends the banner and a resource found no answer, the machine and its
 // observations are read again once, as for a timeline advance: one read again at a time, so this
 // read again and the timeline's do not abandon each other, and at most once per POLL_MS from when the
@@ -395,16 +397,16 @@ function MachineState({ id, path, tl, older, busy, readAgain, changed }: { id: s
   const lost = useRef<[boolean, boolean]>([false, false]);
   const m = useItem<Machine>(path, keepW3(k, 0, lost));
   const [obs] = useList<Observation>(`${path}/observations`, "", true, keepW3(k, 1, lost));
-  // The position keeps nothing: its line is drawn only from its own latest answer (operator experience §2.3).
-  const pos = useItem<Position>(`${path}/position`);
-  const { recoveryMode } = useRecoveryState();
+  // The position keeps nothing: its line is drawn only from its own latest answer (operator experience §2.3),
+  // and the recovery mode it is read under is that answer's own header, never another response's.
+  const pos = useItem<Position>(`${path}/position`, NO_KEEP);
   const again = useRef(readAgain);
   again.current = readAgain;
   const [observe, stop] = useMemo(() => recovery(lost, () => again.current()), []);
   useEffect(() => stop, [stop]);
   useEffect(() => observe(view, n, regained));
   const [km, ko, kt] = (k.current = keptW3(k.current, m, obs, tl, view));
-  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} changed={changed} position={pos.kind === "ok" ? pos.data : undefined} recovery={recoveryMode} />;
+  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} changed={changed} position={pos.kind === "ok" ? pos.data : undefined} recovery={pos.kind === "ok" && pos.recoveryMode === true} />;
 }
 
 // W3 as read: each read's answer, else what it keeps with its failure above it. The machine's rows
