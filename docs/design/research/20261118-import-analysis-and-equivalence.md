@@ -66,12 +66,13 @@ point 2). Five levels, from strict to blind:
 
 Recommendation: **E3 is the definition**, computed server-side from plaintext, with E0 reported
 beside it. Reasons, each measured below: E0 fails on any move of a document between base and
-fragments (§5.3) and on comments (§5.1); E2 and E3 held for every machine in every composition that
-the compiler accepted; E4 cannot see a changed secret behind a reference (§5.5). E3 still counts
-list order, a conservative choice that was tested structurally only (§5.4),
-and calls two forms that Talos treats alike different (§5.4, explicit false against omitted), so it
-can refuse a refactoring that is in fact equivalent. It accepted no non-equivalent composition in the
-controls of §5.3; that is a result on six machines and four mistakes, not a proof of soundness.
+fragments (§5.3) and on comments (§5.1); E2 and E3 held for every machine in the unmodified splits
+the compiler accepted, and were false in the controls N1, N2 and N5 that changed or removed
+something (§5.3); E4 cannot see a changed secret behind a reference (§5.5). E3 still counts list
+order, a conservative choice that was tested structurally only (§5.4), and calls two forms that
+Talos treats alike different (§5.4, explicit false against omitted), so it can refuse a refactoring
+that is in fact equivalent. It accepted none of the three mistaken compositions of §5.3 (N1, N2,
+N5); that is a result on six machines and three mistakes, not a proof of soundness.
 
 ## 4. Method
 
@@ -127,9 +128,10 @@ the `cp3` node label and the `w3` sysctl: the things an operator expects to diff
 
 ### 5.3 M3: a split, composed and compared
 
-The split puts every leaf common to all machines in a common fragment (1218 bytes), every leaf
-common to a role in a role fragment (control plane 1704 bytes, worker 942) and leaves the rest in a
-thin base.
+The split puts every leaf common to all machines in a common fragment, every leaf common to a role
+in a role fragment, and leaves the rest in a thin base. Taken leaf by leaf, the fragments are
+2020 bytes (common), 4009 (control plane) and 975 (worker). After rule R2 below, which keeps some
+of those leaves in the base, they are 1218, 1704 and 942 bytes.
 
 | Variant | Result |
 |---|---|
@@ -179,9 +181,10 @@ Expected: E0 false, E4 true. Observed: E0 false (the digest covers the plaintext
 redacted form shows `<redacted:NAME@VERSION>`: the reference name and its version, not the value.
 A comparison of redacted forms, or of sanitized sources, cannot see a value that changes behind an
 unchanged reference. Only E0 and E4 were read: the harness feeds the same plaintext to the E1 to E3
-columns, so their detection of this change is an inference from how they are built, not a result. Without masking the names, E4 was false for every machine in every variant,
-because the baseline was ingested a second time and its names differ (B2); the masked form is the
-only one that can be true.
+columns, so their detection of this change is an inference from how they are built, not a result.
+Without masking the names, E4 was false for every machine in every variant, because the baseline
+was ingested a second time and its names differ (B2); the masked form is the only one that can be
+true.
 
 ## 6. The three options
 
@@ -201,12 +204,15 @@ either a new write route or a split performed at ingestion; both are specificati
 does not do.
 
 **Effect of the owner's answer on ginsys/bronzeward#869** (closing comment, 18 November 2026,
-17:08 CET: "Whatever the user provides, bw gets access and saves the signing keys"). A machine
-created from a secrets bundle or from a talosconfig alone has no import base and no baseline, so
-there is nothing to compare, and the refactoring question does not arise for it: its configuration
-is built from fragments from the start (the PoC excludes enrolment and bootstrap,
-compilation §6, so this is outside the present scope). A cluster supplied as controlplane node
-configurations has one baseline per node, which is the case measured here.
+17:08 CET: "Whatever the user provides, bw gets access and saves the signing keys"). The answer
+widens which first key a user may supply (a talosconfig, controlplane node configurations, or an
+address with a secrets bundle). It concerns how access is obtained, not whether a baseline exists:
+design §9.1 steps 2 and 4 observe each node's effective configuration and keep it as the baseline
+whatever the first key was, so equivalence stays relevant to every machine adopted that way. Only a
+machine that runs no configuration yet has no baseline, and so nothing to compare; its
+configuration is built from fragments from the start. The PoC excludes enrolment and bootstrap
+(compilation §6), so that case is outside the present scope. I did not check which first keys the
+observation step can read a configuration with.
 
 **Prior art.** Omni derives the patches from a generated default configuration and the difference
 ([design §20.7](../Talos_Configuration_and_Machine_Management_Design.md#207-existing-cluster-adoption)).
@@ -246,8 +252,9 @@ has an import base, from this draft's revision, and makes the release Desired fo
 (`web/src/publish.tsx:152`). From persistence and API §6.1 and §9.3 (its `pendingConvergence` paragraph):
 
 - Publication compiles every covered machine and commits a release carrying each plaintext
-  configuration digest. It compares nothing with the import base: its stale-input checks concern
-  heads and the import base revision, not the output.
+  configuration digest. In §6.1's steps and the stale-input refusals of §4.2 I found no comparison
+  of the output with the import base: the checks named there concern heads and the import base
+  revision, not the output.
 - `pendingConvergence` is true exactly when the `Desired` digest differs from the `Applied` digest,
   and after an adoption the `Applied` digest is the import base's. So after a publication, a machine
   whose release compiled the baseline's bytes reads `pendingConvergence=false`: an E0 check,
@@ -267,8 +274,10 @@ compiler already produces both (B1, `control=true`).
 - Synthetic cluster of six machines from one `gen config`: no real node, no comments served by a
   real node, no operator-written legacy `machine.install` or `machine.network.hostname`
   (v1.14.5 refused both and `gen.sh` uses the documents instead).
-- A first split attempt failed twice before R2 (§5.3), and E2 to E4 first compared false for a
-  leaf-equal split because document order had changed; both are recorded above, not hidden.
+- The leaf-by-leaf split was refused before R2 (§5.3). An earlier version of the program also
+  matched documents by position, and reported false at E2 to E4 for a split whose leaves were equal
+  but whose document order had changed; the committed program matches by kind and name, and that
+  earlier run's output was not kept.
 - E4 is false when the names are not masked (§5.5); the masked form is what §3 defines.
 - Fragment order was observed to matter only in one leaf-by-leaf case (§5.3) and its cause was not
   investigated. A case with two fragments that set the same leaf was not run.
