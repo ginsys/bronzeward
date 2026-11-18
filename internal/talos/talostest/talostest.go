@@ -184,6 +184,15 @@ type Node struct {
 	stalls   map[resource.Type]bool
 	applied  []Applied
 	onApply  func(context.Context, *machine.ApplyConfigurationRequest) (*machine.ApplyConfigurationResponse, error)
+
+	stallVersion bool
+}
+
+// StallVersion makes the node hold every Version request until its context ends, or answer again.
+func (n *Node) StallVersion(on bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.stallVersion = on
 }
 
 // Serve runs a node behind mutual TLS with p's CA until the test ends. It reports no resource
@@ -222,7 +231,14 @@ type machineServer struct {
 	n *Node
 }
 
-func (machineServer) Version(context.Context, *emptypb.Empty) (*machine.VersionResponse, error) {
+func (s machineServer) Version(ctx context.Context, _ *emptypb.Empty) (*machine.VersionResponse, error) {
+	s.n.mu.Lock()
+	stall := s.n.stallVersion
+	s.n.mu.Unlock()
+	if stall {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return &machine.VersionResponse{Messages: []*machine.Version{{Version: &machine.VersionInfo{Tag: "v1.14.5"}}}}, nil
 }
 

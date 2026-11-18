@@ -60,7 +60,7 @@ var ErrUnavailable = errors.New("signer: the endpoint did not answer, or did not
 
 // tryLifetime is the validity of the certificate Try signs: one Version read's, with room for a slow
 // dial.
-const tryLifetime = 2 * time.Minute
+var tryLifetime = 2 * time.Minute
 
 // Extract is the CA certificate and key a first key holds. The endpoint is dialled only for a
 // talosconfig, whose own endpoints are ignored; the document is never kept.
@@ -147,12 +147,17 @@ func osCA(document []byte) (ca *x509.PEMEncodedCertificateAndKey, ok bool) {
 
 // Try signs one `os:reader` certificate from ca, valid from now for tryLifetime, and makes one
 // Version read at endpoint with it. Nil means a node answered; the key is trustworthy only then.
+// The connection ends no later than the certificate does (persistence-api.md §3.4): a node that
+// holds the read open is ErrUnavailable once the certificate has lapsed.
 func Try(ctx context.Context, ca provider.CAKey, endpoint string, now time.Time) error {
 	pair := &x509.PEMEncodedCertificateAndKey{Crt: ca.Crt(), Key: ca.Key()}
-	cert, err := secrets.NewAdminCertificateAndKey(now, pair, role.MakeSet(role.Reader), tryLifetime)
+	life := tryLifetime
+	cert, err := secrets.NewAdminCertificateAndKey(now, pair, role.MakeSet(role.Reader), life)
 	if err != nil {
 		return &Refusal{RuleUnusable}
 	}
+	ctx, cancel := context.WithDeadline(ctx, now.Add(life))
+	defer cancel()
 	doc, err := clientconfig.NewConfig("bronzeward", []string{endpoint}, ca.Crt(), cert).Bytes()
 	if err != nil {
 		return ErrUnavailable
