@@ -560,6 +560,12 @@ first key; the draft; one import for each recorded machine, in member order. A m
 or reported no platform, is listed as not recorded with the reason and gets no machine and no import.
 The first key, by default the cluster's talosconfig cut to the one chosen context so that no other
 context's key reaches the server, is sent once to `POST /clusters/{id}/first-keys` and never printed.
+Its `endpoint` is the IP address of the first control-plane member that answered discovery, the
+address that member was read at (never the name `--endpoint` was given: a DNS name was resolved once
+for the first reads and no member address comes from it); a `--first-key-kind secrets-bundle` takes the
+same address. A cluster where no control-plane member answered stops at discovery, exit 1 with nothing
+sent, because no address could carry the first key. `cluster discover` prints that same address in
+its `cluster first-key` command.
 
 A second run finds what exists and changes nothing that stands. A `409 conflict` on the cluster or
 on a machine names the existing record, which the command reads and shows as it is recorded (the
