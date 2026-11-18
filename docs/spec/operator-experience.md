@@ -219,9 +219,12 @@ configuration is unchanged (above), and `no-step` claims nothing. A line is show
 is the latest one the page holds; a failed read of it removes the line rather than keeping guidance the page can no
 longer vouch for.
 
-**Until the read is served**, which needs the implementing change of
-[#868](https://github.com/ginsys/bronzeward/issues/868), the page shows only the `not-handed-over` line, drawn from
-the machine's own `desired`, `applied` and `openDrift`, with no read of its own. The other steps are not drawn from
+**Until the read is served**, which needs the implementing change,
+[ginsys/bronzeward#879](https://github.com/ginsys/bronzeward/issues/879), the page shows only the `not-handed-over`
+line, drawn from the machine's own `desired`, `applied` and `openDrift`, with no read of its own. That line is wrong
+while an import of the machine is open: a machine with no Desired and no Applied configuration whose import is
+running, paused or released into an open draft still reads "Next: import its configuration", where the server's step
+is `import-running`, `import-paused` or `draft-to-publish`. It stays so until the read replaces it. The other steps are not drawn from
 `GET /ingestions`, `GET /plans` and `GET /operations`: those are separate reads taken at different moments, an
 operation can move from one state to the next between two of them and leave every list empty, and a plan's
 `committed` state is terminal and says nothing of its operation (an adopt plan stays `committed` with its operation
