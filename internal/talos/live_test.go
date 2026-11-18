@@ -180,6 +180,11 @@ const activationLabel = "bw-act"
 // labelPattern matches activationLabel as a key of a labels map inside one document.
 var labelPattern = regexp.MustCompile(`(?m)^\s+` + activationLabel + `:\s*"?yes"?\s*$`)
 
+// machineTypeWorker matches the machine.type key of a node's stored configuration (a child of the
+// top-level machine key, four spaces in, before the next top-level key), so a `type: worker` line
+// inside a file's content or another section does not count.
+var machineTypeWorker = regexp.MustCompile(`(?m)^machine:\n(?:(?:[ #].*)?\n)*?    type: worker\b`)
+
 // kubeNodeConfigDocument returns the text of the configuration stream's KubeNodeConfig document
 // after its kind line, up to the next document, where that text starts in b, and how many such
 // documents the stream holds (the first is the one returned).
@@ -220,8 +225,8 @@ func TestLiveApplyLabelDocument(t *testing.T) {
 	}
 	original := before.Bytes()
 	// Only a worker is changed: the control plane is on the same fixture and answers the same way.
-	if !bytes.Contains(original, []byte("type: worker")) {
-		t.Fatal("control: the target's machine type is not worker; the endpoint must be the worker's")
+	if !machineTypeWorker.Match(original) {
+		t.Fatal("control: the target's machine.type is not worker; the endpoint must be the worker's")
 	}
 	// The label goes into the worker's own KubeNodeConfig document: a second one is refused as a
 	// duplicate. The control: exactly one such document, and it holds no labels yet.
