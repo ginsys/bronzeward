@@ -60,32 +60,32 @@ describe("the line for each state, in §2.3's terms", () => {
   });
 
   test("4: a selected release with nothing applied asks a publisher for an adopt plan", () => {
-    const s = nextStep(published, { proposed: [], approved: [] });
+    const s = nextStep(published, { proposed: [], approved: [], committed: [] });
     expect(s?.text).toContain("adopt plan");
     expect(links(s)).toEqual([planPath("rel_a", "mch_x", "adopt")]);
   });
 
   test("5: pending convergence asks a publisher for an apply-config plan", () => {
-    const s = nextStep(behind, { proposed: [], approved: [] });
+    const s = nextStep(behind, { proposed: [], approved: [], committed: [] });
     expect(s?.text).toContain("apply-config plan");
     expect(links(s)).toEqual([planPath("rel_a", "mch_x", "apply-config")]);
   });
 
   test("6: a proposed plan for the selected release asks an approver, and says approving does not apply", () => {
-    const s = nextStep(published, { proposed: [plan({ id: "pln_1" })], approved: [] });
+    const s = nextStep(published, { proposed: [plan({ id: "pln_1" })], approved: [], committed: [] });
     expect(s?.text).toContain("approver");
     expect(s?.text).toContain("does not apply");
     expect(links(s)).toEqual(["/plans/pln_1"]);
   });
 
   test("7: an approved plan for the selected release says the controller applies it", () => {
-    const s = nextStep(behind, { proposed: [], approved: [plan({ id: "pln_2", state: "approved", operation: "apply-config" })] });
+    const s = nextStep(behind, { proposed: [], approved: [plan({ id: "pln_2", state: "approved", operation: "apply-config" })], committed: [] });
     expect(s?.text).toContain("controller");
     expect(links(s)).toEqual(["/plans/pln_2"]);
   });
 
   test("a plan for another release is ignored", () => {
-    expect(nextStep(published, { proposed: [plan({ release: "rel_other" })], approved: [] })?.text).toContain("adopt plan");
+    expect(nextStep(published, { proposed: [plan({ release: "rel_other" })], approved: [], committed: [plan({ release: "rel_other", state: "committed" })] })?.text).toContain("adopt plan");
   });
 });
 
@@ -96,7 +96,7 @@ describe("overlapping states: the first match of 2, 3, 7, 6, 5, 4, 1 wins", () =
   });
 
   test("7 over 6: an approved and a proposed plan together name the approved one", () => {
-    const k: Known = { proposed: [plan({ id: "pln_p" })], approved: [plan({ id: "pln_a", state: "approved" })] };
+    const k: Known = { proposed: [plan({ id: "pln_p" })], approved: [plan({ id: "pln_a", state: "approved" })], committed: [] };
     expect(links(nextStep(published, k))).toEqual(["/plans/pln_a"]);
   });
 
@@ -112,24 +112,36 @@ describe("no line where the page cannot say", () => {
   test("a read not answered gives no line, never 'nothing to do' or a wrong step", () => {
     expect(nextStep(fresh, {})).toBeUndefined();
     expect(nextStep(fresh, { ingestions: [ingestion({ draft: "drf_9" })] })).toBeUndefined();
-    expect(nextStep(published, { proposed: [] })).toBeUndefined();
-    expect(nextStep(published, { approved: [] })).toBeUndefined();
+    expect(nextStep(published, { proposed: [], committed: [] })).toBeUndefined();
+    expect(nextStep(published, { approved: [], committed: [] })).toBeUndefined();
+    expect(nextStep(published, { proposed: [], approved: [] })).toBeUndefined();
+  });
+
+  test("a committed plan for the selected release gives no line, even with the plan lists empty: an operation is in flight", () => {
+    const committed = [plan({ id: "pln_c", state: "committed", operation: "apply-config" })];
+    expect(nextStep(behind, { proposed: [], approved: [], committed })).toBeUndefined();
+    expect(nextStep(behind, { proposed: [], approved: [plan({ state: "approved" })], committed })).toBeUndefined();
+  });
+
+  test("open drift gives no line, whatever the pending state and the plan reads say", () => {
+    const drifted = machine({ desired: "rel_a", applied: { release: "rel_old", source: "operation" }, pendingConvergence: true, openDrift: { revision: 1, observation: "obs_1", lastObservation: "obs_1", lateLanding: null } });
+    expect(nextStep(drifted, { proposed: [], approved: [], committed: [] })).toBeUndefined();
   });
 
   test("open drift, a selected release already applied, and Applied with no Desired give no line", () => {
-    expect(nextStep(machine({ desired: "rel_a", applied: { release: "rel_a", source: "operation" } }), { proposed: [], approved: [] })).toBeUndefined();
+    expect(nextStep(machine({ desired: "rel_a", applied: { release: "rel_a", source: "operation" } }), { proposed: [], approved: [], committed: [] })).toBeUndefined();
     expect(nextStep(machine({ applied: { release: "rel_a", source: "adoption" } }), { ingestions: [] })).toBeUndefined();
-    expect(nextStep(machine({ desired: "rel_a", applied: { release: "rel_a", source: "operation" }, openDrift: { revision: 1, observation: "obs_1", lastObservation: "obs_1", lateLanding: null } }), { proposed: [], approved: [] })).toBeUndefined();
+    expect(nextStep(machine({ desired: "rel_a", applied: { release: "rel_a", source: "operation" }, openDrift: { revision: 1, observation: "obs_1", lastObservation: "obs_1", lateLanding: null } }), { proposed: [], approved: [], committed: [] })).toBeUndefined();
   });
 
   test("a line never says unchanged", () => {
-    for (const s of [nextStep(fresh, { ingestions: [] }), nextStep(published, { proposed: [], approved: [] }), nextStep(behind, { proposed: [], approved: [] })]) expect(s?.text.toLowerCase()).not.toContain("unchanged");
+    for (const s of [nextStep(fresh, { ingestions: [] }), nextStep(published, { proposed: [], approved: [], committed: [] }), nextStep(behind, { proposed: [], approved: [], committed: [] })]) expect(s?.text.toLowerCase()).not.toContain("unchanged");
   });
 });
 
 describe("the markup", () => {
   test("a step renders as one paragraph with its links", () => {
-    const out = html(h(NextStepLine, { step: nextStep(published, { proposed: [plan({ id: "pln_1" })], approved: [] }) }));
+    const out = html(h(NextStepLine, { step: nextStep(published, { proposed: [plan({ id: "pln_1" })], approved: [], committed: [] }) }));
     expect(out).toContain('data-testid="next-step"');
     expect(out).toContain('href="/plans/pln_1"');
   });

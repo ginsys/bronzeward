@@ -3,9 +3,10 @@
 // reads below, and shows nothing where a read is unknown: a missing line is honest, a wrong one is not.
 // It never says "unchanged" from matching identifiers (§2.3).
 
+import { createContext, useContext, useMemo } from "react";
 import type { components } from "./api/v1";
 import { publishPath } from "./drafts.tsx";
-import { Ref, short, useItem, useList } from "./list.tsx";
+import { type Keep, type Reads, ReadsProvider, Ref, short, useItem, useList, useReads } from "./list.tsx";
 import { planPath } from "./plan.tsx";
 import { planFor } from "./review.tsx";
 
@@ -17,7 +18,7 @@ type Draft = components["schemas"]["DraftBody"];
 export interface Step { text: string; links: { to: string; label: string; id: string }[] }
 
 // What the page has read; undefined is a read not answered (loading or failed), never an empty answer.
-export interface Known { ingestions?: Ingestion[] | undefined; draft?: Draft | undefined; proposed?: Plan[] | undefined; approved?: Plan[] | undefined }
+export interface Known { ingestions?: Ingestion[] | undefined; draft?: Draft | undefined; proposed?: Plan[] | undefined; approved?: Plan[] | undefined; committed?: Plan[] | undefined }
 
 const RUNNING = new Set(["held", "paused", "resumed"]);
 
@@ -30,6 +31,7 @@ export const releasedDraft = (ingestions: readonly Ingestion[]): string | undefi
 // over. States 2, 3 and 1 are for a machine with no Desired and no Applied; 7, 6, 5 and 4 for one whose selected
 // release is not carried by what Bronzeward applied. Any other state, and any unknown read, shows no line.
 export function nextStep(m: Machine, k: Known): Step | undefined {
+  if (m.openDrift !== null) return undefined;
   if (m.desired === null && m.applied === null) {
     if (k.ingestions === undefined) return undefined;
     const running = k.ingestions.find((i) => RUNNING.has(i.state));
@@ -54,6 +56,8 @@ export function nextStep(m: Machine, k: Known): Step | undefined {
   const op = m.desired === null ? undefined : planFor(m.desired, m);
   if (m.desired === null || op === undefined || k.proposed === undefined || k.approved === undefined) return undefined;
   const release = m.desired;
+  // A committed plan for the selected release has an operation in flight (or one that did not finish): no line.
+  if (k.committed === undefined || k.committed.some((p) => p.release === release)) return undefined;
   const approved = k.approved.find((p) => p.release === release);
   if (approved !== undefined) {
     return { text: `Plan ${short(approved.id)} for the selected release is approved. Next: the controller commits and applies it. Nothing is left for you to do.`, links: [{ to: `/plans/${approved.id}`, label: "Open the plan", id: approved.id }] };
@@ -79,32 +83,45 @@ export function NextStepLine({ step }: { step: Step | undefined }) {
 
 const enc = encodeURIComponent;
 
+// These reads keep nothing: a read again that finds no answer must not leave the last answer's guidance on
+// the page, since a line that says what to do next is wrong on data the page can no longer vouch for.
+const NO_KEEP: Keep = { held: () => false, lost: () => {} };
+
 function StoredDraft({ machine, ingestions, draft }: { machine: Machine; ingestions: Ingestion[]; draft: string }) {
-  const item = useItem<Draft>(`/drafts/${enc(draft)}`);
+  const item = useItem<Draft>(`/drafts/${enc(draft)}`, NO_KEEP);
   return <NextStepLine step={nextStep(machine, { ingestions, draft: item.kind === "ok" ? item.data : undefined })} />;
 }
 
 // A machine with no Desired and no Applied: its imports (one list, by machine), then the draft of the
 // newest one that stored a draft.
 function ImportStep({ machine }: { machine: Machine }) {
-  const [list] = useList<Ingestion>("/ingestions", new URLSearchParams({ machine: machine.id }).toString(), true);
+  const [list] = useList<Ingestion>("/ingestions", new URLSearchParams({ machine: machine.id }).toString(), true, NO_KEEP);
   if (list.kind !== "ok") return null;
   const ingestions = list.data.items;
   const stored = ingestions.some((i) => RUNNING.has(i.state)) ? undefined : releasedDraft(ingestions);
   return stored === undefined ? <NextStepLine step={nextStep(machine, { ingestions })} /> : <StoredDraft machine={machine} ingestions={ingestions} draft={stored} />;
 }
 
-// A machine whose selected release is not what Bronzeward applied: the machine's proposed and approved plans
-// (two lists, by machine and state, bounded by what is pending).
+// A machine whose selected release is not what Bronzeward applied: the machine's proposed, approved and
+// committed plans (three lists, by machine and state).
 function PlanStep({ machine }: { machine: Machine }) {
   const q = (state: string) => new URLSearchParams({ machine: machine.id, state }).toString();
-  const [proposed] = useList<Plan>("/plans", q("proposed"), true);
-  const [approved] = useList<Plan>("/plans", q("approved"), true);
-  const known: Known = { proposed: proposed.kind === "ok" ? proposed.data.items : undefined, approved: approved.kind === "ok" ? approved.data.items : undefined };
-  return <NextStepLine step={nextStep(machine, known)} />;
+  const [proposed] = useList<Plan>("/plans", q("proposed"), true, NO_KEEP);
+  const [approved] = useList<Plan>("/plans", q("approved"), true, NO_KEEP);
+  const [committed] = useList<Plan>("/plans", q("committed"), true, NO_KEEP);
+  const items = (l: typeof proposed) => (l.kind === "ok" ? l.data.items : undefined);
+  return <NextStepLine step={nextStep(machine, { proposed: items(proposed), approved: items(approved), committed: items(committed) })} />;
 }
 
+// The page counts the settled reads of the machine and its observations to decide when to read them again
+// (countingSettle in machine.tsx); this line's reads must not count, so they settle through the page's own settle.
+export const OuterSettle = createContext<Reads["settle"] | undefined>(undefined);
+
 export function NextStep({ machine }: { machine: Machine }) {
-  if (machine.desired === null && machine.applied === null) return <ImportStep machine={machine} />;
-  return machine.desired !== null && planFor(machine.desired, machine) !== undefined ? <PlanStep machine={machine} /> : null;
+  const reads = useReads();
+  const outer = useContext(OuterSettle);
+  const own = useMemo(() => (outer === undefined ? reads : { ...reads, settle: outer }), [reads, outer]);
+  const wanted = machine.openDrift === null && (machine.desired === null ? machine.applied === null : planFor(machine.desired, machine) !== undefined);
+  if (!wanted) return null;
+  return <ReadsProvider value={own}>{machine.desired === null ? <ImportStep machine={machine} /> : <PlanStep machine={machine} />}</ReadsProvider>;
 }
