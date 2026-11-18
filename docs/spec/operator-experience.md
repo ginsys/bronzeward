@@ -1314,6 +1314,7 @@ so the page reads every page of that list.
 | Draft editor | [W4](operator-experience-wireframes.md#w4-draft-editor) | `GET /drafts/{id}`, draft `PUT`/`DELETE`, discard |
 | Protected review | [W5](operator-experience-wireframes.md#w5-protected-import-review) | `GET /ingestions/{id}/review`, marks, continuations |
 | Import base summary | none (a summary, linked from the draft and the machine page) | `GET /import-base-revisions/{id}` |
+| Import base text | none (a protected action on the summary page, §9) | `GET /import-base-revisions/{id}/document` |
 | Release and rendered review | [W6](operator-experience-wireframes.md#w6-release-and-rendered-review) | `GET /releases/{id}`, `/machines/{m}/review` |
 | Plan and approval | [W7](operator-experience-wireframes.md#w7-plan-and-approval) | `GET /plans/{id}`, approvals, cancellations |
 | Operation timeline | [W8](operator-experience-wireframes.md#w8-operation-timeline) | `GET /operations/{id}`, `/events` |
@@ -1458,6 +1459,16 @@ restore nobody entered stays the same residual
    identified by position only, as the server does.
 7. Debug output (`-v`) prints methods, paths, status and request IDs, never headers carrying
    credentials or bodies of keyed routes.
+8. **The import base text** (`GET /import-base-revisions/{id}/document`, [choice
+   §17.41](persistence-api.md#17-choices-for-owner-review)) is a protected read like the
+   review. Items 2, 3, 4, 6 and 7 apply to it: shown and discarded, no client-controlled
+   copy, no copy-to-clipboard or download, no JSON, YAML or save form, an error repeats the
+   server's problem without a body. Items 1 (inputs) and 5 (redacted renders) do not. The
+   stored document is the sanitized text and can still hold a value nobody marked, so the
+   view says so as the review does and treats the whole text as protected. The server answers
+   it only to the author who made the import and continued its review: the clients offer the
+   action to any `author` and show the server's refusal (`not-the-importer`,
+   `import-not-reviewed`) as it comes, with no body.
 
 ## 10. Action, route and role matrix
 
@@ -1478,6 +1489,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `import start` | `POST /ingestions` | author | yes | draft's |
 | `import review` | `GET /ingestions/{id}/review` | author | yes | no |
 | `import base` (web: the import base summary) | `GET /import-base-revisions/{id}` | author | yes | no |
+| `import-base document` (web: Show document on the summary) | `GET /import-base-revisions/{id}/document` | author | yes | no |
 | `import mark` / `continue` / `takeover` / `abandon` | `POST /ingestions/{id}/marks` / `continuations` / `takeovers` / `abandonments` | author | yes | no |
 | `import status` | `GET /ingestions/{id}` | any | no | no |
 | `draft create` | `POST /drafts` | author | no | no |

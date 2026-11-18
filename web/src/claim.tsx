@@ -119,7 +119,7 @@ export function discardOn(target: Pick<EventTarget, "addEventListener" | "remove
 }
 
 // The review's answer as the page keeps it: the document text, or why there is none.
-export function reviewed(res: Load<components["schemas"]["IngestionReviewBody"]> | undefined): { text: string } | { why: Exclude<Load<unknown>, { kind: "ok" | "loading" | "discarded" }> } | undefined {
+export function reviewed(res: Load<{ document: string }> | undefined): { text: string } | { why: Exclude<Load<unknown>, { kind: "ok" | "loading" | "discarded" }> } | undefined {
   if (res === undefined || res.kind === "loading" || res.kind === "discarded") return undefined;
   return res.kind === "ok" ? { text: res.data.document } : { why: res };
 }
@@ -180,15 +180,60 @@ function Review({ b, marking }: { b: Ingestion; marking: { send: (marks: string[
   );
 }
 
-// The open review: the notice, the read-only text and the close button. Closing is a plain button, not a
-// gated action: it only drops what the page holds, so no role, connection or epoch state may disable it.
-export function Shown({ id, text, close, marking }: { id: string; text: string; close: () => void; marking?: { send: (marks: string[]) => void; busy: boolean } }) {
+// The import base's document, read on request by the author who imported and reviewed it
+// (persistence and API choice §17.41, client contracts §11.3): the same view as the review, with no
+// marks. Held in this page's memory only: dropped on leaving the page, on pagehide and on sign-out,
+// and a read in flight goes with it. A refusal of the server is shown as it came and keeps nothing.
+type BaseDocumentBody = components["schemas"]["ImportBaseDocument"];
+export const readBaseDocument = (read: <T>(path: string, live?: () => boolean) => Promise<Load<T> | undefined>, id: string, live: () => boolean) =>
+  read<BaseDocumentBody>(`/import-base-revisions/${enc(id)}/document`, live);
+
+export function BaseDocument({ id }: { id: string }) {
+  const read = useSettled();
+  const { failure } = useReads();
+  const [text, setText] = useState<string>();
+  const [why, setWhy] = useState<ReactNode>();
+  const [reading, setReading] = useState(false);
+  const [reads] = useState(newest);
+  const drop = useCallback(() => {
+    reads.drop();
+    setReading(false);
+    setText(undefined);
+  }, [reads]);
+  useEffect(() => discardOn(window, drop), [drop]);
+  // Another import base is another text: nothing read for the old one stays.
+  useEffect(() => drop, [id, drop]);
+  const open = useCallback(async () => {
+    const mine = reads.start();
+    setWhy(undefined);
+    setText(undefined);
+    setReading(true);
+    const r = reviewed(await readBaseDocument(read, id, () => reads.live(mine)));
+    if (!reads.live(mine)) return;
+    setReading(false);
+    if (r === undefined) return;
+    if ("text" in r) setText(r.text);
+    else setWhy(failure(r.why));
+  }, [reads, read, failure, id]);
+  return (
+    <section aria-label="Protected document">
+      {text === undefined ? <Action label="Show document" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={id} text={text} close={drop} kind="document" />}
+      {why}
+    </section>
+  );
+}
+
+// The open review or document: the notice, the read-only text and the close button. Closing is a plain
+// button, not a gated action: it only drops what the page holds, so no role, connection or epoch state
+// may disable it.
+export function Shown({ id, text, close, marking, kind = "review" }: { id: string; text: string; close: () => void; marking?: { send: (marks: string[]) => void; busy: boolean }; kind?: "review" | "document" }) {
+  const doc = kind === "document";
   return (
     <>
-      <Status testid="review-notice">PROTECTED REVIEW. This may contain secrets nothing has recognised yet. This page stores none of it. Screen capture and copying by hand are outside its control, and browser extensions can read this page.</Status>
-      <p><label>Review of import {short(id)}<br /><textarea readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
+      <Status testid="review-notice">{doc ? "PROTECTED DOCUMENT" : "PROTECTED REVIEW"}. This may contain secrets nothing has recognised yet. This page stores none of it. Screen capture and copying by hand are outside its control, and browser extensions can read this page.</Status>
+      <p><label>{doc ? "Document of import base" : "Review of import"} {short(id)}<br /><textarea readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
       {marking && <MarksPanel text={text} send={marking.send} busy={marking.busy} />}
-      <p><button type="button" onClick={close}>Close review</button></p>
+      <p><button type="button" onClick={close}>{doc ? "Close document" : "Close review"}</button></p>
     </>
   );
 }

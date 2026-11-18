@@ -143,6 +143,7 @@ describe("the import base summary (ginsys/bronzeward#857)", () => {
     const out = html(h(ImportBaseRows, { r: wrong }));
     for (const s of ["Identifier", ibr, "Machine", "Author", "Created", "Document size", "1234 bytes", "References", "Embedded documents"]) expect(out).toContain(s);
     for (const s of ["bw-sentinel-text", "ab".repeat(32), "cd".repeat(32), "registry/secret-name", "Digest</dt>"]) expect(out).not.toContain(s);
-    expect(out).toContain("The document text and its digests are not shown.");
+    expect(out).toContain("The digests and reference names are not shown.");
+    expect(out).toContain("only the author who imported it and reviewed it may read it");
   });
 });

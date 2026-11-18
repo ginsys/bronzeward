@@ -105,6 +105,9 @@ commands:
   import review <ingestion>
               a paused import's staged document, only on a terminal, in a pager (space or f
               forward, b back, q quit) that writes nothing else; then marks from the prompt
+  import-base document <import base revision>
+              the stored document of an import base, only for the author who made the import and
+              continued its review, only on a terminal, in the same pager; no marks prompt
   import mark <ingestion> [--no-wait]
               mark values as secret by their paths, one per line from the prompt or standard
               input, never an argument; waits until the import pauses again
@@ -284,7 +287,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "login": e.loginCmd, "logout": e.logoutCmd,
 		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
 		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
-		"draft": e.draftCmd, "import": e.importCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd,
+		"draft": e.draftCmd, "import": e.importCmd, "import-base": e.importBaseCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd,
 		"approve": e.approve, "approval": e.approvalCmd, "operation": e.operationCmd, "act": e.actCmd,
 		"drift": e.driftCmd, "recovery": e.recoveryCmd, "identity": e.identityCmd}
 	pos, err := e.parse("bronzewardctl", args, -1, nil)

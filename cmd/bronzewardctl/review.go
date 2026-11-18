@@ -47,7 +47,7 @@ func (e *env) importReview(args []string) (err error) {
 	case out == nil || !isTerminal(out) || !isTerminal(stdin):
 		return usageError{errors.New("import review shows the review only when standard input and standard output are a terminal, with no override; nothing was read or written")}
 	}
-	rows, cols, err := screenSize(out)
+	rows, cols, err := screenSize(out, "import review")
 	if err != nil {
 		return err
 	}
@@ -102,14 +102,14 @@ func (e *env) rawFile() *os.File {
 
 // screenSize is the terminal out's rows and columns, 24 by 80 when it does not say. A terminal
 // smaller than the pager needs is refused before anything is read.
-func screenSize(out *os.File) (rows, cols int, err error) {
+func screenSize(out *os.File, command string) (rows, cols int, err error) {
 	cols, rows, err = term.GetSize(int(out.Fd())) // width, then height
 	if err != nil {
 		rows, cols = 24, 80
 	}
 	if rows < minRows || cols < minCols {
-		return 0, 0, usageError{fmt.Errorf("import review needs a terminal at least %d columns wide and %d rows high, and this one is %d by %d; nothing was read",
-			minCols, minRows, cols, rows)}
+		return 0, 0, usageError{fmt.Errorf("%s needs a terminal at least %d columns wide and %d rows high, and this one is %d by %d; nothing was read",
+			command, minCols, minRows, cols, rows)}
 	}
 	return rows, cols, nil
 }
@@ -199,7 +199,7 @@ func (e *env) pager(out *os.File, lines []string, rows, cols int) (err error) {
 	}
 	// A resize to less than the pager needs is 0 by 0: the pager shows a notice until it is usable.
 	size := func() (int, int) {
-		r, c, err := screenSize(out)
+		r, c, err := screenSize(out, "the pager")
 		if err != nil {
 			return 0, 0
 		}

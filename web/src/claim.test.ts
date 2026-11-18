@@ -2,7 +2,7 @@ import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { Claim, ClaimView, claimSpec, discardOn, EXPIRY_TICK, expiry, newest, offers, readReview, rereadOnce, rereads, reviewed, Shown, shownVerbs, watchesExpiry, watchExpiry } from "./claim.tsx";
+import { BaseDocument, Claim, ClaimView, claimSpec, discardOn, readBaseDocument, EXPIRY_TICK, expiry, newest, offers, readReview, rereadOnce, rereads, reviewed, Shown, shownVerbs, watchesExpiry, watchExpiry } from "./claim.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
@@ -191,6 +191,55 @@ describe("an idle paused page and a late review read (Copilot threads on web/src
     await readReview(async (path, l) => { seen.path = path; seen.live = l; return undefined; }, "ing_6fdq2la", live);
     expect(seen.path).toBe("/ingestions/ing_6fdq2la/review");
     expect(seen.live).toBe(live);
+  });
+});
+
+// ginsys/bronzeward#858: the import base's document, read on request by the author who reviewed it.
+describe("the import base document view (ginsys/bronzeward#858)", () => {
+  const ibr = "ibr_2xxaaaaaaaaaaaaaaaaaaaqa4m";
+  const asAuthor = { roles: ["author"], offline: false };
+  const shell = (value: object, el: ReactNode) => renderToStaticMarkup(h(ShellContext, { value: value as never }, h(ReadsProvider, { value: noReads }, el)));
+
+  test("its read goes to the document path with the shell's liveness check", async () => {
+    const seen: { path?: string; live?: (() => boolean) | undefined } = {};
+    const live = () => false;
+    await readBaseDocument(async (path, l) => { seen.path = path; seen.live = l; return undefined; }, ibr, live);
+    expect(seen.path).toBe(`/import-base-revisions/${ibr}/document`);
+    expect(seen.live).toBe(live);
+  });
+
+  test("the text is read on request only: the page offers Show document and holds no text before it", () => {
+    const out = shell(asAuthor, h(BaseDocument, { id: ibr }));
+    expect(out).toContain("Show document");
+    expect(out).not.toContain("<textarea");
+  });
+
+  test("the open document has its own notice and label, a close button every role can press, and no copy, download or print control", () => {
+    for (const value of [{ roles: [], offline: false }, { roles: ["author"], offline: true }]) {
+      const out = shell(value, h(Shown, { id: ibr, text: "machine:\n  token: BWSYNTH-base", close: () => {}, kind: "document" }));
+      expect(out).toContain("PROTECTED DOCUMENT.");
+      expect(out).not.toContain("PROTECTED REVIEW");
+      expect(out).toContain("Document of import base ibr_2xxa…qa4m");
+      expect(out).toContain("Close document");
+      expect(out).not.toMatch(/<button[^>]*disabled[^>]*>Close document/);
+      expect(out).toContain("readOnly");
+      for (const control of ["Copy", "Download", "Print", "Save", "Export"]) expect(out).not.toContain(control);
+    }
+  });
+
+  test("the review keeps its own wording and marks panel hook", () => {
+    const out = shell(asAuthor, h(Shown, { id: "ing_6fdq2la", text: "x = 1", close: () => {} }));
+    expect(out).toContain("PROTECTED REVIEW.");
+    expect(out).toContain("Review of import ing_6fdq2la");
+    expect(out).toContain("Close review");
+  });
+
+  test("a read that failed shows no text: only the reviewed text of an ok answer is kept", () => {
+    expect(reviewed({ kind: "ok", data: { id: ibr, machine: "mch_b3caa2q", document: "token = BWSYNTH-base" } } as never)).toEqual({ text: "token = BWSYNTH-base" });
+    for (const kind of ["forbidden", "conflict", "offline"]) {
+      const r = reviewed({ kind } as never);
+      expect(r !== undefined && "text" in r).toBe(false);
+    }
   });
 });
 

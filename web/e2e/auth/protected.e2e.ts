@@ -1,5 +1,6 @@
 // The protected import review (ginsys/bronzeward#341, client contracts §11 and the cases PROT-01,
-// PROT-03, PROT-04, PROT-05 and PROT-06 cases 1 to 4) against the disposable deployment, whose
+// PROT-03, PROT-04, PROT-05 and PROT-06 cases 1 to 4, and PROT-07, the import base's document of
+// ginsys/bronzeward#858) against the disposable deployment, whose
 // provider is mise run dev-bao's OpenBao behind the proxy of bao.ts. PROT-06 case 4 stops the
 // deployment's interrupt build at its draft commit (ginsys/bronzeward#366).
 // Nothing here reads, prints or keeps a review: the page holds the review text in its memory, and a
@@ -13,7 +14,7 @@
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
-import { CONTROL, FIXTURE_ISSUER } from "../auth.conf.ts";
+import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE } from "../auth.conf.ts";
 import { cacheControl, cacheHolds, faults, fixtureSignIn, interrupt, mint, storageControl, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
@@ -25,6 +26,8 @@ let machine = "";
 // The case's import and the name of the document it staged, set by pausedImport and cleared after the case.
 let importId = "";
 let docName = "";
+// The import base the continued import of PROT-01 wrote, which PROT-07 reads the document of.
+let baseId = "";
 
 const hex = () => randomBytes(4).toString("hex");
 const post = async (path: string) => expect((await fetch(`${CONTROL}${path}`, { method: "POST" })).ok).toBe(true);
@@ -235,8 +238,56 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
     await $("button=Continue import").click();
     await expect(ended()).toHaveText(holds(`Import ${short(id)} released into draft`), { wait: 60_000 });
+    // The import base this release wrote, for the document case that follows (ginsys/bronzeward#858).
+    const ing = await api("h-author", "GET", `/ingestions/${id}`);
+    const op = await api("h-author", "GET", `/operations/${ing.body!["operation"] as string}`);
+    baseId = (op.body!["result"] as { importBaseRevision: string }).importBaseRevision;
+    expect(baseId).toMatch(/^ibr_/);
     // The storage and cache checks of this journey run in afterEach, with the probe of the controls case as
     // their positive control. The probe is run again here, in the page the journey ended in.
+    await cacheControl(at);
+  });
+
+  it("PROT-07: the author who imported and reviewed an import base shows its document; another author is refused and sees none; the page keeps nothing and drops the text on leaving", async function () {
+    this.timeout(180_000);
+    expect(baseId).toMatch(/^ibr_/);
+    const base = `${FIXTURE_PAGE}/import-base-revisions/${baseId}`;
+    const documentPath = `/api/v1/import-base-revisions/${baseId}/document`;
+    const shows = () => $('section[aria-label="Protected document"]');
+    // The importer, who continued the review of this import in PROT-01.
+    expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
+    await browser.url(base);
+    await shows().$("button=Show document").click();
+    await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
+    await expect($('[data-testid="review-notice"]')).toHaveText(holds("PROTECTED DOCUMENT"));
+    // Only a boolean crosses WebDriver: the text in the field is as long, in bytes, as the size the summary
+    // above it states, so it is the stored document and not some other text. No copy, download or print
+    // control is offered beside it.
+    expect(
+      await browser.execute(() => {
+        const text = document.querySelector<HTMLTextAreaElement>('[data-testid="review-text"]')?.value ?? "";
+        const stated = /Document size\s*(\d+) bytes/.exec(document.body.innerText);
+        return text.length > 0 && stated !== null && new TextEncoder().encode(text).length === Number(stated[1]);
+      }),
+    ).toBe(true);
+    for (const control of ["Copy", "Download", "Print", "Save", "Export"]) expect(await shows().$(`button*=${control}`).isExisting()).toBe(false);
+    // Leaving the page drops the text: the same page again holds none, until it is shown on request.
+    await $("button=Close document").click();
+    expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
+    await shows().$("button=Show document").click();
+    await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
+    await browser.url(`${FIXTURE_PAGE}/machines`);
+    expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
+    await storageEmpty();
+    expect(await cacheHolds(documentPath)).toBe(false);
+    // Another author, who did not import it, is refused by the server's rule and the page holds no text.
+    expect(await fixtureSignIn("h-all", {}, { upstream: at })).toMatch(SERVER);
+    await browser.url(base);
+    await shows().$("button=Show document").click();
+    await expect(shows()).toHaveText(holds("not-the-importer"), { wait: 20_000 });
+    expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
+    await storageEmpty();
+    expect(await cacheHolds(documentPath)).toBe(false);
     await cacheControl(at);
   });
 

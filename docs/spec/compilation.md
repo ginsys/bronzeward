@@ -554,7 +554,12 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    after a provider write (§2.3 step 6 failing part-way) abandons the claim
    with that refusal, and the generations it created are unused (§2.3).
 5. **Continue.** The operator's continuation takes the claim as a mark does and
-   records the review as `continued`. Its run decrypts the envelope, checks its
+   records the review as `continued`, with the principal that continued it
+   (`continued_by`, in the same `UPDATE`; a mark records none). The record
+   shows who continued the review, never who read it, and an import base's
+   text is read only by the author who imported it and continued it
+   ([persistence and API §3.2](persistence-api.md#32-the-import-base), choice
+   §17.41 there). Its run decrypts the envelope, checks its
    digest and runs the draft transaction, which releases the claim (§3.4). A
    draft that moved while the claim was paused fails the draft transaction as
    for any ingestion, and the claim is abandoned.

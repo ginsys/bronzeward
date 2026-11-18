@@ -58,6 +58,9 @@ func (p *Problem) Error() string {
 		if p.Subject != "" {
 			s += " You are signed in as " + printable(p.Subject) + "."
 		}
+		s += p.ruleLine()
+	case "conflict":
+		s += p.ruleLine()
 	case "validation-failed":
 		// The rule and where in the body: a path, position or name the server gives, never a value
 		// (client-contracts.md §8.2; #347).
@@ -82,6 +85,16 @@ func (p *Problem) Error() string {
 		}
 	}
 	return s
+}
+
+// ruleLine names the rule the server refused by, when its answer carries one: a refusal that has
+// two causes, such as the import base text's not-the-importer and import-not-reviewed, is told
+// apart by it. The rule is a name the server chose, escaped like every part from the server.
+func (p *Problem) ruleLine() string {
+	if r := p.str("rule"); r != "" {
+		return "\nRefused: rule " + r + "."
+	}
+	return ""
 }
 
 // Lines are the lines of the answer. Every part from the server is escaped when it is added, so a line

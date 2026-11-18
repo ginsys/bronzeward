@@ -1335,6 +1335,13 @@ type IdentityBodyKind string
 // IdentityBodyRoles defines model for IdentityBody.Roles.
 type IdentityBodyRoles string
 
+// ImportBaseDocument The stored sanitized document of an import base revision, the review's document form (persistence and API §9.2). It can still hold a value nobody marked, and carries no declarations, digest, baseline or generation path.
+type ImportBaseDocument struct {
+	Document string `json:"document"`
+	Id       string `json:"id"`
+	Machine  string `json:"machine"`
+}
+
 // ImportBaseSummary What an import base revision records of itself, without its content (persistence and API §3.2).
 type ImportBaseSummary struct {
 	// Author The principal identifier of the human whose ingestion wrote the revision.

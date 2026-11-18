@@ -149,6 +149,7 @@ no role included (`internal/api/api.go:339`).
 | import list / status | `GET /ingestions`, `/ingestions/{id}` | list | no | filters `state`, `machine` (`internal/api/ingestions.go:280-299`) |
 | import review | `GET /ingestions/{id}/review` | no | no | `author`, human; `no-store`; only while `paused` (`internal/api/review.go:30-52`) |
 | import base summary | `GET /import-base-revisions/{id}` | no | no | `author`, human; `no-store`; size and counts only, no text, no digest (choice §17.38) |
+| import base text | `GET /import-base-revisions/{id}/document` | no | no | `author`, human, and the importer who continued the review; `no-store` also on refusals (choice §17.41) |
 | release list / show | `GET /releases`, `/releases/{id}` | list | no | |
 | release review, provenance | `GET /releases/{id}/machines/{m}/review` | no | no | redacted |
 | plan list / show | `GET /plans`, `/plans/{id}` | list | no | filters `state`, `machine` (`internal/api/plans.go:429-451`) |
@@ -1492,6 +1493,7 @@ Plaintext can pass through a client in these places only:
 | An ingestion `document` (`source: document`) | `POST /ingestions` | a full machine configuration with its secrets | keyed `document`, `internal/api/ingestions.go:24-26` |
 | Marks | `POST /ingestions/{id}/marks`, `POST /ingestions` `marks`, `PUT /drafts/{id}/fragments/{name}` `marks` | a path can spell a secret mapping key | on the mark route `marks` is the keyed member (`internal/api/marks.go:67-68`); on the start route and the fragment write the keyed member is `document`, and `marks` stays in the canonical body that the same keyed fingerprint covers (`internal/api/ingestions.go:24-26`, `internal/api/fragments.go:37`, `internal/api/fragments.go:51-57`, `internal/api/body.go:170-172`); [compilation §3.6](compilation.md#36-operator-review) item 4 |
 | The protected review | `GET /ingestions/{id}/review` | can hold a value nobody marked yet | `internal/api/review.go:24-31`; [compilation §3.6](compilation.md#36-operator-review) |
+| The import base text | `GET /import-base-revisions/{id}/document` | the stored sanitized document, which can hold a value nobody marked | `internal/api/importbase_document.go`; [persistence and API choice §17.41](persistence-api.md#17-choices-for-owner-review) |
 | Tokens | every request | credentials | [§9](#9-authentication) |
 | The talosconfig file of `cluster discover` | none: it is read from a file the operator names and goes to Talos nodes only | holds the cluster's client key | [§3.3](#33-client-actions-with-no-route) |
 | A first key file of `cluster first-key` or `cluster onboard` | none: it is read from a file the operator names and sent once to `POST /clusters/{id}/first-keys` | may hold the cluster's CA key | [§3.3](#33-client-actions-with-no-route) |
@@ -1502,6 +1504,9 @@ Not protected: rendered release reviews, plan diffs and provenance are redacted 
 The review is served to any human `author`, not only the one who started the ingestion
 (`internal/api/routes.go:99`), as the contract intends: "only to the roles that may mark"
 ([compilation §3.6](compilation.md#36-operator-review)). A client does not narrow this.
+The import base text is stricter: the server answers it only to the author who made the
+import and continued its review, and a client offers the action to any `author` and shows
+the refusal.
 
 ### 11.2 Rules for both clients
 
@@ -1631,12 +1636,23 @@ The qualification: the server's `no-store` and the client's refusal to persist l
 client keeps. They do not stop the operator, the terminal, a recording or the host from keeping
 the text. The requirement is proposed with that limit stated.
 
+`import-base document <ibr>` shows an import base's stored document
+(`GET /import-base-revisions/{id}/document`, [persistence and API choice
+§17.41](persistence-api.md#17-choices-for-owner-review)) as item 1 shows the review: only when
+standard input and output are a terminal, through the same in-process pager, after the item 2
+notice, with no `-o json`, `-o yaml`, save or export form, no override, and no marks prompt, since
+a stored document is not marked. The server answers only the author who made the import and
+continued its review; the command shows its refusal (`403 forbidden` with `not-the-importer`, or
+`409 conflict` with `import-not-reviewed`) as it comes and prints no body.
+
 ### 11.4 Web review and document input
 
 **Proposed.**
 
-1. The review is fetched with `cache: 'no-store'`, rendered as text in a read-only element, and
-   discarded on leaving the page, on `pagehide` and on sign-out.
+1. The review, and an import base's text (Show document on the import base page), is fetched with
+   `cache: 'no-store'`, rendered as text in a read-only element with no copy, download or print
+   action, and discarded on leaving the page, on `pagehide` and on sign-out. The import base page
+   offers the action to any `author` and shows the server's refusal as it comes.
 2. Document and marks fields set `autocomplete="off"`, `spellcheck="false"`, `autocorrect="off"` and
    `autocapitalize="off"`, so browser spelling services do not receive their text (assumption S5).
 3. No draft of a document or of marks is kept between page loads.
@@ -1729,6 +1745,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | PROT-05 | refusal | mark accepted (`202`), then the run cannot decrypt the staged envelope | after the `marked` event, a `resume-failed` event with `dependency-unavailable`; the watch ends with the operation still `running`; the mark reported as not applied; `import takeover` offered once the lease lapses, and `import abandon`; no wait without end |
 | PROT-06 | disconnect | mark accepted (`202`), then the serving process is killed before the run writes any event; second case: the same during a continuation; third case: the same during a takeover; fourth case: during a continuation, the run releases the claim before its lease lapses and its draft transaction is delayed past `leaseUntil` before `COMMIT`, which the fixture's interrupt build does (`-tags fixtureinterrupt`, step `draft-commit`, action `stall`, `internal/seam`) and the default server binary cannot | the client reads the ingestion once its `leaseUntil` has passed; `held` (mark, continuation) or `resumed` (takeover) with `leaseUntil` passed ends the watch with the operation still `running`; the mark, continuation or takeover reported as of unknown outcome, never as not applied; a later read, `import takeover` and `import abandon` offered; in the fourth case the outcome stays unknown, the claim `held` with its lease lapsed, until a later read shows the operation `succeeded`; the read of the operation answers while the commit stalls ([#803](https://github.com/ginsys/bronzeward/issues/803)), and an `abandoned` read is unreachable on a continuation, because an encrypted claim is not due until its `expiresAt` (`internal/staging/sweep.go:13`); no wait until the claim's absolute expiry |
 | PROT-04 | disconnect | connection dropped during the review read | nothing persisted; review read again |
+| PROT-07 | success, refusal | an import base's document, read by the author who imported and reviewed it, then by another author | the first: the text shows on request only (the CLI on a terminal, in the pager; the web in a read-only field with the notice and no copy, download or print control), is gone on leaving the page and in the pager's quit, and leaves nothing in storage or the HTTP cache; the second: `403 forbidden` with `not-the-importer`, shown as it came, with no text |
 | COMP-01 | refusal | `GET /server` serves an API revision below the client's minimum | refused before any write, both revisions named; the recovery entry is the exception, since a recovery start refuses that read until its entry commits: the revision shows after the commit, the entry's success stands, and the client says that the read failed |
 | COMP-02 | success | response carrying a `Deprecation` header | warning shown once, naming the route |
 | ETAG-02 | success | edit after the client's own import succeeded; second case: another author writes between the import and the re-read | first: draft `revision` equals the import's `result.draftRevision`, the next write uses the new ETag, no `412`; second: revision is higher, treated as `412`, newer state shown |

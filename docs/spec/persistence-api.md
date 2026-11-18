@@ -242,7 +242,7 @@ statement.
 | DependencyStatus | mutable | last classification per provider object version and creation time, and when first seen `retained` | design §7.6, §7.8; [dependency monitor §5](dependency-monitor.md#5-state) |
 | DependencyAlert | immutable | every alert the dependency monitor raises | [dependency monitor §6.2](dependency-monitor.md#62-alert-kinds) |
 | DependencyMonitor | mutable singleton | the monitor's progress, last completed pass, last stall alert and last logged alert | [dependency monitor §5.1](dependency-monitor.md#51-records) |
-| Staging claim | mutable, fenced | state, owner, owner generation, lease, expiry, payload, and an encrypted claim's review: `pending` or `continued`, none when not requested (compilation §3.6); for a draft entry route, the principal and idempotency key (§7.2) | compilation §3 |
+| Staging claim | mutable, fenced | state, owner, owner generation, lease, expiry, payload, and an encrypted claim's review: `pending` or `continued`, none when not requested (compilation §3.6), and, once continued, the principal that continued it (choice §17.41); for a draft entry route, the principal and idempotency key (§7.2) | compilation §3 |
 | MachineState | mutable, revisioned | Desired, Applied (with source), baseline revision | execution and recovery (Desired, Applied and Observed) |
 | Observation | immutable | purpose, read-start basis, machine revision, identity, assignment evidence, running version, configuration digest, health, or what could not be read | execution and recovery §4.1 |
 | Plan | immutable | the binding, creator and role | execution and recovery (plan binding) |
@@ -333,7 +333,9 @@ An author reads what a revision holds with `GET /import-base-revisions/{id}`
 count of its references and embedded entries. The summary carries no document
 text, which is source text with references, and no digest (choice §17.38). The
 revision does not record the operation or ingestion that wrote it, so the
-summary does not name one.
+summary does not name one. The document itself is read with
+`GET /import-base-revisions/{id}/document` (§9.2), to the author who made the
+import and only when that author continued its operator review (choice §17.41).
 
 A draft built from an import or an adoption carries its new import base
 revision as an entry, so the release published from it compiles on the new
@@ -1858,10 +1860,12 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   `400 cursor-invalid` **(choice §17.14)**.
 - **Redaction**: responses carry sanitized sources, reference names and
   compilation's redacted review data; never a secret value, ciphertext or
-  baseline (design §11.1). One exception: `GET /ingestions/{id}/review` answers
-  the staged sanitized document, which can still hold a value no one has
-  marked, to the operator reviewing it, under `no-store` (§9.3, compilation
-  §3.6).
+  baseline (design §11.1). Two exceptions, each answering a sanitized
+  document that can still hold a value no one has marked, under `no-store`:
+  `GET /ingestions/{id}/review` answers the staged one to the operator
+  reviewing it (§9.3, compilation §3.6), and
+  `GET /import-base-revisions/{id}/document` answers the stored one to the
+  author who made the import and continued its review (choice §17.41).
 - Every response to an authenticated request carries `Bronzeward-Epoch` with
   the epoch identity the request read, and `Bronzeward-Recovery-Mode: true`
   while recovery mode was in effect in that read. The read is the one that
@@ -1918,6 +1922,7 @@ API revisions:
 | 4 | `GET /principals` (§9.2) |
 | 5 | `display` on `GET /principals` (§9.2, §10) |
 | 6 | `GET /machines/{id}/position` (§9.3) |
+| 7 | `GET /import-base-revisions/{id}/document` (§9.2, choice §17.41) |
 
 ### 9.2 Resources and routes
 
@@ -1943,6 +1948,7 @@ idempotency and conflict behavior.
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
 | `GET /import-base-revisions/{id}` (the summary of an import base revision, §3.2; no query, no ETag): `id`; `machine`; `author`, the principal that wrote it; `createdAt`; `documentBytes`, the size of its sanitized document; `references`, how many reference rows it holds; `embedded`, how many embedded entries it holds. No document text, no digest, no reference name and no generation path **(choice §17.38)**; the read records no act | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
+| `GET /import-base-revisions/{id}/document` (the sanitized document of an import base revision, §3.2; no query, no ETag; API revision 7): `id`; `machine`; `document`, the stored text. Nothing else: no declarations, digest, baseline or generation path. The caller must be the revision's `author`, and the import must have been continued by that same author after an operator review, so a second `author`, a drift adoption, an import made without review and one continued by another author read nothing; the document can still hold a value no one has marked. The read records no act and the server stores and logs nothing of the answer **(choice §17.41)** | 200, `Cache-Control: no-store`, also on every refusal; `403 forbidden` with `rule: not-the-importer` for another author, whatever the review state; `409 conflict` with `rule: import-not-reviewed` for the importer when the record does not show their own continuation; `404 not-found` | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/continuations`, `/takeovers` (a further mark on a paused ingestion and its continuation into the draft transaction, compilation §3.6; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation; a mark's also the owner generation it took (§9.3) | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2, a paused ingestion's included), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
 | `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3) | 201 | `author`, human only (§10.3) |
@@ -4498,6 +4504,31 @@ design and evidence do not settle the question. Each is marked in place as
     `name` column, which holds a service identity's name and which the row's
     check keeps `NULL` for a human; and a write on every mutating request,
     which would lock the row each time whether or not the name changed.
+41. **An import base's text is read only by the author who imported it and
+    reviewed it** (§3.2, §9.2; owner decision of ginsys/bronzeward#858, 18
+    November 2026, 15:12 CET: shown only after the author reviewed it, and the
+    author is the person who provided the configuration file):
+    `GET /import-base-revisions/{id}/document` answers the stored sanitized
+    document, under `no-store` and recording no act, when the caller is the
+    revision's `author` and that same principal continued the import's
+    operator review (compilation §3.6 item 5). The continuer is recorded on the
+    claim, `staging_claim.continued_by`, by the continuation's own `UPDATE`;
+    nothing reads the audit log for it. The record shows a continuation, never
+    that the text was read, since the review read records no act (choice
+    §17.36). Another `author` is `403 forbidden` (`not-the-importer`) before
+    anything of the review is revealed; the importer is `409 conflict`
+    (`import-not-reviewed`) for an import made without review, one continued by
+    another author, a continuation that predates the column, and a drift
+    adoption, which reads a node and has no file a person provided. The check
+    selects the document only after it passes. The document can still hold a
+    value nobody marked (compilation §8.4), so the clients treat it as the
+    review's text (operator experience §9). Alternatives: the summary read with
+    a text member, which weakens that read's no-text contract and its test;
+    showing it to any `author`, which the owner set aside; a redacted whole
+    form, which choice §17.38 records none of; reading the continuer from the
+    `act` log, which is not an authorization source and has no index for it;
+    refusing a continuation by anyone but the importer, which narrows who may
+    continue another author's import and is the owner's call.
 
 ## 18. Traceability
 
@@ -4516,7 +4547,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §6.4 orphans | §7.4, §7.8, §13.2 | DB §9; KL case G; PC §4 row 065; the orphan-report identity's grants and the report's selection: §16 check, the pinned OpenBao only (choice §17.30) |
 | §7 idempotency | §11.1, §12.5 | [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent) rows 012, 013; DB row 061; DB §4.6 (advisory lock); [E1 §7](../design/research/20260922-secret-ingress-extraction-before-persistence.md#7-limits), [E1 §4.4](../design/research/20260922-secret-ingress-extraction-before-persistence.md#44-the-forbidden-design-measured) |
 | §8 operations | §11.1, §12.5, §15.2 | [DS §4.2](../design/research/20260925-dispatch-safety.md#42-ownership-loss-and-a-second-executor-criterion-2) row 009; DB §4.5 rows 020, 021 |
-| §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5; the review route: choice §17.36, compilation §3.6; plan durations and adopt evidence: choices §17.37, §17.38; the principals read: choice §17.40 |
+| §9 API | §11.1, §11.2, §13.7 | none: FR §9 item 5; the review route: choice §17.36, compilation §3.6; plan durations and adopt evidence: choices §17.37, §17.38; the principals read: choice §17.40; the import base text read: choice §17.41 |
 | §10 authentication, authorization | §13.1, §13.3, §13.6, §13.7 | none: FR §9 item 5; [DS §4.1](../design/research/20260925-dispatch-safety.md#41-revocation-around-the-commitment-boundary-criterion-1) row 003 for approval revocation and its lock; self-approval reasons: choice §17.39 |
 | §11 migrations | §7.2, §14.2 | [DB §4.6](../design/research/20260924-database-semantics.md#46-s6-migrations) rows 022–026; [DB §6.2](../design/research/20260924-database-semantics.md#62-criterion-2-intent-ownership-queue-claims-migrations-restored-state) |
 | §12 restored state, epoch | §7.7, §7.8, §14.6 | DB §4.7 row 027; DB §9 (inferred); [KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation) items 2, 5; FR §9 item 4 |
