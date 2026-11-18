@@ -193,18 +193,38 @@ configurations", or "Diff withheld: the change cannot be shown". It never infers
 from matching release IDs, names or sources.
 
 **Proposed: "where you are, what next" on the machine page.** Under the status sentences
-([§2.4](#24-desired-applied-and-observed)) the page shows one line when the machine is not handed over: it has no
-`desired`, no `applied` and no open drift. The line says so and names the next step, an import of the machine's
-configuration, which reads the node and writes nothing to it, with the link to start it. It comes from the machine's
-own fields and makes no read of its own, so it is as current as the `Desired` and `Applied` rows beside it. Any
-other state shows no line, and no line says "nothing to do" or "unchanged".
+([§2.4](#24-desired-applied-and-observed)) the page shows at most one line, drawn from one answer and from nothing
+else: the `step` of `GET /machines/{id}/position` ([persistence and API §9.3](persistence-api.md#93-examples),
+G18 below), which decides the step from facts read in one snapshot. The step list, its order and the facts that
+choose each value are the server's contract there, so the web client and the CLI cannot disagree; this section
+fixes what the line says and links to. A client treats a `step` value it does not know as `no-step`.
 
-The later steps (publish the imported draft, plan, approve) are not shown. The page can read what they need only
-through other lists (`GET /ingestions?machine=`, `GET /plans?machine=&state=`, `GET /operations?machine=&state=`),
-which are separate reads taken at different moments: an operation can move from one state to the next between two
-of them and leave every list empty, and a plan's `committed` state is terminal and says nothing of its operation
-(an adopt plan stays `committed` with its operation `completed`). Showing those steps needs a read that answers
-the machine's whole position at once, which `GET /drafts` and the lists above do not give.
+| `step` | The line says | Link | Who acts |
+| --- | --- | --- | --- |
+| `not-handed-over` | Not handed over: no Desired and no Applied configuration is recorded. Next: import its configuration. An import reads the node and writes nothing to it. | start the import for this machine | `author` |
+| `import-running` | An import of this machine is running. | the ingestion | nobody yet |
+| `import-paused` | An import waits for review of the staged change. | the protected review ([§5.3](#53-protected-import-with-review)) | `author` |
+| `draft-to-publish` | The import is stored in an open draft. Next: publish it; that makes its release this machine's Desired release. Publishing sends nothing to the machine. | the draft | `publisher` |
+| `needs-plan` | A release is selected and not yet applied. Next: create a plan, `apply-config` to send it, or `adopt` to accept the configuration the node already runs. | create a plan for the machine | `publisher` |
+| `awaiting-approval` | A plan waits for approval. When its approval is from an earlier epoch, it says so: the plan must be approved again. | the plan | `approver`, a human |
+| `awaiting-dispatch` | A plan is approved. The controller applies it when nothing holds the machine scope or the cluster's rollout scope; it names the holder from `rolloutHeldBy`, and says so when `machine.frozen` or `machine.scopeState` stops it. | the plan | the controller |
+| `operation-in-flight` | An operation is changing this machine (its state is named). Next: wait for it to end. | the operation | the controller |
+| `operation-unresolved` | An operation on this machine is unresolved. A recovery admin must decide; there is no retry. | the operation | `recovery-admin`, a human |
+| `drift-open` | The node differs from what Bronzeward recorded. Next: adopt the node's configuration, or revert it ([§5.8](#58-drift-freeze-then-adopt-or-revert)). | the drift view | `author`, `publisher`, `approver` by step |
+| `no-step` | no line | none | none |
+
+The line never says "unchanged" or "nothing to do": equal release identifiers are not evidence that the node's
+configuration is unchanged (above), and `no-step` claims nothing. A line is shown only while the answer it comes from
+is the latest one the page holds; a failed read of it removes the line rather than keeping guidance the page can no
+longer vouch for.
+
+**Until the read is served**, which needs the implementing change of
+[#868](https://github.com/ginsys/bronzeward/issues/868), the page shows only the `not-handed-over` line, drawn from
+the machine's own `desired`, `applied` and `openDrift`, with no read of its own. The other steps are not drawn from
+`GET /ingestions`, `GET /plans` and `GET /operations`: those are separate reads taken at different moments, an
+operation can move from one state to the next between two of them and leave every list empty, and a plan's
+`committed` state is terminal and says nothing of its operation (an adopt plan stays `committed` with its operation
+`completed`).
 
 ### 2.4 Desired, applied and observed
 
@@ -1269,7 +1289,7 @@ so the page reads every page of that list.
 | Sign-in and context | [W1](operator-experience-wireframes.md#w1-sign-in-and-context) | (#253) |
 | Machines | [W2](operator-experience-wireframes.md#w2-machines) | `GET /machines`, `GET /clusters` |
 | Clusters and a cluster's page | none (see the note under W2) | `GET /clusters[/{id}]`, `GET /machines?cluster=`, `GET /drafts` |
-| Machine detail | [W3](operator-experience-wireframes.md#w3-machine-detail) | `GET /machines/{id}`, `/observations`, `/timeline` |
+| Machine detail | [W3](operator-experience-wireframes.md#w3-machine-detail) | `GET /machines/{id}`, `/observations`, `/timeline`, `/position` (G18, specified, not yet served) |
 | Draft editor | [W4](operator-experience-wireframes.md#w4-draft-editor) | `GET /drafts/{id}`, draft `PUT`/`DELETE`, discard |
 | Protected review | [W5](operator-experience-wireframes.md#w5-protected-import-review) | `GET /ingestions/{id}/review`, marks, continuations |
 | Release and rendered review | [W6](operator-experience-wireframes.md#w6-release-and-rendered-review) | `GET /releases/{id}`, `/machines/{m}/review` |
@@ -1425,6 +1445,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | Action (CLI) | Route | Roles | Human only | If-Match |
 | --- | --- | --- | --- | --- |
 | reads (`list`, `show`, `history`, `timeline`, `observations`, `act list`, `operation show`) | `GET` resource routes | any | no | no |
+| machine position (web "where you are, what next" line, [§2.3](#23-import-publish-plan-approve-apply); G18) | `GET /machines/{id}/position`, specified and not yet served | any | no | no |
 | `operation watch` | `GET /operations/{id}/events` (SSE) | any | no | no |
 | `cluster add` | `POST /clusters` | author | yes | no |
 | `cluster discover` | none: reads Talos nodes with the operator's talosconfig | none | no | no |
@@ -1490,6 +1511,7 @@ accepted limitation.
 | G15 | No principal display name: bodies carry principal identifiers only (`internal/api/acts.go:19-30`, `internal/api/releases.go:53`), and no route maps one to a subject or name | showing who published, planned, approved or entered recovery | shortened principal identifiers, until the view resolves them with `GET /principals`, served from API revision 4 ([client contracts](client-contracts.md#14-proposed-api-gap-issues-and-downstream-refinement) A7, [#335](https://github.com/ginsys/bronzeward/issues/335)) |
 | G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether the `Desired` release's artifact digest for the machine differs from the `Applied` digest (before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/reads.go:155-167`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L155-L167)), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)); after an adoption the `Applied` digest is the baseline's ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not rule it out | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | served since [#280](https://github.com/ginsys/bronzeward/issues/280): the machine's `pendingConvergence`, which serves neither digest (`internal/api/reads.go:155-171`) |
 | G17 | Before a decision no route serves the settle floor, and no route serves the maximum transport deadline at all; the accounting journey needs both before a decision: `SettleFloor` defaults to 30 s and may be configured higher, `MaxTransportDeadline` is required deployment configuration with no default (`internal/config/config.go:134-135`, `internal/config/config.go:161-164`), and neither is on `GET /recovery` (`internal/api/recovery_exits.go:123-148`). After a decision, a successful accounting's entries carry `facts.settleFloor` and `facts.anchor` on the machine timeline and operation events (`internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`, `internal/api/recovery_accountings.go:230-231`). Separately, on a normal start a plan-creation refusal states the maximum at any time, before a decision too; a recovery start refuses plan creation before that check (`internal/api/plans.go:113-114`, `internal/api/routes.go:120`, `internal/api/api.go:350-352`). The scope-accounting anchor is the later of the restore stop plus that maximum and any restored unaccounted attempt's transport deadline (`internal/api/recovery_accountings.go:85-87`, `internal/api/recovery_accountings.go:143`, `internal/api/recovery_accountings.go:188-189`), so a client cannot compute it | the recovery accounting journey: when the end observation may begin ([§5.9](#59-recovery-after-a-restore), [W10](operator-experience-wireframes.md#w10-recovery-console)) | served since [#278](https://github.com/ginsys/bronzeward/issues/278): `GET /server` serves the settle floor and the maximum transport deadline, after a recovery start's entry too; the refusal text still states the floor and the point it counts from after a failed decision (`internal/api/settle.go:148-150`) |
+| G18 | No read answers a machine's whole position at once. The lists the client could combine (`GET /ingestions?machine=`, `GET /plans?machine=&state=`, `GET /operations?machine=&state=`) are separate reads at the default isolation level (`internal/api/reads.go:40-57`), so an operation that moves between two of them leaves every list empty, and a committed plan says nothing of its operation (an adopt plan stays `committed` with its operation `completed`) | the "where you are, what next" line beyond the not-handed-over step ([§2.3](#23-import-publish-plan-approve-apply)), [W3](operator-experience-wireframes.md#w3-machine-detail) | specified, not yet served: `GET /machines/{id}/position` ([persistence and API §9.3](persistence-api.md#93-examples)) answers it from one snapshot; until the implementing change ships it, the web shows only the not-handed-over line |
 
 Not gaps, by design: no client dispatch or apply route
 ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary));
@@ -1579,7 +1601,7 @@ implementation.
 
 Proposed changes: the web inventory ticket (#255) also carries the shared web shell (header,
 banners, state catalogue of [§8](#8-states-every-view-must-handle)); and #253 records, for each
-gap G1-G17, whether it becomes an API issue that natively blocks the client tickets it affects.
+gap G1-G18, whether it becomes an API issue that natively blocks the client tickets it affects.
 
 **Qualifications this document left to #253**, besides the gaps, and where the
 [client contracts](client-contracts.md) settle them:
