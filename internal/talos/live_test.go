@@ -176,14 +176,14 @@ func TestLiveApply(t *testing.T) {
 // cannot collide with the scenarios' labels (`tier`, `bw-s2`).
 const activationLabel = "bw-act"
 
-// TestLiveApplyLabelDocument applies the worker's own configuration plus one KubeNodeConfig
-// document that holds activationLabel, in no-reboot mode (E1), and reads the machine configuration
+// TestLiveApplyLabelDocument applies the worker's own configuration with activationLabel added to
+// its KubeNodeConfig document, in no-reboot mode (E1), and reads the machine configuration
 // before and after (Read A, E2). Class accepted is the proof that the node named NO_REBOOT:
 // classifyApply admits nothing else, so another mode would show as unrecognised with code OK, and
 // the test would fail on it rather than widen the check. The label resource (Read B) and the
 // Kubernetes Node (Read C) are read by the fixture run with talosctl and kubectl, not here.
 // A deferred restore puts the original configuration back, so a failed assertion still leaves the
-// node as it was. It needs a worker that holds no KubeNodeConfig document of its own.
+// node as it was. It needs a worker whose one KubeNodeConfig document holds no labels yet.
 func TestLiveApplyLabelDocument(t *testing.T) {
 	tc, ep := liveTarget(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
@@ -198,8 +198,19 @@ func TestLiveApplyLabelDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	original := before.Bytes()
-	if bytes.Contains(original, []byte("kind: KubeNodeConfig")) {
-		t.Fatal("control: the worker already holds a KubeNodeConfig document; the label document would be a second one")
+	// The label goes into the worker's own KubeNodeConfig document: a second one is refused as a
+	// duplicate. The control: exactly one such document, and it holds no labels yet.
+	const kindLine = "\nkind: KubeNodeConfig\n"
+	if n := bytes.Count(original, []byte(kindLine)); n != 1 {
+		t.Fatalf("control: the worker's configuration holds %d KubeNodeConfig documents; want exactly one", n)
+	}
+	at := bytes.Index(original, []byte(kindLine)) + len(kindLine)
+	end := len(original)
+	if next := bytes.Index(original[at:], []byte("\n---")); next >= 0 {
+		end = at + next
+	}
+	if bytes.Contains(original[at:end], []byte("labels:")) {
+		t.Fatal("control: the worker's KubeNodeConfig document already holds labels")
 	}
 	a, err := DialApplier(ctx, tc, ep)
 	if err != nil {
@@ -240,10 +251,12 @@ func TestLiveApplyLabelDocument(t *testing.T) {
 		}
 	}()
 
-	document := "---\napiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  " + activationLabel + ": \"yes\"\n"
-	// A copy, so appending cannot write into original, which the restore sends back.
-	planned := append(bytes.Clone(bytes.TrimRight(original, "\n")), '\n')
-	planned = append(planned, document...)
+	// A new slice, so building it cannot write into original, which the restore sends back.
+	labels := "labels:\n  " + activationLabel + ": \"yes\"\n"
+	planned := make([]byte, 0, len(original)+len(labels))
+	planned = append(planned, original[:at]...)
+	planned = append(planned, labels...)
+	planned = append(planned, original[at:]...)
 	got := send(ctx, planned)
 	t.Logf("apply of the label document answered %+v (accepted means the node named NO_REBOOT, one message, no error)", got)
 	if got.Class != ClassAccepted || !got.Accounts() {
