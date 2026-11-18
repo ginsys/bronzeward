@@ -219,17 +219,14 @@ configuration is unchanged (above), and `no-step` claims nothing. A line is show
 is the latest one the page holds; a failed read of it removes the line rather than keeping guidance the page can no
 longer vouch for.
 
-**Until the read is served**, which needs the implementing change,
-[ginsys/bronzeward#879](https://github.com/ginsys/bronzeward/issues/879), the page shows only the `not-handed-over`
-line, drawn from the machine's own `desired`, `applied` and `openDrift`, with no read of its own. That line is wrong
-while the machine has work open: a machine with no Desired and no Applied configuration still reads "Next: import its
-configuration" while its import is running, stalled, paused or released into an open draft, or while an adopt plan for
-it is proposed or approved, where the server's step is `import-running`, `import-stalled`, `import-paused`,
-`draft-to-publish`, `awaiting-approval` or `awaiting-dispatch`. It stays so until the read replaces it. The other steps are not drawn from
+The read is served since API revision 6
+([ginsys/bronzeward#879](https://github.com/ginsys/bronzeward/issues/879)), and the page reads it as a third read
+beside the machine and its observations, under the page's own reads. The line is not drawn from
 `GET /ingestions`, `GET /plans` and `GET /operations`: those are separate reads taken at different moments, an
 operation can move from one state to the next between two of them and leave every list empty, and a plan's
 `committed` state is terminal and says nothing of its operation (an adopt plan stays `committed` with its operation
-`completed`).
+`completed`). Where the server is older than revision 6 the read fails and the page shows no line. The drift view
+that the `drift-open` row names is not a page of the web client yet, so that line links to none.
 
 ### 2.4 Desired, applied and observed
 
@@ -1294,7 +1291,7 @@ so the page reads every page of that list.
 | Sign-in and context | [W1](operator-experience-wireframes.md#w1-sign-in-and-context) | (#253) |
 | Machines | [W2](operator-experience-wireframes.md#w2-machines) | `GET /machines`, `GET /clusters` |
 | Clusters and a cluster's page | none (see the note under W2) | `GET /clusters[/{id}]`, `GET /machines?cluster=`, `GET /drafts` |
-| Machine detail | [W3](operator-experience-wireframes.md#w3-machine-detail) | `GET /machines/{id}`, `/observations`, `/timeline`, `/position` (G18, specified, not yet served) |
+| Machine detail | [W3](operator-experience-wireframes.md#w3-machine-detail) | `GET /machines/{id}`, `/observations`, `/timeline`, `/position` (G18) |
 | Draft editor | [W4](operator-experience-wireframes.md#w4-draft-editor) | `GET /drafts/{id}`, draft `PUT`/`DELETE`, discard |
 | Protected review | [W5](operator-experience-wireframes.md#w5-protected-import-review) | `GET /ingestions/{id}/review`, marks, continuations |
 | Import base summary | none (a summary, linked from the draft and the machine page) | `GET /import-base-revisions/{id}` |
@@ -1451,7 +1448,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | Action (CLI) | Route | Roles | Human only | If-Match |
 | --- | --- | --- | --- | --- |
 | reads (`list`, `show`, `history`, `timeline`, `observations`, `act list`, `operation show`) | `GET` resource routes | any | no | no |
-| machine position (web "where you are, what next" line, [§2.3](#23-import-publish-plan-approve-apply); G18) | `GET /machines/{id}/position`, specified and not yet served | any | no | no |
+| machine position (web "where you are, what next" line, [§2.3](#23-import-publish-plan-approve-apply); G18) | `GET /machines/{id}/position` | any | no | no |
 | `operation watch` | `GET /operations/{id}/events` (SSE) | any | no | no |
 | `cluster add` | `POST /clusters` | author | yes | no |
 | `cluster discover` | none: reads Talos nodes with the operator's talosconfig | none | no | no |
@@ -1518,7 +1515,7 @@ accepted limitation.
 | G15 | No principal display name: bodies carry principal identifiers only (`internal/api/acts.go:19-30`, `internal/api/releases.go:53`), and no route maps one to a subject or name | showing who published, planned, approved or entered recovery | shortened principal identifiers, until the view resolves them with `GET /principals`, served from API revision 4 ([client contracts](client-contracts.md#14-proposed-api-gap-issues-and-downstream-refinement) A7, [#335](https://github.com/ginsys/bronzeward/issues/335)) |
 | G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether the `Desired` release's artifact digest for the machine differs from the `Applied` digest (before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/reads.go:155-167`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L155-L167)), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)); after an adoption the `Applied` digest is the baseline's ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not rule it out | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | served since [#280](https://github.com/ginsys/bronzeward/issues/280): the machine's `pendingConvergence`, which serves neither digest (`internal/api/reads.go:155-171`) |
 | G17 | Before a decision no route serves the settle floor, and no route serves the maximum transport deadline at all; the accounting journey needs both before a decision: `SettleFloor` defaults to 30 s and may be configured higher, `MaxTransportDeadline` is required deployment configuration with no default (`internal/config/config.go:134-135`, `internal/config/config.go:161-164`), and neither is on `GET /recovery` (`internal/api/recovery_exits.go:123-148`). After a decision, a successful accounting's entries carry `facts.settleFloor` and `facts.anchor` on the machine timeline and operation events (`internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`, `internal/api/recovery_accountings.go:230-231`). Separately, on a normal start a plan-creation refusal states the maximum at any time, before a decision too; a recovery start refuses plan creation before that check (`internal/api/plans.go:113-114`, `internal/api/routes.go:120`, `internal/api/api.go:350-352`). The scope-accounting anchor is the later of the restore stop plus that maximum and any restored unaccounted attempt's transport deadline (`internal/api/recovery_accountings.go:85-87`, `internal/api/recovery_accountings.go:143`, `internal/api/recovery_accountings.go:188-189`), so a client cannot compute it | the recovery accounting journey: when the end observation may begin ([§5.9](#59-recovery-after-a-restore), [W10](operator-experience-wireframes.md#w10-recovery-console)) | served since [#278](https://github.com/ginsys/bronzeward/issues/278): `GET /server` serves the settle floor and the maximum transport deadline, after a recovery start's entry too; the refusal text still states the floor and the point it counts from after a failed decision (`internal/api/settle.go:148-150`) |
-| G18 | No read answers a machine's whole position at once. The lists the client could combine (`GET /ingestions?machine=`, `GET /plans?machine=&state=`, `GET /operations?machine=&state=`) are separate reads at the default isolation level (`internal/api/reads.go:40-57`), so an operation that moves between two of them leaves every list empty, and a committed plan says nothing of its operation (an adopt plan stays `committed` with its operation `completed`) | the "where you are, what next" line beyond the not-handed-over step ([§2.3](#23-import-publish-plan-approve-apply)), [W3](operator-experience-wireframes.md#w3-machine-detail) | specified, not yet served: `GET /machines/{id}/position` ([persistence and API §9.3](persistence-api.md#93-examples)) answers it from one snapshot; until the implementing change ships it, the web shows only the not-handed-over line |
+| G18 | No read answers a machine's whole position at once. The lists the client could combine (`GET /ingestions?machine=`, `GET /plans?machine=&state=`, `GET /operations?machine=&state=`) are separate reads at the default isolation level (`internal/api/reads.go:40-57`), so an operation that moves between two of them leaves every list empty, and a committed plan says nothing of its operation (an adopt plan stays `committed` with its operation `completed`) | the "where you are, what next" line beyond the not-handed-over step ([§2.3](#23-import-publish-plan-approve-apply)), [W3](operator-experience-wireframes.md#w3-machine-detail) | served: `GET /machines/{id}/position` ([persistence and API §9.3](persistence-api.md#93-examples)) answers it from one snapshot, and the web draws the line from its `step` |
 
 Not gaps, by design: no client dispatch or apply route
 ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary));

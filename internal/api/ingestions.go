@@ -253,11 +253,16 @@ func (b ingestionBody) subjects() []string {
 }
 
 // An import's claim has exactly one ingest operation; a draft update's has none.
-const selectIngestions = `SELECT c.id, c.kind, c.mode, c.state, c.machine, COALESCE(o.draft, c.draft), o.id, c.review, c.owner_gen,
+// selectIngestionsAt judges each claim's state at the time the SQL term clock names.
+func selectIngestionsAt(clock string) string {
+	return `SELECT c.id, c.kind, c.mode, c.state, c.machine, COALESCE(o.draft, c.draft), o.id, c.review, c.owner_gen,
 		c.lease_until, c.expires_at, c.created_at
-	FROM (SELECT id, kind, mode, ` + staging.EffectiveStateSQL + ` AS state, machine, draft, review, owner_gen, lease_until,
+	FROM (SELECT id, kind, mode, ` + staging.EffectiveStateAtSQL(clock) + ` AS state, machine, draft, review, owner_gen, lease_until,
 		expires_at, created_at FROM staging_claim) c
 	LEFT JOIN operation o ON o.ingestion = c.id`
+}
+
+var selectIngestions = selectIngestionsAt("clock_timestamp()")
 
 func scanIngestion(r interface{ Scan(...any) error }) (ingestionBody, error) {
 	var b ingestionBody

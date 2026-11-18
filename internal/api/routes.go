@@ -93,6 +93,7 @@ func routes() []*route {
 	rs := []*route{
 		list("/clusters", listClusters), read(g("/clusters/{id}"), getCluster),
 		list("/machines", listMachines, "cluster"), read(g("/machines/{id}"), getMachine),
+		read(g("/machines/{id}/position"), getPosition),
 		list("/machines/{id}/observations", listObservations), list("/machines/{id}/timeline", listTimeline, "order"),
 	}
 	for _, kind := range []string{"fragment", "profile", "assignment"} {

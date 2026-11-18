@@ -393,10 +393,17 @@ func insertPlan(ctx context.Context, tx *sql.Tx, q *request, in *planInput, b *p
 // as before. The clock is read when the plan is, not at the transaction's start, which can
 // precede a wait on the installation state. The list's state filter matches planStateSQL, the
 // state the read serves.
-const (
-	planStateSQL = `CASE WHEN s.state = 'approved' AND ap.revoked AND (r.at IS NULL OR r.at < p.expires_at) THEN 'revoked'
-			WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= c.t THEN 'expired' ELSE s.state END`
-	selectPlan = `SELECT p.id, s.revision, ` + planStateSQL + `,
+//
+// planStateAt is that state judged at the time the SQL term t names; a read that shows several
+// objects at one instant (the position read) passes its one clock reading.
+func planStateAt(t string) string {
+	return `CASE WHEN s.state = 'approved' AND ap.revoked AND (r.at IS NULL OR r.at < p.expires_at) THEN 'revoked'
+			WHEN s.state IN ('proposed', 'approved') AND p.expires_at <= ` + t + ` THEN 'expired' ELSE s.state END`
+}
+
+var (
+	planStateSQL = planStateAt("c.t")
+	selectPlan   = `SELECT p.id, s.revision, ` + planStateSQL + `,
 		s.operation, s.approval, p.cluster, p.machine, p.release, p.kind, p.mode,
 		p.assignment_revision, p.desired_release, p.baseline_revision, p.drift_record, p.route,
 		extract(epoch FROM p.max_observation_age)::bigint,

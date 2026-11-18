@@ -8,8 +8,9 @@ import type { components } from "./api/v1";
 import { ChangeEndpoint } from "./forms.tsx";
 import { type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, node, release } from "./machines.tsx";
-import { NextStep } from "./nextstep.tsx";
+import { NextStep, type Position } from "./nextstep.tsx";
 import type { ReadResult } from "./request.ts";
+import { useRecoveryState } from "./shell.tsx";
 import { clock, Status } from "./states.tsx";
 
 export type Observation = components["schemas"]["ObservationBody"];
@@ -264,19 +265,19 @@ export type W3Kept = [Kept<Machine>, Kept<Listed<Observation>>, Kept<Timeline<En
 export const keptW3 = (was: W3Kept | undefined, m: Load<Machine>, obs: Load<Listed<Observation>> | Dropped, tl: Load<Timeline<Entry>> | Dropped, view: string): W3Kept =>
   [kept(was?.[0], m, view), kept(was?.[1], obs, view, (o) => o.restarted), kept(was?.[2], tl, view, (t) => t.restarted)];
 
-// The machine and its observations read again for the timeline's advances, one read again at a
-// time: `n` counts them, `left` is how many of the current one's two reads (the machine and its
-// observations) have not settled, the first page's reads included. An advance while they are in
-// flight does not abandon them: it marks one more read again, which starts when both settle.
+// The machine, its observations and its position read again for the timeline's advances, one read again at a
+// time: `n` counts them, `left` is how many of the current one's three reads (the machine, its
+// observations and its position) have not settled, the first page's reads included. An advance while they are in
+// flight does not abandon them: it marks one more read again, which starts when all settle.
 // Advances faster than one read would otherwise discard every read again before it answers. Each
 // read is counted under the page's own reads (`key`: its view and read again): a new key starts its
-// own two reads, and a read of an earlier key, which still settles, counts for nothing.
+// own three reads, and a read of an earlier key, which still settles, counts for nothing.
 export type AdvanceReads = { key: string; n: number; left: number; dirty: boolean };
-export const advanceReads = (key: string): AdvanceReads => ({ key, n: 0, left: 2, dirty: false });
+export const advanceReads = (key: string): AdvanceReads => ({ key, n: 0, left: 3, dirty: false });
 export const stepAdvance = (a: AdvanceReads, e: "advance" | { key: string } | { key: string; settled: number }): AdvanceReads => {
-  const next = { ...a, n: a.n + 1, left: 2, dirty: false };
+  const next = { ...a, n: a.n + 1, left: 3, dirty: false };
   if (e === "advance") return a.left > 0 ? { ...a, dirty: true } : next;
-  if (!("settled" in e)) return e.key === a.key ? a : { ...a, key: e.key, left: 2, dirty: false };
+  if (!("settled" in e)) return e.key === a.key ? a : { ...a, key: e.key, left: 3, dirty: false };
   if (e.key !== a.key || e.settled !== a.n || a.left === 0) return a;
   return a.left === 1 && a.dirty ? next : { ...a, left: a.left - 1 };
 };
@@ -394,19 +395,22 @@ function MachineState({ id, path, tl, older, busy, readAgain, changed }: { id: s
   const lost = useRef<[boolean, boolean]>([false, false]);
   const m = useItem<Machine>(path, keepW3(k, 0, lost));
   const [obs] = useList<Observation>(`${path}/observations`, "", true, keepW3(k, 1, lost));
+  // The position keeps nothing: its line is drawn only from its own latest answer (operator experience §2.3).
+  const pos = useItem<Position>(`${path}/position`);
+  const { recoveryMode } = useRecoveryState();
   const again = useRef(readAgain);
   again.current = readAgain;
   const [observe, stop] = useMemo(() => recovery(lost, () => again.current()), []);
   useEffect(() => stop, [stop]);
   useEffect(() => observe(view, n, regained));
   const [km, ko, kt] = (k.current = keptW3(k.current, m, obs, tl, view));
-  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} changed={changed} />;
+  return <MachineShown id={id} m={m} obs={obs} km={km} ko={ko} tl={tl} kt={kt} older={older} busy={busy} changed={changed} position={pos.kind === "ok" ? pos.data : undefined} recovery={recoveryMode} />;
 }
 
 // W3 as read: each read's answer, else what it keeps with its failure above it. The machine's rows
 // need only the machine: with no observations to show, they show without the latest read's line and
 // the observations' list (client contracts §8.6 item 6, case 5).
-export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed }: { id: string; m: Load<Machine>; obs: Load<Listed<Observation>> | Dropped; km: Kept<Machine>; ko: Kept<Listed<Observation>>; tl: Load<Timeline<Entry>> | Dropped; kt: Kept<Timeline<Entry>>; older: (() => void) | undefined; busy: boolean; changed?: () => void }) {
+export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed, position, recovery }: { id: string; m: Load<Machine>; obs: Load<Listed<Observation>> | Dropped; km: Kept<Machine>; ko: Kept<Listed<Observation>>; tl: Load<Timeline<Entry>> | Dropped; kt: Kept<Timeline<Entry>>; older: (() => void) | undefined; busy: boolean; changed?: () => void; position?: Position | undefined; recovery?: boolean | undefined }) {
   const [pm, po, timeline] = [usePending(m, "the machine"), usePending(obs, "the observations"), usePending(tl, "the timeline")];
   const d = m.kind === "ok" ? m.data : km.data;
   const read = obs.kind === "ok" ? obs.data : ko.data;
@@ -420,7 +424,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed 
       <p>Cluster <Ref to={`/clusters/${d.cluster}`} id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
       {changed !== undefined && <ChangeEndpoint machine={d} onChanged={changed} />}
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list).map((s) => <li key={s}>{s}</li>)}</ul>
-      <NextStep machine={d} />
+      <NextStep position={position} recovery={recovery} />
       <dl>
         <dt>Desired</dt><dd>{release(d.desired)}</dd>
         <dt>Applied</dt><dd>{d.applied === null ? "none" : <>{release(d.applied.release)} by {d.applied.source}</>}</dd>

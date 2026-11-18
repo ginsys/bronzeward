@@ -21,7 +21,7 @@ import (
 // required. A difference from routes() is a transcription error in one of the two.
 var specRoutes = []string{
 	"GET /clusters any", "GET /clusters/{id} any", "GET /machines any", "GET /machines/{id} any",
-	"GET /machines/{id}/observations any", "GET /machines/{id}/timeline any",
+	"GET /machines/{id}/position any", "GET /machines/{id}/observations any", "GET /machines/{id}/timeline any",
 	"GET /fragments any", "GET /fragments/{id} any", "GET /fragments/{id}/revisions any", "GET /fragment-revisions/{id} any",
 	"GET /profiles any", "GET /profiles/{id} any", "GET /profiles/{id}/revisions any", "GET /profile-revisions/{id} any",
 	"GET /assignments any", "GET /assignments/{id} any", "GET /assignments/{id}/revisions any", "GET /assignment-revisions/{id} any",

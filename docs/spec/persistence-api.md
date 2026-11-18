@@ -1808,6 +1808,7 @@ API revisions:
 | 3 | `order` and `tail` on `GET /machines/{id}/timeline` (§9.2) |
 | 4 | `GET /principals` (§9.2) |
 | 5 | `display` on `GET /principals` (§9.2, §10) |
+| 6 | `GET /machines/{id}/position` (§9.3) |
 
 ### 9.2 Resources and routes
 
@@ -1821,7 +1822,7 @@ idempotency and conflict behavior.
 | Route | Result | Roles |
 | --- | --- | --- |
 | `GET /clusters`, `/clusters/{id}`, `/machines`, `/machines/{id}`, `/machines/{id}/observations`, `/machines/{id}/timeline` | 200 | any role |
-| `GET /machines/{id}/position` (where one machine stands in import, publish, plan, approve and apply, read in one snapshot; no query, no ETag, not paged; **specified here and not yet served**, §9.3) | 200 | any role |
+| `GET /machines/{id}/position` (where one machine stands in import, publish, plan, approve and apply, read in one snapshot; no query, no ETag, not paged; API revision 6, §9.3) | 200 | any role |
 | `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments | 200 | any role |
 | `GET /drafts[/{id}]`, `/ingestions[/{id}]`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
@@ -2409,9 +2410,11 @@ choice §10.35), or null: `{"revision", "observation", "lastObservation",
 that opened it, the latest one recorded on it and the operation that latest
 observation may be a late landing of, or null. Its digests are not served.
 
-**A machine's position** (**specified here and not yet served**; a client until
-then reads the separate lists, which can disagree, operator experience §2.3
-and its gap G18, [#868](https://github.com/ginsys/bronzeward/issues/868)).
+**A machine's position** (API revision 6, served since
+[ginsys/bronzeward#879](https://github.com/ginsys/bronzeward/issues/879);
+before it a client read the separate lists, which can disagree, operator
+experience §2.3 and its gap G18,
+[ginsys/bronzeward#868](https://github.com/ginsys/bronzeward/issues/868)).
 `GET /machines/{id}/position` answers where one machine stands in import,
 publish, plan, approve and apply, with every member read in one snapshot. A
 client that drew the same answer from `GET /ingestions`, `GET /plans` and
@@ -2766,7 +2769,7 @@ counter, not the ETag token, so the token is not named.
 | 501 | `not-implemented` | a routed §9.2 route whose handler has not landed yet: routed, authenticated and role-checked, nothing committed. PoC delivery state only; it disappears when every route has its handler |
 | 503 | `dependency-unavailable` | the provider is sealed or unreachable, or the process has no provider, or no executor, that the route needs; authentication could not reach the identity provider or the database; or the database failed while the request ran: the installation-state read made once it authenticated (§9.1), its first-use principal row (§10) or the row an identity revocation records or reads for the subject it names by `iss` and `sub` (§10, §10.4), its key's lookup or its own transaction, or a connection lost or refused in a transaction its route runs before its own (§7.2); or the provider refused or could not decrypt a staged envelope for a review (§9.3). A request so answered committed nothing of its own transaction; what an earlier one committed stays (§14). A publication also uses this code for missing or unreadable identity, running version or Talos access (§6.1.1), naming the machine, observation, rule and safe cause; later compiler dependency failures name the dependency (§6.1). Publication commits no release or Desired change on refusal, but its operation, act, events and already recorded observations remain. Ingestion and dispatch Talos access failures use `talos-access-unavailable` |
 | 503 | `talos-access-unavailable` | the error of a failed `ingest` operation, or the cause recorded by a dispatch's use-time check or fresh observation that failed on it (execution and recovery §3.1): the cluster's Talos access configuration is absent, unreadable by the identity, unreachable behind a sealed or silent provider, not a usable talosconfig or refused by Talos, or the machine's Talos endpoint did not answer (§3.3); or the node answered with a machine configuration this server cannot decode, which gives the cause `machine-config-undecodable` (a document kind newer than the server's Talos machinery; retrying does not help, the machinery has to move); the body names the cluster or machine, never a value; an ingestion's claim is abandoned and nothing read is kept. A use-time check that fails on the access read and on another dependency at once, as under a sealed provider, reports this code; its timeline entry records each dependency's result (execution and recovery §4.1). A publication observation also retains this code in its unread values, while the publish operation reports `dependency-unavailable` under §6.1.1 |
-| 503 | `transient-conflict` | deadlock retries exhausted in the request's own transaction, or serialization failure on every attempt of the position read's snapshot (§9.3, specified, not yet served), or, as the error of a failed `publish` operation, in its T3 (§5 rule 5, §6.2); §14 gives the answer when the deadlock is in a transaction the route runs before the request's own |
+| 503 | `transient-conflict` | deadlock retries exhausted in the request's own transaction, or serialization failure on every attempt of the position read's snapshot (§9.3), or, as the error of a failed `publish` operation, in its T3 (§5 rule 5, §6.2); §14 gives the answer when the deadlock is in a transaction the route runs before the request's own |
 | 503 | `epoch-superseded` | the serving process started before the current epoch, so it may issue no ownership (§5.1); nothing of the request's own transaction was committed, while a draft entry's staging claim, or a scope mark's recorded observation or only its `observation-started` entry, or a principal row, committed before it stays (§7.2, §9.2, §14). Its `Bronzeward-Epoch` can name the epoch the entry replaced (§9.1) |
 | 503 | `schema-mismatch` | never served: the server does not start (§11) |
 
@@ -3601,7 +3604,7 @@ or Desired change; it does not erase earlier evidence.
 | Plan | A release that does not cover the machine | `422 validation-failed` naming both | nothing |
 | Plan | A duration or attempt limit out of range, or a transport deadline above the maximum or the verification deadline (§9.3) | `400 invalid-request` | nothing |
 | Plan | Approval or identity revocation racing a commitment | the revoker waits for the commitment or precedes it (§1.2 item 3) | the revocation, after or before the commitment |
-| Position | A machine's position read (§9.3, specified, not yet served) whose snapshot fails serialization on every one of four attempts (the first and three retries) | `503 transient-conflict`; never an answer built from two snapshots | nothing |
+| Position | A machine's position read (§9.3) whose snapshot fails serialization on every one of four attempts (the first and three retries) | `503 transient-conflict`; never an answer built from two snapshots | nothing |
 | Recovery | Plan creation, approval, adoption plan or unfreeze on a scope still pre-restore unaccounted | `409 recovery-mode-active` | nothing |
 | Recovery | Commitment, attempt or adoption record on a scope not released in the current epoch | refused by execution and recovery's scope gate | its refusal entry |
 | Recovery | Publication changing the assignment of a scope not released in the current epoch | operation `failed`, `409 recovery-mode-active` (§6.2) | operation, act |

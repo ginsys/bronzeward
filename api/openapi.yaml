@@ -1288,6 +1288,30 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MachineBody'}
         default: {$ref: '#/components/responses/Problem'}
+  /machines/{id}/position:
+    get:
+      operationId: getMachinesIdPosition
+      tags: [machines]
+      description: Where one machine stands in import, publish, plan, approve and apply, every member read in one snapshot
+        (API revision 6). Takes no query, is not paged and carries no ETag.
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PositionBody'}
+        default: {$ref: '#/components/responses/Problem'}
   /machines/{id}/freezes:
     post:
       operationId: postMachinesIdFreezes
@@ -3425,6 +3449,98 @@ components:
         kubernetesVersion: {type: string}
         machineryVersion: {type: string}
         platformMode: {type: string}
+      additionalProperties: false
+    PositionBody:
+      type: object
+      required: [machine, ingestion, draft, plan, operation, rolloutHeldBy, step]
+      properties:
+        machine: {$ref: '#/components/schemas/MachineBody'}
+        ingestion:
+          description: The machine's newest live ingestion, else its newest of any state; null when it has none.
+          oneOf:
+          - {$ref: '#/components/schemas/PositionIngestion'}
+          - {type: 'null'}
+        draft:
+          description: The draft that ingestion names; null when ingestion is null.
+          oneOf:
+          - {$ref: '#/components/schemas/PositionDraft'}
+          - {type: 'null'}
+        plan:
+          description: The newest proposed or approved plan that would pass comparison 2 of a commitment against the machine
+            now; null when there is none.
+          oneOf:
+          - {$ref: '#/components/schemas/PositionPlan'}
+          - {type: 'null'}
+        operation:
+          description: The apply-config operation that holds the machine scope; null when none does.
+          oneOf:
+          - {$ref: '#/components/schemas/PositionOperation'}
+          - {type: 'null'}
+        rolloutHeldBy:
+          description: The operation that holds the machine's cluster rollout scope when it belongs to another machine.
+          oneOf:
+          - {$ref: '#/components/schemas/PositionRolloutHolder'}
+          - {type: 'null'}
+        step:
+          description: 'The first row of the position table whose facts hold. A client treats a value it does not know as
+            no-step: a later revision may add one.'
+          type: string
+          enum: [operation-unresolved, operation-in-flight, awaiting-dispatch, awaiting-approval, import-paused, import-stalled,
+            import-running, draft-to-publish, drift-open, needs-plan, not-handed-over, no-step]
+      additionalProperties: false
+    PositionDraft:
+      type: object
+      required: [id, state, revision]
+      properties:
+        id: {type: string}
+        state: {type: string, enum: [open, published, discarded]}
+        revision: {type: integer}
+      additionalProperties: false
+    PositionIngestion:
+      type: object
+      required: [id, kind, state, draft, operation, createdAt, leaseLapsed]
+      properties:
+        id: {type: string}
+        kind: {type: string}
+        state: {type: string}
+        draft: {type: string}
+        operation: {type: [string, 'null']}
+        createdAt: {type: string, format: date-time}
+        leaseLapsed:
+          description: true when the claim is held or resumed and its lease has lapsed at the snapshot's clock reading.
+          type: boolean
+      additionalProperties: false
+    PositionOperation:
+      type: object
+      required: [id, kind, state, plan, createdAt]
+      properties:
+        id: {type: string}
+        kind: {type: string}
+        state: {type: string}
+        plan: {type: string}
+        createdAt: {type: string, format: date-time}
+      additionalProperties: false
+    PositionPlan:
+      type: object
+      required: [id, state, operation, release, approvalCurrent, createdAt, expiresAt]
+      properties:
+        id: {type: string}
+        state: {type: string, enum: [proposed, approved]}
+        operation: {type: string, enum: [apply-config, adopt]}
+        release: {type: string}
+        approvalCurrent:
+          description: true when the plan's approval was recorded in the current epoch, false when in an earlier one; null
+            while the plan has no approval.
+          type: [boolean, 'null']
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+      additionalProperties: false
+    PositionRolloutHolder:
+      type: object
+      required: [id, machine]
+      properties:
+        id: {type: string}
+        machine: {type: string}
       additionalProperties: false
     PrincipalBody:
       description: What one principal identifier names (persistence and API §9.2). A member that does not apply to its kind is

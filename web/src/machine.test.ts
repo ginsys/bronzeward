@@ -252,37 +252,37 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
   });
 
   // The counter's steps only: MachineItem's wiring of them is not rendered here (no DOM renderer).
-  test("#424 item 2, the read-again counter: advances faster than one read again do not abandon it; one more read again follows when both its reads settle", () => {
+  test("#424 item 2, the read-again counter: advances faster than one read again do not abandon it; one more read again follows when all its reads settle", () => {
     const k = "v\n0";
     const s = (settled: number, key = k) => ({ key, settled });
     const run = (events: Parameters<typeof stepAdvance>[1][], from = advanceReads(k)) => events.reduce(stepAdvance, from);
-    // The first page's two reads settle; the first advance then reads again.
-    const first = run([s(0), s(0), "advance"]);
-    expect(first).toEqual({ key: k, n: 1, left: 2, dirty: false });
+    // The first page's three reads (the machine, its observations and its position) settle; the first advance then reads again.
+    const first = run([s(0), s(0), s(0), "advance"]);
+    expect(first).toEqual({ key: k, n: 1, left: 3, dirty: false });
     // Three more advances while the read again is in flight: it stays the one in flight.
-    const busy = run([s(0), s(0), "advance", "advance", "advance", "advance"]);
+    const busy = run([s(0), s(0), s(0), "advance", "advance", "advance", "advance"]);
     expect(busy.n).toBe(1);
-    // A late answer from an earlier read counts for nothing; the read again's own two complete it.
-    const done = run([s(0), s(1)], busy);
+    // A late answer from an earlier read counts for nothing; the read again's own three complete it.
+    const done = run([s(0), s(1), s(1)], busy);
     expect(done).toEqual({ key: k, n: 1, left: 1, dirty: true });
-    expect(stepAdvance(done, s(1))).toEqual({ key: k, n: 2, left: 2, dirty: false });
+    expect(stepAdvance(done, s(1))).toEqual({ key: k, n: 2, left: 3, dirty: false });
     // With no advance meanwhile, it ends there.
-    expect(run([s(0), s(0), "advance", s(1), s(1)])).toEqual({ key: k, n: 1, left: 0, dirty: false });
+    expect(run([s(0), s(0), s(0), "advance", s(1), s(1), s(1)])).toEqual({ key: k, n: 1, left: 0, dirty: false });
   });
 
   test("#424 item 2, the read-again counter: a new view or read again of the page counts only its own reads", () => {
     const k = "v\n0";
     const run = (events: Parameters<typeof stepAdvance>[1][], from = advanceReads(k)) => events.reduce(stepAdvance, from);
     // A read again in flight with one more marked, then the page reads again (a new key).
-    const moved = run([{ key: k, settled: 0 }, { key: k, settled: 0 }, "advance", "advance", { key: "v\n1" }]);
-    expect(moved).toEqual({ key: "v\n1", n: 1, left: 2, dirty: false });
-    // The earlier key's two reads still settle: they neither complete the new reads nor start another.
-    const late = run([{ key: k, settled: 1 }, { key: k, settled: 1 }], moved);
+    const moved = run([{ key: k, settled: 0 }, { key: k, settled: 0 }, { key: k, settled: 0 }, "advance", "advance", { key: "v\n1" }]);
+    expect(moved).toEqual({ key: "v\n1", n: 1, left: 3, dirty: false });
+    // The earlier key's three reads still settle: they neither complete the new reads nor start another.
+    const late = run([{ key: k, settled: 1 }, { key: k, settled: 1 }, { key: k, settled: 1 }], moved);
     expect(late).toBe(moved);
     // An advance while the new key's reads are in flight waits for them.
-    const waiting = run(["advance", { key: "v\n1", settled: 1 }], moved);
+    const waiting = run(["advance", { key: "v\n1", settled: 1 }, { key: "v\n1", settled: 1 }], moved);
     expect(waiting).toEqual({ key: "v\n1", n: 1, left: 1, dirty: true });
-    expect(stepAdvance(waiting, { key: "v\n1", settled: 1 })).toEqual({ key: "v\n1", n: 2, left: 2, dirty: false });
+    expect(stepAdvance(waiting, { key: "v\n1", settled: 1 })).toEqual({ key: "v\n1", n: 2, left: 3, dirty: false });
     // The same key again changes nothing.
     expect(stepAdvance(moved, { key: "v\n1" })).toBe(moved);
   });
@@ -294,12 +294,14 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     const outer: unknown[] = [];
     const settle = countingSettle((res) => outer.push(res) < 0, (e) => (a = stepAdvance(a, e)), k, a.n);
     const res = { kind: "ok", status: 200, data: {} } as unknown as Parameters<typeof settle>[0];
-    // The first visit's two reads settle late: the page still takes both, the count does not move.
+    // The first visit's three reads settle late: the page still takes all three, the count does not move.
     settle(res, () => {}, () => false, () => false);
     settle(res, () => {}, () => false, () => false);
-    expect(outer).toHaveLength(2);
-    expect(a).toEqual({ key: k, n: 0, left: 2, dirty: false });
-    // The return visit's own two reads count.
+    settle(res, () => {}, () => false, () => false);
+    expect(outer).toHaveLength(3);
+    expect(a).toEqual({ key: k, n: 0, left: 3, dirty: false });
+    // The return visit's own three reads count.
+    settle(res, () => {}, () => true, () => false);
     settle(res, () => {}, () => true, () => false);
     settle(res, () => {}, () => true, () => false);
     expect(a).toEqual({ key: k, n: 0, left: 0, dirty: false });
@@ -412,12 +414,12 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       expect(lostSince(lost)).toBe(true);
       expect(lost.current).toEqual([false, false]);
       expect(lostSince(lost)).toBe(false);
-      // The read again is the counter's: with one in flight it waits for both reads, so the two never abandon each other.
+      // The read again is the counter's: with one in flight it waits for all three reads, so the two never abandon each other.
       const s = (settled: number) => ({ key: "v\n0", settled });
-      const inFlight = [s(0), s(0), "advance" as const].reduce(stepAdvance, advanceReads("v\n0"));
+      const inFlight = [s(0), s(0), s(0), "advance" as const].reduce(stepAdvance, advanceReads("v\n0"));
       const asked = stepAdvance(inFlight, "advance");
-      expect(asked).toEqual({ key: "v\n0", n: 1, left: 2, dirty: true });
-      expect([s(1), s(1)].reduce(stepAdvance, asked)).toEqual({ key: "v\n0", n: 2, left: 2, dirty: false });
+      expect(asked).toEqual({ key: "v\n0", n: 1, left: 3, dirty: true });
+      expect([s(1), s(1), s(1)].reduce(stepAdvance, asked)).toEqual({ key: "v\n0", n: 2, left: 3, dirty: false });
     });
 
     test("a resource that keeps getting no answer is read again at most once per poll interval; a stop drops the wait it cleared", () => {
