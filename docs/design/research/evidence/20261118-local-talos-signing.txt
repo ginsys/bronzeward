@@ -1,0 +1,79 @@
+Evidence for docs/design/research/20261118-local-talos-signing.md (ginsys/bronzeward#874).
+All inputs synthetic. No key, token or secret value appears below. Times are CET unless marked Z.
+
+== Pinned versions ==
+Talos machinery: github.com/siderolabs/talos/pkg/machinery v1.14.5 (go.mod), the module the program is built with.
+Offline inputs generated with the host's talosctl v1.14.6 and --talos-version v1.14.5.
+Fixture run: the fixture's pinned talosctl and Talos v1.14.5 nodes (fixtures/versions.env).
+Bronzeward main at 9f009866.
+
+== Commands: offline (no node, no fixture) ==
+talosctl gen secrets --output-file <dir>/secrets.yaml --talos-version v1.14.5
+talosctl gen config synthetic https://192.0.2.10:6443 --with-secrets <dir>/secrets.yaml --output <dir> --talos-version v1.14.5 --force
+go run docs/design/research/evidence/20261118-local-talos-signing/main.go offline <dir>
+
+The certificate fingerprint on the "source" lines changes with every generated bundle; the answers do not.
+
+== Output: offline ==
+machinery: github.com/siderolabs/talos/pkg/machinery (module as pinned in go.mod)
+run at 2026-11-18T16:32:01Z
+source controlplane.yaml: CA certificate 94cf26b23c7ed586, key present=true
+source worker.yaml: CA certificate present=true, key present=false
+source secrets.yaml Certs.OS: CA certificate 94cf26b23c7ed586, key present=true
+source talosconfig: CA certificate 94cf26b23c7ed586 (no key field exists)
+same CA across the three sources: true
+talosconfig client cert subject: O=[os:admin] validity 2026-11-18T16:31:25Z .. 2027-11-18T16:31:25Z
+sign controlplane.yaml os:admin 1h: O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=true
+sign secrets.yaml os:admin 1h: O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=true
+sign talosconfig CA only (no key): REFUSED: failed to parse PEM block
+sign worker.yaml os:admin 1h: REFUSED: failed to parse PEM block
+roles os:admin: O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=true
+roles os:reader: O=[os:reader] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=true
+roles os:operator: O=[os:operator] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=true
+roles os:reader+os:etcd:backup: O=[os:reader os:etcd:backup] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=true
+roles empty set: REFUSED: at least one role is required to generate a Talos API certificate
+roles unknown os:bogus (Parse): O=[os:bogus] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=true
+ttl 60s: O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=1m0s keyAlg=Ed25519 chainVerifies=true
+ttl 87600h (ten years, the CA's own): O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=87600h0m0s keyAlg=Ed25519 chainVerifies=true
+ttl 1000000h (about 114 years): O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=1000000h0m0s keyAlg=Ed25519 chainVerifies=true
+currentTime = now+5s (skew ahead): O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=4s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=false
+currentTime = now-1h (back-dated): O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1h0m1s notAfter-notBefore=2h0m0s keyAlg=Ed25519 chainVerifies=true
+currentTime = now-2h, ttl 1h (already expired): O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-2h0m1s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=false
+foreign CA os:admin, verified against the cluster CA: O=[os:admin] CN="" isCA=false keyUsage=1 eku=[clientAuth] notBefore-call=-1s notAfter-notBefore=1h0m0s keyAlg=Ed25519 chainVerifies=false
+two signatures with identical inputs: certificates equal=false keys equal=false serials b640000f43ca... / bca9742815e7...
+
+== Commands: fixture node run (heavy run, one at 2026-11-18T17:34:09 to 17:37:57 CET) ==
+Under the plain heavy-run lock at nice -n 19, load1 11.47 at the start, /home 69680 MiB free, /var/lib/docker 15661 MiB free.
+fixtures/bin/up
+go run docs/design/research/evidence/20261118-local-talos-signing/main.go node <dir> 10.55.0.2
+  (<dir> holds the fixture's controlplane.yaml, talos-secrets.yaml as secrets.yaml, and talosconfig)
+fixtures/bin/down
+
+== Output: fixture node run ==
+up rc=0
+run at 2026-11-18T16:36:41Z, endpoint 10.55.0.2
+CA certificates equal across control plane config, bundle and talosconfig: true
+1 os:admin, CA from control plane config: Version: ok v1.14.5
+1 os:admin, CA from control plane config: MachineConfig: ok 18623 bytes
+2 os:admin, CA from secrets bundle: Version: ok v1.14.5
+2 os:admin, CA from secrets bundle: MachineConfig: ok 18623 bytes
+3 os:reader: Version: ok v1.14.5
+3 os:reader: MachineConfig: talos: reading the machine configuration: PermissionDenied (code PermissionDenied)
+4 os:admin signed by a foreign CA: Version: talos: version: Unavailable (code Unavailable)
+4 os:admin signed by a foreign CA: MachineConfig: talos: reading the machine configuration: Unavailable (code Unavailable)
+5a NotBefore +5 s, presented at +0 s: Version: talos: version: Unavailable (code Unavailable)
+5b same certificate, presented at +7 s: Version: ok v1.14.5
+6 expired (signed at now-2h, ttl 1h): Version: talos: version: Unavailable (code Unavailable)
+7 back-dated (signed at now-1h, ttl 2h): Version: ok v1.14.5
+8 operator's own certificate: Version: ok v1.14.5
+8 operator's own certificate: MachineConfig: ok 18623 bytes
+8 local certificate, same moment: Version: ok v1.14.5
+8 local certificate, same moment: MachineConfig: ok 18623 bytes
+9a 60 s certificate, first use: Version: ok v1.14.5
+9b same connection, 5 s past NotAfter: Version: ok v1.14.5
+9c new connection with the same certificate, 5 s past NotAfter: Version: talos: version: Unavailable (code Unavailable)
+node run rc=0
+down rc=0 (fixture is down: no containers, networks, volumes or state left)
+
+== Not measured ==
+CA rotation, and a revoked or removed key: no run. Only Talos v1.14.5 on the fixture's Docker nodes, one sample per case.
