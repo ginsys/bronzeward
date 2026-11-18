@@ -527,9 +527,14 @@ secret with exit 1, and says so: "OpenBao answered 403: the token may not create
 secret is already there. Where it is already there, run the command again with `--skip-secret`."
 `--skip-secret` is an assertion by the operator: the command never reads the secret back, so it cannot
 tell a stale document from a current one. The other answers are named by class and never quoted: no secret
-mount, OpenBao unreachable, an unexpected answer (the write may have happened, and the outcome is
-unknown) and, for a token that may also update, a check-and-set refusal, which reads as present and
+mount (nothing was written, exit 1), and OpenBao not answering or giving an unexpected answer, or a Ctrl-C while the
+create was in flight (the write may have happened, so the outcome is unknown, exit 3, and the next step
+is to read the secret with `bao`) and, for a token that may also update, a check-and-set refusal, which reads as present and
 carries on. A redirect is never followed.
+
+The commands that the run prints name the global `--context` it was given, so each reaches the same
+server. A missing endpoint (none in the context, none given with `--endpoint`) is exit 2 before any
+request, like a file name that cannot be printed back in a command.
 
 The text output lists the cluster, the secret, the draft and one row per member, then the next
 commands. `-o json` and `-o yaml` print one object once, at the end:
