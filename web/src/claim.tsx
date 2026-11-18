@@ -302,8 +302,14 @@ function ClaimSection({ b, again, now }: { b: Ingestion; again: () => void; now:
     armed.current = true;
     setEnds((n) => n + 1);
   }, []);
+  const marked = mw?.outcome;
+  useEffect(() => {
+    if (marked !== undefined) ended();
+  }, [marked, ended]);
   // The read that follows an action can remove the button focus stayed on (a browser keeps focus on a control
   // that is disabled): the first change of the offer after an action ended checks focus once more, then no more.
+  // This effect follows the ones that end an action (the marks above, the actions' own, which run first as
+  // children), so an action ending in the commit that changes the offer is armed before the offer is read.
   const offer = `${o.review} ${o.verbs.join()}`;
   const seen = useRef(offer);
   useEffect(() => {
@@ -312,10 +318,6 @@ function ClaimSection({ b, again, now }: { b: Ingestion; again: () => void; now:
     armed.current = r.armed;
     if (r.check) setEnds((n) => n + 1);
   }, [offer]);
-  const marked = mw?.outcome;
-  useEffect(() => {
-    if (marked !== undefined) ended();
-  }, [marked, ended]);
   const section = useRef<HTMLElement>(null);
   useFocusOn(ends, section);
   if (!o.review && shown.length === 0 && mw === undefined) return null;
