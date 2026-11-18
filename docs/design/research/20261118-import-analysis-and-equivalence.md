@@ -66,13 +66,14 @@ point 2). Five levels, from strict to blind:
 
 Recommendation: **E3 is the definition**, computed server-side from plaintext, with E0 reported
 beside it. Reasons, each measured below: E0 fails on any move of a document between base and
-fragments (§5.3) and on comments (§5.1); E2 and E3 held for every machine in the unmodified splits
-the compiler accepted, and were false in the controls N1, N2 and N5 that changed or removed
-something (§5.3); E4 cannot see a changed secret behind a reference (§5.5). E3 still counts list
-order, a conservative choice that was tested structurally only (§5.4), and calls two forms that
-Talos treats alike different (§5.4, explicit false against omitted), so it can refuse a refactoring
-that is in fact equivalent. It accepted none of the three mistaken compositions of §5.3 (N1, N2,
-N5); that is a result on six machines and three mistakes, not a proof of soundness.
+fragments (§5.3) and on comments (§5.1); E2 and E3 held on all six machines in the unmodified
+splits the compiler accepted (§5.3); E4 cannot see a changed secret behind a reference (§5.5). E3
+still counts list order, a conservative choice that was tested structurally only (§5.4), and calls
+two forms that Talos treats alike different (§5.4, explicit false against omitted), so it can refuse
+a refactoring that is in fact equivalent. The controls ran on two machines, `cp1` and `w1`: a
+changed value (N1) and a dropped key (N2) gave E2 and E3 false in both R2 variants, and a missing
+role fragment (N5) gave them false for `cp1` in one variant and was refused by the compiler in the
+others, so no comparison ran there. That is evidence on those cases, not a proof of soundness.
 
 ## 4. Method
 
@@ -135,8 +136,8 @@ of those leaves in the base, they are 1218, 1704 and 942 bytes.
 
 | Variant | Result |
 |---|---|
-| Leaf by leaf | **Refused on every machine.** Control planes: `base-override` at `fragment[0]` (`machine.ca.key`, `cluster.etcd.ca.key`). Workers: "trusted CA certificates are required". A strategic-merge patch merges a mapping as a unit, so a fragment cannot take one leaf of a mapping whose other leaves stay in the base. |
-| Rule R2: where the direct leaves of one mapping fall into different classes, all of them stay in the base (a nested mapping below is classified on its own); documents emptied by the split are dropped | Every machine composes. **E2 true, E3 true, E4 true; E0 false and E1 false** because document order changed (`docOrderSame=false`). Thin base: 11630 to 4025 bytes (`cp1`), 3341 to 1161 (`w1`). |
+| Leaf by leaf | **Refused on every machine.** Control planes: `base-override` at `fragment[0]` (`machine.ca.key`, `cluster.etcd.ca.key`). Workers: "trusted CA certificates are required". All the refusals were on the CA mappings, where a fragment took some leaves of a mapping and the base kept the others. The machinery merges map members and struct fields recursively (`config/merge/merge.go`, with replacement and custom-merge exceptions), so this does not show that splitting a mapping is impossible; the cause was not isolated. |
+| Rule R2, a conservative workaround that worked on these inputs: where the direct leaves of one mapping fall into different classes, all of them stay in the base (a nested mapping below is classified on its own); documents emptied by the split are dropped | Every machine composes. **E2 true, E3 true, E4 true; E0 false and E1 false** because document order changed (`docOrderSame=false`). Thin base: 11630 to 4025 bytes (`cp1`), 3341 to 1161 (`w1`). |
 | R2, emptied documents kept as identity-only shells in the base | **E0 true, E1 true, E2 true, E3 true, E4 true, `docOrderSame=true`** for all six. Thin base: 5160 bytes (`cp1`), 1784 (`w1`). |
 
 Negative controls, each of which must be detected, on `cp1` and `w1`. Under both R2 variants a
@@ -191,7 +192,7 @@ true.
 | | (a) manual | (b) assisted proposal | (c) automatic split |
 |---|---|---|---|
 | Needs | the operator writes fragments and a thin base | a proposal engine over the imported machines, plus the check | the engine plus the check, with no review |
-| Evidence | N1, N2 and N5 show the check detects the mistakes a manual edit makes (§5.3) | §5.2 sizes the proposal (118 against 320 leaves); §5.3 shows it composes in the forward order on all six machines only with R2 | as (b): the check accepted a split on every machine, once R2 and the shells were applied |
+| Evidence | N1 and N2 gave E2 and E3 false on `cp1` and `w1`; N5 was caught by the compiler's refusal in most variants (§5.3) | §5.2 sizes the proposal (118 against 320 leaves); §5.3 shows it composes in the forward order on all six machines only with R2 | as (b): the check accepted a split on every machine, once R2 and the shells were applied |
 | Limits | an edited thin base has to be written somewhere (below) | the engine sees only sanitized documents, so it cannot see shared secrets (B2) and cannot tell an unmarked secret from a plain value (§7) | the check proves equality with the baseline; it does not prove the split is a good one: 118 leaves can still put a machine-specific value into a role fragment |
 | The check | required | required | required, and it is the only review |
 
