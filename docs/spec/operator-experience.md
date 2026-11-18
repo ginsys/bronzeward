@@ -197,8 +197,9 @@ from matching release IDs, names or sources.
 steps above and the next step, with its link. It comes from the machine's `desired` and `applied` and from
 reads that the page makes only in the states that need them, all of them existing list filters:
 `GET /ingestions?machine=` and, for the newest import that stored a draft, `GET /drafts/{id}`; and
-`GET /plans?machine=&state=proposed`, `...&state=approved` and `...&state=committed`. No route is added and
-`GET /drafts` is not read (it has no filter). These reads keep no earlier answer: one that finds no answer
+`GET /plans?machine=&state=proposed` and `...&state=approved`; and `GET /operations?machine=&state=` for each of
+`committed`, `sending`, `verifying` and `unresolved`. No route is added and `GET /drafts` is not read (it has no
+filter). These reads keep no earlier answer: one that finds no answer
 removes the line. The states overlap, so the first match of this order wins:
 
 | Order | State | Line says | Link |
@@ -212,13 +213,14 @@ removes the line. The states overlap, so the first match of this order wins:
 | 7th | No `desired`, no `applied`, and none of the first two | not handed over: no `Desired` and no `Applied`; import the configuration, which writes nothing to the node | Import this machine |
 
 Any other state shows no line: open drift (checked before the order), a `desired` that `applied` already
-carries, `applied` with no `desired`, and a `committed` plan whose operation still holds the machine's scope
-(`committed`, `sending`, `verifying` or `unresolved`; checked before the 3rd to 6th rows, so it also removes the
-line an `approved` or `proposed` plan would give). `committed` is a plan's terminal state and says nothing of the
-operation, so the page reads the newest committed plan's operation (`GET /operations/{id}`): a finished one
-(`completed`, `rejected`, `cancelled`, `failed`), such as an adopt plan's, hides nothing. So does a state whose read
-has not answered or failed, and one whose machine read failed on a refresh; the line is never
-"nothing to do" in its place. A plan for another release than `desired` is not counted. A
+carries, `applied` with no `desired`, and an operation of the machine that still holds its scope (`committed`,
+`sending`, `verifying` or `unresolved`; checked before the 3rd to 6th rows, so it also removes the line an
+`approved` or `proposed` plan would give). A plan's `committed` state is terminal and says nothing of its
+operation (an adopt plan stays `committed` with its operation `completed`), so the operations are read, not the
+plans' states: a finished one (`completed`, `rejected`, `cancelled`, `failed`) hides nothing. So does a state whose
+read has not answered or failed, and a machine read that found no answer on a refresh (its last answer stays shown
+under the offline banner, and the line is not drawn from it); the line is never "nothing to do" in its place. A
+plan for another release than `desired` is not counted. A
 draft found another way than through the machine's import is not shown, since `GET /drafts` has no filter.
 
 ### 2.4 Desired, applied and observed
