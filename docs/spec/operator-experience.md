@@ -223,9 +223,9 @@ longer vouch for.
 [ginsys/bronzeward#879](https://github.com/ginsys/bronzeward/issues/879), the page shows only the `not-handed-over`
 line, drawn from the machine's own `desired`, `applied` and `openDrift`, with no read of its own. That line is wrong
 while the machine has work open: a machine with no Desired and no Applied configuration still reads "Next: import its
-configuration" while its import is running, paused or released into an open draft, or while an adopt plan for it is
-proposed or approved, where the server's step is `import-running`, `import-paused`, `draft-to-publish`,
-`awaiting-approval` or `awaiting-dispatch`. It stays so until the read replaces it. The other steps are not drawn from
+configuration" while its import is running, stalled, paused or released into an open draft, or while an adopt plan for
+it is proposed or approved, where the server's step is `import-running`, `import-stalled`, `import-paused`,
+`draft-to-publish`, `awaiting-approval` or `awaiting-dispatch`. It stays so until the read replaces it. The other steps are not drawn from
 `GET /ingestions`, `GET /plans` and `GET /operations`: those are separate reads taken at different moments, an
 operation can move from one state to the next between two of them and leave every list empty, and a plan's
 `committed` state is terminal and says nothing of its operation (an adopt plan stays `committed` with its operation
