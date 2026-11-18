@@ -232,11 +232,13 @@ log a tenant per entry.
 On 18 November 2026, 17:08 CET, the owner answered
 [#869](https://github.com/ginsys/bronzeward/issues/869): "I think we must support all
 "first keys": TALOSCONFIG, controlplane node configs, or even an ip + secrets.yaml.
-Whatever the user provides, bw gets access and saves the signing keys" (relayed by the
-campaign lead; the words were not read at source). Read as the lead read it, Bronzeward
-holds each cluster's Talos CA key and signs its own admin certificates, which reverses the
-2026-10-21 decision of [#266](https://github.com/ginsys/bronzeward/issues/266) as a
-specification task ([#874](https://github.com/ginsys/bronzeward/issues/874)).
+Whatever the user provides, bw gets access and saves the signing keys" (recorded in [the
+closing comment of that issue](https://github.com/ginsys/bronzeward/issues/869#issuecomment-6984191100),
+read at source). The comment's own reading: with an endpoint and a secrets bundle there is
+no client certificate, so Bronzeward signs its own admin certificate from the stored CA
+key, which reverses the 2026-10-21 decision of
+[#266](https://github.com/ginsys/bronzeward/issues/266) and retires choice §17.29. The
+specification work is tracked in [#874](https://github.com/ginsys/bronzeward/issues/874).
 
 For tenancy this raises the stakes of S and fixes the shape of T:
 
