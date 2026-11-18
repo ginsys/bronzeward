@@ -582,7 +582,8 @@ Evidence worth keeping must be copied out of `.state/` before `down`.
   upgrade, reset, disk and installer behavior do not exist here. This matches the scope of the PoC
   path and the deferred Upgrade/LifecycleClient tests, and nothing more.
 - Reading a node's machine configuration needs the `os:admin` Talos role. Measured on this fixture
-  (`internal/talos` `TestLiveRoleProbe`, Talos v1.13.6): talosconfigs for `os:reader` and
+  (`internal/talos` `TestLiveRoleProbe`, Talos v1.14.5 on 18 November 2026; the result is the
+  same as on v1.13.6): talosconfigs for `os:reader` and
   `os:operator` read the version but are refused the `MachineConfig` resource (`PermissionDenied`).
   The only bound on what an ingestion read can do with that credential is `internal/talos`'s
   read-only interface, which its guard tests hold to an allowlist of machinery calls.

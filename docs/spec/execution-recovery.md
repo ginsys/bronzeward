@@ -28,7 +28,7 @@ The evidence it rests on, abbreviated below:
 
 "DS row 005" is row 005 of the dispatch-safety capture (DS §3). Every dispatch
 result holds for one `apply-config --mode=no-reboot` on one container worker
-running Talos v1.13.6 (the v1.14 rerun is scheduled in ginsys/bronzeward#713), at one assignment revision, against one PostgreSQL 17.11
+running Talos v1.13.6 (the fixture now runs v1.14.5; the dispatch-safety rerun on it is not yet recorded), at one assignment revision, against one PostgreSQL 17.11
 server at its default isolation, with a rollout limit of one
 ([DS §7](../design/research/20260925-dispatch-safety.md#7-limits)). This
 contract inherits those limits; §9 lists them with the gaps.
@@ -67,7 +67,7 @@ published, encrypted per-machine artifact to an existing **worker** with Talos
 `apply-config` in `no-reboot` mode, over direct Talos access (DS §2.1, §6.3).
 The artifact's contract minor is the node's running minor (compilation
 contract §10.2); a v1.14 worker running v1.14.5 is the target, and the evidence so far is on a
-v1.13 worker running v1.13.6; the v1.14 rerun is scheduled in ginsys/bronzeward#713
+v1.13 worker running v1.13.6; the fixture now runs v1.14.5, and the apply activation evidence is ginsys/bronzeward#714
 ([E3 §4.3](../design/research/20260925-talos-compatibility.md#43-operationrpc-compatibility-against-v1136)).
 Publication, observation, adoption and recovery are separate capabilities that
 send nothing to a machine.
@@ -2133,17 +2133,22 @@ conservative option; those that do not say so. Each is marked in place as
       cluster record holds (see `persistence-api.md`), against the node's
       `Infos.cluster.talos.dev` resource. Talos describes it as the cluster's
       globally unique identifier, distinct from the shared `cluster.secret`
-      (machinery v1.13.6, `config/types/v1alpha1/v1alpha1_types.go`).
+      (machinery v1.14.5, `config/types/cluster/discovery_identity.go`, where
+      the `DiscoveryIdentityConfig` document holds it; in v1.13.6 the same
+      sentence sat on `config/types/v1alpha1/v1alpha1_types.go`, whose field is
+      deprecated in v1.14.5).
     - **What each reports.** The node ID is Talos's `Identities.cluster.talos.dev`
       value, random, kept across reboots and reset on a wipe (machinery
-      v1.13.6, `resources/cluster/identity.go`); the SMBIOS UUID is the
-      `systeminformation` resource. On the Docker fixture (Talos v1.13.6,
-      platform `container`) `talosctl get systeminformation` returns no
-      resource on either node, `get identity` a distinct node ID per node, and
-      `get info` one cluster ID on both. On one bare-metal node of the
-      operator's office cluster (Talos v1.13.8) all three are present. Each
-      was read with `talosctl` under `os:admin`, 2 October 2026, not yet
-      through the application's read-only client, which #22 and #26 show.
+      v1.14.5, `resources/cluster/identity.go`, byte-identical to v1.13.6);
+      the SMBIOS UUID is the `systeminformation` resource. On the Docker
+      fixture (Talos v1.14.5, platform `container`) `talosctl get
+      systeminformation` returns no resource on either node, `get identity` a
+      distinct node ID per node, and `get info` one cluster ID on both: the
+      same three results as on v1.13.6. On one bare-metal node of the
+      operator's office cluster (Talos v1.13.8) all three are present. The
+      fixture was read with `talosctl` under `os:admin` on 18 November 2026,
+      the office node on 2 October 2026, neither yet through the application's
+      read-only client, which #22 and #26 show.
     - **Limits.** The fixture exercises only the node-ID key; the SMBIOS-UUID
       key is checked against a stubbed Talos response until a scenario runs on
       hardware. A wipe gives a node-ID machine a new node ID, so it is refused
