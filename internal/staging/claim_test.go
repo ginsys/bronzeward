@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -256,6 +257,35 @@ func TestHeartbeat(t *testing.T) {
 	}
 	if !capped.lease.Equal(capped.expires) || !op.Equal(capped.lease) {
 		t.Fatalf("lease %s, expiry %s, operation lease %s; want all equal", capped.lease, capped.expires, op)
+	}
+}
+
+// Create records where an import's configuration came from (persistence-api choice §17.41): document
+// or machine as given, none for an empty source, and the schema refuses any other value.
+func TestCreateRecordsSource(t *testing.T) {
+	f := setup(t)
+	o := Owner{ID: "a/4242/start-1", Epoch: currentEpoch(t, f.db)}
+	for i, tc := range []struct {
+		source, want string
+		refused      bool
+	}{{"document", "document", false}, {"machine", "machine", false}, {"", "", false}, {"node", "", true}} {
+		c := Claim{ID: id.New(id.Ingestion), Kind: "import", Mode: "transient", Cluster: f.cluster, Machine: f.machine, Source: tc.source, Gen: 1}
+		err := inTx(t.Context(), f.db, func(tx *sql.Tx) error {
+			return Create(t.Context(), tx, o, timers, c, f.human, fmt.Sprintf("k-source-%012d", i))
+		})
+		if tc.refused {
+			if err == nil {
+				t.Errorf("source %q was accepted", tc.source)
+			}
+			continue
+		}
+		var got string
+		if err != nil {
+			t.Fatalf("source %q: %v", tc.source, err)
+		}
+		if err := f.db.QueryRow(`SELECT coalesce(source, '') FROM staging_claim WHERE id = $1`, c.ID).Scan(&got); err != nil || got != tc.want {
+			t.Errorf("source %q recorded %q, %v; want %q", tc.source, got, err, tc.want)
+		}
 	}
 }
 

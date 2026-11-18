@@ -185,7 +185,7 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	case !errors.Is(err, sql.ErrNoRows):
 		return result{}, err
 	}
-	c := staging.Claim{ID: id.New(id.Ingestion), Kind: in.Kind, Mode: in.Staging, Cluster: cluster, Machine: in.Machine, Gen: 1}
+	c := staging.Claim{ID: id.New(id.Ingestion), Kind: in.Kind, Mode: in.Staging, Cluster: cluster, Machine: in.Machine, Source: in.Source, Gen: 1}
 	if in.Review {
 		c.Review = "pending"
 	}

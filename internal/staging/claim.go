@@ -35,10 +35,11 @@ type Timers struct{ Lease, AbsoluteExpiry time.Duration }
 
 // Claim is one claim as its owner knows it. Kind is import or drift-adoption, with its Machine, or
 // draft-update, with its Draft (persistence-api §9.3). Review is the operator review its creation requests,
-// pending, or empty (compilation §3.6).
+// pending, or empty (compilation §3.6). Source is where an import's configuration came from, document
+// or machine, empty for a draft update (persistence-api choice §17.41).
 type Claim struct {
-	ID, Kind, Mode, Cluster, Machine, Draft, Review string
-	Gen                                             int64
+	ID, Kind, Mode, Cluster, Machine, Draft, Review, Source string
+	Gen                                                     int64
 }
 
 var (
@@ -106,12 +107,12 @@ func Create(ctx context.Context, tx *sql.Tx, o Owner, t Timers, c Claim, princip
 		current = `$4::text IS NOT NULL` // $4 is still the claim's owner epoch
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO staging_claim (id, mode, state, owner, owner_gen, owner_epoch, lease_until,
-		expires_at, principal, idempotency_key, cluster, machine, draft, kind, review, created_at)
+		expires_at, principal, idempotency_key, cluster, machine, draft, kind, review, source, created_at)
 		SELECT $1, $2, 'held', $3, 1, $4, at.t + $5::bigint * interval '1 microsecond',
-		at.t + $6::bigint * interval '1 microsecond', $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), at.t
+		at.t + $6::bigint * interval '1 microsecond', $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), NULLIF($14, ''), at.t
 		FROM installation_state, (SELECT clock_timestamp() AS t) at WHERE `+current,
 		c.ID, c.Mode, o.ID, o.Epoch, t.Lease.Microseconds(), t.AbsoluteExpiry.Microseconds(), principal, key, c.Cluster, c.Machine,
-		c.Draft, c.Kind, c.Review)
+		c.Draft, c.Kind, c.Review, c.Source)
 	if err != nil {
 		return fmt.Errorf("staging: create the claim: %w", err)
 	}
