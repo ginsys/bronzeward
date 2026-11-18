@@ -526,12 +526,12 @@ Next: supply the cluster's first key, then import its configuration.
 `cluster first-key` supplies or replaces a cluster's first key: a human `author` act, one
 `POST /clusters/{id}/first-keys` ([persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)).
 `--kind` is `talosconfig`, `machine-config` (a control plane configuration) or `secrets-bundle`,
-`--file` names the document, and `--endpoint` is required for the first and the last kind and refused
-for `machine-config`. The file is read with a size limit, sent once and never copied, logged or
+`--file` names the document, and `--endpoint` is required for every kind: the server tries the key
+at that address before it stores it, and a failed try stores nothing and leaves the existing key. The file is read with a size limit, sent once and never copied, logged or
 printed; a talosconfig is cut to the one context `--talos-context` names (else the current one). It
 answers with the cluster, the kind, whether a key was replaced and the CA key's version; the refusals
 of §3.4 (`first-key-unusable`, `first-key-no-ca-key`, `first-key-role-insufficient`,
-`first-key-endpoint-no-control-plane`) print their rule and nothing from the document. A talosconfig
+`first-key-endpoint-no-control-plane`, `first-key-not-trusted`) print their rule and nothing from the document. A talosconfig
 whose certificate is `os:reader` is refused: Bronzeward needs the `os:admin` read of a control
 plane's configuration to take the CA key from it.
 
@@ -543,7 +543,7 @@ an `author` signed in as a person (exit 1 otherwise, with nothing sent) and take
 | --- | --- |
 | `--name <name>` | the cluster's name; required |
 | `--kubernetes-endpoint <https url>` or `proposed` | the Kubernetes endpoint to record; required. `proposed` takes the one that discovery proposes, and stops with exit 1 if it proposes none or an endpoint that is not https |
-| `--first-key-kind machine-config\|secrets-bundle` with `--first-key-file <file>` | supply that document as the first key instead of the talosconfig. Both or neither; a `secrets-bundle` needs `--endpoint` |
+| `--first-key-kind machine-config\|secrets-bundle` with `--first-key-file <file>` | supply that document as the first key instead of the talosconfig. Both or neither; the key is tried at the same member address as a talosconfig |
 | `--skip-first-key` | supply no first key: the operator says the cluster already holds one. It takes no `--first-key-*` flag |
 | `--no-import` | stop after the first key: no draft, no import |
 | `--review`, `--staging encrypted\|transient` | as `import start`: `--review` pauses the first import for review and needs encrypted staging |
@@ -562,8 +562,8 @@ The first key, by default the cluster's talosconfig cut to the one chosen contex
 context's key reaches the server, is sent once to `POST /clusters/{id}/first-keys` and never printed.
 Its `endpoint` is the IP address of the first control-plane member that answered discovery, the
 address that member was read at (never the name `--endpoint` was given: a DNS name was resolved once
-for the first reads and no member address comes from it); a `--first-key-kind secrets-bundle` takes the
-same address. A cluster where no control-plane member answered stops at discovery, exit 1 with nothing
+for the first reads and no member address comes from it); a first key of any other kind is tried at
+the same address. A cluster where no control-plane member answered stops at discovery, exit 1 with nothing
 sent, because no address could carry the first key. `cluster discover` prints that same address in
 its `cluster first-key` command.
 
