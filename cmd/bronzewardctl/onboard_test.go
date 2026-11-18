@@ -556,6 +556,11 @@ func TestOnboardRecoveryCommandsKeepTheirFlags(t *testing.T) {
 			t.Errorf("no %q command with the context in:\n%s", cmd, out)
 		}
 	}
+	// A run that completes names the context in its last line too.
+	e3 := newOnboard(t)
+	if code, out, errOut := e3.run("--context", "lab"); code != 0 || !strings.Contains(out, "bronzewardctl --context 'lab' draft show") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want the draft show command with the context", code, out, errOut)
+	}
 	e2 := newOnboard(t)
 	e2.api.failPost = map[string]int{"/machines": 1}
 	args := []string{"cluster", "onboard", "--talosconfig", e2.file, "--name", "lab", "--kubernetes-endpoint", "proposed", "--skip-secret"}
@@ -576,12 +581,21 @@ func TestOnboardRefusesBeforeAnyRequest(t *testing.T) {
 	if code, out, errOut := e.run(); code != 2 || !strings.Contains(errOut, "--endpoint") || e.requests() != 0 {
 		t.Errorf("no endpoint: exit %d, stdout %q, stderr %q, %d requests", code, out, errOut, e.requests())
 	}
+	// The endpoint check reads the context the run uses: --talos-context b, not the file's current a.
+	oneEmpty := strings.Replace(twoContextTalosconfig(), "endpoints: [10.9.9.9:50000]", "endpoints: []", 1) // context a only
+	if err := os.WriteFile(e.file, []byte(oneEmpty), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, errOut := e.run("--talos-context", "b"); code != 0 {
+		t.Errorf("context b has an endpoint: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	before := e.requests()
 	tabbed := filepath.Join(filepath.Dir(e.file), "talos\tconfig")
 	if err := os.WriteFile(tabbed, []byte(twoContextTalosconfig()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	args := append([]string{"cluster", "onboard", "--talosconfig", tabbed}, e.base()[4:]...)
-	if code, out, errOut := e.runArgs(args...); code != 2 || !strings.Contains(errOut, "rename the file") || e.requests() != 0 {
-		t.Errorf("unprintable name: exit %d, stdout %q, stderr %q, %d requests", code, out, errOut, e.requests())
+	if code, out, errOut := e.runArgs(args...); code != 2 || !strings.Contains(errOut, "rename the file") || e.requests() != before {
+		t.Errorf("unprintable name: exit %d, stdout %q, stderr %q, %d new requests", code, out, errOut, e.requests()-before)
 	}
 }
