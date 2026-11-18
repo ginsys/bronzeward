@@ -260,6 +260,12 @@ export function Shown({ id, text, close, marking, kind = "review" }: { id: strin
   );
 }
 
+// After an action of the section ended (`armed`), the first change of the offer checks focus once more and
+// disarms; a later change (the expiry tick, a lease that lapsed, another operator) never does.
+export function recheckOnOffer(armed: boolean, was: string, now: string): { check: boolean; armed: boolean } {
+  return armed && was !== now ? { check: true, armed: false } : { check: false, armed };
+}
+
 // The claim's actions under the import page's state line (W5).
 export function Claim(p: { b: Ingestion; again: () => void; now: number }) {
   return useWrites() === undefined ? null : <ClaimSection {...p} />;
@@ -291,15 +297,27 @@ function ClaimSection({ b, again, now }: { b: Ingestion; again: () => void; now:
   // An action of the section ended: the button that sent it was disabled while it ran or is gone, so focus goes
   // to the section, where the outcome is and the next action follows.
   const [ends, setEnds] = useState(0);
-  const ended = useCallback(() => setEnds((n) => n + 1), []);
+  const armed = useRef(false);
+  const ended = useCallback(() => {
+    armed.current = true;
+    setEnds((n) => n + 1);
+  }, []);
+  // The read that follows an action can remove the button focus stayed on (a browser keeps focus on a control
+  // that is disabled): the first change of the offer after an action ended checks focus once more, then no more.
+  const offer = `${o.review} ${o.verbs.join()}`;
+  const seen = useRef(offer);
+  useEffect(() => {
+    const r = recheckOnOffer(armed.current, seen.current, offer);
+    seen.current = offer;
+    armed.current = r.armed;
+    if (r.check) setEnds((n) => n + 1);
+  }, [offer]);
   const marked = mw?.outcome;
   useEffect(() => {
     if (marked !== undefined) ended();
   }, [marked, ended]);
   const section = useRef<HTMLElement>(null);
-  // The read that follows an action can remove the button focus stayed on (a browser keeps focus on a
-  // control that is disabled), so the offer is part of the key: the check runs again when it changes.
-  useFocusOn(ends > 0 && `${ends} ${o.review} ${o.verbs.join()}`, section);
+  useFocusOn(ends, section);
   if (!o.review && shown.length === 0 && mw === undefined) return null;
   return (
     <section ref={section} tabIndex={-1} aria-label="Claim">

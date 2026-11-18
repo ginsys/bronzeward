@@ -2,7 +2,7 @@ import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { BaseDocument, Claim, ClaimView, claimSpec, discardOn, readBaseDocument, EXPIRY_TICK, expiry, newest, offers, readReview, rereadOnce, rereads, reviewed, Shown, shownVerbs, watchesExpiry, watchExpiry } from "./claim.tsx";
+import { BaseDocument, Claim, ClaimView, claimSpec, discardOn, readBaseDocument, EXPIRY_TICK, expiry, newest, offers, readReview, recheckOnOffer, rereadOnce, rereads, reviewed, Shown, shownVerbs, watchesExpiry, watchExpiry } from "./claim.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
@@ -320,5 +320,24 @@ describe("the import page's claim section", () => {
   });
   test("a released import shows no claim section", () => {
     expect(page(h(Claim, { b: ing({ state: "released" }), again: () => {}, now: LATE }))).toBe("");
+  });
+});
+
+// Where focus goes after an action of the claim section (ginsys/bronzeward#896).
+describe("the focus check after the offer changes", () => {
+  const was = "false continue,abandon";
+  const now = "false abandon";
+  test("the first change of the offer after an action ended checks focus once and disarms", () => {
+    expect(recheckOnOffer(true, was, now)).toEqual({ check: true, armed: false });
+  });
+  test("an offer that did not change keeps the check armed for the read that follows", () => {
+    expect(recheckOnOffer(true, was, was)).toEqual({ check: false, armed: true });
+  });
+  test("a later change of the offer (the expiry tick, a lease that lapsed, another operator) moves nothing", () => {
+    const first = recheckOnOffer(true, was, now);
+    expect(recheckOnOffer(first.armed, now, "false takeover,abandon")).toEqual({ check: false, armed: false });
+  });
+  test("a change of the offer before any action ended moves nothing", () => {
+    expect(recheckOnOffer(false, was, now)).toEqual({ check: false, armed: false });
   });
 });
