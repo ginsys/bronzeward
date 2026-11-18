@@ -121,7 +121,7 @@ describe("the read-only views", () => {
 // ginsys/bronzeward#857: the summary of an import base revision, from the one read at its path.
 describe("the import base summary (ginsys/bronzeward#857)", () => {
   const ibr = "ibr_2xxaaaaaaaaaaaaaaaaaaaqa4m";
-  const summary: S["ImportBaseSummary"] = { id: ibr, machine: "mch_b3caaaaaaaaaaaaaaaaaaaaa2q", author: "idn_k2pqaaaaaaaaaaaaaaaaaaa7xz", createdAt: "2026-11-18T09:00:00Z", documentBytes: 1234, references: 2, embedded: 1 };
+  const summary: components["schemas"]["ImportBaseSummary"] = { id: ibr, machine: "mch_b3caaaaaaaaaaaaaaaaaaaaa2q", author: "idn_k2pqaaaaaaaaaaaaaaaaaaa7xz", createdAt: "2026-11-18T09:00:00Z", documentBytes: 1234, references: 2, embedded: 1 };
 
   test("its path is its view, and an identifier with the prefix links to it", () => {
     expect(at(`/import-base-revisions/${ibr}`)?.type).toBe(ImportBaseItem);
