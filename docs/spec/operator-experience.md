@@ -192,6 +192,29 @@ the machine?" only from that diff: "Changes shown below", "No differences in the
 configurations", or "Diff withheld: the change cannot be shown". It never infers "unchanged"
 from matching release IDs, names or sources.
 
+**Proposed: "where you are, what next" on the machine page.** Under the status sentences
+([§2.4](#24-desired-applied-and-observed)) the page shows one line that names the machine's place in the
+steps above and the next step, with its link. It comes from the machine's `desired` and `applied` and from
+reads that the page makes only in the states that need them, all of them existing list filters:
+`GET /ingestions?machine=` and, for the newest import that stored a draft, `GET /drafts/{id}`; and
+`GET /plans?machine=&state=proposed` and `...&state=approved`. No route is added and `GET /drafts` is not read
+(it has no filter). The states overlap, so the first match of this order wins:
+
+| Order | State | Line says | Link |
+| --- | --- | --- | --- |
+| 1st | No `desired`, no `applied`, and an import of the machine is `held`, `paused` or `resumed` | the import is not finished | the import |
+| 2nd | No `desired`, no `applied`, and the newest import that stored a draft left it `open` | the import is stored in that draft; edit it if needed, then a publisher publishes it, which makes a release the machine's `Desired` and sends nothing | the draft, Publish |
+| 3rd | `desired` selected, not carried by `applied`, and a plan for that release is `approved` | the controller commits and applies it; nothing is left for the operator | the plan |
+| 4th | the same, and a plan for that release is `proposed` | an approver approves it; approving does not apply | the plan |
+| 5th | the same, no such plan, and `applied` is set (pending convergence) | a publisher creates an apply-config plan | Create plan |
+| 6th | the same, no such plan, and `applied` is null | a publisher creates an adopt plan (handover) | Create plan |
+| 7th | No `desired`, no `applied`, and none of the first two | not handed over: no `Desired` and no `Applied`; import the configuration, which writes nothing to the node | Import this machine |
+
+Any other state shows no line: open drift, a `desired` that `applied` already carries, `applied` with no
+`desired`, a `committed` plan, an operation in flight. So does a state whose read has not answered or failed;
+the line is never "nothing to do" in its place. A plan for another release than `desired` is not counted. A
+draft found another way than through the machine's import is not shown, since `GET /drafts` has no filter.
+
 ### 2.4 Desired, applied and observed
 
 `GET /machines/{id}` returns `desired` (a release ID or null), `applied {release, source}` (or

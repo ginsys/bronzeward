@@ -158,7 +158,11 @@ history. "Drifted" comes from the open drift record, which compares
 with `Applied`; an observation equal to `Desired` or an older release is still drift. With no
 `Applied`, `Desired` or observation the row says so ("Not applied or adopted by Bronzeward",
 "No release selected", "No configuration read recorded") and shows no time. The status
-sentences are those of [§2.4](operator-experience.md#24-desired-applied-and-observed).
+sentences are those of [§2.4](operator-experience.md#24-desired-applied-and-observed). One line
+under them, not drawn, says where the machine is in the steps import, publish, plan, approve, and
+what the next one is, with its link; its states, their order and the reads they make are in
+[§2.3](operator-experience.md#23-import-publish-plan-approve-apply). It shows nothing where it
+cannot say.
 
 The timeline opens on its newest page and polls on from its tail, as
 [client contracts §8.6](client-contracts.md#86-event-resumption) item 6 has it, and a poll with
