@@ -164,6 +164,11 @@ func TestContinuedByNeedsAContinuedReview(t *testing.T) {
 	if _, err := f.db.Exec(`UPDATE staging_claim SET review = 'pending' WHERE id = $1`, pending.ID); err == nil {
 		t.Error("a claim with a continued_by went back to a pending review")
 	}
+	// A null review is no continued review either: the check reads NULL as passing unless it is
+	// written against the null.
+	if _, err := f.db.Exec(`UPDATE staging_claim SET review = NULL WHERE id = $1`, pending.ID); err == nil {
+		t.Error("a claim with a continued_by lost its review")
+	}
 }
 
 // continueWith is Continue in a transaction of its own.
