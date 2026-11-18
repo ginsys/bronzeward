@@ -172,6 +172,119 @@ func TestLiveApply(t *testing.T) {
 	}
 }
 
+// activationLabel is the node label the activation evidence applies (ginsys/bronzeward#714). It
+// cannot collide with the scenarios' labels (`tier`, `bw-s2`).
+const activationLabel = "bw-act"
+
+// TestLiveApplyLabelDocument applies the worker's own configuration plus one KubeNodeConfig
+// document that holds activationLabel, in no-reboot mode (E1), and reads the machine configuration
+// before and after (Read A, E2). Class accepted is the proof that the node named NO_REBOOT:
+// classifyApply admits nothing else, so another mode would show as unrecognised with code OK, and
+// the test would fail on it rather than widen the check. The label resource (Read B) and the
+// Kubernetes Node (Read C) are read by the fixture run with talosctl and kubectl, not here.
+// A deferred restore puts the original configuration back, so a failed assertion still leaves the
+// node as it was. It needs a worker that holds no KubeNodeConfig document of its own.
+func TestLiveApplyLabelDocument(t *testing.T) {
+	tc, ep := liveTarget(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+	r, err := Dial(ctx, tc, ep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	before, err := r.MachineConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := before.Bytes()
+	if bytes.Contains(original, []byte("kind: KubeNodeConfig")) {
+		t.Fatal("control: the worker already holds a KubeNodeConfig document; the label document would be a second one")
+	}
+	a, err := DialApplier(ctx, tc, ep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	send := func(sendCtx context.Context, b []byte) Response {
+		sctx, scancel := context.WithTimeout(sendCtx, 30*time.Second)
+		defer scancel()
+		resp, err := a.ApplyNoReboot(sctx, b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	// A defer, not t.Cleanup: it runs before the two Close calls above, which a Cleanup would follow.
+	// The test context may have ended by then, so a fresh one bounds the restore and its read.
+	defer func() {
+		rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer rcancel()
+		restored := send(rctx, original)
+		t.Logf("restore of the original configuration: %+v", restored)
+		if restored.Class != ClassAccepted {
+			t.Errorf("the original configuration was not restored: %+v", restored)
+			return
+		}
+		deadline := time.Now().Add(time.Minute)
+		for {
+			got, err := r.MachineConfig(rctx)
+			if err == nil && bytes.Equal(got.Bytes(), original) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Errorf("the node did not return to its original configuration within a minute (read error %v)", err)
+				return
+			}
+			time.Sleep(time.Second)
+		}
+	}()
+
+	document := "---\napiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  " + activationLabel + ": \"yes\"\n"
+	// A copy, so appending cannot write into original, which the restore sends back.
+	planned := append(bytes.Clone(bytes.TrimRight(original, "\n")), '\n')
+	planned = append(planned, document...)
+	got := send(ctx, planned)
+	t.Logf("apply of the label document answered %+v (accepted means the node named NO_REBOOT, one message, no error)", got)
+	if got.Class != ClassAccepted || !got.Accounts() {
+		t.Fatalf("the label document: %+v; want accepted", got)
+	}
+
+	// Read A: the stored configuration holds the label and its resource version moved. The node may
+	// take a moment to store it, so the read repeats for up to 30 seconds and logs when it showed.
+	start := time.Now()
+	deadline := start.Add(30 * time.Second)
+	for {
+		after, err := r.MachineConfig(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(after.Bytes(), []byte(activationLabel)) {
+			t.Logf("Read A: the label showed %s after the apply; resource version %q to %q, digest %s to %s",
+				time.Since(start).Round(time.Millisecond), before.ResourceVersion(), after.ResourceVersion(),
+				digest(original), digest(after.Bytes()))
+			if after.ResourceVersion() == before.ResourceVersion() {
+				t.Fatalf("the label is stored but the resource version did not move: %q", after.ResourceVersion())
+			}
+			// The restore follows at once, so the fixture run reads Reads B and C while the label
+			// is held: BW_TEST_ACTIVATION_HOLD names how long (a Go duration, none by default).
+			if hold := os.Getenv("BW_TEST_ACTIVATION_HOLD"); hold != "" {
+				d, err := time.ParseDuration(hold)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("holding the label for %s", d)
+				time.Sleep(d)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Read A: the stored configuration holds no %q 30 seconds after an accepted apply", activationLabel)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 func TestLiveUnreachable(t *testing.T) {
 	tc, _ := liveTarget(t)
 	// 192.0.2.1 is TEST-NET-1 (RFC 5737): nothing answers there.
