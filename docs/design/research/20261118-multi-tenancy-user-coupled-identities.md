@@ -214,7 +214,7 @@ Two axes: who holds the identity, and where tenants are separated.
 | Layout | paths and groups, or namespaces | namespaces (paths work with the cost in question 3) | paths as today |
 | OpenBao enforces the tenant | yes (M1, M5) | yes (M5) | no: the application does |
 | Approval before decryption | impossible (M6) | the application, as today | the application, as today |
-| Operations with no user (rows 2, 3, 4a, 9) | cannot serve | serves | serves |
+| Operations with no user (rows 2, 3, 9; row 4a needs no OpenBao identity under any model) | cannot serve | serves | serves |
 | A leaked or buggy controller reaches | the tokens it holds | the tokens it holds: every tenant, in one process | every tenant and every key |
 | What it needs | a client or exchange for the audience; a ttl policy | a namespace, mounts, policies and tokens per tenant; configuration for many tokens; an OpenBao administrator | nothing |
 | Measured | M1 to M5, M7, M8 | M5, M7 | not new |
