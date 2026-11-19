@@ -91,10 +91,10 @@ const focusedPath = () => browser.execute(() => document.activeElement?.closest(
 const focusedLabel = () => browser.execute(() => document.activeElement?.closest("label")?.firstChild?.textContent?.trim() ?? "");
 // A step after which focus was lost to the page: recorded, and every step's result is asserted at the end,
 // so one run names each of them. Focus may be on the body for a few ms before the shell moves it, so a step
-// is lost only when it stays so for 2 s (ginsys/bronzeward#911).
+// is lost only when focus never arrives within 2 s or is lost again after it did (ginsys/bronzeward#911).
 const watch = () => {
   const lost: string[] = [];
-  return { lost, after: async (step: string) => void (await browser.waitUntil(focusKept, { timeout: 2_000, interval: 25 }).catch(() => lost.push(step))) };
+  return { lost, after: async (step: string) => void (await focusSettles(focusKept, step).catch(() => lost.push(step))) };
 };
 // Whether a status or alert shows `text`: announced without moving focus (4.1.3).
 const announced = (text: string) => browser.execute((t: string) => [...document.querySelectorAll('[role="alert"], [role="status"] > p')].some((e) => e.textContent?.includes(t)), text);
