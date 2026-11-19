@@ -60,8 +60,13 @@ func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration)
 	if !end.Equal(end.Truncate(time.Second)) {
 		end = end.Truncate(time.Second).Add(time.Second)
 	}
+	// A duration that cannot hold the rounded end saturates, and the certificate would end early.
+	ttl := end.Sub(now)
+	if !now.Add(ttl).Equal(end) {
+		return Cert{}, ErrLifetime
+	}
 	pair, err := secrets.NewAdminCertificateAndKey(now, &cryptox509.PEMEncodedCertificateAndKey{Crt: k.Crt(), Key: k.Key()},
-		role.MakeSet(r), end.Sub(now))
+		role.MakeSet(r), ttl)
 	if err != nil {
 		return Cert{}, ErrSign
 	}
