@@ -149,3 +149,9 @@ Untested in Safari, each with its reason: the cases at 320 CSS pixels (no BiDi `
 window cannot go below 336 CSS pixels: eight cases are skipped, and one step of the plan page's case is
 skipped inside the case, which runs the rest) and the two-browsers part of ETAG-01 (safaridriver runs one
 session at a time; the deterministic variant runs). Safari's previous major is not run.
+
+The 320 CSS pixel reflow cases are untested in Safari, because safaridriver has no viewport command and
+the window stops at 336 CSS pixels; those cases run in Chrome, Edge, Firefox and Firefox ESR. The lead
+accepted this as a limit (decision RULING-20261119-1756-38, under the owner's 2026-10-07 delegation,
+which the owner may overrule); it is written in the
+[client contracts §15](../docs/spec/client-contracts.md#15-assumptions-and-limits).

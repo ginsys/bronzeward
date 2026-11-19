@@ -59,7 +59,7 @@ point 2). Five levels, from strict to blind:
 | E1 | both are loaded and re-encoded by the machinery (typed load, encoder without comments) first, then E0 | comments, key order, formatting and the typed encoding's normalisation | yes, by construction |
 | E2 | the parsed documents, matched by kind and name, have equal trees | comments, key order, document order, formatting; **not** list order | yes, by construction |
 | E3 | the same documents as typed machinery documents (`configloader`), matched by kind and name, are equal | as E2, plus whatever the typed form normalises | yes, by construction |
-| E4 | the redacted forms, with the reference names masked, are equal as E2 | as E2, and the value behind every reference | **not behind a reference** (measured); a literal secret sits in the tree, so a change shows |
+| E4 | the redacted forms, with the reference names masked, are equal as E2 | as E2, and the value behind every reference | **not behind a reference** (measured); a literal secret that no redaction means masks (compilation §8.3: composed path, schema, value) sits in the tree, so a change shows; a literal in a field the schema marks, or an exact copy of a resolved value, is masked, and a change between two such values can leave the redacted form unchanged (not measured) |
 
 "By construction" means the level reads the plaintext, so a different value is a different tree. N4
 (§5.5) measured it for E0 only: its harness does not change the plaintext columns.
@@ -152,6 +152,15 @@ fragments share no leaf. Leaf by leaf it does matter for `w1`: the forward order
 reverse order composes and compares equal at E2 to E4. Order can therefore decide whether a
 composition is accepted; the cause was not investigated.
 
+Rule R2 was shown on inputs that classify alike. `measure.go` builds the common fragment and each
+role fragment from the first machine of the group and its classes (`mis[0]`, and the first machine of
+each role), and thins each machine's base with that machine's own classes, with R2 applied per
+machine. R2 can therefore demote a leaf on one machine and not on the machine a fragment came from.
+Every machine was composed and compared equal individually, so the six-machine result stands, but it
+holds because these six machines classify alike under R2; it does not show that R2 is consistent
+across a group whose machines classify differently. Applying the demotion across the whole group, or
+thinning each base from the fragments' classification, is left open.
+
 Two consequences. A path-level proposal is **not composable as it stands**: in the forward order the
 compiler accepted the split on all six machines only under R2, a rule about the patcher's merge
 granularity (the one leaf-by-leaf acceptance was `w1` in the reverse order), so a proposal that has
@@ -235,9 +244,12 @@ short or integer secrets quoted in a message.
   (N4); E1 to E3 are built to see it (§5.5). They run inside the compiler's process, where both the
   old base and the new composition resolve to plaintext, and they report a path and a yes or no,
   never a value. E4, the only level computable from what the API serves, is blind to a change behind
-  a reference (N4). Compilation §8.4 lists secrets nothing identifies: those are not behind a
-  reference, so a change to one appears in the redacted tree and E4 sees it. What E4 cannot do is
-  recognise such a value as a secret. A change is detectable; a secret that was never marked stays
+  a reference (N4). Compilation §8.4 lists secrets nothing identifies (a field the schema does not
+  mark and nothing references): those are not behind a reference and no redaction means masks them,
+  so a change to one appears in the redacted tree and E4 sees it. A literal that redaction does
+  mask (compilation §8.3: a field the schema marks, an exact copy of a resolved value) is the other
+  case: a change between two such values can leave the redacted form unchanged, so E4 can miss it;
+  this was not measured. What E4 cannot do is recognise such a value as a secret. A change is detectable; a secret that was never marked stays
   unknown to every level.
 - **A proposal can copy an unmarked secret into a fragment.** The engine reads sanitized documents,
   where an unmarked secret is a plain leaf, so it can put one into a shared fragment as source text.

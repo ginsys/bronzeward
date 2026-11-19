@@ -527,11 +527,15 @@ Next: supply the cluster's first key, then import its configuration.
 `POST /clusters/{id}/first-keys` ([persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)).
 `--kind` is `talosconfig`, `machine-config` (a control plane configuration) or `secrets-bundle`,
 `--file` names the document, and `--endpoint` is required for every kind: the server tries the key
-at that address before it stores it, and a failed try stores nothing and leaves the existing key. The file is read with a size limit, sent once and never copied, logged or
+at that address before it stores it, and a failed try stores nothing and leaves the existing key.
+`--endpoint` is a Talos node address here, as on `cluster discover` and `cluster onboard`. It is not
+the Kubernetes API URL that `cluster add --endpoint` records (`--kubernetes-endpoint` on `cluster
+onboard`), and it is never the Bronzeward server, which `context add --server` sets; the global flag
+is `--context`. The file is read with a size limit, sent once and never copied, logged or
 printed; a talosconfig is cut to the one context `--talos-context` names (else the current one). It
 answers with the cluster, the kind, whether a key was replaced and the CA key's version; the refusals
 of §3.4 (`first-key-unusable`, `first-key-no-ca-key`, `first-key-role-insufficient`,
-`first-key-endpoint-no-control-plane`) print their rule and nothing from the document, and a failed try
+`first-key-endpoint-no-control-plane`, `first-key-cluster-mismatch`) print their rule and nothing from the document, and a failed try
 (`talos-access-unavailable`) says only that the key could not be tried at that address, because a node that
 refuses the key and one that does not answer are not told apart. A talosconfig
 whose certificate is `os:reader` is refused: Bronzeward needs the `os:admin` read of a control
@@ -569,7 +573,8 @@ the same address. A cluster where no control-plane member answered stops at disc
 sent, because no address could carry the first key. `cluster discover` prints that same address in
 its `cluster first-key` command.
 
-A second run finds what exists and changes nothing that stands. A `409 conflict` on the cluster or
+A second run finds what exists and changes nothing that stands, except the first key, which it supplies
+again (below). A `409 conflict` on the cluster or
 on a machine names the existing record, which the command reads and shows as it is recorded (the
 flags are not applied to it). A machine that is recorded in another cluster stops the command, naming
 both cluster IDs, before the first key. The draft is titled `onboard <name>`, and an open draft of that
@@ -1483,7 +1488,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `cluster add` | `POST /clusters` | author | yes | no |
 | `cluster discover` | none: reads Talos nodes with the operator's talosconfig | none | no | no |
 | `cluster first-key` | `POST /clusters/{id}/first-keys` | author (human) | yes | no |
-| `cluster onboard` | `POST /clusters`, `POST /clusters/{id}/first-keys`, `POST /machines`, `POST /drafts`, `POST /ingestions` | author (human) | yes | draft's |
+| `cluster onboard` | `POST /clusters`, `POST /machines`, `POST /clusters/{id}/first-keys`, `POST /drafts`, `POST /ingestions` | author (human) | yes | draft's |
 | `machine add` | `POST /machines` | author | yes | no |
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | no |
 | `import start` | `POST /ingestions` | author | yes | draft's |

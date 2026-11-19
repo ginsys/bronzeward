@@ -412,11 +412,18 @@ They are held apart **(choice §17.29)**.
   provider's tooling, and `secret/data/access/talos/<cluster id>`, the
   `bw-onboard` create-only policy and `internal/accessput` are retired. No
   Bronzeward identity but the signer reads, lists or deletes the key at this
-  path (an imported control plane configuration's `machine.ca.key` is also a
-  schema secret, extracted as an ordinary generation, compilation §1), and the
-  normal API never carries a secret value (compilation §1): a first key enters
-  by the route of §3.4, which extracts the key before anything is persisted
-  (design §7.1). `internal/talos/discover` stays a read-only package with its
+  path. That is a claim about the path and the signer's copy, not that the value
+  reaches no other process: an `os:admin` machine configuration read, which the
+  ingestion and the executor make with their certificates (§3.4, "What it
+  signs"), carries `machine.ca.key` in its answer. The ingestion extracts it as a
+  schema secret into an ordinary generation (compilation §1), the executor's
+  observations and dispatches are held to the scan of compilation §15 for the
+  key and the client key (§16), the compiler's own copy is open in
+  [#889](https://github.com/ginsys/bronzeward/issues/889), and a leaked
+  `os:admin` certificate can read the key (§3.4, "Expiry is the only
+  revocation"). The normal API never carries a secret value (compilation §1)
+  except the first-key route of §3.4, which extracts the key before anything is
+  persisted (design §7.1). `internal/talos/discover` stays a read-only package with its
   own dial and source guard, and the reader of the machine configuration and the
   apply path stay out of the CLI (client contracts, "Excluded").
 - **Who uses it.** The signer identity alone reads the CA key, its latest
@@ -451,8 +458,10 @@ They are held apart **(choice §17.29)**.
   each observation and use-time check (execution and recovery §4.1). The path is disjoint from the secret generations
   under `secret/data/gen/*`, so the ingestion identity still never reads what
   it creates (compilation §1, choice §16.1 there). The compiler, the
-  dependency monitor and the normal API cannot read it; only its metadata is
-  read, by the access-presence identity alone, for the presence answer below.
+  dependency monitor and the normal API cannot read it. The presence answer
+  below reads only its metadata, with the access-presence identity alone; the
+  metadata identity's `secret/metadata/*` grant (dependency monitor §4) reaches
+  the same metadata, though the monitor never requests it (choice §17.42).
 - **What it can do.** Reading a node's machine configuration needs the
   `os:admin` Talos role, as observed on the fixture (`internal/talos`
   `TestLiveRoleProbe`, Talos v1.14.5, recorded in the fixture README and the same as on v1.13.6:
@@ -635,16 +644,35 @@ there.
   working key with one Talos does not trust, and one rule holds for all three
   kinds (lead ruling RULING-20261118-2103-2, 18 November 2026, on the design
   review of this section). The cost is a reachable endpoint at supply time, so
-  there is no offline first supply; onboarding needs one anyway to ingest. An
+  there is no offline first supply; onboarding needs one anyway to ingest.
+  **A key of another cluster is refused on every supply** (not built yet:
+  [#938](https://github.com/ginsys/bronzeward/issues/938)). The node that
+  answers the `Version` read can belong to any cluster, so after the try is
+  answered and before the write the route reads the node's Talos cluster ID on
+  the same connection, as an ingestion does (§3.3, "Identity before use"), and
+  compares it with the cluster record's `talosClusterId`, which every cluster
+  has (§7.3). A difference is `422 validation-failed` with a `rule` of
+  `first-key-cluster-mismatch`; neither id is in the answer, an event or a log
+  line, nothing is written, and the stored key and its version stay as they
+  were. It runs on a first supply as well as a replacement, because a first
+  supply from the wrong cluster is the same defect. An
   `endpoint` missing for any kind, or outside the §3.3 grammar, is a malformed
   body, `400 invalid-request`, with nothing written. The
   document is extracted before anything is persisted (design §7.1) and is never
-  stored, logged, returned or quoted in an error (compilation §13); its parse
-  failures give a fixed refusal, `422 validation-failed` with a `rule` of
+  stored, logged, returned or quoted in an error (compilation §13); its
+  refusals give a fixed `422 validation-failed` with a `rule` of
   `first-key-unusable`, `first-key-no-ca-key`, `first-key-role-insufficient`,
-  or `first-key-endpoint-no-control-plane` (the talosconfig read at the endpoint
-  found no CA key, as a worker node's answer would), and a failed try, or any
-  other failed Talos read, is `503 talos-access-unavailable` (§3.3, failure).
+  `first-key-endpoint-no-control-plane` or `first-key-cluster-mismatch`. Two of
+  them need a Talos read, so a refused read does not win by default, and each
+  outcome is its own: a document that cannot be parsed, or a client that cannot
+  be built or dialled at all (a talosconfig that does not parse, an endpoint
+  that cannot be dialled as given), fails before any read as
+  `first-key-unusable`; a configuration read the node answers
+  with `PermissionDenied` is `first-key-role-insufficient`; an answer that
+  parses and holds no CA key, as a worker node's answer would, is
+  `first-key-endpoint-no-control-plane`. Any other failed read, an answer that
+  does not parse as a machine configuration, and a failed try are
+  `503 talos-access-unavailable` (§3.3, failure).
   A node that refuses the signed certificate and an endpoint that does not
   answer are not told apart: Talos reports both as `Unavailable` (measured, with
   the TLS cause not isolated, §3.3), so the problem says only that the try
@@ -717,7 +745,20 @@ there.
   or recovery observation, and for dispatch), for a lifetime that covers the use
   and no more, below a configured maximum (the value belongs to the
   implementation, not to this contract). The certificate's `NotBefore` is the
-  signer's clock at signing; the node's clock is not read.
+  signer's clock at signing minus a fixed allowance of 300 seconds (not built
+  yet: [#938](https://github.com/ginsys/bronzeward/issues/938)); the node's
+  clock is not read, and the allowance covers its drift. A node refused a
+  certificate presented 4.1 s before its `NotBefore`, and one signed with
+  `now - 1 h` was accepted ([signing locally](../design/research/20261118-local-talos-signing.md),
+  §3), but skew against a real node was not measured (the fixture's node shares
+  the signer's clock), so 300 s is a chosen bound and not a measured one. It is
+  far above the skew of a synchronised clock and is the five minutes kubeadm
+  uses for the CA certificates it generates (`CertificateBackdate`,
+  `cmd/kubeadm/app/constants/constants.go`). `NotAfter` stays measured from the
+  signing instant, and the maximum lifetime applies to that span and not to
+  `NotAfter` minus `NotBefore`, so back-dating adds no valid time after
+  signing and a leaked certificate is usable for no longer than before. The
+  value is fixed and is not a setting.
 - **Expiry is the only revocation, and a connection closes with it.** Nothing
   revokes one certificate: Talos has no per-certificate revocation evidenced
   (design §13.2) and a held connection answered a request after `NotAfter` in
@@ -4163,11 +4204,20 @@ each (design §7.7 consequences):
   `endpoint` reaches no control plane, with control plane endpoints embedded in
   the file that are ignored (`first-key-endpoint-no-control-plane`), and a key
   of an unrelated CA supplied as a replacement of a working key
-  (`503 talos-access-unavailable`, the stored key and its version unchanged)
+  (`503 talos-access-unavailable`, the stored key and its version unchanged),
+  a talosconfig that cannot be dialled (`first-key-unusable`) against one whose
+  read fails or whose answer is not a machine configuration
+  (`503 talos-access-unavailable`), and a valid key and endpoint of another
+  cluster, as a first supply and as a replacement (`first-key-cluster-mismatch`,
+  neither id in the answer; not built yet:
+  [#938](https://github.com/ginsys/bronzeward/issues/938), with the control that
+  the matching cluster's key is accepted)
   are each refused with nothing written, and that a certificate signed by an unrelated CA
   is refused by the node; the roles by use (`os:reader` for an observation that does not read
   the configuration, `os:admin` for the rest) and a lifetime that covers the
-  use and no more; no Talos connection kept past its certificate's
+  use and no more, measured from the signing instant, with a `NotBefore` 300 s
+  before it (not built yet:
+  [#938](https://github.com/ginsys/bronzeward/issues/938)); no Talos connection kept past its certificate's
   `NotAfter`, with a control that holds one open past it and must then fail
   the test; every supply and replacement recorded as an act by an `author`
   with no approval step, with a control that requires an approval and must
