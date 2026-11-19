@@ -15,7 +15,7 @@
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
-import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, measure, narrow, onMain, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
+import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, itNarrow, measure, narrow, onMain, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -190,7 +190,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     expect(w.lost).toEqual([]);
   });
 
-  it("wizard, 320 CSS pixels: the form with a long draft title and the import page do not scroll the page sideways", async function () {
+  itNarrow("wizard, 320 CSS pixels: the form with a long draft title and the import page do not scroll the page sideways", async function () {
     this.timeout(180_000);
     const wide = `w${"x".repeat(119)}`;
     const d = await draft(`synthetic ${wide}`);
@@ -274,7 +274,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await focusSettles(() => focusIn(CLAIM), "the claim section");
     });
 
-    it("320 CSS pixels: the paused import, its open review and the marks panel do not scroll the page sideways", async function () {
+    itNarrow("320 CSS pixels: the paused import, its open review and the marks panel do not scroll the page sideways", async function () {
       this.timeout(180_000);
       const id = await startImport("encrypted", true, "paused");
       await openImport(id, "paused");
@@ -368,7 +368,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       expect(w.lost).toEqual([]);
     });
 
-    it("320 CSS pixels: the conflict view with their text and mine does not scroll the page sideways", async function () {
+    itNarrow("320 CSS pixels: the conflict view with their text and mine does not scroll the page sideways", async function () {
       this.timeout(180_000);
       const { id, name, etag } = await toStaleSave();
       await $('main ul[aria-label="Entries"]').$(`button=fragment ${name}`).click();

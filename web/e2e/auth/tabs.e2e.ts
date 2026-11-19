@@ -4,7 +4,7 @@ import { $, browser, expect } from "@wdio/globals";
 import { PRINCIPAL_CHANGED } from "../../src/app.tsx";
 import { FIXTURE_PAGE } from "../auth.conf.ts";
 import type { Counts } from "../provider.ts";
-import { counts, fixtureSignIn, settled, storageEmpty, where } from "./helpers.ts";
+import { counts, fixtureSignIn, inSafari, settled, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -28,6 +28,8 @@ async function newTab(url: string): Promise<string> {
   const w = await browser.newWindow(url);
   const handle = "handle" in w ? w.handle : w.contextId;
   await browser.switchToWindow(handle);
+  // Safari's window.open can leave the new window on about:blank, never loading the address.
+  if (inSafari() && url !== "about:blank" && (await browser.getUrl()) === "about:blank") await browser.url(url);
   return handle;
 }
 
