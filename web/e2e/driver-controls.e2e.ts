@@ -1,7 +1,7 @@
 // Positive controls for the harness's own commands. wdio.conf.ts changes four commands in Safari
 // (getText, keys, the select commands and Tab), and a worker hook that throws is logged and ignored:
 // a command that was not changed leaves every later case failing on the driver's own behaviour
-// (ginsys/bronzeward#892). These cases pass in every browser, and fail in Safari when a change did not
+// (ginsys/bronzeward#892). These cases pass in every browser (the disabled-select case runs only in Safari), and fail in Safari when a change did not
 // take, so the run says so, and names the command, before the cases that depend on it.
 import { $, browser, expect } from "@wdio/globals";
 
@@ -28,13 +28,15 @@ describe("the harness's own commands", () => {
     expect(await $("#deep").getText()).toBe("shown");
   });
 
-  it("a disabled select, or a disabled option, keeps its value and the page hears nothing", async () => {
+  it("a disabled select, or a disabled option, keeps its value and the page hears nothing", async function () {
+    // The refusal is Safari's harness change: geckodriver's own select command sets a disabled select's value.
+    if ((browser.capabilities as { browserName?: string }).browserName?.toLowerCase() !== "safari") return this.skip();
     await browser.execute(() => {
       const heard: string[] = [];
       (window as unknown as { heardDisabled: string[] }).heardDisabled = heard;
       for (const id of ["sd", "so"]) for (const type of ["input", "change"]) document.getElementById(id)!.addEventListener(type, () => heard.push(id));
     });
-    // Each driver may refuse the choice or ignore it: the value stays, and no event is raised.
+    // The driver may refuse the choice or ignore it: the value stays, and no event is raised.
     await $("#sd").selectByAttribute("value", "y").catch(() => undefined);
     await $("#so").selectByAttribute("value", "q").catch(() => undefined);
     expect(await $("#sd").getValue()).toBe("x");
