@@ -358,7 +358,7 @@ jobs:
     # owner decided on 2026-11-01 to require browser-auth and idp, after this split. The job's
     # result is success only when all four legs succeed. fail-fast stays off so that one failing
     # browser does not hide another's result. Not on macOS: its hosted runner has no Docker for the
-    # provider. Each leg uploads under its own artifact name, after a failed run too: the run's
+    # provider, so Safari runs these cases in safari.yml, with the services run natively. Each leg uploads under its own artifact name, after a failed run too: the run's
     # files when its scan passed, and only a scanned listing of their names and sizes, or nothing,
     # when it did not.
     strategy:
