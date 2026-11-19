@@ -55,9 +55,10 @@ jobs:
         with:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: node go
-      # The downloaded Chrome and Firefox are not under a path the runner's AppArmor profiles
-      # allow, so with unprivileged user namespaces restricted Chrome finds no sandbox. The
-      # runner is this job's alone; the browsers keep their sandboxes.
+      # Chrome for Testing is downloaded into the WebdriverIO cache, outside the path the runner's
+      # AppArmor profile for Chrome allows, so with unprivileged user namespaces restricted it has
+      # no sandbox. This lifts that restriction for the whole runner, which exists for this job
+      # only. (ci.yml's Edge workaround is another one: it restores Edge's setuid sandbox.)
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # The pinned Edge replaces the runner's, at the default path; dpkg allows the downgrade.
       - name: Install the pinned Edge
@@ -71,6 +72,13 @@ jobs:
           got=$(/opt/microsoft/msedge/msedge --version)
           case "$got" in *"$want"*) echo "$got" ;; *) echo "edge: installed '$got', not $want" >&2; exit 1 ;; esac
       - run: mise run browser
+      # The versions the run used, so the log shows the driver is the pinned one (WebdriverIO
+      # ignores a driver option it does not read). The driver is cached under the run's TMPDIR.
+      - if: always()
+        name: Show the Edge and driver versions
+        run: |
+          /opt/microsoft/msedge/msedge --version
+          find "${TMPDIR:-/tmp}" "$RUNNER_TEMP" -name msedgedriver -type f -print -exec {} --version \;
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-previous-linux
@@ -98,8 +106,10 @@ jobs:
         with:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: node go
-      # As in the browser job: the downloaded browsers need user namespaces for their sandboxes.
-      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # As in the browser job, for the downloaded Chrome only: Edge is installed under /opt and
+      # Firefox does not use Chrome's sandbox.
+      - if: matrix.browser == 'chrome-previous'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - if: matrix.browser == 'edge-previous'
         name: Install the pinned Edge
         run: |
@@ -115,6 +125,11 @@ jobs:
       - run: mise run dev-bao
       - run: mise run dev-idp
       - run: mise run browser-auth
+      - if: always() && matrix.browser == 'edge-previous'
+        name: Show the Edge and driver versions
+        run: |
+          /opt/microsoft/msedge/msedge --version
+          find "${TMPDIR:-/tmp}" "$RUNNER_TEMP" -name msedgedriver -type f -print -exec {} --version \;
       # After a failed run too. The task writes the scan's own status; the whole directory goes up
       # only when the scan passed, otherwise only the listing the task scanned does, if it passed.
       - id: publish
