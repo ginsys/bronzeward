@@ -163,6 +163,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     await browser.keys("ArrowDown");
     expect(await $('input[name="staging"][value="transient"]').isSelected()).toBe(true);
     // A review needs encrypted staging, so the checkbox is disabled and Tab passes it.
+    // The staging choice disables it in the same render (web/src/imports.tsx:702), so the read after the key press cannot pass early.
     expect(await $('input[name="review"]').isEnabled()).toBe(false);
     // The filled form is on show: its contrast and the size of its selects and buttons (1.4.3, 2.5.8).
     const form = await measure();
