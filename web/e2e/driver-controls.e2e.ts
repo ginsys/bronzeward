@@ -18,6 +18,19 @@ describe("the harness's own commands", () => {
     expect(await $("#l").getText()).toBe("started\nsucceeded");
   });
 
+  it("getText and an assertion on a text wait for an element that appears after the call", async () => {
+    await browser.execute(() => {
+      setTimeout(() => {
+        const p = document.createElement("p");
+        p.id = "late";
+        p.textContent = "later ";
+        document.body.append(p);
+      }, 1000);
+    });
+    await expect($("#late")).toHaveText("later");
+    expect(await $("#late").getText()).toBe("later");
+  });
+
   it("keys sends repeated characters and spaces whole", async () => {
     await $("#i").click();
     await browser.keys("198.51.100.43  x".split(""));
