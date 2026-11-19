@@ -48,7 +48,8 @@ const capabilities: Record<string, WebdriverIO.Capabilities> = {
     // which reads edgeDriverVersion.
     "wdio:edgedriverOptions": { edgeDriverVersion: previous.edge.version } as unknown as WebdriverIO.EdgedriverOptions,
   },
-  "firefox-previous": { browserName: "firefox", browserVersion: previous.firefox, unhandledPromptBehavior: acceptLeave, "moz:firefoxOptions": { args: headless ? ["-headless"] : [] } },
+  // A bare version reads as a nightly build id to @puppeteer/browsers; "stable_<version>" is the release archive's.
+  "firefox-previous": { browserName: "firefox", browserVersion: `stable_${previous.firefox}`, unhandledPromptBehavior: acceptLeave, "moz:firefoxOptions": { args: headless ? ["-headless"] : [] } },
 };
 const browsers = (process.env["BW_BROWSERS"] ?? "chrome,firefox").split(",");
 for (const b of browsers) if (!(b in capabilities)) throw new Error(`unknown browser ${b}`);
