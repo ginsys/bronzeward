@@ -55,6 +55,10 @@ jobs:
         with:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: node go
+      # The downloaded Chrome and Firefox are not under a path the runner's AppArmor profiles
+      # allow, so with unprivileged user namespaces restricted Chrome finds no sandbox. The
+      # runner is this job's alone; the browsers keep their sandboxes.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # The pinned Edge replaces the runner's, at the default path; dpkg allows the downgrade.
       - name: Install the pinned Edge
         run: |
@@ -94,6 +98,8 @@ jobs:
         with:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: node go
+      # As in the browser job: the downloaded browsers need user namespaces for their sandboxes.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - if: matrix.browser == 'edge-previous'
         name: Install the pinned Edge
         run: |
