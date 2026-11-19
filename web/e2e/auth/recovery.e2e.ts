@@ -37,6 +37,7 @@ async function fill(reason: string) {
   await $('input[name="database-taken"]').setValue(when);
   await $('input[name="stoppedAt"]').setValue(when);
   await $('input[name="reason"]').setValue(reason);
+  // The gate follows the typed fields synchronously (web/src/recovery.tsx:244), so the read cannot pass early.
   expect(await $("main form").$("button=Enter recovery").isEnabled()).toBe(false);
   await $("main form").$("label*=Type enter").$("input").setValue("enter");
   expect(await $("main form").$("button=Enter recovery").isEnabled()).toBe(true);
@@ -136,6 +137,7 @@ describe("the recovery entry (#364)", () => {
     await $('input[name="database-taken"]').setValue(when);
     await $('input[name="stoppedAt"]').setValue(when);
     await $('input[name="reason"]').setValue("unconfirmed synthetic restore");
+    // Same gate (web/src/recovery.tsx:244): it follows the typed fields synchronously.
     expect(await $("main form").$("button=Enter recovery").isEnabled()).toBe(false);
     await browser.execute(() => document.querySelector<HTMLFormElement>("main form[aria-label='Enter recovery']")!.requestSubmit());
     await browser.pause(1_000);
@@ -193,6 +195,7 @@ describe("the recovery entry (#364)", () => {
     const revoke = $("main form[aria-label='Revoke identity']");
     await expect(exit).toBeExisting({ wait: 20_000 });
     for (const [form, label] of [[exit, "Exit recovery"], [revoke, "Revoke identity"]] as const) {
+      // Disabled by role in the same `Action` element as its reason (web/src/shell.tsx:53-62), so it cannot pass early.
       expect(await form.$(`button=${label}`).isEnabled()).toBe(false);
       expect(await form.getText()).toContain("Needs recovery-admin");
     }
@@ -209,6 +212,7 @@ describe("the recovery entry (#364)", () => {
   it("a revocation submitted without the typed confirmation sends nothing, the disabled button bypassed", async () => {
     await openRevocation("revocation-unconfirmed");
     await fillRevocation({ iss: FIXTURE_ISSUER, sub: "h-revokee-unconfirmed", reason: "unconfirmed synthetic revocation" }, "");
+    // The gate follows the typed fields synchronously (web/src/recovery.tsx:356,399), so the read cannot pass early.
     expect(await $("main form[aria-label='Revoke identity']").$("button=Revoke identity").isEnabled()).toBe(false);
     await browser.execute(() => document.querySelector<HTMLFormElement>("main form[aria-label='Revoke identity']")!.requestSubmit());
     await browser.pause(1_000);

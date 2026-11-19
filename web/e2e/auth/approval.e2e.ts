@@ -17,7 +17,7 @@ import { RECOVERY_START } from "../../src/recovery.tsx";
 import { SCOPE_NO_MODE, SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, type Step } from "../injector.ts";
-import { answers, api, disposable, eventually, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, measure, mint, mirrored, narrow, overflows, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
+import { absent, answers, api, disposable, eventually, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, measure, mint, mirrored, narrow, overflows, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The page's answer to Approve and to Revoke approval: each control's Result, in an element that takes
@@ -78,8 +78,10 @@ describe("approval and revocation (#358)", () => {
       `Self-approval, predicted: you did not create this plan or publish this release, and you authored no fragment, profile or assignment revision in it. ${UNPREDICTED}`,
       { wait: 20_000 },
     );
+    // Not a single read that can pass early: the gate is `busy || typed !== p.id` (web/src/approval.tsx:143), false from the first render until the full ID is typed.
     expect(await approve().isEnabled()).toBe(false);
     await typed().setValue(PLAN.slice(0, -1));
+    // Same gate: a short ID differs from the plan ID, and typing is synchronous.
     expect(await approve().isEnabled()).toBe(false);
     await typed().setValue(PLAN);
     expect(await approve().isEnabled()).toBe(true);
@@ -123,6 +125,7 @@ describe("approval and revocation (#358)", () => {
     await fromTitle();
     const before = await tabTo((f) => f.name === "plan", "the typed plan ID field");
     expect(before.some((t) => t.startsWith("@@ machine.nodeLabels @@"))).toBe(true);
+    // Nothing typed yet, so the gate `busy || typed !== p.id` (web/src/approval.tsx:143) holds from the first render.
     expect(await approve().isEnabled()).toBe(false);
     const seen = await measure();
     expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
@@ -193,6 +196,7 @@ describe("approval and revocation (#358)", () => {
         const route = `/plans/${seed.plans.proposed}/approvals`;
         await open(human, undefined, "proposed", {}, seed.plans.proposed);
         await typed().setValue(seed.plans.proposed);
+        // The button is disabled with its reason in one element, so the reason read at the next lines confirms the gate; an early read cannot pass here.
         expect(await approve().isEnabled()).toBe(false);
         await expect($('main form[aria-label="Approve plan"]')).toHaveText(expect.stringContaining("Needs approver"));
         await browser.execute(() => document.querySelector<HTMLFormElement>('main form[aria-label="Approve plan"]')!.requestSubmit());
@@ -279,6 +283,7 @@ describe("approval and revocation (#358)", () => {
       await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 30_000 });
       expect(await posts()).toEqual([`POST ${route}`]);
       expect((await answers()).filter((a) => a.startsWith(`${route} `))).toEqual([`${route} 201`]);
+      // "Repeat exactly" is drawn disabled in the same block as the notice text awaited above (web/src/states.tsx:167-179), so it cannot pass early.
       expect(await notice().parentElement().$("button=Repeat exactly").isEnabled()).toBe(false);
       expect((await api(at, "h-viewer", "GET", `/plans/${id}`)).body!["state"]).toBe("approved");
     });
@@ -316,7 +321,7 @@ describe("approval and revocation (#358)", () => {
       const { route } = await approving(["scope-refused"]);
       await expect($('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`Scope ${INJECTED_SCOPE} refuses this request. ${SCOPE_NO_MODE}`), { wait: 20_000 });
       expect(await posts()).toEqual([`POST ${route}`]);
-      expect(await $('[data-testid="recovery"]').isExisting()).toBe(false);
+      await absent(() => $('[data-testid="recovery"]').isExisting(), "the recovery banner after a scope's refusal");
       expect(await $("body").getText()).not.toContain(RECOVERY_START);
     });
   });
