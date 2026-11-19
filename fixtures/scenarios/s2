@@ -251,7 +251,7 @@ released_once() {
         JOIN operation op ON op.id = r.operation
       WHERE o.id = rm.publication_observation AND o.machine = rm.machine
         AND s.purpose = 'publication' AND s.operation = r.operation
-        AND s.publication_generation = op.owner_gen AND o.access_path = 'access/talos/' || r.cluster
+        AND s.publication_generation = op.owner_gen AND o.access_path = 'access/talos-ca/' || r.cluster AND o.access_serial IS NOT NULL AND o.access_not_after IS NOT NULL
         AND substring(o.running_version FROM '^v[0-9]+\.[0-9]+') = r.contract))
       FROM release_machine rm JOIN release r ON r.id = rm.release WHERE r.operation = '$pub_op'")" = t ]
 }

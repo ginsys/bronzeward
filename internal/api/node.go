@@ -135,8 +135,11 @@ func (n *node) mismatch(got talos.Identity) string {
 
 func (a *API) accessFailure(j job, cause, subject, id string, err error) *refusal {
 	a.quote(j, cause, err)
-	r := refuse(http.StatusServiceUnavailable, "talos-access-unavailable",
-		"the machine could not be read through its cluster's Talos access; the claim is abandoned").with(subject, id)
+	detail := "the machine could not be read through its cluster's Talos access; the claim is abandoned"
+	if cause == "absent" {
+		detail = noFirstKeyDetail + "; the claim is abandoned"
+	}
+	r := refuse(http.StatusServiceUnavailable, "talos-access-unavailable", detail).with(subject, id)
 	r.cause = cause
 	return r
 }

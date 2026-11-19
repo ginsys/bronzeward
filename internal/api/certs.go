@@ -15,6 +15,10 @@ import (
 // errNoKeyAct is a cluster no first-key act names a key for: there is nothing to sign from.
 var errNoKeyAct = errors.New("no first-key act names a CA key for the cluster")
 
+// noFirstKeyDetail is the remedy a refusal for cause "absent" names: only the first-keys route
+// creates an act, so a cluster onboarded before it needs a first key supplied (persistence-api.md §9.1).
+const noFirstKeyDetail = "no first key is recorded for the cluster; supply one with POST /clusters/{id}/first-keys"
+
 // errKeyChanged is a stored CA key version whose created_time is not the one the act recorded: the
 // path and version name other bytes than the supply the act records.
 var errKeyChanged = errors.New("the CA key version was written again since its act")

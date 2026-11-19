@@ -88,7 +88,16 @@ func (a *API) publicationEvidence(ctx context.Context, q publicationQuery, j pub
 		return ref(409, "publication-evidence", "superseded-observation"), nil
 	}
 	if !usable {
-		return ref(503, "publication-evidence", "unreadable-identity-or-version"), nil
+		r := ref(503, "publication-evidence", "unreadable-identity-or-version")
+		var access sql.NullString
+		if err := q.QueryRowContext(ctx, `SELECT unread->'identity'->>'cause' FROM observation WHERE id = $1`, observation).
+			Scan(&access); err != nil {
+			return nil, err
+		}
+		if access.String == "absent" {
+			r.detail = "Publication refused by its node evidence check: " + noFirstKeyDetail + "."
+		}
+		return r, nil
 	}
 	if !identity {
 		return ref(422, "publication-identity", "identity-mismatch"), nil
