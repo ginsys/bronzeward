@@ -583,7 +583,7 @@ func TestNewStartsPublisher(t *testing.T) {
 	mustExec(t, b.db, `UPDATE machine SET talos_endpoint = $2 WHERE id = $1`, b.machine, node.Endpoint)
 	x.access = provider.NewTalosAccess(x.access.Version(), pki.Talosconfig("", "", ""))
 	h := New(life, b.db, auth.NewVerifier(b.cfg, b.db, auth.Discover(b.cfg.OIDC)), b.cfg, testExecution(), nil,
-		&Publishers{Meta: b.held, Compiler: b.held}, x,
+		&Publishers{Meta: b.held, Compiler: b.held}, x, nil,
 		&config.Ingestion{Instance: "a", Heartbeat: 20 * time.Millisecond, Lease: time.Minute}, epoch, false, nil)
 	defer stopping(h.(*API), stop)
 	op := b.queuePublish(1)

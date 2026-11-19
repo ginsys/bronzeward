@@ -29,6 +29,48 @@ func (e EmbeddedFormat) Valid() bool {
 	}
 }
 
+// Defines values for FirstKeyBodyKind.
+const (
+	FirstKeyBodyKindMachineConfig FirstKeyBodyKind = "machine-config"
+	FirstKeyBodyKindSecretsBundle FirstKeyBodyKind = "secrets-bundle"
+	FirstKeyBodyKindTalosconfig   FirstKeyBodyKind = "talosconfig"
+)
+
+// Valid indicates whether the value is a known member of the FirstKeyBodyKind enum.
+func (e FirstKeyBodyKind) Valid() bool {
+	switch e {
+	case FirstKeyBodyKindMachineConfig:
+		return true
+	case FirstKeyBodyKindSecretsBundle:
+		return true
+	case FirstKeyBodyKindTalosconfig:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FirstKeyInputKind.
+const (
+	FirstKeyInputKindMachineConfig FirstKeyInputKind = "machine-config"
+	FirstKeyInputKindSecretsBundle FirstKeyInputKind = "secrets-bundle"
+	FirstKeyInputKindTalosconfig   FirstKeyInputKind = "talosconfig"
+)
+
+// Valid indicates whether the value is a known member of the FirstKeyInputKind enum.
+func (e FirstKeyInputKind) Valid() bool {
+	switch e {
+	case FirstKeyInputKindMachineConfig:
+		return true
+	case FirstKeyInputKindSecretsBundle:
+		return true
+	case FirstKeyInputKindTalosconfig:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FragmentInputLayer.
 const (
 	FragmentInputLayerCluster  FragmentInputLayer = "cluster"
@@ -1243,6 +1285,35 @@ type ExitRequest struct {
 	Facts *map[string]string `json:"facts,omitempty"`
 }
 
+// FirstKeyBody defines model for FirstKeyBody.
+type FirstKeyBody struct {
+	CaKeyVersion struct {
+		CreatedTime time.Time `json:"createdTime"`
+		Version     int       `json:"version"`
+	} `json:"caKeyVersion"`
+	Cluster string           `json:"cluster"`
+	Kind    FirstKeyBodyKind `json:"kind"`
+
+	// Replaced Whether the stored key replaced an earlier version.
+	Replaced bool `json:"replaced"`
+}
+
+// FirstKeyBodyKind defines model for FirstKeyBody.Kind.
+type FirstKeyBodyKind string
+
+// FirstKeyInput defines model for FirstKeyInput.
+type FirstKeyInput struct {
+	// Document The first key's text, at most 512 KiB, never stored, logged or returned.
+	Document string `json:"document"`
+
+	// Endpoint The one address dialled, in the machine endpoint grammar.
+	Endpoint string            `json:"endpoint"`
+	Kind     FirstKeyInputKind `json:"kind"`
+}
+
+// FirstKeyInputKind defines model for FirstKeyInput.Kind.
+type FirstKeyInputKind string
+
 // FragmentBody defines model for FragmentBody.
 type FragmentBody struct {
 	Cluster      string    `json:"cluster"`
@@ -2261,6 +2332,15 @@ type PostClustersParams struct {
 	BronzewardExpectedEpoch *ExpectedEpoch `json:"Bronzeward-Expected-Epoch,omitempty"`
 }
 
+// PostClustersIdFirstKeysParams defines parameters for PostClustersIdFirstKeys.
+type PostClustersIdFirstKeysParams struct {
+	// IdempotencyKey 16 to 128 characters of [A-Za-z0-9_-] (persistence and API §7.1).
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// BronzewardExpectedEpoch Optional; the epoch identity the client expects. When the key has no record and this names another epoch, the request is refused 412 epoch-mismatch and its own transaction commits nothing. An empty one or two of them are 400 invalid-request (API revision 2; persistence and API §7.2, §9.1).
+	BronzewardExpectedEpoch *ExpectedEpoch `json:"Bronzeward-Expected-Epoch,omitempty"`
+}
+
 // GetDependenciesParams defines parameters for GetDependencies.
 type GetDependenciesParams struct {
 	// Limit 1 to 500; 50 when absent.
@@ -2757,6 +2837,9 @@ type PostApprovalsIdRevocationsJSONRequestBody = ReasonInput
 
 // PostClustersJSONRequestBody defines body for PostClusters for application/json ContentType.
 type PostClustersJSONRequestBody = ClusterInput
+
+// PostClustersIdFirstKeysJSONRequestBody defines body for PostClustersIdFirstKeys for application/json ContentType.
+type PostClustersIdFirstKeysJSONRequestBody = FirstKeyInput
 
 // PostDraftsJSONRequestBody defines body for PostDrafts for application/json ContentType.
 type PostDraftsJSONRequestBody = DraftInput

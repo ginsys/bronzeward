@@ -283,6 +283,37 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ClusterBody'}
         default: {$ref: '#/components/responses/Problem'}
+  /clusters/{id}/first-keys:
+    post:
+      operationId: postClustersIdFirstKeys
+      tags: [clusters]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ExpectedEpoch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FirstKeyInput'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FirstKeyBody'}
+        default: {$ref: '#/components/responses/Problem'}
   /dependencies:
     get:
       operationId: getDependencies
@@ -2981,6 +3012,32 @@ components:
           type: [object, 'null']
           additionalProperties: {type: string}
           description: At most 16 members; names at most 64 bytes, values at most 1024.
+      additionalProperties: false
+    FirstKeyBody:
+      type: object
+      required: [cluster, kind, caKeyVersion, replaced]
+      properties:
+        cluster: {type: string}
+        kind: {type: string, enum: [machine-config, secrets-bundle, talosconfig]}
+        caKeyVersion:
+          type: object
+          required: [version, createdTime]
+          properties:
+            version: {type: integer}
+            createdTime: {type: string, format: date-time}
+          additionalProperties: false
+        replaced: {type: boolean, description: Whether the stored key replaced an earlier version.}
+      additionalProperties: false
+    FirstKeyInput:
+      type: object
+      required: [kind, document, endpoint]
+      properties:
+        kind: {type: string, enum: [machine-config, secrets-bundle, talosconfig]}
+        document:
+          type: string
+          minLength: 1
+          description: The first key's text, at most 512 KiB, never stored, logged or returned.
+        endpoint: {type: string, description: 'The one address dialled, in the machine endpoint grammar.'}
       additionalProperties: false
     FragmentBody:
       type: object

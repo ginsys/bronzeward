@@ -650,12 +650,30 @@ there.
   the TLS cause not isolated, §3.3), so the problem says only that the try
   failed, and the author checks the key and the endpoint. Nothing is written on
   a refusal or a failed try, and the stored key stays as it was.
+  **The write is check-and-set against the version the supply read** (`0` for
+  a cluster with no key): two supplies racing for one cluster cannot both win,
+  and a path that moved since the read is `409 conflict` with nothing written
+  and the other supply's key stored. A provider that cannot be read or written,
+  a refused signer policy, or a server with no signer identity configured is
+  `503 dependency-unavailable`. The answer's `caKeyVersion` is the stored
+  key's `version` and `createdTime`; the path is the cluster's and is not told.
+  **The route is keyed (§7.1):** the document is HMACed under the digest key
+  into the request's fingerprint, beside the `kind`, the `endpoint` and the
+  cluster, and, like the key, is never stored, logged, returned or quoted; no
+  log line, error or response carries the digest either. Two limits stay: a
+  crash between the provider write and the act's commit leaves a stored key with
+  no act (a retry then stores the next version and answers `replaced: true`),
+  and a latest version that was
+  soft-deleted makes the read refuse, so a supply on top of it is `503`.
 - **Authority.** An `author` supplies and replaces a first key, human only, with
   no approval step (owner decision BW-874-first-key-authority-1, 2026-11-18
   17:41 CET: "A"). Every supply and replacement is recorded in the audit trail
   as an act (§10.5) naming the author, the cluster, the kind, whether it
   replaced a key, the CA certificate's fingerprint and the key's version
-  identity, never a value.
+  identity, never a value. The act's own row (action `cluster.first-key`,
+  subject the cluster) holds who, role, epoch and time; the `FirstKeyAct` row
+  beside it holds the cluster, the kind, `replaced`, the CA certificate's
+  SHA-256 fingerprint, and the key's path, version and `created_time`.
 - **The signer.** One component identity, the signer, reads and writes
   `secret/data/access/talos-ca/*` and nothing else (create, read and update; no
   list or delete). It signs in process memory and hands the ingestion and the
@@ -1979,6 +1997,7 @@ API revisions:
 | 5 | `display` on `GET /principals` (§9.2, §10) |
 | 6 | `GET /machines/{id}/position` (§9.3) |
 | 7 | `GET /import-base-revisions/{id}/document` (§9.2, choice §17.41) |
+| 8 | `POST /clusters/{id}/first-keys` (§9.2, §3.4) |
 
 ### 9.2 Resources and routes
 
@@ -2000,7 +2019,7 @@ idempotency and conflict behavior.
 | `GET /identity` (the caller's own identity; no query, no ETag): `kind` (`human` or `service`); `issuer` and `subject` for a human, `service`, the service identity's name, for automation, each `null` for the other kind; `principal`, its identifier, `null` for a human with no row yet, which the read does not create (§10); `roles`, those the credential maps to in design §13.7's order, `[]` for none; `expiresAt`, the token's `exp` or the automation token's expiry; `epoch`, the epoch the read held, as its `Bronzeward-Epoch`. Nothing else of the credential, its token ID and claims included | 200 | any authenticated credential, roles or none (§10.3) |
 | `GET /principals?id=…` (what principal identifiers name, for display; no ETag): `items`, one entry per distinct identifier given, in the order first given: `id`; `kind`, `human`, `service` or `unknown`, the last for an identifier no row holds; `issuer`, `subject` and `display`, its display name, `null` when it has none (§10), for a human, `service`, the service identity's name, for a service, each `null` otherwise. Nothing else of the row, its revocation and responsible human included; the read records no act **(choice §17.40)** | 200 | any role |
 | `GET /server` (the version, API revision, features and start mode of the process that answered, and the read-only settings a client shows) | 200 | any role |
-| `POST /clusters/{id}/first-keys` (supply or replace a cluster's first key, §3.4); synchronous, no operation | 200 with `cluster`, `kind`, `caKeyVersion`, `replaced`; an act (§10.5) | `author`, human only (§10.3) |
+| `POST /clusters/{id}/first-keys` (supply or replace a cluster's first key, §3.4); synchronous, no operation | 200 with `cluster`, `kind`, `caKeyVersion` (`version` and `createdTime`), `replaced`; an act (§10.5); `409 conflict` when the stored key changed while the supply ran (§3.4) | `author`, human only (§10.3) |
 | `GET /clusters/{id}/talos-access` (whether Bronzeward holds the cluster's Talos CA key, §3.3 "Presence"; no query, no ETag): `present`, and `version` and `createdTime` when present, `reason` when not; never a key, a path or a policy | 200, `Cache-Control: no-store`; `404 not-found` for no such cluster | `author`, human only (§10.3) |
 | `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
@@ -3270,6 +3289,13 @@ rows are readable by any role (design §13.7 item 2, `viewer`'s audit read) and
 are never deleted. Every transaction that writes an act, the token tool's
 included, takes the act-order lock just before it (rule 5), so acts become
 visible in recording order.
+
+A first-key supply or replacement (§3.4) writes its act, action
+`cluster.first-key` with the cluster as subject, and one **FirstKeyAct** row
+in the same transaction: the cluster, the kind, whether it replaced a key, the
+CA certificate's SHA-256 fingerprint, and the stored key's path, KV version
+and `created_time`. The row is immutable and holds no value: no document, no
+certificate, no key. Nothing is approved, so the act has no approval step.
 
 An approval carries a **self-approval mark**, computed in the approval's
 transaction. It is marked when any reason holds, and every reason that holds

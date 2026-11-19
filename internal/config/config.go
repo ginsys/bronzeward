@@ -96,8 +96,8 @@ type Provider struct {
 	// under the same rules. The server does not use it; `bronzeward orphans` requires it.
 	ReportTokenFile string `yaml:"reportTokenFile"`
 	// SignerTokenFile holds the signer identity's static token (persistence-api.md §3.4), under the
-	// same rules: it reads and writes each cluster's CA key and nothing else. Optional until the
-	// server serves first keys.
+	// same rules: it reads and writes each cluster's CA key and nothing else. Optional, like the
+	// report's: without it the server starts and answers a first key with 503 dependency-unavailable.
 	SignerTokenFile string `yaml:"signerTokenFile"`
 }
 
@@ -308,7 +308,8 @@ func (p *Provider) validate() error {
 	}
 	// Each identity authenticates with its own token and no other (compilation.md §1,
 	// dependency-monitor.md §4, persistence-api.md §3.3, §3.4, §6.4). The report's is optional: only
-	// `bronzeward orphans` uses it. The signer's is optional until the server serves first keys. Each path is absolute and in clean form, so one file has one
+	// `bronzeward orphans` uses it. The signer's is optional too: the server starts without it and
+	// refuses a first key (§3.4). Each path is absolute and in clean form, so one file has one
 	// spelling here: folding `.`, `..` or a relative path by text would equate files a directory
 	// symlink keeps apart. A symlinked directory or a hard link can still give one file two
 	// spellings; that is not detectable without opening the files.
