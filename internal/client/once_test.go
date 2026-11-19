@@ -1,12 +1,15 @@
 package client
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -28,7 +31,14 @@ func TestOnceWriteIsSentOnce(t *testing.T) {
 		{"a transient-conflict 503", func(w http.ResponseWriter) { problemAnswer(w, 503, "transient-conflict", `,"detail":"`+detail+`"`) }, true, "an attempt may have committed", detail},
 		{"an epoch-mismatch 412", func(w http.ResponseWriter) {
 			problemAnswer(w, 412, "epoch-mismatch", `,"epoch":"ep_BWSYNTH-2","detail":"`+detail+`"`)
-		}, true, "the route may have stored the key", "No attempt of it can have committed anything"},
+		}, true, "an attempt may have committed", "No attempt of it can have committed anything"},
+		{"a 412 cut off before its body ends", func(w http.ResponseWriter) { cutOff(w, 412, "ep_BWSYNTH-1") }, true, "an attempt may have committed", ""},
+		{"a conflict that names the key's record", func(w http.ResponseWriter) {
+			problemAnswer(w, 409, "conflict", `,"request":"req_BWSYNTH","epoch":"ep_BWSYNTH-2","detail":"`+detail+`"`)
+		}, true, "an attempt may have committed", "No attempt of it can have committed anything"},
+		{"a reused key", func(w http.ResponseWriter) { problemAnswer(w, 422, "idempotency-key-reused", `,"detail":"`+detail+`"`) }, true, "an attempt may have committed", detail},
+		{"a refusal of the input", func(w http.ResponseWriter) { problemAnswer(w, 422, "validation-failed", `,"detail":"`+detail+`"`) }, false, "validation-failed", detail},
+		{"a refusal of the role", func(w http.ResponseWriter) { problemAnswer(w, 403, "forbidden", `,"detail":"`+detail+`"`) }, false, "forbidden", detail},
 		{"a talos-access-unavailable 503", func(w http.ResponseWriter) {
 			problemAnswer(w, 503, "talos-access-unavailable", `,"detail":"`+detail+`"`)
 		}, false, "talos-access-unavailable", detail},
@@ -63,7 +73,11 @@ func TestOnceWriteIsNotRepeatedAfterARenewal(t *testing.T) {
 	for _, once := range []bool{false, true} {
 		f := &fake{epoch: "ep_BWSYNTH-1", post: func(_ int, w http.ResponseWriter, _ *http.Request) { created(w) }}
 		c, _, _ := writeClient(t, f, "ep_BWSYNTH-1")
+		var posts atomic.Int32 // every POST that reaches the server, the unauthorized ones included
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				posts.Add(1)
+			}
 			if r.Method == http.MethodPost && r.Header.Get("Authorization") == "Bearer "+first {
 				w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
 				problemAnswer(w, http.StatusUnauthorized, "unauthenticated", "")
@@ -84,11 +98,40 @@ func TestOnceWriteIsNotRepeatedAfterARenewal(t *testing.T) {
 		w := clusterWrite()
 		w.Once = once
 		_, err := c.Send(w)
-		if once && (err == nil || len(f.postsSeen()) != 0) {
-			t.Errorf("a Once write: %v after %d accepted posts; want the 401 as the answer and no second post", err, len(f.postsSeen()))
+		var p *Problem
+		if once && (!errors.As(err, &p) || p.Status != http.StatusUnauthorized || posts.Load() != 1) {
+			t.Errorf("a Once write: %v after %d posts; want the 401 as the answer after exactly one post", err, posts.Load())
 		}
-		if !once && (err != nil || len(f.postsSeen()) != 1) {
-			t.Errorf("control, an ordinary write: %v after %d accepted posts; want the renewal to repeat it once", err, len(f.postsSeen()))
+		if !once && (err != nil || posts.Load() != 2) {
+			t.Errorf("control, an ordinary write: %v after %d posts; want the renewal to send it again once", err, posts.Load())
+		}
+	}
+}
+
+// TestOnceWriteIsNotRepeatedWhenNothingWasSent: a POST that fails before any byte goes out is
+// repeated for an ordinary write and not for a Once write, which ends with the error as it is.
+func TestOnceWriteIsNotRepeatedWhenNothingWasSent(t *testing.T) {
+	for _, once := range []bool{false, true} {
+		f := &fake{epoch: "ep_BWSYNTH-1", post: func(_ int, w http.ResponseWriter, _ *http.Request) { created(w) }}
+		c, notices, waits := writeClient(t, f, "ep_BWSYNTH-1")
+		var dials atomic.Int32
+		refused := &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+			dials.Add(1)
+			return nil, errors.New("BWSYNTH connection refused")
+		}}
+		c.hc.Transport = postsOnly{post: refused, rest: c.hc.Transport}
+		w := clusterWrite()
+		w.Once = once
+		_, err := c.Send(w)
+		var u *Unknown
+		if err == nil || errors.As(err, &u) {
+			t.Fatalf("once %v: error %v; want a plain failure, nothing was sent", once, err)
+		}
+		if once && (dials.Load() != 1 || len(*waits) != 0 || strings.Contains(notices.String(), "repeat")) {
+			t.Errorf("a Once write: %d dials, waits %v, notices %q; want one dial and no repeat", dials.Load(), *waits, notices)
+		}
+		if !once && dials.Load() != 4 {
+			t.Errorf("control, an ordinary write: %d dials, want 4", dials.Load())
 		}
 	}
 }
