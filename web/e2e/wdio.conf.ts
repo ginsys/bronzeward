@@ -125,7 +125,10 @@ export const config: WebdriverIO.Config = {
         const transparent = (x: Element) => getComputedStyle(x).opacity === "0";
         for (let p: Element | null = e; p; p = p.parentElement) if (transparent(p)) return "";
         if (!e.checkVisibility({ visibilityProperty: true })) return "";
-        const hidden = [...e.querySelectorAll<HTMLElement>("*")].filter(transparent).map((h) => [h, h.getAttribute("style")] as const);
+        // The whole subtree of each transparent element, since a descendant may set its own visibility.
+        const subtrees = new Set<HTMLElement>();
+        for (const t of [...e.querySelectorAll<HTMLElement>("*")].filter(transparent)) for (const h of [t, ...t.querySelectorAll<HTMLElement>("*")]) subtrees.add(h);
+        const hidden = [...subtrees].map((h) => [h, h.getAttribute("style")] as const);
         // visibility, not display: the box stays, so a block boundary around it still breaks the line.
         for (const [h] of hidden) h.style.setProperty("visibility", "hidden", "important");
         try {
