@@ -7,7 +7,7 @@ import { Key } from "webdriverio";
 import { NORMAL_START, PRE_ENTRY } from "../../src/recovery.tsx";
 import { SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_ISSUER } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, holding, interrupt, mint, release, seen, storageEmpty } from "./helpers.ts";
+import { absent, answers, faults, fixtureSignIn, holding, interrupt, mint, release, seen, storageEmpty } from "./helpers.ts";
 
 const result = () => $('[data-testid="write-result"]');
 const entered = () => $('[data-testid="entered"]');
@@ -56,7 +56,7 @@ describe("the recovery entry (#364)", () => {
     // With the refusal's own problem (§8.2), kept after the form went.
     await expect(entered()).toHaveText(expect.stringContaining("Request "));
     await expect($("main h2")).toHaveText("Machines", { wait: 20_000 });
-    expect(await $("body").getText()).not.toContain(PRE_ENTRY);
+    await absent(async () => (await $("body").getText()).includes(PRE_ENTRY), "the pre-entry text after the shell read again");
     const sent = await entries();
     expect(sent).toHaveLength(1);
     // The entry is sent without the epoch header (§8.4 item 3), the first send included.
@@ -80,7 +80,7 @@ describe("the recovery entry (#364)", () => {
     // state at that epoch: read as a recovery start, never as a normal one.
     await expect($('[data-testid="epoch"]')).toHaveText(`Epoch ${epoch}`, { wait: 20_000 });
     await expect($('[data-testid="recovery"]')).toHaveText(expect.stringContaining(`epoch ${epoch}`), { wait: 20_000 });
-    expect(await $("body").getText()).not.toContain(NORMAL_START);
+    await absent(async () => (await $("body").getText()).includes(NORMAL_START), "the normal-start text after the move to the recovery state");
     // The form is gone with the move, so the header keeps the refusal: its reading and its problem.
     await expect(entered()).toHaveText(expect.stringContaining(`An entry is already recorded on this server, in epoch ${epoch}`));
     await expect(entered()).toHaveText(expect.stringContaining("Request "));
@@ -107,7 +107,7 @@ describe("the recovery entry (#364)", () => {
     expect((await answers()).filter((a) => a.startsWith("/recovery/entries "))).toEqual(["/recovery/entries 201", "/recovery/entries 201"]);
     expect(await entered().getText()).toMatch(/Epoch \S+, was \S+\./);
     // Not set aside, though the epoch changed under the write.
-    expect(await $("body").getText()).not.toContain(SET_ASIDE);
+    await absent(async () => (await $("body").getText()).includes(SET_ASIDE), "the set-aside text after the epoch changed under the write");
   });
 
   it("REC-04 (b): the server loses its own reply after the commit: the 500 is repeated under the same key, no epoch check, the minted epoch shown", async function () {
@@ -127,7 +127,7 @@ describe("the recovery entry (#364)", () => {
     // The first send committed and the server lost its answer; the repeat was replayed.
     expect((await answers()).filter((a) => a.startsWith("/recovery/entries "))).toEqual(["/recovery/entries 500", "/recovery/entries 201"]);
     expect(await entered().getText()).toMatch(/Epoch \S+, was \S+\./);
-    expect(await $("body").getText()).not.toContain(SET_ASIDE);
+    await absent(async () => (await $("body").getText()).includes(SET_ASIDE), "the set-aside text after the lost reply was repeated");
   });
 
   it("an entry submitted without the typed confirmation sends nothing, the disabled button bypassed", async () => {
