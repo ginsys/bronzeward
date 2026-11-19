@@ -17,7 +17,7 @@ type EventBody = components["schemas"]["EventBody"];
 type Reader = ReturnType<typeof settledReads>;
 
 export const CLOSING = "Closing this page does not stop the operation. Open it again and the server's state is read.";
-export const LIVE = "Live: following this operation. It reconnects after a drop.";
+export const LIVE = "Live: connected (resumes after a drop)";
 export const ENDED = "Live: ended.";
 export const SERVER_TIMES_UNREAD = "The server's event times were not read, so the times shown are those of this browser when each event arrived.";
 
@@ -109,8 +109,8 @@ export interface Follow {
   again: () => void;
   failure: (res: Failed) => ReactNode;
   signal: AbortSignal;
-  // The client's epoch now: a final read the client discarded under another epoch than the watch ended
-  // on is a restore's (§8.5).
+  // The client's epoch now: a final read made when it differs from the epoch the watch ended on, whether
+  // the client discarded the read or answered it, is a restore's (§8.5).
   epoch: () => string | undefined;
   received?: () => string;
 }
@@ -121,9 +121,9 @@ const ROUNDS = 3;
 // The events of operation `id` followed to the end (§8.6): each as a received row, then, once the
 // watch ended, every row again with the server's time from the JSON pages. That read is outside
 // `watch`, so the epoch rule is applied here: the client discards a read answered under another epoch
-// than the one it knew, and when the watch ended on another one, the installation was restored or
-// entered recovery mode, so the notice shows and the watch starts again, as the reader does for a
-// stream that reaches a new epoch.
+// than the one it knew, and when the watch ended on another one, or the server restarted the list, the
+// installation was restored or entered recovery mode, so the notice shows and the watch starts again,
+// as the reader does for a stream that reaches a new epoch.
 export async function follow(reading: Reader, id: string, f: Follow): Promise<void> {
   const received = f.received ?? (() => new Date().toISOString());
   for (let round = 0; ; round++) {
@@ -141,9 +141,13 @@ export async function follow(reading: Reader, id: string, f: Follow): Promise<vo
     f.again();
     const read = await readPages<EventBody>(reading, `/operations/${encodeURIComponent(id)}/events`, "", { items: [], next: undefined, restarted: false }, true, () => !f.signal.aborted);
     if (f.signal.aborted) return;
-    if (read.kind === "ok") return f.dispatch({ type: "server", rows: read.data.items.map((e) => rowOf(e, e.at, true)) });
+    // A restore shows in the read's own answer too: a list the server restarted (a refused cursor), or a
+    // client that took another epoch than the watch ended on while the read was answered.
     const now = f.epoch();
-    if (read.kind === "discarded" && round < ROUNDS - 1 && r.epoch !== undefined && now !== undefined && now !== r.epoch) continue;
+    const moved = r.epoch !== undefined && now !== undefined && now !== r.epoch;
+    const restored = read.kind === "ok" ? read.data.restarted || moved : read.kind === "discarded" && moved;
+    if (restored && round < ROUNDS - 1) continue;
+    if (read.kind === "ok" && !restored) return f.dispatch({ type: "server", rows: read.data.items.map((e) => rowOf(e, e.at, true)) });
     return f.dispatch({ type: "end", text: SERVER_TIMES_UNREAD });
   }
 }

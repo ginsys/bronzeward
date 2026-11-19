@@ -110,6 +110,66 @@ describe("the timeline (ginsys/bronzeward#359, W8)", () => {
     expect((await run("completed", 3)).view.cleared).toBeUndefined();
   });
 
+  // A fake whose final read comes back `ok` and still marks a restore: "restart" refuses the first cursor
+  // (the server restarted the list); "epoch" has the client at e2 when the read ends, as when the page's
+  // own read of the operation took it there during the watch, while the pages answer `ok`. Only the first
+  // read is marked, so the next round reads plainly.
+  async function restoredOk(how: "restart" | "epoch") {
+    const epoch = "e1";
+    let armed = false;
+    let refused = false;
+    const fetch = async (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const u = String(url);
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      if (u === EVENTS && headers["Accept"] === "text/event-stream") {
+        return new Response(sent(epoch).map(frame).join(""), { status: 200, headers: { "Content-Type": "text/event-stream", "Bronzeward-Epoch": epoch } });
+      }
+      if (u.startsWith(EVENTS)) {
+        if (armed && how === "restart") {
+          if (u.includes("cursor=")) {
+            armed = false;
+            refused = true;
+            return json({ type: "urn:bronzeward:problem:cursor-invalid", title: "cursor-invalid", status: 400 }, 400, epoch);
+          }
+          if (!refused) return json({ items: sent(epoch).slice(0, 1), next: "c1" }, 200, epoch);
+        }
+        return json({ items: sent(epoch) }, 200, epoch);
+      }
+      if (u === `${API_BASE}/operations/${OP}`) return json({ id: OP, kind: "apply-config", state: "completed" }, 200, epoch);
+      throw new Error(`unexpected ${u}`);
+    };
+    const client = new Client({ fetch: fetch as typeof globalThis.fetch, token: () => "SYNTH-token", sleep: async () => {} });
+    let view: TimelineView = { rows: [], done: false };
+    let again = 0;
+    let moved = how === "epoch";
+    await follow(client, OP, {
+      dispatch: (a) => void (view = timelineView(view, a)),
+      soon: () => {},
+      again: () => void (armed = again++ === 0),
+      failure: () => "not read",
+      signal: new AbortController().signal,
+      epoch: () => (moved && again === 1 ? ((moved = false), "e2") : client.currentEpoch),
+      received: () => "2026-11-19T10:00:00Z",
+    });
+    return { view, again };
+  }
+
+  test("a final read the server restarted shows the restored notice and watches again", async () => {
+    const { view, again } = await restoredOk("restart");
+    expect(again).toBe(2);
+    expect(view.cleared).toBe(RESTORED);
+    expect(view.rows.every((r) => r.server)).toBe(true);
+    expect(view.rows.length).toBe(2);
+  });
+
+  test("a final read answered under another epoch than the watch ended on shows the restored notice and watches again", async () => {
+    const { view, again } = await restoredOk("epoch");
+    expect(again).toBe(2);
+    expect(view.cleared).toBe(RESTORED);
+    expect(view.rows.map((r) => r.id)).toEqual(["e1:1", "e1:2"]);
+    expect(view.rows.every((r) => r.server)).toBe(true);
+  });
+
   test("a state change row names the state it reached and its cause, from short tokens only", () => {
     const state = (data: unknown) => rowOf({ id: "e1:3", type: "operation-state", data }, "2026-11-19T10:08:00Z", true);
     expect(state({ from: "unresolved", to: "cancelled", cause: "resolution" })).toMatchObject({ line: "operation-state: unresolved → cancelled (resolution)", to: "cancelled", cause: "resolution" });
