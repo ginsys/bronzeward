@@ -474,8 +474,9 @@ async function cleanup() {
 export const config: WebdriverIO.Config = {
   ...base,
   // Every spec file unless BW_SPECS names some (comma-separated, e.g. "inventory,shell"), for a local
-  // rerun; CI sets none.
-  specs: process.env["BW_SPECS"] ? process.env["BW_SPECS"].split(",").map((s) => `./auth/${s}.e2e.ts`) : ["./auth/*.e2e.ts"],
+  // rerun; CI sets none. The harness's own commands come first, so that a change to them that did not
+  // take (Safari, ginsys/bronzeward#892) fails the run on its own name before the cases that use it.
+  specs: process.env["BW_SPECS"] ? process.env["BW_SPECS"].split(",").map((s) => `./auth/${s}.e2e.ts`) : ["./driver-controls.e2e.ts", "./auth/*.e2e.ts"],
   baseUrl: IDP_PAGE,
   async onPrepare() {
     try {
