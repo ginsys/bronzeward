@@ -114,12 +114,15 @@ runner, and a failed or cancelled check that is not required still leaves a pull
 on main, daily and on request, in two jobs, `safari` (`mise run browser`) and `safari-auth` (`mise run
 browser-auth`), and a failure of either opens one issue (ginsys/bronzeward#892).
 
-The run on 19 November 2026 ([run 44512625313](https://github.com/ginsys/bronzeward/actions/runs/44512625313))
-passed: Safari 27.2 on macOS, `browser` 3 of 3 spec files, `browser-auth` 15 of 15 (the 14 specs and
-`driver-controls.e2e.ts`, which checks the harness's own commands in every browser). The artifact scan
-found 32 artifacts clean, and its planted control found each planted value. The jobs took 1 min 29 s for
-`safari` and 22 min 55 s for `safari-auth` (19 min 6 s of them in the specs), which is why that job's
-limit is 45 minutes. The tested tree differs from the one these records describe in `conformance/` files only.
+The run on 19 November 2026 ([run 44526371599](https://github.com/ginsys/bronzeward/actions/runs/44526371599))
+ran Safari 27.2 on macOS: `browser` passed 3 of 3 spec files, and `browser-auth` passed 13 of 15 (the 14
+specs and `driver-controls.e2e.ts`, which checks the harness's own commands in every browser, and passes).
+The two that failed are `approval.e2e.ts` (3 of 16 cases) and `publish.e2e.ts` (1 case), listed below; an
+earlier run of the same cases passed one of the three, which depends on the typed plan ID (below). The
+artifact scan found 32 artifacts clean, and its planted control found each planted value. The jobs took 1 min
+41 s for `safari` and 17 min 11 s for `safari-auth` (15 min 28 s of them in the specs; an earlier run took
+22 min 10 s), which is why that job's limit is 45 minutes. The tested tree differs from the one these records
+describe in `conformance/` files only.
 
 The hosted macOS runner has no Docker, so `scripts/dev/native-services.sh` runs PostgreSQL 17 (Homebrew's,
 whose patch release the run logs), OpenBao and Zitadel (vendor release binaries at the tags of the images in
@@ -137,6 +140,11 @@ differences from the other browsers are handled in `web/e2e/wdio.conf.ts` and `w
   found by its window handle, since `newWindow` leaves the session in the opener.
 - There is no BiDi: a dialog is read with the classic alert commands.
 
-Untested in Safari, each with its reason: the seven cases at 320 CSS pixels (no BiDi `setViewport`, and
-Safari's window cannot go below 336 CSS pixels), and the two-browsers part of ETAG-01 (safaridriver runs one
-session at a time; the deterministic variant runs). Safari's previous major is not run.
+Untested in Safari, each with its reason: the cases at 320 CSS pixels (no BiDi `setViewport`, and Safari's
+window cannot go below 336 CSS pixels), the two-browsers part of ETAG-01 (safaridriver runs one session at a
+time; the deterministic variant runs), and four cases of `approval.e2e.ts` and `publish.e2e.ts` that landed on
+main after the Safari harness was written: two fail on the missing BiDi session, and two type a plan ID or a
+reason and fail when it holds a repeated character, which safaridriver drops from typed text (the plan ID is
+random, so the Approve case passed in one run and failed in the next)
+([ginsys/bronzeward#927](https://github.com/ginsys/bronzeward/issues/927)); `safari-auth` stays red until that
+issue is closed. Safari's previous major is not run.
