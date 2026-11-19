@@ -9,7 +9,7 @@ import type { components } from "./api/v1";
 import { useWrites } from "./forms.tsx";
 import { settledReads } from "./imports.tsx";
 import { type Failed, Id, readPages, Ref, useReads } from "./list.tsx";
-import { eventLine, watch } from "./progress.ts";
+import { eventLine, RESTORED, watch } from "./progress.ts";
 import { Status } from "./states.tsx";
 
 type Operation = components["schemas"]["OperationBody"];
@@ -22,7 +22,23 @@ export const ENDED = "Live: ended.";
 export const SERVER_TIMES_UNREAD = "The server's event times were not read, so the times shown are those of this browser when each event arrived.";
 
 // One timeline row: its time is the server's once the watch has ended, the browser's at arrival before.
-export interface Row { id: string; line: string; at: string; server: boolean }
+// A state change row also keeps the state it reached and its cause, which the outcome line names.
+export interface Row { id: string; line: string; at: string; server: boolean; to?: string; cause?: string }
+
+// A short server token (a state, a cause, a problem code): anything else is not shown.
+const TOKEN = /^[A-Za-z0-9_-]{1,64}$/;
+const token = (v: unknown): string | undefined => (typeof v === "string" && TOKEN.test(v) ? v : undefined);
+
+// An event as a row: the shared reader's line, except that a state change names the state it reached
+// and why (`internal/api/recovery_acts.go` and the other writers of `operation-state` set `from`, `to`
+// and `cause`).
+export function rowOf(e: { id: string; type: string; data: unknown }, at: string, server: boolean): Row {
+  const d = (typeof e.data === "object" && e.data !== null ? e.data : {}) as Record<string, unknown>;
+  const to = e.type === "operation-state" ? token(d["to"]) : undefined;
+  if (to === undefined) return { id: e.id, line: eventLine(e), at, server };
+  const [from, cause] = [token(d["from"]), token(d["cause"])];
+  return { id: e.id, line: `operation-state: ${from === undefined ? "" : `${from} → `}${to}${cause === undefined ? "" : ` (${cause})`}`, at, server, to, ...(cause !== undefined && { cause }) };
+}
 export interface TimelineView { rows: Row[]; cleared?: string; end?: ReactNode; done: boolean }
 export type TimelineAct =
   | { type: "start" }
@@ -40,17 +56,23 @@ export function timelineView(v: TimelineView, a: TimelineAct): TimelineView {
   }
 }
 
+// The cause the last change into `state` gave, when a row names one.
+export const causeOf = (rows: readonly Row[], state: string) => [...rows].reverse().find((r) => r.to === state)?.cause;
+
 const clock = (at: string) => new Date(at).toLocaleTimeString("en-GB");
 
 // The outcome in words, from the operation as last read. Only a completed operation whose result names
 // the applied release is shown as applied; an unresolved one is not terminal and stays followed.
-export function Outcome({ o }: { o: Operation }) {
+// `why` is the cause the operation's last state change gave, when an event did.
+export function Outcome({ o, cause: why }: { o: Operation; cause?: string | undefined }) {
   const machine = o.subject?.machine;
   const attempts = o.attempts ?? [];
-  // An apply-config error record names its cause and attempts; a problem document names neither.
+  // An apply-config error record names its cause and attempts; a publish or ingest problem document
+  // names its code (`type`) and no attempts.
   const err: Record<string, unknown> = o.error ?? {};
-  const cause = typeof err["cause"] === "string" ? err["cause"] : undefined;
-  const n = typeof err["attempts"] === "number" ? err["attempts"] : attempts.length;
+  const cause = token(err["cause"]) ?? token(typeof err["type"] === "string" ? err["type"].replace(/^urn:bronzeward:problem:/, "") : undefined);
+  const n = typeof err["attempts"] === "number" ? err["attempts"] : 0;
+  const count = `${n} ${n === 1 ? "attempt" : "attempts"}`;
   switch (o.state) {
     case "completed": {
       const applied = o.result !== null && "appliedRelease" in o.result ? o.result : undefined;
@@ -63,14 +85,14 @@ export function Outcome({ o }: { o: Operation }) {
           </Status>
         );
     }
-    case "failed": return <Status testid="outcome">Failed{cause === undefined ? "" : `: ${cause}`} ({n} {n === 1 ? "attempt" : "attempts"}).</Status>;
-    case "rejected": return <Status testid="outcome">Rejected: the node refused every attempt as invalid{cause === undefined ? "" : ` (${cause})`}, {n} {n === 1 ? "attempt" : "attempts"}.</Status>;
-    case "cancelled": return <Status testid="outcome">Cancelled.</Status>;
+    case "failed": return <Status testid="outcome">Failed{cause === undefined ? "" : `: ${cause}`}{n === 0 ? "" : ` (${count})`}.</Status>;
+    case "rejected": return <Status testid="outcome">Rejected: the node refused every attempt as invalid{cause === undefined ? "" : ` (${cause})`}{n === 0 ? "" : `, ${count}`}.</Status>;
+    case "cancelled": return <Status testid="outcome">Cancelled{why === undefined ? "" : `: ${why}`}.</Status>;
     case "succeeded": return <Status testid="outcome">Succeeded.</Status>;
     case "unresolved":
       return (
         <Status testid="outcome">
-          Outcome unknown. A recovery administrator must account for attempt {attempts.length === 0 ? "" : attempts[attempts.length - 1]!.number}. No conflicting work on this machine proceeds until then.
+          Outcome unknown. A recovery administrator must account for {attempts.length === 0 ? "this operation: no attempt is recorded" : `attempt ${attempts[attempts.length - 1]!.number}`}. No conflicting work on this machine proceeds until then.
           {" "}<Ref to="/recovery" id="recovery">Open in Recovery</Ref> (recovery-admin). This page keeps following the operation.
         </Status>
       );
@@ -87,30 +109,43 @@ export interface Follow {
   again: () => void;
   failure: (res: Failed) => ReactNode;
   signal: AbortSignal;
+  // The client's epoch now: a final read the client discarded under another epoch than the watch ended
+  // on is a restore's (§8.5).
+  epoch: () => string | undefined;
   received?: () => string;
 }
 
+// The final read may restart the watch this many times after a restore.
+const ROUNDS = 3;
+
 // The events of operation `id` followed to the end (§8.6): each as a received row, then, once the
-// watch ended, every row again with the server's time from the JSON pages.
+// watch ended, every row again with the server's time from the JSON pages. That read is outside
+// `watch`, so the epoch rule is applied here: the client discards a read answered under another epoch
+// than the one it knew, and when the watch ended on another one, the installation was restored or
+// entered recovery mode, so the notice shows and the watch starts again, as the reader does for a
+// stream that reaches a new epoch.
 export async function follow(reading: Reader, id: string, f: Follow): Promise<void> {
   const received = f.received ?? (() => new Date().toISOString());
-  f.dispatch({ type: "start" });
-  const r = await watch(reading, id, {
-    show: (e) => {
-      f.dispatch({ type: "show", row: { id: e.id, line: eventLine(e), at: received(), server: false } });
-      f.soon();
-    },
-    clear: (why) => f.dispatch({ type: "clear", why }),
-    signal: f.signal,
-  });
-  if (r.kind === "stopped" || f.signal.aborted) return;
-  if (r.kind === "failed") return f.dispatch({ type: "end", text: f.failure(r.res) });
-  f.again();
-  const read = await readPages<EventBody>(reading, `/operations/${encodeURIComponent(id)}/events`, "", { items: [], next: undefined, restarted: false }, true, () => !f.signal.aborted);
-  if (f.signal.aborted) return;
-  f.dispatch(read.kind === "ok"
-    ? { type: "server", rows: read.data.items.map((e) => ({ id: e.id, line: eventLine(e), at: e.at, server: true })) }
-    : { type: "end", text: SERVER_TIMES_UNREAD });
+  for (let round = 0; ; round++) {
+    f.dispatch(round === 0 ? { type: "start" } : { type: "clear", why: RESTORED });
+    const r = await watch(reading, id, {
+      show: (e) => {
+        f.dispatch({ type: "show", row: rowOf(e, received(), false) });
+        f.soon();
+      },
+      clear: (why) => f.dispatch({ type: "clear", why }),
+      signal: f.signal,
+    });
+    if (r.kind === "stopped" || f.signal.aborted) return;
+    if (r.kind === "failed") return f.dispatch({ type: "end", text: f.failure(r.res) });
+    f.again();
+    const read = await readPages<EventBody>(reading, `/operations/${encodeURIComponent(id)}/events`, "", { items: [], next: undefined, restarted: false }, true, () => !f.signal.aborted);
+    if (f.signal.aborted) return;
+    if (read.kind === "ok") return f.dispatch({ type: "server", rows: read.data.items.map((e) => rowOf(e, e.at, true)) });
+    const now = f.epoch();
+    if (read.kind === "discarded" && round < ROUNDS - 1 && r.epoch !== undefined && now !== undefined && now !== r.epoch) continue;
+    return f.dispatch({ type: "end", text: SERVER_TIMES_UNREAD });
+  }
 }
 
 export function TimelineRows({ rows }: { rows: readonly Row[] }) {
@@ -121,9 +156,10 @@ export function TimelineRows({ rows }: { rows: readonly Row[] }) {
   );
 }
 
-// The page's timeline, with `reread` called soon after events arrive so its own read of the operation
-// follows the state.
-export function OperationTimeline({ id, reread }: { id: string; reread: () => void }) {
+// The page's outcome and timeline: `o` is the operation as last read, and `reread` is called soon after
+// events arrive so that read follows the state. The outcome names the cause of the state it shows when
+// a state change row gave one.
+export function OperationTimeline({ id, o, reread }: { id: string; o: Operation; reread: () => void }) {
   const client = useWrites()?.client;
   const reads = useReads();
   const now = useRef(reads);
@@ -140,7 +176,7 @@ export function OperationTimeline({ id, reread }: { id: string; reread: () => vo
       timer = setTimeout(() => again.current(), 300);
     };
     const reading = settledReads(client, { settle: now.current.settle, undropped: now.current.undropped }, () => !abort.signal.aborted);
-    void follow(reading, id, { dispatch, soon, again: () => again.current(), failure: (res) => now.current.failure(res), signal: abort.signal });
+    void follow(reading, id, { dispatch, soon, again: () => again.current(), failure: (res) => now.current.failure(res), signal: abort.signal, epoch: () => client.currentEpoch });
     return () => {
       clearTimeout(timer);
       abort.abort();
@@ -148,6 +184,7 @@ export function OperationTimeline({ id, reread }: { id: string; reread: () => vo
   }, [client, id]);
   return (
     <section aria-label="Timeline">
+      <Outcome o={o} cause={causeOf(rows, o.state)} />
       <h3>Timeline</h3>
       {cleared !== undefined && <Status testid="cleared">{cleared}</Status>}
       <TimelineRows rows={rows} />

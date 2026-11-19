@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { ReadsProvider, type Reads } from "./list.tsx";
-import { CLOSING, ENDED, follow, LIVE, OperationTimeline, Outcome, type Row, SERVER_TIMES_UNREAD, TimelineRows, type TimelineView, timelineView } from "./operation.tsx";
+import { causeOf, CLOSING, ENDED, follow, LIVE, OperationTimeline, Outcome, type Row, rowOf, SERVER_TIMES_UNREAD, TimelineRows, type TimelineView, timelineView } from "./operation.tsx";
+import { RESTORED } from "./progress.ts";
 import { API_BASE, Client } from "./request.ts";
 
 type Operation = components["schemas"]["OperationBody"];
@@ -24,32 +25,40 @@ const EVENTS_SENT = [
   { id: "e1:1", type: "commitment", at: "2026-11-19T10:06:02Z", data: { generation: 3 } },
   { id: "e1:2", type: "operation-state", at: "2026-11-19T10:07:03Z", data: {} },
 ];
+// The same events with their ids under `epoch`, as the server writes them.
+const sent = (epoch: string) => EVENTS_SENT.map((e) => ({ ...e, id: e.id.replace("e1", epoch) }));
 const frame = (e: { id: string; type: string; data: unknown }) => `id: ${e.id}\nevent: ${e.type}\ndata: ${JSON.stringify(e.data)}\n\n`;
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": status === 200 ? "application/json" : "application/problem+json", "Bronzeward-Epoch": "e1" } });
+const json = (body: unknown, status = 200, epoch = "e1") =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": status === 200 ? "application/json" : "application/problem+json", "Bronzeward-Epoch": epoch } });
 
 // A fake server whose operation is `state` and whose JSON pages answer the first `pages` reads, then 403.
-function server(state: string, pages: number) {
+// Every answer is under e1 until the second pages read; that read and every answer after it is under `later`.
+function server(state: string, pages: number, later = "e1") {
   let page = 0;
+  let epoch = "e1";
   const fetch = async (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const u = String(url);
     const headers = (init?.headers ?? {}) as Record<string, string>;
     if (u === EVENTS && headers["Accept"] === "text/event-stream") {
-      return new Response(EVENTS_SENT.map(frame).join(""), { status: 200, headers: { "Content-Type": "text/event-stream", "Bronzeward-Epoch": "e1" } });
+      return new Response(sent(epoch).map(frame).join(""), { status: 200, headers: { "Content-Type": "text/event-stream", "Bronzeward-Epoch": epoch } });
     }
-    if (u.startsWith(EVENTS)) return ++page <= pages ? json({ items: EVENTS_SENT }) : json({ type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: 403 }, 403);
-    if (u === `${API_BASE}/operations/${OP}`) return state === "unreadable" ? json({ type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: 403 }, 403) : json({ id: OP, kind: "apply-config", state });
+    if (u.startsWith(EVENTS)) {
+      if (++page === 2) epoch = later;
+      return page <= pages ? json({ items: sent(epoch) }, 200, epoch) : json({ type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: 403 }, 403);
+    }
+    if (u === `${API_BASE}/operations/${OP}`) return state === "unreadable" ? json({ type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: 403 }, 403) : json({ id: OP, kind: "apply-config", state }, 200, epoch);
     throw new Error(`unexpected ${u}`);
   };
   return new Client({ fetch: fetch as typeof globalThis.fetch, token: () => "SYNTH-token", sleep: async () => {} });
 }
 
 // What `follow` did: each view after each action, and how often it asked for a read again.
-async function run(state: string, pages: number) {
+async function run(state: string, pages: number, later = "e1") {
   let view: TimelineView = { rows: [], done: false };
   const views: TimelineView[] = [];
   const calls = { soon: 0, again: 0 };
-  await follow(server(state, pages), OP, {
+  const client = server(state, pages, later);
+  await follow(client, OP, {
     dispatch: (a) => {
       view = timelineView(view, a);
       views.push(view);
@@ -58,6 +67,7 @@ async function run(state: string, pages: number) {
     again: () => void calls.again++,
     failure: () => "not read",
     signal: new AbortController().signal,
+    epoch: () => client.currentEpoch,
     received: () => "2026-11-19T10:00:00Z",
   });
   return { view, views, calls };
@@ -92,6 +102,32 @@ describe("the timeline (ginsys/bronzeward#359, W8)", () => {
     expect(view.rows.every((r) => !r.server)).toBe(true);
   });
 
+  test("pages answered under another epoch than the watch ended on show the restored notice and the replayed list", async () => {
+    const { view } = await run("completed", 5, "e2");
+    expect(view.cleared).toBe(RESTORED);
+    expect(view.rows.every((r) => r.server)).toBe(true);
+    expect(view.rows.length).toBe(2);
+    expect((await run("completed", 3)).view.cleared).toBeUndefined();
+  });
+
+  test("a state change row names the state it reached and its cause, from short tokens only", () => {
+    const state = (data: unknown) => rowOf({ id: "e1:3", type: "operation-state", data }, "2026-11-19T10:08:00Z", true);
+    expect(state({ from: "unresolved", to: "cancelled", cause: "resolution" })).toMatchObject({ line: "operation-state: unresolved → cancelled (resolution)", to: "cancelled", cause: "resolution" });
+    expect(state({ to: "unresolved", cause: "a b" })).toMatchObject({ line: "operation-state: unresolved", to: "unresolved" });
+    expect(state({ to: "unresolved", cause: "a b" }).cause).toBeUndefined();
+    expect(state({ to: { x: 1 } })).toMatchObject({ line: "operation-state" });
+    expect(rowOf({ id: "e1:1", type: "commitment", data: { generation: 3, to: "x" } }, "2026-11-19T10:08:00Z", true).to).toBeUndefined();
+  });
+
+  test("the outcome's cause is that of the last change into the state shown", () => {
+    const row = (id: string, to: string, cause?: string): Row => ({ id, line: "x", at: "2026-11-19T10:00:00Z", server: true, to, ...(cause !== undefined && { cause }) });
+    const rows = [row("e1:1", "unresolved", "takeover"), row("e1:2", "cancelled", "resolution"), row("e1:3", "unresolved", "recovery-entry")];
+    expect(causeOf(rows, "cancelled")).toBe("resolution");
+    expect(causeOf(rows, "unresolved")).toBe("recovery-entry");
+    expect(causeOf(rows, "completed")).toBeUndefined();
+    expect(causeOf([], "cancelled")).toBeUndefined();
+  });
+
   test("the reducer: a new watch starts empty, a clear takes the rows back, an end keeps them", () => {
     const row = (id: string): Row => ({ id, line: "x", at: "2026-11-19T10:00:00Z", server: false });
     const shown = timelineView(timelineView({ rows: [], done: false }, { type: "show", row: row("e1:1") }), { type: "show", row: row("e1:2") });
@@ -108,7 +144,7 @@ describe("the timeline (ginsys/bronzeward#359, W8)", () => {
   });
 
   test("the page says it follows the operation and that closing it stops nothing, and has no retry control", () => {
-    const page = h(OperationTimeline, { id: OP, reread: () => {} });
+    const page = h(OperationTimeline, { id: OP, o: op({ state: "sending" }), reread: () => {} });
     expect(text(page)).toContain(LIVE);
     expect(text(page)).toContain(CLOSING);
     expect(text(page)).not.toContain(ENDED);
@@ -132,6 +168,22 @@ describe("the outcome lines", () => {
       expect(html(h(Outcome, { o: op(o) }))).not.toMatch(/<button/i);
     });
   }
+
+  test("a failed publish or ingest names its problem's code, and says nothing of attempts it has none of", () => {
+    const problem = (type: string) => ({ type, title: "t", status: 503, instance: "req_a" }) as unknown as Operation["error"];
+    expect(text(h(Outcome, { o: op({ state: "failed", error: problem("urn:bronzeward:problem:dependency-unavailable") }) }))).toBe("Failed: dependency-unavailable.");
+    expect(text(h(Outcome, { o: op({ state: "failed", error: problem("urn:bronzeward:problem:x y") }) }))).toBe("Failed.");
+  });
+
+  test("a cancelled operation names its cause when an event gave one", () => {
+    expect(text(h(Outcome, { o: op({ state: "cancelled" }), cause: "resolution" }))).toBe("Cancelled: resolution.");
+  });
+
+  test("an unresolved operation with no attempt does not name one", () => {
+    const flat = text(h(Outcome, { o: op({ state: "unresolved", attempts: [] }) }));
+    expect(flat).toContain("A recovery administrator must account for this operation: no attempt is recorded.");
+    expect(flat).not.toMatch(/attempt \./);
+  });
 
   test("only a completed operation whose result names the applied release is shown as applied", () => {
     for (const state of ["succeeded", "failed", "rejected", "cancelled", "unresolved", "sending", "committed"]) {

@@ -15,7 +15,7 @@ import { IngestionItem, StartImport } from "./imports.tsx";
 import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
-import { Outcome, OperationTimeline } from "./operation.tsx";
+import { OperationTimeline } from "./operation.tsx";
 import { RecoveryConsole } from "./recovery.tsx";
 import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
@@ -429,8 +429,7 @@ export function OperationItem({ id }: { id: string }) {
       title={(o) => `Operation ${short(id)}${o === undefined ? "" : `: ${o.kind}, ${o.state}`}`}>
       {(o) => (
         <>
-          <Outcome o={o} />
-          <OperationTimeline id={id} reread={reread} />
+          <OperationTimeline id={id} o={o} reread={reread} />
           <Fields rows={[
             ["Kind", o.kind], ["State", o.state], ["Subject", <Subject s={o.subject} />], ["Created", <>{when(o.createdAt)} by {by(o.createdBy)}</>],
             ["Epoch", o.epoch], ["Last event", o.lastEvent], ["Result", <Record v={o.result} />], ["Error", <Record v={o.error} />],
