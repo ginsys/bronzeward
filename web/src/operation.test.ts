@@ -179,6 +179,11 @@ describe("the outcome lines", () => {
     expect(text(h(Outcome, { o: op({ state: "cancelled" }), cause: "resolution" }))).toBe("Cancelled: resolution.");
   });
 
+  test("an unresolved operation names the cause of the change into it when an event gave one", () => {
+    expect(text(h(Outcome, { o: op({ state: "unresolved" }), cause: "takeover" }))).toMatch(/^Outcome unknown \(takeover\)\. A recovery administrator must account for /);
+    expect(text(h(Outcome, { o: op({ state: "unresolved" }) }))).toMatch(/^Outcome unknown\. A recovery administrator/);
+  });
+
   test("an unresolved operation with no attempt does not name one", () => {
     const flat = text(h(Outcome, { o: op({ state: "unresolved", attempts: [] }) }));
     expect(flat).toContain("A recovery administrator must account for this operation: no attempt is recorded.");
