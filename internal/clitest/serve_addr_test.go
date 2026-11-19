@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // TestServeAddressTakenBeforeItBinds is the control for ginsys/bronzeward#940: the first address
@@ -12,7 +13,11 @@ import (
 // serve on another address. No test here runs in parallel, so the swap of pickAddr is not seen by
 // another test.
 func TestServeAddressTakenBeforeItBinds(t *testing.T) {
+	// It answers after 2 s, which serve's exit on the bind precedes even on a loaded host: the control
+	// is the answer of another server that arrives after serve ended, and it must not depend on how
+	// fast serve fails (a faster answer is the accepted limit, in the retry's own comment).
 	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer held.Close()

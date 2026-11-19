@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -205,15 +207,21 @@ func startConfigExec(t *testing.T, roles, issuerURL, audience, execution, extra 
 // serveAttempts is how many addresses startConfigExec tries for serve.
 const serveAttempts = 5
 
-// pickAddr returns a local address that nothing listens on now. A test may replace it.
+// pickAddr returns a local address that nothing listens on now, on a port below Linux's ephemeral
+// range (32768 and up): the kernel hands that range to every listener on port 0 and every outgoing
+// connection, so a port from it is the one most likely taken before serve binds it. A test may
+// replace it.
 var pickAddr = func(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for range 50 {
+		addr := "127.0.0.1:" + strconv.Itoa(20000+rand.IntN(12000))
+		if l, err := net.Listen("tcp", addr); err == nil {
+			l.Close()
+			return addr
+		}
 	}
-	defer l.Close()
-	return l.Addr().String()
+	t.Fatal("no free port below the ephemeral range")
+	return ""
 }
 
 // served is the fixture's bronzeward serve: its configuration, its process, and the output of
