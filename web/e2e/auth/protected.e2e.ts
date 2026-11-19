@@ -15,7 +15,7 @@ import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE } from "../auth.conf.ts";
-import { cacheControl, cacheHolds, eventually, faults, fixtureSignIn, interrupt, mint, settled, storageControl, storageEmpty } from "./helpers.ts";
+import { absent, cacheControl, cacheHolds, eventually, faults, fixtureSignIn, interrupt, mint, settled, storageControl, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -175,6 +175,9 @@ async function choose(path: string) {
 
 const sendMarks = () => $("section[aria-label=Marks]").$("button=Send marks").click();
 
+// Whether the review's or the document's text field is on the page, answered in the page as a boolean.
+const reviewShown = () => browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null);
+
 // Whether the page shows `text` anywhere, in its text or in the value of a field, answered in the page so
 // that the text never leaves it. A field's typed value is not part of the body's text.
 const pageShows = (text: string) =>
@@ -240,9 +243,9 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await claimShows("The marks were accepted in operation", 30_000);
     await expect(ended()).toHaveText(holds("The marks were applied: re-staged and paused again"), { wait: 60_000 });
     // The marked value's path is not shown anywhere once it was sent.
-    expect(await pageShows(TIER)).toBe(false);
+    await absent(() => pageShows(TIER), "the marked path");
     // The review ends with the paused state it was read in; the page holds no text of it.
-    expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
+    await absent(reviewShown, "the review text");
     await $("button=Continue import").click();
     await expect(ended()).toHaveText(holds(`Import ${short(id)} released into draft`), { wait: 60_000 });
     // The import base this release wrote, for the document case that follows (ginsys/bronzeward#858).
@@ -280,14 +283,16 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     for (const control of ["Copy", "Download", "Print", "Save", "Export"]) expect(await shows().$(`button*=${control}`).isExisting()).toBe(false);
     // Leaving the page drops the text: the same page again holds none, until it is shown on request.
     await $("button=Close document").click();
-    expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
+    // The closed state's own control shows exactly when the text is gone (claim.tsx), so it marks the state.
+    await shows().$("button=Show document").waitForExist({ timeout: 20_000, timeoutMsg: "the document was not closed" });
+    await absent(reviewShown, "the document text after Close document");
     await shows().$("button=Show document").click();
     await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
     // A page load starts a sign-in again, whose state storage holds until it ends, so the page is read
     // only once it settled signed in (the check below measures storage, not a sign-in in flight).
     await browser.url(`${FIXTURE_PAGE}/`);
     await settled(FIXTURE_PAGE);
-    expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
+    await absent(reviewShown, "the document text after leaving the page");
     await storageEmpty();
     expect(await cacheHolds(documentPath)).toBe(false);
     // Another author, who did not import it, is refused by the server's rule and the page holds no text.
@@ -295,7 +300,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await browser.url(base);
     await shows().$("button=Show document").click();
     await expect(shows()).toHaveText(holds("not-the-importer"), { wait: 20_000 });
-    expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
+    await absent(reviewShown, "the document text of a refused author");
     await storageEmpty();
     expect(await cacheHolds(documentPath)).toBe(false);
     await cacheControl(at);
@@ -308,7 +313,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await typeMarks(["not a path"]);
     await sendMarks();
     await claimShows("The mark at position 0 (the first is 0) is refused.", 30_000);
-    expect(await pageShows("not a path")).toBe(false);
+    await absent(() => pageShows("not a path"), "the refused mark");
     await expect(allowed()).toHaveText("Paused for review. Continue it, or abandon it.");
     await abandon();
   });
@@ -324,7 +329,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await expect(ended()).toHaveText(holds("The mark was not applied: it was refused ("), { wait: 60_000 });
     await expect(ended()).toHaveText(holds("the mark at position 0 (the first is 0)"));
     await expect(ended()).toHaveText(holds("The import is paused again"));
-    expect(await pageShows("doc[0]/machine")).toBe(false);
+    await absent(() => pageShows("doc[0]/machine"), "the refused path");
     await abandon();
   });
 
@@ -338,7 +343,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await claimShows("The marks were accepted in operation", 30_000);
     await expect(ended()).toHaveText(holds("The mark was not applied: it was refused (dependency-unavailable"), { wait: 60_000 });
     await expect(ended()).toHaveText(holds("The import is paused again"));
-    expect(await pageShows(TIER)).toBe(false);
+    await absent(() => pageShows(TIER), "the path of a mark refused on a dependency");
     await post("/bao/fault?mode=none");
     await abandon();
   });
@@ -351,7 +356,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await $('section[aria-label="Protected review"]').$("button=Review import").click();
     // The failed read puts the shell offline: its banner shows and actions are disabled until a read answers.
     await $('[data-testid="offline"]').waitForExist({ timeout: 20_000, timeoutMsg: "the failed read did not end in the offline state" });
-    expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
+    await absent(reviewShown, "the review text after a failed read");
     await storageEmpty();
     expect(await cacheHolds(`/api/v1/ingestions/${id}/review`)).toBe(false);
     await faults({ upstream: at });
