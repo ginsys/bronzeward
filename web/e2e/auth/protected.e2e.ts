@@ -97,6 +97,7 @@ async function pausedImport(): Promise<string> {
   expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
   await $('nav[aria-label="Main"]').$("a=Changes").click();
   await $("main").$("a=Imports").click();
+  await expect($("main h2")).toHaveText("Imports", { wait: 30_000 });
   await $("main").$("button=Start import").click();
   await expect($("main h2")).toHaveText("Start import");
   await $(`select[name="machine"] option[value="${machine}"]`).waitForExist({ timeout: 20_000 });
