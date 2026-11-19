@@ -117,7 +117,7 @@ func TestClusterDiscoverPrintsCommands(t *testing.T) {
 		"bronzewardctl cluster add --name <name> --endpoint 'https://10.0.0.1:6443' --contract 'v1.13' --talos-cluster-id 'c-1'",
 		"bronzewardctl machine add --cluster <cluster id> --smbios-uuid '11111111-2222-3333-4444-555555555555' --platform 'metal' --talos-endpoint '10.0.0.1'",
 		"bronzewardctl machine add --cluster <cluster id> --talos-node-id 'n2' --platform 'container' --talos-endpoint '10.0.0.2'",
-		"bao kv put -mount=secret access/talos/<cluster id> 'talosconfig=@" + c.file + "'",
+		"bronzewardctl cluster first-key --cluster <cluster id> --kind talosconfig --file '" + c.file + "' --endpoint '10.0.0.1'",
 		"Nothing was sent to the server and no secret was written.",
 		"talos-access-unavailable",
 		"bronzewardctl cluster onboard --talosconfig '" + c.file + "' --endpoint '10.0.0.1:50000' --name <name> --kubernetes-endpoint proposed --bao-addr <url> --bao-token-file <file>",
@@ -126,8 +126,8 @@ func TestClusterDiscoverPrintsCommands(t *testing.T) {
 			t.Errorf("no %q in:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, talosconfigMarker) {
-		t.Error("the output holds the talosconfig's key")
+	if strings.Contains(out, talosconfigMarker) || strings.Contains(out, "bao kv put") {
+		t.Error("the output holds the talosconfig's key or the retired bao command")
 	}
 	// A second discovery of the same cluster prints the same.
 	if _, again, _ := runCtl(t, "cluster", "discover", "--talosconfig", c.file, "--endpoint", "10.0.0.1:50000"); again != out {
@@ -179,8 +179,36 @@ func TestClusterDiscoverRecordsNoMemberItCannotName(t *testing.T) {
 	res.Supported = false
 	discoverFixture(t, res, nil)
 	_, out, _ = runCtl(t, "cluster", "discover", "--talosconfig", c.file)
-	if strings.Contains(out, "bronzewardctl cluster add") || strings.Contains(out, "bao kv put") || !strings.Contains(out, "Not recorded: contract v1.13") {
+	if strings.Contains(out, "bronzewardctl cluster add") || strings.Contains(out, "cluster first-key") || !strings.Contains(out, "Not recorded: contract v1.13") {
 		t.Errorf("an unsupported contract:\n%s", out)
+	}
+}
+
+// TestClusterDiscoverFirstKeyCommand: the first-key command names the address the first control-plane
+// member that answered was read at, skipping a control-plane member that did not answer and every
+// worker, and carries --talos-context as given. With no control-plane member answering there is no
+// command, and the output says so.
+func TestClusterDiscoverFirstKeyCommand(t *testing.T) {
+	res := twoMembers
+	res.Members = []discover.Member{
+		{NodeID: "w0", Hostname: "w-0", Address: "10.0.0.9", Role: "worker", Platform: "metal", Answered: true},
+		{NodeID: "n0", Hostname: "cp-0", Address: "10.0.0.7", Role: "controlplane"},
+		{NodeID: "n1", Hostname: "cp-1", Address: "fd00::1", Role: "controlplane", SMBIOSUUID: "11111111-2222-3333-4444-555555555555", Platform: "metal", Answered: true},
+		{NodeID: "n2", Hostname: "cp-2", Address: "10.0.0.2", Role: "controlplane", Platform: "metal", Answered: true},
+	}
+	c := discoverFixture(t, res, nil)
+	_, out, _ := runCtl(t, "cluster", "discover", "--talosconfig", c.file, "--talos-context", "prod")
+	want := "bronzewardctl cluster first-key --cluster <cluster id> --kind talosconfig --file '" + c.file + "' --endpoint '[fd00::1]' --talos-context 'prod'"
+	if !strings.Contains(out, want) || strings.Count(out, "cluster first-key") != 1 {
+		t.Errorf("no %q, once, in:\n%s", want, out)
+	}
+
+	res.Members = []discover.Member{{NodeID: "n0", Hostname: "cp-0", Address: "10.0.0.7", Role: "controlplane"},
+		{NodeID: "w0", Hostname: "w-0", Address: "10.0.0.9", Role: "worker", Platform: "metal", Answered: true}}
+	discoverFixture(t, res, nil)
+	_, out, _ = runCtl(t, "cluster", "discover", "--talosconfig", c.file)
+	if strings.Contains(out, "bronzewardctl cluster first-key") || !strings.Contains(out, "Not recorded: the first key. No control-plane member answered") {
+		t.Errorf("no control-plane member answered:\n%s", out)
 	}
 }
 

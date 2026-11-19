@@ -46,8 +46,16 @@ type Write struct {
 	// comparison of the two epochs cannot show (§8.5, §8.6 item 3).
 	readMoves int
 	counted   bool
-	Read      func(*Client) (string, error)
-	Check     string
+	// Once marks a write the route's 503 does not repeat (operator-experience.md §5.2: the first key
+	// is sent once, and each repeat would dial the node again). Its 503 is the answer: a
+	// dependency-unavailable leaves the outcome unknown, because the route stores before it commits,
+	// and any other 503 is a refusal.
+	// Stop, when set, takes the Ctrl-C for the request in flight: the request ends, and the outcome
+	// is unknown, never a repeat. Nothing else of a write takes it (client-contracts.md §8.2).
+	Once  bool
+	Stop  context.Context
+	Read  func(*Client) (string, error)
+	Check string
 	// Input is the input a repeat gives where the command resolved what the operator typed, so the
 	// outcome-unknown block names it instead of "the same input".
 	Input string
@@ -356,6 +364,13 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 				}
 			}
 			return a.r, nil
+		case a.p == nil && a.r == nil && w.Stop != nil && w.Stop.Err() != nil:
+			// The operator's Ctrl-C ended the request: no repeat, and unknown once a connection was taken.
+			if !a.sent {
+				return nil, c.Context.fail(fmt.Errorf("%s not sent: stopped at your request", route))
+			}
+			u.Why = "stopped at your request while the request was in flight"
+			return nil, c.unknown(w, u)
 		case !a.sent:
 			// Nothing reached the server: repeated, never ambiguous (AMB-01).
 			if errors.As(a.err, new(*trust)) {
@@ -369,6 +384,8 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			return nil, &Blocked{a.err, []string{"This is the stored answer to an earlier attempt with this key: that attempt was refused."}}
 		case p == nil && (a.status == 0 || a.status >= 500), p != nil && (code == "internal-error" || a.status >= 500 && !p.unavailable() && code != "epoch-superseded"):
 			ambiguous = true
+		case p != nil && p.unavailable() && w.Once:
+			return nil, c.after(code == "dependency-unavailable", w, u, a.err)
 		case p != nil && p.unavailable():
 		case p != nil && p.Status == http.StatusUnauthorized && c.signIn != nil && !renewed && !c.signIn.failed && c.signIn.tokens.RefreshToken != "":
 			renewed = true
@@ -561,7 +578,11 @@ func (c *Client) post(w *Write, key, epoch string) attempt {
 	route := w.Method + " /api/v1" + w.Path
 	var a attempt
 	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { a.sent = true }}
-	q, err := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), w.Method,
+	ctx := context.Background()
+	if w.Stop != nil {
+		ctx = w.Stop
+	}
+	q, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), w.Method,
 		strings.TrimSuffix(c.Context.Server, "/")+"/api/v1"+w.Path, bytes.NewReader(w.Body))
 	if err != nil {
 		a.err = c.Context.fail(err)

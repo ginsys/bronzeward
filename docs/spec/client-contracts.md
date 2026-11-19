@@ -209,7 +209,14 @@ are `--kind`, `--file`, `--endpoint` (required for every kind: the Talos node ad
 the key at, not a Bronzeward address; [operator experience §5.2](operator-experience.md#52-inventory))
 and `--talos-context`. The file is read with a size limit, sent once and never copied, logged or
 printed; a talosconfig is cut to one context first; errors name the route's rule and never quote the
-server's Talos text.
+server's Talos text. It is the one write sent once ([operator experience §5.2](operator-experience.md#52-inventory)):
+each request dials the node, so a `503` is not repeated as [§8.2](#82-errors) says a write repeats it.
+`talos-access-unavailable` is a refusal that stored nothing (exit 1) and `dependency-unavailable` is an
+unknown outcome (exit 3), because the route stores the key before it commits the act. Each run takes a
+key of its own, random like every write's ([§8.4](#84-idempotency-and-ambiguous-responses) item 1), so a
+second run supplies the key again and does not replay the first answer; `--idempotency-key`,
+`--expect-epoch` and `--expect-principal` repeat an unknown outcome as for any write. It is also the one
+write that takes the Ctrl-C ([§8.2](#82-errors)): the request can stall at the node.
 
 ### 3.3 Client actions with no route
 
@@ -564,7 +571,10 @@ client always shows `title`, `detail` when present, and `instance`, each escaped
 
 A Ctrl-C ends a read at once: a request in flight and a wait before a retry stop, the command prints
 one line that names the request and exits 130. It does not change the retry rules above. The Ctrl-C
-is taken for each read only. A write, and a read made inside a write, does not take it. The renewal
+is taken for each read only. A write, and a read made inside a write, does not take it, with one
+exception: `cluster first-key` takes it for its request in flight, which ends the request and leaves
+the outcome unknown (exit 3, with the repeat of [§8.4](#84-idempotency-and-ambiguous-responses) item 4);
+a Ctrl-C before the connection is taken sends nothing. The renewal
 of a stored sign-in is not cut short: it runs to its end, and the stop follows. After the first Ctrl-C,
 the attempt to read the event stream writes no further notice and runs no callback of its caller,
 such as showing or clearing an event or asking whether to stop; a write that has already started is
@@ -2019,12 +2029,12 @@ Limits:
   not implemented yet. No synthetic contract probe was run against the
   server for this document: every server behaviour
   above is read from source and contract text, and G17 is inferred, not observed.
-- The first-key route's client side is not built yet
-  ([ginsys/bronzeward#900](https://github.com/ginsys/bronzeward/issues/900)): bronzewardctl has no
-  `cluster first-key` command, and `cluster onboard` still takes the operator's OpenBao address and
-  token and writes the key itself. [§3.2](#32-writes), [§3.3](#33-client-actions-with-no-route) and
-  [operator experience §5.2](operator-experience.md#52-inventory) describe the command once that
-  issue is done, including a second run that supplies the first key again.
+- The first-key route's client side is half built
+  ([ginsys/bronzeward#900](https://github.com/ginsys/bronzeward/issues/900)): bronzewardctl has the
+  `cluster first-key` command, and `cluster discover` prints it, but `cluster onboard` still takes the
+  operator's OpenBao address and token and writes the key itself. [§3.3](#33-client-actions-with-no-route)
+  and [operator experience §5.2](operator-experience.md#52-inventory) describe `cluster onboard` as it
+  is once that issue is done, including a second run that supplies the first key again.
 - For a person signed in as recovery-admin
   ([#361](https://github.com/ginsys/bronzeward/issues/361)), bronzewardctl reads recovery status
   and sends recovery enter, recovery exit and identity revoke; enter and revoke are sent only when
