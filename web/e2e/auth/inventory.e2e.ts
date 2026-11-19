@@ -304,7 +304,7 @@ describe("the machine detail (W3)", () => {
     expect(await texts('[data-testid="observations"] tbody tr td:last-child')).toEqual(["configDigest (node unreachable)", "nothing", "nothing"]);
     // The principal is the identity Bronzeward recorded for h-author, shortened (G23).
     await expect($('[data-testid="timeline"]')).toHaveText(expect.stringMatching(/freeze idn_[a-z2-7]{4}…[a-z2-7]{4} author "synthetic incident"/), { wait: 20_000 });
-    expect(await $("main").getText()).not.toMatch(/healthy|converged/i);
+    await absent(async () => /healthy|converged/i.test(await $("main").getText()), "a health or convergence word while the drift is open");
   });
 
   it("a machine never read: the absent fields said so, without a time; the timeline polled every 5 s or slower while shown", async function () {
@@ -384,7 +384,7 @@ describe("the machine detail (W3)", () => {
     const shown = await $("main").getText();
     expect(shown.split("Not read:").length - 1).toBe(1);
     expect(shown).toContain(refused);
-    expect(shown).not.toContain(TRANSPORT_FAILURE);
+    await absent(async () => (await $("main").getText()).includes(TRANSPORT_FAILURE), "the transport failure line beside the offline banner");
     expect(await $('[data-testid="sentences"]').isExisting()).toBe(true);
     // The held answers end the banner; W3 then reads the machine again, once, and shows its answer.
     const before = await machineReads();
@@ -453,7 +453,9 @@ describe("the machine detail (W3)", () => {
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: bodies([m1], false) })).toMatch(SERVER);
     await $(`a[title="${id}"]`).click();
     await expect($("main h2")).toHaveText(`Machine ${id}`);
-    expect(await texts('[data-testid="sentences"] li')).not.toContain(FROZEN);
+    // The sentences come with their own read, after the machine's: with none shown yet, the Frozen line would be absent for any reason.
+    await browser.waitUntil(async () => (await texts('[data-testid="sentences"] li')).length > 0, { timeout: 20_000, timeoutMsg: "the sentences did not appear" });
+    await absent(async () => (await texts('[data-testid="sentences"] li')).includes(FROZEN), "the Frozen line before the freeze");
     expect(await $('[data-testid="observed"]').getText()).toContain(short(m1.id));
     const reads = async () => (await answers()).filter((a) => a === `/machines/${id} 200`).length;
     const before = await reads();
