@@ -7,11 +7,13 @@
 # `pass`, the integrated run's: `run` without the Go rows and the negative controls (the refusal
 # set through the orphan rows). `node-id`: the Talos access refusal for another node ID, on its own
 # up. `register`: the preconditions and steps 1 and 2 alone, the cluster and its machines recorded
-# and the access secret written, for a participant's import (fixtures/participants). Each check
+# and the access secret written, for a participant's import (fixtures/participants).
+# `first-keys`: after step 1 and 2's records, the three first keys of ginsys/bronzeward#898 supplied
+# to the control plane's endpoint, the refusals, and the scan; on an up of its own. Each check
 # writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s1.tsv in the
 # evidence directory and to stdout; the directory is then scanned by bin/evidence. Exit 1 on any
 # FAIL.
-# Usage: scenarios/s1 run|pass|review|node-id|register   (on a fresh fixtures/bin/up, with mise run
+# Usage: scenarios/s1 run|pass|review|node-id|register|first-keys   (on a fresh fixtures/bin/up, with mise run
 # dev-db and mise run dev-bao up for run's Go tests)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -21,7 +23,7 @@ bin=$here/../bin
 
 s1_mode=${1:-}
 pass_only=''
-case $s1_mode in run | review | node-id | register) ;; pass) pass_only=1 ;; *) die "usage: scenarios/s1 run|pass|review|node-id|register" ;; esac
+case $s1_mode in run | review | node-id | register | first-keys) ;; pass) pass_only=1 ;; *) die "usage: scenarios/s1 run|pass|review|node-id|register|first-keys" ;; esac
 need docker curl jq timeout id sleep git date sha256sum base64 head tr
 need_state
 # No fixture lock of its own: bw, seed, inject and evidence each take the one they need.
@@ -779,6 +781,97 @@ node-id() {
   post_state
 }
 
+# first-keys: ginsys/bronzeward#898 against the fixture's own control plane, on an up of its own: the
+# three first keys (the control plane's configuration, the cluster's secrets bundle, the os:admin
+# talosconfig) supplied in turn, each tried at the control plane's endpoint before the CA key is
+# stored, the stored key and the act read back, then the refusals, each leaving the stored version
+# and the acts as they were, and the scan. The documents hold the cluster's CA key: the request
+# bodies are withheld from every transcript and the files live in a directory of the state, never
+# the evidence.
+first_keys_endpoint=''
+fk_version() { bao kv metadata get -format=json -mount=secret "access/talos-ca/$cluster" | jq -er '.data.current_version'; }
+fk_absent() { ! bao kv metadata get -mount=secret "access/talos-ca/$cluster" >/dev/null 2>&1; }
+fk_acts() { sql "SELECT count(*) FROM first_key_act WHERE cluster = '$cluster'"; }
+# fk_post <kind> <file> <endpoint> <name> <status> <problem code or ->: the file's text as the document.
+fk_post() {
+  local kind=$1 file=$2 endpoint=$3 name=$4 doc body
+  doc=$(jq -Rs . <"$file") || return 1
+  withheld+=("${doc:1:${#doc}-2}")
+  body=$(jq -nc --arg k "$kind" --rawfile d "$file" --arg e "$endpoint" '{kind: $k, document: $d, endpoint: $e}') || return 1
+  answers "$5" "$6" POST "/api/v1/clusters/$cluster/first-keys" "$author" "$body" "$(key "first-key-$name")"
+}
+# fk_supply <kind> <file> <name> <replaced> <version>: a 200 that stores that version, with one act each.
+fk_supply() {
+  fk_post "$1" "$2" "$first_keys_endpoint" "$3" 200 - || return 1
+  jq -e --arg c "$cluster" --arg k "$1" --argjson r "$4" --argjson v "$5" \
+    '.cluster == $c and .kind == $k and .replaced == $r and .caKeyVersion.version == $v' "$EV/last.body" >/dev/null || {
+    say "s1: first key $3: the answer is not the expected one"
+    return 1
+  }
+  [ "$(fk_version)" = "$5" ] && [ "$(fk_acts)" = "$5" ]
+}
+# fk_refused <kind> <file> <endpoint> <name> <status> <problem code> <rule or ->: refused, with nothing
+# written: the stored version and the acts are as they were.
+fk_refused() {
+  local v a
+  v=$(fk_version) && a=$(fk_acts) || return 1
+  fk_post "$1" "$2" "$3" "$4" "$5" "$6" || return 1
+  [ "$7" = - ] || jq -e --arg r "$7" '.rule == $r' "$EV/last.body" >/dev/null || {
+    say "s1: first key $4: the refusal does not name the rule $7"
+    return 1
+  }
+  [ "$(fk_version)" = "$v" ] && [ "$(fk_acts)" = "$a" ]
+}
+# fk_ca_value <crt|key>: the fixture's os CA certificate or key, as the secrets bundle holds it.
+fk_ca_value() { awk -v f="$1:" '/^ *os:$/ {o = 1; next} o && $1 == f {print $2; exit}' "$STATE/talos-secrets.yaml" | base64 -d; }
+# fk_stored_is_fixtures: the key at the path is the fixture's os CA key (compared by digest, whitespace
+# aside; nothing printed) and every act records the fixture CA certificate's fingerprint.
+fk_stored_is_fixtures() {
+  local want_crt got_crt want_key got_key
+  want_crt=$(fk_ca_value crt | openssl x509 -outform DER | sha256sum | cut -d' ' -f1) || return 1
+  got_crt=$(bao kv get -field=ca -mount=secret "access/talos-ca/$cluster" | openssl x509 -outform DER | sha256sum | cut -d' ' -f1) || return 1
+  want_key=$(fk_ca_value key | tr -d '[:space:]' | sha256sum | cut -d' ' -f1) || return 1
+  got_key=$(bao kv get -field=key -mount=secret "access/talos-ca/$cluster" | tr -d '[:space:]' | sha256sum | cut -d' ' -f1) || return 1
+  [ "$want_crt" = "$got_crt" ] && [ "$want_key" = "$got_key" ] &&
+    [ "$(sql "SELECT count(*) FROM first_key_act WHERE cluster = '$cluster' AND ca_fingerprint = '$want_crt'")" = 3 ]
+}
+first-keys() {
+  local tmp
+  preconditions
+  fresh_author
+  cluster_register
+  first_keys_endpoint=$TALOS_CONTROLPLANE_IP:50000
+  tmp=$(mktemp -d -- "$STATE/first-keys.XXXXXX") || die "no directory for the first-key documents"
+  node_talos "$TALOS_WORKER_IP" get machineconfig v1alpha1 -o jsonpath='{.spec}' >"$tmp/worker.yaml" || die "cannot read the worker's configuration"
+  talosctl gen secrets --output-file "$tmp/other-secrets.yaml" || die "cannot generate an unrelated secrets bundle"
+  talosctl_timed 30 -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP" config new "$tmp/reader.talosconfig" --roles os:reader --crt-ttl 1h ||
+    die "cannot generate an os:reader talosconfig"
+  printf 'not a first key %s\n' "$run_key" >"$tmp/garbage"
+  check 'S1 first keys' 'no CA key is stored before the first supply: the path has no version' fk_absent
+  check 'S1 first keys' "the control plane's machine configuration, tried at its endpoint: 200, replaced false, version 1, one act" \
+    fk_supply machine-config "$STATE/controlplane.yaml" machine-config false 1
+  check 'S1 first keys' "the cluster's secrets bundle: 200, replaced true, version 2, two acts" \
+    fk_supply secrets-bundle "$STATE/talos-secrets.yaml" secrets-bundle true 2
+  check 'S1 first keys' "the os:admin talosconfig, whose CA key is read through the control plane: 200, replaced true, version 3, three acts" \
+    fk_supply talosconfig "$TALOSCONFIG" talosconfig true 3
+  check 'S1 first keys' "the stored key is the fixture's os CA key, and each act records its certificate's fingerprint" fk_stored_is_fixtures
+  check 'S1 first keys' 'a worker configuration holds no key: 422 first-key-no-ca-key, nothing written' \
+    fk_refused machine-config "$tmp/worker.yaml" "$first_keys_endpoint" worker-config 422 validation-failed first-key-no-ca-key
+  check 'S1 first keys' 'a document that is no machine configuration: 422 first-key-unusable, nothing written' \
+    fk_refused machine-config "$tmp/garbage" "$first_keys_endpoint" garbage 422 validation-failed first-key-unusable
+  check 'S1 first keys' 'an os:reader talosconfig: 422 first-key-role-insufficient, nothing written' \
+    fk_refused talosconfig "$tmp/reader.talosconfig" "$first_keys_endpoint" reader 422 validation-failed first-key-role-insufficient
+  check 'S1 first keys' 'the os:admin talosconfig at the worker, which holds no CA key: 422 first-key-endpoint-no-control-plane, nothing written' \
+    fk_refused talosconfig "$TALOSCONFIG" "$TALOS_WORKER_IP:50000" worker-endpoint 422 validation-failed first-key-endpoint-no-control-plane
+  check 'S1 first keys' "an unrelated cluster's secrets bundle as a replacement: the node refuses its certificate, 503 talos-access-unavailable, the stored key and its version unchanged" \
+    fk_refused secrets-bundle "$tmp/other-secrets.yaml" "$first_keys_endpoint" unrelated 503 talos-access-unavailable -
+  check 'S1 first keys' "the stored key is still the fixture's after the refusals" fk_stored_is_fixtures
+  rm -rf -- "$tmp"
+  check 'S1 backups, PA §16' 'inject db-snapshot: a dump of the bronzeward database after the first keys' \
+    "$bin/inject" db-snapshot "$backup_name"
+  outcome_bundle 'S1 first keys' first-keys
+}
+
 run() {
   # Preconditions, then the pre-state.
   preconditions
@@ -962,6 +1055,7 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   # instead.
   dump_table=staging_claim dump_id=${interrupted[0]:-} dump_row='an interrupted claim'
   [ "$s1_mode" != pass ] || dump_table=machine dump_id=$machine_w dump_row="the worker's machine"
+  [ "$s1_mode" != first-keys ] || { dump_table=first_key_act dump_row="a first key's act"; dump_id=$(sql "SELECT act FROM first_key_act ORDER BY act LIMIT 1") || dump_id=; }
   if [ "$s1_mode" = node-id ] || [ "$s1_mode" = register ]; then
     :
   elif [ -n "${dump_id%% *}" ] &&
