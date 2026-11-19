@@ -44,6 +44,10 @@ commands:
   cluster list | show <id>
   cluster add --name <name> --endpoint <https url> --contract <v1.x> --talos-cluster-id <id>
   cluster discover --talosconfig <file> [--talos-context <name>] [--endpoint <host|ip[:port]>]   read a cluster, print the commands that record it
+  cluster first-key --cluster <id> --kind talosconfig|machine-config|secrets-bundle --file <file>
+              --endpoint <ip[:port]> [--talos-context <name>]
+              author, a person; supplies or replaces the cluster's first key: one request, tried at the
+              endpoint before anything is stored; a Ctrl-C while it runs leaves the outcome unknown (exit 3)
   cluster onboard --talosconfig <file> --name <name> --kubernetes-endpoint <https url>|proposed
               (--bao-addr <url> (--bao-token-file <file> | --bao-token-stdin) | --skip-secret)
               [--talos-context <name>] [--endpoint <host|ip[:port]>] [--staging encrypted|transient]

@@ -275,7 +275,7 @@ func (e *env) machineAdd(args []string) error {
 			}
 		}
 		return []string{sf("Machine %s recorded in cluster %s. Endpoint %s.", m.Id, cluster, m.TalosEndpoint),
-			"Next: give Bronzeward the cluster's Talos access in the provider, then import its configuration."}, nil
+			"Next: supply the cluster's first key (cluster first-key), then import its configuration."}, nil
 	})
 }
 

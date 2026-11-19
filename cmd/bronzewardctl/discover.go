@@ -85,6 +85,17 @@ func readTalosconfig(file string) ([]byte, error) {
 	return b, nil
 }
 
+// firstControlPlane is the address the first control-plane member that answered was read at: the
+// endpoint a first key is tried at (operator-experience.md §5.2). None answered, none is given.
+func firstControlPlane(res discover.Result) (string, bool) {
+	for _, m := range res.Members {
+		if m.Role == "controlplane" && m.Answered && m.Address != "" {
+			return m.Address, true
+		}
+	}
+	return "", false
+}
+
 // endpointArg is address as the server's endpoint grammar takes it: an IPv6 literal in brackets.
 func endpointArg(address string) string {
 	if strings.Contains(address, ":") {
@@ -156,10 +167,6 @@ func discoverLines(res discover.Result, file, talosContext, override string) []s
 			out = append(out, "  bronzewardctl machine add --cluster <cluster id> "+key+" --platform "+client.ShellWord(m.Platform)+" --talos-endpoint "+client.ShellWord(endpointArg(m.Address)))
 		}
 	}
-	out = append(out, "  bao kv put -mount=secret access/talos/<cluster id> "+client.ShellWord("talosconfig=@"+file))
-	for _, n := range notRecorded {
-		out = append(out, "", "Not recorded: "+n+" Add it with machine add once it answers.")
-	}
 	selection := ""
 	if talosContext != "" {
 		selection += " --talos-context " + client.ShellWord(talosContext)
@@ -167,7 +174,19 @@ func discoverLines(res discover.Result, file, talosContext, override string) []s
 	if override != "" {
 		selection += " --endpoint " + client.ShellWord(override)
 	}
-	return append(out, "", "Nothing was sent to the server and no secret was written. Until the bao command has run, the first source: machine import fails with talos-access-unavailable.",
+	if address, ok := firstControlPlane(res); ok {
+		first := "  bronzewardctl cluster first-key --cluster <cluster id> --kind talosconfig --file " + client.ShellWord(file) + " --endpoint " + client.ShellWord(endpointArg(address))
+		if talosContext != "" {
+			first += " --talos-context " + client.ShellWord(talosContext)
+		}
+		out = append(out, first)
+	} else {
+		out = append(out, "", "Not recorded: the first key. No control-plane member answered, so no address can carry it; run cluster discover again once one does.")
+	}
+	for _, n := range notRecorded {
+		out = append(out, "", "Not recorded: "+n+" Add it with machine add once it answers.")
+	}
+	return append(out, "", "Nothing was sent to the server and no secret was written. Until the first-key command has run, the first source: machine import fails with talos-access-unavailable.",
 		"cluster onboard does all of this in one run, and imports each machine into a draft: bronzewardctl cluster onboard --talosconfig "+client.ShellWord(file)+selection+
 			" --name <name> --kubernetes-endpoint proposed --bao-addr <url> --bao-token-file <file>")
 }
