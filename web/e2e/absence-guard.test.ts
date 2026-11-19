@@ -125,13 +125,19 @@ export const protectedStorage = (source: string, fileName: string): number[] => 
   return lines;
 };
 
-// How many times the two-read check is used, not imported: an unused import or a comment does not count.
+// How many times the two-read check is called or handed over as a callback (`afterEach(check)`), under its own name or
+// the name it is imported as. An unused import, a type reference (`typeof check`), a comment and a string do not count.
 export const afterPauseUses = (source: string): number => {
   const file = ts.createSourceFile("spec.ts", source, ts.ScriptTarget.Latest, true);
+  const names = new Set(["storageEmptyAfterPause"]);
+  for (const s of file.statements) {
+    const named = ts.isImportDeclaration(s) ? s.importClause?.namedBindings : undefined;
+    if (named !== undefined && ts.isNamedImports(named)) for (const e of named.elements) if ((e.propertyName ?? e.name).text === "storageEmptyAfterPause") names.add(e.name.text);
+  }
   let uses = 0;
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node)) return;
-    if (ts.isIdentifier(node) && node.text === "storageEmptyAfterPause") uses++;
+    if (ts.isCallExpression(node)) for (const part of [node.expression, ...node.arguments]) if (ts.isIdentifier(part) && names.has(part.text)) uses++;
     ts.forEachChild(node, visit);
   };
   visit(file);
@@ -222,6 +228,10 @@ test("the two-read check counts as used only where it is called or registered, n
   expect(afterPauseUses("afterEach(storageEmptyAfterPause);")).toBe(1);
   expect(afterPauseUses('import { storageEmptyAfterPause } from "./helpers.ts";')).toBe(0);
   expect(afterPauseUses('import { storageEmptyAfterPause } from "./helpers.ts";\n// storageEmptyAfterPause is used here\nconst s = "storageEmptyAfterPause";')).toBe(0);
+  // A type reference is no use, and an imported alias is one.
+  expect(afterPauseUses('import { storageEmptyAfterPause } from "./helpers.ts";\ntype Check = typeof storageEmptyAfterPause;\nconst f = storageEmptyAfterPause;')).toBe(0);
+  expect(afterPauseUses('import { storageEmptyAfterPause as check } from "./helpers.ts";\nafterEach(check);')).toBe(1);
+  expect(afterPauseUses('import { storageEmptyAfterPause as check } from "./helpers.ts";\nawait check();')).toBe(1);
 });
 
 test("the positive control: a trailing note and a block note above count, and the walk says which read each one is", () => {
