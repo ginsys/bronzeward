@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
-	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/talos"
 )
 
@@ -93,8 +93,7 @@ func TestRecoveryScopeMark(t *testing.T) {
 	ae := newAttemptEnv(t, "")
 	ae.sent(t)
 	ae.second(t)
-	me := &markEnv{attemptEnv: ae, x: &fakeExecutor{access: provider.NewTalosAccess(provider.TalosAccessVersion{
-		Path: "access/talos/" + ae.cluster, Version: 2, CreatedTime: time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)}, []byte("tc"))}}
+	me := &markEnv{attemptEnv: ae, x: &fakeExecutor{}}
 	m2 := ae.machine2
 	me.report(me.recordedIdentity(t, m2))
 
@@ -147,14 +146,13 @@ func TestRecoveryScopeMark(t *testing.T) {
 		}},
 		// The access is refused to the executor's check and to the observation's own certificate alike.
 		{"access", "blocked", []string{"observation", "access"}, func() {
-			me.x.err = provider.ErrDenied
 			me.env.keys.kv.mu.Lock()
 			defer me.env.keys.kv.mu.Unlock()
 			me.env.keys.kv.status["GET"] = http.StatusForbidden
 		}},
 		{"again", "ready", []string{}, func() {}},
 	} {
-		me.x.decryptErr, me.x.err = nil, nil
+		me.x.decryptErr = nil
 		if me.env.keys != nil {
 			me.env.keys.kv.mu.Lock()
 			delete(me.env.keys.kv.status, "GET")
@@ -243,13 +241,18 @@ func TestRecoveryScopeMark(t *testing.T) {
 	// signed from one version and the check reads another, so the observation is not evidence of the key
 	// the check passed (execution-recovery.md §3.2 comparison 3). The two sign separate certificates, so
 	// the comparison is of the key (path, version, created_time), never of the serial.
+	// A certificate names its key version from the act before the provider is asked for it, so the key is
+	// replaced as the observation's read of the old version arrives: the check, which reads the act after,
+	// names the new one.
 	rotate := func() {
-		me.x.mu.Lock()
-		defer me.x.mu.Unlock()
-		me.x.onRead = nil
-		me.env.keys.seed(t, me.db, ae.cluster)
+		var reads atomic.Int32
+		me.env.keys.kv.before = func(method, _ string) {
+			if method == http.MethodGet && reads.Add(1) == 1 {
+				me.env.keys.seed(t, me.db, ae.cluster)
+			}
+		}
 	}
-	me.x.onRead = rotate
+	rotate()
 	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "rotated"), http.StatusCreated); b.State != "blocked" ||
 		len(b.Missing) != 1 || b.Missing[0] != "observation" {
 		t.Fatalf("a mark on an observation signed from another key version than the check read was marked %s missing %v; want blocked, observation", b.State, b.Missing)
@@ -258,7 +261,7 @@ func TestRecoveryScopeMark(t *testing.T) {
 	other := me.recordedIdentity(t, m2)
 	other.NodeID, other.SMBIOSUUID = "another-node", ""
 	me.report(other)
-	me.x.onRead = rotate
+	rotate()
 	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "rotated-identity"), http.StatusCreated); b.State != "blocked" ||
 		len(b.Missing) != 2 || b.Missing[0] != "observation" || b.Missing[1] != "identity" {
 		t.Fatalf("a mark on an observation that read another identity and another key version was marked %s missing %v; want observation then identity", b.State, b.Missing)
@@ -316,8 +319,9 @@ func TestRecoveryScopeMark(t *testing.T) {
 	// §7.3 step 6: a restoration observation's digest that the restored Applied does not explain is
 	// drift, recorded by the observation's own transaction.
 	f := observeFor{purpose: "restoration"}
-	acc := me.x.access.Version()
-	o := observed{ID: id.New(id.Observation), Access: storedAccess(acc), Digest: &[32]byte{9}, ResourceVersion: "rv9",
+	acc := &observedAccess{Path: "access/talos-ca/" + ae.cluster, Version: 1, CreatedTime: time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC),
+		Serial: "a1", NotAfter: time.Now().Add(time.Minute)}
+	o := observed{ID: id.New(id.Observation), Access: acc, Digest: &[32]byte{9}, ResourceVersion: "rv9",
 		Unread: map[string]unreadValue{"health": {Cause: "none-bound"}, "identity": {Cause: "identity-read"},
 			"runningVersion": {Cause: "version-read"}, "assignmentEvidence": {Cause: "unassigned"}}}
 	if err := ctl.inTx(t.Context(), func(tx *sql.Tx) error { _, _, err := ctl.startObservation(t.Context(), tx, m2, f, &o); return err }); err != nil {

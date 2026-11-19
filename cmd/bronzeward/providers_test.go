@@ -71,7 +71,7 @@ func TestProviderClientsMetadataToken(t *testing.T) {
 	}
 }
 
-// The executor client serve hands observations reads the Talos access under the executor
+// The executor client serve hands the executor decrypts a release's artifact under the executor
 // identity's token, read from executorTokenFile (persistence-api §3.3): not ingestion's.
 func TestProviderClientsExecutorToken(t *testing.T) {
 	p, sent := tokenStandIn(t)
@@ -79,8 +79,8 @@ func TestProviderClientsExecutorToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := exe.TalosAccess(t.Context(), id.New(id.Cluster)); err == nil {
-		t.Fatal("the stand-in's 404 read as a version")
+	if _, err := exe.DecryptArtifact(t.Context(), "vault:v1:AAAA", 1); err == nil {
+		t.Fatal("the stand-in's 404 read as an artifact")
 	}
 	if tokens := sent(); len(tokens) != 1 || tokens[0] != "synthetic-executor-token" {
 		t.Fatalf("sent %q, want the executor identity's token once", tokens)

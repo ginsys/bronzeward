@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"os"
 	"sync"
@@ -125,7 +124,7 @@ func TestE2ESeedSurvivesARunningController(t *testing.T) {
 	// automation token the seed's environment issues, and the principal's name is unique.
 	cfg := testAuth("http://127.0.0.1:1")
 	var d deps
-	d.exe = &fakeExecutor{err: errors.New("no Talos access: the deployment has no node")}
+	d.exe = &fakeExecutor{}
 	life, stop := context.WithCancel(t.Context())
 	d.life, d.runs = life, &sync.WaitGroup{}
 	d.timers = config.Ingestion{Heartbeat: 10 * time.Millisecond, Lease: 10 * time.Millisecond}

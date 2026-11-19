@@ -1348,7 +1348,7 @@ CREATE TABLE observation (
   basis                bigint NOT NULL,
   revision             bigint NOT NULL,
   entry_kind           text NOT NULL GENERATED ALWAYS AS ('observation') STORED,
-  access_path          text CHECK (access_path ~ '^access/talos(-ca)?/cl_[a-z2-7]{26}$'),
+  access_path          text CHECK (access_path ~ '^access/talos-ca/cl_[a-z2-7]{26}$'),
   access_version       bigint CHECK (access_version >= 1),
   access_created       text CHECK (access_created ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$'),
   access_serial        text CHECK (access_serial ~ '^[0-9a-f]{1,40}$'),
@@ -1364,12 +1364,11 @@ CREATE TABLE observation (
   unread               jsonb NOT NULL CHECK (jsonb_typeof(unread) = 'object'),
   at                   timestamptz NOT NULL,
   CHECK (basis < revision),
+  -- The access is the signer's CA key version and the serial and NotAfter of the certificate signed
+  -- from it for the observation's use (persistence-api.md §3.3): all recorded, or none.
   CONSTRAINT observation_access CHECK ((access_path IS NULL) = (access_version IS NULL)
-    AND (access_path IS NULL) = (access_created IS NULL)),
-  -- A certificate's serial and NotAfter are recorded exactly when the access is the signer's CA key
-  -- (persistence-api.md §3.3); the stored talosconfig a dispatch still uses has neither.
-  CONSTRAINT observation_certificate CHECK ((access_serial IS NOT NULL) = (access_not_after IS NOT NULL)
-    AND (access_serial IS NOT NULL) = coalesce(access_path LIKE 'access/talos-ca/%', false)),
+    AND (access_path IS NULL) = (access_created IS NULL) AND (access_path IS NULL) = (access_serial IS NULL)
+    AND (access_path IS NULL) = (access_not_after IS NULL)),
   CONSTRAINT observation_unavailable CHECK (access_version IS NOT NULL OR (smbios_uuid IS NULL
     AND talos_node_id IS NULL AND talos_cluster_id IS NULL AND assignment_evidence IS NULL AND running_version IS NULL
     AND configuration_digest IS NULL AND resource_version IS NULL AND health IS NULL)),

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"time"
 )
@@ -20,7 +19,6 @@ type dispatchCandidate struct {
 type heldOperation struct {
 	id, machine, cluster, plan, state string
 	gen                               int64
-	retryAccess                       string // accessKey of the retry's observation
 	sent, unaccounted, retry          bool
 }
 
@@ -222,8 +220,7 @@ func (a *API) foreignOperations(ctx context.Context) ([]heldOperation, error) {
 // it, as no timer does (§3.4). sent marks an operation with a recorded attempt. retry marks an
 // unresolved operation whose latest classification is this token's safe-to-retry, its observation
 // still within the plan's age, with no attempt, response, takeover or classification since: one
-// that has aged out is observed and classified again. retryAccess is the Talos access version
-// identity (path, version, created_time) that observation read.
+// that has aged out is observed and classified again.
 func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 	current, err := a.currentEpoch(ctx)
 	if err != nil {
@@ -233,15 +230,14 @@ func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 			EXISTS (SELECT FROM attempt WHERE operation = o.id),
 			EXISTS (SELECT FROM attempt t WHERE t.operation = o.id
 				AND NOT EXISTS (SELECT FROM attempt_accounting c WHERE c.attempt = t.id)),
-			(SELECT ob.access_path || '@' || ob.access_version || '@' || ob.access_created FROM operation_classification c JOIN observation ob ON ob.id = c.observation
+			EXISTS (SELECT FROM operation_classification c JOIN observation ob ON ob.id = c.observation
 					JOIN machine_event se ON se.machine = ob.machine AND se.revision = ob.basis
 				WHERE c.operation = o.id AND c.outcome = 'safe-to-retry'
 					AND c.owner = o.owner AND c.owner_gen = o.owner_gen AND c.owner_epoch = o.owner_epoch
 					AND c.revision = (SELECT max(revision) FROM operation_classification WHERE operation = o.id)
 					AND clock_timestamp() - se.at <= p.max_observation_age
 					AND NOT EXISTS (SELECT FROM machine_event e WHERE e.machine = o.machine AND e.revision > c.revision
-						AND e.kind IN ('attempt', 'response', 'ownership-transition', 'classification') AND e.entry->>'operation' = o.id)
-				AND ob.access_version IS NOT NULL)
+						AND e.kind IN ('attempt', 'response', 'ownership-transition', 'classification') AND e.entry->>'operation' = o.id))
 		FROM operation o JOIN plan p ON p.id = o.plan WHERE o.kind = 'apply-config'
 				AND o.state IN ('committed', 'verifying', 'unresolved')
 				AND o.owner = $1 AND o.owner_epoch = $2 ORDER BY o.created_at, o.id`, a.d.owner.ID, current)
@@ -252,12 +248,10 @@ func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 	var ops []heldOperation
 	for rows.Next() {
 		var op heldOperation
-		var retryAccess sql.NullString
 		if err := rows.Scan(&op.id, &op.machine, &op.cluster, &op.plan, &op.state, &op.gen, &op.sent, &op.unaccounted,
-			&retryAccess); err != nil {
+			&op.retry); err != nil {
 			return nil, err
 		}
-		op.retry, op.retryAccess = retryAccess.Valid, retryAccess.String
 		ops = append(ops, op)
 	}
 	return ops, rows.Err()

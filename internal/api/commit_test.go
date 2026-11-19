@@ -129,8 +129,8 @@ func (ce *commitEnv) evidence(t *testing.T, plan string, change func(*evSeed)) s
 			SELECT $1, $2, epoch, 'observation', jsonb_build_object('observation', $3::text, 'purpose', $4::text, 'basis', $5::bigint), now()
 			FROM installation_state`, machine, rev, obs, s.purpose, basis)
 		mustExec(t, tx, `INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created,
-				smbios_uuid, talos_node_id, talos_cluster_id, running_version, configuration_digest, unread, at)
-			SELECT $1, $2, $3, $4, 'access/talos/' || cluster, 3, '2026-10-01T00:00:00Z', $5::uuid, $6, NULLIF($7, ''), NULLIF($8, ''), $9,
+				access_serial, access_not_after, smbios_uuid, talos_node_id, talos_cluster_id, running_version, configuration_digest, unread, at)
+			SELECT $1, $2, $3, $4, 'access/talos-ca/' || cluster, 3, '2026-10-01T00:00:00Z', 'a1', now() + interval '1 day', $5::uuid, $6, NULLIF($7, ''), NULLIF($8, ''), $9,
 				$10::jsonb, now()
 			FROM machine WHERE id = $2`,
 			obs, machine, basis, rev, s.uuid, s.nodeID, s.clusterID, s.version, s.digest, s.unread)

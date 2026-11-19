@@ -56,8 +56,8 @@ func recordedDrift(t *testing.T, db *sql.DB, machine string, basis int64, digest
 		SELECT $1, $2, epoch, 'observation', jsonb_build_object('observation', $3::text, 'purpose', 'drift', 'basis', $4::bigint), now()
 		FROM installation_state`, machine, rev, obs, basis)
 	mustExec(t, tx, `INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created,
-			configuration_digest, unread, at)
-		SELECT $1, id, $3, $4, 'access/talos/' || cluster, 3, '2026-10-01T00:00:00Z', $5, '{}', now()
+			access_serial, access_not_after, configuration_digest, unread, at)
+		SELECT $1, id, $3, $4, 'access/talos-ca/' || cluster, 3, '2026-10-01T00:00:00Z', 'a1', now() + interval '1 day', $5, '{}', now()
 		FROM machine WHERE id = $2`, obs, machine, basis, rev, digest)
 	var ep string
 	if err := tx.QueryRow(`SELECT epoch FROM installation_state`).Scan(&ep); err != nil {

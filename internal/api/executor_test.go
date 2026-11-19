@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/siderolabs/talos/pkg/machinery/role"
+
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
@@ -77,9 +79,7 @@ func newExecEnv(t *testing.T) *execEnv {
 	mustExec(t, ce.db, `ALTER TABLE release_machine ENABLE TRIGGER immutable_rows`)
 	node.AcceptApply(t)
 	// The talosconfig's own endpoints and nodes, unroutable, are ignored: the machine's endpoint is dialled (PA §16).
-	return &execEnv{commitEnv: ce, node: node, artifact: artifact, keys: keys, keyAct: keyAct, x: &fakeExecutor{artifact: artifact,
-		access: provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + ce.cluster, Version: 1,
-			CreatedTime: accessCreated}, pki.Talosconfig("192.0.2.1", "192.0.2.2", ""))}}
+	return &execEnv{commitEnv: ce, node: node, artifact: artifact, keys: keys, keyAct: keyAct, x: &fakeExecutor{artifact: artifact}}
 }
 
 // executor is a controller of the current epoch over xe's database whose executor loop, once
@@ -236,13 +236,13 @@ func TestExecutorCompletes(t *testing.T) {
 		AND (entry->>'started')::timestamptz <= at`, xe.machine); n != 1 {
 		t.Fatalf("use-time check %s names no start at or before its entry", entry)
 	}
-	// One decryption and one stored-talosconfig read for the dispatch; the completion observation signs
-	// a certificate from the act's key version, the one CA key read, and records it.
+	// One decryption for the dispatch. Two certificates are signed, each a read of the act's key
+	// version: one for the dispatch (its evidence observation, check and attempt) and one for the
+	// completion observation, which records its own.
 	xe.x.mu.Lock()
 	defer xe.x.mu.Unlock()
-	if kvReads := xe.keys.kv.readVersions(); xe.x.decrypts != 1 || len(xe.x.reads) != 1 || !slices.Equal(kvReads, []int{xe.keyAct.Version}) {
-		t.Fatalf("%d decryptions, %d access reads, CA key reads of versions %v; want 1, 1 and [%d]", xe.x.decrypts, len(xe.x.reads),
-			kvReads, xe.keyAct.Version)
+	if kvReads := xe.keys.kv.readVersions(); xe.x.decrypts != 1 || !slices.Equal(kvReads, []int{xe.keyAct.Version, xe.keyAct.Version}) {
+		t.Fatalf("%d decryptions, CA key reads of versions %v; want 1 and [%d %d]", xe.x.decrypts, kvReads, xe.keyAct.Version, xe.keyAct.Version)
 	}
 	if n := count(t, xe.db, `SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
 		WHERE o.machine = $1 AND s.purpose = 'completion' AND o.access_path = $2 AND o.access_version = $3
@@ -263,21 +263,20 @@ func TestExecutorUseTimeCheckFailure(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, cause string
-		fail        func(*fakeExecutor)
-		heal        func(*fakeExecutor)
-		decrypts    int
+		fail        func(*testing.T, *execEnv)
+		heal        func(*testing.T, *execEnv)
 	}{
-		{"sealed provider", "provider-unavailable", func(x *fakeExecutor) { x.decryptErr = fmt.Errorf("sealed: %w", provider.ErrUnavailable) },
-			func(x *fakeExecutor) { x.decryptErr = nil }, 1},
-		{"another key", "key-mismatch", func(x *fakeExecutor) { x.keyName = "other-key" }, func(x *fakeExecutor) { x.keyName = "" }, 0},
-		{"unreadable access", "denied", func(x *fakeExecutor) { x.err = fmt.Errorf("no: %w", provider.ErrDenied) },
-			func(x *fakeExecutor) { x.err = nil }, 1},
-		{"absent access", "absent", func(x *fakeExecutor) { x.err = fmt.Errorf("no: %w", provider.ErrAbsent) },
-			func(x *fakeExecutor) { x.err = nil }, 1},
-		{"malformed access", "malformed", func(x *fakeExecutor) { x.err = fmt.Errorf("no: %w", provider.ErrProtocol) },
-			func(x *fakeExecutor) { x.err = nil }, 1},
-		{"sealed access", "provider-unavailable", func(x *fakeExecutor) { x.err = fmt.Errorf("sealed: %w", provider.ErrUnavailable) },
-			func(x *fakeExecutor) { x.err = nil }, 1},
+		{"sealed provider", "provider-unavailable", func(_ *testing.T, xe *execEnv) { xe.x.decryptErr = fmt.Errorf("sealed: %w", provider.ErrUnavailable) },
+			func(_ *testing.T, xe *execEnv) { xe.x.decryptErr = nil }},
+		{"another key", "key-mismatch", func(_ *testing.T, xe *execEnv) { xe.x.keyName = "other-key" }, func(_ *testing.T, xe *execEnv) { xe.x.keyName = "" }},
+		{"unreadable key", "denied", kvStatus(http.StatusForbidden), kvStatus(0)},
+		{"absent key act", "absent", func(t *testing.T, xe *execEnv) { dropFirstKeyActs(t, xe.db, xe.cluster) },
+			func(t *testing.T, xe *execEnv) { xe.keys.seed(t, xe.db, xe.cluster) }},
+		{"the named version is gone", "version-gone", func(_ *testing.T, xe *execEnv) { xe.keys.kv.destroy(xe.keyAct.Path, xe.keyAct.Version) },
+			func(t *testing.T, xe *execEnv) { xe.keys.seed(t, xe.db, xe.cluster) }},
+		{"malformed key answer", "malformed", func(_ *testing.T, xe *execEnv) { xe.keys.kv.setGarble(true) },
+			func(_ *testing.T, xe *execEnv) { xe.keys.kv.setGarble(false) }},
+		{"sealed key", "provider-unavailable", kvStatus(http.StatusServiceUnavailable), kvStatus(0)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -286,7 +285,7 @@ func TestExecutorUseTimeCheckFailure(t *testing.T) {
 				AND class = 'retained'`, artifactKeyName); n < 1 {
 				t.Fatal("the artifact key is not classified retained")
 			}
-			tc.fail(xe.x)
+			tc.fail(t, xe)
 			beforeObservations := count(t, xe.db, `SELECT count(*) FROM observation_start`)
 			life, stop := context.WithCancel(t.Context())
 			idle := make(chan struct{})
@@ -305,7 +304,7 @@ func TestExecutorUseTimeCheckFailure(t *testing.T) {
 				t.Fatalf("%d observations or a commitment after a failed check", n)
 			}
 			xe.x.mu.Lock()
-			tc.heal(xe.x)
+			tc.heal(t, xe)
 			xe.x.mu.Unlock()
 			until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
 			if n := len(xe.node.AppliedRequests()); n != 1 {
@@ -313,6 +312,22 @@ func TestExecutorUseTimeCheckFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+// kvStatus forces the status of every read of the CA key the dispatch's certificate needs, 0 for none.
+func kvStatus(code int) func(*testing.T, *execEnv) {
+	return func(_ *testing.T, xe *execEnv) {
+		xe.keys.kv.mu.Lock()
+		defer xe.keys.kv.mu.Unlock()
+		xe.keys.kv.status["GET"] = code
+	}
+}
+
+// setGarble makes every read answer 200 with a body that is no KV answer.
+func (k *kvStandIn) setGarble(on bool) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.garble = on
 }
 
 // ER §9.2 and PA §3.3, against a stubbed Talos node: a commitment is refused by comparison 3, nothing
@@ -398,50 +413,46 @@ func TestExecutorCommitmentIdentityKeys(t *testing.T) {
 	})
 }
 
-// PA §3.3 and §16 Talos access, executor: a node-side cause (a talosconfig the client cannot use, a
-// credential Talos refuses) fails the dispatch's fresh observation, which records its cause; no
-// operation is committed and nothing is sent, and once the access is repaired the plan completes.
+// PA §3.3 and §16 Talos access, executor: a node-side cause (a certificate Talos refuses, signed from
+// a CA the node does not trust) fails the dispatch's fresh observation, which records its cause; no
+// operation is committed and nothing is sent, and once the key is repaired the plan completes.
 func TestExecutorNodeSideAccessFailure(t *testing.T) {
 	t.Parallel()
-	for name, c := range map[string]struct {
-		access func(t *testing.T, old provider.TalosAccess) []byte
-		cause  string
-	}{
-		"malformed talosconfig": {func(_ *testing.T, old provider.TalosAccess) []byte {
-			return []byte(strings.Replace(string(old.Talosconfig()), "ca: ", "ca: not-base64-", 1))
-		}, "talosconfig"},
-		"a credential Talos refuses": {func(t *testing.T, _ provider.TalosAccess) []byte {
-			return talostest.NewPKI(t).Talosconfig("", "", "")
-		}, "node-unreachable"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			xe := newExecEnv(t)
-			good := xe.x.access
-			xe.x.access = provider.NewTalosAccess(good.Version(), c.access(t, good))
-			life, stop := context.WithCancel(t.Context())
-			idle := make(chan struct{})
-			a := xe.executor(t, life, idle, options{nodeTimeout: 500 * time.Millisecond})
-			a.startExecutor()
-			defer stopping(a, stop)
-			waitIdle(t, idle, 1)
-			xe.approveThrough(t, a)
-			until(t, a, idle, "a failed evidence observation", func() bool {
-				return count(t, xe.db, `SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine
-					AND s.revision = o.basis WHERE o.machine = $1 AND s.purpose = 'evidence' AND o.unread::text LIKE '%' || $2 || '%'`,
-					xe.machine, c.cause) > 0
-			})
-			passEnds(t, a, idle)
-			xe.wantNothingSent(t)
-			if xe.entries(t, "commitment") != 0 {
-				t.Fatal("a commitment after a failed observation")
-			}
-			xe.x.mu.Lock()
-			xe.x.access = good
-			xe.x.mu.Unlock()
-			until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
-		})
+	xe := newExecEnv(t)
+	good := xe.keys.ca
+	xe.keys.ca = newTalosCA(t) // the act names a key the node does not trust
+	xe.keys.seed(t, xe.db, xe.cluster)
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{nodeTimeout: 500 * time.Millisecond})
+	a.startExecutor()
+	defer stopping(a, stop)
+	waitIdle(t, idle, 1)
+	xe.approveThrough(t, a)
+	until(t, a, idle, "a failed evidence observation", func() bool {
+		return count(t, xe.db, `SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine
+			AND s.revision = o.basis WHERE o.machine = $1 AND s.purpose = 'evidence' AND o.unread::text LIKE '%node-unreachable%'`,
+			xe.machine) > 0
+	})
+	passEnds(t, a, idle)
+	xe.wantNothingSent(t)
+	if xe.entries(t, "commitment") != 0 {
+		t.Fatal("a commitment after a failed observation")
 	}
+	xe.keys.ca = good
+	xe.keys.seed(t, xe.db, xe.cluster)
+	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+}
+
+// refusingSigner is a Signer whose named-version read fails with err, as a provider answer that carried
+// text of its own would.
+type refusingSigner struct {
+	Signer
+	err error
+}
+
+func (s refusingSigner) ReadCAKeyVersion(context.Context, string, int) (provider.CAKey, error) {
+	return provider.CAKey{}, s.err
 }
 
 // PA §16 Talos access, executor: a failed access read at dispatch records its cause, never the
@@ -453,7 +464,7 @@ func TestExecutorAccessErrorTextControl(t *testing.T) {
 		t.Run(fmt.Sprint("quoteErrors=", quote), func(t *testing.T) {
 			t.Parallel()
 			xe := newExecEnv(t)
-			xe.x.err = fmt.Errorf("%s: %w", canary, provider.ErrDenied)
+			xe.env.d.sg = refusingSigner{Signer: xe.keys.sg, err: fmt.Errorf("%s: %w", canary, provider.ErrDenied)}
 			var mu sync.Mutex
 			var logged strings.Builder
 			logf := func(format string, args ...any) {
@@ -528,63 +539,53 @@ func TestExecutorAttemptNotRecordedSendsNothing(t *testing.T) {
 	}
 }
 
-// ER §3.2 and §3.3 comparison 3, PA §3.3: an attempt made again after its transaction failed reads
-// the access again. When it moved since the commitment's evidence was observed (another version
-// number, or the same number with another created_time after the metadata was deleted and written
-// again), comparison 3 refuses the attempt, the operation is observed and classified again with the
-// new access, and the one request rests on that observation, not on the earlier evidence.
-func TestExecutorAttemptAfterAccessRotation(t *testing.T) {
+// ER §3.2 and §3.3 comparison 3, PA §3.3: an attempt made again after its transaction failed signs
+// a new certificate, which names another serial than the commitment's evidence read through, whether
+// or not the CA key moved (a replaced key is another version of it). Comparison 3 refuses the
+// attempt, the operation is observed and classified again, and the one request is sent on new
+// evidence recorded for the operation, signed with the certificate it is sent with.
+func TestExecutorAttemptAfterCertificateRenewal(t *testing.T) {
 	t.Parallel()
-	for name, move := range map[string]func(*provider.TalosAccessVersion){
-		"another version":                        func(v *provider.TalosAccessVersion) { v.Version++ },
-		"the same version, another created time": func(v *provider.TalosAccessVersion) { v.CreatedTime = v.CreatedTime.Add(time.Hour) },
-	} {
+	for name, replaceKey := range map[string]bool{"the key unchanged": false, "the key replaced": true} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			attemptAfterAccessRotation(t, move)
+			xe := newExecEnv(t)
+			var armed atomic.Bool
+			armed.Store(true)
+			life, stop := context.WithCancel(t.Context())
+			idle := make(chan struct{})
+			a := xe.executor(t, life, idle, options{commit: func(tx *sql.Tx) error {
+				var n int
+				if err := tx.QueryRow(`SELECT count(*) FROM attempt`).Scan(&n); err == nil && n > 0 && armed.CompareAndSwap(true, false) {
+					_ = tx.Rollback()
+					if replaceKey {
+						xe.keys.seed(t, xe.db, xe.cluster)
+					}
+					return errors.New("the attempt's commit failed")
+				}
+				return tx.Commit()
+			}})
+			a.startExecutor()
+			defer stopping(a, stop)
+			waitIdle(t, idle, 1)
+			xe.approveThrough(t, a)
+			until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+			if n := len(xe.node.AppliedRequests()); n != 1 {
+				t.Fatalf("%d requests", n)
+			}
+			if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE kind = 'refusal' AND entry->>'comparison' = '3'
+				AND entry->>'cause' = 'the use-time check used another certificate than the evidence'`); n != 1 {
+				t.Fatalf("%d comparison 3 refusals for the renewed certificate", n)
+			}
+			// The retry's evidence: an evidence observation recorded for the operation, signed from the key
+			// the act names now.
+			latest := latestActVersion(t, xe.db, xe.cluster)
+			if n := count(t, xe.db, `SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+				WHERE s.purpose = 'evidence' AND s.operation IS NOT NULL AND o.access_path = $1 AND o.access_version = $2`,
+				latest.Path, latest.Version); n != 1 {
+				t.Fatalf("%d evidence observations recorded for the operation read through the latest key version", n)
+			}
 		})
-	}
-}
-
-func attemptAfterAccessRotation(t *testing.T, move func(*provider.TalosAccessVersion)) {
-	xe := newExecEnv(t)
-	var armed atomic.Bool
-	armed.Store(true)
-	var moved provider.TalosAccessVersion // set under xe.x.mu
-	life, stop := context.WithCancel(t.Context())
-	idle := make(chan struct{})
-	a := xe.executor(t, life, idle, options{commit: func(tx *sql.Tx) error {
-		var n int
-		if err := tx.QueryRow(`SELECT count(*) FROM attempt`).Scan(&n); err == nil && n > 0 && armed.CompareAndSwap(true, false) {
-			_ = tx.Rollback()
-			xe.x.mu.Lock()
-			moved = xe.x.access.Version()
-			move(&moved)
-			xe.x.access = provider.NewTalosAccess(moved, xe.x.access.Talosconfig())
-			xe.x.mu.Unlock()
-			return errors.New("the attempt's commit failed")
-		}
-		return tx.Commit()
-	}})
-	a.startExecutor()
-	defer stopping(a, stop)
-	waitIdle(t, idle, 1)
-	xe.approveThrough(t, a)
-	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
-	if n := len(xe.node.AppliedRequests()); n != 1 {
-		t.Fatalf("%d requests", n)
-	}
-	xe.x.mu.Lock()
-	v := moved
-	xe.x.mu.Unlock()
-	if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation
-		WHERE o.access_path = $1 AND o.access_version = $2 AND o.access_created = $3`, v.Path, v.Version,
-		v.CreatedTime.UTC().Format(time.RFC3339Nano)); n != 1 {
-		t.Fatalf("the attempt does not rest on an observation read with access %+v", v)
-	}
-	if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE kind = 'refusal' AND entry->>'comparison' = '3'
-		AND entry->>'cause' = 'the use-time check read another Talos access than the evidence'`); n != 1 {
-		t.Fatalf("%d comparison 3 refusals for the moved access", n)
 	}
 }
 
@@ -829,10 +830,11 @@ func TestExecutorCheckValidityBoundsDispatch(t *testing.T) {
 	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
 }
 
-// checkedAccess is a seeded use-time check's dependencies: the access the evidence observation o
-// read, so that comparison 3's access term passes and the check's time alone decides.
+// checkedAccess is a seeded use-time check's dependencies: the certificate the evidence observation o
+// read through, so that comparison 3's certificate terms pass and the check's time alone decides.
 const checkedAccess = `jsonb_build_object('access', jsonb_build_object('path', o.access_path,
-	'version', o.access_version, 'created', o.access_created))`
+	'version', o.access_version, 'created', o.access_created, 'serial', o.access_serial,
+	'notAfter', o.access_not_after))`
 
 // ER §3.3: an attempt whose use-time check is older than the plan's validity window at its time is
 // refused by comparison 3 and sends nothing.
@@ -853,19 +855,57 @@ func TestAttemptRefusesAnExpiredUseTimeCheck(t *testing.T) {
 		settled{"unresolved", "3", "the use-time check is older than the plan allows"})
 }
 
-// ER §3.1 item 2: a caller that read the access itself passes the time its reads began, and the
-// check's window runs from that time, not from the check's own start.
-func TestUseTimeCheckWindowStartsWhereTheCallersReadsBegan(t *testing.T) {
-	t.Parallel()
-	xe := newExecEnv(t)
-	began := time.Now().Add(-time.Hour).UTC().Truncate(time.Microsecond)
-	acc := xe.x.access
-	if _, err := xe.a.useTimeCheck(context.Background(), xe.machine, xe.cluster, xe.pid, "", &acc, began); err != nil {
-		t.Fatal(err)
+// access is a seeded use-time check's access dependency: the evidence observation o's certificate, with
+// the serial and the NotAfter replaced by the SQL expressions given (empty keeps the observation's).
+func access(serial, notAfter string) string {
+	if serial == "" {
+		serial = "o.access_serial"
 	}
-	if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'use-time-check'
-		AND (entry->>'started')::timestamptz = $2`, xe.machine, began); n != 1 {
-		t.Fatalf("%d use-time checks start at %s", n, began.Format(time.RFC3339Nano))
+	if notAfter == "" {
+		notAfter = "o.access_not_after"
+	}
+	return `jsonb_build_object('access', jsonb_build_object('path', o.access_path, 'version', o.access_version,
+		'created', o.access_created, 'serial', ` + serial + `, 'notAfter', ` + notAfter + `))`
+}
+
+// ER §3.2 comparison 3, #899: the attempt is sent with the check's certificate, so the check must name
+// the certificate the evidence read through (its serial, beside the key's path, version and
+// created_time), and a certificate past its NotAfter is not sent with. Each control differs from its
+// case in the one term alone: the same check with the observation's own serial and NotAfter is accepted,
+// so the refusal is that term's and no other's.
+func TestAttemptComparesTheCertificate(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		deps  string
+		cause string // empty: the attempt is accepted
+	}{
+		"the evidence's own certificate":     {access("", ""), ""},
+		"another serial, the same key":       {access("'ffff'", ""), "the use-time check used another certificate than the evidence"},
+		"a NotAfter in the future":           {access("", "now() + interval '1 hour'"), ""},
+		"a certificate past its NotAfter":    {access("", "now() - interval '1 second'"), "the certificate passed its NotAfter"},
+		"the NotAfter of another serial too": {access("'ffff'", "now() - interval '1 second'"), "the use-time check used another certificate than the evidence"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ae := newAttemptEnv(t, "")
+			var rev int64
+			if err := ae.db.QueryRow(`UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = $1 RETURNING revision_counter`,
+				ae.machine).Scan(&rev); err != nil {
+				t.Fatal(err)
+			}
+			mustExec(t, ae.db, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+				SELECT $1, $2, epoch, 'use-time-check', jsonb_build_object('plan', $3::text, 'controller', $4::text, 'result', 'passed',
+					'dependencies', `+c.deps+`), now()
+				FROM installation_state, observation o WHERE o.id = $5`, ae.machine, rev, ae.pid, ae.a.d.owner.ID, ae.obs)
+			_, err := ae.a.recordAttempt(context.Background(), ae.op, 1)
+			if c.cause == "" {
+				if err != nil {
+					t.Fatalf("the control was refused: %v", err)
+				}
+				return
+			}
+			ae.wantAttemptRefused(t, err, "3", c.cause, ae.obs, "committed", settled{"unresolved", "3", c.cause})
+		})
 	}
 }
 
@@ -1062,25 +1102,14 @@ func TestExecutorReclassifiesExpiredRetryEvidence(t *testing.T) {
 	}
 }
 
-// ER §3.1 and §3.3, PA §16: a retry is made with the access its evidence read. When the access
-// moved to another version identity while the retry was held back (another version number, or the
-// same number with another created_time after the metadata was deleted and written again), the
-// operation is observed and classified again with the new one, and the attempt rests on that
-// observation.
-func TestExecutorRetryFollowsAccessRotation(t *testing.T) {
+// ER §3.3, D6 of #899: a classified retry takes a new certificate, one new evidence observation
+// recorded for the operation and taken with it, and its attempt, and no new classification: the
+// certificate of the classification's observation lived for that use alone. A key replaced while the
+// retry was held back is signed from, and the evidence names it. A loop that classified again
+// instead of observing for evidence would show a second safe-to-retry classification and no
+// evidence recorded for the operation.
+func TestExecutorRetryTakesNewEvidence(t *testing.T) {
 	t.Parallel()
-	for name, move := range map[string]func(*provider.TalosAccessVersion){
-		"another version":                        func(v *provider.TalosAccessVersion) { v.Version++ },
-		"the same version, another created time": func(v *provider.TalosAccessVersion) { v.CreatedTime = v.CreatedTime.Add(time.Hour) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			retryFollowsAccessRotation(t, move)
-		})
-	}
-}
-
-func retryFollowsAccessRotation(t *testing.T, move func(*provider.TalosAccessVersion)) {
 	xe := newExecEnv(t)
 	xe.ready(t)
 	if _, err := xe.a.commitPlan(context.Background(), xe.pid); err != nil {
@@ -1098,134 +1127,108 @@ func retryFollowsAccessRotation(t *testing.T, move func(*provider.TalosAccessVer
 		return xe.entries(t, "use-time-check") > 0 && count(t, xe.db, `SELECT count(*) FROM operation_classification
 			WHERE outcome = 'safe-to-retry'`) > 0
 	})
-	// The access moves while the provider is still sealed, and a pass ends before it unseals: a
-	// pass that read the earlier access, in flight when until returned, is held back too.
-	xe.x.mu.Lock()
-	v := xe.x.access.Version()
-	move(&v)
-	xe.x.access = provider.NewTalosAccess(v, xe.x.access.Talosconfig())
-	xe.x.mu.Unlock()
+	// The key is replaced while the provider is still sealed, and a pass ends before it unseals: a
+	// pass in flight when until returned is held back too.
+	latest := xe.keys.seed(t, xe.db, xe.cluster)
 	passEnds(t, a, idle)
 	xe.x.mu.Lock()
 	xe.x.decryptErr = nil
 	xe.x.mu.Unlock()
 	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
-	if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation
-		WHERE o.access_path = $1 AND o.access_version = $2 AND o.access_created = $3`, v.Path, v.Version, v.CreatedTime.UTC().Format(time.RFC3339Nano)); n != 1 {
-		t.Fatalf("the attempt does not rest on an observation read with access %+v", v)
+	if n := count(t, xe.db, `SELECT count(*) FROM operation_classification WHERE outcome = 'safe-to-retry'`); n != 1 {
+		t.Fatalf("%d safe-to-retry classifications: the retry classified again instead of taking new evidence", n)
 	}
-}
-
-// PA §16, #899 part B: a dispatch still sends with the stored talosconfig, and a retry whose
-// classification rests on an observation read through a certificate (a recovery or completion
-// observation, which carry no stored access) is not the retry this access can attempt: its observation
-// names another credential. The loop observes and classifies again with the stored access and the
-// attempt rests on that observation, once. Part C removes the case with the stored access.
-func TestExecutorRetryFirstClassifiedOnACertificate(t *testing.T) {
-	t.Parallel()
-	xe := newExecEnv(t)
-	xe.ready(t)
-	if _, err := xe.a.commitPlan(context.Background(), xe.pid); err != nil {
-		t.Fatal(err)
-	}
-	xe.x.mu.Lock()
-	xe.x.decryptErr = fmt.Errorf("sealed: %w", provider.ErrUnavailable)
-	xe.x.mu.Unlock()
-	life, stop := context.WithCancel(t.Context())
-	idle := make(chan struct{})
-	a := xe.executor(t, life, idle, options{})
-	a.startExecutor()
-	defer stopping(a, stop)
-	until(t, a, idle, "a retry held back by a sealed provider", func() bool {
-		return xe.entries(t, "use-time-check") > 0 && count(t, xe.db, `SELECT count(*) FROM operation_classification
-			WHERE outcome = 'safe-to-retry'`) > 0
-	})
-	// The classification's observation is made one read through a certificate from the act's key version.
-	var first string
-	if err := xe.db.QueryRow(`SELECT observation FROM operation_classification WHERE outcome = 'safe-to-retry'`).Scan(&first); err != nil {
-		t.Fatal(err)
-	}
-	mustExec(t, xe.db, `ALTER TABLE observation DISABLE TRIGGER immutable_rows`)
-	mustExec(t, xe.db, `UPDATE observation SET access_path = $2, access_version = $3, access_created = $4, access_serial = 'ab12',
-		access_not_after = now() + interval '1 hour' WHERE id = $1`, first, xe.keyAct.Path, xe.keyAct.Version,
-		xe.keyAct.CreatedTime.UTC().Format(time.RFC3339Nano))
-	mustExec(t, xe.db, `ALTER TABLE observation ENABLE TRIGGER immutable_rows`)
-	passEnds(t, a, idle) // a pass in flight at the change is held back too
-	xe.x.mu.Lock()
-	xe.x.decryptErr = nil
-	xe.x.mu.Unlock()
-	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
-	if n := count(t, xe.db, `SELECT count(*) FROM operation_classification WHERE outcome = 'safe-to-retry'`); n < 2 {
-		t.Fatalf("%d safe-to-retry classifications: the certificate observation was relied on", n)
-	}
-	if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation
-		WHERE o.id <> $1 AND o.access_path = $2 AND o.access_serial IS NULL`, first, "access/talos/"+xe.cluster); n != 1 {
-		t.Fatalf("%d attempts rest on an observation read with the stored access; want 1", n)
+	if n := count(t, xe.db, `SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+		WHERE s.purpose = 'evidence' AND s.operation IS NOT NULL AND o.access_path = $1 AND o.access_version = $2`,
+		latest.Path, latest.Version); n != 1 {
+		t.Fatalf("%d evidence observations recorded for the operation read through key version %d, want 1", n, latest.Version)
 	}
 	if n := count(t, xe.db, `SELECT count(*) FROM attempt`); n != 1 || len(xe.node.AppliedRequests()) != 1 {
 		t.Fatalf("%d attempts and %d requests; want one of each", n, len(xe.node.AppliedRequests()))
 	}
 }
 
-// PA §16 Talos access, executor: a rotation between the evidence observation and the attempt
-// leaves the attempt sending with the version the observation read; the control reads the latest
-// version at send.
-func TestExecutorSendsWithTheObservedAccess(t *testing.T) {
+// PA §3.3, §16, ER §3.1 item 2: one certificate covers a dispatch's evidence observation and its
+// attempt. A key replaced while the evidence observation holds its certificate leaves the attempt
+// sending with that certificate: its serial is the one the observation recorded. The control signs
+// a certificate again at the time of the send and shows another serial, so the comparison can fail.
+func TestExecutorSendsWithTheObservedCertificate(t *testing.T) {
 	t.Parallel()
-	for _, latest := range []bool{false, true} {
-		t.Run(fmt.Sprint("latestAccess=", latest), func(t *testing.T) {
-			t.Parallel()
-			xe := newExecEnv(t)
-			old := xe.x.access
-			v := old.Version()
-			v.Version++
-			rotated := provider.NewTalosAccess(v, append(old.Talosconfig(), "\n# rotated\n"...))
-			var once sync.Once
-			xe.x.onRead = func() { // the first read returns old; every later one rotated
-				once.Do(func() {
-					xe.x.mu.Lock()
-					xe.x.access = rotated
-					xe.x.mu.Unlock()
-				})
+	xe := newExecEnv(t)
+	var once sync.Once
+	observe := func(ctx context.Context, tc []byte, endpoint string) (talos.Reader, error) {
+		once.Do(func() { xe.keys.seed(t, xe.db, xe.cluster) }) // the key is replaced after the certificate was signed
+		return talos.Dial(ctx, tc, endpoint)
+	}
+	// The first attempt's dial records the talosconfig it was given and fails as a transport failure:
+	// what is sent is the configuration, not the apply.
+	var mu sync.Mutex
+	var sent []byte
+	dial := func(_ context.Context, tc []byte, _ string) (talos.Applier, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if sent == nil {
+			sent = bytes.Clone(tc)
+		}
+		return nil, errors.New("not dialled")
+	}
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{dial: observe, dialApply: dial})
+	a.startExecutor()
+	defer stopping(a, stop)
+	waitIdle(t, idle, 1)
+	xe.approveThrough(t, a)
+	until(t, a, idle, "the first attempt dials", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return sent != nil
+	})
+	var serial string
+	if err := xe.db.QueryRow(`SELECT o.access_serial FROM attempt a JOIN observation o ON o.id = a.observation
+		WHERE a.plan = $1 AND a.number = 1`, xe.pid).Scan(&serial); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got := certSerial(t, sent); got != serial {
+		t.Fatalf("sent with certificate %s, want the observation's %s", got, serial)
+	}
+	// No row of any table holds the client key the certificate was signed for or the CA's: the
+	// scan's control finds the serial, which the observation records.
+	scan := func(needle string) (n int) {
+		rows, err := xe.db.Query(`SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()
+			AND table_type = 'BASE TABLE'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var tables []string
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
 			}
-			// The first attempt's dial records the talosconfig it was given and fails as a transport
-			// failure: what is sent is the configuration, not the apply.
-			var mu sync.Mutex
-			var sent []byte
-			dial := func(_ context.Context, tc []byte, _ string) (talos.Applier, error) {
-				mu.Lock()
-				defer mu.Unlock()
-				if sent == nil {
-					sent = bytes.Clone(tc)
-				}
-				return nil, errors.New("not dialled")
-			}
-			life, stop := context.WithCancel(t.Context())
-			idle := make(chan struct{})
-			a := xe.executor(t, life, idle, options{dialApply: dial, latestAccess: latest})
-			a.startExecutor()
-			defer stopping(a, stop)
-			waitIdle(t, idle, 1)
-			xe.approveThrough(t, a)
-			until(t, a, idle, "the first attempt dials", func() bool {
-				mu.Lock()
-				defer mu.Unlock()
-				return sent != nil
-			})
-			if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation
-				WHERE a.plan = $1 AND a.number = 1 AND o.access_version = $2`, xe.pid, old.Version().Version); n != 1 {
-				t.Fatalf("the first attempt does not rest on an observation read with access version %d", old.Version().Version)
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			want := old.Talosconfig()
-			if latest {
-				want = rotated.Talosconfig()
-			}
-			if !bytes.Equal(sent, want) {
-				t.Fatalf("sent with %q, want %q", sent, want)
-			}
-		})
+			tables = append(tables, s)
+		}
+		_ = rows.Close()
+		for _, tbl := range tables {
+			n += count(t, xe.db, `SELECT count(*) FROM "`+tbl+`" r WHERE r::text LIKE '%' || $1 || '%'`, needle)
+		}
+		return n
+	}
+	caKeyLine := strings.Split(string(xe.keys.ca.Key), "\n")[1] // a line of the PEM body, which a JSON or text rendering keeps whole
+	if key := clientKey(sent); key == "" || scan(key) != 0 || len(caKeyLine) < 20 || scan(caKeyLine) != 0 {
+		t.Fatalf("a row holds a client key or the CA key (client key present in the talosconfig: %v)", clientKey(sent) != "")
+	}
+	if scan(serial) == 0 {
+		t.Fatal("the control: the scan did not find the recorded serial")
+	}
+	again, _, err := xe.a.certFor(t.Context(), xe.cluster, role.Admin, nodeUseLife*nodeTimeout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Serial() == serial {
+		t.Fatal("the control: a certificate signed again names the same serial, so the comparison cannot tell them apart")
 	}
 }
 
@@ -1266,8 +1269,8 @@ func TestDispatchOfAPlanCancelledWhileQueuedReadsNoDependency(t *testing.T) {
 	}
 	xe.x.mu.Lock()
 	defer xe.x.mu.Unlock()
-	if len(xe.x.reads) != 0 || xe.x.decrypts != 0 {
-		t.Fatalf("%d access reads and %d decryptions for a cancelled plan", len(xe.x.reads), xe.x.decrypts)
+	if reads := xe.keys.kv.readVersions(); len(reads) != 0 || xe.x.decrypts != 0 {
+		t.Fatalf("%d CA key reads and %d decryptions for a cancelled plan", len(reads), xe.x.decrypts)
 	}
 	xe.wantNothingSent(t)
 }

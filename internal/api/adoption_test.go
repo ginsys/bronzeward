@@ -152,8 +152,8 @@ func (ae *adoptEnv) observed(t *testing.T, change func(*obsSeed)) string {
 			SELECT $1, $2, epoch, 'observation', jsonb_build_object('observation', $3::text, 'purpose', 'drift', 'basis', $4::bigint), now()
 			FROM installation_state`, ae.machine, rev, obs, basis)
 		mustExec(t, tx, `INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created,
-				smbios_uuid, talos_node_id, talos_cluster_id, assignment_evidence, configuration_digest, unread, at)
-			VALUES ($1, $2, $3, $4, 'access/talos/' || $5, 3, '2026-10-01T00:00:00Z', $6::uuid, $10, $7, NULLIF($8, ''), $9, $11::jsonb, now())`,
+				access_serial, access_not_after, smbios_uuid, talos_node_id, talos_cluster_id, assignment_evidence, configuration_digest, unread, at)
+			VALUES ($1, $2, $3, $4, 'access/talos-ca/' || $5, 3, '2026-10-01T00:00:00Z', 'a1', now() + interval '1 day', $6::uuid, $10, $7, NULLIF($8, ''), $9, $11::jsonb, now())`,
 			obs, ae.machine, basis, rev, ae.cluster, s.uuid, s.clusterID, s.evidence, s.digest, s.nodeID, s.unread)
 	}
 	if err := tx.Commit(); err != nil {

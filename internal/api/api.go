@@ -43,14 +43,12 @@ type Ingester interface {
 	EncryptBaseline(ctx context.Context, plaintext []byte) (provider.Ciphertext, error)
 	EncryptStaging(ctx context.Context, envelope []byte) (provider.Ciphertext, error)
 	DecryptStaging(ctx context.Context, ct provider.Ciphertext) ([]byte, error)
-	TalosAccess(ctx context.Context, cluster string) (provider.TalosAccess, error)
 }
 
-// Executor is what observations and dispatch need of *provider.Executor (persistence-api.md §3.3,
-// execution-recovery.md §3.1): the executor identity's read of a cluster's Talos access, and its
-// decryption of a bound artifact under the artifact key.
+// Executor is what dispatch needs of *provider.Executor (execution-recovery.md §3.1): the executor
+// identity's decryption of a bound artifact under the artifact key. A cluster's Talos access is a
+// certificate the Signer signs per use (persistence-api.md §3.3), never read from the provider here.
 type Executor interface {
-	TalosAccess(ctx context.Context, cluster string) (provider.TalosAccess, error)
 	DecryptArtifact(ctx context.Context, ct provider.Ciphertext, keyVersion int) (provider.Artifact, error)
 	ArtifactKey() string
 }
@@ -135,10 +133,8 @@ type options struct {
 	noReadLock     string                                                                               // the named lock's control at commitment and attempt (§3.2, §9.2): "installation state", "assignment head", "plan state", "rollout" or, at an attempt, "machine"
 	readThenWrite  bool                                                                                 // the owner-token control at an attempt (§3.3 comparison 7, DS row 018)
 	noPlanCheck    bool                                                                                 // the in-transaction plan-check control at an attempt (§3.3 comparison 1, DS row 006)
-	latestAccess   bool                                                                                 // the control that sends with the Talos access read again at send (PA §16)
 	recordOrder    bool                                                                                 // the ordering control at settlement: an observation ordered by its recorded revision, not its basis (ER §4.1, DS §7)
 	dispatchRoute  bool                                                                                 // the route control: a plan's observation dials the machine's current endpoint, resolved at dispatch, not the plan's route (PA §3.3, §16)
-	staleAccess    *provider.TalosAccess                                                                // the stale-credential control: an observation uses this access instead of reading the latest (PA §16)
 	afterEffect    func()                                                                               // runs in the transaction, after the effect, act and record
 	beforeRead     func()                                                                               // runs when a read route starts, after routing
 	beforeCommit   func(attempt int) error                                                              // fails an attempt before COMMIT

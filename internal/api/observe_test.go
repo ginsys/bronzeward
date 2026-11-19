@@ -24,14 +24,10 @@ import (
 	"github.com/ginsys/bronzeward/internal/talos/talostest"
 )
 
-// fakeExecutor answers access, or err, as the executor identity's read of a cluster's Talos
-// access; onRead, when set, runs at each read before it answers.
+// fakeExecutor answers the executor identity's artifact decryption; the certificates a use needs are
+// signed from the real signer over a kvStandIn, never read from here.
 type fakeExecutor struct {
-	mu     sync.Mutex
-	access provider.TalosAccess
-	err    error
-	reads  []string
-	onRead func()
+	mu sync.Mutex
 	// artifact is the plaintext DecryptArtifact answers, under the key keyName (artifactKeyName if
 	// empty); decryptErr, when set, is its failure; decrypts counts its calls; onDecrypt, when set,
 	// runs at each call before it answers.
@@ -63,17 +59,6 @@ func (x *fakeExecutor) DecryptArtifact(_ context.Context, _ provider.Ciphertext,
 
 func (x *fakeExecutor) ArtifactKey() string { return cmp.Or(x.keyName, artifactKeyName) }
 
-func (x *fakeExecutor) TalosAccess(_ context.Context, cluster string) (provider.TalosAccess, error) {
-	x.mu.Lock()
-	x.reads = append(x.reads, cluster)
-	hook, acc, err := x.onRead, x.access, x.err
-	x.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
-	return acc, err
-}
-
 // observer is an API over e's database whose executor is x, owning under the current epoch.
 func observer(t *testing.T, e *env, x Executor, o options) *API {
 	t.Helper()
@@ -83,20 +68,28 @@ func observer(t *testing.T, e *env, x Executor, o options) *API {
 	return e.buildWith(d, o)
 }
 
+// unsignedObserver is observer for a process with no signer: every use's certificate is refused as
+// provider-unavailable, so a read it starts records its cause and reaches no node.
+func unsignedObserver(t *testing.T, e *env, o options) *API {
+	t.Helper()
+	d := e.d
+	d.exe, d.sg = &fakeExecutor{}, nil
+	d.owner = staging.Owner{ID: "a/1/" + rand.Text(), Epoch: epoch(t, e.db)}
+	return e.buildWith(d, o)
+}
+
 // obsEnv is a machineEnv whose machine has an assignment, observed through an executor that
 // answers the stand-in's talosconfig at version 3.
 type obsEnv struct {
 	*machineEnv
-	x        *fakeExecutor
-	head     string // the machine's assignment head revision
-	accessOf provider.TalosAccessVersion
+	x    *fakeExecutor
+	head string // the machine's assignment head revision
 }
 
 func newObsEnv(t *testing.T) *obsEnv {
 	t.Helper()
 	oe := &obsEnv{machineEnv: newMachineEnv(t)}
-	oe.accessOf = oe.accessVersion()
-	oe.x = &fakeExecutor{access: provider.NewTalosAccess(oe.accessOf, oe.pki.Talosconfig("", "", ""))}
+	oe.x = &fakeExecutor{}
 	author := id.New(id.Principal)
 	mustExec(t, oe.db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'obs', now())`, author)
 	oe.head = id.New(id.AssignmentRevision)
