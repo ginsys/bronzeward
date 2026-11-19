@@ -12,12 +12,17 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { expect, test } from "vitest";
 
-// Parentheses change no meaning: `(expect(x)).toBe((false))` is the same read.
-const unwrap = (node: ts.Expression): ts.Expression => (ts.isParenthesizedExpression(node) ? unwrap(node.expression) : node);
+// Parentheses and type-only wrappers change no meaning: `(expect(x)).toBe((false as const))` is the same read.
+const unwrap = (node: ts.Expression): ts.Expression =>
+  ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node) || ts.isTypeAssertionExpression(node)
+    ? unwrap(node.expression)
+    : node;
 
 const isExpect = (node: ts.Expression) => {
   const call = unwrap(node);
-  return ts.isCallExpression(call) && ts.isIdentifier(call.expression) && call.expression.text === "expect";
+  if (!ts.isCallExpression(call)) return false;
+  const name = unwrap(call.expression);
+  return ts.isIdentifier(name) && name.text === "expect";
 };
 
 // `expect(...).toBe(false)`, `expect(...).not.toContain(...)` and `expect(...).not.toMatch(...)`.
@@ -162,9 +167,20 @@ test("the negative control: text that only contains a note (a string, a template
   ]);
 });
 
-test("the positive control: a read wrapped in parentheses is the same read", () => {
-  const sample = ["expect(value).toBe((false));", "(expect(value)).toBe(false);", "(expect(value).not).toContain(CANARY);", "expect(value).not.toMatch(/canary/);"];
-  expect(bare(sample.join("\n"))).toEqual([1, 2, 3, 4]);
+test("the positive control: a read wrapped in parentheses or a type-only wrapper is the same read", () => {
+  const sample = [
+    "expect(value).toBe((false));",
+    "(expect(value)).toBe(false);",
+    "(expect(value).not).toContain(CANARY);",
+    "expect(value).not.toMatch(/canary/);",
+    "expect(value).toBe(false as const);",
+    "expect(value).toBe(false!);",
+    "expect(value).toBe(false satisfies boolean);",
+    "(expect)(value).toBe(false);",
+    '(expect)(value).not.toContain("x");',
+    "((expect))(value).not.toMatch(/x/);",
+  ];
+  expect(bare(sample.join("\n"))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 });
 
 test("the positive control: a read over several lines takes a trailing note at its end and a block note above its start", () => {
