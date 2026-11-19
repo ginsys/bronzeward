@@ -433,6 +433,33 @@ func TestFirstKeyProviderFailure(t *testing.T) {
 	}
 }
 
+// PA §3.4: a talosconfig's extraction reads the machine configuration at the endpoint, and a node that
+// accepts the connection and stalls that read ends in the node timeout as 503 talos-access-unavailable,
+// with nothing stored. The control lets the same node answer.
+func TestFirstKeyExtractionIsBounded(t *testing.T) {
+	f := newFirstKeyEnv(t, true)
+	api := f.build(options{nodeTimeout: 300 * time.Millisecond})
+	ca := newTalosCA(t)
+	n, pki := trustingNode(t, ca)
+	doc := string(pki.Talosconfig("a:1", "", ""))
+	n.Stall(talostest.MachineConfigType, true)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- f.do(api, firstKeyCall(f.author, "k-fk-st-0123456789", f.cluster, "talosconfig", doc, n.Endpoint))
+	}()
+	select {
+	case rec := <-done:
+		wantProblem(t, rec, http.StatusServiceUnavailable, "talos-access-unavailable")
+	case <-time.After(10 * time.Second):
+		t.Fatal("a stalled machine configuration read held the request past the node timeout")
+	}
+	if acts, rows := firstKeyRows(t, f); acts != 0 || rows != 0 || f.kv.writes != 0 {
+		t.Fatalf("%d acts, %d rows, %d writes after a stalled read", acts, rows, f.kv.writes)
+	}
+	n.Stall(talostest.MachineConfigType, false)
+	decode[firstKeyBody](t, f.do(api, firstKeyCall(f.author, "k-fk-st-0123456789", f.cluster, "talosconfig", doc, n.Endpoint)), http.StatusOK)
+}
+
 // PA §3.4: a write whose answer is lost or not understood may have stored the version, so it is 503
 // and says what a failed commit says; a read that fails changes nothing and says nothing was stored.
 func TestFirstKeyLostWriteReply(t *testing.T) {

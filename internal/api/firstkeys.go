@@ -141,7 +141,11 @@ func prepareFirstKey(ctx context.Context, a *API, q *request) error {
 		return refuse(http.StatusServiceUnavailable, "dependency-unavailable",
 			"no signer identity is configured (provider.signerTokenFile); nothing was committed")
 	}
-	ca, err := signer.Extract(ctx, signer.Kind(in.Kind), in.Document.bytes(), in.Endpoint)
+	// A talosconfig is read at the endpoint, which may accept the connection and stall: bound the
+	// extraction like every node read (Try is bounded by its certificate's lifetime).
+	ca, err := nodeRead(ctx, a.o.nodeTimeout, func(c context.Context) (provider.CAKey, error) {
+		return signer.Extract(c, signer.Kind(in.Kind), in.Document.bytes(), in.Endpoint)
+	})
 	if err == nil {
 		err = signer.Try(ctx, ca, in.Endpoint, time.Now())
 	}

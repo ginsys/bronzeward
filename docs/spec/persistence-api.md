@@ -678,10 +678,16 @@ there.
   again; that retry stores the next version and answers `replaced: true`, and
   its act makes it the one in use (§6.3). A latest version newer than the
   latest act's `key_version` marks such a key; the presence read does not yet
-  report it. Two requests with the same `Idempotency-Key`, the second reading
-  after the first's write, each store a version; the fingerprint guarantees the
-  same CA, and the replay then answers the first version, whose act is the one
-  recorded. A latest version that was soft-deleted makes the supply's read
+  report it. Two requests with the same `Idempotency-Key` that both pass the
+  key's lookup before either commits each store a version, because the lookup
+  and the fingerprint comparison come before the provider write and the
+  comparison that settles the second request comes after it. The second to
+  commit finds the first's record and answers its replay, or `422
+  idempotency-key-reused` where its document differed: its stored version has
+  no act and is inert, and the first request's act is the one recorded. A key
+  reused for another document by one principal is a client error, and the
+  stray version costs nothing but the next supply's version number. A latest
+  version that was soft-deleted makes the supply's read
   refuse, so a supply on top of it is `503`.
 - **Authority.** An `author` supplies and replaces a first key, human only, with
   no approval step (owner decision BW-874-first-key-authority-1, 2026-11-18
