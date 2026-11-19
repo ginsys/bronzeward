@@ -132,7 +132,9 @@ export const config: WebdriverIO.Config = {
         // visibility, not display: the box stays, so a block boundary around it still breaks the line.
         for (const [h] of hidden) h.style.setProperty("visibility", "hidden", "important");
         try {
-          return e.innerText.replace(/\t/g, " ");
+          // The other drivers' text has no space at a line's end or at either end of the whole: the space
+          // before a transparent box stays in innerText, where a collapsed one would not.
+          return e.innerText.replace(/\t/g, " ").replace(/ +$/gm, "").replace(/^[ \n]+|[ \n]+$/g, "");
         } finally {
           for (const [h, style] of hidden) (style === null ? h.removeAttribute("style") : h.setAttribute("style", style));
         }
