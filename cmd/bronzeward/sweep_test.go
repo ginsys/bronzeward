@@ -302,10 +302,10 @@ func TestServeUntilLiveTakenPort(t *testing.T) {
 	}))
 	defer held.Close()
 	real := pickAddr
-	first := true
+	picks := 0
 	pickAddr = func(t *testing.T) string {
-		if first {
-			first = false
+		picks++
+		if picks == 1 {
 			return held.Listener.Addr().String()
 		}
 		return real(t)
@@ -313,8 +313,8 @@ func TestServeUntilLiveTakenPort(t *testing.T) {
 	defer func() { pickAddr = real }()
 	stop := serveUntilLive(t, dsn)
 	stop()
-	if first {
-		t.Fatal("the held port was never tried")
+	if picks != 2 {
+		t.Fatalf("serve was started on %d addresses, want the held one and one more", picks)
 	}
 }
 
