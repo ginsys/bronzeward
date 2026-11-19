@@ -415,8 +415,7 @@ They are held apart **(choice §17.29)**.
   path. That is a claim about the path and the signer's copy, not that the value
   reaches no other process: an `os:admin` machine configuration read, which the
   ingestion and the executor make with certificates the signer signs for them
-  (§3.4, "What it signs"; not built yet, they read with the stored talosconfig
-  today, [#899](https://github.com/ginsys/bronzeward/issues/899)), carries
+  (§3.4, "What it signs"), carries
   `machine.ca.key` in its answer. The ingestion extracts it as a
   schema secret into an ordinary generation (compilation §1), the executor's
   observations and dispatches are held to the scan of compilation §15 for the
