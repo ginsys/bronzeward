@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -270,15 +272,21 @@ func serveUntilLive(t *testing.T, dsn string, extra ...string) (stop func()) {
 	}
 }
 
-// pickAddr returns a local address that nothing listens on now. A test may replace it.
+// pickAddr returns a local address that nothing listens on now, on a port below Linux's ephemeral
+// range (32768 and up): the kernel hands that range to every listener on port 0 and every outgoing
+// connection, so a port from it is the one most likely taken before serve binds it. A test may
+// replace it.
 var pickAddr = func(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for range 50 {
+		addr := "127.0.0.1:" + strconv.Itoa(20000+rand.IntN(12000))
+		if l, err := net.Listen("tcp", addr); err == nil {
+			_ = l.Close()
+			return addr
+		}
 	}
-	defer l.Close()
-	return l.Addr().String()
+	t.Fatal("no free port below the ephemeral range")
+	return ""
 }
 
 // A port another server took before serve bound it is not serve's own: serveUntilLive must end on a
@@ -286,7 +294,10 @@ var pickAddr = func(t *testing.T) string {
 // that answers /livez with 204, as a server of another test does.
 func TestServeUntilLiveTakenPort(t *testing.T) {
 	_, dsn, _, _, _ := sweepFixtureDSN(t)
+	// It answers after 2 s, which serve's end on the bind precedes even on a loaded host, so the
+	// control does not depend on how fast serve fails.
 	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer held.Close()
