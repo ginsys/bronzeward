@@ -89,7 +89,7 @@ func (f *filler) raw() json.RawMessage {
 }
 
 // notShown is every response member, as Type.Member, that no command of the sweep shows.
-const notShown = "AccessVersionBody.Created AccessVersionBody.Path ActItem.Epoch ActItem.IdempotencyKey ActItem.RequestId " +
+const notShown = "AccessVersionBody.Created AccessVersionBody.NotAfter AccessVersionBody.Path AccessVersionBody.Serial ActItem.Epoch ActItem.IdempotencyKey ActItem.RequestId " +
 	"Applied.ImportBase AttemptAccounting.Basis AttemptBody.Observation AttemptResponse.Class " +
 	"Embedded.Format Embedded.Path EndpointChangeBody.Act EndpointChangeBody.ChangedBy EndpointChangeBody.Epoch " +
 	"EndpointChangeBody.Role Hardware.Serial IdentityBody.Issuer IdentityBody.Subject " +

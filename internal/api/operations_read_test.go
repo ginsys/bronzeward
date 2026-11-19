@@ -306,9 +306,10 @@ func TestMachineObservedHighestBasis(t *testing.T) {
 			SELECT $1, $2, epoch, 'observation', jsonb_build_object('observation', $3::text, 'purpose', 'drift'::text, 'basis', $4::bigint),
 				now() FROM installation_state`, xe.machine, rev, obs, basis)
 		mustExec(t, tx, `INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created,
-				smbios_uuid, talos_node_id, talos_cluster_id, assignment_evidence, running_version, configuration_digest,
-				resource_version, unread, at)
-			SELECT $1, machine, $3, $4, access_path, access_version, access_created, smbios_uuid, talos_node_id, talos_cluster_id,
+				access_serial, access_not_after, smbios_uuid, talos_node_id, talos_cluster_id, assignment_evidence, running_version,
+				configuration_digest, resource_version, unread, at)
+			SELECT $1, machine, $3, $4, access_path, access_version, access_created, access_serial, access_not_after, smbios_uuid,
+				talos_node_id, talos_cluster_id,
 				assignment_evidence, running_version, decode($5, 'hex'), resource_version, unread, now()
 			FROM observation WHERE machine = $2 ORDER BY revision DESC LIMIT 1`, obs, xe.machine, basis, rev, digest)
 		return obs

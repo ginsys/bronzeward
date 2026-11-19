@@ -154,7 +154,7 @@ func startTimersExec(t *testing.T, roles, timers, execution string) (*fixture, *
 	t.Cleanup(sb.Close)
 	dir := t.TempDir()
 	cfg := "provider:\n  address: " + sb.URL + "\n  keys: {baseline: bw-baseline, staging: bw-staging, digest: " + digest + ", artifact: bw-artifact}\n"
-	for _, p := range []string{"ingestion", "compiler", "metadata", "executor"} {
+	for _, p := range []string{"ingestion", "compiler", "metadata", "executor", "signer"} {
 		file := filepath.Join(dir, "openbao-"+p+".token")
 		policies := []string{"bw-" + p}
 		if p == "ingestion" {

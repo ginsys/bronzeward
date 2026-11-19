@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,50 @@ type kvStandIn struct {
 	before    func(method, path string)
 	status    map[string]int // a method's forced status, 0 for none
 	lostReply bool           // a write is stored and then answered with a body the client cannot read
+	gone      map[string]map[int]bool
+	garble    bool   // a read is answered 200 with a body that is no KV answer
+	reads     []int  // the version each read asked for, 0 for the latest
+	sentinel  string // text a test plants in every error body, to scan that no record holds provider error text
+}
+
+// destroy makes version n of path absent to a read, as a soft delete or a destroy does.
+func (k *kvStandIn) destroy(path string, n int) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.gone == nil {
+		k.gone = map[string]map[int]bool{}
+	}
+	if k.gone[path] == nil {
+		k.gone[path] = map[int]bool{}
+	}
+	k.gone[path][n] = true
+}
+
+// readVersions is the versions the reads asked for, in order, 0 for the latest.
+func (k *kvStandIn) readVersions() []int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return append([]int(nil), k.reads...)
+}
+
+// newSignerOver is the real provider.Signer speaking to kv over HTTP.
+func newSignerOver(t *testing.T, kv *kvStandIn) *provider.Signer {
+	t.Helper()
+	srv := httptest.NewServer(kv)
+	t.Cleanup(srv.Close)
+	tokenFile := filepath.Join(t.TempDir(), "signer.token")
+	if err := os.WriteFile(tokenFile, []byte("s.signer-test-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tok, err := provider.ReadTokenFile(tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sg, err := provider.NewSigner(srv.URL, tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sg
 }
 
 type kvVersion struct {
@@ -63,20 +108,32 @@ func (k *kvStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer k.mu.Unlock()
 	if s := k.status[r.Method]; s != 0 {
 		w.WriteHeader(s)
+		fmt.Fprintf(w, `{"errors":[%q]}`, k.sentinel)
 		return
 	}
 	vs := k.versions[path]
 	switch r.Method {
 	case http.MethodGet:
-		if len(vs) == 0 {
+		if k.garble {
+			fmt.Fprintf(w, `{"data":"not a KV answer %s"}`, k.sentinel)
+			return
+		}
+		n := len(vs) // the latest, or the version the read names (?version=N)
+		if q := r.URL.Query().Get("version"); q != "" {
+			n, _ = strconv.Atoi(q)
+			k.reads = append(k.reads, n)
+		} else {
+			k.reads = append(k.reads, 0)
+		}
+		if n < 1 || n > len(vs) || k.gone[path][n] {
 			w.WriteHeader(http.StatusNotFound)
 			fmt.Fprint(w, `{"errors":[]}`)
 			return
 		}
-		v := vs[len(vs)-1]
+		v := vs[n-1]
 		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
 			"data":     map[string]string{"ca": v.ca, "key": v.key},
-			"metadata": map[string]any{"version": len(vs), "created_time": v.created.Format(time.RFC3339Nano), "deletion_time": "", "destroyed": false},
+			"metadata": map[string]any{"version": n, "created_time": v.created.Format(time.RFC3339Nano), "deletion_time": "", "destroyed": false},
 		}})
 	case http.MethodPost:
 		var in struct {
@@ -117,21 +174,9 @@ type firstKeyEnv struct {
 func newFirstKeyEnv(t *testing.T, withSigner bool) *firstKeyEnv {
 	t.Helper()
 	kv := &kvStandIn{versions: map[string][]kvVersion{}, status: map[string]int{}}
-	srv := httptest.NewServer(kv)
-	t.Cleanup(srv.Close)
 	d := deps{ing: &fakeIngester{latest: 1}}
 	if withSigner {
-		tokenFile := filepath.Join(t.TempDir(), "signer.token")
-		if err := os.WriteFile(tokenFile, []byte("s.signer-test-token\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		tok, err := provider.ReadTokenFile(tokenFile)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if d.sg, err = provider.NewSigner(srv.URL, tok); err != nil {
-			t.Fatal(err)
-		}
+		d.sg = newSignerOver(t, kv)
 	}
 	e := newEnvWith(t, d, options{})
 	f := &firstKeyEnv{env: e, kv: kv, author: e.human("h-author")}

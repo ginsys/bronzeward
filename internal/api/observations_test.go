@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
-	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/talos"
 )
 
@@ -30,7 +29,9 @@ func TestObservationsRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oe.x.err = fmt.Errorf("provider: GET: %w", provider.ErrDenied)
+	oe.keys.kv.mu.Lock()
+	oe.keys.kv.status["GET"] = http.StatusForbidden
+	oe.keys.kv.mu.Unlock()
 	denied, err := a.observe(t.Context(), oe.machine, observeFor{purpose: "recovery"})
 	if err != nil {
 		t.Fatal(err)
@@ -58,9 +59,15 @@ func TestObservationsRead(t *testing.T) {
 		!r.StartedAt.Before(r.At) {
 		t.Fatalf("observation %+v", r)
 	}
-	if r.Access == nil || r.Access.Path != oe.accessOf.Path || r.Access.Version != oe.accessOf.Version ||
-		r.Access.Created != oe.accessOf.CreatedTime.Format(time.RFC3339Nano) {
-		t.Fatalf("access %+v; want %+v", r.Access, oe.accessOf)
+	// The access binds the key version's path, version and created_time, and the serial and NotAfter of
+	// the certificate the read went through, as the observation recorded them.
+	if r.Access == nil || r.Access.Serial == nil || r.Access.NotAfter == nil {
+		t.Fatalf("access %+v; want a certificate from %+v", r.Access, oe.keyAct)
+	}
+	if notAfter, perr := time.Parse(time.RFC3339Nano, *r.Access.NotAfter); r.Access.Path != oe.keyAct.Path || r.Access.Version != oe.keyAct.Version ||
+		r.Access.Created != oe.keyAct.CreatedTime.Format(time.RFC3339Nano) || *r.Access.Serial != read.Access.Serial ||
+		perr != nil || !notAfter.Equal(read.Access.NotAfter) {
+		t.Fatalf("access %+v; want a certificate from %+v with serial %s ending %s", r.Access, oe.keyAct, read.Access.Serial, read.Access.NotAfter)
 	}
 	is := func(p *string, v string) bool { return p != nil && *p == v }
 	if !is(r.SMBIOSUUID, uuidA) || !is(r.TalosNodeID, nodeA) || !is(r.TalosClusterID, oe.clusterID) ||
@@ -145,16 +152,18 @@ func unreadOf(b observationBody) map[string]map[string]string {
 func TestObservationAccessCreatedExact(t *testing.T) {
 	t.Parallel()
 	oe := newObsEnv(t)
-	v := oe.accessOf
-	v.CreatedTime = time.Date(2026, 10, 8, 10, 11, 12, 123456789, time.UTC)
-	oe.x.access = provider.NewTalosAccess(v, oe.pki.Talosconfig("", "", ""))
+	// The store holds the version created to the nanosecond; the act records it to the microsecond,
+	// and the certificate's observation answers the store's.
+	keyAct := oe.keys.seedCreated(t, oe.db, oe.cluster, time.Date(2026, 10, 8, 10, 11, 12, 123456789, time.UTC))
 	a := observer(t, oe.env, oe.x, options{})
 	if _, err := a.observe(t.Context(), oe.machine, observeFor{purpose: "drift"}); err != nil {
 		t.Fatal(err)
 	}
 	pg := decode[listPage[observationBody]](t, oe.do(a, call{method: "GET", path: prefix + "/machines/" + oe.machine + "/observations",
 		token: oe.human("h-viewer")}), http.StatusOK)
-	if len(pg.Items) != 1 || pg.Items[0].Access == nil || pg.Items[0].Access.Created != "2026-10-08T10:11:12.123456789Z" {
+	if len(pg.Items) != 1 || pg.Items[0].Access == nil || pg.Items[0].Access.Created != "2026-10-08T10:11:12.123456789Z" ||
+		pg.Items[0].Access.Path != keyAct.Path || pg.Items[0].Access.Version != keyAct.Version ||
+		pg.Items[0].Access.Serial == nil || pg.Items[0].Access.NotAfter == nil {
 		t.Fatalf("observations %+v", pg)
 	}
 }

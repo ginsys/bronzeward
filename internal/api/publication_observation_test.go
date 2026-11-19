@@ -34,17 +34,18 @@ func (*publicationReader) MachineConfig(context.Context) (talos.Config, error) {
 }
 func (*publicationReader) Close() error { return nil }
 
-func (b *buildEnv) publicationReader() (*fakeExecutor, *publicationReader) {
+// publicationReader makes b's observations sign through the real signer and read a stand-in node, and
+// answers the signer's store, where a test makes the access read fail, and the node's reader.
+func (b *buildEnv) publicationReader() (*kvStandIn, *publicationReader) {
 	b.t.Helper()
 	r := &publicationReader{version: "v1.14.5"}
 	if err := b.db.QueryRow(`SELECT coalesce(m.smbios_uuid::text, ''), coalesce(m.talos_node_id, 'fixture-node'), c.talos_cluster_id
   FROM machine m JOIN cluster c ON c.id = m.cluster WHERE m.id = $1`, b.machine).Scan(&r.identity.SMBIOSUUID, &r.identity.NodeID, &r.identity.ClusterID); err != nil {
 		b.t.Fatal(err)
 	}
-	x := &fakeExecutor{access: provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + b.cluster, Version: 3, CreatedTime: accessCreated}, []byte("publication-access-canary"))}
-	b.a.d.exe = x
+	b.a.d.exe, b.a.d.sg = &fakeExecutor{}, b.signer()
 	b.a.o.dial = func(context.Context, []byte, string) (talos.Reader, error) { return r, nil }
-	return x, r
+	return b.env.keys.kv, r
 }
 
 func TestPublicationRunningMinor(t *testing.T) {
@@ -83,8 +84,9 @@ func TestPublicationRunningMinor(t *testing.T) {
 
 func TestPublicationOffline(t *testing.T) {
 	b := newBuildEnv(t)
-	x, _ := b.publicationReader()
-	x.err = provider.ErrAbsent
+	b.publicationReader()
+	b.noSeed = true // the refusal is proven with no act, and signer() seeds none
+	dropFirstKeyActs(t, b.db, b.cluster)
 	_, ref := b.build()
 	if ref == nil || ref.status != http.StatusServiceUnavailable {
 		t.Fatalf("offline publication = %+v; want 503", ref)
@@ -94,8 +96,7 @@ func TestPublicationOffline(t *testing.T) {
 // Existing compiler and worker tests need real publication observations without
 // adding network dependencies to their pinned-value provider fixtures.
 func (b *buildEnv) defaultPublicationReader(a *API) {
-	a.d.exe = &fakeExecutor{access: provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + b.cluster,
-		Version: 3, CreatedTime: accessCreated}, []byte("publication-access-canary"))}
+	a.d.exe, a.d.sg = &fakeExecutor{}, b.signer()
 	a.o.dial = func(ctx context.Context, _ []byte, endpoint string) (talos.Reader, error) {
 		r := &publicationReader{version: "v1.14.5"}
 		err := b.db.QueryRowContext(ctx, `SELECT coalesce(m.smbios_uuid::text, ''), coalesce(m.talos_node_id, 'fixture-node'), c.talos_cluster_id
@@ -106,29 +107,45 @@ func (b *buildEnv) defaultPublicationReader(a *API) {
 }
 
 func TestPublicationIdentityAndAccess(t *testing.T) {
+	status := func(code int) func(*buildEnv, *publicationReader) {
+		return func(b *buildEnv, _ *publicationReader) {
+			b.env.keys.kv.mu.Lock()
+			defer b.env.keys.kv.mu.Unlock()
+			b.env.keys.kv.status["GET"] = code
+		}
+	}
 	for _, c := range []struct {
-		name   string
-		setup  func(*fakeExecutor, *publicationReader)
-		status int
+		name     string
+		setup    func(*buildEnv, *publicationReader)
+		status   int
+		noAccess bool // the access read fails: no node value is recorded
 	}{
-		{"wrong node", func(_ *fakeExecutor, r *publicationReader) {
+		{"wrong node", func(_ *buildEnv, r *publicationReader) {
 			r.identity.SMBIOSUUID = "1c6b7d2f-3e4a-4f60-9b0c-1d2e3f4a5b6c"
-		}, 422},
-		{"wrong cluster", func(_ *fakeExecutor, r *publicationReader) {
+		}, 422, false},
+		{"wrong cluster", func(_ *buildEnv, r *publicationReader) {
 			r.identity.ClusterID = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-		}, 422},
-		{"unreadable identity", func(_ *fakeExecutor, r *publicationReader) { r.identityErr = errors.New("secret-canary") }, 503},
-		{"unreadable version", func(_ *fakeExecutor, r *publicationReader) { r.versionErr = errors.New("secret-canary") }, 503},
-		{"absent", func(x *fakeExecutor, _ *publicationReader) { x.err = provider.ErrAbsent }, 503},
-		{"denied", func(x *fakeExecutor, _ *publicationReader) { x.err = provider.ErrDenied }, 503},
-		{"malformed", func(x *fakeExecutor, _ *publicationReader) { x.err = provider.ErrProtocol }, 503},
-		{"unavailable", func(x *fakeExecutor, _ *publicationReader) { x.err = provider.ErrUnavailable }, 503},
-		{"status", func(x *fakeExecutor, _ *publicationReader) { x.err = provider.ErrStatus }, 503},
+		}, 422, false},
+		{"unreadable identity", func(_ *buildEnv, r *publicationReader) { r.identityErr = errors.New("secret-canary") }, 503, false},
+		{"unreadable version", func(_ *buildEnv, r *publicationReader) { r.versionErr = errors.New("secret-canary") }, 503, false},
+		{"absent", func(b *buildEnv, _ *publicationReader) {
+			b.noSeed = true // the refusal is proven with no act, and signer() seeds none
+			dropFirstKeyActs(b.t, b.db, b.cluster)
+		}, 503, true},
+		{"denied", status(http.StatusForbidden), 503, true},
+		{"malformed", func(b *buildEnv, _ *publicationReader) {
+			b.env.keys.kv.mu.Lock()
+			defer b.env.keys.kv.mu.Unlock()
+			b.env.keys.kv.garble = true
+		}, 503, true},
+		{"unavailable", status(http.StatusServiceUnavailable), 503, true},
+		{"status", status(http.StatusTeapot), 503, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			b := newBuildEnv(t)
-			x, r := b.publicationReader()
-			c.setup(x, r)
+			kv, r := b.publicationReader()
+			kv.sentinel = "secret-canary"
+			c.setup(b, r)
 			// If compiler reads start, this different error would mask the expected node rule.
 			b.held.readErr = errors.New("compiler should not be reached")
 			_, ref := b.build()
@@ -139,7 +156,7 @@ func TestPublicationIdentityAndAccess(t *testing.T) {
 			if o.purpose != "publication" || o.operation.String != b.job.op || o.plan.Valid {
 				t.Fatalf("observation binding %+v", o)
 			}
-			if x.err != nil && (o.accessVersion.Valid || o.runningVersion.Valid || o.nodeID.Valid || len(o.digest) != 0 || o.assignment.Valid) {
+			if c.noAccess && (o.accessVersion.Valid || o.runningVersion.Valid || o.nodeID.Valid || len(o.digest) != 0 || o.assignment.Valid) {
 				t.Fatal("failed access read recorded node values")
 			}
 			if b.logged("secret-canary") || count(t, b.db, `SELECT count(*) FROM machine_event WHERE entry::text LIKE '%secret-canary%'`) != 0 {
@@ -208,10 +225,15 @@ func TestPublicationReadFenced(t *testing.T) {
 	for _, during := range []bool{false, true} {
 		t.Run(fmt.Sprint(during), func(t *testing.T) {
 			b := newBuildEnv(t)
-			x, _ := b.publicationReader()
+			kv, _ := b.publicationReader()
 			takeover := func() { mustExec(t, b.db, `UPDATE operation SET owner_gen = 2 WHERE id = $1`, b.job.op) }
 			if during {
-				x.onRead = takeover
+				// The takeover lands while the signer reads the CA key, as the access read it replaces did.
+				kv.before = func(method, _ string) {
+					if method == http.MethodGet {
+						takeover()
+					}
+				}
 			} else {
 				takeover()
 			}
@@ -289,7 +311,7 @@ func TestPublicationOlderReadCompletingLate(t *testing.T) {
 	}
 	older.Identity = &r.identity
 	older.RunningVersion = "v1.12.4"
-	older.Access = &provider.TalosAccessVersion{Path: "access/talos/" + b.cluster, Version: 3, CreatedTime: accessCreated}
+	older.Access = storedAccess(provider.TalosAccessVersion{Path: "access/talos/" + b.cluster, Version: 3, CreatedTime: accessCreated})
 	u, ref := b.build()
 	if ref != nil {
 		t.Fatal(ref)

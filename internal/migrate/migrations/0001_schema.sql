@@ -1348,9 +1348,11 @@ CREATE TABLE observation (
   basis                bigint NOT NULL,
   revision             bigint NOT NULL,
   entry_kind           text NOT NULL GENERATED ALWAYS AS ('observation') STORED,
-  access_path          text CHECK (access_path ~ '^access/talos/cl_[a-z2-7]{26}$'),
+  access_path          text CHECK (access_path ~ '^access/talos(-ca)?/cl_[a-z2-7]{26}$'),
   access_version       bigint CHECK (access_version >= 1),
   access_created       text CHECK (access_created ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$'),
+  access_serial        text CHECK (access_serial ~ '^[0-9a-f]{1,40}$'),
+  access_not_after     timestamptz,
   smbios_uuid          uuid,
   talos_node_id        text CHECK (talos_node_id ~ '^[!-~]{1,128}$'),
   talos_cluster_id     text CHECK (talos_cluster_id ~ '^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$'),
@@ -1364,6 +1366,10 @@ CREATE TABLE observation (
   CHECK (basis < revision),
   CONSTRAINT observation_access CHECK ((access_path IS NULL) = (access_version IS NULL)
     AND (access_path IS NULL) = (access_created IS NULL)),
+  -- A certificate's serial and NotAfter are recorded exactly when the access is the signer's CA key
+  -- (persistence-api.md §3.3); the stored talosconfig a dispatch still uses has neither.
+  CONSTRAINT observation_certificate CHECK ((access_serial IS NOT NULL) = (access_not_after IS NOT NULL)
+    AND (access_serial IS NOT NULL) = coalesce(access_path LIKE 'access/talos-ca/%', false)),
   CONSTRAINT observation_unavailable CHECK (access_version IS NOT NULL OR (smbios_uuid IS NULL
     AND talos_node_id IS NULL AND talos_cluster_id IS NULL AND assignment_evidence IS NULL AND running_version IS NULL
     AND configuration_digest IS NULL AND resource_version IS NULL AND health IS NULL)),

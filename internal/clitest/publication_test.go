@@ -19,9 +19,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/siderolabs/crypto/x509"
 	coreconfig "github.com/siderolabs/talos/pkg/machinery/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/encoder"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate"
+	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/machinery/config/types/v1alpha1"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
@@ -54,7 +56,14 @@ var configSecret = regexp.MustCompile(`(?m)^\s*(?:token|secret|key|aescbcEncrypt
 // recognise, so only an operator's mark extracts it; the leak scan looks for it too.
 func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(...string) result, unmarked ...string) *standIn {
 	t.Helper()
-	pki := talostest.NewPKI(t)
+	// The node trusts one CA: the cluster's first key supplies it, the server signs a certificate from it
+	// for each observation, and the stored talosconfig a dispatch still sends with is issued from it too.
+	sec, err := secrets.NewTalosCA(time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca := &x509.PEMEncodedCertificateAndKey{Crt: sec.CrtPEM, Key: sec.KeyPEM}
+	pki := talostest.NewPKIFromCA(t, ca)
 	node := talostest.Serve(t, pki)
 	node.SetSMBIOSUUID(t, strings.ToUpper(seedUUID), true)
 	node.SetNodeID(t, standInNodeID)
@@ -77,12 +86,13 @@ func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(..
 		t.Fatal(err)
 	}
 	node.SetMachineConfig(t, doc)
-	st := &standIn{node: node, cfg: cfg, secrets: append([]string{base64.StdEncoding.EncodeToString(pki.KeyPEM)}, unmarked...)}
+	st := &standIn{node: node, cfg: cfg, secrets: append([]string{base64.StdEncoding.EncodeToString(pki.KeyPEM),
+		base64.StdEncoding.EncodeToString(ca.Key), string(ca.Key)}, unmarked...)}
 	for _, m := range configSecret.FindAllStringSubmatch(string(doc), -1) {
 		st.secrets = append(st.secrets, m[1])
 	}
-	if len(st.secrets) < 3 {
-		t.Fatalf("the generated configuration holds %d secrets the scan can find", len(st.secrets)-1)
+	if len(st.secrets) < 5 {
+		t.Fatalf("the generated configuration holds %d secrets the scan can find", len(st.secrets)-3)
 	}
 	access := "/v1/secret/data/access/talos/" + s.cluster
 	data := map[string]any{"data": map[string]any{"talosconfig": string(pki.Talosconfig("", "", ""))}}
@@ -90,6 +100,18 @@ func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(..
 		t.Fatalf("writing the talosconfig: %d %v %s", status, err, body)
 	}
 	t.Cleanup(func() { b.Do(b.Admin(), http.MethodDelete, "/v1/secret/metadata/access/talos/"+s.cluster, nil) })
+	// The first key, as a secrets bundle tried at the node: the server stores the CA key and records the act.
+	bundle := "certs:\n  os:\n    crt: " + base64.StdEncoding.EncodeToString(ca.Crt) + "\n    key: " + base64.StdEncoding.EncodeToString(ca.Key) + "\n"
+	fk, err := json.Marshal(map[string]string{"kind": "secrets-bundle", "document": bundle, "endpoint": node.Endpoint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, _ := http.NewRequest(http.MethodPost, f.base+"/api/v1/clusters/"+s.cluster+"/first-keys", strings.NewReader(string(fk)))
+	q.Header.Set("Authorization", "Bearer "+f.mint("h-all", ""))
+	q.Header.Set("Content-Type", "application/json")
+	q.Header.Set("Idempotency-Key", "k-first-key-"+s.cluster)
+	f.do(q, http.StatusOK)
+	t.Cleanup(func() { b.Do(b.Admin(), http.MethodDelete, "/v1/secret/metadata/access/talos-ca/"+s.cluster, nil) })
 	f.want(ctl("--context", "human", "machine", "set-endpoint", s.machine, "--talos-endpoint", node.Endpoint), 0)
 	return st
 }

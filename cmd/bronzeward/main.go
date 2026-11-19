@@ -197,7 +197,7 @@ func serveContext(ctx context.Context, args []string) error {
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
 	// The ingest runners and the publish worker stop with the signal; a claim or job left held
 	// lapses with its lease.
-	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, exe, sg, cfg.Ingestion, epoch, *recovery, onEntry)))
+	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, exe, sg, cfg.Talos.MaxCertLifetime, cfg.Ingestion, epoch, *recovery, onEntry)))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	select {

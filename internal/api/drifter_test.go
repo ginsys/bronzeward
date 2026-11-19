@@ -10,7 +10,6 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
-	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
 	"github.com/ginsys/bronzeward/internal/talos"
 )
@@ -83,9 +82,10 @@ func TestDrifterOpensAndReturns(t *testing.T) {
 	}
 	if n := count(t, le.db, `SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine
 			AND s.revision = o.basis
-		WHERE o.machine = $1 AND s.purpose = 'drift' AND o.access_version = 1 AND o.configuration_digest IS NOT NULL`,
-		le.machine); n == 0 {
-		t.Fatal("no drift observation recorded the access version and digest it read")
+		WHERE o.machine = $1 AND s.purpose = 'drift' AND o.access_path = 'access/talos-ca/' || $2 AND o.access_version = 1
+			AND o.access_serial IS NOT NULL AND o.access_not_after > now() AND o.configuration_digest IS NOT NULL`,
+		le.machine, le.cluster); n == 0 {
+		t.Fatal("no drift observation recorded the key version, certificate and digest it read")
 	}
 	if n := count(t, le.db, `SELECT count(*) FROM drift_record WHERE machine = $1`, le.machine); n != 0 {
 		t.Fatalf("%d drift records while the node runs Applied", n)
@@ -162,7 +162,9 @@ func TestDrifterLogsUnread(t *testing.T) {
 	t.Parallel()
 	le := newLoopEnv(t, "")
 	le.appliedIsNode(t)
-	le.x.err = provider.ErrUnavailable
+	le.env.keys.kv.mu.Lock()
+	le.env.keys.kv.status["GET"] = http.StatusServiceUnavailable
+	le.env.keys.kv.mu.Unlock()
 	life, stop := context.WithCancel(t.Context())
 	idle := make(chan struct{})
 	a := le.drifter(t, life, 20*time.Millisecond, idle)
@@ -215,7 +217,7 @@ func TestNewStartsDrifter(t *testing.T) {
 	ex := testExecution()
 	ex.DriftInterval = 20 * time.Millisecond
 	life, stop := context.WithCancel(t.Context())
-	h := New(life, le.db, auth.NewVerifier(le.cfg, le.db, auth.Discover(le.cfg.OIDC)), le.cfg, ex, nil, nil, le.x, nil,
+	h := New(life, le.db, auth.NewVerifier(le.cfg, le.db, auth.Discover(le.cfg.OIDC)), le.cfg, ex, nil, nil, le.x, le.signer(), 0,
 		&config.Ingestion{Instance: "a", Heartbeat: time.Hour, Lease: 2 * time.Hour}, epoch(t, le.db), false, nil)
 	defer stopping(h.(*API), stop)
 	deadline := time.Now().Add(5 * time.Second)

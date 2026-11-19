@@ -145,10 +145,21 @@ func TestRecoveryScopeMark(t *testing.T) {
 			other.NodeID, other.SMBIOSUUID = "another-node", ""
 			me.report(other)
 		}},
-		{"access", "blocked", []string{"observation", "access"}, func() { me.x.err = provider.ErrDenied }},
+		// The access is refused to the executor's check and to the observation's own certificate alike.
+		{"access", "blocked", []string{"observation", "access"}, func() {
+			me.x.err = provider.ErrDenied
+			me.env.keys.kv.mu.Lock()
+			defer me.env.keys.kv.mu.Unlock()
+			me.env.keys.kv.status["GET"] = http.StatusForbidden
+		}},
 		{"again", "ready", []string{}, func() {}},
 	} {
 		me.x.decryptErr, me.x.err = nil, nil
+		if me.env.keys != nil {
+			me.env.keys.kv.mu.Lock()
+			delete(me.env.keys.kv.status, "GET")
+			me.env.keys.kv.mu.Unlock()
+		}
 		me.report(me.recordedIdentity(t, m2))
 		c.arrange()
 		from := ""
@@ -228,8 +239,13 @@ func TestRecoveryScopeMark(t *testing.T) {
 	me.x.mu.Unlock()
 	mustExec(t, ae.db, `UPDATE machine_state SET desired = $2 WHERE machine = $1`, m2, desired)
 
-	// The Talos access rotates between the observation's read and the dependency check's: the check
-	// passed a credential the observation was not made with, so the observation is missing.
+	// The Talos access rotates between the observation's read and the dependency check's. The mark's
+	// observation reads through a certificate and the check through the stored talosconfig, two
+	// credentials no version comparison relates, so until the check moves onto certificates (ginsys/bronzeward#899
+	// part C) a rotation of the stored access marks no observation missing. This "ready" outcome is
+	// transitional: it weakens the pre-certificate assertion ("blocked, missing observation"), the PR body
+	// names it, and part C restores it by comparing the observation's recorded key path, version and serial
+	// with the credential the check uses.
 	v2 := me.x.access
 	me.x.onRead = func() {
 		me.x.mu.Lock()
@@ -238,9 +254,8 @@ func TestRecoveryScopeMark(t *testing.T) {
 		me.x.access = provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + ae.cluster, Version: 3,
 			CreatedTime: time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)}, []byte("tc3"))
 	}
-	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "rotated"), http.StatusCreated); b.State != "blocked" ||
-		len(b.Missing) != 1 || b.Missing[0] != "observation" {
-		t.Fatalf("a mark checking access the observation was not made with was marked %s missing %v", b.State, b.Missing)
+	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "rotated"), http.StatusCreated); b.State != "ready" || len(b.Missing) != 0 {
+		t.Fatalf("a mark on a certificate observation, the stored access rotated, was marked %s missing %v; want ready", b.State, b.Missing)
 	}
 	me.x.mu.Lock()
 	me.x.access = v2
@@ -257,8 +272,9 @@ func TestRecoveryScopeMark(t *testing.T) {
 			CreatedTime: time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)}, []byte("tc3"))
 	}
 	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "rotated-identity"), http.StatusCreated); b.State != "blocked" ||
-		len(b.Missing) != 2 || b.Missing[0] != "observation" || b.Missing[1] != "identity" {
-		t.Fatalf("a mark on an observation that is not evidence and read another identity was marked %s missing %v", b.State, b.Missing)
+		len(b.Missing) != 1 || b.Missing[0] != "identity" {
+		// Transitional like the case above: part C restores the two-item answer, observation then identity.
+		t.Fatalf("a mark on a certificate observation that read another identity was marked %s missing %v; want identity alone", b.State, b.Missing)
 	}
 	me.x.mu.Lock()
 	me.x.access = v2
@@ -317,7 +333,7 @@ func TestRecoveryScopeMark(t *testing.T) {
 	// drift, recorded by the observation's own transaction.
 	f := observeFor{purpose: "restoration"}
 	acc := me.x.access.Version()
-	o := observed{ID: id.New(id.Observation), Access: &acc, Digest: &[32]byte{9}, ResourceVersion: "rv9",
+	o := observed{ID: id.New(id.Observation), Access: storedAccess(acc), Digest: &[32]byte{9}, ResourceVersion: "rv9",
 		Unread: map[string]unreadValue{"health": {Cause: "none-bound"}, "identity": {Cause: "identity-read"},
 			"runningVersion": {Cause: "version-read"}, "assignmentEvidence": {Cause: "unassigned"}}}
 	if err := ctl.inTx(t.Context(), func(tx *sql.Tx) error { _, _, err := ctl.startObservation(t.Context(), tx, m2, f, &o); return err }); err != nil {

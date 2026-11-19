@@ -13,7 +13,6 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
-	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
 	"github.com/ginsys/bronzeward/internal/talos"
 	"github.com/ginsys/bronzeward/internal/talos/talostest"
@@ -30,11 +29,19 @@ type loopEnv struct {
 
 func newLoopEnv(t *testing.T, extra string, before ...func(*planEnv)) *loopEnv {
 	t.Helper()
-	pki := talostest.NewPKI(t)
-	node := talostest.Serve(t, pki)
+	ca := newTalosCA(t) // the signer's CA, which the node trusts
+	node := talostest.Serve(t, talostest.NewPKIFromCA(t, ca))
 	ae := newAdoptEnv(t, extra, append([]func(*planEnv){func(p *planEnv) {
 		mustExec(t, p.db, `UPDATE machine SET talos_endpoint = $2 WHERE id = $1`, p.machine, node.Endpoint)
 	}}, before...)...)
+	// The environment may have made a signer for the node's CA before it was known: replace it, and the
+	// act that named the old one's key, with a store holding this CA.
+	if ae.env.keys != nil {
+		dropFirstKeyActs(t, ae.db, ae.cluster)
+	}
+	ae.env.seeded = map[string]bool{}
+	ae.env.keys = newKeyStore(t, ca)
+	ae.env.signer()
 	node.SetSMBIOSUUID(t, ae.uuid.String, ae.uuid.Valid)
 	node.SetNodeID(t, cmp.Or(ae.nodeID.String, "node-a"))
 	node.SetClusterID(t, ae.clusterID)
@@ -46,8 +53,7 @@ func newLoopEnv(t *testing.T, extra string, before ...func(*planEnv)) *loopEnv {
 		JOIN release_machine rm ON rm.release = p.release AND rm.machine = p.machine
 		WHERE p.id = $1 AND b.id = rm.import_base_revision`, ae.pid, digest[:])
 	mustExec(t, ae.db, `ALTER TABLE import_base_revision ENABLE TRIGGER immutable_rows`)
-	return &loopEnv{adoptEnv: ae, node: node, x: &fakeExecutor{access: provider.NewTalosAccess(provider.TalosAccessVersion{
-		Path: "access/talos/" + ae.cluster, Version: 1, CreatedTime: accessCreated}, pki.Talosconfig("", "", ""))}}
+	return &loopEnv{adoptEnv: ae, node: node, x: &fakeExecutor{}}
 }
 
 // adopter is a controller of the current epoch over le's database under timers, whose adoption
@@ -164,11 +170,12 @@ func TestAdopterRetriesUnread(t *testing.T) {
 		fail func(le *loopEnv, failing bool) // makes the read fail, or recover
 	}{
 		{"access", func(le *loopEnv, failing bool) {
-			le.x.mu.Lock()
-			defer le.x.mu.Unlock()
-			le.x.err = nil
+			kv := le.env.keys.kv
+			kv.mu.Lock()
+			defer kv.mu.Unlock()
+			delete(kv.status, "GET")
 			if failing {
-				le.x.err = provider.ErrUnavailable
+				kv.status["GET"] = http.StatusServiceUnavailable
 			}
 		}},
 		{"identity", func(le *loopEnv, failing bool) { // an answered failure: the later reads still run
@@ -380,7 +387,7 @@ func TestNewStartsAdopter(t *testing.T) {
 				x = le.x
 			}
 			life, stop := context.WithCancel(t.Context())
-			h := New(life, le.db, auth.NewVerifier(le.cfg, le.db, auth.Discover(le.cfg.OIDC)), le.cfg, testExecution(), nil, nil, x, nil,
+			h := New(life, le.db, auth.NewVerifier(le.cfg, le.db, auth.Discover(le.cfg.OIDC)), le.cfg, testExecution(), nil, nil, x, le.signer(), 0,
 				&config.Ingestion{Instance: "a", Heartbeat: 20 * time.Millisecond, Lease: time.Minute}, epoch(t, le.db), false, nil)
 			defer stopping(h.(*API), stop)
 			le.approveThrough(t, h.(*API))
