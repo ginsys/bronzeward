@@ -117,8 +117,22 @@ export const config: WebdriverIO.Config = {
     // on an element that appears after the call must wait for it, as it does with the driver's own text.
     await browser.overwriteCommand("getText", async function (this: WebdriverIO.Element) {
       await this.waitForExist();
-      // innerText puts a tab between table cells, where the other drivers' text has a space.
-      return browser.execute((e: HTMLElement) => (e.checkVisibility({ visibilityProperty: true }) ? e.innerText.replace(/\t/g, " ") : ""), this as unknown as HTMLElement);
+      // innerText puts a tab between table cells, where the other drivers' text has a space. The
+      // other drivers leave out what is not shown, transparent text included, which checkVisibility
+      // does not test by default: a transparent element or ancestor gives no text, and a transparent
+      // descendant is hidden for the read and put back, in one synchronous step.
+      return browser.execute((e: HTMLElement) => {
+        const transparent = (x: Element) => getComputedStyle(x).opacity === "0";
+        for (let p: Element | null = e; p; p = p.parentElement) if (transparent(p)) return "";
+        if (!e.checkVisibility({ visibilityProperty: true })) return "";
+        const hidden = [...e.querySelectorAll<HTMLElement>("*")].filter(transparent).map((h) => [h, h.getAttribute("style")] as const);
+        for (const [h] of hidden) h.style.setProperty("display", "none", "important");
+        try {
+          return e.innerText.replace(/\t/g, " ");
+        } finally {
+          for (const [h, style] of hidden) (style === null ? h.removeAttribute("style") : h.setAttribute("style", style));
+        }
+      }, this as unknown as HTMLElement);
     }, { attachToElement: true });
     // A key sequence sent as one action loses its spaces in safaridriver ("machine:\n  nodeLabels:"
     // arrives as "machine:\n nodeLabels:"), where the same keys one at a time arrive whole. Single
@@ -163,6 +177,8 @@ export const config: WebdriverIO.Config = {
           const o = [...e.options];
           const hit = how === "selectByIndex" ? o[Number(x)] : how === "selectByVisibleText" ? o.find((p) => p.text.trim() === String(x).trim()) : o.find((p) => String(p.getAttribute(String(x))) === String(y));
           if (hit === undefined) return "no such option";
+          // The driver's own click leaves a disabled select or option as it is.
+          if (e.disabled || hit.disabled || (hit.parentElement instanceof HTMLOptGroupElement && hit.parentElement.disabled)) return "the select or the option is disabled";
           if (e.value === hit.value) return "";
           e.value = hit.value;
           e.dispatchEvent(new Event("input", { bubbles: true }));

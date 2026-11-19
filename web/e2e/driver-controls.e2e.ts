@@ -9,7 +9,7 @@ describe("the harness's own commands", () => {
   before(async () => {
     await browser.url("about:blank");
     await browser.execute(() => {
-      document.body.innerHTML = '<p id="t">Showing 4 of 4. </p><ul id="l"><li>started</li><li>succeeded</li></ul><table id="tb"><tbody><tr><td>2026</td><td>freeze x</td></tr></tbody></table><input id="i"><select id="s"><option value="a">a</option><option value="b">b</option></select><button id="b1">one</button><a id="a1" href="#x">two</a>';
+      document.body.innerHTML = '<p id="t">Showing 4 of 4. </p><ul id="l"><li>started</li><li>succeeded</li></ul><table id="tb"><tbody><tr><td>2026</td><td>freeze x</td></tr></tbody></table><input id="i"><select id="s"><option value="a">a</option><option value="b">b</option></select><button id="b1">one</button><a id="a1" href="#x">two</a><p id="ghost" style="opacity:0">hidden</p><p id="part">shown <span style="opacity:0">ghost</span></p><select id="sd" disabled><option value="x">x</option><option value="y">y</option></select><select id="so"><option value="p">p</option><option value="q" disabled>q</option></select>';
     });
   });
 
@@ -17,6 +17,25 @@ describe("the harness's own commands", () => {
     expect(await $("#t").getText()).toBe("Showing 4 of 4.");
     expect(await $("#l").getText()).toBe("started\nsucceeded");
     expect(await $("#tb").getText()).toBe("2026 freeze x");
+  });
+
+  it("getText leaves out transparent text, an element's own or a descendant's", async () => {
+    expect(await $("#ghost").getText()).toBe("");
+    expect(await $("#part").getText()).toBe("shown");
+  });
+
+  it("a disabled select, or a disabled option, keeps its value and the page hears nothing", async () => {
+    await browser.execute(() => {
+      const heard: string[] = [];
+      (window as unknown as { heardDisabled: string[] }).heardDisabled = heard;
+      for (const id of ["sd", "so"]) for (const type of ["input", "change"]) document.getElementById(id)!.addEventListener(type, () => heard.push(id));
+    });
+    // Each driver may refuse the choice or ignore it: the value stays, and no event is raised.
+    await $("#sd").selectByAttribute("value", "y").catch(() => undefined);
+    await $("#so").selectByAttribute("value", "q").catch(() => undefined);
+    expect(await $("#sd").getValue()).toBe("x");
+    expect(await $("#so").getValue()).toBe("p");
+    expect(await browser.execute(() => (window as unknown as { heardDisabled: string[] }).heardDisabled)).toEqual([]);
   });
 
   it("getText and an assertion on a text wait for an element that appears after the call", async () => {
