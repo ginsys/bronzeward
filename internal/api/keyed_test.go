@@ -44,11 +44,6 @@ type fakeIngester struct {
 	decrypts   int
 	onDecrypt  func(ctx context.Context)
 	onEncrypt  func(ctx context.Context) error
-	// access is the cluster's Talos access TalosAccess answers, or accessErr; accessReads
-	// records the clusters asked for.
-	access      provider.TalosAccess
-	accessErr   error
-	accessReads []string
 }
 
 func (f *fakeIngester) Digest(_ context.Context, in []byte, v int) (provider.Digest, error) {
@@ -150,17 +145,6 @@ func (f *fakeIngester) DecryptStaging(ctx context.Context, ct provider.Ciphertex
 		return nil, errors.New("fake: not a staging ciphertext of this provider")
 	}
 	return append([]byte(nil), p...), nil
-}
-
-// TalosAccess answers f.access, or f.accessErr, and counts the reads.
-func (f *fakeIngester) TalosAccess(_ context.Context, cluster string) (provider.TalosAccess, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.accessReads = append(f.accessReads, cluster)
-	if f.accessErr != nil {
-		return provider.TalosAccess{}, f.accessErr
-	}
-	return f.access, nil
 }
 
 // docInput is a body carrying unextracted input in its document member.

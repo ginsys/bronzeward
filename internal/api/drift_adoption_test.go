@@ -36,8 +36,8 @@ func openDriftOn(t *testing.T, db *sql.DB, machine string) int64 {
 		SELECT $1, $2, epoch, 'observation', jsonb_build_object('observation', $3::text, 'purpose', 'drift', 'basis', $4::bigint), now()
 		FROM installation_state`, machine, rev-1, obs, basis)
 	mustExec(t, tx, `INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created,
-			configuration_digest, unread, at)
-		SELECT $1, id, $3, $4, 'access/talos/' || cluster, 3, '2026-10-01T00:00:00Z', decode(repeat('09', 32), 'hex'), '{}', now()
+			access_serial, access_not_after, configuration_digest, unread, at)
+		SELECT $1, id, $3, $4, 'access/talos-ca/' || cluster, 3, '2026-10-01T00:00:00Z', 'a1', now() + interval '1 day', decode(repeat('09', 32), 'hex'), '{}', now()
 		FROM machine WHERE id = $2`, obs, machine, basis, rev-1)
 	mustExec(t, tx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 		SELECT $1, $2, epoch, 'drift', jsonb_build_object('record', $2::bigint, 'change', 'opened', 'observation', $3::text), now()

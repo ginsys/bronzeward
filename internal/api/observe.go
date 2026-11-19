@@ -18,18 +18,12 @@ import (
 	"github.com/ginsys/bronzeward/internal/talos/signer"
 )
 
-// accessKey is v's whole version identity (PA §16: path, version and created_time), in the form
-// heldOperations reads it from the observation a retry rests on.
-func accessKey(v provider.TalosAccessVersion) string {
-	return fmt.Sprintf("%s@%d@%s", v.Path, v.Version, createdText(v.CreatedTime))
-}
-
 // observeFor is what an observation is taken for (execution-recovery.md §4.1): its purpose, and
-// the plan and operation it is taken for, if any. access, when set, is the Talos access a dispatch
-// read once for this observation and the attempt made on it (§3.1 item 2); it is not read again.
+// the plan and operation it is taken for, if any. cert, when set, is the certificate a dispatch
+// signed once for this observation and the attempt made on it (§3.1 item 2); it is not signed again.
 type observeFor struct {
 	purpose, plan, operation string
-	access                   *provider.TalosAccess
+	cert                     *signer.Cert
 	paced                    bool
 	generation               int64 // publication owner generation; zero for other purposes
 }
@@ -44,9 +38,8 @@ var errReadNotDue = errors.New("a recovery read of the machine is within the set
 const nodeUseLife = 4
 
 // observedAccess is the access identity an observation records (persistence-api.md §3.3): the CA key
-// version's path, version and created_time and, for a certificate signed for the observation, its
-// serial and NotAfter. A dispatch's observation still uses the stored talosconfig and records its
-// version alone, with no serial.
+// version's path, version and created_time and the serial and NotAfter of the certificate signed
+// from it for the observation's use.
 type observedAccess struct {
 	Path        string
 	Version     int
@@ -55,14 +48,10 @@ type observedAccess struct {
 	NotAfter    time.Time
 }
 
-// storedAccess is the identity of the stored talosconfig a dispatch's observation used: no serial.
-func storedAccess(v provider.TalosAccessVersion) *observedAccess {
-	return &observedAccess{Path: v.Path, Version: v.Version, CreatedTime: v.CreatedTime}
-}
-
-// version is x's key version identity in the form a use-time check compares.
-func (x observedAccess) version() provider.TalosAccessVersion {
-	return provider.TalosAccessVersion{Path: x.Path, Version: x.Version, CreatedTime: x.CreatedTime}
+// accessOf is the access identity of certificate c.
+func accessOf(c signer.Cert) *observedAccess {
+	ca := c.CA()
+	return &observedAccess{Path: ca.Path, Version: ca.Version, CreatedTime: ca.CreatedTime, Serial: c.Serial(), NotAfter: c.NotAfter()}
 }
 
 // observed is what observe recorded: the observation's id, its basis (the start entry's revision)
@@ -125,19 +114,13 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 		return observed{}, err
 	}
 
-	// A dispatch's observation uses the talosconfig it read once for the observation and its attempt
-	// (f.access); every other observation signs a certificate for its own reads.
-	var tc []byte
-	var notAfter time.Time
-	var err error
+	// A dispatch's observation uses the certificate it signed once for the observation and its attempt
+	// (f.cert); every other observation signs a certificate for its own reads.
 	var cert signer.Cert
-	var signed bool
-	switch {
-	case f.access != nil:
-		tc, o.Access = f.access.Talosconfig(), storedAccess(f.access.Version())
-	case a.o.staleAccess != nil:
-		tc, o.Access = a.o.staleAccess.Talosconfig(), storedAccess(a.o.staleAccess.Version())
-	default:
+	var err error
+	if f.cert != nil {
+		cert = *f.cert
+	} else {
 		var cause string
 		if cert, cause, err = a.certFor(ctx, cluster, role.Admin, nodeUseLife*a.o.nodeTimeout); err != nil {
 			if ctx.Err() != nil {
@@ -150,11 +133,8 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 			o.unreadAll(cause, "identity", "runningVersion", "configuration", "assignmentEvidence")
 			return o, a.recordObservation(ctx, machine, f, &o)
 		}
-		notAfter = cert.NotAfter()
-		ca := cert.CA()
-		o.Access = &observedAccess{Path: ca.Path, Version: ca.Version, CreatedTime: ca.CreatedTime, Serial: cert.Serial(), NotAfter: notAfter}
-		signed = true
 	}
+	o.Access = accessOf(cert)
 	if head.Valid {
 		o.AssignmentEvidence = head.String
 	} else {
@@ -163,9 +143,7 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 	// A certificate that cannot be made into a talosconfig fails like a dial: the assignment
 	// evidence above is recorded, and every value that needs the node is named unread.
 	var r talos.Reader
-	if signed {
-		tc, err = cert.Config(o.Endpoint)
-	}
+	tc, err := cert.Config(o.Endpoint)
 	if err == nil {
 		r, err = a.o.dial(ctx, tc, o.Endpoint)
 	}
@@ -175,9 +153,7 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 		o.unreadAll("talosconfig", "identity", "runningVersion", "configuration")
 		return o, a.recordObservation(ctx, machine, f, &o)
 	}
-	if !notAfter.IsZero() {
-		r = talos.Bound(r, notAfter)
-	}
+	r = talos.Bound(r, cert.NotAfter())
 	defer r.Close()
 
 	reads := []struct {

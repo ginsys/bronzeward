@@ -36,8 +36,8 @@ func PublicationObservation(t testing.TB, db publicationDB, machine, operation s
    SELECT $1, $2, epoch, 'observation', jsonb_build_object('observation', $3::text, 'purpose', 'publication'), now()
    FROM installation_state`, []any{machine, revision, observation}},
 		{`INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created,
-   smbios_uuid, talos_node_id, talos_cluster_id, running_version, unread, at)
-   SELECT $1, m.id, $3-1, $3, 'access/talos/' || m.cluster, 1, '2026-10-19T00:00:00Z',
+   access_serial, access_not_after, smbios_uuid, talos_node_id, talos_cluster_id, running_version, unread, at)
+   SELECT $1, m.id, $3-1, $3, 'access/talos-ca/' || m.cluster, 1, '2026-10-19T00:00:00Z', 'a1', now() + interval '1 minute',
    m.smbios_uuid, coalesce(m.talos_node_id, 'fixture-node'), c.talos_cluster_id, c.contract || '.0',
    '{"configuration":{"cause":"fixture"},"health":{"cause":"none-bound"}}', now()
    FROM machine m JOIN cluster c ON c.id = m.cluster WHERE m.id = $2`, []any{observation, machine, revision}},

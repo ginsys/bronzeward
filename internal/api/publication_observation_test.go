@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/siderolabs/talos/pkg/machinery/constants"
 
 	"github.com/ginsys/bronzeward/internal/id"
-	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
 	"github.com/ginsys/bronzeward/internal/talos"
 )
@@ -318,7 +318,8 @@ func TestPublicationOlderReadCompletingLate(t *testing.T) {
 	}
 	older.Identity = &r.identity
 	older.RunningVersion = "v1.12.4"
-	older.Access = storedAccess(provider.TalosAccessVersion{Path: "access/talos/" + b.cluster, Version: 3, CreatedTime: accessCreated})
+	older.Access = &observedAccess{Path: "access/talos-ca/" + b.cluster, Version: 3, CreatedTime: accessCreated, Serial: "a1",
+		NotAfter: time.Now().Add(time.Minute)}
 	u, ref := b.build()
 	if ref != nil {
 		t.Fatal(ref)

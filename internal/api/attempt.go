@@ -227,6 +227,19 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 		WHERE machine = $1 AND kind = 'commitment' AND entry->>'operation' = $2`, machine, operation).Scan(&obs); err != nil {
 		return r, machine, plan, fmt.Errorf("attempt of operation %s: its commitment entry: %w", operation, err)
 	}
+	// The attempt's record names the observation it rests on, the commitment's or the classification's;
+	// the comparisons read the evidence. A retry's is the newest evidence observation recorded for the
+	// operation, taken with the certificate this attempt is sent with: a certificate lives for one use,
+	// so the classification's observation, read through an earlier one, shows another serial (§3.3).
+	rests := obs
+	if cls.Valid {
+		err := tx.QueryRowContext(ctx, `SELECT o.id FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+			WHERE o.machine = $1 AND s.purpose = 'evidence' AND s.operation = $2 ORDER BY o.revision DESC LIMIT 1`,
+			machine, operation).Scan(&obs)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return r, machine, plan, err
+		}
+	}
 	var basis int64
 	var startedAt time.Time
 	var identityMatches, digestMatches, minorMatches bool
@@ -322,7 +335,7 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 			'verificationDeadline', $9::timestamptz + p.verification_deadline, 'observation', $10::text,
 			'classification', $12::bigint)), $9
 		FROM plan p WHERE p.id = $11`,
-		machine, r.Revision, current, r.Attempt, operation, r.Number, a.d.owner.ID, generation, at, obs, plan, cls); err != nil {
+		machine, r.Revision, current, r.Attempt, operation, r.Number, a.d.owner.ID, generation, at, rests, plan, cls); err != nil {
 		return r, machine, plan, err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO attempt (id, operation, plan, machine, number, owner, owner_gen, owner_epoch, route,
@@ -330,7 +343,7 @@ func (a *API) recordAttemptTx(ctx context.Context, tx *sql.Tx, operation string,
 		SELECT $1, $2, p.id, p.machine, $3, $4, $5, $6, p.route, $7, $8::timestamptz + p.transport_deadline,
 			$8::timestamptz + p.verification_deadline, $8, $9, $11
 		FROM plan p WHERE p.id = $10`,
-		r.Attempt, operation, r.Number, a.d.owner.ID, generation, current, obs, at, r.Revision, plan, cls)
+		r.Attempt, operation, r.Number, a.d.owner.ID, generation, current, rests, at, r.Revision, plan, cls)
 	if err != nil {
 		return r, machine, plan, err
 	}

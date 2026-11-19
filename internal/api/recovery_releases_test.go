@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/talos"
 )
 
@@ -122,8 +121,7 @@ func TestRecoveryScopeRelease(t *testing.T) {
 	ae := newAttemptEnv(t, "")
 	ae.sent(t)
 	ae.second(t)
-	me := &markEnv{attemptEnv: ae, x: &fakeExecutor{access: provider.NewTalosAccess(provider.TalosAccessVersion{
-		Path: "access/talos/" + ae.cluster, Version: 2, CreatedTime: time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)}, []byte("tc"))}}
+	me := &markEnv{attemptEnv: ae, x: &fakeExecutor{}}
 	m2 := ae.machine2
 	me.report(me.recordedIdentity(t, m2))
 

@@ -138,29 +138,18 @@ func (h *heldReader) Close() error {
 
 // PA §3.3, §3.4: no connection outlives its certificate. A connection that answers nothing is closed
 // at the certificate's NotAfter and the observation is recorded without a node value; the control
-// reads through the stored talosconfig, which no certificate bounds, and the same connection is
-// still held after that NotAfter has passed.
+// holds the same reader with nothing bounding it, and it is still held after that NotAfter has passed.
 func TestObserveHeldConnectionEndsAtNotAfter(t *testing.T) {
 	t.Parallel()
-	run := func(t *testing.T, access bool) (h *heldReader, done chan error, oe *obsEnv, started time.Time) {
-		t.Helper()
-		oe = newObsEnv(t)
-		h = newHeldReader()
-		dial := func(context.Context, []byte, string) (talos.Reader, error) { return h, nil }
-		a := observer(t, oe.env, oe.x, options{dial: dial, nodeTimeout: 250 * time.Millisecond})
-		f := observeFor{purpose: "drift"}
-		if access {
-			f.access = &oe.x.access
-		}
-		done = make(chan error, 1)
-		started = time.Now()
-		go func() { _, err := a.observe(t.Context(), oe.machine, f); done <- err }()
-		return h, done, oe, started
-	}
-
 	t.Run("certificate", func(t *testing.T) {
 		t.Parallel()
-		h, done, oe, started := run(t, false)
+		oe := newObsEnv(t)
+		h := newHeldReader()
+		dial := func(context.Context, []byte, string) (talos.Reader, error) { return h, nil }
+		a := observer(t, oe.env, oe.x, options{dial: dial, nodeTimeout: 250 * time.Millisecond})
+		done := make(chan error, 1)
+		started := time.Now()
+		go func() { _, err := a.observe(t.Context(), oe.machine, observeFor{purpose: "drift"}); done <- err }()
 		select {
 		case err := <-done:
 			if err != nil {
@@ -187,18 +176,18 @@ func TestObserveHeldConnectionEndsAtNotAfter(t *testing.T) {
 		}
 	})
 
-	t.Run("control: the stored talosconfig has no certificate to end it", func(t *testing.T) {
+	t.Run("control: nothing but the certificate's bound ends a held reader", func(t *testing.T) {
 		t.Parallel()
-		h, done, _, _ := run(t, true)
+		h := newHeldReader()
+		done := make(chan error, 1)
+		go func() { _, err := h.Identity(t.Context()); done <- err }()
 		select {
 		case <-done:
 			t.Fatal("the control ended by itself: it does not hold a connection past a NotAfter")
 		case <-time.After(4 * time.Second): // past the end a certificate for this observation would have had
 		}
 		h.Close()
-		if err := <-done; err != nil {
-			t.Fatal(err)
-		}
+		<-done
 	})
 }
 

@@ -123,9 +123,9 @@ func (ae *attemptEnv) observed(t *testing.T, change func(*cobs)) string {
 		SELECT $1, $2, epoch, 'observation', jsonb_build_object('observation', $3::text, 'purpose', $4::text, 'basis', $5::bigint),
 			now() + make_interval(secs => $6)
 		FROM installation_state`, ae.machine, rev, obs, s.purpose, basis, secs)
-	mustExec(t, tx, `INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created, smbios_uuid,
-			talos_node_id, talos_cluster_id, assignment_evidence, running_version, configuration_digest, resource_version, unread, at)
-		SELECT $1, $2, $3, $4, 'access/talos/' || cluster, 3, '2026-10-01T00:00:00Z', $5::uuid, $6, $7, $8, $9, $10, $11, $12::jsonb,
+	mustExec(t, tx, `INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created, access_serial,
+			access_not_after, smbios_uuid, talos_node_id, talos_cluster_id, assignment_evidence, running_version, configuration_digest, resource_version, unread, at)
+		SELECT $1, $2, $3, $4, 'access/talos-ca/' || cluster, 3, '2026-10-01T00:00:00Z', 'a1', now() + interval '1 day', $5::uuid, $6, $7, $8, $9, $10, $11, $12::jsonb,
 			now() + make_interval(secs => $13)
 		FROM machine WHERE id = $2`, obs, ae.machine, basis, rev, vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6],
 		s.unread, secs)

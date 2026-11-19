@@ -1,7 +1,10 @@
 package api
 
 import (
+	stdx509 "crypto/x509"
 	"database/sql"
+	"encoding/base64"
+	"encoding/pem"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +38,31 @@ func clientKey(tc []byte) string {
 			return v
 		}
 	}
+	return ""
+}
+
+// certSerial is the serial, in hex, of the client certificate a talosconfig document holds, as the
+// observation records it: how a test tells which certificate a request was sent with.
+func certSerial(t *testing.T, tc []byte) string {
+	t.Helper()
+	for _, l := range strings.Split(string(tc), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(l), "crt: "); ok {
+			pemBytes, err := base64.StdEncoding.DecodeString(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block, _ := pem.Decode(pemBytes)
+			if block == nil {
+				t.Fatal("the talosconfig's crt holds no PEM block")
+			}
+			c, err := stdx509.ParseCertificate(block.Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return c.SerialNumber.Text(16)
+		}
+	}
+	t.Fatal("the talosconfig holds no crt")
 	return ""
 }
 

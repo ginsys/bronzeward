@@ -51,7 +51,6 @@ func newMachineEnv(t *testing.T) *machineEnv {
 	if err := me.db.QueryRow(`SELECT talos_cluster_id FROM cluster WHERE id = $1`, me.cluster).Scan(&me.clusterID); err != nil {
 		t.Fatal(err)
 	}
-	me.setAccess(me.pki.Talosconfig("", "", ""))
 	me.node.SetSMBIOSUUID(t, strings.ToUpper(uuidA), true)
 	me.node.SetNodeID(t, nodeA)
 	me.node.SetClusterID(t, me.clusterID)
@@ -65,16 +64,6 @@ func (me *machineEnv) setEndpoint(t *testing.T, machine, endpoint string) {
 		t.Fatal(err)
 	}
 	me.endpoint = endpoint
-}
-
-func (me *machineEnv) accessVersion() provider.TalosAccessVersion {
-	return provider.TalosAccessVersion{Path: "access/talos/" + me.cluster, Version: 3, CreatedTime: accessCreated}
-}
-
-func (me *machineEnv) setAccess(talosconfig []byte) {
-	me.f.mu.Lock()
-	defer me.f.mu.Unlock()
-	me.f.access, me.f.accessErr = provider.NewTalosAccess(me.accessVersion(), talosconfig), nil
 }
 
 // nodeMachine inventories a machine of me's cluster recorded by Talos node ID id, at me's node.

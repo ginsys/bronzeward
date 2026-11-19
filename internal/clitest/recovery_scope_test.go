@@ -134,9 +134,9 @@ func (f *fixture) seedObservation(machine, purpose, version string, ago time.Dur
 		{`INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 			SELECT $1, $2, epoch, 'observation', jsonb_build_object('observation', $3::text, 'purpose', $4::text), now() + make_interval(secs => $5)
 			FROM installation_state`, []any{machine, rev, obs, purpose, secs}},
-		{`INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created, smbios_uuid, talos_node_id,
+		{`INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created, access_serial, access_not_after, smbios_uuid, talos_node_id,
 				talos_cluster_id, running_version, configuration_digest, resource_version, unread, at)
-			SELECT $1, m.id, $3 - 1, $3, 'access/talos/' || m.cluster, 1, '2026-10-19T00:00:00Z', m.smbios_uuid, coalesce(m.talos_node_id, 'fixture-node'),
+			SELECT $1, m.id, $3 - 1, $3, 'access/talos-ca/' || m.cluster, 1, '2026-10-19T00:00:00Z', 'a1', now() + interval '1 day', m.smbios_uuid, coalesce(m.talos_node_id, 'fixture-node'),
 				c.talos_cluster_id, c.contract || '.0', decode(repeat('ab', 32), 'hex'), $4, '{"health":{"cause":"none-bound"}}',
 				now() + make_interval(secs => $5)
 			FROM machine m JOIN cluster c ON c.id = m.cluster WHERE m.id = $2`, []any{obs, machine, rev, version, secs}},

@@ -136,8 +136,8 @@ func (p plans) startRow(rev int, purpose string, planID, operation any) record {
 
 func (p plans) observationRow(obsID string, basis, rev int) record {
 	return newRecord("observation", "id", obsID, "machine", p.machine, "basis", basis, "revision", rev,
-		"access_path", "access/talos/"+p.cluster, "access_version", 1, "access_created", created,
-		"talos_cluster_id", nil, "smbios_uuid", "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b", "running_version", "v1.13.6",
+		"access_path", "access/talos-ca/"+p.cluster, "access_version", 1, "access_created", created,
+		"access_serial", "a1", "access_not_after", time.Now().Add(time.Minute), "talos_cluster_id", nil, "smbios_uuid", "0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b", "running_version", "v1.13.6",
 		"configuration_digest", digest(1), "resource_version", "3", "health", `{}`, "unread", `{}`, "at", time.Now())
 }
 
@@ -396,9 +396,13 @@ func TestPlanConstraints(t *testing.T) {
 	observe("observation of no start", "23503", obs.with("basis", 99))
 	observe("observation recorded at its basis", "23514", obs.with("revision", 100))
 	observe("failed access read with a digest", "23514/observation_unavailable",
-		obs.with("access_path", nil, "access_version", nil, "access_created", nil))
+		obs.with("access_path", nil, "access_version", nil, "access_created", nil, "access_serial", nil, "access_not_after", nil))
 	observe("access version without its path", "23514", obs.with("access_path", nil))
-	observe("access path of no cluster", "23514", obs.with("access_path", "access/talos/x"))
+	observe("access path of no cluster", "23514", obs.with("access_path", "access/talos-ca/x"))
+	observe("access path of the stored talosconfig", "23514", obs.with("access_path", "access/talos/"+p.cluster))
+	observe("access with no serial", "23514", obs.with("access_serial", nil))
+	observe("access with no NotAfter", "23514", obs.with("access_not_after", nil))
+	observe("a serial with no access", "23514", obs.with("access_path", nil, "access_version", nil, "access_created", nil))
 	observe("unread values as an array", "23514", obs.with("unread", `[]`))
 	observe("health as an array", "23514", obs.with("health", `[]`))
 	observe("digest of 31 bytes", "23514", obs.with("configuration_digest", digest(1)[:31]))
@@ -406,7 +410,7 @@ func TestPlanConstraints(t *testing.T) {
 		p.entry(p.machine, 102, "observation"), obs.with("id", id.New(id.Observation), "revision", 102).stmt())...)
 	// The positive control: a failed access read records no value and its cause.
 	commitRows(t, db, append(append([]stmt{}, started...), obs.with("access_path", nil, "access_version", nil, "access_created", nil,
-		"smbios_uuid", nil, "running_version", nil, "configuration_digest", nil, "resource_version", nil, "health", nil,
+		"access_serial", nil, "access_not_after", nil, "smbios_uuid", nil, "running_version", nil, "configuration_digest", nil, "resource_version", nil, "health", nil,
 		"unread", `{"talos-access":"talos-access-unavailable"}`).stmt())...)
 }
 
@@ -713,7 +717,7 @@ func TestPlanConstraintControl(t *testing.T) {
 			p.entry(p.machine, 100, "observation-started"), p.startRow(100, "drift", nil, nil).stmt(),
 			p.entry(p.machine, 101, "observation"),
 			p.observationRow(id.New(id.Observation), 100, 101).with("access_path", nil, "access_version", nil,
-				"access_created", nil).stmt()}},
+				"access_created", nil, "access_serial", nil, "access_not_after", nil).stmt()}},
 		{"ALTER TABLE operation DROP CONSTRAINT operation_plan", []stmt{
 			{insertPlanOperation, []any{id.New(id.Operation), "apply-config", "committed", owner, nil, nil, nil}}}},
 		{"ALTER TABLE operation DROP CONSTRAINT operation_apply_config_owned", []stmt{

@@ -145,7 +145,7 @@ func TestRecoveryReads(t *testing.T) {
 	ae.sent(t)
 	ae.enterStopped(t, time.Now().Add(-time.Hour))
 	old := ae.a
-	r := observer(t, ae.env, &fakeExecutor{err: errors.New("no access in this test")}, options{})
+	r := unsignedObserver(t, ae.env, options{})
 	reads := func(m string) int {
 		return count(t, ae.db, `SELECT count(*) FROM observation_start s JOIN observation o ON o.machine = s.machine AND o.basis = s.revision
 			WHERE s.machine = $1 AND s.purpose = 'recovery' AND s.plan IS NULL AND s.operation IS NULL`, m)
@@ -183,8 +183,7 @@ func TestRecoveryReadsPaceTheMachine(t *testing.T) {
 		transport_deadline = clock_timestamp() - interval '10 seconds' WHERE id = $1`, att.Attempt)
 	mustExec(t, ae.db, `ALTER TABLE attempt ENABLE TRIGGER immutable_rows`)
 	ae.enterStopped(t, time.Now().Add(-time.Hour))
-	noAccess := &fakeExecutor{err: errors.New("no access in this test")}
-	r := observer(t, ae.env, noAccess, options{})
+	r := unsignedObserver(t, ae.env, options{})
 	reads := func(m string) int {
 		return count(t, ae.db, `SELECT count(*) FROM observation_start WHERE machine = $1 AND purpose = 'recovery'`, m)
 	}
@@ -197,7 +196,7 @@ func TestRecoveryReadsPaceTheMachine(t *testing.T) {
 	defer func() { _ = held.Rollback() }()
 	mustExec(t, held, `SELECT FROM machine WHERE id = $1 FOR UPDATE`, ae.target.machine2)
 	errs := make(chan error, 2)
-	for _, c := range []*API{r, observer(t, ae.env, noAccess, options{})} {
+	for _, c := range []*API{r, unsignedObserver(t, ae.env, options{})} {
 		go func() {
 			_, err := c.observe(t.Context(), ae.target.machine2, observeFor{purpose: "recovery", paced: true})
 			errs <- err
@@ -251,7 +250,7 @@ func TestNewStartsRecoveryReads(t *testing.T) {
 	ex.SettleFloor = 3 * time.Second
 	life, stop := context.WithCancel(t.Context())
 	h := New(life, ae.db, auth.NewVerifier(ae.cfg, ae.db, auth.Discover(ae.cfg.OIDC)), ae.cfg, ex, nil, nil,
-		&fakeExecutor{err: errors.New("no access in this test")}, ae.signer(), 0, &config.Ingestion{Instance: "a", Heartbeat: time.Hour, Lease: 2 * time.Hour},
+		&fakeExecutor{}, ae.signer(), 0, &config.Ingestion{Instance: "a", Heartbeat: time.Hour, Lease: 2 * time.Hour},
 		epoch(t, ae.db), false, nil)
 	defer stopping(h.(*API), stop)
 	deadline := time.Now().Add(10 * time.Second)
