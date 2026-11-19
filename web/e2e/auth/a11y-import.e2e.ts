@@ -15,7 +15,7 @@
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
-import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, itNarrow, measure, narrow, onMain, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
+import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, itNarrow, measure, narrow, onMain, overflows, pickByKeys, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -68,11 +68,6 @@ async function leavesNothing() {
   importId = "";
 }
 
-// ArrowDown on the focused select until it holds `value`: the deployment may offer other drafts and machines.
-async function arrowUntil(sel: string, value: string) {
-  for (let i = 0; i < 20 && (await $(sel).getValue()) !== value; i++) await browser.keys("ArrowDown");
-  expect(await $(sel).getValue()).toBe(value);
-}
 
 // Whether the review text holds the tier label of the document the case staged, answered in the page
 // (it reads the label from the synthetic provider, as the case that staged it did): neither the label
@@ -140,10 +135,10 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     // The machine, then the draft the machine's cluster offers: a select takes the arrow keys.
     await $(`select[name="machine"] option[value="${machine}"]`).waitForExist({ timeout: 20_000 });
     await tabTo((f) => f.tag === "SELECT" && f.name === "machine", "the machine select");
-    await arrowUntil('select[name="machine"]', machine);
+    await pickByKeys(machine);
     await $(`select[name="draft"] option[value="${d.id}"]`).waitForExist({ timeout: 20_000 });
     await tabTo((f) => f.tag === "SELECT" && f.name === "draft", "the draft select");
-    await arrowUntil('select[name="draft"]', d.id);
+    await pickByKeys(d.id);
     expect(await $('select[name="machine"]').getValue()).toBe(machine);
     expect(await $('select[name="draft"]').getValue()).toBe(d.id);
     // The source radios: Tab enters the group, an arrow key picks the document.

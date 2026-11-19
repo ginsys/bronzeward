@@ -342,6 +342,42 @@ export const scrollsOnItsOwn = (sel: string) => browser.execute((s: string) => {
 // Whether this session is Safari's, whose driver has no BiDi session (setViewport, dialog events) and
 // shows no leave dialog; the cases that need them take the route written beside them.
 export const inSafari = () => (browser.capabilities as { browserName?: string }).browserName?.toLowerCase() === "safari";
+// Another window on `url`, switched to; its handle. Over WebDriver BiDi newWindow does not switch to
+// the tab it opens. Safari's window.open can leave the new window with no address, or on about:blank,
+// never loading the one asked for: it is given a few seconds, then loaded by address.
+export async function newTab(url: string): Promise<string> {
+  const before = await browser.getWindowHandles();
+  const w = await browser.newWindow(url);
+  const asked = "handle" in w ? w.handle : w.contextId;
+  // The handle newWindow answers is not the new window's in Safari (measured on the runner: the case
+  // went on in the window it opened from), so the new window is the one that was not there before.
+  const opened = (await browser.getWindowHandles()).filter((h) => !before.includes(h));
+  const handle = opened.length === 1 ? opened[0]! : asked;
+  await browser.switchToWindow(handle);
+  const now = await browser.getWindowHandle();
+  if (now !== handle) throw new Error(`newTab: switched to ${handle} (newWindow said ${asked}), and the current window is ${now}; windows before: ${before.join(", ")}`);
+  if (inSafari() && url !== "about:blank") {
+    const loaded = await browser.waitUntil(async () => !["", "about:blank"].includes(await browser.getUrl()), { timeout: 5000 }).catch(() => false);
+    if (!loaded) await browser.url(url);
+  }
+  return handle;
+}
+// Moves the focused select to the option of `value` by keyboard. Other browsers take ArrowDown;
+// Safari on macOS opens its own popup for the arrow keys, which safaridriver's key events do not
+// operate (measured on the runner: seven key sequences left the value as it was), and it does change
+// the value for type-ahead, so the option's label is typed.
+export async function pickByKeys(value: string) {
+  const read = () => browser.execute(() => (document.activeElement as HTMLSelectElement).value);
+  if (inSafari()) {
+    const label = await browser.execute((v: string) => [...(document.activeElement as HTMLSelectElement).options].find((o) => o.value === v)?.text ?? "", value);
+    expect(label).not.toBe("");
+    await browser.pause(1100); // type-ahead forgets what was typed after a second (wdio.conf.ts)
+    await browser.keys(label.split(""));
+  } else {
+    for (let i = 0; i < 20 && (await read()) !== value; i++) await browser.keys("ArrowDown");
+  }
+  expect(await read()).toBe(value);
+}
 // Each dialog the page raises while `act` runs, answered with `accept`, as the messages. Other
 // browsers answer it from a BiDi event; Safari has no BiDi session, so the dialog is read and
 // answered through the classic alert commands once `act` has returned or reported it.

@@ -38,9 +38,17 @@ describe("the harness's own commands", () => {
     expect(await $("#i").getValue()).toBe("198.51.100.43  x");
   });
 
-  it("a select takes a choice by its value", async () => {
+  it("a select takes each choice by its value, and the page hears each", async () => {
+    await browser.execute(() => {
+      const heard: string[] = [];
+      (window as unknown as { heard: string[] }).heard = heard;
+      document.getElementById("s")!.addEventListener("change", (e) => heard.push((e.target as HTMLSelectElement).value));
+    });
     await $("#s").selectByAttribute("value", "b");
     expect(await $("#s").getValue()).toBe("b");
+    await $("#s").selectByVisibleText("a");
+    expect(await $("#s").getValue()).toBe("a");
+    expect(await browser.execute(() => (window as unknown as { heard: string[] }).heard)).toEqual(["b", "a"]);
   });
 
   it("Tab reaches a button and then a link", async () => {

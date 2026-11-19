@@ -86,6 +86,9 @@ export async function secondSession(requested: WebdriverIO.Capabilities): Promis
   });
 }
 
+// Safari's type-ahead on a select forgets what was typed after a second.
+const TYPE_AHEAD_MS = 1100;
+let typedAt = 0;
 let target: Server | undefined;
 let provider: Server | undefined;
 let host: ChildProcess | undefined;
@@ -133,12 +136,34 @@ export const config: WebdriverIO.Config = {
       }
       return origKeys(value);
     });
-    // Safari's click on a select that is not in view fails as not interactable, where it takes the
-    // choice once the select is scrolled to.
+    // Safari's click on an option fails as not interactable while the select is out of view, and when it
+    // works it can set the value without the input and change events the page listens to (measured on
+    // the runner: the second choice of a form left the page's choice unmade). Its type-ahead is a real
+    // key press that raises them, so the option is chosen by typing its label on the focused select.
     for (const name of ["selectByAttribute", "selectByVisibleText", "selectByIndex"] as const) {
-      await browser.overwriteCommand(name, async function (this: WebdriverIO.Element, orig: (...a: unknown[]) => Promise<void>, ...args: unknown[]) {
+      await browser.overwriteCommand(name, async function (this: WebdriverIO.Element, _orig: unknown, a: string | number, b?: string | number) {
+        await this.waitForExist();
         await this.scrollIntoView({ block: "center" });
-        return orig(...args);
+        const found = await browser.execute((e: HTMLSelectElement, how: string, x: string | number, y: string | number | undefined) => {
+          const o = [...e.options];
+          const hit = how === "selectByIndex" ? o[Number(x)] : how === "selectByVisibleText" ? o.find((p) => p.text.trim() === String(x).trim()) : o.find((p) => String(p.getAttribute(String(x))) === String(y));
+          if (hit === undefined) return { error: "no such option" };
+          const label = hit.text;
+          const earlier = o.slice(0, o.indexOf(hit)).some((p) => p.text.startsWith(label));
+          if (e.value !== hit.value) e.focus();
+          return { value: hit.value, label, same: e.value === hit.value, ambiguous: label === "" || earlier };
+        }, this as unknown as HTMLSelectElement, name, a, b);
+        if ("error" in found) throw new Error(`${name}(${String(a)}${b === undefined ? "" : `, ${String(b)}`}): ${found.error}`);
+        if (found.same) return;
+        if (found.ambiguous) throw new Error(`${name}: the option's label "${found.label}" does not pick it by typing`);
+        // Type-ahead keeps what was typed for a second: a choice made just after another would be searched
+        // as the two labels one after the other, and found nowhere.
+        const quiet = TYPE_AHEAD_MS - (Date.now() - typedAt);
+        if (quiet > 0) await browser.pause(quiet);
+        await browser.keys(found.label.split(""));
+        typedAt = Date.now();
+        const now = await browser.execute((e: HTMLSelectElement) => e.value, this as unknown as HTMLSelectElement);
+        if (now !== found.value) throw new Error(`${name}: typing "${found.label}" left the select at "${now}", not "${found.value}"`);
       }, { attachToElement: true });
     }
   },

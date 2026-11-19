@@ -4,33 +4,24 @@ import { $, browser, expect } from "@wdio/globals";
 import { PRINCIPAL_CHANGED } from "../../src/app.tsx";
 import { FIXTURE_PAGE } from "../auth.conf.ts";
 import type { Counts } from "../provider.ts";
-import { counts, fixtureSignIn, inSafari, settled, storageEmpty, where } from "./helpers.ts";
+import { counts, fixtureSignIn, newTab, settled, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
 // The first tab signed in, in a tab of its own: after a close WebdriverIO switches to the first
-// window, which stays idle.
+// window, which stays idle. The handle is read once the tab has settled: Safari's handle names a page,
+// and a navigation to another origin (the sign-in's redirects) gives the tab another one.
 async function signInTab(flags: Record<string, string>): Promise<string> {
-  const handle = await newTab("about:blank");
+  await newTab("about:blank");
   expect(await fixtureSignIn("h-viewer", flags)).toMatch(SERVER);
-  return handle;
+  return browser.getWindowHandle();
 }
 
 // Another tab of the page: it takes the open tabs' pair, or signs in when they have none to give.
 async function openTab(): Promise<string> {
-  const handle = await newTab(`${FIXTURE_PAGE}/`);
+  await newTab(`${FIXTURE_PAGE}/`);
   expect(await settled(FIXTURE_PAGE)).toMatch(SERVER);
-  return handle;
-}
-
-// Over WebDriver BiDi newWindow does not switch to the tab it opens.
-async function newTab(url: string): Promise<string> {
-  const w = await browser.newWindow(url);
-  const handle = "handle" in w ? w.handle : w.contextId;
-  await browser.switchToWindow(handle);
-  // Safari's window.open can leave the new window on about:blank, never loading the address.
-  if (inSafari() && url !== "about:blank" && (await browser.getUrl()) === "about:blank") await browser.url(url);
-  return handle;
+  return browser.getWindowHandle();
 }
 
 async function closeTab(handle: string, then: string) {
@@ -131,12 +122,19 @@ describe("several tabs", () => {
   });
 });
 
-// Only the idle first tab left, so the next case starts with no holder.
+// Only the idle first tab left, so the next case starts with no holder. The tabs of the page are the
+// ones to close, found by their address: the idle window never leaves about:blank, and Safari neither
+// lists its windows in the order it opened them nor keeps a handle across a navigation to another origin.
 afterEach(async () => {
-  const [keep, ...rest] = await browser.getWindowHandles();
-  for (const h of rest) {
+  for (const h of await browser.getWindowHandles()) {
     await browser.switchToWindow(h);
-    if ((await where()).startsWith(FIXTURE_PAGE)) await storageEmpty();
-    await closeTab(h, keep!);
+    if (!(await where()).startsWith(FIXTURE_PAGE)) continue;
+    // A tab in the middle of a redirect holds its sign-in state in session storage until it settles.
+    await browser.waitUntil(() => storageEmpty().then(() => true, () => false), { timeout: 15_000, interval: 500 }).catch(() => undefined);
+    await storageEmpty();
+    await browser.closeWindow();
   }
+  const [idle, ...more] = await browser.getWindowHandles();
+  if (idle === undefined || more.length > 0) throw new Error(`${more.length + (idle === undefined ? 0 : 1)} windows are open, one expected`);
+  await browser.switchToWindow(idle);
 });
