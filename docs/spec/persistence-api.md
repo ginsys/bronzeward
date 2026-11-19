@@ -664,8 +664,10 @@ there.
   stored, logged, returned or quoted in an error (compilation §13); its
   refusals give a fixed `422 validation-failed` with a `rule` of
   `first-key-unusable`, `first-key-no-ca-key`, `first-key-role-insufficient`,
-  `first-key-endpoint-no-control-plane` or `first-key-cluster-mismatch`. Two of
-  them need a Talos read, so a refused read does not win by default, and each
+  `first-key-endpoint-no-control-plane` or `first-key-cluster-mismatch`. Three of
+  them need a Talos read (the configuration read for `first-key-role-insufficient`
+  and `first-key-endpoint-no-control-plane`, the identity read for
+  `first-key-cluster-mismatch`), so a refused read does not win by default, and each
   outcome is its own: a document that cannot be parsed, or a client that cannot
   be built or dialled at all (a talosconfig that does not parse, an endpoint
   that cannot be dialled as given), fails before any read as
