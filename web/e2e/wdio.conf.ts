@@ -115,7 +115,7 @@ export const config: WebdriverIO.Config = {
     if ((capabilities as WebdriverIO.Capabilities).browserName?.toLowerCase() !== "safari") return;
     await browser.overwriteCommand("getText", async function (this: WebdriverIO.Element) {
       return browser.execute((e: HTMLElement) => (e.checkVisibility({ visibilityProperty: true }) ? e.innerText : ""), this as unknown as HTMLElement);
-    }, true);
+    }, { attachToElement: true });
     // A key sequence sent as one action loses its spaces in safaridriver ("machine:\n  nodeLabels:"
     // arrives as "machine:\n nodeLabels:"), where the same keys one at a time arrive whole. Single
     // characters are sent one at a time, a space and a line break as the keys they are.
@@ -135,7 +135,7 @@ export const config: WebdriverIO.Config = {
       await browser.overwriteCommand(name, async function (this: WebdriverIO.Element, orig: (...a: unknown[]) => Promise<void>, ...args: unknown[]) {
         await this.scrollIntoView({ block: "center" });
         return orig(...args);
-      }, true);
+      }, { attachToElement: true });
     }
   },
 
