@@ -59,7 +59,7 @@ point 2). Five levels, from strict to blind:
 | E1 | both are loaded and re-encoded by the machinery (typed load, encoder without comments) first, then E0 | comments, key order, formatting and the typed encoding's normalisation | yes, by construction |
 | E2 | the parsed documents, matched by kind and name, have equal trees | comments, key order, document order, formatting; **not** list order | yes, by construction |
 | E3 | the same documents as typed machinery documents (`configloader`), matched by kind and name, are equal | as E2, plus whatever the typed form normalises | yes, by construction |
-| E4 | the redacted forms, with the reference names masked, are equal as E2 | as E2, and the value behind every reference | **not behind a reference** (measured); a literal secret that no redaction means masks (compilation §8.3: composed path, schema, value) sits in the tree, so a change shows; a literal in a field the schema marks, or an exact copy of a resolved value, is masked, and a change between two such values can leave the redacted form unchanged (not measured) |
+| E4 | the redacted forms, with the reference names masked, are equal as E2 | as E2, and the value behind every reference | **not behind a reference** (measured); a literal secret that no redaction means masks (compilation §8.3: composed path, schema, value) sits in the tree, so a change shows; a literal in a field the schema marks, or an exact copy of a resolved `string` value (its base64 forms too; integer and boolean values are not looked for, §8.3), is masked, and a change between two such values can leave the redacted form unchanged (not measured) |
 
 "By construction" means the level reads the plaintext, so a different value is a different tree. N4
 (§5.5) measured it for E0 only: its harness does not change the plaintext columns.
@@ -247,7 +247,8 @@ short or integer secrets quoted in a message.
   a reference (N4). Compilation §8.4 lists secrets nothing identifies (a field the schema does not
   mark and nothing references): those are not behind a reference and no redaction means masks them,
   so a change to one appears in the redacted tree and E4 sees it. A literal that redaction does
-  mask (compilation §8.3: a field the schema marks, an exact copy of a resolved value) is the other
+  mask (compilation §8.3: a field the schema marks, an exact copy of a resolved `string` value or its
+  base64 form; an integer or boolean copy is not looked for, so it stays visible) is the other
   case: a change between two such values can leave the redacted form unchanged, so E4 can miss it;
   this was not measured. What E4 cannot do is recognise such a value as a secret. A change is detectable; a secret that was never marked stays
   unknown to every level.
