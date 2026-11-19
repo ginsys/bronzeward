@@ -88,6 +88,20 @@ describe("the harness's own commands", () => {
     expect(await $("#i").getValue()).toBe("198.51.100.43  x");
   });
 
+  // The cases of the plan page and the revocation type a string: ginsys/bronzeward#927 items 3 and 4.
+  it("keys sends a typed string whole: repeated characters and spaces arrive as typed", async () => {
+    await browser.execute(() => ((document.getElementById("i") as HTMLInputElement).value = ""));
+    await $("#i").click();
+    await browser.keys("aabb seeded  reason");
+    // Counts and an index only: the case reports how the string differs, never the string.
+    const want = "aabb seeded  reason";
+    const read = await browser.execute((want: string) => {
+      const v = (document.getElementById("i") as HTMLInputElement).value;
+      return { typed: v.length, of: want.length, firstDifference: [...want].findIndex((c, i) => v[i] !== c) };
+    }, want);
+    expect(read).toEqual({ typed: want.length, of: want.length, firstDifference: -1 });
+  });
+
   it("a select takes each choice by its value, and the page hears each", async () => {
     await browser.execute(() => {
       const heard: string[] = [];
