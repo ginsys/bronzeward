@@ -125,6 +125,19 @@ export const protectedStorage = (source: string, fileName: string): number[] => 
   return lines;
 };
 
+// How many times the two-read check is used, not imported: an unused import or a comment does not count.
+export const afterPauseUses = (source: string): number => {
+  const file = ts.createSourceFile("spec.ts", source, ts.ScriptTarget.Latest, true);
+  let uses = 0;
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node)) return;
+    if (ts.isIdentifier(node) && node.text === "storageEmptyAfterPause") uses++;
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return uses;
+};
+
 const bare = (source: string) => absenceReads(source).filter((r) => !r.noted).map((r) => r.line);
 
 test("the positive control: the read flags a bare false read, a bare negated include and a bare negated match", () => {
@@ -202,6 +215,13 @@ test("the positive control: in a protected spec every reference to the one-read 
 test("the negative control: the same references in a spec that is not protected, and the two-read check anywhere, are not refused", () => {
   for (const name of ["tabs.e2e.ts", "provider.e2e.ts", "drafts.e2e.ts"]) expect(protectedStorage(STORAGE.join("\n"), name), name).toEqual([]);
   expect(protectedStorage("afterEach(storageEmptyAfterPause);\n// storageEmpty is one read", "protected.e2e.ts")).toEqual([]);
+});
+
+test("the two-read check counts as used only where it is called or registered, never for an import or a comment", () => {
+  expect(afterPauseUses(STORAGE.join("\n"))).toBe(1);
+  expect(afterPauseUses("afterEach(storageEmptyAfterPause);")).toBe(1);
+  expect(afterPauseUses('import { storageEmptyAfterPause } from "./helpers.ts";')).toBe(0);
+  expect(afterPauseUses('import { storageEmptyAfterPause } from "./helpers.ts";\n// storageEmptyAfterPause is used here\nconst s = "storageEmptyAfterPause";')).toBe(0);
 });
 
 test("the positive control: a trailing note and a block note above count, and the walk says which read each one is", () => {
@@ -323,8 +343,8 @@ test("the e2e auth specs carry no unnoted absence read", () => {
     for (const line of protectedStorage(source, file)) found.push(`${name}:${line} storageEmpty (one read) in a protected spec`);
     if (PROTECTED_SPECS.includes(name)) {
       checked.push(name);
-      // The control for the storage rule: the two-read check that replaces the one-read name is in the file.
-      if (!source.includes("storageEmptyAfterPause")) found.push(`${name}: no storageEmptyAfterPause`);
+      // The control for the storage rule: the two-read check that replaces the one-read name is called or registered in the file.
+      if (afterPauseUses(source) === 0) found.push(`${name}: no storageEmptyAfterPause call`);
     }
   }
   expect(checked).toEqual([...PROTECTED_SPECS].sort());
