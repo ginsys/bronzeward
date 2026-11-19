@@ -129,6 +129,21 @@ else
 fi
 chmod 700 "$case/$value"
 
+# 4b'''. An unreadable file with an ordinary name in a readable directory (ginsys/bronzeward#936): the
+# listing sizes a file from stat, not by reading it, so it is still made and lists the file, as GNU find's
+# -printf did. (Skipped when the user can read it anyway, as root can.)
+fresh unreadable-file
+echo "expected $value to equal 1" >"$case/out/console.log"
+printf 'twelve bytes' >"$case/out/sub/blob.bin"
+chmod 000 "$case/out/sub/blob.bin"
+if [ -r "$case/out/sub/blob.bin" ]; then
+  ok
+else
+  scan
+  if [ "$rc" -ne 0 ] && [ "$(cat "$case/dev/status")" = listed ] && grep -q "^f 12 sub/blob.bin$" "$case/dev/listing/files.txt"; then ok; else bad "an unreadable file with an ordinary name: rc=$rc status=$(cat "$case/dev/status" 2>/dev/null) listing=$(cat "$case/dev/listing/files.txt" 2>/dev/null)"; fi
+fi
+chmod 600 "$case/out/sub/blob.bin"
+
 # 4c. A value that the control files' own names hold ("planted-0.log") must not break the control's count.
 fresh control-name
 rc=0
@@ -192,7 +207,10 @@ echo "expected $value to equal 1" >"$case/out/console.log"
 printf 'two words' >"$case/out/sub/a b.txt"
 ln -s sub/page.html "$case/out/link"
 ln -s $'tgt\n' "$case/out/newline-link"
+printf 'locked' >"$case/out/locked.bin" # unreadable where the user cannot read it anyway: GNU lists it from stat
+chmod 000 "$case/out/locked.bin"
 scan
+chmod 600 "$case/out/locked.bin"
 if ! find "$case/out" -maxdepth 0 -printf '' 2>/dev/null; then
   ok
 else

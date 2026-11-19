@@ -34,15 +34,16 @@ case ${1:-} in
     # diagnostics are dropped and a listing that did not complete is withheld. The listing is made with
     # POSIX tools, as GNU find's -printf is missing from the BSD find of a macOS runner (ginsys/bronzeward#930):
     # the type is f (a regular file, with its size), l (a symbolic link) or o (any other kind), and only a
-    # file has a size: a link and the others list 0, where GNU's %s gives a link its target's path length
-    # and GNU's %y has one letter for each of p, s, c and b.
+    # file has a size, which ls -dn reads from stat (field 5), so a file the user cannot read is still listed
+    # (ginsys/bronzeward#936): a link and the others list 0, where GNU's %s gives a link its target's path
+    # length and GNU's %y has one letter for each of p, s, c and b.
     names=
     complete=1
     if [ -d "$out" ]; then
       names=$(cd "$out" 2>/dev/null && find . -mindepth 1 ! -type d -exec sh -c '
         for p; do
           if [ -L "$p" ]; then t=l; n=0
-          elif [ -f "$p" ]; then t=f; n=$(wc -c <"$p") || exit 1
+          elif [ -f "$p" ]; then t=f; l=$(ls -dn -- "$p") || exit 1; n=$(printf "%s\n" "$l" | awk "{print \$5}")
           else t=o; n=0; fi
           printf "%s %s %s\n" "$t" "$((n + 0))" "${p#./}"
         done' sh {} + 2>/dev/null | LC_ALL=C sort) || complete=
