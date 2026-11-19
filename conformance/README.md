@@ -71,3 +71,38 @@ header in `web/e2e/auth.conf.ts` has the details.
 
 The web accessibility passes of journeys §13 are not §12 cases; they are recorded per browser in
 [accessibility-web.md](accessibility-web.md).
+
+## Browsers
+
+Every web record above runs in the browsers its `browsers` list names, by `mise run browser` or
+`mise run browser-auth`, in three workflows (decision B6 of ginsys/bronzeward#255):
+
+| Workflow | Browsers | Required |
+| --- | --- | --- |
+| `ci.yml` | Chrome and Edge as the runner has them, Firefox stable and Firefox ESR | yes |
+| `previous-majors.yml` | the previous major of Chrome, Edge and Firefox, pinned below | no: daily on main, on request, and on a pull request that changes its files |
+| `safari.yml` | Safari | no: on main, daily and on request |
+
+`previous-majors.yml` is outside the required checks (ginsys/bronzeward#893): three more
+`browser-auth` legs would add about 45 runner-minutes to each of the three runs a change gets and put
+three vendors' download servers in the merge path. The builds are pinned in
+[`web/e2e/previous-majors.json`](../web/e2e/previous-majors.json), each from the vendor's own source:
+
+| Browser | Build | Source |
+| --- | --- | --- |
+| Chrome | 156.0.8078.80 | Chrome for Testing, downloaded by WebdriverIO |
+| Edge | 156.0.4314.58 | Microsoft's package repository, the `.deb` checked against its pinned sha256; the driver at the same version |
+| Firefox | 159.0.1 | Mozilla's release archive, downloaded by WebdriverIO |
+
+The first run, on 19 November 2026 ([run 44432276292](https://github.com/ginsys/bronzeward/actions/runs/44432276292)),
+passed on all three: `mise run browser` (both specs, 2 passing each, in each browser) and `mise run browser-auth` (14 of
+14 spec files in each browser), with the artifact scan's planted control finding each planted value in
+every job. The log shows the Edge and its driver at 156.0.4314.58. Every previous major was obtainable,
+so none is recorded as untested. The runs took 1 min 10 s for `browser` and 14 min 35 s to 15 min 22 s for each
+`browser-auth` leg, about 45 runner-minutes in all.
+
+A failed run on main opens one issue, "Previous-major browsers run failed on main" (marker
+`previous-majors-main-failure`, labels `type/implementation` and `area/ci`), and a later failure comments on it. The
+pins are moved by hand until ginsys/bronzeward#907 adds a tool: a pin more than one major behind still
+passes against an older browser, and a green run does not say so. Not run: the previous release of
+Firefox ESR, and Safari's previous major.
