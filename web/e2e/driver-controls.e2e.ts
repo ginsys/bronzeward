@@ -9,7 +9,7 @@ describe("the harness's own commands", () => {
   before(async () => {
     await browser.url("about:blank");
     await browser.execute(() => {
-      document.body.innerHTML = '<p id="t">Showing 4 of 4. </p><ul id="l"><li>started</li><li>succeeded</li></ul><table id="tb"><tbody><tr><td>2026</td><td>freeze x</td></tr></tbody></table><input id="i"><select id="s"><option value="a">a</option><option value="b">b</option></select><button id="b1">one</button><a id="a1" href="#x">two</a><p id="ghost" style="opacity:0">hidden</p><p id="part">shown <span style="opacity:0">ghost</span></p><div id="blk">before<div style="opacity:0"></div>after</div><select id="sd" disabled><option value="x">x</option><option value="y">y</option></select><select id="so"><option value="p">p</option><option value="q" disabled>q</option></select>';
+      document.body.innerHTML = '<p id="t">Showing 4 of 4. </p><ul id="l"><li>started</li><li>succeeded</li></ul><table id="tb"><tbody><tr><td>2026</td><td>freeze x</td></tr></tbody></table><input id="i"><select id="s"><option value="a">a</option><option value="b">b</option></select><button id="b1">one</button><a id="a1" href="#x">two</a><p id="ghost" style="opacity:0">hidden</p><p id="part">shown <span style="opacity:0">ghost</span></p><div id="blk">before<div style="opacity:0"></div>after</div><p id="deep">shown <span style="opacity:0"><b style="visibility:visible">ghost</b></span></p><select id="sd" disabled><option value="x">x</option><option value="y">y</option></select><select id="so"><option value="p">p</option><option value="q" disabled>q</option></select>';
     });
   });
 
@@ -24,6 +24,8 @@ describe("the harness's own commands", () => {
     expect(await $("#part").getText()).toBe("shown");
     // An empty transparent block between two lines leaves the line break where it was.
     expect(await $("#blk").getText()).toBe("before\nafter");
+    // A descendant of a transparent element that sets its own visibility is transparent too.
+    expect(await $("#deep").getText()).toBe("shown");
   });
 
   it("a disabled select, or a disabled option, keeps its value and the page hears nothing", async () => {
