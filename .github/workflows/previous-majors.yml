@@ -74,7 +74,9 @@ jobs:
       - run: mise run browser
       # The versions the run used, so the log shows the driver is the pinned one (WebdriverIO
       # ignores a driver option it does not read). The driver is cached under the run's TMPDIR.
+      # Only a log: a find that meets an unreadable directory in /tmp must not fail a passed run.
       - if: always()
+        continue-on-error: true
         name: Show the Edge and driver versions
         run: |
           /opt/microsoft/msedge/msedge --version
@@ -126,6 +128,7 @@ jobs:
       - run: mise run dev-idp
       - run: mise run browser-auth
       - if: always() && matrix.browser == 'edge-previous'
+        continue-on-error: true
         name: Show the Edge and driver versions
         run: |
           /opt/microsoft/msedge/msedge --version
