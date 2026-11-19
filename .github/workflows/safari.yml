@@ -86,7 +86,7 @@ jobs:
     # runs on this job's own files.
     if: ${{ !inputs.simulate-failure }}
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     env:
       BW_BROWSERS: safari
       MISE_DISABLE_TOOLS: node
