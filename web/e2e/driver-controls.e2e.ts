@@ -9,13 +9,14 @@ describe("the harness's own commands", () => {
   before(async () => {
     await browser.url("about:blank");
     await browser.execute(() => {
-      document.body.innerHTML = '<p id="t">Showing 4 of 4. </p><ul id="l"><li>started</li><li>succeeded</li></ul><input id="i"><select id="s"><option value="a">a</option><option value="b">b</option></select><button id="b1">one</button><a id="a1" href="#x">two</a>';
+      document.body.innerHTML = '<p id="t">Showing 4 of 4. </p><ul id="l"><li>started</li><li>succeeded</li></ul><table id="tb"><tbody><tr><td>2026</td><td>freeze x</td></tr></tbody></table><input id="i"><select id="s"><option value="a">a</option><option value="b">b</option></select><button id="b1">one</button><a id="a1" href="#x">two</a>';
     });
   });
 
   it("getText answers the rendered text: no trailing space, a line break between block items", async () => {
     expect(await $("#t").getText()).toBe("Showing 4 of 4.");
     expect(await $("#l").getText()).toBe("started\nsucceeded");
+    expect(await $("#tb").getText()).toBe("2026 freeze x");
   });
 
   it("getText and an assertion on a text wait for an element that appears after the call", async () => {
