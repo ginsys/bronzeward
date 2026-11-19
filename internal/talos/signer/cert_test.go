@@ -88,6 +88,29 @@ func TestSignRoleAndLifetime(t *testing.T) {
 	}
 }
 
+// A certificate states its validity to the whole second, so a lifetime with a fraction is covered by
+// rounding the end up: the certificate is never over before now+life, and never a second past it.
+func TestSignCoversFractionalLifetime(t *testing.T) {
+	k := storedKey(newCA(t))
+	base := time.Now().Truncate(time.Second)
+	for name, c := range map[string]struct{ now, life time.Duration }{
+		"under a second, late in the second": {900 * time.Millisecond, 500 * time.Millisecond},
+		"under a second, early":              {100 * time.Millisecond, 500 * time.Millisecond},
+		"fraction on both":                   {250 * time.Millisecond, 90*time.Second + 500*time.Millisecond},
+		"whole":                              {0, 90 * time.Second},
+	} {
+		now := base.Add(c.now)
+		cert, err := signer.Sign(k, role.Admin, now, c.life, time.Hour)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		end := now.Add(c.life)
+		if got := parsed(t, cert).NotAfter; got.Before(end) || got.Sub(end) >= time.Second || !cert.NotAfter().Equal(got) {
+			t.Errorf("%s: NotAfter %s for an end of %s, want it at the next whole second at most", name, got, end)
+		}
+	}
+}
+
 // A lifetime above the maximum, or not above zero, and a role outside the two, are refused; none is
 // cut down to fit.
 func TestSignRefusals(t *testing.T) {

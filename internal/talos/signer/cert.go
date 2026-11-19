@@ -42,7 +42,8 @@ type Cert struct {
 }
 
 // Sign signs a client certificate from k for r, valid from now for life, and refuses a life above
-// max. The lifetime covers the use and no more; the node's clock is not read. Only os:reader and
+// max. The certificate covers the lifetime and ends at the next whole second after it, which is all a
+// certificate can state; the node's clock is not read. Only os:reader and
 // os:admin are signed. The certificate's serial and NotAfter are read back from the certificate
 // itself, so a record names what the node will check and not what was asked for.
 func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration) (Cert, error) {
@@ -52,8 +53,15 @@ func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration)
 	if life <= 0 || life > max {
 		return Cert{}, ErrLifetime
 	}
+	// A certificate states its validity to the whole second and drops the fraction, which would end it
+	// before the use it covers. So its end is rounded up to the next whole second: never early, and at
+	// most a second late.
+	end := now.Add(life)
+	if !end.Equal(end.Truncate(time.Second)) {
+		end = end.Truncate(time.Second).Add(time.Second)
+	}
 	pair, err := secrets.NewAdminCertificateAndKey(now, &cryptox509.PEMEncodedCertificateAndKey{Crt: k.Crt(), Key: k.Key()},
-		role.MakeSet(r), life)
+		role.MakeSet(r), end.Sub(now))
 	if err != nil {
 		return Cert{}, ErrSign
 	}
