@@ -29,6 +29,13 @@ web=${BW_DEV_IDP_WEB_ORIGIN:-http://localhost:${BW_E2E_PORT_BASE-16000}}
 # localhost (fixtures/participants/session).
 participants=""
 [ "${2:-}" = --participants ] && participants=1
+# BW_DEV_RUNTIME=native (scripts/dev/native-services.sh, ginsys/bronzeward#892): the same provider as
+# processes of the host, for the hosted macOS runner, which has no Docker. PostgreSQL is the host's, at
+# BW_DEV_PG_PORT; Zitadel is the binary BW_NATIVE_ZITADEL; the groups target is the host-built
+# fixtures/oidc, on the idp port plus 2. The default instance only, without the login page. Pids and
+# logs are in the state directory, which down removes.
+native=${BW_DEV_RUNTIME:-docker}
+groupsport=$((BW_DEV_IDP_PORT + 2))
 loginport=$((BW_DEV_IDP_PORT + 1))
 loginbase=http://localhost:$loginport/ui/v2/login
 password='Synthetic-Pass-1!'
@@ -46,6 +53,10 @@ die() {
   exit 1
 }
 pin() { sed -n "s/^$1=//p" fixtures/versions.env; }
+# pid_alive FILE: the process whose pid FILE holds is running.
+pid_alive() {
+  [ -s "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null
+}
 # Each docker query is assigned before it is tested, so that a docker failure (no daemon, no
 # permission) stops the script instead of reading as an absent container, as in mise run dev-down.
 present() {
@@ -56,8 +67,20 @@ present() {
 # alive <container>...: each is still running. One that has exited fails up at once with its own
 # log tail. The containers run without --rm, so that they and their logs survive until down.
 alive() {
-  local c running
+  local c running f
   for c; do
+    if [ "$native" = native ]; then
+      case $c in
+      "$zitadel") f=zitadel ;;
+      "$groups") f=groups ;;
+      *) continue ;;
+      esac
+      if ! pid_alive "$state/$f.pid"; then
+        tail -n 50 "$state/$f.log" >&2 || true
+        die "$c exited during start-up, its log tail above (${BW_DEV_PFX}mise run dev-idp-down)"
+      fi
+      continue
+    fi
     running=$(docker inspect -f '{{.State.Running}}' "$c") || die "cannot inspect $c (docker inspect)"
     [ "$running" = true ] && continue
     docker logs --tail 50 "$c" >&2 || true
@@ -70,15 +93,26 @@ alive() {
 ours() {
   local running project
   [ -f "$state/idp.env" ] && [ -s "$state/seed.pat" ] || return 1
-  running=$(docker ps -q --filter "name=^$groups\$" --filter status=running) || die "cannot list containers (docker ps)"
-  [ -n "$running" ] || return 1
+  if [ "$native" = native ]; then
+    pid_alive "$state/groups.pid" || return 1
+  else
+    running=$(docker ps -q --filter "name=^$groups\$" --filter status=running) || die "cannot list containers (docker ps)"
+    [ -n "$running" ] || return 1
+  fi
   project=$(sed -n 's/^BW_TEST_IDP_PROJECT=//p' "$state/idp.env")
   [ -n "$project" ] && curl -sf --noproxy '*' -o /dev/null --max-time 5 \
     -H "Authorization: Bearer $(cat "$state/seed.pat")" "$issuer/management/v1/projects/$project"
 }
 
 down() {
-  local c ids
+  local c ids f
+  if [ "$native" = native ]; then
+    for f in groups zitadel; do
+      if [ -s "$state/$f.pid" ]; then kill "$(cat "$state/$f.pid")" 2>/dev/null || true; fi
+    done
+    rm -rf -- "$state"
+    return
+  fi
   for c in "$login" "$groups" "$zitadel" "$pg"; do
     if present "$c"; then docker rm -fv "$c" >/dev/null; fi
     for _ in $(seq 30); do present "$c" || continue 2; sleep 1; done
@@ -126,7 +160,7 @@ zitadel_failed() {
 }
 
 up() {
-  local c ids arch out seeded base=${BW_E2E_PORT_BASE-16000}
+  local c ids arch out code seeded base=${BW_E2E_PORT_BASE-16000}
   # The browser tasks accept only these bases (web/e2e/ports.ts), so a provider seeded for any
   # other would match no run. BW_DEV_IDP_WEB_ORIGIN names the origin itself and is not checked.
   if [ -z "${BW_DEV_IDP_WEB_ORIGIN:-}" ] &&
@@ -161,14 +195,21 @@ up() {
     summary
     return
   fi
-  for c in "$pg" "$zitadel" "$groups" "$login"; do
-    if present "$c"; then
-      die "$c exists but is not this checkout's complete provider (another checkout's, or an interrupted up); run ${BW_DEV_PFX}mise run dev-idp-down, then ${BW_DEV_PFX}mise run dev-idp"
+  if [ "$native" = native ]; then
+    # No containers or network. Processes of an earlier start are this checkout's own state.
+    if pid_alive "$state/zitadel.pid" || pid_alive "$state/groups.pid"; then
+      die "a Zitadel or groups process of an earlier start still runs but is not this checkout's complete provider; run ${BW_DEV_PFX}mise run dev-idp-down, then ${BW_DEV_PFX}mise run dev-idp"
     fi
-  done
-  ids=$(docker network ls -q --filter "name=^$net\$") || die "cannot list networks (docker network ls)"
-  if [ -n "$ids" ]; then
-    die "network $net exists without the provider (an interrupted up); run ${BW_DEV_PFX}mise run dev-idp-down, then ${BW_DEV_PFX}mise run dev-idp"
+  else
+    for c in "$pg" "$zitadel" "$groups" "$login"; do
+      if present "$c"; then
+        die "$c exists but is not this checkout's complete provider (another checkout's, or an interrupted up); run ${BW_DEV_PFX}mise run dev-idp-down, then ${BW_DEV_PFX}mise run dev-idp"
+      fi
+    done
+    ids=$(docker network ls -q --filter "name=^$net\$") || die "cannot list networks (docker network ls)"
+    if [ -n "$ids" ]; then
+      die "network $net exists without the provider (an interrupted up); run ${BW_DEV_PFX}mise run dev-idp-down, then ${BW_DEV_PFX}mise run dev-idp"
+    fi
   fi
   # A taken port fails here, before the state directory, the network or a container exists. Two
   # names on one slot are the usual cause. A connection that opens means a listener holds it.
@@ -181,21 +222,31 @@ up() {
   rm -rf -- "$state"
   mkdir -p "$state"
   chmod 700 "$state"
-  # A static binary, so that the groups target runs in the Zitadel image, which has no C library.
-  # Built into the state directory, which down removes, for the daemon's Linux platform, not the
-  # host's.
-  arch=$(docker version --format '{{.Server.Arch}}') || die "cannot read the docker daemon's architecture (docker version)"
-  GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -o "$state/oidc" ./fixtures/oidc
-  docker network create "$net" >/dev/null
-  docker run -d --name "$pg" --network "$net" -e POSTGRES_USER=postgres -e POSTGRES_HOST_AUTH_METHOD=trust \
-    "$(pin POSTGRES_IMAGE)" >/dev/null
   local ready=""
-  for _ in $(seq 30); do
-    alive "$pg"
-    if docker exec "$pg" pg_isready -q -h 127.0.0.1 -U postgres; then ready=1 && break; fi
-    sleep 1
-  done
-  [ -n "$ready" ] || die "$pg was not ready within 30s (docker logs $pg)"
+  if [ "$native" = native ]; then
+    # The host's own binary, and the PostgreSQL native-services.sh started (superuser postgres, trust).
+    go build -o "$state/oidc" ./fixtures/oidc
+    for _ in $(seq 30); do
+      if pg_isready -q -h 127.0.0.1 -p "$BW_DEV_PG_PORT" -U postgres; then ready=1 && break; fi
+      sleep 1
+    done
+    [ -n "$ready" ] || die "no PostgreSQL answers on 127.0.0.1:$BW_DEV_PG_PORT within 30s (scripts/dev/native-services.sh up starts it)"
+  else
+    # A static binary, so that the groups target runs in the Zitadel image, which has no C library.
+    # Built into the state directory, which down removes, for the daemon's Linux platform, not the
+    # host's.
+    arch=$(docker version --format '{{.Server.Arch}}') || die "cannot read the docker daemon's architecture (docker version)"
+    GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -o "$state/oidc" ./fixtures/oidc
+    docker network create "$net" >/dev/null
+    docker run -d --name "$pg" --network "$net" -e POSTGRES_USER=postgres -e POSTGRES_HOST_AUTH_METHOD=trust \
+      "$(pin POSTGRES_IMAGE)" >/dev/null
+    for _ in $(seq 30); do
+      alive "$pg"
+      if docker exec "$pg" pg_isready -q -h 127.0.0.1 -U postgres; then ready=1 && break; fi
+      sleep 1
+    done
+    [ -n "$ready" ] || die "$pg was not ready within 30s (docker logs $pg)"
+  fi
   # The master key and every password are synthetic. ZITADEL_HTTPCLIENT_DENYLIST replaces a
   # default that refuses every private address, so that Zitadel may call the groups target on this
   # network: a setting for this throwaway provider only, never a production default.
@@ -208,23 +259,37 @@ up() {
       -e ZITADEL_OIDC_DEFAULTLOGINURLV2="$loginbase/login?authRequest="
       -e ZITADEL_OIDC_DEFAULTLOGOUTURLV2="$loginbase/logout?post_logout_redirect=")
   fi
-  out=$(docker run -d --name "$zitadel" --network "$net" -p "127.0.0.1:$BW_DEV_IDP_PORT:8080" --user "$(id -u):$(id -g)" \
-    -v "$state:/state" "${loginv2[@]}" \
-    -e ZITADEL_EXTERNALDOMAIN=localhost -e ZITADEL_EXTERNALPORT="$BW_DEV_IDP_PORT" -e ZITADEL_EXTERNALSECURE=false \
-    -e ZITADEL_TLS_ENABLED=false -e ZITADEL_HTTPCLIENT_DENYLIST=169.254.0.0/16 \
-    -e ZITADEL_OIDC_DEVICEAUTH_LIFETIME="${devicelife}s" \
-    -e ZITADEL_DATABASE_POSTGRES_HOST="$pg" -e ZITADEL_DATABASE_POSTGRES_PORT=5432 \
-    -e ZITADEL_DATABASE_POSTGRES_DATABASE=zitadel \
-    -e ZITADEL_DATABASE_POSTGRES_USER_USERNAME=zitadel -e ZITADEL_DATABASE_POSTGRES_USER_PASSWORD=zitadel \
-    -e ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE=disable \
-    -e ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME=postgres -e ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD=postgres \
-    -e ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE=disable \
-    -e ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME=bw-seed -e ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME=bw-seed \
-    -e ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE=2099-01-01T00:00:00Z -e ZITADEL_FIRSTINSTANCE_PATPATH=/state/seed.pat \
-    -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME=bw-login -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME=bw-login \
-    -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE=2099-01-01T00:00:00Z \
-    -e ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH=/state/login.pat \
-    "$(pin ZITADEL_IMAGE)" start-from-init --masterkey MasterkeyNeedsToHave32Characters --tlsMode disabled 2>&1) || zitadel_failed "$out"
+  # The settings both runtimes share, as KEY=VALUE; the database's address and the token files' paths
+  # differ and are added below.
+  local zenv=(ZITADEL_EXTERNALDOMAIN=localhost ZITADEL_EXTERNALPORT="$BW_DEV_IDP_PORT" ZITADEL_EXTERNALSECURE=false
+    ZITADEL_TLS_ENABLED=false ZITADEL_HTTPCLIENT_DENYLIST=169.254.0.0/16
+    ZITADEL_OIDC_DEVICEAUTH_LIFETIME="${devicelife}s"
+    ZITADEL_DATABASE_POSTGRES_DATABASE=zitadel
+    ZITADEL_DATABASE_POSTGRES_USER_USERNAME=zitadel ZITADEL_DATABASE_POSTGRES_USER_PASSWORD=zitadel
+    ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE=disable
+    ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME=postgres ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD=postgres
+    ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE=disable
+    ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME=bw-seed ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME=bw-seed
+    ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE=2099-01-01T00:00:00Z
+    ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME=bw-login ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME=bw-login
+    ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE=2099-01-01T00:00:00Z)
+  if [ "$native" = native ]; then
+    # In the background with its descriptors closed, so that the step that runs this does not wait for it.
+    env "${zenv[@]}" ZITADEL_PORT="$BW_DEV_IDP_PORT" \
+      ZITADEL_DATABASE_POSTGRES_HOST=127.0.0.1 ZITADEL_DATABASE_POSTGRES_PORT="$BW_DEV_PG_PORT" \
+      ZITADEL_FIRSTINSTANCE_PATPATH="$state/seed.pat" ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH="$state/login.pat" \
+      "$BW_NATIVE_ZITADEL" start-from-init --masterkey MasterkeyNeedsToHave32Characters --tlsMode disabled \
+      >"$state/zitadel.log" 2>&1 </dev/null &
+    echo $! >"$state/zitadel.pid"
+  else
+    local denv=() e
+    for e in "${zenv[@]}"; do denv+=(-e "$e"); done
+    out=$(docker run -d --name "$zitadel" --network "$net" -p "127.0.0.1:$BW_DEV_IDP_PORT:8080" --user "$(id -u):$(id -g)" \
+      -v "$state:/state" "${loginv2[@]}" "${denv[@]}" \
+      -e ZITADEL_DATABASE_POSTGRES_HOST="$pg" -e ZITADEL_DATABASE_POSTGRES_PORT=5432 \
+      -e ZITADEL_FIRSTINSTANCE_PATPATH=/state/seed.pat -e ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH=/state/login.pat \
+      "$(pin ZITADEL_IMAGE)" start-from-init --masterkey MasterkeyNeedsToHave32Characters --tlsMode disabled 2>&1) || zitadel_failed "$out"
+  fi
   # Ready once a management call answers: /debug/ready can answer before the REST gateway reaches
   # the API behind it.
   ready=""
@@ -234,7 +299,10 @@ up() {
       -H "Authorization: Bearer $(cat "$state/seed.pat")" "$issuer/admin/v1/settings/oidc"; then ready=1 && break; fi
     sleep 1
   done
-  [ -n "$ready" ] || die "Zitadel was not ready within 120s (docker logs $zitadel)"
+  if [ -z "$ready" ]; then
+    [ "$native" != native ] || tail -n 50 "$state/zitadel.log" >&2 || true
+    die "Zitadel was not ready within 120s (docker logs $zitadel; in the native runtime, its log tail is above)"
+  fi
   if [ -n "$participants" ]; then
     # The login page calls Zitadel's API as the login client, on this network, with the instance's
     # host name in the Host header. The cookie secret is random per start. No file holds it, but
@@ -293,21 +361,35 @@ up() {
   done
   # The target runs first: Zitadel refuses a target whose host does not resolve. It reads its
   # signing key per call, and refuses every call until the key is written below.
-  docker run -d --name "$groups" --network "$net" --user "$(id -u):$(id -g)" \
-    -v "$state:/state:ro" --entrypoint /state/oidc "$(pin ZITADEL_IMAGE)" \
-    groups -signing-key /state/groups.key -project "$project" -listen 0.0.0.0:8090 >/dev/null
-  # Up once it answers an unsigned call (503 without a key), asked from inside the network.
+  local gtarget=http://$groups:8090/groups
+  if [ "$native" = native ]; then
+    gtarget=http://127.0.0.1:$groupsport/groups
+    "$state/oidc" groups -signing-key "$state/groups.key" -project "$project" -listen "127.0.0.1:$groupsport" \
+      >"$state/groups.log" 2>&1 </dev/null &
+    echo $! >"$state/groups.pid"
+  else
+    docker run -d --name "$groups" --network "$net" --user "$(id -u):$(id -g)" \
+      -v "$state:/state:ro" --entrypoint /state/oidc "$(pin ZITADEL_IMAGE)" \
+      groups -signing-key /state/groups.key -project "$project" -listen 0.0.0.0:8090 >/dev/null
+  fi
+  # Up once it answers an unsigned call (503 without a key), asked from inside the network, or on
+  # the host's loopback in the native runtime.
   ready=""
   for _ in $(seq 30); do
     alive "$pg" "$zitadel" "$groups"
-    if [ "$(docker run --rm --network "$net" "$(pin CURL_IMAGE)" -s -o /dev/null -w '%{http_code}' \
-      -X POST "http://$groups:8090/groups" 2>/dev/null)" = 503 ]; then ready=1 && break; fi
+    if [ "$native" = native ]; then
+      code=$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' -X POST "$gtarget" 2>/dev/null) || code=
+    else
+      code=$(docker run --rm --network "$net" "$(pin CURL_IMAGE)" -s -o /dev/null -w '%{http_code}' \
+        -X POST "$gtarget" 2>/dev/null) || code=
+    fi
+    if [ "$code" = 503 ]; then ready=1 && break; fi
     sleep 1
   done
-  [ -n "$ready" ] || die "$groups did not answer within 30s (docker logs $groups)"
+  [ -n "$ready" ] || die "$groups did not answer within 30s (docker logs $groups; in the native runtime, $state/groups.log)"
   # interruptOnError: a refused or unreachable target fails the token request.
   target=$(api POST /v2/actions/targets "{\"name\":\"bw-groups\",\"restCall\":{\"interruptOnError\":true},
-    \"endpoint\":\"http://$groups:8090/groups\",\"timeout\":\"5s\"}")
+    \"endpoint\":\"$gtarget\",\"timeout\":\"5s\"}")
   key=$(jq -er .signingKey <<<"$target")
   (umask 077 && printf '%s\n' "$key" >"$state/groups.key")
   api PUT /v2/actions/executions "{\"condition\":{\"function\":{\"name\":\"preaccesstoken\"}},
@@ -330,6 +412,15 @@ EOF
 case ${1:-} in
 up)
   command -v jq >/dev/null || die "needs jq"
+  case $native in
+  docker) ;;
+  native)
+    [ -x "${BW_NATIVE_ZITADEL:-}" ] || die "BW_DEV_RUNTIME=native needs BW_NATIVE_ZITADEL, the Zitadel binary (scripts/dev/native-services.sh up sets it)"
+    [ -n "${BW_DEV_PG_PORT:-}" ] || die "BW_DEV_RUNTIME=native needs BW_DEV_PG_PORT, the PostgreSQL's port"
+    [ -z "$BW_DEV_PFX" ] && [ -z "$participants" ] || die "BW_DEV_RUNTIME=native runs the default instance, without --participants"
+    ;;
+  *) die "BW_DEV_RUNTIME is docker or native, not '$native'" ;;
+  esac
   up
   ;;
 down) down ;;
