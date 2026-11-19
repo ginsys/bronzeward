@@ -1868,12 +1868,13 @@ describe("a plain !bwref value that goes on to the next line", () => {
     // time per character grew with the length of the line (ginsys/bronzeward#719): this draft took
     // 24,752 ms on e735dc3a, 27.9 times the time per character of a line of 5,000 tags. Half the size
     // (160,000 tags) read 14 against the limit of 12, too close to fail every run. The line of 20,000
-    // tags that read 2.87 at a gap of 4 had the same cause.
+    // tags that read 2.87 at a gap of 4 had the same cause. The case takes under a second alone and passed the
+    // default 5 s in a loaded pod once (ginsys/bronzeward#920), so it has its own limit and keeps its size.
     test("a flow line of 320,000 tags lists every one", () => {
       expect(bounded(320000, (n) => `[${lines(n, (i) => `${i ? ", " : ""}!bwref x/foo${i}`)}]\n`)).toHaveLength(
         320000,
       );
-    });
+    }, 30_000);
 
     // The same line with an anchor on every tag: `anchoredContinues` had the same search of the rest of the line
     // for each tag, and a search back to the start of the line (ginsys/bronzeward#719). On the code before the
