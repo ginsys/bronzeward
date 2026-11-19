@@ -91,6 +91,13 @@ func TestPublicationOffline(t *testing.T) {
 	if ref == nil || ref.status != http.StatusServiceUnavailable {
 		t.Fatalf("offline publication = %+v; want 503", ref)
 	}
+	// A cluster with no first-key act: the refusal names the remedy, and nothing creates the act.
+	if !strings.Contains(ref.detail, "first-keys") {
+		t.Fatalf("the refusal does not name the first-keys route: %q", ref.detail)
+	}
+	if n := count(t, b.db, `SELECT count(*) FROM first_key_act`); n != 0 {
+		t.Fatalf("%d first-key acts after a refused publication; want none", n)
+	}
 }
 
 // Existing compiler and worker tests need real publication observations without

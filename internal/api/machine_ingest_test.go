@@ -449,6 +449,15 @@ func TestMachineAccessUnavailable(t *testing.T) {
 			if me.leaked(t, op, canaries...) {
 				t.Fatal("the talosconfig or a read value appears in the record or the log")
 			}
+			if c.cause == "absent" {
+				// No act: the refusal names the remedy, and nothing creates the act.
+				if d, _ := readOp(t, me.db, op).error["detail"].(string); !strings.Contains(d, "first-keys") {
+					t.Fatalf("the refusal does not name the first-keys route: %q", d)
+				}
+				if n := count(t, me.db, `SELECT count(*) FROM first_key_act`); n != 0 {
+					t.Fatalf("%d first-key acts after a refused ingestion; want none", n)
+				}
+			}
 		})
 	}
 }
