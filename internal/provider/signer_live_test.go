@@ -42,6 +42,78 @@ func TestLiveSignerPolicyExact(t *testing.T) {
 	})
 }
 
+// ReadCAKeyVersion against a real OpenBao: one named version is read after a newer one exists, and a
+// version that is deleted, destroyed or never written is ErrAbsent with no fallback to the latest.
+// The control is ReadCAKey, which answers the latest whatever version the caller meant.
+func TestLiveReadCAKeyVersion(t *testing.T) {
+	b := live(t)
+	signerGrants(b)
+	ctx := t.Context()
+	cl := id.New(id.Cluster)
+	p, err := CAKeyPath(cl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := NewSigner(b.Addr, tokenOf(b.Token("bw-signer")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := NewCAKey([]byte(caText), []byte(keyText))
+	second := NewCAKey([]byte(caText+"2"), []byte(keyText+"2"))
+	v1, err := signer.WriteCAKey(ctx, cl, first, 0)
+	if err != nil || v1.Version != 1 {
+		t.Fatalf("the create: %+v, %v", v1, err)
+	}
+	if v2, err := signer.WriteCAKey(ctx, cl, second, 1); err != nil || v2.Version != 2 {
+		t.Fatalf("the replacement: %+v, %v", v2, err)
+	}
+
+	// Version 1 is read as version 1 with its own created time, though version 2 is the latest;
+	// "latest" answers version 2, which is the signing from latest this read exists to prevent.
+	k, err := signer.ReadCAKeyVersion(ctx, cl, 1)
+	if err != nil || k.Version() != v1 || string(k.Key()) != keyText {
+		t.Fatalf("version 1 after version 2: %+v, %v", k.Version(), err)
+	}
+	if latest, err := signer.ReadCAKey(ctx, cl); err != nil || latest.Version().Version != 2 {
+		t.Fatalf("control: the latest read: %+v, %v", latest.Version(), err)
+	}
+	if k2, err := signer.ReadCAKeyVersion(ctx, cl, 2); err != nil || k2.Version().Version != 2 || string(k2.Key()) != keyText+"2" {
+		t.Fatalf("version 2: %+v, %v", k2.Version(), err)
+	}
+
+	// A version that was never written is absent, and the latest still reads.
+	if _, err := signer.ReadCAKeyVersion(ctx, cl, 3); !errors.Is(err, ErrAbsent) {
+		t.Fatalf("a never-written version 3: %v, want ErrAbsent", err)
+	}
+
+	// Soft-deleting version 1 (administrator) makes it absent; version 2 still reads.
+	if status, body, err := b.Do(b.Admin(), http.MethodPost, "/v1/secret/delete/"+p, map[string]any{"versions": []int{1}}); err != nil || status/100 != 2 {
+		t.Fatalf("control: the soft delete of version 1: status %d, %v: %s", status, err, body)
+	}
+	if _, err := signer.ReadCAKeyVersion(ctx, cl, 1); !errors.Is(err, ErrAbsent) {
+		t.Fatalf("a soft-deleted version 1: %v, want ErrAbsent", err)
+	}
+	// Undeleting returns it, so the refusal came from the deletion and not from the read.
+	if status, body, err := b.Do(b.Admin(), http.MethodPost, "/v1/secret/undelete/"+p, map[string]any{"versions": []int{1}}); err != nil || status/100 != 2 {
+		t.Fatalf("control: the undelete of version 1: status %d, %v: %s", status, err, body)
+	}
+	if k, err := signer.ReadCAKeyVersion(ctx, cl, 1); err != nil || k.Version() != v1 {
+		t.Fatalf("version 1 after the undelete: %+v, %v", k.Version(), err)
+	}
+
+	// Destroying version 1 makes it absent for good.
+	if status, body, err := b.Do(b.Admin(), http.MethodPost, "/v1/secret/destroy/"+p, map[string]any{"versions": []int{1}}); err != nil || status/100 != 2 {
+		t.Fatalf("control: the destroy of version 1: status %d, %v: %s", status, err, body)
+	}
+	if _, err := signer.ReadCAKeyVersion(ctx, cl, 1); !errors.Is(err, ErrAbsent) {
+		t.Fatalf("a destroyed version 1: %v, want ErrAbsent", err)
+	}
+	if k, err := signer.ReadCAKeyVersion(ctx, cl, 2); err != nil || k.Version().Version != 2 {
+		t.Fatalf("version 2 after version 1 was destroyed: %+v, %v", k.Version(), err)
+	}
+	t.Logf("version 1 read beside version 2; version 3, a deleted and a destroyed version 1 are ErrAbsent")
+}
+
 func TestLiveSignerIdentity(t *testing.T) {
 	b := live(t)
 	signerGrants(b)
