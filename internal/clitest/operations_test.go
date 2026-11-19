@@ -341,9 +341,7 @@ func (f *fixture) another(t *testing.T, flags ...string) (string, func()) {
 		t.Fatal(err)
 	}
 	s := &served{cfg: cfg}
-	s.cmd = exec.Command(filepath.Join(f.bin, "bronzeward"), append([]string{"serve", "-config", cfg}, flags...)...)
-	s.cmd.Stdout, s.cmd.Stderr = &s.log, &s.log
-	if err := s.cmd.Start(); err != nil {
+	if err := s.start(f.bin, flags...); err != nil {
 		t.Fatal(err)
 	}
 	stop := sync.OnceFunc(s.stop)

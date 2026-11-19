@@ -253,15 +253,10 @@ func (f *fixture) tryServeUp(flags ...string) error {
 	if dir == "" {
 		dir = f.bin
 	}
-	cmd := exec.Command(filepath.Join(dir, "bronzeward"), append([]string{"serve", "-config", f.srv.cfg}, flags...)...)
-	cmd.Env = append(os.Environ(), f.srv.env...)
-	cmd.Stdout, cmd.Stderr = &f.srv.log, &f.srv.log
-	if err := cmd.Start(); err != nil {
+	if err := f.srv.start(dir, flags...); err != nil {
 		f.t.Fatal(err)
 	}
-	done := make(chan struct{})
-	f.srv.cmd, f.srv.done = cmd, done
-	go func() { cmd.Wait(); close(done) }()
+	done := f.srv.done
 	for i := 0; ; i++ {
 		select {
 		case <-done:
@@ -289,6 +284,21 @@ func (f *fixture) tryServeUp(flags ...string) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// start runs the bronzeward serve of the directory dir on the configuration, with flags. It is the
+// one place that sets cmd and done, so a served with a cmd always has a done for stop to wait on.
+func (s *served) start(dir string, flags ...string) error {
+	cmd := exec.Command(filepath.Join(dir, "bronzeward"), append([]string{"serve", "-config", s.cfg}, flags...)...)
+	cmd.Env = append(os.Environ(), s.env...)
+	cmd.Stdout, cmd.Stderr = &s.log, &s.log
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	s.cmd, s.done = cmd, done
+	go func() { cmd.Wait(); close(done) }()
+	return nil
 }
 
 // stop kills serve, as a crash would, and waits for it to exit.
