@@ -113,7 +113,10 @@ export const config: WebdriverIO.Config = {
   // every assertion on a text stays as strict as it is in the other four browsers.
   async before(capabilities, _specs, browser) {
     if ((capabilities as WebdriverIO.Capabilities).browserName?.toLowerCase() !== "safari") return;
+    // An override is not wrapped as the commands are, so it waits for the element itself: an assertion
+    // on an element that appears after the call must wait for it, as it does with the driver's own text.
     await browser.overwriteCommand("getText", async function (this: WebdriverIO.Element) {
+      await this.waitForExist();
       return browser.execute((e: HTMLElement) => (e.checkVisibility({ visibilityProperty: true }) ? e.innerText : ""), this as unknown as HTMLElement);
     }, { attachToElement: true });
     // A key sequence sent as one action loses its spaces in safaridriver ("machine:\n  nodeLabels:"
