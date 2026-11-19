@@ -163,7 +163,7 @@ describe("the write views (#338)", () => {
     // The first send committed before its answer was dropped; the 503s reached no server.
     expect(await writeAnswers()).toEqual(["/clusters 201"]);
     expect(await notice().getText()).toContain(`Key ${key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
-    expect(await result().getText()).not.toContain("Not saved");
+    await absent(async () => (await result().getText()).includes("Not saved"), "a not-saved result after an unknown outcome");
   });
 
   it("TLS-03: a write that meets a refused redirect each time is repeated with the same key, then unknown, never not done", async function () {
@@ -180,7 +180,7 @@ describe("the write views (#338)", () => {
     expect(await notice().getText()).not.toContain(REDIRECTED);
     // No send followed the redirect to its target, and none reached the server.
     expect(await redirected()).toBe(0);
-    expect(await writeAnswers()).toEqual([]);
+    await absent(async () => (await writeAnswers()).length > 0, "a server answer to a write that met a refused redirect");
     // Positive control: the same redirect, met by a fetch that follows redirects, reaches the target
     // and is counted, so the zero above is the page's refusal. Nothing is forwarded to the server.
     await faults({ upstream: at, steps: { path: "/clusters", take: ["redirect"] } });
@@ -239,13 +239,13 @@ describe("the write views (#338)", () => {
     // One send, never repeated: a definite refusal, so no notice either. It reached no server.
     await oneWrite(1);
     expect(await seen()).toEqual(["409"]);
-    expect(await writeAnswers()).toEqual([]);
+    await absent(async () => (await writeAnswers()).length > 0, "a server answer to a write refused with a scope");
     await absent(() => notice().isExisting(), "a notice after a definite refusal");
     // A server refusal is announced as an alert, and no status message carries its text
     // (ginsys/bronzeward#815).
     expect(await result().getAttribute("role")).toBe("alert");
     // The region is clipped, so its text is read as text content, never as visible text.
-    for (const line of await mirrored()) expect(line).not.toContain("Not saved");
+    await absent(async () => (await mirrored()).some((line) => line.includes("Not saved")), "the refusal text in the status region");
     // The scope's refusal showed the page no recovery start: no banner, no start-mode text.
     await absent(() => $('[data-testid="recovery"]').isExisting(), "the recovery banner after a scope's refusal");
     const body = await $("body").getText();
