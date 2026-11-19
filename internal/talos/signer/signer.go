@@ -21,7 +21,6 @@ import (
 	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/talos"
 	"github.com/siderolabs/crypto/x509"
-	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/role"
@@ -150,16 +149,14 @@ func osCA(document []byte) (ca *x509.PEMEncodedCertificateAndKey, ok bool) {
 // The connection ends no later than the certificate does (persistence-api.md §3.4): a node that
 // holds the read open is ErrUnavailable once the certificate has lapsed.
 func Try(ctx context.Context, ca provider.CAKey, endpoint string, now time.Time) error {
-	pair := &x509.PEMEncodedCertificateAndKey{Crt: ca.Crt(), Key: ca.Key()}
-	life := tryLifetime
-	cert, err := secrets.NewAdminCertificateAndKey(now, pair, role.MakeSet(role.Reader), life)
+	cert, err := Sign(ca, role.Reader, now, tryLifetime, tryLifetime)
 	if err != nil {
 		return &Refusal{RuleUnusable}
 	}
-	// X.509 keeps whole seconds, so the certificate lapses at NotAfter cut to the second.
-	ctx, cancel := context.WithDeadline(ctx, now.Add(life).Truncate(time.Second))
+	// X.509 keeps whole seconds, and NotAfter is the certificate's own.
+	ctx, cancel := context.WithDeadline(ctx, cert.NotAfter())
 	defer cancel()
-	doc, err := clientconfig.NewConfig("bronzeward", []string{endpoint}, ca.Crt(), cert).Bytes()
+	doc, err := cert.Config(endpoint)
 	if err != nil {
 		return ErrUnavailable
 	}
