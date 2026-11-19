@@ -174,7 +174,7 @@ describe("the publication page (#342)", () => {
     await tabTo((f) => f.title === REL, "the release link");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText(`Release ${short(REL)}`, { wait: 20_000 });
-    await expect($("main h3=Machines covered (0)")).toBeExisting({ wait: 20_000 });
+    await expect($("main").$("h3=Machines covered (0)")).toBeExisting({ wait: 20_000 });
     expect(await focused()).toBe("main");
     expect((await writes()).map(([m, r]) => `${m} ${r}`)).toEqual([`POST /drafts/${id}/publications`]);
   });
@@ -197,7 +197,7 @@ describe("the publication page (#342)", () => {
       await $(`main a[title="${REL}"]`).click();
       await expect($("main h2")).toHaveText(`Release ${short(REL)}`, { wait: 20_000 });
       // The heading shows while the release loads: wait for its tables, then measure.
-      await expect($("main h3=Machines covered (0)")).toBeExisting({ wait: 20_000 });
+      await expect($("main").$("h3=Machines covered (0)")).toBeExisting({ wait: 20_000 });
       expect(["the release", await overflows()]).toEqual(["the release", 0]);
     });
   });
