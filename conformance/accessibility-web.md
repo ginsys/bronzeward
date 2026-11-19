@@ -117,17 +117,17 @@ approval, from [#358](https://github.com/ginsys/bronzeward/issues/358). Automate
 disposable deployment with synthetic data. The change shown on the plan is an injected unified diff of
 synthetic text; the approval and the revocation are the server's own. Recorded on 19 November 2026
 with Chrome 157, Edge 157, Firefox 160 and Firefox ESR 153 on Linux, from the `browser-auth` jobs of
-the pull request that added the cases (run pending). The keyboard cases failed on the unchanged product
+[#917](https://github.com/ginsys/bronzeward/pull/917), which added the cases ([run](https://github.com/ginsys/bronzeward/actions/runs/44469086708)). The keyboard cases failed on the unchanged product
 (Chrome 139, local): Approve and Revoke approval are disabled once the write is accepted, so focus fell
 to the page body; the page's answer now takes it.
 
 | Item | Screen and what is checked | chrome | edge | firefox | firefox-esr |
 | --- | --- | --- | --- | --- | --- |
-| 2.1.1 Keyboard, 2.1.2 No keyboard trap | the plan page by Tab alone: the change, then the typed plan ID field, then Approve by Enter; on an approved plan the reason field and Revoke approval by Enter; Tab reaches each of them and never stays on one stop on the way | pending | pending | pending | pending |
-| 2.4.3 Focus order | Tab reaches the change before the typed plan ID field; after Approve and after Revoke approval, focus is in the page's answer and not on the page body | pending | pending | pending | pending |
-| 4.1.3 Status messages | the approval's recorded reasons are mirrored into the page's one `role="status"` region; where focus goes after each write is in the 2.4.3 row | pending | pending | pending | pending |
-| 1.4.3 Contrast | the plan page with its change: the lowest contrast of any shown text, measured in the page, at least 4.5:1 | pending | pending | pending | pending |
-| 1.4.10 Reflow | at 320 CSS pixels the plan page with a long change line does not scroll sideways | pending | pending | pending | pending |
+| 2.1.1 Keyboard, 2.1.2 No keyboard trap | the plan page by Tab alone: the change, then the typed plan ID field, then Approve by Enter; on an approved plan the reason field and Revoke approval by Enter; Tab reaches each of them and never stays on one stop on the way | pass | pass | pass | pass |
+| 2.4.3 Focus order | Tab reaches the change before the typed plan ID field; after Approve and after Revoke approval, focus is in the page's answer and not on the page body | pass | pass | pass | pass |
+| 4.1.3 Status messages | the approval's recorded reasons are mirrored into the page's one `role="status"` region; where focus goes after each write is in the 2.4.3 row | pass | pass | pass | pass |
+| 1.4.3 Contrast | the plan page with its change: the lowest contrast of any shown text, measured in the page, at least 4.5:1 | pass | pass | pass | pass |
+| 1.4.10 Reflow | at 320 CSS pixels the plan page with a long change line does not scroll sideways | pass | pass | pass | pass |
 
 Not run here: the screen-reader half of T8, owed by [#447](https://github.com/ginsys/bronzeward/issues/447)
 (see the table below), and the keyboard path of the refusal cases (a forced submit by a user without
