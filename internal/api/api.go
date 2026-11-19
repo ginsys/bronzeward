@@ -55,6 +55,14 @@ type Executor interface {
 	ArtifactKey() string
 }
 
+// Signer is what first keys need of *provider.Signer (persistence-api.md §3.4): the signer
+// identity's read and check-and-set write of a cluster's Talos CA key. Nothing else of the signer
+// reaches a route.
+type Signer interface {
+	ReadCAKey(ctx context.Context, cluster string) (provider.CAKey, error)
+	WriteCAKey(ctx context.Context, cluster string, k provider.CAKey, cas int) (provider.CAKeyVersion, error)
+}
+
 // Publishers are publication's provider identities (compilation.md §1): the metadata identity's
 // reads by name, and the compiler identity's pinned reads and encryption under the artifact key.
 type Publishers struct {
@@ -87,6 +95,7 @@ type deps struct {
 	ing      Ingester
 	pub      *publishClients
 	exe      Executor
+	sg       Signer // first keys' provider identity; nil without a provider
 	timers   config.Ingestion
 	owner    staging.Owner
 	life     context.Context
@@ -167,13 +176,14 @@ type request struct {
 	actID        string        // the act of the transaction attempt in progress
 	ingest       *draftIngest  // a draft update's ingestion, from its prepare to its end
 	mark         *markEvidence // a scope mark's observation and dependency check, from its prepare
+	stored       *storedKey    // a first key's stored CA key, from its prepare
 }
 
 type ctxKey struct{}
 
 func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*request) }
 
-// New returns the /api/v1 handler. ing, pub, exe and ic are nil without a provider. epoch is the
+// New returns the /api/v1 handler. ing, pub, exe, sg and ic are nil without a provider. epoch is the
 // one this process read at its start: it owns claims and jobs under it, and under no later one
 // (§5.1). With a provider, it starts the publish worker and the adoption and drift loops. The
 // ingest runners, the worker and the loops stop when life ends. A recovery start (recovery is
@@ -181,8 +191,8 @@ func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*
 // start at the normal restart that entry allows (execution-recovery.md §7.2). onEntry runs once a
 // recovery start's entry has committed, after it owns under the new epoch.
 func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex config.Execution, ing Ingester, pub *Publishers,
-	exe Executor, ic *config.Ingestion, epoch string, recovery bool, onEntry func()) http.Handler {
-	d := deps{ing: ing, exe: exe, life: life, exec: ex, preEntry: new(atomic.Bool), recoveryStart: recovery, start: epoch,
+	exe Executor, sg Signer, ic *config.Ingestion, epoch string, recovery bool, onEntry func()) http.Handler {
+	d := deps{ing: ing, exe: exe, sg: sg, life: life, exec: ex, preEntry: new(atomic.Bool), recoveryStart: recovery, start: epoch,
 		onEntry: onEntry, entry: new(entryState)}
 	d.preEntry.Store(recovery)
 	if pub != nil {

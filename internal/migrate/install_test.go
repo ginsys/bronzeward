@@ -170,7 +170,7 @@ func TestEveryTableClassified(t *testing.T) {
 	immutable := []string{"act", "adoption_record", "approval", "approval_revocation", "assignment_revision", "attempt",
 		"attempt_accounting", "attempt_response", "operation_classification",
 		"assignment_revision_fragment", "assignment_revision_profile", "dependency_alert",
-		"dependency", "fragment_reference", "fragment_revision", "identity_revocation", "idempotency_record",
+		"dependency", "first_key_act", "fragment_reference", "fragment_revision", "identity_revocation", "idempotency_record",
 		"import_base_reference", "import_base_revision", "machine_endpoint_change", "machine_event", "machine_freeze", "observation",
 		"observation_start", "operation_event", "plan", "plan_cancellation",
 		"profile_revision", "profile_revision_fragment", "recovery_epoch", "recovery_exit", "recovery_restore", "release", "release_machine", "release_source",

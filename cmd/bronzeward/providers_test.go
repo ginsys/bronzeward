@@ -46,7 +46,7 @@ func tokenStandIn(t *testing.T) (*config.Provider, func() []string) {
 // ingestion's, not the compiler's.
 func TestProviderClientsMetadataToken(t *testing.T) {
 	p, sent := tokenStandIn(t)
-	_, pub, _, err := providerClients(p)
+	_, pub, _, _, err := providerClients(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestProviderClientsMetadataToken(t *testing.T) {
 // identity's token, read from executorTokenFile (persistence-api §3.3): not ingestion's.
 func TestProviderClientsExecutorToken(t *testing.T) {
 	p, sent := tokenStandIn(t)
-	_, _, exe, err := providerClients(p)
+	_, _, exe, _, err := providerClients(p)
 	if err != nil {
 		t.Fatal(err)
 	}

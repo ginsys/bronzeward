@@ -635,6 +635,24 @@ CREATE TABLE machine_endpoint_change (
 );
 CALL make_immutable('machine_endpoint_change');
 
+-- A first-key supply or replacement of a cluster's Talos CA key (persistence-api.md §3.4): the
+-- cluster, the kind of first key, whether it replaced a key, the CA certificate's SHA-256
+-- fingerprint and the stored key's version identity (path, KV version, created_time). Who, in which
+-- role, the epoch and the time are the act's (§10.5). It holds no value: no key, no certificate and
+-- no document. The act is written after the effect in the same transaction, so its reference is
+-- checked at commit.
+CREATE TABLE first_key_act (
+  act              text NOT NULL PRIMARY KEY REFERENCES act (id) DEFERRABLE INITIALLY DEFERRED,
+  cluster          text NOT NULL REFERENCES cluster (id),
+  kind             text NOT NULL CHECK (kind IN ('machine-config', 'secrets-bundle', 'talosconfig')),
+  replaced         boolean NOT NULL,
+  ca_fingerprint   text NOT NULL CHECK (ca_fingerprint ~ '^[0-9a-f]{64}$'),
+  key_path         text NOT NULL CHECK (key_path = 'access/talos-ca/' || cluster),
+  key_version      integer NOT NULL CHECK (key_version >= 1 AND (NOT replaced OR key_version >= 2)),
+  key_created_time timestamptz NOT NULL
+);
+CALL make_immutable('first_key_act');
+
 -- A freeze or an unfreeze of a machine scope (execution and recovery §6.2; §3): who, in which role,
 -- why, and the act. It is exactly one freeze or unfreeze entry on the machine's timeline, keyed by
 -- that entry's revision; the machine's frozen column projects the latest one.

@@ -59,8 +59,9 @@ execution:
 # cluster's talosconfig is an operator-written provider secret at access/talos/<cluster id>
 # (persistence-api.md §3.3), not a file named here. reportTokenFile, optional, holds the
 # orphan-report identity's token for `bronzeward orphans` (persistence-api.md §6.4), under the
-# same rules; the server never reads it. signerTokenFile, optional until the server serves first
-# keys, holds the signer identity's token (persistence-api.md §3.4), under the same rules.
+# same rules; the server never reads it. signerTokenFile, optional, holds the signer identity's
+# token (persistence-api.md §3.4), under the same rules; without it the server starts and answers
+# a first key with 503 dependency-unavailable.
 # provider:
 #   address: http://127.0.0.1:11200
 #   keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest, artifact: bw-artifact}

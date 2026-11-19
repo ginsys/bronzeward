@@ -124,6 +124,7 @@ func routes() []*route {
 		clusterCreation().on(human(m(post, "/clusters", author))),
 		machineInventory().on(human(m(post, "/machines", author))),
 		endpointReplacement().on(human(m(post, "/machines/{id}/talos-endpoints", author))),
+		firstKeySupply().on(human(m(post, "/clusters/{id}/first-keys", author))),
 		draftCreation().on(m(post, "/drafts", author)),
 	)
 	rs = append(rs,
