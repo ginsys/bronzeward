@@ -115,9 +115,11 @@ ok "${#names[@]} instance names: bands, slots and container names checked agains
 # No dev task or dev-idp hardcodes what the helper owns: a default container name or port, or the
 # state directory, outside a comment or a task description.
 code() { grep -v -e '^[[:space:]]*#' -e '^description = ' "$1" || true; }
-hard=$(code "$root/mise.toml" | grep -n -e '11432' -e '11200' -e '11080' -e '55433' -e '58201' -e '58280' -e 'bw-dev-pg' -e 'bw-dev-bao' -e 'bw-dev-idp' -e '\.dev/idp' || true)
-expect "mise.toml hardcodes no default name, port or idp state directory" "" "$hard"
-hard=$(code "$root/fixtures/dev-idp" | grep -n -e '11432' -e '11200' -e '11080' -e '55433' -e '58201' -e '58280' -e 'bw-dev-pg' -e 'bw-dev-bao' -e 'bw-dev-idp' -e '\.dev/idp' || true)
-expect "fixtures/dev-idp hardcodes no default name, port or idp state directory" "" "$hard"
+hardcoded() { code "$1" | grep -n -e '11432' -e '11200' -e '11080' -e '55433' -e '58201' -e '58280' -e 'bw-dev-pg' -e 'bw-dev-bao' -e 'bw-dev-idp' -e '\.dev/idp' || true; }
+expect "mise.toml hardcodes no default name, port or idp state directory" "" "$(hardcoded "$root/mise.toml")"
+expect "fixtures/dev-idp hardcodes no default name, port or idp state directory" "" "$(hardcoded "$root/fixtures/dev-idp")"
+expect "scripts/dev/native-services.sh hardcodes no default name, port or idp state directory" "" "$(hardcoded "$root/scripts/dev/native-services.sh")"
+# The positive control: the scan finds a port in code, and not in a comment.
+expect "the scan finds a hardcoded port in code and none in a comment" "1:pgport=11432" "$(hardcoded <(printf '%s\n' '# pg is on 11432' 'pgport=11432'))"
 
 exit "$fail"

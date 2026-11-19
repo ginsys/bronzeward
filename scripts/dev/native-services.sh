@@ -5,8 +5,8 @@
 # 127.0.0.1:11432 (role bronzeward, trust auth), OpenBao on 127.0.0.1:11200 (root token
 # bw-dev-root-token), the identity provider on localhost:11080 (fixtures/dev-idp, BW_DEV_RUNTIME=native).
 # Usage: scripts/dev/native-services.sh up | down
-#   OpenBao and Zitadel are the vendors' release binaries at the fixtures/native-versions.env pins, checked
-#   against their sha256; PostgreSQL 17 is Homebrew's (brew cannot pin a patch release, so the run
+#   OpenBao and Zitadel are the vendors' release binaries at the tags of the images in fixtures/versions.env, checked
+#   against the sha256 in fixtures/native-versions.env; PostgreSQL 17 is Homebrew's (brew cannot pin a patch release, so the run
 #   logs the version it got). Zitadel has only a port setting, so it listens on every interface of the
 #   runner VM, which has no inbound route; OpenBao and PostgreSQL listen on 127.0.0.1.
 # It installs software and starts trust-auth services, so it refuses anywhere but a GitHub Actions
@@ -34,21 +34,37 @@ die() {
 
 up() {
   cd "$(dirname "$0")/../.."
-  local pin_file=fixtures/native-versions.env state=$PWD/.dev/native pgport=11432 baoport=11200
+  local pin_file=fixtures/native-versions.env state=$PWD/.dev/native
+  # The ports of the default dev instance, from the one place that owns them.
+  unset BW_DEV_INSTANCE
+  # shellcheck disable=SC1091 # the path is the repository root's, after the cd above; mise's lint runs without -x
+  . scripts/dev/instance.sh || die "scripts/dev/instance.sh failed"
+  local pgport=$BW_DEV_PG_PORT baoport=$BW_DEV_BAO_PORT
   pin() { sed -n "s/^$1=//p" "$pin_file"; }
+  # image_tag NAME: the tag of the image pinned as NAME in the Linux fixture's versions.env, so that
+  # the release the macOS run downloads is the release the fixture runs.
+  image_tag() {
+    local v
+    v=$(sed -n "s/^$1=//p" fixtures/versions.env)
+    v=${v#*:}
+    v=${v%%@*}
+    [ -n "$v" ] || die "no tag in $1 of fixtures/versions.env"
+    printf %s "$v"
+  }
   rm -rf -- "$state"
   mkdir -p "$state"
 
-  # fetch NAME: the vendor archive pinned as <NAME>_URL and <NAME>_SHA256, checked before it is
-  # unpacked; prints the directory it was unpacked into.
+  # fetch NAME URL: the vendor archive at URL, checked against the sha256 pinned as <NAME>_SHA256
+  # before it is unpacked; prints the directory it was unpacked into.
   fetch() {
-    local url sha dir
-    url=$(pin "$1_URL") sha=$(pin "$1_SHA256")
-    [ -n "$url" ] && [ -n "$sha" ] || die "no $1_URL and $1_SHA256 in $pin_file"
+    local sha dir
+    sha=$(pin "$1_SHA256")
+    [ -n "$sha" ] || die "no $1_SHA256 in $pin_file"
     dir=$state/$(printf %s "$1" | tr '[:upper:]' '[:lower:]')
     mkdir -p "$dir"
-    curl -fsSL --retry 3 -o "$dir.tar.gz" "$url"
-    printf '%s  %s\n' "$sha" "$dir.tar.gz" | shasum -a 256 -c - >&2 || die "$1: the download does not match the pinned sha256"
+    curl -fsSL --retry 3 -o "$dir.tar.gz" "$2"
+    printf '%s  %s\n' "$sha" "$dir.tar.gz" | shasum -a 256 -c - >&2 ||
+      die "$1: the download of $2 does not match the sha256 in $pin_file; after a new release in versions.env, pin the new archive's sha256 there"
     tar -xzf "$dir.tar.gz" -C "$dir"
     printf %s "$dir"
   }
@@ -79,8 +95,9 @@ up() {
   createuser -h 127.0.0.1 -p "$pgport" -U postgres -s bronzeward
   createdb -h 127.0.0.1 -p "$pgport" -U postgres -O bronzeward bronzeward
 
-  local bao
-  bao=$(binary "$(fetch OPENBAO_DARWIN_ARM64)" bao)
+  local bao baover
+  baover=$(image_tag OPENBAO_IMAGE)
+  bao=$(binary "$(fetch OPENBAO_DARWIN_ARM64 "https://github.com/openbao/openbao/releases/download/v$baover/openbao_${baover}_darwin_arm64.tar.gz")" bao)
   "$bao" version >&2
   nohup "$bao" server -dev -dev-root-token-id=bw-dev-root-token -dev-listen-address="127.0.0.1:$baoport" \
     >"$state/bao.log" 2>&1 </dev/null &
@@ -92,8 +109,9 @@ up() {
   done
   [ -n "$ready" ] || { tail -n 30 "$state/bao.log" >&2; die "OpenBao was not unsealed within 30s"; }
 
-  local zitadel
-  zitadel=$(binary "$(fetch ZITADEL_DARWIN_ARM64)" zitadel)
+  local zitadel zitadelver
+  zitadelver=$(image_tag ZITADEL_IMAGE)
+  zitadel=$(binary "$(fetch ZITADEL_DARWIN_ARM64 "https://github.com/zitadel/zitadel/releases/download/$zitadelver/zitadel-darwin-arm64.tar.gz")" zitadel)
   "$zitadel" --version >&2 || true
   BW_DEV_RUNTIME=native BW_NATIVE_ZITADEL=$zitadel BW_DEV_PG_PORT=$pgport fixtures/dev-idp up
 }
