@@ -55,7 +55,7 @@ const sends = (n: number) => browser.waitUntil(async () => (await writes()).leng
 // Signs in as h-author on the disposable deployment and opens Add cluster from the machine list.
 async function open(flags: Record<string, string> = {}): Promise<string> {
   expect(await fixtureSignIn("h-author", flags, { upstream: at })).toMatch(SERVER);
-  // once: a precondition, not an absence the page under test keeps: the sign-in just cleared the log, and a late write of an earlier case would fail that case's own checks.
+  // once: a precondition, not an absence the page under test keeps: it reads the log the sign-in just cleared, before this case does anything.
   // The sign-in cleared the write log, and no write of an earlier case reached it since.
   expect(await writes()).toEqual([]);
   await $('nav[aria-label="Main"]').$("a=Machines").click();

@@ -132,7 +132,8 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     await browser.url(`${FIXTURE_PAGE}/plans/${seed.plans.approved}`);
     await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: approved$/), { wait: 20_000 });
     // The approval is of the current epoch, so the page offers no new approval. The form is drawn only once the approval's
-    // read and the identity read answer (EarlierEpoch, web/src/approval.tsx:158), so both answers are awaited first.
+    // read and the identity read answer (EarlierEpoch, web/src/approval.tsx:158). The two markers show the page holds
+    // both answers; EarlierEpoch asks for them again in the same render, so only an answer later than the pause is missed.
     await $('[data-testid="approval-record"]').waitForExist({ timeout: 20_000 });
     await $('[data-testid="principal"]').waitForExist({ timeout: 20_000 });
     await absent(() => $('main form[aria-label="Approve plan"]').isExisting(), "the Approve form on a plan approved in the current epoch");

@@ -14,7 +14,7 @@ import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { EMPTY_NOTE, NO_PROVENANCE, PROVENANCE_LIMIT } from "../../src/review.tsx";
 import { WITHHELD } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { absent, answers, faults, fixtureSignIn, focusSettles, fromTitle, holding, itNarrow, measure, mint, mirrored, narrow, newTab, onMain, overflows, param, pickByKeys, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
+import { absent, answers, eventually, faults, fixtureSignIn, focusSettles, fromTitle, holding, itNarrow, measure, mint, mirrored, narrow, newTab, onMain, overflows, param, pickByKeys, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -392,8 +392,8 @@ describe("the machine detail (W3)", () => {
     await release();
     await $('[data-testid="offline"]').waitForExist({ timeout: 20_000, reverse: true });
     await browser.waitUntil(async () => (await machineReads()) === before + 1, { timeout: 20_000, timeoutMsg: "W3 did not read the machine again" });
-    // once: the matcher waits for the refusal to end once the machine was read again (counted above); the pause below, with the read count unchanged, is the second look.
-    await expect($("main")).not.toHaveText(expect.stringContaining(refused), { wait: 20_000 });
+    await eventually(async () => !(await $("main").getText()).includes(refused), "the refusal gone once W3 read the machine again", 20_000);
+    await absent(async () => (await $("main").getText()).includes(refused), "the refusal after W3 read the machine again");
     await browser.pause(6_000);
     expect(await machineReads()).toBe(before + 1);
   });
