@@ -111,6 +111,24 @@ else
 fi
 chmod 700 "$case/out/$value"
 
+# 4b''. An artifact directory named with the value that cannot be entered: the listing cannot be made,
+# so nothing is uploaded, and the listing's own cd must not put the path in the log either (bash's message
+# for a failed cd begins "cd:").
+fresh unreadable-root
+mkdir "$case/$value"
+echo "clean" >"$case/$value/page.html"
+chmod 000 "$case/$value"
+if [ -r "$case/$value" ]; then
+  ok
+else
+  rc=0
+  "$tool" scan "$case/dev/status" "$case/dev/listing" "$case/$value" "$value" 2>"$root/err" >/dev/null || rc=$?
+  line=$("$tool" publish "$case/$value" "$case/dev/status" "$case/dev/listing")
+  up=${line#path=}
+  if [ "$rc" -ne 0 ] && [ "$(cat "$case/dev/status")" = withheld ] && [ "$(find "$up" -type f | wc -l)" -eq 0 ] && ! grep -q 'cd:' "$root/err"; then ok; else bad "an artifact directory named with the value that cannot be entered: rc=$rc status=$(cat "$case/dev/status" 2>/dev/null) log=$(cat "$root/err")"; fi
+fi
+chmod 700 "$case/$value"
+
 # 4c. A value that the control files' own names hold ("planted-0.log") must not break the control's count.
 fresh control-name
 rc=0
@@ -145,7 +163,45 @@ scan
 publish
 if [ "$rc" -ne 0 ] && [ "$up" = "$case/dev/listing" ] && [ "$(wc -l <"$up/files.txt")" -eq 1 ]; then ok; else bad "no artifact directory: rc=$rc upload is $up"; fi
 
-# 8. Usage errors exit 2.
+# 8. A find without -printf, as the BSD find of a macOS runner is (ginsys/bronzeward#930): the listing is
+# still made, from the same tree, and the scan still ends as listed. The shim refuses -printf and
+# otherwise runs the real find.
+shim=$root/shim
+mkdir -p "$shim"
+real_find=$(command -v find)
+cat >"$shim/find" <<EOF
+#!/bin/sh
+for a; do
+  if [ "\$a" = -printf ]; then echo "find: unknown primary or operator: -printf" >&2; exit 1; fi
+done
+exec "$real_find" "\$@"
+EOF
+chmod +x "$shim/find"
+fresh bsd-find
+echo "expected $value to equal 1" >"$case/out/console.log"
+ln -s console.log "$case/out/sub/link"
+PATH="$shim:$PATH" scan
+if [ "$rc" -ne 0 ] && [ "$(cat "$case/dev/status")" = listed ] && grep -q "^f [0-9]* console.log$" "$case/dev/listing/files.txt" && grep -q "^f [0-9]* sub/page.html$" "$case/dev/listing/files.txt" && grep -q "^l 0 sub/link$" "$case/dev/listing/files.txt"; then ok; else bad "a find without -printf: rc=$rc status=$(cat "$case/dev/status" 2>/dev/null) listing=$(cat "$case/dev/listing/files.txt" 2>/dev/null)"; fi
+
+# 9. Where GNU find is here, the listing equals what its -printf '%y %s %P' gives, except that a link
+# lists 0 where GNU gives its target's length: types, sizes of a file and of an empty file, links (one
+# whose target ends in a newline), a name with a space, and a nested file.
+fresh parity
+echo "expected $value to equal 1" >"$case/out/console.log"
+: >"$case/out/empty"
+printf 'two words' >"$case/out/sub/a b.txt"
+ln -s sub/page.html "$case/out/link"
+ln -s $'tgt\n' "$case/out/newline-link"
+scan
+if ! find "$case/out" -maxdepth 0 -printf '' 2>/dev/null; then
+  ok
+else
+  want=$(find "$case/out" -mindepth 1 ! -type d -printf '%y %s %P\n' | sed 's/^l [0-9]* /l 0 /' | LC_ALL=C sort)
+  got=$(tail -n +2 "$case/dev/listing/files.txt")
+  if [ -n "$want" ] && [ "$got" = "$want" ]; then ok; else bad "the listing differs from GNU find's: want '$want' got '$got'"; fi
+fi
+
+# 10. Usage errors exit 2.
 rc=0
 "$tool" 2>/dev/null || rc=$?
 if [ "$rc" -eq 2 ]; then ok; else bad "no verb: rc=$rc, want 2"; fi

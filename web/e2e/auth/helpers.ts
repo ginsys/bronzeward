@@ -388,8 +388,11 @@ export async function dialogsDuring(accept: boolean, act: () => Promise<unknown>
     const failed = await act().then(() => undefined, (e: unknown) => e);
     await browser.waitUntil(async () => {
       try {
-        asked.push(await browser.getAlertText());
+        // The message is kept only once the alert is answered: a failed answer is tried again, and the
+        // alert is then read again, so one dialog is not counted twice.
+        const message = await browser.getAlertText();
         await (accept ? browser.acceptAlert() : browser.dismissAlert());
+        asked.push(message);
         return true;
       } catch {
         return false;

@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, syntheticDocument } from "../auth.conf.ts";
-import { eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, measure, mint, mirrored, narrow, onMain, overflows, storageEmpty, tabTo } from "./helpers.ts";
+import { eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, itNarrow, measure, mint, mirrored, narrow, onMain, overflows, storageEmpty, tabTo } from "./helpers.ts";
 
 const statusRegions = () => browser.execute(() => document.querySelectorAll('[role="status"]').length);
 
@@ -180,7 +180,7 @@ describe("the publication page (#342)", () => {
     expect((await writes()).map(([m, r]) => `${m} ${r}`)).toEqual([`POST /drafts/${id}/publications`]);
   });
 
-  it("320 CSS pixels: the publication page with a long draft title, its accepted line, its end and the release page do not scroll the page sideways", async function () {
+  itNarrow("320 CSS pixels: the publication page with a long draft title, its accepted line, its end and the release page do not scroll the page sideways", async function () {
     this.timeout(180_000);
     const id = await staged(`synthetic w${"x".repeat(119)}`);
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies: succeeded(id) })).toMatch(SERVER);
