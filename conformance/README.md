@@ -123,7 +123,7 @@ limit is 45 minutes.
 
 The hosted macOS runner has no Docker, so `scripts/dev/native-services.sh` runs PostgreSQL 17 (Homebrew's,
 whose patch release the run logs), OpenBao and Zitadel (vendor release binaries at the pins of
-`fixtures/versions.env`, checked against their sha256) at the ports of the Linux fixture. Safari's
+`fixtures/native-versions.env`, checked against their sha256) at the ports of the Linux fixture. Safari's
 differences from the other browsers are handled in `web/e2e/wdio.conf.ts` and `web/e2e/auth/helpers.ts`, and
 `driver-controls.e2e.ts` fails the run, naming the command, if a change did not take:
 

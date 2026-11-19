@@ -5,7 +5,7 @@
 # 127.0.0.1:11432 (role bronzeward, trust auth), OpenBao on 127.0.0.1:11200 (root token
 # bw-dev-root-token), the identity provider on localhost:11080 (fixtures/dev-idp, BW_DEV_RUNTIME=native).
 # Usage: scripts/dev/native-services.sh up | down
-#   OpenBao and Zitadel are the vendors' release binaries at the fixtures/versions.env pins, checked
+#   OpenBao and Zitadel are the vendors' release binaries at the fixtures/native-versions.env pins, checked
 #   against their sha256; PostgreSQL 17 is Homebrew's (brew cannot pin a patch release, so the run
 #   logs the version it got). Zitadel has only a port setting, so it listens on every interface of the
 #   runner VM, which has no inbound route; OpenBao and PostgreSQL listen on 127.0.0.1.
@@ -34,7 +34,7 @@ die() {
 
 up() {
   cd "$(dirname "$0")/../.."
-  local pin_file=fixtures/versions.env state=$PWD/.dev/native pgport=11432 baoport=11200
+  local pin_file=fixtures/native-versions.env state=$PWD/.dev/native pgport=11432 baoport=11200
   pin() { sed -n "s/^$1=//p" "$pin_file"; }
   rm -rf -- "$state"
   mkdir -p "$state"
