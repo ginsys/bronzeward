@@ -133,9 +133,11 @@ export const config: WebdriverIO.Config = {
         }
         for (const n of texts.keys()) n.data = "";
         try {
-          // The other drivers' text has no space at a line's end or at either end of the whole: the space
-          // before a transparent box stays in innerText, where a collapsed one would not.
-          return e.innerText.replace(/\t/g, " ").replace(/ +$/gm, "").replace(/^[ \n]+|[ \n]+$/g, "");
+          const text = e.innerText.replace(/\t/g, " ");
+          // Only where text was emptied, the space before a transparent box stays in innerText, where a
+          // collapsed one would not: it goes, at a line's end and at either end of the whole. Any other
+          // text is returned as innerText has it, preformatted whitespace included.
+          return texts.size === 0 ? text : text.replace(/ +$/gm, "").replace(/^[ \n]+|[ \n]+$/g, "");
         } finally {
           for (const [n, data] of texts) n.data = data;
         }
