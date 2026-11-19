@@ -20,7 +20,7 @@ import { REPLAYED, unknown } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
 import type { Step } from "../injector.ts";
 import { secondSession } from "../wdio.conf.ts";
-import { dialogsDuring, faults, fixtureSignIn, inSafari, itNarrow, mint, storageEmpty } from "./helpers.ts";
+import { absent, dialogsDuring, faults, fixtureSignIn, inSafari, itNarrow, mint, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
@@ -345,7 +345,7 @@ describe("the draft editor (#339)", () => {
     // The drop showed the unknown notice, so it shows the replayed result until dismissed (B11).
     expect(await notice().getText()).toContain(`${REPLAYED} Saved (the server answered 200).`);
     await notice().parentElement().$("button=Dismiss").click();
-    expect(await notice().isExisting()).toBe(false);
+    await absent(() => notice().isExisting(), "the replayed-result notice after Dismiss");
   });
 
   it("Revert to base on a new entry says it has no base; Remove proposes the removal; Discard asks, then discards", async () => {

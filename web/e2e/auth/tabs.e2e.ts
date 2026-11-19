@@ -4,7 +4,7 @@ import { $, browser, expect } from "@wdio/globals";
 import { PRINCIPAL_CHANGED } from "../../src/app.tsx";
 import { FIXTURE_PAGE } from "../auth.conf.ts";
 import type { Counts } from "../provider.ts";
-import { counts, fixtureSignIn, newTab, settled, storageEmpty, where } from "./helpers.ts";
+import { absent, counts, fixtureSignIn, newTab, settled, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -42,7 +42,7 @@ describe("several tabs", () => {
     for (const tab of [first, second]) {
       await browser.switchToWindow(tab);
       await expect($('[data-testid="status"]')).toHaveText(PRINCIPAL_CHANGED, { wait: 20_000 });
-      expect(await $('[data-testid="principal"]').isExisting()).toBe(false);
+      await absent(() => $('[data-testid="principal"]').isExisting(), "the principal after the renewal for another subject");
       // Nothing read under the old subject stays: no principal, no server version (§7 item 5).
       expect(await $("body").getText()).not.toMatch(/h-viewer|API revision/);
       expect(await $('[data-testid="server"]').getText()).toBe("Server unknown");

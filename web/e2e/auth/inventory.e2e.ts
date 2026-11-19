@@ -14,7 +14,7 @@ import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { EMPTY_NOTE, NO_PROVENANCE, PROVENANCE_LIMIT } from "../../src/review.tsx";
 import { WITHHELD } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, focusSettles, fromTitle, holding, itNarrow, measure, mint, mirrored, narrow, newTab, onMain, overflows, param, pickByKeys, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
+import { absent, answers, faults, fixtureSignIn, focusSettles, fromTitle, holding, itNarrow, measure, mint, mirrored, narrow, newTab, onMain, overflows, param, pickByKeys, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -180,7 +180,7 @@ describe("the machines", () => {
     await browser.execute(() => void dispatchEvent(new Event("online")));
     await $('[data-testid="offline"]').waitForExist({ timeout: 10_000 });
     expect(await rows()).toEqual(ids);
-    expect(await $('[data-testid="status"]').isExisting()).toBe(false);
+    await absent(() => $('[data-testid="status"]').isExisting(), "a status line while the list is kept under the banner");
     await faults({ upstream: at });
     await release();
   });
@@ -196,7 +196,7 @@ describe("the machines", () => {
     await $("label*=Cluster").$("select").$("option=lab-a").waitForExist({ timeout: 20_000 });
     await release();
     await statusIs(TRANSPORT_FAILURE);
-    expect(await $('[data-testid="offline"]').isExisting()).toBe(false);
+    await absent(() => $('[data-testid="offline"]').isExisting(), "the offline banner after a first read with no answer");
   });
 
   it("a cluster filter in the query stays shown while the clusters are not read, and their read without answer is shown", async () => {
@@ -255,7 +255,7 @@ describe("the machines", () => {
     await browser.waitUntil(async () => (await answers()).filter((a) => a === "/machines 200").length === 2, { timeout: 20_000, timeoutMsg: "the newer list read did not answer" });
     await release();
     await statusIs(REVOKED);
-    expect(await $('[data-testid="principal"]').isExisting()).toBe(false);
+    await absent(() => $('[data-testid="principal"]').isExisting(), "the principal after the revocation");
   });
 });
 
@@ -431,7 +431,7 @@ describe("the machine detail (W3)", () => {
     expect(shown).toEqual([...shown].sort((x, y) => y - x));
     expect(shown.at(-1)).toBe(0);
     expect((await answers()).filter((a) => a.startsWith(`/machines/${id}/timeline?order=newest&cursor=`))).toHaveLength(1);
-    expect(await $("button=Load older").isExisting()).toBe(false);
+    await absent(() => $("button=Load older").isExisting(), "Load older at the timeline's start");
   });
 
   it("#424 item 2: a poll with new timeline entries reads the machine and its observations again; the Frozen line and the Observed row follow", async function () {
