@@ -64,7 +64,8 @@ async function openImport(id: string, heading: string) {
 // answer of the case's review.
 async function leavesNothing() {
   await storageEmpty();
-  if (importId !== "") expect(await cacheHolds(`/api/v1/ingestions/${importId}/review`)).toBe(false);
+  // The case's last step may be a request whose answer the browser caches a moment later, so the read is repeated.
+  if (importId !== "") await absent(() => cacheHolds(`/api/v1/ingestions/${importId}/review`), "the review answer in the HTTP cache");
   importId = "";
 }
 

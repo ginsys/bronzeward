@@ -20,7 +20,7 @@ import { REPLAYED, unknown } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
 import type { Step } from "../injector.ts";
 import { secondSession } from "../wdio.conf.ts";
-import { absent, dialogsDuring, faults, fixtureSignIn, inSafari, itNarrow, mint, storageEmpty } from "./helpers.ts";
+import { absent, dialogsDuring, eventually, faults, fixtureSignIn, inSafari, itNarrow, mint, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
@@ -220,7 +220,8 @@ describe("the draft editor (#339)", () => {
     await save(draft, name);
     await expect(result()).toHaveText(expect.stringContaining(`Fragment ${name} saved in draft`), { wait: 30_000 });
     await expect($('main ul[aria-label="Entries"]')).toHaveText(expect.stringContaining(`fragment ${name} new`));
-    expect(await guarded()).toBe(false);
+    // The guard clears after the save, so a read taken before it clears fails and one taken after it passes.
+    await eventually(async () => !(await guarded()), "the leave guard cleared after the save");
     await oneWrite(1);
     // ginsys/bronzeward#517 H1: the pane now edits the entry it created. H4: Add fragment with that
     // name again sends nothing.
@@ -267,7 +268,7 @@ describe("the draft editor (#339)", () => {
       expect(puts[0]![2]).not.toBe(puts[1]![2]);
       // The 412 lost nothing: the entry still holds the other browser's text, and not this one's.
       expect(await storedHolds(id, name, "theirs")).toBe(true);
-      expect(await storedHolds(id, name, "mine")).toBe(false);
+      await absent(() => storedHolds(id, name, "mine"), "this browser's text in the stored entry after the 412");
       const now =(await api("h-author", "GET", `/drafts/${id}`)).body!["revision"] as number;
       await pane().$("button=Show their change").click();
       await expect($("main h2")).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
@@ -688,7 +689,7 @@ describe("the draft editor (#339)", () => {
       expect(own!.startsWith(`role ${b} `)).toBe(true);
       expect(own).toContain("from this assignment");
       // The documents are read for their references and never shown: the page holds no canary.
-      expect(await browser.execute(() => document.body.innerText.includes("-doc-"))).toBe(false);
+      await absent(() => browser.execute(() => document.body.innerText.includes("-doc-")), "a document canary on the page");
     });
   };
   assignmentCases();
