@@ -138,12 +138,14 @@ export const config: WebdriverIO.Config = {
     // runner: a click on Imports opened a draft). The click waits until the element holds still.
     await browser.overwriteCommand("click", async function (this: WebdriverIO.Element, orig: (o?: unknown) => Promise<void>, options?: unknown) {
       await this.waitForExist();
+      // Still means the same box in three reads in a row, 200 ms: one equal pair can fall just before a shift.
       let last = "";
-      for (let i = 0; i < 10; i++) {
+      let still = 0;
+      for (let i = 0; i < 20 && still < 2; i++) {
         const now = await browser.execute((e: HTMLElement) => { const r = e.getBoundingClientRect(); return `${r.x},${r.y},${r.width},${r.height}`; }, this as unknown as HTMLElement);
-        if (now === last) break;
+        still = now === last ? still + 1 : 0;
         last = now;
-        await browser.pause(100);
+        if (still < 2) await browser.pause(100);
       }
       (globalThis as { bwStillClicks?: number }).bwStillClicks = ((globalThis as { bwStillClicks?: number }).bwStillClicks ?? 0) + 1;
       return orig(options);
