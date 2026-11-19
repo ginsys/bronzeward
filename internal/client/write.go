@@ -378,6 +378,9 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			}
 			u.Why = "stopped at your request while the request was in flight"
 			return nil, c.unknown(w, u)
+		case w.Once:
+			// Sent once, whatever answers: nothing is repeated, and the first answer is final.
+			return nil, c.onceAnswer(w, u, a, ambiguous)
 		case !a.sent:
 			// Nothing reached the server: repeated, never ambiguous (AMB-01).
 			if errors.As(a.err, new(*trust)) {
@@ -389,17 +392,10 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		case p != nil && a.replayed:
 			// The key's stored refusal, replayed: the earlier attempt's known outcome (§8.4 item 2).
 			return nil, &Blocked{a.err, []string{"This is the stored answer to an earlier attempt with this key: that attempt was refused."}}
-		case w.Once && code == "talos-access-unavailable":
-			// The route's one answer that says nothing was stored: a refusal, but a repeat's stays unknown.
-			return nil, c.after(ambiguous, w, u, a.err)
-		case w.Once && a.status >= 500 || w.Once && p == nil && a.status == 0:
-			// The route stores the key before it commits, so any other failure, whatever its code, may
-			// follow the store: the outcome is unknown, and nothing is repeated.
-			return nil, c.after(true, w, u, a.err)
 		case p == nil && (a.status == 0 || a.status >= 500), p != nil && (code == "internal-error" || a.status >= 500 && !p.unavailable() && code != "epoch-superseded"):
 			ambiguous = true
 		case p != nil && p.unavailable():
-		case p != nil && p.Status == http.StatusUnauthorized && c.signIn != nil && !renewed && !c.signIn.failed && c.signIn.tokens.RefreshToken != "" && !w.Once:
+		case p != nil && p.Status == http.StatusUnauthorized && c.signIn != nil && !renewed && !c.signIn.failed && c.signIn.tokens.RefreshToken != "":
 			renewed = true
 			if rerr := c.renew(); rerr != nil {
 				fmt.Fprintf(c.Notices, "%s: %s.\n", c.Context.Where(), Shown(rerr))
@@ -423,10 +419,6 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			return nil, c.setAside(w, u, ambiguous)
 		case code == "epoch-mismatch":
 			u.Why = "the epoch is now " + printable(fmt.Sprint(p.Doc["epoch"])) + ", and this send committed nothing"
-			if w.Once { // the lookup that refused may be the one after the route stored the key
-				u.Why = "the epoch is now " + printable(fmt.Sprint(p.Doc["epoch"])) + ", and the route may have stored the key before it moved"
-				ambiguous = true
-			}
 			return nil, c.setAside(w, u, ambiguous)
 		case code == "idempotency-key-reused" && (try > 0 || w.Repeat != nil):
 			u.Why = "the key is recorded for another request; this send did nothing, and the original outcome is still unknown"
@@ -458,6 +450,29 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		return nil, &Blocked{last, []string{fmt.Sprintf("Not done: none of the %d attempts committed anything of its own.", len(backoff)+1)}}
 	}
 	return nil, c.after(ambiguous, w, u, last)
+}
+
+// onceAnswer is the end of a Once write that no 2xx answered. The route stores the key before it
+// commits its act, so only an answer decided before the store says nothing was stored: a request that
+// never reached the server, a refusal of the input, of the sign-in or of the role, and the route's
+// talos-access-unavailable. Every 5xx, a lost or cut answer and the refusals of the idempotency
+// lookup (epoch-mismatch, a conflict that names the key's record, a reused key) may follow the store,
+// so the outcome is unknown. A repeat stays unknown whatever refuses it.
+func (c *Client) onceAnswer(w *Write, u *Unknown, a attempt, ambiguous bool) error {
+	p := a.p
+	switch {
+	case !a.sent:
+		return c.after(ambiguous, w, u, a.err)
+	case a.status >= 300 && a.status < 400:
+		u.Why = printable(a.err.Error())
+		return c.unknown(w, u)
+	case p != nil && a.replayed:
+		return &Blocked{a.err, []string{"This is the stored answer to an earlier attempt with this key: that attempt was refused."}}
+	case p != nil && p.Status < 500 && p.Code() != "epoch-mismatch" && p.Code() != "idempotency-key-reused" && (p.Code() != "conflict" || p.Doc["request"] == nil),
+		p != nil && p.Code() == "talos-access-unavailable":
+		return c.after(ambiguous, w, u, a.err)
+	}
+	return c.after(true, w, u, a.err)
 }
 
 // after reports a write that ends without a 2xx: not done, unless an earlier attempt was
