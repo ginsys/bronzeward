@@ -284,7 +284,7 @@ export async function tabTo(match: (f: Focus) => boolean, what: string): Promise
     if (f.same) throw new Error(`Tab did not leave ${f.tag} "${f.text}" on the way to ${what}`);
     passed.push(f.text);
   }
-  throw new Error(`Tab never reached ${what}`);
+  throw new Error(`Tab never reached ${what} (stops: ${passed.slice(0, 30).map((s) => s.slice(0, 30)).join(" | ")})`);
 }
 export const focused = () => browser.execute(() => document.activeElement?.id ?? "");
 // Whether focus is on an element of the page, not lost to the body after a change (2.4.3).
@@ -371,19 +371,12 @@ export async function dialogsDuring(accept: boolean, act: () => Promise<unknown>
   }
   return asked;
 }
-// Runs `run` at 320 CSS pixels, and restores the viewport it found. Safari has no BiDi session, so it
-// resizes the window instead, as the draft editor's own narrow does.
+// A case at 320 CSS pixels (WCAG 1.4.10). Safari cannot be narrowed that far: its driver has no BiDi
+// session for setViewport, and a window it resizes stops at 336 CSS pixels (measured on the runner).
+// The case is skipped there, and its record says so (conformance/cases).
+export const itNarrow: Mocha.TestFunction | Mocha.PendingTestFunction = inSafari() ? it.skip : it;
+// Runs `run` at 320 CSS pixels, and restores the viewport it found.
 export async function narrow<T>(run: () => Promise<T>): Promise<T> {
-  if (inSafari()) {
-    const size = await browser.getWindowSize();
-    await browser.setWindowSize(320 + size.width - (await browser.execute(() => innerWidth)), size.height);
-    try {
-      expect(await browser.execute(() => innerWidth)).toBe(320);
-      return await run();
-    } finally {
-      await browser.setWindowSize(size.width, size.height);
-    }
-  }
   const before = await browser.execute(() => ({ width: innerWidth, height: innerHeight }));
   try {
     await browser.setViewport({ width: 320, height: 640 });

@@ -20,7 +20,7 @@ import { REPLAYED, unknown } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
 import type { Step } from "../injector.ts";
 import { secondSession } from "../wdio.conf.ts";
-import { dialogsDuring, faults, fixtureSignIn, inSafari, mint, storageEmpty } from "./helpers.ts";
+import { dialogsDuring, faults, fixtureSignIn, inSafari, itNarrow, mint, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
@@ -489,7 +489,7 @@ describe("the draft editor (#339)", () => {
       expect(await profileRevisions(first.id, p)).toEqual([second.revision, first.revision]);
     });
 
-    it("at 320 CSS pixels a long unbroken profile name wraps and the page does not scroll sideways", async () => {
+    itNarrow("at 320 CSS pixels a long unbroken profile name wraps and the page does not scroll sideways", async () => {
       const a = `pw-${hex()}`;
       const long = `p${"x".repeat(60)}`;
       const seed = await seeded(a);
@@ -693,7 +693,7 @@ describe("the draft editor (#339)", () => {
   };
   assignmentCases();
 
-  it("at 320 CSS pixels a wide row scrolls inside the Drafts and References tables, and the page does not", async () => {
+  itNarrow("at 320 CSS pixels a wide row scrolls inside the Drafts and References tables, and the page does not", async () => {
     const wide = `w${"x".repeat(119)}`;
     const d = await api("h-author", "POST", "/drafts", { cluster: cluster.id, title: `synthetic ${wide}` });
     expect(d.status).toBe(201);

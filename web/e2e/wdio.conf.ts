@@ -9,7 +9,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 // The launcher logs and ignores any other error a launcher hook throws, and runs the specs anyway.
-import { remote, SevereServiceError } from "webdriverio";
+import { Key, remote, SevereServiceError } from "webdriverio";
 import { FAKE_ISSUER, PAGE_LISTEN, PAGE_ORIGIN, TARGET_ORIGIN } from "./ports.ts";
 import { printFailure } from "./print-failure.ts";
 import { startProvider } from "./provider.ts";
@@ -116,6 +116,27 @@ export const config: WebdriverIO.Config = {
     await browser.overwriteCommand("getText", async function (this: WebdriverIO.Element) {
       return browser.execute((e: HTMLElement) => (e.checkVisibility({ visibilityProperty: true }) ? e.innerText : ""), this as unknown as HTMLElement);
     }, true);
+    // A key sequence sent as one action loses its spaces in safaridriver ("machine:\n  nodeLabels:"
+    // arrives as "machine:\n nodeLabels:"), where the same keys one at a time arrive whole. Single
+    // characters are sent one at a time, a space and a line break as the keys they are.
+    // Safari's Tab skips links; its Option+Tab reaches every control, as the other browsers' Tab does.
+    await browser.overwriteCommand("keys", async function (origKeys: (v: string | string[]) => Promise<void>, value: string | string[]) {
+      if (value === "Tab") return origKeys(["Alt", "Tab"]);
+      if (Array.isArray(value) && value.length === 2 && value[0] === "Shift" && value[1] === "Tab") return origKeys(["Shift", "Alt", "Tab"]);
+      if (Array.isArray(value) && value.length > 1 && value.every((v) => v.length === 1)) {
+        for (const v of value) await origKeys(v === " " ? Key.Space : v === "\n" ? Key.Enter : v);
+        return;
+      }
+      return origKeys(value);
+    });
+    // Safari's click on a select that is not in view fails as not interactable, where it takes the
+    // choice once the select is scrolled to.
+    for (const name of ["selectByAttribute", "selectByVisibleText", "selectByIndex"] as const) {
+      await browser.overwriteCommand(name, async function (this: WebdriverIO.Element, orig: (...a: unknown[]) => Promise<void>, ...args: unknown[]) {
+        await this.scrollIntoView({ block: "center" });
+        return orig(...args);
+      }, true);
+    }
   },
 
   // The target counts every request but its own two control routes, and answers with the canary

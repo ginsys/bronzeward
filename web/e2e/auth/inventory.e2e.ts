@@ -14,7 +14,7 @@ import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { EMPTY_NOTE, NO_PROVENANCE, PROVENANCE_LIMIT } from "../../src/review.tsx";
 import { WITHHELD } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, focusSettles, fromTitle, holding, measure, mint, mirrored, narrow, onMain, overflows, param, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, focusSettles, fromTitle, holding, itNarrow, measure, mint, mirrored, narrow, onMain, overflows, param, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -702,7 +702,7 @@ describe("the read-only lists and items", () => {
     await expect($("main")).toHaveText(expect.stringContaining("class-change"));
   });
 
-  it("reflow at 320 CSS pixels: no page scrolls sideways; only a table scrolls on its own", async () => {
+  itNarrow("reflow at 320 CSS pixels: no page scrolls sideways; only a table scrolls on its own", async () => {
     const at = await disposable();
     // The longest valid name (128 bytes, no space to wrap at) is an option of the cluster filter.
     const long = `${"a".repeat(63)}.${"b".repeat(62)}.c`;
@@ -819,7 +819,7 @@ describe("the rendered review of a release's machine", () => {
     expect(seen.small).toBe(0);
   });
 
-  it("reflow at 320 CSS pixels: neither the release nor its review scrolls the page sideways", async () => {
+  itNarrow("reflow at 320 CSS pixels: neither the release nor its review scrolls the page sideways", async () => {
     const { s, m } = await served();
     await narrow(async () => {
       await nav("Changes");
