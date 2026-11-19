@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -250,15 +251,72 @@ func TestServeSweepsWithoutIngestion(t *testing.T) {
 }
 
 // serveUntilLive starts serve on a free port with extra flags and returns once it answers /livez,
-// so its startup, the startup sweep included, has completed; stop ends it.
+// so its startup, the startup sweep included, has completed; stop ends it. The port is picked and
+// freed before serve binds it, so another test's server can take it in between
+// (ginsys/bronzeward#940): serve then ends on the bind, and the other server answers /livez in its
+// place. Such an end is tried again on a new port. The proper fix is for serve to report the address
+// it bound, which is product code.
 func serveUntilLive(t *testing.T, dsn string, extra ...string) (stop func()) {
+	t.Helper()
+	for attempt := 1; ; attempt++ {
+		stop, err := tryServeUntilLive(t, dsn, extra...)
+		if err == nil {
+			return stop
+		}
+		if attempt == 5 {
+			t.Fatal(err)
+		}
+		t.Logf("%v, trying another port", err)
+	}
+}
+
+// pickAddr returns a local address that nothing listens on now. A test may replace it.
+var pickAddr = func(t *testing.T) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	addr := l.Addr().String()
-	_ = l.Close()
+	defer l.Close()
+	return l.Addr().String()
+}
+
+// A port another server took before serve bound it is not serve's own: serveUntilLive must end on a
+// port where its serve runs (ginsys/bronzeward#940). The control: the first port is held by a server
+// that answers /livez with 204, as a server of another test does.
+func TestServeUntilLiveTakenPort(t *testing.T) {
+	_, dsn, _, _, _ := sweepFixtureDSN(t)
+	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer held.Close()
+	real := pickAddr
+	first := true
+	pickAddr = func(t *testing.T) string {
+		if first {
+			first = false
+			return held.Listener.Addr().String()
+		}
+		return real(t)
+	}
+	defer func() { pickAddr = real }()
+	stop := serveUntilLive(t, dsn)
+	stop()
+	if first {
+		t.Fatal("the held port was never tried")
+	}
+}
+
+// bindGrace is how long a /livez answer must be followed by a running serve before it counts as
+// serve's own: serve binds after it opens the database, so a server that holds the address already
+// answers first, and serve then ends on the bind.
+const bindGrace = 500 * time.Millisecond
+
+// tryServeUntilLive is serveUntilLive on one port, which returns the end of serve, before or within
+// bindGrace of the first /livez answer, instead of failing the test.
+func tryServeUntilLive(t *testing.T, dsn string, extra ...string) (stop func(), _ error) {
+	t.Helper()
+	addr := pickAddr(t)
 	cfg := configFileAt(t, dsn, addr)
 	ctx, cancel := context.WithCancel(t.Context())
 	errc := make(chan error, 1)
@@ -273,13 +331,19 @@ func serveUntilLive(t *testing.T, dsn string, extra ...string) (stop func()) {
 		if r, err := http.Get("http://" + addr + "/livez"); err == nil {
 			_ = r.Body.Close()
 			if r.StatusCode == http.StatusNoContent {
-				return stop
+				select {
+				case err := <-errc:
+					cancel()
+					return nil, fmt.Errorf("serve ended after /livez answered: %w", err)
+				case <-time.After(bindGrace):
+					return stop, nil
+				}
 			}
 		}
 		select {
 		case err := <-errc:
 			cancel()
-			t.Fatalf("serve ended before it answered /livez: %v", err)
+			return nil, fmt.Errorf("serve ended before it answered /livez: %w", err)
 		default:
 		}
 		if time.Now().After(deadline) {
