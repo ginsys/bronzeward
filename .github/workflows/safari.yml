@@ -123,6 +123,17 @@ jobs:
             got=$(command -v "$t") || { echo "safari: $t is not on PATH" >&2; exit 1; }
             [ "$got" = "$want/$t" ] || { echo "safari: $t is $got, not $want/$t" >&2; exit 1; }
           done
+      # Safari's Tab skips buttons and links by default (Option+Tab reaches them), so the keyboard
+      # cases would fail on a setting and not on the page. These are the settings a tester turns on
+      # in Safari's Advanced pane and System Settings > Keyboard ("Press Tab to highlight each item",
+      # "Keyboard navigation"); the read-back shows what the runner holds.
+      - run: |
+          defaults write com.apple.Safari WebKitTabToLinksPreferenceKey -bool true
+          defaults write com.apple.Safari WebKit2TabsToLinks -bool true
+          defaults write -g AppleKeyboardUIMode -int 2
+          defaults read com.apple.Safari WebKitTabToLinksPreferenceKey
+          defaults read com.apple.Safari WebKit2TabsToLinks
+          defaults read -g AppleKeyboardUIMode
       - run: mise run browser-auth
       # After a failed run too: the whole directory goes up only when the scan passed, otherwise only
       # the listing the task scanned does, if it passed (as in ci.yml's browser-auth job).

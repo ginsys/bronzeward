@@ -339,8 +339,51 @@ export const scrollsOnItsOwn = (sel: string) => browser.execute((s: string) => {
   const r = document.querySelector(s);
   return r !== null && r.scrollWidth > r.clientWidth;
 }, sel);
-// Runs `run` at 320 CSS pixels, and restores the viewport it found.
+// Whether this session is Safari's, whose driver has no BiDi session (setViewport, dialog events) and
+// shows no leave dialog; the cases that need them take the route written beside them.
+export const inSafari = () => (browser.capabilities as { browserName?: string }).browserName?.toLowerCase() === "safari";
+// Each dialog the page raises while `act` runs, answered with `accept`, as the messages. Other
+// browsers answer it from a BiDi event; Safari has no BiDi session, so the dialog is read and
+// answered through the classic alert commands once `act` has returned or reported it.
+type Dialog = { message: () => string; accept: () => Promise<void>; dismiss: () => Promise<void> };
+export async function dialogsDuring(accept: boolean, act: () => Promise<unknown>, timeoutMsg: string): Promise<string[]> {
+  const asked: string[] = [];
+  if (inSafari()) {
+    const failed = await act().then(() => undefined, (e: unknown) => e);
+    await browser.waitUntil(async () => {
+      try {
+        asked.push(await browser.getAlertText());
+        await (accept ? browser.acceptAlert() : browser.dismissAlert());
+        return true;
+      } catch {
+        return false;
+      }
+    }, { timeout: 10_000, timeoutMsg: failed === undefined ? timeoutMsg : `${timeoutMsg}; the action failed: ${String(failed)}` });
+    return asked;
+  }
+  const answer = (d: Dialog) => void (asked.push(d.message()), accept ? d.accept() : d.dismiss());
+  browser.on("dialog", answer);
+  try {
+    await act();
+    await browser.waitUntil(async () => asked.length > 0, { timeout: 10_000, timeoutMsg });
+  } finally {
+    browser.off("dialog", answer);
+  }
+  return asked;
+}
+// Runs `run` at 320 CSS pixels, and restores the viewport it found. Safari has no BiDi session, so it
+// resizes the window instead, as the draft editor's own narrow does.
 export async function narrow<T>(run: () => Promise<T>): Promise<T> {
+  if (inSafari()) {
+    const size = await browser.getWindowSize();
+    await browser.setWindowSize(320 + size.width - (await browser.execute(() => innerWidth)), size.height);
+    try {
+      expect(await browser.execute(() => innerWidth)).toBe(320);
+      return await run();
+    } finally {
+      await browser.setWindowSize(size.width, size.height);
+    }
+  }
   const before = await browser.execute(() => ({ width: innerWidth, height: innerHeight }));
   try {
     await browser.setViewport({ width: 320, height: 640 });

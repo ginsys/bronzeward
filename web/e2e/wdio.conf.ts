@@ -107,6 +107,16 @@ export const config: WebdriverIO.Config = {
   beforeSession(_config, capabilities) {
     ownProfile(capabilities as WebdriverIO.Capabilities);
   },
+  // safaridriver answers "Get Element Text" with the DOM's text, which keeps a block's trailing space
+  // and puts no line break between block items, where the other drivers answer the rendered text the
+  // specification names. In Safari alone, the rendered text comes from the page (innerText), so that
+  // every assertion on a text stays as strict as it is in the other four browsers.
+  async before(capabilities, _specs, browser) {
+    if ((capabilities as WebdriverIO.Capabilities).browserName?.toLowerCase() !== "safari") return;
+    await browser.overwriteCommand("getText", async function (this: WebdriverIO.Element) {
+      return browser.execute((e: HTMLElement) => (e.checkVisibility({ visibilityProperty: true }) ? e.innerText : ""), this as unknown as HTMLElement);
+    }, true);
+  },
 
   // The target counts every request but its own two control routes, and answers with the canary
   // (readable by the page, so the positive control delivers it into the page's memory).
