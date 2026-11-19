@@ -1,7 +1,12 @@
+import { createElement as h, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
-import { afterApproval, findRevocation, overwrites, predict, recordedReasons, REVOKE_LIMIT, type Source, UNPREDICTED } from "./approval.tsx";
-import type { Load, Reads } from "./list.tsx";
+import { afterApproval, ApproveControl, findRevocation, overwrites, predict, recordedReasons, RevokeControl, REVOKE_LIMIT, type Source, UNPREDICTED } from "./approval.tsx";
+import { WritesProvider } from "./forms.tsx";
+import { type Load, type Reads, ReadsProvider } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
+import { ShellContext } from "./shell.tsx";
+import { Writes } from "./write.ts";
 
 type P = Parameters<typeof predict>;
 const REL = `rel_${"i".repeat(26)}`;
@@ -99,5 +104,34 @@ describe("the revocation's reason on the machine's timeline (ginsys/bronzeward#3
     const { reads, paths } = timeline({ "": { items: [other], next: "c2" }, c2: { items: [entry("apr_other", "no")] } });
     expect(await findRevocation(reads, "mch_1", "apr_1", () => true)).toEqual({ kind: "ok", data: undefined });
     expect(paths).toHaveLength(2);
+  });
+});
+
+describe("the answers of the approval and the revocation (ginsys/bronzeward#358, T8, 2.4.3)", () => {
+  const noReads: Reads = { client: { read: () => new Promise(() => {}) }, settle: () => true, undropped: () => () => true, view: "", again: 0, regained: 0, go: () => {}, failure: () => null };
+  const page = (n: ReactNode) => renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["approver"], offline: false } }, h(ReadsProvider, { value: noReads }, n))));
+  const at = (markup: string, testid: string) => [...markup.matchAll(new RegExp(`<div[^>]*data-testid="${testid}"[^>]*>`, "g"))];
+  const noop = () => {};
+
+  test("in every plan state the approval's answer is one focusable wrapper, after the form where there is one, so the reread that replaces the form leaves it mounted", () => {
+    for (const state of ["proposed", "approved", "committed", "revoked", "expired", "cancelled"]) {
+      const markup = page(h(ApproveControl, { p: plan({ state, approval: state === "proposed" ? null : "apr_1" }), reread: noop }));
+      const found = at(markup, "approval-answer");
+      expect(found.length, state).toBe(1);
+      expect(found[0]![0], state).toContain('tabindex="-1"');
+      if (state === "proposed") expect(markup.indexOf('aria-label="Approve plan"'), state).toBeLessThan(found[0]!.index!);
+    }
+  });
+
+  test("in every plan state the revocation's answer is one focusable wrapper, after the form where there is one", () => {
+    for (const state of ["proposed", "approved", "committed", "revoked", "expired", "cancelled"]) {
+      const markup = page(h(RevokeControl, { p: plan({ state, approval: state === "proposed" ? null : "apr_1" }), reread: noop }));
+      const found = at(markup, "revoke-answer");
+      expect(found.length, state).toBe(1);
+      expect(found[0]![0], state).toContain('tabindex="-1"');
+      const form = markup.indexOf('aria-label="Revoke approval"');
+      expect(form >= 0, state).toBe(state === "approved" || state === "committed");
+      if (form >= 0) expect(form, state).toBeLessThan(found[0]!.index!);
+    }
   });
 });
