@@ -15,7 +15,7 @@ import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE } from "../auth.conf.ts";
-import { cacheControl, cacheHolds, faults, fixtureSignIn, interrupt, mint, settled, storageControl, storageEmpty } from "./helpers.ts";
+import { cacheControl, cacheHolds, eventually, faults, fixtureSignIn, interrupt, mint, settled, storageControl, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -188,19 +188,26 @@ const pageShows = (text: string) =>
 // `takeover` is the generation of a takeover that came before: the page then knows that it discarded the
 // earlier mark, and says so with exactly that sentence, once. No other "not applied" text may show, so the
 // run of this step stays unknown. With no takeover before it, the page has no "not applied" text at all.
+// The end text of an earlier step stays on the page until the watch of the next one starts, so the wait for "the
+// outcome is unknown" can pass on that old text. The sentence belongs to this step's own end text: it is waited for
+// (bounded), the count is taken once it shows, and it must still hold after a short pause (ginsys/bronzeward#916).
 async function unknownOutcome(what: string, takeover?: number) {
   await expect(ended()).toHaveText(holds("the outcome is unknown"), { wait: 90_000 });
+  if (takeover !== undefined) {
+    const sentence = `The earlier mark was not applied: a takeover at generation ${takeover} resumed the import without it.`;
+    await eventually(() => pageShows(sentence), `${what}: the takeover sentence`, 90_000);
+  }
   // The page's hidden status region mirrors each status message, so its copy is not counted (ginsys/bronzeward#830).
-  const notApplied = await browser.execute(() => {
+  const notApplied = () => browser.execute(() => {
     const count = (text: string) => (text.match(/not applied/g) ?? []).length;
     return count(document.body.innerText) - count(document.querySelector('[data-testid="page-status"]')?.textContent ?? "");
   });
-  if (takeover === undefined) {
-    expect(notApplied).toBe(0);
-  } else {
-    expect(await pageShows(`The earlier mark was not applied: a takeover at generation ${takeover} resumed the import without it.`)).toBe(true);
-    expect(notApplied).toBe(1);
-  }
+  const want = takeover === undefined ? 0 : 1;
+  // The body's text and the status region's copy settle a moment apart, so the first count after the sentence shows
+  // can read one short. It is waited for, then read again after a pause so that a late second text still fails.
+  await eventually(async () => (await notApplied()) === want, `${what}: the count of "not applied" texts reaching ${want}`);
+  await browser.pause(300);
+  expect([`${what}: not applied texts`, await notApplied()]).toEqual([`${what}: not applied texts`, want]);
   await expect(allowed()).toHaveText("Its run stopped renewing the lease. Take it over to resume, or abandon it.", { wait: 20_000 });
   // `what` names the step in the failing line of the log.
   if (!(await $("button=Abandon import").isExisting())) throw new Error(`${what}: abandon is not offered`);

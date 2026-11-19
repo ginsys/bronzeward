@@ -17,7 +17,7 @@ import { RECOVERY_START } from "../../src/recovery.tsx";
 import { SCOPE_NO_MODE, SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, type Step } from "../injector.ts";
-import { answers, api, disposable, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, measure, mint, mirrored, narrow, overflows, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
+import { answers, api, disposable, eventually, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, measure, mint, mirrored, narrow, overflows, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The page's answer to Approve and to Revoke approval: each control's Result, in an element that takes
@@ -217,7 +217,7 @@ describe("approval and revocation (#358)", () => {
       await expect($("main h2")).toHaveText(`Plan ${short(id)}: approved`, { wait: 20_000 });
       await focusSettles(focusKept, "the page, not the body");
       await focusSettles(() => focusIn(ANSWER), "the approval's answer");
-      expect((await mirrored()).some((t) => t.includes("Recorded self-approval reasons"))).toBe(true);
+      await eventually(async () => (await mirrored()).some((t) => t.includes("Recorded self-approval reasons")), "the self-approval answer mirrored");
       expect(await statusRegions()).toBe(1);
       expect(await posts()).toEqual([`POST /plans/${id}/approvals`]);
       expect((await api(at, "h-viewer", "GET", `/plans/${id}`)).body!["state"]).toBe("approved");
