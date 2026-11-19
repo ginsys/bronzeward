@@ -826,7 +826,9 @@ func TestExecutorCheckValidityBoundsDispatch(t *testing.T) {
 	xe.approveThrough(t, a)
 	until(t, a, idle, "three checks that expired before the commitment", func() bool { return xe.entries(t, "use-time-check") >= 3 })
 	xe.wantNothingSent(t)
-	setCheckValidity("1 hour")
+	// The window that holds stays within what a certificate can be signed for (a plan with a longer one is
+	// refused at creation): the dispatch certificate's life includes it, and the deployment's maximum is 15 minutes.
+	setCheckValidity("5 minutes")
 	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
 }
 
