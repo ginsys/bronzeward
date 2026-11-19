@@ -264,7 +264,7 @@ describe("approval and revocation (#358)", () => {
       await expect($('main form[aria-label="Approve plan"]')).not.toBeExisting();
       await $("main").$("button=Revoke approval").click();
       await expect($('[data-testid="revoke-input"]')).toHaveText("Give a reason.");
-      expect(await posts()).toEqual([]);
+      await absent(async () => (await posts()).length > 0, "a revocation sent without a reason");
       await $('main form[aria-label="Revoke approval"] input[name="reason"]').setValue("seeded reason");
       await $("main").$("button=Revoke approval").click();
       // The page reads the plan again and shows it revoked, with the reason on the machine's timeline.

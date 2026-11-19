@@ -11,7 +11,7 @@
 // The cases sign in as h-publisher.
 import { $, browser, expect } from "@wdio/globals";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { api, fixtureSignIn, type Seed, seeded, storageEmpty, syntheticMachine, writes } from "./helpers.ts";
+import { absent, api, fixtureSignIn, type Seed, seeded, storageEmpty, syntheticMachine, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // Canonical identifiers (internal/id/id.go): 26 base32 characters whose last one has two zero low bits.
@@ -76,7 +76,7 @@ describe("the plan creation page (#357)", () => {
     // A reason is required: an empty one sends nothing.
     await $("main").$("button=Cancel plan").click();
     await expect($('[data-testid="cancel-input"]')).toHaveText("Give a reason.");
-    expect(await writes()).toEqual([]);
+    await absent(async () => (await writes()).length > 0, "a cancellation sent without a reason");
     // The page also carries the revocation's reason field, so the cancellation's own form is named.
     await $('main form[aria-label="Cancel plan"] input[name="reason"]').setValue("synthetic reason");
     await $("main").$("button=Cancel plan").click();
@@ -131,7 +131,7 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     await expect($('main form[aria-label="Approve plan"]')).not.toBeExisting();
     await $("main").$("button=Cancel plan").click();
     await expect($('[data-testid="cancel-input"]')).toHaveText("Give a reason.");
-    expect(await writes()).toEqual([]);
+    await absent(async () => (await writes()).length > 0, "a cancellation sent without a reason");
     await $('main form[aria-label="Cancel plan"] input[name="reason"]').setValue("seeded reason");
     await $("main").$("button=Cancel plan").click();
     // The page reads the plan again and shows it cancelled, which removes the write's own result.
