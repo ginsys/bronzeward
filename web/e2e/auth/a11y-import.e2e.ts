@@ -15,7 +15,7 @@
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
-import { api, cacheControl, cacheHolds, disposable, fixtureSignIn, focusKept, focused, fromTitle, hex, measure, narrow, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
+import { api, cacheControl, cacheHolds, disposable, fixtureSignIn, focusIn, focusKept, focused, fromTitle, hex, measure, narrow, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -98,8 +98,6 @@ const watch = () => {
 // Whether a status or alert shows `text`: announced without moving focus (4.1.3).
 const announced = (text: string) => browser.execute((t: string) => [...document.querySelectorAll('[role="alert"], [role="status"] > p')].some((e) => e.textContent?.includes(t)), text);
 const statusRegions = () => browser.execute(() => document.querySelectorAll('[role="status"]').length);
-// Whether focus is on an element of `selector` or inside it: the new content took it after an action (2.4.3).
-const focusIn = (selector: string) => browser.execute((s: string) => document.activeElement !== document.body && document.activeElement?.closest(s) != null, selector);
 const CLAIM = 'section[aria-label="Claim"]';
 const REVIEW = 'section[aria-label="Protected review"]';
 // The editor pane: Save is disabled while it runs, and a browser that keeps focus on a disabled control leaves it on Save.

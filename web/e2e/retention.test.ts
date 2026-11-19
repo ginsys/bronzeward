@@ -1,5 +1,5 @@
 // Client contracts §11.5 item 2: a browser test never retains a trace, HAR, video or screenshot of a
-// protected review. The protected import spec must not call any API that makes one, and neither may a
+// protected review. A protected spec (the import, review and publication specs) must not call any API that makes one, and neither may a
 // file it imports or the WebdriverIO configuration the run loads. A test cannot prove that no artifact
 // exists, so this reads the sources for the calls and has a positive control for every read: the same
 // read must flag a sample source that makes each kind of artifact, the walk must reach a file that only
@@ -242,7 +242,7 @@ test("the positive control: the walk reaches a file only a transitive import nam
   expect(artifactCalls(walked.get(`${dir}/leaf.ts`)!)).toEqual(["saveScreenshot"]);
 });
 
-test.each(["auth/protected.e2e.ts", "auth/a11y-import.e2e.ts"])("the protected import spec %s, the files it imports and the auth configuration make no screenshot, recording, trace, HAR or PDF", (name) => {
+test.each(["auth/protected.e2e.ts", "auth/a11y-import.e2e.ts", "auth/publish.e2e.ts"])("the protected spec %s, the files it imports and the auth configuration make no screenshot, recording, trace, HAR or PDF", (name) => {
   const spec = here(name);
   const files = sources([spec, here("auth.conf.ts")]);
   // The control for the spec: it is a real, long file, so an empty read would pass here.

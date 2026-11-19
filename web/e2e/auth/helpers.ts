@@ -276,6 +276,9 @@ export async function tabTo(match: (f: Focus) => boolean, what: string): Promise
 export const focused = () => browser.execute(() => document.activeElement?.id ?? "");
 // Whether focus is on an element of the page, not lost to the body after a change (2.4.3).
 export const focusKept = () => browser.execute(() => document.activeElement !== null && document.activeElement !== document.body && document.activeElement !== document.documentElement);
+// Whether focus is on an element of `selector` or inside it: the new content took it after an action (2.4.3).
+// Only a boolean leaves the page, so a focused field's text never reaches the WebDriver log.
+export const focusIn = (selector: string) => browser.execute((s: string) => document.activeElement !== document.body && document.activeElement?.closest(s) != null, selector);
 // A click on the header's title, which takes no focus, starts the next Tab from there.
 export const fromTitle = () => $("header h1").click();
 

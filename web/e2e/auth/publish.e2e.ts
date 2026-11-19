@@ -13,7 +13,9 @@ import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, syntheticDocument } from "../auth.conf.ts";
-import { fixtureSignIn, mint, storageEmpty } from "./helpers.ts";
+import { fixtureSignIn, focusIn, focusKept, focused, fromTitle, measure, mint, mirrored, narrow, overflows, storageEmpty, tabTo } from "./helpers.ts";
+
+const statusRegions = () => browser.execute(() => document.querySelectorAll('[role="status"]').length);
 
 // Synthetic identifiers of a publication the deployment cannot produce.
 const OP = `op_${"w".repeat(26)}`;
@@ -89,21 +91,35 @@ describe("the publication page (#342)", () => {
     expect(m.body!["applied"]).toBeNull();
   });
 
-  it("a succeeded publication, served by the injector, names its release and sends nothing but the one POST", async function () {
-    this.timeout(180_000);
-    const d = await api("h-author", "POST", "/drafts", { cluster, title: `synthetic ${hex()}` });
+  // A draft with one fragment, so its revision is 2, and the synthetic bodies of its succeeded publication.
+  async function staged(title: string) {
+    const d = await api("h-author", "POST", "/drafts", { cluster, title });
     expect(d.status).toBe(201);
     const id = d.body!["id"] as string;
     const name = `pub-${hex()}`;
     const f = await api("h-author", "PUT", `/drafts/${id}/fragments/${name}`, { layer: "role", document: syntheticDocument(name), marks: null, declarations: null }, d.etag);
     expect(f.status).toBe(200);
+    return id;
+  }
+  const succeeded = (id: string) => {
     const at0 = "2026-11-11T22:00:00Z";
     const accepted = { id: OP, kind: "publish", state: "queued", epoch: "ep_synthetic", lastEvent: 0, subject: { draft: id, draftRevision: 2 }, createdBy: null, createdAt: at0, result: null, error: null };
-    const bodies = {
+    const release = {
+      id: REL, cluster, draft: id, draftRevision: 2, operation: OP, publishedBy: { principal: "h-publisher", role: "publisher" }, publishedAt: at0,
+      renderer: { contract: "v1.14", machineryVersion: "synthetic", machineryChecksum: "synthetic", kubernetesVersion: "synthetic" }, sources: [], machines: [],
+    };
+    return {
       [`/drafts/${id}/publications`]: accepted,
       [`/operations/${OP}`]: { ...accepted, state: "succeeded", lastEvent: 1, result: { release: REL } },
       [`/operations/${OP}/events`]: { items: [] },
+      [`/releases/${REL}`]: release,
     };
+  };
+
+  it("a succeeded publication, served by the injector, names its release and sends nothing but the one POST", async function () {
+    this.timeout(180_000);
+    const id = await staged(`synthetic ${hex()}`);
+    const bodies = succeeded(id);
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies })).toMatch(SERVER);
     await $('nav[aria-label="Main"]').$("a=Changes").click();
     await $(`main a[title="${id}"]`).click();
@@ -117,6 +133,70 @@ describe("the publication page (#342)", () => {
     await expect($("main").$("button=Publish")).toBeDisabled();
     // The page sent the one POST and reads: no apply-config, adopt or other write came from the client.
     expect((await writes()).map(([m, r]) => `${m} ${r}`)).toEqual([`POST /drafts/${id}/publications`]);
+  });
+
+  // The page's answer to Publish: the accepted line and what follows it. Publish stays disabled once the
+  // write is accepted, so a keyboard user's focus must move here and not fall to the body (2.4.3).
+  const ANSWER = '[data-testid="publish-answer"]';
+
+  it("keyboard only (T3): the draft's Publish this draft link, Publish and the release link are reached and operated, focus follows the new content", async function () {
+    this.timeout(180_000);
+    const id = await staged(`synthetic ${hex()}`);
+    expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies: succeeded(id) })).toMatch(SERVER);
+    await fromTitle();
+    await tabTo((f) => f.text === "Changes", "the Changes link");
+    await browser.keys("Enter");
+    await expect($("main h2")).toHaveText("Changes");
+    expect(await focused()).toBe("main");
+    await tabTo((f) => f.title === id, "the draft's link");
+    await browser.keys("Enter");
+    await expect($("main h2")).toHaveText(expect.stringContaining("synthetic"));
+    expect(await focused()).toBe("main");
+    await tabTo((f) => f.tag === "A" && f.text === "Publish this draft", "the Publish this draft link");
+    await browser.keys("Enter");
+    await expect($("main h2")).toHaveText(expect.stringContaining(`Publish draft ${short(id)}`), { wait: 20_000 });
+    expect(await focused()).toBe("main");
+    await tabTo((f) => f.tag === "BUTTON" && f.text === "Publish", "Publish");
+    await browser.keys("Enter");
+    await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
+    // The accepted line is a status, announced without moving focus; the button that had focus is now disabled.
+    expect((await mirrored()).some((t) => t.includes("Publishing draft"))).toBe(true);
+    expect(await $("main").$("button=Publish").isEnabled()).toBe(false);
+    expect(["focus kept", await focusKept()]).toEqual(["focus kept", true]);
+    expect(["focus in the answer", await focusIn(ANSWER)]).toEqual(["focus in the answer", true]);
+    await expect($('[data-testid="ended"]')).toHaveText(`Publication succeeded: release ${short(REL)} was published. Nothing has been sent to any machine.`, { wait: 120_000 });
+    expect(["focus in the answer after the end", await focusIn(ANSWER)]).toEqual(["focus in the answer after the end", true]);
+    expect(await statusRegions()).toBe(1);
+    const seen = await measure();
+    expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(seen.small).toBe(0);
+    // On to the release, by keyboard: the next Tab leaves the answer, and the link opens the release's page.
+    await tabTo((f) => f.title === REL, "the release link");
+    await browser.keys("Enter");
+    await expect($("main h2")).toHaveText(`Release ${short(REL)}`, { wait: 20_000 });
+    expect(await focused()).toBe("main");
+    expect((await writes()).map(([m, r]) => `${m} ${r}`)).toEqual([`POST /drafts/${id}/publications`]);
+  });
+
+  it("320 CSS pixels: the publication page with a long draft title, its accepted line, its end and the release page do not scroll the page sideways", async function () {
+    this.timeout(180_000);
+    const id = await staged(`synthetic w${"x".repeat(119)}`);
+    expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies: succeeded(id) })).toMatch(SERVER);
+    await narrow(async () => {
+      await $('nav[aria-label="Main"]').$("a=Changes").click();
+      await $(`main a[title="${id}"]`).click();
+      await $("main").$("a=Publish this draft").click();
+      await expect($("main h2")).toHaveText(expect.stringContaining(`Publish draft ${short(id)}`), { wait: 20_000 });
+      expect(["the publication page", await overflows()]).toEqual(["the publication page", 0]);
+      await $("main").$("button=Publish").click();
+      await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
+      expect(["the accepted line", await overflows()]).toEqual(["the accepted line", 0]);
+      await expect($('[data-testid="ended"]')).toHaveText(`Publication succeeded: release ${short(REL)} was published. Nothing has been sent to any machine.`, { wait: 120_000 });
+      expect(["the end", await overflows()]).toEqual(["the end", 0]);
+      await $(`main a[title="${REL}"]`).click();
+      await expect($("main h2")).toHaveText(`Release ${short(REL)}`, { wait: 20_000 });
+      expect(["the release", await overflows()]).toEqual(["the release", 0]);
+    });
   });
 });
 
