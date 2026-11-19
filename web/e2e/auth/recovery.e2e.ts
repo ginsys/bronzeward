@@ -3,6 +3,7 @@
 // its own reply after the COMMIT, through the interrupt build's fault hook (ginsys/bronzeward#366).
 // Every value is synthetic.
 import { $, browser, expect } from "@wdio/globals";
+import { Key } from "webdriverio";
 import { NORMAL_START, PRE_ENTRY } from "../../src/recovery.tsx";
 import { SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_ISSUER } from "../auth.conf.ts";
@@ -280,7 +281,7 @@ async function clearRevocation(labels: string[]) {
   for (const label of labels) {
     const input = $("main form[aria-label='Revoke identity']").$(`label*=${label}`).$("input");
     await input.click();
-    await browser.keys(["Control", "a"]);
+    await browser.keys([Key.Ctrl, "a"]);
     await browser.keys("Backspace");
     expect(await input.getValue()).toBe("");
   }

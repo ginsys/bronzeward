@@ -20,7 +20,7 @@ import { REPLAYED, unknown } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
 import type { Step } from "../injector.ts";
 import { secondSession } from "../wdio.conf.ts";
-import { faults, fixtureSignIn, mint, storageEmpty } from "./helpers.ts";
+import { dialogsDuring, faults, fixtureSignIn, inSafari, mint, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
@@ -153,18 +153,7 @@ async function oneWrite(n: number, atLeast = false) {
 }
 
 // Each dialog's message, answered with `accept`, while `act` runs.
-async function dialogs(accept: boolean, act: () => Promise<void>): Promise<string[]> {
-  const asked: string[] = [];
-  const answer = (d: { message: () => string; accept: () => Promise<void>; dismiss: () => Promise<void> }) => void (asked.push(d.message()), accept ? d.accept() : d.dismiss());
-  browser.on("dialog", answer);
-  try {
-    await act();
-    await browser.waitUntil(async () => asked.length > 0, { timeout: 10_000, timeoutMsg: "no dialog" });
-  } finally {
-    browser.off("dialog", answer);
-  }
-  return asked;
-}
+const dialogs = (accept: boolean, act: () => Promise<void>) => dialogsDuring(accept, act, "no dialog");
 
 const guarded = () => browser.execute(() => !dispatchEvent(new Event("beforeunload", { cancelable: true })));
 
@@ -246,6 +235,9 @@ describe("the draft editor (#339)", () => {
 
   it("ETAG-01: two browsers on one draft: the second to save gets 412, sends nothing more, sees the first's text, and re-applies its own", async function () {
     this.timeout(120_000);
+    // Safari's driver runs one session at a time ("There is already a Safaridriver instance running"),
+    // so this case has no second browser to open. It is recorded untested in Safari (conformance/cases/ETAG-01.yaml).
+    if (inSafari()) this.skip();
     const name = `etag2-${hex()}`;
     const { id } = await seeded(name);
     // The other browser: a second session of this browser, signed in as h-all first, since the

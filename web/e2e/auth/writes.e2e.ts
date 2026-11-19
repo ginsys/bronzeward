@@ -7,12 +7,13 @@
 // epoch commits a new epoch in the deployment's database, as a recovery entry does.
 import { randomBytes } from "node:crypto";
 import { $, $$, browser, expect } from "@wdio/globals";
+import { Key } from "webdriverio";
 import { PRINCIPAL_CHANGED } from "../../src/app.tsx";
 import { PRE_ENTRY, RECOVERY_START } from "../../src/recovery.tsx";
 import { REPEATING, REPLAYED, SCOPE_NO_MODE, SET_ASIDE, UNKNOWN, unknown } from "../../src/states.tsx";
 import { CONTROL } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, REDIRECTED, type Step } from "../injector.ts";
-import { answers, faults, fixtureSignIn, holding, mirrored, release, storageEmpty } from "./helpers.ts";
+import { answers, dialogsDuring, faults, fixtureSignIn, holding, mirrored, release, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
@@ -97,7 +98,7 @@ async function type(values: [string, string][], replace = false) {
   for (const [field, value] of values) {
     for (let i = 0; i < 40 && (await focused()) !== field; i++) await browser.keys("Tab");
     expect(await focused()).toBe(field);
-    if (replace) await browser.keys(["Control", "a"]);
+    if (replace) await browser.keys([Key.Ctrl, "a"]);
     await browser.keys(value.split(""));
   }
   await browser.keys("Enter");
@@ -299,22 +300,14 @@ describe("the write views (#338)", () => {
     await add([], { held: "/clusters" });
     await browser.waitUntil(async () => (await holding()).includes("/clusters"), { timeout: 20_000, timeoutMsg: "the write was not held" });
     const { key } = await oneWrite(1);
-    const asked: string[] = [];
-    const answer = (d: { message: () => string; dismiss: () => Promise<void> }) => void (asked.push(d.message()), d.dismiss());
-    browser.on("dialog", answer);
-    try {
-      await $('nav[aria-label="Main"]').$("a=Machines").click();
-      await browser.waitUntil(async () => asked.length === 1, { timeout: 10_000, timeoutMsg: "no leave dialog" });
-      await expect($("main h2")).toHaveText("Add cluster");
-      // Back to the machine list: refused, the page and its address stay on the form, and the
-      // history returns to the form's own entry rather than adding one.
-      const entry = JSON.stringify(await browser.execute(() => history.state));
-      await browser.back();
-      await browser.waitUntil(async () => asked.length === 2, { timeout: 10_000, timeoutMsg: "no leave dialog on Back" });
-      await browser.waitUntil(async () => JSON.stringify(await browser.execute(() => history.state)) === entry, { timeout: 10_000, timeoutMsg: "the history did not return to the form's entry" });
-    } finally {
-      browser.off("dialog", answer);
-    }
+    const asked = await dialogsDuring(false, () => $('nav[aria-label="Main"]').$("a=Machines").click(), "no leave dialog");
+    await expect($("main h2")).toHaveText("Add cluster");
+    // Back to the machine list: refused, the page and its address stay on the form, and the
+    // history returns to the form's own entry rather than adding one.
+    const entry = JSON.stringify(await browser.execute(() => history.state));
+    asked.push(...(await dialogsDuring(false, () => browser.back(), "no leave dialog on Back")));
+    await browser.waitUntil(async () => JSON.stringify(await browser.execute(() => history.state)) === entry, { timeout: 10_000, timeoutMsg: "the history did not return to the form's entry" });
+    expect(asked).toHaveLength(2);
     for (const a of asked) expect(a).toContain(`Sent, with no answer yet. Key ${key}, POST /api/v1/clusters.`);
     await expect($("main h2")).toHaveText("Add cluster");
     expect(new URL(await browser.getUrl()).pathname).toBe("/clusters/new");
