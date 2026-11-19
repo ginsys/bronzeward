@@ -120,13 +120,14 @@ export const config: WebdriverIO.Config = {
       // innerText puts a tab between table cells, where the other drivers' text has a space. The
       // other drivers leave out what is not shown, transparent text included, which checkVisibility
       // does not test by default: a transparent element or ancestor gives no text, and a transparent
-      // descendant is hidden for the read and put back, in one synchronous step.
+      // descendant is made invisible for the read and put back, in one synchronous step.
       return browser.execute((e: HTMLElement) => {
         const transparent = (x: Element) => getComputedStyle(x).opacity === "0";
         for (let p: Element | null = e; p; p = p.parentElement) if (transparent(p)) return "";
         if (!e.checkVisibility({ visibilityProperty: true })) return "";
         const hidden = [...e.querySelectorAll<HTMLElement>("*")].filter(transparent).map((h) => [h, h.getAttribute("style")] as const);
-        for (const [h] of hidden) h.style.setProperty("display", "none", "important");
+        // visibility, not display: the box stays, so a block boundary around it still breaks the line.
+        for (const [h] of hidden) h.style.setProperty("visibility", "hidden", "important");
         try {
           return e.innerText.replace(/\t/g, " ");
         } finally {
