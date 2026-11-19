@@ -518,7 +518,7 @@ func TestWrites(t *testing.T) {
 	}
 	r = ctl("--context", "human", "machine", "add", "--cluster", s.cluster, "--talos-node-id", "BWSYNTH-node-3", "--platform", "container", "--talos-endpoint", "10.55.0.10")
 	f.want(r, 0, "recorded in cluster "+s.cluster+" (lab-a). Endpoint 10.55.0.10:50000.",
-		"Next: give Bronzeward the cluster's Talos access in the provider, then import its configuration.")
+		"Next: supply the cluster's first key (cluster first-key), then import its configuration.")
 	f.want(ctl(append([]string{"--context", "human"}, routes["POST /api/v1/machines/"+s.machine+"/talos-endpoints"]...)...), 0,
 		fmt.Sprintf("Machine %s: Talos endpoint 10.55.0.4:50001, was 10.55.0.3:50000", s.machine))
 	if n := f.actCount(); n != before+4 {
