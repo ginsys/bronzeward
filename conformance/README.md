@@ -114,12 +114,12 @@ runner, and a failed or cancelled check that is not required still leaves a pull
 on main, daily and on request, in two jobs, `safari` (`mise run browser`) and `safari-auth` (`mise run
 browser-auth`), and a failure of either opens one issue (ginsys/bronzeward#892).
 
-The run on 19 November 2026 ([run 44490676062](https://github.com/ginsys/bronzeward/actions/runs/44490676062))
+The run on 19 November 2026 ([run 44507666294](https://github.com/ginsys/bronzeward/actions/runs/44507666294))
 passed: Safari 27.2 on macOS, `browser` 3 of 3 spec files, `browser-auth` 15 of 15 (the 14 specs and
 `driver-controls.e2e.ts`, which checks the harness's own commands in every browser). The artifact scan
-found 32 artifacts clean, and its planted control found each planted value. The jobs took 2 min 7 s for
-`safari` and 21 min 34 s for `safari-auth` (18 min 37 s of them in the specs), which is why that job's
-limit is 45 minutes.
+found 32 artifacts clean, and its planted control found each planted value. The jobs took 2 min 31 s for
+`safari` and 21 min 23 s for `safari-auth` (18 min 4 s of them in the specs), which is why that job's
+limit is 45 minutes. The tested tree differs from the one these records describe in `conformance/` files only.
 
 The hosted macOS runner has no Docker, so `scripts/dev/native-services.sh` runs PostgreSQL 17 (Homebrew's,
 whose patch release the run logs), OpenBao and Zitadel (vendor release binaries at the tags of the images in
