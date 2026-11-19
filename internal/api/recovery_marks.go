@@ -8,6 +8,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/siderolabs/talos/pkg/machinery/role"
+
 	"github.com/ginsys/bronzeward/internal/id"
 )
 
@@ -114,17 +116,14 @@ func prepareMark(ctx context.Context, a *API, q *request) error {
 	if desired.Valid { // the Desired release's record for the machine exists: machine_state references it
 		art = &boundArtifact{ciphertext: ct.String, key: key.String, version: int(version.Int64)}
 	}
-	var u useTime
-	u, ev.deps, _, err = a.checkDependencies(ctx, cluster, "restoration mark of "+m, art, nil)
+	_, ev.deps, _, err = a.checkDependencies(ctx, cluster, "restoration mark of "+m, art, nil)
 	if err != nil {
 		return err
 	}
-	// The check read the access itself: an observation made with another version of it is not evidence
-	// of the credential the check passed. An observation read through a certificate (a serial) is of
-	// another kind than the check's stored talosconfig and compares with none of it: the check moves
-	// onto certificates in the executor's change.
-	if d, ok := ev.deps["access"].(map[string]any); ok && d["result"] == "passed" && obs.Access != nil && obs.Access.Serial == "" {
-		ev.otherAccess = accessKey(obs.Access.version()) != accessKey(u.access.Version())
+	if obs.Access != nil {
+		if ev.otherAccess, err = a.keyMoved(ctx, cluster, obs.Access); err != nil {
+			return err
+		}
 	}
 	for _, name := range []string{"access", "artifact"} {
 		if d, ok := ev.deps[name].(map[string]any); ok && d["result"] == "failed" {
@@ -133,6 +132,25 @@ func prepareMark(ctx context.Context, a *API, q *request) error {
 	}
 	q.mark = ev
 	return nil
+}
+
+// keyMoved is whether the CA key the cluster's signer reads now is not the one x, an observation's
+// access, was signed from (path, version and created_time): such an observation is not evidence of
+// the key the mark's check passed. The observation and the check each sign a certificate for their
+// own use, so their serials differ by construction and are never compared. A key that cannot be read
+// now counts as moved; a database failure or a cancelled ctx is an error.
+func (a *API) keyMoved(ctx context.Context, cluster string, x *observedAccess) (bool, error) {
+	c, cause, err := a.certFor(ctx, cluster, role.Admin, nodeUseLife*a.o.nodeTimeout)
+	switch {
+	case err == nil:
+		ca := c.CA()
+		return ca.Path != x.Path || ca.Version != x.Version || !ca.CreatedTime.Equal(x.CreatedTime), nil
+	case ctx.Err() != nil:
+		return false, ctx.Err()
+	case cause == "": // a database failure, not a credential one
+		return false, err
+	}
+	return true, nil
 }
 
 // markScope is step 6's mark under the locks above, from the evidence prepareMark took: unresolved

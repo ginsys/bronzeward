@@ -239,46 +239,30 @@ func TestRecoveryScopeMark(t *testing.T) {
 	me.x.mu.Unlock()
 	mustExec(t, ae.db, `UPDATE machine_state SET desired = $2 WHERE machine = $1`, m2, desired)
 
-	// The Talos access rotates between the observation's read and the dependency check's. The mark's
-	// observation reads through a certificate and the check through the stored talosconfig, two
-	// credentials no version comparison relates, so until the check moves onto certificates (ginsys/bronzeward#899
-	// part C) a rotation of the stored access marks no observation missing. This "ready" outcome is
-	// transitional: it weakens the pre-certificate assertion ("blocked, missing observation"), the PR body
-	// names it, and part C restores it by comparing the observation's recorded key path, version and serial
-	// with the credential the check uses.
-	v2 := me.x.access
-	me.x.onRead = func() {
+	// The CA key rotates between the observation's read and the dependency check's: the observation was
+	// signed from one version and the check reads another, so the observation is not evidence of the key
+	// the check passed (execution-recovery.md §3.2 comparison 3). The two sign separate certificates, so
+	// the comparison is of the key (path, version, created_time), never of the serial.
+	rotate := func() {
 		me.x.mu.Lock()
 		defer me.x.mu.Unlock()
 		me.x.onRead = nil
-		me.x.access = provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + ae.cluster, Version: 3,
-			CreatedTime: time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)}, []byte("tc3"))
+		me.env.keys.seed(t, me.db, ae.cluster)
 	}
-	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "rotated"), http.StatusCreated); b.State != "ready" || len(b.Missing) != 0 {
-		t.Fatalf("a mark on a certificate observation, the stored access rotated, was marked %s missing %v; want ready", b.State, b.Missing)
+	me.x.onRead = rotate
+	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "rotated"), http.StatusCreated); b.State != "blocked" ||
+		len(b.Missing) != 1 || b.Missing[0] != "observation" {
+		t.Fatalf("a mark on an observation signed from another key version than the check read was marked %s missing %v; want blocked, observation", b.State, b.Missing)
 	}
-	me.x.mu.Lock()
-	me.x.access = v2
-	me.x.mu.Unlock()
 	// An observation that is not evidence still names the other identity it read: each item is missing.
 	other := me.recordedIdentity(t, m2)
 	other.NodeID, other.SMBIOSUUID = "another-node", ""
 	me.report(other)
-	me.x.onRead = func() {
-		me.x.mu.Lock()
-		defer me.x.mu.Unlock()
-		me.x.onRead = nil
-		me.x.access = provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + ae.cluster, Version: 3,
-			CreatedTime: time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)}, []byte("tc3"))
-	}
+	me.x.onRead = rotate
 	if b := decode[scopeMarkBody](t, me.mark(ctl, m2, "rotated-identity"), http.StatusCreated); b.State != "blocked" ||
-		len(b.Missing) != 1 || b.Missing[0] != "identity" {
-		// Transitional like the case above: part C restores the two-item answer, observation then identity.
-		t.Fatalf("a mark on a certificate observation that read another identity was marked %s missing %v; want identity alone", b.State, b.Missing)
+		len(b.Missing) != 2 || b.Missing[0] != "observation" || b.Missing[1] != "identity" {
+		t.Fatalf("a mark on an observation that read another identity and another key version was marked %s missing %v; want observation then identity", b.State, b.Missing)
 	}
-	me.x.mu.Lock()
-	me.x.access = v2
-	me.x.mu.Unlock()
 	me.report(me.recordedIdentity(t, m2))
 
 	// An operation changes state after the observation's basis (here a resolution recorded while the
