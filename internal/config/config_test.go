@@ -470,10 +470,32 @@ func TestIngestionBlock(t *testing.T) {
 	}
 }
 
-// TestNoTalosBlock: the Talos credential is per cluster and read from the provider at use
-// (persistence-api §3.3), so a deployment-wide talosconfig file is refused, not ignored.
-func TestNoTalosBlock(t *testing.T) {
-	if _, err := Load(strings.NewReader(base + authBlock + "talos: {talosconfig: /etc/bronzeward/talosconfig}\n")); err == nil || !strings.Contains(err.Error(), "field talos not found") {
-		t.Fatalf("a talos block: %v", err)
+// TestNoTalosconfigFile: the Talos credential is signed per use from the cluster's CA key
+// (persistence-api §3.3, §3.4), so a deployment-wide talosconfig file is refused, not ignored.
+func TestNoTalosconfigFile(t *testing.T) {
+	if _, err := Load(strings.NewReader(base + authBlock + "talos: {talosconfig: /etc/bronzeward/talosconfig}\n")); err == nil || !strings.Contains(err.Error(), "field talosconfig not found") {
+		t.Fatalf("a talosconfig file: %v", err)
+	}
+}
+
+// The maximum certificate lifetime defaults to 15m, and a value that is not positive or not whole
+// seconds is refused with its own name.
+func TestTalosMaxCertLifetime(t *testing.T) {
+	c, err := Load(strings.NewReader(base + authBlock))
+	if err != nil || c.Talos.MaxCertLifetime != 15*time.Minute {
+		t.Fatalf("default: %+v, %v", c.Talos, err)
+	}
+	c, err = Load(strings.NewReader(base + authBlock + "talos: {maxCertLifetime: 90s}\n"))
+	if err != nil || c.Talos.MaxCertLifetime != 90*time.Second {
+		t.Fatalf("set: %+v, %v", c.Talos, err)
+	}
+	for name, c := range map[string]struct{ in, want string }{
+		"negative":     {"-1s", "talos.maxCertLifetime must be positive"},
+		"fractional":   {"1500ms", "talos.maxCertLifetime must be a whole number of seconds"},
+		"not duration": {"soon", "cannot unmarshal !!str `soon` into time.Duration"},
+	} {
+		if _, err := Load(strings.NewReader(base + authBlock + "talos: {maxCertLifetime: " + c.in + "}\n")); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v; want an error naming %q", name, err, c.want)
+		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/id"
@@ -102,7 +103,19 @@ func (l kvLatest) stringMember(name string) (string, error) {
 // version is ErrAbsent). A policy refusal is ErrDenied, and an answer that is not one live version
 // with its metadata is ErrProtocol.
 func readLatest(ctx context.Context, c *client, path string) (kvLatest, error) {
-	r, err := c.do(ctx, http.MethodGet, "/v1/secret/data/"+path, nil, false)
+	return readKV(ctx, c, path, 0)
+}
+
+// readKV is readLatest for one named version (a KV v2 read of secret/data/<path>?version=N), or for
+// the latest when version is 0. A named version that is missing, soft-deleted or destroyed is
+// OpenBao's 404, ErrAbsent, and no other version is read in its place; an answer that is not that
+// version, live, is ErrProtocol.
+func readKV(ctx context.Context, c *client, path string, version int) (kvLatest, error) {
+	url := "/v1/secret/data/" + path
+	if version > 0 {
+		url += "?version=" + strconv.Itoa(version)
+	}
+	r, err := c.do(ctx, http.MethodGet, url, nil, false)
 	if err != nil {
 		return kvLatest{}, err
 	}
@@ -126,6 +139,9 @@ func readLatest(ctx context.Context, c *client, path string) (kvLatest, error) {
 	m := out.Data.Metadata
 	if m.Version == nil || *m.Version < 1 {
 		return kvLatest{}, r.bad("no version")
+	}
+	if version > 0 && *m.Version != version {
+		return kvLatest{}, r.bad("the answer is not the asked version")
 	}
 	if m.CreatedTime == nil {
 		return kvLatest{}, r.bad("no created_time")
