@@ -759,7 +759,7 @@ there.
   §3), but skew against a real node was not measured (the fixture's node shares
   the signer's clock), so 300 s is a chosen bound and not a measured one. It is
   far above the skew of a synchronised clock and is the five minutes kubeadm
-  uses for the CA certificates it generates (`CertificateBackdate`,
+  uses for the certificates it generates and renews (`CertificateBackdate`,
   `cmd/kubeadm/app/constants/constants.go`). `NotAfter` stays measured from the
   signing instant, and the maximum lifetime applies to that span and not to
   `NotAfter` minus `NotBefore`, so back-dating adds no valid time after
@@ -4211,9 +4211,10 @@ each (design §7.7 consequences):
   the file that are ignored (`first-key-endpoint-no-control-plane`), and a key
   of an unrelated CA supplied as a replacement of a working key
   (`503 talos-access-unavailable`, the stored key and its version unchanged),
-  a talosconfig that cannot be dialled (`first-key-unusable`) against one whose
-  read fails or whose answer is not a machine configuration
-  (`503 talos-access-unavailable`), and a valid key and endpoint of another
+  a talosconfig that does not parse, or whose certificate authority, certificate
+  or key is unusable (`first-key-unusable`), against a well-formed endpoint that
+  does not answer, a read that fails, or an answer that is not a machine
+  configuration (`503 talos-access-unavailable`), and a valid key and endpoint of another
   cluster, as a first supply and as a replacement (`first-key-cluster-mismatch`,
   neither id in the answer; not built yet:
   [#938](https://github.com/ginsys/bronzeward/issues/938), with the control that
