@@ -12,42 +12,73 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { expect, test } from "vitest";
 
-const isExpect = (node: ts.Expression) => ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "expect";
+// Parentheses change no meaning: `(expect(x)).toBe((false))` is the same read.
+const unwrap = (node: ts.Expression): ts.Expression => (ts.isParenthesizedExpression(node) ? unwrap(node.expression) : node);
+
+const isExpect = (node: ts.Expression) => {
+  const call = unwrap(node);
+  return ts.isCallExpression(call) && ts.isIdentifier(call.expression) && call.expression.text === "expect";
+};
 
 // `expect(...).toBe(false)`, `expect(...).not.toContain(...)` and `expect(...).not.toMatch(...)`.
 const isAbsenceRead = (node: ts.CallExpression): boolean => {
-  const callee = node.expression;
+  const callee = unwrap(node.expression);
   if (!ts.isPropertyAccessExpression(callee)) return false;
   const matcher = callee.name.text;
-  if (matcher === "toBe") return node.arguments.length === 1 && node.arguments[0]!.kind === ts.SyntaxKind.FalseKeyword && isExpect(callee.expression);
+  if (matcher === "toBe") return node.arguments.length === 1 && unwrap(node.arguments[0]!).kind === ts.SyntaxKind.FalseKeyword && isExpect(callee.expression);
   if (matcher !== "toContain" && matcher !== "toMatch") return false;
-  const negation = callee.expression;
+  const negation = unwrap(callee.expression);
   return ts.isPropertyAccessExpression(negation) && negation.name.text === "not" && isExpect(negation.expression);
 };
 
 const NOTE = /^\/\/\s*once:\s*\S/;
-const TRAILING_NOTE = /\S\s*\/\/\s*once:\s*\S/;
 
-// Whether line `at` (0-based) carries a note: a trailing comment, or a block of `//` lines directly above it
-// whose first line is the note.
-const noted = (lines: string[], at: number): boolean => {
-  if (TRAILING_NOTE.test(lines[at] ?? "")) return true;
-  let top = at - 1;
-  if (!(lines[top] ?? "").trim().startsWith("//")) return false;
-  while ((lines[top - 1] ?? "").trim().startsWith("//")) top--;
-  return NOTE.test(lines[top]!.trim());
+type Comment = { text: string; line: number; ownLine: boolean; pos: number };
+
+// Every `//` comment of the file as the parser holds it, so a string, a template or a block comment that merely
+// contains `// once:` is no note. `ownLine` is a comment with only blanks before it on its line.
+const lineComments = (file: ts.SourceFile): Comment[] => {
+  const text = file.text;
+  const seen = new Map<number, Comment>();
+  const take = (ranges: ts.CommentRange[] | undefined) => {
+    for (const r of ranges ?? []) {
+      if (r.kind !== ts.SyntaxKind.SingleLineCommentTrivia || seen.has(r.pos)) continue;
+      const line = file.getLineAndCharacterOfPosition(r.pos).line;
+      const before = text.slice(file.getPositionOfLineAndCharacter(line, 0), r.pos);
+      seen.set(r.pos, { text: text.slice(r.pos, r.end), line, ownLine: before.trim() === "", pos: r.pos });
+    }
+  };
+  const visit = (node: ts.Node): void => {
+    take(ts.getLeadingCommentRanges(text, node.pos));
+    take(ts.getTrailingCommentRanges(text, node.end));
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return [...seen.values()];
+};
+
+// Whether the read carries a note: a trailing comment after its end on the line it ends, or a block of own-line
+// `//` comments directly above its first line whose first line is the note.
+const noted = (file: ts.SourceFile, comments: Comment[], node: ts.Node): boolean => {
+  const first = file.getLineAndCharacterOfPosition(node.getStart(file)).line;
+  const last = file.getLineAndCharacterOfPosition(node.getEnd()).line;
+  if (comments.some((c) => !c.ownLine && c.line === last && c.pos >= node.getEnd() && NOTE.test(c.text))) return true;
+  const above = new Map(comments.filter((c) => c.ownLine).map((c) => [c.line, c.text]));
+  let top = first - 1;
+  if (!above.has(top)) return false;
+  while (above.has(top - 1)) top--;
+  return NOTE.test(above.get(top)!);
 };
 
 // Every absence read of a source, by 1-based line, with whether it carries a note. Parsed from the TypeScript tree,
 // so a comment or a string makes no read.
 export const absenceReads = (source: string, fileName = "source.e2e.ts"): { line: number; noted: boolean }[] => {
   const file = ts.createSourceFile(fileName, `${source}\nexport {};\n`, ts.ScriptTarget.Latest, true);
-  const lines = source.split("\n");
+  const comments = lineComments(file);
   const found: { line: number; noted: boolean }[] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && isAbsenceRead(node)) {
-      const at = file.getLineAndCharacterOfPosition(node.getStart(file)).line;
-      found.push({ line: at + 1, noted: noted(lines, at) });
+      found.push({ line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1, noted: noted(file, comments, node) });
     }
     ts.forEachChild(node, visit);
   };
@@ -112,6 +143,48 @@ test("the negative control: an empty note, a note that is not the block's first 
     'expect(await $("e").isEnabled()).toBe(false); // the gate',
   ];
   expect(bare(sample.join("\n"))).toEqual([2, 5, 8, 10, 11]);
+});
+
+test("the negative control: text that only contains a note (a string, a template, a block comment) is no note", () => {
+  const sample = [
+    'expect("// once: synthetic text").not.toContain("canary");',
+    "expect(`// once: synthetic text`).not.toContain(\"canary\");",
+    "expect(value).toBe(false); /* // once: reason */",
+    "expect(value).toBe(false); /* once: reason */",
+    'const s = "// once: reason"; expect(value).toBe(false);',
+  ];
+  expect(absenceReads(sample.join("\n"))).toEqual([
+    { line: 1, noted: false },
+    { line: 2, noted: false },
+    { line: 3, noted: false },
+    { line: 4, noted: false },
+    { line: 5, noted: false },
+  ]);
+});
+
+test("the positive control: a read wrapped in parentheses is the same read", () => {
+  const sample = ["expect(value).toBe((false));", "(expect(value)).toBe(false);", "(expect(value).not).toContain(CANARY);", "expect(value).not.toMatch(/canary/);"];
+  expect(bare(sample.join("\n"))).toEqual([1, 2, 3, 4]);
+});
+
+test("the positive control: a read over several lines takes a trailing note at its end and a block note above its start", () => {
+  const sample = [
+    "expect(",
+    "  value,",
+    ").toBe(false); // once: the text is drawn with the state the case waited for",
+    "// once: the same render",
+    "expect(",
+    "  other,",
+    ").toBe(false);",
+    "expect(",
+    "  third,",
+    ").toBe(false);",
+  ];
+  expect(absenceReads(sample.join("\n"))).toEqual([
+    { line: 1, noted: true },
+    { line: 5, noted: true },
+    { line: 8, noted: false },
+  ]);
 });
 
 test("the positive control: a read inside a loop, a closure and a call argument is found", () => {
