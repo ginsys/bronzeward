@@ -53,9 +53,15 @@ die() {
   exit 1
 }
 pin() { sed -n "s/^$1=//p" fixtures/versions.env; }
-# pid_alive FILE: the process whose pid FILE holds is running.
+# pid_alive FILE: the process whose pid FILE holds is running. A process that has exited and is not
+# yet reaped, where PID 1 does not reap, is a zombie: kill -0 still succeeds on it, but it is gone.
 pid_alive() {
-  [ -s "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null
+  local pid stat
+  [ -s "$1" ] || return 1
+  pid=$(cat "$1")
+  kill -0 "$pid" 2>/dev/null || return 1
+  stat=$(ps -o stat= -p "$pid" 2>/dev/null || true)
+  case $stat in Z*) return 1 ;; esac
 }
 # Each docker query is assigned before it is tested, so that a docker failure (no daemon, no
 # permission) stops the script instead of reading as an absent container, as in mise run dev-down.
