@@ -142,7 +142,7 @@ func exportedSurface(t *testing.T, files map[string][]byte) []string {
 }
 
 var surface = []string{
-	"Applier", "Applier.ApplyNoReboot", "Applier.Close", "Class", "ClassAccepted", "ClassCode",
+	"Applier", "Applier.ApplyNoReboot", "Applier.Close", "Bound", "BoundApplier", "Class", "ClassAccepted", "ClassCode",
 	"ClassInvalidArgument", "ClassRejected", "ClassTransport", "ClassUnrecognised",
 	"Config", "Config.Bytes", "Config.Digest", "Config.Format", "Config.GoString", "Config.MarshalJSON",
 	"Config.MarshalText", "Config.MarshalYAML", "Config.ResourceVersion", "Config.String",
@@ -152,6 +152,8 @@ var surface = []string{
 	"Reader", "Reader.Close", "Reader.Identity", "Reader.MachineConfig", "Reader.Version",
 	"Response", "Response.Accounts", "Response.Class", "Response.Code", "Response.Text", "TransportFailure",
 	"applier.ApplyNoReboot", "applier.Close",
+	"bound.Close", "bound.ctx", "bound.shut", "boundApplier.<embedded>", "boundApplier.ApplyNoReboot",
+	"boundReader.<embedded>", "boundReader.Identity", "boundReader.MachineConfig", "boundReader.Version",
 	"reader.Close", "reader.Identity", "reader.MachineConfig", "reader.Version",
 	"requestError.Error", "requestError.GRPCStatus", "requestError.Is", "requestError.Unwrap",
 }

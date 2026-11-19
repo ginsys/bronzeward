@@ -15,10 +15,17 @@ import (
 // closed list of imports: nothing that writes a file, logs, prints, speaks http or runs a process
 // can be added without this test failing and the list being edited in review. The machinery's
 // client is not on it: the package reaches a node only through internal/talos's reader.
+//
+// crypto/x509 and encoding/pem only parse the certificate Sign has just made, to read its serial and
+// NotAfter back; fmt and io only implement the Format method that keeps a Cert from rendering.
 var allowedImports = []string{
 	"bytes",
 	"context",
+	"crypto/x509",
+	"encoding/pem",
 	"errors",
+	"fmt",
+	"io",
 	"time",
 	"github.com/ginsys/bronzeward/internal/provider",
 	"github.com/ginsys/bronzeward/internal/talos",
