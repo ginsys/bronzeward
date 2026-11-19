@@ -133,6 +133,21 @@ export const config: WebdriverIO.Config = {
       }
       return origKeys(value);
     });
+    // safaridriver clicks where the element was when the command started, so a click on a link that a
+    // list read above it is about to push down lands on the link now under that point (measured on the
+    // runner: a click on Imports opened a draft). The click waits until the element holds still.
+    await browser.overwriteCommand("click", async function (this: WebdriverIO.Element, orig: (o?: unknown) => Promise<void>, options?: unknown) {
+      await this.waitForExist();
+      let last = "";
+      for (let i = 0; i < 10; i++) {
+        const now = await browser.execute((e: HTMLElement) => { const r = e.getBoundingClientRect(); return `${r.x},${r.y},${r.width},${r.height}`; }, this as unknown as HTMLElement);
+        if (now === last) break;
+        last = now;
+        await browser.pause(100);
+      }
+      (globalThis as { bwStillClicks?: number }).bwStillClicks = ((globalThis as { bwStillClicks?: number }).bwStillClicks ?? 0) + 1;
+      return orig(options);
+    }, { attachToElement: true });
     // Safari's click on an option fails as not interactable while the select is out of view, and when it
     // works it can set the value without the input and change events the page listens to (measured on
     // the runner: the second choice of a form left the page's choice unmade). Its type-ahead cannot
