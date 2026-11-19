@@ -54,9 +54,9 @@ func (e *env) clusterFirstKey(args []string) error {
 		return err
 	}
 	body, _ := json.Marshal(apitypes.FirstKeyInput{Document: doc, Endpoint: endpoint, Kind: apitypes.FirstKeyInputKind(kind)})
-	// The one write that takes the Ctrl-C, armed by Send around its request only: that can stall at the node.
+	// Once: sent once, and the one write whose request in flight takes the Ctrl-C, since it can stall at the node.
 	return firstKeyRefusal(e.write(&client.Write{Method: http.MethodPost, Path: "/clusters/" + url.PathEscape(cluster) + "/first-keys", Body: body,
-		HumanOnly: true, Repeat: rp, Once: true, Stop: e.arm, Check: "act list"},
+		HumanOnly: true, Repeat: rp, Once: true, Check: "act list"},
 		func(_ *client.Client, r *client.Response) ([]string, error) {
 			var x apitypes.FirstKeyBody
 			err := json.Unmarshal(r.Body, &x)
