@@ -182,6 +182,13 @@ func TestFirstKeyRefusals(t *testing.T) {
 		{"a rule of a newer server", refuse(422, "validation-failed", `,"rule":"first-key-cluster-mismatch"`), 1, []string{"the rule first-key-cluster-mismatch"}},
 		{"the node could not be tried", refuse(503, "talos-access-unavailable", ""), 1, []string{"could not be tried at that endpoint", "Nothing was stored"}},
 		{"the key may be stored", refuse(503, "dependency-unavailable", ""), 3, []string{"outcome unknown", "--idempotency-key"}},
+		{"the store may follow a deadlock", refuse(503, "transient-conflict", ""), 3, []string{"outcome unknown", "--idempotency-key"}},
+		{"an internal error", refuse(500, "internal-error", ""), 3, []string{"outcome unknown", "--idempotency-key"}},
+		{"a 503 that is no problem", func(_ int, w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(503)
+			fmt.Fprint(w, fkPlanted)
+		}, 3, []string{"outcome unknown", "--idempotency-key"}},
 		{"a person is needed", refuse(403, "forbidden", `,"humanOnly":true`), 1, []string{"needs a person signed in"}},
 		{"the key moved under it", refuse(409, "conflict", ""), 1, nil},
 	} {
@@ -197,7 +204,7 @@ func TestFirstKeyRefusals(t *testing.T) {
 					t.Errorf("no %q in %q", w, errOut)
 				}
 			}
-			if strings.Contains(errOut, fkPlanted) && c.code != 3 && c.name != "a person is needed" && c.name != "the key moved under it" {
+			if strings.Contains(errOut, fkPlanted) {
 				t.Errorf("the server's words reached standard error: %q", errOut)
 			}
 			if n := len(f.sent()); n != 1 {
@@ -313,7 +320,7 @@ func TestFirstKeyNeverLeavesTheKey(t *testing.T) {
 		_, out, errOut := runCtl(t, args...)
 		all.WriteString(out + errOut)
 	}
-	for _, c := range canaries {
+	for _, c := range append([]string{fkPlanted}, canaries...) {
 		if strings.Contains(all.String(), c) {
 			t.Errorf("the canary %q is in what the command printed:\n%s", c, all.String())
 		}
@@ -327,6 +334,31 @@ func TestFirstKeyNeverLeavesTheKey(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Dir(file))
 	if len(entries) != 1 {
 		t.Errorf("%d files beside the key file, want only the key file", len(entries))
+	}
+}
+
+// TestFirstKeyRepeatStaysUnknown: a repeat of an unknown outcome, answered by a refusal that is not a
+// replay, leaves the outcome unknown (exit 3 and the repeat flags): the refusal says nothing of the
+// attempt it repeats, so "nothing was stored" is never printed for it.
+func TestFirstKeyRepeatStaysUnknown(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		answer func(int, http.ResponseWriter, *http.Request)
+	}{
+		{"a refusal by a rule", refuse(422, "validation-failed", `,"rule":"first-key-no-ca-key"`)},
+		{"the node not tried", refuse(503, "talos-access-unavailable", "")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f, file := newFirstKey(t)
+			f.answer = c.answer
+			code, out, errOut := runCtl(t, fkArgs(file, "--idempotency-key", "abcdefghijklmnop", "--expect-epoch", "ep_FK-1", "--expect-principal", "h_FK")...)
+			if code != 3 || out != "" || !strings.Contains(errOut, "outcome unknown") || strings.Contains(errOut, "Nothing was stored") || strings.Contains(errOut, fkPlanted) {
+				t.Errorf("exit %d, stdout %q, stderr %q; want 3 and the unknown-outcome block, with no claim that nothing was stored", code, out, errOut)
+			}
+			if n := len(f.sent()); n != 1 {
+				t.Errorf("%d first-key requests, want 1", n)
+			}
+		})
 	}
 }
 

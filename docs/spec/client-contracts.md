@@ -210,9 +210,10 @@ the key at, not a Bronzeward address; [operator experience §5.2](operator-exper
 and `--talos-context`. The file is read with a size limit, sent once and never copied, logged or
 printed; a talosconfig is cut to one context first; errors name the route's rule and never quote the
 server's Talos text. It is the one write sent once ([operator experience §5.2](operator-experience.md#52-inventory)):
-each request dials the node, so a `503` is not repeated as [§8.2](#82-errors) says a write repeats it.
-`talos-access-unavailable` is a refusal that stored nothing (exit 1) and `dependency-unavailable` is an
-unknown outcome (exit 3), because the route stores the key before it commits the act. Each run takes a
+each request dials the node, so no answer is repeated as [§8.2](#82-errors) says a write repeats a `503`.
+`talos-access-unavailable` is a refusal that stored nothing (exit 1); every other `503`, a `5xx` and a
+lost answer is an unknown outcome (exit 3), because the route stores the key before it commits the act.
+A repeat that a refusal answers stays unknown. The server's detail is never printed. Each run takes a
 key of its own, random like every write's ([§8.4](#84-idempotency-and-ambiguous-responses) item 1), so a
 second run supplies the key again and does not replay the first answer; `--idempotency-key`,
 `--expect-epoch` and `--expect-principal` repeat an unknown outcome as for any write. It is also the one
