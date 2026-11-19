@@ -108,6 +108,31 @@ func TestOnceWriteIsNotRepeatedAfterARenewal(t *testing.T) {
 	}
 }
 
+// TestOnceWriteStoppedBeforeTheConnection: a Ctrl-C taken before the connection sends nothing. For a
+// first send that is a plain failure; for an operator's repeat the earlier attempt's outcome is still
+// unknown, so the block and its repeat flags stay.
+func TestOnceWriteStoppedBeforeTheConnection(t *testing.T) {
+	for _, repeat := range []bool{false, true} {
+		f := &fake{epoch: "ep_BWSYNTH-1", post: func(_ int, w http.ResponseWriter, _ *http.Request) { created(w) }}
+		c, _, _ := writeClient(t, f, "ep_BWSYNTH-1")
+		c.Arm = func() (context.Context, func() bool) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx, func() bool { return true }
+		}
+		w := clusterWrite()
+		w.Once = true
+		if repeat {
+			w.Repeat = &Repeat{Key: "BWSYNTH-aaaaaaaaaaaaaaa", Epoch: "ep_BWSYNTH-1", Principal: "svc_BWSYNTH"}
+		}
+		_, err := c.Send(w)
+		var u *Unknown
+		if err == nil || errors.As(err, &u) != repeat || !strings.Contains(err.Error(), "stopped at your request") || len(f.postsSeen()) != 0 {
+			t.Errorf("repeat %v: error %v after %d posts; want a stop that sent nothing, unknown only for a repeat", repeat, err, len(f.postsSeen()))
+		}
+	}
+}
+
 // TestOnceWriteIsNotRepeatedWhenNothingWasSent: a POST that fails before any byte goes out is
 // repeated for an ordinary write and not for a Once write, which ends with the error as it is.
 func TestOnceWriteIsNotRepeatedWhenNothingWasSent(t *testing.T) {

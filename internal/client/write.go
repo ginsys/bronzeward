@@ -372,7 +372,8 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		case a.p == nil && a.r == nil && stopped:
 			// The operator's Ctrl-C ended the request: no repeat, and unknown once a connection was taken.
 			if !a.sent {
-				return nil, c.Context.fail(fmt.Errorf("%s not sent: stopped at your request", route))
+				// A repeat keeps the unknown outcome of the attempt it repeats.
+				return nil, c.after(ambiguous, w, u, c.Context.fail(fmt.Errorf("%s not sent: stopped at your request", route)))
 			}
 			u.Why = "stopped at your request while the request was in flight"
 			return nil, c.unknown(w, u)
