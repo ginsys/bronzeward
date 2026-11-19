@@ -111,6 +111,17 @@ func TestSignCoversFractionalLifetime(t *testing.T) {
 	}
 }
 
+// A lifetime so long that its rounded end does not fit a time.Duration is refused: the duration would
+// saturate and the certificate end before the lifetime asked for.
+func TestSignRefusesAnUnrepresentableEnd(t *testing.T) {
+	k := storedKey(newCA(t))
+	now := time.Date(2026, 11, 19, 0, 0, 0, int(100*time.Millisecond), time.UTC)
+	huge := time.Duration(9223372036) * time.Second
+	if _, err := signer.Sign(k, role.Admin, now, huge, huge); !errors.Is(err, signer.ErrLifetime) {
+		t.Fatalf("a 292-year lifetime: %v, want ErrLifetime", err)
+	}
+}
+
 // A lifetime above the maximum, or not above zero, and a role outside the two, are refused; none is
 // cut down to fit.
 func TestSignRefusals(t *testing.T) {

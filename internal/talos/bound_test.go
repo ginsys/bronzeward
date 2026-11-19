@@ -47,11 +47,11 @@ func TestBoundClosesTheConnectionAtNotAfter(t *testing.T) {
 func TestBoundCloseBeforeNotAfterClosesOnce(t *testing.T) {
 	c := &closeCounter{}
 	b := Bound(c, time.Now().Add(300*time.Millisecond))
-	if err := b.Close(); err != nil {
-		t.Fatal(err)
+	if err := b.Close(); err != nil || c.closes.Load() != 1 {
+		t.Fatalf("Close: %v, %d closes, want one at once", err, c.closes.Load())
 	}
-	if err := b.Close(); err != nil {
-		t.Fatal(err)
+	if err := b.Close(); err != nil || c.closes.Load() != 1 {
+		t.Fatalf("a second Close: %v, %d closes, want still one", err, c.closes.Load())
 	}
 	time.Sleep(500 * time.Millisecond)
 	if n := c.closes.Load(); n != 1 {
