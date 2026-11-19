@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Fixture tests for scripts/ci/report-safari.sh, safari.yml's `report` job, with a stub `gh` that
-# serves a fixed issue list and records what the script asks it to do. A failed run opens one issue,
-# a second one comments on it, and a run with no runner, or a success, touches nothing.
+# Fixture tests for scripts/ci/report-browser-run.sh, the `report` job of safari.yml and
+# previous-majors.yml, with a stub `gh` that serves a fixed issue list and records what the script
+# asks it to do. A failed run opens one issue, a second one comments on it, and a run with no
+# runner, or a success, touches nothing. Each workflow reports into its own issue.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-script="$here/../ci/report-safari.sh"
+script="$here/../ci/report-browser-run.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir "$work/bin"
@@ -94,6 +95,24 @@ if [ "$rc" -eq 0 ] && [ "$(calls 'issue create')" -eq 0 ] && grep -qx 9 "$work/a
 run skipped false '[[]]'
 if [ "$rc" -eq 0 ] && [ ! -s "$work/calls" ]; then ok; else bad "SIMULATED=false reported"; fi
 
+# A second subject (previous-majors.yml) reports into its own issue, with its own title and marker,
+# and an open Safari issue never catches its failure. The same holds the other way round.
+pm='[[{"number":21,"body":"<!-- bronzeward-key: previous-majors-main-failure -->"}]]'
+run_pm() { SUBJECT='Previous-major browsers' KEY=previous-majors run "$@"; }
+run_pm failure '' "$real"
+if [ "$rc" -eq 0 ] && [ "$(calls 'issue create')" -eq 1 ] && [ "$(calls 'issue comment')" -eq 0 ] \
+  && grep -q 'bronzeward-key: previous-majors-main-failure' "$work/args-create" \
+  && grep -q '^Previous-major browsers run failed on main$' "$work/args-create"; then ok; else bad "an open Safari issue caught a previous-majors failure, or the new issue lacks its marker or title"; fi
+run_pm failure '' "$pm"
+if [ "$rc" -eq 0 ] && [ "$(calls 'issue create')" -eq 0 ] && grep -qx 21 "$work/args-comment"; then ok; else bad "a previous-majors failure did not comment on #21"; fi
+run failure '' "$pm"
+if [ "$rc" -eq 0 ] && [ "$(calls 'issue create')" -eq 1 ] && grep -q 'bronzeward-key: safari-main-failure' "$work/args-create"; then ok; else bad "an open previous-majors issue caught a Safari failure"; fi
+run_pm skipped true '[[]]'
+if [ "$rc" -eq 0 ] && grep -q 'bronzeward-key: previous-majors-simulated-failure' "$work/args-create" \
+  && grep -q '^\[test\] Previous-major browsers run failed (simulated)$' "$work/args-create"; then ok; else bad "a simulated previous-majors failure lacks its own marker or title"; fi
+run_pm cancelled '' '[[]]'
+if [ "$rc" -eq 0 ] && [ ! -s "$work/calls" ]; then ok; else bad "a cancelled previous-majors run called gh"; fi
+
 # A lookup that fails creates nothing and fails the script.
 rc=0
 rm -f "$work/calls"
@@ -113,5 +132,5 @@ for unset_var in REPO RESULT REF RUN_URL EVENT SHA; do
   if [ "$rc" -ne 0 ] && [ ! -e "$work/calls" ]; then ok; else bad "unset $unset_var did not stop the script"; fi
 done
 
-echo "report-safari-test: $pass passed, $fail failed"
+echo "report-browser-run-test: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

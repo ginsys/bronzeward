@@ -4,7 +4,7 @@
 // once per browser in BW_BROWSERS.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,11 @@ const headless = process.env["BW_HEADED"] === undefined;
 // other prompt keeps the default (dismiss and report), so a case still meets the page's confirm().
 // WebdriverIO types the capability as the string form only.
 const acceptLeave = { beforeUnload: "accept" } as unknown as string;
+// The previous major of each browser, pinned to one build from the vendor's own source (decision
+// B6, ginsys/bronzeward#893). previous-majors.json holds the pins and previous-majors.yml runs them.
+const previous = JSON.parse(readFileSync(new URL("previous-majors.json", import.meta.url), "utf8")) as {
+  chrome: string; edge: { version: string }; firefox: string;
+};
 const capabilities: Record<string, WebdriverIO.Capabilities> = {
   chrome: { browserName: "chrome", "goog:chromeOptions": { args: headless ? ["--headless=new"] : [] } },
   edge: { browserName: "MicrosoftEdge", "ms:edgeOptions": { args: headless ? ["--headless=new"] : [] } },
@@ -34,6 +39,16 @@ const capabilities: Record<string, WebdriverIO.Capabilities> = {
   firefox: { browserName: "firefox", browserVersion: "stable", unhandledPromptBehavior: acceptLeave, "moz:firefoxOptions": { args: headless ? ["-headless"] : [] } },
   "firefox-esr": { browserName: "firefox", browserVersion: "esr", unhandledPromptBehavior: acceptLeave, "moz:firefoxOptions": { args: headless ? ["-headless"] : [] } },
   safari: { browserName: "safari" },
+  "chrome-previous": { browserName: "chrome", browserVersion: previous.chrome, "goog:chromeOptions": { args: headless ? ["--headless=new"] : [] } },
+  // The job installs this Edge at the default path; the driver is pinned to the same version, or
+  // WebdriverIO would pick the one its own detection finds.
+  "edge-previous": {
+    browserName: "MicrosoftEdge", "ms:edgeOptions": { args: headless ? ["--headless=new"] : [] },
+    // @wdio/types declares no field here; @wdio/utils hands the object to edgedriver's start(),
+    // which reads edgeDriverVersion.
+    "wdio:edgedriverOptions": { edgeDriverVersion: previous.edge.version } as unknown as WebdriverIO.EdgedriverOptions,
+  },
+  "firefox-previous": { browserName: "firefox", browserVersion: previous.firefox, unhandledPromptBehavior: acceptLeave, "moz:firefoxOptions": { args: headless ? ["-headless"] : [] } },
 };
 const browsers = (process.env["BW_BROWSERS"] ?? "chrome,firefox").split(",");
 for (const b of browsers) if (!(b in capabilities)) throw new Error(`unknown browser ${b}`);

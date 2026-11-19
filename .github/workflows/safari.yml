@@ -79,7 +79,7 @@ jobs:
           retention-days: 14
 
   report:
-    # Runs after every Safari job, and decides in scripts/ci/report-safari.sh: only `failure`, or a
+    # Runs after every Safari job, and decides in scripts/ci/report-browser-run.sh: only `failure`, or a
     # simulated failure, reports. It is the only job here with a write permission.
     needs: safari
     if: always()
@@ -106,4 +106,4 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EVENT: ${{ github.event_name }}
           SHA: ${{ github.sha }}
-        run: scripts/ci/report-safari.sh
+        run: scripts/ci/report-browser-run.sh
