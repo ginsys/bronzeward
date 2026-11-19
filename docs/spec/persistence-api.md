@@ -653,9 +653,13 @@ there.
   **The write is check-and-set against the version the supply read** (`0` for
   a cluster with no key): two supplies racing for one cluster cannot both win,
   and a path that moved since the read is `409 conflict` with nothing written
-  and the other supply's key stored. A provider that cannot be read or written,
-  a refused signer policy, or a server with no signer identity configured is
-  `503 dependency-unavailable`. The answer's `caKeyVersion` is the stored
+  and the other supply's key stored. A provider that cannot be read, a refused
+  signer policy, or a server with no signer identity configured is
+  `503 dependency-unavailable` with nothing stored. A write that fails any other
+  way than the check-and-set refusal (unreachable, refused, or answered with
+  something the client cannot read) has an unknown outcome: it is the same `503`,
+  and says what a failed commit says below, that the key may have been stored
+  without its act. The answer's `caKeyVersion` is the stored
   key's `version` and `createdTime`; the path is the cluster's and is not told.
   **The route is keyed (§7.1):** the document is HMACed under the digest key
   into the request's fingerprint, beside the `kind`, the `endpoint` and the
@@ -4161,7 +4165,8 @@ each (design §7.7 consequences):
   with no approval step, with a control that requires an approval and must
   then fail; the audit act and every response free of the document and the
   key, in compilation §15's scan, with a positive control; and a supply whose
-  transaction fails after the provider write, leaving the key stored with no act,
+  transaction fails after the provider write, or whose write the provider stored
+  and answered with something unreadable, leaving the key stored with no act,
   the answer saying that it may be stored without its act and never that nothing
   was stored, and the next supply storing the following version as `replaced`
   with its act recorded;

@@ -167,7 +167,7 @@ func prepareFirstKey(ctx context.Context, a *API, q *request) error {
 	}
 	v, err := a.d.sg.WriteCAKey(ctx, cluster, ca, cas)
 	if err != nil {
-		return providerRefusal(err)
+		return writeRefusal(err)
 	}
 	q.stored = &storedKey{version: v, replaced: replaced, fingerprint: fp}
 	return nil
@@ -187,15 +187,26 @@ func firstKeyRefusal(err error) error {
 	return err
 }
 
-// providerRefusal is the answer to a failed read or write of the stored key. A moved path is 409; an
-// unavailable provider, a refused policy or an answer that is not the provider's is 503, never a
-// claim about whether the write happened beyond "nothing was committed".
+// providerRefusal is the answer to a failed read of the stored key, which changes nothing: an
+// unavailable provider, a refused policy or an answer that is not the provider's is 503.
 func providerRefusal(err error) error {
+	switch {
+	case errors.Is(err, provider.ErrUnavailable), errors.Is(err, provider.ErrDenied), errors.Is(err, provider.ErrProtocol), errors.Is(err, provider.ErrStatus):
+		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the provider could not read the CA key; nothing was stored")
+	}
+	return err
+}
+
+// writeRefusal is the answer to a failed write. Only a check-and-set refusal says the key was not
+// written, so a moved path is 409 with nothing stored. Every other failure leaves the write
+// unknown (the provider may have stored the version and lost or garbled its answer), so it is 503
+// and says what a failed commit says: the key may be stored without its act.
+func writeRefusal(err error) error {
 	switch {
 	case errors.Is(err, provider.ErrExists):
 		return refuse(http.StatusConflict, "conflict", "the cluster's CA key changed while this first key was supplied; nothing was stored")
 	case errors.Is(err, provider.ErrUnavailable), errors.Is(err, provider.ErrDenied), errors.Is(err, provider.ErrProtocol), errors.Is(err, provider.ErrStatus):
-		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the provider could not store the CA key; nothing was committed")
+		return refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the provider did not confirm the write; "+keyWithoutAct)
 	}
 	return err
 }
