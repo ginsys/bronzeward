@@ -18,8 +18,10 @@ const unwrap = (node: ts.Expression): ts.Expression =>
     ? unwrap(node.expression)
     : node;
 
+// `expect(x)` or `expect(promise).resolves`, which asserts the same value once the promise settles.
 const isExpect = (node: ts.Expression) => {
-  const call = unwrap(node);
+  let call = unwrap(node);
+  if (ts.isPropertyAccessExpression(call) && call.name.text === "resolves") call = unwrap(call.expression);
   if (!ts.isCallExpression(call)) return false;
   const name = unwrap(call.expression);
   return ts.isIdentifier(name) && name.text === "expect";
@@ -179,8 +181,11 @@ test("the positive control: a read wrapped in parentheses or a type-only wrapper
     "(expect)(value).toBe(false);",
     '(expect)(value).not.toContain("x");',
     "((expect))(value).not.toMatch(/x/);",
+    "await expect(cacheHolds(path)).resolves.toBe(false);",
+    'await expect(text()).resolves.not.toContain("x");',
+    "await expect(text()).resolves.not.toMatch(/x/);",
   ];
-  expect(bare(sample.join("\n"))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  expect(bare(sample.join("\n"))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
 });
 
 test("the positive control: a read over several lines takes a trailing note at its end and a block note above its start", () => {
