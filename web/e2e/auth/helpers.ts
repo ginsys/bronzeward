@@ -22,6 +22,14 @@ export const mirrored = () => browser.execute(() => [...document.querySelectorAl
 // This waits for `read` to hold, so a read that never holds fails with what it waited for.
 export const eventually = (read: () => Promise<boolean>, what: string, timeout = 5_000) =>
   browser.waitUntil(read, { timeout, interval: 25, timeoutMsg: `${what} was not shown within ${timeout} ms` });
+// The other side of the same early read: a check that `read` is false passes when the page has not yet rendered the
+// thing it must not show. Called once the page is on the state the check is about, it reads, pauses and reads again,
+// so a thing that renders a moment later still fails it (ginsys/bronzeward#921).
+export async function absent(read: () => Promise<boolean>, what: string) {
+  expect([`${what} is absent`, await read()]).toEqual([`${what} is absent`, false]);
+  await browser.pause(300);
+  expect([`${what} is absent after a pause`, await read()]).toEqual([`${what} is absent after a pause`, false]);
+}
 
 // Waits until the page is back on `page`/ with its reads settled: the footer's server versions once
 // the shell shows a page, which may hold a state of its own (an empty list), else the state text.

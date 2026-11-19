@@ -15,7 +15,7 @@
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
-import { api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, measure, narrow, onMain, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
+import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, measure, narrow, onMain, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -246,7 +246,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Send marks", "Send marks");
       await browser.keys("Enter");
       await expect(ended()).toHaveText(holds("The marks were applied: re-staged and paused again"), { wait: 60_000 });
-      expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
+      await absent(() => browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null), "the review text after the marks were applied");
       await focusSettles(() => focusIn(CLAIM), "the claim section");
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Continue import", "Continue import");
       await browser.keys("Enter");
