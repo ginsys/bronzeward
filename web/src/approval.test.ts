@@ -119,7 +119,10 @@ describe("the answers of the approval and the revocation (ginsys/bronzeward#358,
       const found = at(markup, "approval-answer");
       expect(found.length, state).toBe(1);
       expect(found[0]![0], state).toContain('tabindex="-1"');
-      if (state === "proposed") expect(markup.indexOf('aria-label="Approve plan"'), state).toBeLessThan(found[0]!.index!);
+      // The form shows for a proposed plan only here (an approved plan's form waits for its reads), and the wrapper follows its end.
+      const formEnd = markup.indexOf("</form>");
+      expect(formEnd >= 0, state).toBe(state === "proposed");
+      if (formEnd >= 0) expect(formEnd, state).toBeLessThan(found[0]!.index!);
     }
   });
 
@@ -129,9 +132,9 @@ describe("the answers of the approval and the revocation (ginsys/bronzeward#358,
       const found = at(markup, "revoke-answer");
       expect(found.length, state).toBe(1);
       expect(found[0]![0], state).toContain('tabindex="-1"');
-      const form = markup.indexOf('aria-label="Revoke approval"');
-      expect(form >= 0, state).toBe(state === "approved" || state === "committed");
-      if (form >= 0) expect(form, state).toBeLessThan(found[0]!.index!);
+      const formEnd = markup.indexOf("</form>");
+      expect(formEnd >= 0, state).toBe(state === "approved" || state === "committed");
+      if (formEnd >= 0) expect(formEnd, state).toBeLessThan(found[0]!.index!);
     }
   });
 });
