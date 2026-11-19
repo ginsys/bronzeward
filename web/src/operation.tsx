@@ -92,7 +92,7 @@ export function Outcome({ o, cause: why }: { o: Operation; cause?: string | unde
     case "unresolved":
       return (
         <Status testid="outcome">
-          Outcome unknown. A recovery administrator must account for {attempts.length === 0 ? "this operation: no attempt is recorded" : `attempt ${attempts[attempts.length - 1]!.number}`}. No conflicting work on this machine proceeds until then.
+          Outcome unknown{why === undefined ? "" : ` (${why})`}. A recovery administrator must account for {attempts.length === 0 ? "this operation: no attempt is recorded" : `attempt ${attempts[attempts.length - 1]!.number}`}. No conflicting work on this machine proceeds until then.
           {" "}<Ref to="/recovery" id="recovery">Open in Recovery</Ref> (recovery-admin). This page keeps following the operation.
         </Status>
       );
