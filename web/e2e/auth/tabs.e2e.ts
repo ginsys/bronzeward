@@ -123,8 +123,8 @@ describe("several tabs", () => {
 });
 
 // Only the idle first tab left, so the next case starts with no holder. The tabs of the page are the
-// ones to close, found by their address: the idle window never leaves about:blank, and Safari neither
-// lists its windows in the order it opened them nor keeps a handle across a navigation to another origin.
+// ones to close, found by their address: Safari neither lists its windows in the order it opened them nor
+// keeps a handle across a navigation to another origin.
 afterEach(async () => {
   for (const h of await browser.getWindowHandles()) {
     await browser.switchToWindow(h);
@@ -132,7 +132,9 @@ afterEach(async () => {
     // A tab in the middle of a redirect holds its sign-in state in session storage until it settles.
     await browser.waitUntil(() => storageEmpty().then(() => true, () => false), { timeout: 15_000, interval: 500 }).catch(() => undefined);
     await storageEmpty();
-    await browser.closeWindow();
+    // The last window cannot be closed (the session would end): a case may have left it on the page.
+    if ((await browser.getWindowHandles()).length === 1) await browser.url("about:blank");
+    else await browser.closeWindow();
   }
   const [idle, ...more] = await browser.getWindowHandles();
   if (idle === undefined || more.length > 0) throw new Error(`${more.length + (idle === undefined ? 0 : 1)} windows are open, one expected`);
