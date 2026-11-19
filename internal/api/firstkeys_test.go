@@ -25,11 +25,12 @@ import (
 // over HTTP. It enforces check-and-set as OpenBao does. before runs ahead of a request without the
 // lock held, so a test can move the path between the signer's read and its write.
 type kvStandIn struct {
-	mu       sync.Mutex
-	versions map[string][]kvVersion
-	writes   int
-	before   func(method, path string)
-	status   map[string]int // a method's forced status, 0 for none
+	mu        sync.Mutex
+	versions  map[string][]kvVersion
+	writes    int
+	before    func(method, path string)
+	status    map[string]int // a method's forced status, 0 for none
+	lostReply bool           // a write is stored and then answered with a body the client cannot read
 }
 
 type kvVersion struct {
@@ -94,6 +95,10 @@ func (k *kvStandIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		k.writes++
 		v := kvVersion{in.Data.CA, in.Data.Key, time.Now().UTC().Truncate(time.Second)}
 		k.versions[path] = append(vs, v)
+		if k.lostReply {
+			fmt.Fprint(w, `{"data":{}}`) // stored, and an answer the client cannot read
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": len(vs) + 1, "created_time": v.created.Format(time.RFC3339Nano)}})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -425,6 +430,38 @@ func TestFirstKeyProviderFailure(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// PA §3.4: a write whose answer is lost or not understood may have stored the version, so it is 503
+// and says what a failed commit says; a read that fails changes nothing and says nothing was stored.
+func TestFirstKeyLostWriteReply(t *testing.T) {
+	f := newFirstKeyEnv(t, true)
+	ca := newTalosCA(t)
+	n, _ := trustingNode(t, ca)
+	f.kv.lostReply = true
+	doc := wantProblem(t, f.do(f.api, firstKeyCall(f.author, "k-fk-lw-0123456789", f.cluster, "machine-config", controlPlaneConfig(ca), n.Endpoint)),
+		http.StatusServiceUnavailable, "dependency-unavailable")
+	detail, _ := doc["detail"].(string)
+	if !strings.Contains(detail, "may have been stored without its act") || strings.Contains(detail, "nothing was") {
+		t.Errorf("the detail is %q", detail)
+	}
+	if ver, _ := f.kv.latest(f.path); ver != 1 {
+		t.Fatalf("the key is at version %d; the provider stored it before the answer was lost", ver)
+	}
+	if acts, rows := firstKeyRows(t, f); acts != 0 || rows != 0 {
+		t.Fatalf("%d acts, %d rows", acts, rows)
+	}
+	f.kv.lostReply = false
+	b := decode[firstKeyBody](t, f.do(f.api, firstKeyCall(f.author, "k-fk-lw-0123456789", f.cluster, "machine-config", controlPlaneConfig(ca), n.Endpoint)), http.StatusOK)
+	if !b.Replaced || b.CAKeyVersion.Version != 2 {
+		t.Fatalf("the second supply answered %+v", b)
+	}
+	f.kv.status[http.MethodGet] = http.StatusServiceUnavailable
+	doc = wantProblem(t, f.do(f.api, firstKeyCall(f.author, "k-fk-lw-2123456789", f.cluster, "machine-config", controlPlaneConfig(ca), n.Endpoint)),
+		http.StatusServiceUnavailable, "dependency-unavailable")
+	if detail, _ := doc["detail"].(string); !strings.Contains(detail, "nothing was stored") {
+		t.Errorf("a failed read says %q", detail)
 	}
 }
 
