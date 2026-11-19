@@ -216,6 +216,10 @@ describe("approval and revocation (#358)", () => {
       await fromTitle();
       await tabTo((f) => f.name === "plan", "the typed plan ID field");
       await browser.keys(id);
+      // The typed ID is read back before Tab: Approve stays disabled, and Tab skips it, until the field holds
+      // the whole ID (ginsys/bronzeward#927 item 4). Only counts and an index leave the page.
+      const read = await browser.execute((e: HTMLInputElement, want: string) => ({ typed: e.value.length, of: want.length, firstDifference: [...want].findIndex((c, i) => e.value[i] !== c) }), (await typed()) as unknown as HTMLInputElement, id);
+      expect({ ...read, approveEnabled: await approve().isEnabled() }).toEqual({ typed: id.length, of: id.length, firstDifference: -1, approveEnabled: true });
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Approve", "Approve");
       await browser.keys("Enter");
       await expect($("main h2")).toHaveText(`Plan ${short(id)}: approved`, { wait: 20_000 });
