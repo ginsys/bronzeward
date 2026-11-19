@@ -149,9 +149,11 @@ func TestSignBoundIsTheMaximumLessTheRoundingSlack(t *testing.T) {
 	if _, err := signer.Sign(k, role.Admin, now, huge, time.Duration(1<<63-1)); !errors.Is(err, signer.ErrLifetime) {
 		t.Errorf("a 292-year lifetime: %v, want ErrLifetime", err)
 	}
-	// A maximum at or below the slack, or at the bottom of a time.Duration, admits no lifetime.
+	// A maximum at or below the slack, or at the bottom of a time.Duration, admits no lifetime. The key
+	// cannot sign, so a request that got past the up-front check would answer ErrSign, not ErrLifetime.
+	unusable := provider.NewCAKey([]byte("not a certificate"), []byte("not a key"))
 	for name, max := range map[string]time.Duration{"zero": 0, "the slack": 2 * time.Second, "negative": -time.Minute, "minimum": time.Duration(-1 << 63)} {
-		if _, err := signer.Sign(k, role.Admin, now, time.Second, max); !errors.Is(err, signer.ErrLifetime) {
+		if _, err := signer.Sign(unusable, role.Admin, now, time.Second, max); !errors.Is(err, signer.ErrLifetime) {
 			t.Errorf("a maximum of %s: %v, want ErrLifetime", name, err)
 		}
 	}
