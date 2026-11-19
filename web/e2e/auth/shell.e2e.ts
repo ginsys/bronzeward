@@ -274,7 +274,7 @@ describe("the state catalogue", () => {
     await browser.waitUntil(() => answered("/identity", 4), { timeout: 10_000, timeoutMsg: "the held read's answer did not reach the page" });
     await browser.pause(500);
     expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
-    // The machine list's own state may be shown; the refusal is not.
+    // once: read after the held read's answer reached the page (waitUntil above) and a 500 ms pause; the machine list's own state may be shown, the refusal is not.
     expect(await $("main").getText()).not.toContain("Not read");
   });
 
@@ -354,9 +354,10 @@ describe("recovery", () => {
       await announced("status", PRE_ENTRY);
       expect(await testid("problem").getText()).toBe(INJECTED_REFUSAL);
       await announced("recovery", `Recovery mode. Drafts can be edited. ${RECOVERY_START}`);
-      expect(await testid("principal").isExisting()).toBe(false);
+      await absent(() => testid("principal").isExisting(), "the principal while the late read is held");
       await release();
       await browser.pause(500);
+      // once: read after the late read was released and a 500 ms pause.
       expect(await testid("principal").isExisting()).toBe(false);
       expect(await testid("recovery").getText()).toBe(`Recovery mode. Drafts can be edited. ${RECOVERY_START}`);
       await faults({ upstream: at });
