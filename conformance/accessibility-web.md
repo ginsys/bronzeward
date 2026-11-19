@@ -8,9 +8,11 @@ accepted in [#255](https://github.com/ginsys/bronzeward/issues/255): keyboard on
 browser; screen reader on VoiceOver with Safari, and on NVDA with Firefox and with Chrome.
 
 An automated check is evidence for what it measures, not conformance (§13). Items whose views
-come with later tickets (reflow of the diff in review) are recorded by those tickets; the plan page
-and its approval are in the last section of the keyboard and measured checks. The import wizard, the protected import review and the conflict
-view of the draft editor are recorded in the last section of the keyboard and measured checks.
+come with later tickets (reflow of the diff in review) are recorded by those tickets. The import
+wizard, the protected import review and the conflict view of the draft editor are recorded in the
+section "Import wizard, protected review and conflict view", the publish screen in "Publish screen
+(T3)", and the plan page and its approval in "Plan and approval screen (T8)", all of the keyboard and
+measured checks.
 
 ## Keyboard and measured checks
 
@@ -117,7 +119,7 @@ approval, from [#358](https://github.com/ginsys/bronzeward/issues/358). Automate
 disposable deployment with synthetic data. The change shown on the plan is an injected unified diff of
 synthetic text; the approval and the revocation are the server's own. Recorded on 19 November 2026
 with Chrome 157, Edge 157, Firefox 160 and Firefox ESR 153 on Linux, from the `browser-auth` jobs of
-[#917](https://github.com/ginsys/bronzeward/pull/917), which added the cases ([run](https://github.com/ginsys/bronzeward/actions/runs/44469086708)). The keyboard cases failed on the unchanged product
+[#917](https://github.com/ginsys/bronzeward/pull/917), which added the cases ([run](https://github.com/ginsys/bronzeward/actions/runs/44474115437)). The keyboard cases failed on the unchanged product
 (Chrome 139, local): Approve and Revoke approval are disabled once the write is accepted, so focus fell
 to the page body; the page's answer now takes it.
 
