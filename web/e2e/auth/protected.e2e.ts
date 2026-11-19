@@ -274,14 +274,20 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // Only a boolean crosses WebDriver: the text in the field is as long, in bytes, as the size the summary
     // above it states, so it is the stored document and not some other text. No copy, download or print
     // control is offered beside it.
-    expect(
-      await browser.execute(() => {
-        const text = document.querySelector<HTMLTextAreaElement>('[data-testid="review-text"]')?.value ?? "";
-        const stated = /Document size\s*(\d+) bytes/.exec(document.body.innerText);
-        return text.length > 0 && stated !== null && new TextEncoder().encode(text).length === Number(stated[1]);
-      }),
-    ).toBe(true);
-    for (const control of ["Copy", "Download", "Print", "Save", "Export"]) expect(await shows().$(`button*=${control}`).isExisting()).toBe(false);
+    await eventually(
+      () =>
+        browser.execute(() => {
+          const text = document.querySelector<HTMLTextAreaElement>('[data-testid="review-text"]')?.value ?? "";
+          const stated = /Document size\s*(\d+) bytes/.exec(document.body.innerText);
+          return text.length > 0 && stated !== null && new TextEncoder().encode(text).length === Number(stated[1]);
+        }),
+      "the document text, as long as the size its summary states",
+    );
+    // The state is the shown document; a control that renders a moment later still fails the second read.
+    await absent(async () => {
+      for (const control of ["Copy", "Download", "Print", "Save", "Export"]) if (await shows().$(`button*=${control}`).isExisting()) return true;
+      return false;
+    }, "a copy, download, print, save or export control");
     // Leaving the page drops the text: the same page again holds none, until it is shown on request.
     await $("button=Close document").click();
     // The closed state's own control shows exactly when the text is gone (claim.tsx), so it marks the state.
@@ -364,7 +370,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // A read that answers ends the offline state; the review is then read again on request.
     await browser.refresh();
     await expect(allowed()).toHaveText("Paused for review. Continue it, or abandon it.", { wait: 30_000 });
-    expect(await $('[data-testid="offline"]').isExisting()).toBe(false);
+    await absent(() => $('[data-testid="offline"]').isExisting(), "the offline banner after the page was read again");
     await openReview();
     await abandon();
   });
@@ -451,7 +457,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     const stopped = Date.now() - began;
     console.log(`PROT-06 case 4: the watch stopped ${stopped} ms after the click`);
     expect(stopped).toBeLessThan(45_000);
-    expect(await $('[data-testid="offline"]').isExisting()).toBe(false);
+    await absent(() => $('[data-testid="offline"]').isExisting(), "the offline banner after the watch stopped");
     // The commit goes: the claim is released and the import is in the draft. The page's watch ended on the
     // unknown outcome, so the state is read by reload.
     await interrupt();
@@ -460,7 +466,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
       const heading = await $("main h2").getText();
       return heading === `Import ${short(id)}: released`;
     }, { timeout: 60_000, interval: 3_000, timeoutMsg: "the import does not show its claim released after the commit went" });
-    expect(await $("button=Abandon import").isExisting()).toBe(false);
+    await absent(() => $("button=Abandon import").isExisting(), "Abandon import after the claim was released");
   });
 });
 
@@ -490,8 +496,8 @@ describe("an expired claim (ginsys/bronzeward#341)", () => {
       return (await $("main h2").getText()).startsWith(`Import ${short(id)}: `) && !(await $("main h2").getText()).endsWith(": paused");
     }, { timeout: 150_000, interval: 5_000, timeoutMsg: "the import still shows paused long after its absolute expiry" });
     await expect(allowed()).toHaveText(holds("Ended: "));
-    expect(await $("button=Review import").isExisting()).toBe(false);
-    expect(await $("button=Continue import").isExisting()).toBe(false);
+    await absent(() => $("button=Review import").isExisting(), "Review import after the import ended");
+    await absent(() => $("button=Continue import").isExisting(), "Continue import after the import ended");
   });
 });
 
