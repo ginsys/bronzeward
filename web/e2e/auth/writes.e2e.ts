@@ -13,7 +13,7 @@ import { PRE_ENTRY, RECOVERY_START } from "../../src/recovery.tsx";
 import { REPEATING, REPLAYED, SCOPE_NO_MODE, SET_ASIDE, UNKNOWN, unknown } from "../../src/states.tsx";
 import { CONTROL } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, REDIRECTED, type Step } from "../injector.ts";
-import { answers, dialogsDuring, faults, fixtureSignIn, holding, mirrored, release, storageEmpty } from "./helpers.ts";
+import { absent, answers, dialogsDuring, faults, fixtureSignIn, holding, mirrored, release, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
@@ -122,7 +122,7 @@ describe("the write views (#338)", () => {
   it("AMB-01: a connection dropped before the server saw the write is repeated with the same key, and done", async () => {
     const name = await add(["drop"]);
     await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
-    expect((await result().getText()).includes(REPLAYED)).toBe(false);
+    await absent(async () => (await result().getText()).includes(REPLAYED), "the replayed sentence in the result");
     // The page met a closed connection, not an answer, then the repeat's 201.
     expect(await seen()).toEqual(["failed", "201"]);
     // Only the repeat reached the server: the drop came before it saw the write.
@@ -131,7 +131,7 @@ describe("the write views (#338)", () => {
     // The drop showed the unknown notice, so it shows the result until dismissed (B11).
     expect(await notice().getText()).toContain(`Saved (the server answered 201). Key ${key}`);
     await notice().parentElement().$("button=Dismiss").click();
-    expect(await notice().isExisting()).toBe(false);
+    await absent(() => notice().isExisting(), "the notice after Dismiss");
   });
 
   it("AMB-03: a 500 internal-error after the commit is repeated with the same key; the replayed result is shown", async () => {
@@ -151,7 +151,7 @@ describe("the write views (#338)", () => {
     const text = await result().getText();
     expect([text.slice(0, said.length), text.slice(said.length)]).toEqual([said, " dependency-unavailable: injected. Request req-injected."]);
     await oneWrite(4);
-    expect(await notice().isExisting()).toBe(false);
+    await absent(() => notice().isExisting(), "a notice after every attempt was answered 503");
   });
 
   it("AMB-09: a write dropped after the commit, each repeat answered 503, is unknown with its key and resource, never not done", async function () {
@@ -196,7 +196,8 @@ describe("the write views (#338)", () => {
     expect(await seen()).toEqual(["failed"]);
     // The write committed before its answer was dropped.
     expect(await writeAnswers()).toEqual(["/clusters 201"]);
-    // The notice's buttons follow its text, in the same block.
+    // The notice's buttons follow its text, in the same block. Read once on purpose: the set-aside notice draws
+    // "Repeat exactly" disabled in the same element as its text (web/src/states.tsx), so it cannot render later.
     expect(await notice().parentElement().$("button=Repeat exactly").isEnabled()).toBe(false);
     // The notice's own way out asks nothing; a link elsewhere still does (the leave guard's case).
     const asked: string[] = [];
@@ -239,14 +240,14 @@ describe("the write views (#338)", () => {
     await oneWrite(1);
     expect(await seen()).toEqual(["409"]);
     expect(await writeAnswers()).toEqual([]);
-    expect(await notice().isExisting()).toBe(false);
+    await absent(() => notice().isExisting(), "a notice after a definite refusal");
     // A server refusal is announced as an alert, and no status message carries its text
     // (ginsys/bronzeward#815).
     expect(await result().getAttribute("role")).toBe("alert");
     // The region is clipped, so its text is read as text content, never as visible text.
     for (const line of await mirrored()) expect(line).not.toContain("Not saved");
     // The scope's refusal showed the page no recovery start: no banner, no start-mode text.
-    expect(await $('[data-testid="recovery"]').isExisting()).toBe(false);
+    await absent(() => $('[data-testid="recovery"]').isExisting(), "the recovery banner after a scope's refusal");
     const body = await $("body").getText();
     expect(body).not.toContain(RECOVERY_START);
     expect(body).not.toContain(PRE_ENTRY);
@@ -272,7 +273,7 @@ describe("the write views (#338)", () => {
     await expect($('[data-testid="status"]')).toHaveText(PRINCIPAL_CHANGED, { wait: 30_000 });
     // Set aside while its answer is still held: the notice shows at once, with no dismissal.
     await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
-    expect(await notice().parentElement().$("button=Dismiss").isExisting()).toBe(false);
+    await absent(() => notice().parentElement().$("button=Dismiss").isExisting(), "Dismiss while the answer is held");
     await release();
     // Settled: the notice can now be dismissed, so no repeat can still be scheduled.
     await notice().parentElement().$("button=Dismiss").waitForExist({ timeout: 20_000 });
@@ -291,6 +292,8 @@ describe("the write views (#338)", () => {
     await browser.execute(() => document.querySelector<HTMLFormElement>("main form")!.requestSubmit());
     await browser.pause(500);
     expect(await writes()).toHaveLength(1);
+    // The submit above ignores the button, so a button enabled during the hold fails nothing there: read it again.
+    expect(await $("main form").$("button=Add cluster").isEnabled()).toBe(false);
     await release();
     await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
     await oneWrite(1);
