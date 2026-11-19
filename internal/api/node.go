@@ -26,13 +26,13 @@ const nodeTimeout = 10 * time.Second
 // read from the CA key version the cluster's latest first-key act names, its identity and the
 // endpoint recorded as an event of the operation, committed before the node is dialled; the node
 // dialled at the machine's endpoint, its identity compared with the machine's and its cluster's
-// records; then its machine configuration. The certificate lives to cover the three node requests
-// and no connection outlives it. A failure is the operation's refusal, naming the cluster or the
+// records; then its machine configuration. The certificate lives to cover the dial and the three
+// node requests (nodeUseLife) and no connection outlives it. A failure is the operation's refusal, naming the cluster or the
 // machine and never a value or a client's text; an error stops the run. The credential and the
 // reader live only for this call.
 func (a *API) readNode(ctx context.Context, j job) (ingest.Unresolved, *refusal, error) {
 	n := j.node
-	cert, cause, err := a.certFor(ctx, j.claim.Cluster, role.Admin, 3*a.o.nodeTimeout)
+	cert, cause, err := a.certFor(ctx, j.claim.Cluster, role.Admin, nodeUseLife*a.o.nodeTimeout)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ingest.Unresolved{}, nil, errStop

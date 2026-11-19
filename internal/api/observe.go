@@ -38,9 +38,10 @@ type observeFor struct {
 // machine was recorded within the settle floor, so nothing is recorded and nothing is read.
 var errReadNotDue = errors.New("a recovery read of the machine is within the settle floor")
 
-// observationLife is how many node timeouts a certificate signed for one observation covers: the
-// dial and its three requests, each bounded by one (persistence-api.md §3.3).
-const observationLife = 4
+// nodeUseLife is how many node timeouts a certificate signed for one use of a node covers: the dial
+// and its three requests, each bounded by one (persistence-api.md §3.3). An observation and an
+// ingestion's node read both use it.
+const nodeUseLife = 4
 
 // observedAccess is the access identity an observation records (persistence-api.md §3.3): the CA key
 // version's path, version and created_time and, for a certificate signed for the observation, its
@@ -129,15 +130,16 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 	var tc []byte
 	var notAfter time.Time
 	var err error
+	var cert signer.Cert
+	var signed bool
 	switch {
 	case f.access != nil:
 		tc, o.Access = f.access.Talosconfig(), storedAccess(f.access.Version())
 	case a.o.staleAccess != nil:
 		tc, o.Access = a.o.staleAccess.Talosconfig(), storedAccess(a.o.staleAccess.Version())
 	default:
-		var cert signer.Cert
 		var cause string
-		if cert, cause, err = a.certFor(ctx, cluster, role.Admin, observationLife*a.o.nodeTimeout); err != nil {
+		if cert, cause, err = a.certFor(ctx, cluster, role.Admin, nodeUseLife*a.o.nodeTimeout); err != nil {
 			if ctx.Err() != nil {
 				return observed{}, ctx.Err()
 			}
@@ -151,18 +153,22 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 		notAfter = cert.NotAfter()
 		ca := cert.CA()
 		o.Access = &observedAccess{Path: ca.Path, Version: ca.Version, CreatedTime: ca.CreatedTime, Serial: cert.Serial(), NotAfter: notAfter}
-		if tc, err = cert.Config(o.Endpoint); err != nil {
-			a.quoteObservation(o.ID, "talosconfig", err)
-			o.unreadAll("talosconfig", "identity", "runningVersion", "configuration")
-			return o, a.recordObservation(ctx, machine, f, &o)
-		}
+		signed = true
 	}
 	if head.Valid {
 		o.AssignmentEvidence = head.String
 	} else {
 		o.Unread["assignmentEvidence"] = unreadValue{Cause: "unassigned"}
 	}
-	r, err := a.o.dial(ctx, tc, o.Endpoint)
+	// A certificate that cannot be made into a talosconfig fails like a dial: the assignment
+	// evidence above is recorded, and every value that needs the node is named unread.
+	var r talos.Reader
+	if signed {
+		tc, err = cert.Config(o.Endpoint)
+	}
+	if err == nil {
+		r, err = a.o.dial(ctx, tc, o.Endpoint)
+	}
 	clear(tc)
 	if err != nil {
 		a.quoteObservation(o.ID, "talosconfig", err)
