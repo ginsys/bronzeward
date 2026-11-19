@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, syntheticDocument } from "../auth.conf.ts";
-import { fixtureSignIn, focusIn, focusKept, focused, fromTitle, measure, mint, mirrored, narrow, overflows, storageEmpty, tabTo } from "./helpers.ts";
+import { fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, measure, mint, mirrored, narrow, onMain, overflows, storageEmpty, tabTo } from "./helpers.ts";
 
 const statusRegions = () => browser.execute(() => document.querySelectorAll('[role="status"]').length);
 
@@ -147,25 +147,25 @@ describe("the publication page (#342)", () => {
     await tabTo((f) => f.text === "Changes", "the Changes link");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText("Changes");
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     await tabTo((f) => f.title === id, "the draft's link");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText(expect.stringContaining("synthetic"));
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     await tabTo((f) => f.tag === "A" && f.text === "Publish this draft", "the Publish this draft link");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText(expect.stringContaining(`Publish draft ${short(id)}`), { wait: 20_000 });
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     await tabTo((f) => f.tag === "BUTTON" && f.text === "Publish", "Publish");
     await browser.keys("Enter");
     await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
     // The accepted line is a status, announced without moving focus; the button that had focus is now disabled.
     expect((await mirrored()).some((t) => t.includes("Publishing draft"))).toBe(true);
     expect(await $("main").$("button=Publish").isEnabled()).toBe(false);
-    expect(["focus kept", await focusKept()]).toEqual(["focus kept", true]);
-    expect(["focus in the answer", await focusIn(ANSWER)]).toEqual(["focus in the answer", true]);
+    await focusSettles(focusKept, "the page, not the body");
+    await focusSettles(() => focusIn(ANSWER), "the answer");
     await expect($('[data-testid="ended"]')).toHaveText(`Publication succeeded: release ${short(REL)} was published. Nothing has been sent to any machine.`, { wait: 120_000 });
-    expect(["focus in the answer after the end", await focusIn(ANSWER)]).toEqual(["focus in the answer after the end", true]);
+    await focusSettles(() => focusIn(ANSWER), "the answer after the end");
     expect(await statusRegions()).toBe(1);
     const seen = await measure();
     expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
@@ -175,7 +175,7 @@ describe("the publication page (#342)", () => {
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText(`Release ${short(REL)}`, { wait: 20_000 });
     await expect($("main").$("h3=Machines covered (0)")).toBeExisting({ wait: 20_000 });
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     expect((await writes()).map(([m, r]) => `${m} ${r}`)).toEqual([`POST /drafts/${id}/publications`]);
   });
 

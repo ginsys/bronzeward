@@ -279,6 +279,16 @@ export const focusKept = () => browser.execute(() => document.activeElement !== 
 // Whether focus is on an element of `selector` or inside it: the new content took it after an action (2.4.3).
 // Only a boolean leaves the page, so a focused field's text never reaches the WebDriver log.
 export const focusIn = (selector: string) => browser.execute((s: string) => document.activeElement !== document.body && document.activeElement?.closest(s) != null, selector);
+// Whether the page's `main` holds focus: a navigation moved it to the new page.
+export const onMain = async () => (await focused()) === "main";
+// The shell moves focus in an effect, a few milliseconds after the content it follows is on screen, so one
+// read right after that content can be early (ginsys/bronzeward#911). This waits up to 2 s for `read` to hold,
+// then reads again after 300 ms, so a focus lost again later still fails.
+export async function focusSettles(read: () => Promise<boolean>, what: string) {
+  await browser.waitUntil(read, { timeout: 2_000, interval: 25, timeoutMsg: `focus did not reach ${what} within 2 s` });
+  await browser.pause(300);
+  expect([`focus stays on ${what}`, await read()]).toEqual([`focus stays on ${what}`, true]);
+}
 // A click on the header's title, which takes no focus, starts the next Tab from there.
 export const fromTitle = () => $("header h1").click();
 
