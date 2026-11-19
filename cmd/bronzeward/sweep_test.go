@@ -331,13 +331,22 @@ func tryServeUntilLive(t *testing.T, dsn string, extra ...string) (stop func(), 
 		if r, err := http.Get("http://" + addr + "/livez"); err == nil {
 			_ = r.Body.Close()
 			if r.StatusCode == http.StatusNoContent {
+				// An end within bindGrace is the bind failing; the timer and the end may both be ready
+				// when this goroutine runs again, so the end is read again after the wait.
+				var ended error
 				select {
-				case err := <-errc:
-					cancel()
-					return nil, fmt.Errorf("serve ended after /livez answered: %w", err)
+				case ended = <-errc:
 				case <-time.After(bindGrace):
-					return stop, nil
+					select {
+					case ended = <-errc:
+					default:
+					}
 				}
+				if ended != nil {
+					cancel()
+					return nil, fmt.Errorf("serve ended after /livez answered: %w", ended)
+				}
+				return stop, nil
 			}
 		}
 		select {

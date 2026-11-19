@@ -275,8 +275,12 @@ func (f *fixture) tryServeUp(flags ...string) error {
 		if err == nil && r.StatusCode == http.StatusNoContent {
 			select {
 			case <-done:
-				return errServeExited
 			case <-time.After(bindGrace):
+			}
+			select { // read again: both may be ready, and select then picks either
+			case <-done:
+				return errServeExited
+			default:
 				return nil
 			}
 		}
