@@ -15,7 +15,7 @@
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
-import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, itNarrow, measure, narrow, onMain, overflows, pickByKeys, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
+import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, itNarrow, measure, narrow, onMain, overflows, pickByKeys, storageControl, storageEmptyAfterPause, syntheticMachine, tab, tabTo } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -63,7 +63,7 @@ async function openImport(id: string, heading: string) {
 // What every protected case leaves behind: nothing in storage, IndexedDB or caches, and no cached
 // answer of the case's review.
 async function leavesNothing() {
-  await storageEmpty();
+  await storageEmptyAfterPause();
   // The case's last step may be a request whose answer the browser caches a moment later, so the read is repeated.
   if (importId !== "") await absent(() => cacheHolds(`/api/v1/ingestions/${importId}/review`), "the review answer in the HTTP cache");
   importId = "";
@@ -183,6 +183,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     const seen = await measure();
     expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
     expect(seen.small).toBe(0);
+    // once: `lost` is appended only by the awaited `after()` calls of the steps above (watch), so nothing can add to it later.
     expect(w.lost).toEqual([]);
   });
 
@@ -260,7 +261,9 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Close review", "Close review");
       await browser.keys("Enter");
-      await expect($('[data-testid="review-text"]')).not.toBeExisting();
+      // Closing swaps the shown review for the "Review import" action in one render (web/src/claim.tsx:195), so its return is the marker.
+      await $("main").$("button=Review import").waitForExist({ timeout: 20_000 });
+      await absent(() => $('[data-testid="review-text"]').isExisting(), "the review text after Close review");
       await focusSettles(() => focusIn(REVIEW), "the review's section");
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Abandon import", "Abandon import");
       await browser.keys("Enter");
@@ -361,6 +364,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await browser.keys("Enter");
       await expect(pane().$('[data-testid="write-result"]')).toHaveText(holds(`Fragment ${name} saved in draft`), { wait: 30_000 });
       await focusSettles(() => focusIn(PANE), "the editor pane");
+      // once: `lost` is appended only by the awaited `after()` calls of the steps above (watch), so nothing can add to it later.
       expect(w.lost).toEqual([]);
     });
 

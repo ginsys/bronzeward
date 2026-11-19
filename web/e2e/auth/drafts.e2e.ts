@@ -225,8 +225,8 @@ describe("the draft editor (#339)", () => {
     await oneWrite(1);
     // ginsys/bronzeward#517 H1: the pane now edits the entry it created. H4: Add fragment with that
     // name again sends nothing.
-    await expect(pane().$("label*=name")).not.toBeExisting();
     await expect(pane().$("button=Remove")).toBeExisting();
+    await absent(() => pane().$("label*=name").isExisting(), "the name field of a new entry in the pane after the save");
     await $("main").$("button=Add fragment").click();
     await pane().$("label*=name").$("input").setValue(name);
     await pane().$("button=Save").click();

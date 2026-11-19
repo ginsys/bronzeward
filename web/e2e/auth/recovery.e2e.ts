@@ -141,6 +141,7 @@ describe("the recovery entry (#364)", () => {
     expect(await $("main form").$("button=Enter recovery").isEnabled()).toBe(false);
     await browser.execute(() => document.querySelector<HTMLFormElement>("main form[aria-label='Enter recovery']")!.requestSubmit());
     await browser.pause(1_000);
+    // once: read after the 1 s pause that follows the forced submit.
     expect(await entries()).toEqual([]);
     // once: read after the 1 s pause that follows the forced submit.
     expect(await $("body").getText()).not.toContain("Recovery mode entered");
@@ -200,12 +201,14 @@ describe("the recovery entry (#364)", () => {
       expect(await form.$(`button=${label}`).isEnabled()).toBe(false);
       expect(await form.getText()).toContain("Needs recovery-admin");
     }
+    // once: no step has clicked or submitted yet, and the page sends a write only from a submit.
     // Nothing was sent by the page.
     expect((await writes()).filter(([, route]) => route !== "/recovery/entries")).toEqual([]);
     // The role gate also stops a submit that skips the disabled button, the confirmation typed.
     await fillRevocation({ iss: FIXTURE_ISSUER, sub: "h-viewer-revokee", reason: "viewer synthetic revocation" }, "h-viewer-revokee");
     await browser.execute(() => document.querySelector<HTMLFormElement>("main form[aria-label='Revoke identity']")!.requestSubmit());
     await browser.pause(1_000);
+    // once: read after the 1 s pause that follows the forced submit.
     expect((await writes()).filter(([, route]) => route !== "/recovery/entries")).toEqual([]);
     // once: read after the 1 s pause that follows the forced submit.
     expect(await revoke.$('[data-testid="write-result"]').isExisting()).toBe(false);
@@ -218,6 +221,7 @@ describe("the recovery entry (#364)", () => {
     expect(await $("main form[aria-label='Revoke identity']").$("button=Revoke identity").isEnabled()).toBe(false);
     await browser.execute(() => document.querySelector<HTMLFormElement>("main form[aria-label='Revoke identity']")!.requestSubmit());
     await browser.pause(1_000);
+    // once: read after the 1 s pause that follows the forced submit.
     expect(await revocations()).toEqual([]);
     // once: read after the 1 s pause that follows the forced submit.
     expect(await $("body").getText()).not.toContain("Revoked ");

@@ -177,7 +177,9 @@ describe("the state catalogue", () => {
     await faults({});
     await nav("Changes").click();
     await expect($("main h2")).toHaveText("Changes");
-    await expect(testid("offline")).not.toBeExisting({ wait: 10_000 });
+    // The held operations read of the first step can still answer late, so the banner is read again after it ended.
+    await eventually(async () => !(await testid("offline").isExisting()), "the offline banner gone after the next page's read");
+    await absent(() => testid("offline").isExisting(), "the offline banner after the next page's read");
     // Changes shows the drafts list's own status too, before the releases list's.
     await browser.waitUntil(async () => (await $$('main [data-testid="status"]').map((e) => e.getText())).includes("No releases published yet."),
       { timeout: 10_000, timeoutMsg: "Changes did not show its empty releases list" });
@@ -340,7 +342,8 @@ describe("recovery", () => {
     // The next page reads it again.
     await faults({ upstream: at });
     await nav("Changes").click();
-    await expect(testid("recovery-read")).not.toBeExisting({ wait: 10_000 });
+    await eventually(async () => !(await testid("recovery-read").isExisting()), "the banner's read state gone after the next page's read");
+    await absent(() => testid("recovery-read").isExisting(), "the banner's read state after the next page's read");
     await announced("recovery", new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}\\. No machine scopes\\. Drafts can be edited\\. ${literal(RECOVERY_START)}$`));
     expect(await testid("epoch").getText()).toBe(`Epoch ${epoch}`);
     expect(await testid("server").getText()).toMatch(SERVER);
