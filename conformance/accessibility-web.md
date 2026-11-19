@@ -8,8 +8,8 @@ accepted in [#255](https://github.com/ginsys/bronzeward/issues/255): keyboard on
 browser; screen reader on VoiceOver with Safari, and on NVDA with Firefox and with Chrome.
 
 An automated check is evidence for what it measures, not conformance (§13). Items whose views
-come with later tickets (approval, the plan evidence's focus order, reflow of the diff in review)
-are recorded by those tickets. The import wizard, the protected import review and the conflict
+come with later tickets (reflow of the diff in review) are recorded by those tickets; the plan page
+and its approval are in the last section of the keyboard and measured checks. The import wizard, the protected import review and the conflict
 view of the draft editor are recorded in the last section of the keyboard and measured checks.
 
 ## Keyboard and measured checks
@@ -109,14 +109,38 @@ The previous major of each browser (B6) ran the same specs, and every row above 
 
 Not run here: Safari, whose WebDriver needs a macOS runner.
 
+### Plan and approval screen (T8)
+
+The plan page of T8 (W7): the change, the prediction, the typed plan ID and Approve, and Revoke
+approval, from [#358](https://github.com/ginsys/bronzeward/issues/358). Automated, in
+`web/e2e/auth/approval.e2e.ts` ("keyboard only (T8)"), run by `mise run browser-auth` against a
+disposable deployment with synthetic data. The change shown on the plan is an injected unified diff of
+synthetic text; the approval and the revocation are the server's own. Recorded on 19 November 2026
+with Chrome 157, Edge 157, Firefox 160 and Firefox ESR 153 on Linux, from the `browser-auth` jobs of
+the pull request that added the cases (run pending). The keyboard cases failed on the unchanged product
+(Chrome 139, local): Approve and Revoke approval are disabled once the write is accepted, so focus fell
+to the page body; the page's answer now takes it.
+
+| Item | Screen and what is checked | chrome | edge | firefox | firefox-esr |
+| --- | --- | --- | --- | --- | --- |
+| 2.1.1 Keyboard, 2.1.2 No keyboard trap | the plan page by Tab alone: the change, then the typed plan ID field, then Approve by Enter; on an approved plan the reason field and Revoke approval by Enter; Tab moves on from every control | pending | pending | pending | pending |
+| 2.4.3 Focus order | Tab reaches the change before the typed plan ID field; after Approve and after Revoke approval, focus is in the page's answer and not on the page body | pending | pending | pending | pending |
+| 4.1.3 Status messages | the approval's recorded reasons are mirrored into the page's one `role="status"` region; where focus goes after each write is in the 2.4.3 row | pending | pending | pending | pending |
+| 1.4.3 Contrast | the plan page with its change: the lowest contrast of any shown text, measured in the page, at least 4.5:1 | pending | pending | pending | pending |
+| 1.4.10 Reflow | at 320 CSS pixels the plan page with a long change line does not scroll sideways | pending | pending | pending | pending |
+
+Not run here: the screen-reader half of T8, owed by [#447](https://github.com/ginsys/bronzeward/issues/447)
+(see the table below), and the keyboard path of the refusal cases (a forced submit by a user without
+`approver`, the 409 and 412 answers), which the same file checks by pointer and by the server's answer.
+
 ## Screen reader
 
-| Pass | T1 | T2 | T3 (to publication) | T4 | T5 | T6 | T7 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| VoiceOver with Safari | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed |
-| NVDA with Firefox | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed |
-| NVDA with Chrome | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed |
+| Pass | T1 | T2 | T3 (to publication) | T4 | T5 | T6 | T7 | T8 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| VoiceOver with Safari | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed |
+| NVDA with Firefox | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed |
+| NVDA with Chrome | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed |
 
-T3 to T7 are the tasks of [journeys §13](../docs/spec/operator-experience.md#13-usability-and-accessibility-acceptance). Their passes are owed by [#342](https://github.com/ginsys/bronzeward/issues/342), which closes on its automated acceptance.
+T3 to T8 are the tasks of [journeys §13](../docs/spec/operator-experience.md#13-usability-and-accessibility-acceptance). Their passes are owed by [#342](https://github.com/ginsys/bronzeward/issues/342), which closes on its automated acceptance, except T8's, which [#358](https://github.com/ginsys/bronzeward/issues/358) hands to [#447](https://github.com/ginsys/bronzeward/issues/447) below.
 
 [#447](https://github.com/ginsys/bronzeward/issues/447) holds these passes and closes when they run. [#334](https://github.com/ginsys/bronzeward/issues/334) closes on its automated acceptance, by the owner's decision of 1 November 2026.
