@@ -25,9 +25,14 @@ export const SERVER_TIMES_UNREAD = "The server's event times were not read, so t
 // A state change row also keeps the state it reached and its cause, which the outcome line names.
 export interface Row { id: string; line: string; at: string; server: boolean; to?: string; cause?: string }
 
-// A short server token (a state, a cause, a problem code): anything else is not shown.
+// A short server token (a state, a problem code): anything else is not shown.
 const TOKEN = /^[A-Za-z0-9_-]{1,64}$/;
 const token = (v: unknown): string | undefined => (typeof v === "string" && TOKEN.test(v) ? v : undefined);
+// A cause is a token or a sentence the server wrote (`internal/api/settle.go`: "a completion observation
+// contradicts the postconditions"). It is shown as text, so it needs no escaping; one with a control or
+// format character (a line feed, a bidirectional control) or over 300 characters is not shown.
+const CAUSE = /^[^\p{Cc}\p{Cf}]{1,300}$/u;
+const causeText = (v: unknown): string | undefined => (typeof v === "string" && CAUSE.test(v.trim()) ? v.trim() : undefined);
 
 // An event as a row: the shared reader's line, except that a state change names the state it reached
 // and why (`internal/api/recovery_acts.go` and the other writers of `operation-state` set `from`, `to`
@@ -36,7 +41,7 @@ export function rowOf(e: { id: string; type: string; data: unknown }, at: string
   const d = (typeof e.data === "object" && e.data !== null ? e.data : {}) as Record<string, unknown>;
   const to = e.type === "operation-state" ? token(d["to"]) : undefined;
   if (to === undefined) return { id: e.id, line: eventLine(e), at, server };
-  const [from, cause] = [token(d["from"]), token(d["cause"])];
+  const [from, cause] = [token(d["from"]), causeText(d["cause"])];
   return { id: e.id, line: `operation-state: ${from === undefined ? "" : `${from} → `}${to}${cause === undefined ? "" : ` (${cause})`}`, at, server, to, ...(cause !== undefined && { cause }) };
 }
 export interface TimelineView { rows: Row[]; cleared?: string; end?: ReactNode; done: boolean }
@@ -70,7 +75,7 @@ export function Outcome({ o, cause: why }: { o: Operation; cause?: string | unde
   // An apply-config error record names its cause and attempts; a publish or ingest problem document
   // names its code (`type`) and no attempts.
   const err: Record<string, unknown> = o.error ?? {};
-  const cause = token(err["cause"]) ?? token(typeof err["type"] === "string" ? err["type"].replace(/^urn:bronzeward:problem:/, "") : undefined);
+  const cause = causeText(err["cause"]) ?? token(typeof err["type"] === "string" ? err["type"].replace(/^urn:bronzeward:problem:/, "") : undefined);
   const n = typeof err["attempts"] === "number" ? err["attempts"] : 0;
   const count = `${n} ${n === 1 ? "attempt" : "attempts"}`;
   switch (o.state) {
@@ -80,7 +85,7 @@ export function Outcome({ o, cause: why }: { o: Operation; cause?: string | unde
         ? <Status testid="outcome">Completed. No applied release is recorded, so nothing is shown as applied.</Status>
         : (
           <Status testid="outcome">
-            Applied: release <Id id={applied.appliedRelease} /> is the machine's Applied release, confirmed by observation <Id id={applied.observation} />.
+            Applied: this operation applied release <Id id={applied.appliedRelease} />, confirmed by observation <Id id={applied.observation} />.
             {machine !== undefined && <> <Ref to={`/machines/${encodeURIComponent(machine)}`} id={machine}>Desired, Applied and Observed of the machine</Ref></>}
           </Status>
         );

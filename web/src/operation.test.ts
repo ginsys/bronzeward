@@ -170,11 +170,18 @@ describe("the timeline (ginsys/bronzeward#359, W8)", () => {
     expect(view.rows.every((r) => r.server)).toBe(true);
   });
 
-  test("a state change row names the state it reached and its cause, from short tokens only", () => {
+  test("a state change row names the state it reached and its cause, a token or a sentence the server wrote", () => {
     const state = (data: unknown) => rowOf({ id: "e1:3", type: "operation-state", data }, "2026-11-19T10:08:00Z", true);
     expect(state({ from: "unresolved", to: "cancelled", cause: "resolution" })).toMatchObject({ line: "operation-state: unresolved → cancelled (resolution)", to: "cancelled", cause: "resolution" });
-    expect(state({ to: "unresolved", cause: "a b" })).toMatchObject({ line: "operation-state: unresolved", to: "unresolved" });
-    expect(state({ to: "unresolved", cause: "a b" }).cause).toBeUndefined();
+    // The sentences `internal/api/settle.go` writes as causes.
+    expect(state({ from: "committed", to: "failed", cause: "a completion observation contradicts the postconditions" })).toMatchObject({ line: "operation-state: committed → failed (a completion observation contradicts the postconditions)", cause: "a completion observation contradicts the postconditions" });
+    expect(state({ to: "unresolved", cause: "no completion observation by the verification deadline" }).cause).toBe("no completion observation by the verification deadline");
+    // Not shown: a line feed, a bidirectional control, a cause over 300 characters, a state that is no token.
+    for (const cause of ["a\nb", "a‮b", "x".repeat(301), 7]) {
+      expect(state({ to: "unresolved", cause })).toMatchObject({ line: "operation-state: unresolved", to: "unresolved" });
+      expect(state({ to: "unresolved", cause }).cause).toBeUndefined();
+    }
+    expect(state({ to: "a b", cause: "resolution" })).toMatchObject({ line: "operation-state" });
     expect(state({ to: { x: 1 } })).toMatchObject({ line: "operation-state" });
     expect(rowOf({ id: "e1:1", type: "commitment", data: { generation: 3, to: "x" } }, "2026-11-19T10:08:00Z", true).to).toBeUndefined();
   });
@@ -214,7 +221,7 @@ describe("the timeline (ginsys/bronzeward#359, W8)", () => {
 
 describe("the outcome lines", () => {
   const states: [string, Partial<Operation>, RegExp][] = [
-    ["completed with an applied release", { state: "completed", result: { appliedRelease: "rel_aaaaaaaaaaaaaaaaaaaaaaaaaa", observation: "obs_aaaaaaaaaaaaaaaaaaaaaaaaaa" } }, /^Applied: release .* is the machine's Applied release, confirmed by observation .*Desired, Applied and Observed of the machine$/],
+    ["completed with an applied release", { state: "completed", result: { appliedRelease: "rel_aaaaaaaaaaaaaaaaaaaaaaaaaa", observation: "obs_aaaaaaaaaaaaaaaaaaaaaaaaaa" } }, /^Applied: this operation applied release .*, confirmed by observation .*Desired, Applied and Observed of the machine$/],
     ["completed with no applied release", { state: "completed", result: null }, /^Completed\. No applied release is recorded, so nothing is shown as applied\.$/],
     ["failed", { state: "failed", error: { outcome: "failed", cause: "verification-timeout", observation: "obs_a", attempts: 2 } }, /^Failed: verification-timeout \(2 attempts\)\.$/],
     ["rejected", { state: "rejected", error: { outcome: "rejected", cause: "invalid-config", attempts: 1 } }, /^Rejected: the node refused every attempt as invalid \(invalid-config\), 1 attempt\.$/],
@@ -233,6 +240,17 @@ describe("the outcome lines", () => {
     const problem = (type: string) => ({ type, title: "t", status: 503, instance: "req_a" }) as unknown as Operation["error"];
     expect(text(h(Outcome, { o: op({ state: "failed", error: problem("urn:bronzeward:problem:dependency-unavailable") }) }))).toBe("Failed: dependency-unavailable.");
     expect(text(h(Outcome, { o: op({ state: "failed", error: problem("urn:bronzeward:problem:x y") }) }))).toBe("Failed.");
+  });
+
+  test("a failed operation names the sentence the server wrote as its cause", () => {
+    const error = { outcome: "failed", cause: "a completion observation contradicts the postconditions", observation: "obs_a", attempts: 2 } as const;
+    expect(text(h(Outcome, { o: op({ state: "failed", error }) }))).toBe("Failed: a completion observation contradicts the postconditions (2 attempts).");
+    expect(text(h(Outcome, { o: op({ state: "failed", error: { ...error, cause: "a\nb" } }) }))).toBe("Failed (2 attempts).");
+  });
+
+  test("an unresolved operation names a sentence cause from its state change row", () => {
+    const row = rowOf({ id: "e1:3", type: "operation-state", data: { from: "committed", to: "unresolved", cause: "no completion observation by the verification deadline" } }, "2026-11-19T10:08:00Z", true);
+    expect(text(h(Outcome, { o: op({ state: "unresolved" }), cause: causeOf([row], "unresolved") }))).toMatch(/^Outcome unknown \(no completion observation by the verification deadline\)\. /);
   });
 
   test("a cancelled operation names its cause when an event gave one", () => {
