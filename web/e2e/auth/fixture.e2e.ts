@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { NOT_ACCEPTED, REVOKED } from "../../src/app.tsx";
 import { FIXTURE_API, FIXTURE_ISSUER, FIXTURE_PAGE } from "../auth.conf.ts";
-import { counts, fixtureSignIn, mint, storageEmpty, where } from "./helpers.ts";
+import { absent, counts, fixtureSignIn, mint, storageEmpty, where } from "./helpers.ts";
 
 const reading = () => $('[data-testid="reading"]');
 const ALL_ROLES = "viewer or author or publisher or approver or recovery-admin";
@@ -27,7 +27,7 @@ describe("a token the server does not accept", () => {
   for (const [defect, read] of cases) {
     it(`AUTH-02 ${defect}: 401, one renewal attempt, the browser's own reading`, async () => {
       expect(await fixtureSignIn("h-viewer", { defect })).toBe(NOT_ACCEPTED);
-      if (read === undefined) expect(await reading().isExisting()).toBe(false);
+      if (read === undefined) await absent(() => reading().isExisting(), "the browser's own reading after the refusal");
       else expect(await reading().getText()).toContain(read);
       expect((await counts()).refresh).toBe(1);
       await noLoop();
