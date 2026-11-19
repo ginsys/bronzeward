@@ -37,6 +37,9 @@ func (a *API) readNode(ctx context.Context, j job) (ingest.Unresolved, *refusal,
 		if ctx.Err() != nil {
 			return ingest.Unresolved{}, nil, errStop
 		}
+		if cause == "" { // a database failure, not a credential one: the run stops with it
+			return ingest.Unresolved{}, nil, err
+		}
 		return ingest.Unresolved{}, a.accessFailure(j, cause, "cluster", j.claim.Cluster, err), nil
 	}
 	v := cert.CA()

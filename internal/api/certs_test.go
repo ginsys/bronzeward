@@ -237,3 +237,34 @@ func TestObservationsFollowAReplacedKey(t *testing.T) {
 		t.Fatalf("the two observations name %+v; want one from %+v, then another, with its own serial, from %+v", got, oe.keyAct, second)
 	}
 }
+
+// A database failure while looking for the cluster's act is an error and no credential cause: neither
+// an observation nor an ingestion records it as a talos-access-unavailable failure (the context is
+// live, so nothing else would stop them).
+func TestCertForDatabaseFailureIsNoCause(t *testing.T) {
+	t.Run("observation", func(t *testing.T) {
+		oe := newObsEnv(t)
+		a := observer(t, oe.env, oe.x, options{})
+		mustExec(t, oe.db, "ALTER TABLE first_key_act RENAME TO first_key_act_away")
+		t.Cleanup(func() { mustExec(t, oe.db, "ALTER TABLE first_key_act_away RENAME TO first_key_act") })
+		if _, cause, err := a.certFor(t.Context(), oe.cluster, role.Admin, time.Minute); err == nil || cause != "" {
+			t.Fatalf("certFor = cause %q, %v; want an error and no cause", cause, err)
+		}
+		if _, err := a.observe(t.Context(), oe.machine, observeFor{purpose: "drift"}); err == nil {
+			t.Fatal("observe recorded a database failure as a talos-access-unavailable observation")
+		}
+		if n := count(t, oe.db, `SELECT count(*) FROM observation WHERE machine = $1`, oe.machine); n != 0 {
+			t.Fatalf("%d observations recorded; want none", n)
+		}
+	})
+	t.Run("ingestion", func(t *testing.T) {
+		me := newMachineEnv(t)
+		mustExec(t, me.db, "ALTER TABLE first_key_act RENAME TO first_key_act_away")
+		t.Cleanup(func() { mustExec(t, me.db, "ALTER TABLE first_key_act_away RENAME TO first_key_act") })
+		op, j := me.startJob(t, map[string]any{"source": "machine", "document": nil})
+		me.runWith(t, options{nodeTimeout: 500 * time.Millisecond}, j)
+		if r := readOp(t, me.db, op); r.state == "failed" {
+			t.Fatalf("a database failure ended the ingestion as a refusal: %+v", r.error)
+		}
+	})
+}
