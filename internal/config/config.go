@@ -27,10 +27,10 @@ type Config struct {
 	// Provider is optional: nil when absent, validated when present. Nothing in the server reads
 	// it yet; it configures internal/provider.
 	Provider *Provider `yaml:"provider"`
-	// Talos holds the one deployment-wide limit on the certificates Bronzeward signs. There is no
-	// talosconfig file: each use signs its own certificate from the cluster's CA key
-	// (persistence-api §3.3, §3.4).
-	Talos Talos `yaml:"talos"`
+	// Talos holds the one deployment-wide limit on the certificates Bronzeward signs. The block is
+	// optional and never nil after Load: absent, it is the default. There is no talosconfig file: each
+	// use signs its own certificate from the cluster's CA key (persistence-api §3.3, §3.4).
+	Talos *Talos `yaml:"talos"`
 	// Ingestion is required with Provider and refused without it: ingestion is what uses it.
 	Ingestion *Ingestion `yaml:"ingestion"`
 }
@@ -46,21 +46,19 @@ type Ingestion struct {
 	Sweep          time.Duration `yaml:"sweep"`
 }
 
-// DefaultMaxCertLifetime is Talos.MaxCertLifetime when none is configured.
+// DefaultMaxCertLifetime is Talos.MaxCertLifetime when the talos block is absent.
 const DefaultMaxCertLifetime = 15 * time.Minute
 
-// Talos is the limit a use's certificate lifetime is held under (persistence-api.md §3.4).
+// Talos is the limit a use's certificate lifetime is held under (persistence-api.md §3.4). A block
+// that is present names the limit: an omitted or zero value is refused, never defaulted.
 type Talos struct {
 	// MaxCertLifetime is the longest lifetime a signed certificate may be asked for. A use that
-	// needs more is refused, never given a shorter certificate. Default 15m.
+	// needs more is refused, never given a shorter certificate.
 	MaxCertLifetime time.Duration `yaml:"maxCertLifetime"`
 }
 
 func (t *Talos) validate() error {
-	if t.MaxCertLifetime == 0 {
-		t.MaxCertLifetime = DefaultMaxCertLifetime
-	}
-	if t.MaxCertLifetime < 0 {
+	if t.MaxCertLifetime <= 0 {
 		return errors.New("config: talos.maxCertLifetime must be positive")
 	}
 	// A certificate states its NotAfter to the second, so a finer limit could not be met exactly.
@@ -283,6 +281,9 @@ func Load(r io.Reader) (Config, error) {
 	}
 	if err := c.Execution.validate(); err != nil {
 		return Config{}, err
+	}
+	if c.Talos == nil {
+		c.Talos = &Talos{MaxCertLifetime: DefaultMaxCertLifetime}
 	}
 	if err := c.Talos.validate(); err != nil {
 		return Config{}, err
