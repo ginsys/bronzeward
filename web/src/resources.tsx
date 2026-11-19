@@ -1,7 +1,7 @@
 // The read-only lists and items besides the machines (#334): sources and their revisions,
 // releases, plans, operations, acts and dependencies with their releases and alerts. Every
 // resource has its path (B3) and every identifier links to its view where it has one. The release
-// review, plan and drift actions, and the operation watch come with their own tickets.
+// review, plan and drift actions come with their own tickets; an operation's timeline is operation.tsx.
 
 import { Fragment as Group, type ReactNode, useCallback, useRef, useState } from "react";
 import type { components } from "./api/v1";
@@ -15,6 +15,7 @@ import { IngestionItem, StartImport } from "./imports.tsx";
 import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
+import { Outcome, OperationTimeline } from "./operation.tsx";
 import { RecoveryConsole } from "./recovery.tsx";
 import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
@@ -420,11 +421,16 @@ const ATTEMPTS: readonly Col<S["AttemptBody"]>[] = [
 const Record = ({ v }: { v: unknown }) => (v === null ? "none" : <pre>{JSON.stringify(v, null, 2)}</pre>);
 
 export function OperationItem({ id }: { id: string }) {
+  // The timeline bumps `n` soon after events arrive, so the state and outcome follow the operation.
+  const [n, setN] = useState(0);
+  const reread = useCallback(() => setN((x) => x + 1), []);
   return (
-    <ItemOf<S["OperationBody"]> path={`/operations/${encodeURIComponent(id)}`} what="the operation"
+    <ItemOf<S["OperationBody"]> path={`/operations/${encodeURIComponent(id)}`} what="the operation" n={n}
       title={(o) => `Operation ${short(id)}${o === undefined ? "" : `: ${o.kind}, ${o.state}`}`}>
       {(o) => (
         <>
+          <Outcome o={o} />
+          <OperationTimeline id={id} reread={reread} />
           <Fields rows={[
             ["Kind", o.kind], ["State", o.state], ["Subject", <Subject s={o.subject} />], ["Created", <>{when(o.createdAt)} by {by(o.createdBy)}</>],
             ["Epoch", o.epoch], ["Last event", o.lastEvent], ["Result", <Record v={o.result} />], ["Error", <Record v={o.error} />],
