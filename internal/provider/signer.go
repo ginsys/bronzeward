@@ -91,11 +91,27 @@ func NewSigner(addr string, tok Token) (*Signer, error) {
 // ErrAbsent; a policy refusal is ErrDenied; an answer that is not one live version holding both
 // members as non-empty strings is ErrProtocol.
 func (s *Signer) ReadCAKey(ctx context.Context, cluster string) (CAKey, error) {
+	return s.readCAKey(ctx, cluster, 0)
+}
+
+// ReadCAKeyVersion reads the one version of cluster's CA key that a first-key act names, never
+// "latest" (persistence-api.md §3.4): a stored version no act names is inert. A version that is
+// missing, soft-deleted or destroyed is ErrAbsent, and no other version is read in its place; the
+// rest is as ReadCAKey.
+func (s *Signer) ReadCAKeyVersion(ctx context.Context, cluster string, version int) (CAKey, error) {
+	if version < 1 {
+		return CAKey{}, errors.New("provider: a ca key version is a positive integer")
+	}
+	return s.readCAKey(ctx, cluster, version)
+}
+
+// readCAKey is a CA key read at version, or at the latest when version is 0.
+func (s *Signer) readCAKey(ctx context.Context, cluster string, version int) (CAKey, error) {
 	p, err := CAKeyPath(cluster)
 	if err != nil {
 		return CAKey{}, err
 	}
-	l, err := readLatest(ctx, s.c, p)
+	l, err := readKV(ctx, s.c, p, version)
 	if err != nil {
 		return CAKey{}, err
 	}

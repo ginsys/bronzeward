@@ -32,7 +32,7 @@ func signerStandIn(t *testing.T, handler http.HandlerFunc) (*Signer, *recorder) 
 		if err != nil {
 			t.Errorf("reading the request body: %v", err)
 		}
-		rec.add(request{r.Method, r.URL.Path, r.Header.Get("X-Vault-Token"), body})
+		rec.add(request{r.Method, r.URL.RequestURI(), r.Header.Get("X-Vault-Token"), body}) // the path with its query, as compiler_test does
 		handler(w, r)
 	}))
 	t.Cleanup(srv.Close)
@@ -81,6 +81,84 @@ func TestReadCAKey(t *testing.T) {
 	k.Key()[0] = 'X'
 	if string(k.Key()) != keyText {
 		t.Fatal("Key shares its bytes")
+	}
+}
+
+// A read at a named version asks for that version and nothing else (persistence-api.md §3.4): the
+// request carries ?version=N, and an answer for another version is refused, never used.
+func TestReadCAKeyVersion(t *testing.T) {
+	cl := id.New(id.Cluster)
+	s, rec := signerStandIn(t, func(w http.ResponseWriter, r *http.Request) {
+		respond(t, w, 200, kvRead(map[string]any{"ca": caText, "key": keyText}, kvMetadata(3, "2026-11-19T01:02:03Z")))
+	})
+	k, err := s.ReadCAKeyVersion(t.Context(), cl, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rec.last()
+	if got.method != http.MethodGet || got.path != "/v1/secret/data/access/talos-ca/"+cl+"?version=3" {
+		t.Fatalf("request %s %s", got.method, got.path)
+	}
+	if v := k.Version(); v.Version != 3 || v.Path != "access/talos-ca/"+cl {
+		t.Fatalf("version %+v", v)
+	}
+	// The provider answers a newer version than the one asked: refused, not used.
+	s, _ = signerStandIn(t, func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, 200, kvRead(map[string]any{"ca": caText, "key": keyText}, kvMetadata(4, "2026-11-19T01:02:03Z")))
+	})
+	if _, err := s.ReadCAKeyVersion(t.Context(), cl, 3); !errors.Is(err, ErrProtocol) {
+		t.Errorf("an answer for another version: %v, want ErrProtocol", err)
+	}
+	// The control: ReadCAKey takes whatever the latest is, so the same answer passes. A check that
+	// cannot tell the two apart proves nothing.
+	if _, err := s.ReadCAKey(t.Context(), cl); err != nil {
+		t.Errorf("the latest read of the same answer: %v", err)
+	}
+}
+
+// A named version that is soft-deleted or destroyed is refused with no fallback: OpenBao answers it
+// 404, and a 200 whose metadata says deleted or destroyed is not live. Exactly one request is made,
+// so no other version is read in its place.
+func TestReadCAKeyVersionGone(t *testing.T) {
+	cl := id.New(id.Cluster)
+	for name, c := range map[string]struct {
+		status int
+		md     func() map[string]any
+		want   error
+	}{
+		"404 for a deleted or destroyed version": {404, nil, ErrAbsent},
+		"deleted in the metadata": {200, func() map[string]any {
+			md := kvMetadata(2, "2026-11-19T01:02:03Z")
+			md["deletion_time"] = "2026-11-19T02:00:00Z"
+			return md
+		}, ErrProtocol},
+		"destroyed in the metadata": {200, func() map[string]any {
+			md := kvMetadata(2, "2026-11-19T01:02:03Z")
+			md["destroyed"] = true
+			return md
+		}, ErrProtocol},
+	} {
+		s, rec := signerStandIn(t, func(w http.ResponseWriter, _ *http.Request) {
+			if c.md == nil {
+				respond(t, w, c.status, map[string]any{"errors": []string{}})
+				return
+			}
+			respond(t, w, c.status, kvRead(map[string]any{"ca": caText, "key": keyText}, c.md()))
+		})
+		if _, err := s.ReadCAKeyVersion(t.Context(), cl, 2); !errors.Is(err, c.want) {
+			t.Errorf("%s: %v, want %v", name, err, c.want)
+		}
+		if n := len(rec.all()); n != 1 {
+			t.Errorf("%s: %d requests, want exactly the one for the named version", name, n)
+		}
+	}
+	// Refused before sending: no version below 1, and no non-cluster id.
+	s, rec := signerStandIn(t, func(http.ResponseWriter, *http.Request) {})
+	if _, err := s.ReadCAKeyVersion(t.Context(), cl, 0); err == nil {
+		t.Error("version 0 was accepted")
+	}
+	if _, err := s.ReadCAKeyVersion(t.Context(), "cl_../../sys", 1); err == nil || len(rec.all()) != 0 {
+		t.Errorf("a non-cluster id: %v, %d requests", err, len(rec.all()))
 	}
 }
 
@@ -234,7 +312,7 @@ func (withSignerList) List(context.Context, string) ([]string, error) { return n
 // The signer identity reads and writes the one CA key path and does nothing else: no list, no delete,
 // no metadata read, no Transit operation, whatever its policy would allow.
 func TestSignerMethodSet(t *testing.T) {
-	want := []string{"ReadCAKey", "WriteCAKey"}
+	want := []string{"ReadCAKey", "ReadCAKeyVersion", "WriteCAKey"}
 	if got := methodNames(reflect.TypeFor[*Signer]()); !slices.Equal(got, want) {
 		t.Fatalf("*Signer exports %q, want exactly %q", got, want)
 	}
