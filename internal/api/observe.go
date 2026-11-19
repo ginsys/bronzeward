@@ -141,6 +141,9 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 			if ctx.Err() != nil {
 				return observed{}, ctx.Err()
 			}
+			if cause == "" { // a database failure, not a credential one: nothing is recorded as it
+				return observed{}, err
+			}
 			a.quoteObservation(o.ID, cause, err)
 			o.unreadAll(cause, "identity", "runningVersion", "configuration", "assignmentEvidence")
 			return o, a.recordObservation(ctx, machine, f, &o)
