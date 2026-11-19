@@ -389,16 +389,17 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		case p != nil && a.replayed:
 			// The key's stored refusal, replayed: the earlier attempt's known outcome (§8.4 item 2).
 			return nil, &Blocked{a.err, []string{"This is the stored answer to an earlier attempt with this key: that attempt was refused."}}
+		case w.Once && code == "talos-access-unavailable":
+			// The route's one answer that says nothing was stored: a refusal, but a repeat's stays unknown.
+			return nil, c.after(ambiguous, w, u, a.err)
+		case w.Once && a.status >= 500 || w.Once && p == nil && a.status == 0:
+			// The route stores the key before it commits, so any other failure, whatever its code, may
+			// follow the store: the outcome is unknown, and nothing is repeated.
+			return nil, c.after(true, w, u, a.err)
 		case p == nil && (a.status == 0 || a.status >= 500), p != nil && (code == "internal-error" || a.status >= 500 && !p.unavailable() && code != "epoch-superseded"):
 			ambiguous = true
-			if w.Once {
-				return nil, c.after(true, w, u, a.err)
-			}
-		case p != nil && p.unavailable() && w.Once:
-			// Only the talos-access-unavailable of the route says nothing was stored.
-			return nil, c.after(ambiguous || code != "talos-access-unavailable", w, u, a.err)
 		case p != nil && p.unavailable():
-		case p != nil && p.Status == http.StatusUnauthorized && c.signIn != nil && !renewed && !c.signIn.failed && c.signIn.tokens.RefreshToken != "":
+		case p != nil && p.Status == http.StatusUnauthorized && c.signIn != nil && !renewed && !c.signIn.failed && c.signIn.tokens.RefreshToken != "" && !w.Once:
 			renewed = true
 			if rerr := c.renew(); rerr != nil {
 				fmt.Fprintf(c.Notices, "%s: %s.\n", c.Context.Where(), Shown(rerr))
@@ -422,6 +423,10 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			return nil, c.setAside(w, u, ambiguous)
 		case code == "epoch-mismatch":
 			u.Why = "the epoch is now " + printable(fmt.Sprint(p.Doc["epoch"])) + ", and this send committed nothing"
+			if w.Once { // the lookup that refused may be the one after the route stored the key
+				u.Why = "the epoch is now " + printable(fmt.Sprint(p.Doc["epoch"])) + ", and the route may have stored the key before it moved"
+				ambiguous = true
+			}
 			return nil, c.setAside(w, u, ambiguous)
 		case code == "idempotency-key-reused" && (try > 0 || w.Repeat != nil):
 			u.Why = "the key is recorded for another request; this send did nothing, and the original outcome is still unknown"

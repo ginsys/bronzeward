@@ -304,20 +304,26 @@ func TestFirstKeyNeverLeavesTheKey(t *testing.T) {
 	for _, c := range []struct {
 		answer func(int, http.ResponseWriter, *http.Request)
 		args   []string
+		code   int
+		shows  string // what the run prints, so a run that stopped before the request cannot pass
 	}{
-		{nil, nil},
-		{quoting, nil},
-		{refuse(503, "dependency-unavailable", ""), nil},
-		{nil, []string{"-o", "json"}},
-		{nil, []string{"-o", "yaml"}},
-		{quoting, []string{"-v"}},
+		{nil, nil, 0, "stored as CA key version"},
+		{quoting, nil, 1, "the rule first-key-unusable"},
+		{refuse(503, "dependency-unavailable", ""), nil, 3, "outcome unknown"},
+		{nil, []string{"-o", "json"}, 0, `"caKeyVersion"`},
+		{nil, []string{"-o", "yaml"}, 0, "caKeyVersion:"},
+		{quoting, []string{"-v"}, 1, "the rule first-key-unusable"},
 	} {
 		f.answer = c.answer
 		args := fkArgs(file)
 		if len(c.args) > 0 { // global flags come before the command
 			args = append(append([]string(nil), c.args...), args...)
 		}
-		_, out, errOut := runCtl(t, args...)
+		before := len(f.sent())
+		code, out, errOut := runCtl(t, args...)
+		if code != c.code || !strings.Contains(out+errOut, c.shows) || len(f.sent()) != before+1 {
+			t.Errorf("%v: exit %d (want %d), %d requests sent (want 1), output %q; want it to hold %q", c.args, code, c.code, len(f.sent())-before, out+errOut, c.shows)
+		}
 		all.WriteString(out + errOut)
 	}
 	for _, c := range append([]string{fkPlanted}, canaries...) {
