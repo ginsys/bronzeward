@@ -80,7 +80,7 @@ assertions failed on the unchanged product and pass on all four browsers since
 [#905](https://github.com/ginsys/bronzeward/pull/905). The publish screen of T3 is not run here:
 [#897](https://github.com/ginsys/bronzeward/issues/897).
 
-The previous major of each browser (B6) ran the same specs, and every row above passes on Chrome 156.0.8078.80, Edge 156.0.4314.58 and Firefox 159.0.1 ([run of 19 November 2026](https://github.com/ginsys/bronzeward/actions/runs/44432276292), 14 of 14 spec files in each browser; the builds and sources are in the [browsers section of the conformance README](README.md#browsers)).
+The previous major of each browser (B6) ran the same specs, and every row above passes on Chrome 156.0.8078.80, Edge 156.0.4314.58 and Firefox 159.0.1 ([run of 19 November 2026](https://github.com/ginsys/bronzeward/actions/runs/44437080904), 14 of 14 spec files in each browser; the builds and sources are in the [browsers section of the conformance README](README.md#browsers)).
 
 Not run here: Safari, whose WebDriver needs a macOS runner.
 
