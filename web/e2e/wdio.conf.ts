@@ -148,10 +148,16 @@ export const config: WebdriverIO.Config = {
           const o = [...e.options];
           const hit = how === "selectByIndex" ? o[Number(x)] : how === "selectByVisibleText" ? o.find((p) => p.text.trim() === String(x).trim()) : o.find((p) => String(p.getAttribute(String(x))) === String(y));
           if (hit === undefined) return { error: "no such option" };
+          // The shortest start of the label that no other option's label shares: typing all of a long
+          // label is no better, and its punctuation need not reach the page.
           const label = hit.text;
-          const earlier = o.slice(0, o.indexOf(hit)).some((p) => p.text.startsWith(label));
+          const lower = label.toLowerCase();
+          let typed = "";
+          for (let n = 1; n <= label.length && typed === ""; n++) {
+            if (o.filter((p) => p.text.toLowerCase().startsWith(lower.slice(0, n))).length === 1) typed = label.slice(0, n);
+          }
           if (e.value !== hit.value) e.focus();
-          return { value: hit.value, label, same: e.value === hit.value, ambiguous: label === "" || earlier };
+          return { value: hit.value, label, typed, same: e.value === hit.value, ambiguous: typed === "" };
         }, this as unknown as HTMLSelectElement, name, a, b);
         if ("error" in found) throw new Error(`${name}(${String(a)}${b === undefined ? "" : `, ${String(b)}`}): ${found.error}`);
         if (found.same) return;
@@ -160,10 +166,10 @@ export const config: WebdriverIO.Config = {
         // as the two labels one after the other, and found nowhere.
         const quiet = TYPE_AHEAD_MS - (Date.now() - typedAt);
         if (quiet > 0) await browser.pause(quiet);
-        await browser.keys(found.label.split(""));
+        await browser.keys(found.typed.split(""));
         typedAt = Date.now();
         const now = await browser.execute((e: HTMLSelectElement) => e.value, this as unknown as HTMLSelectElement);
-        if (now !== found.value) throw new Error(`${name}: typing "${found.label}" left the select at "${now}", not "${found.value}"`);
+        if (now !== found.value) throw new Error(`${name}: typing "${found.typed}" left the select at "${now}", not "${found.value}"`);
       }, { attachToElement: true });
     }
   },
