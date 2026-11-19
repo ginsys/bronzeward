@@ -39,12 +39,15 @@ type observationBody struct {
 	Unread                map[string]unreadValue `json:"unread"`
 }
 
-// accessVersionBody is the Talos access version an observation read (persistence-api.md §3.3):
-// its provider path, version and creation time, never the talosconfig.
+// accessVersionBody is the Talos access an observation read (persistence-api.md §3.3): its provider
+// path, version and creation time and, when it read through a certificate, that certificate's serial
+// and NotAfter (null for an observation that used the stored talosconfig), never a credential.
 type accessVersionBody struct {
-	Path    string `json:"path"`
-	Version int    `json:"version"`
-	Created string `json:"created"`
+	Path     string  `json:"path"`
+	Version  int     `json:"version"`
+	Created  string  `json:"created"`
+	Serial   *string `json:"serial"`
+	NotAfter *string `json:"notAfter"`
 }
 
 // machineNamed refuses with 404 unless v is a machine the database holds.
@@ -70,7 +73,8 @@ func listObservations(a *API, w http.ResponseWriter, q *request) {
 			return "", nil, err
 		}
 		out, err := listRows(ctx, tx, q, id.Observation, `SELECT o.id, o.machine, o.basis, o.revision, s.purpose, s.plan, s.operation, s.publication_generation,
-				s.endpoint, s.controller, se.at, o.at, o.access_path, o.access_version, o.access_created, o.smbios_uuid::text,
+				s.endpoint, s.controller, se.at, o.at, o.access_path, o.access_version, o.access_created, o.access_serial,
+				to_char(o.access_not_after AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), o.smbios_uuid::text,
 				o.talos_node_id, o.talos_cluster_id, o.assignment_evidence, o.running_version, o.resource_version, o.health, o.unread
 			FROM observation o
 			JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
@@ -83,10 +87,11 @@ func listObservations(a *API, w http.ResponseWriter, q *request) {
 func scanObservation(r *sql.Rows) (observationBody, string, error) {
 	var b observationBody
 	var plan, operation, path, created sql.NullString
+	var serial, notAfter *string
 	var version sql.NullInt64
 	var health, unread []byte
 	err := r.Scan(&b.ID, &b.Machine, &b.Basis, &b.Revision, &b.Purpose, &plan, &operation, &b.PublicationGeneration, &b.Endpoint, &b.Controller,
-		&b.StartedAt, &b.At, &path, &version, &created, &b.SMBIOSUUID, &b.TalosNodeID, &b.TalosClusterID,
+		&b.StartedAt, &b.At, &path, &version, &created, &serial, &notAfter, &b.SMBIOSUUID, &b.TalosNodeID, &b.TalosClusterID,
 		&b.AssignmentEvidence, &b.RunningVersion, &b.ResourceVersion, &health, &unread)
 	if err != nil {
 		return b, "", err
@@ -98,7 +103,7 @@ func scanObservation(r *sql.Rows) (observationBody, string, error) {
 		b.Operation = &operation.String
 	}
 	if path.Valid {
-		b.Access = &accessVersionBody{Path: path.String, Version: int(version.Int64), Created: created.String}
+		b.Access = &accessVersionBody{Path: path.String, Version: int(version.Int64), Created: created.String, Serial: serial, NotAfter: notAfter}
 	}
 	if health != nil {
 		b.Health = health

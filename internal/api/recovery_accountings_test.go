@@ -244,11 +244,14 @@ func TestNewStartsRecoveryReads(t *testing.T) {
 	t.Parallel()
 	ae := newAttemptEnv(t, "")
 	ae.enterStopped(t, time.Now().Add(-time.Hour))
+	// The observations sign a certificate and dial: a closed local port refuses at once, where the
+	// inventory's address would hold every read to its node timeout.
+	mustExec(t, ae.db, `UPDATE machine SET talos_endpoint = '127.0.0.1:1'`)
 	ex := testExecution()
 	ex.SettleFloor = 3 * time.Second
 	life, stop := context.WithCancel(t.Context())
 	h := New(life, ae.db, auth.NewVerifier(ae.cfg, ae.db, auth.Discover(ae.cfg.OIDC)), ae.cfg, ex, nil, nil,
-		&fakeExecutor{err: errors.New("no access in this test")}, nil, &config.Ingestion{Instance: "a", Heartbeat: time.Hour, Lease: 2 * time.Hour},
+		&fakeExecutor{err: errors.New("no access in this test")}, ae.signer(), 0, &config.Ingestion{Instance: "a", Heartbeat: time.Hour, Lease: 2 * time.Hour},
 		epoch(t, ae.db), false, nil)
 	defer stopping(h.(*API), stop)
 	deadline := time.Now().Add(10 * time.Second)

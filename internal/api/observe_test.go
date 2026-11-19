@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -248,9 +249,8 @@ func TestObserveDrift(t *testing.T) {
 	if fmt.Sprint(r.obsEntry) != fmt.Sprint(map[string]any{"observation": r.id, "purpose": "drift", "basis": float64(r.basis)}) {
 		t.Fatalf("observation entry %v", r.obsEntry)
 	}
-	if r.accessPath.String != "access/talos/"+oe.cluster || r.accessVersion.Int64 != 3 ||
-		r.accessCreated.String != "2026-10-02T09:00:00.123456Z" {
-		t.Fatalf("access %v %v %v", r.accessPath, r.accessVersion, r.accessCreated)
+	if !recordedFrom(t, oe.db, r.id, got.Access, oe.keyAct) {
+		t.Fatalf("access %v %v %v; returned %+v, want a certificate from %+v", r.accessPath, r.accessVersion, r.accessCreated, got.Access, oe.keyAct)
 	}
 	if r.smbios.String != uuidA || r.nodeID.String != nodeA || r.clusterID.String != oe.clusterID || r.assignment.String != oe.head ||
 		r.runningVersion.String != "v1.14.5" || string(r.digest) != string(want[:]) || r.resourceVersion.String == "" || r.health.Valid {
@@ -259,7 +259,7 @@ func TestObserveDrift(t *testing.T) {
 	if fmt.Sprint(r.unread) != fmt.Sprint(map[string]map[string]string{"health": {"cause": "none-bound"}}) {
 		t.Fatalf("unread %v", r.unread)
 	}
-	if got.Digest == nil || *got.Digest != want || got.AssignmentEvidence != oe.head || got.Access == nil || *got.Access != oe.accessOf {
+	if got.Digest == nil || *got.Digest != want || got.AssignmentEvidence != oe.head || !got.Access.signedFrom(oe.keyAct) {
 		t.Fatalf("returned %+v", got)
 	}
 	for _, md := range oe.node.Seen() {
@@ -312,7 +312,11 @@ func TestObserveStartCommittedBeforeRead(t *testing.T) {
 			ON e.machine = s.machine AND e.revision = s.revision WHERE s.machine = $1`, oe.machine)
 	}
 	var atRead, atDial int
-	oe.x.onRead = func() { atRead = started() }
+	oe.keys.kv.before = func(method, _ string) {
+		if method == http.MethodGet {
+			atRead = started()
+		}
+	}
 	dial := func(ctx context.Context, tc []byte, endpoint string) (talos.Reader, error) {
 		atDial = started()
 		return talos.Dial(ctx, tc, endpoint)
@@ -331,20 +335,41 @@ func TestObserveStartCommittedBeforeRead(t *testing.T) {
 // talos-access-unavailable and the provider-side cause; the node is never dialled.
 func TestObserveAccessReadFails(t *testing.T) {
 	t.Parallel()
+	forced := func(status int) func(*testing.T, *obsEnv) {
+		return func(_ *testing.T, oe *obsEnv) {
+			oe.keys.kv.mu.Lock()
+			defer oe.keys.kv.mu.Unlock()
+			oe.keys.kv.status["GET"] = status
+		}
+	}
 	for name, c := range map[string]struct {
-		err   error
+		set   func(*testing.T, *obsEnv)
 		cause string
 	}{
-		"absent":              {fmt.Errorf("provider: GET: %w", provider.ErrAbsent), "absent"},
-		"denied":              {fmt.Errorf("provider: GET: %w", provider.ErrDenied), "denied"},
-		"malformed":           {fmt.Errorf("provider: GET: %w", provider.ErrProtocol), "malformed"},
-		"sealed":              {fmt.Errorf("provider: GET: %w", provider.ErrUnavailable), "provider-unavailable"},
-		"unclassified status": {fmt.Errorf("provider: GET: %w", provider.ErrStatus), "provider-unavailable"},
+		"no first-key act": {func(t *testing.T, oe *obsEnv) {
+			mustExec(t, oe.db, `ALTER TABLE first_key_act DISABLE TRIGGER immutable_rows`)
+			mustExec(t, oe.db, `DELETE FROM first_key_act WHERE cluster = $1`, oe.cluster)
+			mustExec(t, oe.db, `ALTER TABLE first_key_act ENABLE TRIGGER immutable_rows`)
+		}, "absent"},
+		"version gone": {func(_ *testing.T, oe *obsEnv) { oe.keys.kv.destroy(oe.keyAct.Path, oe.keyAct.Version) }, "version-gone"},
+		"version written again": {func(_ *testing.T, oe *obsEnv) {
+			oe.keys.kv.mu.Lock()
+			defer oe.keys.kv.mu.Unlock()
+			oe.keys.kv.versions[oe.keyAct.Path][0].created = oe.keyAct.CreatedTime.Add(time.Hour)
+		}, "version-changed"},
+		"denied": {forced(http.StatusForbidden), "denied"},
+		"malformed": {func(_ *testing.T, oe *obsEnv) {
+			oe.keys.kv.mu.Lock()
+			defer oe.keys.kv.mu.Unlock()
+			oe.keys.kv.garble = true
+		}, "malformed"},
+		"sealed":              {forced(http.StatusServiceUnavailable), "provider-unavailable"},
+		"unclassified status": {forced(http.StatusTeapot), "provider-unavailable"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			oe := newObsEnv(t)
-			oe.x.err = c.err
+			c.set(t, oe)
 			got, err := observer(t, oe.env, oe.x, options{}).observe(t.Context(), oe.machine, observeFor{purpose: "drift"})
 			if err != nil {
 				t.Fatal(err)
@@ -379,12 +404,12 @@ func TestObserveNodeReadFails(t *testing.T) {
 		cause  string
 		unread []string // the node values unread for cause; all when every value
 	}{
-		"malformed talosconfig": {func(_ *testing.T, oe *obsEnv) {
-			bad := strings.Replace(string(oe.pki.Talosconfig("", "", "")), "ca: ", "ca: not-base64-", 1)
-			oe.x.access = provider.NewTalosAccess(oe.accessOf, []byte(bad))
-		}, "talosconfig", all},
-		"a credential Talos refuses": {func(t *testing.T, oe *obsEnv) {
-			oe.x.access = provider.NewTalosAccess(oe.accessOf, talostest.NewPKI(t).Talosconfig("", "", ""))
+		"a certificate Talos refuses": {func(t *testing.T, oe *obsEnv) {
+			other := newTalosCA(t) // the node trusts another CA than the one the signer holds
+			oe.keys.kv.mu.Lock()
+			defer oe.keys.kv.mu.Unlock()
+			v := &oe.keys.kv.versions[oe.keyAct.Path][0]
+			v.ca, v.key = string(other.Crt), string(other.Key)
 		}, "node-unreachable", all},
 		"an endpoint that does not answer": {func(t *testing.T, oe *obsEnv) {
 			oe.setEndpoint(t, oe.machine, silentEndpoint(t))
@@ -411,7 +436,7 @@ func TestObserveNodeReadFails(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := readObs(t, oe.db, oe.machine)
-			if r.accessVersion.Int64 != 3 || r.assignment.String != oe.head || r.health.Valid {
+			if r.accessVersion.Int64 != int64(oe.keyAct.Version) || r.assignment.String != oe.head || r.health.Valid {
 				t.Fatalf("access %v, assignment %v, health %v", r.accessVersion, r.assignment, r.health)
 			}
 			want := map[string]map[string]string{"health": {"cause": "none-bound"}}
@@ -455,18 +480,23 @@ func TestObserveUnassigned(t *testing.T) {
 // alone; under quoteErrors, which logs the error text, the scan catches the key, so it can fail.
 func TestObserveErrorTextControl(t *testing.T) {
 	t.Parallel()
-	quoting := func(_ context.Context, tc []byte, _ string) (talos.Reader, error) {
-		return nil, errors.New("talos: cannot parse " + string(tc))
-	}
 	for _, quote := range []bool{false, true} {
 		t.Run(fmt.Sprint("quoteErrors=", quote), func(t *testing.T) {
 			t.Parallel()
 			oe := newObsEnv(t)
+			var signedKey string // the key this observation's certificate was signed with
+			quoting := func(_ context.Context, tc []byte, _ string) (talos.Reader, error) {
+				signedKey = clientKey(tc)
+				return nil, errors.New("talos: cannot parse " + string(tc))
+			}
 			if _, err := observer(t, oe.env, oe.x, options{dial: quoting, quoteErrors: quote}).observe(t.Context(), oe.machine,
 				observeFor{purpose: "drift"}); err != nil {
 				t.Fatal(err)
 			}
-			if got := oe.leaks(t); got != quote {
+			if signedKey == "" {
+				t.Fatal("the dial was given no client key to scan for")
+			}
+			if got := oe.leaks(t, signedKey); got != quote {
 				t.Fatalf("leaked %v with quoteErrors %v", got, quote)
 			}
 		})
@@ -526,14 +556,19 @@ func TestObserveRefusesStaleOwner(t *testing.T) {
 	if n := count(t, oe.db, `SELECT count(*) FROM observation_start WHERE machine = $1`, oe.machine); n != 0 {
 		t.Fatalf("%d starts recorded", n)
 	}
-	if len(oe.x.reads) != 0 || len(oe.node.Seen()) != 0 {
-		t.Fatalf("read the access %d times, the node %d", len(oe.x.reads), len(oe.node.Seen()))
+	if reads := oe.keys.kv.readVersions(); len(reads) != 0 || len(oe.node.Seen()) != 0 {
+		t.Fatalf("read the CA key %d times, the node %d", len(reads), len(oe.node.Seen()))
 	}
 
 	// A new epoch during the read (a restore) ends this process's ownership: the start stays, as
 	// the earlier epoch's entry, and nothing is recorded under the new one.
 	a := observer(t, oe.env, oe.x, options{})
-	oe.x.onRead = func() { newEpoch(t, oe.db) }
+	var once sync.Once
+	oe.keys.kv.before = func(method, _ string) {
+		if method == http.MethodGet {
+			once.Do(func() { newEpoch(t, oe.db) })
+		}
+	}
 	if _, err := a.observe(t.Context(), oe.machine, observeFor{purpose: "drift"}); !errors.Is(err, errNotController) {
 		t.Fatalf("observed across an epoch change: %v", err)
 	}
@@ -550,7 +585,8 @@ func TestObserveRefusesStaleOwner(t *testing.T) {
 func TestObservePlanRoute(t *testing.T) {
 	t.Parallel()
 	p := newPlanEnv(t)
-	pki := talostest.NewPKI(t)
+	p.env.signer() // the observations sign certificates from this CA, which both nodes trust
+	pki := talostest.NewPKIFromCA(t, p.env.keys.ca)
 	nodeA, nodeB := talostest.Serve(t, pki), talostest.Serve(t, pki)
 	mustExec(t, p.db, `UPDATE machine SET talos_endpoint = $2 WHERE id = $1`, p.machine, nodeA.Endpoint)
 	plan := decode[planBody](t, p.plan(p.robot, "k-plan-0123456789ab", applyBody(p.target.rel, p.machine, "")), 201)
@@ -558,8 +594,7 @@ func TestObservePlanRoute(t *testing.T) {
 		t.Fatalf("plan route %s; want %s", plan.Route, nodeA.Endpoint)
 	}
 	mustExec(t, p.db, `UPDATE machine SET talos_endpoint = $2 WHERE id = $1`, p.machine, nodeB.Endpoint)
-	x := &fakeExecutor{access: provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + p.cluster, Version: 1,
-		CreatedTime: accessCreated}, pki.Talosconfig("", "", ""))}
+	x := &fakeExecutor{}
 	a := observer(t, p.env, x, options{})
 	ev, err := a.observe(t.Context(), p.machine, observeFor{purpose: "evidence", plan: plan.ID})
 	if err != nil {
@@ -661,7 +696,7 @@ func TestObservationRecordsTheAccessItRead(t *testing.T) {
 	t.Parallel()
 	ae := newAttemptEnv(t, "")
 	p := publishFixture(t, newDraftEnv(t))
-	for i, f := range []observeFor{
+	for _, f := range []observeFor{
 		{purpose: "evidence", plan: ae.pid},
 		{purpose: "completion", plan: ae.pid, operation: ae.op},
 		{purpose: "recovery", plan: ae.pid, operation: ae.op},
@@ -674,33 +709,40 @@ func TestObservationRecordsTheAccessItRead(t *testing.T) {
 			// Use the owner whose running publication the observation names.
 			e, machine, cluster, owner = p.env, p.machine, p.cluster, p.owner
 		}
-		path := "access/talos/" + cluster
-		stale := provider.NewTalosAccess(provider.TalosAccessVersion{Path: path, Version: 1, CreatedTime: accessCreated}, []byte("context: a\n"))
+		sg := e.signer()
+		named := latestActVersion(t, e.db, cluster)
+		// A version written after the one the act names, which no act names: "latest" is not it.
+		e.keys.kv.put(named.Path, string(e.keys.ca.Crt), string(e.keys.ca.Key))
+		if latest, _ := e.keys.kv.latest(named.Path); latest == named.Version {
+			t.Fatalf("%s: the store's latest is still the act's version %d", f.purpose, latest)
+		}
 		for _, control := range []bool{false, true} {
-			v := provider.TalosAccessVersion{Path: path, Version: 10*i + 2, CreatedTime: accessCreated.Add(time.Duration(i) * time.Second)}
-			x := &fakeExecutor{access: provider.NewTalosAccess(v, []byte("context: a\n"))}
-			o := options{}
-			if control {
-				o.staleAccess = &stale
-			}
 			d := e.d
-			d.exe, d.owner = x, owner
-			got, err := e.buildWith(d, o).observe(t.Context(), machine, f)
+			d.exe, d.owner, d.sg = &fakeExecutor{}, owner, sg
+			if control {
+				d.sg = latestSigner{sg}
+			}
+			// No node answers here: the access is recorded before the dial, and this test asserts only the access.
+			noNode := func(context.Context, []byte, string) (talos.Reader, error) {
+				return nil, errors.New("no node in this test")
+			}
+			got, err := e.buildWith(d, options{dial: noNode}).observe(t.Context(), machine, f)
 			if err != nil {
 				t.Fatalf("%s: %v", f.purpose, err)
 			}
-			want := v
-			if control {
-				want = stale.Version()
+			// The observation records the act's key version with the certificate's serial and NotAfter; the
+			// control signs from the latest and records no access at all.
+			if recorded := recordedFrom(t, e.db, got.ID, got.Access, named); recorded == control {
+				t.Fatalf("%s (control %v): the observation records %+v; want the certificate from %+v exactly when not the control", f.purpose,
+					control, got.Access, named)
 			}
 			if n := count(t, e.db, `SELECT count(*) FROM observation o
 				JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
-				WHERE o.id = $1 AND o.access_path = $2 AND o.access_version = $3 AND o.access_created::timestamptz = $4
-				AND s.purpose = $5 AND s.plan IS NOT DISTINCT FROM NULLIF($6, '')
-				AND s.operation IS NOT DISTINCT FROM NULLIF($7, '')
-				AND s.publication_generation IS NOT DISTINCT FROM NULLIF($8::bigint, 0) AND s.controller = $9`,
-				got.ID, want.Path, want.Version, want.CreatedTime, f.purpose, f.plan, f.operation, f.generation, owner.ID); n != 1 {
-				t.Fatalf("%s (control %v): the observation does not record access version %d", f.purpose, control, want.Version)
+				WHERE o.id = $1 AND s.purpose = $2 AND s.plan IS NOT DISTINCT FROM NULLIF($3, '')
+				AND s.operation IS NOT DISTINCT FROM NULLIF($4, '')
+				AND s.publication_generation IS NOT DISTINCT FROM NULLIF($5::bigint, 0) AND s.controller = $6`,
+				got.ID, f.purpose, f.plan, f.operation, f.generation, owner.ID); n != 1 {
+				t.Fatalf("%s (control %v): the observation's start does not match", f.purpose, control)
 			}
 		}
 	}

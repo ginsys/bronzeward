@@ -14,7 +14,6 @@ import (
 	"github.com/ginsys/bronzeward/internal/auth"
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
-	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
 	"github.com/ginsys/bronzeward/internal/talos/talostest"
 )
@@ -254,7 +253,7 @@ func TestPublishWorkerCommittedReplyLost(t *testing.T) {
 		},
 	})
 	b.a = a
-	x, node := b.publicationReader()
+	kv, node := b.publicationReader()
 	op = b.queuePublish(1)
 	j, ok := b.claim(a)
 	if !ok || j.op != op {
@@ -289,11 +288,8 @@ func TestPublishWorkerCommittedReplyLost(t *testing.T) {
 			count(t, b.db, `SELECT count(*) FROM observation_start`) != 1 {
 			t.Fatal("publication was repeated after its committed reply was lost")
 		}
-		x.mu.Lock()
-		reads := len(x.reads)
-		x.mu.Unlock()
-		if reads != 1 {
-			t.Fatalf("%d access reads; want only the original publication read", reads)
+		if reads := kv.readVersions(); len(reads) != 1 {
+			t.Fatalf("%d CA key reads %v; want only the original publication read", len(reads), reads)
 		}
 	}
 	checkCommitted()
@@ -301,7 +297,7 @@ func TestPublishWorkerCommittedReplyLost(t *testing.T) {
 	node.identityErr = errors.New("node unavailable after publication")
 	node.versionErr = node.identityErr
 	other := b.worker("run-1/2/b", t.Context(), idle)
-	other.d.exe, other.o.dial = x, a.o.dial
+	other.d.exe, other.d.sg, other.o.dial = &fakeExecutor{}, b.signer(), a.o.dial
 	for _, worker := range []*API{a, other} {
 		if claimed, ok := b.claim(worker); ok {
 			t.Fatalf("committed publication claimed again: %+v", claimed)
@@ -574,16 +570,15 @@ func TestNewStartsPublisher(t *testing.T) {
 		t.Fatal(err)
 	}
 	life, stop := context.WithCancel(t.Context())
-	x, r := b.publicationReader()
-	pki := talostest.NewPKI(t)
+	_, r := b.publicationReader()
+	pki := talostest.NewPKIFromCA(t, b.env.keys.ca) // the node trusts the signer's CA
 	node := talostest.Serve(t, pki)
 	node.SetSMBIOSUUID(t, r.identity.SMBIOSUUID, true)
 	node.SetNodeID(t, r.identity.NodeID)
 	node.SetClusterID(t, r.identity.ClusterID)
 	mustExec(t, b.db, `UPDATE machine SET talos_endpoint = $2 WHERE id = $1`, b.machine, node.Endpoint)
-	x.access = provider.NewTalosAccess(x.access.Version(), pki.Talosconfig("", "", ""))
 	h := New(life, b.db, auth.NewVerifier(b.cfg, b.db, auth.Discover(b.cfg.OIDC)), b.cfg, testExecution(), nil,
-		&Publishers{Meta: b.held, Compiler: b.held}, x, nil,
+		&Publishers{Meta: b.held, Compiler: b.held}, &fakeExecutor{}, b.signer(), 0,
 		&config.Ingestion{Instance: "a", Heartbeat: 20 * time.Millisecond, Lease: time.Minute}, epoch, false, nil)
 	defer stopping(h.(*API), stop)
 	op := b.queuePublish(1)

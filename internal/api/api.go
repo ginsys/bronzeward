@@ -55,11 +55,12 @@ type Executor interface {
 	ArtifactKey() string
 }
 
-// Signer is what first keys need of *provider.Signer (persistence-api.md §3.4): the signer
-// identity's read and check-and-set write of a cluster's Talos CA key. Nothing else of the signer
-// reaches a route.
+// Signer is what first keys and certificates need of *provider.Signer (persistence-api.md §3.4): the
+// signer identity's read and check-and-set write of a cluster's Talos CA key, and its read of one
+// named version, from which a use's certificate is signed.
 type Signer interface {
 	ReadCAKey(ctx context.Context, cluster string) (provider.CAKey, error)
+	ReadCAKeyVersion(ctx context.Context, cluster string, version int) (provider.CAKey, error)
 	WriteCAKey(ctx context.Context, cluster string, k provider.CAKey, cas int) (provider.CAKeyVersion, error)
 }
 
@@ -95,7 +96,8 @@ type deps struct {
 	ing      Ingester
 	pub      *publishClients
 	exe      Executor
-	sg       Signer // first keys' provider identity; nil without a provider
+	sg       Signer        // first keys' and certificates' provider identity; nil without a provider
+	maxCert  time.Duration // the most a certificate's span may be (talos.maxCertLifetime); the default when zero
 	timers   config.Ingestion
 	owner    staging.Owner
 	life     context.Context
@@ -191,8 +193,8 @@ func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*
 // start at the normal restart that entry allows (execution-recovery.md §7.2). onEntry runs once a
 // recovery start's entry has committed, after it owns under the new epoch.
 func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex config.Execution, ing Ingester, pub *Publishers,
-	exe Executor, sg Signer, ic *config.Ingestion, epoch string, recovery bool, onEntry func()) http.Handler {
-	d := deps{ing: ing, exe: exe, sg: sg, life: life, exec: ex, preEntry: new(atomic.Bool), recoveryStart: recovery, start: epoch,
+	exe Executor, sg Signer, maxCert time.Duration, ic *config.Ingestion, epoch string, recovery bool, onEntry func()) http.Handler {
+	d := deps{ing: ing, exe: exe, sg: sg, maxCert: maxCert, life: life, exec: ex, preEntry: new(atomic.Bool), recoveryStart: recovery, start: epoch,
 		onEntry: onEntry, entry: new(entryState)}
 	d.preEntry.Store(recovery)
 	if pub != nil {
@@ -226,6 +228,9 @@ func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *AP
 	}
 	if d.life == nil {
 		d.life = context.Background()
+	}
+	if d.maxCert == 0 {
+		d.maxCert = config.DefaultMaxCertLifetime
 	}
 	if d.runs == nil {
 		d.runs = &sync.WaitGroup{}

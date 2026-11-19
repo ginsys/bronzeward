@@ -269,16 +269,24 @@ cluster_id_set() {
     UPDATE cluster SET talos_cluster_id = '$1' WHERE id = '$cluster';
     ALTER TABLE cluster ENABLE TRIGGER identity" >/dev/null
 }
-# fault <name> on|off: the fault an access case puts in place, then takes away. A value written to
-# the access path holds the canary, so a problem or a log that quoted it fails the scan; it goes
-# over stdin.
+# fault <name> on|off: the fault an access case puts in place, then takes away. A machine import
+# signs from the CA key version the cluster's latest first-key act names: absent deletes that key's
+# metadata, and changed then writes other bytes at the same path, so the version number is again 1
+# with another created_time. The value written holds the canary, so a problem or a log that quoted
+# it fails the scan; it goes over stdin. Taking either away supplies the first key again, a new act
+# that names the restored version.
 fault() {
-  local access=access/talos/$cluster
+  local ca=access/talos-ca/$cluster
   case $1-$2 in
-    absent-on) bao kv metadata delete -mount=secret "$access" >/dev/null ;;
-    garbage-on) printf 'not a talosconfig %s\n' "$BW_CANARY" | bao_stdin kv put -mount=secret "$access" talosconfig=- >/dev/null ;;
-    malformed-on) printf '%s\n' "$BW_CANARY" | bao_stdin kv put -mount=secret "$access" other=- >/dev/null ;;
-    absent-off | garbage-off | malformed-off) put_access "$cluster" ;;
+    absent-on) bao kv metadata delete -mount=secret "$ca" >/dev/null ;;
+    changed-on)
+      bao kv metadata delete -mount=secret "$ca" >/dev/null &&
+        printf '{"ca":"%s","key":"%s"}' "$BW_CANARY" "$BW_CANARY" | bao_stdin kv put -mount=secret "$ca" - >/dev/null
+      ;;
+    absent-off | changed-off)
+      bao kv metadata delete -mount=secret "$ca" >/dev/null 2>&1 || true
+      fk_post talosconfig "$TALOSCONFIG" "$first_keys_endpoint" "restore-$RANDOM$RANDOM" 200 -
+      ;;
     silent-on) "$bin/inject" linksplit A worker >/dev/null ;;
     silent-off) "$bin/inject" linkjoin A worker >/dev/null ;;
     cluster-id-on | cluster-id-off) cluster_id_set "$([ "$2" = on ] && printf '%s' "$wrong_cid" || printf '%s' "$talos_cid")" ;;
@@ -664,6 +672,7 @@ preconditions() {
 # and endpoint, the access secret, and the import draft with its ETag.
 cluster_draft() {
   cluster_register
+  first_key_step
 
   # Step 3: the import draft.
   check 'S1 step 3' 'POST /drafts as h-author: 201 with an ETag' \
@@ -709,12 +718,23 @@ cluster_register() {
     put_access "$cluster"
 }
 
+# first_key_step: step 2's other half (ginsys/bronzeward#899): a machine import signs its own
+# certificate from the CA key its cluster's latest first-key act names, so the os:admin talosconfig's
+# CA key is supplied through the first-keys route, tried at the control plane. The stored talosconfig
+# above stays for the executor's dispatch, which takes a certificate in a later change.
+first_key_step() {
+  first_keys_endpoint=$TALOS_CONTROLPLANE_IP:50000
+  check 'S1 step 2' 'POST /clusters/<cluster>/first-keys with the os:admin talosconfig: 200, version 1, one act' \
+    fk_supply talosconfig "$TALOSCONFIG" step2 false 1
+}
+
 # register: the preconditions and steps 1 and 2 alone, the state from which a participant imports
 # the worker (usability task T3, fixtures/participants).
 register() {
   preconditions
   fresh_author
   cluster_register
+  first_key_step
 }
 
 # review: the operator review rows alone (review.sh), on the records steps 1 to 3 make.
@@ -998,15 +1018,12 @@ controls() {
   fresh_author
   # Talos access refusals (PA §3.3, §16): each fixture-producible cause, one import each, its fault
   # put in place before and taken away after.
-  check 'S1 access' 'the access secret absent (metadata deleted): abandoned, 503 talos-access-unavailable, cause absent, nothing kept' \
-    access_case absent "$machine_w" 503 talos-access-unavailable absent
+  check 'S1 access' 'the CA key the first-key act names, its metadata deleted: abandoned, 503 talos-access-unavailable, cause version-gone, nothing kept' \
+    access_case absent "$machine_w" 503 talos-access-unavailable version-gone
   outcome_bundle 'S1 access' access-absent
-  check 'S1 access' 'the access secret not a talosconfig: abandoned, 503 talos-access-unavailable, cause talosconfig, nothing kept' \
-    access_case garbage "$machine_w" 503 talos-access-unavailable talosconfig
-  outcome_bundle 'S1 access' access-garbage
-  check 'S1 access' 'the access secret not exactly a talosconfig field: abandoned, 503 talos-access-unavailable, cause malformed, nothing kept' \
-    access_case malformed "$machine_w" 503 talos-access-unavailable malformed
-  outcome_bundle 'S1 access' access-malformed
+  check 'S1 access' 'the CA key written again at the same path, version 1 with another created_time: abandoned, 503 talos-access-unavailable, cause version-changed, nothing kept' \
+    access_case changed "$machine_w" 503 talos-access-unavailable version-changed
+  outcome_bundle 'S1 access' access-changed
   check 'S1 access' 'OpenBao sealed: refused at the request, 503 dependency-unavailable, no claim, ETag and gen/ unchanged' \
     sealed_refused
   outcome_bundle 'S1 access' access-sealed

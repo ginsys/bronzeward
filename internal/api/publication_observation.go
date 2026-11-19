@@ -67,7 +67,7 @@ func (a *API) publicationEvidence(ctx context.Context, q publicationQuery, j pub
 	err := q.QueryRowContext(ctx, `SELECT
   s.purpose = 'publication' AND s.operation = $3 AND s.publication_generation = $4 AND s.controller = $5
    AND se.epoch = $6 AND oe.epoch = $6 AND m.cluster = $7,
-  o.access_path IS NOT DISTINCT FROM 'access/talos/' || m.cluster AND o.access_version IS NOT NULL
+  o.access_path IS NOT NULL AND o.access_path IN ('access/talos/' || m.cluster, 'access/talos-ca/' || m.cluster) AND o.access_version IS NOT NULL
    AND o.talos_node_id IS NOT NULL AND o.talos_cluster_id IS NOT NULL AND o.running_version IS NOT NULL
    AND NOT o.unread ? 'identity' AND NOT o.unread ? 'runningVersion',
   `+identityMatch+`, substring(o.running_version FROM '^v[0-9]+\.[0-9]+') IS NOT DISTINCT FROM $8,

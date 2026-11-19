@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,13 +35,21 @@ type execEnv struct {
 	node     *talostest.Node
 	x        *fakeExecutor
 	artifact []byte
+	keys     *keyStore             // the signer the loops' own observations sign from
+	keyAct   provider.CAKeyVersion // the version the cluster's first-key act names
 }
 
 func newExecEnv(t *testing.T) *execEnv {
 	t.Helper()
-	pki := talostest.NewPKI(t)
+	// The node trusts the signer's CA, so the certificates the loops sign for their own observations
+	// are accepted, and so is the stored talosconfig a dispatch still sends with.
+	ca := newTalosCA(t)
+	pki := talostest.NewPKIFromCA(t, ca)
 	node := talostest.Serve(t, pki)
 	p := newPlanEnv(t)
+	keys := newKeyStore(t, ca)
+	p.env.keys, p.d.sg = keys, keys.sg
+	keyAct := keys.seed(t, p.db, p.cluster)
 	mustExec(t, p.db, `UPDATE machine SET talos_endpoint = $2 WHERE id = $1`, p.machine, node.Endpoint)
 	ce := &commitEnv{planEnv: p}
 	b := decode[planBody](t, ce.plan(ce.robot, "k-apply-0123456789ab", applyBody(ce.target.rel, ce.machine, "")), http.StatusCreated)
@@ -68,7 +77,7 @@ func newExecEnv(t *testing.T) *execEnv {
 	mustExec(t, ce.db, `ALTER TABLE release_machine ENABLE TRIGGER immutable_rows`)
 	node.AcceptApply(t)
 	// The talosconfig's own endpoints and nodes, unroutable, are ignored: the machine's endpoint is dialled (PA §16).
-	return &execEnv{commitEnv: ce, node: node, artifact: artifact, x: &fakeExecutor{artifact: artifact,
+	return &execEnv{commitEnv: ce, node: node, artifact: artifact, keys: keys, keyAct: keyAct, x: &fakeExecutor{artifact: artifact,
 		access: provider.NewTalosAccess(provider.TalosAccessVersion{Path: "access/talos/" + ce.cluster, Version: 1,
 			CreatedTime: accessCreated}, pki.Talosconfig("192.0.2.1", "192.0.2.2", ""))}}
 }
@@ -227,11 +236,19 @@ func TestExecutorCompletes(t *testing.T) {
 		AND (entry->>'started')::timestamptz <= at`, xe.machine); n != 1 {
 		t.Fatalf("use-time check %s names no start at or before its entry", entry)
 	}
-	// One decryption, one access read for the dispatch and one for the completion observation.
+	// One decryption and one stored-talosconfig read for the dispatch; the completion observation signs
+	// a certificate from the act's key version, the one CA key read, and records it.
 	xe.x.mu.Lock()
 	defer xe.x.mu.Unlock()
-	if xe.x.decrypts != 1 || len(xe.x.reads) != 2 {
-		t.Fatalf("%d decryptions, %d access reads", xe.x.decrypts, len(xe.x.reads))
+	if kvReads := xe.keys.kv.readVersions(); xe.x.decrypts != 1 || len(xe.x.reads) != 1 || !slices.Equal(kvReads, []int{xe.keyAct.Version}) {
+		t.Fatalf("%d decryptions, %d access reads, CA key reads of versions %v; want 1, 1 and [%d]", xe.x.decrypts, len(xe.x.reads),
+			kvReads, xe.keyAct.Version)
+	}
+	if n := count(t, xe.db, `SELECT count(*) FROM observation o JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
+		WHERE o.machine = $1 AND s.purpose = 'completion' AND o.access_path = $2 AND o.access_version = $3
+			AND o.access_created::timestamptz = $4 AND o.access_serial IS NOT NULL AND o.access_not_after IS NOT NULL`,
+		xe.machine, xe.keyAct.Path, xe.keyAct.Version, xe.keyAct.CreatedTime); n != 1 {
+		t.Fatalf("the completion observation does not record a certificate from %+v", xe.keyAct)
 	}
 	if n := count(t, xe.db, `SELECT count(*) FROM operation WHERE state IN ('committed', 'sending', 'verifying', 'unresolved')`); n != 0 {
 		t.Fatalf("%d operations hold the scope", n)
@@ -1096,6 +1113,57 @@ func retryFollowsAccessRotation(t *testing.T, move func(*provider.TalosAccessVer
 	if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation
 		WHERE o.access_path = $1 AND o.access_version = $2 AND o.access_created = $3`, v.Path, v.Version, v.CreatedTime.UTC().Format(time.RFC3339Nano)); n != 1 {
 		t.Fatalf("the attempt does not rest on an observation read with access %+v", v)
+	}
+}
+
+// PA §16, #899 part B: a dispatch still sends with the stored talosconfig, and a retry whose
+// classification rests on an observation read through a certificate (a recovery or completion
+// observation, which carry no stored access) is not the retry this access can attempt: its observation
+// names another credential. The loop observes and classifies again with the stored access and the
+// attempt rests on that observation, once. Part C removes the case with the stored access.
+func TestExecutorRetryFirstClassifiedOnACertificate(t *testing.T) {
+	t.Parallel()
+	xe := newExecEnv(t)
+	xe.ready(t)
+	if _, err := xe.a.commitPlan(context.Background(), xe.pid); err != nil {
+		t.Fatal(err)
+	}
+	xe.x.mu.Lock()
+	xe.x.decryptErr = fmt.Errorf("sealed: %w", provider.ErrUnavailable)
+	xe.x.mu.Unlock()
+	life, stop := context.WithCancel(t.Context())
+	idle := make(chan struct{})
+	a := xe.executor(t, life, idle, options{})
+	a.startExecutor()
+	defer stopping(a, stop)
+	until(t, a, idle, "a retry held back by a sealed provider", func() bool {
+		return xe.entries(t, "use-time-check") > 0 && count(t, xe.db, `SELECT count(*) FROM operation_classification
+			WHERE outcome = 'safe-to-retry'`) > 0
+	})
+	// The classification's observation is made one read through a certificate from the act's key version.
+	var first string
+	if err := xe.db.QueryRow(`SELECT observation FROM operation_classification WHERE outcome = 'safe-to-retry'`).Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, xe.db, `ALTER TABLE observation DISABLE TRIGGER immutable_rows`)
+	mustExec(t, xe.db, `UPDATE observation SET access_path = $2, access_version = $3, access_created = $4, access_serial = 'ab12',
+		access_not_after = now() + interval '1 hour' WHERE id = $1`, first, xe.keyAct.Path, xe.keyAct.Version,
+		xe.keyAct.CreatedTime.UTC().Format(time.RFC3339Nano))
+	mustExec(t, xe.db, `ALTER TABLE observation ENABLE TRIGGER immutable_rows`)
+	passEnds(t, a, idle) // a pass in flight at the change is held back too
+	xe.x.mu.Lock()
+	xe.x.decryptErr = nil
+	xe.x.mu.Unlock()
+	until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+	if n := count(t, xe.db, `SELECT count(*) FROM operation_classification WHERE outcome = 'safe-to-retry'`); n < 2 {
+		t.Fatalf("%d safe-to-retry classifications: the certificate observation was relied on", n)
+	}
+	if n := count(t, xe.db, `SELECT count(*) FROM attempt a JOIN observation o ON o.id = a.observation
+		WHERE o.id <> $1 AND o.access_path = $2 AND o.access_serial IS NULL`, first, "access/talos/"+xe.cluster); n != 1 {
+		t.Fatalf("%d attempts rest on an observation read with the stored access; want 1", n)
+	}
+	if n := count(t, xe.db, `SELECT count(*) FROM attempt`); n != 1 || len(xe.node.AppliedRequests()) != 1 {
+		t.Fatalf("%d attempts and %d requests; want one of each", n, len(xe.node.AppliedRequests()))
 	}
 }
 

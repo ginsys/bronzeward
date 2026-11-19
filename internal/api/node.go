@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/siderolabs/talos/pkg/machinery/role"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/ginsys/bronzeward/internal/ingest"
-	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
 	"github.com/ginsys/bronzeward/internal/talos"
 )
@@ -22,46 +22,44 @@ import (
 // ingestion talos-access-unavailable instead of holding its claim to the lease.
 const nodeTimeout = 10 * time.Second
 
-// readNode is a source machine job's input (persistence-api.md §3.3): the cluster's Talos access
-// read; its version and the endpoint recorded as an event of the operation, committed before the
-// node is dialled; the node dialled at the machine's endpoint, its identity compared with the
-// machine's and its cluster's records; then its machine configuration. A failure is the
-// operation's refusal, naming the cluster or the machine and never a value or a client's text; an
-// error stops the run. The credential and the reader live only for this call.
+// readNode is a source machine job's input (persistence-api.md §3.3): a certificate signed for this
+// read from the CA key version the cluster's latest first-key act names, its identity and the
+// endpoint recorded as an event of the operation, committed before the node is dialled; the node
+// dialled at the machine's endpoint, its identity compared with the machine's and its cluster's
+// records; then its machine configuration. The certificate lives to cover the three node requests
+// and no connection outlives it. A failure is the operation's refusal, naming the cluster or the
+// machine and never a value or a client's text; an error stops the run. The credential and the
+// reader live only for this call.
 func (a *API) readNode(ctx context.Context, j job) (ingest.Unresolved, *refusal, error) {
 	n := j.node
-	acc, err := a.d.ing.TalosAccess(ctx, j.claim.Cluster)
+	cert, cause, err := a.certFor(ctx, j.claim.Cluster, role.Admin, 3*a.o.nodeTimeout)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ingest.Unresolved{}, nil, errStop
 		}
-		cause := "provider-unavailable" // sealed, silent, or a status the client does not classify
-		switch {
-		case errors.Is(err, provider.ErrAbsent):
-			cause = "absent"
-		case errors.Is(err, provider.ErrDenied):
-			cause = "denied"
-		case errors.Is(err, provider.ErrProtocol):
-			cause = "malformed"
-		}
 		return ingest.Unresolved{}, a.accessFailure(j, cause, "cluster", j.claim.Cluster, err), nil
 	}
-	v := acc.Version()
+	v := cert.CA()
 	if err := a.inTx(ctx, func(tx *sql.Tx) error {
 		if err := staging.Hold(ctx, tx, a.d.owner, j.claim); err != nil {
 			return err
 		}
 		return a.event(ctx, tx, j, map[string]any{"type": "talos-access", "path": v.Path, "version": v.Version,
-			"createdTime": v.CreatedTime.UTC().Format(time.RFC3339Nano), "endpoint": n.endpoint})
+			"createdTime": v.CreatedTime.UTC().Format(time.RFC3339Nano), "serial": cert.Serial(),
+			"notAfter": cert.NotAfter().UTC().Format(time.RFC3339), "endpoint": n.endpoint})
 	}); err != nil {
 		return ingest.Unresolved{}, nil, fmt.Errorf("recording the Talos access: %w", err)
 	}
-	tc := acc.Talosconfig()
+	tc, err := cert.Config(n.endpoint)
+	if err != nil {
+		return ingest.Unresolved{}, a.accessFailure(j, "talosconfig", "cluster", j.claim.Cluster, err), nil
+	}
 	r, err := a.o.dial(ctx, tc, n.endpoint)
 	clear(tc)
 	if err != nil {
 		return ingest.Unresolved{}, a.accessFailure(j, "talosconfig", "cluster", j.claim.Cluster, err), nil
 	}
+	r = talos.Bound(r, cert.NotAfter())
 	defer r.Close()
 
 	id, err := nodeRead(ctx, a.o.nodeTimeout, r.Identity)

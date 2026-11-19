@@ -10,9 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/siderolabs/talos/pkg/machinery/role"
+
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/talos"
+	"github.com/ginsys/bronzeward/internal/talos/signer"
 )
 
 // accessKey is v's whole version identity (PA §16: path, version and created_time), in the form
@@ -35,6 +38,32 @@ type observeFor struct {
 // machine was recorded within the settle floor, so nothing is recorded and nothing is read.
 var errReadNotDue = errors.New("a recovery read of the machine is within the settle floor")
 
+// observationLife is how many node timeouts a certificate signed for one observation covers: the
+// dial and its three requests, each bounded by one (persistence-api.md §3.3).
+const observationLife = 4
+
+// observedAccess is the access identity an observation records (persistence-api.md §3.3): the CA key
+// version's path, version and created_time and, for a certificate signed for the observation, its
+// serial and NotAfter. A dispatch's observation still uses the stored talosconfig and records its
+// version alone, with no serial.
+type observedAccess struct {
+	Path        string
+	Version     int
+	CreatedTime time.Time
+	Serial      string
+	NotAfter    time.Time
+}
+
+// storedAccess is the identity of the stored talosconfig a dispatch's observation used: no serial.
+func storedAccess(v provider.TalosAccessVersion) *observedAccess {
+	return &observedAccess{Path: v.Path, Version: v.Version, CreatedTime: v.CreatedTime}
+}
+
+// version is x's key version identity in the form a use-time check compares.
+func (x observedAccess) version() provider.TalosAccessVersion {
+	return provider.TalosAccessVersion{Path: x.Path, Version: x.Version, CreatedTime: x.CreatedTime}
+}
+
 // observed is what observe recorded: the observation's id, its basis (the start entry's revision)
 // and revision, the endpoint dialled, and each value read; Unread names each value not read and
 // why. Access is nil when the access read failed.
@@ -42,7 +71,7 @@ type observed struct {
 	ID                 string
 	Basis, Revision    int64
 	Endpoint           string
-	Access             *provider.TalosAccessVersion
+	Access             *observedAccess
 	Identity           *talos.Identity
 	AssignmentEvidence string
 	RunningVersion     string
@@ -95,38 +124,50 @@ func (a *API) observe(ctx context.Context, machine string, f observeFor) (observ
 		return observed{}, err
 	}
 
-	var acc provider.TalosAccess
+	// A dispatch's observation uses the talosconfig it read once for the observation and its attempt
+	// (f.access); every other observation signs a certificate for its own reads.
+	var tc []byte
+	var notAfter time.Time
 	var err error
-	if f.access != nil {
-		acc = *f.access
-	} else if a.o.staleAccess != nil {
-		acc = *a.o.staleAccess
-	} else {
-		acc, err = a.d.exe.TalosAccess(ctx, cluster)
-	}
-	if err != nil {
-		if ctx.Err() != nil {
-			return observed{}, ctx.Err()
+	switch {
+	case f.access != nil:
+		tc, o.Access = f.access.Talosconfig(), storedAccess(f.access.Version())
+	case a.o.staleAccess != nil:
+		tc, o.Access = a.o.staleAccess.Talosconfig(), storedAccess(a.o.staleAccess.Version())
+	default:
+		var cert signer.Cert
+		var cause string
+		if cert, cause, err = a.certFor(ctx, cluster, role.Admin, observationLife*a.o.nodeTimeout); err != nil {
+			if ctx.Err() != nil {
+				return observed{}, ctx.Err()
+			}
+			a.quoteObservation(o.ID, cause, err)
+			o.unreadAll(cause, "identity", "runningVersion", "configuration", "assignmentEvidence")
+			return o, a.recordObservation(ctx, machine, f, &o)
 		}
-		cause := accessCause(err)
-		a.quoteObservation(o.ID, cause, err)
-		o.unreadAll(cause, "identity", "runningVersion", "configuration", "assignmentEvidence")
-		return o, a.recordObservation(ctx, machine, f, &o)
+		notAfter = cert.NotAfter()
+		ca := cert.CA()
+		o.Access = &observedAccess{Path: ca.Path, Version: ca.Version, CreatedTime: ca.CreatedTime, Serial: cert.Serial(), NotAfter: notAfter}
+		if tc, err = cert.Config(o.Endpoint); err != nil {
+			a.quoteObservation(o.ID, "talosconfig", err)
+			o.unreadAll("talosconfig", "identity", "runningVersion", "configuration")
+			return o, a.recordObservation(ctx, machine, f, &o)
+		}
 	}
-	v := acc.Version()
-	o.Access = &v
 	if head.Valid {
 		o.AssignmentEvidence = head.String
 	} else {
 		o.Unread["assignmentEvidence"] = unreadValue{Cause: "unassigned"}
 	}
-	tc := acc.Talosconfig()
 	r, err := a.o.dial(ctx, tc, o.Endpoint)
 	clear(tc)
 	if err != nil {
 		a.quoteObservation(o.ID, "talosconfig", err)
 		o.unreadAll("talosconfig", "identity", "runningVersion", "configuration")
 		return o, a.recordObservation(ctx, machine, f, &o)
+	}
+	if !notAfter.IsZero() {
+		r = talos.Bound(r, notAfter)
 	}
 	defer r.Close()
 
@@ -275,10 +316,13 @@ func (a *API) recordObservation(ctx context.Context, machine string, f observeFo
 	if err != nil {
 		return err
 	}
-	var path, version, created, smbios, nodeID, clusterID any
+	var path, version, created, serial, notAfter, smbios, nodeID, clusterID any
 	var digest []byte
 	if o.Access != nil {
 		path, version, created = o.Access.Path, int64(o.Access.Version), createdText(o.Access.CreatedTime)
+		if o.Access.Serial != "" {
+			serial, notAfter = o.Access.Serial, o.Access.NotAfter
+		}
 	}
 	if o.Identity != nil {
 		smbios, nodeID, clusterID = nullable(o.Identity.SMBIOSUUID), o.Identity.NodeID, o.Identity.ClusterID
@@ -311,11 +355,11 @@ func (a *API) recordObservation(ctx context.Context, machine string, f observeFo
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO observation (id, machine, basis, revision, access_path, access_version, access_created,
-				smbios_uuid, talos_node_id, talos_cluster_id, assignment_evidence, running_version, configuration_digest, resource_version,
-				health, unread, at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10, $11, $12, $13, $14, NULL, $15, $16)`,
-			o.ID, machine, o.Basis, o.Revision, path, version, created, smbios, nodeID, clusterID, assignment, running, digest, resource,
-			unread, at)
+				access_serial, access_not_after, smbios_uuid, talos_node_id, talos_cluster_id, assignment_evidence, running_version,
+				configuration_digest, resource_version, health, unread, at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::uuid, $11, $12, $13, $14, $15, $16, NULL, $17, $18)`,
+			o.ID, machine, o.Basis, o.Revision, path, version, created, serial, notAfter, smbios, nodeID, clusterID, assignment, running, digest,
+			resource, unread, at)
 		if err != nil || (f.purpose != "drift" && f.purpose != "restoration") {
 			return err
 		}

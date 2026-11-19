@@ -884,8 +884,14 @@ type AbandonInput = map[string]interface{}
 // AccessVersionBody defines model for AccessVersionBody.
 type AccessVersionBody struct {
 	Created string `json:"created"`
-	Path    string `json:"path"`
-	Version int    `json:"version"`
+
+	// NotAfter The end of that certificate's validity; null when serial is.
+	NotAfter *string `json:"notAfter"`
+	Path     string  `json:"path"`
+
+	// Serial The serial of the certificate the observation read through, in lower-case hexadecimal; null when it used the stored talosconfig.
+	Serial  *string `json:"serial"`
+	Version int     `json:"version"`
 }
 
 // AccountingBody defines model for AccountingBody.

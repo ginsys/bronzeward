@@ -31,6 +31,8 @@ var accessCreated = time.Date(2026, 10, 2, 9, 0, 0, 123456000, time.UTC)
 // talosconfig as the cluster's Talos access at version 3.
 type machineEnv struct {
 	*ingestEnv
+	keys      *keyStore // the signer's CA, which the stand-in node trusts, and the cluster's first-key act
+	keyAct    provider.CAKeyVersion
 	pki       talostest.PKI
 	node      *talostest.Node
 	clusterID string
@@ -39,7 +41,11 @@ type machineEnv struct {
 
 func newMachineEnv(t *testing.T) *machineEnv {
 	t.Helper()
-	me := &machineEnv{ingestEnv: newIngestEnv(t, options{}), pki: talostest.NewPKI(t)}
+	me := &machineEnv{ingestEnv: newIngestEnv(t, options{})}
+	ca := newTalosCA(t)
+	me.pki, me.keys = talostest.NewPKIFromCA(t, ca), newKeyStore(t, ca)
+	me.env.keys, me.d.sg = me.keys, me.keys.sg
+	me.keyAct = me.keys.seed(t, me.db, me.cluster)
 	me.node = talostest.Serve(t, me.pki)
 	me.setEndpoint(t, me.machine, me.node.Endpoint)
 	if err := me.db.QueryRow(`SELECT talos_cluster_id FROM cluster WHERE id = $1`, me.cluster).Scan(&me.clusterID); err != nil {
@@ -93,10 +99,15 @@ func (me *machineEnv) run(t *testing.T, machine string, o options) (op string, j
 // wantAccessEvent asserts ev is the access record: the version identity and the endpoint dialled.
 func (me *machineEnv) wantAccessEvent(t *testing.T, ev map[string]any) {
 	t.Helper()
-	want := map[string]any{"type": "talos-access", "path": "access/talos/" + me.cluster, "version": float64(3),
-		"createdTime": "2026-10-02T09:00:00.123456Z", "endpoint": me.endpoint}
-	if fmt.Sprint(ev) != fmt.Sprint(want) {
-		t.Fatalf("access event %v; want %v", ev, want)
+	// The event names the CA key version the act names and the certificate's serial and end.
+	serial, _ := ev["serial"].(string)
+	notAfter, err := time.Parse(time.RFC3339, fmt.Sprint(ev["notAfter"]))
+	delete(ev, "serial")
+	delete(ev, "notAfter")
+	want := map[string]any{"type": "talos-access", "path": me.keyAct.Path, "version": float64(me.keyAct.Version),
+		"createdTime": me.keyAct.CreatedTime.UTC().Format(time.RFC3339Nano), "endpoint": me.endpoint}
+	if fmt.Sprint(ev) != fmt.Sprint(want) || serial == "" || err != nil || notAfter.IsZero() {
+		t.Fatalf("access event %v, serial %q, notAfter %v (%v); want %v with a serial and an end", ev, serial, notAfter, err, want)
 	}
 }
 
@@ -171,9 +182,9 @@ func (me *machineEnv) leaked(t *testing.T, op string, canaries ...string) bool {
 
 // keyCanaries are the forms the stand-in's client key takes in a talosconfig and in its PEM.
 func (me *machineEnv) keyCanaries() []string {
-	pem := string(me.pki.KeyPEM)
+	pem := string(me.keys.ca.Key) // the CA key the certificates are signed from; the client key it signs is never stored
 	lines := strings.Split(pem, "\n")
-	return []string{base64.StdEncoding.EncodeToString(me.pki.KeyPEM), lines[1]}
+	return []string{base64.StdEncoding.EncodeToString(me.keys.ca.Key), lines[1]}
 }
 
 // PA §3.3, §8: a source machine ingestion reads the cluster's Talos access, records its version
@@ -203,8 +214,8 @@ func TestMachineIngestion(t *testing.T) {
 	if strings.Contains(doc, runToken) || !strings.Contains(doc, "!bwref") {
 		t.Fatalf("import base document %q", doc)
 	}
-	if reads := me.f.accessReads; !slices.Equal(reads, []string{me.cluster}) {
-		t.Fatalf("access reads %v", reads)
+	if reads := me.keys.kv.readVersions(); !slices.Equal(reads, []int{me.keyAct.Version}) {
+		t.Fatalf("CA key reads %v; want one, of the version the act names", reads)
 	}
 	if st, _, _ := claimRow(t, me.db, j.claim.ID); st != "released" {
 		t.Fatalf("claim %s", st)
@@ -356,31 +367,51 @@ func TestMachineAccessUnavailable(t *testing.T) {
 		subject    string
 		accessRead bool
 	}{
-		"absent secret": {func(_ *testing.T, me *machineEnv) []string {
-			me.f.accessErr = fmt.Errorf("provider: GET: %w", provider.ErrAbsent)
+		"no first-key act": {func(t *testing.T, me *machineEnv) []string {
+			me.noSeed = true // the refusal is proven with no act, and signer() seeds none
+			dropFirstKeyActs(t, me.db, me.cluster)
 			return nil
 		}, "absent", "cluster", false},
+		"the version the act names is gone": {func(_ *testing.T, me *machineEnv) []string {
+			me.keys.kv.destroy(me.keyAct.Path, me.keyAct.Version)
+			return nil
+		}, "version-gone", "cluster", false},
+		"the version the act names was written again": {func(_ *testing.T, me *machineEnv) []string {
+			me.keys.kv.mu.Lock()
+			defer me.keys.kv.mu.Unlock()
+			me.keys.kv.versions[me.keyAct.Path][0].created = me.keyAct.CreatedTime.Add(time.Hour)
+			return nil
+		}, "version-changed", "cluster", false},
 		"read denied": {func(_ *testing.T, me *machineEnv) []string {
-			me.f.accessErr = fmt.Errorf("provider: GET: %w", provider.ErrDenied)
+			me.keys.kv.mu.Lock()
+			defer me.keys.kv.mu.Unlock()
+			me.keys.kv.status["GET"] = http.StatusForbidden
 			return nil
 		}, "denied", "cluster", false},
 		"provider sealed or partitioned": {func(_ *testing.T, me *machineEnv) []string {
-			me.f.accessErr = fmt.Errorf("provider: GET: %w", provider.ErrUnavailable)
+			me.keys.kv.mu.Lock()
+			defer me.keys.kv.mu.Unlock()
+			me.keys.kv.status["GET"] = http.StatusServiceUnavailable
 			return nil
 		}, "provider-unavailable", "cluster", false},
 		"malformed provider answer": {func(_ *testing.T, me *machineEnv) []string {
-			me.f.accessErr = fmt.Errorf("provider: GET: %w", provider.ErrProtocol)
+			me.keys.kv.mu.Lock()
+			defer me.keys.kv.mu.Unlock()
+			me.keys.kv.garble = true
 			return nil
 		}, "malformed", "cluster", false},
-		"malformed talosconfig with a synthetic key": {func(_ *testing.T, me *machineEnv) []string {
-			bad := strings.Replace(string(me.pki.Talosconfig("", "", "")), "ca: ", "ca: not-base64-", 1)
-			me.setAccess([]byte(bad))
-			return []string{"not-base64-"}
-		}, "talosconfig", "cluster", true},
-		"a credential Talos refuses": {func(t *testing.T, me *machineEnv) []string {
-			other := talostest.NewPKI(t)
-			me.setAccess(other.Talosconfig("", "", ""))
-			return []string{base64.StdEncoding.EncodeToString(other.KeyPEM)}
+		"a CA key that cannot sign": {func(_ *testing.T, me *machineEnv) []string {
+			me.keys.kv.mu.Lock()
+			defer me.keys.kv.mu.Unlock()
+			me.keys.kv.versions[me.keyAct.Path][0].key = "not-a-key-CANARY"
+			return []string{"not-a-key-CANARY"}
+		}, "sign", "cluster", false},
+		"a certificate Talos refuses": {func(t *testing.T, me *machineEnv) []string {
+			other := newTalosCA(t) // the node trusts another CA than the one the signer holds
+			me.keys.kv.mu.Lock()
+			defer me.keys.kv.mu.Unlock()
+			me.keys.kv.versions[me.keyAct.Path][0].ca, me.keys.kv.versions[me.keyAct.Path][0].key = string(other.Crt), string(other.Key)
+			return []string{base64.StdEncoding.EncodeToString(other.Key)}
 		}, "node-unreachable", "machine", true},
 		"an endpoint that does not answer": {func(t *testing.T, me *machineEnv) []string {
 			me.setEndpoint(t, me.machine, silentEndpoint(t))
@@ -426,18 +457,20 @@ func TestMachineAccessUnavailable(t *testing.T) {
 // alone, and under quoteErrors, which logs the error text, the same scan catches the key, so the
 // scan above can fail.
 func TestMachineAccessErrorTextControl(t *testing.T) {
-	quoting := func(_ context.Context, tc []byte, _ string) (talos.Reader, error) {
-		return nil, errors.New("talos: cannot parse " + string(tc))
-	}
 	for _, quote := range []bool{false, true} {
 		t.Run(fmt.Sprint("quoteErrors=", quote), func(t *testing.T) {
 			me := newMachineEnv(t)
+			var signedKey string // the key this ingestion's certificate was signed with
+			quoting := func(_ context.Context, tc []byte, _ string) (talos.Reader, error) {
+				signedKey = clientKey(tc)
+				return nil, errors.New("talos: cannot parse " + string(tc))
+			}
 			op, j := me.startJob(t, map[string]any{"source": "machine", "document": nil})
 			me.runWith(t, options{dial: quoting, quoteErrors: quote}, j)
-			if r := readOp(t, me.db, op); r.state != "failed" {
-				t.Fatalf("operation %+v", r)
+			if r := readOp(t, me.db, op); r.state != "failed" || signedKey == "" {
+				t.Fatalf("operation %+v, client key %q", r, signedKey)
 			}
-			if got := me.leaked(t, op, me.keyCanaries()...); got != quote {
+			if got := me.leaked(t, op, append(me.keyCanaries(), signedKey)...); got != quote {
 				t.Fatalf("leaked %v with quoteErrors %v", got, quote)
 			}
 		})

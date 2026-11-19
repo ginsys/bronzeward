@@ -19,6 +19,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/migrate"
+	"github.com/ginsys/bronzeward/internal/provider"
 )
 
 // env is one test's database, fixture issuer and API. robot is the automation identity of AP §2:
@@ -34,6 +35,53 @@ type env struct {
 	robotID string
 	mu      sync.Mutex
 	logs    []string
+	keys    *keyStore // the signer's CA key store, made on first use or by a test that has a node trust its CA
+	keyMu   sync.Mutex
+	seeded  map[string]bool // the clusters signer() has seeded an act for
+	noSeed  bool            // signer() seeds no act: the environment starts with none
+}
+
+// signer is the signer an API with an executor signs its observations' certificates through: e's
+// keyStore, made on first use, with a first-key act and CA key version seeded once for each cluster
+// when first seen. It never seeds a cluster again, so a test that removes an act, or a version, to
+// prove a refusal keeps it removed; a test that needs a cluster never seeded sets noSeed first
+// (the refusal tests that start with no act at all).
+func (e *env) signer() *provider.Signer {
+	e.t.Helper()
+	e.keyMu.Lock()
+	defer e.keyMu.Unlock()
+	if e.keys == nil {
+		e.keys = newKeyStore(e.t, newTalosCA(e.t))
+	}
+	if e.noSeed {
+		return e.keys.sg
+	}
+	if e.seeded == nil {
+		e.seeded = map[string]bool{}
+	}
+	rows, err := e.db.Query(`SELECT id FROM cluster`)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	var clusters []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			e.t.Fatal(err)
+		}
+		clusters = append(clusters, c)
+	}
+	if err := rows.Err(); err != nil {
+		e.t.Fatal(err)
+	}
+	rows.Close()
+	for _, c := range clusters {
+		if !e.seeded[c] {
+			e.seeded[c] = true
+			e.keys.seed(e.t, e.db, c)
+		}
+	}
+	return e.keys.sg
 }
 
 func newEnv(t *testing.T, o options) *env {
@@ -44,7 +92,7 @@ func newEnv(t *testing.T, o options) *env {
 // newEnvWith is newEnv with ingestion's dependencies.
 func newEnvWith(t *testing.T, d deps, o options) *env {
 	t.Helper()
-	e := &env{t: t, db: testDB(t), d: d}
+	e := &env{t: t, db: testDB(t), d: d, seeded: map[string]bool{}}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -78,6 +126,9 @@ func (e *env) build(o options) *API {
 func (e *env) buildWith(d deps, o options) *API {
 	if o.logf == nil {
 		o.logf = e.logf
+	}
+	if d.exe != nil && d.sg == nil {
+		d.sg = e.signer()
 	}
 	if d.exec.MaxTransportDeadline == 0 {
 		d.exec = testExecution()

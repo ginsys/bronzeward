@@ -120,9 +120,11 @@ func prepareMark(ctx context.Context, a *API, q *request) error {
 		return err
 	}
 	// The check read the access itself: an observation made with another version of it is not evidence
-	// of the credential the check passed.
-	if d, ok := ev.deps["access"].(map[string]any); ok && d["result"] == "passed" && obs.Access != nil {
-		ev.otherAccess = accessKey(*obs.Access) != accessKey(u.access.Version())
+	// of the credential the check passed. An observation read through a certificate (a serial) is of
+	// another kind than the check's stored talosconfig and compares with none of it: the check moves
+	// onto certificates in the executor's change.
+	if d, ok := ev.deps["access"].(map[string]any); ok && d["result"] == "passed" && obs.Access != nil && obs.Access.Serial == "" {
+		ev.otherAccess = accessKey(obs.Access.version()) != accessKey(u.access.Version())
 	}
 	for _, name := range []string{"access", "artifact"} {
 		if d, ok := ev.deps[name].(map[string]any); ok && d["result"] == "failed" {

@@ -2452,11 +2452,17 @@ components:
     AbandonInput: {type: object, additionalProperties: false}
     AccessVersionBody:
       type: object
-      required: [path, version, created]
+      required: [path, version, created, serial, notAfter]
       properties:
         path: {type: string}
         version: {type: integer}
         created: {type: string}
+        serial:
+          description: The serial of the certificate the observation read through, in lower-case hexadecimal; null when it used the stored talosconfig.
+          type: [string, 'null']
+        notAfter:
+          description: The end of that certificate's validity; null when serial is.
+          type: [string, 'null']
       additionalProperties: false
     AccountingBody:
       type: object
