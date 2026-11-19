@@ -57,7 +57,8 @@ func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration)
 	if r != role.Reader && r != role.Admin {
 		return Cert{}, ErrRole
 	}
-	if life <= 0 || life > max-roundingSlack {
+	// max is compared before the subtraction: a maximum at the bottom of a time.Duration would wrap.
+	if life <= 0 || max <= roundingSlack || life > max-roundingSlack {
 		return Cert{}, ErrLifetime
 	}
 	end := now.Add(life)

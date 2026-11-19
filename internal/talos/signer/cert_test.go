@@ -149,6 +149,12 @@ func TestSignBoundIsTheMaximumLessTheRoundingSlack(t *testing.T) {
 	if _, err := signer.Sign(k, role.Admin, now, huge, time.Duration(1<<63-1)); !errors.Is(err, signer.ErrLifetime) {
 		t.Errorf("a 292-year lifetime: %v, want ErrLifetime", err)
 	}
+	// A maximum at or below the slack, or at the bottom of a time.Duration, admits no lifetime.
+	for name, max := range map[string]time.Duration{"zero": 0, "the slack": 2 * time.Second, "negative": -time.Minute, "minimum": time.Duration(-1 << 63)} {
+		if _, err := signer.Sign(k, role.Admin, now, time.Second, max); !errors.Is(err, signer.ErrLifetime) {
+			t.Errorf("a maximum of %s: %v, want ErrLifetime", name, err)
+		}
+	}
 }
 
 // A lifetime above the maximum, or not above zero, and a role outside the two, are refused; none is
