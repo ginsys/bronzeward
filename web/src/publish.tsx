@@ -11,7 +11,7 @@ import { startsNew, useSend, useWrites } from "./forms.tsx";
 import { settledReads, watchView } from "./imports.tsx";
 import { Id, Ref, short, useItem, usePending, useReads } from "./list.tsx";
 import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
-import { Action } from "./shell.tsx";
+import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
 import type { Outcome } from "./write.ts";
 
@@ -128,6 +128,9 @@ function Publish({ id }: { id: string }) {
   const [note, setNote] = useState<string | undefined>();
   const o = w?.outcome;
   const op = o?.kind === "done" ? operationId(o.data) : undefined;
+  // Publish is disabled once the write is accepted (publishLocked), so focus falls to the page: it goes to the answer (WCAG 2.4.3).
+  const answer = useRef<HTMLDivElement>(null);
+  useFocusOn(o, answer);
   const readAgain = () => {
     keep.current = true;
     setNote(undefined);
@@ -154,13 +157,15 @@ function Publish({ id }: { id: string }) {
         </>
       )}
       {note !== undefined && <Status testid="no-etag">{note} <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
-      <WriteResult
-        w={w}
-        done={(data): ReactNode => accepted(id, data)}
-        conflict={<Status testid="write-result" role="alert">Not published: someone changed this draft since this page read it. <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
-      />
-      {o?.kind === "done" && typeof o.data === "object" && op === undefined && <Status testid="no-operation">The publication was accepted without naming its operation. Find it in the operations list, kind publish.</Status>}
-      {op !== undefined && <Progress key={op} op={op} draft={id} onFailed={setFailed} />}
+      <div ref={answer} tabIndex={-1} data-testid="publish-answer">
+        <WriteResult
+          w={w}
+          done={(data): ReactNode => accepted(id, data)}
+          conflict={<Status testid="write-result" role="alert">Not published: someone changed this draft since this page read it. <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
+        />
+        {o?.kind === "done" && typeof o.data === "object" && op === undefined && <Status testid="no-operation">The publication was accepted without naming its operation. Find it in the operations list, kind publish.</Status>}
+        {op !== undefined && <Progress key={op} op={op} draft={id} onFailed={setFailed} />}
+      </div>
       <p><Ref to={`/drafts/${id}`} id={id}>Back to the draft</Ref></p>
     </>
   );
