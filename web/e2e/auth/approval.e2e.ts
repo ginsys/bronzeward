@@ -17,9 +17,14 @@ import { RECOVERY_START } from "../../src/recovery.tsx";
 import { SCOPE_NO_MODE, SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, type Step } from "../injector.ts";
-import { answers, api, disposable, faults, fixtureSignIn, mint, type Seed, seeded, storageEmpty, syntheticMachine, writes } from "./helpers.ts";
+import { answers, api, disposable, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, measure, mint, mirrored, narrow, overflows, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
+// The page's answer to Approve and to Revoke approval: each control's Result, in an element that takes
+// focus once the control that sent it is disabled and the page changes under it (2.4.3).
+const ANSWER = '[data-testid="approval-answer"]';
+const REVOKE_ANSWER = '[data-testid="revoke-answer"]';
+const statusRegions = () => browser.execute(() => document.querySelectorAll('[role="status"]').length);
 const PLAN = `pln_${"q".repeat(26)}`;
 const REL = `rel_${"i".repeat(26)}`;
 const DRAFT = `drf_${"d".repeat(26)}`;
@@ -106,6 +111,26 @@ describe("approval and revocation (#358)", () => {
     await expect($('[data-testid="unseen-overwrite"]')).toHaveText(expect.stringContaining("Overwrites the drifted configuration of drift record 4, which no reviewer has seen."), { wait: 20_000 });
   });
 
+  // T8 (journeys section 13), the order: an approver reaches the change before the approval's typed ID field (2.4.3),
+  // every focus Tab reaches shows an outline (2.4.7), and the page measures as the other views do. The unified text is
+  // synthetic; a long line makes the change scroll inside its own focusable region at 320 CSS pixels (1.4.10).
+  it("keyboard only (T8): the change is reached before the typed plan ID, and the page measures", async function () {
+    this.timeout(120_000);
+    const unified = `@@ machine.nodeLabels @@\n+  team: storage\n+  note: ${"x".repeat(240)}`;
+    const evidence = { ...plan("proposed").evidence, diff: { from: `rel_${"j".repeat(26)}`, to: REL, withheld: false, unified } };
+    await open("h-all", { "/identity": await identity("h-all"), [`/plans/${PLAN}`]: plan("proposed", { operation: "apply-config", mode: "no-reboot", transportDeadlineSeconds: 60, verificationDeadlineSeconds: 120, maxAttempts: 3, evidence }), [`/releases/${REL}`]: release, [`/drafts/${DRAFT}`]: draft });
+    await expect($('[data-testid="diff"]')).toBeExisting({ wait: 20_000 });
+    await fromTitle();
+    const before = await tabTo((f) => f.name === "plan", "the typed plan ID field");
+    expect(before.some((t) => t.startsWith("@@ machine.nodeLabels @@"))).toBe(true);
+    expect(await approve().isEnabled()).toBe(false);
+    const seen = await measure();
+    expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(seen.small).toBe(0);
+    await narrow(async () => expect(["the plan page with its change", await overflows()]).toEqual(["the plan page with its change", 0]));
+    expect(await posts()).toEqual([]);
+  });
+
   it("REC-03, first case: plan creation on a recovery start after its entry is refused without a scope and read as a recovery start", async function () {
     this.timeout(120_000);
     at = await disposable("start=normal");
@@ -160,17 +185,66 @@ describe("approval and revocation (#358)", () => {
     const sends = async (route: string) => ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).filter((w) => w.startsWith(`POST ${route} `));
     const notice = () => $('[data-testid="write-notice"]');
 
-    it("h-viewer: [Approve] is disabled with its reason; a forced submit reaches the server, whose refusal is shown", async function () {
+    // Neither identity holds the approver role (fixtures/oidc/issuer: h-viewer is bw-viewers, h-publisher is bw-publishers). The
+    // publisher is the one that can write elsewhere, which ginsys/bronzeward#358's comment of 2026-11-01 asks for.
+    for (const human of ["h-viewer", "h-publisher"]) {
+      it(`${human}: [Approve] is disabled with its reason; a forced submit reaches the server, whose refusal is shown`, async function () {
+        this.timeout(60_000);
+        const route = `/plans/${seed.plans.proposed}/approvals`;
+        await open(human, undefined, "proposed", {}, seed.plans.proposed);
+        await typed().setValue(seed.plans.proposed);
+        expect(await approve().isEnabled()).toBe(false);
+        await expect($('main form[aria-label="Approve plan"]')).toHaveText(expect.stringContaining("Needs approver"));
+        await browser.execute(() => document.querySelector<HTMLFormElement>('main form[aria-label="Approve plan"]')!.requestSubmit());
+        await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Not saved: /), { wait: 20_000 });
+        expect(await posts()).toEqual([`POST ${route}`]);
+        expect((await answers()).filter((a) => a.startsWith(`${route} `))).toEqual([`${route} 403`]);
+      });
+    }
+
+    // T8, the operation: the approver types the plan ID and approves by keyboard. The approval makes the page read the
+    // plan again, and the control that had focus is gone with its form; focus must be in the answer once the page reads
+    // "approved", not only before it (2.4.3).
+    it("keyboard only (T8): typing the plan ID and Approve by keyboard, focus is in the answer once the plan reads approved", async function () {
+      this.timeout(120_000);
+      const id = seed.plans.proposed;
+      await open("h-all", undefined, "proposed", {}, id);
+      await fromTitle();
+      await tabTo((f) => f.name === "plan", "the typed plan ID field");
+      await browser.keys(id);
+      await tabTo((f) => f.tag === "BUTTON" && f.text === "Approve", "Approve");
+      await browser.keys("Enter");
+      await expect($("main h2")).toHaveText(`Plan ${short(id)}: approved`, { wait: 20_000 });
+      await focusSettles(focusKept, "the page, not the body");
+      await focusSettles(() => focusIn(ANSWER), "the approval's answer");
+      expect((await mirrored()).some((t) => t.includes("Recorded self-approval reasons"))).toBe(true);
+      expect(await statusRegions()).toBe(1);
+      expect(await posts()).toEqual([`POST /plans/${id}/approvals`]);
+      expect((await api(at, "h-viewer", "GET", `/plans/${id}`)).body!["state"]).toBe("approved");
+    });
+
+    it("keyboard only (T8): Revoke approval by keyboard, focus is in the answer once the plan reads revoked", async function () {
+      this.timeout(120_000);
+      await open("h-all", undefined, "approved", {}, seed.plans.approved);
+      await fromTitle();
+      await tabTo((f) => f.name === "reason", "the reason field");
+      await browser.keys("seeded reason");
+      await tabTo((f) => f.tag === "BUTTON" && f.text === "Revoke approval", "Revoke approval");
+      await browser.keys("Enter");
+      await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: revoked$/), { wait: 20_000 });
+      await focusSettles(focusKept, "the page, not the body");
+      await focusSettles(() => focusIn(REVOKE_ANSWER), "the revocation's answer");
+      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by \S+: seeded reason$/), { wait: 20_000 });
+      expect(await posts()).toEqual([expect.stringMatching(/^POST \/approvals\/apr_\w+\/revocations$/)]);
+    });
+
+    // A revocation after the controller committed is offered, with its limit on the control (ginsys/bronzeward#358, row 2).
+    it("a committed plan offers [Revoke approval] with the limit that it does not stop an attempt already recorded", async function () {
       this.timeout(60_000);
-      const route = `/plans/${seed.plans.proposed}/approvals`;
-      await open("h-viewer", undefined, "proposed", {}, seed.plans.proposed);
-      await typed().setValue(seed.plans.proposed);
-      expect(await approve().isEnabled()).toBe(false);
-      await expect($('main form[aria-label="Approve plan"]')).toHaveText(expect.stringContaining("Needs approver"));
-      await browser.execute(() => document.querySelector<HTMLFormElement>('main form[aria-label="Approve plan"]')!.requestSubmit());
-      await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Not saved: /), { wait: 20_000 });
-      expect(await posts()).toEqual([`POST ${route}`]);
-      expect((await answers()).filter((a) => a.startsWith(`${route} `))).toEqual([`${route} 403`]);
+      await open("h-all", undefined, "committed", {}, seed.plans.committed);
+      await expect($('[data-testid="revoke-limit"]')).toHaveText(REVOKE_LIMIT);
+      expect(await $("main").$("button=Revoke approval").isEnabled()).toBe(true);
+      expect(await posts()).toEqual([]);
     });
 
     it("an approved plan: a reason is required; [Revoke approval] sends one revocation, states the limit on the control, and the server revokes the plan", async function () {

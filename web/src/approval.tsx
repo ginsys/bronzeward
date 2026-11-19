@@ -8,7 +8,7 @@ import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { type Load, Id, type Reads, settledRead, short, useItem, useReads } from "./list.tsx";
 import { REASON_MAX, reasonProblem } from "./plan.tsx";
-import { Action } from "./shell.tsx";
+import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
 
 type S = components["schemas"];
@@ -119,6 +119,8 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
   const writes = useWrites()!;
   const [w, send] = useSend();
   const [typed, setTyped] = useState("");
+  const answer = useRef<HTMLDivElement>(null);
+  useFocusOn(w?.outcome, answer);
   const done = w?.outcome?.kind === "done";
   useEffect(() => {
     if (done) reread();
@@ -133,7 +135,6 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
   };
   const over = overwrites(p);
   const busy = (w !== undefined && !startsNew(writes, w)) || done;
-  const result = <Result w={w} done={recorded} />;
   const form = (
     <section aria-label="Approval">
       <Prediction p={p} />
@@ -141,14 +142,16 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
       <form onSubmit={submit} aria-label="Approve plan">
         <p><label>To approve, type the plan ID ({p.id}): <input name="plan" autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} disabled={busy} /></label> Approval is for a human sign-in only.</p>
         <p><Action label="Approve" needs={["approver"]} submit busy={busy || typed.trim() !== p.id} /></p>
-        {result}
       </form>
     </section>
   );
-  if (p.state === "proposed") return form;
-  if (p.state !== "approved" || p.approval === null) return result;
   // An approved plan whose approval is from an earlier epoch authorizes nothing, and the page offers a new approval.
-  return <EarlierEpoch approval={p.approval}>{(earlier) => (earlier ? form : result)}</EarlierEpoch>;
+  const shown = p.state === "proposed" ? form
+    : p.state === "approved" && p.approval !== null ? <EarlierEpoch approval={p.approval}>{(earlier) => (earlier ? form : null)}</EarlierEpoch>
+    : null;
+  // The answer keeps one place in the tree, so the reread that replaces the form leaves it mounted. The
+  // Approve button is disabled once the write is accepted, which drops focus; the answer takes it.
+  return <>{shown}<div ref={answer} tabIndex={-1} data-testid="approval-answer"><Result w={w} done={recorded} /></div></>;
 }
 
 // Whether an approval was recorded in an epoch before the current one; false until both reads answer.
@@ -163,6 +166,8 @@ export function RevokeControl({ p, reread }: { p: Plan; reread: () => void }) {
   const writes = useWrites()!;
   const [note, setNote] = useState<string | undefined>();
   const [w, send] = useSend();
+  const answer = useRef<HTMLDivElement>(null);
+  useFocusOn(w?.outcome, answer);
   const done = w?.outcome?.kind === "done";
   useEffect(() => {
     if (done) reread();
@@ -171,24 +176,25 @@ export function RevokeControl({ p, reread }: { p: Plan; reread: () => void }) {
     const r = data as S["ApprovalRevocationBody"];
     return <>Revocation of approval <Id id={r.approval} /> recorded by <Id id={r.revokedBy} /> ({r.role}), act <Id id={r.act} />. {REVOKE_LIMIT} The plan's state above is read again.</>;
   };
-  if (p.approval === null || (p.state !== "approved" && p.state !== "committed")) return <Result w={w} done={recorded} />;
   const approval = p.approval;
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (approval === null) return;
     const reason = String(new FormData(e.currentTarget).get("reason") ?? "");
     const bad = reasonProblem(reason);
     setNote(bad);
     if (bad === undefined && !done) send({ method: "POST", path: `/approvals/${enc(approval)}/revocations`, body: { reason }, resource: `/plans/${enc(p.id)}` });
   };
   const busy = (w !== undefined && !startsNew(writes, w)) || done;
-  return (
+  const form = (
     <form onSubmit={submit} aria-label="Revoke approval">
       <p><label>Reason (at most {REASON_MAX} bytes) <input name="reason" autoComplete="off" disabled={busy} /></label></p>
       <p><Action label="Revoke approval" needs={["approver", "recovery-admin"]} submit busy={busy} /> <span data-testid="revoke-limit">{REVOKE_LIMIT}</span></p>
       {note !== undefined && <p role="alert" data-testid="revoke-input">{note}</p>}
-      <Result w={w} done={recorded} />
     </form>
   );
+  // The answer keeps one place in the tree, so the reread that ends the approved state does not unmount it.
+  return <>{approval !== null && (p.state === "approved" || p.state === "committed") ? form : null}<div ref={answer} tabIndex={-1} data-testid="revoke-answer"><Result w={w} done={recorded} /></div></>;
 }
 
 // The recorded approval's own line: its reasons, and the unseen overwrite it approved.
