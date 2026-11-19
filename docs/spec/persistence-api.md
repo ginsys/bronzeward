@@ -660,11 +660,25 @@ there.
   **The route is keyed (§7.1):** the document is HMACed under the digest key
   into the request's fingerprint, beside the `kind`, the `endpoint` and the
   cluster, and, like the key, is never stored, logged, returned or quoted; no
-  log line, error or response carries the digest either. Two limits stay: a
-  crash between the provider write and the act's commit leaves a stored key with
-  no act (a retry then stores the next version and answers `replaced: true`),
-  and a latest version that was
-  soft-deleted makes the read refuse, so a supply on top of it is `503`.
+  log line, error or response carries the digest either. Three limits stay.
+  **The provider write comes before the act's commit** (the act needs the
+  stored version's `createdTime`, and the act is immutable), so a crash or a
+  failed commit after the write leaves a stored version with no act. **That
+  version is inert until a supply is recorded:** signing reads the exact
+  version the cluster's latest `FirstKeyAct` names (a KV v2 read of that
+  `version`), never "latest", and where that version is soft-deleted or
+  destroyed the read refuses and never falls back to another. The failed
+  request does not say nothing was stored: its problem says the key may have
+  been stored without its act, that it is not used until a supply is recorded,
+  and that the author reads `GET /clusters/{id}/talos-access` and supplies
+  again; that retry stores the next version and answers `replaced: true`, and
+  its act makes it the one in use (§6.3). A latest version newer than the
+  latest act's `key_version` marks such a key; the presence read does not yet
+  report it. Two requests with the same `Idempotency-Key`, the second reading
+  after the first's write, each store a version; the fingerprint guarantees the
+  same CA, and the replay then answers the first version, whose act is the one
+  recorded. A latest version that was soft-deleted makes the supply's read
+  refuse, so a supply on top of it is `503`.
 - **Authority.** An `author` supplies and replaces a first key, human only, with
   no approval step (owner decision BW-874-first-key-authority-1, 2026-11-18
   17:41 CET: "A"). Every supply and replacement is recorded in the audit trail
@@ -1348,10 +1362,16 @@ machinery's `SupportedWith` window. A refused contract or Kubernetes version is
 
 Two directions, each walked in §13.2 and §13.3:
 
-- **Provider write succeeded, database commit failed.** Only ingestion writes
-  the provider. Its generations exist and no committed draft references them:
-  unused provider objects in design §7.4's sense. Nothing in the database
-  refers to them, so nothing can resolve to them.
+- **Provider write succeeded, database commit failed.** Two routes write the
+  provider. Ingestion's generations exist and no committed draft references
+  them: unused provider objects in design §7.4's sense. Nothing in the database
+  refers to them, so nothing can resolve to them. A first key (§3.4) is stored at
+  `access/talos-ca/<cluster>`, where `talos-access` reports the latest version.
+  A failed commit leaves a stored version with no `FirstKeyAct` row naming it.
+  That version is inert: signing reads the exact version the cluster's latest
+  act names, never "latest". It is seen as a latest version newer than the
+  latest act's `key_version`, and repaired by the next supply, which records
+  `replaced: true` and its act.
 - **Database commit succeeded, provider state absent.** Bronzeward's order
   (provider write, then the database commit that references it) never
   produces this. A provider restored to an older snapshot does: it lost
@@ -3640,6 +3660,16 @@ process's own (§5.1) and ends the pre-entry gate, as the entry would have.
    lists their paths under the abandoned claim. Nothing deletes them (design
    §7.8), and a new import mints new names.
 
+A first key is not an orphan in the same sense (§3.4): the key is written
+first, so a failed commit leaves a stored version with no act. The author
+supplies a first key, the provider stores version 2 over version 1, and the
+transaction fails. The request answers a problem that says the key may have been
+stored without its act and is not used until a supply is recorded: signing reads
+version 1, the one the latest act names, and never "latest". The author reads
+`GET /clusters/{id}/talos-access`, sees version 2 where the last answered supply
+named version 1, and supplies again: the next version is 3, `replaced: true`,
+and its act, which names version 3, makes it the one in use.
+
 ### 13.3 Database commit succeeded, the other side failed
 
 Two cases, both with the database ahead of what the client or the provider
@@ -4130,7 +4160,11 @@ each (design §7.7 consequences):
   the test; every supply and replacement recorded as an act by an `author`
   with no approval step, with a control that requires an approval and must
   then fail; the audit act and every response free of the document and the
-  key, in compilation §15's scan, with a positive control;
+  key, in compilation §15's scan, with a positive control; and a supply whose
+  transaction fails after the provider write, leaving the key stored with no act,
+  the answer saying that it may be stored without its act and never that nothing
+  was stored, and the next supply storing the following version as `replaced`
+  with its act recorded;
 - the presence read (§3.3, "Presence"), against the fixture's OpenBao, each
   state set up on one disposable cluster path: a human `author` reading a
   stored CA key gets `{"present": true}` with `version` the metadata's

@@ -341,8 +341,10 @@ const notCommitted = "nothing of the request's own transaction was committed"
 func (a *API) fail(w http.ResponseWriter, q *request, err error) {
 	a.o.logf("%s %s %s: %v", q.id, q.r.Method, q.r.URL.EscapedPath(), err)
 	var ref *refusal
+	own := false
 	switch {
 	case errors.As(err, &ref):
+		own = true
 		if ref.code == "epoch-mismatch" {
 			setEpoch(w, q) // the epoch the lookup read, which the problem names
 		}
@@ -358,6 +360,11 @@ func (a *API) fail(w http.ResponseWriter, q *request, err error) {
 		ref = refuse(http.StatusServiceUnavailable, "dependency-unavailable", "the database failed; "+notCommitted)
 	default:
 		ref = refuse(http.StatusInternalServerError, "internal-error", notCommitted)
+	}
+	if q.stored != nil && !errors.Is(err, errUnknownOutcome) {
+		// A first key's prepare wrote the provider before this transaction failed: the problem keeps
+		// its status and code, and its detail must not say that nothing was stored (§3.4).
+		ref = keyStoredWithoutAct(ref, own)
 	}
 	a.problem(w, q, ref)
 }

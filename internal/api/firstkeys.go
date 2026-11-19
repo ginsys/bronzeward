@@ -200,6 +200,22 @@ func providerRefusal(err error) error {
 	return err
 }
 
+const keyWithoutAct = "the CA key may have been stored without its act; it is not used until a supply is recorded; read GET /clusters/{id}/talos-access and supply again"
+
+// keyStoredWithoutAct is the problem for a first key whose transaction failed after prepare stored
+// the key. It keeps ref's status, code and members; ref's own detail stays only where the request
+// itself was refused (an epoch mismatch), and otherwise gives way to the true account.
+func keyStoredWithoutAct(ref *refusal, refused bool) *refusal {
+	r := *ref
+	switch {
+	case refused && r.detail != "":
+		r.detail += "; " + keyWithoutAct
+	default:
+		r.detail = keyWithoutAct
+	}
+	return &r
+}
+
 // caFingerprint is the SHA-256 of the DER of the CA certificate's first PEM block, in lower-case hex.
 func caFingerprint(k provider.CAKey) (string, bool) {
 	b, _ := pem.Decode(k.Crt())

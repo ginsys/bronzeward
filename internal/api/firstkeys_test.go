@@ -428,6 +428,46 @@ func TestFirstKeyProviderFailure(t *testing.T) {
 	}
 }
 
+// PA §3.4, §6.3, §13.2: the provider write comes first, so a transaction that fails after it leaves
+// the key stored with no act. The answer keeps its status and code but says so, and never that
+// nothing was stored; supplying again stores the next version, records its act and says `replaced`.
+func TestFirstKeyCommitFailure(t *testing.T) {
+	for name, c := range map[string]struct {
+		fail   func(int) error
+		status int
+		code   string
+	}{
+		"a failed commit":            {func(int) error { return fmt.Errorf("write failed") }, http.StatusInternalServerError, "internal-error"},
+		"deadlocks on every attempt": {deadlock(maxAttempts), http.StatusServiceUnavailable, "transient-conflict"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFirstKeyEnv(t, true)
+			ca := newTalosCA(t)
+			n, _ := trustingNode(t, ca)
+			broken := f.build(options{beforeCommit: c.fail})
+			call := firstKeyCall(f.author, "k-fk-cf-0123456789", f.cluster, "machine-config", controlPlaneConfig(ca), n.Endpoint)
+			doc := wantProblem(t, f.do(broken, call), c.status, c.code)
+			detail, _ := doc["detail"].(string)
+			if !strings.Contains(detail, "may have been stored without its act") || !strings.Contains(detail, "supply again") || strings.Contains(detail, "nothing") {
+				t.Errorf("the detail is %q", detail)
+			}
+			if ver, _ := f.kv.latest(f.path); ver != 1 {
+				t.Fatalf("the key is at version %d; the provider write precedes the transaction", ver)
+			}
+			if acts, rows := firstKeyRows(t, f); acts != 0 || rows != 0 {
+				t.Fatalf("%d acts, %d rows after a failed transaction", acts, rows)
+			}
+			b := decode[firstKeyBody](t, f.do(f.api, call), http.StatusOK)
+			if !b.Replaced || b.CAKeyVersion.Version != 2 {
+				t.Fatalf("the second supply answered %+v", b)
+			}
+			if acts, rows := firstKeyRows(t, f); acts != 1 || rows != 1 {
+				t.Fatalf("%d acts, %d rows after the second supply", acts, rows)
+			}
+		})
+	}
+}
+
 // The document type prints a placeholder under every verb and does not marshal, so a log line or an
 // encoder that reaches it holds none of it.
 func TestFirstKeyDocumentRedacts(t *testing.T) {
