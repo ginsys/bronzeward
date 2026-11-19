@@ -9,7 +9,8 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 // The launcher logs and ignores any other error a launcher hook throws, and runs the specs anyway.
-import { Key, remote, SevereServiceError } from "webdriverio";
+import { remote, SevereServiceError } from "webdriverio";
+import { safariKeys } from "./safari-keys.ts";
 import { FAKE_ISSUER, PAGE_LISTEN, PAGE_ORIGIN, TARGET_ORIGIN } from "./ports.ts";
 import { printFailure } from "./print-failure.ts";
 import { startProvider } from "./provider.ts";
@@ -143,18 +144,12 @@ export const config: WebdriverIO.Config = {
         }
       }, this as unknown as HTMLElement);
     }, { attachToElement: true });
-    // A key sequence sent as one action loses its spaces in safaridriver ("machine:\n  nodeLabels:"
-    // arrives as "machine:\n nodeLabels:"), where the same keys one at a time arrive whole. Single
-    // characters are sent one at a time, a space and a line break as the keys they are.
-    // Safari's Tab skips links; its Option+Tab reaches every control, as the other browsers' Tab does.
+    // A key sequence sent as one action loses its spaces and its repeated characters in safaridriver
+    // ("machine:\n  nodeLabels:" arrives as "machine:\n nodeLabels:"), where the same keys one at a time
+    // arrive whole. safari-keys.ts decides the calls: text goes one character at a time, as an array of
+    // characters or as a string, and Tab goes as Option+Tab.
     await browser.overwriteCommand("keys", async function (origKeys: (v: string | string[]) => Promise<void>, value: string | string[]) {
-      if (value === "Tab") return origKeys(["Alt", "Tab"]);
-      if (Array.isArray(value) && value.length === 2 && value[0] === "Shift" && value[1] === "Tab") return origKeys(["Shift", "Alt", "Tab"]);
-      if (Array.isArray(value) && value.length > 1 && value.every((v) => v.length === 1)) {
-        for (const v of value) await origKeys(v === " " ? Key.Space : v === "\n" ? Key.Enter : v);
-        return;
-      }
-      return origKeys(value);
+      for (const k of safariKeys(value)) await origKeys(k);
     });
     // safaridriver clicks where the element was when the command started, so a click on a link that a
     // list read above it is about to push down lands on the link now under that point (measured on the

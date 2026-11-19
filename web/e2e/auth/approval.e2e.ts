@@ -17,7 +17,7 @@ import { RECOVERY_START } from "../../src/recovery.tsx";
 import { SCOPE_NO_MODE, SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, type Step } from "../injector.ts";
-import { absent, answers, api, disposable, eventually, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, measure, mint, mirrored, narrow, overflows, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
+import { absent, answers, api, disposable, eventually, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, inSafari, measure, mint, mirrored, narrow, overflows, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The page's answer to Approve and to Revoke approval: each control's Result, in an element that takes
@@ -130,7 +130,8 @@ describe("approval and revocation (#358)", () => {
     const seen = await measure();
     expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
     expect(seen.small).toBe(0);
-    await narrow(async () => expect(["the plan page with its change", await overflows()]).toEqual(["the plan page with its change", 0]));
+    // Safari cannot be narrowed to 320 pixels (the reason is at itNarrow): the rest of the case runs there.
+    if (!inSafari()) await narrow(async () => expect(["the plan page with its change", await overflows()]).toEqual(["the plan page with its change", 0]));
     expect(await posts()).toEqual([]);
   });
 

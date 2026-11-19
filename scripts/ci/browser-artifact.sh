@@ -31,11 +31,21 @@ case ${1:-} in
     fi
     mkdir -p "$listing"
     # find quotes the path of an entry it cannot read, and that name may hold a flagged value, so its
-    # diagnostics are dropped and a listing that did not complete is withheld.
+    # diagnostics are dropped and a listing that did not complete is withheld. The listing is made with
+    # POSIX tools, as GNU find's -printf is missing from the BSD find of a macOS runner (ginsys/bronzeward#930):
+    # the type is f (a regular file, with its size), l (a symbolic link) or o (any other kind), and only a
+    # file has a size: a link and the others list 0, where GNU's %s gives a link its target's path length
+    # and GNU's %y has one letter for each of p, s, c and b.
     names=
     complete=1
     if [ -d "$out" ]; then
-      names=$(find "$out" -mindepth 1 ! -type d -printf '%y %s %P\n' 2>/dev/null | LC_ALL=C sort) || complete=
+      names=$(cd "$out" 2>/dev/null && find . -mindepth 1 ! -type d -exec sh -c '
+        for p; do
+          if [ -L "$p" ]; then t=l; n=0
+          elif [ -f "$p" ]; then t=f; n=$(wc -c <"$p") || exit 1
+          else t=o; n=0; fi
+          printf "%s %s %s\n" "$t" "$((n + 0))" "${p#./}"
+        done' sh {} + 2>/dev/null | LC_ALL=C sort) || complete=
     fi
     {
       echo "withheld: the artifact scan did not pass, so this lists names and sizes only (type size path)"
