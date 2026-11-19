@@ -17,5 +17,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/protected.e2e.ts, mise run browser-auth with BW_SPECS=protected; the storage and HTTP cache checks each have a positive control in the same file; web/e2e/retention.test.ts, mise run web, checks that the spec, its local imports and auth.conf.ts make no screenshot, recording, trace, HAR or PDF call
-    browsers: [chrome, edge, firefox, firefox-esr]
-    covers: 'the browser journey, also in the previous major of chrome, edge and firefox (previous-majors.yml, conformance/README.md "Browsers"; ginsys/bronzeward#893). Safari is not run (ginsys/bronzeward#255, B6)'
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
+    covers: 'the browser journey, also in the previous major of chrome, edge and firefox (previous-majors.yml, conformance/README.md "Browsers"; ginsys/bronzeward#893) and in Safari (safari.yml, ginsys/bronzeward#892)'

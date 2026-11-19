@@ -15,4 +15,4 @@ expect:
 runs:
   web:
     check: web/e2e/auth/drafts.e2e.ts, mise run browser-auth
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]

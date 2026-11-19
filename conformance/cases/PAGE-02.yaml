@@ -15,5 +15,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/inventory.e2e.ts, mise run browser-auth; a cursor refused without an epoch change in web/src/list.test.ts, mise run web
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: the machine list

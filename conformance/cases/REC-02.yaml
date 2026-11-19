@@ -15,5 +15,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/recovery.e2e.ts, mise run browser-auth; the texts, the header and the classification of the answers in web/src/recovery.test.ts and web/src/write.test.ts, mise run web
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: both refusals of the entry sent from the page, with the request counts and the missing epoch header

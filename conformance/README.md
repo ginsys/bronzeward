@@ -81,7 +81,7 @@ Every web record above runs in the browsers its `browsers` list names, by `mise 
 | --- | --- | --- |
 | `ci.yml` | Chrome and Edge as the runner has them, Firefox stable and Firefox ESR | yes |
 | `previous-majors.yml` | the previous major of Chrome, Edge and Firefox, pinned below | no: daily on main, on request, and on a pull request that changes its files |
-| `safari.yml` | Safari | no: on main, daily and on request |
+| `safari.yml` | Safari 27.2 on a GitHub-hosted macOS runner, `browser` and `browser-auth` | no: on main, daily and on request |
 
 `previous-majors.yml` is outside the required checks (ginsys/bronzeward#893): three more
 `browser-auth` legs would add about 45 runner-minutes to each of the three runs a change gets and put
@@ -106,3 +106,36 @@ A failed run on main opens one issue, "Previous-major browsers run failed on mai
 pins are moved by hand until ginsys/bronzeward#907 adds a tool: a pin more than one major behind still
 passes against an older browser, and a green run does not say so. Not run: the previous release of
 Firefox ESR, and Safari's previous major.
+
+### Safari
+
+`safari.yml` is outside the required checks (ginsys/bronzeward#612): the macOS arm64 pool sometimes has no
+runner, and a failed or cancelled check that is not required still leaves a pull request unstable. It runs
+on main, daily and on request, in two jobs, `safari` (`mise run browser`) and `safari-auth` (`mise run
+browser-auth`), and a failure of either opens one issue (ginsys/bronzeward#892).
+
+The run on 19 November 2026 ([run 44490676062](https://github.com/ginsys/bronzeward/actions/runs/44490676062))
+passed: Safari 27.2 on macOS, `browser` 3 of 3 spec files, `browser-auth` 15 of 15 (the 14 specs and
+`driver-controls.e2e.ts`, which checks the harness's own commands in every browser). The artifact scan
+found 32 artifacts clean, and its planted control found each planted value. The jobs took 2 min 7 s for
+`safari` and 21 min 34 s for `safari-auth` (18 min 37 s of them in the specs), which is why that job's
+limit is 45 minutes.
+
+The hosted macOS runner has no Docker, so `scripts/dev/native-services.sh` runs PostgreSQL 17 (Homebrew's,
+whose patch release the run logs), OpenBao and Zitadel (vendor release binaries at the pins of
+`fixtures/versions.env`, checked against their sha256) at the ports of the Linux fixture. Safari's
+differences from the other browsers are handled in `web/e2e/wdio.conf.ts` and `web/e2e/auth/helpers.ts`, and
+`driver-controls.e2e.ts` fails the run, naming the command, if a change did not take:
+
+- Tab skips buttons and links, so the harness sends Option+Tab, which reaches every control. The cases
+  do not test that a plain Tab reaches links in Safari.
+- A focused select never changes under the arrow keys, so a keyboard case types the option's label, and
+  another choice is made by setting the value and raising `input` and `change`.
+- A click lands where the element was when the command started, so it waits until the element has held still
+  for 200 ms. `getText` answers the rendered text (tabs between cells read as spaces), and a second tab is
+  found by its window handle, since `newWindow` leaves the session in the opener.
+- There is no BiDi: a dialog is read with the classic alert commands.
+
+Untested in Safari, each with its reason: the seven cases at 320 CSS pixels (no BiDi `setViewport`, and
+Safari's window cannot go below 336 CSS pixels), and the two-browsers part of ETAG-01 (safaridriver runs one
+session at a time; the deterministic variant runs). Safari's previous major is not run.

@@ -13,5 +13,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/tabs.e2e.ts and web/e2e/auth/writes.e2e.ts, mise run browser-auth
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: the change shown and the cached state discarded, in two tabs (tabs.e2e.ts); in one tab, an Add cluster sent as h-author whose answer the injector holds over the renewal for h-publisher, then drops after the commit, is set aside and not repeated (writes.e2e.ts)

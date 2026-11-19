@@ -13,4 +13,4 @@ expect:
 runs:
   web:
     check: web/e2e/auth/protected.e2e.ts, mise run browser-auth with BW_SPECS=protected
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]

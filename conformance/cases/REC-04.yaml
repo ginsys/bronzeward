@@ -15,5 +15,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/recovery.e2e.ts, mise run browser-auth; the repeat, the key and the classification of the answers in web/src/write.test.ts, mise run web
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: '(a), the dropped 201, through the injector, and (b), the server losing its own COMMIT reply, through the disposable deployment''s interrupt build; the server side of (b) is also covered by internal/api/recovery_entries_test.go and internal/api/interrupt_seam_on_test.go'
