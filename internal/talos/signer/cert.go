@@ -42,10 +42,13 @@ type Cert struct {
 }
 
 // Sign signs a client certificate from k for r, valid from now for life, and refuses a life above
-// max. The certificate covers the lifetime and ends at the next whole second after it, which is all a
-// certificate can state; the node's clock is not read. Only os:reader and
-// os:admin are signed. The certificate's serial and NotAfter are read back from the certificate
-// itself, so a record names what the node will check and not what was asked for.
+// max. A certificate states whole seconds: NotBefore drops the fraction of now, and NotAfter is the
+// next whole second at or after now+life, so it never ends before the use it covers. max bounds the
+// issued certificate's own span, NotAfter minus NotBefore: a lifetime whose certificate would span
+// more is refused, never shortened, so a lifetime within two seconds of max can be refused. The
+// node's clock is not read. Only os:reader and os:admin are signed. The certificate's serial and
+// NotAfter are read back from the certificate itself, so a record names what the node will check
+// and not what was asked for.
 func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration) (Cert, error) {
 	if r != role.Reader && r != role.Admin {
 		return Cert{}, ErrRole
@@ -77,6 +80,9 @@ func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration)
 	parsed, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
 		return Cert{}, ErrSign
+	}
+	if parsed.NotAfter.Sub(parsed.NotBefore) > max {
+		return Cert{}, ErrLifetime
 	}
 	caCrt, crt, key := string(k.Crt()), string(pair.Crt), string(pair.Key)
 	return Cert{ca: k.Version(), role: r, serial: parsed.SerialNumber.Text(16), notAfter: parsed.NotAfter.UTC(),

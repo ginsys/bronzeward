@@ -478,8 +478,8 @@ func TestNoTalosconfigFile(t *testing.T) {
 	}
 }
 
-// An absent talos block is 15m, and a present one must name a positive whole-second limit: an
-// explicit zero or an empty block is refused, not turned into the default.
+// An absent talos block is 15m, and a present one must name a positive limit: an explicit zero or
+// an empty block is refused, not turned into the default.
 func TestTalosMaxCertLifetime(t *testing.T) {
 	c, err := Load(strings.NewReader(base + authBlock))
 	if err != nil || c.Talos.MaxCertLifetime != 15*time.Minute {
@@ -492,7 +492,6 @@ func TestTalosMaxCertLifetime(t *testing.T) {
 	for name, c := range map[string]struct{ in, want string }{
 		"negative":     {"-1s", "talos.maxCertLifetime must be positive"},
 		"zero":         {"0s", "talos.maxCertLifetime must be positive"},
-		"fractional":   {"1500ms", "talos.maxCertLifetime must be a whole number of seconds"},
 		"not duration": {"soon", "cannot unmarshal !!str `soon` into time.Duration"},
 	} {
 		if _, err := Load(strings.NewReader(base + authBlock + "talos: {maxCertLifetime: " + c.in + "}\n")); err == nil || !strings.Contains(err.Error(), c.want) {

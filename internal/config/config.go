@@ -61,10 +61,6 @@ func (t *Talos) validate() error {
 	if t.MaxCertLifetime <= 0 {
 		return errors.New("config: talos.maxCertLifetime must be positive")
 	}
-	// A certificate states its NotAfter to the second, so a finer limit could not be met exactly.
-	if t.MaxCertLifetime%time.Second != 0 {
-		return errors.New("config: talos.maxCertLifetime must be a whole number of seconds")
-	}
 	return nil
 }
 
