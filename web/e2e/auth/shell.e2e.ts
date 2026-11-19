@@ -240,7 +240,12 @@ describe("the state catalogue", () => {
     await faults({});
     await event("online");
     await expect(testid("principal")).toHaveText("Signed in as h-viewer");
-    // The banner ends with the read that answered, which can settle a moment after the principal shows.
+    // The online event ends the banner at once and reads again: wait until every one of those reads has answered
+    // (the third identity answer, the second of each list), so a banner a late answer would bring shows in the reads below.
+    await browser.waitUntil(async () => (await answered("/identity", 3)) && (await answered("/drafts", 2)) && (await answered("/releases", 2)), {
+      timeout: 10_000,
+      timeoutMsg: "the online event's reads did not all answer",
+    });
     await eventually(async () => !(await testid("offline").isExisting()), "the offline banner gone after the online event");
     await absent(() => testid("offline").isExisting(), "the offline banner after the online event");
     // The changes page reads its two lists each time it is shown, under the refused identity too.
