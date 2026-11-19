@@ -13,5 +13,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/shell.e2e.ts, mise run browser-auth; once per route in web/src/request.test.ts, mise run web
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: the web client

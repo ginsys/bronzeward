@@ -12,4 +12,4 @@ expect:
 runs:
   web:
     check: web/e2e/auth/fixture.e2e.ts, mise run browser-auth
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]

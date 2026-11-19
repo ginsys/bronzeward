@@ -12,4 +12,4 @@ runs:
   web:
     check: the read case in web/e2e/tls.e2e.ts, mise run browser; the write case in web/e2e/auth/writes.e2e.ts, mise run browser-auth, where the injector answers each send of Add cluster with a redirect
     browsers: [chrome, edge, firefox, firefox-esr, safari]
-    covers: the read case in every browser listed; the write case in all but safari, repeated with the same key and then shown as an unknown outcome with its key and the resource to read, never as not done, and naming no target
+    covers: the read case and the write case in every browser listed, repeated with the same key and then shown as an unknown outcome with its key and the resource to read, never as not done, and naming no target

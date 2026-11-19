@@ -15,5 +15,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/tabs.e2e.ts, mise run browser-auth; the tab protocol in web/src/renewer.test.ts, mise run web, including a frozen tab, which no browser driver used here can freeze
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: all four cases

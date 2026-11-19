@@ -15,5 +15,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/approval.e2e.ts, mise run browser-auth; the start mode from a write's refusal in web/src/write.test.ts, mise run web
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: the first case on a real recovery start; the second case injected, since no setup step of a disposable deployment leaves a machine's scope pre-restore unaccounted, and its real round trip is ginsys/bronzeward#261's

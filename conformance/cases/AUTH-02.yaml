@@ -15,5 +15,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/fixture.e2e.ts, mise run browser-auth; the readings in web/src/auth.test.ts, mise run web
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: every listed defect; over-lifetime has no reading until the client has read maxTokenLifetimeSeconds (client contracts §9.6)

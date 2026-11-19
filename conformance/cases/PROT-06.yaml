@@ -17,5 +17,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/protected.e2e.ts, mise run browser-auth with BW_SPECS=protected
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: 'cases 1 to 4. In case 4 the "held, outcome unknown" reading comes from the ingestion read (GET /api/v1/ingestions/<ingestion>), the claim held with its lease lapsed. An abandoned read is unreachable on a continuation: an encrypted claim is not due until its expiresAt, however long its lease has lapsed (internal/staging/sweep.go:13). The same case runs in the CLI: internal/clitest/import_test.go (the subtest "PROT-06, the draft commit delayed"), recorded in internal/clitest/testdata/import-cases.yaml'

@@ -13,4 +13,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/drafts.e2e.ts, mise run browser-auth; a deterministic variant moves the draft through the API instead of a second browser
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
+    covers: 'in Safari only the deterministic variant runs; the two-browsers case is untested there, because safaridriver runs one session at a time (a second browser cannot be opened beside the first)'

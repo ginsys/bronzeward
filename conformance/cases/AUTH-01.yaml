@@ -14,5 +14,5 @@ expect:
 runs:
   web:
     check: web/e2e/auth/provider.e2e.ts, mise run browser-auth
-    browsers: [chrome, edge, firefox, firefox-esr]
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: sign-in and the GET /server read; reading machines, and showing the recorded Bronzeward-Epoch, run with the first list view
