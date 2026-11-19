@@ -32,6 +32,31 @@ describe("the harness's own commands", () => {
     expect(await $("#late").getText()).toBe("later");
   });
 
+  it("a click waits for the element to hold still, and lands on it after a shift", async function () {
+    // The element is pushed down once, a moment after the command starts: the point it had is then another's.
+    await browser.execute(() => {
+      const hits: string[] = [];
+      (window as unknown as { hits: string[] }).hits = hits;
+      const b = document.createElement("button");
+      b.id = "shift";
+      b.textContent = "shifting";
+      b.addEventListener("click", () => hits.push("shift"));
+      document.body.append(b);
+      setTimeout(() => {
+        const pad = document.createElement("div");
+        pad.style.height = "60px";
+        document.body.insertBefore(pad, b);
+      }, 150);
+    });
+    const before = (globalThis as { bwStillClicks?: number }).bwStillClicks ?? 0;
+    await $("#shift").click();
+    expect(await browser.execute(() => (window as unknown as { hits: string[] }).hits)).toEqual(["shift"]);
+    // Only Safari's harness holds the click still: the count says the change took.
+    if ((browser.capabilities as { browserName?: string }).browserName?.toLowerCase() === "safari") {
+      expect((globalThis as { bwStillClicks?: number }).bwStillClicks ?? 0).toBeGreaterThan(before);
+    }
+  });
+
   it("keys sends repeated characters and spaces whole", async () => {
     await $("#i").click();
     await browser.keys("198.51.100.43  x".split(""));
