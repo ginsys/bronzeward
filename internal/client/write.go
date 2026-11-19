@@ -46,14 +46,16 @@ type Write struct {
 	// comparison of the two epochs cannot show (§8.5, §8.6 item 3).
 	readMoves int
 	counted   bool
-	// Once marks a write the route's 503 does not repeat (operator-experience.md §5.2: the first key
-	// is sent once, and each repeat would dial the node again). Its 503 is the answer: a
-	// dependency-unavailable leaves the outcome unknown, because the route stores before it commits,
-	// and any other 503 is a refusal.
-	// Stop, when set, takes the Ctrl-C for the request in flight: the request ends, and the outcome
-	// is unknown, never a repeat. Nothing else of a write takes it (client-contracts.md §8.2).
-	Once  bool
-	Stop  context.Context
+	// Once marks a write that is sent once (operator-experience.md §5.2: the first key's repeats
+	// would each dial the node again): no answer of it is repeated. A talos-access-unavailable is a
+	// refusal; every other 503, a 5xx and a lost answer leave the outcome unknown, because the route
+	// stores before it commits. The server's detail is dropped from its problems, so no text of the
+	// server reaches a notice, an error or the unknown-outcome block.
+	Once bool
+	// Stop, when set, arms the Ctrl-C around the request in flight only, never the reads before it:
+	// the context it returns ends the request, and its second result says a Ctrl-C was taken. The
+	// outcome is then unknown, never a repeat. Nothing else of a write takes it (client-contracts.md §8.2).
+	Stop  func() (context.Context, func() bool)
 	Read  func(*Client) (string, error)
 	Check string
 	// Input is the input a repeat gives where the command resolved what the operator typed, so the
@@ -317,7 +319,12 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			}
 		}
 		sent := clock()
-		a := c.post(w, key, ref)
+		sctx, disarm := context.Background(), func() bool { return false }
+		if w.Stop != nil {
+			sctx, disarm = w.Stop()
+		}
+		a := c.post(w, key, ref, sctx)
+		stopped := disarm()
 		p, code := a.p, ""
 		if p != nil {
 			code = p.Code()
@@ -364,7 +371,7 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 				}
 			}
 			return a.r, nil
-		case a.p == nil && a.r == nil && w.Stop != nil && w.Stop.Err() != nil:
+		case a.p == nil && a.r == nil && stopped:
 			// The operator's Ctrl-C ended the request: no repeat, and unknown once a connection was taken.
 			if !a.sent {
 				return nil, c.Context.fail(fmt.Errorf("%s not sent: stopped at your request", route))
@@ -384,8 +391,12 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			return nil, &Blocked{a.err, []string{"This is the stored answer to an earlier attempt with this key: that attempt was refused."}}
 		case p == nil && (a.status == 0 || a.status >= 500), p != nil && (code == "internal-error" || a.status >= 500 && !p.unavailable() && code != "epoch-superseded"):
 			ambiguous = true
+			if w.Once {
+				return nil, c.after(true, w, u, a.err)
+			}
 		case p != nil && p.unavailable() && w.Once:
-			return nil, c.after(code == "dependency-unavailable", w, u, a.err)
+			// Only the talos-access-unavailable of the route says nothing was stored.
+			return nil, c.after(ambiguous || code != "talos-access-unavailable", w, u, a.err)
 		case p != nil && p.unavailable():
 		case p != nil && p.Status == http.StatusUnauthorized && c.signIn != nil && !renewed && !c.signIn.failed && c.signIn.tokens.RefreshToken != "":
 			renewed = true
@@ -574,14 +585,10 @@ func processRefusal(err error) bool {
 	return errors.As(err, &p) && p.Code() == "recovery-mode-active" && p.Doc["scope"] == nil
 }
 
-func (c *Client) post(w *Write, key, epoch string) attempt {
+func (c *Client) post(w *Write, key, epoch string, ctx context.Context) attempt {
 	route := w.Method + " /api/v1" + w.Path
 	var a attempt
 	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { a.sent = true }}
-	ctx := context.Background()
-	if w.Stop != nil {
-		ctx = w.Stop
-	}
 	q, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), w.Method,
 		strings.TrimSuffix(c.Context.Server, "/")+"/api/v1"+w.Path, bytes.NewReader(w.Body))
 	if err != nil {
@@ -641,6 +648,9 @@ func (c *Client) post(w *Write, key, epoch string) attempt {
 		return a
 	}
 	if a.p = c.problem(route, r, body); a.p != nil {
+		if w.Once {
+			delete(a.p.Doc, "detail") // a write of a secret prints no words of the server's
+		}
 		a.err = a.p
 	} else {
 		a.err = c.Context.fail(fmt.Errorf("%s answered %s, not a Bronzeward problem", route, printable(r.Status)))

@@ -54,10 +54,9 @@ func (e *env) clusterFirstKey(args []string) error {
 		return err
 	}
 	body, _ := json.Marshal(apitypes.FirstKeyInput{Document: doc, Endpoint: endpoint, Kind: apitypes.FirstKeyInputKind(kind)})
-	stop, disarm := e.arm() // the one write that takes the Ctrl-C: the request can stall at the node
-	defer disarm()
+	// The one write that takes the Ctrl-C, armed by Send around its request only: that can stall at the node.
 	return firstKeyRefusal(e.write(&client.Write{Method: http.MethodPost, Path: "/clusters/" + url.PathEscape(cluster) + "/first-keys", Body: body,
-		HumanOnly: true, Repeat: rp, Once: true, Stop: stop, Check: "act list"},
+		HumanOnly: true, Repeat: rp, Once: true, Stop: e.arm, Check: "act list"},
 		func(_ *client.Client, r *client.Response) ([]string, error) {
 			var x apitypes.FirstKeyBody
 			err := json.Unmarshal(r.Body, &x)
@@ -99,8 +98,9 @@ func firstKeyDocument(file, kind, talosContext string) (string, error) {
 // firstKeyRefusal says what the route refused by, naming the rule and nothing the server's Talos read
 // gave: the route sends neither the document nor a node's words, and this client prints neither.
 func firstKeyRefusal(err error) error {
+	var u *client.Unknown
 	var p *client.Problem
-	if !errors.As(err, &p) {
+	if errors.As(err, &u) || !errors.As(err, &p) { // an unknown outcome stays unknown: "nothing was stored" is not known of it
 		return err
 	}
 	rule, _ := p.Doc["rule"].(string)
