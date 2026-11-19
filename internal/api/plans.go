@@ -18,6 +18,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/talos/signer"
 	"github.com/ginsys/bronzeward/internal/textdiff"
 )
 
@@ -88,9 +89,13 @@ func (in *planInput) check(*API) error {
 }
 
 // resolve fills what the request leaves out from the deployment's defaults and holds the transport
-// deadline to the deployment's maximum and the verification deadline (choice §17.37). It runs in
+// deadline to the deployment's maximum and the verification deadline (choice §17.37). An apply-config
+// plan is also held to the one certificate its dispatch signs, which covers nodeUse (the observation's
+// node reads), the check's validity and the transport deadline and may not exceed maxCert: a plan
+// above it could be approved and then refused at every dispatch. An adopt plan has no check or
+// transport deadline, and its observation signs its own certificate for nodeUse alone. It runs in
 // T4, so only a request with no record meets it.
-func (in *planInput) resolve(exec config.Execution) error {
+func (in *planInput) resolve(exec config.Execution, maxCert, nodeUse time.Duration) error {
 	def := exec.PlanDefaults
 	fill := func(v **int64, d time.Duration) {
 		if *v == nil {
@@ -115,6 +120,10 @@ func (in *planInput) resolve(exec config.Execution) error {
 	}
 	if *in.TransportDeadlineSeconds > *in.VerificationDeadlineSeconds {
 		return errors.New("transportDeadlineSeconds must be at most verificationDeadlineSeconds")
+	}
+	if use := nodeUse + time.Duration(*in.CheckValiditySeconds+*in.TransportDeadlineSeconds)*time.Second; use > maxCert-signer.RoundingSlack {
+		return fmt.Errorf("checkValiditySeconds and transportDeadlineSeconds must leave room for the node reads: "+
+			"%s of node use, the check validity and the transport deadline are at most the deployment's certificate lifetime, %s", nodeUse, maxCert)
 	}
 	return nil
 }
@@ -206,7 +215,7 @@ type planBody struct {
 // the release was compiled from. The plan is one plan entry on the machine's timeline, proposed.
 func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*planInput)
-	if err := in.resolve(a.d.exec); err != nil {
+	if err := in.resolve(a.d.exec, a.d.maxCert, nodeUseLife*a.o.nodeTimeout); err != nil {
 		return result{}, refuse(http.StatusBadRequest, "invalid-request", err.Error())
 	}
 	b := planBody{ID: id.New(id.Plan), Revision: 1, State: "proposed", Machine: in.Machine, Release: in.ReleaseID,

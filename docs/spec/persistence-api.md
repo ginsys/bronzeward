@@ -2412,8 +2412,11 @@ plan, `transportDeadlineSeconds` and `verificationDeadlineSeconds`, with
 `execution.planDefaults` value. An `adopt` plan takes no `mode`, deadlines or
 attempt limit. A value out of range is `400 invalid-request` before the request
 is admitted. A transport deadline above the deployment's maximum transport
-deadline (execution and recovery §7.3) or above the verification deadline, once
-the defaults are filled, is `400 invalid-request` from the creation
+deadline (execution and recovery §7.3), above the verification deadline, or
+such that the node reads, `checkValiditySeconds` and `transportDeadlineSeconds`
+together exceed the signer's `talos.maxCertLifetime` less two seconds (one
+certificate covers a dispatch, §3.3), once the defaults are filled, is
+`400 invalid-request` from the creation
 transaction, after the key is looked up, so that a repeated request replays its
 recorded answer whatever the deployment's values are now (§7.2)
 **(choice §17.37)**.
@@ -3891,7 +3894,7 @@ or Desired change; it does not erase earlier evidence.
 | Plan | An `apply-config` plan for a release that is not the machine's `Desired` | `409 conflict` naming the `Desired` release | nothing |
 | Plan | An `apply-config` plan for a machine with no `Applied`; an `adopt` plan for a machine with one and no open drift record; the machine's assignment head moved past the revision the release was compiled from | `409 conflict` | nothing |
 | Plan | A release that does not cover the machine | `422 validation-failed` naming both | nothing |
-| Plan | A duration or attempt limit out of range, or a transport deadline above the maximum or the verification deadline (§9.3) | `400 invalid-request` | nothing |
+| Plan | A duration or attempt limit out of range, or a transport deadline above the maximum or the verification deadline, or a certificate lifetime above the signer's maximum (§9.3) | `400 invalid-request` | nothing |
 | Plan | Approval or identity revocation racing a commitment | the revoker waits for the commitment or precedes it (§1.2 item 3) | the revocation, after or before the commitment |
 | Position | A machine's position read (§9.3) whose snapshot fails serialization on every one of four attempts (the first and three retries) | `503 transient-conflict`; never an answer built from two snapshots | nothing |
 | Recovery | Plan creation, approval, adoption plan or unfreeze on a scope still pre-restore unaccounted | `409 recovery-mode-active` | nothing |
