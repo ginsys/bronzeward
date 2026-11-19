@@ -184,9 +184,19 @@ const storageState = () =>
     caches: "caches" in self ? await caches.keys() : ["unreadable"],
   }));
 
-// Client contracts §11.5 item 3: no browser storage holds a value outside a redirect.
+// Client contracts §11.5 item 3: no browser storage holds a value outside a redirect. One read: a write that lands a
+// moment after the case's last step is missed, so the protected specs use storageEmptyAfterPause instead (the
+// guard, absence-guard.test.ts, refuses this name there).
 export async function storageEmpty() {
   expect(await storageState()).toEqual({ local: 0, session: 0, indexedDB: [], caches: [] });
+}
+
+// storageEmpty read again after a pause, as `absent` does for a page read: for the specs that handle a protected
+// document, where a late write would be a leak that one read passes before it exists.
+export async function storageEmptyAfterPause() {
+  await storageEmpty();
+  await browser.pause(300);
+  await storageEmpty();
 }
 
 // The positive control of storageEmpty (ginsys/bronzeward#341, client contracts §11.5): plants a

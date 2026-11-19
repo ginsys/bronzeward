@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, syntheticDocument } from "../auth.conf.ts";
-import { eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, itNarrow, measure, mint, mirrored, narrow, onMain, overflows, storageEmpty, tabTo } from "./helpers.ts";
+import { eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, itNarrow, measure, mint, mirrored, narrow, onMain, overflows, storageEmptyAfterPause, tabTo } from "./helpers.ts";
 
 const statusRegions = () => browser.execute(() => document.querySelectorAll('[role="status"]').length);
 
@@ -82,9 +82,11 @@ describe("the publication page (#342)", () => {
     // Nothing reached any machine: no release, no apply-config or adopt operation, no Applied release.
     const releases = await api("h-viewer", "GET", "/releases");
     expect(releases.status).toBe(200);
+    // once: an API body read after the publication operation ended (awaited above), the only thing that could create a release.
     expect(releases.body!["items"]).toEqual([]);
     const ops = await api("h-viewer", "GET", "/operations");
     expect(ops.status).toBe(200);
+    // once: an API body read after the publication operation ended (awaited above), the only thing that could create an operation.
     expect((ops.body!["items"] as { kind: string }[]).filter((o) => o.kind === "apply-config" || o.kind === "adopt")).toEqual([]);
     const m = await api("h-viewer", "GET", `/machines/${machine}`);
     expect(m.status).toBe(200);
@@ -204,4 +206,4 @@ describe("the publication page (#342)", () => {
   });
 });
 
-afterEach(storageEmpty);
+afterEach(storageEmptyAfterPause);

@@ -42,10 +42,12 @@ describe("the plan creation page (#357)", () => {
     await expect($("main").$("button=Create plan")).toBeEnabled();
     // The refusal belongs to apply-config: choosing adopt hides it.
     await $("main").$("select").selectByAttribute("value", "adopt");
+    // once: the refusal was shown and awaited above; the matcher waits for its removal on the change of the operation, and no write is in flight to draw it again.
     await expect($('[data-testid="write-result"]')).not.toBeExisting();
     expect((await writes()).filter((w) => w.startsWith("POST "))).toEqual(["POST /plans"]);
     const plans = await api(at, "h-viewer", "GET", "/plans");
     expect(plans.status).toBe(200);
+    // once: an API body read after the one refused write was answered (awaited above), and nothing else sends.
     expect(plans.body!["items"]).toEqual([]);
   });
 
@@ -116,7 +118,9 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     await browser.url(`${FIXTURE_PAGE}/plans/${seed.plans.expired}`);
     await expect($('[data-testid="plan-terminal"]')).toHaveText(expect.stringContaining("expired"), { wait: 20_000 });
     await expect($('[data-testid="plan-terminal"] a')).toHaveAttribute("href", `/plans/new?${new URLSearchParams({ release: seed.release, machine: seed.machine2, operation: "apply-config" })}`);
+    // once: the control is drawn from the plan's state in the render that drew the terminal line awaited above (web/src/resources.tsx:383, web/src/plan.tsx:233).
     await expect($("main").$("button=Cancel plan")).not.toBeExisting();
+    // once: the expired plan's page has no control that sends a write (the Cancel plan form is absent, above), and the case clicks nothing.
     expect(await writes()).toEqual([]);
   });
 
@@ -127,8 +131,11 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     expect(await fixtureSignIn("h-all", {}, { upstream: sat })).toMatch(SERVER);
     await browser.url(`${FIXTURE_PAGE}/plans/${seed.plans.approved}`);
     await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: approved$/), { wait: 20_000 });
-    // The approval is of the current epoch, so the page offers no new approval.
-    await expect($('main form[aria-label="Approve plan"]')).not.toBeExisting();
+    // The approval is of the current epoch, so the page offers no new approval. The form is drawn only once the approval's
+    // read and the identity read answer (EarlierEpoch, web/src/approval.tsx:158), so both answers are awaited first.
+    await $('[data-testid="approval-record"]').waitForExist({ timeout: 20_000 });
+    await $('[data-testid="principal"]').waitForExist({ timeout: 20_000 });
+    await absent(() => $('main form[aria-label="Approve plan"]').isExisting(), "the Approve form on a plan approved in the current epoch");
     await $("main").$("button=Cancel plan").click();
     await expect($('[data-testid="cancel-input"]')).toHaveText("Give a reason.");
     await absent(async () => (await writes()).length > 0, "a cancellation sent without a reason");

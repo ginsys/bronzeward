@@ -104,6 +104,7 @@ describe("approval and revocation (#358)", () => {
       expect.stringContaining(`Self-approval, predicted: you did not create this plan. Not predicted, since this read failed: release ${short(REL)}.`),
       { wait: 20_000 },
     );
+    // once: no step of the case submits, and the page sends a write only from a submit (web/src/approval.tsx:132-135).
     expect(await posts()).toEqual([]);
   });
 
@@ -132,6 +133,7 @@ describe("approval and revocation (#358)", () => {
     expect(seen.small).toBe(0);
     // Safari cannot be narrowed to 320 pixels (the reason is at itNarrow): the rest of the case runs there.
     if (!inSafari()) await narrow(async () => expect(["the plan page with its change", await overflows()]).toEqual(["the plan page with its change", 0]));
+    // once: the case only tabs and measures, and the page sends a write only from a submit (web/src/approval.tsx:132-135).
     expect(await posts()).toEqual([]);
   });
 
@@ -253,6 +255,7 @@ describe("approval and revocation (#358)", () => {
       await open("h-all", undefined, "committed", {}, seed.plans.committed);
       await expect($('[data-testid="revoke-limit"]')).toHaveText(REVOKE_LIMIT);
       expect(await $("main").$("button=Revoke approval").isEnabled()).toBe(true);
+      // once: the case clicks nothing, and the page sends a write only from a submit (web/src/approval.tsx:186).
       expect(await posts()).toEqual([]);
     });
 
@@ -260,8 +263,11 @@ describe("approval and revocation (#358)", () => {
       this.timeout(120_000);
       await open("h-all", undefined, "approved", {}, seed.plans.approved);
       await expect($('[data-testid="revoke-limit"]')).toHaveText(REVOKE_LIMIT);
-      // The approval is of the current epoch, so the page offers no new one.
-      await expect($('main form[aria-label="Approve plan"]')).not.toBeExisting();
+      // The approval is of the current epoch, so the page offers no new one. The form is drawn only once the approval's
+      // read and the identity read answer (EarlierEpoch, web/src/approval.tsx:158), so both answers are awaited first.
+      await $('[data-testid="approval-record"]').waitForExist({ timeout: 20_000 });
+      await $('[data-testid="principal"]').waitForExist({ timeout: 20_000 });
+      await absent(() => $('main form[aria-label="Approve plan"]').isExisting(), "the Approve form on a plan approved in the current epoch");
       await $("main").$("button=Revoke approval").click();
       await expect($('[data-testid="revoke-input"]')).toHaveText("Give a reason.");
       await absent(async () => (await posts()).length > 0, "a revocation sent without a reason");

@@ -55,6 +55,7 @@ const sends = (n: number) => browser.waitUntil(async () => (await writes()).leng
 // Signs in as h-author on the disposable deployment and opens Add cluster from the machine list.
 async function open(flags: Record<string, string> = {}): Promise<string> {
   expect(await fixtureSignIn("h-author", flags, { upstream: at })).toMatch(SERVER);
+  // once: a precondition, not an absence the page under test keeps: the sign-in just cleared the log, and a late write of an earlier case would fail that case's own checks.
   // The sign-in cleared the write log, and no write of an earlier case reached it since.
   expect(await writes()).toEqual([]);
   await $('nav[aria-label="Main"]').$("a=Machines").click();
@@ -173,6 +174,7 @@ describe("the write views (#338)", () => {
     await expect(notice()).toHaveText(expect.stringContaining(REPEATING), { wait: 30_000 });
     expect(await notice().getText()).toContain(UNKNOWN);
     await sends(4);
+    // once: the matcher waits for the repeating text to end after the fourth send was seen above, and no send is left to draw it again.
     await expect(notice()).not.toHaveText(expect.stringContaining(REPEATING), { wait: 30_000 });
     expect(await notice().getText()).toContain(UNKNOWN);
     const { key } = await oneWrite(4);
@@ -209,6 +211,7 @@ describe("the write views (#338)", () => {
     } finally {
       browser.off("dialog", answer);
     }
+    // once: the leave guard asks with a synchronous confirm in the click's own navigation (web/src/forms.tsx:102), so a dialog is recorded before the awaited text shows.
     expect(asked).toEqual([]);
   });
 

@@ -392,6 +392,7 @@ describe("the machine detail (W3)", () => {
     await release();
     await $('[data-testid="offline"]').waitForExist({ timeout: 20_000, reverse: true });
     await browser.waitUntil(async () => (await machineReads()) === before + 1, { timeout: 20_000, timeoutMsg: "W3 did not read the machine again" });
+    // once: the matcher waits for the refusal to end once the machine was read again (counted above); the pause below, with the read count unchanged, is the second look.
     await expect($("main")).not.toHaveText(expect.stringContaining(refused), { wait: 20_000 });
     await browser.pause(6_000);
     expect(await machineReads()).toBe(before + 1);
@@ -778,12 +779,14 @@ describe("the rendered review of a release's machine", () => {
     expect(await where()).toBe(`${FIXTURE_PAGE}/releases/${s.rel.id}/machines/${m}`);
     await expect($('[data-testid="document"]')).toHaveText(expect.stringContaining('team: ""'));
     expect(await texts("main pre .badge")).toEqual(["[secret registry/example-pass, version 1]", "[secret, marked by the pinned machinery]"]);
+    // once: the document's text is drawn in one render from the served review (web/src/review.tsx:144-160), and the same element's text was awaited above.
     await expect($('[data-testid="document"]')).not.toHaveText(expect.stringContaining("<redacted"));
     await expect($("main")).toHaveText(expect.stringContaining(EMPTY_NOTE));
     await expect($('[data-testid="provenance"]')).toHaveText(expect.stringContaining("registry/example-pass"));
     await expect($('[data-testid="provenance"]')).toHaveText(expect.stringContaining("doc[0]/machine/registries/config/registry.example.test/auth/password"));
     await expect($("main")).toHaveText(expect.stringContaining(PROVENANCE_LIMIT));
     await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("Hand it over first (an adopt plan)"));
+    // once: the case opens pages and clicks links only, and the page sends a write only from a submit.
     // The page reads and sends nothing: no write left the browser.
     expect(await (await fetch(`${CONTROL}/writes`)).json()).toEqual([]);
   });
@@ -798,7 +801,9 @@ describe("the rendered review of a release's machine", () => {
     const { s, m } = await served({ configuration: null, notice: "no redacted form could be produced", provenance: [] });
     await open(s.rel.id, m);
     await expect($('main [data-testid="status"]')).toHaveText(WITHHELD);
+    // once: the withheld state, the missing document area and the missing note are drawn by one expression (web/src/review.tsx:160), and the status it draws was awaited above.
     await expect($('[data-testid="document"]')).not.toBeExisting();
+    // once: the same render as the line above.
     await expect($("main")).not.toHaveText(expect.stringContaining(EMPTY_NOTE));
     await expect($("main")).toHaveText(expect.stringContaining(NO_PROVENANCE));
   });

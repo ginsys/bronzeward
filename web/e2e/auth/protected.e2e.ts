@@ -15,7 +15,7 @@ import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE } from "../auth.conf.ts";
-import { absent, cacheControl, cacheHolds, eventually, faults, fixtureSignIn, interrupt, mint, settled, storageControl, storageEmpty } from "./helpers.ts";
+import { absent, cacheControl, cacheHolds, eventually, faults, fixtureSignIn, interrupt, mint, settled, storageControl, storageEmptyAfterPause } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -147,7 +147,7 @@ async function openReview() {
 // What every protected journey leaves behind: nothing in storage, IndexedDB or caches, and no answer of
 // the case's review in the HTTP cache. The cache probe of cacheControl is its positive control.
 async function leavesNothing() {
-  await storageEmpty();
+  await storageEmptyAfterPause();
   // The case's last step may be a request whose answer the browser caches a moment later, so the read is repeated.
   if (importId !== "") await absent(() => cacheHolds(`/api/v1/ingestions/${importId}/review`), "the review answer in the HTTP cache");
   importId = "";
@@ -301,7 +301,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await browser.url(`${FIXTURE_PAGE}/`);
     await settled(FIXTURE_PAGE);
     await absent(reviewShown, "the document text after leaving the page");
-    await storageEmpty();
+    await storageEmptyAfterPause();
     await absent(() => cacheHolds(documentPath), "the document in the HTTP cache after leaving the page");
     // Another author, who did not import it, is refused by the server's rule and the page holds no text.
     expect(await fixtureSignIn("h-all", {}, { upstream: at })).toMatch(SERVER);
@@ -309,7 +309,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await shows().$("button=Show document").click();
     await expect(shows()).toHaveText(holds("not-the-importer"), { wait: 20_000 });
     await absent(reviewShown, "the document text of a refused author");
-    await storageEmpty();
+    await storageEmptyAfterPause();
     await absent(() => cacheHolds(documentPath), "the document in the HTTP cache after a refused author");
     await cacheControl(at);
   });
@@ -365,7 +365,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // The failed read puts the shell offline: its banner shows and actions are disabled until a read answers.
     await $('[data-testid="offline"]').waitForExist({ timeout: 20_000, timeoutMsg: "the failed read did not end in the offline state" });
     await absent(reviewShown, "the review text after a failed read");
-    await storageEmpty();
+    await storageEmptyAfterPause();
     await absent(() => cacheHolds(`/api/v1/ingestions/${id}/review`), "the review answer in the HTTP cache after a failed read");
     await faults({ upstream: at });
     // A read that answers ends the offline state; the review is then read again on request.
