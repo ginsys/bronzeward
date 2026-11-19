@@ -669,9 +669,11 @@ there.
   and `first-key-endpoint-no-control-plane`, the identity read for
   `first-key-cluster-mismatch`), so a refused read does not win by default, and each
   outcome is its own: a document that cannot be parsed, or a client that cannot
-  be built or dialled at all (a talosconfig that does not parse, an endpoint
-  that cannot be dialled as given), fails before any read as
-  `first-key-unusable`; a configuration read the node answers
+  be built from it (a talosconfig that does not parse, or a certificate
+  authority, certificate or key in it that is unusable), fails before any read
+  as `first-key-unusable`; an endpoint is judged by the §3.3 grammar before
+  that (a malformed one is the `400` above), and a well-formed one that does
+  not answer is a failed read, `503 talos-access-unavailable` below; a configuration read the node answers
   with `PermissionDenied` is `first-key-role-insufficient`; an answer that
   parses and holds no CA key, as a worker node's answer would, is
   `first-key-endpoint-no-control-plane`. Any other failed read, an answer that
