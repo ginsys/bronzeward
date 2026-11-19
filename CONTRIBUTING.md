@@ -39,7 +39,7 @@ The label set is managed from [ginsys/.github](https://github.com/ginsys/.github
 
 Refine or subdivide incomplete implementation and acceptance issues with concrete contracts and checks before removing refinement labels. Preserve native dependencies and acceptance coverage when subdividing. Stable `bronzeward-key` markers identify seeded issues and must not be changed or duplicated. Preserve human edits.
 
-The [licence decision](https://github.com/ginsys/bronzeward/issues/16) is independent owner work in milestone 02 and does not block the PoC specification review. Completing a milestone still requires its own issue completion criteria; this independence does not mark the licence work done.
+The [licence decision](https://github.com/ginsys/bronzeward/issues/16) is a standalone project issue outside every milestone (milestone 02 is closed) and blocks no milestone's work. Completing a milestone still requires its own issue completion criteria; this independence does not mark the licence work done.
 
 ## Evidence and closure
 

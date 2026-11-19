@@ -607,8 +607,9 @@ one.
 
 Both clients are built from certificates the signer signs for the cluster
 (`os:admin` where the use reads a machine configuration or sends a mutating
-request; [persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)), whose key carries
-`os:admin` ([persistence and API §3.3](persistence-api.md#33-talos-access)). Every observation (§4.1), whether
+request; [persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)). The CA key the
+signer signs them from carries no role of its own; the role is the one the certificate is signed with
+([persistence and API §3.3](persistence-api.md#33-talos-access)). Every observation (§4.1), whether
 taken for a plan or not, goes through an **observation client** whose source
 is held to an allowlist of read calls by test, as ingestion's is; `drift`,
 `restoration` and `recovery` observations have no plan and need no approval.

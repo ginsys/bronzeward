@@ -81,11 +81,12 @@ Kept unchanged, as the issue requires:
   administration.
 
 Excluded: a server session or backend-for-frontend, direct provider or Talos access from a
-client (two exceptions, [§3.3](#33-client-actions-with-no-route): `cluster discover` reads
+client (one exception, [§3.3](#33-client-actions-with-no-route): `cluster discover` reads
 a cluster with the operator's own talosconfig through `internal/talos/discover`, a read-only
-package, and the first key goes to the server through `POST /clusters/{id}/first-keys`, never to
-OpenBao from a client; the client imports neither `internal/talos` nor `internal/provider`, so it
-never links the server's Talos or provider packages), a new credential policy, the decisions of
+package; the first key is no exception, because it goes to the server through
+`POST /clusters/{id}/first-keys` ([§3.2](#32-writes)), never to OpenBao from a client; the client
+imports neither `internal/talos` nor `internal/provider`, so it never links the server's Talos or
+provider packages), a new credential policy, the decisions of
 [#265](https://github.com/ginsys/bronzeward/issues/265) and
 [#266](https://github.com/ginsys/bronzeward/issues/266), and any client implementation.
 [#162](https://github.com/ginsys/bronzeward/issues/162) concerns Talos access and does not supply
@@ -169,6 +170,7 @@ no role included (`internal/api/api.go:339`).
 | `cluster add` | `POST /clusters` | author | yes | | 201 | | |
 | `machine add` | `POST /machines` | author | yes | | 201 | | |
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | | 201 | | |
+| `cluster first-key` | `POST /clusters/{id}/first-keys` | author | yes | | 200 | `document` | |
 | `import start` | `POST /ingestions` | author | yes | draft's | 202 | `document` | |
 | `import mark` | `POST /ingestions/{id}/marks` | author | yes | | 202 | `marks` | |
 | `import continue` / `takeover` | `POST /ingestions/{id}/continuations` / `takeovers` | author | yes | | 202 | | |
@@ -201,6 +203,14 @@ cancellation of only its own plan is checked in the handler
 (`internal/api/cancellations.go:61-67`). The ingestion start's `If-Match` is the target draft's
 ETag (`internal/api/ingestions.go:153-154`).
 
+`cluster first-key` sends one first key, a talosconfig, a control plane configuration or a secrets
+bundle ([persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)). Its flags
+are `--kind`, `--file`, `--endpoint` (required for every kind: the Talos node address the server tries
+the key at, not a Bronzeward address; [operator experience §5.2](operator-experience.md#52-inventory))
+and `--talos-context`. The file is read with a size limit, sent once and never copied, logged or
+printed; a talosconfig is cut to one context first; errors name the route's rule and never quote the
+server's Talos text.
+
 ### 3.3 Client actions with no route
 
 | Client action | Why no route | Contract |
@@ -208,8 +218,7 @@ ETag (`internal/api/ingestions.go:153-154`).
 | `login`, `logout` | identity-provider and client concerns; the server keeps no session | [§9](#9-authentication) |
 | `context` | client configuration | [§5](#5-endpoint-discovery-and-context-selection) |
 | `cluster discover` | reads a cluster's nodes with the operator's own talosconfig and calls no Bronzeward route; prints the `cluster add`, `machine add` and `cluster first-key` commands that record it and runs none of them | `--talosconfig <file>` is required and nothing else is searched (not `$TALOSCONFIG`, not Talos's default file, not the current directory); table output only; the file is read with a size limit and never copied, logged or printed; errors give the node's gRPC code and never its text |
-| `cluster first-key` | calls `POST /clusters/{id}/first-keys` with one first key: a talosconfig, a control plane configuration or a secrets bundle ([persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)); it needs a human `author` | `--kind` and `--file`; the file is read with a size limit, sent once and never copied, logged or printed; a talosconfig is cut to one context first; errors name the route's rule and never quote the server's Talos text |
-| `cluster onboard` | does the discover read, then runs those steps, the first key included, and the imports itself ([operator experience §5.2](operator-experience.md#52-inventory)); it holds no OpenBao address or token | the same `--talosconfig` and read rules; `-o json` and `-o yaml` print one object at the end; the first key is sent once and never logged or printed; errors give the node's gRPC code and never its text |
+| `cluster onboard` | has no route of its own: it does the discover read, then runs the routes of [§3.2](#32-writes) for those steps, the first key included, and the imports itself ([operator experience §5.2](operator-experience.md#52-inventory)); it holds no OpenBao address or token | the same `--talosconfig` and read rules; `-o json` and `-o yaml` print one object at the end; the first key is sent once and never logged or printed; errors give the node's gRPC code and never its text |
 | automation token issue, rotate, list | server-side command only | not offered by either client |
 | dispatch, apply | the controller dispatches approved plans ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary); [§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy) item 2) | not offered |
 
@@ -1496,7 +1505,7 @@ Plaintext can pass through a client in these places only:
 | The import base text | `GET /import-base-revisions/{id}/document` | the stored sanitized document, which can hold a value nobody marked | `internal/api/importbase_document.go`; [persistence and API choice §17.41](persistence-api.md#17-choices-for-owner-review) |
 | Tokens | every request | credentials | [§9](#9-authentication) |
 | The talosconfig file of `cluster discover` | none: it is read from a file the operator names and goes to Talos nodes only | holds the cluster's client key | [§3.3](#33-client-actions-with-no-route) |
-| A first key file of `cluster first-key` or `cluster onboard` | none: it is read from a file the operator names and sent once to `POST /clusters/{id}/first-keys` | may hold the cluster's CA key | [§3.3](#33-client-actions-with-no-route) |
+| A first key file of `cluster first-key` or `cluster onboard` | `POST /clusters/{id}/first-keys`: it is read from a file the operator names and sent once | may hold the cluster's CA key | [§3.2](#32-writes), [persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer) |
 
 Not protected: rendered release reviews, plan diffs and provenance are redacted by the server
 ([compilation §8.3](compilation.md#83-redaction)) and are handled as ordinary reads.
@@ -2017,6 +2026,13 @@ Limits:
   [#293](https://github.com/ginsys/bronzeward/issues/293) respectively applied (see the opening),
   and those to the web client in [§8.6](#86-event-resumption) item 6, which are read with
   [#443](https://github.com/ginsys/bronzeward/issues/443) applied. They move as the code changes.
+- **Safari and 320 CSS pixels** (the lead's decision RULING-20261119-1756-38, under the owner's
+  2026-10-07 delegation; the owner may overrule it). The 320 CSS pixel reflow cases are untested in
+  Safari, because safaridriver has no viewport command and Safari's window stops at 336 CSS pixels;
+  those cases run in Chrome, Edge, Firefox and Firefox ESR. This sits beside the owner's accepted
+  limitation that Safari 16 is not run (BW-255-matrix-1, recorded on
+  ginsys/bronzeward#255). [`conformance/README.md`](../../conformance/README.md#safari)
+  lists the cases.
 - Every choice in [§13](#13-alternatives-and-open-choices) and every implementation choice above
   is decided. This document decides no credential policy.
 - It does not change any role, human-only rule, route, schema or server setting.
