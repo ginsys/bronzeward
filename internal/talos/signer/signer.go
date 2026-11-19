@@ -149,8 +149,8 @@ func osCA(document []byte) (ca *x509.PEMEncodedCertificateAndKey, ok bool) {
 // The connection ends no later than the certificate does (persistence-api.md §3.4): a node that
 // holds the read open is ErrUnavailable once the certificate has lapsed.
 func Try(ctx context.Context, ca provider.CAKey, endpoint string, now time.Time) error {
-	// The probe has no configured maximum; two seconds is room for the whole-second encoding.
-	cert, err := Sign(ca, role.Reader, now, tryLifetime, tryLifetime+2*time.Second)
+	// The probe has no configured maximum; its maximum leaves room for the whole-second encoding.
+	cert, err := Sign(ca, role.Reader, now, tryLifetime, tryLifetime+roundingSlack)
 	if err != nil {
 		return &Refusal{RuleUnusable}
 	}

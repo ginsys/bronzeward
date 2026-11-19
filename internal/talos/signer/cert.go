@@ -19,9 +19,9 @@ import (
 var (
 	// ErrRole is a role that is not one a use needs: only os:reader and os:admin are signed.
 	ErrRole = errors.New("signer: a certificate is signed only for the os:reader or os:admin role")
-	// ErrLifetime is a lifetime that is not positive, or that is above the configured maximum. It is
-	// never cut down to the maximum: a lifetime that does not cover its use would fail the use in the
-	// middle.
+	// ErrLifetime is a lifetime that is not positive, or above the maximum less the two seconds a
+	// certificate's whole-second encoding can add to its span. It is never cut down to fit: a
+	// lifetime that does not cover its use would fail the use in the middle.
 	ErrLifetime = errors.New("signer: the lifetime is not above zero and within the maximum")
 	// ErrSign is a CA key that cannot sign.
 	ErrSign = errors.New("signer: the CA key could not sign a certificate")
@@ -41,35 +41,31 @@ type Cert struct {
 	crt, key *string
 }
 
-// Sign signs a client certificate from k for r, valid from now for life, and refuses a life above
-// max. A certificate states whole seconds: NotBefore drops the fraction of now, and NotAfter is the
-// next whole second at or after now+life, so it never ends before the use it covers. max bounds the
-// issued certificate's own span, NotAfter minus NotBefore: a lifetime whose certificate would span
-// more is refused, never shortened, so a lifetime within two seconds of max can be refused. The
-// node's clock is not read. Only os:reader and os:admin are signed. The certificate's serial and
-// NotAfter are read back from the certificate itself, so a record names what the node will check
-// and not what was asked for.
+// roundingSlack is the room a certificate's whole-second encoding can add to its span: NotBefore
+// drops the fraction of now (under a second) and NotAfter is rounded up (under a second).
+const roundingSlack = 2 * time.Second
+
+// Sign signs a client certificate from k for r, valid from now for life. max bounds the issued
+// certificate's own span, NotAfter minus NotBefore, which can exceed life by under roundingSlack:
+// so a life above max minus roundingSlack is refused up front, at any now, and never shortened. A
+// certificate states whole seconds: NotBefore drops the fraction of now, and NotAfter is the next
+// whole second at or after now+life, so it never ends before the use it covers. The node's clock is
+// not read. Only os:reader and os:admin are signed. The certificate's serial and NotAfter are read
+// back from the certificate itself, so a record names what the node will check and not what was
+// asked for.
 func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration) (Cert, error) {
 	if r != role.Reader && r != role.Admin {
 		return Cert{}, ErrRole
 	}
-	if life <= 0 || life > max {
+	if life <= 0 || life > max-roundingSlack {
 		return Cert{}, ErrLifetime
 	}
-	// A certificate states its validity to the whole second and drops the fraction, which would end it
-	// before the use it covers. So its end is rounded up to the next whole second: never early, and at
-	// most a second late.
 	end := now.Add(life)
 	if !end.Equal(end.Truncate(time.Second)) {
 		end = end.Truncate(time.Second).Add(time.Second)
 	}
-	// A duration that cannot hold the rounded end saturates, and the certificate would end early.
-	ttl := end.Sub(now)
-	if !now.Add(ttl).Equal(end) {
-		return Cert{}, ErrLifetime
-	}
 	pair, err := secrets.NewAdminCertificateAndKey(now, &cryptox509.PEMEncodedCertificateAndKey{Crt: k.Crt(), Key: k.Key()},
-		role.MakeSet(r), ttl)
+		role.MakeSet(r), end.Sub(now))
 	if err != nil {
 		return Cert{}, ErrSign
 	}
@@ -81,7 +77,8 @@ func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration)
 	if err != nil {
 		return Cert{}, ErrSign
 	}
-	if parsed.NotAfter.Sub(parsed.NotBefore) > max {
+	// An assertion: the up-front check leaves room for the encoding, so this never fires.
+	if parsed.NotAfter.After(parsed.NotBefore.Add(max)) || parsed.NotAfter.Before(now.Add(life)) {
 		return Cert{}, ErrLifetime
 	}
 	caCrt, crt, key := string(k.Crt()), string(pair.Crt), string(pair.Key)
