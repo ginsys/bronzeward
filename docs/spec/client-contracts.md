@@ -1044,6 +1044,14 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
      `web/src/machine.test.ts:381`).
    - The observations' restart notice stays through the reads again after it within the view
      (`web/src/machine.test.ts:204`, `web/src/machine.test.ts:245`).
+7. The operation page ([W8](operator-experience-wireframes.md#w8-operation-timeline)) shows a time on
+   each event row. The stream carries no event time (the server sends `at` only in the JSON form,
+   as `api/openapi.yaml` says of the events route), so while the watch runs each row shows the browser's clock at the
+   event's arrival and is marked "received": the page never presents it as the server's. When the
+   watch ends, and each time the page opens an operation again, the page reads the JSON event pages
+   once and replaces every row's time with the server's `at`, without the mark. A page that cannot
+   read the pages keeps the received times and says that the server's were not read. The CLI's watch
+   has its own rule ([operator experience §5.7](operator-experience.md)).
 
 ## 9. Authentication
 
