@@ -14,7 +14,7 @@ import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { EMPTY_NOTE, NO_PROVENANCE, PROVENANCE_LIMIT } from "../../src/review.tsx";
 import { WITHHELD } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, focusSettles, fromTitle, holding, itNarrow, measure, mint, mirrored, narrow, onMain, overflows, param, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, focusSettles, fromTitle, holding, itNarrow, measure, mint, mirrored, narrow, newTab, onMain, overflows, param, pickByKeys, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -117,8 +117,7 @@ describe("the machines", () => {
     // A new tab on the path takes this tab's sign-in (B1); over WebDriver BiDi newWindow does not
     // switch to it.
     const first = await browser.getWindowHandle();
-    const tab = await browser.newWindow(`${FIXTURE_PAGE}/machines/${id}`);
-    await browser.switchToWindow("handle" in tab ? tab.handle : tab.contextId);
+    await newTab(`${FIXTURE_PAGE}/machines/${id}`);
     await expect($("main h2")).toHaveText(`Machine ${id}`, { wait: 20_000 });
     expect(await where()).toBe(`${FIXTURE_PAGE}/machines/${id}`);
     await browser.closeWindow();
@@ -289,8 +288,11 @@ describe("the machine detail (W3)", () => {
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: { [`/machines/${id}`]: machine, [`/machines/${id}/observations`]: { items: [k, m1, p] } } })).toMatch(SERVER);
     await $(`a[title="${id}"]`).click();
     await expect($("main h2")).toHaveText(`Machine ${id}`);
+    // The sentences of the observations come with their read, after the machine's: wait for all of them.
+    const want = sentences(machine, [p, m1, k]);
+    await browser.waitUntil(async () => (await $$('[data-testid="sentences"] li').length) === want.length, { timeout: 20_000, timeoutMsg: `the sentences did not all appear (${want.length} expected)` });
     const said = await texts('[data-testid="sentences"] li');
-    expect(said).toEqual(sentences(machine, [p, m1, k]));
+    expect(said).toEqual(want);
     expect(said[0]).toMatch(new RegExp(`^Drifted since 2026-10-2\\d \\d\\d:\\d\\d: a read differed from what Bronzeward last verified \\(${short(rel("a"))}\\)\\.$`));
     expect(said).toContain("It equals the selected release; that does not close the drift.");
     expect(said).toEqual(expect.arrayContaining([expect.stringMatching(/^The latest read at 2026-10-2\d \d\d:\d\d could not read: configDigest \(node unreachable\)\.$/)]));
@@ -654,7 +656,7 @@ describe("the read-only lists and items", () => {
     await nav("Plans");
     await loaded();
     await tabTo((f) => f.tag === "SELECT", "the state filter");
-    await browser.keys("ArrowDown");
+    await pickByKeys("proposed");
     await browser.waitUntil(async () => (await param("state")) === "proposed", { timeout: 10_000, timeoutMsg: "the state filter did not reach the query" });
     const seen = await measure();
     expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
