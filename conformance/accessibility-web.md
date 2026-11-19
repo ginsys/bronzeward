@@ -123,7 +123,7 @@ to the page body; the page's answer now takes it.
 
 | Item | Screen and what is checked | chrome | edge | firefox | firefox-esr |
 | --- | --- | --- | --- | --- | --- |
-| 2.1.1 Keyboard, 2.1.2 No keyboard trap | the plan page by Tab alone: the change, then the typed plan ID field, then Approve by Enter; on an approved plan the reason field and Revoke approval by Enter; Tab moves on from every control | pending | pending | pending | pending |
+| 2.1.1 Keyboard, 2.1.2 No keyboard trap | the plan page by Tab alone: the change, then the typed plan ID field, then Approve by Enter; on an approved plan the reason field and Revoke approval by Enter; Tab reaches each of them and never stays on one stop on the way | pending | pending | pending | pending |
 | 2.4.3 Focus order | Tab reaches the change before the typed plan ID field; after Approve and after Revoke approval, focus is in the page's answer and not on the page body | pending | pending | pending | pending |
 | 4.1.3 Status messages | the approval's recorded reasons are mirrored into the page's one `role="status"` region; where focus goes after each write is in the 2.4.3 row | pending | pending | pending | pending |
 | 1.4.3 Contrast | the plan page with its change: the lowest contrast of any shown text, measured in the page, at least 4.5:1 | pending | pending | pending | pending |
