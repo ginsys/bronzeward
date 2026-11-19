@@ -8,7 +8,7 @@ import { deprecated, incompatible } from "../../src/shell.tsx";
 import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_API, FIXTURE_PAGE } from "../auth.conf.ts";
 import type { Faults } from "../injector.ts";
-import { answered, faults, fixtureSignIn, mint, mirrored, release, seen, settled, storageEmpty, where } from "./helpers.ts";
+import { absent, answered, eventually, faults, fixtureSignIn, mint, mirrored, release, seen, settled, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 const testid = (id: string) => $(`[data-testid="${id}"]`);
@@ -96,8 +96,8 @@ describe("the shell", () => {
 
   it("COMP-01: a server below the client's minimum API revision is refused before any other read, both revisions named", async () => {
     expect(await fixtureSignIn("h-viewer", {}, { revision: 1 })).toBe(incompatible(1));
-    expect(await testid("principal").isExisting()).toBe(false);
-    expect(await $("nav").isExisting()).toBe(false);
+    await absent(() => testid("principal").isExisting(), "the principal after the refusal");
+    await absent(() => $("nav").isExisting(), "the navigation after the refusal");
     expect(await testid("server").getText()).toMatch(/^Server .+, API revision 1$/);
     expect(await seen()).toEqual(["/server"]);
   });
@@ -157,7 +157,7 @@ describe("the state catalogue", () => {
 
   it("disconnected: a first identity read with no answer is shown as such, not as loading or offline", async () => {
     expect(await fixtureSignIn("h-viewer", {}, { redirect: "/identity" })).toBe(TRANSPORT_FAILURE);
-    expect(await testid("offline").isExisting()).toBe(false);
+    await absent(() => testid("offline").isExisting(), "the offline banner after a first identity read with no answer");
     expect(await testid("server").getText()).toMatch(SERVER);
   });
 
@@ -209,7 +209,7 @@ describe("the state catalogue", () => {
     await faults({ missing: "/identity" });
     await nav("Changes").click();
     await announced("status", "Not read: not-found. Not found: injected Request req-injected.", "alert");
-    expect(await testid("offline").isExisting()).toBe(false);
+    await absent(() => testid("offline").isExisting(), "the offline banner after a refusal the server answered");
   });
 
   it("offline: after a refusal the shell kept above the page, a read without answer keeps the data under the banner", async () => {
@@ -240,7 +240,9 @@ describe("the state catalogue", () => {
     await faults({});
     await event("online");
     await expect(testid("principal")).toHaveText("Signed in as h-viewer");
-    expect(await testid("offline").isExisting()).toBe(false);
+    // The banner ends with the read that answered, which can settle a moment after the principal shows.
+    await eventually(async () => !(await testid("offline").isExisting()), "the offline banner gone after the online event");
+    await absent(() => testid("offline").isExisting(), "the offline banner after the online event");
     // The changes page reads its two lists each time it is shown, under the refused identity too.
     await reads(10);
     expect(await ordered()).toEqual(sorted(["/server", "/identity", "/machines", "/clusters", "/identity", "/drafts", "/releases", "/identity", "/drafts", "/releases"]));
@@ -290,7 +292,7 @@ describe("the state catalogue", () => {
     await announced("offline", /^Offline since /);
     await release();
     await expect(testid("status")).toHaveText(REVOKED, { wait: 10_000 });
-    expect(await testid("principal").isExisting()).toBe(false);
+    await absent(() => testid("principal").isExisting(), "the principal after the revocation");
     expect(await $("footer").getText()).toMatch(/^Client .+\. Server unknown$/);
   });
 });
@@ -310,7 +312,7 @@ describe("recovery", () => {
     expect(await testid("status").getAttribute("role")).toBeNull();
     // §8.2: the refusal's own title, detail and request ID stay shown under the restriction.
     expect(await testid("problem").getText()).toMatch(/^Not read: .+\. Request \S+\.$/);
-    expect(await testid("principal").isExisting()).toBe(false);
+    await absent(() => testid("principal").isExisting(), "the principal under the process's restriction");
     expect(await testid("server").getText()).toBe("Server unknown");
     expect(await seen()).toEqual(["/server"]);
     // The entry, as a recovery administrator would make it (synthetic values only).
@@ -366,7 +368,7 @@ describe("recovery", () => {
     await nav("Changes").click();
     await announced("status", PRE_ENTRY);
     expect(await testid("problem").getText()).toBe(INJECTED_REFUSAL);
-    expect(await testid("principal").isExisting()).toBe(false);
+    await absent(() => testid("principal").isExisting(), "the principal after the process's refusal");
     expect(await testid("server").getText()).toBe("Server unknown");
     // The changes page's own lists, its releases and its drafts, may arrive before or after the
     // identity.
