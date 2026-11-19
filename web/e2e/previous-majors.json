@@ -1,0 +1,14 @@
+{
+  "chrome": "156.0.8078.80",
+  "edge": {
+    "version": "156.0.4314.58",
+    "debUrl": "https://packages.microsoft.com/repos/edge/pool/main/m/microsoft-edge-stable/microsoft-edge-stable_156.0.4314.58-1_amd64.deb",
+    "debSha256": "adcf4ce88e3eb276083a561efd0cb06b6801f09dcb6585f6cc23c59730414c3d"
+  },
+  "firefox": "159.0.1",
+  "sources": {
+    "chrome": "Chrome for Testing (storage.googleapis.com/chrome-for-testing-public), downloaded by WebdriverIO from browserVersion",
+    "edge": "Microsoft's own package repository (packages.microsoft.com/repos/edge); the driver comes from msedgedriver.microsoft.com through WebdriverIO, at the same version",
+    "firefox": "Mozilla's release archive (archive.mozilla.org/pub/firefox/releases), downloaded by WebdriverIO from browserVersion"
+  }
+}

@@ -1,0 +1,158 @@
+name: Previous majors
+
+# The browser cases in the previous major of Chrome, Edge and Firefox (decision B6,
+# ginsys/bronzeward#893), each at the build pinned in web/e2e/previous-majors.json, outside the
+# required checks. The browser and browser-auth jobs of ci.yml, run on these browsers, would add
+# about 45 runner-minutes to each of the three runs a change gets (pull request, merge queue, main)
+# and put three vendors' download servers in the merge path. A failed or cancelled check that is not
+# required still leaves a pull request UNSTABLE (ginsys/bronzeward#612), so this workflow never runs
+# on merge_group. It runs once a day on main, on request, and on a pull request that changes one of
+# the files below, so that such a change proves itself. A failed run on main opens one issue (or
+# comments on the open one) through scripts/ci/report-browser-run.sh. A pin that falls behind the
+# browsers' releases keeps passing against an older major: until the pins are updated by a tool,
+# conformance/README.md says how to move them by hand.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/previous-majors.yml
+      - web/e2e/previous-majors.json
+      - web/e2e/wdio.conf.ts
+      - scripts/ci/report-browser-run.sh
+  schedule:
+    - cron: '47 5 * * *'  # daily, 05:47 UTC; GitHub stops a schedule after 60 days without repository activity
+  workflow_dispatch:
+    inputs:
+      simulate-failure:
+        description: Skip the browser jobs and report as if they failed, into a separate "[test]" issue
+        type: boolean
+        default: false
+
+concurrency:
+  group: previous-majors-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
+  # not stop a task run from installing. Tools come from jdx/mise-action's install step only.
+  MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+jobs:
+  browser:
+    # TLS-02 and TLS-03's read case (mise run browser) in the previous major of each browser.
+    # GitHub-hosted (no browser in-cluster). Uploaded only if the scan passed.
+    if: ${{ !inputs.simulate-failure }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BW_BROWSERS: chrome-previous,edge-previous,firefox-previous
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: node go
+      # The pinned Edge replaces the runner's, at the default path; dpkg allows the downgrade.
+      - name: Install the pinned Edge
+        run: |
+          url=$(jq -er .edge.debUrl web/e2e/previous-majors.json)
+          sha=$(jq -er .edge.debSha256 web/e2e/previous-majors.json)
+          want=$(jq -er .edge.version web/e2e/previous-majors.json)
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/edge.deb" "$url"
+          echo "$sha  $RUNNER_TEMP/edge.deb" | sha256sum -c -
+          sudo dpkg -i "$RUNNER_TEMP/edge.deb"
+          got=$(/opt/microsoft/msedge/msedge --version)
+          case "$got" in *"$want"*) echo "$got" ;; *) echo "edge: installed '$got', not $want" >&2; exit 1 ;; esac
+      - run: mise run browser
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-previous-linux
+          path: web/e2e/out
+          retention-days: 14
+
+  browser-auth:
+    # The AUTH cases (mise run browser-auth) in the previous major of each browser, as ci.yml's
+    # browser-auth job runs them: against the test identity provider and the fixture issuer, with
+    # dev-bao's OpenBao, one browser per runner. Each leg uploads under its own artifact name, after
+    # a failed run too: the run's files when its scan passed, and only a scanned listing of their
+    # names and sizes, or nothing, when it did not.
+    if: ${{ !inputs.simulate-failure }}
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome-previous, edge-previous, firefox-previous]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BW_BROWSERS: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: node go
+      - if: matrix.browser == 'edge-previous'
+        name: Install the pinned Edge
+        run: |
+          url=$(jq -er .edge.debUrl web/e2e/previous-majors.json)
+          sha=$(jq -er .edge.debSha256 web/e2e/previous-majors.json)
+          want=$(jq -er .edge.version web/e2e/previous-majors.json)
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/edge.deb" "$url"
+          echo "$sha  $RUNNER_TEMP/edge.deb" | sha256sum -c -
+          sudo dpkg -i "$RUNNER_TEMP/edge.deb"
+          got=$(/opt/microsoft/msedge/msedge --version)
+          case "$got" in *"$want"*) echo "$got" ;; *) echo "edge: installed '$got', not $want" >&2; exit 1 ;; esac
+      - run: mise run dev-db
+      - run: mise run dev-bao
+      - run: mise run dev-idp
+      - run: mise run browser-auth
+      # After a failed run too. The task writes the scan's own status; the whole directory goes up
+      # only when the scan passed, otherwise only the listing the task scanned does, if it passed.
+      - id: publish
+        if: always()
+        run: bash scripts/ci/browser-artifact.sh publish web/e2e/out .dev/browser-auth/scan.status .dev/browser-auth/listing >> "$GITHUB_OUTPUT"
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-auth-previous-${{ matrix.browser }}
+          path: ${{ steps.publish.outputs.path }}
+          include-hidden-files: true
+          retention-days: 14
+      - if: always()
+        run: mise run dev-down
+
+  report:
+    # Runs after every browser job, and decides in scripts/ci/report-browser-run.sh: only
+    # `failure`, or a simulated failure, reports. It is the only job here with a write permission.
+    needs: [browser, browser-auth]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    # One report at a time, so two failed runs cannot both create the issue.
+    concurrency:
+      group: previous-majors-report
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: scripts/ci
+      - name: Report a failed run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # `failure` when either job failed; a cancelled or skipped job reports nothing.
+          RESULT: ${{ (needs.browser.result == 'failure' || needs.browser-auth.result == 'failure') && 'failure' || needs.browser.result }}
+          REF: ${{ github.ref }}
+          SIMULATED: ${{ inputs.simulate-failure }}
+          SUBJECT: Previous-major browsers
+          KEY: previous-majors
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: scripts/ci/report-browser-run.sh

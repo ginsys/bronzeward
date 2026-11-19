@@ -33,7 +33,8 @@ permissions:
 # package, package-check and hosting run GitHub-hosted too: two separate machines build the
 # archives, and hosting needs Docker. The Safari run is not here: it needs a macOS runner that
 # GitHub sometimes cannot give, so safari.yml runs it on main and on a schedule, outside the
-# required checks (ginsys/bronzeward#612).
+# required checks (ginsys/bronzeward#612). The previous major of each browser is not here either:
+# previous-majors.yml runs it the same way.
 
 env:
   # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
