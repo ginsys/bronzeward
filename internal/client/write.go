@@ -50,12 +50,10 @@ type Write struct {
 	// would each dial the node again): no answer of it is repeated. A talos-access-unavailable is a
 	// refusal; every other 503, a 5xx and a lost answer leave the outcome unknown, because the route
 	// stores before it commits. The server's detail is dropped from its problems, so no text of the
-	// server reaches a notice, an error or the unknown-outcome block.
-	Once bool
-	// Stop, when set, arms the Ctrl-C around the request in flight only, never the reads before it:
-	// the context it returns ends the request, and its second result says a Ctrl-C was taken. The
-	// outcome is then unknown, never a repeat. Nothing else of a write takes it (client-contracts.md §8.2).
-	Stop  func() (context.Context, func() bool)
+	// server reaches a notice, an error or the unknown-outcome block. The request in flight takes the
+	// Ctrl-C (the client's Arm), the reads before it do not, and a Ctrl-C leaves the outcome unknown
+	// (client-contracts.md §8.2). Nothing else of a write takes it.
+	Once  bool
 	Read  func(*Client) (string, error)
 	Check string
 	// Input is the input a repeat gives where the command resolved what the operator typed, so the
@@ -320,8 +318,8 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		}
 		sent := clock()
 		sctx, disarm := context.Background(), func() bool { return false }
-		if w.Stop != nil {
-			sctx, disarm = w.Stop()
+		if w.Once && c.Arm != nil { // the Ctrl-C of the request in flight, never of the reads before it
+			sctx, disarm = c.Arm()
 		}
 		a := c.post(w, key, ref, sctx)
 		stopped := disarm()
