@@ -136,14 +136,16 @@ go vet ./...
 # compiles (ginsys/bronzeward#628). No cgo, as the release builds. vet also type-checks its tests.
 GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./cmd/bronzewardctl
 GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go vet ./internal/client ./cmd/bronzewardctl
-go test ./...
+# -timeout 25m on both runs that include internal/api, as go-db has (see its comment): go test's
+# 10 min per package is below that package's runtime on a loaded host, where it ran 623 s to 791 s.
+go test -timeout 25m ./...
 # The client's dependency-closure test reads the closure through a child go list, which go test's
 # cache does not track, so a cached pass could hide a new forbidden import: it runs uncached.
 go test -count=1 -run '^Test(ClientClosure|Forbidden)' ./internal/client
 # The fixture's instance C binary: the interruption seam (internal/seam) and its callers, built with
 # its tag; the tests of every other package also pass with the seam compiled in but not armed.
 go vet -tags fixtureinterrupt ./...
-go test -tags fixtureinterrupt ./internal/seam ./internal/ingest ./internal/api
+go test -timeout 25m -tags fixtureinterrupt ./internal/seam ./internal/ingest ./internal/api
 gofmt -l experiments/e1-secret-ingress | { ! grep . ; }
 go -C experiments/e1-secret-ingress mod verify
 go -C experiments/e1-secret-ingress mod tidy -diff
