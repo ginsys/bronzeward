@@ -15,7 +15,7 @@
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
-import { api, cacheControl, cacheHolds, disposable, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, measure, narrow, onMain, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
+import { api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, measure, narrow, onMain, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -156,7 +156,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     await tabTo((f) => f.tag === "BUTTON" && f.text === "Start import", "Start import");
     await browser.keys("Enter");
     await expect($('[data-testid="start-note"]')).toHaveText("Not sent: paste the document or choose its file.");
-    expect(await announced("Not sent: paste the document or choose its file.")).toBe(true);
+    await eventually(() => announced("Not sent: paste the document or choose its file."), "the refusal announced");
     await w.after("a start refused");
     // Back to the document field, which a typed document fills; the file field is reached and left on the way.
     for (let i = 0; i < 8 && !(await focusedLabel()).startsWith("Document"); i++) await tab(true);
@@ -182,7 +182,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     await expect(ended()).toHaveText(holds("released into draft"), { wait: 60_000 });
     expect(Date.now() - sentAt).toBeLessThan(90_000);
     await expect(allowed()).toHaveText(holds("Released into draft"), { wait: 20_000 });
-    expect(await announced("Released into draft")).toBe(true);
+    await eventually(() => announced("Released into draft"), "the release announced");
     expect(await statusRegions()).toBe(1);
     const seen = await measure();
     expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
@@ -234,7 +234,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       // The button that held focus is replaced by the review: focus is on its text.
       await focusSettles(() => focusIn('[data-testid="review-text"]'), "the review's text");
       expect(await reviewHolds()).toBe(true);
-      expect(await announced("PROTECTED REVIEW")).toBe(true);
+      await eventually(() => announced("PROTECTED REVIEW"), "the review announced");
       const seen = await measure();
       expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
       expect(seen.small).toBe(0);
@@ -346,7 +346,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Save", "Save");
       await browser.keys("Enter");
       await expect(pane().$('[data-testid="status"]')).toHaveText(holds("Someone changed this draft"), { wait: 20_000 });
-      expect(await announced("Someone changed this draft")).toBe(true);
+      await eventually(() => announced("Someone changed this draft"), "the refusal announced");
       // Save was disabled while it ran: focus is in the pane, on the refusal or on Save, and Show their change is next.
       await focusSettles(() => focusIn(PANE), "the editor pane");
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Show their change", "Show their change");

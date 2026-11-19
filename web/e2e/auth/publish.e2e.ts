@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, syntheticDocument } from "../auth.conf.ts";
-import { fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, measure, mint, mirrored, narrow, onMain, overflows, storageEmpty, tabTo } from "./helpers.ts";
+import { eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, measure, mint, mirrored, narrow, onMain, overflows, storageEmpty, tabTo } from "./helpers.ts";
 
 const statusRegions = () => browser.execute(() => document.querySelectorAll('[role="status"]').length);
 
@@ -160,7 +160,7 @@ describe("the publication page (#342)", () => {
     await browser.keys("Enter");
     await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
     // The accepted line is a status, announced without moving focus; the button that had focus is now disabled.
-    expect((await mirrored()).some((t) => t.includes("Publishing draft"))).toBe(true);
+    await eventually(async () => (await mirrored()).some((t) => t.includes("Publishing draft")), "the accepted line mirrored");
     expect(await $("main").$("button=Publish").isEnabled()).toBe(false);
     await focusSettles(focusKept, "the page, not the body");
     await focusSettles(() => focusIn(ANSWER), "the answer");

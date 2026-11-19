@@ -17,6 +17,11 @@ export const status = () => $('[data-testid="status"]').getText();
 // The text of every message the page's one role="status" region holds: each status message is
 // mirrored into it and carries no role of its own (ginsys/bronzeward#830).
 export const mirrored = () => browser.execute(() => [...document.querySelectorAll('[role="status"] > p')].map((p) => p.textContent ?? ""));
+// A read of the page taken right after a wait on another element can be early: the mirror is filled by an effect
+// after the message shows, and an end text of an earlier run stays until the watch restarts (ginsys/bronzeward#916).
+// This waits for `read` to hold, so a read that never holds fails with what it waited for.
+export const eventually = (read: () => Promise<boolean>, what: string, timeout = 5_000) =>
+  browser.waitUntil(read, { timeout, interval: 25, timeoutMsg: `${what} was not shown within ${timeout} ms` });
 
 // Waits until the page is back on `page`/ with its reads settled: the footer's server versions once
 // the shell shows a page, which may hold a state of its own (an empty list), else the state text.

@@ -52,6 +52,15 @@ describe("W11 state catalogue: every text a status message", () => {
     expect(page.match(/<p data-testid="status">/g)).toHaveLength(2);
   });
 
+  // A static render runs no effect, so it shows the first render only. The mirror is filled by the effect after it
+  // (states.tsx), so an end-to-end read of the region taken right after the visible message can be early and waits
+  // for it (ginsys/bronzeward#916). This pins the first render alone, not the later one.
+  test("a page leaves its status region empty in the first render, so a read of the mirror must wait for it", () => {
+    const page = html(h(StatusPage, null, h(Empty, { text: "No machines." })));
+    expect(page).toContain('<p data-testid="status">No machines.</p>');
+    expect(page).toContain('<div role="status" aria-atomic="false" data-testid="page-status" class="sr-only"></div>');
+  });
+
   test("a write's 403 names what the route accepts, as a read's does (§8.2 403 row)", () => {
     const forbidden = (extra: Record<string, unknown>) => ({ type: "urn:bronzeward:problem:forbidden", title: "Forbidden", status: 403, instance: "req-2", ...extra });
     expect(status(h(Refused, { problem: forbidden({ roles: ["author"] }), status: 403, verb: "saved" }))).toBe("Not saved: forbidden. Needs author. Forbidden Request req-2.");
