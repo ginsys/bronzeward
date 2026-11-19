@@ -93,16 +93,17 @@ so focus fell to the page body; the page's answer now takes it.
 
 | Item | Screen and what is checked | chrome | edge | firefox | firefox-esr |
 | --- | --- | --- | --- | --- | --- |
-| 2.1.1 Keyboard, 2.1.2 No keyboard trap | from the draft to the release by Tab and Enter alone: the Changes link, the draft's link, Publish this draft, Publish and the release link; Tab leaves every control | pass | pass | pass | pass |
+| 2.1.1 Keyboard, 2.1.2 No keyboard trap | from the draft to the release by Tab and Enter alone: the Changes link, the draft's link, Publish this draft, Publish and the release link; Tab reaches each of them and never stays on one stop | pass | pass | pass | pass |
 | 2.4.7 Focus visible | every focus Tab reaches shows an outline of at least 2 px | pass | pass | pass | pass |
 | 2.4.3 Focus order | each page change moves focus to the new page; after Publish, and again when the operation ends, focus is in the page's answer and not on the page body; Tab continues to the release link | pass | pass | pass | pass |
-| 4.1.3 Status messages | the accepted line is mirrored into the page's one `role="status"` region, announced without moving focus; the page holds exactly one such region | pass | pass | pass | pass |
+| 4.1.3 Status messages | the accepted line is mirrored into a `role="status"` region, and the page holds exactly one such region; where focus goes after Publish is in the 2.4.3 row | pass | pass | pass | pass |
 | 1.4.3 Contrast | the publication page with its accepted line and its end: the lowest contrast of any shown text, measured in the page, at least 4.5:1 | pass | pass | pass | pass |
 | 1.4.10 Reflow | at 320 CSS pixels no page scrolls sideways: the publication page with a long draft title, the accepted line, the end and the release page | pass | pass | pass | pass |
 | 2.5.8 Target size | the publication page: every button, select and navigation link at least 24 by 24 px | pass | pass | pass | pass |
 
-Not run here: the refusal paths of the page by keyboard (the 412 "Read the draft again" alert and the
-no-ETag note), which sit in the same focus wrapper but have no case of their own.
+Not run here: the refusal paths of the page by keyboard. The 412 "Read the draft again" alert sits in
+the same focus wrapper as the accepted line, and the no-ETag note sits before it; neither has a case of
+its own.
 
 Not run here: Safari, whose WebDriver needs a macOS runner; previous major versions (B6).
 
