@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
@@ -236,6 +238,9 @@ func TestMachineTimelineRevision2(t *testing.T) {
 // TestMachineTimelineInterruptedRead checks that Ctrl-C ends --follow with exit 130 even when the
 // read that is in flight fails: the failure does not turn the stop into exit 1.
 func TestMachineTimelineInterruptedRead(t *testing.T) {
+	probe := make(chan os.Signal, 1)
+	signal.Notify(probe, os.Interrupt)
+	t.Cleanup(func() { signal.Stop(probe) })
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2")
 		w.Header().Set("Content-Type", "application/json")
@@ -249,7 +254,15 @@ func TestMachineTimelineInterruptedRead(t *testing.T) {
 				return
 			}
 			syscall.Kill(syscall.Getpid(), syscall.SIGINT) // Ctrl-C while this read is in flight
-			time.Sleep(50 * time.Millisecond)              // the signal is on the channel before the failure is
+			// The failure is sent once the signal has been delivered: the runtime hands it to every
+			// channel registered for it under one lock, the command's among them, and the command's
+			// disarm waits for that lock. A fixed sleep lost this race on a loaded host.
+			select {
+			case <-probe:
+			case <-time.After(10 * time.Second):
+				t.Errorf("the interrupt was not delivered within 10 s")
+				return
+			}
 			w.Header().Set("Content-Type", "application/problem+json")
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:invalid-request","title":"unexpected","status":400}`)
