@@ -149,25 +149,23 @@ func startConfigExec(t *testing.T, roles, issuerURL, audience, execution, extra 
 	t.Helper()
 	db, dsn := dbtest.New(t)
 	f := &fixture{t: t, bin: binaries(t), home: t.TempDir(), db: db}
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := l.Addr().String()
-	l.Close()
-	f.base = "http://" + addr
 	f.iss, f.idp = serveIssuer(t)
 	if issuerURL == "" {
 		issuerURL = f.iss.URL
 	}
 	cfg := filepath.Join(t.TempDir(), "bronzeward.yaml")
-	body := "listen: " + addr + "\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: " + issuerURL + "\n    audience: " + audience + "\n" +
-		"  roles: {viewer: [bw-viewers], author: [bw-authors], publisher: [bw-publishers], approver: [bw-approvers], recovery-admin: [bw-recovery]}\n" +
-		"  deniedSubjects: [{iss: \"" + f.iss.URL + "\", sub: h-denied}]\n" +
-		"execution: {maxTransportDeadline: 5m" + execution + "}\n" + extra
-	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
+	// listenOn points the fixture and its configuration at a new address.
+	listenOn := func(addr string) {
+		f.base = "http://" + addr
+		body := "listen: " + addr + "\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: " + issuerURL + "\n    audience: " + audience + "\n" +
+			"  roles: {viewer: [bw-viewers], author: [bw-authors], publisher: [bw-publishers], approver: [bw-approvers], recovery-admin: [bw-recovery]}\n" +
+			"  deniedSubjects: [{iss: \"" + f.iss.URL + "\", sub: h-denied}]\n" +
+			"execution: {maxTransportDeadline: 5m" + execution + "}\n" + extra
+		if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
+	listenOn(pickAddr(t))
 	f.server("migrate", "-config", cfg)
 	f.token = tokenPattern.FindString(f.server("token", "issue", "-config", cfg, "-name", "ci", "-roles", roles,
 		"-responsible", "h-all", "-operator", "h-operator"))
@@ -185,23 +183,71 @@ func startConfigExec(t *testing.T, roles, issuerURL, audience, execution, extra 
 			t.Logf("serve log:\n%s", f.srv.log.String())
 		}
 	})
-	f.serveUp()
-	return f
+	// The address is picked and freed before serve binds it, so another process can take it in
+	// between (ginsys/bronzeward#940): serve then exits on the bind, and a server of another test on
+	// that address answers /livez in its place. tryServeUp reports that exit, and a new address is
+	// tried. The proper fix is for serve to report the address it bound, which is product code.
+	for attempt := 1; ; attempt++ {
+		err := f.tryServeUp()
+		if err == nil {
+			return f
+		}
+		f.srv.stop() // the log is read only after the process, and its copy of the output, ended
+		if !errors.Is(err, errServeExited) || attempt == serveAttempts {
+			t.Fatalf("%v\n%s", err, f.srv.log.String())
+		}
+		t.Logf("serve on %s: %v, trying another address:\n%s", f.base, err, f.srv.log.String())
+		f.srv.log.Reset()
+		listenOn(pickAddr(t))
+	}
+}
+
+// serveAttempts is how many addresses startConfigExec tries for serve.
+const serveAttempts = 5
+
+// pickAddr returns a local address that nothing listens on now. A test may replace it.
+var pickAddr = func(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	return l.Addr().String()
 }
 
 // served is the fixture's bronzeward serve: its configuration, its process, and the output of
 // every process a restart started.
 type served struct {
-	cfg string
-	dir string   // the directory of the server binary; empty is the fixture's own
-	env []string // added to the server's environment
-	cmd *exec.Cmd
-	log bytes.Buffer
+	cfg  string
+	dir  string   // the directory of the server binary; empty is the fixture's own
+	env  []string // added to the server's environment
+	cmd  *exec.Cmd
+	done chan struct{} // closed once cmd has exited and its output is copied
+	log  bytes.Buffer
 }
+
+var errServeExited = errors.New("serve exited before it was up")
+
+// bindGrace is how long a /livez answer must be followed by a running serve before it counts as
+// serve's own: serve binds its address after it opens the database, so a server that holds the
+// address already answers first, and serve then exits on the bind.
+const bindGrace = 500 * time.Millisecond
 
 // serveUp starts bronzeward serve on the fixture's configuration, with flags such as
 // -recovery-start, and waits until it answers.
 func (f *fixture) serveUp(flags ...string) {
+	f.t.Helper()
+	if err := f.tryServeUp(flags...); err != nil {
+		f.srv.stop()
+		f.t.Fatalf("%v\n%s", err, f.srv.log.String())
+	}
+}
+
+// tryServeUp is serveUp that returns the failure. It returns errServeExited where serve has
+// exited, which is the one failure another address can cure, and counts a /livez answer only
+// while serve is running and still is after bindGrace.
+func (f *fixture) tryServeUp(flags ...string) error {
 	f.t.Helper()
 	dir := f.srv.dir
 	if dir == "" {
@@ -213,14 +259,29 @@ func (f *fixture) serveUp(flags ...string) {
 	if err := cmd.Start(); err != nil {
 		f.t.Fatal(err)
 	}
-	f.srv.cmd = cmd
+	done := make(chan struct{})
+	f.srv.cmd, f.srv.done = cmd, done
+	go func() { cmd.Wait(); close(done) }()
 	for i := 0; ; i++ {
-		if r, err := http.Get(f.base + "/livez"); err == nil && r.StatusCode == http.StatusNoContent {
+		select {
+		case <-done:
+			return errServeExited
+		default:
+		}
+		r, err := http.Get(f.base + "/livez")
+		if err == nil {
 			r.Body.Close()
-			return
-		} else if i == 100 {
-			f.srv.stop() // the log is read only after the process, and its copy of the output, ended
-			f.t.Fatalf("serve did not answer /livez: %v\n%s", err, f.srv.log.String())
+		}
+		if err == nil && r.StatusCode == http.StatusNoContent {
+			select {
+			case <-done:
+				return errServeExited
+			case <-time.After(bindGrace):
+				return nil
+			}
+		}
+		if i == 100 {
+			return fmt.Errorf("serve did not answer /livez: %v", err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -230,7 +291,7 @@ func (f *fixture) serveUp(flags ...string) {
 func (s *served) stop() {
 	if s.cmd != nil {
 		s.cmd.Process.Kill()
-		s.cmd.Wait()
+		<-s.done
 		s.cmd = nil
 	}
 }
