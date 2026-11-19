@@ -111,6 +111,41 @@ func TestSignCoversFractionalLifetime(t *testing.T) {
 	}
 }
 
+// The maximum bounds the issued certificate's own span, NotAfter minus NotBefore, whatever fraction
+// of a second now and the maximum carry: a lifetime whose certificate would span more is refused and
+// never shortened (ginsys/bronzeward#899). Every accepted certificate also covers now+life.
+func TestSignSpanIsWithinAFractionalMaximum(t *testing.T) {
+	k := storedKey(newCA(t))
+	base := time.Now().Truncate(time.Second)
+	max := 90*time.Second + 500*time.Millisecond
+	var accepted, refused int
+	for _, nowFrac := range []time.Duration{0, 100 * time.Millisecond, 500 * time.Millisecond, 900 * time.Millisecond} {
+		for _, life := range []time.Duration{time.Second, 89 * time.Second, 89*time.Second + 500*time.Millisecond, 90 * time.Second, max} {
+			now := base.Add(nowFrac)
+			cert, err := signer.Sign(k, role.Admin, now, life, max)
+			if err != nil {
+				if !errors.Is(err, signer.ErrLifetime) {
+					t.Fatalf("now +%s, life %s: %v", nowFrac, life, err)
+				}
+				refused++
+				continue
+			}
+			accepted++
+			c := parsed(t, cert)
+			if span := c.NotAfter.Sub(c.NotBefore); span > max {
+				t.Errorf("now +%s, life %s: span %s above the maximum %s", nowFrac, life, span, max)
+			}
+			if c.NotAfter.Before(now.Add(life)) {
+				t.Errorf("now +%s, life %s: NotAfter %s before the end of the use %s", nowFrac, life, c.NotAfter, now.Add(life))
+			}
+		}
+	}
+	// The control: both outcomes occurred, so the loop could have failed either way.
+	if accepted == 0 || refused == 0 {
+		t.Fatalf("%d accepted and %d refused; the cases do not reach both sides of the bound", accepted, refused)
+	}
+}
+
 // A lifetime so long that its rounded end does not fit a time.Duration is refused: the duration would
 // saturate and the certificate end before the lifetime asked for.
 func TestSignRefusesAnUnrepresentableEnd(t *testing.T) {
@@ -142,8 +177,8 @@ func TestSignRefusals(t *testing.T) {
 			t.Errorf("%s: %v, want %v", name, err, c.want)
 		}
 	}
-	// The maximum itself is allowed.
-	if _, err := signer.Sign(k, role.Admin, now, 5*time.Minute, 5*time.Minute); err != nil {
+	// The maximum itself is allowed from a whole second, where the certificate spans it exactly.
+	if _, err := signer.Sign(k, role.Admin, now.Truncate(time.Second), 5*time.Minute, 5*time.Minute); err != nil {
 		t.Errorf("a lifetime equal to the maximum: %v", err)
 	}
 	// A key that cannot sign is the signer's own refusal and quotes nothing.
