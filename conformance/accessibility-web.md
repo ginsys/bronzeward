@@ -77,8 +77,32 @@ after each case.
 Local Chrome 139 runs had found focus dropping to the page body after the actions of the protected
 review and the conflict view ([#896](https://github.com/ginsys/bronzeward/issues/896)); the focus
 assertions failed on the unchanged product and pass on all four browsers since
-[#905](https://github.com/ginsys/bronzeward/pull/905). The publish screen of T3 is not run here:
-[#897](https://github.com/ginsys/bronzeward/issues/897).
+[#905](https://github.com/ginsys/bronzeward/pull/905).
+
+### Publish screen (T3)
+
+The publish screen of T3 (the draft's Publish this draft link, the publication page and the release
+page it names), from [#897](https://github.com/ginsys/bronzeward/issues/897). Automated, in
+`web/e2e/auth/publish.e2e.ts`, run by `mise run browser-auth` against a disposable deployment with
+synthetic data. The deployment has no Talos node, so a succeeded publication is served by the
+injector: the page's own requests are real, the operation's answers are synthetic. Recorded on 19
+November 2026 with Chrome 157, Edge 157, Firefox 160 and Firefox ESR 153 on Linux, from the
+`browser-auth` jobs of [#910](https://github.com/ginsys/bronzeward/pull/910). The first keyboard run
+failed on the unchanged product (Chrome 139, local): Publish is disabled once the write is accepted,
+so focus fell to the page body; the page's answer now takes it.
+
+| Item | Screen and what is checked | chrome | edge | firefox | firefox-esr |
+| --- | --- | --- | --- | --- | --- |
+| 2.1.1 Keyboard, 2.1.2 No keyboard trap | from the draft to the release by Tab and Enter alone: the Changes link, the draft's link, Publish this draft, Publish and the release link; Tab leaves every control | pass | pass | pass | pass |
+| 2.4.7 Focus visible | every focus Tab reaches shows an outline of at least 2 px | pass | pass | pass | pass |
+| 2.4.3 Focus order | each page change moves focus to the new page; after Publish, and again when the operation ends, focus is in the page's answer and not on the page body; Tab continues to the release link | pass | pass | pass | pass |
+| 4.1.3 Status messages | the accepted line is mirrored into the page's one `role="status"` region, announced without moving focus; the page holds exactly one such region | pass | pass | pass | pass |
+| 1.4.3 Contrast | the publication page with its accepted line and its end: the lowest contrast of any shown text, measured in the page, at least 4.5:1 | pass | pass | pass | pass |
+| 1.4.10 Reflow | at 320 CSS pixels no page scrolls sideways: the publication page with a long draft title, the accepted line, the end and the release page | pass | pass | pass | pass |
+| 2.5.8 Target size | the publication page: every button, select and navigation link at least 24 by 24 px | pass | pass | pass | pass |
+
+Not run here: the refusal paths of the page by keyboard (the 412 "Read the draft again" alert and the
+no-ETag note), which sit in the same focus wrapper but have no case of their own.
 
 The previous major of each browser (B6) ran the same specs, and every row above passes on Chrome 156.0.8078.80, Edge 156.0.4314.58 and Firefox 159.0.1 ([run of 19 November 2026](https://github.com/ginsys/bronzeward/actions/runs/44437080904), 14 of 14 spec files in each browser; the builds and sources are in the [browsers section of the conformance README](README.md#browsers)).
 
