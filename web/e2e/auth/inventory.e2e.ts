@@ -14,7 +14,7 @@ import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { EMPTY_NOTE, NO_PROVENANCE, PROVENANCE_LIMIT } from "../../src/review.tsx";
 import { WITHHELD } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { answers, faults, fixtureSignIn, focused, fromTitle, holding, measure, mint, mirrored, narrow, overflows, param, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
+import { answers, faults, fixtureSignIn, focusSettles, fromTitle, holding, measure, mint, mirrored, narrow, onMain, overflows, param, release, seen, storageEmpty, tab, tabTo, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -622,7 +622,7 @@ describe("the read-only lists and items", () => {
     await fromTitle();
     expect((await tab(true)).text).toBe("Skip to the page");
     await browser.keys("Enter");
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     // T2: from the skipped-to list, the machine and its three values. Each Tab walk waits for the
     // page's lists: a page shows its title before they arrive, and a Tab from a main that holds no
     // link yet leaves the page (ginsys/bronzeward#532).
@@ -630,14 +630,14 @@ describe("the read-only lists and items", () => {
     await tabTo((f) => f.title === m, "the machine");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText(`Machine ${m}`);
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     await expect($("main dl")).toHaveText(expect.stringContaining("Desired"));
     // T1: Sign out is on the way to the navigation.
     await fromTitle();
     expect(await tabTo((f) => f.text === "Sources", "the Sources link")).toContain("Sign out");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText("Sources");
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     expect(await where()).toBe(`${FIXTURE_PAGE}/sources`);
     await loaded();
     await tabTo((f) => f.title === s.frg.id, "the fragment");
@@ -806,12 +806,12 @@ describe("the rendered review of a release's machine", () => {
     await tabTo((f) => f.title === s.rel.id, "the release");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText(`Release ${short(s.rel.id)}`);
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     await loaded();
     await tabTo((f) => f.text === `Rendered configuration of ${short(m)}`, "the review link");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText(`Rendered configuration of ${short(m)} in release ${short(s.rel.id)}`);
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     await expect($('[data-testid="document"]')).toBeExisting();
     await loaded();
     const seen = await measure();

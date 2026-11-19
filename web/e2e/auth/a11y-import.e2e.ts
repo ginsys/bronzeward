@@ -15,7 +15,7 @@
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
-import { api, cacheControl, cacheHolds, disposable, fixtureSignIn, focusIn, focusKept, focused, fromTitle, hex, measure, narrow, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
+import { api, cacheControl, cacheHolds, disposable, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, measure, narrow, onMain, overflows, storageControl, storageEmpty, syntheticMachine, tab, tabTo } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -90,10 +90,11 @@ const focusedPath = () => browser.execute(() => document.activeElement?.closest(
 // The label a focused field belongs to.
 const focusedLabel = () => browser.execute(() => document.activeElement?.closest("label")?.firstChild?.textContent?.trim() ?? "");
 // A step after which focus was lost to the page: recorded, and every step's result is asserted at the end,
-// so one run names each of them.
+// so one run names each of them. Focus may be on the body for a few ms before the shell moves it, so a step
+// is lost only when it stays so for 2 s (ginsys/bronzeward#911).
 const watch = () => {
   const lost: string[] = [];
-  return { lost, after: async (step: string) => void ((await focusKept()) || lost.push(step)) };
+  return { lost, after: async (step: string) => void (await browser.waitUntil(focusKept, { timeout: 2_000, interval: 25 }).catch(() => lost.push(step))) };
 };
 // Whether a status or alert shows `text`: announced without moving focus (4.1.3).
 const announced = (text: string) => browser.execute((t: string) => [...document.querySelectorAll('[role="alert"], [role="status"] > p')].some((e) => e.textContent?.includes(t)), text);
@@ -127,15 +128,15 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     await tabTo((f) => f.text === "Changes", "the Changes link");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText("Changes");
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     await tabTo((f) => f.tag === "A" && f.text === "Imports", "the Imports link");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText("Imports");
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     await tabTo((f) => f.tag === "BUTTON" && f.text === "Start import", "Start import");
     await browser.keys("Enter");
     await expect($("main h2")).toHaveText("Start import");
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     // The machine, then the draft the machine's cluster offers: a select takes the arrow keys.
     await $(`select[name="machine"] option[value="${machine}"]`).waitForExist({ timeout: 20_000 });
     await tabTo((f) => f.tag === "SELECT" && f.name === "machine", "the machine select");
@@ -177,7 +178,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     const sentAt = Date.now();
     await browser.keys("Enter");
     await browser.waitUntil(async () => /^\/ingestions\/ing_/.test(await browser.execute(() => location.pathname)), { timeout: 20_000, timeoutMsg: "the wizard did not open the import page" });
-    expect(await focused()).toBe("main");
+    await focusSettles(onMain, "the new page");
     await expect(ended()).toHaveText(holds("released into draft"), { wait: 60_000 });
     expect(Date.now() - sentAt).toBeLessThan(90_000);
     await expect(allowed()).toHaveText(holds("Released into draft"), { wait: 20_000 });
@@ -231,7 +232,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await browser.keys("Enter");
       await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
       // The button that held focus is replaced by the review: focus is on its text.
-      expect(await focusIn('[data-testid="review-text"]')).toBe(true);
+      await focusSettles(() => focusIn('[data-testid="review-text"]'), "the review's text");
       expect(await reviewHolds()).toBe(true);
       expect(await announced("PROTECTED REVIEW")).toBe(true);
       const seen = await measure();
@@ -246,11 +247,11 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await browser.keys("Enter");
       await expect(ended()).toHaveText(holds("The marks were applied: re-staged and paused again"), { wait: 60_000 });
       expect(await browser.execute(() => document.querySelector('[data-testid="review-text"]') !== null)).toBe(false);
-      expect(await focusIn(CLAIM)).toBe(true);
+      await focusSettles(() => focusIn(CLAIM), "the claim section");
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Continue import", "Continue import");
       await browser.keys("Enter");
       await expect(ended()).toHaveText(holds(`Import ${short(id)} released into draft`), { wait: 60_000 });
-      expect(await focusIn(CLAIM)).toBe(true);
+      await focusSettles(() => focusIn(CLAIM), "the claim section");
     });
 
     it("keyboard only (T3): a closed review returns focus to its section, and a paused import is abandoned", async function () {
@@ -264,12 +265,13 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Close review", "Close review");
       await browser.keys("Enter");
       await expect($('[data-testid="review-text"]')).not.toBeExisting();
-      expect(await focusIn(REVIEW)).toBe(true);
+      await focusSettles(() => focusIn(REVIEW), "the review's section");
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Abandon import", "Abandon import");
       await browser.keys("Enter");
       await expect($(CLAIM)).toHaveText(holds("The import was abandoned. Its staged input is discarded."), { wait: 30_000 });
-      expect(await focusIn(CLAIM)).toBe(true);
+      // The case ended the import: the cleanup after it posts no abandon for it (it would answer 409).
       importId = "";
+      await focusSettles(() => focusIn(CLAIM), "the claim section");
     });
 
     it("320 CSS pixels: the paused import, its open review and the marks panel do not scroll the page sideways", async function () {
@@ -346,7 +348,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await expect(pane().$('[data-testid="status"]')).toHaveText(holds("Someone changed this draft"), { wait: 20_000 });
       expect(await announced("Someone changed this draft")).toBe(true);
       // Save was disabled while it ran: focus is in the pane, on the refusal or on Save, and Show their change is next.
-      expect(await focusIn(PANE)).toBe(true);
+      await focusSettles(() => focusIn(PANE), "the editor pane");
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Show their change", "Show their change");
       await browser.keys("Enter");
       await expect($("main h2")).toHaveText(holds(`revision ${now}`), { wait: 20_000 });
@@ -358,11 +360,11 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Copy my text into the new revision", "Copy my text into the new revision");
       await browser.keys("Enter");
       // Copy my text is disabled once it ran: focus is on the text now in the editor.
-      expect(await focusedLabel()).toMatch(/^Document/);
+      await focusSettles(async () => (await focusedLabel()).startsWith("Document"), "the Document text");
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Save", "Save");
       await browser.keys("Enter");
       await expect(pane().$('[data-testid="write-result"]')).toHaveText(holds(`Fragment ${name} saved in draft`), { wait: 30_000 });
-      expect(await focusIn(PANE)).toBe(true);
+      await focusSettles(() => focusIn(PANE), "the editor pane");
       expect(w.lost).toEqual([]);
     });
 
