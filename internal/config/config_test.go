@@ -485,9 +485,19 @@ func TestTalosMaxCertLifetime(t *testing.T) {
 	if err != nil || c.Talos.MaxCertLifetime != 15*time.Minute {
 		t.Fatalf("default: %+v, %v", c.Talos, err)
 	}
-	c, err = Load(strings.NewReader(base + authBlock + "talos: {maxCertLifetime: 90s}\n"))
-	if err != nil || c.Talos.MaxCertLifetime != 90*time.Second {
+	c, err = Load(strings.NewReader(base + authBlock + "talos: {maxCertLifetime: 20m}\n"))
+	if err != nil || c.Talos.MaxCertLifetime != 20*time.Minute {
 		t.Fatalf("set: %+v, %v", c.Talos, err)
+	}
+	// One certificate covers the node reads, the default check validity and the largest transport
+	// deadline, plus the encoding's two seconds: the least limit is accepted, a second under it is not.
+	least := NodeUseBudget + c.Execution.PlanDefaults.CheckValidity + c.Execution.MaxTransportDeadline + 2*time.Second
+	if _, err := Load(strings.NewReader(base + authBlock + "talos: {maxCertLifetime: " + least.String() + "}\n")); err != nil {
+		t.Errorf("the least limit %s: %v", least, err)
+	}
+	if _, err := Load(strings.NewReader(base + authBlock + "talos: {maxCertLifetime: " + (least - time.Second).String() + "}\n")); err == nil ||
+		!strings.Contains(err.Error(), "talos.maxCertLifetime must be at least "+least.String()) {
+		t.Errorf("a second under the least limit %s: %v", least, err)
 	}
 	for name, c := range map[string]struct{ in, want string }{
 		"negative":     {"-1s", "talos.maxCertLifetime must be positive"},

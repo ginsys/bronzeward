@@ -15,6 +15,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/talos/signer"
 )
 
 // testExecution is a deployment's execution block at its defaults, with a five-minute transport
@@ -23,6 +24,40 @@ func testExecution() config.Execution {
 	return config.Execution{SettleFloor: 30 * time.Second, MaxTransportDeadline: 5 * time.Minute, DriftInterval: 5 * time.Minute,
 		PlanDefaults: config.PlanDefaults{Expiry: 24 * time.Hour, MaxObservationAge: 5 * time.Minute, CheckValidity: 5 * time.Minute,
 			TransportDeadline: time.Minute, VerificationDeadline: 10 * time.Minute, MaxAttempts: 3}}
+}
+
+// TestPlanCertificateLifetimeBound holds an apply-config plan to the one certificate its dispatch
+// signs: the node reads, the check validity and the transport deadline fit the maximum less the
+// encoding's two seconds, at the limit and one second over it. An adopt plan states no check to
+// outlive a certificate: its observation signs for the node reads alone, so a long check validity
+// is accepted. The config's node budget is the one the api signs for.
+func TestPlanCertificateLifetimeBound(t *testing.T) {
+	t.Parallel()
+	if config.NodeUseBudget != nodeUseLife*nodeTimeout {
+		t.Fatalf("config.NodeUseBudget %s, api node use %s", config.NodeUseBudget, nodeUseLife*nodeTimeout)
+	}
+	const maxCert = 15 * time.Minute
+	secs := func(n int64) *int64 { return &n }
+	limit := int64((maxCert - signer.RoundingSlack - config.NodeUseBudget) / time.Second) // checkValidity + transportDeadline
+	for _, c := range []struct {
+		name            string
+		check, transfer int64
+		wantErr         bool
+	}{
+		{"at the limit", limit - 60, 60, false},
+		{"a second over", limit - 59, 60, true},
+		{"the transport deadline over", limit - 60, 61, true},
+	} {
+		in := planInput{Operation: "apply-config", CheckValiditySeconds: secs(c.check), TransportDeadlineSeconds: secs(c.transfer),
+			VerificationDeadlineSeconds: secs(900)}
+		if err := in.resolve(testExecution(), maxCert, config.NodeUseBudget); (err != nil) != c.wantErr {
+			t.Errorf("%s: %v, want an error: %v", c.name, err, c.wantErr)
+		}
+	}
+	adopt := planInput{Operation: "adopt", CheckValiditySeconds: secs(3600)}
+	if err := adopt.resolve(testExecution(), maxCert, config.NodeUseBudget); err != nil {
+		t.Errorf("an adopt plan with a check validity above the certificate maximum: %v", err)
+	}
 }
 
 // assignment returns machine's assignment and its head revision, creating both on first use.
@@ -480,6 +515,10 @@ func TestPlanCreationRefusals(t *testing.T) {
 		{name: "attempts over ten", body: applyBody(p.target.rel, p.machine, `,"maxAttempts":11`), status: 400, code: "invalid-request"},
 		{name: "attempts zero", body: applyBody(p.target.rel, p.machine, `,"maxAttempts":0`), status: 400, code: "invalid-request"},
 		{name: "transport above maximum", body: applyBody(p.target.rel, p.machine, `,"transportDeadlineSeconds":301,"verificationDeadlineSeconds":900`),
+			status: 400, code: "invalid-request"},
+		// A dispatch signs one certificate for the observation, the check and the attempt (execution-recovery.md
+		// §3.1 item 2): 40 s of node use, the check's validity and the transport deadline, at most 15 minutes.
+		{name: "certificate lifetime above maximum", body: applyBody(p.target.rel, p.machine, `,"checkValiditySeconds":801,"transportDeadlineSeconds":60,"verificationDeadlineSeconds":900`),
 			status: 400, code: "invalid-request"},
 		{name: "transport above verification", body: applyBody(p.target.rel, p.machine, `,"transportDeadlineSeconds":120,"verificationDeadlineSeconds":90`),
 			status: 400, code: "invalid-request"},

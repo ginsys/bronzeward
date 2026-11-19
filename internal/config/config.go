@@ -17,6 +17,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/id"
 	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/talos/signer"
 )
 
 type Config struct {
@@ -63,6 +64,18 @@ func (t *Talos) validate() error {
 		return errors.New("config: talos.maxCertLifetime must be positive")
 	}
 	return nil
+}
+
+// NodeUseBudget is the certificate lifetime one use of a node needs: the dial and its three
+// requests, each bounded by the server's node timeout (the api package's nodeUseLife times
+// nodeTimeout, which a test there holds equal to this).
+const NodeUseBudget = 40 * time.Second
+
+// minCertLifetime is the least talos.maxCertLifetime under which a dispatch with the largest
+// transport deadline and the default check validity can be signed for: the node reads, the check
+// and the attempt use one certificate (execution-recovery.md §3.1 item 2).
+func (e Execution) minCertLifetime() time.Duration {
+	return NodeUseBudget + e.PlanDefaults.CheckValidity + e.MaxTransportDeadline + signer.RoundingSlack
 }
 
 var instanceName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
@@ -284,6 +297,10 @@ func Load(r io.Reader) (Config, error) {
 	}
 	if err := c.Talos.validate(); err != nil {
 		return Config{}, err
+	}
+	if need := c.Execution.minCertLifetime(); c.Talos.MaxCertLifetime < need {
+		return Config{}, fmt.Errorf("config: talos.maxCertLifetime must be at least %s: the node reads, "+
+			"execution.planDefaults.checkValidity and execution.maxTransportDeadline share one certificate", need)
 	}
 	if c.Provider != nil {
 		if err := c.Provider.validate(); err != nil {

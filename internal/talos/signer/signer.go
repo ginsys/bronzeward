@@ -150,7 +150,7 @@ func osCA(document []byte) (ca *x509.PEMEncodedCertificateAndKey, ok bool) {
 // holds the read open is ErrUnavailable once the certificate has lapsed.
 func Try(ctx context.Context, ca provider.CAKey, endpoint string, now time.Time) error {
 	// The probe has no configured maximum; its maximum leaves room for the whole-second encoding.
-	cert, err := Sign(ca, role.Reader, now, tryLifetime, tryLifetime+roundingSlack)
+	cert, err := Sign(ca, role.Reader, now, tryLifetime, tryLifetime+RoundingSlack)
 	if err != nil {
 		return &Refusal{RuleUnusable}
 	}

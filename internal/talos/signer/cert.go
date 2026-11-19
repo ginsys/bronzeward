@@ -41,13 +41,14 @@ type Cert struct {
 	crt, key *string
 }
 
-// roundingSlack is the room a certificate's whole-second encoding can add to its span: NotBefore
-// drops the fraction of now (under a second) and NotAfter is rounded up (under a second).
-const roundingSlack = 2 * time.Second
+// RoundingSlack is the room a certificate's whole-second encoding can add to its span: NotBefore
+// drops the fraction of now (under a second) and NotAfter is rounded up (under a second). A use
+// may ask for at most the configured maximum less this.
+const RoundingSlack = 2 * time.Second
 
 // Sign signs a client certificate from k for r, valid from now for life. max bounds the issued
-// certificate's own span, NotAfter minus NotBefore, which can exceed life by under roundingSlack:
-// so a life above max minus roundingSlack is refused up front, at any now, and never shortened. A
+// certificate's own span, NotAfter minus NotBefore, which can exceed life by under RoundingSlack:
+// so a life above max minus RoundingSlack is refused up front, at any now, and never shortened. A
 // certificate states whole seconds: NotBefore drops the fraction of now, and NotAfter is the next
 // whole second at or after now+life, so it never ends before the use it covers. The node's clock is
 // not read. Only os:reader and os:admin are signed. The certificate's serial and NotAfter are read
@@ -58,7 +59,7 @@ func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration)
 		return Cert{}, ErrRole
 	}
 	// max is compared before the subtraction: a maximum at the bottom of a time.Duration would wrap.
-	if life <= 0 || max <= roundingSlack || life > max-roundingSlack {
+	if life <= 0 || max <= RoundingSlack || life > max-RoundingSlack {
 		return Cert{}, ErrLifetime
 	}
 	end := now.Add(life)
