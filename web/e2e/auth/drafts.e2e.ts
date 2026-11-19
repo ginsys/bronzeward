@@ -515,6 +515,7 @@ describe("the draft editor (#339)", () => {
       const refused = profilePane().$('[data-testid="write-result"]');
       await expect(refused).toHaveText(expect.stringContaining("validation-failed"), { wait: 30_000 });
       await expect(profilePane().$('[data-testid="write-where"]')).toHaveText("At fragments[0].");
+      // once: the refusal and its path are drawn in one render (web/src/drafts.tsx:720-721), so the text awaited above is the whole text.
       expect(await refused.getText()).not.toContain(seed.revision);
     });
   };
@@ -632,10 +633,8 @@ describe("the draft editor (#339)", () => {
       await expect(refused).toHaveText(expect.stringContaining("a name must have a head or be proposed by this draft, not removed by it"));
       await expect(asg().$('[data-testid="write-where"]')).toHaveText(`At ${where}.`);
       const shown = await refused.getText();
-      for (const id of [...revisions, stored.revision]) {
-        expect(shown).not.toContain(id);
-        expect(shown).not.toContain(shortId(id));
-      }
+      // once: the refusal and its path are drawn in one render (web/src/drafts.tsx:720-721), so the text awaited above is the whole text.
+      for (const id of [...revisions, stored.revision]) for (const form of [id, shortId(id)]) expect(shown).not.toContain(form);
       expect(await draftRevision()).toBe(before);
       // The same revision id and the same body: the profiles and the fragments both stay.
       expect(await storedAssignment(draft, m)).toEqual(stored);

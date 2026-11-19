@@ -23,6 +23,7 @@ describe("signed in through the test provider", () => {
     expect(await param("post_logout_redirect")).toBe(`${IDP_PAGE}/signed-out`);
     await browser.url(`${IDP_PAGE}/signed-out`);
     await expect($('[data-testid="status"]')).toHaveText(SIGNED_OUT);
+    // once: a fresh load of the signed-out page, which draws its state in one render and holds no session to draw from.
     expect(await $("body").getText()).not.toContain(userId("h-viewer"));
     await storageEmpty();
     // Back past the provider to the page that showed data: it starts a new sign-in instead.

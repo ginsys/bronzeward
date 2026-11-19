@@ -44,7 +44,7 @@ describe("several tabs", () => {
       await expect($('[data-testid="status"]')).toHaveText(PRINCIPAL_CHANGED, { wait: 20_000 });
       await absent(() => $('[data-testid="principal"]').isExisting(), "the principal after the renewal for another subject");
       // Nothing read under the old subject stays: no principal, no server version (§7 item 5).
-      expect(await $("body").getText()).not.toMatch(/h-viewer|API revision/);
+      await absent(async () => /h-viewer|API revision/.test(await $("body").getText()), "the old principal or a server version after the renewal for another subject");
       expect(await $('[data-testid="server"]').getText()).toBe("Server unknown");
     }
     expect(await counts()).toMatchObject({ authorize: 1, refresh: 1, spent: 0 });

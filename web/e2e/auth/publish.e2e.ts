@@ -161,7 +161,7 @@ describe("the publication page (#342)", () => {
     await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
     // The accepted line is a status, announced without moving focus; the button that had focus is now disabled.
     await eventually(async () => (await mirrored()).some((t) => t.includes("Publishing draft")), "the accepted line mirrored");
-    // The busy state and the accepted line come from one operation in one render (web/src/publish.tsx:145,163), so the button is already disabled here.
+    // once: the busy state and the accepted line come from one operation in one render (web/src/publish.tsx:145,163), so the button is already disabled here.
     expect(await $("main").$("button=Publish").isEnabled()).toBe(false);
     await focusSettles(focusKept, "the page, not the body");
     await focusSettles(() => focusIn(ANSWER), "the answer");

@@ -177,6 +177,7 @@ describe("the write views (#338)", () => {
     expect(await notice().getText()).toContain(UNKNOWN);
     const { key } = await oneWrite(4);
     expect(await notice().getText()).toContain(`Key ${key}`);
+    // once: the notice's whole text is drawn in one render from the write's outcome (web/src/forms.tsx:57-79), and the repeating text awaited gone above is part of it.
     expect(await notice().getText()).not.toContain(REDIRECTED);
     // No send followed the redirect to its target, and none reached the server.
     expect(await redirected()).toBe(0);
@@ -196,8 +197,7 @@ describe("the write views (#338)", () => {
     expect(await seen()).toEqual(["failed"]);
     // The write committed before its answer was dropped.
     expect(await writeAnswers()).toEqual(["/clusters 201"]);
-    // The notice's buttons follow its text, in the same block. Read once on purpose: the set-aside notice draws
-    // "Repeat exactly" disabled in the same element as its text (web/src/states.tsx), so it cannot render later.
+    // once: the set-aside notice draws "Repeat exactly" disabled in the same element as its text (web/src/states.tsx), so it cannot render later.
     expect(await notice().parentElement().$("button=Repeat exactly").isEnabled()).toBe(false);
     // The notice's own way out asks nothing; a link elsewhere still does (the leave guard's case).
     const asked: string[] = [];
@@ -235,6 +235,7 @@ describe("the write views (#338)", () => {
     await expect(result()).toHaveText(expect.stringContaining(`Scope ${INJECTED_SCOPE} refuses this request. ${SCOPE_NO_MODE}`), { wait: 20_000 });
     const text = await result().getText();
     expect(text).toMatch(/^Not saved: recovery-mode-active\./);
+    // once: the text of the awaited result itself, drawn from a refused outcome that is final (web/src/forms.tsx:196-204).
     expect(text).not.toMatch(/started for recovery|recovery start/i);
     // One send, never repeated: a definite refusal, so no notice either. It reached no server.
     await oneWrite(1);
@@ -248,9 +249,10 @@ describe("the write views (#338)", () => {
     await absent(async () => (await mirrored()).some((line) => line.includes("Not saved")), "the refusal text in the status region");
     // The scope's refusal showed the page no recovery start: no banner, no start-mode text.
     await absent(() => $('[data-testid="recovery"]').isExisting(), "the recovery banner after a scope's refusal");
-    const body = await $("body").getText();
-    expect(body).not.toContain(RECOVERY_START);
-    expect(body).not.toContain(PRE_ENTRY);
+    await absent(async () => {
+      const body = await $("body").getText();
+      return body.includes(RECOVERY_START) || body.includes(PRE_ENTRY);
+    }, "the start-mode text after a scope's refusal");
     // Positive control: the process's refusal of the same write, without a scope member, does show
     // the start mode. This server started normally, so the banner never shows; the shell shows its
     // pre-entry view in place of the page (§8.5 item 1). The shell reads /server again as soon as
@@ -287,12 +289,13 @@ describe("the write views (#338)", () => {
   it("a second submit while the write is in flight sends nothing new", async () => {
     const name = await add([], { held: "/clusters" });
     await browser.waitUntil(async () => (await holding()).includes("/clusters"), { timeout: 20_000, timeoutMsg: "the write was not held" });
+    // once: busy disables the button (web/src/shell.tsx:53-58), so an early read fails rather than passes.
     expect(await $("main form").$("button=Add cluster").isEnabled()).toBe(false);
     // A second submit event of the same form, its button disabled or not: the form sends nothing new.
     await browser.execute(() => document.querySelector<HTMLFormElement>("main form")!.requestSubmit());
     await browser.pause(500);
     expect(await writes()).toHaveLength(1);
-    // The submit above ignores the button, so a button enabled during the hold fails nothing there: read it again.
+    // once: the submit above ignores the button, so a button enabled during the hold fails nothing there; busy disables it (web/src/shell.tsx:53-58), so an early read fails rather than passes.
     expect(await $("main form").$("button=Add cluster").isEnabled()).toBe(false);
     await release();
     await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
@@ -333,6 +336,7 @@ describe("the write views (#338)", () => {
     // Longer than the three repeats' 1 + 2 + 4 s.
     await browser.pause(8_000);
     await oneWrite(1);
+    // once: read after the 8 s pause above, which outlasts the three repeats.
     expect(await notice().isExisting()).toBe(false);
   });
 

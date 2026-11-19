@@ -299,7 +299,7 @@ describe("the machine detail (W3)", () => {
     // The observed read's attribution is shown under the open drift too (#423 C5).
     expect(await $('[data-testid="observed"]').getText()).toMatch(new RegExp(`^read at 2026-10-2\\d \\d\\d:\\d\\d \\(${short(m1.id)}\\): attributed to ${short(rel("b"))}$`));
     expect(said.at(-1)).toBe(HEALTH);
-    // Pending convergence is not stated while the drift is open (§2.4: they are different).
+    // once: `said` is the snapshot asserted equal to the expected sentences above; pending convergence is not stated while the drift is open (§2.4).
     expect(said.join(" ")).not.toContain("Pending convergence");
     expect(await texts('[data-testid="observations"] tbody tr td:last-child')).toEqual(["configDigest (node unreachable)", "nothing", "nothing"]);
     // The principal is the identity Bronzeward recorded for h-author, shortened (G23).
