@@ -79,12 +79,78 @@ func TestSignRoleAndLifetime(t *testing.T) {
 		if c.Role() != r || len(cert.Subject.Organization) != 1 || cert.Subject.Organization[0] != string(r) {
 			t.Errorf("%s: role %q, organization %q", r, c.Role(), cert.Subject.Organization)
 		}
-		if got := cert.NotAfter.Sub(cert.NotBefore); got < 90*time.Second || got > 91*time.Second {
-			t.Errorf("%s: valid for %s, want the 90s asked for", r, got)
+		if got := cert.NotAfter.Sub(now); got < 90*time.Second || got > 91*time.Second {
+			t.Errorf("%s: valid for %s after the signing instant, want the 90s asked for", r, got)
 		}
 		if !c.NotAfter().Equal(cert.NotAfter) || c.Serial() != cert.SerialNumber.Text(16) {
 			t.Errorf("%s: NotAfter %s and serial %s are not the certificate's own", r, c.NotAfter(), c.Serial())
 		}
+	}
+}
+
+// A certificate is valid from 300 s before the signing instant, a fixed allowance for a node whose
+// clock is behind (persistence-api.md §3.4, ginsys/bronzeward#938). The certificate states whole
+// seconds, so NotBefore is the signing second less 300 s whatever the fraction, and NotAfter is as it
+// was: the allowance adds no valid time after signing. 300 s is a chosen bound, not a measured skew.
+func TestSignBacksNotBeforeUp(t *testing.T) {
+	k := storedKey(newCA(t))
+	base := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	for _, frac := range []time.Duration{0, 1, 250 * time.Millisecond, 999999999} {
+		now := base.Add(frac)
+		life := 90*time.Second + 500*time.Millisecond
+		cert, err := signer.Sign(k, role.Admin, now, life, 5*time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := parsed(t, cert)
+		if want := base.Add(-300 * time.Second); !c.NotBefore.Equal(want) {
+			t.Errorf("start +%s: NotBefore %s, want the signing second less 300s, %s", frac, c.NotBefore, want)
+		}
+		end := now.Add(life) // NotAfter is the next whole second at or after it, measured from the signing instant
+		want := end.Truncate(time.Second)
+		if !end.Equal(want) {
+			want = want.Add(time.Second)
+		}
+		if !c.NotAfter.Equal(want) {
+			t.Errorf("start +%s: NotAfter %s, want %s: the allowance must add no valid time after signing", frac, c.NotAfter, want)
+		}
+	}
+}
+
+// A node whose clock is behind the signer's by less than the allowance accepts the certificate, and
+// one behind by more does not. The node's clock is the test's: a signing time ahead of the real
+// clock by d is a node behind by d, as the signing note simulated it. The control is not the edge
+// itself: at 301 s the encoding's whole second can still put NotBefore a few milliseconds ahead of
+// the clock and the handshake would then accept it at random, so it sits well past it.
+func TestCertAcceptedByANodeBehindItsClock(t *testing.T) {
+	ca := newCA(t)
+	n := talostest.Serve(t, talostest.NewPKIFromCA(t, ca))
+	dial := func(ahead time.Duration) error {
+		t.Helper()
+		c, err := signer.Sign(storedKey(ca), role.Reader, time.Now().Add(ahead), time.Minute, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc, err := c.Config(n.Endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := talos.Dial(ctx(t), doc, n.Endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close() //nolint:errcheck
+		_, err = r.Version(ctx(t))
+		return err
+	}
+	if err := dial(0); err != nil {
+		t.Fatalf("a node on the signer's clock: %v", err)
+	}
+	if err := dial(299 * time.Second); err != nil {
+		t.Fatalf("a node 299s behind: %v", err)
+	}
+	if err := dial(310 * time.Second); err == nil {
+		t.Fatal("a node 310s behind accepted the certificate: the node does not check NotBefore, so the test proves nothing")
 	}
 }
 
@@ -111,10 +177,13 @@ func TestSignCoversFractionalLifetime(t *testing.T) {
 	}
 }
 
-// The maximum bounds the issued certificate's own span, NotAfter minus NotBefore, and the outcome
-// does not depend on the clock (ginsys/bronzeward#899): a lifetime up to the maximum less the two
-// seconds the whole-second encoding can add is signed from every fractional start, and one above
-// it is refused from every start. Every certificate covers now+life and spans no more than max.
+// The maximum bounds the issued certificate's span from the signing instant, NotAfter minus now, and
+// not the allowance NotBefore is backed up by (persistence-api.md §3.4, ginsys/bronzeward#938); the
+// outcome does not depend on the clock (ginsys/bronzeward#899): a lifetime up to the maximum less the
+// two seconds the whole-second encoding can add is signed from every fractional start, and one above
+// it is refused from every start. Every certificate covers now+life and reaches no further than
+// now+max. The 15-minute maximum with the longest dispatch lifetime it admits, 898s, is the case a
+// back-date that left the span at NotAfter minus NotBefore would refuse.
 func TestSignBoundIsTheMaximumLessTheRoundingSlack(t *testing.T) {
 	k := storedKey(newCA(t))
 	base := time.Now().Truncate(time.Second)
@@ -131,8 +200,11 @@ func TestSignBoundIsTheMaximumLessTheRoundingSlack(t *testing.T) {
 				continue
 			}
 			c := parsed(t, cert)
-			if span := c.NotAfter.Sub(c.NotBefore); span > max {
-				t.Errorf("%s maximum, start +%s: span %s above the maximum %s", name, frac, span, max)
+			if span := c.NotAfter.Sub(now); span > max {
+				t.Errorf("%s maximum, start +%s: reaches %s past the signing instant, above the maximum %s", name, frac, span, max)
+			}
+			if got := c.NotAfter.Sub(c.NotBefore) - c.NotAfter.Sub(now); got < 300*time.Second || got >= 301*time.Second {
+				t.Errorf("%s maximum, start +%s: NotBefore is %s before the signing instant, want 300s and the dropped fraction", name, frac, got)
 			}
 			if c.NotAfter.Before(now.Add(edge)) {
 				t.Errorf("%s maximum, start +%s: NotAfter %s before the end of the use %s", name, frac, c.NotAfter, now.Add(edge))
@@ -141,6 +213,11 @@ func TestSignBoundIsTheMaximumLessTheRoundingSlack(t *testing.T) {
 				t.Errorf("%s maximum, start +%s: a lifetime above max less two seconds: %v, want ErrLifetime", name, frac, err)
 			}
 		}
+	}
+	// The default maximum and the longest lifetime it admits: signed, and not refused for the 300s
+	// NotBefore is backed up by.
+	if _, err := signer.Sign(k, role.Admin, base, 15*time.Minute-2*time.Second, 15*time.Minute); err != nil {
+		t.Errorf("15 minutes and 898s: %v", err)
 	}
 	// A lifetime and maximum at the limit of a time.Duration leave no room to round: refused, not
 	// saturated into a certificate that ends early.

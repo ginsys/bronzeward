@@ -41,17 +41,25 @@ type Cert struct {
 	crt, key *string
 }
 
-// RoundingSlack is the room a certificate's whole-second encoding can add to its span: NotBefore
-// drops the fraction of now (under a second) and NotAfter is rounded up (under a second). A use
-// may ask for at most the configured maximum less this.
+// RoundingSlack is the room a certificate's whole-second encoding can add to its span from the
+// signing instant: NotAfter is rounded up (under a second). A use may ask for at most the configured
+// maximum less this. It is kept at two seconds, with a second to spare, so the plan refusal, the
+// startup minimum and the specification's figure stay as they are.
 const RoundingSlack = 2 * time.Second
 
-// Sign signs a client certificate from k for r, valid from now for life. max bounds the issued
-// certificate's own span, NotAfter minus NotBefore, which can exceed life by under RoundingSlack:
-// so a life above max minus RoundingSlack is refused up front, at any now, and never shortened. A
-// certificate states whole seconds: NotBefore drops the fraction of now, and NotAfter is the next
-// whole second at or after now+life, so it never ends before the use it covers. The node's clock is
-// not read. Only os:reader and os:admin are signed. The certificate's serial and NotAfter are read
+// notBeforeBackdate is how far before the signing instant a certificate's NotBefore lies: a fixed
+// allowance for a node whose clock is behind the signer's (persistence-api.md §3.4). The node's clock
+// is not read, and the value is chosen, not measured.
+const notBeforeBackdate = 300 * time.Second
+
+// Sign signs a client certificate from k for r, valid from now for life. max bounds how far past now
+// the certificate reaches, NotAfter minus now, which can exceed life by under RoundingSlack: so a
+// life above max minus RoundingSlack is refused up front, at any now, and never shortened. The
+// certificate is also valid from the whole second 300 s before now, an allowance for a node whose
+// clock is behind; it adds no valid time after now and is not part of the span max bounds. A
+// certificate states whole seconds: NotAfter is the next whole second at or after now+life, so it
+// never ends before the use it covers. The node's clock is not read. Only os:reader and os:admin
+// are signed. The certificate's serial and NotAfter are read
 // back from the certificate itself, so a record names what the node will check and not what was
 // asked for.
 func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration) (Cert, error) {
@@ -66,8 +74,8 @@ func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration)
 	if !end.Equal(end.Truncate(time.Second)) {
 		end = end.Truncate(time.Second).Add(time.Second)
 	}
-	pair, err := secrets.NewAdminCertificateAndKey(now, &cryptox509.PEMEncodedCertificateAndKey{Crt: k.Crt(), Key: k.Key()},
-		role.MakeSet(r), end.Sub(now))
+	pair, err := secrets.NewAdminCertificateAndKey(now.Add(-notBeforeBackdate), &cryptox509.PEMEncodedCertificateAndKey{Crt: k.Crt(), Key: k.Key()},
+		role.MakeSet(r), end.Sub(now)+notBeforeBackdate)
 	if err != nil {
 		return Cert{}, ErrSign
 	}
@@ -79,8 +87,9 @@ func Sign(k provider.CAKey, r role.Role, now time.Time, life, max time.Duration)
 	if err != nil {
 		return Cert{}, ErrSign
 	}
-	// An assertion: the up-front check leaves room for the encoding, so this never fires.
-	if parsed.NotAfter.After(parsed.NotBefore.Add(max)) || parsed.NotAfter.Before(now.Add(life)) {
+	// An assertion: the up-front check leaves room for the encoding, so this never fires. The span is
+	// measured from the signing instant: NotBefore's allowance is outside the maximum.
+	if parsed.NotAfter.After(now.Add(max)) || parsed.NotAfter.Before(now.Add(life)) {
 		return Cert{}, ErrLifetime
 	}
 	caCrt, crt, key := string(k.Crt()), string(pair.Crt), string(pair.Key)
