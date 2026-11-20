@@ -77,6 +77,37 @@ describe("the shell", () => {
     expect(s.slice(4).sort()).toEqual(["/clusters", "/identity", "/identity", "/machines", "/plans"]);
   });
 
+  it("the navigation is grouped and static beside the page, and its icons are decorative (ginsys/bronzeward#973)", async () => {
+    // A desktop window, wider than the 68 rem below which the navigation stacks; put back afterwards.
+    const size = await browser.getWindowSize();
+    await browser.setWindowSize(1400, Math.max(size.height, 800));
+    await fixtureSignIn("h-viewer");
+    const shell = await browser.execute(() => {
+      const pos = (s: string) => getComputedStyle(document.querySelector(s)!).position;
+      const nav = document.querySelector('nav[aria-label="Main"]')!;
+      const icons = [...document.querySelectorAll("svg")];
+      return {
+        // 2.4.11: nothing covers a focused element, so none of these scrolls apart from the page.
+        position: [pos("header"), pos("nav"), pos("main"), pos("footer")],
+        groups: [...nav.querySelectorAll(".group")].map((g) => g.textContent),
+        links: [...nav.querySelectorAll("a")].map((a) => a.textContent),
+        // Every icon is hidden from assistive technology, has no title and no style attribute.
+        icons: icons.length,
+        undecorated: icons.filter((s) => s.getAttribute("aria-hidden") !== "true" || s.querySelector("title") !== null || s.hasAttribute("style")).length,
+        navBesideMain: nav.getBoundingClientRect().right <= document.querySelector("main")!.getBoundingClientRect().left + 1,
+      };
+    });
+    await browser.setWindowSize(size.width, size.height);
+    expect(shell.position).toEqual(["static", "static", "static", "static"]);
+    expect(shell.groups).toEqual(["Inventory", "Delivery", "Governance"].slice(0, shell.groups.length));
+    expect(shell.groups.length).toBeGreaterThanOrEqual(2);
+    expect(shell.links).toContain("Machines");
+    expect(shell.icons).toBeGreaterThan(shell.links.length);
+    expect(shell.undecorated).toBe(0);
+    // The test's window is wider than the 68 rem where the navigation sits beside the page.
+    expect(shell.navBesideMain).toBe(true);
+  });
+
   it("a query-only move reads the identity again under the new view", async () => {
     await fixtureSignIn("h-viewer");
     await browser.execute(() => {
