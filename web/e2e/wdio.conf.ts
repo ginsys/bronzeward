@@ -227,10 +227,12 @@ export const config: WebdriverIO.Config = {
       "-issuer", FAKE_ISSUER, "-provider-origins", TARGET_ORIGIN, "-redirect-api", TARGET_ORIGIN,
     ], { stdio: "inherit" });
     for (let i = 0; ; i++) {
-      // A host that could not start fails the run even where something else answers on its port.
+      const answered = await fetch(hostUrl).then((r) => r.ok, () => false);
+      // Read after the request settles: a failed spawn is reported while the request is in flight, and
+      // fails the run even where something else answers on the host's port.
       const why = died(host);
       if (why !== undefined) throw new SevereServiceError(why);
-      if (await fetch(hostUrl).then((r) => r.ok, () => false)) break;
+      if (answered) break;
       if (i === 50 || host.exitCode !== null) throw new SevereServiceError("the static host did not answer within 10 s");
       await new Promise((r) => setTimeout(r, 200));
     }
