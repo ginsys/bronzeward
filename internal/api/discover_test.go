@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -345,6 +347,42 @@ func TestDiscoveryDeadlineCoversTheExtraction(t *testing.T) {
 		http.StatusServiceUnavailable, "talos-access-unavailable")
 	if took := time.Since(start); took < 500*time.Millisecond || took > 10*time.Second {
 		t.Fatalf("the call took %v: want it to end at the 1 s deadline, not at the 20 s node timeout", took)
+	}
+}
+
+// slowBody is a request body that waits before its first byte, as a client that uploads slowly does.
+type slowBody struct {
+	wait time.Duration
+	r    io.Reader
+	done bool
+}
+
+func (b *slowBody) Read(p []byte) (int, error) {
+	if !b.done {
+		b.done = true
+		time.Sleep(b.wait)
+	}
+	return b.r.Read(p)
+}
+
+// §9.2: the deadline is the whole call's, from the start of the handler, so the read of the request body
+// is part of it. A body that takes 1.5 s with a stalled cluster and a 3 s deadline ends the call at about
+// 3 s, not at 4.5 s.
+func TestDiscoveryDeadlineCoversTheBody(t *testing.T) {
+	d := newDiscoveryEnv(t, options{discoverWithin: 3 * time.Second}, 0)
+	ca := newTalosCA(t)
+	n, _ := discoveryNode(t, ca, refusingMembers...)
+	n.StallVersion(true) // the walk waits for the deadline whatever the runner's speed
+	c := discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), n.Endpoint)
+	r := httptest.NewRequest(c.method, c.path, &slowBody{wait: 1500 * time.Millisecond, r: strings.NewReader(c.body)})
+	r.Header.Set("Authorization", "Bearer "+c.token)
+	r.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	start := time.Now()
+	d.api.ServeHTTP(rec, r)
+	wantProblem(t, rec, http.StatusServiceUnavailable, "talos-access-unavailable")
+	if took := time.Since(start); took < 2500*time.Millisecond || took > 4*time.Second {
+		t.Fatalf("the call took %v: want it to end at the 3 s deadline counted from the start, not at 4.5 s", took)
 	}
 }
 

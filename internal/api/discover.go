@@ -72,6 +72,10 @@ type discoveryBody struct {
 // discoverCluster is postDiscovery's work: the request's checks, then the three steps. Every error that
 // is not a refusal is a defect.
 func (a *API) discoverCluster(q *request) (discoveryBody, error) {
+	// The deadline is the whole call's, from here: reading the body, extracting the key and walking the
+	// cluster share it, so the call lasts the deadline at most.
+	dctx, cancel := context.WithTimeout(q.r.Context(), a.o.discoverWithin)
+	defer cancel()
 	if q.r.URL.RawQuery != "" {
 		return discoveryBody{}, refuse(http.StatusBadRequest, "invalid-request", "a discovery takes no query")
 	}
@@ -88,9 +92,6 @@ func (a *API) discoverCluster(q *request) (discoveryBody, error) {
 		return discoveryBody{}, ref
 	}
 	in := q.input.(*firstKeyInput)
-	// The deadline covers the whole call, the extraction included: the call lasts the deadline at most.
-	dctx, cancel := context.WithTimeout(q.r.Context(), a.o.discoverWithin)
-	defer cancel()
 	// A talosconfig is read at the endpoint, which may accept the connection and stall: the extraction is
 	// bounded like every node read, inside the deadline. The walk below has the deadline alone.
 	ca, err := nodeRead(dctx, a.o.nodeTimeout, func(c context.Context) (provider.CAKey, error) {
