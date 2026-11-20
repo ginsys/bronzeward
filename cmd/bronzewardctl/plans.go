@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -35,9 +36,11 @@ func (e *env) planCmd(args []string) error {
 		return err
 	}
 	if v == "list" {
-		return list(e, l, "/plans", values(f), nil, "PLAN\tSTATE\tMACHINE\tOPERATION\tRELEASE\tEXPIRES", "", func(w *tabwriter.Writer, p *apitypes.PlanBody) {
-			tf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", p.Id, p.State, p.Machine, p.Operation, p.Release, when(p.ExpiresAt))
-		})
+		return listWith(e, l, "/plans", values(f), nil, nil,
+			func(c *client.Client, ps []apitypes.PlanBody) { e.titlePlans(c, ps...) },
+			"PLAN\tTITLE\tSTATE\tMACHINE\tOPERATION\tRELEASE\tEXPIRES", "", func(w *tabwriter.Writer, p *apitypes.PlanBody) {
+				tf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.Id, e.titleCell("plan", p.Id), p.State, p.Machine, p.Operation, p.Release, when(p.ExpiresAt))
+			})
 	}
 	var lines []string
 	return showThen(e, "/plans/"+url.PathEscape(pos[0]), func(c *client.Client, r *client.Response, p *apitypes.PlanBody) error {
@@ -47,6 +50,11 @@ func (e *env) planCmd(args []string) error {
 		var change string
 		if lines, change = e.planSnapshot(c, r, p); change != "" {
 			return fmt.Errorf("%s while the plan was read; nothing is shown. Read it again with: plan show %s", change, client.ShellWord(p.Id))
+		}
+		// After the view, whose own read of the machine the title reuses.
+		e.titlePlans(c, *p)
+		if t := e.titleOf("plan", p.Id); t != "" {
+			lines = slices.Insert(lines, 1, sf("  Title\t%s", t))
 		}
 		return nil
 	}, func(w *tabwriter.Writer, _ *apitypes.PlanBody) { printLines(w, lines) })
@@ -300,6 +308,13 @@ func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
 	e.preload(c, p.CreatedBy.Principal)
 	var m apitypes.MachineBody
 	mErr := getJSON(c, "/machines/"+url.PathEscape(p.Machine), &m)
+	if mErr == nil && e.output == "table" {
+		// The plan's title names this machine: it is read once for the command (client contracts A8 rule 2).
+		if e.bodies == nil {
+			e.bodies = map[string]any{}
+		}
+		e.bodies[titlePath("machines", p.Machine)] = &m
+	}
 	var cl apitypes.ClusterBody
 	var cluster string
 	if err := getJSON(c, "/clusters/"+url.PathEscape(p.Cluster), &cl); err != nil {
