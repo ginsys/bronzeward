@@ -170,7 +170,7 @@ no role included (`internal/api/api.go:339`).
 | `cluster add` | `POST /clusters` | author | yes | | 201 | | |
 | `machine add` | `POST /machines` | author | yes | | 201 | | |
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | | 201 | | |
-| `machine rename` | `POST /machines/{id}/names` | author | yes | | 201 | | |
+| `machine rename` (not served yet: [persistence and API §3.5](persistence-api.md#35-a-machines-name)) | `POST /machines/{id}/names` | author | yes | | 201 | | |
 | `cluster first-key` | `POST /clusters/{id}/first-keys` | author | yes | | 200 | `document` | |
 | `import start` | `POST /ingestions` | author | yes | draft's | 202 | `document` | |
 | `import mark` | `POST /ingestions/{id}/marks` | author | yes | | 202 | `marks` | |
@@ -1960,8 +1960,12 @@ beside the identifier as a cluster's is (`mch_9fd… (node-a)`, [operator experi
 A machine with no name, and a server older than the revision that adds it, which serves no member, read the same
 way: the identifier, the Talos endpoint and the node ID, as before.
 
-1. The name's grammar makes it safe text by construction (lowercase `a-z`, digits and hyphen), so
-   the remote-text rule of A7 and A8 is not needed for it. A client still renders it as a text node.
+1. The name is remote text like every server string: a declared format binds a correct server, not
+   the bytes received (§6 item 8, as A7 cites it). The
+   CLI escapes it as it does every other server string. The web client renders it as a text node
+   and shows it only when the received value matches the grammar (1 to 63 characters, lowercase
+   `a-z`, digits and hyphen, neither first nor last a hyphen), else the identifier; that check
+   replaces A7's control and format character test, which a name that passes it cannot fail.
 2. The commands keep taking identifiers. A name is unique only within a cluster
    ([persistence and API §3.5](persistence-api.md#35-a-machines-name)), so a command taking a name
    would need the cluster too; that is a separate decision, and no client resolves a name to an
