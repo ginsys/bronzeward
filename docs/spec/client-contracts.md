@@ -2024,8 +2024,7 @@ one. The rule is one for both clients:
    print a `Title` line under the heading. A table prints a dash where no title could be built, and a detail no line;
    a draft, release or plan read that fails (and a draft with no title) leaves no title, while a machine that cannot
    be read is named by its identifier and an ingestion that cannot be read is an import with no machine. Each distinct
-   draft, release, plan, ingestion and machine is read once for a command, under the retry bound A8 item 2 states, and
-   `plan show` takes the machine from the read its own view makes. `-o json` and `-o yaml` read nothing more. The other
+   draft, release, plan, ingestion and machine is read once for a command, and `plan show` takes the machine from the read its own view makes. `-o json` and `-o yaml` read nothing more. The other
    cross-references and the other commands that print a machine or a release stay identifiers, tracked by
    [#996](https://github.com/ginsys/bronzeward/issues/996), so A8 is not fully met until that issue closes.
 
