@@ -7,7 +7,8 @@ import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import type { components } from "./api/v1";
 import { Id, Ref, short, useReads, viewOf } from "./list.tsx";
 import { MachineRef, machineText } from "./machines.tsx";
-import { bodiesOf, draftText, operationTitle, planTitle, releaseTitle } from "./titles.ts";
+import { bodiesOf, genOf } from "./bodies.ts";
+import { draftText, operationTitle, planTitle, releaseTitle } from "./titles.ts";
 
 type S = components["schemas"];
 
@@ -16,9 +17,7 @@ type S = components["schemas"];
 export function useBody<T>(path: string | undefined): T | null | undefined {
   const { client, view, again, settle, undropped } = useReads();
   const bodies = bodiesOf(client);
-  // The page's reads start again with the view and with each read again, a new epoch included: a title
-  // read under another generation is not kept.
-  const gen = `${view}|${again}`;
+  const gen = genOf(view, again);
   useEffect(() => {
     // A refusal the read meets that the shell must act on ends the page as any read's does. With no path
     // nothing is asked, and the generation still advances, so a view that asks nothing forgets as any other.

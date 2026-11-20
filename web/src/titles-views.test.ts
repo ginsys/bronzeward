@@ -7,9 +7,9 @@
 import { act, createElement as h, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { type Reads, ReadsProvider } from "./list.tsx";
+import { type Reads, ReadsProvider, useItem } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
-import { when } from "./states.tsx";
+import { Status, StatusPage, when } from "./states.tsx";
 import { PlanState } from "./plan.tsx";
 import { ACTS, Change, DependencyItem, Plans, ReleaseItem } from "./resources.tsx";
 import { MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef } from "./titles.tsx";
@@ -434,6 +434,33 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
     await mount(h(DependencyItem, { id: "dep_x" }), { ...reads, view: "w" });
     await settled();
     expect(text()).toContain(released);
+  });
+
+  test("an object the page reads itself is not read again for a title built on it", async () => {
+    answers[`/operations/${OP}`] = ok(operation("apply-config", { plan: PLN, machine: MCH }));
+    const Page = () => {
+      const item = useItem<unknown>(`/plans/${PLN}`);
+      return item.kind === "ok" ? h(Named, { id: OP }) : null;
+    };
+    await mount(h(Page));
+    await settled();
+    expect(text()).toBe(`Apply of worker-1 to ${released}`);
+    expect(asked.filter((p) => p === `/plans/${PLN}`)).toHaveLength(1);
+    expect([...asked].sort()).toEqual([`/drafts/${DRF}`, `/machines/${MCH}`, `/operations/${OP}`, `/plans/${PLN}`, `/releases/${REL}`]);
+  });
+
+  test("a status that names an object by identifier keeps its mirror in step when the title arrives", async () => {
+    let answer: (r: ReadResult<unknown>) => void = () => {};
+    const late = new Promise<ReadResult<unknown>>((r) => (answer = r));
+    const slow: Reads = { ...reads, client: { read: async <T,>(path: string) => (path === `/releases/${REL}` ? late : answers[path] ?? missing) as ReadResult<T> } };
+    await mount(h(StatusPage, null, h(Status, { testid: "s", children: h("span", null, "Published ", h(Named, { id: REL }), ".") })), slow);
+    await settled();
+    const mirror = () => box.querySelector('[role="status"]')?.textContent;
+    expect(mirror()).toBe("Published rel_k2pq…cdef.");
+    await act(async () => answer(ok(release())));
+    await settled();
+    expect(text()).toContain(`Published ${released}.`);
+    expect(mirror()).toBe(`Published ${released}.`);
   });
 
   test("a view that names one object in several places, and objects of one release, reads each distinct body once", async () => {
