@@ -109,7 +109,7 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     await expect($('[data-testid="plan-proposed"]')).toHaveText("Plan proposed. It is not approved, and nothing runs until an approver approves.", { wait: 60_000 });
     await expect($(`main a[title="${seed.machine2}"]`)).toBeExisting();
     expect((await writes()).filter((w) => w.startsWith("POST "))).toEqual(["POST /plans"]);
-    await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: proposed$/), { wait: 20_000 });
+    await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan(: .+ \(proposed\)| \S+: proposed)$/), { wait: 20_000 });
   });
 
   it("W3's timeline links the plan and the operation a commitment names, and the operation's link opens its page (#359)", async function () {
@@ -144,7 +144,7 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     // The automation identity made the seeded plan, and a publisher cancels only its own plans.
     expect(await fixtureSignIn("h-all", {}, { upstream: sat })).toMatch(SERVER);
     await browser.url(`${FIXTURE_PAGE}/plans/${seed.plans.approved}`);
-    await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: approved$/), { wait: 20_000 });
+    await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan(: .+ \(approved\)| \S+: approved)$/), { wait: 20_000 });
     // The approval is of the current epoch, so the page offers no new approval. The form is drawn only once the approval's
     // read and the identity read answer (EarlierEpoch, web/src/approval.tsx:158). The two markers show the page holds
     // both answers; EarlierEpoch asks for them again in the same render, so only an answer later than the pause is missed.
@@ -157,7 +157,7 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     await $('main form[aria-label="Cancel plan"] input[name="reason"]').setValue("seeded reason");
     await $("main").$("button=Cancel plan").click();
     // The page reads the plan again and shows it cancelled, which removes the write's own result.
-    await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: cancelled$/), { wait: 60_000 });
+    await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan(: .+ \(cancelled\)| \S+: cancelled)$/), { wait: 60_000 });
     expect(await writes()).toEqual([`POST ${route}`]);
     expect((await api(sat, "h-viewer", "GET", `/plans/${seed.plans.approved}`)).body!["state"]).toBe("cancelled");
   });

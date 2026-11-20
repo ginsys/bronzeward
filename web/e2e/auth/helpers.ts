@@ -5,11 +5,24 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { $, browser, expect } from "@wdio/globals";
+import { short } from "../../src/list.tsx";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE, IDP_PAGE, idpEnv } from "../auth.conf.ts";
 import type { Faults } from "../injector.ts";
 import type { Counts } from "../provider.ts";
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
+
+// The heading of a plan page in `state` (ginsys/bronzeward#987): the derived title with the whole identifier
+// as its title attribute, or, where a read the title needs failed, the shortened identifier of the old heading.
+export async function planHeading(id: string, state: string, wait = 20_000) {
+  await expect($("main h2")).toHaveText(expect.stringMatching(new RegExp(`^Plan(: .+ \\(${state}\\)| ${short(id)}: ${state})$`)), { wait });
+}
+
+// The heading of a release page: the derived title with the whole identifier as its title attribute.
+export async function releaseHeading(id: string, wait = 20_000) {
+  await expect($("main h2")).toHaveText(expect.stringMatching(/^Release: .+, published /), { wait });
+  await expect($(`main h2 [title="${id}"]`)).toBeExisting();
+}
 
 export const where = () => browser.execute(() => location.origin + location.pathname);
 export const param = (name: string) => browser.execute((n: string) => new URLSearchParams(location.search).get(n), name);

@@ -17,7 +17,7 @@ import { RECOVERY_START } from "../../src/recovery.tsx";
 import { SCOPE_NO_MODE, SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, type Step } from "../injector.ts";
-import { absent, answers, api, disposable, eventually, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, inSafari, measure, mint, mirrored, narrow, overflows, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
+import { absent, answers, api, disposable, eventually, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, inSafari, measure, mint, mirrored, narrow, overflows, planHeading, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The page's answer to Approve and to Revoke approval: each control's Result, in an element that takes
@@ -65,7 +65,7 @@ describe("approval and revocation (#358)", () => {
   async function open(human: string, bodies: Record<string, unknown> | undefined, state = "proposed", more: Faults = {}, id = PLAN) {
     expect(await fixtureSignIn(human, {}, { upstream: at, ...(bodies === undefined ? {} : { bodies }), ...more })).toMatch(SERVER);
     await browser.url(`${FIXTURE_PAGE}/plans/${id}`);
-    await expect($("main h2")).toHaveText(`Plan ${short(id)}: ${state}`, { wait: 20_000 });
+    await planHeading(id, state);
   }
   const approve = () => $('main form[aria-label="Approve plan"]').$("button=Approve");
   const typed = () => $('main form[aria-label="Approve plan"] input[name="plan"]');
@@ -225,7 +225,7 @@ describe("approval and revocation (#358)", () => {
       expect({ ...read, approveEnabled: await approve().isEnabled() }).toEqual({ typed: id.length, of: id.length, firstDifference: -1, approveEnabled: true });
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Approve", "Approve");
       await browser.keys("Enter");
-      await expect($("main h2")).toHaveText(`Plan ${short(id)}: approved`, { wait: 20_000 });
+      await planHeading(id, "approved");
       await focusSettles(focusKept, "the page, not the body");
       await focusSettles(() => focusIn(ANSWER), "the approval's answer");
       await eventually(async () => (await mirrored()).some((t) => t.includes("Recorded self-approval reasons")), "the self-approval answer mirrored");
@@ -242,7 +242,7 @@ describe("approval and revocation (#358)", () => {
       await browser.keys("seeded reason");
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Revoke approval", "Revoke approval");
       await browser.keys("Enter");
-      await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: revoked$/), { wait: 20_000 });
+      await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan(: .+ \(revoked\)| \S+: revoked)$/), { wait: 20_000 });
       await focusSettles(focusKept, "the page, not the body");
       await focusSettles(() => focusIn(REVOKE_ANSWER), "the revocation's answer");
       await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by h-\S+ at \S+: seeded reason$/), { wait: 20_000 });
@@ -275,7 +275,7 @@ describe("approval and revocation (#358)", () => {
       await $('main form[aria-label="Revoke approval"] input[name="reason"]').setValue("seeded reason");
       await $("main").$("button=Revoke approval").click();
       // The page reads the plan again and shows it revoked, with the reason on the machine's timeline.
-      await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: revoked$/), { wait: 20_000 });
+      await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan(: .+ \(revoked\)| \S+: revoked)$/), { wait: 20_000 });
       await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by h-\S+ at \S+: seeded reason$/), { wait: 20_000 });
       expect(await posts()).toEqual([expect.stringMatching(/^POST \/approvals\/apr_\w+\/revocations$/)]);
       expect((await api(at, "h-viewer", "GET", `/plans/${seed.plans.approved}`)).body!["state"]).toBe("revoked");
