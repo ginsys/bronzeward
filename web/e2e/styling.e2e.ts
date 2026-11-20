@@ -63,6 +63,10 @@ const inject = () =>
     off.disabled = true;
     const link = mk("a", "g969-link", "Link");
     link.href = "#g969";
+    const line = mk("p", "g969-line", "before ");
+    const inline = document.createElement("button");
+    inline.textContent = "Inline";
+    line.append(inline, " after");
     const table = mk("table", "g969-table");
     const tr = table.createTBody().insertRow();
     tr.id = "g969-row";
@@ -138,6 +142,12 @@ describe("the styled client", () => {
   it("a link outside a paragraph is underlined", async () => {
     const d = await browser.execute(() => getComputedStyle(document.getElementById("g969-link")!).textDecorationLine);
     expect(d).toBe("underline");
+  });
+
+  it("a button stays in its line of text, as the drivers read it", async () => {
+    // Oat's inline-flex button makes the text read put a line break on each side of it: the draft entries,
+    // the status lines with a "Show more" and several specs read that text.
+    expect(await $("#g969-line").getText()).toBe("before Inline after");
   });
 
   it("hover leaves every colour an opaque rgb() with its contrast", async () => {

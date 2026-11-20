@@ -33,14 +33,16 @@ main:focus { outline: none; }
 .skip:focus { position: static; }
 
 /* Oat undoes four things our accessibility record keeps. A disabled control keeps its full contrast
-   (Oat halves it); a button shows it disabled by a dashed border, a field by Oat's muted background. A link is underlined wherever it is (Oat does that
-   in running text only). A button's label wraps (Oat does not). Hover colours are plain hex, so a colour
-   read at rest is three bytes (Oat mixes them, which the contrast measure cannot read), and nothing
-   transitions, so a read right after a hover is not a colour on its way. */
+   (Oat halves it); a button shows it disabled by a dashed border, a field by Oat's muted background.
+   A link is underlined wherever it is (Oat does that in running text only). A button's label wraps (Oat
+   does not). Hover colours are plain hex, so a colour read at rest is three bytes (Oat mixes them, which
+   the contrast measure cannot read), and nothing transitions, so a read right after a hover is not a
+   colour on its way. A button stays an inline block: Oat's inline-flex makes the drivers' text read put
+   a line break before and after it, inside a list item or a status line. */
 :disabled, [aria-disabled="true"] { opacity: 1; }
 a { text-decoration: underline; transition: none; }
 a:hover { color: var(--foreground); }
-button { --_hov: #2fb677; white-space: normal; transition: none; margin-inline-end: 0.5rem; }
+button { --_hov: #2fb677; display: inline-block; white-space: normal; transition: none; margin-inline-end: 0.5rem; }
 button:disabled { color: var(--muted-foreground); background-color: var(--background); border: 1px dashed var(--muted-foreground); }
 
 /* The controls are the browser's own: Oat draws a select arrow, a check mark and a radio dot as data:
