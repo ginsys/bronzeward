@@ -86,7 +86,7 @@ here says which key was seen empty.
 
 | Thing | What it is | Where it is read | It is not |
 | --- | --- | --- | --- |
-| Fragment revision | An immutable native Talos YAML `document`, sanitized, plus its `declarations` (`internal/api/sources.go:53-70`) | `GET /fragment-revisions/{id}` | A machine's configuration |
+| Fragment revision | An immutable native Talos YAML `document`, sanitized, plus its `declarations` (`internal/api/sources.go:53-70`); the server cannot promise the text holds no value nobody marked ([§9](#9-secret-handling-in-the-clients) item 9) | `GET /fragment-revisions/{id}` | A machine's configuration |
 | Profile revision | An ordered list of fragment revision IDs (`internal/api/sources.go:72-78`) | `GET /profile-revisions/{id}` | A merged document |
 | Assignment revision | For one machine: profile names and per-layer fragment names (`internal/api/sources.go:80-88`) | `GET /assignment-revisions/{id}` | A configuration |
 | Release `sources[]` | Pointers: `kind`, `head`, `revision` (null once removed) and `headRevision` (`internal/api/releases.go:27-58`) | `GET /releases/{id}` | The configuration |
@@ -1316,6 +1316,19 @@ picks the open drafts from the drafts it reads, because `GET /drafts` has no clu
 (the list-filter paragraph of [persistence and API §9.2](persistence-api.md#92-resources-and-routes)),
 so the page reads every page of that list.
 
+**The cluster page** is that content and no more (decided with [#951](https://github.com/ginsys/bronzeward/issues/951),
+[§12](#12-alternatives-and-recommendations) C7; the web client has shown it since
+[#859](https://github.com/ginsys/bronzeward/issues/859)): the cluster's name, Kubernetes
+endpoint, contract and Talos cluster ID, its machines with the counts above, and its open drafts.
+It shows no plans, because `GET /plans` has no cluster filter (G20), and no Talos credential state
+([#856](https://github.com/ginsys/bronzeward/issues/856) owns that). A cluster's releases stay
+off it: the release list is filtered in the browser (G9 of the
+[client contracts](client-contracts.md#4-api-gap-audit)) and nothing yet needs them there.
+
+**Titles.** A release, a plan and an operation are shown with a title derived from their fields,
+never a stored name: client contracts A8 holds the rule and G19 the gap. A machine has no name
+until the owner decides G8.
+
 | Screen | Wireframe | Main routes |
 | --- | --- | --- |
 | Sign-in and context | [W1](operator-experience-wireframes.md#w1-sign-in-and-context) | (#253) |
@@ -1480,6 +1493,26 @@ restore nobody entered stays the same residual
    it only to the author who made the import from a file they provided and continued its review: the clients offer the
    action to any `author` and show the server's refusal (`not-the-importer`,
    `import-not-reviewed`) as it comes, with no body.
+9. **A fragment revision's text** (`GET /fragment-revisions/{id}`, every role) is the server's
+   sanitized text, and it can still hold a value nobody marked: a fragment update ingests under a
+   transient claim that no review reads before it is stored, and detection is not promised
+   ([compilation §2.4](compilation.md#24-what-identification-does-not-promise),
+   [§8.4](compilation.md#84-what-redaction-does-not-cover),
+   [persistence and API §9.3](persistence-api.md#93-examples)). The route is open to every role, so
+   it is not a protected read like items 2 and 8: the clients treat it as an ordinary read under
+   that accepted limit, and whether it becomes a protected one is
+   [ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974). The web view that
+   exists (`/fragment-revisions/{id}`, reached from a fragment's revisions list and a release's
+   source rows) follows these display rules, which are the web view's own: it shows the text
+   as served in a text node in a `pre`, never parsed or rendered as markup, with the declared
+   references and the embedded documents and nothing else; a one-line notice says the text is
+   sanitized by the server and that the server cannot promise it holds no value nobody marked, as
+   item 8 says of the import base text; it has no copy-to-clipboard button and no download, as
+   item 4 has for a field that can hold a value nobody marked; it keeps the text in memory for the
+   page only, never in browser storage; a refused read repeats the server's problem without a body
+   (item 6), and item 7 holds. The CLI's `fragment show` is unchanged (`-o json` prints the body
+   whole), as are the draft editor's and the composition views' reads of the same text: a rule on
+   one client only would half-decide ginsys/bronzeward#974.
 
 ## 10. Action, route and role matrix
 
@@ -1559,6 +1592,8 @@ accepted limitation.
 | G16 | No convergence status: a machine body serves `desired` and `applied.release` but not whether the `Desired` release's artifact digest for the machine differs from the `Applied` digest (before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/reads.go:155-167`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L155-L167)), which is what pending convergence means ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)); after an adoption the `Applied` digest is the baseline's ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not rule it out | showing whether a machine still needs a plan ([§2.4](#24-desired-applied-and-observed), [§5.2](#52-inventory), [W2](operator-experience-wireframes.md#w2-machines)) | served since [#280](https://github.com/ginsys/bronzeward/issues/280): the machine's `pendingConvergence`, which serves neither digest (`internal/api/reads.go:155-171`) |
 | G17 | Before a decision no route serves the settle floor, and no route serves the maximum transport deadline at all; the accounting journey needs both before a decision: `SettleFloor` defaults to 30 s and may be configured higher, `MaxTransportDeadline` is required deployment configuration with no default (`internal/config/config.go:134-135`, `internal/config/config.go:161-164`), and neither is on `GET /recovery` (`internal/api/recovery_exits.go:123-148`). After a decision, a successful accounting's entries carry `facts.settleFloor` and `facts.anchor` on the machine timeline and operation events (`internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`, `internal/api/recovery_accountings.go:230-231`). Separately, on a normal start a plan-creation refusal states the maximum at any time, before a decision too; a recovery start refuses plan creation before that check (`internal/api/plans.go:113-114`, `internal/api/routes.go:120`, `internal/api/api.go:350-352`). The scope-accounting anchor is the later of the restore stop plus that maximum and any restored unaccounted attempt's transport deadline (`internal/api/recovery_accountings.go:85-87`, `internal/api/recovery_accountings.go:143`, `internal/api/recovery_accountings.go:188-189`), so a client cannot compute it | the recovery accounting journey: when the end observation may begin ([§5.9](#59-recovery-after-a-restore), [W10](operator-experience-wireframes.md#w10-recovery-console)) | served since [#278](https://github.com/ginsys/bronzeward/issues/278): `GET /server` serves the settle floor and the maximum transport deadline, after a recovery start's entry too; the refusal text still states the floor and the point it counts from after a failed decision (`internal/api/settle.go:148-150`) |
 | G18 | No read answers a machine's whole position at once. The lists the client could combine (`GET /ingestions?machine=`, `GET /plans?machine=&state=`, `GET /operations?machine=&state=`) are separate reads at the default isolation level (`internal/api/reads.go:40-57`), so an operation that moves between two of them leaves every list empty, and a committed plan says nothing of its operation (an adopt plan stays `committed` with its operation `completed`) | the "where you are, what next" line beyond the not-handed-over step ([§2.3](#23-import-publish-plan-approve-apply)), [W3](operator-experience-wireframes.md#w3-machine-detail) | served: `GET /machines/{id}/position` ([persistence and API §9.3](persistence-api.md#93-examples)) answers it from one snapshot, and the web draws the line from its `step` |
+| G19 | Plans, releases and operations carry no name: a draft has a `title`, but `PlanBody`, `ReleaseBody` and `OperationBody` do not (`api/openapi.yaml`); they carry the fields a title can be built from (`draft` and `publishedAt`; `operation`, `machine` and `release`; `kind` and `subject`) | finding a release, a plan or an operation in a list; naming one in a message ([#564](https://github.com/ginsys/bronzeward/issues/564) item 1) | both clients show a title derived from those fields, the identifier kept as the stable reference ([client contracts](client-contracts.md#4-api-gap-audit) A8, G26); no API change |
+| G20 | `GET /plans` filters by `state` and `machine`, not by `cluster` (`internal/api/plans.go:429-451`) | the cluster page listing its open plans ([§6](#6-web-interface)) | the cluster page lists no plans; a plan is reached from its machine and from the plan list ([client contracts](client-contracts.md#4-api-gap-audit) G27) |
 
 Not gaps, by design: no client dispatch or apply route
 ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary));
@@ -1575,6 +1610,9 @@ general secret browser (milestone exclusion).
 | C3 | Editing | native YAML editor; forms over the Talos schema; both | Native YAML for documents and structured controls for metadata only: the design makes native Talos configuration canonical ([design §6.1](../design/Talos_Configuration_and_Machine_Management_Design.md#61-canonical-model)), and a schema form would be a second model to keep in step with every Talos version | accepted; usability unmeasured |
 | C4 | Protected review in the CLI | terminal pager in process; temporary file in `$EDITOR`; web-only review | Terminal pager in process; non-terminal output refused with no override; no JSON, YAML, save or export form; marks by prompt or stdin, never a client-read file. An editor leaves swap and backup files the client cannot control ([compilation §3.6](compilation.md#36-operator-review)); web-only would make the CLI unable to finish an import. It limits client-controlled persistence only and does not prevent terminal or host capture ([§9](#9-secret-handling-in-the-clients)) | accepted as [client contracts §11.3](client-contracts.md#113-cli-review) qualifies it; no standard-output export form in any case |
 | C5 | Concurrency and retries | last-seen ETag; re-read then write; journal of requests | Last-seen ETag per draft, stop on 412; repeat an ambiguous write with its key only on request, for the exact request held in memory, the same principal and the same epoch ([§8](#8-states-every-view-must-handle)), an epoch the write's own transaction checks against the one the client last saw (G13, closed by #293); no body journal: re-reading before writing is a silent overwrite, and a journal would store documents and marks | accepted, within the limits of §8; any persistence across restarts is #253's |
+| C6 | Names of plans, releases and operations | a stored name set at creation (API revision, a field on three bodies); a title derived from fields the body already carries; the identifier only | A derived title: it needs no API change and no new place for an operator to type a name, and an operation has no author who could name it. The cost is up to three extra reads for an operation, which both clients bound to one read per object (client contracts A8). A stored name stays open for a plan or a release if the derived title proves too weak | accepted for the specification; the implementation issues carry it; usability unmeasured |
+| C7 | The cluster page | the page that exists (cluster fields, its machines with counts, its open drafts); add plans and releases; add Talos credential state | The page that exists, and no more: the plan list has no cluster filter (G20), releases are filtered in the browser (G9 of the client contracts), and credential state is [#856](https://github.com/ginsys/bronzeward/issues/856)'s. A page that read every machine's plans to show a count would cost one read per machine on every visit | accepted; usability unmeasured |
+| C8 | The fragment revision view | none (reads only through the draft editor and the composition views); a read-only page with display rules; a page for authors only | A read-only page with display rules that the web view alone applies (§9 item 9): text node in a `pre`, a notice that the server cannot promise the text holds no unmarked value, no copy or download, memory only. The access rule (every role, or authors only) is not decided here | display rules accepted; access rule open, [#974](https://github.com/ginsys/bronzeward/issues/974) |
 
 ## 13. Usability and accessibility acceptance
 
