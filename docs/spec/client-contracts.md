@@ -1526,6 +1526,36 @@ added; any future cookie needs its own CSRF design.
    on a `pageshow` with `persisted` true the application discards any state and renders nothing
    until signed in again, so the guarantee rests on items 3 and 4, not on the header alone.
 
+### 10.4 Styling and the content policy
+
+**Proposed.** The web client is styled with Oat (`@knadh/oat`, MIT, pinned to one exact version),
+dark first with no light theme (D13). The bundle contains only the Oat files the client uses:
+the base, theme, form, button, table and animation files, with the base file first because it
+declares the cascade layers. Oat's rules are in layers and the client's own stylesheet is not, so
+the client's rule wins wherever the two meet.
+
+1. **Theme.** The page sets `color-scheme: dark` and a `color-scheme` meta element, and overrides
+   Oat's colour tokens with plain colours. Every pair of text and background is at least 4.5:1 and
+   every control border, table rule and focus ring at least 3:1, measured on the page background
+   and on a card; the measured pairs are quoted with the change that sets them.
+2. **Focus and disabled controls.** A focused control shows a solid outline of 3 px, offset 2 px,
+   in the ring colour (Oat draws 2 px, and none on a text field). A disabled control keeps its full
+   contrast and shows it by a dashed border (Oat halves its opacity).
+3. **Links and buttons.** A link is underlined wherever it is, and a button's label wraps at 320 CSS
+   pixels. Hover colours are plain colours without transition, so a colour read at rest is three
+   bytes; the contrast measure of the browser cases throws on any other form.
+4. **Controls are native.** A select, check box and radio use the browser's own control. Oat draws
+   their arrow, mark and dot as `data:` images, and `img-src 'self'` does not match a `data:` URL, so
+   the policy of §10.2 is unchanged and no drawn mark is used: the client's stylesheet clears the
+   select's background image and the mask image of a checked control's pseudo-element (the browser
+   still requests the mask image when only the pseudo-element's content is cleared). A later view that needs an Oat
+   component with a `data:` image gets its own decision and does not widen the policy.
+5. **The header is not sticky**, so nothing covers a focused element (2.4.11).
+
+A browser case on the signed-out page fails if Oat's focus rule wins over the client's, if a
+`data:` image is requested (it is checked with a positive control, a `data:` image that must be
+reported), if a control is not native, or if a hover colour is not an opaque `rgb()`.
+
 ## 11. Protected input
 
 ### 11.1 What is protected
@@ -1808,7 +1838,8 @@ the specification review asked the question in
 [#463](https://github.com/ginsys/bronzeward/issues/463); the owner can overrule it. The campaign
 lead decided D12 on 2026-11-02, when the specification review asked the question in
 [#486](https://github.com/ginsys/bronzeward/issues/486), under the owner's standing rule to take
-clearly recommended decisions; it is recorded for owner review.
+clearly recommended decisions; it is recorded for owner review. The owner decided D13 on
+2026-11-20, as its row states.
 
 | ID | Choice | Options | Decision and reason |
 | --- | --- | --- | --- |
@@ -1824,6 +1855,7 @@ clearly recommended decisions; it is recorded for owner review.
 | D10 | Epoch check on a human's repeated write (G21) | (a) server-enforced: mutations accept an expected-epoch request header and refuse, committing no act or idempotency record, when it differs from the current epoch, giving humans an epoch check like the one service tokens already get (API issue A6); (b) client-only check of [§8.4](#84-idempotency-and-ambiguous-responses) item 3 for humans, with the race between its confirming read and the repeat explicitly accepted | **Decided** by the owner (Serge, 2026-10-22 08:43 CEST): (a), served by [#293](https://github.com/ginsys/bronzeward/issues/293). Reason: it closes the race at the only place that knows the epoch at commit time, and keeps the earlier-epoch `409` of AMB-07 because, unlike the service check, which refuses before any record is answered (`internal/api/idempotency.go:47-49`), it runs only when a lookup finds no record and refuses only under the key's lock: the write's own, a fragment write's claim transaction's or the first lookup's fresh read (`internal/api/idempotency.go:52-58`, `internal/api/tx.go:204-210`, `internal/api/fragments.go:95-103`, `internal/api/tx.go:71-81`, as A6). Rejected: (b), which needs no server change and leaves a short window, but a human's repeat that lands in it after a restore removed the record, or whose first attempt never committed, executes afresh, with no error to any party |
 | D11 | Which remote text the CLI escapes in human output | (a) all remote text, with no list of fields, escaped as a value before it is formatted, tab and line feed included; (b) only fields that hold free text; (c) the list of item 4 as it stands, with the server refusing control characters in its inputs | **Ruled** by the lead (2026-11-01): (a) ([§6](#6-tls-trust) item 8). Reason: the API schemas give most text members as plain strings, and a format that a schema declares binds a correct server, not the bytes that arrive, so no field can be called safe by its format, and a list of fields goes out of date with every command. A test that fills every string member of every response type is what keeps the rule true. Rejected: (b), which needs that list and trusts the formats, declared or not, of a server it cannot check; (c), which trusts the server for resource text and not for its version string, and leaves the CLI open to any input the server does not refuse |
 | D12 | A client's bound on its own request | (a) no client bound, so the browser or the operating system decides; (b) one total bound per logical write, its repeats included; (c) a bound per attempt on the response headers and on the whole attempt, with the same values in both clients; (d) an idle bound that fires only when no byte arrives for some time | **Decided** by the campaign lead on 2026-11-02 under the owner's standing rule to take clearly recommended decisions, recorded for owner review: (c), with 30 s for the headers and 60 s for the attempt ([§8.4](#84-idempotency-and-ambiguous-responses) item 8). Reason: `fetch` has no timeout of its own, so under (a) a stalled answer keeps a write on "Saving" or "Repeating" until the operator leaves the page, which drops the write ([#486](https://github.com/ginsys/bronzeward/issues/486)). The CLI already bounds each attempt with these values (`internal/client/transport.go:91-95`), so one pair of values keeps both clients and AMB-14 the same. A request body is at most 1 MiB ([§8.1](#81-requests)), lists come in pages, and a write that starts a long job answers `202` and goes on as an operation ([§8.2](#82-errors)), so a working server is expected to answer well inside 60 s. A write that it answers later is handled as an ambiguous attempt, under the same key. Rejected: (b), which gives a repeat no time of its own after a stalled first attempt used the budget; (d), which a server that sends a byte from time to time never fires, and which Go's HTTP client does not offer for a body read |
+| D13 | How the web client is styled | (a) Oat (`@knadh/oat`), the CSS library the sibling control plane uses; (b) a hand-written stylesheet; (c) another library | **Decided** by the owner (Serge, 2026-11-20 08:12 CET): (a), dark first with no light theme ([§10.4](#104-styling-and-the-content-policy), [#969](https://github.com/ginsys/bronzeward/issues/969)). Reason: one look across the owner's projects, with no component code to write or keep. Rejected: (b), which keeps the 28-line stylesheet and no shell; (c), which no one asked for. Oat's drawn `data:` marks conflict with `img-src 'self'`, and the answer is native controls, not a wider policy |
 
 ## 14. Proposed API-gap issues and downstream refinement
 

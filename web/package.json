@@ -10,6 +10,7 @@
     "verify": "npm run types && tsc --noEmit && tsc --noEmit -p e2e && vitest run && vite build"
   },
   "dependencies": {
+    "@knadh/oat": "1.1.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "yaml": "2.9.1"

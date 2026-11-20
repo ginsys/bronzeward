@@ -318,8 +318,12 @@ export const fromTitle = () => $("header h1").click();
 // The lowest contrast of any shown text (WCAG 1.4.3) and the controls under 24 px (2.5.8), measured
 // in the page. Only numbers leave it.
 export const measure = () => browser.execute(() => {
+  // Only an opaque rgb() reads as three bytes: color(), oklch(), or a translucent colour would read as
+  // garbage or as near black, so it throws instead.
   const lum = (c: string) => {
-    const [r, g, b] = (c.match(/[\d.]+/g) ?? []).slice(0, 3).map((v) => {
+    const m = /^rgba?\((\d+(?:\.\d+)?), (\d+(?:\.\d+)?), (\d+(?:\.\d+)?)(?:, (\d+(?:\.\d+)?))?\)$/.exec(c);
+    if (m === null || (m[4] !== undefined && Number(m[4]) !== 1)) throw new Error(`computed colour "${c}" is not an opaque rgb()`);
+    const [r, g, b] = [m[1], m[2], m[3]].map((v) => {
       const s = Number(v) / 255;
       return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
     });
