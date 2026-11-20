@@ -9,6 +9,8 @@ import { ChangeEndpoint } from "./forms.tsx";
 import { type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, node, release } from "./machines.tsx";
 import { NextStep, type Position } from "./nextstep.tsx";
+import { principalId } from "./principals.ts";
+import { Who } from "./principals.tsx";
 import type { ReadResult } from "./request.ts";
 import { clock, Status } from "./states.tsx";
 
@@ -236,12 +238,13 @@ export const attribution = (r: string | null) => (r === null ? "matches neither 
 
 // A timeline entry's members that name what it is about; the rest stays in the API.
 const SHOWN = ["change", "resolution", "from", "to", "principal", "role", "reason", "cause", "observation", "operation", "plan"];
-// An identifier is shortened, and links to its page where its prefix has one (a plan, an operation: W3).
+// An identifier is shortened, and links to its page where its prefix has one (a plan, an operation: W3);
+// a principal shows its name (G23).
 export function details(e: Entry): ReactNode {
   const r = (e.entry ?? {}) as Record<string, unknown>;
   return SHOWN.filter((k) => typeof r[k] === "string" && r[k] !== "").map((k, i) => {
     const v = r[k] as string;
-    return <Fragment key={k}>{i > 0 && " "}{k === "reason" ? `"${v}"` : /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Id id={v} /> : v}</Fragment>;
+    return <Fragment key={k}>{i > 0 && " "}{k === "reason" ? `"${v}"` : k === "principal" && principalId(v) ? <Who id={v} /> : /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Id id={v} /> : v}</Fragment>;
   });
 }
 

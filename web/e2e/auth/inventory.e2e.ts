@@ -302,8 +302,8 @@ describe("the machine detail (W3)", () => {
     // once: `said` is the snapshot asserted equal to the expected sentences above; pending convergence is not stated while the drift is open (§2.4).
     expect(said.join(" ")).not.toContain("Pending convergence");
     expect(await texts('[data-testid="observations"] tbody tr td:last-child')).toEqual(["configDigest (node unreachable)", "nothing", "nothing"]);
-    // The principal is the identity Bronzeward recorded for h-author, shortened (G23).
-    await expect($('[data-testid="timeline"]')).toHaveText(expect.stringMatching(/freeze idn_[a-z2-7]{4}…[a-z2-7]{4} author "synthetic incident"/), { wait: 20_000 });
+    // The principal is the identity Bronzeward recorded for h-author, named by GET /principals (G23).
+    await expect($('[data-testid="timeline"]')).toHaveText(expect.stringMatching(/freeze h-\S+ at \S+ author "synthetic incident"/), { wait: 20_000 });
     await absent(async () => /healthy|converged/i.test(await $("main").getText()), "a health or convergence word while the drift is open");
   });
 
@@ -599,7 +599,7 @@ const loaded = () => browser.waitUntil(async () => !(await texts('main [data-tes
 
 
 describe("the read-only lists and items", () => {
-  it("empty lists are status messages; the audit lists the acts of real writes, principals shortened", async () => {
+  it("empty lists are status messages; the audit lists the acts of real writes, principals named", async () => {
     const at = await disposable();
     const cl = await cluster(at, "lab-a");
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
@@ -615,7 +615,8 @@ describe("the read-only lists and items", () => {
     await nav("Audit");
     const row = $(`//main//tbody/tr[contains(., "${short(cl.id)}")]`);
     await expect(row).toHaveText(expect.stringContaining("cluster.create"));
-    expect(await row.$$("td").map((td) => td.getText())).toEqual(expect.arrayContaining([expect.stringMatching(/^idn_[a-z2-7]{4}…[a-z2-7]{4} \(\w+\)$/)]));
+    // The names read answers after the row is drawn (G23): the cell shows the shortened identifier until then.
+    await browser.waitUntil(async () => (await row.$$("td").map((td) => td.getText())).some((t) => /^h-\S+ at \S+ \(\w+\)$/.test(t)), { timeout: 20_000, timeoutMsg: "the audit row's Principal cell never showed the principal's name" });
   });
 
   it("keyboard only: every focus visible, the skip link, a filter, and each identifier's link opens its item at its path", async () => {

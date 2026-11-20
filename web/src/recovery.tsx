@@ -5,6 +5,7 @@
 import { type FormEvent, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Result, useSend, useWrites } from "./forms.tsx";
 import { Head, Id, type Load, Scroll, useReads, useSettled } from "./list.tsx";
+import { Who } from "./principals.tsx";
 import type { Problem, ReadResult } from "./request.ts";
 import type { Outcome } from "./write.ts";
 import { useGate, useOffline, useRecoveryState } from "./shell.tsx";
@@ -255,6 +256,19 @@ export function EnterRecovery({ onRead }: { onRead?: () => void }) {
   );
 }
 
+// Who entered recovery and who left it, and what the entry restored.
+export const RecoveryFacts = ({ r }: { r: Recovery }) => (
+  <>
+    {r.entry != null && (
+      <p data-testid="recovery-entry">
+        Entered {when(r.entry.enteredAt)} by <Who id={r.entry.enteredBy} />: {r.entry.reason}. Restore stopped {when(r.entry.stoppedAt)}. Restored:{" "}
+        {r.entry.restored.map((b) => `${b.family} ${b.backup} (taken ${when(b.takenAt)})`).join("; ")}.
+      </p>
+    )}
+    {r.exit != null && <p data-testid="recovery-exit">Exited {when(r.exit.at)} by <Who id={r.exit.exitedBy} /> (act {r.exit.act}).</p>}
+  </>
+);
+
 // W10. Read again every 5 s while shown (no stream serves recovery state, cc §8.6 item 6).
 export const REREAD_MS = 5000;
 
@@ -300,13 +314,7 @@ export function RecoveryConsole() {
       <Status testid="recovery-state">
         Recovery mode {r.recoveryMode ? "on" : "off"}, epoch {r.epoch}. {mode === "recovery" ? RECOVERY_START : mode === "normal" ? "Server started normally." : UNKNOWN_START}
       </Status>
-      {r.entry != null && (
-        <p data-testid="recovery-entry">
-          Entered {when(r.entry.enteredAt)} by {r.entry.enteredBy}: {r.entry.reason}. Restore stopped {when(r.entry.stoppedAt)}. Restored:{" "}
-          {r.entry.restored.map((b) => `${b.family} ${b.backup} (taken ${when(b.takenAt)})`).join("; ")}.
-        </p>
-      )}
-      {r.exit != null && <p data-testid="recovery-exit">Exited {when(r.exit.at)} by {r.exit.exitedBy} (act {r.exit.act}).</p>}
+      <RecoveryFacts r={r} />
       <Scopes scopes={inRecovery(r.scopes)} />
       <ExitRecovery held={held.length} recoveryMode={r.recoveryMode} onChanged={() => again((i) => i + 1)} />
       <Revocation />

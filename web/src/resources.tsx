@@ -13,6 +13,7 @@ import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
 import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
+import { Who } from "./principals.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
 import { OperationTimeline } from "./operation.tsx";
@@ -77,7 +78,7 @@ type Row = readonly [string, ReactNode];
 const Fields = ({ rows }: { rows: readonly Row[] }) => <dl>{rows.map(([k, v]) => <Group key={k}><dt>{k}</dt><dd>{v}</dd></Group>)}</dl>;
 const Ids = ({ ids }: { ids: readonly string[] | null }) =>
   ids === null || ids.length === 0 ? "none" : ids.map((id, i) => <Group key={id}>{i > 0 && ", "}<Id id={id} /></Group>);
-const by = (c: { principal: string; role: string } | null) => (c === null ? "none" : <><Id id={c.principal} /> ({c.role})</>);
+export const by = (c: { principal: string; role: string } | null) => (c === null ? "none" : <><Who id={c.principal} /> ({c.role})</>);
 const cap = (s: string) => s[0]!.toUpperCase() + s.slice(1);
 export const seconds = (n: number | null) => (n === null ? "none" : n % 60 === 0 && n > 0 ? `${n / 60} min` : `${n} s`);
 
@@ -166,7 +167,7 @@ export function Sources({ query, go }: { query: string; go: (to: string) => void
 
 type Source = S["FragmentBody"] | S["ProfileBody"] | S["AssignmentBody"];
 type Revision = { id: string; author: string; createdAt: string };
-const REVISIONS: readonly Col<Revision>[] = [["Revision", (r) => <Id id={r.id} />], ["Author", (r) => <Id id={r.author} />], CREATED];
+export const REVISIONS: readonly Col<Revision>[] = [["Revision", (r) => <Id id={r.id} />], ["Author", (r) => <Who id={r.author} />], CREATED];
 type Kind = "fragment" | "profile" | "assignment";
 
 export function SourceItem({ kind, id }: { kind: Kind; id: string }) {
@@ -206,7 +207,7 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
             ...("profiles" in r ? [["Profiles", r.profiles.join(", ") || "none"] as const] : []),
             ...("fragments" in r ? [["Fragments", Array.isArray(r.fragments) ? <Ids ids={r.fragments} />
               : Object.entries(r.fragments).map(([layer, names]) => `${layer}: ${names.join(", ")}`).join("; ") || "none"] as const] : []),
-            ["Author", <Id id={r.author} />], ["Created", when(r.createdAt)],
+            ["Author", <Who id={r.author} />], ["Created", when(r.createdAt)],
           ]} />
           {"document" in r && (
             <>
@@ -230,7 +231,7 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
 export const ImportBaseRows = ({ r }: { r: S["ImportBaseSummary"] }) => (
   <>
     <Fields rows={[
-      ["Identifier", r.id], ["Machine", <Id id={r.machine} />], ["Author", <Id id={r.author} />], ["Created", when(r.createdAt)],
+      ["Identifier", r.id], ["Machine", <Id id={r.machine} />], ["Author", <Who id={r.author} />], ["Created", when(r.createdAt)],
       ["Document size", `${r.documentBytes} bytes`], ["References", r.references], ["Embedded documents", r.embedded],
     ]} />
     <p>The digests and reference names are not shown. The document text is read on request, and only the author who imported it and reviewed it may read it.</p>
@@ -443,8 +444,8 @@ export function OperationItem({ id }: { id: string }) {
   );
 }
 
-const ACTS: readonly Col<S["ActItem"]>[] = [
-  ["At", (a) => when(a.at)], ["Principal", (a) => <><Id id={a.principal} /> ({a.principalKind})</>], ["Via", (a) => a.via],
+export const ACTS: readonly Col<S["ActItem"]>[] = [
+  ["At", (a) => when(a.at)], ["Principal", (a) => <><Who id={a.principal} /> ({a.principalKind})</>], ["Via", (a) => a.via],
   ["Role", (a) => a.role ?? "none"], ["Action", (a) => a.action], ["Subjects", (a) => <Ids ids={a.subjects} />],
   ["Request", (a) => a.requestId ?? "none"], ["Act", (a) => <Id id={a.id} />],
 ];
