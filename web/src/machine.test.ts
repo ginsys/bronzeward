@@ -814,4 +814,56 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(detailsCell("attempt", { attempt: "att_abcdefghijklmnopqrstuvwxyz", operation: op, number: 1, observation: obs })).toBe(`<span title="${obs}">obs_abcdâ€¦wxyz</span> ${opLink}`);
     expect(detailsCell("plan-cancellation", { plan, principal: "h-author", role: "author", reason: "synthetic" })).toBe(`h-author author &quot;synthetic&quot; ${planLink}`);
   });
+
+  // ginsys/bronzeward#986 (client contracts A9 item 4): the stored entry is {previous, new, principal, role}
+  // (internal/api/names.go), the old name null on a first naming. A name is shown only when it matches the grammar.
+  test("a name-change entry shows the old then the new name, each only when it passes the name grammar", () => {
+    expect(plainText(detailsCell("name-change", { previous: "web-1", new: "web-2", principal: "h-author", role: "operator" }))).toBe("web-1 web-2 h-author operator");
+    expect(plainText(detailsCell("name-change", { previous: null, new: "web-2", principal: "h-author", role: "operator" }))).toBe("web-2 h-author operator");
+    // A name failing the grammar is left out of the row, which still shows who and in which role.
+    expect(plainText(detailsCell("name-change", { previous: "Web-1", new: "web\n2", principal: "h-author", role: "operator" }))).toBe("h-author operator");
+    // Only this kind: an endpoint-change entry stores the same two keys and is not put through the name grammar.
+    expect(plainText(detailsCell("endpoint-change", { previous: "10.5.0.2:50000", new: "10.5.0.3:50000", principal: "h-author", role: "operator" }))).toBe("h-author operator");
+  });
+
+  // A9 item 4: an unknown kind, or an entry of another shape, never breaks or drops the row.
+  test("an unknown kind renders from the members it has and never throws", () => {
+    expect(plainText(detailsCell("future-kind", { x: 1, new: "web-2", principal: "h-author" }))).toBe("h-author");
+    expect(() => detailsCell("future-kind", "text")).not.toThrow();
+    expect(() => detailsCell("future-kind", [1, 2])).not.toThrow();
+    const row = renderToStaticMarkup(createElement(ReadsProvider, { value: { go: () => {}, client: {}, view: "v", again: 0 } as unknown as Reads }, createElement(TimelineRows, {
+      tl: { ...UNREAD, read: true, items: [{ revision: 1, epoch: "ep", at: READ, kind: "future-kind", entry: "text" }], restarted: false, older: undefined } as never, older: undefined, busy: false,
+    })));
+    expect(row).toContain("<td>future-kind</td>");
+  });
+
+  // A9 and the issue's no-storage row: rendering a name reads the body already held, and writes nowhere.
+  test("rendering a name touches no storage and logs nothing", () => {
+    const setItem = vi.fn();
+    vi.stubGlobal("localStorage", { setItem });
+    vi.stubGlobal("sessionStorage", { setItem });
+    const spies = [vi.spyOn(console, "log"), vi.spyOn(console, "info"), vi.spyOn(console, "warn"), vi.spyOn(console, "error"), setItem];
+    detailsCell("name-change", { previous: "web-1", new: "Bad Name", principal: "h-author", role: "operator" });
+    for (const s of spies) expect(s).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+});
+
+// ginsys/bronzeward#986: the machine page's heading names the machine, the whole identifier its title.
+describe("the machine heading (client contracts A9)", () => {
+  const heading = (m: Machine) => renderToStaticMarkup(createElement(ReadsProvider, { value: { go: () => {}, failure: () => "FAILED", client: {}, view: "v", again: 0 } as unknown as Reads }, createElement(MachineShown, {
+    id: "mch_a", m: { kind: "ok", data: m }, obs: { kind: "ok", data: { items: [], next: undefined, restarted: false } },
+    km: { view: "v", data: m, restarted: false }, ko: { view: "v", data: undefined, restarted: false },
+    tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
+  }))).match(/<h2>.*?<\/h2>/)?.[0];
+  test("a named machine shows its name, a machine with none or a bad name its identifier", () => {
+    expect(heading(machine({ name: "web-1" }))).toBe('<h2>Machine <span title="mch_a">web-1</span></h2>');
+    expect(heading(machine({ name: null }))).toBe("<h2>Machine mch_a</h2>");
+    expect(heading(machine({ name: "Web-1" }))).toBe("<h2>Machine mch_a</h2>");
+    // A server older than revision 10 serves no member at all.
+    const old = machine({});
+    delete (old as { name?: unknown }).name;
+    expect(heading(old)).toBe("<h2>Machine mch_a</h2>");
+  });
 });

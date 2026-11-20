@@ -1,6 +1,7 @@
 // The machine list (wireframe W2) and the clusters' list and items. The server filters machines
-// by cluster; the browser filters them by state over all pages (G9). Machines have no name, so
-// they show endpoint and node ID (G8).
+// by cluster; the browser filters them by state over all pages (G9). A machine is shown by its name
+// where the body carries one and it passes the grammar, else by its identifier, with its endpoint and
+// node ID beside it (G8, client contracts A9).
 
 import type { components } from "./api/v1";
 import { AddClusterAction, RecordMachineAction } from "./forms.tsx";
@@ -58,6 +59,15 @@ export function observed(m: Machine, now: number): string {
 export const node = (m: Machine) => (m.hardware.talosNodeId != null ? `node ${m.hardware.talosNodeId}` : `UUID ${m.hardware.smbiosUuid ?? "unknown"}`);
 export const release = (id: string | null) => <Id id={id} />;
 
+// A9: a name is remote text, shown only when the received value matches the grammar (1 to 63 characters,
+// lowercase letters, digits and hyphen, neither end a hyphen; no `m` flag, so `$` refuses a trailing line
+// feed), else the identifier is shown. It replaces A7's control and format character test.
+const MACHINE_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+export const machineName = (name: unknown): string | undefined => (typeof name === "string" && MACHINE_NAME.test(name) ? name : undefined);
+// A machine's link: its name as the text, else the shortened identifier, the whole identifier the title.
+// The one display of a machine for every view (the views that carry only an identifier pass the name they read).
+export const MachineRef = ({ id, name }: { id: string; name?: unknown }) => <Ref to={`/machines/${id}`} id={id}>{machineName(name)}</Ref>;
+
 export function Filter({ label, value, options, onChange }: { label: string; value: string; options: readonly (readonly [string, string])[]; onChange: (v: string) => void }) {
   return (
     <label>
@@ -99,7 +109,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
             <tbody>
               {shown.map((m) => (
                 <tr key={m.id}>
-                  <th scope="row"><Ref to={`/machines/${m.id}`} id={m.id} /></th>
+                  <th scope="row"><MachineRef id={m.id} name={m.name} /></th>
                   <td>{m.talosEndpoint}</td>
                   <td>{node(m)}</td>
                   <td>{release(m.desired)}</td>
@@ -194,7 +204,7 @@ export function MachineSummary({ machines }: { machines: readonly Machine[] }) {
         <tbody>
           {machines.map((m) => (
             <tr key={m.id}>
-              <th scope="row"><Ref to={`/machines/${m.id}`} id={m.id} /></th>
+              <th scope="row"><MachineRef id={m.id} name={m.name} /></th>
               <td>{m.talosEndpoint}</td>
               <td>{node(m)}</td>
               <td>{badges(m).join(", ")}</td>
