@@ -192,17 +192,62 @@ func TestExtractTalosconfig(t *testing.T) {
 	})
 }
 
+const (
+	clusterA = "cluster-a-id"
+	clusterB = "cluster-b-id"
+)
+
+// servedAs is a node of the cluster named id, on pki.
+func servedAs(t *testing.T, pki talostest.PKI, id string) *talostest.Node {
+	t.Helper()
+	n := talostest.Serve(t, pki)
+	n.SetNodeID(t, "stand-in-node")
+	n.SetClusterID(t, id)
+	return n
+}
+
+// A try also reads the node's Talos cluster ID and compares it with the one asked for
+// (persistence-api.md §3.4, ginsys/bronzeward#938): the same cluster is accepted, another is the
+// first-key-cluster-mismatch refusal naming neither id, and a node that cannot say which cluster it
+// belongs to is unavailable and not a mismatch.
+func TestTryClusterIdentity(t *testing.T) {
+	ca := newCA(t)
+	pki := talostest.NewPKIFromCA(t, ca)
+	k, err := signer.Extract(ctx(t), signer.SecretsBundle, bundle(ca), "unused:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := servedAs(t, pki, clusterA)
+	if err := signer.Try(ctx(t), k, n.Endpoint, clusterA, time.Now()); err != nil {
+		t.Fatalf("the node's own cluster: %v", err)
+	}
+	err = signer.Try(ctx(t), k, n.Endpoint, clusterB, time.Now())
+	if got := rule(t, err); got != signer.RuleClusterMismatch {
+		t.Fatalf("rule %q", got)
+	}
+	if strings.Contains(err.Error(), clusterA) || strings.Contains(err.Error(), clusterB) {
+		t.Fatalf("the refusal names a cluster id: %v", err)
+	}
+	if err := signer.Try(ctx(t), k, n.Endpoint, "", time.Now()); err == nil {
+		t.Fatal("an empty id matched a node's")
+	}
+	silent := talostest.Serve(t, pki) // no node identity and no cluster information
+	if err := signer.Try(ctx(t), k, silent.Endpoint, clusterA, time.Now()); !errors.Is(err, signer.ErrUnavailable) {
+		t.Fatalf("a node that reports no cluster: %v", err)
+	}
+}
+
 func TestTry(t *testing.T) {
 	ca := newCA(t)
 	pki := talostest.NewPKIFromCA(t, ca)
-	n := talostest.Serve(t, pki)
+	n := servedAs(t, pki, clusterA)
 
 	t.Run("a key the node trusts", func(t *testing.T) {
 		k, err := signer.Extract(ctx(t), signer.SecretsBundle, bundle(ca), n.Endpoint)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := signer.Try(ctx(t), k, n.Endpoint, time.Now()); err != nil {
+		if err := signer.Try(ctx(t), k, n.Endpoint, clusterA, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -212,7 +257,7 @@ func TestTry(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := signer.Try(ctx(t), k, n.Endpoint, time.Now()); !errors.Is(err, signer.ErrUnavailable) {
+		if err := signer.Try(ctx(t), k, n.Endpoint, clusterA, time.Now()); !errors.Is(err, signer.ErrUnavailable) {
 			t.Fatalf("err %v", err)
 		}
 	})
@@ -221,14 +266,14 @@ func TestTry(t *testing.T) {
 		k, _ := signer.Extract(ctx(t), signer.SecretsBundle, bundle(ca), n.Endpoint)
 		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := signer.Try(c, k, "127.0.0.1:1", time.Now()); !errors.Is(err, signer.ErrUnavailable) {
+		if err := signer.Try(c, k, "127.0.0.1:1", clusterA, time.Now()); !errors.Is(err, signer.ErrUnavailable) {
 			t.Fatalf("err %v", err)
 		}
 	})
 
 	t.Run("a node that holds the read open does not outlive the certificate", func(t *testing.T) {
 		defer signer.SetTryLifetime(2 * time.Second)()
-		held := talostest.Serve(t, pki)
+		held := servedAs(t, pki, clusterA)
 		held.StallVersion(true)
 		k, err := signer.Extract(ctx(t), signer.SecretsBundle, bundle(ca), held.Endpoint)
 		if err != nil {
@@ -238,7 +283,7 @@ func TestTry(t *testing.T) {
 		// start+2s itself. The caller's context allows far longer than the certificate lives.
 		start := time.Now().Truncate(time.Second).Add(900 * time.Millisecond)
 		notAfter := start.Add(2 * time.Second).Truncate(time.Second).Add(time.Second)
-		if err := signer.Try(ctx(t), k, held.Endpoint, start); !errors.Is(err, signer.ErrUnavailable) {
+		if err := signer.Try(ctx(t), k, held.Endpoint, clusterA, start); !errors.Is(err, signer.ErrUnavailable) {
 			t.Fatalf("err %v", err)
 		}
 		if over := time.Since(notAfter); over > 500*time.Millisecond {
@@ -248,7 +293,7 @@ func TestTry(t *testing.T) {
 
 	t.Run("a certificate authority key that cannot sign is refused", func(t *testing.T) {
 		bad := provider.NewCAKey(ca.Crt, []byte("not a key"))
-		if got := rule(t, signer.Try(ctx(t), bad, n.Endpoint, time.Now())); got != signer.RuleUnusable {
+		if got := rule(t, signer.Try(ctx(t), bad, n.Endpoint, clusterA, time.Now())); got != signer.RuleUnusable {
 			t.Fatalf("rule %q", got)
 		}
 	})

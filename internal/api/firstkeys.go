@@ -130,8 +130,9 @@ func prepareFirstKey(ctx context.Context, a *API, q *request) error {
 	if id.MustHave(cluster, id.Cluster) != nil {
 		return notFound
 	}
-	var one int
-	switch err := a.db.QueryRowContext(ctx, `SELECT 1 FROM cluster WHERE id = $1`, cluster).Scan(&one); {
+	// The cluster's Talos cluster ID, stored canonical, is what the endpoint's own must equal.
+	var talosClusterID string
+	switch err := a.db.QueryRowContext(ctx, `SELECT talos_cluster_id FROM cluster WHERE id = $1`, cluster).Scan(&talosClusterID); {
 	case errors.Is(err, sql.ErrNoRows):
 		return notFound.with("cluster", cluster)
 	case err != nil:
@@ -147,7 +148,7 @@ func prepareFirstKey(ctx context.Context, a *API, q *request) error {
 		return signer.Extract(c, signer.Kind(in.Kind), in.Document.bytes(), in.Endpoint)
 	})
 	if err == nil {
-		err = signer.Try(ctx, ca, in.Endpoint, time.Now())
+		err = signer.Try(ctx, ca, in.Endpoint, talosClusterID, time.Now())
 	}
 	if err != nil {
 		return firstKeyRefusal(err)

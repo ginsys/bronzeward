@@ -44,6 +44,7 @@ const (
 	RuleNoCAKey          = "first-key-no-ca-key"
 	RuleRoleInsufficient = "first-key-role-insufficient"
 	RuleNoControlPlane   = "first-key-endpoint-no-control-plane"
+	RuleClusterMismatch  = "first-key-cluster-mismatch"
 )
 
 // Refusal is a first key refused by one of the rules above. It names the rule and nothing of the
@@ -145,10 +146,13 @@ func osCA(document []byte) (ca *x509.PEMEncodedCertificateAndKey, ok bool) {
 }
 
 // Try signs one `os:reader` certificate from ca, valid from now for tryLifetime, and makes one
-// Version read at endpoint with it. Nil means a node answered; the key is trustworthy only then.
-// The connection ends no later than the certificate does (persistence-api.md §3.4): a node that
-// holds the read open is ErrUnavailable once the certificate has lapsed.
-func Try(ctx context.Context, ca provider.CAKey, endpoint string, now time.Time) error {
+// Version read at endpoint with it, then reads the node's Talos cluster ID on the same connection
+// and compares it with wantClusterID (the cluster record's, canonical). Nil means a node answered and
+// belongs to that cluster; the key is trustworthy only then. A node of another cluster is the
+// RuleClusterMismatch refusal, which names no id; a failed identity read is ErrUnavailable. The
+// connection ends no later than the certificate does (persistence-api.md §3.4): a node that holds
+// a read open is ErrUnavailable once the certificate has lapsed.
+func Try(ctx context.Context, ca provider.CAKey, endpoint, wantClusterID string, now time.Time) error {
 	// The probe has no configured maximum; its maximum leaves room for the whole-second encoding.
 	cert, err := Sign(ca, role.Reader, now, tryLifetime, tryLifetime+RoundingSlack)
 	if err != nil {
@@ -168,6 +172,13 @@ func Try(ctx context.Context, ca provider.CAKey, endpoint string, now time.Time)
 	defer r.Close() //nolint:errcheck
 	if _, err := r.Version(ctx); err != nil {
 		return ErrUnavailable
+	}
+	id, err := r.Identity(ctx)
+	if err != nil {
+		return ErrUnavailable
+	}
+	if id.ClusterID != wantClusterID {
+		return &Refusal{RuleClusterMismatch}
 	}
 	return nil
 }
