@@ -1,0 +1,21 @@
+id: AUTH-06
+setup: as EVT-01; the provider rotates the refresh token and issues the sign-in's access token 270 seconds ago, so it expires 30 seconds after the sign-in, with expires_in 24 seconds; the renewal is answered with an access token minted at that moment
+action: open the operation page and wait for the renewal and for the token that opened the stream to expire
+exchange:
+  - request: GET /operations/{id}/events
+    headers: ["Accept: text/event-stream", "Authorization: the sign-in's token"]
+  - request: POST <provider>/token
+    headers: ["grant_type=refresh_token"]
+  - request: GET /operations/{id}/events
+    headers: ["Accept: text/event-stream", "Authorization: the renewed token", "Last-Event-ID: the ID of the last event shown"]
+fault: the server ends the stream at the expiry of the token that opened it
+expect:
+  server: the second stream opened with the renewed token
+  client: one renewal; the stream opened again from the last event shown
+  shown: every event once, with no gap or repeat, and the outcome after a later resolution
+  absent: [an event shown twice or missing after the renewal, token in browser storage]
+runs:
+  web:
+    check: web/e2e/auth/operation.e2e.ts, mise run browser-auth with BW_SPECS=operation
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
+    covers: the stream half of the case only (the renewal of the operation page's stream); the other halves are the CLI cases (internal/clitest/cases.yaml, internal/clitest/operations_test.go) and the AUTH-02 and AUTH-07 web cases

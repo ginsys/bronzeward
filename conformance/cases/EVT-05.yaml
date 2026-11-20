@@ -1,0 +1,20 @@
+id: EVT-05
+setup: as EVT-01; the operation stays unresolved
+action: open the operation page with its stream open and every event shown, then have the harness commit a new epoch with an ownership-transition event of that epoch for the operation
+exchange:
+  - request: GET /operations/{id}/events
+    headers: ["Accept: text/event-stream"]
+  - request: GET /operations/{id}/events
+    headers: ["Accept: text/event-stream"]
+fault: the epoch changes while the stream is open, so the stream's next event ID carries another epoch than the stream was opened under
+expect:
+  server: the open stream carries an event whose ID has the new epoch
+  client: the stream ended; the stream opened again without Last-Event-ID
+  shown: the shell's notice that the installation entered recovery mode or was restored; the display cleared and every event shown once again, with the event of the new epoch, and the page saying it is live
+  absent: [an event shown twice or missing after the replay, token in browser storage]
+runs:
+  web:
+    check: web/e2e/auth/operation.e2e.ts, mise run browser-auth with BW_SPECS=operation
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
+    covers: >-
+      the harness committed the epoch and wrote the first event of the new epoch itself (a row of the operation's machine, the kind the entry writes, with the operation's generation and epoch updated and its owner unchanged), because an entry on a second process cannot be made while the first holds the stream; the trigger the row names is covered by the CLI case (internal/clitest/testdata/operation-cases.yaml) and the Go test of the client (internal/client/watch_test.go). The display clear and the reopening are read from the page's result and the shell's notice (§8.5 item 3). The page does not show the reader's own notice for the clear: after the new epoch the shell mounts the page anew within milliseconds (ginsys/bronzeward#959), so the browser case cannot tell the reader's comparison of the event ID's epoch from the shell's reaction, and a mutant of the reader that does not compare it survives this case; the reader's rule is proven by the unit test "item 3: an event of another epoch than the stream's ends it, clears, and reopens without Last-Event-ID" in web/src/progress.test.ts

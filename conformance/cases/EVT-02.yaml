@@ -1,0 +1,20 @@
+id: EVT-02
+setup: as EVT-01; the page's reopening of its stream is held by the injector until the harness has committed a new epoch
+action: open the operation page, let its first stream deliver the events and be cut, commit a new epoch (the harness commits it, the way a restore does) while the reopening is held, then let the reopening go on
+exchange:
+  - request: GET /operations/{id}/events
+    headers: ["Accept: text/event-stream"]
+  - request: GET /operations/{id}/events
+    headers: ["Accept: text/event-stream", "Last-Event-ID: an ID of the earlier epoch"]
+fault: the epoch changes between the page's operation read and its stream
+expect:
+  server: the reopening answered under the new epoch, with the `reset` event first
+  client: the stream opened again from the start, without Last-Event-ID, every later open the same; the new epoch told once
+  shown: the shell's notice that the installation entered recovery mode or was restored; the display cleared and every event shown again, once
+  absent: [an event shown twice or missing after the replay, token in browser storage]
+runs:
+  web:
+    check: web/e2e/auth/operation.e2e.ts, mise run browser-auth with BW_SPECS=operation
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
+    covers: >-
+      the display cleared and replayed and the stream reopened without Last-Event-ID, read from the page's result and the shell's notice (§8.5 item 3). The page does not show the reader's own notice for the clear: after the new epoch the shell mounts the page anew within milliseconds (ginsys/bronzeward#959), so a mutant of the reader that skips the clear on a reset survives this browser case, and the reader's rule is proven by the unit test "item 3: a reset clears what was shown and the replay is shown from the start" in web/src/progress.test.ts. The injector closes the first stream's connection 400 ms after the last event it passed, because a browser drops the data it has not read when its body stream fails, so the case does not prove a cut that loses events in flight (the Go and CLI tests cover that cut)

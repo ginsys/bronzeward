@@ -1,0 +1,19 @@
+id: EVT-03
+setup: as EVT-01
+action: open the operation page on the unresolved operation, then resolve it to cancelled as h-recovery
+exchange:
+  - request: GET /operations/{id}/events
+    headers: ["Accept: text/event-stream"]
+  - request: POST /operations/{id}/resolutions
+    headers: ["Authorization: a recovery-admin token"]
+fault: none
+expect:
+  server: the stream carries the resolution's event; the operation is cancelled
+  client: one stream, kept open past `unresolved`, and ended at `cancelled`
+  shown: 'while unresolved, "Outcome unknown", the way to Recovery and the page saying it is live, with no end of the watch; after the resolution, "Cancelled: resolution" and the end of the watch'
+  absent: [an end of the watch on the unresolved operation, token in browser storage]
+runs:
+  web:
+    check: web/e2e/auth/operation.e2e.ts, mise run browser-auth with BW_SPECS=operation
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
+    covers: a stream cut while the operation is unresolved, so that the page reads the operation, finds it unresolved and goes on (the watch reads the operation only when a stream ends); the operation of the seed that has no attempt, because a resolution is refused once an attempt is recorded (the operation of the ordinary seed has one); the resolution is made by h-recovery through the API, not through the page

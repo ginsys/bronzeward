@@ -1,0 +1,19 @@
+id: EVT-04
+setup: as EVT-01
+action: open the operation page on the unresolved operation, resolve it to cancelled as h-recovery
+exchange:
+  - request: GET /operations/{id}/events
+    headers: ["Accept: text/event-stream"]
+  - request: GET /operations/{id}
+  - request: GET /operations/{id}/events
+fault: the injector passes the events the page has, drops the event the resolution writes, and closes the stream's connection, so the stream ends after the terminal state is written and before its last event is sent
+expect:
+  server: the operation read answers cancelled; the JSON event pages carry the dropped event
+  client: no new stream; the operation read, then the JSON pages to their end
+  shown: 'the received rows replaced by the server''s times, with the event the stream never carried shown once, the outcome "Cancelled: resolution" and the end of the watch'
+  absent: [a received row after the watch ended, the state change shown twice, token in browser storage]
+runs:
+  web:
+    check: web/e2e/auth/operation.e2e.ts, mise run browser-auth with BW_SPECS=operation
+    browsers: [chrome, edge, firefox, firefox-esr, safari]
+    covers: the drain, read as two reads of the event pages after the cut (the drain and the page's final read for the server's times); the receipt phase (each row marked "received" with the browser's clock) and its replacement by the server's times, which the page's unit tests cover without a browser; the seed that has no attempt, as EVT-03
