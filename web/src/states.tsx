@@ -3,6 +3,7 @@
 // the first write view (#257) on.
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
+import { Icon } from "./icons.tsx";
 import { type Problem, type ReadResult, TRANSPORT_FAILURE, WRITE_TRANSPORT_FAILURE } from "./request.ts";
 
 export const WITHHELD = "Configuration not shown: it could not be redacted.";
@@ -62,7 +63,8 @@ export function Status({ children, actions, testid = "status", role = "status" }
   });
   useEffect(() => () => mirror?.(id, undefined), [mirror, id]);
   return (
-    <div>
+    <div className={role === "alert" ? "alert danger" : "alert"}>
+      <Icon name={role === "alert" ? "error" : "info"} />
       <p ref={shown} role={role === "alert" ? "alert" : undefined} data-testid={testid}>{children}</p>
       {actions}
     </div>

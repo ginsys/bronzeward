@@ -1554,7 +1554,25 @@ the client's rule wins wherever the two meet.
    select's background image and the mask image of a checked control's pseudo-element (the browser
    still requests the mask image when only the pseudo-element's content is cleared). A later view that needs an Oat
    component with a `data:` image gets its own decision and does not widen the policy.
-5. **The header is not sticky**, so nothing covers a focused element (2.4.11).
+5. **The header is not sticky**, so nothing covers a focused element (2.4.11): the top bar and the
+   navigation have no fixed or sticky position, and the navigation column has a width only.
+6. **The desktop shell** (ginsys/bronzeward#973, on the owner's feedback of 2026-11-20; designed and reviewed at 1280 and 1600 CSS pixels, with no design
+   effort below that). A top bar holds the product name, the principal line, the banners and Sign
+   out, in the order they already have, so Tab order after the skip link does not change. A left
+   navigation, one `nav` landmark and no `aside`, groups the pages as Inventory (Machines, Clusters,
+   Sources), Delivery (Changes, Plans, Operations) and Governance (Audit, Recovery) and marks the
+   current page by `aria-current`, a bar and a bold label, never by colour alone. The page sits in a
+   column of at most 90 rem. Below 68 rem the navigation stacks above the page, which keeps the
+   reflow of 1.4.10 at 320 CSS pixels. One spacing scale (`--s1` to `--s6`, 0.25 to 2 rem) is the only
+   source of padding, gap and margin in the shell rules. A status line is an alert box, a bordered
+   panel holds a page section, and a detail list is a two-column grid; the box is a class and changes
+   no role, and every fill is an opaque colour so the contrast measure can read it.
+7. **Icons are decorative inline SVG** (Heroicons 2.2.0 outline, MIT, the paths vendored in one module
+   with the notice kept). An icon is an `<svg>` element with `aria-hidden="true"`, no title and no
+   style attribute, drawn with presentation attributes, so it is markup and not an image load:
+   `img-src 'self'` and `style-src 'self'` need no change, and `require-trusted-types-for 'script'` is
+   met because icons are JSX elements and never HTML strings. An icon stands beside the word that
+   carries the meaning, outside the elements whose text the status mirror and the browser cases read.
 
 A browser case on the signed-out page fails if Oat's focus rule wins over the client's, if a
 `data:` image is requested (it is checked with a positive control, a `data:` image that must be

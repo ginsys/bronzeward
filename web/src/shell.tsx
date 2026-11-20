@@ -9,7 +9,8 @@ import { type Load, ReadsProvider } from "./list.tsx";
 import { Entered, PreEntry, type Recovery, RecoveryBanner, RecoveryRead, type StartMode, startModeOf, startRefusal } from "./recovery.tsx";
 import { Client, type ClientOptions, EPOCH_CHANGED, type Problem, type ReadResult } from "./request.ts";
 import { view } from "./resources.tsx";
-import { follow, PAGES, usePath } from "./router.ts";
+import { type IconName, Icon } from "./icons.tsx";
+import { follow, GROUPS, PAGES, usePath } from "./router.ts";
 import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status, StatusPage } from "./states.tsx";
 import { type Ending, EPOCH_CHANGED_ASIDE, type Writes } from "./write.ts";
 import type { components } from "./api/v1";
@@ -496,8 +497,9 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     <ShellContext value={{ roles: id?.roles ?? [], offline: offline !== undefined, kept, mode, recoveryMode }}>
       <StatusPage>
       <a className="skip" href="#main">Skip to the page</a>
+      <div className={id !== undefined ? "shell with-nav" : "shell"}>
       <header>
-        <h1>Bronzeward</h1>
+        <h1><Icon name="machines" />Bronzeward</h1>
         {id !== undefined && (
           <p>
             <span data-testid="principal">Signed in as {id.subject ?? id.service}</span> ({id.kind}).{" "}
@@ -505,7 +507,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
             <span data-testid="epoch">Epoch {id.epoch}</span>
           </p>
         )}
-        <button type="button" onClick={() => signingOut() && reads.signOut(signOut)}>Sign out</button>
+        <button type="button" onClick={() => signingOut() && reads.signOut(signOut)}><Icon name="signOut" />Sign out</button>
         {recoveryMode && <RecoveryBanner recovery={recovery.kind === "ok" ? recovery.data : undefined} mode={mode} />}
         {recoveryMode && recovery.kind !== "loading" && <RecoveryRead res={recovery} />}
         <Entered />
@@ -513,16 +515,22 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
         <Deprecations routes={notices} />
         <WriteNotices go={show} />
         {offline !== undefined && <Offline since={offline} readAt={reads.readAt} />}
-        {id !== undefined && (
-          <nav aria-label="Main">
-            {PAGES.filter(([to]) => to !== "/recovery" || recoveryMode || id.roles.includes("recovery-admin")).map(([to, title]) => (
-              <a key={to} href={to} aria-current={current(path) === to ? "page" : undefined} onClick={(e) => follow(e, go, to)}>{title}</a>
-            ))}
-          </nav>
-        )}
       </header>
+      {id !== undefined && (
+        <nav aria-label="Main">
+          {GROUPS.map(([label, tos]) => (
+            <div key={label} role="group" aria-label={label}>
+              <p className="group">{label}</p>
+              {PAGES.filter(([to]) => (tos as readonly string[]).includes(to) && (to !== "/recovery" || recoveryMode || id.roles.includes("recovery-admin"))).map(([to, title]) => (
+                <a key={to} href={to} aria-current={current(path) === to ? "page" : undefined} onClick={(e) => follow(e, go, to)}><Icon name={to.slice(1) as IconName} />{title}</a>
+              ))}
+            </div>
+          ))}
+        </nav>
+      )}
       <ReadsProvider value={{ client, settle: settlePage, undropped: reads.since, view: JSON.stringify([path, query]), again, regained, go, failure: (res) => <Failure res={res} sub={sub} /> }}><main id="main" ref={page} tabIndex={-1}>{holding && (failedRead.kind === "loading" || failedRead.kind === "discarded" || failedRead.kind === "ok" ? <Loading what="the server and your identity under the new epoch" /> : <Failure res={failedRead} sub={sub} />)}{main}</main></ReadsProvider>
       <VersionFooter server={server.kind === "ok" ? server.data : undefined} />
+      </div>
       </StatusPage>
     </ShellContext>
   );

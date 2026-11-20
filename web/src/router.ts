@@ -16,6 +16,14 @@ export const PAGES = [
   ["/recovery", "Recovery"],
 ] as const;
 
+// The sidebar's groups (client contracts §10.4): every PAGES path once, so the groups only arrange the
+// navigation and never add or drop a page.
+export const GROUPS = [
+  ["Inventory", ["/machines", "/clusters", "/sources"]],
+  ["Delivery", ["/changes", "/plans", "/operations"]],
+  ["Governance", ["/audit", "/recovery"]],
+] as const;
+
 type Entries = Pick<History, "state" | "go" | "pushState" | "replaceState">;
 type Ask = (to: string, from: string) => boolean;
 const position = (state: unknown): number | undefined => {

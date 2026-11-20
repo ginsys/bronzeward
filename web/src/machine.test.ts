@@ -382,7 +382,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       km: { view: "v", data: machine({}), restarted: false }, ko: { view: "v", data: undefined, restarted: false },
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
-    expect(out).toMatch(/<\/h2>FAILED<div><p data-testid="restarted">/);
+    expect(out).toMatch(/<\/h2>FAILED<div class="alert"><svg[^>]*aria-hidden="true"[^>]*><path[^>]*><\/path><\/svg><p data-testid="restarted">/);
   });
 
   test("#443: an observations read again that fails shows its failure after the heading, and the observations kept still show", () => {
