@@ -1239,6 +1239,13 @@ printf 'nothing to see\n' >"$STATE/selftest-target-$BW_BAO_METADATA_TOKEN/file"
 ln -s "$STATE/selftest-target-$BW_BAO_METADATA_TOKEN/file" "$STATE/data/selftest-textlink"
 # A client private key from the generated talosconfig, which the secrets bundle does not hold.
 awk '$1 == "key:" {print "client-key=" $2}' "$TALOSCONFIG" >"$STATE/data/selftest-client-key-leak"
+# A private key no list holds, as the server makes one at each use: found by its shape, raw in one file
+# and as base64 in another. A synthetic PEM, not from any signer.
+# The BEGIN and END lines are written in two pieces: a whole one in a tracked file is what a secret scan
+# of the commits refuses.
+{ printf '%s\n' '-----BEGIN ED25519 PRIV''ATE KEY-----'; head -c 48 /dev/urandom | base64 -w64; printf '%s\n' '-----END ED25519 PRIV''ATE KEY-----'; } \
+  >"$STATE/data/selftest-generated-key-leak"
+base64 -w0 "$STATE/data/selftest-generated-key-leak" >"$STATE/data/selftest-generated-key-leak-b64"
 # An untracked symlink: the bundle would carry the target's name, not the bytes that ran.
 ln -s /etc/hostname "$FIXTURES/.selftest-untracked-link"
 went=0
@@ -1900,6 +1907,11 @@ rm "$STATE/selftest-evidence.err"
 grep --quiet --fixed-strings "$STATE/data/selftest-client-key-leak" "$bundle/leak-scan.txt" ||
   fail "leak scan missed a client private key from the talosconfig"
 rm "$STATE/data/selftest-client-key-leak"
+grep --quiet --fixed-strings "$STATE/data/selftest-generated-key-leak" "$bundle/leak-scan.txt" ||
+  fail "leak scan missed a generated private key that no list holds"
+grep --quiet --fixed-strings "$STATE/data/selftest-generated-key-leak-b64" "$bundle/leak-scan.txt" ||
+  fail "leak scan missed a generated private key held as base64"
+rm "$STATE/data/selftest-generated-key-leak" "$STATE/data/selftest-generated-key-leak-b64"
 grep --quiet --fixed-strings "$STATE/data/selftest-link" "$bundle/leak-scan.txt" || fail "leak scan skipped a symlinked file"
 grep --quiet --line-regexp --fixed-strings "1 $STATE/data/selftest-textlink" "$bundle/leak-scan.txt" ||
   fail "leak scan missed a secret held only in the target path of a symlink"

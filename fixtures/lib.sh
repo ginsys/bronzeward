@@ -1325,6 +1325,36 @@ scan_patterns() {
     awk 'length($0) >= 8' | sort -u
 }
 
+# leak_shape: fixed strings that find a PEM private key by its shape, one per line, for the keys that
+# no list can name: the server makes a client key at each use and the CA key at its own time. The
+# `PRIVATE KEY-----` of the BEGIN and END lines, as text, as hex, and as base64 at each of the three
+# byte offsets it can sit at in a longer encoding. A base64 core drops the first and the last group,
+# which depend on the bytes next to the needle. The scans pass it as a second --file beside
+# scan-patterns.txt, so a file holding a listed key is still one hit.
+leak_shape() {
+  local needle="PRIVATE KEY-----" pad enc hex
+  hex=$(printf '%s' "$needle" | od -An -tx1 | tr -d ' \n')
+  printf '%s\n' "$needle" "$hex" "${hex^^}"
+  for pad in '' x xx; do
+    enc=$(printf '%s%s' "$pad" "$needle" | base64 -w0)
+    printf '%s\n' "${enc:4:${#enc}-8}"
+  done
+}
+
+# leak_shape_check: the scan's own control for leak_shape, held in memory so that no probe file sits
+# under a scanned root: a synthetic key line must match as text, hex and base64 at every offset, and a
+# certificate line and plain base64 must not. A scan that fails it is void.
+leak_shape_check() {
+  # Written in two pieces: a whole BEGIN line in a tracked file is what a secret scan of the commits refuses.
+  local probe='-----BEGIN BWSYNTH PRIV''ATE KEY-----' pad
+  for pad in '' x xx; do
+    grep --quiet --fixed-strings --file=<(leak_shape) <<<"$(printf '%s%s' "$pad" "$probe" | base64 -w0)" || return 1
+  done
+  grep --quiet --fixed-strings --file=<(leak_shape) <<<"$probe" || return 1
+  grep --quiet --fixed-strings --file=<(leak_shape) <<<"$(printf '%s' "$probe" | od -An -tx1 | tr -d ' \n')" || return 1
+  ! grep --quiet --fixed-strings --file=<(leak_shape) <<<"-----BEGIN CERTIFICATE----- $(printf 'BWSYNTH-' | base64 -w0)"
+}
+
 # bao_stdin <args>: as bao, with the caller's stdin handed to the CLI, for a value it reads from
 # there (`key=-`, `value=-`, `-` as a file): the CLI's command line inside the container is
 # readable by any local user, as the client's is, so no key or canary is put on either.
