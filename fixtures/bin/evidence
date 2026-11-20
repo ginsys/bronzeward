@@ -678,13 +678,15 @@ others=
 # Files the content pass reported, so that the name pass below does not report one of them again:
 # a file with a secret in its name and one in its content is one file.
 declare -A reported=()
+# The shape patterns once, not per file: building them runs od and base64.
+shape=$(leak_shape)
 while IFS= read -r -d '' file; do
   [ "$file" != "$scan" ] || continue
   # Occurrences, not matching lines: two secrets on one line are two hits.
   rc=0
   # --no-messages: grep names the file it cannot read, and that name may hold a secret. Its exit
   # status says the same, and the message below goes through `shown`.
-  found=$(grep --no-messages --text --fixed-strings --only-matching --file="$STATE/scan-patterns.txt" --file=<(leak_shape) "$file") || rc=$?
+  found=$(grep --no-messages --text --fixed-strings --only-matching --file="$STATE/scan-patterns.txt" --file=<(printf '%s\n' "$shape") "$file") || rc=$?
   [ "$rc" -le 1 ] || die "leak scan could not read $(shown "$file"); results void"
   hits=$(sed '/^$/d' <<<"$found" | wc -l)
   unset found

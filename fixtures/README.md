@@ -348,9 +348,9 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
   one entry per line.
 
 No list names a private key the server makes at each use (a per-use client certificate's key) or
-the CA key, so the scan also matches the shape of a PEM private key: the `PRIVATE KEY-----` of its
-BEGIN and END lines as text, as hex and as base64 at each of the three offsets it can sit at in a
-longer encoding (`leak_shape` in `lib.sh`; `scripts/test/leak-shape-test.sh` proves it with
+the CA key, so the scan also matches the shape of a PEM private key: the end of its BEGIN and END
+lines (the words "private key" and five dashes) as text, as hex and as base64 at each of the three
+offsets it can sit at in a longer encoding (`leak_shape` in `lib.sh`; `scripts/test/leak-shape-test.sh` proves it with
 generated keys and mutants). `bin/evidence` first checks that matcher on a synthetic key line held
 in memory, a positive and a negative, and a scan that fails it is void. The same patterns are used
 by the refusal body checks in `scenarios/s1` and `scenarios/s5`. It does not find a key that is not

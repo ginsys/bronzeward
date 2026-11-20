@@ -92,7 +92,7 @@ mutant() { # mutant <name> <sed expression>
   if [ "$out" -gt 0 ] 2>/dev/null; then echo "ok   mutant $1 is caught ($out failing checks)"; else echo "FAIL mutant $1 passes every check"; status=1; fi
 }
 mutant alignment "s/for pad in '' x xx/for pad in '' x/"
-mutant dashes 's/needle="PRIVATE KEY-----"/needle="PRIVATE KEY"/'
+mutant dashes 's/needle="PRIV""ATE KEY-----"/needle="PRIV""ATE KEY"/'
 # shellcheck disable=SC2016 # the sed expression is a literal pattern, not an expansion
 mutant hex 's/ "\$hex" "\${hex^^}"//'
 exit "$status"
