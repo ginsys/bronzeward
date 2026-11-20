@@ -109,9 +109,10 @@ describe("the shell", () => {
     await expect($("main h2")).toHaveText("Audit");
     await nav("Sources").click();
     await expect($("main h2")).toHaveText("Sources");
-    await reads(12);
+    // The Audit page names the principals of the acts it lists with one read of GET /principals (G23), once for the visit.
+    await reads(13);
     expect(await ordered()).toEqual(sorted([
-      "/server", "/identity", "/machines", "/clusters", "/acts", "/identity", "/fragments", "/profiles", "/assignments", "/dependencies", "/dependency-alerts", "/identity",
+      "/server", "/identity", "/machines", "/clusters", "/acts", "/principals", "/identity", "/fragments", "/profiles", "/assignments", "/dependencies", "/dependency-alerts", "/identity",
     ]));
     expect(await $$('[data-testid="deprecation"]').length).toBe(1);
   });
