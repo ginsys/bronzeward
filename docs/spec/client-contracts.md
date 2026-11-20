@@ -226,7 +226,10 @@ answer is an unknown outcome (exit 3): every `5xx`, a lost answer, the refusals 
 lookup (`epoch-mismatch`, a conflict that names the key's record, a reused key), which may follow the
 store, and a 4xx with any other code, such as `precondition-failed`, `scope-busy` or a code the client has
 not met. The route sends none of those today, so each reads unknown only to be safe; a rerun replaces the
-key (`replaced: true`), so the cost of the doubt is one repeat. A failure before any byte goes out is
+key (`replaced: true`), so the cost of the doubt is one repeat. `unauthenticated` is on the list because
+`staleToken` (`internal/api/api.go:324-328`) refuses service tokens only and this route is for humans
+(`internal/api/routes.go:127`), so no `401` can follow the store; a refusal added after the prepare step
+must not carry a listed code without a marker the client reads, as a conflict's `request` member is. A failure before any byte goes out is
 not repeated, and a `401` is not renewed and resent. A repeat that a refusal answers stays unknown. The server's detail is never printed. Each run takes a
 key of its own, random like every write's ([§8.4](#84-idempotency-and-ambiguous-responses) item 1), so a
 second run supplies the key again and does not replay the first answer; `--idempotency-key`,
