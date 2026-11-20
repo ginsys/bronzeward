@@ -33,6 +33,10 @@ if ! cmp --silent -- "$rebuilt" "$STATE/scan-patterns.txt"; then
   die "$STATE/scan-patterns.txt is not the list this run's credentials give; results void"
 fi
 rm -f -- "$rebuilt"
+# The list names the secrets the run made; a key the server makes at each use is in no list, so the
+# content pass also matches the shape of a PEM private key. A matcher that cannot find a synthetic
+# key line, or that finds a certificate, would make the scan pass or fail on nothing: results void.
+leak_shape_check || die "the leak-scan key-shape matcher fails its own probe; results void"
 # shown <path>: the path as a message or the bundle may record it. A name that holds a secret is
 # never written out, for the same reason a matched line is not; the entry is identified by its inode
 # instead. That holds for error messages as much as for the report, so every path this command
@@ -680,7 +684,7 @@ while IFS= read -r -d '' file; do
   rc=0
   # --no-messages: grep names the file it cannot read, and that name may hold a secret. Its exit
   # status says the same, and the message below goes through `shown`.
-  found=$(grep --no-messages --text --fixed-strings --only-matching --file="$STATE/scan-patterns.txt" "$file") || rc=$?
+  found=$(grep --no-messages --text --fixed-strings --only-matching --file="$STATE/scan-patterns.txt" --file=<(leak_shape) "$file") || rc=$?
   [ "$rc" -le 1 ] || die "leak scan could not read $(shown "$file"); results void"
   hits=$(sed '/^$/d' <<<"$found" | wc -l)
   unset found

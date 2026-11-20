@@ -347,6 +347,17 @@ No secret is committed. `bin/up` generates all of them into the gitignored `.sta
   newline or another control character is reported in bash's quoted form, so that the report stays
   one entry per line.
 
+No list names a private key the server makes at each use (a per-use client certificate's key) or
+the CA key, so the scan also matches the shape of a PEM private key: the `PRIVATE KEY-----` of its
+BEGIN and END lines as text, as hex and as base64 at each of the three offsets it can sit at in a
+longer encoding (`leak_shape` in `lib.sh`; `scripts/test/leak-shape-test.sh` proves it with
+generated keys and mutants). `bin/evidence` first checks that matcher on a synthetic key line held
+in memory, a positive and a negative, and a scan that fails it is void. The same patterns are used
+by the refusal body checks in `scenarios/s1` and `scenarios/s5`. It does not find a key that is not
+PEM-shaped after one base64 layer, base64 wrapped at 64 or 76 columns with a line break inside
+the matched run, or a key in a path name. A tracked or untracked file under `fixtures/` that holds
+the line makes `fixtures-diff.txt` a hit.
+
 The scan has a positive control, `.state/data/canary-control.txt`. If the scan does not find it
 holding exactly what `bin/up` planted, or cannot read a path or file it was given, the command
 fails, because an empty result would then prove nothing. Only that file and its copies inside

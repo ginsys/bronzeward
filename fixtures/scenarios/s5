@@ -571,7 +571,7 @@ adoption_refused() {
     and .error.rule == \"guard-value\" and .error.paths == [\"$LABEL_MARK\"]" 200 - GET "/api/v1/operations/$op" "$author" || return 1
   # 1 is the only clean answer: 0 found a secret, and 2 read no pattern file or no body.
   n=0
-  grep --quiet --fixed-strings --file=<(printf '%s\n' "$secret") --file="$STATE/scan-patterns.txt" -- "$EV/last.body" || n=$?
+  grep --quiet --fixed-strings --file=<(printf '%s\n' "$secret") --file="$STATE/scan-patterns.txt" --file=<(leak_shape) -- "$EV/last.body" || n=$?
   [ "$n" = 1 ] || {
     say "s5: the refused drift adoption's problem holds a secret or could not be scanned (grep exit $n)"
     return 1
