@@ -42,6 +42,21 @@ func TestOnceWriteIsSentOnce(t *testing.T) {
 		{"a talos-access-unavailable 503", func(w http.ResponseWriter) {
 			problemAnswer(w, 503, "talos-access-unavailable", `,"detail":"`+detail+`"`)
 		}, false, "talos-access-unavailable", detail},
+		// The refusals the route decides before it stores anything, one row per listed code
+		// (preStoreCodes), each a plain refusal; and the 4xx the list leaves out, each unknown.
+		{"an invalid-request 400", func(w http.ResponseWriter) { problemAnswer(w, 400, "invalid-request", `,"detail":"`+detail+`"`) }, false, "invalid-request", detail},
+		{"an unauthenticated 401", func(w http.ResponseWriter) { problemAnswer(w, 401, "unauthenticated", "") }, false, "unauthenticated", ""},
+		{"an identity-revoked 403", func(w http.ResponseWriter) { problemAnswer(w, 403, "identity-revoked", `,"detail":"`+detail+`"`) }, false, "identity-revoked", detail},
+		{"a not-found 404", func(w http.ResponseWriter) { problemAnswer(w, 404, "not-found", `,"detail":"`+detail+`"`) }, false, "not-found", detail},
+		{"a conflict that names no record", func(w http.ResponseWriter) { problemAnswer(w, 409, "conflict", `,"detail":"`+detail+`"`) }, false, "conflict", detail},
+		{"a recovery-mode-active 409", func(w http.ResponseWriter) { problemAnswer(w, 409, "recovery-mode-active", `,"detail":"`+detail+`"`) }, false, "recovery-mode-active", detail},
+		{"an idempotency-key-required 428", func(w http.ResponseWriter) {
+			problemAnswer(w, 428, "idempotency-key-required", `,"detail":"`+detail+`"`)
+		}, false, "idempotency-key-required", detail},
+		{"a 409 with a code the client does not know", func(w http.ResponseWriter) { problemAnswer(w, 409, "BWSYNTH-new-error", `,"detail":"`+detail+`"`) }, true, "an attempt may have committed", detail},
+		{"a 400 with a code the client does not know", func(w http.ResponseWriter) { problemAnswer(w, 400, "BWSYNTH-new-error", `,"detail":"`+detail+`"`) }, true, "an attempt may have committed", detail},
+		{"a scope-busy 409", func(w http.ResponseWriter) { problemAnswer(w, 409, "scope-busy", `,"detail":"`+detail+`"`) }, true, "an attempt may have committed", detail},
+		{"a precondition-failed 412", func(w http.ResponseWriter) { problemAnswer(w, 412, "precondition-failed", `,"detail":"`+detail+`"`) }, true, "an attempt may have committed", detail},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fake{epoch: "ep_BWSYNTH-1", post: func(_ int, w http.ResponseWriter, _ *http.Request) { tc.post(w) }}
