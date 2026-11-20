@@ -539,16 +539,29 @@ var operationCases = map[string]func(*testing.T, *watchEnv){
 	"EVT-03": func(t *testing.T, e *watchEnv) {
 		f := e.f
 		// No attempt can be recorded, so the operation stays committed, and a resolution can cancel it
-		// once it is unresolved: cancelled says that nothing was sent.
+		// once it is unresolved: cancelled says that nothing was sent. The executor advances a committed
+		// operation on each heartbeat with a certificate signed again, which comparison 3 refuses and
+		// settles, so only the dispatch's own use-time check may be recorded: every later one fails
+		// before that comparison, whatever the timing.
 		for _, q := range []string{`CREATE FUNCTION bwsynth_no_attempt() RETURNS trigger LANGUAGE plpgsql AS
 				$$BEGIN RAISE EXCEPTION 'BWSYNTH: EVT-03 records no attempt'; END$$`,
-			`CREATE TRIGGER bwsynth_no_attempt BEFORE INSERT ON attempt FOR EACH ROW EXECUTE FUNCTION bwsynth_no_attempt()`} {
+			`CREATE TRIGGER bwsynth_no_attempt BEFORE INSERT ON attempt FOR EACH ROW EXECUTE FUNCTION bwsynth_no_attempt()`,
+			`CREATE FUNCTION bwsynth_one_check() RETURNS trigger LANGUAGE plpgsql AS
+				$$BEGIN
+					IF NEW.kind = 'use-time-check' AND EXISTS (SELECT FROM machine_event e WHERE e.kind = 'use-time-check'
+							AND e.entry->>'plan' = NEW.entry->>'plan') THEN
+						RAISE EXCEPTION 'BWSYNTH: EVT-03 records one use-time check';
+					END IF;
+					RETURN NEW;
+				END$$`,
+			`CREATE TRIGGER bwsynth_one_check BEFORE INSERT ON machine_event FOR EACH ROW EXECUTE FUNCTION bwsynth_one_check()`} {
 			if _, err := f.db.Exec(q); err != nil {
 				t.Fatalf("%s: %v", q, err)
 			}
 		}
 		defer func() {
-			for _, q := range []string{`DROP TRIGGER bwsynth_no_attempt ON attempt`, `DROP FUNCTION bwsynth_no_attempt()`} {
+			for _, q := range []string{`DROP TRIGGER bwsynth_one_check ON machine_event`, `DROP FUNCTION bwsynth_one_check()`,
+				`DROP TRIGGER bwsynth_no_attempt ON attempt`, `DROP FUNCTION bwsynth_no_attempt()`} {
 				if _, err := f.db.Exec(q); err != nil {
 					t.Errorf("%s: %v", q, err)
 				}
