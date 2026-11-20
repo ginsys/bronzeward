@@ -25,6 +25,8 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/resources/cluster"
 	"github.com/siderolabs/talos/pkg/machinery/resources/hardware"
 	"github.com/siderolabs/talos/pkg/machinery/resources/runtime"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Member is one cluster member. SMBIOSUUID and Platform are "" when the member did not answer, or
@@ -161,7 +163,7 @@ func walk(ctx context.Context, talosconfig []byte, contextName, endpoint string,
 	res.Supported = res.Contract != "" && res.Contract == supportedMinor()
 	list, err := safe.StateListAll[*cluster.Member](startCtx, n.api.COSI)
 	if err != nil {
-		if limited && ended(ctx) {
+		if limited && cutBy(ctx, err) {
 			res.Cut = true // the identity was read; the caller's time ran out before the members were listed
 			return res, nil
 		}
@@ -195,13 +197,26 @@ func walk(ctx context.Context, talosconfig []byte, contextName, endpoint string,
 const deadlineTolerance = 100 * time.Millisecond
 
 // ended reports whether the caller's time is up: its context has ended, or its deadline is within
-// deadlineTolerance.
+// deadlineTolerance. It is only for a member that did not answer, where listing the walk as Cut errs on
+// the side of "that member may be reachable"; a failed read goes through cutBy.
 func ended(ctx context.Context) bool {
 	if ctx.Err() != nil {
 		return true
 	}
 	d, ok := ctx.Deadline()
 	return ok && time.Until(d) < deadlineTolerance
+}
+
+// cutBy reports whether err, a failed read, is the caller's cut: its context has ended, or the read failed
+// with a deadline or cancellation code while the caller's deadline is within deadlineTolerance. Any other
+// error is the node's own, however near the deadline is.
+func cutBy(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	code := status.Code(err)
+	timedOut := code == codes.DeadlineExceeded || code == codes.Canceled || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+	return timedOut && ended(ctx)
 }
 
 // version is the Talos tag the dialled node answers.
@@ -228,7 +243,7 @@ func readMemberAt(ctx context.Context, creds *clientconfig.Context, addrs []neti
 		if m.Address == "" {
 			m.Address = a.String()
 		}
-		if ended(ctx) {
+		if ctx.Err() != nil { // strict: an address is still tried while the deadline is near and has not passed
 			return
 		}
 		if read, ok := readMember(ctx, creds, a, m.NodeID); ok {

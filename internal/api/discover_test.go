@@ -366,23 +366,24 @@ func (b *slowBody) Read(p []byte) (int, error) {
 }
 
 // §9.2: the deadline is the whole call's, from the start of the handler, so the read of the request body
-// is part of it. A body that takes 1.5 s with a stalled cluster and a 3 s deadline ends the call at about
-// 3 s, not at 4.5 s.
+// is part of it. A body that takes 3 s with a stalled cluster and a 3 s deadline ends the call at about
+// 3 s, not at 6 s; the 4.5 s ceiling leaves 1.5 s for the setup before the handler (authentication and a
+// database read, about 2 ms where it was measured).
 func TestDiscoveryDeadlineCoversTheBody(t *testing.T) {
 	d := newDiscoveryEnv(t, options{discoverWithin: 3 * time.Second}, 0)
 	ca := newTalosCA(t)
 	n, _ := discoveryNode(t, ca, refusingMembers...)
 	n.StallVersion(true) // the walk waits for the deadline whatever the runner's speed
 	c := discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), n.Endpoint)
-	r := httptest.NewRequest(c.method, c.path, &slowBody{wait: 1500 * time.Millisecond, r: strings.NewReader(c.body)})
+	r := httptest.NewRequest(c.method, c.path, &slowBody{wait: 3 * time.Second, r: strings.NewReader(c.body)})
 	r.Header.Set("Authorization", "Bearer "+c.token)
 	r.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	start := time.Now()
 	d.api.ServeHTTP(rec, r)
 	wantProblem(t, rec, http.StatusServiceUnavailable, "talos-access-unavailable")
-	if took := time.Since(start); took < 2500*time.Millisecond || took > 4*time.Second {
-		t.Fatalf("the call took %v: want it to end at the 3 s deadline counted from the start, not at 4.5 s", took)
+	if took := time.Since(start); took < 2500*time.Millisecond || took > 4500*time.Millisecond {
+		t.Fatalf("the call took %v: want it to end at the 3 s deadline counted from the start, not at 6 s", took)
 	}
 }
 
