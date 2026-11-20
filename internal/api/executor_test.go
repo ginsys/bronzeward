@@ -589,6 +589,62 @@ func TestExecutorAttemptAfterCertificateRenewal(t *testing.T) {
 	}
 }
 
+// A dispatch that commits the plan and then fails short of a refusal at its attempt waits a lease
+// before it is tried again, and the committed operation waits with it: the delay is stored under
+// the plan, and the loop's read of the operation honours it. Within a lease of one hour the loop
+// passes ten times on a 20 ms heartbeat without the operation being advanced, so no new
+// certificate is signed for it and comparison 3 refuses nothing; with a lease of 50 ms the
+// operation is advanced after it, comparison 3 refuses the certificate signed again once, and the
+// operation completes.
+func TestExecutorRetryDelayOfCommittedOperation(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		lease time.Duration
+		waits bool // the operation is not advanced within the passes
+	}{"a lease of one hour": {time.Hour, true}, "a lease of 50 ms": {50 * time.Millisecond, false}} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			xe := newExecEnv(t)
+			var armed atomic.Bool
+			armed.Store(true)
+			life, stop := context.WithCancel(t.Context())
+			idle := make(chan struct{})
+			a := xe.executor(t, life, idle, options{commit: func(tx *sql.Tx) error {
+				var n int
+				if err := tx.QueryRow(`SELECT count(*) FROM attempt`).Scan(&n); err == nil && n > 0 && armed.CompareAndSwap(true, false) {
+					_ = tx.Rollback()
+					return errors.New("the attempt's commit failed")
+				}
+				return tx.Commit()
+			}})
+			a.d.timers.Heartbeat, a.d.timers.Lease = 20*time.Millisecond, c.lease
+			a.startExecutor()
+			defer stopping(a, stop)
+			waitIdle(t, idle, 1)
+			xe.approveThrough(t, a)
+			until(t, a, idle, "the plan is committed", func() bool { return xe.entries(t, "commitment") == 1 })
+			if !c.waits {
+				until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+				if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE kind = 'refusal' AND entry->>'comparison' = '3'
+					AND entry->>'cause' = 'the use-time check used another certificate than the evidence'`); n != 1 {
+					t.Fatalf("%d comparison 3 refusals for the renewed certificate; want 1", n)
+				}
+				return
+			}
+			waitIdle(t, idle, 10) // ten heartbeats of the loop with the lease still running
+			if s := xe.opState(t); s != "committed" {
+				t.Errorf("the operation is %s; want committed, not advanced within the lease", s)
+			}
+			if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE kind = 'use-time-check' AND entry->>'operation' IS NOT NULL`); n != 0 {
+				t.Errorf("%d use-time checks recorded for the operation within the lease; want none", n)
+			}
+			if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE kind = 'refusal'`); n != 0 {
+				t.Errorf("%d refusals recorded within the lease; want none", n)
+			}
+		})
+	}
+}
+
 // Where revokeAtCommitment places the approval's revocation.
 const (
 	// revokeAfter revokes once the commitment has committed (DS row 004).
