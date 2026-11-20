@@ -872,10 +872,13 @@ s6web() {
   local t0=$SECONDS c i p ev op
   task=s6web log=$part/setup-s6web.log
   : >"$log"
+  # T1's setup first, as in the session order: it migrates the schema and starts A, which waits for
+  # the migration, so the restart below times out on a fixture that only session start has made.
+  # s1 seeds the token itself.
+  t1 >>"$log" 2>&1 || die "setup s6web: t1 failed; its output is in $log"
   trap handback EXIT
   set_issuer fixture
   stage restart_a
-  [ -s "$STATE/automation-token" ] || stage "$bin/seed"
   scenario s1 pass
   scenario s3 handover
   scenario s2 pass
