@@ -149,7 +149,8 @@ func (a *API) executorPass(ctx context.Context, st *executorState) bool {
 		return step("operations", err)
 	}
 	for _, op := range held {
-		if time.Now().Before(st.retry[op.id]) {
+		// A dispatch that failed after its commitment stored its delay under the plan.
+		if time.Now().Before(st.retry[op.id]) || time.Now().Before(st.retry[op.plan]) {
 			continue
 		}
 		delete(st.retry, op.id)
