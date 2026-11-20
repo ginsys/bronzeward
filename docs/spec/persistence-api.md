@@ -781,8 +781,9 @@ A machine may carry a name, an operator's label for finding it **(choice §17.43
 in the database and is not part of any configuration, release or plan.
 
 - **Grammar.** 1 to 63 characters: lowercase `a-z`, digits and the hyphen, neither the first nor
-  the last character a hyphen. A name is therefore always a valid DNS hostname label, and no
-  identifier (§2) holds an underscore, so a name never reads as one. Uppercase is not folded to
+  the last character a hyphen. A name is therefore always a valid DNS hostname label, and since
+  every identifier (§2) holds an underscore after its prefix and a name never does, a name never
+  reads as an identifier. Uppercase is not folded to
   lowercase, because a stored name that differs from the typed one is a second spelling for one
   name: it is a malformed body, `400 invalid-request`, with nothing committed.
 - **Unique within a cluster**, by a partial unique index on the machine's cluster and name over the
@@ -813,7 +814,7 @@ in the database and is not part of any configuration, release or plan.
   cannot be erased, and there is no retention rule beyond that of the timeline, as for a cluster's
   name. The grammar does not stop a person's name (`annas-laptop`): operators should not put
   personal names in it. A principal's `display` is different: it is the identity provider's claim,
-  refreshed by each admitted request of the subject and kept apart from every record (§10, choice
+  refreshed by each admitted mutating request of the subject and kept apart from every record (§10, choice
   §17.40).
 - **Roles.** `author`, human only (§10.3), as inventory and the endpoint route.
 
@@ -4893,7 +4894,8 @@ design and evidence do not settle the question. Each is marked in place as
     each client (a file for the CLI, browser storage for the web), which splits
     one fact between devices, shows a second browser none and does not survive a
     restore; a name composed by the client from the cluster name, endpoint and a
-    short node ID, which is what the tables show today; the hostname read from the
+    short node ID, which repeats what the tables show beside the identifier and
+    is no name an operator chose; the hostname read from the
     rendered configuration of the applied or desired release, which has no
     value before a first publish, costs a review read for each
     machine and is not unique. A route that clears the name, or `name: null` on
