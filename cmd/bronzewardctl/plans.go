@@ -396,7 +396,7 @@ func (e *env) stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.Mach
 		lines = append(lines, "Approved, but the plan names no approval.")
 	} else if err := getJSON(c, "/approvals/"+url.PathEscape(*p.Approval), &a); err != nil {
 		lines = append(lines, sf("Approved by %s, which cannot be read: %v", *p.Approval, err))
-	} else if e.preload(c, a.Approver.Principal); a.Epoch != c.Context.LastEpoch {
+	} else if e.preload(c, a.Approver.Principal); a.Epoch != c.Context.LastEpoch { // the names read counts: it may show a newer epoch
 		return []string{sf("Approved by %s (%s) in epoch %s. This approval is from before the last recovery entry and authorizes nothing; "+
 			"an approver may approve again: bronzewardctl approve ", e.who(a.Approver.Principal), a.Approver.Role, a.Epoch) + client.ShellWord(p.Id), again}
 	} else {

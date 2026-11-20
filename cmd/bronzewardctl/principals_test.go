@@ -56,6 +56,7 @@ type principalFake struct {
 	timeline string             // the answer of GET /machines/mch_a/timeline
 	recovery string             // the answer of GET /recovery
 	moved    bool               // GET /principals answers in a new epoch
+	flip     bool               // the first GET /principals answers in a new epoch and the next in the old one
 }
 
 func pid(i int) string {
@@ -90,7 +91,7 @@ func (f *principalFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/principals":
 		ids := r.URL.Query()["id"]
 		f.calls = append(f.calls, ids)
-		if f.moved {
+		if f.moved || f.flip && len(f.calls) == 1 {
 			w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2")
 		}
 		if f.failRead {
@@ -329,5 +330,16 @@ func TestPrincipalNamesInRecoveryStatus(t *testing.T) {
 	code, out, errOut = runCtl(t, "recovery", "status")
 	if code == 0 || out != "" || !strings.Contains(errOut, "the epoch changed from") {
 		t.Errorf("a restore seen by the names read: exit %d, out\n%s\nerr\n%s", code, out, errOut)
+	}
+
+	// The entry's and the exit's names are two reads: the first sees a new epoch and the second the old
+	// one again, which leaves the epoch equal and the moves counted.
+	f = principalServer(t, nil)
+	f.recovery = fmt.Sprintf(`{"epoch":"ep_BWSYNTH-1","recoveryMode":false,"entry":{"enteredBy":%q,"enteredAt":"2026-11-01T08:40:00Z",`+
+		`"stoppedAt":"2026-11-01T08:31:00Z","reason":"drill","restored":[]},"exit":{"exitedBy":%q,"at":"2026-11-01T09:00:00Z","act":"act_x"},"scopes":[]}`, pid(0), pid(4))
+	f.flip = true
+	code, out, errOut = runCtl(t, "recovery", "status")
+	if code == 0 || out != "" || !strings.Contains(errOut, "the epoch changed from 'ep_BWSYNTH-1' and changed back") {
+		t.Errorf("a move and a move back: exit %d, out\n%s\nerr\n%s", code, out, errOut)
 	}
 }
