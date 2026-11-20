@@ -32,6 +32,7 @@ var titles = map[string]string{
 	"not-implemented":           "This route's handler has not landed yet",
 	"transient-conflict":        "The request kept conflicting with others",
 	"dependency-unavailable":    "A dependency is unavailable",
+	"name-in-use":               "Another machine of the cluster holds this name",
 	"machine-identity-mismatch": "The node read is not the recorded machine",
 	"talos-access-unavailable":  "The machine could not be read through its cluster's Talos access",
 }

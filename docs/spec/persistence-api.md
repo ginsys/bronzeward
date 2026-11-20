@@ -228,7 +228,7 @@ statement.
 | Entity | Kind | Holds | Owner of semantics |
 | --- | --- | --- | --- |
 | Cluster | mutable, revisioned | name, endpoint, Talos cluster ID (unique, §7.3), contract, status | this contract |
-| Machine | mutable, revisioned | `mch` id, identity key: its SMBIOS UUID or, for a machine that reports none, its Talos node ID, fixed at inventory (unique, §7.3), hardware evidence, cluster membership, an optional name, unique within the cluster (§3.5; not served yet: revision 10), Talos endpoint (§3.3), platform mode: `metal`, `container` or `cloud`, required at inventory with no default and fixed there, the mode its configuration validates in and its release machines record (compilation §6 step 8; choice §17.32), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
+| Machine | mutable, revisioned | `mch` id, identity key: its SMBIOS UUID or, for a machine that reports none, its Talos node ID, fixed at inventory (unique, §7.3), hardware evidence, cluster membership, an optional name, unique within the cluster (§3.5), Talos endpoint (§3.3), platform mode: `metal`, `container` or `cloud`, required at inventory with no default and fixed there, the mode its configuration validates in and its release machines record (compilation §6 step 8; choice §17.32), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
 | MachineEndpointChange | immutable | a machine's previous Talos endpoint and new one, who changed it, role, epoch, time (§3.3) | this contract |
 | FirstKeyAct | immutable | a cluster's first-key supply or replacement: the cluster, the kind, whether it replaced a key, the CA certificate's fingerprint, the CA key's version identity (path, version, `created_time`), who, role, epoch, time; never a value (§3.4) | this contract |
 | Fragment | mutable head | name, layer, scope (a cluster or the library), pointer to the head revision | this contract |
@@ -778,11 +778,9 @@ there.
 ### 3.5 A machine's name
 
 A machine may carry a name, an operator's label for finding it **(choice §17.43)**. It is stored
-in the database and is not part of any configuration, release or plan. **Nothing here is served
-yet.** The table of API revisions in §9.1 lists served revisions only, and a test holds it equal to
-the server's own, so the row for this change is added with the code: revision 10 adds `name` on a
-machine and on `POST /machines`, the route `POST /machines/{id}/names`, the `name-change` timeline
-entry and the `name-in-use` problem code.
+in the database and is not part of any configuration, release or plan. It is served from API
+revision 10 (§9.1), which adds `name` on a machine and on `POST /machines`, the route
+`POST /machines/{id}/names`, the `name-change` timeline entry and the `name-in-use` problem code.
 
 - **Grammar.** 1 to 63 characters: lowercase `a-z`, digits and the hyphen, neither the first nor
   the last character a hyphen. A name is therefore always a valid DNS hostname label, and since
@@ -794,7 +792,7 @@ entry and the `name-in-use` problem code.
   machines that have one (§7.3); two clusters may use the same name. A request that would give a
   name another machine of the cluster holds is `409 name-in-use` (§9.4), a code of its own, naming
   that machine. It is not `conflict`, which on `POST /machines` already means an identity key
-  that is recorded and names the existing machine (`internal/api/inventory.go:313`): a client that
+  that is recorded and names the existing machine (`internal/api/inventory.go:321`): a client that
   adopts the machine a `conflict` names (client contracts, `cluster onboard`) must not read a name
   clash as an existing node, and tells the two apart by the code. Where both hold, the identity
   key's `conflict` is answered first.
@@ -2139,6 +2137,7 @@ API revisions:
 | 7 | `GET /import-base-revisions/{id}/document` (§9.2, choice §17.41) |
 | 8 | `POST /clusters/{id}/first-keys` (§9.2, §3.4) |
 | 9 | `serial` and `notAfter` in the `access` object of an observation (§9.2, §3.3) |
+| 10 | `name` on a machine and on `POST /machines`, `POST /machines/{id}/names`, the `name-change` timeline entry and the `name-in-use` problem code (§3.5, choice §17.43) |
 
 ### 9.2 Resources and routes
 
@@ -2168,9 +2167,9 @@ idempotency and conflict behavior.
 | `GET /import-base-revisions/{id}/document` (the sanitized document of an import base revision, §3.2; no query, no ETag; API revision 7): `id`; `machine`; `document`, the stored text. Nothing else: no declarations, digest, baseline or generation path. The caller must be the revision's `author`, the import's source must be `document` (a file a person provided), and the import must have been continued by that same author after an operator review, so a second `author`, a drift adoption, a source `machine` import, a claim with no recorded source, an import made without review and one continued by another author read nothing; the document can still hold a value no one has marked. The read records no act and the server stores and logs nothing of the answer **(choice §17.41)** | 200, `Cache-Control: no-store`, also on every refusal; `403 forbidden` with `rule: not-the-importer` for another author, whatever the review state; `409 conflict` with `rule: import-not-reviewed` for the importer when the record does not show a file import they continued themselves; `404 not-found` | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/continuations`, `/takeovers` (a further mark on a paused ingestion and its continuation into the draft transaction, compilation §3.6; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation; a mark's also the owner generation it took (§9.3) | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2, a paused ingestion's included), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
-| `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3, and an optional `name`, §3.5; the `name` is not served yet: revision 10) | 201 | `author`, human only (§10.3) |
+| `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3, and an optional `name`, §3.5) | 201 | `author`, human only (§10.3) |
 | `POST /machines/{id}/talos-endpoints` (replace a machine's Talos endpoint, §3.3) | 201 | `author`, human only (§10.3) |
-| `POST /machines/{id}/names` (replace a machine's name, §3.5; not served yet: it is revision 10 when it lands) | 201 | `author`, human only (§10.3) |
+| `POST /machines/{id}/names` (replace a machine's name, §3.5; API revision 10) | 201 | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
@@ -3095,7 +3094,7 @@ counter, not the ETag token, so the token is not named.
 | 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose identity key is not the machine record's or whose Talos cluster ID is not its cluster record's, whose identity read failed, or whose SMBIOS UUID is absent for a machine recorded by one or present for a machine recorded by node ID (§3.3); its claim is abandoned and nothing read is kept. The body names the machine and, when the node's identity differed, a `cause` member with the field: `smbios-uuid`, `node-id` or `cluster-id`, a closed set of field names and never a value. A failed identity read has no `cause` member |
 | 409 | `ingestion-abandoned` | the error of a failed `ingest` operation whose staging claim was abandoned: by an operator's abandonment, by the sweep at the claim's absolute expiry or, under transient staging, at its lease lapse, by an ingestion start of the same draft revision once the claim is due, by a takeover with nothing to decrypt, or by recovery-mode entry (§8.2); the generations it created are orphans (§6.4) |
 | 409 | `recovery-mode-entered` | the error of a failed `publish` operation that was `queued` or `running` when recovery-mode entry committed (§8.2, §12.2); nothing it compiled was published |
-| 409 | `name-in-use` | a machine name that another machine of the cluster holds (`POST /machines`, `POST /machines/{id}/names`, §3.5; not served yet: revision 10); the body's `machine` names that machine |
+| 409 | `name-in-use` | a machine name that another machine of the cluster holds (`POST /machines`, `POST /machines/{id}/names`, §3.5); the body's `machine` names that machine |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry, and plan creation, approval or unfreezing under it after entry (§12.2); only a scope refusal's body carries a `scope` member; a refusal by the recovery-start flag concerns no scope and carries none |
 | 412 | `precondition-failed` | `If-Match` does not match |

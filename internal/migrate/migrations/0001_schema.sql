@@ -183,6 +183,9 @@ CREATE TABLE machine (
   smbios_uuid      uuid,
   serial           text CHECK (serial IS NULL OR (btrim(serial) <> '' AND octet_length(serial) <= 128
                      AND serial !~ '[[:cntrl:]]')),
+  -- An operator's label for the machine (persistence-api.md §3.5): a DNS hostname label, unique within
+  -- its cluster by the partial index below. It is set at inventory or replaced by a name-change entry.
+  name             text CONSTRAINT machine_name CHECK (name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'),
   frozen           boolean NOT NULL DEFAULT false,
   scope_state      text NOT NULL CHECK (scope_state IN ('normal', 'pre-restore-unaccounted', 'unresolved',
                      'blocked', 'ready', 'released')),
@@ -199,6 +202,8 @@ CREATE TABLE machine (
 -- installation.
 CREATE UNIQUE INDEX machine_smbios_uuid ON machine (smbios_uuid);
 CREATE UNIQUE INDEX machine_talos_node_id ON machine (talos_node_id);
+-- A name is unique within its cluster, over the machines that have one (§3.5, §7.3).
+CREATE UNIQUE INDEX machine_cluster_name ON machine (cluster, name) WHERE name IS NOT NULL;
 
 -- A machine's identity and cluster, and a cluster's Talos cluster ID, are fixed when recorded
 -- (choice §10.26 of execution and recovery), so a plan binds them by naming its machine (its §2):
@@ -555,7 +560,14 @@ CREATE TABLE machine_event (
              'approval-revocation', 'identity-revocation', 'plan-cancellation', 'plan-expiry', 'observation-started',
              'observation', 'adoption', 'applied-change', 'commitment', 'refusal', 'attempt', 'operation-state',
              'response', 'accounting', 'classification', 'ownership-transition', 'use-time-check', 'freeze',
-             'unfreeze', 'drift', 'scope-state')),
+             'unfreeze', 'drift', 'scope-state', 'name-change')),
+  -- A name change holds the machine's previous name (JSON null when it had none), its new name and
+  -- who changed it, in which role (persistence-api.md §3.5).
+  CONSTRAINT machine_event_name_change CHECK (kind <> 'name-change'
+    OR (entry ? 'previous' AND jsonb_typeof(entry->'previous') IN ('string', 'null')
+      AND jsonb_typeof(entry->'new') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'principal') IS NOT DISTINCT FROM 'string'
+      AND jsonb_typeof(entry->'role') IS NOT DISTINCT FROM 'string')),
   -- A scope state change names the states it moved between and its cause (execution and recovery
   -- §7.4): an entry's marks every scope pre-restore unaccounted.
   CONSTRAINT machine_event_scope_state CHECK (kind <> 'scope-state'
