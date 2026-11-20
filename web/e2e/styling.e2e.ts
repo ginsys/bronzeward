@@ -35,12 +35,14 @@ const inject = () =>
   browser.execute(() => {
     const seen: string[] = [];
     (globalThis as unknown as { g969: string[] }).g969 = seen;
-    // Every violation, with where it came from. Only `style-src-attr` is left out: Safari 27.2 reports
-    // one on this page with no source file, line 0 and an empty sample, at main without Oat or this
-    // stylesheet as well (probe run 44716396716), so Oat did not bring it and the case is about image
-    // loads (ginsys/bronzeward#975).
+    // Every violation, with where it came from. Only one shape is left out: Safari 27.2 reports a
+    // `style-src-attr` violation on this page with no source file, line 0 and an empty sample, at main
+    // without Oat or this stylesheet as well (probe run 44716396716), so Oat did not bring it
+    // (ginsys/bronzeward#975). A real `style` attribute is reported with a sample or a source, so it is
+    // kept, and the case "a style attribute is reported" proves that where the browser names it.
     document.addEventListener("securitypolicyviolation", (e) => {
-      if (e.effectiveDirective !== "style-src-attr") seen.push(`${e.effectiveDirective} ${e.blockedURI} ${e.sourceFile}:${e.lineNumber} ${JSON.stringify(e.sample)}`);
+      const sourceless = e.effectiveDirective === "style-src-attr" && e.sourceFile === "" && e.lineNumber === 0 && e.sample === "";
+      if (!sourceless) seen.push(`${e.effectiveDirective} ${e.blockedURI} ${e.sourceFile}:${e.lineNumber} ${JSON.stringify(e.sample)}`);
     });
     const box = document.createElement("div");
     const mk = <K extends keyof HTMLElementTagNameMap>(tag: K, id: string, text = "") => {
@@ -136,6 +138,18 @@ describe("the styled client", () => {
       document.body.append(img);
     });
     await browser.waitUntil(async () => (await seen()).length > 0, { timeout: 5_000, timeoutMsg: "the data: image raised no securitypolicyviolation, so the zero above is not a reading" });
+  });
+
+  it("a style attribute is reported by the policy, so the listener's one omission does not hide it", async () => {
+    // `style-src 'self'` refuses a style attribute, and the client's markup has none (ginsys/bronzeward#973
+    // relies on that). Safari is left out: it reports no source for a style attribute either, which is the
+    // shape the listener drops, so its reading proves nothing about the filter.
+    if ((browser.capabilities as { browserName?: string }).browserName?.toLowerCase().includes("safari")) return;
+    await browser.execute(() => document.getElementById("g969-button")!.setAttribute("style", "color: red"));
+    await browser.waitUntil(
+      async () => (await browser.execute(() => (globalThis as unknown as { g969: string[] }).g969)).some((v) => v.startsWith("style-src-attr")),
+      { timeout: 5_000, timeoutMsg: "a style attribute raised no style-src-attr violation the listener kept" },
+    );
   });
 
   it("a disabled button keeps its contrast", async () => {
