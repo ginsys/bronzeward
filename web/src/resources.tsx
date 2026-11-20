@@ -21,7 +21,7 @@ import { RecoveryConsole } from "./recovery.tsx";
 import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
-import { MachineById, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useMachineText } from "./titles.tsx";
+import { type Held, MachineById, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useMachineText } from "./titles.tsx";
 
 type S = components["schemas"];
 type Col<T> = readonly [string, (t: T) => ReactNode];
@@ -406,17 +406,21 @@ export function PlanItem({ id }: { id: string }) {
   const reread = useCallback(() => setN((x) => x + 1), []);
   const [answers, setAnswers] = useState(0);
   const settled = useCallback(() => setAnswers((x) => x + 1), []);
+  // An approved plan reads its machine itself (and again at each poll): its heading and target name the
+  // machine from that body and ask the titles' store for nothing (A8 rule 2).
+  const [machine, setMachine] = useState<S["MachineBody"]>();
+  const held = (p: S["PlanBody"]): Held | undefined => (p.state === "approved" ? { body: machine?.id === p.machine ? machine : undefined } : undefined);
   return (
-    <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" n={n} onSettled={settled} title={(p) => (p === undefined ? `Plan ${short(id)}` : <PlanHeading id={id} p={p} />)}>
+    <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" n={n} onSettled={settled} title={(p) => (p === undefined ? `Plan ${short(id)}` : <PlanHeading id={id} p={p} {...(held(p) !== undefined && { machine: held(p)! })} />)}>
       {(p) => {
         const { validation: v, dryRun, baseline } = p.evidence;
         return (
           <>
             {proposed && p.state === "proposed" && <Status testid="plan-proposed">{PROPOSED}</Status>}
-            <PlanState p={p} reread={reread} answers={answers} />
+            <PlanState p={p} reread={reread} answers={answers} onMachine={setMachine} />
             <Fields rows={[
               ["State", `${p.state}; expires ${when(p.expiresAt)}`],
-              ["Target", <>machine <MachineById id={p.machine} />, cluster <Id id={p.cluster} />, route {p.route}</>],
+              ["Target", <>machine <MachineById id={p.machine} {...(held(p) !== undefined && { held: held(p)! })} />, cluster <Id id={p.cluster} />, route {p.route}</>],
               ["Operation", p.mode === null ? p.operation : `${p.operation}, mode ${p.mode}`],
               ["Release", <><Id id={p.release} /> (the machine's Desired when planned: <Id id={p.desiredRelease} />)</>],
               ["Bound to", <>assignment revision <Id id={p.assignmentRevision} />, baseline revision {p.baselineRevision ?? "none"}, drift record {p.driftRecord ?? "none"}, epoch {p.epoch}</>],

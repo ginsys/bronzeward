@@ -20,10 +20,10 @@ export function useBody<T>(path: string | undefined): T | null | undefined {
   // read under another generation is not kept.
   const gen = `${view}|${again}`;
   useEffect(() => {
-    if (path === undefined) return;
-    // A refusal the read meets that the shell must act on ends the page as any read's does.
+    // A refusal the read meets that the shell must act on ends the page as any read's does. With no path
+    // nothing is asked, and the generation still advances, so a view that asks nothing forgets as any other.
     const live = undropped();
-    bodies.want(gen, [path], (res) => void settle(res, () => {}, live, () => false));
+    bodies.want(gen, path === undefined ? [] : [path], (res) => void settle(res, () => {}, live, () => false));
   }, [bodies, gen, path, settle, undropped]);
   const snapshot = () => (path === undefined ? undefined : bodies.get(gen, path));
   return useSyncExternalStore(bodies.subscribe, snapshot, snapshot) as T | null | undefined;
@@ -41,11 +41,13 @@ export function useMachineText(id: string | null | undefined): string | undefine
 // A machine as a link: its name as the text where it has one, the shortened identifier until then and
 // when it has none, and the whole identifier as the title attribute. An identifier of another shape is
 // shown as any other is, with no read.
-export function MachineById({ id, none = "none" }: { id: string | null | undefined; none?: string }): ReactNode {
+// A view that reads the machine itself passes it as `held` (its body, once read): nothing is asked.
+export type Held = { body: S["MachineBody"] | undefined };
+export function MachineById({ id, none = "none", held }: { id: string | null | undefined; none?: string; held?: Held }): ReactNode {
   const asked = id != null && viewOf(id) === "machines";
-  const m = useBody<S["MachineBody"]>(asked ? at("machines", id) : undefined);
+  const m = useBody<S["MachineBody"]>(asked && held === undefined ? at("machines", id) : undefined);
   if (id == null) return none;
-  return asked ? <MachineRef id={id} name={m?.name} /> : <Id id={id} />;
+  return asked ? <MachineRef id={id} name={(held === undefined ? m : held.body)?.name} /> : <Id id={id} />;
 }
 
 // A title wants the body it is built on: held, as a list row holds it, or read by its identifier.
@@ -60,10 +62,11 @@ export function useReleaseTitle(id: string | undefined, held?: S["ReleaseBody"])
   return r === undefined ? undefined : releaseTitle(r, d);
 }
 
-export function usePlanTitle(id: string | undefined, held?: S["PlanBody"]): string | undefined {
+export function usePlanTitle(id: string | undefined, held?: S["PlanBody"], machineHeld?: Held): string | undefined {
   const p = useOwn("plans", id, held);
   const release = useReleaseTitle(p?.release);
-  const machine = useMachineText(p?.machine);
+  const read = useMachineText(machineHeld === undefined ? p?.machine : undefined);
+  const machine = machineHeld === undefined ? read : machineHeld.body === undefined || p === undefined ? undefined : machineText(p.machine, machineHeld.body.name);
   return p === undefined || machine === undefined ? undefined : planTitle(p, machine, release);
 }
 
@@ -91,7 +94,7 @@ export const OperationRef = ({ o }: { o: S["OperationBody"] }) => <Ref to={at("o
 
 export const ReleaseHeading = ({ id, r }: { id: string; r: S["ReleaseBody"] }) =>
   <Titled id={id} what="Release" text={useReleaseTitle(id, r)} fallback={`Release ${short(id)}`} />;
-export const PlanHeading = ({ id, p }: { id: string; p: S["PlanBody"] }) =>
-  <Titled id={id} what="Plan" text={usePlanTitle(id, p)} tail={` (${p.state})`} fallback={`Plan ${short(id)}: ${p.state}`} />;
+export const PlanHeading = ({ id, p, machine }: { id: string; p: S["PlanBody"]; machine?: Held }) =>
+  <Titled id={id} what="Plan" text={usePlanTitle(id, p, machine)} tail={` (${p.state})`} fallback={`Plan ${short(id)}: ${p.state}`} />;
 export const OperationHeading = ({ id, o }: { id: string; o: S["OperationBody"] }) =>
   <Titled id={id} what="Operation" text={useOperationTitle(o)} tail={` (${o.kind}, ${o.state})`} fallback={`Operation ${short(id)}: ${o.kind}, ${o.state}`} />;
