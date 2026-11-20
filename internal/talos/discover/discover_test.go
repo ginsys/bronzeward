@@ -17,6 +17,7 @@ import (
 	"github.com/cosi-project/runtime/pkg/resource"
 	"github.com/ginsys/bronzeward/internal/talos/talostest"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // stand is a stand-in cluster of two answering members and the addresses their Members entries
@@ -253,8 +254,7 @@ func TestDiscoverLimitedStopsDialling(t *testing.T) {
 // TestEnded: the caller's time is up when its context has ended or its deadline is within the tolerance,
 // as a node's DeadlineExceeded can arrive before the caller's own timer has set ctx.Err().
 func TestEnded(t *testing.T) {
-	near, cancelNear := context.WithTimeout(t.Context(), deadlineTolerance/4)
-	defer cancelNear()
+	near := nearDeadline(t)
 	far, cancelFar := context.WithTimeout(t.Context(), time.Hour)
 	defer cancelFar()
 	gone, cancelGone := context.WithCancel(t.Context())
@@ -266,6 +266,71 @@ func TestEnded(t *testing.T) {
 		if got := ended(c.ctx); got != c.want {
 			t.Errorf("%s: ended is %t, want %t", name, got, c.want)
 		}
+	}
+}
+
+// nearCtx is a context whose deadline is a quarter of the tolerance away while its Err stays nil for as
+// long as the test runs, so no pause of the runner can turn it into one that has ended: the state a node's
+// DeadlineExceeded meets when it arrives before the caller's own timer.
+type nearCtx struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c nearCtx) Deadline() (time.Time, bool) { return c.deadline, true }
+
+func nearDeadline(t *testing.T) context.Context {
+	t.Helper()
+	return nearCtx{t.Context(), time.Now().Add(deadlineTolerance / 4)}
+}
+
+// TestCutBy: a failed read is the caller's cut when the context has ended, or when it failed with a
+// deadline or cancellation code while the deadline is within the tolerance. A node's own error is not,
+// however near the deadline.
+func TestCutBy(t *testing.T) {
+	near := nearDeadline(t)
+	far, cancelFar := context.WithTimeout(t.Context(), time.Hour)
+	defer cancelFar()
+	gone, cancelGone := context.WithCancel(t.Context())
+	cancelGone()
+	deadline, denied := status.Error(codes.DeadlineExceeded, "x"), status.Error(codes.PermissionDenied, "x")
+	for name, c := range map[string]struct {
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		"ended, any error":                  {gone, denied, true},
+		"near, deadline code":               {near, deadline, true},
+		"near, context deadline":            {near, context.DeadlineExceeded, true},
+		"near, the node's own error":        {near, denied, false},
+		"far, deadline code (a node's own)": {far, deadline, false},
+		"no deadline, deadline code":        {t.Context(), deadline, false},
+	} {
+		if got := cutBy(c.ctx, c.err); got != c.want {
+			t.Errorf("%s: cutBy is %t, want %t", name, got, c.want)
+		}
+	}
+}
+
+// TestDiscoverLimitedDialsWhileTheDeadlineIsNear: an address is still dialled when the deadline is near and
+// has not passed; only a context that has ended stops the dialling.
+func TestDiscoverLimitedDialsWhileTheDeadlineIsNear(t *testing.T) {
+	c := newCluster(t)
+	var dialled []string
+	old := memberEndpoint
+	defer func() { memberEndpoint = old }()
+	memberEndpoint = func(a netip.Addr) string {
+		dialled = append(dialled, a.String())
+		return c.closed
+	}
+	creds, _, err := credentials(c.p.Talosconfig(c.a.Endpoint, "", ""), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Member{NodeID: "n1"}
+	readMemberAt(nearDeadline(t), creds, []netip.Addr{netip.MustParseAddr("10.0.0.1")}, &m)
+	if !slices.Equal(dialled, []string{"10.0.0.1"}) {
+		t.Fatalf("addresses dialled %v; want the address tried with 25 ms of the deadline left", dialled)
 	}
 }
 
