@@ -88,15 +88,18 @@ func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
 			attempts = sf(", after %d attempt%s", *e.Attempts, map[bool]string{false: "s"}[*e.Attempts == 1])
 		}
 		lines := []string{sf("%s%s: %s%s.", state, stamp, cause, attempts)}
-		return append(lines, endNextStep(o.State, o.Id, plan, machine)), false
+		if next := endNextStep(o.Kind, o.State, plan, machine); next != "" {
+			lines = append(lines, next)
+		}
+		return lines, false
 	case "unresolved":
 		return []string{unresolvedGuidance(o.Attempts)}, false
 	}
 	return []string{sf("Operation %s is %s.", o.Id, o.State)}, false
 }
 
-// endNextStep is the next safe step after an operation that ended without success.
-func endNextStep(state, op, plan, machine string) string {
+// endNextStep is the next safe step after an operation that ended without success, "" for a pair with none.
+func endNextStep(kind, state, plan, machine string) string {
 	switch {
 	case state == "cancelled":
 		// plan show is no way on: a plan whose operation was cancelled before any attempt stays committed,
@@ -110,9 +113,10 @@ func endNextStep(state, op, plan, machine string) string {
 		}
 		return sf("Nothing more is sent for this plan. Create a new plan: %s", createWords("<release>", machineWord, "<operation>"))
 	case plan == "", machine == "" && state != "rejected":
-		// Without a plan, or without the machine the last case names, there is no command to give; the
-		// operation is the one thing to read (machine show '' would be no command).
-		return sf("Read it: bronzewardctl operation show %s", client.ShellWord(op))
+		// Without a plan, or without the machine the last case names, there is no command to give: the
+		// next step is the one the pair's table gives (A10), never a line that sends the reader back to the
+		// operation they are reading.
+		return operationNextStep(kind, state)
 	case state == "rejected":
 		return sf("The node refused the configuration as invalid, so it applied nothing. Review the plan's release before a new plan: bronzewardctl plan show %s", client.ShellWord(plan))
 	}

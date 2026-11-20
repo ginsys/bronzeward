@@ -430,10 +430,16 @@ func (e *env) operationCmd(args []string) error {
 		return err
 	}
 	if v == "list" {
-		return listWith(e, l, "/operations", values(f), nil, nil,
+		return listWith(e, l, "/operations", values(f), nil,
+			func(o *apitypes.OperationBody) []string {
+				if o.CreatedBy == nil {
+					return nil
+				}
+				return []string{o.CreatedBy.Principal}
+			},
 			func(c *client.Client, ops []apitypes.OperationBody) { e.titleOperations(c, ops...) },
-			"OPERATION\tTITLE\tKIND\tSTATE\tSUBJECT\tCREATED", "", func(w *tabwriter.Writer, o *apitypes.OperationBody) {
-				tf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", o.Id, e.titleCell("operation", o.Id), o.Kind, o.State, subject(o.Subject), when(o.CreatedAt))
+			"OPERATION\tTITLE\tKIND\tSTATE\tSUBJECT\tCREATED\tSTARTED BY", "", func(w *tabwriter.Writer, o *apitypes.OperationBody) {
+				tf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", o.Id, e.titleCell("operation", o.Id), o.Kind, o.State, subject(o.Subject), when(o.CreatedAt), e.startedBy(o, false))
 			})
 	}
 	// A cancelled operation records no cause; its last event holds it. The event is read once and
@@ -444,6 +450,11 @@ func (e *env) operationCmd(args []string) error {
 			e.preload(c, o.CreatedBy.Principal)
 		}
 		e.titleOperations(c, *o)
+		if o.Subject != nil && o.Subject.Plan != nil {
+			if p := heldBody[apitypes.PlanBody](e, titlePath("plans", *o.Subject.Plan)); p != nil {
+				e.preload(c, p.CreatedBy.Principal)
+			}
+		}
 		if e.output == "table" && o.State == "cancelled" {
 			var err error
 			if cause, err = readLastOrStop(c, pos[0], o.State, r.Header.Get("Bronzeward-Epoch")); err != nil {
@@ -460,12 +471,9 @@ func (e *env) operationCmd(args []string) error {
 		if t := e.titleOf("operation", o.Id); t != "" {
 			tf(w, "Title\t%s\n", t)
 		}
+		tf(w, "Now\t%s\n", operationNow(o.Kind, o.State))
 		tf(w, "Subject\t%s\n", subject(o.Subject))
-		by := "the controller"
-		if o.CreatedBy != nil {
-			by = e.who(o.CreatedBy.Principal) + " (" + o.CreatedBy.Role + ")"
-		}
-		tf(w, "Created\t%s by %s\tepoch %s, last event %d\n", when(o.CreatedAt), by, o.Epoch, o.LastEvent)
+		tf(w, "Created\t%s by %s\tepoch %s, last event %d\n", when(o.CreatedAt), e.startedBy(o, true), o.Epoch, o.LastEvent)
 		tf(w, "Result\t%s\n", map[bool]string{true: "none"}[o.Result == nil]+map[bool]string{false: compact(o.Result)}[o.Result == nil])
 		tf(w, "Error\t%s\n", map[bool]string{true: "none"}[o.Error == nil]+map[bool]string{false: compact(o.Error)}[o.Error == nil])
 		if o.Attempts != nil {
@@ -477,6 +485,9 @@ func (e *env) operationCmd(args []string) error {
 		if o.State == "unresolved" || client.Terminal(o.State) {
 			lines, _ := outcome(o, cause)
 			fmt.Fprintln(w, strings.Join(lines, "\n"))
+		}
+		if next := operationNextStep(o.Kind, o.State); next != "" && !endsWithItsOwnNext(o.State) {
+			tf(w, "Next\t%s\n", next)
 		}
 	})
 }
