@@ -467,11 +467,36 @@ func (c *Client) onceAnswer(w *Write, u *Unknown, a attempt, ambiguous bool) err
 		return c.unknown(w, u)
 	case p != nil && a.replayed:
 		return &Blocked{a.err, []string{"This is the stored answer to an earlier attempt with this key: that attempt was refused."}}
-	case p != nil && p.Status < 500 && p.Code() != "epoch-mismatch" && p.Code() != "idempotency-key-reused" && (p.Code() != "conflict" || p.Doc["request"] == nil),
-		p != nil && p.Code() == "talos-access-unavailable":
+	case p != nil && preStoreRefusal(p):
 		return c.after(ambiguous, w, u, a.err)
 	}
 	return c.after(true, w, u, a.err)
+}
+
+// preStoreCodes are the problem codes the first-key route answers before it stores the key, so a
+// write answered by one of them stored nothing (client-contracts §3.2 names each with the line that
+// sends it). Any other code is an unknown outcome, the codes of later routes and of codes the
+// client has not met included.
+var preStoreCodes = map[string]bool{
+	"invalid-request":          true, // a malformed header or body: api.go before the handler
+	"unauthenticated":          true,
+	"identity-revoked":         true,
+	"forbidden":                true, // the role, or a route for humans only
+	"not-found":                true, // no such cluster or route
+	"recovery-mode-active":     true,
+	"idempotency-key-required": true,
+	"validation-failed":        true, // the input, or a rule of the signer, decided in prepare before the write
+	"talos-access-unavailable": true, // the node did not answer or accept the key, decided in prepare before the write
+}
+
+// preStoreRefusal reports whether p is an answer of the route that stored nothing. A conflict is one
+// only without a `request` member: with one it names an earlier request's record, found by the
+// lookup that may follow the store.
+func preStoreRefusal(p *Problem) bool {
+	if p.Code() == "conflict" {
+		return p.Status < 500 && p.Doc["request"] == nil
+	}
+	return preStoreCodes[p.Code()]
 }
 
 // after reports a write that ends without a 2xx: not done, unless an earlier attempt was

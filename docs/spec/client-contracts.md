@@ -211,10 +211,22 @@ and `--talos-context`. The file is read with a size limit, sent once and never c
 printed; a talosconfig is cut to one context first; errors name the route's rule and never quote the
 server's Talos text. It is the one write sent once ([operator experience §5.2](operator-experience.md#52-inventory)):
 each request dials the node, so no answer is repeated as [§8.2](#82-errors) says a write repeats a `503`.
-`talos-access-unavailable` is a refusal that stored nothing (exit 1); every other `503`, a `5xx` and a
-lost answer is an unknown outcome (exit 3), because the route stores the key before it commits the act.
-The refusals of the idempotency lookup (`epoch-mismatch`, a conflict that names the key's record, a
-reused key) are unknown too, since that lookup may follow the store; a failure before any byte goes out is
+The route stores the key before it commits the act, so only a refusal the route decides before the store
+is a refusal that stored nothing (exit 1), and the client names those by problem code: `invalid-request`
+(a header, the query or the body of the request, or the input check: `internal/api/api.go:421-442`,
+`internal/api/tx.go:42-55`), `unauthenticated` and `identity-revoked` (`internal/api/api.go:326-338`),
+`forbidden` (the role, or a route for humans only: `internal/api/api.go:400-408`),
+`idempotency-key-required` (`internal/api/api.go:422`), `recovery-mode-active`
+(`internal/api/api.go:259-261`), `not-found` (no such route or cluster: `internal/api/api.go:252`,
+`internal/api/firstkeys.go:129-136`), `validation-failed` (a rule of the signer on the key, decided
+before the write: `internal/api/firstkeys.go:186`), `talos-access-unavailable` (the node did not answer or
+accept the key, decided before the write: `internal/api/firstkeys.go:188`) and a `conflict` that names no
+earlier request (the key's path moved, nothing written: `internal/api/firstkeys.go:211`). Every other
+answer is an unknown outcome (exit 3): every `5xx`, a lost answer, the refusals of the idempotency
+lookup (`epoch-mismatch`, a conflict that names the key's record, a reused key), which may follow the
+store, and a 4xx with any other code, such as `precondition-failed`, `scope-busy` or a code the client has
+not met. The route sends none of those today, so each reads unknown only to be safe; a rerun replaces the
+key (`replaced: true`), so the cost of the doubt is one repeat. A failure before any byte goes out is
 not repeated, and a `401` is not renewed and resent. A repeat that a refusal answers stays unknown. The server's detail is never printed. Each run takes a
 key of its own, random like every write's ([§8.4](#84-idempotency-and-ambiguous-responses) item 1), so a
 second run supplies the key again and does not replay the first answer; `--idempotency-key`,
