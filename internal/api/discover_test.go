@@ -215,12 +215,13 @@ func TestDiscoveryRuleRefusals(t *testing.T) {
 	for name, c := range map[string]struct {
 		kind, doc, endpoint, rule string
 	}{
-		"garbage machine configuration": {"machine-config", marker, n.Endpoint, "first-key-unusable"},
-		"garbage secrets bundle":        {"secrets-bundle", marker, n.Endpoint, "first-key-unusable"},
-		"garbage talosconfig":           {"talosconfig", marker, n.Endpoint, "first-key-unusable"},
-		"worker configuration":          {"machine-config", workerConfig(ca), n.Endpoint, "first-key-no-ca-key"},
-		"bundle with no key":            {"secrets-bundle", "certs:\n  os:\n    crt: " + b64(ca.Crt) + "\n", n.Endpoint, "first-key-no-ca-key"},
-		"talosconfig at a worker":       {"talosconfig", string(pki.Talosconfig("a:1", "", "")), workerNode.Endpoint, "first-key-endpoint-no-control-plane"},
+		"garbage machine configuration":      {"machine-config", marker, n.Endpoint, "first-key-unusable"},
+		"garbage secrets bundle":             {"secrets-bundle", marker, n.Endpoint, "first-key-unusable"},
+		"garbage talosconfig":                {"talosconfig", marker, n.Endpoint, "first-key-unusable"},
+		"worker configuration":               {"machine-config", workerConfig(ca), n.Endpoint, "first-key-no-ca-key"},
+		"bundle with no key":                 {"secrets-bundle", "certs:\n  os:\n    crt: " + b64(ca.Crt) + "\n", n.Endpoint, "first-key-no-ca-key"},
+		"bundle with a key that cannot sign": {"secrets-bundle", "certs:\n  os:\n    crt: " + b64(ca.Crt) + "\n    key: " + b64([]byte(marker)) + "\n", n.Endpoint, "first-key-unusable"},
+		"talosconfig at a worker":            {"talosconfig", string(pki.Talosconfig("a:1", "", "")), workerNode.Endpoint, "first-key-endpoint-no-control-plane"},
 	} {
 		rec := d.do(d.api, discoveryCall(d.author, c.kind, c.doc, c.endpoint))
 		doc := wantProblem(t, rec, http.StatusUnprocessableEntity, "validation-failed")
@@ -266,7 +267,8 @@ func TestDiscoveryUnreachableAndRefusedKey(t *testing.T) {
 // §9.2: a cluster that lists more than 128 members is 422 validation-failed with rule too-many-members and
 // the limit, before any member is dialled; one at the limit is read whole.
 func TestDiscoveryTooManyMembers(t *testing.T) {
-	d := newDiscoveryEnv(t, options{}, 0)
+	// The members of the case at the limit hang, so that case lasts the deadline: keep it short.
+	d := newDiscoveryEnv(t, options{discoverWithin: 2 * time.Second}, 0)
 	dialled := memberPort(t)
 	ca := newTalosCA(t)
 	members := func(n int) []talostest.Member {
@@ -305,8 +307,9 @@ func TestDiscoveryDeadlineKeepsTheMembersRead(t *testing.T) {
 		talostest.Member{NodeID: "n2", Hostname: "w-1", Addresses: []string{"127.0.0.2"}})
 	start := time.Now()
 	b := decode[discoveryBody](t, d.do(d.api, discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), n.Endpoint)), http.StatusOK)
-	if took := time.Since(start); took > 5*time.Second {
-		t.Fatalf("the call took %v: the deadline did not bound it", took)
+	// The walk waits for the deadline (600 ms) and not for the node timeout (100 ms), and ends at it.
+	if took := time.Since(start); took < 500*time.Millisecond || took > 5*time.Second {
+		t.Fatalf("the call took %v: want the 600 ms deadline to bound it, and the 100 ms node timeout not to", took)
 	}
 	if b.ClusterID != "c-disc" || b.Complete || len(b.Members) != 2 || b.Members[0].Answered || b.Members[1].Answered {
 		t.Fatalf("answer %+v; want the identity, two members unanswered and complete false", b)
@@ -314,6 +317,29 @@ func TestDiscoveryDeadlineKeepsTheMembersRead(t *testing.T) {
 	if !d.logged("complete false") {
 		t.Errorf("the log line does not say the walk was cut: %v", d.logs)
 	}
+}
+
+// §9.2: a deadline that passes after the identity is read and before the member list is, is the identity
+// with no members and complete false, not a 503.
+func TestDiscoveryDeadlineDuringTheMemberList(t *testing.T) {
+	d := newDiscoveryEnv(t, options{discoverWithin: 400 * time.Millisecond}, 0)
+	ca := newTalosCA(t)
+	n, _ := discoveryNode(t, ca, refusingMembers...)
+	n.Stall(talostest.MemberType, true)
+	b := decode[discoveryBody](t, d.do(d.api, discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), n.Endpoint)), http.StatusOK)
+	if b.ClusterID != "c-disc" || b.Complete || len(b.Members) != 0 {
+		t.Fatalf("answer %+v; want the identity, no members and complete false", b)
+	}
+}
+
+// §9.2: an endpoint that gives no cluster ID gives no identity: 503 talos-access-unavailable.
+func TestDiscoveryNoClusterID(t *testing.T) {
+	d := newDiscoveryEnv(t, options{}, 0)
+	ca := newTalosCA(t)
+	n, _ := discoveryNode(t, ca, refusingMembers...)
+	n.SetClusterID(t, "")
+	wantProblem(t, d.do(d.api, discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), n.Endpoint)),
+		http.StatusServiceUnavailable, "talos-access-unavailable")
 }
 
 // §9.2: a deadline that passes before the cluster's identity is read is 503 talos-access-unavailable.
