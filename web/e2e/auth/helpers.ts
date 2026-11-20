@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { $, browser, expect } from "@wdio/globals";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE, IDP_PAGE, idpEnv } from "../auth.conf.ts";
+import { binPath } from "../children.ts";
 import type { Faults } from "../injector.ts";
 import type { Counts } from "../provider.ts";
 
@@ -54,7 +55,7 @@ export async function settled(page: string): Promise<string> {
 export function mint(human: string, flags: Record<string, string> = {}): string {
   const args = ["mint", "-key", `${root}.dev/browser-auth/fixture.key`, "-issuer", FIXTURE_ISSUER, "-human", human];
   for (const [k, v] of Object.entries(flags)) args.push(`-${k}`, v);
-  return execFileSync(`${root}bin/oidc-fixture`, args).toString().trim();
+  return execFileSync(binPath(root, "oidc-fixture"), args).toString().trim();
 }
 
 // A case's start leaves the page an earlier case left, maybe with a write still open, without its

@@ -12,12 +12,13 @@
 //     OpenBao behind a proxy (bao.ts), so the draft cases (#339) can ingest fragment documents.
 // It removes the databases with the processes, and fails the run when it cannot; then the state
 // directory, which names them, is kept, and the next run refuses to start until it is removed.
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { SevereServiceError } from "webdriverio";
+import { type Binary, binPath, died, missingBinaries, spawnChild } from "./children.ts";
 import { printFailure } from "./print-failure.ts";
 import { config as base, removeProfiles } from "./wdio.conf.ts";
 import { type Faults, type Injector, startInjector } from "./injector.ts";
@@ -71,8 +72,8 @@ let bao: Bao | undefined;
 // Set once this run has made the state directory; before that it may be another run's.
 let ownState = false;
 
-function start(bin: string, args: string[], env: Record<string, string> = {}): ChildProcess {
-  const p = spawn(`${root}bin/${bin}`, args, { stdio: "inherit", env: { ...process.env, ...env } });
+function start(bin: Binary, args: string[], env: Record<string, string> = {}): ChildProcess {
+  const p = spawnChild(binPath(root, bin), args, { stdio: "inherit", env: { ...process.env, ...env } });
   procs.push(p);
   return p;
 }
@@ -80,7 +81,10 @@ function start(bin: string, args: string[], env: Record<string, string> = {}): C
 async function ready(url: string, p?: ChildProcess) {
   for (let i = 0; ; i++) {
     if (await fetch(url).then((r) => r.ok, () => false)) return;
-    if (i === 75 || p?.exitCode != null) throw new SevereServiceError(`${url} did not answer within 15 s`);
+    if (i === 75 || p?.exitCode != null) {
+      const why = p === undefined ? undefined : died(p);
+      throw new SevereServiceError(why === undefined ? `${url} did not answer within 15 s` : `the process behind ${url} could not start: ${why}`);
+    }
     await new Promise((r) => setTimeout(r, 200));
   }
 }
@@ -112,7 +116,7 @@ function server(name: string, listen: string, oidc: string, extra: string, flags
     "  maxTransportDeadline: 1m",
     "",
   ].join("\n"));
-  if (on === undefined) execFileSync(`${root}bin/bronzeward`, ["migrate", "-config", file], { stdio: "inherit" });
+  if (on === undefined) execFileSync(binPath(root, "bronzeward"), ["migrate", "-config", file], { stdio: "inherit" });
   return { db, p: interrupt ? start("bronzeward-interrupt", ["serve", "-config", file, ...flags], { BW_INTERRUPT_CONTROL: interruptFile }) : start("bronzeward", ["serve", "-config", file, ...flags]) };
 }
 
@@ -256,7 +260,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       const args = ["mint", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-human", human];
       for (const f of ["defect", "without-group"]) if (q.has(f)) args.push(`-${f}`, q.get(f)!);
       if (aged && q.has("age")) args.push("-age", `${Number(q.get("age"))}s`);
-      return { access: execFileSync(`${root}bin/oidc-fixture`, args).toString().trim(), sub: human };
+      return { access: execFileSync(binPath(root, "oidc-fixture"), args).toString().trim(), sub: human };
     };
     // A failed mint fails the spec that asked for it, not the launcher, whose cleanup must still run.
     try {
@@ -288,6 +292,9 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
 }
 
 async function prepare() {
+  // First, before anything starts: a binary that is not there fails the run by name.
+  const missing = missingBinaries(root);
+  if (missing.length > 0) throw new SevereServiceError(`not an executable file: ${missing.map((n) => `bin/${n}`).join(", ")} (mise run browser-auth builds them)`);
   // Anything left on these ports from an earlier run would answer the readiness checks below.
   for (const at of [PAGE_LISTEN, FIXTURE_LISTEN, FIXTURE_ISSUER.slice(7), CONTROL.slice(7), FIXTURE_API.slice(7), IDP_API.slice(7), INJECTOR.slice(7), DISPOSABLE_API.slice(7), KEYS, BAO_PROXY]) {
     if (await fetch(`http://${at}/`).then(() => true, () => false)) throw new SevereServiceError(`something already answers on ${at}`);
@@ -307,7 +314,7 @@ async function prepare() {
   if (idp["BW_TEST_IDP_WEB_ORIGIN"] !== IDP_PAGE) {
     throw new SevereServiceError(`dev-idp's web origin is ${idp["BW_TEST_IDP_WEB_ORIGIN"]}, not this run's page ${IDP_PAGE}: start dev-idp with the same BW_E2E_PORT_BASE, or with BW_DEV_IDP_WEB_ORIGIN=${IDP_PAGE}`);
   }
-  execFileSync(`${root}bin/oidc-fixture`, ["keygen", "-out", `${state}/fixture.key`]);
+  execFileSync(binPath(root, "oidc-fixture"), ["keygen", "-out", `${state}/fixture.key`]);
   const keys = start("oidc-fixture", ["serve", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-listen", KEYS]);
   await ready(`http://${KEYS}/jwks`, keys);
   const next = { grant: { access: "", sub: "" } };
@@ -388,7 +395,7 @@ async function prepare() {
     if (seed !== undefined) {
       const out = `${state}/seeded.json`;
       // From the package's own directory: the API tests read the OpenAPI description by a path relative to it.
-      execFileSync(`${root}bin/e2eseed.test`, ["-test.run", "^TestE2ESeed$", "-test.count=1"], {
+      execFileSync(binPath(root, "e2eseed.test"), ["-test.run", "^TestE2ESeed$", "-test.count=1"], {
         cwd: `${root}internal/api`,
         stdio: "inherit",
         env: { ...process.env, BW_E2E_SEED_ATTEMPT: seed === "noattempt" ? "none" : "", BW_E2E_SEED_DSN:`postgres://bronzeward@127.0.0.1:${PG_PORT}/${disposable.db}?sslmode=disable`, BW_E2E_SEED_OUT: out },
