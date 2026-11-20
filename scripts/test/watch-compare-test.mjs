@@ -56,6 +56,13 @@ test("R2: a received id the server never sent, or one out of the server's order,
   const swapped = run();
   [swapped.log[0], swapped.log[1]] = [swapped.log[1], swapped.log[0]];
   only(verdict(swapped), "R2");
+  // A clear does not erase what was seen before it, and the list may start again from the first event after it.
+  const cleared = run();
+  cleared.log.splice(1, 0, { op: "add", id: `${E}:99`, received: true, text: "received 09:59:59 x" }, { op: "clear" });
+  only(verdict(cleared), "R2");
+  const restart = run();
+  restart.log.splice(3, 0, { op: "clear" }, added(server[0]));
+  assert.equal(verdict(restart)["R2"], true);
 });
 
 test("R3: a missing row, a leftover received prefix and a time from the receipt each fail", () => {
@@ -89,7 +96,17 @@ test("R5: a state row that does not name its state, or the cause the event holds
   const r = run();
   assert.equal(verdict(r, { server: withCause })["R5"], false);
   r.final[5] = { ...r.final[5], text: `${r.final[5].text} (a completion observation matched)` };
+  // The line the page showed on receipt names the cause too, so the final row alone is not enough.
+  assert.equal(verdict(r, { server: withCause })["R5"], false);
+  r.log[7] = { ...r.log[7], text: `${r.log[7].text} (a completion observation matched)` };
   assert.equal(verdict(r, { server: withCause })["R5"], true);
+  // The transition is named in its direction, and a line the page showed first and replaced later counts too.
+  const reversed = run();
+  reversed.final[4] = { ...reversed.final[4], text: `${timeOf(server[4].at)} operation-state: ${server[4].data.to} → ${server[4].data.from}` };
+  only(verdict(reversed), "R5");
+  const wrongReceipt = run();
+  wrongReceipt.log[5] = { ...wrongReceipt.log[5], text: "received 09:59:59 operation-state: wrong" };
+  only(verdict(wrongReceipt), "R5");
 });
 
 test("flow: one commitment, the expected attempts, one approval entry, the transition before the attempt", () => {

@@ -21,29 +21,27 @@ const row = (rule, ok, detail) => ({ rule, ok, detail: ok ? "" : detail });
 // before the stop and after the restart; R5 each shown line names what its event holds.
 export function compare({ server, log, final, timeOf, outage = false }) {
   const out = [];
+  const ids = server.map((e) => e.id);
   const seen = new Set();
   let twice;
-  let from = 0;
-  log.forEach((x, i) => {
+  let next = 0;
+  let stray;
+  // A clear lets the page show the list again from the start, so each rule restarts there; a violation
+  // before a clear stays found.
+  for (const x of log) {
     if (x.op === "clear") {
       seen.clear();
-      from = i + 1;
+      next = 0;
     } else if (x.op === "add") {
       if (seen.has(x.id) && twice === undefined) twice = x.id;
       seen.add(x.id);
+      if (!x.received) continue;
+      const at = ids.indexOf(x.id, next);
+      if (at < 0 && stray === undefined) stray = x.id;
+      if (at >= 0) next = at + 1;
     }
-  });
-  out.push(row("R1", twice === undefined, `${twice} was shown twice`));
-
-  const ids = server.map((e) => e.id);
-  let next = 0;
-  let stray;
-  for (const x of log.slice(from)) {
-    if (x.op !== "add" || !x.received) continue;
-    const at = ids.indexOf(x.id, next);
-    if (at < 0 && stray === undefined) stray = x.id;
-    if (at >= 0) next = at + 1;
   }
+  out.push(row("R1", twice === undefined, `${twice} was shown twice`));
   out.push(row("R2", stray === undefined, `${stray} is not a later event the server sent`));
 
   const wrong = [];
@@ -64,14 +62,23 @@ export function compare({ server, log, final, timeOf, outage = false }) {
     out.push(row("R4", before > 0 && after > 0, `${before} rows received before the stop and ${after} after the restart`));
   }
 
-  const unnamed = [];
-  server.forEach((e, i) => {
-    const text = final[i]?.text ?? "";
+  // A state change line names its transition as the page words it, `from → to`, and its cause; any
+  // other line names its type. Every line the page showed counts, a received one before its replacement
+  // included.
+  const need = (e) => {
     const d = e.data ?? {};
-    const need = e.type === "operation-state" && typeof d.to === "string" ? [d.to, ...(typeof d.cause === "string" ? [d.cause.trim()] : [])] : [e.type];
-    if (!need.every((s) => text.includes(s))) unnamed.push(e.id);
-  });
-  out.push(row("R5", unnamed.length === 0, `${unnamed.join(", ")} not named in the line shown`));
+    if (e.type !== "operation-state" || typeof d.to !== "string") return [e.type];
+    return [typeof d.from === "string" ? `${d.from} → ${d.to}` : d.to, ...(typeof d.cause === "string" ? [d.cause.trim()] : [])];
+  };
+  const byId = new Map(server.map((e) => [e.id, e]));
+  const shown = [...final, ...log.filter((x) => x.op === "add")];
+  const unnamed = new Set();
+  for (const f of shown) {
+    const e = byId.get(f.id);
+    if (e !== undefined && !need(e).every((s) => f.text.includes(s))) unnamed.add(e.id);
+  }
+  for (const e of server) if (!final.some((f) => f.id === e.id)) unnamed.add(e.id);
+  out.push(row("R5", unnamed.size === 0, `${[...unnamed].join(", ")} not named in the line shown`));
   return out;
 }
 

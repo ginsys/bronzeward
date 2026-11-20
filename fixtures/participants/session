@@ -657,12 +657,33 @@ t9_watch_end() {
 # headless Chrome, its log and the server's events in <dir>/web-watch.json, the rules of compare.mjs on
 # it in <dir>/web-watch.tsv. A is the web host's API, so these run while A answers.
 t9_web=''
+t9_web_dir=''
+# web_stop: end the driver and the wrapper that started it. Killing the wrapper alone leaves the driver
+# and its browser running, so the driver's own pid (web.pid) gets the signal and ends its browser.
+web_stop() {
+  [ -n "${t9_web:-}" ] || return 0
+  if [ -s "$t9_web_dir/web.pid" ]; then kill "$(<"$t9_web_dir/web.pid")" 2>/dev/null || true; fi
+  kill "$t9_web" 2>/dev/null || true
+  wait "$t9_web" 2>/dev/null || true
+  t9_web=''
+}
+# web_mark <name>: mark the page's log at this moment (stop or restart) and wait for the driver's
+# acknowledgement, so that a row received after the event is never logged before its mark.
+web_mark() {
+  : >"$t9_web_dir/mark-$1"
+  for _ in $(seq 40); do
+    [ -e "$t9_web_dir/mark-$1.ack" ] && return 0
+    sleep 0.25
+  done
+  die "the web driver did not log the $1 mark within 10 s; see $t9_web_dir/web.out"
+}
 # web_start <dir> <operation> [live]: the driver, in the background as t9_web. With "live" the step
 # fails unless the page shows the live notice and a received row within 120 s, so that the stop meets
 # a page that is following.
 web_start() {
   rm -rf -- "$1"
   mkdir -p -- "$1"
+  t9_web_dir=$1
   passwords --only h-viewer --exec node "$here/web-watch.mjs" h-viewer "$1" "$2" "http://127.0.0.1:$SERVER_A_PORT" "$STATE/automation-token" \
     >"$1/web.out" 2>&1 &
   t9_web=$!
@@ -717,11 +738,7 @@ t9_clean() {
     wait "$t9_watcher" 2>/dev/null || true
     t9_watcher=''
   fi
-  if [ -n "${t9_web:-}" ]; then
-    kill "$t9_web" 2>/dev/null || true
-    wait "$t9_web" 2>/dev/null || true
-    t9_web=''
-  fi
+  web_stop
   if ! running "$BW_A"; then
     echo "t9 disconnect: A is started again" >&2
     (trap cleanup_stopped INT TERM; restart_a) >>"$log" 2>&1 || echo "A could not be started again; recreate the fixture" >&2
@@ -766,7 +783,7 @@ t9_disconnect() {
   t9_watch_ready "$dir"
   [ -z "$web_run" ] || web_start "$dir/web" "$t9_op" live
   "$bin/inject" kill A >>"$log" 2>&1 || die "cannot stop A; its output is in $log"
-  [ -z "$web_run" ] || : >"$dir/web/mark-stop"
+  [ -z "$web_run" ] || web_mark stop
   rc=0
   wait "$t9_reader" || rc=$?
   t9_reader=''
@@ -782,7 +799,7 @@ t9_disconnect() {
   sleep 60
   restart_a >>"$log" 2>&1 || die "cannot start A again; its output is in $log"
   echo "A is started again: the participant's client can resume"
-  [ -z "$web_run" ] || : >"$dir/web/mark-restart"
+  [ -z "$web_run" ] || web_mark restart
   "$here/prepare" t9-release >>"$log" 2>&1 || die "the hold on T9's apply could not be released; its output is in $log"
   echo "the hold is released: the apply goes on"
   last=$(t9_ids "$dir/before" | tail -n 1)
@@ -900,7 +917,7 @@ s6web() {
   ev=$(find "$STATE/evidence" -maxdepth 1 -type d -name 's6-cli-*' | sort | tail -n 1)
   [ -n "$ev" ] || die "s6 cli kept no evidence directory"
   op=$(jq -r '.id' "$ev/s6-send-operation.json") && [ -n "$op" ] || die "$ev/s6-send-operation.json names no operation"
-  trap '[ -z "$t9_web" ] || kill "$t9_web" 2>/dev/null || true' EXIT
+  trap web_stop EXIT
   web_start "$part/s6-web" "$op"
   web_compare "$part/s6-web" "$op"
   jq -e --slurpfile k "$ev/s6-send-events.json" '[.server[] | [.id, .type, .at]] == [$k[0][] | [.id, .type, .at]]' "$part/s6-web/web-watch.json" >/dev/null ||
