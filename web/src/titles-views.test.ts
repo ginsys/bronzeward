@@ -147,6 +147,18 @@ describe("ginsys/bronzeward#987: a plan", () => {
     expect(text()).toBe("pln_k2pq…cdef");
   });
 
+  test("a plan whose machine the view holds is titled from that body, waits for it, and never reads the machine", async () => {
+    const heading = (machine: { body: unknown }, view: string) => mount(h(PlanHeading, { id: PLN, p: plan("apply-config") as never, machine: machine as never }), { ...reads, view });
+    await heading({ body: undefined }, "v");
+    await settled();
+    // Nothing is built on a machine that is not read yet: the old heading text.
+    expect(text()).toBe("Plan pln_k2pq…cdef: proposed");
+    await heading({ body: { id: MCH, name: "worker-7" } }, "w");
+    await settled();
+    expect(text()).toBe(`Plan: Apply of worker-7 to Add the office labels, published ${when(at)} (proposed)`);
+    expect(asked).not.toContain(`/machines/${MCH}`);
+  });
+
   test("the heading keeps its state, with the title or without it", async () => {
     await mount(h(PlanHeading, { id: PLN, p: plan("apply-config") as never }));
     await settled();
@@ -247,6 +259,26 @@ describe("ginsys/bronzeward#987: a machine", () => {
     await settled();
     // Shown as every identifier of another shape is, by Id.
     expect(text()).toBe("mach…-one");
+    expect(asked).toEqual([]);
+  });
+
+  test("a view that asks nothing still ends the generation before it, so a return reads again", async () => {
+    await mount(h(MachineById, { id: MCH }), { ...reads, view: "v" });
+    await settled();
+    await mount(h(MachineById, { id: "machine-one" }), { ...reads, view: "w" });
+    await settled();
+    await mount(h(MachineById, { id: MCH }), { ...reads, view: "v" });
+    await settled();
+    expect(asked).toEqual([`/machines/${MCH}`, `/machines/${MCH}`]);
+  });
+
+  test("a machine the view holds is named from that body and asks for nothing", async () => {
+    await mount(h(MachineById, { id: MCH, held: { body: { id: MCH, name: "worker-9" } as never } }));
+    await settled();
+    expect(text()).toBe("worker-9");
+    await mount(h(MachineById, { id: MCH, held: { body: undefined } }), { ...reads, view: "w" });
+    await settled();
+    expect(text()).toBe("mch_k2pq…cdef");
     expect(asked).toEqual([]);
   });
 

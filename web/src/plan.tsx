@@ -186,7 +186,7 @@ export function poll(reread: () => void, wait = 5000) {
 // read of the plan (`answers` counts them, so a read the shell did not answer counts too) starts the three reads, and
 // five seconds after they are all answered the plan is read again. A read the shell did not answer (offline, a
 // transport failure) keeps what is shown, and the poll goes on, for the supporting reads and for the plan's own.
-function Approved({ p, reread, answers }: { p: Plan; reread: () => void; answers: number }) {
+function Approved({ p, reread, answers, onMachine }: { p: Plan; reread: () => void; answers: number; onMachine?: ((m: Machine) => void) | undefined }) {
   const settled = useSettled();
   const [seen, setSeen] = useState<Reads>(LOADING);
   const timer = useMemo(() => poll(reread), [reread]);
@@ -202,10 +202,12 @@ function Approved({ p, reread, answers }: { p: Plan; reread: () => void; answers
       ]);
       if (!live) return;
       setSeen((s) => ({ approval: approval ?? s.approval, now: now ?? s.now, machine: machine ?? s.machine }));
+      // The plan's heading and target name the machine from this read: no read of their own (A8 rule 2).
+      if (machine?.kind === "ok") onMachine?.(machine.data);
       timer.settled();
     })();
     return () => void (live = false);
-  }, [p, answers, settled, timer]);
+  }, [p, answers, settled, timer, onMachine]);
   const { approval, now, machine } = seen;
   const pending = [usePending(approval, "the approval"), usePending(machine, "the machine")];
   const reasons = machine.kind === "ok" ? staleReasons(p, machine.data) : [];
@@ -227,12 +229,12 @@ function Approved({ p, reread, answers }: { p: Plan; reread: () => void; answers
   );
 }
 
-export function PlanState({ p, reread, answers = 0 }: { p: Plan; reread: () => void; answers?: number }) {
+export function PlanState({ p, reread, answers = 0, onMachine }: { p: Plan; reread: () => void; answers?: number; onMachine?: (m: Machine) => void }) {
   const terminal = TERMINAL[p.state];
   return (
     <>
       {terminal !== undefined && <Status testid="plan-terminal"><span className="badge">{p.state}</span> {terminal(p)}{again(p)}</Status>}
-      {p.state === "approved" && <Approved p={p} reread={reread} answers={answers} />}
+      {p.state === "approved" && <Approved p={p} reread={reread} answers={answers} onMachine={onMachine} />}
       {p.state === "committed" && p.committedOperation !== null && <Status testid="plan-committed">Committed: operation <Id id={p.committedOperation} />.</Status>}
     </>
   );
