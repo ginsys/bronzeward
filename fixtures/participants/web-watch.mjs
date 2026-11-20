@@ -50,12 +50,12 @@ mkdirSync(profile, { recursive: true });
 // The session ends a driver it must stop by this pid (the wrapper that started it does not pass the signal on), and the browser goes
 // with it. Both are in place before the browser starts, so a stop during the start ends this process too.
 writeFileSync(join(dir, "web.pid"), `${process.pid}\n`);
-let browser;
-process.on("SIGTERM", () => Promise.resolve(browser?.deleteSession()).finally(() => process.exit(143)));
-browser = await remote({
+const starting = remote({
   logLevel: "silent",
   capabilities: { browserName: "chrome", "goog:chromeOptions": { args: ["--headless=new", `--user-data-dir=${profile}`] } },
 });
+process.on("SIGTERM", () => starting.then((b) => b.deleteSession(), () => {}).finally(() => process.exit(143)));
+const browser = await starting;
 const say = async (what) => out(`${what}: ${await browser.getTitle()} <${new URL(await browser.getUrl()).pathname}>`);
 async function submit(selector, value) {
   const field = await browser.$(selector);
