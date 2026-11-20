@@ -389,7 +389,8 @@ export async function noAppLocks(timeout = 15_000) {
       await browser.pause(250);
     }
   } finally {
-    await browser.url("about:blank");
+    // A failed return is not allowed to hide the error that got us here; the next navigation fails on it anyway.
+    await browser.url("about:blank").catch(() => undefined);
   }
   if (first !== undefined && first.renewer + first.tab > 0) console.log(`noAppLocks: waited ${Date.now() - t0} ms for renewer ${first.renewer}, tab ${first.tab}`);
   if (zeros < 2) throw new Error(`noAppLocks: no two zero reads in a row within ${timeout} ms of the case; the last read had renewer ${last.renewer}, tab ${last.tab}: the next case would join a page's pair`);
