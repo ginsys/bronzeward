@@ -645,8 +645,7 @@ there.
   kinds (lead ruling RULING-20261118-2103-2, 18 November 2026, on the design
   review of this section). The cost is a reachable endpoint at supply time, so
   there is no offline first supply; onboarding needs one anyway to ingest.
-  **A key of another cluster is refused on every supply** (not built yet:
-  [#938](https://github.com/ginsys/bronzeward/issues/938)). The node that
+  **A key of another cluster is refused on every supply.** The node that
   answers the `Version` read can belong to any cluster, so after the try is
   answered and before the write the route reads the node's Talos cluster ID on
   the same connection, as an ingestion does (§3.3, "Identity before use"), and
@@ -749,8 +748,7 @@ there.
   or recovery observation, and for dispatch), for a lifetime that covers the use
   and no more, below a configured maximum (the value belongs to the
   implementation, not to this contract). The certificate's `NotBefore` is the
-  signer's clock at signing minus a fixed allowance of 300 seconds (not built
-  yet: [#938](https://github.com/ginsys/bronzeward/issues/938)); the node's
+  signer's clock at signing minus a fixed allowance of 300 seconds; the node's
   clock is not read, and the allowance covers its drift. A node refused a
   certificate presented 4.1 s before its `NotBefore`, and one signed with
   `now - 1 h` was accepted ([signing locally](../design/research/20261118-local-talos-signing.md),
@@ -4218,15 +4216,13 @@ each (design §7.7 consequences):
   does not answer, a read that fails, or an answer that is not a machine
   configuration (`503 talos-access-unavailable`), and a valid key and endpoint of another
   cluster, as a first supply and as a replacement (`first-key-cluster-mismatch`,
-  neither id in the answer; not built yet:
-  [#938](https://github.com/ginsys/bronzeward/issues/938), with the control that
-  the matching cluster's key is accepted)
+  neither id in the answer or the log, with the control that the matching
+  cluster's key is accepted)
   are each refused with nothing written, and that a certificate signed by an unrelated CA
   is refused by the node; the roles by use (`os:reader` for an observation that does not read
   the configuration, `os:admin` for the rest) and a lifetime that covers the
   use and no more, measured from the signing instant, with a `NotBefore` 300 s
-  before it (not built yet:
-  [#938](https://github.com/ginsys/bronzeward/issues/938)); no Talos connection kept past its certificate's
+  before it; no Talos connection kept past its certificate's
   `NotAfter`, with a control that holds one open past it and must then fail
   the test; every supply and replacement recorded as an act by an `author`
   with no approval step, with a control that requires an approval and must
