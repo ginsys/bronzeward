@@ -113,7 +113,7 @@ var markersShown = map[string][3]int{
 	"fragment show f1": {6, 6, 6}, "fragment show frv_1": {8, 8, 8}, "fragment history f1": {5, 5, 5},
 	"profile show p1": {5, 5, 5}, "profile show prv_1": {5, 5, 5}, "profile history p1": {5, 5, 5},
 	"assignment show a1": {4, 4, 4}, "assignment show asr_1": {6, 6, 6}, "assignment history a1": {6, 6, 6},
-	"draft list": {5, 5, 5}, "draft show d1": {9, 9, 9}, "release list": {6, 6, 6}, "release show r1": {15, 15, 15},
+	"draft list": {5, 5, 5}, "draft show d1": {9, 9, 9}, "release list": {7, 7, 7}, "release show r1": {16, 16, 16},
 	"plan list": {6, 6, 6}, "plan show pl1": {30, 28, 30}, "operation list": {8, 8, 8}, "operation show o1": {15, 15, 15}, "act list": {8, 8, 8},
 	"cluster add --name n --endpoint https://e --contract c --talos-cluster-id t":    {5, 5, 5},
 	"machine add --cluster c1 --talos-node-id n --platform metal --talos-endpoint e": {5, 5, 5},

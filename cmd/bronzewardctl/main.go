@@ -234,6 +234,11 @@ type env struct {
 	// names is who the principals a table output prints name, read by GET /principals (names.go);
 	// an identifier asked and not answered is nil. Held for this run only.
 	names map[string]*apitypes.PrincipalBody
+
+	// bodies are the drafts, releases, plans, ingestions and machines read for a title (titles.go), by
+	// path, and titles the titles built from them, by object; both are held for this run only.
+	bodies map[string]any
+	titles map[string]string
 }
 
 func main() {

@@ -56,6 +56,12 @@ func list[T any](e *env, l listing, path string, q url.Values, keep func(*T) boo
 // kept, and the table prints them as e.who gives them, every one asked in one set of reads before
 // the first row (names.go).
 func listWho[T any](e *env, l listing, path string, q url.Values, keep func(*T) bool, who func(*T) []string, header, foot string, row func(*tabwriter.Writer, *T)) error {
+	return listWith(e, l, path, q, keep, who, nil, header, foot, row)
+}
+
+// listWith is listWho that also runs pre on the items kept, with the client, before the first row: the
+// reads a table's titles take (titles.go).
+func listWith[T any](e *env, l listing, path string, q url.Values, keep func(*T) bool, who func(*T) []string, pre func(*client.Client, []T), header, foot string, row func(*tabwriter.Writer, *T)) error {
 	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
 		raw, items, next, err := l.read(c, path, q, nil)
 		if err != nil {
@@ -87,6 +93,9 @@ func listWho[T any](e *env, l listing, path string, q url.Values, keep func(*T) 
 				ids = append(ids, who(&vs[i])...)
 			}
 			e.preload(c, ids...)
+		}
+		if pre != nil {
+			pre(c, vs)
 		}
 		return e.emit(raw, func(w *tabwriter.Writer) {
 			switch {
@@ -371,19 +380,24 @@ func (e *env) releaseCmd(args []string) error {
 		return err
 	}
 	if v == "list" {
-		return listWho(e, l, "/releases", url.Values{}, func(r *apitypes.ReleaseBody) bool {
+		return listWith(e, l, "/releases", url.Values{}, func(r *apitypes.ReleaseBody) bool {
 			return (cluster == "" || r.Cluster == cluster) && (draft == "" || r.Draft == draft)
 		}, func(r *apitypes.ReleaseBody) []string { return []string{r.PublishedBy.Principal} },
-			"RELEASE\tCLUSTER\tDRAFT\tPUBLISHED\tBY\tMACHINES", "", func(w *tabwriter.Writer, r *apitypes.ReleaseBody) {
-				tf(w, "%s\t%s\t%s r%d\t%s\t%s (%s)\t%d\n", r.Id, r.Cluster, r.Draft, r.DraftRevision, when(r.PublishedAt),
+			func(c *client.Client, rs []apitypes.ReleaseBody) { e.titleReleases(c, rs...) },
+			"RELEASE\tTITLE\tCLUSTER\tDRAFT\tPUBLISHED\tBY\tMACHINES", "", func(w *tabwriter.Writer, r *apitypes.ReleaseBody) {
+				tf(w, "%s\t%s\t%s\t%s r%d\t%s\t%s (%s)\t%d\n", r.Id, e.titleCell("release", r.Id), r.Cluster, r.Draft, r.DraftRevision, when(r.PublishedAt),
 					e.who(r.PublishedBy.Principal), r.PublishedBy.Role, len(r.Machines))
 			})
 	}
 	return showThen(e, "/releases/"+url.PathEscape(pos[0]), func(c *client.Client, _ *client.Response, r *apitypes.ReleaseBody) error {
 		e.preload(c, r.PublishedBy.Principal)
+		e.titleReleases(c, *r)
 		return nil
 	}, func(w *tabwriter.Writer, r *apitypes.ReleaseBody) {
 		tf(w, "Release %s\tcluster %s\tpublished by %s (%s) %s\n", r.Id, r.Cluster, e.who(r.PublishedBy.Principal), r.PublishedBy.Role, when(r.PublishedAt))
+		if t := e.titleOf("release", r.Id); t != "" {
+			tf(w, "Title\t%s\n", t)
+		}
 		tf(w, "Draft\t%s revision %d, operation %s\n", r.Draft, r.DraftRevision, r.Operation)
 		tf(w, "Renderer\tcontract %s, machinery %s, Kubernetes %s\n", r.Renderer.Contract, r.Renderer.MachineryVersion, r.Renderer.KubernetesVersion)
 		fmt.Fprintln(w, "Built from (source revisions, not configuration):")
@@ -409,9 +423,11 @@ func (e *env) operationCmd(args []string) error {
 		return err
 	}
 	if v == "list" {
-		return list(e, l, "/operations", values(f), nil, "OPERATION\tKIND\tSTATE\tSUBJECT\tCREATED", "", func(w *tabwriter.Writer, o *apitypes.OperationBody) {
-			tf(w, "%s\t%s\t%s\t%s\t%s\n", o.Id, o.Kind, o.State, subject(o.Subject), when(o.CreatedAt))
-		})
+		return listWith(e, l, "/operations", values(f), nil, nil,
+			func(c *client.Client, ops []apitypes.OperationBody) { e.titleOperations(c, ops...) },
+			"OPERATION\tTITLE\tKIND\tSTATE\tSUBJECT\tCREATED", "", func(w *tabwriter.Writer, o *apitypes.OperationBody) {
+				tf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", o.Id, e.titleCell("operation", o.Id), o.Kind, o.State, subject(o.Subject), when(o.CreatedAt))
+			})
 	}
 	// A cancelled operation records no cause; its last event holds it. The event is read once and
 	// kept only when it is of the epoch of the operation shown; its time is not shown.
@@ -420,6 +436,7 @@ func (e *env) operationCmd(args []string) error {
 		if o.CreatedBy != nil {
 			e.preload(c, o.CreatedBy.Principal)
 		}
+		e.titleOperations(c, *o)
 		if e.output == "table" && o.State == "cancelled" {
 			var err error
 			if cause, err = readLastOrStop(c, pos[0], o.State, r.Header.Get("Bronzeward-Epoch")); err != nil {
@@ -433,6 +450,9 @@ func (e *env) operationCmd(args []string) error {
 	}
 	return showThen(e, "/operations/"+url.PathEscape(pos[0]), findCause, func(w *tabwriter.Writer, o *apitypes.OperationBody) {
 		tf(w, "Operation %s\t%s\t%s\n", o.Id, o.Kind, o.State)
+		if t := e.titleOf("operation", o.Id); t != "" {
+			tf(w, "Title\t%s\n", t)
+		}
 		tf(w, "Subject\t%s\n", subject(o.Subject))
 		by := "the controller"
 		if o.CreatedBy != nil {
