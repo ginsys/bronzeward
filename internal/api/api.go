@@ -152,6 +152,7 @@ type options struct {
 	stopAt         func(step string) bool                                                               // a draft update's ingestion stops at step, as a killed process would
 	dial           func(ctx context.Context, talosconfig []byte, endpoint string) (talos.Reader, error) // talos.Dial by default
 	nodeTimeout    time.Duration                                                                        // bounds each node request; nodeTimeout by default
+	discoverWithin time.Duration                                                                        // bounds a whole discovery (POST /discoveries); discoverDeadline by default
 	quoteErrors    bool                                                                                 // the pass-through control (§16): a node read's failure logs its error text
 	keepAlive      func(time.Duration) idleTimer                                                        // an event stream's keep-alive timer, newIdleTimer if nil (§8.3)
 }
@@ -221,6 +222,9 @@ func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *AP
 	}
 	if o.nodeTimeout == 0 {
 		o.nodeTimeout = nodeTimeout
+	}
+	if o.discoverWithin == 0 {
+		o.discoverWithin = discoverDeadline
 	}
 	if d.life == nil {
 		d.life = context.Background()

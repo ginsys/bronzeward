@@ -40,6 +40,7 @@ var specRoutes = []string{
 	"POST /clusters author human", "POST /machines author human", "POST /machines/{id}/talos-endpoints author human",
 	"POST /machines/{id}/names author human",
 	"POST /clusters/{id}/first-keys author human",
+	"POST /discoveries author human",
 	"POST /drafts author",
 	"PUT /drafts/{id}/fragments/{name} author if-match", "DELETE /drafts/{id}/fragments/{name} author if-match",
 	"PUT /drafts/{id}/profiles/{name} author if-match", "DELETE /drafts/{id}/profiles/{name} author if-match",

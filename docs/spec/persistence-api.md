@@ -1579,7 +1579,8 @@ Design: [§11.1](../design/Talos_Configuration_and_Machine_Management_Design.md#
 ### 7.1 The key
 
 Every mutating request (`POST`, `PUT`, `DELETE`) carries an `Idempotency-Key`
-header: 16 to 128 characters of `[A-Za-z0-9_-]`. A missing key is
+header: 16 to 128 characters of `[A-Za-z0-9_-]`. The one exception is `POST
+/discoveries`, which only reads and records nothing (§9.2). A missing key is
 `428 idempotency-key-required` **(choice §17.9)**; design §11.1 asks for keys on
 "every mutating operation that might be retried by clients or proxies", and any
 of them can be.
@@ -2138,6 +2139,7 @@ API revisions:
 | 8 | `POST /clusters/{id}/first-keys` (§9.2, §3.4) |
 | 9 | `serial` and `notAfter` in the `access` object of an observation (§9.2, §3.3) |
 | 10 | `name` on a machine and on `POST /machines`, `POST /machines/{id}/names`, the `name-change` timeline entry and the `name-in-use` problem code (§3.5, choice §17.43) |
+| 11 | `POST /discoveries`, a `POST` that only reads (§9.2) |
 
 ### 9.2 Resources and routes
 
@@ -2170,6 +2172,7 @@ idempotency and conflict behavior.
 | `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3, and an optional `name`, §3.5) | 201 | `author`, human only (§10.3) |
 | `POST /machines/{id}/talos-endpoints` (replace a machine's Talos endpoint, §3.3) | 201 | `author`, human only (§10.3) |
 | `POST /machines/{id}/names` (replace a machine's name, §3.5; API revision 10) | 201 | `author`, human only (§10.3) |
+| `POST /discoveries` (find a cluster's identity and members from a first key, as `bronzewardctl cluster discover` does from a talosconfig; API revision 11). The body is a first key's (§3.4): `kind`, `document`, `endpoint`; the document is never stored, logged or returned, and there is no Talos context member, because a talosconfig is read at its current context. The server extracts the CA key, signs an `os:reader` certificate valid for the deadline below plus the two seconds of the signer's rounding slack (never above `talos.maxCertLifetime` less two seconds: a deployment whose maximum is shorter answers `503 dependency-unavailable`), reads the cluster with it, and drops the key, the certificate and the document with the request. It reads and writes no provider path, so it works with no signer identity configured. **It records no act, no idempotency record and no first-key row, and has no replay**: it is the one `POST` that only reads, so it takes no `Idempotency-Key`, no `Bronzeward-Expected-Epoch` and no query (a query is `400 invalid-request`), because a stored act or record would keep what the route promises not to and would replay a stale member list. The server's request log line (request identifier, method, path, principal, outcome, member count) is the only trace of a call and holds no key, document, endpoint or member address. **Bounds:** the whole discovery has a deadline of 60 s, and a cluster that lists more than 128 members is refused before any member is dialled; the server already dials the endpoints an author supplies (§3.4, ingestion), and whether it should restrict the addresses it dials is open at [ginsys/bronzeward#1009](https://github.com/ginsys/bronzeward/issues/1009) | 200, `Cache-Control: no-store`, `clusterId`, `version`, `contract`, `supported`, `endpoint` (the address dialled), `kubernetesEndpoint` (a proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member), `members` (`nodeId`, `hostname`, `address`, `role`, `smbiosUuid`, `platform`, `answered`, the last three empty or false for a member that did not answer) and `complete`. At the deadline the members read so far are answered and the rest listed `answered: false`, with `complete: false`, so a client does not read an unread member as down; only a cluster identity that was not read fails the call. `422 validation-failed` with the signer's `rule` for an unusable document, no CA key in it, or a talosconfig whose role cannot read the machine configuration (§3.4), and with `rule: too-many-members` and `limit: 128`; `503 talos-access-unavailable` for an endpoint that did not answer, did not accept the key or gave no cluster identity (a refused key is not told apart from an unreachable endpoint) | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
@@ -2224,7 +2227,8 @@ which holds the machine row's lock to the writer's commit (`nextEntry` in
 `internal/api/observe.go`, and the writers that raise the counter
 themselves), so a machine's entries commit in revision order.
 
-Every `POST`, `PUT` and `DELETE` needs an `Idempotency-Key` (§7). There is no
+Every `POST`, `PUT` and `DELETE` needs an `Idempotency-Key` (§7), except `POST
+/discoveries`, which only reads. There is no
 route that dispatches, none that issues, rotates or lists automation tokens,
 none that revokes a token except by revoking its service identity (T5c,
 §10.4), and none that grants roles: those requests reach no handler and answer `404` (design
