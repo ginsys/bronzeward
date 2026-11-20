@@ -220,7 +220,10 @@ func (f *filler) routes() []route {
 	add := func(re, body, last string) { rs = append(rs, route{regexp.MustCompile("^" + re + "$"), body, last}) }
 	one := func(re string, v any) { b := f.answer(v); add(re, b, b) }
 	list := func(re string, v any) { b, last := f.page(v); add(re, b, last) }
-	one(`GET /server`, apitypes.ServerBody{})
+	// The sweep's server serves API revision 10, which machine rename needs (client contracts §7.1 item 1);
+	// the filler would write 2 for every integer.
+	server := strings.Replace(f.answer(apitypes.ServerBody{}), `"apiRevision":2`, `"apiRevision":10`, 1)
+	add(`GET /server`, server, server)
 	one(`GET /recovery`, apitypes.RecoveryBody{})
 	one(`GET /identity`, apitypes.IdentityBody{})
 	list(`GET /clusters`, apitypes.ClusterBody{})
