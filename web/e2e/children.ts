@@ -32,9 +32,12 @@ const reasons = new WeakMap<ChildProcess, string>();
 
 export function spawnChild(path: string, args: readonly string[], options: SpawnOptions): ChildProcess {
   const p = spawn(path, args, options);
-  p.once("error", (e) => reasons.set(p, `${path}: ${e.message}`));
+  // `on`, not `once`: a failed kill can raise a second 'error', and with no listener left it ends the launcher.
+  p.on("error", (e) => {
+    if (!reasons.has(p)) reasons.set(p, `${path}: ${e.message}`);
+  });
   return p;
 }
 
-// Why the child could not start or be signalled, naming its path; undefined while none was raised.
+// Why the child could not start or be signalled, naming its path; the first error raised, undefined while none was.
 export const died = (p: ChildProcess): string | undefined => reasons.get(p);

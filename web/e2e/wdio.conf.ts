@@ -227,8 +227,11 @@ export const config: WebdriverIO.Config = {
       "-issuer", FAKE_ISSUER, "-provider-origins", TARGET_ORIGIN, "-redirect-api", TARGET_ORIGIN,
     ], { stdio: "inherit" });
     for (let i = 0; ; i++) {
+      // A host that could not start fails the run even where something else answers on its port.
+      const why = died(host);
+      if (why !== undefined) throw new SevereServiceError(why);
       if (await fetch(hostUrl).then((r) => r.ok, () => false)) break;
-      if (i === 50 || host.exitCode !== null) throw new SevereServiceError(died(host) ?? "the static host did not answer within 10 s");
+      if (i === 50 || host.exitCode !== null) throw new SevereServiceError("the static host did not answer within 10 s");
       await new Promise((r) => setTimeout(r, 200));
     }
   },

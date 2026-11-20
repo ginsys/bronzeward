@@ -71,6 +71,16 @@ test("a binary that cannot start is named, with an exit code set at once, and st
   expect(p.pid).toBeUndefined();
 });
 
+test("a second error on a child (a failed kill after a failed spawn) is caught too, and the first reason stays", async () => {
+  const r = root({});
+  const p = spawnChild(binPath(r, "webhost"), [], { stdio: "ignore" });
+  await new Promise((resolve) => p.once("error", resolve));
+  // With no listener left, emit('error') throws, as the unhandled event ends a launcher.
+  expect(() => p.emit("error", new Error("kill EPERM"))).not.toThrow();
+  expect(died(p)).toContain("ENOENT");
+  expect(died(p)).not.toContain("EPERM");
+});
+
 test("a child that runs has no death recorded, and is counted alive until it is stopped", async () => {
   const r = root({ bronzeward: "run" });
   const p = spawnChild(binPath(r, "bronzeward"), [], { stdio: "ignore" });
