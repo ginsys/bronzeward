@@ -323,6 +323,23 @@ func TestPlanSnapshot(t *testing.T) {
 			}
 		})
 	}
+	// The title's own reads (the release's draft) are answers the view shows, so a move that falls in
+	// them shows no view either: the Title line would come from another epoch than the rest.
+	t.Run("moved in the title reads", func(t *testing.T) {
+		f := planServer(t)
+		f.set(func(f *planFake) {
+			f.epochFor = func(path string) string {
+				if path == "/drafts/drf_BWSYNTH" {
+					return "ep_BWSYNTH-3"
+				}
+				return "ep_BWSYNTH-2"
+			}
+		})
+		code, out, errOut := runCtl(t, "plan", "show", "pln_BWSYNTH")
+		if code == 0 || out != "" || !strings.Contains(errOut, "the epoch changed from ep_BWSYNTH-2 and changed back while the plan was read; nothing is shown.") {
+			t.Errorf("plan show: exit %d, stdout %q, stderr %q; want a failure naming the change and change back", code, out, errOut)
+		}
+	})
 	// A move at the plan answer itself is before the snapshot: the plan answer shows ep_BWSYNTH-3,
 	// and every read from it on stays there, so the whole view shows, for show and for create.
 	t.Run("moved at the plan answer", func(t *testing.T) {
