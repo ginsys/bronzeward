@@ -10,10 +10,20 @@ import (
 
 // Titles of releases, plans and operations (client contracts A8): built from fields the bodies carry,
 // printed beside the identifier, which stays in its own column. Each distinct draft, release, plan,
-// ingestion and machine is read once for the command, by GET with one try; a read that fails leaves
-// the object with no title, and the identifier alone is shown. What was read is kept for this run only
-// and never reaches a log or an error. -o json and -o yaml read nothing and print the resource unchanged.
-// The text is remote text and goes through tf or sf like every other (client contracts §6 item 8).
+// ingestion and machine is read once for the command, by GET with one try. A draft, release or plan
+// read that fails leaves the object with no title, and its identifier alone is shown; a machine read
+// that fails names the machine by its identifier, and an ingestion read that fails is an import with no
+// machine to name (A8 rule 1). What was read is kept for this run only and never reaches a log or an
+// error. -o json and -o yaml read nothing and print the resource unchanged. The text is remote text and
+// goes through tf or sf like every other (client contracts §6 item 8).
+
+// holdBody keeps the body read at path, nil for a read that failed, so it is not read again.
+func (e *env) holdBody(path string, body any) {
+	if e.bodies == nil {
+		e.bodies = map[string]any{}
+	}
+	e.bodies[path] = body
+}
 
 // titleBody is the body at path as read once in this run, nil when the read or its decoding failed.
 func titleBody[T any](e *env, c *client.Client, path string) *T {
@@ -28,10 +38,7 @@ func titleBody[T any](e *env, c *client.Client, path string) *T {
 			t = &v
 		}
 	}
-	if e.bodies == nil {
-		e.bodies = map[string]any{}
-	}
-	e.bodies[path] = t
+	e.holdBody(path, t)
 	return t
 }
 
