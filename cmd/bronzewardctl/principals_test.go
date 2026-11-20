@@ -54,6 +54,8 @@ type principalFake struct {
 	failRead bool
 	display  func(i int) string // the display name of the human with a name, "Name <i>" when nil
 	timeline string             // the answer of GET /machines/mch_a/timeline
+	recovery string             // the answer of GET /recovery
+	moved    bool               // GET /principals answers in a new epoch
 }
 
 func pid(i int) string {
@@ -68,6 +70,9 @@ func (f *principalFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	switch path {
 	case "/server":
+		if f.moved && len(f.calls) > 0 {
+			w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2")
+		}
 		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":5,"startMode":"normal"}`)
 	case "/acts":
 		var items []string
@@ -75,6 +80,8 @@ func (f *principalFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			items = append(items, fmt.Sprintf(`{"id":"act_%d","at":"2026-11-20T04:00:00Z","action":"x","epoch":"ep_BWSYNTH-1","principal":%q,"principalKind":"human","role":"author","via":"token","subjects":[]}`, i, p))
 		}
 		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(items, ","))
+	case "/recovery":
+		fmt.Fprint(w, f.recovery)
 	case "/machines/mch_a/timeline":
 		fmt.Fprint(w, f.timeline)
 	case "/releases/rel_BWSYNTH":
@@ -83,6 +90,9 @@ func (f *principalFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/principals":
 		ids := r.URL.Query()["id"]
 		f.calls = append(f.calls, ids)
+		if f.moved {
+			w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2")
+		}
 		if f.failRead {
 			w.Header().Set("Content-Type", "application/problem+json")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -287,17 +297,37 @@ func TestPrincipalNamesInTimeline(t *testing.T) {
 	f.timeline = fmt.Sprintf(`{"items":[`+
 		`{"revision":1,"at":"2026-11-20T04:00:00Z","kind":"plan","entry":{"plan":"pln_a","operation":"apply-config","release":"rel_a","principal":%q,"role":"publisher"}},`+
 		`{"revision":2,"at":"2026-11-20T04:01:00Z","kind":"approval","entry":{"approval":"apr_a","plan":"pln_a","principal":%q,"role":"approver","selfApproval":{"marked":false,"reasons":[]},"unseenOverwrite":false}},`+
-		`{"revision":3,"at":"2026-11-20T04:02:00Z","kind":"accounting","entry":{"operation":"op_a","attempt":"att_a","decidedBy":%q,"role":"recovery-admin"}}]}`, pid(1), pid(0), pid(1))
+		`{"revision":3,"at":"2026-11-20T04:02:00Z","kind":"accounting","entry":{"operation":"op_a","attempt":"att_a","decidedBy":%q,"role":"recovery-admin"}},`+
+		`{"revision":4,"at":"2026-11-20T04:03:00Z","kind":"freeze","entry":{"principal":%q,"role":"approver","reason":"r"}},`+
+		`{"revision":5,"at":"2026-11-20T04:04:00Z","kind":"scope-state","entry":{"from":"normal","to":"pre-restore-unaccounted","cause":"recovery-entry","enteredBy":%q}}]}`, pid(1), pid(0), pid(1), pid(0), pid(1))
 	code, out, errOut := runCtl(t, "machine", "timeline", "mch_a")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
-	for _, want := range []string{"by sub-1 at https://idp.example (publisher)", "by Name 0 (approver)", "decided by sub-1 at https://idp.example"} {
+	for _, want := range []string{"by sub-1 at https://idp.example (publisher)", "by Name 0 (approver)", "decided by sub-1 at https://idp.example",
+		`"principal":"Name 0"`, `"enteredBy":"sub-1 at https://idp.example"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in\n%s", want, out)
 		}
 	}
 	if c := f.read(); len(c) != 1 || len(c[0]) != 2 {
 		t.Errorf("reads %v, want one read of two identifiers", c)
+	}
+}
+
+// TestPrincipalNamesInRecoveryStatus: the names are read before the epoch check, so a restore that
+// the names read sees stops the command as a restore seen by any other read would.
+func TestPrincipalNamesInRecoveryStatus(t *testing.T) {
+	f := principalServer(t, nil)
+	f.recovery = fmt.Sprintf(`{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"entry":{"enteredBy":%q,"enteredAt":"2026-11-01T08:40:00Z",`+
+		`"stoppedAt":"2026-11-01T08:31:00Z","reason":"drill","restored":[]},"exit":null,"scopes":[]}`, pid(0))
+	code, out, errOut := runCtl(t, "recovery", "status")
+	if code != 0 || !strings.Contains(out, "by Name 0: drill") {
+		t.Errorf("exit %d, out\n%s\nerr\n%s", code, out, errOut)
+	}
+	f.moved = true
+	code, out, errOut = runCtl(t, "recovery", "status")
+	if code == 0 || out != "" || !strings.Contains(errOut, "the epoch changed from") {
+		t.Errorf("a restore seen by the names read: exit %d, out\n%s\nerr\n%s", code, out, errOut)
 	}
 }

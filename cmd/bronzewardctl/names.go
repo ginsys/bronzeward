@@ -55,7 +55,7 @@ func (e *env) preload(c *client.Client, ids ...string) {
 }
 
 // principalKeys are the members of a timeline entry's untyped record that hold a principal.
-var principalKeys = []string{"principal", "decidedBy", "requestedBy"}
+var principalKeys = []string{"principal", "decidedBy", "requestedBy", "resolvedBy", "enteredBy", "exitedBy", "markedBy", "releasedBy"}
 
 // entryPrincipals are the principals a timeline entry names.
 func entryPrincipals(entry any) []string {
