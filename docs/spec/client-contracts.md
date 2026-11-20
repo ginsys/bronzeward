@@ -1550,16 +1550,11 @@ Not protected: rendered release reviews, plan diffs and provenance are redacted 
 ([compilation §8.3](compilation.md#83-redaction)) and are handled as ordinary reads.
 
 **Decided: a fragment revision stays readable by every role, with the limit recorded.** `GET /fragment-revisions/{id}` is read by every role and answers a
-fragment's sanitized text, which can hold a value nobody marked: a fragment update ingests under a
-transient claim, so no review reads it before it is stored (`internal/api/fragments.go:126`,
-[persistence and API §9.3](persistence-api.md#93-examples), [compilation §3.6](compilation.md#36-operator-review)),
-and detection is not promised ([compilation §2.4](compilation.md#24-what-identification-does-not-promise),
-[§8.4](compilation.md#84-what-redaction-does-not-cover)). The route is not in the table above:
-both clients handle it as an ordinary read under that accepted limit. The owner decided it (Serge,
-typed 2026-11-20 11:36 CET in the bronzeward lead's session, answering
-[ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974): "1. Every role, limit
-recorded."), so making the read a protected one is a new decision. The web view's display rules
-are in [operator experience §9](operator-experience.md#9-secret-handling-in-the-clients) item 9.
+fragment's sanitized text, which can hold a value nobody marked. The route is not in the table above:
+both clients handle it as an ordinary read under the accepted limit that
+[persistence and API §9.1](persistence-api.md#91-conventions) states with the owner's decision
+(ginsys/bronzeward#974); the web view's display rules are in
+[operator experience §9](operator-experience.md#9-secret-handling-in-the-clients) item 9.
 
 The review is served to any human `author`, not only the one who started the ingestion
 (`internal/api/routes.go:99`), as the contract intends: "only to the roles that may mark"
@@ -1972,8 +1967,13 @@ way: the identifier, the Talos endpoint and the node ID, as before.
    would need the cluster too; that is a separate decision, and no client resolves a name to an
    identifier.
 3. `machine add` takes an optional `--name`, and `machine rename <id> --name <name>` is a write
-   with the role and keying of the table in §3.2. A refusal `409 conflict` names the machine that
-   holds the name; a `400 invalid-request` names the grammar.
+   with the role and keying of the table in §3.2. A name another machine of the cluster holds is
+   refused `409 name-in-use`, naming that machine; the machine's own current name is `409
+   conflict`, and `machine` names the machine itself; a `400 invalid-request` names the grammar.
+   `cluster onboard` adopts the machine a `409 conflict` on `POST /machines` names, as an existing
+   node (`cmd/bronzewardctl/onboard.go:372-376`, [operator experience §5.2](operator-experience.md#52-inventory)):
+   it must not read `name-in-use` that way, and a client that sends a name tells the two by the
+   code.
 4. A `name-change` entry on `GET /machines/{id}/timeline` is rendered from its members like any
    other kind, and a client must not fail or drop the row for a kind it does not know:
    `api/openapi.yaml:4178` types `kind` as a free string.

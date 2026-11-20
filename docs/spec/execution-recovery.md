@@ -787,12 +787,13 @@ Required entries:
 | Classification | the operation, the outcome of §5 that ends the operation or admits a retry (completed, rejected, failed, safe to retry), the observation it rests on (none for a rejection, which rests on responses) and the entries relied on, by revision (the observation's entry and every response and accounting entry of the operation's attempts); an unresolved or cancelled operation names its cause on its state entry |
 | `Applied` change | from, to, digest, source (operation or adoption record) |
 | Endpoint change | previous and new Talos endpoint, who, role ([persistence and API §3.3](persistence-api.md#33-talos-access)) |
+| Name change | previous name or none, new name, who, role ([persistence and API §3.5](persistence-api.md#35-a-machines-name)) |
 
 Plan entries, from creation to commitment or a terminal plan state (§2), and
 machine-scope facts are recorded on the machine's timeline beside its
 operations' entries: drift records and their resolution, freezes and unfreezes,
 adoption records, recovery-mode entry, scope states and scope release (§6,
-§7), and Talos endpoint changes.
+§7), Talos endpoint changes and machine name changes.
 
 A `publication` start names a publish operation and its `publicationGeneration`,
 with no plan, and dials the current inventory endpoint. Its ownership fences,
