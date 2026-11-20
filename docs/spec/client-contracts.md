@@ -1566,7 +1566,9 @@ the client's rule wins wherever the two meet.
    reflow of 1.4.10 at 320 CSS pixels. One spacing scale (`--s1` to `--s6`, 0.25 to 2 rem) is the only
    source of padding, gap and margin in the shell rules. A status line is an alert box, a bordered
    panel holds a page section, and a detail list is a two-column grid; the box is a class and changes
-   no role, and every fill is an opaque colour so the contrast measure can read it.
+   no role, and every fill is an opaque colour so the contrast measure can read it. The filters and
+   actions above a list sit in one wrapping row (the `toolbar` class), each action keeping its refusal
+   note beside it, with the markup order unchanged.
 7. **Icons are decorative inline SVG** (Heroicons 2.2.0 outline, MIT, the paths vendored in one module
    with the notice kept). An icon is an `<svg>` element with `aria-hidden="true"`, no title and no
    style attribute, drawn with presentation attributes, so it is markup and not an image load:
