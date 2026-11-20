@@ -105,7 +105,8 @@ Type the plan ID to send it, or press Enter to stop:
 [exit 0]
 
 $ bronzewardctl --context human plan show {plan}
-Plan pln_…  committed                                        expires <local time> <local time>
+Plan pln_…  committed  expires <local time> <local time>
+  Title                              Adopt of mch_… to import worker, published <local time>
   Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
   Operation                          adopt: records Applied from the node's own bytes and sends nothing to the machine
   Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
