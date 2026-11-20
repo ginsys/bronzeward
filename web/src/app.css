@@ -85,7 +85,7 @@ nav a[aria-current="page"] { background-color: #10301f; font-weight: bold; box-s
 main { grid-area: main; min-width: 0; max-width: 90rem; padding: var(--s5) var(--s6); }
 footer { grid-area: foot; padding: var(--s3) var(--s5); border-top: 1px solid var(--border); color: var(--muted-foreground); }
 @media (max-width: 68rem) {
-  .shell.with-nav { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "nav" "main" "foot"; }
+  .shell.with-nav { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "nav" "main" "foot"; grid-template-rows: auto auto 1fr auto; }
   nav { border-right: 0; border-bottom: 1px solid var(--border); }
   header, footer { padding-inline: var(--s4); }
   main { padding: var(--s4); }
