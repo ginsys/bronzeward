@@ -264,7 +264,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       const grant: Grant = { ...mint(q.get("human") ?? ""), rotate: q.has("rotate"), hold: Number(q.get("hold") ?? 0), bare: q.has("bare") };
       if (q.has("lifetime")) grant.lifetime = Number(q.get("lifetime"));
       if (q.has("age")) grant.fresh = () => mint(q.get("human") ?? "", false).access;
-      if (q.has("renew-as")) grant.renewed = { ...mint(q.get("renew-as")!), lifetime: 300 };
+      if (q.has("renew-as")) grant.renewed = { ...mint(q.get("renew-as")!, false), lifetime: 300 };
       next.grant = grant;
     } catch (e) {
       return res.writeHead(500).end(String(e));
