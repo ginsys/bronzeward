@@ -1,18 +1,62 @@
-/* Every view's layout (journeys §13): the page reflows at 320 CSS pixels and only a table scrolls on
-   its own (WCAG 1.4.10), focus is always visible (2.4.7) and targets are at least 24 px (2.5.8). No
-   meaning is carried by colour. */
-body { margin: 0 auto; padding: 0 1rem; max-width: 80rem; font-family: system-ui, sans-serif; line-height: 1.5; color: #111; background: #fff; }
-:focus-visible { outline: 3px solid #1a4fc4; outline-offset: 2px; }
+/* The client is styled with Oat (@knadh/oat, MIT), dark first, over the tokens below; this file is not in a
+   cascade layer and Oat's rules are, so every rule here wins over Oat's without a specificity fight
+   (client contracts §10.4). Every view's layout (journeys §13): the page reflows at 320 CSS pixels and
+   only a table scrolls on its own (WCAG 1.4.10), focus is always visible (2.4.7) and targets are at
+   least 24 px (2.5.8). No meaning is carried by colour. */
+
+/* Dark, and only dark. The contrast of each pair on the page background #0c1017 (WCAG 2): text 15.5,
+   secondary text 7.4, link and ring 10.2, button text on the primary 10.6 (7.7 on its hover), danger
+   7.5, control border and table rule 4.75 (4.35 on a card, 3.9 on a hovered row, above the 3 of 1.4.11).
+   --border is Oat's own decorative rule and is never a control's or a table's. */
+:root {
+  color-scheme: dark;
+  --background: #0c1017;
+  --foreground: #e2e8f0;
+  --card: #141a24;
+  --faint: #141a24;
+  --muted: #1c2333;
+  --muted-foreground: #94a3b8;
+  --primary: #3dd68c;
+  --primary-foreground: #09090b;
+  --ring: #3dd68c;
+  --border: #2a3346;
+  --input: #718096;
+  --danger: #f4807b;
+}
+
+body { margin: 0 auto; padding: 0 1rem; max-width: 80rem; }
+:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; }
 main:focus { outline: none; }
 .skip { position: absolute; left: -100vw; }
-/* Hidden from sight, read by assistive technology: the page's one status region (ginsys/bronzeward#830). */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .skip:focus { position: static; }
+
+/* Oat undoes four things our accessibility record keeps. A disabled control keeps its full contrast
+   (Oat halves it) and shows it by its dashed border. A link is underlined wherever it is (Oat does that
+   in running text only). A button's label wraps (Oat does not). Hover colours are plain hex, so a colour
+   read at rest is three bytes (Oat mixes them, which the contrast measure cannot read), and nothing
+   transitions, so a read right after a hover is not a colour on its way. */
+:disabled, [aria-disabled="true"] { opacity: 1; }
+a { text-decoration: underline; transition: none; }
+a:hover { color: var(--foreground); }
+button { --_hov: #2fb677; white-space: normal; transition: none; margin-inline-end: 0.5rem; }
+button:disabled { color: var(--muted-foreground); background-color: var(--background); border: 1px dashed var(--muted-foreground); }
+
+/* The controls are the browser's own: Oat draws a select arrow, a check mark and a radio dot as data:
+   images, which the content policy's img-src 'self' refuses. */
+select, input[type="checkbox"], input[type="radio"] { appearance: auto; accent-color: var(--primary); }
+select { background-image: none; width: auto; max-width: 100%; margin-inline-start: 0.25rem; }
+input[type="checkbox"]::after, input[type="radio"]::after { content: none; mask-image: none; }
+textarea { max-width: 100%; box-sizing: border-box; }
+
+header { border-bottom: 1px solid var(--input); padding-bottom: 0.5rem; }
+header h1 { margin: 1rem 0 0.25rem; }
+h2 { margin: 1.5rem 0 0.75rem; }
+h3 { margin: 1rem 0 0.5rem; }
+main { padding-block-start: 1rem; }
+footer { margin-top: 2rem; padding: 1rem 0; border-top: 1px solid var(--input); color: var(--muted-foreground); }
 nav { display: flex; flex-wrap: wrap; gap: 0 1rem; }
 nav a, button, select { min-height: 24px; min-width: 24px; }
-select { max-width: 100%; }
-/* A textarea's cols set its width on a wide page; at 320 CSS pixels it fits the page instead. */
-textarea { max-width: 100%; box-sizing: border-box; }
 nav a { display: inline-block; padding: 0.25rem 0; }
 p, dd, li, h2, h3 { overflow-wrap: anywhere; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -20,9 +64,9 @@ dt { font-weight: bold; }
 dd { margin-left: 1rem; }
 .scroll { max-width: 100%; overflow-x: auto; }
 table { border-collapse: collapse; }
-th, td { padding: 0.25rem 0.5rem; text-align: left; vertical-align: top; border-bottom: 1px solid #767676; }
-/* A redaction token of the rendered review: its kind in words, inside a border, never colour alone (1.4.1, 1.4.11). */
-.badge { border: 1px solid #1a4fc4; border-radius: 0.25rem; padding: 0 0.25rem; background: #eef2fc; font-weight: bold; }
-/* Every browser draws a disabled button the same: #555 on #fff is 7.46:1 (1.4.3); the dashed border keeps it unlike an enabled one. */
-button:disabled { color: #555; background: #fff; border: 1px dashed #555; }
+thead, tbody tr { border-bottom: 0; }
+th, td { padding: 0.25rem 0.5rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--input); }
+tbody tr { transition: none; }
+tbody tr:hover { background-color: var(--muted); }
+.badge { border: 1px solid var(--primary); border-radius: 0.25rem; padding: 0 0.25rem; background-color: var(--muted); font-weight: bold; }
 pre.diff { overflow: auto; max-width: 100%; }

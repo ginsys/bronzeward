@@ -1618,7 +1618,8 @@ banners (2.4.7, 2.4.11); logical focus order through the plan evidence (2.4.3); 
 operation progress announced without moving focus (4.1.3); errors identified in text at the
 field (3.3.1); contrast of text and redaction badges (1.4.3, 1.4.11); reflow at 320 CSS pixels
 without losing the diff (1.4.10); target size (2.5.8); colour never the only signal of
-drift, freeze or failure (1.4.1). Check each with a keyboard-only pass and a screen-reader pass
+drift, freeze or failure (1.4.1). The dark theme's measured pairs and the 3 px focus ring are in
+[client contracts §10.4](client-contracts.md#104-styling-and-the-content-policy). Check each with a keyboard-only pass and a screen-reader pass
 on the tasks above. An automated checker or a reviewed wireframe does not establish conformance
 ([WCAG 2.2](https://www.w3.org/TR/WCAG22/)).
 

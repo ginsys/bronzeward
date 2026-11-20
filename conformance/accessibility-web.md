@@ -29,7 +29,7 @@ ESR 153 on Linux.
 | 2.4.11 Focus not obscured | nothing is fixed or sticky, so the header and banners never cover focus | by construction | | | |
 | 4.1.3 Status messages | every state text is mirrored into the page's one hidden `role="status"` region, announced without moving focus; a server refusal is an alert on its own element; the empty machine list checks the mirror and the Changes page checks that two messages share one region | pass | pass | pass | pass |
 | 1.4.3 Contrast | the lowest contrast of any shown text, measured in the page, at least 4.5:1 | pass | pass | pass | pass |
-| 1.4.11 Non-text contrast | focus outline `#1a4fc4` on white 6.9:1; table rules `#767676` on white 4.5:1 | by computation | | | |
+| 1.4.11 Non-text contrast | focus outline `#3dd68c` on the page `#0c1017` 10.2:1; table rules and control borders `#718096` on the page 4.75:1, on a card 4.35:1 | by computation | | | |
 | 1.4.10 Reflow | at 320 CSS pixels no page scrolls sideways: machines, plans and a plan with its diff, sources, a fragment and its revision's document, operations and an operation; a table scrolls in its own labelled, focusable region | pass | pass | pass | pass |
 | 2.5.8 Target size | every button, select and navigation link at least 24 by 24 px | pass | pass | pass | pass |
 | 1.4.1 Use of colour | drift, freeze, staleness and failure are words; the views set no colour with meaning | by construction; the words in `web/src/*.test.ts` | | | |
@@ -42,7 +42,7 @@ The release page and the rendered review of one of its machines
 | Item | What is checked on the release page and its rendered review |
 | --- | --- |
 | 2.1.1 Keyboard, 2.4.7 Focus visible | Tab reaches the release in the list, then the link to a machine's rendered configuration; Enter opens it and focus moves to the page |
-| 1.4.3 Contrast, 1.4.11 Non-text contrast | the lowest contrast of any shown text, redaction badges included, is at least 4.5:1; the badge border is `#1a4fc4` on white, 6.9:1 |
+| 1.4.3 Contrast, 1.4.11 Non-text contrast | the lowest contrast of any shown text, redaction badges included, is at least 4.5:1; the badge border is `#3dd68c` on the page `#0c1017`, 10.2:1 |
 | 1.4.1 Use of colour | a redaction token shows as `[secret registry/example-pass, version 1]`: its kind is words inside a border, never colour alone |
 | 1.4.10 Reflow | at 320 CSS pixels neither page scrolls sideways; the provenance table scrolls in its own labelled region |
 | 2.5.8 Target size | every button, select and navigation link at least 24 by 24 px |
