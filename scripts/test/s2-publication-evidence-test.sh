@@ -28,13 +28,13 @@ SET LOCAL statement_timeout = '5s';
 CREATE TEMP TABLE release (id text, operation text, cluster text, contract text);
 CREATE TEMP TABLE draft (id text, state text, release text);
 CREATE TEMP TABLE release_machine (release text, machine text, publication_observation text);
-CREATE TEMP TABLE observation (id text, machine text, basis bigint, access_path text, running_version text);
+CREATE TEMP TABLE observation (id text, machine text, basis bigint, access_path text, access_serial text, access_not_after timestamptz, running_version text);
 CREATE TEMP TABLE observation_start (machine text, revision bigint, purpose text, operation text, publication_generation bigint);
 CREATE TEMP TABLE operation (id text, owner_gen bigint);
 INSERT INTO pg_temp.release VALUES ('rel_publication', 'op_publication', 'cl_fixture', 'v1.14');
 INSERT INTO pg_temp.draft VALUES ('drf_publication', 'published', 'rel_publication');
 INSERT INTO pg_temp.release_machine VALUES ('rel_publication', 'mch_worker', 'obs_worker');
-INSERT INTO pg_temp.observation VALUES ('obs_worker', 'mch_worker', 10, 'access/talos-ca/cl_fixture', 'v1.14.5');
+INSERT INTO pg_temp.observation VALUES ('obs_worker', 'mch_worker', 10, 'access/talos-ca/cl_fixture', 'a1b2c3d4', '2026-12-01T00:00:00Z', 'v1.14.5');
 INSERT INTO pg_temp.observation_start VALUES ('mch_worker', 10, 'publication', 'op_publication', 2);
 INSERT INTO pg_temp.operation VALUES ('op_publication', 2);
 SQL
@@ -45,7 +45,7 @@ mutation() {
     matching_two_machines)
       cat <<'SQL'
 INSERT INTO pg_temp.release_machine VALUES ('rel_publication', 'mch_controlplane', 'obs_controlplane');
-INSERT INTO pg_temp.observation VALUES ('obs_controlplane', 'mch_controlplane', 11, 'access/talos-ca/cl_fixture', 'v1.14.6');
+INSERT INTO pg_temp.observation VALUES ('obs_controlplane', 'mch_controlplane', 11, 'access/talos-ca/cl_fixture', 'a1b2c3d5', '2026-12-01T00:00:00Z', 'v1.14.6');
 INSERT INTO pg_temp.observation_start VALUES ('mch_controlplane', 11, 'publication', 'op_publication', 2);
 SQL
       ;;
@@ -62,6 +62,8 @@ SQL
     null_generation) printf '%s\n' 'UPDATE pg_temp.observation_start SET publication_generation = NULL;' ;;
     null_owner_generation) printf '%s\n' 'UPDATE pg_temp.operation SET owner_gen = NULL;' ;;
     null_access_path) printf '%s\n' 'UPDATE pg_temp.observation SET access_path = NULL;' ;;
+    null_access_serial) printf '%s\n' 'UPDATE pg_temp.observation SET access_serial = NULL;' ;;
+    null_access_not_after) printf '%s\n' 'UPDATE pg_temp.observation SET access_not_after = NULL;' ;;
     null_purpose) printf '%s\n' 'UPDATE pg_temp.observation_start SET purpose = NULL;' ;;
     null_operation_binding) printf '%s\n' 'UPDATE pg_temp.observation_start SET operation = NULL;' ;;
     null_running_version) printf '%s\n' 'UPDATE pg_temp.observation SET running_version = NULL;' ;;
@@ -79,7 +81,7 @@ SQL
     mixed_null_generation)
       cat <<'SQL'
 INSERT INTO pg_temp.release_machine VALUES ('rel_publication', 'mch_controlplane', 'obs_controlplane');
-INSERT INTO pg_temp.observation VALUES ('obs_controlplane', 'mch_controlplane', 11, 'access/talos-ca/cl_fixture', 'v1.14.6');
+INSERT INTO pg_temp.observation VALUES ('obs_controlplane', 'mch_controlplane', 11, 'access/talos-ca/cl_fixture', 'a1b2c3d5', '2026-12-01T00:00:00Z', 'v1.14.6');
 INSERT INTO pg_temp.observation_start VALUES ('mch_controlplane', 11, 'publication', 'op_publication', NULL);
 SQL
       ;;
@@ -114,7 +116,7 @@ sha256sum "$0"
 passed=0 failed=0
 for case_name in matching matching_two_machines no_release duplicate_release draft_not_published draft_wrong_release missing_draft \
   zero_machines missing_observation missing_start missing_operation null_observation_link null_generation null_owner_generation \
-  null_access_path null_purpose null_operation_binding null_running_version wrong_operation_binding wrong_machine_binding \
+  null_access_path null_access_serial null_access_not_after null_purpose null_operation_binding null_running_version wrong_operation_binding wrong_machine_binding \
   wrong_start_basis wrong_generation wrong_access_path wrong_purpose wrong_minor malformed_minor mixed_missing_observation mixed_null_generation; do
   want=1
   case $case_name in matching | matching_two_machines) want=0 ;; esac
