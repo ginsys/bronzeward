@@ -223,7 +223,7 @@ describe("the timeline (ginsys/bronzeward#359, W8)", () => {
   test("the page opens with the sentence of its kind and state and ends its outcome with the next step", () => {
     const page = (o: Partial<Operation>) => h(OperationTimeline, { id: OP, o: op(o), reread: () => {} });
     const markup = html(page({ kind: "apply-config", state: "rejected" }));
-    expect(markup).toMatch(/data-testid="now">The node refused every attempt as invalid, so the machine did not change\.<\/p>/);
+    expect(markup).toMatch(/data-testid="now">The machine was not changed\.<\/p>/);
     expect(markup).toMatch(/data-testid="next">Next: Correct the release and create a new plan\.<\/p>/);
     expect(markup.indexOf('data-testid="now"')).toBeLessThan(markup.indexOf('data-testid="outcome"'));
     expect(markup.indexOf('data-testid="outcome"')).toBeLessThan(markup.indexOf('data-testid="next"'));

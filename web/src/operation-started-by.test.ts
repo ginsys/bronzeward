@@ -8,7 +8,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
-import { StartedBy } from "./resources.tsx";
+import { OperationItem, Operations, StartedBy } from "./resources.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -22,7 +22,7 @@ const PLN = "pln_k2pq3rstuvwxyz234567abcdef";
 const OP = "op_k2pq3rstuvwxyz234567abcdefg";
 const creator = { principal: "usr_creator", role: "publisher" };
 const plan = (operation: string) => ({ id: PLN, state: "approved", cluster: "cl_a", machine: MCH, release: REL, operation, createdBy: creator });
-const operation = (kind: string, createdBy: unknown, subject: unknown) => ({ id: OP, kind, state: "completed", epoch: "ep_a", lastEvent: 1, subject, createdBy, createdAt: at });
+const operation = (kind: string, createdBy: unknown, subject: unknown) => ({ id: OP, kind, state: "completed", epoch: "ep_a", lastEvent: 1, subject, createdBy, createdAt: at, result: null, error: null });
 
 let root: Root;
 let box: HTMLElement;
@@ -62,6 +62,37 @@ afterEach(async () => {
   box.remove();
   localStorage.clear();
   sessionStorage.clear();
+});
+
+// The list and the page use it: a call site that went back to the raw `createdBy` would print none here.
+describe("the operations list and the operation page", () => {
+  const publish = { ...operation("publish", { principal: "usr_a", role: "publisher" }, { draft: DRF, draftRevision: 3 }), id: "op_pub" };
+  const apply = { ...operation("apply-config", null, { plan: PLN, machine: MCH }), id: "op_apply" };
+  const adopt = { ...operation("adopt", null, { plan: PLN, machine: MCH }), id: "op_adopt" };
+
+  test("the list's Started by column names the controller and the plan for an apply and an adoption", async () => {
+    answers["/operations"] = ok({ items: [publish, apply, adopt] });
+    await mount(h(Operations, { query: "", go: () => {} }));
+    await settled();
+    const rows = [...box.querySelectorAll("tbody tr")].map((tr) => [...tr.children].map((c) => c.textContent ?? ""));
+    expect([...box.querySelectorAll("th")].map((th) => th.textContent)).toContain("Started by");
+    expect([...box.querySelectorAll("th")].map((th) => th.textContent)).not.toContain("Created by");
+    const startedCol = [...box.querySelectorAll("th")].findIndex((th) => th.textContent === "Started by");
+    expect(rows.map((r) => r[startedCol])).toEqual([
+      expect.stringMatching(/\(publisher\)$/),
+      expect.stringMatching(/^the controller, committing plan Apply of worker-1 to .*\(created by .*\(publisher\)\)$/),
+      expect.stringMatching(/^the controller, adopting under plan /),
+    ]);
+  });
+
+  test("the page's Created row names the controller and the plan, and never none", async () => {
+    answers["/operations/op_apply"] = ok(apply);
+    await mount(h(OperationItem, { id: "op_apply" }));
+    await settled();
+    const created = [...box.querySelectorAll("dt")].find((dt) => dt.textContent === "Created")?.nextElementSibling?.textContent;
+    expect(created).toMatch(/ by the controller, committing plan Apply of worker-1 to .*\(created by .*\(publisher\)\)$/);
+    expect(created).not.toContain("none");
+  });
 });
 
 describe("who started an operation", () => {

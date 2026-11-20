@@ -11,20 +11,20 @@ import { operationNext, operationNow, startedBy } from "./operation-words.ts";
 const PAIRS: [string, string, string, string | undefined][] = [
   ["publish", "queued", "Accepted; no worker has taken it yet.", "Wait; nothing to do."],
   ["publish", "running", "A worker is compiling the draft and writing the release.", "Wait; nothing to do."],
-  ["publish", "succeeded", "The draft became an immutable release. Nothing was sent to any machine.", "Create a plan to send it to a machine (publisher)."],
+  ["publish", "succeeded", "The draft became an immutable release. Nothing was sent to any machine.", "Create a plan for each machine (publisher): an adopt plan where it has no Applied configuration, which sends nothing; an apply plan otherwise, which sends the release."],
   ["publish", "failed", "The draft was not published; no release was made.", "Fix the cause named above and publish again; a publish is safe to repeat."],
-  ["ingest", "running", "The machine's configuration is being read into the draft, or the import waits for review.", "Open the import to see which; a review is for an author."],
+  ["ingest", "running", "The import is reading the machine's configuration into the draft, waits for review, or has stalled with its runner gone.", "Open the import to see which; an author reviews a paused one and takes a stalled one over or abandons it."],
   ["ingest", "succeeded", "The machine's configuration is stored in the draft. Nothing was written to the machine.", "Publish the draft (publisher)."],
   ["ingest", "failed", "No configuration was stored from the machine, and nothing was written to it.", "Start the import again (author)."],
   ["apply-config", "committed", "The controller committed the plan and holds the machine; no request is sent yet.", "Wait for the controller."],
   ["apply-config", "sending", "A request is in flight, or its outcome is unknown.", "Wait for the controller."],
   ["apply-config", "verifying", "The node accepted the request; the controller is checking the result.", "Wait for the controller."],
-  ["apply-config", "completed", "The release is applied to the machine and confirmed.", "None needed."],
-  ["apply-config", "rejected", "The node refused every attempt as invalid, so the machine did not change.", "Correct the release and create a new plan."],
-  ["apply-config", "failed", "A check after the request contradicts the result; Applied was not updated.", "Read the machine's drift and observations, then create a new plan."],
-  ["apply-config", "cancelled", "Cancelled before any request was sent; the machine did not change.", "Create a new plan if the change is still wanted."],
-  ["apply-config", "unresolved", "The outcome is not established yet, and the machine stays held.", undefined],
-  ["adopt", "completed", "The machine's running configuration is recorded as Applied, by observation. Nothing was sent.", "None needed; the first apply plan afterwards carries a whole-configuration diff."],
+  ["apply-config", "completed", "The machine's Applied configuration is updated.", "None needed."],
+  ["apply-config", "rejected", "The machine was not changed.", "Correct the release and create a new plan."],
+  ["apply-config", "failed", "The machine may have been changed wrongly or not changed at all; its Applied configuration was not updated.", "Read the machine's drift and observations, then create a new plan."],
+  ["apply-config", "cancelled", "No attempt is recorded for it, which is not proof that nothing was sent.", "Read the machine's Observed configuration, then create a new plan if the change is still wanted."],
+  ["apply-config", "unresolved", "The controller keeps examining it and may settle it on its own.", undefined],
+  ["adopt", "completed", "The machine's running configuration is recorded as Applied, by observation. Nothing was sent.", "None needed; the first apply plan afterwards carries a whole-configuration diff, or says it is withheld."],
 ];
 
 describe("the sentence and the next step of each kind and state", () => {
@@ -51,6 +51,21 @@ describe("the sentence and the next step of each kind and state", () => {
     expect(operationNow("frobnicate", "running")).toBe("An operation of kind frobnicate in state running; this page has no description of it.");
     expect(operationNext("frobnicate", "sideways")).toBeUndefined();
     expect(operationNext("publish", "sideways")).toBeUndefined();
+  });
+
+  // A state or a kind named like a property every object has is unknown, not the property's value.
+  test.each(["constructor", "toString", "__proto__", "hasOwnProperty"])("the inherited name %s is an unknown state and an unknown kind", (name) => {
+    expect(operationNow("publish", name)).toBe(`A publish operation in state ${name}; this page has no description of it.`);
+    expect(operationNow(name, "running")).toBe(`An operation of kind ${name} in state running; this page has no description of it.`);
+    expect(operationNext("publish", name)).toBeUndefined();
+    expect(operationNext(name, "running")).toBeUndefined();
+  });
+
+  test("a sentence repeats no fact the outcome line states for the same state", () => {
+    // Outcome says the node refused every attempt as invalid, confirmed by an observation, and that the outcome is unknown.
+    expect(operationNow("apply-config", "rejected")).not.toMatch(/refused|invalid/);
+    expect(operationNow("apply-config", "completed")).not.toMatch(/confirmed|observation/);
+    expect(operationNow("apply-config", "unresolved")).not.toMatch(/not established|unknown/);
   });
 
   test("a pair the server cannot produce says so with both raw values", () => {
