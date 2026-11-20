@@ -1979,9 +1979,11 @@ the web client, whole in the CLI, which prints every identifier whole. The text 
 
 **A8. Titles of plans, releases and operations (client rule, no API change).** Closes G26. Both
 clients show a title built from fields the body already carries, with the identifier kept as the
-stable reference (the whole identifier as the title attribute in the web client; in the CLI a column
-of a table and a line of a detail, whose heading names the identifier today, for example
-`Plan <id>  <state>` at `cmd/bronzewardctl/plans.go:328`). A stored name was the alternative: it needs an API revision and a field set at plan creation
+stable reference (the whole identifier as the title attribute in the web client; in the CLI the
+identifier keeps its own column of a table and the heading of a detail, for example
+`Plan <id>  <state>`, and the title is a TITLE column beside it in a list and a `Title` line under
+the heading of a detail, with a dash in the column and no line where no title could be built).
+A stored name was the alternative: it needs an API revision and a field set at plan creation
 and at publication, and for an operation it could only be generated text, since no operator creates
 one. The rule is one for both clients:
 
