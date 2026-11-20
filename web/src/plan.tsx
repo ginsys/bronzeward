@@ -10,6 +10,7 @@ import { type Load, Id, Ref, short, usePending, useReads, useSettled } from "./l
 import type { Problem } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
+import { MachineById } from "./titles.tsx";
 
 type PlanInput = components["schemas"]["PlanInput"];
 type Operation = PlanInput["operation"];
@@ -106,7 +107,7 @@ function Create({ release, machine, first }: { release: string; machine: string;
   const busy = (w !== undefined && !startsNew(writes, w)) || o?.kind === "done";
   return (
     <form onSubmit={submit} aria-label="Create plan">
-      <p>Plan for machine <Id id={machine} /> and release <Id id={release} />.</p>
+      <p>Plan for machine <MachineById id={machine} /> and release <Id id={release} />.</p>
       <p>
         <label>Operation{" "}
           <select value={operation} onChange={(e) => (setOperation(e.target.value as Operation), setNote(undefined))} disabled={busy}>

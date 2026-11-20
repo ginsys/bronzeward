@@ -64,6 +64,8 @@ export const release = (id: string | null) => <Id id={id} />;
 // feed), else the identifier is shown. It replaces A7's control and format character test.
 const MACHINE_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 export const machineName = (name: unknown): string | undefined => (typeof name === "string" && MACHINE_NAME.test(name) ? name : undefined);
+// A machine as text, where a title names it (A8 rule 1): its name, else the shortened identifier.
+export const machineText = (id: string, name?: unknown): string => machineName(name) ?? short(id);
 // A machine's link: its name as the text, else the shortened identifier, the whole identifier the title.
 // The one display of a machine for every view (the views that carry only an identifier pass the name they read).
 export const MachineRef = ({ id, name }: { id: string; name?: unknown }) => <Ref to={`/machines/${id}`} id={id}>{machineName(name)}</Ref>;

@@ -16,7 +16,7 @@ export const principalId = (id: string) => /^idn_[a-z2-7]{25}[aeimquy4]$/.test(i
 
 // Remote text that is shown as it is: the rule of an operation's cause (`operation.tsx`), which keeps
 // a control or format character (a line feed, a bidirectional control) and a long text out of the page.
-const SAFE = /^[^\p{Cc}\p{Cf}]{1,300}$/u;
+export const SAFE = /^[^\p{Cc}\p{Cf}]{1,300}$/u;
 
 // A human's display name, else its subject at its issuer; a service's name. Nothing (the caller shows
 // the shortened identifier) for an identifier no row holds, a read that did not answer, a record that
