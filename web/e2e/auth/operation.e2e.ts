@@ -92,6 +92,7 @@ describe("the operation page's stream (#359)", () => {
     await reach(n + 1);
     await expect($('[data-testid="outcome"]')).toHaveText(expect.stringContaining("Cancelled: resolution"), { wait: 30_000 });
     expect((await rows()).filter((r) => r.includes("operation-state: unresolved → cancelled")).length).toBe(1);
+    await browser.waitUntil(async () => (await timeline()).includes(ENDED), { timeout: 30_000, timeoutMsg: "the watch did not end at cancelled" });
     expect(await streams()).toHaveLength(2);
     await storageEmpty();
   });
@@ -200,10 +201,13 @@ describe("the operation page's stream (#359)", () => {
     // The token is issued 270 s ago, so it expires 30 s after the sign-in, and the server ends the stream at the expiry of the token
     // that opened it; expires_in 24 s brings the renewal 12 s after the sign-in (the page renews at max(left - 60 s, left / 2),
     // web/src/auth.ts:18-22), with a token minted then, which has its full lifetime.
+    const begun = Date.now();
     await open(s, {}, { rotate: "1", lifetime: "24", age: "270" });
     await reach(n);
     await browser.waitUntil(async () => (await streams()).length >= 2, { timeout: 90_000, timeoutMsg: "the page did not open the stream again after the token's expiry" });
-    expect((await counts()).refresh).toBeGreaterThanOrEqual(1);
+    // The renewal comes 12 s after the sign-in: a reopening before the original token's expiry (30 s after it) is not the one this case is about.
+    expect(Date.now() - begun).toBeGreaterThanOrEqual(25_000);
+    expect((await counts()).refresh).toBe(1);
     expect(await streams()).toEqual([`${eventsOf(s)} -`, `${eventsOf(s)} ${s.ids[n - 1]}`]);
     await absent(async () => (await rows()).length !== n, "a repeated or missing event after the renewal");
     await resolve(s);
