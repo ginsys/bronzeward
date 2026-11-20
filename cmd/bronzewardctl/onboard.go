@@ -396,12 +396,11 @@ func (e *env) onboardFirstKey(a *onboardArgs, obj *onboarding, address string, r
 	var stored bool
 	err := firstKeyRefusal(e.quietly(func() error {
 		return e.writeAfter(nil, firstKeyWrite(obj.Cluster.ID, in, nil), func(_ *client.Client, r *client.Response) ([]string, error) {
-			err := json.Unmarshal(r.Body, &x)
-			stored = err == nil
-			return nil, err
+			stored = true
+			return nil, json.Unmarshal(r.Body, &x)
 		})
 	}))
-	// An answer that was read is the key stored, whatever fails after it (keeping what the answers
+	// An answer that arrived is the key stored, whatever fails after it (keeping what the answers
 	// taught the context): the step says stored, and the error still ends the run, as plan create's does.
 	if err != nil && !stored {
 		obj.FirstKey = onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}

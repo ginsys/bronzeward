@@ -319,17 +319,22 @@ func TestOnboardOtherFirstKey(t *testing.T) {
 // what the answers taught the context fails afterwards, as plan create's plan does: the run still ends
 // with the error, and its rerun command skips the key, which a repeat would replace.
 func TestOnboardFirstKeySaveFails(t *testing.T) {
-	e := newOnboard(t)
-	e.api.keyAnswer = func(n int, w http.ResponseWriter) {
-		if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward", "config.yaml"), []byte("{"), 0o600); err != nil {
-			t.Error(err)
+	for _, c := range []struct{ name, body string }{
+		{"a readable answer", `{"cluster":"cl_x","kind":"talosconfig","replaced":false,"caKeyVersion":{"version":1,"createdTime":"2026-11-19T21:00:00Z"}}`},
+		{"an answer that is not JSON", `{`},
+	} {
+		e := newOnboard(t)
+		e.api.keyAnswer = func(_ int, w http.ResponseWriter) {
+			if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward", "config.yaml"), []byte("{"), 0o600); err != nil {
+				t.Error(err)
+			}
+			w.Header().Set("Bronzeward-Epoch", "ep_OB-2")
+			_, _ = io.WriteString(w, c.body)
 		}
-		w.Header().Set("Bronzeward-Epoch", "ep_OB-2")
-		_, _ = io.WriteString(w, `{"cluster":"cl_x","kind":"talosconfig","replaced":false,"caKeyVersion":{"version":`+strconv.Itoa(n)+`,"createdTime":"2026-11-19T21:00:00Z"}}`)
-	}
-	code, out, errOut := e.run()
-	if code != 1 || len(e.api.keys) != 1 || !strings.Contains(out, "First key: stored") || !strings.Contains(out, "--skip-first-key") || !strings.Contains(errOut, "keeping the epoch") {
-		t.Errorf("exit %d, %d first keys, stdout %q, stderr %q; want 1, 1, the key stored, --skip-first-key in the rerun and the save failure reported", code, len(e.api.keys), out, errOut)
+		code, out, errOut := e.run()
+		if code != 1 || len(e.api.keys) != 1 || !strings.Contains(out, "First key: stored") || !strings.Contains(out, "--skip-first-key") || !strings.Contains(errOut, "keeping the epoch") {
+			t.Errorf("%s: exit %d, %d first keys, stdout %q, stderr %q; want 1, 1, the key stored, --skip-first-key in the rerun and the save failure reported", c.name, code, len(e.api.keys), out, errOut)
+		}
 	}
 }
 
