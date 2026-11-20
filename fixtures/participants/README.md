@@ -200,9 +200,13 @@ facilitator only. Setup `tN` means `fixtures/participants/session tN`.
   completion line. Before it stops A, the step checks that the watch runs and printed its first event. The stop is
   not synchronised with the watch, so this does not prove that the stop cut the CLI's own stream. The
   proof is the end of the step: the watch must exit 0 within 120 s of the apply's completion, print
-  the outage notice and print the completion line. The step fails if it does not. The web interface has no operation timeline
-  yet; that half waits for ginsys/bronzeward#359 (web timeline), and T9's measures do not cover a
-  resumed stream there. A participant on the CLI runs `operation watch <operation>` and sees one
+  the outage notice and print the completion line. The step fails if it does not. The web interface's operation page follows
+  the apply too, and `session t9 disconnect --web` proves it the same way: headless Chrome signed in
+  as h-viewer has the page open before the stop; every row the page received, read as it was added, is
+  an event the server sent, once each and in order, rows arrive both before the stop and after the
+  restart, and after the end the page shows the server's events with the server's times (compare.mjs
+  and its rules R1 to R5; F1 to F4 read the flow's counts). The human pass with a real participant stays
+  with ginsys/bronzeward#447. A participant on the CLI runs `operation watch <operation>` and sees one
   retry notice per read while A is down.
 - When A starts again, it takes the apply over from C. It observes the worker again and applies
   from that observation, so the age of the evidence that the commitment used does not limit the
