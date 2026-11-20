@@ -13,6 +13,11 @@
 #   session t5 collide    h-all's competing save into the participant's open draft (collide.mjs)
 #   session t9 disconnect A stopped for 60 s and started again; a stream resumed with
 #                         Last-Event-ID follows the apply to completion, no event lost or repeated
+#   session t9 disconnect --web   the same, with the operation page of the web interface open as h-viewer
+#                         (web-watch.mjs): every row it receives is the server's, once and in order,
+#                         and after the end it shows the server's events (compare.mjs; ginsys/bronzeward#359)
+#   session s6web         not a participant task: S6.1 on the fixture, then the page on its send operation
+#                         compared with the server's events; starts dev-db and dev-bao if they are not running
 #   session t10 revert    the facilitator's close of a drift that T10 left open (prepare t10-revert)
 #   session scan [path]   no session password in any retained file or log, with a planted control
 #   session stop          the web host and dev-idp; fixtures/bin/down removes the fixture
@@ -648,6 +653,52 @@ t9_watch_end() {
   wait "$t9_watcher" || t9_watch_rc=$?
   t9_watcher=''
 }
+# The operation page followed against the server (ginsys/bronzeward#359): web-watch.mjs as h-viewer in
+# headless Chrome, its log and the server's events in <dir>/web-watch.json, the rules of compare.mjs on
+# it in <dir>/web-watch.tsv. A is the web host's API, so these run while A answers.
+t9_web=''
+# web_start <dir> <operation> [live]: the driver, in the background as t9_web. With "live" the step
+# fails unless the page shows the live notice and a received row within 120 s, so that the stop meets
+# a page that is following.
+web_start() {
+  rm -rf -- "$1"
+  mkdir -p -- "$1"
+  passwords --only h-viewer --exec node "$here/web-watch.mjs" h-viewer "$1" "$2" "http://127.0.0.1:$SERVER_A_PORT" "$STATE/automation-token" \
+    >"$1/web.out" 2>&1 &
+  t9_web=$!
+  [ -n "${3:-}" ] || return 0
+  for _ in $(seq 120); do
+    [ -e "$1/web-ready" ] && return 0
+    kill -0 "$t9_web" 2>/dev/null || break
+    sleep 1
+  done
+  die "the page did not show the operation live within 120 s; see $1/web.out"
+}
+# web_compare <dir> <operation> [--outage] [--flow <attempts>]: the driver ended by itself within
+# 120 s, and every rule holds.
+web_compare() {
+  local dir=$1 op=$2 args=()
+  shift 2
+  for _ in $(seq 120); do kill -0 "$t9_web" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$t9_web" 2>/dev/null; then die "the page did not show the end of the watch within 120 s; see $dir/web.out"; fi
+  wait "$t9_web" || die "the web driver failed; see $dir/web.out"
+  t9_web=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --outage) args+=(--outage) ;;
+      --flow)
+        args+=(--flow "$2" "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$(worker)' AND kind = 'approval'
+          AND entry->>'plan' = (SELECT plan FROM operation WHERE id = '$op')")")
+        shift
+        ;;
+    esac
+    shift
+  done
+  node "$here/compare.mjs" "$dir/web-watch.json" ${args[@]+"${args[@]}"} >"$dir/web-watch.tsv" || {
+    grep -- $'\tFAIL\t' "$dir/web-watch.tsv" >&2 || true
+    die "the page and the server disagree; see $dir/web-watch.tsv"
+  }
+}
 # t9_clean: on any exit of t9 disconnect, the reader ends and A runs again with its forwarder to
 # Zitadel, so that the participant's server is never left stopped or unable to sign anyone in. A
 # start of A that failed or was interrupted can leave A running with no forwarder in its namespace.
@@ -665,6 +716,11 @@ t9_clean() {
     kill "$t9_watcher" 2>/dev/null || true
     wait "$t9_watcher" 2>/dev/null || true
     t9_watcher=''
+  fi
+  if [ -n "${t9_web:-}" ]; then
+    kill "$t9_web" 2>/dev/null || true
+    wait "$t9_web" 2>/dev/null || true
+    t9_web=''
   fi
   if ! running "$BW_A"; then
     echo "t9 disconnect: A is started again" >&2
@@ -692,7 +748,8 @@ t9_release() {
 # and at the start. A takes it over when it starts, and then the hold is released. If the apply does
 # not survive A's restart, the step fails.
 t9_disconnect() {
-  local dir=$part/t9-disconnect rc last state cause done_at=0
+  local dir=$part/t9-disconnect rc last state cause done_at=0 web_run=${1:-}
+  [ -z "$web_run" ] || [ "$web_run" = --web ] || die "usage: session t9 disconnect [--web]"
   # The cleanup first: any exit from here on, a failed read included, releases T9's hold.
   trap t9_clean EXIT
   trap 'exit 130' INT TERM
@@ -707,7 +764,9 @@ t9_disconnect() {
   t9_open "$dir/before"
   t9_watch_start "$dir"
   t9_watch_ready "$dir"
+  [ -z "$web_run" ] || web_start "$dir/web" "$t9_op" live
   "$bin/inject" kill A >>"$log" 2>&1 || die "cannot stop A; its output is in $log"
+  [ -z "$web_run" ] || : >"$dir/web/mark-stop"
   rc=0
   wait "$t9_reader" || rc=$?
   t9_reader=''
@@ -723,6 +782,7 @@ t9_disconnect() {
   sleep 60
   restart_a >>"$log" 2>&1 || die "cannot start A again; its output is in $log"
   echo "A is started again: the participant's client can resume"
+  [ -z "$web_run" ] || : >"$dir/web/mark-restart"
   "$here/prepare" t9-release >>"$log" 2>&1 || die "the hold on T9's apply could not be released; its output is in $log"
   echo "the hold is released: the apply goes on"
   last=$(t9_ids "$dir/before" | tail -n 1)
@@ -745,6 +805,10 @@ t9_disconnect() {
   [ "$t9_watch_rc" -eq 0 ] || die "operation watch ended with exit $t9_watch_rc through A's stop; its output is $dir/watch.txt (a product finding)"
   grep -q 'until the watch ends' "$dir/watch.txt" || die "operation watch did not meet the outage; see $dir/watch.txt"
   grep -q '^Completed at ' "$dir/watch.txt" || die "operation watch did not report the completion; see $dir/watch.txt"
+  if [ -n "$web_run" ]; then
+    web_compare "$dir/web" "$t9_op" --outage --flow 1
+    read_ok "the web page followed the apply through A's stop: every row it received is the server's, once, in order; after the end it shows the server's events; one commitment, one attempt, one approval" true
+  fi
   trap - EXIT INT TERM
   read_ok "the CLI's operation watch followed the apply through A's stop and reported its completion" true
   read_ok "the stream resumed with Last-Event-ID after A's restart: $(t9_ids "$dir/full" | wc -l) events, none lost or repeated, the apply completed" true
@@ -752,7 +816,7 @@ t9_disconnect() {
 t9() {
   if [ "${1:-}" = disconnect ]; then
     task=t9 log=$part/setup-t9.log
-    t9_disconnect
+    t9_disconnect "${2:-}"
     return
   fi
   setup t9
@@ -797,6 +861,66 @@ t11() {
   # plane's scope is as S7 left it and nothing was dispatched since. A failure is named.
   prepare t11-check
   echo "names: none"
+}
+
+# s6web: S6.1 on the fixture (s1 pass, s3 handover, s2 pass, s3 pass, s4 run, s4 ds, s6 run), then the
+# operation page on the finished send operation against the server's events (ginsys/bronzeward#359).
+# dev-db and dev-bao, which s4 ds needs, are started on the default instance only if they are not
+# running, and only those it started are stopped, never dev-down (it would remove the participant
+# environment's provider). A and the page need Zitadel: A goes back on it before the page is read. B
+# and C are stopped, as t11 leaves them.
+s6_dev=()
+s6web_end() {
+  local c
+  for c in ${s6_dev[@]+"${s6_dev[@]}"}; do docker stop "$c" >>"$log" 2>&1 || echo "$c could not be stopped" >&2; done
+  s6_dev=()
+  handback
+}
+s6web() {
+  local t0=$SECONDS c i p ev op
+  task=s6web log=$part/setup-s6web.log
+  : >"$log"
+  trap s6web_end EXIT
+  set_issuer fixture
+  stage restart_a
+  [ -s "$STATE/automation-token" ] || stage "$bin/seed"
+  scenario s1 pass
+  scenario s3 handover
+  scenario s2 pass
+  scenario s3 pass
+  scenario s4 run
+  for c in "$BW_DEV_PG_CONTAINER:dev-db" "$BW_DEV_BAO_CONTAINER:dev-bao"; do
+    running "${c%%:*}" && continue
+    (cd "$repo" && mise run "${c##*:}") >>"$log" 2>&1 || die "setup s6web: mise run ${c##*:} failed; its output is in $log"
+    s6_dev+=("${c%%:*}")
+  done
+  scenario s4 ds
+  scenario s6 run
+  for c in ${s6_dev[@]+"${s6_dev[@]}"}; do docker stop "$c" >>"$log" 2>&1 || die "cannot stop $c"; done
+  s6_dev=()
+  for i in A B C; do
+    c=BW_$i
+    p=$(docker inspect --type container --format '{{.State.Paused}}' "${!c}") || die "cannot inspect $i"
+    [ "$p" != true ] || stage "$bin/inject" unpause "$i"
+  done
+  for i in B C; do
+    c=BW_$i
+    ! running "${!c}" || stage "$bin/inject" kill "$i"
+  done
+  set_issuer zitadel
+  stage restart_a
+  trap - EXIT
+  echo "setup s6web: $((SECONDS - t0)) s"
+  ev=$(find "$STATE/evidence" -maxdepth 1 -type d -name 's6-run-*' | sort | tail -n 1)
+  [ -n "$ev" ] || die "s6 run kept no evidence directory"
+  op=$(jq -r '.id' "$ev/s6-send-operation.json") && [ -n "$op" ] || die "$ev/s6-send-operation.json names no operation"
+  trap '[ -z "$t9_web" ] || kill "$t9_web" 2>/dev/null || true' EXIT
+  web_start "$part/s6-web" "$op"
+  web_compare "$part/s6-web" "$op"
+  jq -e --slurpfile k "$ev/s6-send-events.json" '[.server[] | [.id, .type, .at]] == [$k[0][] | [.id, .type, .at]]' "$part/s6-web/web-watch.json" >/dev/null ||
+    die "the events the server serves now differ from those s6 run kept ($ev/s6-send-events.json)"
+  trap - EXIT
+  read_ok "the page followed S6.1's send operation $op: the server's events, once each and in order, the same as s6 run kept ($(jq '.server | length' "$part/s6-web/web-watch.json") events)" true
 }
 
 # What this scan made: its planted controls, the copied logs, the expanded backups and its error
@@ -997,9 +1121,9 @@ cmd=${1:-}
 case $cmd in
 start | shell | t1 | stop) "$cmd" ;;
 passwords | scan) "$cmd" "$@" ;;
-t2 | t3 | t4 | t5 | t6 | t7 | t8 | t9 | t10 | t11)
+t2 | t3 | t4 | t5 | t6 | t7 | t8 | t9 | t10 | t11 | s6web)
   need_state
   "$cmd" "$@"
   ;;
-*) die "usage: fixtures/participants/session start | passwords [--only <human>] [--exec <command>...] | shell | t1 | t2 | t3 | t4 | t5 [collide] | t6 | t7 | t8 | t9 [disconnect] | t10 [revert] | t11 | scan [path]... | stop (run stop before fixtures/bin/down or fixtures/dev-idp down; one participant session per Docker daemon; the session uses the host's one default dev-idp, so no other checkout may start or stop the default dev-idp on that daemon while a session starts or runs)" ;;
+*) die "usage: fixtures/participants/session start | passwords [--only <human>] [--exec <command>...] | shell | t1 | t2 | t3 | t4 | t5 [collide] | t6 | t7 | t8 | t9 [disconnect [--web]] | t10 [revert] | t11 | s6web | scan [path]... | stop (run stop before fixtures/bin/down or fixtures/dev-idp down; one participant session per Docker daemon; the session uses the host's one default dev-idp, so no other checkout may start or stop the default dev-idp on that daemon while a session starts or runs)" ;;
 esac

@@ -160,7 +160,8 @@ the slot rule are in [CONTRIBUTING.md](../CONTRIBUTING.md#several-instances-on-o
   because the clients accept plain http to localhost only (client contracts §6 item 1). A fixture
   server reaches that URL through a forwarder (container `bw-dev-forward`) on its own 127.0.0.1 at
   the issuer's port, inside its network namespace and never on the host
-  (`fixtures/participants/session`). A device code lives 5 minutes, because a person types it.
+  (`fixtures/participants/session`). `session s6web` runs S6.1 in that environment and compares the
+  web operation page with the server's events of its send operation (ginsys/bronzeward#359). A device code lives 5 minutes, because a person types it.
   The login policy offers no second-factor setup after the password. The device code page is
   Zitadel's own built-in page, and the web sign-in uses the login page.
   The login page's cookie secret is random per start. No file holds it, but Docker keeps it in
