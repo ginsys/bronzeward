@@ -219,6 +219,33 @@ describe("the timeline (ginsys/bronzeward#359, W8)", () => {
     expect(markup.match(/<li[^>]*>/g)).toHaveLength(2);
   });
 
+  // ginsys/bronzeward#998: the page says what the operation did and what comes next, above and below its outcome.
+  test("the page opens with the sentence of its kind and state and ends its outcome with the next step", () => {
+    const page = (o: Partial<Operation>) => h(OperationTimeline, { id: OP, o: op(o), reread: () => {} });
+    const markup = html(page({ kind: "apply-config", state: "rejected" }));
+    expect(markup).toMatch(/data-testid="now">The node refused every attempt as invalid, so the machine did not change\.<\/p>/);
+    expect(markup).toMatch(/data-testid="next">Next: Correct the release and create a new plan\.<\/p>/);
+    expect(markup.indexOf('data-testid="now"')).toBeLessThan(markup.indexOf('data-testid="outcome"'));
+    expect(markup.indexOf('data-testid="outcome"')).toBeLessThan(markup.indexOf('data-testid="next"'));
+  });
+
+  test("an unresolved operation carries no second next step, since its outcome line names the Recovery route", () => {
+    expect(html(h(OperationTimeline, { id: OP, o: op({ state: "unresolved" }), reread: () => {} }))).not.toContain('data-testid="next"');
+  });
+
+  test("an unknown kind or state shows both raw values, never a blank, and no next step", () => {
+    const markup = html(h(OperationTimeline, { id: OP, o: op({ kind: "frobnicate", state: "sideways" }), reread: () => {} }));
+    expect(markup).toContain("An operation of kind frobnicate in state sideways; this page has no description of it.");
+    expect(markup).toContain("In progress: sideways.");
+    expect(markup).not.toContain('data-testid="next"');
+  });
+
+  test("an adoption says it recorded the machine's configuration as Applied, not that no applied release is recorded", () => {
+    const line = text(h(Outcome, { o: op({ kind: "adopt", state: "completed", result: { adoptionRecord: "pln_aaaaaaaaaaaaaaaaaaaaaaaaaa" } }) }));
+    expect(line).toMatch(/^Adopted: the adoption record is .*Desired, Applied and Observed of the machine$/);
+    expect(line).not.toContain("No applied release");
+  });
+
   test("the page says it follows the operation and that closing it stops nothing, and has no retry control", () => {
     const page = h(OperationTimeline, { id: OP, o: op({ state: "sending" }), reread: () => {} });
     expect(text(page)).toContain(LIVE);

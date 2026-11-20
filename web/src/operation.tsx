@@ -9,6 +9,7 @@ import type { components } from "./api/v1";
 import { useWrites } from "./forms.tsx";
 import { settledReads } from "./imports.tsx";
 import { type Failed, Id, readPages, Ref, useReads } from "./list.tsx";
+import { operationNext, operationNow } from "./operation-words.ts";
 import { eventLine, RESTORED, watch } from "./progress.ts";
 import { Status } from "./states.tsx";
 
@@ -81,6 +82,16 @@ export function Outcome({ o, cause: why }: { o: Operation; cause?: string | unde
   switch (o.state) {
     case "completed": {
       const applied = o.result !== null && "appliedRelease" in o.result ? o.result : undefined;
+      // An adoption records the machine's configuration as Applied from the observation, with no release applied.
+      const adopted = o.result !== null && "adoptionRecord" in o.result ? o.result : undefined;
+      if (adopted !== undefined) {
+        return (
+          <Status testid="outcome">
+            Adopted: the adoption record is <Id id={adopted.adoptionRecord} />.
+            {machine !== undefined && <> <Ref to={`/machines/${encodeURIComponent(machine)}`} id={machine}>Desired, Applied and Observed of the machine</Ref></>}
+          </Status>
+        );
+      }
       return applied === undefined
         ? <Status testid="outcome">Completed. No applied release is recorded, so nothing is shown as applied.</Status>
         : (
@@ -165,6 +176,12 @@ export function TimelineRows({ rows }: { rows: readonly Row[] }) {
   );
 }
 
+// The next step an operator can take from the operation's state; nothing where the outcome line already says it.
+export const Next = ({ o }: { o: Operation }) => {
+  const next = operationNext(o.kind, o.state);
+  return next === undefined ? null : <p data-testid="next">Next: {next}</p>;
+};
+
 // The page's outcome and timeline: `o` is the operation as last read, and `reread` is called soon after
 // events arrive so that read follows the state. The outcome names the cause of the state it shows when
 // a state change row gave one.
@@ -193,7 +210,9 @@ export function OperationTimeline({ id, o, reread }: { id: string; o: Operation;
   }, [client, id]);
   return (
     <section aria-label="Timeline">
+      <p data-testid="now">{operationNow(o.kind, o.state)}</p>
       <Outcome o={o} cause={causeOf(rows, o.state)} />
+      <Next o={o} />
       <div className="panel">
         <h3>Timeline</h3>
         {cleared !== undefined && <Status testid="cleared">{cleared}</Status>}
