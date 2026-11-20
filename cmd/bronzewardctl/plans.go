@@ -51,8 +51,6 @@ func (e *env) planCmd(args []string) error {
 		if lines, change = e.planSnapshot(c, r, p); change != "" {
 			return fmt.Errorf("%s while the plan was read; nothing is shown. Read it again with: plan show %s", change, client.ShellWord(p.Id))
 		}
-		// After the view, whose own read of the machine the title reuses.
-		e.titlePlans(c, *p)
 		if t := e.titleOf("plan", p.Id); t != "" {
 			lines = slices.Insert(lines, 1, sf("  Title\t%s", t))
 		}
@@ -65,9 +63,14 @@ func (e *env) planCmd(args []string) error {
 // snapshots, and its sentences could describe a state that never existed (client-contracts.md
 // section 8.5). The plan answer's own epoch is compared, and so is the count of moves since that
 // answer, the GET /server it called for included, so that an epoch changed and changed back is
-// seen too.
+// seen too. The title's reads are part of that snapshot, and come after the view, whose own read of
+// the machine the title reuses.
 func (e *env) planSnapshot(c *client.Client, r *client.Response, p *apitypes.PlanBody) ([]string, string) {
-	return snapshot(c, r, func() []string { return e.planView(c, p) })
+	return snapshot(c, r, func() []string {
+		lines := e.planView(c, p)
+		e.titlePlans(c, *p)
+		return lines
+	})
 }
 
 // snapshot is planSnapshot for any lines that read builds from the answer r and further reads.
