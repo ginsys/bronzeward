@@ -236,8 +236,8 @@ func TestRecordReads(t *testing.T) {
 		{[]string{"draft", "show", "drf_test"}, "asr_new", "assignment " + m + " asr_new changed (based on head revision 3)"},
 		{[]string{"machine", "timeline", m}, "adoption", "1 2026-10-22 10:00:00 UTC adoption operation op_adopt, plan pln_adopt, approval apr_a, " +
 			"observation obs_a, controller ctl-b"},
-		{[]string{"plan", "list"}, "pln_test", "pln_test proposed " + m + " apply-config rel_test 2026-10-23 10:04:00 UTC"},
-		{[]string{"operation", "list"}, "op_test", "op_test apply-config unresolved plan pln_test, machine " + m + " 2026-10-22 10:06:00 UTC"},
+		{[]string{"plan", "list"}, "pln_test", "pln_test - proposed " + m + " apply-config rel_test 2026-10-23 10:04:00 UTC"},
+		{[]string{"operation", "list"}, "op_test", "op_test - apply-config unresolved plan pln_test, machine " + m + " 2026-10-22 10:06:00 UTC"},
 	} {
 		r := f.ctl(nil, "", c.args...)
 		i := slices.IndexFunc(strings.Split(r.out, "\n"), func(l string) bool { return strings.Contains(l, c.key) })
