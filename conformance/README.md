@@ -38,6 +38,7 @@ header in `web/e2e/auth.conf.ts` has the details.
 | [AUTH-02](cases/AUTH-02.yaml) | web: `mise run browser-auth` |
 | [AUTH-03](cases/AUTH-03.yaml) | web: `mise run browser-auth` |
 | [AUTH-05](cases/AUTH-05.yaml) | web: `mise run browser-auth` |
+| [AUTH-06](cases/AUTH-06.yaml) | web, the operation page's stream half: `mise run browser-auth` with `BW_SPECS=operation` |
 | [AMB-01](cases/AMB-01.yaml) | web, as a keyed repeat: `mise run browser-auth` |
 | [AMB-02](cases/AMB-02.yaml) | web, the in-progress wait and the replay: `mise run browser-auth`; the bound and a published draft's `409`: `mise run web` |
 | [AMB-03](cases/AMB-03.yaml) | web: `mise run browser-auth` |
@@ -55,6 +56,11 @@ header in `web/e2e/auth.conf.ts` has the details.
 | [COMP-02](cases/COMP-02.yaml) | web: `mise run browser-auth` |
 | [ETAG-01](cases/ETAG-01.yaml) | web, a fragment entry: `mise run browser-auth` |
 | [ETAG-02](cases/ETAG-02.yaml) | web, an import's draft: `mise run browser-auth` |
+| [EVT-01](cases/EVT-01.yaml) | web, the operation page: `mise run browser-auth` with `BW_SPECS=operation` |
+| [EVT-02](cases/EVT-02.yaml) | web, the operation page: `mise run browser-auth` with `BW_SPECS=operation` |
+| [EVT-03](cases/EVT-03.yaml) | web, the operation page: `mise run browser-auth` with `BW_SPECS=operation` |
+| [EVT-04](cases/EVT-04.yaml) | web, the operation page: `mise run browser-auth` with `BW_SPECS=operation` |
+| [EVT-05](cases/EVT-05.yaml) | web, the operation page, the epoch written by the harness: `mise run browser-auth` with `BW_SPECS=operation` |
 | [PAGE-01](cases/PAGE-01.yaml) | web, the machine list: `mise run browser-auth` |
 | [PAGE-02](cases/PAGE-02.yaml) | web, the machine list: `mise run browser-auth` |
 | [PROT-01](cases/PROT-01.yaml) | web, the browser journey: `mise run browser-auth` with `BW_SPECS=protected` |
