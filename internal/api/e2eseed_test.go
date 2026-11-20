@@ -20,7 +20,10 @@ import (
 
 // seeded names the records the e2e harness's browser cases read (web/e2e/auth.conf.ts serves this
 // as JSON): one cluster of two machines and its release, and one plan of the target release in each
-// state a plan page shows. Committed is the plan of Operation, whose first attempt is recorded.
+// state a plan page shows. Committed is the plan of Operation, whose first attempt is recorded, or
+// with no attempt where the seed is asked for none (BW_E2E_SEED_ATTEMPT=none): a resolution to
+// cancelled is refused once an attempt exists (recovery_acts.go), so the browser cases that cancel
+// the operation read the seed without one.
 type seeded struct {
 	Cluster   string `json:"cluster"`
 	Release   string `json:"release"`
@@ -39,11 +42,14 @@ type seeded struct {
 
 // seedPlans makes ae's records into one plan per state. The committed plan goes first: its
 // operation holds the cluster's rollout scope, so a running controller dispatches none of the
-// others. Only the proposed plan is left for a browser sign-in to approve, and it is made by the
+// others. With no attempt (attempt false) the operation is itself one a controller might dispatch:
+// TestE2ESeedWithoutAttemptSurvivesARunningController proves it does not. Only the proposed plan is left for a browser sign-in to approve, and it is made by the
 // automation identity, so any approver other than that identity may.
-func seedPlans(t *testing.T, ae *attemptEnv) seeded {
+func seedPlans(t *testing.T, ae *attemptEnv, attempt bool) seeded {
 	t.Helper()
-	ae.seedAttempt(t)
+	if attempt {
+		ae.seedAttempt(t)
+	}
 	ae.second(t)
 	s := seeded{Cluster: ae.cluster, Release: ae.target.rel, Machine: ae.machine, Machine2: ae.machine2, Operation: ae.op}
 	s.Plans.Committed, s.Plans.Approved = ae.pid, ae.plan2
@@ -87,7 +93,7 @@ func TestE2ESeed(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	useDatabase(t, db)
-	b, err := json.Marshal(seedPlans(t, newAttemptEnv(t, "")))
+	b, err := json.Marshal(seedPlans(t, newAttemptEnv(t, ""), os.Getenv("BW_E2E_SEED_ATTEMPT") != "none"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +121,13 @@ func shown(t *testing.T, db *sql.DB) string {
 // drift loops over the database, lets the first pass end, seeds, and then runs many passes more:
 // every plan keeps its state, and the operation keeps its owner, its state and its one attempt. A
 // controller that moved a seeded record would fail here, on every CI run.
-func TestE2ESeedSurvivesARunningController(t *testing.T) {
+func TestE2ESeedSurvivesARunningController(t *testing.T) { seedSurvives(t, true) }
+
+// The seed with no attempt (BW_E2E_SEED_ATTEMPT=none) has the same proof: its committed operation
+// is still its seeded owner's and not unresolved, and no controller pass wrote an attempt for it.
+func TestE2ESeedWithoutAttemptSurvivesARunningController(t *testing.T) { seedSurvives(t, false) }
+
+func seedSurvives(t *testing.T, attempt bool) {
 	db := migrated(t)
 	useDatabase(t, db)
 	idle := make(chan struct{}, 1000)
@@ -144,7 +156,7 @@ func TestE2ESeedSurvivesARunningController(t *testing.T) {
 	waitIdle(t, idle, 1) // the first pass, whose takeover reads the operations that exist then
 
 	ae := newAttemptEnv(t, "")
-	s := seedPlans(t, ae)
+	s := seedPlans(t, ae, attempt)
 	execFrom, driftFrom := execPasses.Load(), driftPasses.Load() // passes before this point may have read nothing of the seed
 	before := shown(t, db)
 	if before == "" {
@@ -183,7 +195,11 @@ func TestE2ESeedSurvivesARunningController(t *testing.T) {
 	if owner == d.owner.ID || state == "unresolved" {
 		t.Errorf("the controller took over the seeded operation: owner %s, state %s", owner, state)
 	}
-	if n := count(t, db, `SELECT count(*) FROM attempt WHERE operation = $1`, s.Operation); n != 1 {
-		t.Errorf("the operation has %d attempts, want 1", n)
+	want := 0
+	if attempt {
+		want = 1
+	}
+	if n := count(t, db, `SELECT count(*) FROM attempt WHERE operation = $1`, s.Operation); n != want {
+		t.Errorf("the operation has %d attempts, want %d", n, want)
 	}
 }

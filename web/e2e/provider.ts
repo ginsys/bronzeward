@@ -18,6 +18,10 @@ export interface Grant {
   // for `renewed`'s access token and subject if set (AUTH-07). Without it every use is refused.
   rotate?: boolean;
   renewed?: Grant;
+  // A renewal's access token, minted when the provider answers it, for the same subject, so it carries
+  // its own expiry (AUTH-06's stream half: the token the stream was opened with expires, the renewed one
+  // does not); without it every answer carries `access`.
+  fresh?: () => string;
   // How many refresh requests to take and never answer (AUTH-11's second and third cases).
   hold?: number;
   // Issue no refresh token: a provider that does not rotate (AUTH-11's fourth case).
@@ -121,7 +125,8 @@ export function startProvider(o: ProviderOptions): Promise<Provider> {
           latest.delete(token);
           spent.add(token);
           if ((grant.hold ?? 0) > 0) return void grant.hold!--;
-          return answer(res, headers, grant.renewed ?? grant);
+          const renewal = grant.renewed ?? grant;
+          return answer(res, headers, grant.fresh === undefined ? renewal : { ...renewal, access: grant.fresh() });
         }
         const code = codes.get(form.get("code") ?? "");
         codes.delete(form.get("code") ?? "");
