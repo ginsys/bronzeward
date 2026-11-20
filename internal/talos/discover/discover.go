@@ -5,7 +5,7 @@
 // package's source to an allowlist of machinery calls so that none can be added unnoticed.
 //
 // The CLI links this package (the one exception to decision T2: the client never links the
-// server's Talos packages). It therefore has its own dial and does not import internal/talos,
+// server's Talos packages). The server links it too, for POST /discoveries, through DiscoverLimited. It therefore has its own dial and does not import internal/talos,
 // whose reader returns whole machine configurations with their secrets. Nothing here writes a
 // file, sends a node routing header or quotes the talosconfig or a node's error text.
 package discover
@@ -46,6 +46,17 @@ type Result struct {
 	Endpoint, ResolvedFrom string
 	Supported              bool
 	Members                []Member
+	// Cut is true when the caller's context ended before every member was read: a member listed
+	// unanswered then may be reachable. A member that did not answer on its own is not a cut.
+	Cut bool
+}
+
+// TooManyMembers is DiscoverLimited's refusal for a cluster that lists more members than the caller
+// allows. No member has been dialled when it is returned.
+type TooManyMembers struct{ Limit int }
+
+func (e *TooManyMembers) Error() string {
+	return "discover: the cluster lists more than " + strconv.Itoa(e.Limit) + " members"
 }
 
 // memberEndpoint is where a member is dialled; a test points it at a stand-in.
@@ -93,6 +104,15 @@ var ErrNoEndpoint = errors.New("discover: the talosconfig names no endpoint")
 // ErrUnknownContext, before any dial. A DNS name is resolved once and the address it gave is dialled
 // (resolveEndpoint). A member that does not answer is listed as such, not an error.
 func Discover(ctx context.Context, talosconfig []byte, contextName, endpoint string) (Result, error) {
+	return DiscoverLimited(ctx, talosconfig, contextName, endpoint, 0)
+}
+
+// DiscoverLimited is Discover for a caller that bounds its work, the server. A cluster that lists
+// more than maxMembers members (0 is no bound) is the refusal *TooManyMembers, raised after the member
+// list is read and before any member is dialled. A caller whose ctx ends while the members are read
+// gets the members read so far, the rest listed unanswered, and Result.Cut set: only a cluster
+// identity that was not read is an error.
+func DiscoverLimited(ctx context.Context, talosconfig []byte, contextName, endpoint string, maxMembers int) (Result, error) {
 	creds, first, err := credentials(talosconfig, contextName)
 	if err != nil {
 		return Result{}, err
@@ -132,6 +152,9 @@ func Discover(ctx context.Context, talosconfig []byte, contextName, endpoint str
 		return Result{}, failed("listing the cluster members", err)
 	}
 	stop()
+	if maxMembers > 0 && list.Len() > maxMembers {
+		return Result{}, &TooManyMembers{Limit: maxMembers}
+	}
 	for ms := range list.All() {
 		s := ms.TypedSpec()
 		m := Member{NodeID: s.NodeID, Hostname: s.Hostname, Role: "worker"}
@@ -139,6 +162,9 @@ func Discover(ctx context.Context, talosconfig []byte, contextName, endpoint str
 			m.Role = "controlplane"
 		}
 		readMemberAt(ctx, creds, s.Addresses, &m)
+		if !m.Answered && ctx.Err() != nil {
+			res.Cut = true
+		}
 		if m.Role == "controlplane" && s.ControlPlane != nil && res.KubernetesEndpoint == "" && m.Address != "" {
 			res.KubernetesEndpoint = "https://" + net.JoinHostPort(m.Address, strconv.Itoa(s.ControlPlane.APIServerPort))
 		}
