@@ -13,6 +13,7 @@ import { Id, Ref, short, useItem, usePending, useReads } from "./list.tsx";
 import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
+import { Named } from "./titles.tsx";
 import type { Outcome } from "./write.ts";
 
 type S = components["schemas"];
@@ -94,13 +95,13 @@ function Progress({ op, draft, onFailed }: { op: string; draft: string; onFailed
       // A publication that definitively failed left the draft open: Publish may send again (the server
       // reuses only a queued or running operation).
       else onFailed(op);
-      show({ type: "end", text: "release" in e ? <>Publication succeeded: release <Id id={e.release} /> was published. {SENT_NOTHING}</> : e.text });
+      show({ type: "end", text: "release" in e ? <>Publication succeeded: release <Named id={e.release} /> was published. {SENT_NOTHING}</> : e.text });
     });
     return () => abort.abort();
   }, [client, op, draft, onFailed]);
   return (
     <section aria-label="Progress">
-      <h3>Progress of operation <Id id={op} /></h3>
+      <h3>Progress of operation <Named id={op} /></h3>
       {cleared !== undefined && <Status testid="cleared">{cleared}</Status>}
       <ol aria-live="polite" data-testid="events">{lines.map((l, i) => <li key={i}>{l}</li>)}</ol>
       {end !== undefined && <Status testid="ended">{end}</Status>}

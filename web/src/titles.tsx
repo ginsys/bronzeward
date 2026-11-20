@@ -1,6 +1,6 @@
-// What shows a release, a plan, an operation or a machine by a title instead of its identifier (client
-// contracts A8 and A9): the hooks that read the bodies a title names through the page's own store, and the
-// links and headings that show it. The title is the text and the whole identifier the title attribute; a
+// What shows a release, a plan, an operation, a draft, an import or a machine by a title instead of its
+// identifier (client contracts A8 and A9): the hooks that read the bodies a title names through the page's
+// own store, and the links and headings that show it. The title is the text and the whole identifier the title attribute; a
 // read that did not answer, or text that is not safe, leaves the shortened identifier, as every other is.
 
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
@@ -87,6 +87,38 @@ export function useOperationTitle(o: S["OperationBody"] | undefined): string | u
 
 const Titled = ({ id, text, what, fallback, tail = "" }: { id: string; text: string | undefined; what: string; fallback: string; tail?: string }) =>
   text === undefined ? fallback : <span title={id}>{`${what}: ${text}${tail}`}</span>;
+
+// A link to an object the view names by its identifier: the title as the text where there is one, else
+// the shortened identifier, and the whole identifier as the title attribute.
+const NamedLink = ({ id, text }: { id: string; text: string | undefined }) => <Ref to={`/${viewOf(id)}/${encodeURIComponent(id)}`} id={id}>{text}</Ref>;
+
+const NamedDraft = ({ id }: { id: string }) => <NamedLink id={id} text={draftText(useBody<S["DraftBody"]>(at("drafts", id)))} />;
+const NamedRelease = ({ id }: { id: string }) => <NamedLink id={id} text={useReleaseTitle(id)} />;
+const NamedPlan = ({ id }: { id: string }) => <NamedLink id={id} text={usePlanTitle(id)} />;
+// An operation named by its identifier has no body in hand: it is read, then its subject's.
+const NamedOperation = ({ id }: { id: string }) => <NamedLink id={id} text={useOperationTitle(useBody<S["OperationBody"]>(at("operations", id)) ?? undefined)} />;
+// An import is titled as its operation is: "Import of <machine>", or "Import" where it names no machine.
+function NamedImport({ id }: { id: string }) {
+  const i = useBody<S["IngestionBody"]>(at("ingestions", id));
+  const machine = useMachineText(i?.machine);
+  return <NamedLink id={id} text={i == null || (i.machine != null && machine === undefined) ? undefined : operationTitle("ingest", { machine })} />;
+}
+
+// An object a view names by its identifier, by the view its prefix names: a machine, release, plan,
+// operation, draft or import shows its title, any other identifier as `Id` shows it. Each body is read
+// once through the page's store.
+export function Named({ id, none = "none" }: { id: string | null | undefined; none?: string }): ReactNode {
+  if (id == null) return none;
+  switch (viewOf(id)) {
+    case "machines": return <MachineById id={id} />;
+    case "releases": return <NamedRelease id={id} />;
+    case "plans": return <NamedPlan id={id} />;
+    case "operations": return <NamedOperation id={id} />;
+    case "drafts": return <NamedDraft id={id} />;
+    case "ingestions": return <NamedImport id={id} />;
+    default: return <Id id={id} />;
+  }
+}
 
 export const ReleaseRef = ({ r }: { r: S["ReleaseBody"] }) => <Ref to={at("releases", r.id)!} id={r.id}>{useReleaseTitle(r.id, r)}</Ref>;
 export const PlanRef = ({ p }: { p: S["PlanBody"] }) => <Ref to={at("plans", p.id)!} id={p.id}>{usePlanTitle(p.id, p)}</Ref>;

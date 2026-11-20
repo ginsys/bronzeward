@@ -15,7 +15,7 @@ import { eventLine, type Refusal, refusalOf, refusalText, terminal, type Watch, 
 import type { Client, ReadResult } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
-import { MachineById } from "./titles.tsx";
+import { MachineById, Named } from "./titles.tsx";
 import type { Outcome, WriteSpec } from "./write.ts";
 
 type S = components["schemas"];
@@ -166,8 +166,8 @@ export function IngestionItem({ id }: { id: string }) {
           <dl>
             <dt>State</dt><dd>{b.state}, {b.kind}, {b.mode} staging</dd>
             <dt>Machine</dt><dd><MachineById id={b.machine} /></dd>
-            <dt>Draft</dt><dd><Id id={b.draft} /></dd>
-            <dt>Operation</dt><dd><Id id={b.operation} /></dd>
+            <dt>Draft</dt><dd><Named id={b.draft} /></dd>
+            <dt>Operation</dt><dd><Named id={b.operation} /></dd>
             <dt>Review</dt><dd>{b.review ?? "not requested"}</dd>
             <dt>Owner generation</dt><dd>{b.ownerGeneration}</dd>
             <dt>Lease</dt><dd>{lease(b, now)}</dd>
@@ -483,7 +483,7 @@ function Progress({ b, readAt, again }: { b: Ingestion; readAt: number; again: (
   if (op === null) return null;
   return (
     <section aria-label="Progress">
-      <h3>Progress of operation <Id id={op} /></h3>
+      <h3>Progress of operation <Named id={op} /></h3>
       {cleared !== undefined && <Status testid="cleared">{cleared}</Status>}
       <ol aria-live="polite" data-testid="events">{lines.map((l, i) => <li key={i}>{l}</li>)}</ol>
       {end !== undefined && <Status testid="ended">{end}</Status>}

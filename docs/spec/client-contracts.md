@@ -2012,10 +2012,13 @@ one. The rule is one for both clients:
    list link and item heading show the title (the heading keeps the plan's state and the
    operation's kind and state), the identifier is the title attribute, and a failed read, an unsafe draft title or a
    `subject` lacking what its kind needs leaves the shortened identifier. A view reads at most four title bodies
-   at a time, each distinct one once. The title is built for the three objects only: a plan's release, an
-   operation's plan, draft and import, a release's draft and publication, the publication result line and
-   an act's subjects stay identifiers, tracked by
-   [#996](https://github.com/ginsys/bronzeward/issues/996), so A8 is not fully met until that issue closes. A machine
+   at a time, each distinct one once. A view that names a release, plan, operation, draft or import by its
+   identifier shows the same title, the identifier as the title attribute and the shortened identifier where the read
+   does not answer ([#996](https://github.com/ginsys/bronzeward/issues/996)): a plan's release, committed operation and
+   change, a release's draft and publication, an import's draft and operation, the plans, imports and dependency
+   tables, an act's subjects, the review's release and the publication's result line and progress heading.
+   An operation's Subject cell and its outcome line stay identifiers until the operation page's own change lands. An
+   identifier inside a sentence built as plain text stays one. A machine
    a view names by identifier is shown by its name (A9) in the plan, operation, import, draft, assignment,
    release, review, recovery and dependency views, read through the same store, or taken from the machine body
    or list the view already holds.

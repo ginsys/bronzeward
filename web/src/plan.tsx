@@ -10,7 +10,7 @@ import { type Load, Id, Ref, short, usePending, useReads, useSettled } from "./l
 import type { Problem } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
-import { MachineById } from "./titles.tsx";
+import { MachineById, Named } from "./titles.tsx";
 
 type PlanInput = components["schemas"]["PlanInput"];
 type Operation = PlanInput["operation"];
@@ -65,7 +65,7 @@ export function nextAfter(p: Problem | null, release: string, machine: string): 
   const d = p?.detail ?? "";
   if (d.includes("is for the machine's Desired release")) {
     const desired = typeof p?.["desired"] === "string" ? p["desired"] : undefined;
-    return <>Plan the machine's Desired release{desired !== undefined && <> <Id id={desired} /></>} instead. A published draft cannot be published again: to send this release's changes, change a new draft and publish it, then plan the release it makes.</>;
+    return <>Plan the machine's Desired release{desired !== undefined && <> <Named id={desired} /></>} instead. A published draft cannot be published again: to send this release's changes, change a new draft and publish it, then plan the release it makes.</>;
   }
   if (d.includes("has no Applied configuration")) {
     return <>Hand the machine over first: <Ref to={planPath(release, machine, "adopt")} id={machine}>create an adopt plan</Ref> for it. Nothing has been sent.</>;
@@ -107,7 +107,7 @@ function Create({ release, machine, first }: { release: string; machine: string;
   const busy = (w !== undefined && !startsNew(writes, w)) || o?.kind === "done";
   return (
     <form onSubmit={submit} aria-label="Create plan">
-      <p>Plan for machine <MachineById id={machine} /> and release <Id id={release} />.</p>
+      <p>Plan for machine <MachineById id={machine} /> and release <Named id={release} />.</p>
       <p>
         <label>Operation{" "}
           <select value={operation} onChange={(e) => (setOperation(e.target.value as Operation), setNote(undefined))} disabled={busy}>
@@ -235,7 +235,7 @@ export function PlanState({ p, reread, answers = 0, onMachine }: { p: Plan; rere
     <>
       {terminal !== undefined && <Status testid="plan-terminal"><span className="badge">{p.state}</span> {terminal(p)}{again(p)}</Status>}
       {p.state === "approved" && <Approved p={p} reread={reread} answers={answers} onMachine={onMachine} />}
-      {p.state === "committed" && p.committedOperation !== null && <Status testid="plan-committed">Committed: operation <Id id={p.committedOperation} />.</Status>}
+      {p.state === "committed" && p.committedOperation !== null && <Status testid="plan-committed">Committed: operation <Named id={p.committedOperation} />.</Status>}
     </>
   );
 }
