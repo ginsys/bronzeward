@@ -34,7 +34,9 @@ main:focus { outline: none; }
 
 /* Oat undoes four things our accessibility record keeps. A disabled control keeps its full contrast
    (Oat halves it); a button shows it disabled by a dashed border, a field by Oat's muted background.
-   A link is underlined wherever it is (Oat does that in running text only). A button's label wraps (Oat
+   A link is underlined wherever it is (Oat does that in running text only), except the links of the main
+   navigation, which are not text: an icon, their group and the bar and bold label of the current page
+   show what they are. A button's label wraps (Oat
    does not). Hover colours are plain hex, so a colour read at rest is three bytes (Oat mixes them, which
    the contrast measure cannot read), and nothing transitions, so a read right after a hover is not a
    colour on its way. A button stays an inline block: Oat's inline-flex makes the drivers' text read put
@@ -93,8 +95,8 @@ h1 .icon, button .icon { margin-inline-end: var(--s2); }
 
 /* A status line or a refusal is an alert box: the icon and its words, never colour alone. The class
    changes no role (the paragraph keeps its own). */
-.alert { display: flex; align-items: flex-start; gap: var(--s3); margin: 0 0 var(--s3); padding: var(--s3) var(--s4); background-color: var(--muted); border: 1px solid var(--border); border-radius: 0.375rem; }
-.alert p { margin: 0; flex: 1; min-width: 0; }
+.alert { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s3); margin: 0 0 var(--s3); padding: var(--s3) var(--s4); background-color: var(--muted); border: 1px solid var(--border); border-radius: 0.375rem; }
+.alert p { margin: 0; flex: 1 1 12rem; min-width: 0; }
 .alert .icon { margin-top: 0.1rem; color: var(--primary); }
 .alert.danger { border-color: var(--danger); }
 .alert.danger .icon { color: var(--danger); }
