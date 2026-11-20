@@ -160,7 +160,7 @@ export async function follow(reading: Reader, id: string, f: Follow): Promise<vo
 export function TimelineRows({ rows }: { rows: readonly Row[] }) {
   return (
     <ol aria-live="polite" data-testid="events">
-      {rows.map((r) => <li key={r.id}>{r.server ? null : "received "}<time dateTime={r.at}>{clock(r.at)}</time> {r.line}</li>)}
+      {rows.map((r) => <li key={r.id} data-event-id={r.id}>{r.server ? null : "received "}<time dateTime={r.at}>{clock(r.at)}</time> {r.line}</li>)}
     </ol>
   );
 }

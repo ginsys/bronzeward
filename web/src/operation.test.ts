@@ -210,6 +210,15 @@ describe("the timeline (ginsys/bronzeward#359, W8)", () => {
     expect(flat).toMatch(/^received \d\d:\d\d:\d\d commitment\d\d:\d\d:\d\d response$/);
   });
 
+  // A hook for the fixture run's comparison (fixtures/participants/web-watch.mjs): each row names the server's
+  // event id, which the page shows nowhere else. It is an attribute, so the text above is unchanged.
+  test("each row carries the server's event id and nothing else of the event", () => {
+    const rows: Row[] = [{ id: "e1:1", line: "commitment", at: "2026-11-19T10:06:02Z", server: false }, { id: "e1:2", line: "response", at: "2026-11-19T10:07:03Z", server: true }];
+    const markup = renderToStaticMarkup(h(TimelineRows, { rows }));
+    expect([...markup.matchAll(/<li data-event-id="([^"]*)">/g)].map((m) => m[1])).toEqual(["e1:1", "e1:2"]);
+    expect(markup.match(/<li[^>]*>/g)).toHaveLength(2);
+  });
+
   test("the page says it follows the operation and that closing it stops nothing, and has no retry control", () => {
     const page = h(OperationTimeline, { id: OP, o: op({ state: "sending" }), reread: () => {} });
     expect(text(page)).toContain(LIVE);
