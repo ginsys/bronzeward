@@ -104,15 +104,22 @@ var ErrNoEndpoint = errors.New("discover: the talosconfig names no endpoint")
 // ErrUnknownContext, before any dial. A DNS name is resolved once and the address it gave is dialled
 // (resolveEndpoint). A member that does not answer is listed as such, not an error.
 func Discover(ctx context.Context, talosconfig []byte, contextName, endpoint string) (Result, error) {
-	return DiscoverLimited(ctx, talosconfig, contextName, endpoint, 0)
+	return walk(ctx, talosconfig, contextName, endpoint, 0, false)
 }
 
-// DiscoverLimited is Discover for a caller that bounds its work, the server. A cluster that lists
-// more than maxMembers members (0 is no bound) is the refusal *TooManyMembers, raised after the member
-// list is read and before any member is dialled. A caller whose ctx ends while the members are read
-// gets the members read so far, the rest listed unanswered, and Result.Cut set: only a cluster
+// DiscoverLimited is Discover for a caller that bounds its work, the server, with its ctx alone: the
+// reads from the endpoint have no deadline of their own beyond it. A cluster that lists more than
+// maxMembers members (0 is no bound) is the refusal *TooManyMembers, raised after the member list is
+// read and before any member is dialled. A caller whose ctx ends once the cluster's identity is read
+// gets that identity, the members read so far, the rest listed unanswered, and Result.Cut set: only an
 // identity that was not read is an error.
 func DiscoverLimited(ctx context.Context, talosconfig []byte, contextName, endpoint string, maxMembers int) (Result, error) {
+	return walk(ctx, talosconfig, contextName, endpoint, maxMembers, true)
+}
+
+// walk is both: limited says the caller's ctx is the only bound on the reads from the endpoint, and
+// that a ctx that ends after the identity is read is a Cut result, not an error.
+func walk(ctx context.Context, talosconfig []byte, contextName, endpoint string, maxMembers int, limited bool) (Result, error) {
 	creds, first, err := credentials(talosconfig, contextName)
 	if err != nil {
 		return Result{}, err
@@ -126,7 +133,12 @@ func DiscoverLimited(ctx context.Context, talosconfig []byte, contextName, endpo
 	}
 	// The name lookup, the dial and the reads from the endpoint share one deadline; the members are
 	// read under the caller's context, each address under its own.
-	startCtx, stop := context.WithTimeout(ctx, startTimeout)
+	startCtx, stop := ctx, func() {}
+	if !limited {
+		var cancel context.CancelFunc
+		startCtx, cancel = context.WithTimeout(ctx, startTimeout)
+		stop = cancel
+	}
 	defer stop()
 	ep, name, err := resolveEndpoint(startCtx, endpoint, source)
 	if err != nil {
@@ -149,6 +161,10 @@ func DiscoverLimited(ctx context.Context, talosconfig []byte, contextName, endpo
 	res.Supported = res.Contract != "" && res.Contract == supportedMinor()
 	list, err := safe.StateListAll[*cluster.Member](startCtx, n.api.COSI)
 	if err != nil {
+		if limited && ctx.Err() != nil {
+			res.Cut = true // the identity was read; the caller's time ran out before the members were listed
+			return res, nil
+		}
 		return Result{}, failed("listing the cluster members", err)
 	}
 	stop()
@@ -188,13 +204,17 @@ func version(ctx context.Context, n *node) (string, error) {
 
 // readMemberAt fills m from the first of addrs that answers as m. Every address has its own deadline
 // of memberTimeout, so a silent address does not use up the time of the next one. The total bound for
-// a member is therefore the number of its listed addresses times memberTimeout. Address is the one
+// a member is therefore the number of its listed addresses times memberTimeout, or less when the caller's
+// ctx ends first: no address is dialled after that. Address is the one
 // that answered, or the first listed when none did, and a member that did not answer keeps the
 // NodeID of its list entry and nothing else from any address.
 func readMemberAt(ctx context.Context, creds *clientconfig.Context, addrs []netip.Addr, m *Member) {
 	for _, a := range addrs {
 		if m.Address == "" {
 			m.Address = a.String()
+		}
+		if ctx.Err() != nil {
+			return
 		}
 		if read, ok := readMember(ctx, creds, a, m.NodeID); ok {
 			m.Address, m.SMBIOSUUID, m.Platform, m.Answered = a.String(), read.SMBIOSUUID, read.Platform, true

@@ -192,6 +192,64 @@ func TestDiscoverLimitedCutByTheCaller(t *testing.T) {
 	}
 }
 
+// TestDiscoverLimitedHasNoStartBound: the caller's context is the only bound on the reads from the
+// endpoint, not the command's own start timeout (a start timeout already over would fail every read).
+func TestDiscoverLimitedHasNoStartBound(t *testing.T) {
+	c := newCluster(t)
+	shorten(t, memberTimeout, time.Nanosecond)
+	res, err := DiscoverLimited(t.Context(), c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, 0)
+	if err != nil || res.ClusterID != "c-1" || res.Cut || len(res.Members) != 2 {
+		t.Fatalf("got %+v, %v; want the cluster read whole with the start timeout spent", res, err)
+	}
+}
+
+// TestDiscoverLimitedCutDuringTheMemberList: the caller's context ends after the identity is read and
+// while the member list is: the identity with no members and Cut, not an error. A caller whose context
+// ends before the identity is read gets the error.
+func TestDiscoverLimitedCutDuringTheMemberList(t *testing.T) {
+	c := newCluster(t)
+	c.a.Stall(talostest.MemberType, true)
+	ctx, cancel := context.WithTimeout(t.Context(), 400*time.Millisecond)
+	defer cancel()
+	res, err := DiscoverLimited(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, 0)
+	if err != nil || res.ClusterID != "c-1" || !res.Cut || len(res.Members) != 0 {
+		t.Fatalf("got %+v, %v; want the identity, no members and Cut", res, err)
+	}
+	d := newCluster(t)
+	d.a.Stall(talostest.InfoType, true)
+	ctx, cancel = context.WithTimeout(t.Context(), 400*time.Millisecond)
+	defer cancel()
+	if _, err := DiscoverLimited(ctx, d.p.Talosconfig(d.a.Endpoint, "", ""), "", d.a.Endpoint, 0); err == nil {
+		t.Fatal("a context that ended before the identity was read is an error")
+	}
+}
+
+// TestDiscoverLimitedStopsDialling: once the caller's context has ended no further address of a member
+// is dialled; the member is listed unanswered at its first address and the walk is Cut.
+func TestDiscoverLimitedStopsDialling(t *testing.T) {
+	c := newCluster(t)
+	c.a.SetMembers(t,
+		talostest.Member{NodeID: "n1", Hostname: "cp-1", Addresses: []string{"10.0.0.1", "10.0.0.8", "10.0.0.9"}, ControlPlanePort: 6443},
+	)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var dialled []string
+	old := memberEndpoint
+	defer func() { memberEndpoint = old }()
+	memberEndpoint = func(a netip.Addr) string {
+		dialled = append(dialled, a.String())
+		cancel() // the caller's time runs out as the first address is dialled
+		return c.closed
+	}
+	res, err := DiscoverLimited(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, 0)
+	if err != nil || !res.Cut || len(res.Members) != 1 || res.Members[0].Answered || res.Members[0].Address != "10.0.0.1" {
+		t.Fatalf("got %+v, %v; want one unanswered member at its first address and Cut", res, err)
+	}
+	if !slices.Equal(dialled, []string{"10.0.0.1"}) {
+		t.Fatalf("addresses dialled %v; want only the first", dialled)
+	}
+}
+
 func TestDiscoverUnsupportedContract(t *testing.T) {
 	c := newCluster(t)
 	old := supportedMinor

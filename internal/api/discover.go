@@ -99,9 +99,12 @@ func (a *API) discoverCluster(q *request) (discoveryBody, error) {
 	}
 	// The certificate covers the whole discovery and the rounding of its whole-second encoding.
 	cert, err := signer.Sign(ca, role.Reader, time.Now(), a.o.discoverWithin+signer.RoundingSlack, a.d.maxCert)
-	if err != nil {
+	if errors.Is(err, signer.ErrLifetime) {
 		return discoveryBody{}, refuse(http.StatusServiceUnavailable, "dependency-unavailable",
 			"the deployment's certificate lifetime is shorter than a discovery needs; nothing was recorded")
+	}
+	if err != nil {
+		return discoveryBody{}, discoveryRefusal(&signer.Refusal{Rule: signer.RuleUnusable}) // a key that parses and cannot sign is an unusable document
 	}
 	tc, err := cert.Config(in.Endpoint)
 	if err != nil {
@@ -111,6 +114,9 @@ func (a *API) discoverCluster(q *request) (discoveryBody, error) {
 	dctx, cancel := context.WithTimeout(ctx, a.o.discoverWithin)
 	defer cancel()
 	res, err := discover.DiscoverLimited(dctx, tc, "", in.Endpoint, maxDiscoveryMembers)
+	if err == nil && res.ClusterID == "" {
+		err = errors.New("the endpoint gave no cluster ID")
+	}
 	if err != nil {
 		return discoveryBody{}, discoveryRefusal(err)
 	}
