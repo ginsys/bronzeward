@@ -556,8 +556,10 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
     };
     return kind !== undefined && Object.hasOwn(pages, kind) ? pages[kind]!() : undefined;
   }
-  if (source !== undefined) return <SourceItem kind={source} id={id} />;
-  if (revision !== undefined) return <RevisionItem kind={revision} id={id} />;
+  // Keyed by the path, so a move to another source or revision keeps none of the last one's rows: a
+  // profile's pinned fragment reads, and the rest the page was asked to read (ginsys/bronzeward#997).
+  if (source !== undefined) return <SourceItem key={path} kind={source} id={id} />;
+  if (revision !== undefined) return <RevisionItem key={path} kind={revision} id={id} />;
   // A draft's page is keyed by its id: a move to another draft keeps none of the last one's reads,
   // ETag or editor text (ginsys/bronzeward#517 H2).
   const items: Record<string, () => ReactNode> = {

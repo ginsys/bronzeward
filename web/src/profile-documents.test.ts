@@ -5,13 +5,13 @@
 // fragment revision. This file mounts the two exported pages in a DOM with a client that answers by
 // path and records every path it is asked.
 
-import { act, createElement as h } from "react";
+import { act, createElement as h, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
-import { RevisionItem, SourceItem } from "./resources.tsx";
+import { RevisionItem, SourceItem, view } from "./resources.tsx";
 import { ShellContext } from "./shell.tsx";
 import { Writes } from "./write.ts";
 
@@ -164,5 +164,27 @@ describe("ginsys/bronzeward#997: the profile page with no revision", () => {
     expect(box.textContent).toContain("FAILED");
     expect(shown()).toHaveLength(0);
     expect(fragmentReads()).toHaveLength(0);
+  });
+});
+
+describe("ginsys/bronzeward#997: a move from one profile page to another", () => {
+  test("after the rest was read, the new page starts only its own first 20 reads", async () => {
+    for (const rev of ["prv_a", "prv_b"]) answers[`/profile-revisions/${rev}`] = ok({ ...profileRevision(pins(25)), id: rev });
+    for (const id of pins(25)) answers[`/fragment-revisions/${id}`] = ok(fragment(id, `f${id}`, "cluster", `doc ${id}\n`));
+    const go = (path: string, v: string) =>
+      act(async () => {
+        const page = view(path, "", () => {}) as ReactElement;
+        root.render(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["viewer"], offline: false } }, h(ReadsProvider, { value: { ...reads, view: v } }, page))));
+      });
+    await go("/profile-revisions/prv_a", "v1");
+    await settled();
+    await act(async () => [...box.querySelectorAll("button")].find((b) => b.textContent === "Show the remaining 5")!.click());
+    await settled();
+    expect(fragmentReads()).toHaveLength(25);
+    asked.length = 0;
+    await go("/profile-revisions/prv_b", "v2");
+    await settled();
+    expect(fragmentReads()).toHaveLength(20);
+    expect(documents()).toHaveLength(20);
   });
 });
