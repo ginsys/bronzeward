@@ -6,8 +6,9 @@
 
 /* Dark, and only dark. The contrast of each pair on the page background #0c1017 (WCAG 2): text 15.5,
    secondary text 7.4, link and ring 10.2, button text on the primary 10.6 (7.7 on its hover), danger
-   7.5, control border and table rule 4.75 (4.35 on a card, 3.9 on a hovered row, above the 3 of 1.4.11).
-   --border is Oat's own decorative rule and is never a control's or a table's. */
+   7.5, every border and table rule 4.75 (4.35 on a card, 3.9 on a hovered row, above the 3 of 1.4.11).
+   Oat draws its borders with --border (the file picker's button, a fieldset) and --input (a field), so
+   both are the one value. */
 :root {
   color-scheme: dark;
   --background: #0c1017;
@@ -19,7 +20,7 @@
   --primary: #3dd68c;
   --primary-foreground: #09090b;
   --ring: #3dd68c;
-  --border: #2a3346;
+  --border: #718096;
   --input: #718096;
   --danger: #f4807b;
 }
@@ -32,7 +33,7 @@ main:focus { outline: none; }
 .skip:focus { position: static; }
 
 /* Oat undoes four things our accessibility record keeps. A disabled control keeps its full contrast
-   (Oat halves it) and shows it by its dashed border. A link is underlined wherever it is (Oat does that
+   (Oat halves it); a button shows it disabled by a dashed border, a field by Oat's muted background. A link is underlined wherever it is (Oat does that
    in running text only). A button's label wraps (Oat does not). Hover colours are plain hex, so a colour
    read at rest is three bytes (Oat mixes them, which the contrast measure cannot read), and nothing
    transitions, so a read right after a hover is not a colour on its way. */
