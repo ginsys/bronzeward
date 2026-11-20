@@ -298,8 +298,8 @@ func TestDiscoveryTooManyMembers(t *testing.T) {
 // complete is false, so a client does not read an unread member as down. A call whose members all
 // refused at once is complete.
 func TestDiscoveryDeadlineKeepsTheMembersRead(t *testing.T) {
-	// The node timeout bounds the extraction and nothing else: the walk lasts the 600 ms deadline, six times the node timeout, and is still answered.
-	d := newDiscoveryEnv(t, options{nodeTimeout: 100 * time.Millisecond, discoverWithin: 600 * time.Millisecond}, 0)
+	// The node timeout bounds the extraction and nothing else: the walk lasts the 2 s deadline, twenty times the node timeout, and is still answered. The deadline is long enough for a slow runner to read the identity first.
+	d := newDiscoveryEnv(t, options{nodeTimeout: 100 * time.Millisecond, discoverWithin: 2 * time.Second}, 0)
 	memberPort(t) // 127.0.0.1:50000 accepts and never answers, so a read of that member waits for the deadline
 	ca := newTalosCA(t)
 	n, _ := discoveryNode(t, ca,
@@ -307,9 +307,9 @@ func TestDiscoveryDeadlineKeepsTheMembersRead(t *testing.T) {
 		talostest.Member{NodeID: "n2", Hostname: "w-1", Addresses: []string{"127.0.0.2"}})
 	start := time.Now()
 	b := decode[discoveryBody](t, d.do(d.api, discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), n.Endpoint)), http.StatusOK)
-	// The walk waits for the deadline (600 ms) and not for the node timeout (100 ms), and ends at it.
-	if took := time.Since(start); took < 500*time.Millisecond || took > 5*time.Second {
-		t.Fatalf("the call took %v: want the 600 ms deadline to bound it, and the 100 ms node timeout not to", took)
+	// The walk waits for the deadline (2 s) and not for the node timeout (100 ms), and ends at it.
+	if took := time.Since(start); took < 1500*time.Millisecond || took > 10*time.Second {
+		t.Fatalf("the call took %v: want the 2 s deadline to bound it, and the 100 ms node timeout not to", took)
 	}
 	if b.ClusterID != "c-disc" || b.Complete || len(b.Members) != 2 || b.Members[0].Answered || b.Members[1].Answered {
 		t.Fatalf("answer %+v; want the identity, two members unanswered and complete false", b)
@@ -322,7 +322,7 @@ func TestDiscoveryDeadlineKeepsTheMembersRead(t *testing.T) {
 // §9.2: a deadline that passes after the identity is read and before the member list is, is the identity
 // with no members and complete false, not a 503.
 func TestDiscoveryDeadlineDuringTheMemberList(t *testing.T) {
-	d := newDiscoveryEnv(t, options{discoverWithin: 400 * time.Millisecond}, 0)
+	d := newDiscoveryEnv(t, options{discoverWithin: 2 * time.Second}, 0) // long enough for a slow runner to read the identity first
 	ca := newTalosCA(t)
 	n, _ := discoveryNode(t, ca, refusingMembers...)
 	n.Stall(talostest.MemberType, true)
