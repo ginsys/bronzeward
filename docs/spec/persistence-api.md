@@ -802,9 +802,9 @@ in the database and is not part of any configuration, release or plan.
   `machine.name`, the machine as subject), in one transaction. Its `201` answer holds `machine`,
   `revision`, `previousName` (`null` when there was none), `name`, `changedBy`, `role`, `act`,
   `epoch` and `at`. A machine read serves `name: null` for a machine with none. **A request that
-  names the machine's own current name is `409 conflict`, and `machine` names the machine itself**,
-  on this route and on the endpoint route alike (`internal/api/endpoint.go:58-64` for the endpoint
-  route, which §3.3 leaves unsaid): nothing changed, so no entry is recorded. The replay of a
+  names the machine's own current name is `409 conflict`, and `machine` names the machine itself**:
+  nothing changed, so no entry is recorded. The endpoint route refuses the same way for an endpoint
+  equal to the current one (`internal/api/endpoint.go:58-64`, which §3.3 leaves unsaid). The replay of a
   request under the same `Idempotency-Key` in the same epoch returns the stored `201` (§7.2), so
   only a new key with the same name draws the `409`; a replay from an earlier epoch is `409
   conflict` as §7.2 says. The route cannot clear a name: a machine that has one keeps one, which
