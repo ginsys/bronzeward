@@ -166,11 +166,18 @@ func (c *Client) setStartMode(m string) {
 
 // Get reads path under /api/v1. After an answer showing a new epoch it reads GET /server again
 // for the start mode (§8.5) before the recovery banner is shown; a failed re-read fails the read.
-func (c *Client) Get(path string) (*Response, error) { return c.get(path, nil) }
+func (c *Client) Get(path string) (*Response, error) { return c.get(path, nil, maxTries) }
+
+// GetOnce is Get with one try and no retry notice: the read of a name printed beside an identifier,
+// whose failure leaves the identifier shown and is not worth the wait of a retry.
+func (c *Client) GetOnce(path string) (*Response, error) { return c.get(path, nil, 1) }
+
+// maxTries is the tries of a read, the first included (§8.2).
+const maxTries = 5
 
 // get is Get with the retry policy of retryIn: with a stop, the read is repeated until stop answers true.
-func (c *Client) get(path string, stop func() bool) (*Response, error) {
-	r, err := c.retryUntil(path, stop)
+func (c *Client) get(path string, stop func() bool, tries int) (*Response, error) {
+	r, err := c.retryUntil(path, stop, tries)
 	if errors.As(err, new(*Interrupted)) { // a Ctrl-C ends the read: no refresh arms another request, but the banner reads none
 		c.banner()
 		return nil, err
@@ -192,7 +199,7 @@ func (c *Client) get(path string, stop func() bool) (*Response, error) {
 // retry sends a GET, retrying a retryable 503, a 5xx that is not a Bronzeward problem and a
 // transport failure after 1 s, doubling to at most 30 s, at most 5 tries (§8.2). A sign-in the
 // server answers 401 to is renewed once and the request sent once more (§9.5 item 1).
-func (c *Client) retry(path string) (*Response, error) { return c.retryUntil(path, nil) }
+func (c *Client) retry(path string) (*Response, error) { return c.retryUntil(path, nil, maxTries) }
 
 // watchStep is how often a wait of a watch's read asks whether the watch has ended.
 const watchStep = 250 * time.Millisecond
@@ -207,9 +214,9 @@ var ErrWatchRestored = errors.New("the installation was restored while the watch
 
 // retryUntil is retry. A watch's operation read passes stop: the read is then repeated with no cap of
 // tries until stop answers true, which returns the last error joined with ErrWatchEnded (§8.6 item 2).
-func (c *Client) retryUntil(path string, stop func() bool) (*Response, error) {
+func (c *Client) retryUntil(path string, stop func() bool, tries int) (*Response, error) {
 	ctx, disarm := c.arm()
-	r, err := c.retryIn(ctx, path, stop)
+	r, err := c.retryIn(ctx, path, stop, tries)
 	if disarm() { // a Ctrl-C taken while the read ended still stops the command
 		return nil, c.cut(&Interrupted{Route: "GET /api/v1" + path})
 	}
@@ -218,7 +225,7 @@ func (c *Client) retryUntil(path string, stop func() bool) (*Response, error) {
 
 // retryIn is retry with the Ctrl-C of ctx: it ends the request in flight and the wait before a retry.
 // renew is not cancelled: a refresh the identity provider already answered must be kept (§9.5).
-func (c *Client) retryIn(ctx context.Context, path string, stop func() bool) (*Response, error) {
+func (c *Client) retryIn(ctx context.Context, path string, stop func() bool, tries int) (*Response, error) {
 	delay, renewed := time.Second, false
 	for try := 1; ; try++ {
 		r, retry, err := c.once(ctx, path)
@@ -235,11 +242,11 @@ func (c *Client) retryIn(ctx context.Context, path string, stop func() bool) (*R
 				fmt.Fprintf(c.Notices, "%s: %s.\n", c.Context.Where(), Shown(rerr))
 			}
 		}
-		if !retry || stop == nil && try == 5 {
+		if !retry || stop == nil && try == tries {
 			return r, err
 		}
 		if stop == nil {
-			fmt.Fprintf(c.Notices, "%s: %s; try %d of 5 in %s\n", c.Context.Where(), Shown(err), try+1, delay)
+			fmt.Fprintf(c.Notices, "%s: %s; try %d of %d in %s\n", c.Context.Where(), Shown(err), try+1, tries, delay)
 			if werr := waitFor(ctx, delay); werr != nil {
 				return nil, werr
 			}

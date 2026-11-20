@@ -276,7 +276,7 @@ func (c *Client) operation(op string) (*apitypes.OperationBody, string, error) {
 // operationReadUntil is the read of GET /operations/{op} as the server answered it, whose retries go
 // on until stop answers true (retryUntil). A nil stop is five tries.
 func (c *Client) operationReadUntil(op string, stop func() bool) (*apitypes.OperationBody, OperationRead, error) {
-	r, err := c.get("/operations/"+url.PathEscape(op), stop)
+	r, err := c.get("/operations/"+url.PathEscape(op), stop, maxTries)
 	if err != nil {
 		return nil, OperationRead{}, err
 	}

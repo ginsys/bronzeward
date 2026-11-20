@@ -49,6 +49,13 @@ func showThen[T any](e *env, path string, then func(*client.Client, *client.Resp
 // (one with a next cursor, or one reached by a cursor) says so. A filter the API does not serve (G9)
 // applies to the items read; -o then prints the items kept, with the page's next cursor.
 func list[T any](e *env, l listing, path string, q url.Values, keep func(*T) bool, header, foot string, row func(*tabwriter.Writer, *T)) error {
+	return listWho(e, l, path, q, keep, nil, header, foot, row)
+}
+
+// listWho is list for rows that print principals: who gives the principal identifiers of an item
+// kept, and the table prints them as e.who gives them, every one asked in one set of reads before
+// the first row (names.go).
+func listWho[T any](e *env, l listing, path string, q url.Values, keep func(*T) bool, who func(*T) []string, header, foot string, row func(*tabwriter.Writer, *T)) error {
 	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
 		raw, items, next, err := l.read(c, path, q, nil)
 		if err != nil {
@@ -73,6 +80,13 @@ func list[T any](e *env, l listing, path string, q url.Values, keep func(*T) boo
 				return err
 			}
 			vs = kept
+		}
+		if who != nil {
+			var ids []string
+			for i := range vs {
+				ids = append(ids, who(&vs[i])...)
+			}
+			e.preload(c, ids...)
 		}
 		return e.emit(raw, func(w *tabwriter.Writer) {
 			switch {
@@ -198,7 +212,7 @@ func head(w *tabwriter.Writer, kind, id, what, cluster string, rev *string, n in
 
 // sourceShow reads a head, or a revision when id has the revision prefix, or a head's revisions:
 // a revision's row is its history line, which show follows with its detail.
-func sourceShow[H, R any](e *env, noun, revPrefix string, args []string, h func(*tabwriter.Writer, *H), row, detail func(*tabwriter.Writer, *R)) error {
+func sourceShow[H, R any](e *env, noun, revPrefix string, args []string, h func(*tabwriter.Writer, *H), author func(*R) string, row, detail func(*tabwriter.Writer, *R)) error {
 	v, rest, err := e.verb(noun, args, "show", "history")
 	if err != nil {
 		return err
@@ -211,11 +225,15 @@ func sourceShow[H, R any](e *env, noun, revPrefix string, args []string, h func(
 	id := url.PathEscape(pos[0])
 	switch {
 	case v == "history":
-		return list(e, l, "/"+noun+"s/"+id+"/revisions", url.Values{}, nil, "REVISION\tAUTHOR\tCREATED\tCONTENT", "", row)
+		return listWho(e, l, "/"+noun+"s/"+id+"/revisions", url.Values{}, nil, func(r *R) []string { return []string{author(r)} },
+			"REVISION\tAUTHOR\tCREATED\tCONTENT", "", row)
 	case l != listing{}:
 		return usageError{fmt.Errorf("%s show reads one resource: --limit, --cursor and --all are history's", noun)}
 	case strings.HasPrefix(pos[0], revPrefix+"_"):
-		return show(e, "/"+noun+"-revisions/"+id, func(w *tabwriter.Writer, x *R) {
+		return showThen(e, "/"+noun+"-revisions/"+id, func(c *client.Client, _ *client.Response, x *R) error {
+			e.preload(c, author(x))
+			return nil
+		}, func(w *tabwriter.Writer, x *R) {
 			row(w, x)
 			detail(w, x)
 		})
@@ -233,8 +251,8 @@ func (e *env) fragmentCmd(args []string) error {
 	}
 	return sourceShow(e, "fragment", "frv", args, func(w *tabwriter.Writer, f *apitypes.FragmentBody) {
 		head(w, "Fragment", f.Id, f.Name+", layer "+f.Layer+", scope "+f.Scope, f.Cluster, f.Revision, f.HeadRevision, f.CreatedAt)
-	}, func(w *tabwriter.Writer, r *apitypes.FragmentRevisionBody) {
-		tf(w, "%s\t%s\t%s\tfragment %s, layer %s\n", r.Id, r.Author, when(r.CreatedAt), r.Name, r.Layer)
+	}, func(r *apitypes.FragmentRevisionBody) string { return r.Author }, func(w *tabwriter.Writer, r *apitypes.FragmentRevisionBody) {
+		tf(w, "%s\t%s\t%s\tfragment %s, layer %s\n", r.Id, e.who(r.Author), when(r.CreatedAt), r.Name, r.Layer)
 	}, func(w *tabwriter.Writer, r *apitypes.FragmentRevisionBody) {
 		tf(w, "Cluster\t%s\n", r.Cluster)
 		var refs []string
@@ -258,8 +276,8 @@ func (e *env) profileCmd(args []string) error {
 	}
 	return sourceShow(e, "profile", "prv", args, func(w *tabwriter.Writer, p *apitypes.ProfileBody) {
 		head(w, "Profile", p.Id, p.Name+", scope "+p.Scope, p.Cluster, p.Revision, p.HeadRevision, p.CreatedAt)
-	}, func(w *tabwriter.Writer, r *apitypes.ProfileRevisionBody) {
-		tf(w, "%s\t%s\t%s\tprofile %s pins %s\n", r.Id, r.Author, when(r.CreatedAt), r.Name, strings.Join(r.Fragments, ", "))
+	}, func(r *apitypes.ProfileRevisionBody) string { return r.Author }, func(w *tabwriter.Writer, r *apitypes.ProfileRevisionBody) {
+		tf(w, "%s\t%s\t%s\tprofile %s pins %s\n", r.Id, e.who(r.Author), when(r.CreatedAt), r.Name, strings.Join(r.Fragments, ", "))
 	}, func(w *tabwriter.Writer, r *apitypes.ProfileRevisionBody) {
 		tf(w, "Cluster\t%s\n", r.Cluster)
 	})
@@ -275,14 +293,14 @@ func (e *env) assignmentCmd(args []string) error {
 	}
 	return sourceShow(e, "assignment", "asr", args, func(w *tabwriter.Writer, a *apitypes.AssignmentBody) {
 		head(w, "Assignment", a.Id, "machine "+a.Machine, a.Cluster, a.Revision, a.HeadRevision, a.CreatedAt)
-	}, func(w *tabwriter.Writer, r *apitypes.AssignmentRevisionBody) {
+	}, func(r *apitypes.AssignmentRevisionBody) string { return r.Author }, func(w *tabwriter.Writer, r *apitypes.AssignmentRevisionBody) {
 		parts := []string{"profiles: " + map[bool]string{true: "none"}[len(r.Profiles) == 0] + strings.Join(r.Profiles, ", ")}
 		for _, layer := range []string{"global", "site", "cluster", "role", "workload", "override"} {
 			if names := r.Fragments[layer]; len(names) > 0 {
 				parts = append(parts, layer+": "+strings.Join(names, ", "))
 			}
 		}
-		tf(w, "%s\t%s\t%s\tmachine %s, %s\n", r.Id, r.Author, when(r.CreatedAt), r.Machine, strings.Join(parts, "; "))
+		tf(w, "%s\t%s\t%s\tmachine %s, %s\n", r.Id, e.who(r.Author), when(r.CreatedAt), r.Machine, strings.Join(parts, "; "))
 	}, func(w *tabwriter.Writer, r *apitypes.AssignmentRevisionBody) {
 		tf(w, "Cluster\t%s\n", r.Cluster)
 	})
@@ -353,15 +371,19 @@ func (e *env) releaseCmd(args []string) error {
 		return err
 	}
 	if v == "list" {
-		return list(e, l, "/releases", url.Values{}, func(r *apitypes.ReleaseBody) bool {
+		return listWho(e, l, "/releases", url.Values{}, func(r *apitypes.ReleaseBody) bool {
 			return (cluster == "" || r.Cluster == cluster) && (draft == "" || r.Draft == draft)
-		}, "RELEASE\tCLUSTER\tDRAFT\tPUBLISHED\tBY\tMACHINES", "", func(w *tabwriter.Writer, r *apitypes.ReleaseBody) {
-			tf(w, "%s\t%s\t%s r%d\t%s\t%s (%s)\t%d\n", r.Id, r.Cluster, r.Draft, r.DraftRevision, when(r.PublishedAt),
-				r.PublishedBy.Principal, r.PublishedBy.Role, len(r.Machines))
-		})
+		}, func(r *apitypes.ReleaseBody) []string { return []string{r.PublishedBy.Principal} },
+			"RELEASE\tCLUSTER\tDRAFT\tPUBLISHED\tBY\tMACHINES", "", func(w *tabwriter.Writer, r *apitypes.ReleaseBody) {
+				tf(w, "%s\t%s\t%s r%d\t%s\t%s (%s)\t%d\n", r.Id, r.Cluster, r.Draft, r.DraftRevision, when(r.PublishedAt),
+					e.who(r.PublishedBy.Principal), r.PublishedBy.Role, len(r.Machines))
+			})
 	}
-	return show(e, "/releases/"+url.PathEscape(pos[0]), func(w *tabwriter.Writer, r *apitypes.ReleaseBody) {
-		tf(w, "Release %s\tcluster %s\tpublished by %s (%s) %s\n", r.Id, r.Cluster, r.PublishedBy.Principal, r.PublishedBy.Role, when(r.PublishedAt))
+	return showThen(e, "/releases/"+url.PathEscape(pos[0]), func(c *client.Client, _ *client.Response, r *apitypes.ReleaseBody) error {
+		e.preload(c, r.PublishedBy.Principal)
+		return nil
+	}, func(w *tabwriter.Writer, r *apitypes.ReleaseBody) {
+		tf(w, "Release %s\tcluster %s\tpublished by %s (%s) %s\n", r.Id, r.Cluster, e.who(r.PublishedBy.Principal), r.PublishedBy.Role, when(r.PublishedAt))
 		tf(w, "Draft\t%s revision %d, operation %s\n", r.Draft, r.DraftRevision, r.Operation)
 		tf(w, "Renderer\tcontract %s, machinery %s, Kubernetes %s\n", r.Renderer.Contract, r.Renderer.MachineryVersion, r.Renderer.KubernetesVersion)
 		fmt.Fprintln(w, "Built from (source revisions, not configuration):")
@@ -395,6 +417,9 @@ func (e *env) operationCmd(args []string) error {
 	// kept only when it is of the epoch of the operation shown; its time is not shown.
 	var cause *lastEvent
 	findCause := func(c *client.Client, r *client.Response, o *apitypes.OperationBody) error {
+		if o.CreatedBy != nil {
+			e.preload(c, o.CreatedBy.Principal)
+		}
 		if e.output == "table" && o.State == "cancelled" {
 			var err error
 			if cause, err = readLastOrStop(c, pos[0], o.State, r.Header.Get("Bronzeward-Epoch")); err != nil {
@@ -411,7 +436,7 @@ func (e *env) operationCmd(args []string) error {
 		tf(w, "Subject\t%s\n", subject(o.Subject))
 		by := "the controller"
 		if o.CreatedBy != nil {
-			by = o.CreatedBy.Principal + " (" + o.CreatedBy.Role + ")"
+			by = e.who(o.CreatedBy.Principal) + " (" + o.CreatedBy.Role + ")"
 		}
 		tf(w, "Created\t%s by %s\tepoch %s, last event %d\n", when(o.CreatedAt), by, o.Epoch, o.LastEvent)
 		tf(w, "Result\t%s\n", map[bool]string{true: "none"}[o.Result == nil]+map[bool]string{false: compact(o.Result)}[o.Result == nil])
@@ -486,8 +511,9 @@ func (e *env) actCmd(args []string) error {
 	if _, err := e.paged("act "+v, rest, 0, &l, nil); err != nil {
 		return err
 	}
-	return list(e, l, "/acts", url.Values{}, nil, "ACT\tAT\tACTION\tPRINCIPAL\tROLE\tVIA\tSUBJECTS", "", func(w *tabwriter.Writer, a *apitypes.ActItem) {
-		tf(w, "%s\t%s\t%s\t%s (%s)\t%s\t%s\t%s\n", a.Id, when(a.At), a.Action, a.Principal, a.PrincipalKind, or(a.Role, "-"),
-			a.Via, strings.Join(a.Subjects, ", "))
-	})
+	return listWho(e, l, "/acts", url.Values{}, nil, func(a *apitypes.ActItem) []string { return []string{a.Principal} },
+		"ACT\tAT\tACTION\tPRINCIPAL\tROLE\tVIA\tSUBJECTS", "", func(w *tabwriter.Writer, a *apitypes.ActItem) {
+			tf(w, "%s\t%s\t%s\t%s (%s)\t%s\t%s\t%s\n", a.Id, when(a.At), a.Action, e.who(a.Principal), a.PrincipalKind, or(a.Role, "-"),
+				a.Via, strings.Join(a.Subjects, ", "))
+		})
 }

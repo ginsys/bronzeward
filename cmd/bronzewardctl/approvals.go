@@ -62,7 +62,7 @@ func (e *env) approve(args []string) error {
 		}
 		var view, prediction []string
 		if _, change := snapshot(c, r, func() []string {
-			if view = planView(c, &p); p.State == "proposed" {
+			if view = e.planView(c, &p); p.State == "proposed" {
 				view = view[:len(view)-1] // its one state line points at this approve command
 			}
 			prediction = predict(c, &p)
@@ -231,14 +231,15 @@ func (e *env) approvalCmd(args []string) error {
 	}
 	// current is the epoch of the approval answer itself, so that a later read cannot move it.
 	var current string
-	return showThen(e, "/approvals/"+url.PathEscape(pos[0]), func(c *client.Client, r *client.Response, _ *apitypes.ApprovalBody) error {
+	return showThen(e, "/approvals/"+url.PathEscape(pos[0]), func(c *client.Client, r *client.Response, a *apitypes.ApprovalBody) error {
 		if current = r.Header.Get("Bronzeward-Epoch"); current == "" {
 			current = c.Context.LastEpoch
 		}
+		e.preload(c, a.Approver.Principal)
 		return nil
 	}, func(w *tabwriter.Writer, a *apitypes.ApprovalBody) {
 		tf(w, "Approval %s of plan %s, epoch %s\n", a.Id, a.Plan, a.Epoch)
-		tf(w, "  Approver\t%s (%s)\n", a.Approver.Principal, a.Approver.Role)
+		tf(w, "  Approver\t%s (%s)\n", e.who(a.Approver.Principal), a.Approver.Role)
 		tf(w, "  Self-approval\trecorded reasons: %s\n", orList(a.SelfApproval.Reasons))
 		if a.UnseenOverwrite {
 			fmt.Fprintln(w, "  Overwrites\tthe drifted configuration, which no reviewer had seen: the approver approved overwriting it")
@@ -289,7 +290,8 @@ func (e *env) approvalRevoke(args []string) error {
 		if err := json.Unmarshal(r.Body, &x); err != nil || e.output != "table" {
 			return nil, err
 		}
-		lines := []string{sf("Revocation of approval %s recorded by %s (%s), act %s.", x.Approval, x.RevokedBy, x.Role, x.Act)}
+		e.preload(c, x.RevokedBy)
+		lines := []string{sf("Revocation of approval %s recorded by %s (%s), act %s.", x.Approval, e.who(x.RevokedBy), x.Role, x.Act)}
 		var p apitypes.PlanBody
 		var err error
 		// A restore between the answer and the read can undo the revocation, so the read says what

@@ -147,11 +147,12 @@ func (e *env) recoveryTakeover(args []string) error {
 		tf(e.err, "  The serving controller becomes the owner at generation %d and the operation becomes unresolved.\n  It sends nothing to the node and classifies nothing.\n", gen+1)
 		return nil
 	}
-	err = e.writeAfter(prep, w, func(_ *client.Client, resp *client.Response) ([]string, error) {
+	err = e.writeAfter(prep, w, func(c *client.Client, resp *client.Response) ([]string, error) {
 		var x apitypes.TakeoverBody
 		err := json.Unmarshal(resp.Body, &x)
+		e.preload(c, x.RequestedBy)
 		return []string{sf("Operation %s taken over (act %s): %s at generation %d.", x.Operation, x.Act, x.State, x.Generation),
-			sf("Recorded by %s (%s).", x.RequestedBy, x.Role),
+			sf("Recorded by %s (%s).", e.who(x.RequestedBy), x.Role),
 			"Next: recovery account, or recovery resolve if the operation has no attempt."}, err
 	})
 	return operationNext(err, operation)
@@ -204,11 +205,12 @@ func (e *env) recoveryResolve(args []string) error {
 		tf(e.err, "  The operation ends cancelled. It records no remote outcome: no attempt was sent, and nothing is sent now.\n")
 		return nil
 	}
-	err = e.writeAfter(prep, w, func(_ *client.Client, resp *client.Response) ([]string, error) {
+	err = e.writeAfter(prep, w, func(c *client.Client, resp *client.Response) ([]string, error) {
 		var x apitypes.ResolutionBody
 		err := json.Unmarshal(resp.Body, &x)
+		e.preload(c, x.ResolvedBy)
 		return []string{sf("Operation %s resolved (act %s): %s.", x.Operation, x.Act, x.State),
-			sf("Recorded by %s (%s). It records no remote outcome.", x.ResolvedBy, x.Role),
+			sf("Recorded by %s (%s). It records no remote outcome.", e.who(x.ResolvedBy), x.Role),
 			"Next: recovery status names the scope's next step."}, err
 	})
 	return operationNext(err, operation)

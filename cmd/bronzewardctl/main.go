@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/client"
+	"github.com/ginsys/bronzeward/internal/client/apitypes"
 )
 
 const usage = `usage: bronzewardctl [global flags] <command> [arguments]
@@ -228,6 +229,10 @@ type env struct {
 	// collect is set while a composite prints one object for -o json or yaml: a write then hands its
 	// answer to it and prints nothing (composite.go).
 	collect *collector
+
+	// names is who the principals a table output prints name, read by GET /principals (names.go);
+	// an identifier asked and not answered is nil. Held for this run only.
+	names map[string]*apitypes.PrincipalBody
 }
 
 func main() {

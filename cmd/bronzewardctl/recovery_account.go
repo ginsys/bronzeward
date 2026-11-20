@@ -308,7 +308,8 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		if e.output != "table" {
 			return lines, nil
 		}
-		return append(lines, settleFacts(c, machine, "scope-state", s.Revision, x.Epoch), sf("Recorded by %s (%s): act %s.", x.DecidedBy, x.Role, x.Act), next), nil
+		e.preload(c, x.DecidedBy)
+		return append(lines, settleFacts(c, machine, "scope-state", s.Revision, x.Epoch), sf("Recorded by %s (%s): act %s.", e.who(x.DecidedBy), x.Role, x.Act), next), nil
 	})
 	return settleNext(err, machine, "")
 }
@@ -406,7 +407,8 @@ func (e *env) recoveryAccount(args []string) error {
 		if e.output != "table" {
 			return lines, err
 		}
-		return append(lines, settleFacts(c, machine, "accounting", x.Revision, x.Epoch), sf("Recorded by %s (%s): act %s.", x.DecidedBy, x.Role, x.Act),
+		e.preload(c, x.DecidedBy)
+		return append(lines, settleFacts(c, machine, "accounting", x.Revision, x.Epoch), sf("Recorded by %s (%s): act %s.", e.who(x.DecidedBy), x.Role, x.Act),
 			"Next: operation show "+client.ShellWord(operation)+"."), err
 	})
 	return settleNext(err, machine, operation)

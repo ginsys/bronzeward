@@ -167,18 +167,19 @@ func (e *env) machineFreeze(verb string, args []string) error {
 	body, _ := json.Marshal(apitypes.ReasonInput{Reason: reason.v})
 	err = e.write(&client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/" + verb + "s", Body: body, Repeat: rp,
 		Check: "machine timeline " + client.ShellWord(pos[0]), Read: freezeRead(m)},
-		func(_ *client.Client, r *client.Response) ([]string, error) {
+		func(c *client.Client, r *client.Response) ([]string, error) {
 			var x apitypes.FreezeBody
 			if err := json.Unmarshal(r.Body, &x); err != nil {
 				return nil, err
 			}
+			e.preload(c, x.Principal)
 			lines := []string{"Unfrozen. The freeze no longer stops a commitment or an attempt for this machine.",
 				"Unfreezing approves and commits nothing. An attempt already recorded was not stopped by the freeze, and an adoption could still be recorded."}
 			if x.Frozen {
 				// "An attempt ..." is freezeLimits with its capital.
 				lines = []string{"Frozen. No new commitment or attempt for this machine until an approver unfreezes it.", "An" + freezeLimits[2:] + "."}
 			}
-			return append(lines, sf("Recorded by %s (%s): machine %s, timeline revision %d, act %s.", x.Principal, x.Role, x.Machine, x.Revision, x.Act)), nil
+			return append(lines, sf("Recorded by %s (%s): machine %s, timeline revision %d, act %s.", e.who(x.Principal), x.Role, x.Machine, x.Revision, x.Act)), nil
 		})
 	return whyBlocked(err, verb)
 }
