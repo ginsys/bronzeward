@@ -1327,12 +1327,14 @@ scan_patterns() {
 
 # leak_shape: fixed strings that find a PEM private key by its shape, one per line, for the keys that
 # no list can name: the server makes a client key at each use and the CA key at its own time. The
-# `PRIVATE KEY-----` of the BEGIN and END lines, as text, as hex, and as base64 at each of the three
+# end of the PEM BEGIN and END lines (the needle), as text, as hex, and as base64 at each of the three
 # byte offsets it can sit at in a longer encoding. A base64 core drops the first and the last group,
 # which depend on the bytes next to the needle. The scans pass it as a second --file beside
-# scan-patterns.txt, so a file holding a listed key is still one hit.
+# scan-patterns.txt, so a file holding a listed key is still one hit. The needle is written in two
+# # pieces, and no file under fixtures/ holds it whole: such a file would match the scan itself wherever
+# a diff or copy of it lands in a scanned root.
 leak_shape() {
-  local needle="PRIVATE KEY-----" pad enc hex
+  local needle="PRIV""ATE KEY-----" pad enc hex
   hex=$(printf '%s' "$needle" | od -An -tx1 | tr -d ' \n')
   printf '%s\n' "$needle" "$hex" "${hex^^}"
   for pad in '' x xx; do
