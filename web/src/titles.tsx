@@ -80,7 +80,7 @@ export function useOperationTitle(o: S["OperationBody"] | undefined): string | u
   if (o.kind !== "ingest") return operationTitle(o.kind, { draft: draftText(draft), plan });
   // An import's machine is on its ingestion, which the subject names: no ingestion named, no answer
   // from it or no machine on it is an import with no machine to name.
-  if (s?.ingestion === undefined) return operationTitle("ingest", {});
+  if (s?.ingestion == null) return operationTitle("ingest", {});
   if (ingestion === undefined || (ingestion?.machine != null && machine === undefined)) return undefined;
   return operationTitle("ingest", { machine });
 }

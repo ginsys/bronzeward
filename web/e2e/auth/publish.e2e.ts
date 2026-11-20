@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
 import { short } from "../../src/list.tsx";
 import { CONTROL, syntheticDocument } from "../auth.conf.ts";
-import { eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, itNarrow, measure, mint, mirrored, narrow, onMain, overflows, storageEmptyAfterPause, tabTo } from "./helpers.ts";
+import { eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, itNarrow, measure, mint, mirrored, narrow, onMain, overflows, releaseHeading, storageEmptyAfterPause, tabTo } from "./helpers.ts";
 
 const statusRegions = () => browser.execute(() => document.querySelectorAll('[role="status"]').length);
 
@@ -176,7 +176,7 @@ describe("the publication page (#342)", () => {
     // On to the release, by keyboard: the next Tab leaves the answer, and the link opens the release's page.
     await tabTo((f) => f.title === REL, "the release link");
     await browser.keys("Enter");
-    await expect($("main h2")).toHaveText(`Release ${short(REL)}`, { wait: 20_000 });
+    await releaseHeading(REL);
     await expect($("main").$("h3=Machines covered (0)")).toBeExisting({ wait: 20_000 });
     await focusSettles(onMain, "the new page");
     expect((await writes()).map(([m, r]) => `${m} ${r}`)).toEqual([`POST /drafts/${id}/publications`]);
@@ -198,7 +198,7 @@ describe("the publication page (#342)", () => {
       await expect($('[data-testid="ended"]')).toHaveText(`Publication succeeded: release ${short(REL)} was published. Nothing has been sent to any machine.`, { wait: 120_000 });
       expect(["the end", await overflows()]).toEqual(["the end", 0]);
       await $(`main a[title="${REL}"]`).click();
-      await expect($("main h2")).toHaveText(`Release ${short(REL)}`, { wait: 20_000 });
+      await releaseHeading(REL);
       // The heading shows while the release loads: wait for its tables, then measure.
       await expect($("main").$("h3=Machines covered (0)")).toBeExisting({ wait: 20_000 });
       expect(["the release", await overflows()]).toEqual(["the release", 0]);

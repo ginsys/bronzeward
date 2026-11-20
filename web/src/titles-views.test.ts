@@ -198,8 +198,8 @@ describe("ginsys/bronzeward#987: an operation", () => {
     expect(text()).toBe("Import");
   });
 
-  test("ingest whose subject names no ingestion is an import, with no read", async () => {
-    await mount(h(OperationRef, { o: operation("ingest", { draft: DRF, draftRevision: 1 }) as never }));
+  test.each([["names no ingestion", { draft: DRF, draftRevision: 1 }], ["names a null ingestion", { draft: DRF, draftRevision: 1, ingestion: null }]])("ingest whose subject %s is an import, with no read", async (_, subject) => {
+    await mount(h(OperationRef, { o: operation("ingest", subject) as never }));
     await settled();
     expect(text()).toBe("Import");
     expect(asked).toEqual([]);
