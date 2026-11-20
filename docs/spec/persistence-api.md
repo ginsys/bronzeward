@@ -2014,7 +2014,13 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   reviewing it (§9.3, compilation §3.6), and
   `GET /import-base-revisions/{id}/document` answers the stored one to the
   author who made the import from a file they provided and continued its
-  review (choice §17.41).
+  review (choice §17.41). **One read is open:** `GET /fragment-revisions/{id}`
+  answers a fragment's sanitized text to every role, and that text can hold a
+  value no one has marked, because a fragment update ingests under a transient
+  claim that no review reads before it is stored (§9.3, compilation §3.6, §2.4
+  and §8.4). It is served as an ordinary read, under the accepted limit that
+  marking is load-bearing; whether it joins the exceptions above is
+  [ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974).
 - Every response to an authenticated request carries `Bronzeward-Epoch` with
   the epoch identity the request read, and `Bronzeward-Recovery-Mode: true`
   while recovery mode was in effect in that read. The read is the one that

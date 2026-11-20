@@ -285,6 +285,8 @@ supported.
 | G23 | No principal display name: bodies carry principal identifiers only, and no route maps one to a subject or name | `internal/api/acts.go:19-30`, `internal/api/releases.go:53`, `internal/api/plans.go:195`, `internal/api/approvals.go:43`, `internal/api/recovery_entries.go:79`; no such route in `internal/api/routes.go:78-136` | API issue A7, served as `GET /principals` from API revision 4 ([persistence and API §9.2](persistence-api.md#92-resources-and-routes)) by [#335](https://github.com/ginsys/bronzeward/issues/335); the CLI's table and detail output and the web client's views resolve identifiers with it, the web client's once for each view, each read again and each return to a view after one with no name, and show the identifier where the read does not name it |
 | G24 | No convergence status: the machine body serves `desired` and `applied.release`, and compares the artifact digests only to match an observation, never serving them, so a client cannot tell whether the `Desired` release's digest differs from the `Applied` one, which is what pending convergence means. After an adoption the `Applied` digest is the baseline's, so equal or different release IDs do not settle it | before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/reads.go:155-166`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L155-L166); [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values), [§6.3](execution-recovery.md#63-adopt) | closed by API issue A4 ([#280](https://github.com/ginsys/bronzeward/issues/280)): the machine's `pendingConvergence` compares the `Desired` artifact's digest with the `Applied` digest, `true` too for a `Desired` with no `Applied`, and serves neither digest (`internal/api/reads.go:155-171`) |
 | G25 | No read answers a machine's whole position at once (the journeys' G18). The lists a client could combine (`GET /ingestions?machine=`, `GET /plans?machine=&state=`, `GET /operations?machine=&state=`) are separate reads at the default isolation level, so an operation that moves between two of them leaves every list empty, and a committed plan says nothing of its operation | `internal/api/reads.go:40-57`; [persistence and API §8.1](persistence-api.md#81-plans-and-their-operations); the unique scope indexes `internal/migrate/migrations/0001_schema.sql:457-464` | served: `GET /machines/{id}/position` answers the machine, its newest ingestion, draft and plan, the operation holding its scope and one `step` from one snapshot ([persistence and API §9.3](persistence-api.md#93-examples)), implemented by [ginsys/bronzeward#879](https://github.com/ginsys/bronzeward/issues/879), and the web client draws its line from the `step` |
+| G26 | Plans, releases and operations carry no name, so both clients show them by identifier (the journeys' G19, [#564](https://github.com/ginsys/bronzeward/issues/564) item 1). A draft has a `title`; a plan names its `machine`, `release` and `operation`, a release its `draft`, an operation its `kind` and `subject` | `api/openapi.yaml` `DraftBody`, `PlanBody`, `ReleaseBody`, `OperationBody` and `OperationSubject` | client rule A8: both clients show a title derived from those fields; no API change |
+| G27 | `GET /plans` filters by `state` and `machine` and not by `cluster`, so a cluster page cannot list its open plans without reading each machine's plans or the whole list (the journeys' G20) | `internal/api/plans.go:429-451` | accepted limitation: the cluster page does not list plans; the filters for releases and drafts stay G9's accepted client-side filtering |
 
 Not gaps, by design: no dispatch or apply route, no token administration route, no secret
 browser, and no WebSocket (polling and SSE only, [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)).
@@ -1546,6 +1548,17 @@ Plaintext can pass through a client in these places only:
 Not protected: rendered release reviews, plan diffs and provenance are redacted by the server
 ([compilation §8.3](compilation.md#83-redaction)) and are handled as ordinary reads.
 
+**Open: a fragment revision.** `GET /fragment-revisions/{id}` is read by every role and answers a
+fragment's sanitized text, which can hold a value nobody marked: a fragment update ingests under a
+transient claim, so no review reads it before it is stored (`internal/api/fragments.go:126`,
+[persistence and API §9.3](persistence-api.md#93-examples), [compilation §3.6](compilation.md#36-operator-review)),
+and detection is not promised ([compilation §2.4](compilation.md#24-what-identification-does-not-promise),
+[§8.4](compilation.md#84-what-redaction-does-not-cover)). The route is not in the table above, and
+until the owner decides, both clients handle it as an ordinary read under that accepted limit; the
+web view's display rules are in [operator experience §9](operator-experience.md#9-secret-handling-in-the-clients)
+item 9. Whether the read becomes a protected one is
+[#974](https://github.com/ginsys/bronzeward/issues/974).
+
 The review is served to any human `author`, not only the one who started the ingestion
 (`internal/api/routes.go:99`), as the contract intends: "only to the roles that may mark"
 ([compilation §3.6](compilation.md#36-operator-review)). A client does not narrow this.
@@ -1912,6 +1925,36 @@ by its name, and the identifier for one answered `unknown` or when the read fail
 the web client, whole in the CLI, which prints every identifier whole. The text is the same in both clients for the same answer, and it is remote text like any other
 (§6 item 8). `-o json` and `-o yaml` print the resource with the same values, full identifiers included
 ([operator experience §4](operator-experience.md#4-command-tree)).
+
+**A8. Titles of plans, releases and operations (client rule, no API change).** Closes G26. Both
+clients show a title built from fields the body already carries, with the identifier kept as the
+stable reference (the whole identifier as the title attribute in the web client; in the CLI a column
+of a table and a line of a detail, whose heading names the identifier today, for example
+`Plan <id>  <state>` at `cmd/bronzewardctl/plans.go:328`). A stored name was the alternative: it needs an API revision and a field set at plan creation
+and at publication, and for an operation it could only be generated text, since no operator creates
+one. The rule is one for both clients:
+
+| Object | Title | Built from | Reads beyond the object's own |
+| --- | --- | --- | --- |
+| Release | "`<draft title>`, published `<date>`" | `draft` and `publishedAt` of the release, `title` of `GET /drafts/{id}` | 1: the draft |
+| Plan | "`<apply or adopt>` of `<machine>` to `<release title>`" | `operation` (`apply-config` or `adopt`), `machine` and `release` of the plan | 2: its release, then that release's draft |
+| Operation | `publish`: "Publish of `<draft title>`"; `ingest`: "Import of `<machine>`", or "Import" when its `subject` names no machine; `apply-config` and `adopt`: "`<apply or adopt>` of `<plan title>`" | `kind` and `subject` | `publish`: 1; `ingest`: none; `apply-config` and `adopt`: up to 3 (its plan, that plan's release, then that release's draft) |
+
+1. `<machine>` is the machine's identifier (shortened in the web client, whole in the CLI) until the
+   owner decides G8; a stored machine name then replaces it without changing this rule.
+2. Each distinct draft, release and plan is read once for each web view, each read again and each
+   return to a view after one with no title, as A7 says of names, by the same store and the same
+   safe-text rule; the CLI reads each once for each command. A read that fails keeps the
+   identifier, under the retry bound the 503 row states for the names read (the web client keeps it
+   behind the identifier, the CLI tries once). A draft ends `published` or `discarded` and is never
+   deleted ([persistence and API §3.1](persistence-api.md#31-sources-drafts-and-heads)), so a missing
+   draft is a failed read, not a fallback of its own.
+3. A draft title is remote text typed by an author, and it is shown as A7's names are: a text node
+   in the web client, with no control or format character and at most 300 code points, else the
+   identifier (§6 item 8 for the CLI, as A7 cites it).
+4. A title can name a person, so a client keeps it in memory for the web view's generation or for
+   the command, and never in storage, a log or an error.
+5. `-o json` and `-o yaml` print the resource unchanged.
 
 **C1. Contract correction.** Add the `reset` event to the stream contract of
 [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) (G15). A
