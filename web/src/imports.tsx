@@ -15,6 +15,7 @@ import { eventLine, type Refusal, refusalOf, refusalText, terminal, type Watch, 
 import type { Client, ReadResult } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
+import { MachineById } from "./titles.tsx";
 import type { Outcome, WriteSpec } from "./write.ts";
 
 type S = components["schemas"];
@@ -164,7 +165,7 @@ export function IngestionItem({ id }: { id: string }) {
         <>
           <dl>
             <dt>State</dt><dd>{b.state}, {b.kind}, {b.mode} staging</dd>
-            <dt>Machine</dt><dd><Id id={b.machine} /></dd>
+            <dt>Machine</dt><dd><MachineById id={b.machine} /></dd>
             <dt>Draft</dt><dd><Id id={b.draft} /></dd>
             <dt>Operation</dt><dd><Id id={b.operation} /></dd>
             <dt>Review</dt><dd>{b.review ?? "not requested"}</dd>

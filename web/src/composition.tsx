@@ -13,6 +13,7 @@ import { change, declaredOf, doneOnce, editor, EMPTY, FRESH, type Held, holdsUns
 import { startsNew, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { LAYERS } from "./layers.ts";
 import { short, useList, usePending, useSettled } from "./list.tsx";
+import { machineText } from "./machines.tsx";
 import { type EmbeddedPath, references } from "./position.ts";
 import { Action } from "./shell.tsx";
 import { Conflict, Status } from "./states.tsx";
@@ -556,7 +557,6 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const open = draft.state === "open";
   const editable = open && !waits;
   const unsavedList = holdsUnsaved(held, saved, conflict?.mine);
-  useUnsaved(`assignment ${machine === "" ? "(new)" : short(machine)} of draft ${short(draft.id)}`, unsavedList);
   const drafted = useRef(draft.revision);
   const finished = useRef(done);
   finished.current = done;
@@ -565,6 +565,9 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const [profiles] = useList<Profile>("/profiles", "", true);
   const [fragments] = useList<Fragment>("/fragments", "", true);
   const [machines] = useList<Machine>("/machines", new URLSearchParams({ cluster: draft.cluster }).toString(), true);
+  // The machine's name is in the list the page reads already (A9): no read of its own.
+  const called = machine === "" ? "(new)" : machineText(machine, machines.kind === "ok" ? machines.data.items.find((m) => m.id === machine)?.name : undefined);
+  useUnsaved(`assignment ${called} of draft ${short(draft.id)}`, unsavedList);
   const [layers, setLayers] = useState<Record<string, string>>({});
   const asked = useRef(new Set<string>());
   // A layer read that failed is asked again by the next draft read or by the button: the fragment
@@ -724,17 +727,17 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const pendingFragments = usePending(fragments, "fragments");
   const chooseable = machineOffers(draft, machines.kind === "ok" ? machines.data.items : []);
   return (
-    <section aria-label={`Assignment ${machine === "" ? "(new)" : short(machine)}`}>
+    <section aria-label={`Assignment ${called}`}>
       <h3>
         Assignment{" "}
         {entry === undefined ? (
           <label>machine{" "}
             <select value={typed} onChange={(e) => setMachine(e.target.value)} required>
               <option value="">choose</option>
-              {chooseable.map((m) => <option key={m.id} value={m.id}>{short(m.id)} {m.talosEndpoint}</option>)}
+              {chooseable.map((m) => <option key={m.id} value={m.id}>{machineText(m.id, m.name)} {m.talosEndpoint}</option>)}
             </select>
           </label>
-        ) : short(machine)}
+        ) : called}
       </h3>
       <p>{entry === undefined ? "new" : change(entry)}{unsavedList && " -> unsaved"}</p>
       <p>{ASSIGNMENT_STATEMENT}</p>
@@ -761,9 +764,9 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
       {note !== undefined && <Status testid="editor-note">{note}</Status>}
       {!(o?.kind === "refused" && o.status === 412) && conflictView()}
       <WriteResult w={w} conflict={conflictView("alert") || undefined} done={(data) => {
-        if (w?.spec.method === "DELETE") return `Assignment of machine ${short(machine)} removed from draft ${short(draft.id)}.`;
+        if (w?.spec.method === "DELETE") return `Assignment of machine ${called} removed from draft ${short(draft.id)}.`;
         const r = (data as Partial<S["SourceUpdate"]>).entry?.revision;
-        return `Assignment of machine ${short(machine)} saved in draft ${short(draft.id)}${typeof r === "string" ? ` (revision ${short(r)})` : ""}.`;
+        return `Assignment of machine ${called} saved in draft ${short(draft.id)}${typeof r === "string" ? ` (revision ${short(r)})` : ""}.`;
       }} />
       <h4>Composition and references</h4>
       <p>

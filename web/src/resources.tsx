@@ -21,6 +21,7 @@ import { RecoveryConsole } from "./recovery.tsx";
 import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
+import { MachineById, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useMachineText } from "./titles.tsx";
 
 type S = components["schemas"];
 type Col<T> = readonly [string, (t: T) => ReactNode];
@@ -106,7 +107,7 @@ function Pinned({ label, id, clear }: { label: string; id: string | null; clear:
     nextControl(own.current)?.focus();
     clear();
   };
-  return <p ref={own}>{label} <Id id={id} /> <button type="button" onClick={all}>Show all</button></p>;
+  return <p ref={own}>{label} {label === "Machine" ? <MachineById id={id} /> : <Id id={id} />} <button type="button" onClick={all}>Show all</button></p>;
 }
 
 // The first control after `from` and outside it, else the page.
@@ -125,7 +126,7 @@ const named = (kind: string): Col<{ id: string; name: string }> => [cap(kind), (
 
 const FRAGMENTS: readonly Col<S["FragmentBody"]>[] = [named("fragment"), CLUSTER, ["Scope", (f) => f.scope], ["Layer", (f) => f.layer], CURRENT, CREATED];
 const PROFILES: readonly Col<S["ProfileBody"]>[] = [named("profile"), CLUSTER, ["Scope", (p) => p.scope], CURRENT, CREATED];
-const ASSIGNMENTS: readonly Col<S["AssignmentBody"]>[] = [["Assignment", (a) => <Id id={a.id} />], CLUSTER, ["Machine", (a) => <Id id={a.machine} />], CURRENT, CREATED];
+const ASSIGNMENTS: readonly Col<S["AssignmentBody"]>[] = [["Assignment", (a) => <Id id={a.id} />], CLUSTER, ["Machine", (a) => <MachineById id={a.machine} />], CURRENT, CREATED];
 
 // Never a colour alone: the class and its staleness are words.
 export const klass = (d: { class: string | null; stale?: boolean }) => `${d.class ?? "none"}${d.stale === true ? " (stale: not observed recently)" : ""}`;
@@ -179,7 +180,7 @@ export function SourceItem({ kind, id }: { kind: Kind; id: string }) {
           <Fields rows={[
             ["Identifier", s.id], ["Cluster", <Id id={s.cluster} />],
             ...("scope" in s ? [["Scope", s.scope] as const] : []), ...("layer" in s ? [["Layer", s.layer] as const] : []),
-            ...("machine" in s ? [["Machine", <Id id={s.machine} />] as const] : []),
+            ...("machine" in s ? [["Machine", <MachineById id={s.machine} />] as const] : []),
             ["Current revision", <Id id={s.revision} none="removed" />], ["Head revision", s.headRevision], ["Created", when(s.createdAt)],
           ]} />
           <h3>Revisions</h3>
@@ -203,7 +204,7 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
         <>
           <Fields rows={[
             ["Identifier", r.id], ["Cluster", <Id id={r.cluster} />], ...("layer" in r ? [["Layer", r.layer] as const] : []),
-            ...("machine" in r ? [["Machine", <Id id={r.machine} />] as const] : []),
+            ...("machine" in r ? [["Machine", <MachineById id={r.machine} />] as const] : []),
             ...("profiles" in r ? [["Profiles", r.profiles.join(", ") || "none"] as const] : []),
             ...("fragments" in r ? [["Fragments", Array.isArray(r.fragments) ? <Ids ids={r.fragments} />
               : Object.entries(r.fragments).map(([layer, names]) => `${layer}: ${names.join(", ")}`).join("; ") || "none"] as const] : []),
@@ -231,7 +232,7 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
 export const ImportBaseRows = ({ r }: { r: S["ImportBaseSummary"] }) => (
   <>
     <Fields rows={[
-      ["Identifier", r.id], ["Machine", <Id id={r.machine} />], ["Author", <Who id={r.author} />], ["Created", when(r.createdAt)],
+      ["Identifier", r.id], ["Machine", <MachineById id={r.machine} />], ["Author", <Who id={r.author} />], ["Created", when(r.createdAt)],
       ["Document size", `${r.documentBytes} bytes`], ["References", r.references], ["Embedded documents", r.embedded],
     ]} />
     <p>The digests and reference names are not shown. The document text is read on request, and only the author who imported it and reviewed it may read it.</p>
@@ -246,14 +247,14 @@ export const ImportBaseItem = ({ id }: { id: string }) => (
 );
 
 const RELEASES: readonly Col<S["ReleaseBody"]>[] = [
-  ["Release", (r) => <Id id={r.id} />], CLUSTER, ["Published", (r) => when(r.publishedAt)], ["By", (r) => by(r.publishedBy)],
+  ["Release", (r) => <ReleaseRef r={r} />], CLUSTER, ["Published", (r) => when(r.publishedAt)], ["By", (r) => by(r.publishedBy)],
   ["Sources", (r) => r.sources.length], ["Machines", (r) => r.machines.length],
 ];
 
 // The imports (#340): GET /ingestions filtered by state finds paused and lapsed imports (G10), and
 // by machine, as a machine's page links them.
 const INGESTIONS: readonly Col<S["IngestionBody"]>[] = [
-  ["Import", (b) => <Id id={b.id} />], ["State", (b) => b.state], ["Machine", (b) => <Id id={b.machine} />], ["Draft", (b) => <Id id={b.draft} />],
+  ["Import", (b) => <Id id={b.id} />], ["State", (b) => b.state], ["Machine", (b) => <MachineById id={b.machine} />], ["Draft", (b) => <Id id={b.draft} />],
   ["Staging", (b) => b.mode], ["Lease until", (b) => (b.state === "held" || b.state === "resumed" ? when(b.leaseUntil) : "none")],
   ["Expires", (b) => when(b.expiresAt)], CREATED,
 ];
@@ -289,17 +290,20 @@ export function Changes() {
 const BUILT: readonly Col<S["ReleaseSourceBody"]>[] = [
   ["Kind", (s) => s.kind], ["Source", (s) => <Id id={s.head} />], ["Revision", (s) => <Id id={s.revision} none="removed" />],
 ];
+const RenderedLink = ({ to, machine }: { to: string; machine: string }) => (
+  <Ref to={to} id={machine}>Rendered configuration of {useMachineText(machine) ?? short(machine)}</Ref>
+);
 const covered = (release: string): readonly Col<S["ReleaseMachineBody"]>[] => [
-  ["Machine", (m) => <Id id={m.machine} />], ["Mode", (m) => m.mode], ["Publication observation", (m) => <Id id={m.publicationObservation} />],
+  ["Machine", (m) => <MachineById id={m.machine} />], ["Mode", (m) => m.mode], ["Publication observation", (m) => <Id id={m.publicationObservation} />],
   ["Rendered configuration", (m) => {
     const to = reviewPath(release, m.machine);
-    return to === undefined ? "none" : <Ref to={to} id={m.machine}>Rendered configuration of {short(m.machine)}</Ref>;
+    return to === undefined ? "none" : <RenderedLink to={to} machine={m.machine} />;
   }],
 ];
 
 export function ReleaseItem({ id }: { id: string }) {
   return (
-    <ItemOf<S["ReleaseBody"]> path={`/releases/${encodeURIComponent(id)}`} what="the release" title={() => `Release ${short(id)}`}>
+    <ItemOf<S["ReleaseBody"]> path={`/releases/${encodeURIComponent(id)}`} what="the release" title={(r) => (r === undefined ? `Release ${short(id)}` : <ReleaseHeading id={id} r={r} />)}>
       {(r) => (
         <>
           <Fields rows={[
@@ -318,7 +322,7 @@ export function ReleaseItem({ id }: { id: string }) {
 }
 
 const PLANS: readonly Col<S["PlanBody"]>[] = [
-  ["Plan", (p) => <Id id={p.id} />], ["State", (p) => p.state], ["Machine", (p) => <Id id={p.machine} />],
+  ["Plan", (p) => <PlanRef p={p} />], ["State", (p) => p.state], ["Machine", (p) => <MachineById id={p.machine} />],
   ["Operation", (p) => (p.mode === null ? p.operation : `${p.operation}, mode ${p.mode}`)], ["Release", (p) => <Id id={p.release} />],
   CREATED, ["Expires", (p) => when(p.expiresAt)],
 ];
@@ -352,7 +356,7 @@ export function PlanItem({ id }: { id: string }) {
   const [answers, setAnswers] = useState(0);
   const settled = useCallback(() => setAnswers((x) => x + 1), []);
   return (
-    <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" n={n} onSettled={settled} title={(p) => `Plan ${short(id)}${p === undefined ? "" : `: ${p.state}`}`}>
+    <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" n={n} onSettled={settled} title={(p) => (p === undefined ? `Plan ${short(id)}` : <PlanHeading id={id} p={p} />)}>
       {(p) => {
         const { validation: v, dryRun, baseline } = p.evidence;
         return (
@@ -361,7 +365,7 @@ export function PlanItem({ id }: { id: string }) {
             <PlanState p={p} reread={reread} answers={answers} />
             <Fields rows={[
               ["State", `${p.state}; expires ${when(p.expiresAt)}`],
-              ["Target", <>machine <Id id={p.machine} />, cluster <Id id={p.cluster} />, route {p.route}</>],
+              ["Target", <>machine <MachineById id={p.machine} />, cluster <Id id={p.cluster} />, route {p.route}</>],
               ["Operation", p.mode === null ? p.operation : `${p.operation}, mode ${p.mode}`],
               ["Release", <><Id id={p.release} /> (the machine's Desired when planned: <Id id={p.desiredRelease} />)</>],
               ["Bound to", <>assignment revision <Id id={p.assignmentRevision} />, baseline revision {p.baselineRevision ?? "none"}, drift record {p.driftRecord ?? "none"}, epoch {p.epoch}</>],
@@ -390,10 +394,14 @@ export function PlanItem({ id }: { id: string }) {
   );
 }
 
-const Subject = ({ s }: { s: S["OperationSubject"] | null }) =>
-  s === null ? "none" : <Ids ids={[s.machine, s.plan, s.draft, s.ingestion].filter((x) => x !== undefined)} />;
+// A subject's machine is named (A9); its plan, draft and import stay identifiers.
+const Subject = ({ s }: { s: S["OperationSubject"] | null }) => {
+  if (s === null) return "none";
+  const rest = [s.plan, s.draft, s.ingestion].filter((x) => x !== undefined);
+  return <>{s.machine !== undefined && <MachineById id={s.machine} />}{s.machine !== undefined && rest.length > 0 && ", "}{rest.length > 0 && <Ids ids={rest} />}{s.machine === undefined && rest.length === 0 && "none"}</>;
+};
 const OPERATIONS: readonly Col<S["OperationBody"]>[] = [
-  ["Operation", (o) => <Id id={o.id} />], ["Kind", (o) => o.kind], ["State", (o) => o.state], ["Subject", (o) => <Subject s={o.subject} />],
+  ["Operation", (o) => <OperationRef o={o} />], ["Kind", (o) => o.kind], ["State", (o) => o.state], ["Subject", (o) => <Subject s={o.subject} />],
   ["Created by", (o) => by(o.createdBy)], CREATED,
 ];
 
@@ -427,7 +435,7 @@ export function OperationItem({ id }: { id: string }) {
   const reread = useCallback(() => setN((x) => x + 1), []);
   return (
     <ItemOf<S["OperationBody"]> path={`/operations/${encodeURIComponent(id)}`} what="the operation" n={n}
-      title={(o) => `Operation ${short(id)}${o === undefined ? "" : `: ${o.kind}, ${o.state}`}`}>
+      title={(o) => (o === undefined ? `Operation ${short(id)}` : <OperationHeading id={id} o={o} />)}>
       {(o) => (
         <>
           <OperationTimeline id={id} o={o} reread={reread} />
@@ -456,7 +464,7 @@ export function Audit() {
 
 const DEPENDENT: readonly Col<S["DependencyReleaseBody"]>[] = [
   ["Release", (r) => <Id id={r.release} />], CLUSTER, ["Published", (r) => when(r.publishedAt)],
-  ["Records", (r) => r.records.map((x, i) => <Group key={`${x.machine}:${x.kind}`}>{i > 0 && ", "}<Id id={x.machine} /> {x.kind}</Group>)],
+  ["Records", (r) => r.records.map((x, i) => <Group key={`${x.machine}:${x.kind}`}>{i > 0 && ", "}<MachineById id={x.machine} /> {x.kind}</Group>)],
 ];
 
 export function DependencyItem({ id }: { id: string }) {

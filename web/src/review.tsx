@@ -8,6 +8,7 @@ import type { components } from "./api/v1";
 import { Head, Id, Ref, Scroll, short, useItem, usePending, useReads, viewOf } from "./list.tsx";
 import { planPath } from "./plan.tsx";
 import { Action } from "./shell.tsx";
+import { MachineRef, machineText } from "./machines.tsx";
 import { Withheld } from "./states.tsx";
 
 type S = components["schemas"];
@@ -149,12 +150,12 @@ export function Document({ configuration }: { configuration: string }) {
 }
 
 // What the review says, from a body as the server serves it.
-export function ReviewBody({ r }: { r: Review }) {
+export function ReviewBody({ r, name }: { r: Review; name?: unknown }) {
   return (
     <>
       <dl>
         <dt>Release</dt><dd><Id id={r.release} /></dd>
-        <dt>Machine</dt><dd><Id id={r.machine} /></dd>
+        <dt>Machine</dt><dd><MachineRef id={r.machine} name={name} /></dd>
         <dt>Validated in mode</dt><dd>{r.mode}</dd>
       </dl>
       {r.configuration === null ? <Withheld /> : <><Document configuration={r.configuration} /><p>{EMPTY_NOTE}</p></>}
@@ -176,11 +177,13 @@ export function ReviewItem({ release, machine }: { release: string; machine: str
   const pending = usePending(review, "the rendered review");
   const mach = useItem<Machine>(`/machines/${enc(machine)}`);
   const machinePending = usePending(mach, "the machine");
+  // The page holds the machine already, so its name costs no read.
+  const name = mach.kind === "ok" ? mach.data.name : undefined;
   return (
     <>
-      <h2>Rendered configuration of {short(machine)} in release {short(release)}</h2>
+      <h2>Rendered configuration of {machineText(machine, name)} in release {short(release)}</h2>
       <p><Ref to={`/releases/${enc(release)}`} id={release}>Back to the release</Ref></p>
-      {review.kind === "ok" ? <ReviewBody r={review.data} /> : pending}
+      {review.kind === "ok" ? <ReviewBody r={review.data} name={name} /> : pending}
       <h3>Next step</h3>
       {mach.kind === "ok" ? <p data-testid="next-step">{nextStep(release, mach.data)}</p> : machinePending}
       {mach.kind === "ok" && <PlanButton release={release} machine={machine} m={mach.data} />}

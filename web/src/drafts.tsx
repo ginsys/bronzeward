@@ -15,6 +15,7 @@ import { type EmbeddedPath, references, type Spot, spotOfLine, spotOfPath, spotO
 import type { Problem } from "./request.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
+import { MachineById } from "./titles.tsx";
 import type { Outcome, Write } from "./write.ts";
 
 type S = components["schemas"];
@@ -255,7 +256,7 @@ export function DraftItem({ id }: { id: string }) {
                 <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}>{e.kind} {e.kind === "assignment" ? short(nameOf(e)) : nameOf(e)}</button>
                 {" "}{change(e)}
               </li>
-            ) : <li key={`import-base:${e.machine}`}>import base <Id id={e.machine} /> <Id id={e.revision} /></li>)}
+            ) : <li key={`import-base:${e.machine}`}>import base <MachineById id={e.machine} /> <Id id={e.revision} /></li>)}
           </ul>
           {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} />{" "}<Action label="Add profile" needs={["author"]} onClick={() => pick("profile:")} />{" "}<Action label="Add assignment" needs={["author"]} onClick={() => pick("assignment:")} /></p>}
           {selected !== undefined && selected.startsWith("fragment:") && (

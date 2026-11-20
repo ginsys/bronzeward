@@ -10,6 +10,7 @@ import type { Problem, ReadResult } from "./request.ts";
 import type { Outcome } from "./write.ts";
 import { useGate, useOffline, useRecoveryState } from "./shell.tsx";
 import { clock, Disconnected, ProblemFields, problemFields, problemTail, Refused, Status, when } from "./states.tsx";
+import { MachineById } from "./titles.tsx";
 import type { components } from "./api/v1";
 
 export type Recovery = components["schemas"]["RecoveryBody"];
@@ -331,7 +332,7 @@ function Scopes({ scopes }: { scopes: readonly Scope[] }) {
       <tbody>
         {scopes.map((s) => (
           <tr key={s.machine}>
-            <td><Id id={s.machine} /></td>
+            <td><MachineById id={s.machine} /></td>
             <td>{s.state}</td>
             <td>{nextStep(s.state)}</td>
           </tr>
