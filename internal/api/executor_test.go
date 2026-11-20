@@ -592,7 +592,7 @@ func TestExecutorAttemptAfterCertificateRenewal(t *testing.T) {
 // A dispatch that commits the plan and then fails short of a refusal at its attempt waits a lease
 // before it is tried again, and the committed operation waits with it: the delay is stored under
 // the plan, and the loop's read of the operation honours it. Within a lease of one hour the loop
-// passes ten times on a 20 ms heartbeat without the operation being advanced, so no new
+// passes ten more times on a 20 ms heartbeat without the operation being advanced, so no new
 // certificate is signed for it and comparison 3 refuses nothing; with a lease of 50 ms the
 // operation is advanced after it, comparison 3 refuses the certificate signed again once, and the
 // operation completes.
@@ -624,14 +624,19 @@ func TestExecutorRetryDelayOfCommittedOperation(t *testing.T) {
 			xe.approveThrough(t, a)
 			until(t, a, idle, "the plan is committed", func() bool { return xe.entries(t, "commitment") == 1 })
 			if !c.waits {
-				until(t, a, idle, "the operation completes", func() bool { return xe.opState(t) == "completed" })
+				// The heartbeat, not a wake, carries the loop past the lease: wait by the clock.
+				for deadline := time.Now().Add(30 * time.Second); xe.opState(t) != "completed"; waitIdle(t, idle, 1) {
+					if time.Now().After(deadline) {
+						t.Fatalf("the operation is %s 30 s after the lease; want completed", xe.opState(t))
+					}
+				}
 				if n := count(t, xe.db, `SELECT count(*) FROM machine_event WHERE kind = 'refusal' AND entry->>'comparison' = '3'
 					AND entry->>'cause' = 'the use-time check used another certificate than the evidence'`); n != 1 {
 					t.Fatalf("%d comparison 3 refusals for the renewed certificate; want 1", n)
 				}
 				return
 			}
-			waitIdle(t, idle, 10) // ten heartbeats of the loop with the lease still running
+			waitIdle(t, idle, 10) // ten more passes of the loop, a heartbeat apart, with the lease still running
 			if s := xe.opState(t); s != "committed" {
 				t.Errorf("the operation is %s; want committed, not advanced within the lease", s)
 			}
