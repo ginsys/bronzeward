@@ -161,7 +161,7 @@ func walk(ctx context.Context, talosconfig []byte, contextName, endpoint string,
 	res.Supported = res.Contract != "" && res.Contract == supportedMinor()
 	list, err := safe.StateListAll[*cluster.Member](startCtx, n.api.COSI)
 	if err != nil {
-		if limited && ctx.Err() != nil {
+		if limited && ended(ctx) {
 			res.Cut = true // the identity was read; the caller's time ran out before the members were listed
 			return res, nil
 		}
@@ -178,7 +178,7 @@ func walk(ctx context.Context, talosconfig []byte, contextName, endpoint string,
 			m.Role = "controlplane"
 		}
 		readMemberAt(ctx, creds, s.Addresses, &m)
-		if !m.Answered && ctx.Err() != nil {
+		if !m.Answered && ended(ctx) {
 			res.Cut = true
 		}
 		if m.Role == "controlplane" && s.ControlPlane != nil && res.KubernetesEndpoint == "" && m.Address != "" {
@@ -187,6 +187,21 @@ func walk(ctx context.Context, talosconfig []byte, contextName, endpoint string,
 		res.Members = append(res.Members, m)
 	}
 	return res, nil
+}
+
+// deadlineTolerance is how near the caller's deadline has to be for a read that failed to count as cut by it.
+// A node's deadline is derived from the caller's by the transport, and its DeadlineExceeded can arrive a few
+// microseconds before the caller's own timer has set ctx.Err().
+const deadlineTolerance = 100 * time.Millisecond
+
+// ended reports whether the caller's time is up: its context has ended, or its deadline is within
+// deadlineTolerance.
+func ended(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	d, ok := ctx.Deadline()
+	return ok && time.Until(d) < deadlineTolerance
 }
 
 // version is the Talos tag the dialled node answers.
@@ -213,7 +228,7 @@ func readMemberAt(ctx context.Context, creds *clientconfig.Context, addrs []neti
 		if m.Address == "" {
 			m.Address = a.String()
 		}
-		if ctx.Err() != nil {
+		if ended(ctx) {
 			return
 		}
 		if read, ok := readMember(ctx, creds, a, m.NodeID); ok {
