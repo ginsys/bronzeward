@@ -583,7 +583,8 @@ A second run finds what exists and changes nothing that stands, except the first
 again (below). A `409 conflict` on the cluster or
 on a machine names the existing record, which the command reads and shows as it is recorded (the
 flags are not applied to it); a `409 name-in-use`, which a machine name another machine holds draws
-(client contracts A9), names no existing node and is never read that way. A machine that is recorded in another cluster stops the command, naming
+(client contracts A9), names the machine that holds the name, which is not established as the
+discovered node, so the command never adopts it. A machine that is recorded in another cluster stops the command, naming
 both cluster IDs, before the first key. The draft is titled `onboard <name>`, and an open draft of that
 title is reused. A machine whose import was released into that draft is skipped; an import that is
 held, resumed or paused stops the command, with `import status` for it (a paused one is exit 0, as
