@@ -17,7 +17,7 @@
 #                         (web-watch.mjs): every row it receives is the server's, once and in order,
 #                         and after the end it shows the server's events (compare.mjs; ginsys/bronzeward#359)
 #   session s6web         not a participant task: S6.1 on the fixture, then the page on its send operation
-#                         compared with the server's events; starts dev-db and dev-bao if they are not running
+#                         compared with the server's events (s1 pass, s3 handover, s2 pass, s4 cli, s6 cli)
 #   session t10 revert    the facilitator's close of a drift that T10 left open (prepare t10-revert)
 #   session scan [path]   no session password in any retained file or log, with a planted control
 #   session stop          the web host and dev-idp; fixtures/bin/down removes the fixture
@@ -863,41 +863,24 @@ t11() {
   echo "names: none"
 }
 
-# s6web: S6.1 on the fixture (s1 pass, s3 handover, s2 pass, s3 pass, s4 run, s4 ds, s6 run), then the
-# operation page on the finished send operation against the server's events (ginsys/bronzeward#359).
-# dev-db and dev-bao, which s4 ds needs, are started on the default instance only if they are not
-# running, and only those it started are stopped, never dev-down (it would remove the participant
-# environment's provider). A and the page need Zitadel: A goes back on it before the page is read. B
+# s6web: S6.1 on the fixture, as the integrated runner's preset `up s1p s3h s2p s4cli s6cli down` runs
+# it (s1 pass, s3 handover, s2 pass, s4 cli, s6 cli: no dev-db and no dev-bao, which only s4 ds needs),
+# then the operation page on the finished send operation against the server's events
+# (ginsys/bronzeward#359). A and the page need Zitadel: A goes back on it before the page is read. B
 # and C are stopped, as t11 leaves them.
-s6_dev=()
-s6web_end() {
-  local c
-  for c in ${s6_dev[@]+"${s6_dev[@]}"}; do docker stop "$c" >>"$log" 2>&1 || echo "$c could not be stopped" >&2; done
-  s6_dev=()
-  handback
-}
 s6web() {
   local t0=$SECONDS c i p ev op
   task=s6web log=$part/setup-s6web.log
   : >"$log"
-  trap s6web_end EXIT
+  trap handback EXIT
   set_issuer fixture
   stage restart_a
   [ -s "$STATE/automation-token" ] || stage "$bin/seed"
   scenario s1 pass
   scenario s3 handover
   scenario s2 pass
-  scenario s3 pass
-  scenario s4 run
-  for c in "$BW_DEV_PG_CONTAINER:dev-db" "$BW_DEV_BAO_CONTAINER:dev-bao"; do
-    running "${c%%:*}" && continue
-    (cd "$repo" && mise run "${c##*:}") >>"$log" 2>&1 || die "setup s6web: mise run ${c##*:} failed; its output is in $log"
-    s6_dev+=("${c%%:*}")
-  done
-  scenario s4 ds
-  scenario s6 run
-  for c in ${s6_dev[@]+"${s6_dev[@]}"}; do docker stop "$c" >>"$log" 2>&1 || die "cannot stop $c"; done
-  s6_dev=()
+  scenario s4 cli
+  scenario s6 cli
   for i in A B C; do
     c=BW_$i
     p=$(docker inspect --type container --format '{{.State.Paused}}' "${!c}") || die "cannot inspect $i"
@@ -911,16 +894,16 @@ s6web() {
   stage restart_a
   trap - EXIT
   echo "setup s6web: $((SECONDS - t0)) s"
-  ev=$(find "$STATE/evidence" -maxdepth 1 -type d -name 's6-run-*' | sort | tail -n 1)
-  [ -n "$ev" ] || die "s6 run kept no evidence directory"
+  ev=$(find "$STATE/evidence" -maxdepth 1 -type d -name 's6-cli-*' | sort | tail -n 1)
+  [ -n "$ev" ] || die "s6 cli kept no evidence directory"
   op=$(jq -r '.id' "$ev/s6-send-operation.json") && [ -n "$op" ] || die "$ev/s6-send-operation.json names no operation"
   trap '[ -z "$t9_web" ] || kill "$t9_web" 2>/dev/null || true' EXIT
   web_start "$part/s6-web" "$op"
   web_compare "$part/s6-web" "$op"
   jq -e --slurpfile k "$ev/s6-send-events.json" '[.server[] | [.id, .type, .at]] == [$k[0][] | [.id, .type, .at]]' "$part/s6-web/web-watch.json" >/dev/null ||
-    die "the events the server serves now differ from those s6 run kept ($ev/s6-send-events.json)"
+    die "the events the server serves now differ from those s6 cli kept ($ev/s6-send-events.json)"
   trap - EXIT
-  read_ok "the page followed S6.1's send operation $op: the server's events, once each and in order, the same as s6 run kept ($(jq '.server | length' "$part/s6-web/web-watch.json") events)" true
+  read_ok "the page followed S6.1's send operation $op: the server's events, once each and in order, the same as s6 cli kept ($(jq '.server | length' "$part/s6-web/web-watch.json") events)" true
 }
 
 # What this scan made: its planted controls, the copied logs, the expanded backups and its error
