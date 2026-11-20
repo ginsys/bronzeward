@@ -117,11 +117,13 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
   return (
     <>
       <h2>Machines</h2>
-      <Filter label="Cluster:" value={cluster} options={options} onChange={(v) => filter("cluster", v)} />
-      {clusters.kind !== "loading" && unread}
-      <Filter label="State:" value={state?.[0] ?? ""} options={STATES} onChange={(v) => filter("state", v)} />
-      <RecordMachineAction cluster={cluster} />
-      <AddClusterAction />
+      <div className="toolbar">
+        <Filter label="Cluster:" value={cluster} options={options} onChange={(v) => filter("cluster", v)} />
+        {clusters.kind !== "loading" && unread}
+        <Filter label="State:" value={state?.[0] ?? ""} options={STATES} onChange={(v) => filter("state", v)} />
+        <RecordMachineAction cluster={cluster} />
+        <AddClusterAction />
+      </div>
       {body}
       <p>Health is not checked.</p>
     </>
@@ -151,7 +153,7 @@ export function Clusters() {
       </>
     );
   }
-  return <><h2>Clusters</h2><AddClusterAction />{body}</>;
+  return <><h2>Clusters</h2><div className="toolbar"><AddClusterAction /></div>{body}</>;
 }
 
 export function ClusterItem({ id }: { id: string }) {
