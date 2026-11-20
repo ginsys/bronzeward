@@ -779,5 +779,8 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(detailsCell("approval-revocation", { plan, approval: "apr_abcdefghijklmnopqrstuvwxyz", reason: "synthetic" })).toBe(`&quot;synthetic&quot; ${planLink}`);
     expect(detailsCell("use-time-check", { plan, dependencies: {} })).toBe(planLink);
     expect(detailsCell("response", { operation: op, attempt: "att_abcdefghijklmnopqrstuvwxyz" })).toBe(opLink);
+    // The attempt (internal/api/attempt.go) and the plan cancellation (internal/api/cancellations.go) entries name them too.
+    expect(detailsCell("attempt", { attempt: "att_abcdefghijklmnopqrstuvwxyz", operation: op, number: 1, observation: obs })).toBe(`<span title="${obs}">obs_abcdâ€¦wxyz</span> ${opLink}`);
+    expect(detailsCell("plan-cancellation", { plan, principal: "h-author", role: "author", reason: "synthetic" })).toBe(`h-author author &quot;synthetic&quot; ${planLink}`);
   });
 });
