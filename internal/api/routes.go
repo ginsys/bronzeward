@@ -23,7 +23,11 @@ type route struct {
 	// with the digest key (§7.1), its input implements keyedInput, and that member is left out
 	// of the canonical body the rest of the fingerprint covers. Empty for SHA-256.
 	keyed string
-	input func() input
+	// readOnly marks a POST that only reads, because what it reads from is a body: it takes no
+	// Idempotency-Key and no expected epoch, records no act and no idempotency record, and has no
+	// replay (§9.2, POST /discoveries). It is a read route, so it needs read and no effect.
+	readOnly bool
+	input    func() input
 	// prepare runs after the key's lookup and before the transaction; it may write its own
 	// short transaction, as §10's first-use insert does.
 	prepare func(ctx context.Context, a *API, q *request) error
@@ -31,7 +35,7 @@ type route struct {
 	read    readFunc   // a read route
 }
 
-func (rt *route) mutating() bool { return rt.method != http.MethodGet }
+func (rt *route) mutating() bool { return rt.method != http.MethodGet && !rt.readOnly }
 
 // entryPattern is recovery-mode entry's route, the one a recovery start serves before its entry
 // commits (§12.2).
@@ -70,6 +74,7 @@ func routes() []*route {
 	}
 	human := func(rt *route) *route { rt.humanOnly = true; return rt }
 	ifm := func(rt *route) *route { rt.ifMatch = true; return rt }
+	readOnlyPost := func(rt *route, in func() input) *route { rt.readOnly, rt.input = true, in; return rt }
 	exclusive := func(rt *route) *route { rt.exclusive = true; return rt }
 	normal := func(rt *route) *route { rt.normalStartOnly = true; return rt }
 	const post, put, del = http.MethodPost, http.MethodPut, http.MethodDelete
@@ -126,6 +131,7 @@ func routes() []*route {
 		endpointReplacement().on(human(m(post, "/machines/{id}/talos-endpoints", author))),
 		nameReplacement().on(human(m(post, "/machines/{id}/names", author))),
 		firstKeySupply().on(human(m(post, "/clusters/{id}/first-keys", author))),
+		read(human(readOnlyPost(m(post, "/discoveries", author), func() input { return &firstKeyInput{} })), postDiscovery),
 		draftCreation().on(m(post, "/drafts", author)),
 	)
 	rs = append(rs,

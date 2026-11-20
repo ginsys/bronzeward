@@ -269,7 +269,9 @@ func TestExpectedEpochEveryMutation(t *testing.T) {
 	}
 	mutations := 0
 	for _, s := range specRoutes {
-		if !strings.HasPrefix(s, "GET ") {
+		// POST /discoveries is the one POST that only reads (§9.2): it takes no Idempotency-Key and no
+		// expected epoch, so it is not a mutation to walk. TestDiscoveryTakesNoKeyOrEpoch holds it to that.
+		if !strings.HasPrefix(s, "GET ") && !strings.HasPrefix(s, "POST /discoveries ") {
 			mutations++
 		}
 	}

@@ -451,6 +451,37 @@ paths:
                   next: {type: string, description: The cursor of the next page; absent on the last.}
                 additionalProperties: false
         default: {$ref: '#/components/responses/Problem'}
+  /discoveries:
+    post:
+      operationId: postDiscoveries
+      tags: [clusters]
+      description: Finds a cluster's identity and members from a first key, as bronzewardctl cluster discover does from a talosconfig,
+        and records nothing (API revision 11; persistence and API §9.2). The only POST that only reads, so it takes no Idempotency-Key
+        and no Bronzeward-Expected-Epoch, records no act and no idempotency record, and has no replay. The document is the first-key
+        input's (kind, document, endpoint) and is never stored, logged or returned. A refused or unusable document is 422
+        validation-failed with the signer's rule; an endpoint that does not answer, does not accept the key or gives no cluster identity
+        is 503 talos-access-unavailable, and a refused key is not told apart from an unreachable endpoint; a cluster with more members
+        than the bound is 422 validation-failed with the rule too-many-members and the limit. At the deadline the members read so far are
+        answered and the rest listed unanswered, with complete false.
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FirstKeyInput'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DiscoveryBody'}
+        default: {$ref: '#/components/responses/Problem'}
   /drafts:
     get:
       operationId: getDrafts
@@ -2910,6 +2941,35 @@ components:
           items: {$ref: '#/components/schemas/DependencyRecordBody'}
       additionalProperties: false
     DiscardInput: {type: object, additionalProperties: false}
+    DiscoveryBody:
+      type: object
+      required: [clusterId, version, contract, supported, endpoint, kubernetesEndpoint, members, complete]
+      properties:
+        clusterId: {type: string, description: The Talos cluster ID.}
+        version: {type: string, description: The Talos version the dialled node reports.}
+        contract: {type: string, description: The minor of version; empty when it has none.}
+        supported: {type: boolean, description: Whether contract is the minor this server renders.}
+        endpoint: {type: string, description: 'The address dialled, as host:port.'}
+        kubernetesEndpoint: {type: string, description: 'A proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member.'}
+        members:
+          type: array
+          items: {$ref: '#/components/schemas/DiscoveryMember'}
+        complete:
+          type: boolean
+          description: False when the deadline ended the walk before every member was read, so a member listed unanswered may be reachable.
+      additionalProperties: false
+    DiscoveryMember:
+      type: object
+      required: [nodeId, hostname, address, role, smbiosUuid, platform, answered]
+      properties:
+        nodeId: {type: string}
+        hostname: {type: string}
+        address: {type: string, description: 'The address that answered, or the first one listed when none did.'}
+        role: {type: string, enum: [controlplane, worker]}
+        smbiosUuid: {type: string, description: Empty when the member did not answer or reported none.}
+        platform: {type: string, description: 'metal, container or cloud; empty when the member did not answer or reported none.'}
+        answered: {type: boolean}
+      additionalProperties: false
     DraftBody:
       type: object
       required: [id, cluster, title, state, revision, entries]

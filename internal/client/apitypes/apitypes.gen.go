@@ -11,6 +11,24 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for DiscoveryMemberRole.
+const (
+	DiscoveryMemberRoleControlplane DiscoveryMemberRole = "controlplane"
+	DiscoveryMemberRoleWorker       DiscoveryMemberRole = "worker"
+)
+
+// Valid indicates whether the value is a known member of the DiscoveryMemberRole enum.
+func (e DiscoveryMemberRole) Valid() bool {
+	switch e {
+	case DiscoveryMemberRoleControlplane:
+		return true
+	case DiscoveryMemberRoleWorker:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EmbeddedFormat.
 const (
 	EmbeddedFormatJson EmbeddedFormat = "json"
@@ -1187,6 +1205,50 @@ type DependencyReleaseBody struct {
 
 // DiscardInput defines model for DiscardInput.
 type DiscardInput = map[string]interface{}
+
+// DiscoveryBody defines model for DiscoveryBody.
+type DiscoveryBody struct {
+	// ClusterId The Talos cluster ID.
+	ClusterId string `json:"clusterId"`
+
+	// Complete False when the deadline ended the walk before every member was read, so a member listed unanswered may be reachable.
+	Complete bool `json:"complete"`
+
+	// Contract The minor of version; empty when it has none.
+	Contract string `json:"contract"`
+
+	// Endpoint The address dialled, as host:port.
+	Endpoint string `json:"endpoint"`
+
+	// KubernetesEndpoint A proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member.
+	KubernetesEndpoint string            `json:"kubernetesEndpoint"`
+	Members            []DiscoveryMember `json:"members"`
+
+	// Supported Whether contract is the minor this server renders.
+	Supported bool `json:"supported"`
+
+	// Version The Talos version the dialled node reports.
+	Version string `json:"version"`
+}
+
+// DiscoveryMember defines model for DiscoveryMember.
+type DiscoveryMember struct {
+	// Address The address that answered, or the first one listed when none did.
+	Address  string `json:"address"`
+	Answered bool   `json:"answered"`
+	Hostname string `json:"hostname"`
+	NodeId   string `json:"nodeId"`
+
+	// Platform metal, container or cloud; empty when the member did not answer or reported none.
+	Platform string              `json:"platform"`
+	Role     DiscoveryMemberRole `json:"role"`
+
+	// SmbiosUuid Empty when the member did not answer or reported none.
+	SmbiosUuid string `json:"smbiosUuid"`
+}
+
+// DiscoveryMemberRole defines model for DiscoveryMember.Role.
+type DiscoveryMemberRole string
 
 // DraftBody defines model for DraftBody.
 type DraftBody struct {
@@ -2884,6 +2946,9 @@ type PostClustersJSONRequestBody = ClusterInput
 
 // PostClustersIdFirstKeysJSONRequestBody defines body for PostClustersIdFirstKeys for application/json ContentType.
 type PostClustersIdFirstKeysJSONRequestBody = FirstKeyInput
+
+// PostDiscoveriesJSONRequestBody defines body for PostDiscoveries for application/json ContentType.
+type PostDiscoveriesJSONRequestBody = FirstKeyInput
 
 // PostDraftsJSONRequestBody defines body for PostDrafts for application/json ContentType.
 type PostDraftsJSONRequestBody = DraftInput
