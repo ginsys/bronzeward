@@ -1503,14 +1503,16 @@ restore nobody entered stays the same residual
    that accepted limit, and whether it becomes a protected one is
    [ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974). The web view that
    exists (`/fragment-revisions/{id}`, reached from a fragment's revisions list and a release's
-   source rows) follows these display rules, which are the web view's own: it shows the text
-   as served in a text node in a `pre`, never parsed or rendered as markup, with the declared
-   references and the embedded documents and nothing else; a one-line notice says the text is
-   sanitized by the server and that the server cannot promise it holds no value nobody marked, as
-   item 8 says of the import base text; it has no copy-to-clipboard button and no download, as
-   item 4 has for a field that can hold a value nobody marked; it keeps the text in memory for the
-   page only, never in browser storage; a refused read repeats the server's problem without a body
-   (item 6), and item 7 holds. The CLI's `fragment show` is unchanged (`-o json` prints the body
+   source rows) has these display rules, which are the web view's own. It shows the text as served
+   in a text node in a `pre` (`web/src/resources.tsx:215`), never parsed or rendered as markup, with
+   the declared references and the embedded documents (`web/src/resources.tsx:216-219`); it has no
+   copy-to-clipboard button and no download, as item 4 has for a field that can hold a value nobody
+   marked; it keeps the text in memory for the page only, never in browser storage; a refused read
+   repeats the server's problem without a body (item 6), and item 7 holds. **One rule is not
+   built yet:** a one-line notice that the text is sanitized by the server and that the server
+   cannot promise it holds no value nobody marked, as item 8 says of the import base text. The view
+   shows no such notice today (`web/src/resources.tsx:198-225`), and an implementation issue
+   carries it. The CLI's `fragment show` is unchanged (`-o json` prints the body
    whole), as are the draft editor's and the composition views' reads of the same text: a rule on
    one client only would half-decide ginsys/bronzeward#974.
 
