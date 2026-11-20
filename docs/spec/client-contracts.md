@@ -1540,7 +1540,8 @@ the client's rule wins wherever the two meet.
    and on a card; the measured pairs are quoted with the change that sets them.
 2. **Focus and disabled controls.** A focused control shows a solid outline of 3 px, offset 2 px,
    in the ring colour (Oat draws 2 px, and none on a text field). A disabled control keeps its full
-   contrast and shows it by a dashed border (Oat halves its opacity).
+   contrast (Oat halves its opacity); a disabled button shows it by a dashed border and a disabled
+   field by a muted background.
 3. **Links and buttons.** A link is underlined wherever it is, and a button's label wraps at 320 CSS
    pixels. Hover colours are plain colours without transition, so a colour read at rest is three
    bytes; the contrast measure of the browser cases throws on any other form.
