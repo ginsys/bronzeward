@@ -820,9 +820,10 @@ func TestMachineryCallsAllowlisted(t *testing.T) {
 }
 
 var discoverSurface = []string{
-	"Discover", "ErrNoEndpoint", "ErrUnknownContext", "Member", "Member.Address", "Member.Answered", "Member.Hostname", "Member.NodeID",
-	"Member.Platform", "Member.Role", "Member.SMBIOSUUID", "OneContext", "Result", "Result.ClusterID", "Result.Contract",
-	"Result.Endpoint", "Result.KubernetesEndpoint", "Result.Members", "Result.ResolvedFrom", "Result.Supported", "Result.Version", "node.close",
+	"Discover", "DiscoverLimited", "ErrNoEndpoint", "ErrUnknownContext", "Member", "Member.Address", "Member.Answered", "Member.Hostname",
+	"Member.NodeID", "Member.Platform", "Member.Role", "Member.SMBIOSUUID", "OneContext", "Result", "Result.ClusterID", "Result.Contract",
+	"Result.Cut", "Result.Endpoint", "Result.KubernetesEndpoint", "Result.Members", "Result.ResolvedFrom", "Result.Supported", "Result.Version",
+	"TooManyMembers", "TooManyMembers.Error", "TooManyMembers.Limit", "node.close",
 }
 
 // TestDiscoverCallsAllowlisted holds internal/talos/discover, which the CLI links, to

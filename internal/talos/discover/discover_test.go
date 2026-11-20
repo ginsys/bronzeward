@@ -100,7 +100,7 @@ func equalResult(a, b Result) bool {
 	}
 	a.Members, b.Members = nil, nil
 	return a.ClusterID == b.ClusterID && a.Version == b.Version && a.Contract == b.Contract &&
-		a.Supported == b.Supported && a.KubernetesEndpoint == b.KubernetesEndpoint
+		a.Supported == b.Supported && a.KubernetesEndpoint == b.KubernetesEndpoint && a.Cut == b.Cut
 }
 
 // TestDiscoverEndpointFromTheFile: with no endpoint given, the talosconfig's first endpoint is
@@ -138,6 +138,57 @@ func TestDiscoverMemberDoesNotAnswer(t *testing.T) {
 	}
 	if !got.Members[0].Answered {
 		t.Fatalf("the answering member is not marked answered: %+v", got.Members[0])
+	}
+	if got.Cut {
+		t.Fatal("a member that did not answer on its own is not a cut")
+	}
+}
+
+// TestDiscoverLimitedRefusesTooManyMembers: a cluster that lists more members than the bound is the
+// typed refusal, raised before any member is dialled; a cluster at the bound, and any cluster with no
+// bound, is read whole.
+func TestDiscoverLimitedRefusesTooManyMembers(t *testing.T) {
+	c := newCluster(t)
+	tried := route(t, silent(t), map[string]string{"10.0.0.1": c.a.Endpoint, "10.0.0.2": c.b.Endpoint})
+	tc := c.p.Talosconfig(c.a.Endpoint, "", "")
+	_, err := DiscoverLimited(t.Context(), tc, "", c.a.Endpoint, 1)
+	var many *TooManyMembers
+	if !errors.As(err, &many) || many.Limit != 1 {
+		t.Fatalf("a bound of 1 over two members: %v; want *TooManyMembers with Limit 1", err)
+	}
+	if got := tried(); len(got) != 0 {
+		t.Fatalf("a member was dialled before the refusal: %v", got)
+	}
+	for _, bound := range []int{2, 0} {
+		res, err := DiscoverLimited(t.Context(), tc, "", c.a.Endpoint, bound)
+		if err != nil || len(res.Members) != 2 || res.Cut {
+			t.Fatalf("a bound of %d: %d members, cut %t, error %v; want the two members read whole", bound, len(res.Members), res.Cut, err)
+		}
+	}
+}
+
+// TestDiscoverLimitedCutByTheCaller: when the caller's context ends while the members are read, the
+// members read so far are kept, the rest are listed unanswered, Cut says so and there is no error: the
+// cluster's identity was read.
+func TestDiscoverLimitedCutByTheCaller(t *testing.T) {
+	c := newCluster(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	by := map[string]string{"10.0.0.1": c.a.Endpoint, "10.0.0.2": c.b.Endpoint}
+	old := memberEndpoint
+	defer func() { memberEndpoint = old }()
+	memberEndpoint = func(a netip.Addr) string {
+		if a.String() == "10.0.0.2" {
+			cancel() // the second member is reached after the deadline
+		}
+		return by[a.String()]
+	}
+	res, err := DiscoverLimited(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, 0)
+	if err != nil {
+		t.Fatalf("a cut walk with the identity read is not an error: %v", err)
+	}
+	if res.ClusterID != "c-1" || !res.Cut || len(res.Members) != 2 || !res.Members[0].Answered || res.Members[1].Answered || res.Members[1].NodeID != "n2" {
+		t.Fatalf("got %+v; want the identity, Cut, the first member answered and the second listed unanswered", res)
 	}
 }
 
