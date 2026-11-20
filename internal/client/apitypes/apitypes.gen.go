@@ -395,6 +395,7 @@ const (
 	ProblemTypeUrnBronzewardProblemInternalError           ProblemType = "urn:bronzeward:problem:internal-error"
 	ProblemTypeUrnBronzewardProblemInvalidRequest          ProblemType = "urn:bronzeward:problem:invalid-request"
 	ProblemTypeUrnBronzewardProblemMachineIdentityMismatch ProblemType = "urn:bronzeward:problem:machine-identity-mismatch"
+	ProblemTypeUrnBronzewardProblemNameInUse               ProblemType = "urn:bronzeward:problem:name-in-use"
 	ProblemTypeUrnBronzewardProblemNotFound                ProblemType = "urn:bronzeward:problem:not-found"
 	ProblemTypeUrnBronzewardProblemNotImplemented          ProblemType = "urn:bronzeward:problem:not-implemented"
 	ProblemTypeUrnBronzewardProblemPreconditionFailed      ProblemType = "urn:bronzeward:problem:precondition-failed"
@@ -437,6 +438,8 @@ func (e ProblemType) Valid() bool {
 	case ProblemTypeUrnBronzewardProblemInvalidRequest:
 		return true
 	case ProblemTypeUrnBronzewardProblemMachineIdentityMismatch:
+		return true
+	case ProblemTypeUrnBronzewardProblemNameInUse:
 		return true
 	case ProblemTypeUrnBronzewardProblemNotFound:
 		return true
@@ -1496,12 +1499,15 @@ type LayerFragments = []SourceName
 
 // MachineBody defines model for MachineBody.
 type MachineBody struct {
-	Applied   *Applied       `json:"applied"`
-	Cluster   string         `json:"cluster"`
-	Desired   *string        `json:"desired"`
-	Frozen    bool           `json:"frozen"`
-	Hardware  Hardware       `json:"hardware"`
-	Id        string         `json:"id"`
+	Applied  *Applied `json:"applied"`
+	Cluster  string   `json:"cluster"`
+	Desired  *string  `json:"desired"`
+	Frozen   bool     `json:"frozen"`
+	Hardware Hardware `json:"hardware"`
+	Id       string   `json:"id"`
+
+	// Name The machine's name, unique within its cluster; null when it has none (persistence and API §3.5, API revision 10).
+	Name      *string        `json:"name"`
 	Observed  *ObservedBody  `json:"observed"`
 	OpenDrift *OpenDriftBody `json:"openDrift"`
 
@@ -1514,7 +1520,10 @@ type MachineBody struct {
 
 // MachineInput Exactly one of smbiosUuid and talosNodeId.
 type MachineInput struct {
-	Cluster  string               `json:"cluster"`
+	Cluster string `json:"cluster"`
+
+	// Name An optional name, unique within the cluster (persistence and API §3.5).
+	Name     *string              `json:"name,omitempty"`
 	Platform MachineInputPlatform `json:"platform"`
 	Serial   *string              `json:"serial,omitempty"`
 
@@ -1532,6 +1541,26 @@ type MachineInputPlatform string
 // MarkInput defines model for MarkInput.
 type MarkInput struct {
 	Marks []string `json:"marks"`
+}
+
+// NameChangeBody defines model for NameChangeBody.
+type NameChangeBody struct {
+	Act       string    `json:"act"`
+	At        time.Time `json:"at"`
+	ChangedBy string    `json:"changedBy"`
+	Epoch     string    `json:"epoch"`
+	Machine   string    `json:"machine"`
+	Name      string    `json:"name"`
+
+	// PreviousName The name before the change; null when the machine had none.
+	PreviousName *string `json:"previousName"`
+	Revision     int     `json:"revision"`
+	Role         string  `json:"role"`
+}
+
+// NameInput defines model for NameInput.
+type NameInput struct {
+	Name string `json:"name"`
 }
 
 // ObservationBody defines model for ObservationBody.
@@ -2620,6 +2649,15 @@ type PostMachinesIdFreezesParams struct {
 	BronzewardExpectedEpoch *ExpectedEpoch `json:"Bronzeward-Expected-Epoch,omitempty"`
 }
 
+// PostMachinesIdNamesParams defines parameters for PostMachinesIdNames.
+type PostMachinesIdNamesParams struct {
+	// IdempotencyKey 16 to 128 characters of [A-Za-z0-9_-] (persistence and API §7.1).
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// BronzewardExpectedEpoch Optional; the epoch identity the client expects. When the key has no record and this names another epoch, the request is refused 412 epoch-mismatch and its own transaction commits nothing. An empty one or two of them are 400 invalid-request (API revision 2; persistence and API §7.2, §9.1).
+	BronzewardExpectedEpoch *ExpectedEpoch `json:"Bronzeward-Expected-Epoch,omitempty"`
+}
+
 // GetMachinesIdObservationsParams defines parameters for GetMachinesIdObservations.
 type GetMachinesIdObservationsParams struct {
 	// Limit 1 to 500; 50 when absent.
@@ -2888,6 +2926,9 @@ type PostMachinesJSONRequestBody = MachineInput
 
 // PostMachinesIdFreezesJSONRequestBody defines body for PostMachinesIdFreezes for application/json ContentType.
 type PostMachinesIdFreezesJSONRequestBody = ReasonInput
+
+// PostMachinesIdNamesJSONRequestBody defines body for PostMachinesIdNames for application/json ContentType.
+type PostMachinesIdNamesJSONRequestBody = NameInput
 
 // PostMachinesIdTalosEndpointsJSONRequestBody defines body for PostMachinesIdTalosEndpoints for application/json ContentType.
 type PostMachinesIdTalosEndpointsJSONRequestBody = EndpointInput

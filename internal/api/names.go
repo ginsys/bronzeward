@@ -77,9 +77,10 @@ func nameHolder(ctx context.Context, tx *sql.Tx, cluster, name string) (string, 
 	return holder, err
 }
 
-// nameRace answers a name whose holder kept changing across every attempt.
+// nameRace answers a refused name whose holder renamed away before it could be read: nothing
+// committed, and the request can be repeated.
 func nameRace() *refusal {
-	return refuse(http.StatusServiceUnavailable, "transient-conflict", "the machine name kept changing hands; "+notCommitted)
+	return refuse(http.StatusServiceUnavailable, "transient-conflict", "the name's holder renamed away while the request ran; "+notCommitted)
 }
 
 func replaceMachineName(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
@@ -105,12 +106,9 @@ func replaceMachineName(ctx context.Context, _ *API, tx *sql.Tx, q *request) (re
 	if _, err := tx.ExecContext(ctx, `SAVEPOINT rename`); err != nil {
 		return result{}, err
 	}
-	for attempt := 1; ; attempt++ {
-		err = tx.QueryRowContext(ctx, `UPDATE machine SET name = $2, revision_counter = revision_counter + 1
-			WHERE id = $1 RETURNING revision_counter`, m, b.Name).Scan(&b.Revision)
-		if !nameClash(err) {
-			break
-		}
+	err = tx.QueryRowContext(ctx, `UPDATE machine SET name = $2, revision_counter = revision_counter + 1
+		WHERE id = $1 RETURNING revision_counter`, m, b.Name).Scan(&b.Revision)
+	if nameClash(err) {
 		if _, err := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT rename`); err != nil {
 			return result{}, err
 		}
@@ -118,12 +116,10 @@ func replaceMachineName(ctx context.Context, _ *API, tx *sql.Tx, q *request) (re
 		if err != nil {
 			return result{}, err
 		}
-		if holder != "" {
-			return result{}, nameInUse(holder)
-		}
-		if attempt == maxAttempts {
+		if holder == "" {
 			return result{}, nameRace()
 		}
+		return result{}, nameInUse(holder)
 	}
 	if err != nil {
 		return result{}, err
