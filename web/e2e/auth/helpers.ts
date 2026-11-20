@@ -350,14 +350,19 @@ export const scrollsOnItsOwn = (sel: string) => browser.execute((s: string) => {
   return r !== null && r.scrollWidth > r.clientWidth;
 }, sel);
 // The Web Locks of the page's origin cannot be read from about:blank. A file the host serves as itself is a
-// same-origin page that runs no application: the first asset the served index.html names.
+// same-origin page that runs no application: the first asset the served index.html names. A failed read is not kept.
 let lockPage: Promise<string> | undefined;
 const lockPageUrl = () =>
-  (lockPage ??= fetch(`${FIXTURE_PAGE}/`).then(async (r) => {
-    const asset = /\/assets\/[\w.-]+\.(?:css|js)/.exec(await r.text())?.[0];
-    if (asset === undefined) throw new Error("noAppLocks: the served page names no asset to read the locks from");
-    return `${FIXTURE_PAGE}${asset}`;
-  }));
+  (lockPage ??= fetch(`${FIXTURE_PAGE}/`)
+    .then(async (r) => {
+      const asset = /\/assets\/[\w.-]+\.(?:css|js)/.exec(await r.text())?.[0];
+      if (asset === undefined) throw new Error("noAppLocks: the served page names no asset to read the locks from");
+      return `${FIXTURE_PAGE}${asset}`;
+    })
+    .catch((e: unknown) => {
+      lockPage = undefined;
+      throw e;
+    }));
 const heldLocks = () =>
   browser.execute(async () => {
     const names = ((await navigator.locks.query()).held ?? []).map((l) => l.name ?? "");
@@ -365,27 +370,29 @@ const heldLocks = () =>
   });
 // Waits, on the current window, until no page of the app holds the renewer lock or a tab lock: the next case's
 // first tab would join a holder that is still there and sign in with its pair, with no authorize
-// (ginsys/bronzeward#964). Two zero reads in a row, 250 ms apart (an absence is read twice,
-// ginsys/bronzeward#944). A wait that saw a holder prints one line, counts only, so a run's log shows whether
-// the trigger happened; a holder still there after `timeout` fails the case, naming the counts.
+// (ginsys/bronzeward#964). It returns only on two zero reads in a row, 250 ms apart (an absence is read twice,
+// ginsys/bronzeward#944), and fails after `timeout`, naming the counts of its last read. A wait that saw a holder
+// prints one line, counts only, so a run's log shows whether the trigger happened.
 export async function noAppLocks(timeout = 15_000) {
-  await browser.url(await lockPageUrl());
   const t0 = Date.now();
-  let last = await heldLocks();
-  const first = last;
-  const none = (h: typeof last) => h.renewer + h.tab === 0;
+  const url = await lockPageUrl();
+  let first: { renewer: number; tab: number } | undefined;
+  let last = { renewer: 0, tab: 0 };
+  let zeros = 0;
   try {
-    for (let zeros = 0; ; ) {
-      zeros = none(last) ? zeros + 1 : 0;
+    await browser.url(url);
+    for (;;) {
+      last = await heldLocks();
+      first ??= last;
+      zeros = last.renewer + last.tab === 0 ? zeros + 1 : 0;
       if (zeros === 2 || Date.now() - t0 > timeout) break;
       await browser.pause(250);
-      last = await heldLocks();
     }
   } finally {
     await browser.url("about:blank");
   }
-  if (!none(first)) console.log(`noAppLocks: waited ${Date.now() - t0} ms for renewer ${first.renewer}, tab ${first.tab}`);
-  if (!none(last)) throw new Error(`noAppLocks: ${timeout} ms after the case a page of the app still holds renewer ${last.renewer}, tab ${last.tab}: the next case would join its pair`);
+  if (first !== undefined && first.renewer + first.tab > 0) console.log(`noAppLocks: waited ${Date.now() - t0} ms for renewer ${first.renewer}, tab ${first.tab}`);
+  if (zeros < 2) throw new Error(`noAppLocks: no two zero reads in a row within ${timeout} ms of the case; the last read had renewer ${last.renewer}, tab ${last.tab}: the next case would join a page's pair`);
 }
 // Whether this session is Safari's, whose driver has no BiDi session (setViewport, dialog events) and
 // shows no leave dialog; the cases that need them take the route written beside them.
