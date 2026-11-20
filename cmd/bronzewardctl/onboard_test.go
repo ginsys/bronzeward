@@ -315,6 +315,20 @@ func TestOnboardOtherFirstKey(t *testing.T) {
 	}
 }
 
+// TestOnboardSkipFirstKeyNeedsNoControlPlaneAddress: the address of the first control-plane member
+// carries the first key and nothing else, so a run that sends none is not refused for lacking it.
+func TestOnboardSkipFirstKeyNeedsNoControlPlaneAddress(t *testing.T) {
+	e := newOnboard(t)
+	r := obTwoMembers
+	r.Members = append([]discover.Member(nil), obTwoMembers.Members...)
+	r.Members[0] = discover.Member{NodeID: "node-1", Hostname: "cp-1", Address: "10.0.0.1", Role: "controlplane"}
+	e.result = r
+	code, out, errOut := e.run("--skip-first-key", "--no-import")
+	if code != 0 || len(e.api.keys) != 0 || strings.Contains(out+errOut, "no control-plane member answered") || !strings.Contains(out, "First key: skipped") {
+		t.Errorf("exit %d, %d first keys, stdout %q, stderr %q; want 0, none, the first key skipped and no refusal for the address", code, len(e.api.keys), out, errOut)
+	}
+}
+
 // TestOnboardFirstKeySaveFails: a first key the server stored stays stored in the report when keeping
 // what the answers taught the context fails afterwards, as plan create's plan does: the run still ends
 // with the error, and its rerun command skips the key, which a repeat would replace.
