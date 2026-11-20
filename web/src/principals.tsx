@@ -15,8 +15,8 @@ export function Who({ id, none }: { id: string | null | undefined; none?: string
   const ask = id != null && principalId(id);
   useEffect(() => {
     if (!ask) return;
-    // The names read is settled through the shell like every page read, with nothing to show and
-    // nothing held: its refusals end the page, and its failure to answer raises no banner.
+    // A refusal the names read meets that the shell must act on ends the page as any read's does:
+    // the store hands it over, with nothing to show and nothing held.
     const live = undropped();
     names.want(gen, [id], (res) => void settle(res, () => {}, live, () => false));
   }, [names, gen, id, ask, settle, undropped]);
