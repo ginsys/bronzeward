@@ -215,4 +215,39 @@ describe("the operation page's stream (#359)", () => {
     await expect($('[data-testid="outcome"]')).toHaveText(expect.stringContaining("Cancelled: resolution"), { wait: 30_000 });
     await storageEmpty();
   });
+
+  // Operator experience §13 (WCAG 4.1.3): "operation progress announced without moving focus". Not a shared conformance case
+  // (conformance/ holds the cases both clients run); the headless check of what a screen reader is given, not a screen-reader pass.
+  it("progress is announced through the live list and the status region, and focus stays where it was (§13)", async function () {
+    this.timeout(120_000);
+    const s = await start();
+    const n = s.ids.length;
+    await open(s);
+    await reach(n);
+    const region = () => browser.execute(() => {
+      const r = document.querySelector('[data-testid="page-status"]');
+      return { role: r?.getAttribute("role") ?? null, atomic: r?.getAttribute("aria-atomic") ?? null, text: r?.textContent ?? "" };
+    });
+    const live = () => browser.execute(() => document.querySelector('[data-testid="events"]')?.getAttribute("aria-live") ?? null);
+    // The list that receives the events is polite, and the page's one status region is a non-atomic status that already holds the outcome.
+    expect(await live()).toBe("polite");
+    expect(await region()).toMatchObject({ role: "status", atomic: "false", text: expect.stringContaining("Outcome unknown") });
+    // Focus is on a link of the main navigation, outside the list and the outcome; its target names it, so that a lost focus shows.
+    const focused = await browser.execute(() => {
+      const a = document.querySelector<HTMLElement>('nav[aria-label="Main"] a[href]');
+      a?.focus();
+      return a?.getAttribute("href") ?? null;
+    });
+    expect(typeof focused).toBe("string");
+    const active = () => browser.execute(() => document.activeElement?.getAttribute("href") ?? null);
+    expect(await active()).toBe(focused);
+    await resolve(s);
+    await reach(n + 1);
+    await expect($('[data-testid="outcome"]')).toHaveText(expect.stringContaining("Cancelled: resolution"), { wait: 30_000 });
+    // The outcome change reached the status region, the list is still polite, and focus did not move.
+    await browser.waitUntil(async () => (await region()).text.includes("Cancelled: resolution"), { timeout: 30_000, timeoutMsg: "the status region did not receive the outcome" });
+    expect(await live()).toBe("polite");
+    expect(await active()).toBe(focused);
+    await storageEmpty();
+  });
 });
