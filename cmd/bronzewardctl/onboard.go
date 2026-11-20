@@ -393,12 +393,17 @@ func (e *env) onboardFirstKey(a *onboardArgs, obj *onboarding, address string, r
 	}
 	in := apitypes.FirstKeyInput{Document: a.keyDoc, Endpoint: endpointArg(address), Kind: apitypes.FirstKeyInputKind(a.keyType)}
 	var x apitypes.FirstKeyBody
+	var stored bool
 	err := firstKeyRefusal(e.quietly(func() error {
 		return e.writeAfter(nil, firstKeyWrite(obj.Cluster.ID, in, nil), func(_ *client.Client, r *client.Response) ([]string, error) {
-			return nil, json.Unmarshal(r.Body, &x)
+			err := json.Unmarshal(r.Body, &x)
+			stored = err == nil
+			return nil, err
 		})
 	}))
-	if err != nil {
+	// An answer that was read is the key stored, whatever fails after it (keeping what the answers
+	// taught the context): the step says stored, and the error still ends the run, as plan create's does.
+	if err != nil && !stored {
 		obj.FirstKey = onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}
 		return err
 	}
@@ -406,7 +411,10 @@ func (e *env) onboardFirstKey(a *onboardArgs, obj *onboarding, address string, r
 	if x.Replaced {
 		obj.FirstKey.State = obReplaced
 	}
-	return nil
+	if err != nil {
+		obj.FirstKey.Command = rerun()
+	}
+	return err
 }
 
 func (s stepState) s() string { return string(s) }

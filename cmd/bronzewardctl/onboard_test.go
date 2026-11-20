@@ -315,6 +315,24 @@ func TestOnboardOtherFirstKey(t *testing.T) {
 	}
 }
 
+// TestOnboardFirstKeySaveFails: a first key the server stored stays stored in the report when keeping
+// what the answers taught the context fails afterwards, as plan create's plan does: the run still ends
+// with the error, and its rerun command skips the key, which a repeat would replace.
+func TestOnboardFirstKeySaveFails(t *testing.T) {
+	e := newOnboard(t)
+	e.api.keyAnswer = func(n int, w http.ResponseWriter) {
+		if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward", "config.yaml"), []byte("{"), 0o600); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Bronzeward-Epoch", "ep_OB-2")
+		_, _ = io.WriteString(w, `{"cluster":"cl_x","kind":"talosconfig","replaced":false,"caKeyVersion":{"version":`+strconv.Itoa(n)+`,"createdTime":"2026-11-19T21:00:00Z"}}`)
+	}
+	code, out, errOut := e.run()
+	if code != 1 || len(e.api.keys) != 1 || !strings.Contains(out, "First key: stored") || !strings.Contains(out, "--skip-first-key") || !strings.Contains(errOut, "keeping the epoch") {
+		t.Errorf("exit %d, %d first keys, stdout %q, stderr %q; want 1, 1, the key stored, --skip-first-key in the rerun and the save failure reported", code, len(e.api.keys), out, errOut)
+	}
+}
+
 // TestOnboardFirstKeyAnswers: each class of answer of the first-key route. A refusal the route decides
 // before it stores anything is exit 1, naming the rule and nothing of the server's words; every other
 // answer leaves the outcome unknown, exit 3. Exactly one first key is sent, nothing after it runs, and
