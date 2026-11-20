@@ -15,7 +15,7 @@ const reads: Reads = { client: { read: () => new Promise(() => {}) }, settle: ()
 const html = (e: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: reads }, e));
 
 const machine = (over: Partial<Machine> = {}): Machine => ({
-  id: "mch_x", cluster: "cl_a", talosEndpoint: "10.0.0.1:50000", hardware: { talosNodeId: "n1", smbiosUuid: null }, platform: "metal",
+  id: "mch_x", cluster: "cl_a", name: null, talosEndpoint: "10.0.0.1:50000", hardware: { talosNodeId: "n1", smbiosUuid: null }, platform: "metal",
   openDrift: null, frozen: false, scopeState: "normal", pendingConvergence: false, desired: null, applied: null, observed: null, ...over,
 }) as Machine;
 const at = "2026-11-18T10:00:00Z";

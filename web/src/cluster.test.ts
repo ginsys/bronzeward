@@ -16,7 +16,7 @@ const reads: Reads = { client: { read: () => new Promise(() => {}) }, settle: ()
 const html = (e: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: reads }, e));
 
 const machine = (over: Partial<Machine>): Machine => ({
-  id: "mch_x", cluster: "cl_a", talosEndpoint: "10.0.0.1:50000", hardware: { talosNodeId: "n1", smbiosUuid: null }, platform: "metal",
+  id: "mch_x", cluster: "cl_a", name: null, talosEndpoint: "10.0.0.1:50000", hardware: { talosNodeId: "n1", smbiosUuid: null }, platform: "metal",
   openDrift: null, frozen: false, pendingConvergence: false, desired: null, applied: null, observed: null, ...over,
 }) as Machine;
 const draft = (over: Partial<Draft>): Draft => ({ id: "drf_x", cluster: "cl_a", title: "t", state: "open", revision: 1, entries: [], ...over });
