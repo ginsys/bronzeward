@@ -112,6 +112,20 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: proposed$/), { wait: 20_000 });
   });
 
+  it("W3's timeline links the plan and the operation a commitment names, and the operation's link opens its page (#359)", async function () {
+    this.timeout(120_000);
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: sat })).toMatch(SERVER);
+    await browser.url(`${FIXTURE_PAGE}/machines/${seed.machine}`);
+    const timeline = $('[data-testid="timeline"]');
+    // Several entries name the plan and the operation (approval, commitment, state changes): each one links.
+    await browser.waitUntil(async () => (await timeline.$$(`a[href="/plans/${seed.plans.committed}"]`)).length >= 1, { timeout: 20_000, timeoutMsg: "no timeline row links the committed plan" });
+    const operations = await timeline.$$(`a[href="/operations/${seed.operation}"]`);
+    expect(operations.length).toBeGreaterThanOrEqual(1);
+    await operations[0]!.click();
+    await browser.waitUntil(async () => (await browser.getUrl()) === `${FIXTURE_PAGE}/operations/${seed.operation}`, { timeout: 20_000, timeoutMsg: "the operation's link did not open its page" });
+    await expect($('[data-testid="events"]')).toBeExisting({ wait: 30_000 });
+  });
+
   it("an expired plan shows its state and a link to a new plan, and the page sends nothing", async function () {
     this.timeout(120_000);
     expect(await fixtureSignIn("h-publisher", {}, { upstream: sat })).toMatch(SERVER);

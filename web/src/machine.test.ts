@@ -750,10 +750,34 @@ describe("the timeline: newest page, Load older and the poll (client contracts �
     expect(moved).toEqual([false, false, false, false, true]);
   });
 
+  // The Details cell, rendered under the reads context that a link reads (as the attribution case above does).
+  const detailsCell = (kind: string, entry: unknown) => {
+    const reads = { go: () => {} } as unknown as Reads;
+    return renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, details({ revision: 1, epoch: "ep", at: READ, kind, entry })));
+  };
+  const plainText = (html: string) => html.replace(/<[^>]*>/g, "").replaceAll("&quot;", '"');
+
   test("an entry's details: who, why and what it names, identifiers shortened", () => {
-    const e = (kind: string, entry: unknown): Entry => ({ revision: 1, epoch: "ep", at: READ, kind, entry });
-    expect(details(e("freeze", { principal: "h-author", role: "author", reason: "synthetic incident" }))).toBe('h-author author "synthetic incident"');
-    expect(details(e("drift", { record: 3, change: "opened", observation: "obs_abcdefghijklmnopqrstuvwxyz" }))).toBe("opened obs_abcd…wxyz");
-    expect(details(e("unknown-kind", null))).toBe("");
+    expect(plainText(detailsCell("freeze", { principal: "h-author", role: "author", reason: "synthetic incident" }))).toBe('h-author author "synthetic incident"');
+    expect(plainText(detailsCell("drift", { record: 3, change: "opened", observation: "obs_abcdefghijklmnopqrstuvwxyz" }))).toBe("opened obs_abcd…wxyz");
+    expect(detailsCell("unknown-kind", null)).toBe("");
+    // A principal is an identifier with no view: its text, with the whole identifier as the title.
+    expect(detailsCell("freeze", { principal: "idn_abcdefghijklmnopqrstuvwxyz", role: "author" })).toBe('<span title="idn_abcdefghijklmnopqrstuvwxyz">idn_abcd…wxyz</span> author');
+  });
+
+  // W3's links (ginsys/bronzeward#359): a plan or an operation an entry names opens its page; the text is the shortened id as before.
+  test("an entry's details: a plan or an operation it names is a link, whatever the kind", () => {
+    const op = "op_abcdefghijklmnopqrstuvwxyz";
+    const plan = "pln_abcdefghijklmnopqrstuvwxyz";
+    const opLink = `<a href="/operations/${op}" title="${op}">op_abcd…wxyz</a>`;
+    const planLink = `<a href="/plans/${plan}" title="${plan}">pln_abcd…wxyz</a>`;
+    const obs = "obs_abcdefghijklmnopqrstuvwxyz";
+    expect(detailsCell("commitment", { operation: op, plan, approval: "apr_abcdefghijklmnopqrstuvwxyz", observation: obs }))
+      .toBe(`<span title="${obs}">obs_abcd…wxyz</span> ${opLink} ${planLink}`);
+    expect(detailsCell("operation-state", { operation: op, from: "committed", to: "unresolved" })).toBe(`committed unresolved ${opLink}`);
+    expect(detailsCell("approval", { plan, approval: "apr_abcdefghijklmnopqrstuvwxyz", principal: "h-approver" })).toBe(`h-approver ${planLink}`);
+    expect(detailsCell("approval-revocation", { plan, approval: "apr_abcdefghijklmnopqrstuvwxyz", reason: "synthetic" })).toBe(`&quot;synthetic&quot; ${planLink}`);
+    expect(detailsCell("use-time-check", { plan, dependencies: {} })).toBe(planLink);
+    expect(detailsCell("response", { operation: op, attempt: "att_abcdefghijklmnopqrstuvwxyz" })).toBe(opLink);
   });
 });
