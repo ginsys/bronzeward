@@ -2,7 +2,7 @@
 // own, the synthetic provider (provider.ts), and the test static host, which answers every API
 // request with a redirect to that target (fixtures/webhost -redirect-api), then runs the specs
 // once per browser in BW_BROWSERS.
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 // The launcher logs and ignores any other error a launcher hook throws, and runs the specs anyway.
 import { remote, SevereServiceError } from "webdriverio";
+import { binPath, died, missingBinaries, spawnChild } from "./children.ts";
 import { safariKeys } from "./safari-keys.ts";
 import { FAKE_ISSUER, PAGE_LISTEN, PAGE_ORIGIN, TARGET_ORIGIN } from "./ports.ts";
 import { printFailure } from "./print-failure.ts";
@@ -17,6 +18,7 @@ import { startProvider } from "./provider.ts";
 
 export { PAGE_ORIGIN, TARGET_ORIGIN };
 const web = fileURLToPath(new URL("..", import.meta.url));
+const root = `${web}../`;
 const canary = process.env["BW_WEB_CANARY"];
 if (canary === undefined || !canary.startsWith("BWSYNTH-")) throw new Error("BW_WEB_CANARY must hold the run's synthetic canary");
 
@@ -197,6 +199,8 @@ export const config: WebdriverIO.Config = {
   // The target counts every request but its own two control routes, and answers with the canary
   // (readable by the page, so the positive control delivers it into the page's memory).
   async onPrepare() {
+    // First, before anything starts: a binary that is not there fails the run by name.
+    if (missingBinaries(root, ["webhost"]).length > 0) throw new SevereServiceError(`not an executable file: bin/webhost (mise run browser builds it)`);
     target = createServer((req, res) => {
       if (req.url === "/__hits") return res.end(JSON.stringify({ hits }));
       if (req.url === "/__reset") return (hits = 0), res.end();
@@ -218,13 +222,13 @@ export const config: WebdriverIO.Config = {
     clientDir = mkdtempSync(`${tmpdir()}/bw-client-`);
     const clientConfig = `${clientDir}/bronzeward-client.json`;
     writeFileSync(clientConfig, JSON.stringify({ issuer: FAKE_ISSUER, audience: "bronzeward", cliClientId: "synthetic-cli-client", webClientId: "synthetic-web-client" }));
-    host = spawn(`${web}../bin/webhost`, [
+    host = spawnChild(binPath(root, "webhost"), [
       "-listen", PAGE_LISTEN, "-dist", `${web}dist`, "-headers", `${web}headers.json`, "-client-config", clientConfig,
       "-issuer", FAKE_ISSUER, "-provider-origins", TARGET_ORIGIN, "-redirect-api", TARGET_ORIGIN,
     ], { stdio: "inherit" });
     for (let i = 0; ; i++) {
       if (await fetch(hostUrl).then((r) => r.ok, () => false)) break;
-      if (i === 50 || host.exitCode !== null) throw new SevereServiceError("the static host did not answer within 10 s");
+      if (i === 50 || host.exitCode !== null) throw new SevereServiceError(died(host) ?? "the static host did not answer within 10 s");
       await new Promise((r) => setTimeout(r, 200));
     }
   },
