@@ -8,7 +8,7 @@ Choose: freeze while you decide; adopt it into a release; or revert to Desired (
 $ bronzewardctl --context publisher machine freeze mch_… --reason BWSYNTH: decide first
 Frozen. No new commitment or attempt for this machine until an approver unfreezes it.
 An attempt already recorded is not stopped, and an adoption can still be recorded.
-Recorded by idn_… (publisher): machine mch_…, timeline revision <n>, act act_….
+Recorded by h-publisher at http://127.0.0.1:<port> (publisher): machine mch_…, timeline revision <n>, act act_….
 [exit 0]
 
 $ bronzewardctl --context human drift show mch_…
@@ -26,8 +26,8 @@ Plan pln_…  proposed                                         expires <local ti
   Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
   Assignment                         asr_…  baseline revision 1, drift record <n>
   Limits                             transport 60s, verification 600s, observation age 300s, check validity 300s, attempts 3, rollout 1
-  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
-  Approval                           none                                        policy one-approver, committed operation none
+  Created by                         h-publisher at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
+  Approval                           none                                               policy one-approver, committed operation none
 Evidence
   Validation  passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run     not available: no dry run is available for this operation
@@ -41,7 +41,7 @@ The machine is frozen: the plan cannot commit until an approver approves it and,
 $ bronzewardctl --context approver machine unfreeze mch_… --reason BWSYNTH: decided to revert
 Unfrozen. The freeze no longer stops a commitment or an attempt for this machine.
 Unfreezing approves and commits nothing. An attempt already recorded was not stopped by the freeze, and an adoption could still be recorded.
-Recorded by idn_… (approver): machine mch_…, timeline revision <n>, act act_….
+Recorded by h-approver at http://127.0.0.1:<port> (approver): machine mch_…, timeline revision <n>, act act_….
 [exit 0]
 
 $ bronzewardctl --context approver approve pln_…
@@ -51,8 +51,8 @@ Plan pln_…  proposed                                         expires <local ti
   Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
   Assignment                         asr_…  baseline revision 1, drift record <n>
   Limits                             transport 60s, verification 600s, observation age 300s, check validity 300s, attempts 3, rollout 1
-  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
-  Approval                           none                                        policy one-approver, committed operation none
+  Created by                         h-publisher at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
+  Approval                           none                                               policy one-approver, committed operation none
 Evidence
   Validation  passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run     not available: no dry run is available for this operation
@@ -94,8 +94,8 @@ Plan pln_…  proposed                                         expires <local ti
   Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
   Assignment                         asr_…  baseline revision 2, drift record <n>
   Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
-  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
-  Approval                           none                                        policy one-approver, committed operation none
+  Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
+  Approval                           none                                         policy one-approver, committed operation none
 Evidence
   Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run              not available: no dry run is available for this operation
@@ -114,8 +114,8 @@ Plan pln_…  proposed                                         expires <local ti
   Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
   Assignment                         asr_…  baseline revision 2, drift record <n>
   Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
-  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
-  Approval                           none                                        policy one-approver, committed operation none
+  Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
+  Approval                           none                                         policy one-approver, committed operation none
 Evidence
   Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run              not available: no dry run is available for this operation

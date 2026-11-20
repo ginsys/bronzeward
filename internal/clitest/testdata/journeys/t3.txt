@@ -73,8 +73,8 @@ Plan pln_…  proposed                                         expires <local ti
   Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
   Assignment                         asr_…  baseline revision none, drift record none
   Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
-  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
-  Approval                           none                                        policy one-approver, committed operation none
+  Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
+  Approval                           none                                         policy one-approver, committed operation none
 Evidence
   Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run              not available: no dry run is available for this operation
@@ -92,8 +92,8 @@ Plan pln_…  proposed                                         expires <local ti
   Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
   Assignment                         asr_…  baseline revision none, drift record none
   Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
-  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
-  Approval                           none                                        policy one-approver, committed operation none
+  Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
+  Approval                           none                                         policy one-approver, committed operation none
 Evidence
   Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run              not available: no dry run is available for this operation
@@ -111,8 +111,8 @@ Plan pln_…  committed                                        expires <local ti
   Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
   Assignment                         asr_…  baseline revision none, drift record none
   Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
-  Created by                         idn_… (publisher)  epoch ep_…, <local time>, plan revision 3, timeline revision 4
-  Approval                           apr_…              policy one-approver, committed operation op_…
+  Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 3, timeline revision 4
+  Approval                           apr_…               policy one-approver, committed operation op_…
 Evidence
   Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run              not available: no dry run is available for this operation

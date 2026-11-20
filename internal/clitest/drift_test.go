@@ -175,7 +175,7 @@ func TestDriftFreeze(t *testing.T) {
 	f.want(e.ctl(append(roles["approver"], unfreeze...)...), 1, "409", "the machine scope is not frozen")
 
 	// A freeze by a publisher, then the sentences of a frozen machine, then an unfreeze by an approver.
-	recorded := regexp.MustCompile(`Recorded by \S+ \(publisher\): machine ` + e.s.machine + `, timeline revision [0-9]+, act act_[a-z2-7]+\.\n`)
+	recorded := regexp.MustCompile(`Recorded by h-[a-z]+ at http://127\.0\.0\.1:\d+ \(publisher\): machine ` + e.s.machine + `, timeline revision [0-9]+, act act_[a-z2-7]+\.\n`)
 	r = e.ctl(append(roles["publisher"], freeze...)...)
 	if want := frozenWords + "An attempt already recorded is not stopped, and an adoption can still be recorded.\n"; r.code != 0 ||
 		!strings.HasPrefix(r.out, want) || !recorded.MatchString(r.out) {

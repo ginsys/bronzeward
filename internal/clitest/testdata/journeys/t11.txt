@@ -3,7 +3,7 @@ RECOVERY MODE is on in human (https://127.0.0.1:<port>) (start mode: recovery).
 Epoch            ep_…
 Recovery mode    on
 Start mode       recovery (GET /server)
-Entered          <local time> by idn_…: BWSYNTH drill
+Entered          <local time> by h-recovery at http://127.0.0.1:<port>: BWSYNTH drill
 Restore stopped  <local time>
 Restored         database backup BWSYNTH-pg taken at <local time>
 
@@ -27,7 +27,7 @@ Type the machine ID to send it, or press Enter to stop:
 Recorded. Scope mch_… is now blocked until it is marked.
 Attempts accounted: none.
 Settle floor 30s, counted from <time>.
-Recorded by idn_… (recovery-admin): act act_….
+Recorded by h-recovery at http://127.0.0.1:<port> (recovery-admin): act act_….
 Next: recovery mark 'mch_…'.
 [exit 0]
 
@@ -49,7 +49,7 @@ RECOVERY MODE is on in human (https://127.0.0.1:<port>) (start mode: recovery).
 Epoch            ep_…
 Recovery mode    on
 Start mode       recovery (GET /server)
-Entered          <local time> by idn_…: BWSYNTH drill
+Entered          <local time> by h-recovery at http://127.0.0.1:<port>: BWSYNTH drill
 Restore stopped  <local time>
 Restored         database backup BWSYNTH-pg taken at <local time>
 
