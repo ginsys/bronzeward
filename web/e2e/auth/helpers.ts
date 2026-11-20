@@ -15,12 +15,15 @@ const root = fileURLToPath(new URL("../../..", import.meta.url));
 // The heading of a plan page in `state` (ginsys/bronzeward#987): the derived title with the whole identifier
 // as its title attribute, or, where a read the title needs failed, the shortened identifier of the old heading.
 export async function planHeading(id: string, state: string, wait = 20_000) {
-  await expect($("main h2")).toHaveText(expect.stringMatching(new RegExp(`^Plan(: .+ \\(${state}\\)| ${short(id)}: ${state})$`)), { wait });
+  const h2 = $("main h2");
+  await expect(h2).toHaveText(expect.stringMatching(new RegExp(`^Plan(: .+ \\(${state}\\)| ${short(id)}: ${state})$`)), { wait });
+  // The fallback names the identifier in its text; the derived title carries it as the span's title attribute.
+  if ((await h2.getText()).startsWith("Plan:")) await expect($(`main h2 [title="${id}"]`)).toBeExisting();
 }
 
 // The heading of a release page: the derived title with the whole identifier as its title attribute.
 export async function releaseHeading(id: string, wait = 20_000) {
-  await expect($("main h2")).toHaveText(expect.stringMatching(/^Release: .+, published /), { wait });
+  await expect($("main h2")).toHaveText(expect.stringMatching(/^Release: .+, published \d{1,2} [A-Za-z]+\.? \d{4}, \d{2}:\d{2}$/), { wait });
   await expect($(`main h2 [title="${id}"]`)).toBeExisting();
 }
 
