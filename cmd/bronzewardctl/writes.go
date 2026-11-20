@@ -272,10 +272,11 @@ func (e *env) machineAdd(args []string) error {
 	if serial != "" {
 		in.Serial = &serial
 	}
+	var prep func(*client.Client) error
 	if name != "" {
-		in.Name = &name
+		in.Name, prep = &name, needNameRevision
 	}
-	return e.write(machineWrite(in, nodeID, uuid, rp), func(c *client.Client, r *client.Response) ([]string, error) {
+	return e.writeAfter(prep, machineWrite(in, nodeID, uuid, rp), func(c *client.Client, r *client.Response) ([]string, error) {
 		var m apitypes.MachineBody
 		if err := json.Unmarshal(r.Body, &m); err != nil {
 			return nil, err
@@ -310,6 +311,22 @@ func machineWrite(in apitypes.MachineInput, nodeID, uuid string, rp *client.Repe
 		}}
 }
 
+// nameRevision is the API revision that adds a machine's name. A server below it refuses the field of
+// machine add and has no route for machine rename, so the client refuses first, naming both revisions
+// (client contracts §7.1 item 1).
+const nameRevision = 10
+
+func needNameRevision(c *client.Client) error {
+	// The served revision is read on context use (§7 item 3), which a write does only inside its send.
+	if _, _, err := c.Server(); err != nil {
+		return err
+	}
+	if c.Revision < nameRevision {
+		return fmt.Errorf("a machine's name needs API revision %d; the server serves revision %d", nameRevision, c.Revision)
+	}
+	return nil
+}
+
 // machineRename replaces a machine's name (client contracts A9, operator-experience.md §10:
 // POST /machines/{id}/names, author, human only). A name another machine of the cluster holds, and the
 // machine's own current name, are refused by the server and shown as every refusal is.
@@ -329,7 +346,7 @@ func (e *env) machineRename(args []string) error {
 	}
 	body, _ := json.Marshal(in)
 	m := url.PathEscape(pos[0])
-	return e.write(&client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/names", Body: body, HumanOnly: true,
+	return e.writeAfter(needNameRevision, &client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/names", Body: body, HumanOnly: true,
 		Repeat: rp, Check: "machine timeline " + client.ShellWord(pos[0]),
 		Read: func(c *client.Client) (string, error) {
 			r, err := c.Get("/machines/" + m)
