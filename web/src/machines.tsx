@@ -207,7 +207,7 @@ export function MachineSummary({ machines }: { machines: readonly Machine[] }) {
 function ClusterMachines({ id }: { id: string }) {
   const [list] = useList<Machine>("/machines", new URLSearchParams({ cluster: id }).toString(), true);
   const pending = usePending(list, "machines");
-  return <><h3>Machines</h3>{list.kind === "ok" ? <><Restarted list={list.data} /><MachineSummary machines={list.data.items} /></> : pending}</>;
+  return <div className="panel"><h3>Machines</h3>{list.kind === "ok" ? <><Restarted list={list.data} /><MachineSummary machines={list.data.items} /></> : pending}</div>;
 }
 
 // GET /drafts has no cluster filter, so a cluster's open drafts are picked in the browser from every
@@ -231,5 +231,5 @@ export function OpenDraftsView({ drafts }: { drafts: readonly Draft[] }) {
 function ClusterDrafts({ id }: { id: string }) {
   const [list] = useList<Draft>("/drafts", "", true);
   const pending = usePending(list, "drafts");
-  return <><h3>Open drafts</h3>{list.kind === "ok" ? <><Restarted list={list.data} /><OpenDraftsView drafts={openDrafts(list.data.items, id)} /></> : pending}</>;
+  return <div className="panel"><h3>Open drafts</h3>{list.kind === "ok" ? <><Restarted list={list.data} /><OpenDraftsView drafts={openDrafts(list.data.items, id)} /></> : pending}</div>;
 }
