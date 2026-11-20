@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -776,6 +777,35 @@ func TestOnboardSettleAfterASaveFailure(t *testing.T) {
 				t.Errorf("the error that stopped the run is %q, want it kept as \"disk full\"", m.Import.Error)
 			}
 		})
+	}
+}
+
+// TestOnboardAdoptsOnlyAConflict (ginsys/bronzeward#985, client contracts A9 item 3): a `conflict` on
+// POST /machines names the machine that holds the identity, and onboard adopts it as an existing node. A
+// `name-in-use` names a machine too, and is no existing node: it is read by its code, never adopted.
+func TestOnboardAdoptsOnlyAConflict(t *testing.T) {
+	for _, c := range []struct {
+		code    string
+		adopted bool
+	}{{"conflict", true}, {"name-in-use", false}} {
+		e := newOnboard(t)
+		e.api.machineRefusal = c.code
+		code, out, errOut := e.run("-o", "json")
+		e.api.mu.Lock()
+		read := slices.Contains(e.api.log, "GET /machines/mch_holder")
+		e.api.mu.Unlock()
+		if read != c.adopted {
+			t.Errorf("%s: the holder was read %t, want %t (exit %d, stdout %q, stderr %q)", c.code, read, c.adopted, code, out, errOut)
+		}
+		if !c.adopted {
+			if code == 0 || !strings.Contains(out+errOut, c.code) {
+				t.Errorf("%s: exit %d, stdout %q, stderr %q; want a failure that names the code", c.code, code, out, errOut)
+			}
+			var obj onboarding
+			if err := json.Unmarshal([]byte(out), &obj); err != nil || len(obj.Machines) == 0 || obj.Machines[0].Add.State == "existing" {
+				t.Errorf("%s: machines %+v (%v); want the first machine not adopted", c.code, obj.Machines, err)
+			}
+		}
 	}
 }
 

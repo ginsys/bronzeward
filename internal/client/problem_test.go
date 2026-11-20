@@ -69,3 +69,24 @@ func TestValidationRefusal(t *testing.T) {
 		}
 	}
 }
+
+// TestNameInUseNamesTheHolder checks that a refusal of a machine name another machine holds names that
+// machine, which the server gives in the `machine` member and not in its detail (client contracts A9
+// item 3), escaped like every part from the server, and that a refusal that names none adds nothing.
+func TestNameInUseNamesTheHolder(t *testing.T) {
+	for _, tc := range []struct {
+		doc  map[string]any
+		want string
+	}{
+		{map[string]any{"machine": "mch_BWSYNTH"}, "\nThe name is held by machine mch_BWSYNTH."},
+		{map[string]any{"machine": "a\nb"}, "\nThe name is held by machine a\\x0ab."},
+		{map[string]any{}, ""},
+	} {
+		tc.doc["type"], tc.doc["title"], tc.doc["instance"] = problemPrefix+"name-in-use", "BWSYNTH", "req_BWSYNTH"
+		p := &Problem{Status: 409, Doc: tc.doc}
+		_, after, _ := strings.Cut(p.Error(), "(instance req_BWSYNTH)")
+		if after != tc.want {
+			t.Errorf("%v: after the instance %q, want %q", tc.doc, after, tc.want)
+		}
+	}
+}

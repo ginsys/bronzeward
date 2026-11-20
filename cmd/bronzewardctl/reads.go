@@ -177,8 +177,10 @@ func (e *env) clusterCmd(args []string) error {
 }
 
 func (e *env) machineCmd(args []string) error {
-	if v, rest, err := e.verb("machine", args, "list", "show", "timeline", "observations", "add", "set-endpoint", "freeze", "unfreeze"); err != nil {
+	if v, rest, err := e.verb("machine", args, "list", "show", "timeline", "observations", "add", "set-endpoint", "rename", "freeze", "unfreeze"); err != nil {
 		return err
+	} else if v == "rename" {
+		return e.machineRename(rest)
 	} else if v == "timeline" {
 		return e.machineTimeline(rest)
 	} else if v == "observations" {
@@ -219,12 +221,23 @@ func (e *env) machineCmd(args []string) error {
 				if m.Applied != nil {
 					applied = m.Applied.Release + " (" + m.Applied.Source + ")"
 				}
-				tf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", m.Id, m.TalosEndpoint, deref(m.Desired), applied, observedCell(m), stateCell(m))
+				tf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", machineLabel(m.Id, m.Name), m.TalosEndpoint, deref(m.Desired), applied, observedCell(m), stateCell(m))
 			}
 			more(w, next)
 			fmt.Fprintln(w, "Health is not checked in this installation.")
 		})
 	})
+}
+
+// machineLabel is a machine as every command names it: its identifier, with its name beside it when it
+// has one, as a cluster's is (client contracts A9). A machine with no name, and one a server older than
+// API revision 10 serves with no member, is the identifier alone. The text is remote: it is escaped when
+// it is printed, by tf and sf like every other string.
+func machineLabel(id string, name *string) string {
+	if name == nil || *name == "" {
+		return id
+	}
+	return id + " (" + *name + ")"
 }
 
 func ago(t time.Time) string { return time.Since(t).Round(time.Second).String() + " ago" }
@@ -302,7 +315,7 @@ func (e *env) machineShow(c *client.Client, id string) error {
 	}
 	m := ms[0]
 	return e.emit(r.Body, func(w *tabwriter.Writer) {
-		tf(w, "Machine\t%s\tcluster %s\n", m.Id, m.Cluster)
+		tf(w, "Machine\t%s\tcluster %s\n", machineLabel(m.Id, m.Name), m.Cluster)
 		tf(w, "Endpoint\t%s\tplatform %s\n", m.TalosEndpoint, m.Platform)
 		tf(w, "Hardware\tnode ID %s\tSMBIOS UUID %s\n", deref(m.Hardware.TalosNodeId), deref(m.Hardware.SmbiosUuid))
 		tf(w, "Scope\t%s\n", m.ScopeState)

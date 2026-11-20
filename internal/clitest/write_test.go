@@ -489,6 +489,7 @@ func TestWrites(t *testing.T) {
 		"POST /api/v1/machines": {"machine", "add", "--cluster", s.cluster, "--smbios-uuid", "1c6b7d2f-3a4e-4f60-9bac-1d2e3f4a5b6c",
 			"--serial", "SN-2", "--platform", "metal", "--talos-endpoint", "10.55.0.9"},
 		"POST /api/v1/machines/" + s.machine + "/talos-endpoints": {"machine", "set-endpoint", s.machine, "--talos-endpoint", "10.55.0.4:50001"},
+		"POST /api/v1/machines/" + s.machine + "/names":           {"machine", "rename", s.machine, "--name", "web-9"},
 	}
 	before := f.actCount()
 	for route, args := range routes {

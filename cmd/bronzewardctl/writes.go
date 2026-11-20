@@ -244,10 +244,11 @@ func clusterWrite(in apitypes.ClusterInput, rp *client.Repeat) *client.Write {
 // (operator-experience.md §5.2, §10: POST /machines, author, human only).
 func (e *env) machineAdd(args []string) error {
 	var in apitypes.MachineInput
-	var nodeID, uuid, serial, platform string
+	var nodeID, uuid, serial, platform, name string
 	var rf repeatFlags
 	if _, err := e.parse("machine add", args, 0, func(fs *flag.FlagSet) {
 		fs.StringVar(&in.Cluster, "cluster", "", "")
+		fs.StringVar(&name, "name", "", "")
 		fs.StringVar(&nodeID, "talos-node-id", "", "")
 		fs.StringVar(&uuid, "smbios-uuid", "", "")
 		fs.StringVar(&serial, "serial", "", "")
@@ -271,6 +272,9 @@ func (e *env) machineAdd(args []string) error {
 	if serial != "" {
 		in.Serial = &serial
 	}
+	if name != "" {
+		in.Name = &name
+	}
 	return e.write(machineWrite(in, nodeID, uuid, rp), func(c *client.Client, r *client.Response) ([]string, error) {
 		var m apitypes.MachineBody
 		if err := json.Unmarshal(r.Body, &m); err != nil {
@@ -285,7 +289,7 @@ func (e *env) machineAdd(args []string) error {
 				cluster += " (" + x.Name + ")"
 			}
 		}
-		return []string{sf("Machine %s recorded in cluster %s. Endpoint %s.", m.Id, cluster, m.TalosEndpoint),
+		return []string{sf("Machine %s recorded in cluster %s. Endpoint %s.", machineLabel(m.Id, m.Name), cluster, m.TalosEndpoint),
 			"Next: supply the cluster's first key (cluster first-key), then import its configuration."}, nil
 	})
 }
@@ -304,6 +308,42 @@ func machineWrite(in apitypes.MachineInput, nodeID, uuid string, rp *client.Repe
 				return map[bool]string{true: "the machine " + m.Id + " with this identity"}[same]
 			})
 		}}
+}
+
+// machineRename replaces a machine's name (client contracts A9, operator-experience.md §10:
+// POST /machines/{id}/names, author, human only). A name another machine of the cluster holds, and the
+// machine's own current name, are refused by the server and shown as every refusal is.
+func (e *env) machineRename(args []string) error {
+	var in apitypes.NameInput
+	var rf repeatFlags
+	pos, err := e.parse("machine rename", args, 1, func(fs *flag.FlagSet) {
+		fs.StringVar(&in.Name, "name", "", "")
+		rf.flags(fs)
+	})
+	if err != nil {
+		return err
+	}
+	rp, err := rf.repeat(false)
+	if err != nil {
+		return err
+	}
+	body, _ := json.Marshal(in)
+	m := url.PathEscape(pos[0])
+	return e.write(&client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/names", Body: body, HumanOnly: true,
+		Repeat: rp, Check: "machine timeline " + client.ShellWord(pos[0]),
+		Read: func(c *client.Client) (string, error) {
+			r, err := c.Get("/machines/" + m)
+			if err != nil {
+				return "", err
+			}
+			var x apitypes.MachineBody
+			err = json.Unmarshal(r.Body, &x)
+			return "GET /api/v1/machines/" + m + " shows the name " + deref(x.Name), err
+		}}, func(_ *client.Client, r *client.Response) ([]string, error) {
+		var x apitypes.NameChangeBody
+		err := json.Unmarshal(r.Body, &x)
+		return []string{sf("Machine %s: name %s, was %s (timeline revision %d).", x.Machine, x.Name, deref(x.PreviousName), x.Revision)}, err
+	})
 }
 
 // machineSetEndpoint replaces a machine's Talos endpoint (operator-experience.md §10:

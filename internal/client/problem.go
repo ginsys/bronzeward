@@ -61,6 +61,11 @@ func (p *Problem) Error() string {
 		s += p.ruleLine()
 	case "conflict":
 		s += p.ruleLine()
+	case "name-in-use":
+		// The machine that holds the name is a member of the answer and not of its detail (client contracts A9 item 3).
+		if m := p.str("machine"); m != "" {
+			s += "\nThe name is held by machine " + m + "."
+		}
 	case "validation-failed":
 		// The rule and where in the body: a path, position or name the server gives, never a value
 		// (client-contracts.md §8.2; #347).

@@ -92,7 +92,7 @@ func (f *filler) raw() json.RawMessage {
 const notShown = "AccessVersionBody.Created AccessVersionBody.NotAfter AccessVersionBody.Path AccessVersionBody.Serial ActItem.Epoch ActItem.IdempotencyKey ActItem.RequestId " +
 	"Applied.ImportBase AttemptAccounting.Basis AttemptBody.Observation AttemptResponse.Class " +
 	"Embedded.Format Embedded.Path EndpointChangeBody.Act EndpointChangeBody.ChangedBy EndpointChangeBody.Epoch " +
-	"EndpointChangeBody.Role Hardware.Serial IdentityBody.Issuer IdentityBody.Subject MachineBody.Name " +
+	"EndpointChangeBody.Role Hardware.Serial IdentityBody.Issuer IdentityBody.Subject NameChangeBody.Act NameChangeBody.ChangedBy NameChangeBody.Epoch NameChangeBody.Role " +
 	"ObservationBody.AssignmentEvidence ObservationBody.Controller ObservationBody.Health ObservationBody.Machine " +
 	"ObservationBody.Operation ObservationBody.Plan ObservationBody.ResourceVersion ObservationBody.RunningVersion " +
 	"ObservationBody.SmbiosUuid ObservationBody.TalosClusterId ObservationBody.TalosNodeId " +
@@ -109,15 +109,16 @@ const notShown = "AccessVersionBody.Created AccessVersionBody.NotAfter AccessVer
 var markersShown = map[string][3]int{
 	"status": {5, 7, 4}, "version": {1, 1, 1}, "whoami": {5, 5, 5}, "context list": {3, 3, 3},
 	"cluster list": {6, 6, 6}, "cluster show c1": {5, 5, 5},
-	"machine list": {7, 7, 7}, "machine show m1": {11, 11, 11}, "machine timeline m1": {3, 3, 3}, "machine observations m1": {6, 6, 6},
+	"machine list": {8, 8, 8}, "machine show m1": {12, 12, 12}, "machine timeline m1": {3, 3, 3}, "machine observations m1": {6, 6, 6},
 	"fragment show f1": {6, 6, 6}, "fragment show frv_1": {8, 8, 8}, "fragment history f1": {5, 5, 5},
 	"profile show p1": {5, 5, 5}, "profile show prv_1": {5, 5, 5}, "profile history p1": {5, 5, 5},
 	"assignment show a1": {4, 4, 4}, "assignment show asr_1": {6, 6, 6}, "assignment history a1": {6, 6, 6},
 	"draft list": {5, 5, 5}, "draft show d1": {9, 9, 9}, "release list": {6, 6, 6}, "release show r1": {15, 15, 15},
 	"plan list": {6, 6, 6}, "plan show pl1": {30, 28, 30}, "operation list": {8, 8, 8}, "operation show o1": {15, 15, 15}, "act list": {8, 8, 8},
 	"cluster add --name n --endpoint https://e --contract c --talos-cluster-id t":    {5, 5, 5},
-	"machine add --cluster c1 --talos-node-id n --platform metal --talos-endpoint e": {4, 4, 4},
+	"machine add --cluster c1 --talos-node-id n --platform metal --talos-endpoint e": {5, 5, 5},
 	"machine set-endpoint m1 --talos-endpoint e":                                     {3, 3, 3},
+	"machine rename m1 --name n":                                                     {3, 3, 3},
 	"draft create --cluster c1 --title t":                                            {2, 2, 2},
 }
 
@@ -250,6 +251,7 @@ func (f *filler) routes() []route {
 	one(`POST /clusters`, apitypes.ClusterBody{})
 	one(`POST /machines`, apitypes.MachineBody{})
 	one(`POST /machines/[^/]+/talos-endpoints`, apitypes.EndpointChangeBody{})
+	one(`POST /machines/[^/]+/names`, apitypes.NameChangeBody{})
 	one(`POST /drafts`, apitypes.DraftBody{})
 	return rs
 }
@@ -267,6 +269,7 @@ var commands = [][]string{
 	{"cluster", "add", "--name", "n", "--endpoint", "https://e", "--contract", "c", "--talos-cluster-id", "t"},
 	{"machine", "add", "--cluster", "c1", "--talos-node-id", "n", "--platform", "metal", "--talos-endpoint", "e"},
 	{"machine", "set-endpoint", "m1", "--talos-endpoint", "e"},
+	{"machine", "rename", "m1", "--name", "n"},
 	{"draft", "create", "--cluster", "c1", "--title", "t"},
 }
 
