@@ -33,7 +33,9 @@ export function principalText(p: Principal | undefined): string | undefined {
 export interface Names {
   // Reads the names of the identifiers not yet asked for under `gen`, in the next microtask so that
   // every identifier of one render goes out together. A new `gen` forgets what an older one held.
-  want(gen: string, ids: readonly string[]): void;
+  // `settle` gets every answer of the read, for the page's shell: a refusal of the credentials, a new
+  // epoch or the process's refusal is the shell's to handle, whichever read meets it first.
+  want(gen: string, ids: readonly string[], settle?: (res: ReadResult<unknown>) => void): void;
   // The name read for `id` under `gen`; undefined while pending, when the read failed, and for any
   // other generation.
   get(gen: string, id: string): Principal | undefined;
@@ -50,13 +52,17 @@ export function createNames(read: (path: string) => Promise<ReadResult<{ items: 
   let tail: Promise<unknown> = Promise.resolve();
   const listeners = new Set<() => void>();
   const tell = () => listeners.forEach((l) => l());
+  // The page's, from its latest want: every page of a client shares one shell.
+  let settle: ((res: ReadResult<unknown>) => void) | undefined;
 
   // An answer belongs to the map that was current when its read went out: the same generation can come
   // back (a return to a view) with a map of its own.
   const send = (ids: string[]) => {
     const mine = known;
+    const settleHere = settle;
     return read(`/principals?${new URLSearchParams(ids.map((i) => ["id", i]))}`).then(
       (res) => {
+        settleHere?.(res);
         if (mine !== known) return;
         // An identifier the answer leaves out, a failed read or a refusal show the identifier.
         const items = res.kind === "ok" ? res.data.items : [];
@@ -76,7 +82,8 @@ export function createNames(read: (path: string) => Promise<ReadResult<{ items: 
   };
 
   return {
-    want(gen, ids) {
+    want(gen, ids, settleWith) {
+      settle = settleWith;
       if (gen !== current) {
         [current, known, queued] = [gen, new Map(), []];
         tell();

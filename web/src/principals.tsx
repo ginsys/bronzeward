@@ -7,15 +7,19 @@ import { Id, useReads } from "./list.tsx";
 import { namesOf, principalId, principalText } from "./principals.ts";
 
 export function Who({ id, none }: { id: string | null | undefined; none?: string }): ReactNode {
-  const { client, view, again } = useReads();
+  const { client, view, again, settle, undropped } = useReads();
   const names = namesOf(client);
   // The page's reads start again with the view and with each read again, a new epoch included, and a
   // restore may change who an identifier names: a name read under another generation is not kept.
   const gen = `${view}|${again}`;
   const ask = id != null && principalId(id);
   useEffect(() => {
-    if (ask) names.want(gen, [id]);
-  }, [names, gen, id, ask]);
+    if (!ask) return;
+    // The names read is settled through the shell like every page read, with nothing to show and
+    // nothing held: its refusals end the page, and its failure to answer raises no banner.
+    const live = undropped();
+    names.want(gen, [id], (res) => void settle(res, () => {}, live, () => false));
+  }, [names, gen, id, ask, settle, undropped]);
   const snapshot = () => (ask ? names.get(gen, id) : undefined);
   const name = useSyncExternalStore(names.subscribe, snapshot, snapshot);
   const text = principalText(name);
