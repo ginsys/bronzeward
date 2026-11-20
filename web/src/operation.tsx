@@ -194,12 +194,14 @@ export function OperationTimeline({ id, o, reread }: { id: string; o: Operation;
   return (
     <section aria-label="Timeline">
       <Outcome o={o} cause={causeOf(rows, o.state)} />
-      <h3>Timeline</h3>
-      {cleared !== undefined && <Status testid="cleared">{cleared}</Status>}
-      <TimelineRows rows={rows} />
-      {end !== undefined && <Status testid="ended">{end}</Status>}
-      <p>{done ? ENDED : LIVE}</p>
-      <p>{CLOSING}</p>
+      <div className="panel">
+        <h3>Timeline</h3>
+        {cleared !== undefined && <Status testid="cleared">{cleared}</Status>}
+        <TimelineRows rows={rows} />
+        {end !== undefined && <Status testid="ended">{end}</Status>}
+        <p>{done ? ENDED : LIVE}</p>
+        <p>{CLOSING}</p>
+      </div>
     </section>
   );
 }
