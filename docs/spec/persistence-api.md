@@ -778,7 +778,11 @@ there.
 ### 3.5 A machine's name
 
 A machine may carry a name, an operator's label for finding it **(choice §17.43)**. It is stored
-in the database and is not part of any configuration, release or plan.
+in the database and is not part of any configuration, release or plan. **Nothing here is served
+yet.** The table of API revisions in §9.1 lists served revisions only, and a test holds it equal to
+the server's own, so the row for this change is added with the code: revision 10 adds `name` on a
+machine and on `POST /machines`, the route `POST /machines/{id}/names`, the `name-change` timeline
+entry and the `name-in-use` problem code.
 
 - **Grammar.** 1 to 63 characters: lowercase `a-z`, digits and the hyphen, neither the first nor
   the last character a hyphen. A name is therefore always a valid DNS hostname label, and since
@@ -2135,7 +2139,6 @@ API revisions:
 | 7 | `GET /import-base-revisions/{id}/document` (§9.2, choice §17.41) |
 | 8 | `POST /clusters/{id}/first-keys` (§9.2, §3.4) |
 | 9 | `serial` and `notAfter` in the `access` object of an observation (§9.2, §3.3) |
-| 10 | `name` on a machine and on `POST /machines`, `POST /machines/{id}/names`, and the `name-change` timeline entry (§3.5) |
 
 ### 9.2 Resources and routes
 
@@ -2167,7 +2170,7 @@ idempotency and conflict behavior.
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2, a paused ingestion's included), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
 | `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3, and an optional `name`, §3.5) | 201 | `author`, human only (§10.3) |
 | `POST /machines/{id}/talos-endpoints` (replace a machine's Talos endpoint, §3.3) | 201 | `author`, human only (§10.3) |
-| `POST /machines/{id}/names` (replace a machine's name, §3.5; API revision 10) | 201 | `author`, human only (§10.3) |
+| `POST /machines/{id}/names` (replace a machine's name, §3.5; not served yet: it is revision 10 when it lands) | 201 | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
