@@ -448,8 +448,9 @@ directory nor removed under it); one left by a restore that completed, killed wh
 (the live directory present, the staging one holding only `previous`), it names as the replaced
 store, to remove. OpenBao snapshots are encrypted by
 OpenBao and are scanned as they are. The pattern list in `scan-patterns.txt` is rebuilt from the
-generated credentials at every capture and must equal the file, or the scan is void. Talos key material is matched in the base64 form
-the secrets bundle carries, so a decoded PEM copy would not match.
+generated credentials at every capture and must equal the file, or the scan is void. Talos key material
+is matched by the list in the base64 form the secrets bundle carries; a decoded PEM copy of a key is
+found by the shape match above, as text, as hex and as base64 at any offset.
 
 Use only these values in experiments. Never point a prototype at a real cluster, vault or database
 from here.
