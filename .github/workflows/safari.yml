@@ -71,6 +71,13 @@ jobs:
           [ "$got" = "v$WANT" ] || { echo "safari: mise runs node $got, not v$WANT" >&2; exit 1; }
           mise exec -- npm --version
       - run: sudo safaridriver --enable
+      # Safari's inline prediction starts a composition on the word being typed, and a late
+      # deleteCompositionText removes it ("aabb seeded  reason" arrived as "aabb seeded  son",
+      # ginsys/bronzeward#1005). Off before Safari starts. The read-back shows the value written, not
+      # that it took effect: the typed read-back of the keys case in web/e2e/driver-controls.e2e.ts does.
+      - run: |
+          defaults write -g NSAutomaticInlinePredictionEnabled -bool false
+          defaults read -g NSAutomaticInlinePredictionEnabled
       - run: mise run browser
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -126,14 +133,18 @@ jobs:
       # Safari's Tab skips buttons and links by default (Option+Tab reaches them), so the keyboard
       # cases would fail on a setting and not on the page. These are the settings a tester turns on
       # in Safari's Advanced pane and System Settings > Keyboard ("Press Tab to highlight each item",
-      # "Keyboard navigation"); the read-back shows what the runner holds.
+      # "Keyboard navigation"); the read-back shows what the runner holds. Inline prediction is off
+      # too, as in the `safari` job (ginsys/bronzeward#1005): the read-back shows the value written,
+      # not that it took effect.
       - run: |
           defaults write com.apple.Safari WebKitTabToLinksPreferenceKey -bool true
           defaults write com.apple.Safari WebKit2TabsToLinks -bool true
           defaults write -g AppleKeyboardUIMode -int 2
+          defaults write -g NSAutomaticInlinePredictionEnabled -bool false
           defaults read com.apple.Safari WebKitTabToLinksPreferenceKey
           defaults read com.apple.Safari WebKit2TabsToLinks
           defaults read -g AppleKeyboardUIMode
+          defaults read -g NSAutomaticInlinePredictionEnabled
       - run: mise run browser-auth
       # After a failed run too: the whole directory goes up only when the scan passed, otherwise only
       # the listing the task scanned does, if it passed (as in ci.yml's browser-auth job).
