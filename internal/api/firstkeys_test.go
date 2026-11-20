@@ -180,7 +180,7 @@ func newFirstKeyEnv(t *testing.T, withSigner bool) *firstKeyEnv {
 	}
 	e := newEnvWith(t, d, options{})
 	f := &firstKeyEnv{env: e, kv: kv, author: e.human("h-author")}
-	f.cluster = e.createCluster(e.api, f.author, "k-fk-cluster-0123456789")
+	f.cluster = e.createCluster(e.api, f.author, firstKeyClusterKey)
 	f.path = "access/talos-ca/" + f.cluster
 	return f
 }
@@ -208,12 +208,25 @@ func secretsBundle(ca *x509.PEMEncodedCertificateAndKey) string {
 	return "certs:\n  os:\n    crt: " + b64(ca.Crt) + "\n    key: " + b64(ca.Key) + "\n"
 }
 
-// trustingNode is a Talos stand-in trusting ca, holding a control plane configuration with ca's key.
+// firstKeyClusterKey is the idempotency key the first-key env registers its cluster under, so the
+// Talos cluster ID of that cluster is talosClusterID(firstKeyClusterKey).
+const firstKeyClusterKey = "k-fk-cluster-0123456789"
+
+// trustingNode is a Talos stand-in of the env's cluster trusting ca, holding a control plane
+// configuration with ca's key.
 func trustingNode(t *testing.T, ca *x509.PEMEncodedCertificateAndKey) (*talostest.Node, talostest.PKI) {
+	t.Helper()
+	return nodeOfCluster(t, ca, talosClusterID(firstKeyClusterKey))
+}
+
+// nodeOfCluster is a Talos stand-in trusting ca that reports clusterID as its Talos cluster ID.
+func nodeOfCluster(t *testing.T, ca *x509.PEMEncodedCertificateAndKey, clusterID string) (*talostest.Node, talostest.PKI) {
 	t.Helper()
 	pki := talostest.NewPKIFromCA(t, ca)
 	n := talostest.Serve(t, pki)
 	n.SetMachineConfig(t, []byte(controlPlaneConfig(ca)))
+	n.SetNodeID(t, "stand-in-node")
+	n.SetClusterID(t, clusterID)
 	return n, pki
 }
 
@@ -349,6 +362,76 @@ func TestFirstKeyTryRefusal(t *testing.T) {
 		http.StatusServiceUnavailable, "talos-access-unavailable")
 	if f.kv.writes != 1 {
 		t.Fatalf("%d writes", f.kv.writes)
+	}
+}
+
+// PA §3.4 (ginsys/bronzeward#938): the endpoint's Talos cluster ID is read over the connection the
+// try used and compared with the cluster record's talosClusterId, on a first supply and on a
+// replacement, for each kind of document. Another cluster's key and endpoint are 422 validation-failed
+// with the rule first-key-cluster-mismatch, nothing is written, the stored key and its version stay,
+// and neither cluster ID is in the answer or the log. The control: the cluster's own node still
+// succeeds, as every other test in this file shows, and so does a supply after a refusal.
+func TestFirstKeyClusterMismatch(t *testing.T) {
+	otherID := talosClusterID("k-another-cluster-0123456789")
+	for _, replacement := range []bool{false, true} {
+		for _, kind := range []string{"machine-config", "secrets-bundle", "talosconfig"} {
+			name := kind + " as a first supply"
+			if replacement {
+				name = kind + " as a replacement"
+			}
+			t.Run(name, func(t *testing.T) {
+				f := newFirstKeyEnv(t, true)
+				own := newTalosCA(t)
+				wantVersion, wantActs := 0, 0
+				if replacement {
+					n, _ := trustingNode(t, own)
+					decode[firstKeyBody](t, f.do(f.api, firstKeyCall(f.author, "k-fk-m0-0123456789", f.cluster, "machine-config", controlPlaneConfig(own), n.Endpoint)), http.StatusOK)
+					wantVersion, wantActs = 1, 1
+				}
+				foreign := newTalosCA(t)
+				n, pki := nodeOfCluster(t, foreign, otherID)
+				doc := map[string]string{"machine-config": controlPlaneConfig(foreign), "secrets-bundle": secretsBundle(foreign),
+					"talosconfig": string(pki.Talosconfig("a:1", "", ""))}[kind]
+				rec := f.do(f.api, firstKeyCall(f.author, "k-fk-m1-0123456789", f.cluster, kind, doc, n.Endpoint))
+				problem := wantProblem(t, rec, http.StatusUnprocessableEntity, "validation-failed")
+				if problem["rule"] != "first-key-cluster-mismatch" {
+					t.Fatalf("rule %v; want first-key-cluster-mismatch", problem["rule"])
+				}
+				for _, secret := range []string{otherID, talosClusterID(firstKeyClusterKey), b64(foreign.Key), string(foreign.Key)} {
+					if strings.Contains(rec.Body.String(), secret) || f.logged(secret) {
+						t.Fatalf("the answer or the log holds %q: %s", secret, rec.Body)
+					}
+				}
+				ver, stored := f.kv.latest(f.path)
+				if ver != wantVersion || f.kv.writes != wantVersion || (replacement && stored.ca != string(own.Crt)) {
+					t.Fatalf("stored version %d after %d writes, want %d: the refused key moved the stored one", ver, f.kv.writes, wantVersion)
+				}
+				if acts, rows := firstKeyRows(t, f); acts != wantActs || rows != wantActs {
+					t.Fatalf("%d acts, %d rows after the refusal, want %d", acts, rows, wantActs)
+				}
+				// The refusal leaves the route usable: this cluster's own node is accepted next.
+				good, _ := trustingNode(t, foreign)
+				b := decode[firstKeyBody](t, f.do(f.api, firstKeyCall(f.author, "k-fk-m2-0123456789", f.cluster, "machine-config", controlPlaneConfig(foreign), good.Endpoint)), http.StatusOK)
+				if b.CAKeyVersion.Version != wantVersion+1 {
+					t.Fatalf("the control answered version %d, want %d", b.CAKeyVersion.Version, wantVersion+1)
+				}
+			})
+		}
+	}
+}
+
+// PA §3.4: a node that cannot say its cluster is not a match and not a mismatch: the identity read
+// failing is 503 talos-access-unavailable, nothing written.
+func TestFirstKeyNoClusterIdentity(t *testing.T) {
+	f := newFirstKeyEnv(t, true)
+	ca := newTalosCA(t)
+	pki := talostest.NewPKIFromCA(t, ca)
+	n := talostest.Serve(t, pki) // reports no node identity and no cluster information
+	n.SetMachineConfig(t, []byte(controlPlaneConfig(ca)))
+	wantProblem(t, f.do(f.api, firstKeyCall(f.author, "k-fk-n1-0123456789", f.cluster, "machine-config", controlPlaneConfig(ca), n.Endpoint)),
+		http.StatusServiceUnavailable, "talos-access-unavailable")
+	if acts, rows := firstKeyRows(t, f); acts != 0 || rows != 0 || f.kv.writes != 0 {
+		t.Fatalf("%d acts, %d rows, %d writes", acts, rows, f.kv.writes)
 	}
 }
 
