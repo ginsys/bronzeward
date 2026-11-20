@@ -21,6 +21,7 @@ func TestMachineNameNeedsRevision10(t *testing.T) {
 		sent     bool
 	}{
 		{"add with a name, revision 9", 9, append(slices.Clone(add), "--name", "web-1"), false},
+		{"add with an explicitly empty name, revision 9", 9, append(slices.Clone(add), "--name", ""), false},
 		{"add without a name, revision 9", 9, add, true},
 		{"add with a name, revision 10", 10, append(slices.Clone(add), "--name", "web-1"), true},
 		{"rename, revision 9", 9, rename, false},

@@ -245,10 +245,13 @@ func clusterWrite(in apitypes.ClusterInput, rp *client.Repeat) *client.Write {
 func (e *env) machineAdd(args []string) error {
 	var in apitypes.MachineInput
 	var nodeID, uuid, serial, platform, name string
+	var nameGiven bool
 	var rf repeatFlags
 	if _, err := e.parse("machine add", args, 0, func(fs *flag.FlagSet) {
 		fs.StringVar(&in.Cluster, "cluster", "", "")
-		fs.StringVar(&name, "name", "", "")
+		// The flag's presence decides, never its value: an empty --name is a named request the
+		// server refuses, not a nameless machine.
+		fs.Func("name", "", func(s string) error { name, nameGiven = s, true; return nil })
 		fs.StringVar(&nodeID, "talos-node-id", "", "")
 		fs.StringVar(&uuid, "smbios-uuid", "", "")
 		fs.StringVar(&serial, "serial", "", "")
@@ -273,7 +276,7 @@ func (e *env) machineAdd(args []string) error {
 		in.Serial = &serial
 	}
 	var prep func(*client.Client) error
-	if name != "" {
+	if nameGiven {
 		in.Name, prep = &name, needNameRevision
 	}
 	return e.writeAfter(prep, machineWrite(in, nodeID, uuid, rp), func(c *client.Client, r *client.Response) ([]string, error) {
