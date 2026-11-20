@@ -409,8 +409,7 @@ They are held apart **(choice §17.29)**.
   signer identity when a first key supplies it (§3.4) and replaced the same way.
   Its path is derived from the cluster's id and no request names it, so no
   request can point a read at another secret. No operator writes it with the
-  provider's tooling, and `secret/data/access/talos/<cluster id>`, the
-  `bw-onboard` create-only policy and `internal/accessput` are retired. No
+  provider's tooling: a first key is the only way in. No
   Bronzeward identity but the signer reads, lists or deletes the key at this
   path. That is a claim about the path and the signer's copy, not that the value
   reaches no other process: an `os:admin` machine configuration read, which the

@@ -89,14 +89,18 @@ machine_w=$(call POST /machines "$author" "$(jq -nc --arg c "$cluster" --arg n "
 
 `talosEndpoint` is an IP address with an optional port, never a DNS name.
 
-**3. Give Bronzeward the cluster's Talos access**, as the OpenBao administrator. The value goes
-straight to OpenBao; no Bronzeward request carries it:
+**3. Supply the cluster's first key** as `h-author`, a person. The talosconfig is the first key:
+Bronzeward reads the cluster's CA key through the control plane, tries it there, and only then
+stores it. `bronzewardctl` reads the file itself and sends it in one request:
 
 ```sh
-root=$(sed -n 's/^BW_BAO_ROOT_TOKEN=//p' fixtures/.state/secrets.env)
-BAO_TOKEN=$root docker exec -i -e BAO_TOKEN bw-fixture-openbao \
-  bao kv put -mount=secret "access/talos/$cluster" talosconfig=- <"$TALOSCONFIG"
+bronzewardctl cluster first-key --cluster "$cluster" --kind talosconfig --file "$TALOSCONFIG" \
+  --endpoint "$TALOS_CONTROLPLANE_IP:50000"
 ```
+
+Steps 2 and 3 together are `bronzewardctl cluster onboard --talosconfig "$TALOSCONFIG" --name bw-fixture
+--endpoint "$TALOS_CONTROLPLANE_IP:50000" --kubernetes-endpoint "https://$TALOS_CONTROLPLANE_IP:6443"`,
+which also imports both machines.
 
 **4. Import each machine into a draft.** An import reads the node's configuration, stores every
 secret in it as a create-only OpenBao generation, and leaves a `!bwref` reference in its place.
@@ -139,8 +143,8 @@ import's revision. If another write came first, the page says so and links to th
 the start page with `kind=drift-adoption` starts a drift adoption instead, always from the
 machine. The review, continue, takeover and abandon controls are on a later page.
 
-*On your deployment:* `platform` and the endpoints are your machines'; write your own talosconfig
-with `bao kv put -mount=secret access/talos/<cluster id> talosconfig=@<file>`.
+*On your deployment:* `platform` and the endpoints are your machines'; supply your own talosconfig
+as the first key with `bronzewardctl cluster first-key` (or let `cluster onboard` do it).
 
 ## S3 handover: adopt both machines
 

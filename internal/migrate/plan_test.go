@@ -399,7 +399,7 @@ func TestPlanConstraints(t *testing.T) {
 		obs.with("access_path", nil, "access_version", nil, "access_created", nil, "access_serial", nil, "access_not_after", nil))
 	observe("access version without its path", "23514", obs.with("access_path", nil))
 	observe("access path of no cluster", "23514", obs.with("access_path", "access/talos-ca/x"))
-	observe("access path of the stored talosconfig", "23514", obs.with("access_path", "access/talos/"+p.cluster))
+	observe("access path outside the CA key path", "23514", obs.with("access_path", "access/other/"+p.cluster))
 	observe("access with no serial", "23514", obs.with("access_serial", nil))
 	observe("access with no NotAfter", "23514", obs.with("access_not_after", nil))
 	observe("a serial with no access", "23514", obs.with("access_path", nil, "access_version", nil, "access_created", nil))

@@ -2,13 +2,12 @@
 # (#348), run by publication_test.go TestPublication against a disposable bronzeward serve with an
 # OpenBao provider (the test's, through baotest), behind the in-process TLS injector. Data is
 # synthetic: fixture-issuer tokens for the human h-all, who holds author and publisher; a Talos
-# stand-in (talostest) on loopback for the seeded machine, whose configuration and talosconfig the
-# test generates, the talosconfig written to the provider at access/talos/<cluster>. The machine
-# is imported into the seeded draft from the stand-in before the case, and the draft read, so its
-# ETag is kept (T11).
+# stand-in (talostest) on loopback for the seeded machine, whose configuration and CA the test
+# generates, the CA supplied as the cluster's first key. The machine is imported into the seeded
+# draft from the stand-in before the case, and the draft read, so its ETag is kept (T11).
 #
 # The case's argv, standard output and standard error are scanned for the token and for every
-# secret value of the generated configuration and talosconfig.
+# secret value of the generated configuration and CA.
 
 - id: EVT-04
   setup: the seeded draft holds the machine's import base; the operator reads it with draft show

@@ -7,13 +7,15 @@
 # `pass`, the integrated run's: `run` without the Go rows and the negative controls (the refusal
 # set through the orphan rows). `node-id`: the Talos access refusal for another node ID, on its own
 # up. `register`: the preconditions and steps 1 and 2 alone, the cluster and its machines recorded
-# and the access secret written, for a participant's import (fixtures/participants).
-# `first-keys`: after step 1 and 2's records, the three first keys of ginsys/bronzeward#898 supplied
-# to the control plane's endpoint, the refusals, and the scan; on an up of its own. Each check
+# and its first key supplied, for a participant's import (fixtures/participants).
+# `first-keys`: after step 1's records, the three first keys of ginsys/bronzeward#898 supplied
+# to the control plane's endpoint, the refusals, and the scan; on an up of its own.
+# `onboard`: bronzewardctl cluster onboard against the fixture's Talos and server, with no OpenBao
+# address, token or bao on its PATH (ginsys/bronzeward#900), with --no-import; on an up of its own. Each check
 # writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s1.tsv in the
 # evidence directory and to stdout; the directory is then scanned by bin/evidence. Exit 1 on any
 # FAIL.
-# Usage: scenarios/s1 run|pass|review|node-id|register|first-keys   (on a fresh fixtures/bin/up, with mise run
+# Usage: scenarios/s1 run|pass|review|node-id|register|first-keys|onboard   (on a fresh fixtures/bin/up, with mise run
 # dev-db and mise run dev-bao up for run's Go tests)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -23,7 +25,7 @@ bin=$here/../bin
 
 s1_mode=${1:-}
 pass_only=''
-case $s1_mode in run | review | node-id | register | first-keys) ;; pass) pass_only=1 ;; *) die "usage: scenarios/s1 run|pass|review|node-id|register|first-keys" ;; esac
+case $s1_mode in run | review | node-id | register | first-keys | onboard) ;; pass) pass_only=1 ;; *) die "usage: scenarios/s1 run|pass|review|node-id|register|first-keys|onboard" ;; esac
 need docker curl jq timeout id sleep git date sha256sum base64 head tr
 need_state
 # No fixture lock of its own: bw, seed, inject and evidence each take the one they need.
@@ -329,10 +331,12 @@ sealed_refused() {
     return 1
   }
 }
-# put_access <cluster id>: the operator's write of bin/up's talosconfig, over stdin.
-put_access() { bao_stdin kv put -mount=secret "access/talos/$1" talosconfig=- <"$TALOSCONFIG" >/dev/null; }
-# access_read <cluster id>: the executor identity reads the cluster's Talos access.
-access_read() { BAO_TOKEN=$executor_token bao kv get -format=json -mount=secret "access/talos/$1" >/dev/null 2>&1; }
+# ca_read_refused <cluster id>: the executor identity's read of the cluster's stored CA key is refused,
+# and the administrator's read of it (the control) answers.
+ca_read_refused() {
+  bao kv get -format=json -mount=secret "access/talos-ca/$1" >/dev/null 2>&1 || return 1
+  ! BAO_TOKEN=$executor_token bao kv get -format=json -mount=secret "access/talos-ca/$1" >/dev/null 2>&1
+}
 
 # same_file <a> <b>: two capture files are byte-identical and name both nodes.
 same_file() { cmp --quiet -- "$1" "$2" && [ "$(grep --count --extended-regexp '^[0-9a-f]+ ' "$1")" = 2 ]; }
@@ -669,7 +673,7 @@ preconditions() {
 }
 
 # cluster_draft: steps 1 to 3: the cluster by its Talos cluster ID, each machine by its node ID
-# and endpoint, the access secret, and the import draft with its ETag.
+# and endpoint, the first key, and the import draft with its ETag.
 cluster_draft() {
   cluster_register
   first_key_step
@@ -682,7 +686,7 @@ cluster_draft() {
   [ -n "$etag" ] || die "s1: the draft has no ETag; nothing after it can run"
 }
 
-# cluster_register: steps 1 and 2: the cluster, its machines and the access secret.
+# cluster_register: step 1: the cluster and its machines.
 cluster_register() {
   local cid cid_w nid_cp nid_w
   # Step 1: the cluster by its Talos cluster ID, each machine by its node ID and endpoint.
@@ -713,15 +717,11 @@ cluster_register() {
   machine_w=$recorded
 
   fresh_author
-  # Step 2: the operator writes bin/up's os:admin talosconfig to the cluster's access path.
-  check 'S1 step 2' 'bao kv put -mount=secret access/talos/<cluster> as the administrator, talosconfig over stdin' \
-    put_access "$cluster"
 }
 
-# first_key_step: step 2's other half (ginsys/bronzeward#899): a machine import signs its own
-# certificate from the CA key its cluster's latest first-key act names, so the os:admin talosconfig's
-# CA key is supplied through the first-keys route, tried at the control plane. The stored talosconfig
-# above stays for the executor's dispatch, which takes a certificate in a later change.
+# first_key_step: step 2 (ginsys/bronzeward#899): a machine import signs its own certificate from the
+# CA key its cluster's latest first-key act names, so the os:admin talosconfig's CA key is supplied
+# through the first-keys route, tried at the control plane.
 first_key_step() {
   first_keys_endpoint=$TALOS_CONTROLPLANE_IP:50000
   check 'S1 step 2' 'POST /clusters/<cluster>/first-keys with the os:admin talosconfig: 200, version 1, one act' \
@@ -847,13 +847,13 @@ fk_ca_value() { awk -v f="$1:" '/^ *os:$/ {o = 1; next} o && $1 == f {print $2; 
 # fk_stored_is_fixtures: the key at the path is the fixture's os CA key (compared by digest, whitespace
 # aside; nothing printed) and every act records the fixture CA certificate's fingerprint.
 fk_stored_is_fixtures() {
-  local want_crt got_crt want_key got_key
+  local want_crt got_crt want_key got_key acts=${1:-3}
   want_crt=$(fk_ca_value crt | openssl x509 -outform DER | sha256sum | cut -d' ' -f1) || return 1
   got_crt=$(bao kv get -field=ca -mount=secret "access/talos-ca/$cluster" | openssl x509 -outform DER | sha256sum | cut -d' ' -f1) || return 1
   want_key=$(fk_ca_value key | tr -d '[:space:]' | sha256sum | cut -d' ' -f1) || return 1
   got_key=$(bao kv get -field=key -mount=secret "access/talos-ca/$cluster" | tr -d '[:space:]' | sha256sum | cut -d' ' -f1) || return 1
   [ "$want_crt" = "$got_crt" ] && [ "$want_key" = "$got_key" ] &&
-    [ "$(sql "SELECT count(*) FROM first_key_act WHERE cluster = '$cluster' AND ca_fingerprint = '$want_crt'")" = 3 ]
+    [ "$(sql "SELECT count(*) FROM first_key_act WHERE cluster = '$cluster' AND ca_fingerprint = '$want_crt'")" = "$acts" ]
 }
 first-keys() {
   local tmp
@@ -890,6 +890,81 @@ first-keys() {
   check 'S1 backups, PA §16' 'inject db-snapshot: a dump of the bronzeward database after the first keys' \
     "$bin/inject" db-snapshot "$backup_name"
   outcome_bundle 'S1 first keys' first-keys
+}
+
+# onboard: ginsys/bronzeward#900 against the fixture's own Talos and server, on an up of its own:
+# bronzewardctl cluster onboard sends the first key to the server like any other request. The client
+# runs with an empty environment (no OpenBao address or token, and no PATH, so no bao) as h-author.
+# The first key is the talosconfig, whose CA key is read through the control plane. The checks: the
+# records, the stored key, a rerun that replaces it, a run that skips it, the client's own environment
+# and arguments, and the key's value in no evidence file.
+ob_env=''
+# ob_run <name> <args>...: bronzewardctl --context h-author <args> with env -i, its output and exit
+# status kept as cli-<name>.txt, the status the function's. The environment it ran with is ob_env.
+ob_run() {
+  local name=$1 tok rc=0
+  shift
+  tok=$(mint h-author) || return 1
+  keep_secret "$tok"
+  printf '{"accessToken":"%s"}' "$tok" >"$cli_dir/h-author.json"
+  ob_env=$(printf '%s\n' "XDG_CONFIG_HOME=$cli_dir/config" "XDG_STATE_HOME=$cli_dir/state" "XDG_CACHE_HOME=$cli_dir/cache" \
+    'DBUS_SESSION_BUS_ADDRESS=disabled:' "PATH=$cli_dir/nopath") || return 1
+  printf '%s\n' "$ob_env" >"$EV/onboard-client-env.txt"
+  env -i "XDG_CONFIG_HOME=$cli_dir/config" "XDG_STATE_HOME=$cli_dir/state" "XDG_CACHE_HOME=$cli_dir/cache" \
+    'DBUS_SESSION_BUS_ADDRESS=disabled:' "PATH=$cli_dir/nopath" "$ctl_bin" --context h-author "$@" >"$EV/cli-$name.txt" 2>&1 || rc=$?
+  printf '[bronzewardctl --context h-author %s, exit %d]\n' "$*" "$rc" >>"$EV/cli-$name.txt"
+  return "$rc"
+}
+# bao_traces <file>: how many lines name an OpenBao address, token or flag.
+bao_traces() { grep --count --extended-regexp -- 'BAO_|VAULT_|--bao-' "$1" || true; }
+# ob_no_bao <control file>: the client's environment and every kept run's arguments and output name
+# nothing of OpenBao, and the same count reads one line in the control file (which does).
+ob_no_bao() {
+  local f n=0
+  for f in "$EV/onboard-client-env.txt" "$EV"/cli-onboard-*.txt; do
+    [ -e "$f" ] || return 1
+    n=$((n + $(bao_traces "$f")))
+  done
+  [ "$n" = 0 ] && [ "$(bao_traces "$1")" = 1 ]
+}
+# ob_canary_absent: the talosconfig's key, read from the file and never passed as an argument, is in
+# no file of the evidence directory.
+ob_canary_absent() {
+  local canary
+  canary=$(awk '$1 == "key:" {print $2; exit}' "$TALOSCONFIG") && [ -n "$canary" ] || return 1
+  ! grep --recursive --quiet --fixed-strings -- "$canary" "$EV"
+}
+ob_args() {
+  printf '%s\n' cluster onboard --talosconfig "$TALOSCONFIG" --name bw-fixture --endpoint "$TALOS_CONTROLPLANE_IP:50000" \
+    --kubernetes-endpoint "https://$TALOS_CONTROLPLANE_IP:6443" --no-import
+}
+onboard() {
+  local ctl_file args
+  preconditions
+  cli_prepare 'S1 onboard' h-author
+  mkdir -p -- "$cli_dir/nopath"
+  mapfile -t args < <(ob_args)
+  check 'S1 onboard' 'cluster onboard: the talosconfig is the first key; no OpenBao address, token or bao anywhere: exit 0' ob_run onboard-first "${args[@]}"
+  cluster=$(sql "SELECT id FROM cluster WHERE name = 'bw-fixture'") || die "s1: onboard recorded no cluster"
+  check 'S1 onboard' 'the cluster is recorded once, with both machines' same "$(sql "SELECT count(*) FROM cluster WHERE name = 'bw-fixture'") $(sql "SELECT count(*) FROM machine WHERE cluster = '$cluster'")" '1 2'
+  check 'S1 onboard' 'the output says the first key was stored' cli_kept onboard-first '^First key: stored'
+  check 'S1 onboard' 'the stored CA key is version 1 and one act records it' same "$(fk_version) $(fk_acts)" '1 1'
+  check 'S1 onboard' "the stored key is the fixture's os CA key, and the act records its certificate's fingerprint" fk_stored_is_fixtures 1
+  check 'S1 onboard' 'a rerun replaces the key: exit 0, "First key: replaced", version 2, two acts' \
+    ob_run onboard-rerun "${args[@]}"
+  check 'S1 onboard' 'the rerun reports the first key replaced' cli_kept onboard-rerun '^First key: replaced'
+  check 'S1 onboard' 'after the rerun the stored key is version 2 with two acts' same "$(fk_version) $(fk_acts)" '2 2'
+  check 'S1 onboard' 'a run with --skip-first-key sends none: exit 0' ob_run onboard-skip "${args[@]}" --skip-first-key
+  check 'S1 onboard' 'the skipping run reports the first key skipped' cli_kept onboard-skip '^First key: skipped'
+  check 'S1 onboard' 'the skipping run leaves the version and the acts as they were' same "$(fk_version) $(fk_acts)" '2 2'
+  ctl_file=$(mktemp -- "$STATE/onboard-control.XXXXXX") || die "no control file"
+  printf 'BAO_ADDR=http://127.0.0.1:8200\n' >"$ctl_file"
+  check 'S1 onboard' "the client's environment, arguments and output name no OpenBao address, token or flag (the control file reads one)" ob_no_bao "$ctl_file"
+  rm -f -- "$ctl_file"
+  check 'S1 onboard' "the talosconfig's key is in no file of the evidence directory" ob_canary_absent
+  check 'S1 backups, PA §16' 'inject db-snapshot: a dump of the bronzeward database after onboarding' \
+    "$bin/inject" db-snapshot "$backup_name"
+  outcome_bundle 'S1 onboard' onboard
 }
 
 run() {
@@ -976,7 +1051,7 @@ run() {
     die "cannot create an executor token"
   keep_secret "$executor_token"
   check 'S1 pass' "the executor identity's decryption of the worker's baseline: refused" executor_refused "$machine_w"
-  check 'S1 pass' "control: the same executor token reads the cluster's Talos access" access_read "$cluster"
+  check 'S1 pass' "the executor identity's read of the cluster's stored CA key: refused (the administrator's read of it answers)" ca_read_refused "$cluster"
 
   if controls_run 'S1 negative controls' 'the refusal set, the Talos access refusals, takeover, the interruption matrix, the review, expiry and orphan rows'; then
     controls "$claims_before"
@@ -1072,7 +1147,7 @@ if final=$("$bin/evidence" "$EV" 2>"$ev_log"); then
   # instead.
   dump_table=staging_claim dump_id=${interrupted[0]:-} dump_row='an interrupted claim'
   [ "$s1_mode" != pass ] || dump_table=machine dump_id=$machine_w dump_row="the worker's machine"
-  [ "$s1_mode" != first-keys ] || { dump_table=first_key_act dump_row="a first key's act"; dump_id=$(sql "SELECT act FROM first_key_act ORDER BY act LIMIT 1") || dump_id=; }
+  [ "$s1_mode" != first-keys ] && [ "$s1_mode" != onboard ] || { dump_table=first_key_act dump_row="a first key's act"; dump_id=$(sql "SELECT act FROM first_key_act ORDER BY act LIMIT 1") || dump_id=; }
   if [ "$s1_mode" = node-id ] || [ "$s1_mode" = register ]; then
     :
   elif [ -n "${dump_id%% *}" ] &&

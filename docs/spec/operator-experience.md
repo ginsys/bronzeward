@@ -472,7 +472,8 @@ Record it with these commands, in this order. The cluster ID is the one cluster 
   bronzewardctl machine add --cluster <cluster id> --smbios-uuid '5d1d…' --platform 'metal' --talos-endpoint '10.5.0.5'
   bronzewardctl cluster first-key --cluster <cluster id> --kind talosconfig --file ./talosconfig --endpoint '10.5.0.2'
 
-Nothing was sent to the server and no secret was written. Until the first-key command has run, the first source: machine import fails with talos-access-unavailable.
+Nothing was sent to the server. Until the first-key command has run, the first source: machine import fails with talos-access-unavailable.
+cluster onboard does all of this in one run, and imports each machine into a draft: bronzewardctl cluster onboard --talosconfig ./talosconfig --name <name> --kubernetes-endpoint proposed
 ```
 
 A member that does not answer, or reports no platform, gets no command and a "Not recorded" line.

@@ -34,7 +34,7 @@ CREATE TEMP TABLE operation (id text, owner_gen bigint);
 INSERT INTO pg_temp.release VALUES ('rel_publication', 'op_publication', 'cl_fixture', 'v1.14');
 INSERT INTO pg_temp.draft VALUES ('drf_publication', 'published', 'rel_publication');
 INSERT INTO pg_temp.release_machine VALUES ('rel_publication', 'mch_worker', 'obs_worker');
-INSERT INTO pg_temp.observation VALUES ('obs_worker', 'mch_worker', 10, 'access/talos/cl_fixture', 'v1.14.5');
+INSERT INTO pg_temp.observation VALUES ('obs_worker', 'mch_worker', 10, 'access/talos-ca/cl_fixture', 'v1.14.5');
 INSERT INTO pg_temp.observation_start VALUES ('mch_worker', 10, 'publication', 'op_publication', 2);
 INSERT INTO pg_temp.operation VALUES ('op_publication', 2);
 SQL
@@ -45,7 +45,7 @@ mutation() {
     matching_two_machines)
       cat <<'SQL'
 INSERT INTO pg_temp.release_machine VALUES ('rel_publication', 'mch_controlplane', 'obs_controlplane');
-INSERT INTO pg_temp.observation VALUES ('obs_controlplane', 'mch_controlplane', 11, 'access/talos/cl_fixture', 'v1.14.6');
+INSERT INTO pg_temp.observation VALUES ('obs_controlplane', 'mch_controlplane', 11, 'access/talos-ca/cl_fixture', 'v1.14.6');
 INSERT INTO pg_temp.observation_start VALUES ('mch_controlplane', 11, 'publication', 'op_publication', 2);
 SQL
       ;;
@@ -69,7 +69,7 @@ SQL
     wrong_machine_binding) printf '%s\n' "UPDATE pg_temp.observation SET machine = 'mch_other';" ;;
     wrong_start_basis) printf '%s\n' 'UPDATE pg_temp.observation_start SET revision = 9;' ;;
     wrong_generation) printf '%s\n' 'UPDATE pg_temp.observation_start SET publication_generation = 1;' ;;
-    wrong_access_path) printf '%s\n' "UPDATE pg_temp.observation SET access_path = 'access/talos/cl_other';" ;;
+    wrong_access_path) printf '%s\n' "UPDATE pg_temp.observation SET access_path = 'access/talos-ca/cl_other';" ;;
     wrong_purpose) printf '%s\n' "UPDATE pg_temp.observation_start SET purpose = 'drift';" ;;
     wrong_minor) printf '%s\n' "UPDATE pg_temp.observation SET running_version = 'v1.12.4';" ;;
     malformed_minor) printf '%s\n' "UPDATE pg_temp.observation SET running_version = 'invalid';" ;;
@@ -79,7 +79,7 @@ SQL
     mixed_null_generation)
       cat <<'SQL'
 INSERT INTO pg_temp.release_machine VALUES ('rel_publication', 'mch_controlplane', 'obs_controlplane');
-INSERT INTO pg_temp.observation VALUES ('obs_controlplane', 'mch_controlplane', 11, 'access/talos/cl_fixture', 'v1.14.6');
+INSERT INTO pg_temp.observation VALUES ('obs_controlplane', 'mch_controlplane', 11, 'access/talos-ca/cl_fixture', 'v1.14.6');
 INSERT INTO pg_temp.observation_start VALUES ('mch_controlplane', 11, 'publication', 'op_publication', NULL);
 SQL
       ;;

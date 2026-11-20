@@ -32,7 +32,9 @@ type CAKeyVersion struct {
 
 // CAKey is a cluster's Talos os CA certificate and key, with the version it was read at or written
 // as (zero before it is stored). It does not render: every fmt verb prints a placeholder and the
-// marshallers fail. The PEM texts sit behind pointers to strings for the reason TalosAccess's does.
+// marshallers fail. The PEM texts sit behind pointers to strings: fmt prints a struct holding a CAKey
+// in an unexported field by reflection, past those methods, and under a verb a pointer does not take
+// (%s, %q) it dereferences a pointer to a slice, array, struct or map, but never one to a string.
 // Key is the one way out of the secret.
 type CAKey struct {
 	v        CAKeyVersion

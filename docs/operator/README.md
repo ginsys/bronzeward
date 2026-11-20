@@ -91,15 +91,16 @@ under its own policy. The fixture's policies are the reference:
 [OpenBao keys and policies](../../fixtures/README.md#openbao-keys-and-policies). Each token file is
 mode 0600 and named by an absolute path.
 
-Each cluster's Talos client configuration is a provider secret you write, never a Bronzeward
-request (persistence API §3.3):
+Each cluster's Talos CA key reaches OpenBao through Bronzeward, never by your own write: an author
+supplies the cluster's first key, and the signer identity stores it (persistence API §3.4):
 
 ```sh
-bao kv put -mount=secret access/talos/<cluster id> talosconfig=@talosconfig
+bronzewardctl cluster onboard --talosconfig ./talosconfig --name <name> --kubernetes-endpoint <https url>
 ```
 
-`<cluster id>` is the `cl_...` identifier Bronzeward returns when the cluster is recorded
-(walkthrough, S1).
+`cluster onboard` records the cluster and its machines, supplies the first key and imports each
+machine. `cluster first-key` supplies or replaces the key alone, and the cluster's id is the `cl_...`
+identifier Bronzeward returns when the cluster is recorded (walkthrough, S1).
 
 ## Migrate, then serve
 
