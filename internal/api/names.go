@@ -60,6 +60,28 @@ type nameChangeBody struct {
 	At           time.Time `json:"at"`
 }
 
+// nameClash reports the machine_cluster_name index refusing a name (23505).
+func nameClash(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "machine_cluster_name"
+}
+
+// nameHolder is the machine of the cluster that holds name, or "" when none does: the holder that
+// stopped a statement can have renamed away before this read, under read committed.
+func nameHolder(ctx context.Context, tx *sql.Tx, cluster, name string) (string, error) {
+	var holder string
+	err := tx.QueryRowContext(ctx, `SELECT id FROM machine WHERE cluster = $1 AND name = $2`, cluster, name).Scan(&holder)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return holder, err
+}
+
+// nameRace answers a name whose holder kept changing across every attempt.
+func nameRace() *refusal {
+	return refuse(http.StatusServiceUnavailable, "transient-conflict", "the machine name kept changing hands; "+notCommitted)
+}
+
 func replaceMachineName(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*nameInput)
 	m := q.r.PathValue("id")
@@ -83,18 +105,25 @@ func replaceMachineName(ctx context.Context, _ *API, tx *sql.Tx, q *request) (re
 	if _, err := tx.ExecContext(ctx, `SAVEPOINT rename`); err != nil {
 		return result{}, err
 	}
-	err = tx.QueryRowContext(ctx, `UPDATE machine SET name = $2, revision_counter = revision_counter + 1
-		WHERE id = $1 RETURNING revision_counter`, m, b.Name).Scan(&b.Revision)
-	var pe *pgconn.PgError
-	if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "machine_cluster_name" {
+	for attempt := 1; ; attempt++ {
+		err = tx.QueryRowContext(ctx, `UPDATE machine SET name = $2, revision_counter = revision_counter + 1
+			WHERE id = $1 RETURNING revision_counter`, m, b.Name).Scan(&b.Revision)
+		if !nameClash(err) {
+			break
+		}
 		if _, err := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT rename`); err != nil {
 			return result{}, err
 		}
-		var holder string
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM machine WHERE cluster = $1 AND name = $2`, cluster, b.Name).Scan(&holder); err != nil {
+		holder, err := nameHolder(ctx, tx, cluster, b.Name)
+		if err != nil {
 			return result{}, err
 		}
-		return result{}, nameInUse(holder)
+		if holder != "" {
+			return result{}, nameInUse(holder)
+		}
+		if attempt == maxAttempts {
+			return result{}, nameRace()
+		}
 	}
 	if err != nil {
 		return result{}, err

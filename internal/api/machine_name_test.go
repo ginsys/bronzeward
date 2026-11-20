@@ -288,9 +288,15 @@ func TestMachineNameInRecoveryMode(t *testing.T) {
 	m := e.nameMachine(author, "k-machine-0123456789", cl, uuidA, "")
 	ep := newEpoch(t, e.db)
 	mustExec(t, e.db, "UPDATE installation_state SET recovery_mode = true")
+	// Recovery entry leaves each machine's scope unaccounted (§12.2); a rename is not a scope act, so
+	// it is accepted on a machine whose scope is closed too.
+	mustExec(t, e.db, "UPDATE machine SET scope_state = 'pre-restore-unaccounted' WHERE id = $1", m)
 	b := decode[nameChangeBody](t, e.do(e.api, renameCall(author, "k-recovery-0123456789", m, `{"name":"web-1"}`)), http.StatusCreated)
 	if b.Epoch != ep || count(t, e.db, "SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'name-change' AND epoch = $2", m, ep) != 1 {
 		t.Fatalf("change %+v; want epoch %s on the change and its entry", b, ep)
+	}
+	if n := storedName(t, e, m); n == nil || *n != "web-1" {
+		t.Fatalf("stored name %v; want web-1 on the machine with a closed scope", n)
 	}
 }
 
@@ -375,6 +381,9 @@ func TestMachineNameAfterRestore(t *testing.T) {
 	decode[nameChangeBody](t, e.do(e.api, first), http.StatusCreated)
 	lostChange := decode[nameChangeBody](t, e.do(e.api, lost), http.StatusCreated)
 
+	if n := storedName(t, e, m); n == nil || *n != "web-2" {
+		t.Fatalf("before the restore: stored name %v; want web-2", n)
+	}
 	// The restore: the backup holds the first name only.
 	for _, table := range []string{"machine_event", "act", "idempotency_record"} {
 		mustExec(t, e.db, "ALTER TABLE "+table+" DISABLE TRIGGER immutable_rows")
@@ -391,6 +400,9 @@ func TestMachineNameAfterRestore(t *testing.T) {
 	if got.Name == nil || *got.Name != "web-1" {
 		t.Fatalf("after the restore: name %v; want web-1", got.Name)
 	}
+	if n := storedName(t, e, m); n == nil || *n != "web-1" {
+		t.Fatalf("after the restore: stored name %v; want web-1", n)
+	}
 	// The repeat whose record survived still answers the earlier epoch's 409.
 	wantProblem(t, e.do(e.api, first), http.StatusConflict, "conflict")
 	// The repeat whose record the restore removed is refused, because it names the epoch it expects.
@@ -402,5 +414,8 @@ func TestMachineNameAfterRestore(t *testing.T) {
 	b := decode[nameChangeBody](t, e.do(e.api, renameCall(author, "k-rename-again-0123", m, `{"name":"web-2"}`)), http.StatusCreated)
 	if b.Revision != 2 || b.PreviousName == nil || *b.PreviousName != "web-1" || b.Name != "web-2" || b.Epoch != after {
 		t.Fatalf("after the restore: %+v", b)
+	}
+	if n := storedName(t, e, m); n == nil || *n != "web-2" {
+		t.Fatalf("after the second rename: stored name %v; want web-2", n)
 	}
 }
