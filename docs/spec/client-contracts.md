@@ -2044,12 +2044,12 @@ Limits:
   not implemented yet. No synthetic contract probe was run against the
   server for this document: every server behaviour
   above is read from source and contract text, and G17 is inferred, not observed.
-- The first-key route's client side is half built
+- The first-key route's client side is built
   ([ginsys/bronzeward#900](https://github.com/ginsys/bronzeward/issues/900)): bronzewardctl has the
-  `cluster first-key` command, and `cluster discover` prints it, but `cluster onboard` still takes the
-  operator's OpenBao address and token and writes the key itself. [§3.3](#33-client-actions-with-no-route)
-  and [operator experience §5.2](operator-experience.md#52-inventory) describe `cluster onboard` as it
-  is once that issue is done, including a second run that supplies the first key again.
+  `cluster first-key` command, `cluster discover` prints it, and `cluster onboard` sends the first key
+  through the same route and takes no OpenBao address or token. [§3.3](#33-client-actions-with-no-route)
+  and [operator experience §5.2](operator-experience.md#52-inventory) describe it, including a second
+  run that supplies the first key again.
 - For a person signed in as recovery-admin
   ([#361](https://github.com/ginsys/bronzeward/issues/361)), bronzewardctl reads recovery status
   and sends recovery enter, recovery exit and identity revoke; enter and revoke are sent only when

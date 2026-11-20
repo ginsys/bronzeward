@@ -91,16 +91,18 @@ machine_w=$(call POST /machines "$author" "$(jq -nc --arg c "$cluster" --arg n "
 
 **3. Supply the cluster's first key** as `h-author`, a person. The talosconfig is the first key:
 Bronzeward reads the cluster's CA key through the control plane, tries it there, and only then
-stores it. `bronzewardctl` reads the file itself and sends it in one request:
+stores it. The request carries the talosconfig, so `call` keeps it off the command line:
 
 ```sh
-bronzewardctl cluster first-key --cluster "$cluster" --kind talosconfig --file "$TALOSCONFIG" \
-  --endpoint "$TALOS_CONTROLPLANE_IP:50000"
+call POST "/clusters/$cluster/first-keys" "$author" "$(jq -nc --rawfile d "$TALOSCONFIG" --arg e "$TALOS_CONTROLPLANE_IP:50000" \
+  '{kind: "talosconfig", document: $d, endpoint: $e}')" walkthrough-first-key
 ```
 
-Steps 2 and 3 together are `bronzewardctl cluster onboard --talosconfig "$TALOSCONFIG" --name bw-fixture
---endpoint "$TALOS_CONTROLPLANE_IP:50000" --kubernetes-endpoint "https://$TALOS_CONTROLPLANE_IP:6443"`,
-which also imports both machines.
+The answer is `200` with `caKeyVersion`. From a configured `bronzewardctl` context that signs in as
+`h-author`, `bronzewardctl --context <name> cluster first-key --cluster "$cluster" --kind talosconfig
+--file "$TALOSCONFIG" --endpoint "$TALOS_CONTROLPLANE_IP:50000"` sends the same request, and
+`cluster onboard --no-import` does steps 2 and 3 in one run (leave `--no-import` out and its imports
+carry no marks, so the worker's planted file secret would stay in the draft: step 4 marks it).
 
 **4. Import each machine into a draft.** An import reads the node's configuration, stores every
 secret in it as a create-only OpenBao generation, and leaves a `!bwref` reference in its place.
