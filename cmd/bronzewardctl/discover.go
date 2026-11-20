@@ -43,7 +43,7 @@ func (e *env) clusterDiscover(args []string) error {
 		return usageError{errors.New("cluster discover prints commands as text: use -o table")}
 	}
 	if unprintable(file) {
-		return usageError{errors.New("--talosconfig names a file whose name holds a byte or character that cannot be printed back in the bao command: rename the file")}
+		return usageError{errors.New("--talosconfig names a file whose name holds a byte or character that cannot be printed back in the commands it prints: rename the file")}
 	}
 	if unprintable(talosContext) {
 		return usageError{errors.New("--talos-context names a context whose name holds a byte or character that cannot be printed back in the onboarding command: rename the context")}
@@ -186,7 +186,7 @@ func discoverLines(res discover.Result, file, talosContext, override string) []s
 	for _, n := range notRecorded {
 		out = append(out, "", "Not recorded: "+n+" Add it with machine add once it answers.")
 	}
-	return append(out, "", "Nothing was sent to the server and no secret was written. Until the first-key command has run, the first source: machine import fails with talos-access-unavailable.",
+	return append(out, "", "Nothing was sent to the server. Until the first-key command has run, the first source: machine import fails with talos-access-unavailable.",
 		"cluster onboard does all of this in one run, and imports each machine into a draft: bronzewardctl cluster onboard --talosconfig "+client.ShellWord(file)+selection+
-			" --name <name> --kubernetes-endpoint proposed --bao-addr <url> --bao-token-file <file>")
+			" --name <name> --kubernetes-endpoint proposed")
 }

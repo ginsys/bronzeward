@@ -49,13 +49,13 @@ commands:
               author, a person; supplies or replaces the cluster's first key: one request, tried at the
               endpoint before anything is stored; a Ctrl-C while it runs leaves the outcome unknown (exit 3)
   cluster onboard --talosconfig <file> --name <name> --kubernetes-endpoint <https url>|proposed
-              (--bao-addr <url> (--bao-token-file <file> | --bao-token-stdin) | --skip-secret)
+              [--first-key-kind machine-config|secrets-bundle --first-key-file <file> | --skip-first-key]
               [--talos-context <name>] [--endpoint <host|ip[:port]>] [--staging encrypted|transient]
               [--review] [--no-import]
-              author, a person; discovers the cluster, records it and its machines, writes its Talos
-              access to OpenBao once (create-only), then imports each machine into one draft; run
-              again after a failure: what exists is found, and --skip-secret skips the one write
-              that cannot repeat
+              author, a person; discovers the cluster, records it and its machines, supplies its first
+              key (the talosconfig unless --first-key-* names another document), then imports each
+              machine into one draft; run again after a failure: what exists is found, the first key
+              is supplied again (replacing it), and --skip-first-key skips it
   machine list [--cluster <id>] | show <id> | timeline <id> | observations <id>
   machine timeline <id> --follow [--limit <n>]
               the newest entries, then each new one as the server records it, read every 5s;

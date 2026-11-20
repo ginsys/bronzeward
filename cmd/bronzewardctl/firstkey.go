@@ -49,14 +49,11 @@ func (e *env) clusterFirstKey(args []string) error {
 	case talosContext != "" && kind != "talosconfig":
 		return usageError{errors.New("--talos-context cuts a talosconfig, so it is given with --kind talosconfig only")}
 	}
-	doc, err := firstKeyDocument(file, kind, talosContext)
+	doc, err := firstKeyDocument("--file", file, kind, talosContext)
 	if err != nil {
 		return err
 	}
-	body, _ := json.Marshal(apitypes.FirstKeyInput{Document: doc, Endpoint: endpoint, Kind: apitypes.FirstKeyInputKind(kind)})
-	// Once: sent once, and the one write whose request in flight takes the Ctrl-C, since it can stall at the node.
-	return firstKeyRefusal(e.write(&client.Write{Method: http.MethodPost, Path: "/clusters/" + url.PathEscape(cluster) + "/first-keys", Body: body,
-		HumanOnly: true, Repeat: rp, Once: true, Check: "act list"},
+	return firstKeyRefusal(e.write(firstKeyWrite(cluster, apitypes.FirstKeyInput{Document: doc, Endpoint: endpoint, Kind: apitypes.FirstKeyInputKind(kind)}, rp),
 		func(_ *client.Client, r *client.Response) ([]string, error) {
 			var x apitypes.FirstKeyBody
 			err := json.Unmarshal(r.Body, &x)
@@ -67,30 +64,38 @@ func (e *env) clusterFirstKey(args []string) error {
 		}))
 }
 
-// firstKeyDocument is the text to send: the file, or for a talosconfig its one context. Every error
-// names the flag and quotes nothing of the file.
-func firstKeyDocument(file, kind, talosContext string) (string, error) {
+// firstKeyWrite is the one write of a first key, for cluster first-key and cluster onboard alike. Once:
+// sent once, and the one write whose request in flight takes the Ctrl-C, since it can stall at the node.
+func firstKeyWrite(cluster string, in apitypes.FirstKeyInput, rp *client.Repeat) *client.Write {
+	body, _ := json.Marshal(in)
+	return &client.Write{Method: http.MethodPost, Path: "/clusters/" + url.PathEscape(cluster) + "/first-keys", Body: body,
+		HumanOnly: true, Repeat: rp, Once: true, Check: "act list"}
+}
+
+// firstKeyDocument is the text to send: the file name's content, or for a talosconfig its one context.
+// Every error names the flag that gave the file, and quotes nothing of it.
+func firstKeyDocument(flagName, file, kind, talosContext string) (string, error) {
 	f, err := os.Open(file)
 	if err != nil {
-		return "", usageError{fmt.Errorf("--file cannot be read: %w", unwrapPath(err))}
+		return "", usageError{fmt.Errorf("%s cannot be read: %w", flagName, unwrapPath(err))}
 	}
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, maxFirstKey+1))
 	switch {
 	case err != nil:
-		return "", usageError{errors.New("--file cannot be read")}
+		return "", usageError{fmt.Errorf("%s cannot be read", flagName)}
 	case len(b) > maxFirstKey:
-		return "", usageError{fmt.Errorf("--file holds more than %d KiB, which is more than a first key", maxFirstKey>>10)}
+		return "", usageError{fmt.Errorf("%s holds more than %d KiB, which is more than a first key", flagName, maxFirstKey>>10)}
 	}
 	if kind == "talosconfig" {
 		if b, err = discover.OneContext(b, talosContext); errors.Is(err, discover.ErrUnknownContext) {
 			return "", usageError{errors.New("--talos-context names a context that the talosconfig does not hold")}
 		} else if err != nil {
-			return "", usageError{errors.New("--file is not a talosconfig this client can use")}
+			return "", usageError{fmt.Errorf("%s is not a talosconfig this client can use", flagName)}
 		}
 	}
 	if len(b) == 0 || !utf8.Valid(b) {
-		return "", usageError{errors.New("--file holds no text that a first key can be")}
+		return "", usageError{fmt.Errorf("%s holds no text that a first key can be", flagName)}
 	}
 	return string(b), nil
 }

@@ -21,15 +21,13 @@ import (
 	"github.com/ginsys/bronzeward/internal/talos/discover"
 )
 
-// The stand-ins of cluster onboard's tests: an in-memory API server, an OpenBao that records what
-// it is sent, and a stub for the discovery (the CLI's tests may not link the stand-in Talos node;
-// package discover's tests cover the reads). Nothing here is a real credential: every secret is a
-// planted marker, so a test can search every output for it.
+// The stand-ins of cluster onboard's tests: an in-memory API server and a stub for the discovery (the
+// CLI's tests may not link the stand-in Talos node; package discover's tests cover the reads). Nothing
+// here is a real credential: every secret is a planted marker, so a test can search every output for it.
 
 const (
-	plantedToken = "bao-token-PLANTED-0123456789"
-	plantedKeyA  = "synthetic-key-of-context-A"
-	plantedKeyB  = "synthetic-key-of-context-B"
+	plantedKeyA = "synthetic-key-of-context-A"
+	plantedKeyB = "synthetic-key-of-context-B"
 )
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
@@ -78,6 +76,10 @@ type apiFake struct {
 	// did not happen; counts is how many POSTs each route has had.
 	failPost map[string]int
 	counts   map[string]int
+	// keys is each first key the route was sent, in order; keyAnswer, when set, answers the n-th one
+	// (from 1) instead of the route's success, which says replaced from the second key on.
+	keys      []fkPost
+	keyAnswer func(n int, w http.ResponseWriter)
 }
 
 func (f *apiFake) writes() []string {
@@ -193,6 +195,16 @@ func (f *apiFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.machines = append(f.machines, m)
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprint(w, f.machineJSON(m))
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/first-keys"):
+		p := fkPost{path: path, key: r.Header.Get("Idempotency-Key")}
+		_ = json.Unmarshal(body, &p.in)
+		f.keys = append(f.keys, p)
+		if f.keyAnswer != nil {
+			f.keyAnswer(len(f.keys), w)
+			return
+		}
+		fmt.Fprintf(w, `{"cluster":%q,"kind":%q,"replaced":%t,"caKeyVersion":{"version":%d,"createdTime":"2026-11-19T21:00:00Z"}}`,
+			strings.TrimSuffix(strings.TrimPrefix(path, "/clusters/"), "/first-keys"), p.in.Kind, len(f.keys) > 1, len(f.keys))
 	case r.Method == http.MethodGet && path == "/machines":
 		var items []string
 		for _, m := range f.machines {
@@ -319,65 +331,14 @@ func (f *apiFake) operation(w http.ResponseWriter, r *http.Request, rest string)
 		`"createdAt":"2026-11-01T06:00:00Z","epoch":"ep_OB-1","lastEvent":%d}`, op, state, ing.draft, result, problem, len(ing.events))
 }
 
-// baoFake is the OpenBao of the onboard tests. mode is how it answers a write: ok, denied, error,
-// redirect, cas, or occupied (a create-only token: the first create is accepted, every later one is
-// answered 403, as OpenBao answers an update the ACL does not grant).
-type baoFake struct {
-	mu       sync.Mutex
-	mode     string
-	requests []string // "METHOD path"
-	bodies   []string
-	tokens   []string
-	written  int
-}
-
-func (f *baoFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	b, _ := io.ReadAll(r.Body)
-	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
-	f.bodies = append(f.bodies, string(b))
-	f.tokens = append(f.tokens, r.Header.Get("X-Vault-Token"))
-	switch f.mode {
-	case "denied":
-		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprint(w, `{"errors":["permission denied PLANTED-OPENBAO-TEXT"]}`)
-	case "error":
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, `{"errors":["boom PLANTED-OPENBAO-TEXT"]}`)
-	case "redirect":
-		http.Redirect(w, r, "http://127.0.0.1:1/elsewhere", http.StatusTemporaryRedirect)
-	case "absent":
-		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprint(w, `{"errors":["no handler PLANTED-OPENBAO-TEXT"]}`)
-	case "cas":
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, `{"errors":["check-and-set parameter did not match the current version"]}`)
-	case "occupied":
-		if f.written > 0 {
-			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprint(w, `{"errors":["permission denied"]}`)
-			return
-		}
-		f.written++
-		fmt.Fprint(w, `{"data":{"version":1}}`)
-	default:
-		f.written++
-		fmt.Fprint(w, `{"data":{"version":1}}`)
-	}
-}
-
 // onboardEnv is one test's world.
 type onboardEnv struct {
-	t         *testing.T
-	api       *apiFake
-	bao       *baoFake
-	baoURL    string
-	file      string // the talosconfig
-	tokenFile string
-	result    discover.Result
-	calls     []string // "context|endpoint" of each discovery call
-	given     [][]byte
+	t      *testing.T
+	api    *apiFake
+	file   string // the talosconfig
+	result discover.Result
+	calls  []string // "context|endpoint" of each discovery call
+	given  [][]byte
 }
 
 var obTwoMembers = discover.Result{
@@ -391,19 +352,12 @@ var obTwoMembers = discover.Result{
 
 func newOnboard(t *testing.T) *onboardEnv {
 	t.Helper()
-	e := &onboardEnv{t: t, api: &apiFake{roles: `{"kind":"human","principal":"h_OB","roles":["author"]}`}, bao: &baoFake{}, result: obTwoMembers}
+	e := &onboardEnv{t: t, api: &apiFake{roles: `{"kind":"human","principal":"h_OB","roles":["author"]}`}, result: obTwoMembers}
 	api := httptest.NewServer(e.api)
-	bao := httptest.NewServer(e.bao)
 	t.Cleanup(api.Close)
-	t.Cleanup(bao.Close)
 	automationContext(t, api.URL)
-	e.baoURL = bao.URL
-	dir := t.TempDir()
-	e.file, e.tokenFile = filepath.Join(dir, "talosconfig"), filepath.Join(dir, "bao-token")
+	e.file = filepath.Join(t.TempDir(), "talosconfig")
 	if err := os.WriteFile(e.file, []byte(twoContextTalosconfig()), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(e.tokenFile, []byte(plantedToken+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	old, oldMargin := discoverCluster, leaseMargin
@@ -413,14 +367,12 @@ func newOnboard(t *testing.T) *onboardEnv {
 	}
 	leaseMargin = 0
 	t.Cleanup(func() { discoverCluster, leaseMargin = old, oldMargin })
-	t.Setenv("BAO_ADDR", "")
 	return e
 }
 
 // base is the flags every successful run carries.
 func (e *onboardEnv) base() []string {
-	return []string{"cluster", "onboard", "--talosconfig", e.file, "--name", "lab", "--kubernetes-endpoint", "proposed",
-		"--bao-addr", e.baoURL, "--bao-token-file", e.tokenFile}
+	return []string{"cluster", "onboard", "--talosconfig", e.file, "--name", "lab", "--kubernetes-endpoint", "proposed"}
 }
 
 func (e *onboardEnv) run(extra ...string) (int, string, string) {
@@ -442,9 +394,7 @@ func (e *onboardEnv) runArgs(args ...string) (int, string, string) {
 func (e *onboardEnv) requests() int {
 	e.api.mu.Lock()
 	defer e.api.mu.Unlock()
-	e.bao.mu.Lock()
-	defer e.bao.mu.Unlock()
-	return len(e.api.log) + len(e.bao.requests) + len(e.calls)
+	return len(e.api.log) + len(e.calls)
 }
 
 // everything is every byte a command printed, with the request bodies the stand-ins kept.

@@ -118,16 +118,16 @@ func TestClusterDiscoverPrintsCommands(t *testing.T) {
 		"bronzewardctl machine add --cluster <cluster id> --smbios-uuid '11111111-2222-3333-4444-555555555555' --platform 'metal' --talos-endpoint '10.0.0.1'",
 		"bronzewardctl machine add --cluster <cluster id> --talos-node-id 'n2' --platform 'container' --talos-endpoint '10.0.0.2'",
 		"bronzewardctl cluster first-key --cluster <cluster id> --kind talosconfig --file '" + c.file + "' --endpoint '10.0.0.1'",
-		"Nothing was sent to the server and no secret was written.",
+		"Nothing was sent to the server.",
 		"talos-access-unavailable",
-		"bronzewardctl cluster onboard --talosconfig '" + c.file + "' --endpoint '10.0.0.1:50000' --name <name> --kubernetes-endpoint proposed --bao-addr <url> --bao-token-file <file>",
+		"bronzewardctl cluster onboard --talosconfig '" + c.file + "' --endpoint '10.0.0.1:50000' --name <name> --kubernetes-endpoint proposed",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, talosconfigMarker) || strings.Contains(out, "bao kv put") {
-		t.Error("the output holds the talosconfig's key or the retired bao command")
+	if strings.Contains(out, talosconfigMarker) || strings.Contains(out, "OpenBao") {
+		t.Error("the output holds the talosconfig's key or names the retired secret store")
 	}
 	// A second discovery of the same cluster prints the same.
 	if _, again, _ := runCtl(t, "cluster", "discover", "--talosconfig", c.file, "--endpoint", "10.0.0.1:50000"); again != out {
@@ -252,7 +252,7 @@ func TestClusterDiscoverBracketsAnIPv6Endpoint(t *testing.T) {
 }
 
 // TestClusterDiscoverRefusesAFileNameItCannotQuote: a name with a control character would print as
-// a different file in the bao command, so the command refuses it before it reads anything.
+// a different file in a printed command, so the command refuses it before it reads anything.
 func TestClusterDiscoverRefusesAFileNameItCannotQuote(t *testing.T) {
 	c := discoverFixture(t, twoMembers, nil)
 	odd := filepath.Join(filepath.Dir(c.file), "talos\tconfig")
@@ -266,7 +266,7 @@ func TestClusterDiscoverRefusesAFileNameItCannotQuote(t *testing.T) {
 }
 
 // TestClusterDiscoverRefusesAFileNameThatIsNotUTF8: a name with an invalid byte prints as another
-// name in the bao command, so it is refused like a name with a control character.
+// name in a printed command, so it is refused like a name with a control character.
 func TestClusterDiscoverRefusesAFileNameThatIsNotUTF8(t *testing.T) {
 	c := discoverFixture(t, twoMembers, nil)
 	odd := filepath.Join(filepath.Dir(c.file), "talos\xffconfig")
