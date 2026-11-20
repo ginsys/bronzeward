@@ -1545,8 +1545,9 @@ the client's rule wins wherever the two meet.
    in the ring colour (Oat draws 2 px, and none on a text field). A disabled control keeps its full
    contrast (Oat halves its opacity); a disabled button shows it by a dashed border and a disabled
    field by a muted background.
-3. **Links and buttons.** A link is underlined wherever it is, and a button's label wraps at 320 CSS
-   pixels. Hover colours are plain colours without transition, so a colour read at rest is three
+3. **Links and buttons.** A link is underlined wherever it is, except those of the main navigation
+   (item 6), which are not text and show what they are by an icon, their group and, for the current
+   page, a bar and a bold label; and a button's label wraps at 320 CSS pixels. Hover colours are plain colours without transition, so a colour read at rest is three
    bytes; the contrast measure of the browser cases throws on any other form.
 4. **Controls are native.** A select, check box and radio use the browser's own control. Oat draws
    their arrow, mark and dot as `data:` images, and `img-src 'self'` does not match a `data:` URL, so
