@@ -93,8 +93,19 @@ func (e *env) writeAfter(prep func(*client.Client) error, w *client.Write, say f
 	if err != nil {
 		return err
 	}
-	defer func() { err = errors.Join(err, c.Save()) }()
+	defer func() { err = joinStoredSave(err, c.Save()) }()
 	return e.writeWith(c, prep, w, say)
+}
+
+// joinStoredSave adds the error of saving the context to what a write ended with. writeWith returns nil
+// only after the server acknowledged the write, so a save error beside a nil err is a write that is
+// stored: it is a saveFailed that says so, which the callers that go on after the write read. Beside a
+// write's own error it stays plain, so that error keeps its class and exit.
+func joinStoredSave(err, saved error) error {
+	if saved != nil && err == nil {
+		saved = saveFailed{afterEnd{fmt.Errorf("the write is stored; only saving the context failed, which a later command that reads the server keeps again: %w", saved)}}
+	}
+	return errors.Join(err, saved)
 }
 
 // writeWith is writeAfter on a client already open, which the caller saves.

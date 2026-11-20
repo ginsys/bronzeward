@@ -80,6 +80,8 @@ type apiFake struct {
 	// (from 1) instead of the route's success, which says replaced from the second key on.
 	keys      []fkPost
 	keyAnswer func(n int, w http.ResponseWriter)
+	// onPost, when set, runs for every write before it is answered and may set headers on the answer.
+	onPost func(path string, w http.ResponseWriter)
 }
 
 func (f *apiFake) writes() []string {
@@ -141,6 +143,9 @@ func (f *apiFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.counts = map[string]int{}
 		}
 		f.counts[path]++
+		if f.onPost != nil {
+			f.onPost(path, w)
+		}
 		if n := f.failPost[path]; n > 0 && f.counts[path] >= n {
 			f.problem(w, http.StatusUnprocessableEntity, "validation-failed", "")
 			return
@@ -151,6 +156,8 @@ func (f *apiFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"version":"OB","apiRevision":2,"startMode":"normal"}`)
 	case path == "/identity":
 		fmt.Fprint(w, f.roles)
+	case path == "/recovery": // the read a repeat of a write is confirmed by
+		fmt.Fprint(w, `{}`)
 	case r.Method == http.MethodPost && path == "/clusters":
 		var in apitypes.ClusterInput
 		_ = json.Unmarshal(body, &in)

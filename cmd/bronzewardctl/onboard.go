@@ -327,21 +327,29 @@ func (e *env) onboardRecords(a *onboardArgs, res discover.Result, obj *onboardin
 			return nil, json.Unmarshal(r.Body, &cl)
 		})
 	})
+	// A write the server acknowledged is recorded, whatever fails after it (keeping what the answers taught
+	// the context): the step says so, and the error still ends the run, as plan create's does.
+	var lost saveFailed
+	saved := errors.As(err, &lost)
 	state := obCreated
 	if existing := conflictID(err, "cluster"); existing != "" {
 		state = obExisting
 		err = e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
 			return getJSON(c, "/clusters/"+url.PathEscape(existing), &cl)
 		})
-	} else if err == nil && cl.Id == "" {
-		err = errors.New("the cluster was recorded, but its answer names no cluster")
+	} else if (err == nil || saved) && cl.Id == "" {
+		err, saved = errors.New("the cluster was recorded, but its answer names no cluster"), false
 	}
-	if err != nil {
+	if err != nil && !saved {
 		obj.Cluster.onboardPart = onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}
 		return err
 	}
 	a.name = cl.Name
 	obj.Cluster = onboardCluster{onboardPart: onboardPart{State: state, ID: cl.Id}, Name: cl.Name, Endpoint: cl.Endpoint}
+	if saved {
+		obj.Cluster.Command, obj.Cluster.Error = rerun(), client.Shown(err)
+		return err
+	}
 	for i, m := range res.Members {
 		om := &obj.Machines[i]
 		if om.Add.State == obNotRecorded {
@@ -359,6 +367,7 @@ func (e *env) onboardRecords(a *onboardArgs, res discover.Result, obj *onboardin
 				return nil, json.Unmarshal(r.Body, &mb)
 			})
 		})
+		saved := errors.As(err, &lost)
 		state := obCreated
 		if existing := conflictID(err, "machine"); existing != "" {
 			state = obExisting
@@ -370,14 +379,18 @@ func (e *env) onboardRecords(a *onboardArgs, res discover.Result, obj *onboardin
 				return fmt.Errorf("machine %s (node %s) is recorded in cluster %s, not in cluster %s: nothing after the machines ran. Remove it from that cluster or leave this node out of this one",
 					client.Printable(mb.Id), client.Printable(m.NodeID), client.Printable(mb.Cluster), client.Printable(cl.Id))
 			}
-		} else if err == nil && mb.Id == "" {
-			err = errors.New("the machine was recorded, but its answer names no machine")
+		} else if (err == nil || saved) && mb.Id == "" {
+			err, saved = errors.New("the machine was recorded, but its answer names no machine"), false
 		}
-		if err != nil {
+		if err != nil && !saved {
 			om.Add = onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}
 			return err
 		}
 		om.Machine, om.Add = mb.Id, onboardPart{State: state, ID: mb.Id}
+		if saved {
+			om.Add.Command, om.Add.Error = rerun(), client.Shown(err)
+			return err
+		}
 	}
 	return nil
 }
@@ -393,16 +406,15 @@ func (e *env) onboardFirstKey(a *onboardArgs, obj *onboarding, address string, r
 	}
 	in := apitypes.FirstKeyInput{Document: a.keyDoc, Endpoint: endpointArg(address), Kind: apitypes.FirstKeyInputKind(a.keyType)}
 	var x apitypes.FirstKeyBody
-	var stored bool
 	err := firstKeyRefusal(e.quietly(func() error {
 		return e.writeAfter(nil, firstKeyWrite(obj.Cluster.ID, in, nil), func(_ *client.Client, r *client.Response) ([]string, error) {
-			stored = true
 			return nil, json.Unmarshal(r.Body, &x)
 		})
 	}))
 	// An answer that arrived is the key stored, whatever fails after it (keeping what the answers
 	// taught the context): the step says stored, and the error still ends the run, as plan create's does.
-	if err != nil && !stored {
+	var lost saveFailed
+	if err != nil && !errors.As(err, &lost) {
 		obj.FirstKey = onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}
 		return err
 	}
@@ -425,6 +437,7 @@ func (s stepState) s() string { return string(s) }
 func (e *env) onboardImports(a *onboardArgs, obj *onboarding, rerun func() string) error {
 	title, state := "onboard "+a.name, obExisting
 	var draft apitypes.DraftBody
+	var saved bool // the draft was recorded and only keeping the context failed after it
 	err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
 		// GET /drafts takes no filter, so the open draft is picked out here.
 		items, err := c.List("/drafts")
@@ -467,15 +480,21 @@ func (e *env) onboardImports(a *onboardArgs, obj *onboarding, rerun func() strin
 				return nil, nil
 			})
 		})
-		if err == nil && draft.Id == "" {
-			err = errors.New("the draft was opened, but its answer names no draft")
+		var lost saveFailed
+		saved = errors.As(err, &lost)
+		if (err == nil || saved) && draft.Id == "" {
+			err, saved = errors.New("the draft was opened, but its answer names no draft"), false
 		}
 	}
-	if err != nil {
+	if err != nil && !saved {
 		obj.Draft = &onboardDraft{onboardPart: onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}, Title: title}
 		return err
 	}
 	obj.Draft = &onboardDraft{onboardPart: onboardPart{State: state, ID: draft.Id}, Title: title}
+	if saved {
+		obj.Draft.Command, obj.Draft.Error = rerun(), client.Shown(err)
+		return err
+	}
 	for i := range obj.Machines {
 		m := &obj.Machines[i]
 		if m.Machine == "" {

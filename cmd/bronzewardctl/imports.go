@@ -201,7 +201,7 @@ func (e *env) ingest(name, kind string, args []string) (*client.Client, accepted
 			}
 			return lines, err
 		})
-		if err != nil || noWait {
+		if stoppedBy(err) || noWait {
 			return err
 		}
 		return e.follow(c, a, 0)
@@ -244,7 +244,7 @@ func (e *env) importResume(verb string, args []string) error {
 				}
 				return lines, err
 			})
-		if err != nil || noWait {
+		if stoppedBy(err) || noWait {
 			return err
 		}
 		// The server takes the claim at its next generation in the transaction that accepts the
@@ -696,6 +696,14 @@ func ingestionsRead(machine, draft string) func(*client.Client) (string, error) 
 			return map[bool]string{true: "the ingestion " + b.Id + " (" + b.State + ") into draft " + draft}[b.Draft == draft]
 		})
 	}
+}
+
+// stoppedBy says err ends the command before the follow. A write that was acknowledged and only failed to
+// save the context does not: the follow goes on, keeps the context again, which is the retry, and reports
+// it if that fails too, so the save failure is said once.
+func stoppedBy(err error) bool {
+	var lost saveFailed
+	return err != nil && !errors.As(err, &lost)
 }
 
 // joinSave adds the error of saving the context to the error a follow ended with. When the follow
