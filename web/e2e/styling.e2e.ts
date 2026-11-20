@@ -35,7 +35,9 @@ const inject = () =>
   browser.execute(() => {
     const seen: string[] = [];
     (globalThis as unknown as { g969: string[] }).g969 = seen;
-    document.addEventListener("securitypolicyviolation", (e) => seen.push(`${e.effectiveDirective} ${e.blockedURI}`));
+    // Every violation, with where it came from: a blocked inline style means a style did not apply.
+    document.addEventListener("securitypolicyviolation", (e) =>
+      seen.push(`${e.effectiveDirective} ${e.blockedURI} ${e.sourceFile}:${e.lineNumber} ${JSON.stringify(e.sample)}`));
     const box = document.createElement("div");
     const mk = <K extends keyof HTMLElementTagNameMap>(tag: K, id: string, text = "") => {
       const e = document.createElement(tag);
@@ -152,7 +154,8 @@ describe("the styled client", () => {
 
   it("hover leaves every colour an opaque rgb() with its contrast", async () => {
     for (const [id, min] of [["g969-button", 7], ["g969-link", 7], ["g969-row", 7]] as const) {
-      await $(`#${id}`).moveTo();
+      // A table row is not interactable in Safari: the pointer goes to its cell, and the row is hovered with it.
+      await $(id === "g969-row" ? `#${id} > td` : `#${id}`).moveTo();
       const { color, back } = await colours(id);
       // rgb() throws on a hover colour that is color(), relative or translucent.
       expect([id, ratio(color, back) >= min]).toEqual([id, true]);

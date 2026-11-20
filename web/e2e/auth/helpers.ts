@@ -342,8 +342,12 @@ export const measure = () => browser.execute(() => {
     const [a, b] = [lum(getComputedStyle(e).color), lum(back(e))];
     low = Math.min(low, (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05));
   }
-  const small = [...document.querySelectorAll("button, select, nav a")].map((e) => e.getBoundingClientRect()).filter((r) => r.width < 24 || r.height < 24).length;
-  return { contrast: low, small };
+  // Named by tag, position among its kind and size only, never by text: a select's text is its options'.
+  const controls = [...document.querySelectorAll("button, select, nav a")];
+  const smalls = controls.map((e, i) => ({ e, i, r: e.getBoundingClientRect() })).filter(({ r }) => r.width < 24 || r.height < 24)
+    .map(({ e, i, r }) => `${e.tagName.toLowerCase()} ${i} of ${controls.length}: ${r.width}x${r.height}, display ${getComputedStyle(e).display}`);
+  if (smalls.length > 0) throw new Error(`controls under 24 px: ${smalls.join("; ")}`);
+  return { contrast: low, small: smalls.length };
 });
 
 // How far the page scrolls sideways (WCAG 1.4.10): 0 when nothing reflows out of the viewport.
