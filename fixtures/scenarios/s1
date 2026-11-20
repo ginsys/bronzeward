@@ -932,7 +932,7 @@ ob_no_bao() {
 ob_canary_absent() {
   local canary
   canary=$(awk '$1 == "key:" {print $2; exit}' "$TALOSCONFIG") && [ -n "$canary" ] || return 1
-  ! grep --recursive --quiet --fixed-strings -- "$canary" "$EV"
+  ! grep --recursive --quiet --fixed-strings --file=<(printf '%s\n' "$canary") -- "$EV"
 }
 ob_args() {
   printf '%s\n' cluster onboard --talosconfig "$TALOSCONFIG" --name bw-fixture --endpoint "$TALOS_CONTROLPLANE_IP:50000" \
