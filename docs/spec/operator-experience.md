@@ -331,7 +331,7 @@ bronzewardctl
   cluster discover                    --talosconfig required; reads Talos, prints commands, writes nothing
   cluster first-key                   supply or replace the cluster's first key; the server keeps the Talos CA key
   cluster onboard                     discover, record, supply the first key, import each machine
-  machine list | show | add | set-endpoint
+  machine list | show | add | set-endpoint | rename
   machine timeline | observations    paged; --follow polls (G9)
   machine freeze | unfreeze           --reason required
 
@@ -390,8 +390,9 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
   `--no-wait` returns at once.
 - Names are accepted where the API keys by name (fragments, profiles and the draft path) and
   identifiers everywhere else. A cluster is addressed by its ID and displayed with its recorded
-  `name` beside it (`cl_9fd… (lab-a)`); the client resolves no names, except fragment names for a profile's pins, read from the draft's entries, the cluster's fragments or the pinned revision ([§5.4](#54-editing-fragments-profiles-and-assignments)). Machines have no human name in the API
-  ([§11](#11-api-gap-audit), G8), so tables show the Talos endpoint beside the identifier, and
+  `name` beside it (`cl_9fd… (lab-a)`), and a machine the same way when it has a name
+  (`mch_… (node-a)`, client contracts A9); the client resolves no names, except fragment names for a profile's pins, read from the draft's entries, the cluster's fragments or the pinned revision ([§5.4](#54-editing-fragments-profiles-and-assignments)). A machine without a name, and a server that serves none
+  ([§11](#11-api-gap-audit), G8), show the Talos endpoint beside the identifier in tables, and
   the machine detail adds the node ID.
 - No command applies configuration. Dispatch is the controller's; the clients plan, approve,
   watch and cancel.
@@ -1326,8 +1327,9 @@ off it: the release list is filtered in the browser (G9 of the
 [client contracts](client-contracts.md#4-api-gap-audit)) and nothing yet needs them there.
 
 **Titles.** A release, a plan and an operation are shown with a title derived from their fields,
-never a stored name: client contracts A8 holds the rule and G19 the gap. A machine has no name
-until the owner decides G8.
+never a stored name: client contracts A8 holds the rule and G19 the gap. A machine has an
+optional stored name (G8, [§12](#12-alternatives-and-recommendations) C9), which a title uses
+where there is one.
 
 | Screen | Wireframe | Main routes |
 | --- | --- | --- |
@@ -1533,6 +1535,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `cluster onboard` | `POST /clusters`, `POST /machines`, `POST /clusters/{id}/first-keys`, `POST /drafts`, `POST /ingestions` | author (human) | yes | draft's |
 | `machine add` | `POST /machines` | author | yes | no |
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | no |
+| `machine rename` | `POST /machines/{id}/names` | author | yes | no |
 | `import start` | `POST /ingestions` | author | yes | draft's |
 | `import review` | `GET /ingestions/{id}/review` | author | yes | no |
 | `import base` (web: the import base summary) | `GET /import-base-revisions/{id}` | author | yes | no |
@@ -1584,7 +1587,7 @@ accepted limitation.
 | G5 | No render of a draft before publication | authors cannot see a machine's configuration before publishing | publish, then review |
 | G6 | Provenance covers reference occurrences only (`internal/api/releases.go:78-100`), not "which fragment set this field" ([design §6.2](../design/Talos_Configuration_and_Machine_Management_Design.md#62-fragments-profiles-and-assignments)) | field-origin inspector | none |
 | G7 | Drift content is not served: no observed configuration or digest (`internal/api/reads.go:155-171`) | deciding adopt or revert from what changed | a drift-adoption import with review, or `talosctl` outside Bronzeward |
-| G8 | Machines have no human-readable name (`internal/api/inventory.go:177-224`) | finding a machine | endpoint and node ID |
+| G8 | Machines have no human-readable name (`internal/api/inventory.go:177-224`) | finding a machine | decided: an optional stored name, unique within its cluster, from API revision 10 ([persistence and API §3.5](persistence-api.md#35-a-machines-name), C9; Serge, typed 2026-11-20 11:33 CET: "A. Stored name in the API"); until it is served, and for a machine without one, the endpoint and node ID |
 | G9 | No list filters on machines, plans, releases, drafts or acts (before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/reads.go:78-80`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/reads.go#L78-L80); `internal/api/acts.go:72`); operations filter by `plan`, `machine`, `state`, `kind` (`internal/api/operations.go:97`); no machine timeline stream | "plans awaiting my approval", per-cluster views, following a timeline | served since [#280](https://github.com/ginsys/bronzeward/issues/280): plans by `state` and `machine` (`internal/api/plans.go:429-451`), machines by `cluster` (`internal/api/reads.go:199-218`); client-side paging for releases, drafts and acts; polling |
 | G10 | No listing of ingestions: only `GET /ingestions/{id}` (before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/routes.go:90`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/routes.go#L90)) | finding a paused or lapsed import | served since [#280](https://github.com/ginsys/bronzeward/issues/280): `GET /ingestions`, filtered by `state` and `machine` (`internal/api/ingestions.go:280-299`) |
 | G11 | Recovery marks, releases and accountings have no list route; `GET /recovery` shows only their resulting scope states (`internal/api/recovery_exits.go:123-148`), the records themselves appear in machine timelines and acts | recovery console history | timeline |
@@ -1616,6 +1619,7 @@ general secret browser (milestone exclusion).
 | C6 | Names of plans, releases and operations | a stored name set at creation (API revision, a field on three bodies); a title derived from fields the body already carries; the identifier only | A derived title: it needs no API change and no new place for an operator to type a name, and an operation has no author who could name it. The cost is up to three extra reads for an operation, which both clients bound to one read per object (client contracts A8). A stored name stays open for a plan or a release if the derived title proves too weak | accepted for the specification; the implementation issues carry it; usability unmeasured |
 | C7 | The cluster page | the page that exists (cluster fields, its machines with counts, its open drafts); add plans and releases; add Talos credential state | The page that exists, and no more: the plan list has no cluster filter (G20), releases are filtered in the browser (G9 of the client contracts), and credential state is [#856](https://github.com/ginsys/bronzeward/issues/856)'s. A page that read every machine's plans to show a count would cost one read per machine on every visit | accepted; usability unmeasured |
 | C8 | The fragment revision view | none (reads only through the draft editor and the composition views); a read-only page with display rules; a page for authors only | A read-only page with display rules that the web view alone applies (§9 item 9): text node in a `pre`, a notice that the server cannot promise the text holds no unmarked value, no copy or download, memory only. The access rule stays every role, the limit recorded (§9 item 9); an authors-only read would break the release source rows, the draft editor and the composition views for the other roles | accepted; the access rule is the owner's, 2026-11-20 ([ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974)); the notice is not built yet |
+| C9 | A machine's name (G8) | an optional stored name in the API; labels kept by each client; a name composed from the cluster name, endpoint and node ID; the hostname read from the rendered configuration | A stored name: one fact that every operator and both clients share and that a restore keeps. Labels per client split it between devices; the composed name is what the tables show today; the hostname has no value before a first publish and costs a read for each machine. The grammar (lowercase, digits, hyphen) keeps it a valid hostname label and safe text; it is unique within a cluster; an `author` sets it at inventory and replaces it (client contracts A9, [persistence and API §3.5](persistence-api.md#35-a-machines-name), choice §17.43) | decided by the owner, Serge, typed 2026-11-20 11:33 CET: "A. Stored name in the API"; the name and the Talos hostname are independent, and filling the hostname from the name is a separate specification issue |
 
 ## 13. Usability and accessibility acceptance
 

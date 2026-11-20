@@ -228,7 +228,7 @@ statement.
 | Entity | Kind | Holds | Owner of semantics |
 | --- | --- | --- | --- |
 | Cluster | mutable, revisioned | name, endpoint, Talos cluster ID (unique, §7.3), contract, status | this contract |
-| Machine | mutable, revisioned | `mch` id, identity key: its SMBIOS UUID or, for a machine that reports none, its Talos node ID, fixed at inventory (unique, §7.3), hardware evidence, cluster membership, Talos endpoint (§3.3), platform mode: `metal`, `container` or `cloud`, required at inventory with no default and fixed there, the mode its configuration validates in and its release machines record (compilation §6 step 8; choice §17.32), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
+| Machine | mutable, revisioned | `mch` id, identity key: its SMBIOS UUID or, for a machine that reports none, its Talos node ID, fixed at inventory (unique, §7.3), hardware evidence, cluster membership, an optional name, unique within the cluster (§3.5), Talos endpoint (§3.3), platform mode: `metal`, `container` or `cloud`, required at inventory with no default and fixed there, the mode its configuration validates in and its release machines record (compilation §6 step 8; choice §17.32), current freeze and recovery scope state (projected from their facts), machine revision counter (§5, T7) | this contract; freeze and scope state are execution and recovery's |
 | MachineEndpointChange | immutable | a machine's previous Talos endpoint and new one, who changed it, role, epoch, time (§3.3) | this contract |
 | FirstKeyAct | immutable | a cluster's first-key supply or replacement: the cluster, the kind, whether it replaced a key, the CA certificate's fingerprint, the CA key's version identity (path, version, `created_time`), who, role, epoch, time; never a value (§3.4) | this contract |
 | Fragment | mutable head | name, layer, scope (a cluster or the library), pointer to the head revision | this contract |
@@ -774,6 +774,48 @@ there.
 - **Replacing a first key** is another `POST` to the same route. The old CA key
   version stays in the provider as history; a dispatch in flight keeps the
   version its evidence read (§3.3).
+
+### 3.5 A machine's name
+
+A machine may carry a name, an operator's label for finding it **(choice §17.43)**. It is stored
+in the database and is not part of any configuration, release or plan.
+
+- **Grammar.** 1 to 63 characters: lowercase `a-z`, digits and the hyphen, neither the first nor
+  the last character a hyphen. A name is therefore always a valid DNS hostname label, and no
+  identifier (§2) holds an underscore, so a name never reads as one. Uppercase is not folded to
+  lowercase, because a stored name that differs from the typed one is a second spelling for one
+  name: it is a malformed body, `400 invalid-request`, with nothing committed.
+- **Unique within a cluster**, by a partial unique index on the machine's cluster and name over the
+  machines that have one (§7.3); two clusters may use the same name. A request that would give a
+  name another machine of the cluster holds is `409 conflict` naming that machine.
+- **Set at inventory or replaced.** `POST /machines` takes an optional `name`.
+  `POST /machines/{id}/names` replaces the name (`{"name": "<name>"}`): under the machine row
+  `FOR UPDATE` (T11), it records a `name-change` entry on the machine's timeline at the next
+  machine revision, holding the previous name or none, the new name, who and role (execution and
+  recovery §4.1, read through `GET /machines/{id}/timeline`), and its act (§10.5, action
+  `machine.name`, the machine as subject), in one transaction. Its `201` answer holds `machine`,
+  `revision`, `previousName` (`null` when there was none), `name`, `changedBy`, `role`, `act`,
+  `epoch` and `at`. A request that names the machine's current name is `409 conflict`, as the
+  endpoint route's is; the replay of a request under the same `Idempotency-Key` returns the stored
+  `201` (§7.2), so only a new key with the same name draws the `409`. The route cannot clear a
+  name: a machine that has one keeps one, which leaves clients two states, no name and a name.
+- **It changes nothing on a machine.** No existing plan, observation or release is touched, and no
+  plan is needed: publication evidence reads only `endpoint-change` entries
+  (`internal/api/publication_observation.go:113`). Like the endpoint route (§3.3) and inventory,
+  it is accepted installation-wide in recovery mode (§12.2).
+- **The name and the Talos hostname are independent.** The hostname is the machine's
+  configuration, written by the operator in a document of the draft; the name is a label that is
+  always a valid hostname, so that a later specification can offer it as a default. Filling the
+  hostname from the name is a separate compiler feature, specified in
+  ginsys/bronzeward#976, and nothing here does it.
+- **A name is operational data, not a principal's display name.** It is kept with the machine and,
+  in its previous and new values, in the machine's append-only timeline, so a value put there
+  cannot be erased, and there is no retention rule beyond that of the timeline, as for a cluster's
+  name. The grammar does not stop a person's name (`annas-laptop`): operators should not put
+  personal names in it. A principal's `display` is different: it is the identity provider's claim,
+  refreshed by each admitted request of the subject and kept apart from every record (§10, choice
+  §17.40).
+- **Roles.** `author`, human only (§10.3), as inventory and the endpoint route.
 
 ## 4. Revisions and optimistic concurrency
 
@@ -1700,6 +1742,7 @@ retries with a new idempotency key:
 | Active operation per rollout scope | at the PoC rollout limit of one, a partial unique index on the rollout scope over `committed`, `sending`, `verifying`, `unresolved` (execution and recovery §3.2, comparison 5); not evidenced there | execution and recovery's refusal |
 | Machine | its identity key: `smbiosUuid` or `talosNodeId`, exactly one of which `POST /machines` requires, each by its own unique index across the installation | `409 conflict` naming the existing machine |
 | Cluster | its `talosClusterId`, required by `POST /clusters`, by unique index across the installation | `409 conflict` naming the existing cluster |
+| Machine name | its cluster and `name`, where a machine has one, by a partial unique index (§3.5) | `409 conflict` naming the existing machine |
 
 The publish and ingest indexes are separate, each over its own kind, so a
 `publish` and an `ingest` operation bound to one draft revision never collide,
@@ -2082,6 +2125,7 @@ API revisions:
 | 7 | `GET /import-base-revisions/{id}/document` (§9.2, choice §17.41) |
 | 8 | `POST /clusters/{id}/first-keys` (§9.2, §3.4) |
 | 9 | `serial` and `notAfter` in the `access` object of an observation (§9.2, §3.3) |
+| 10 | `name` on a machine and on `POST /machines`, `POST /machines/{id}/names`, and the `name-change` timeline entry (§3.5) |
 
 ### 9.2 Resources and routes
 
@@ -2111,8 +2155,9 @@ idempotency and conflict behavior.
 | `GET /import-base-revisions/{id}/document` (the sanitized document of an import base revision, §3.2; no query, no ETag; API revision 7): `id`; `machine`; `document`, the stored text. Nothing else: no declarations, digest, baseline or generation path. The caller must be the revision's `author`, the import's source must be `document` (a file a person provided), and the import must have been continued by that same author after an operator review, so a second `author`, a drift adoption, a source `machine` import, a claim with no recorded source, an import made without review and one continued by another author read nothing; the document can still hold a value no one has marked. The read records no act and the server stores and logs nothing of the answer **(choice §17.41)** | 200, `Cache-Control: no-store`, also on every refusal; `403 forbidden` with `rule: not-the-importer` for another author, whatever the review state; `409 conflict` with `rule: import-not-reviewed` for the importer when the record does not show a file import they continued themselves; `404 not-found` | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/continuations`, `/takeovers` (a further mark on a paused ingestion and its continuation into the draft transaction, compilation §3.6; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation; a mark's also the owner generation it took (§9.3) | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2, a paused ingestion's included), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
-| `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3) | 201 | `author`, human only (§10.3) |
+| `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3, and an optional `name`, §3.5) | 201 | `author`, human only (§10.3) |
 | `POST /machines/{id}/talos-endpoints` (replace a machine's Talos endpoint, §3.3) | 201 | `author`, human only (§10.3) |
+| `POST /machines/{id}/names` (replace a machine's name, §3.5; API revision 10) | 201 | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
@@ -3636,6 +3681,7 @@ For a database restored to a backup taken at time *T*:
 | Idempotency records after *T* | absent | a retry executes afresh, or is refused `412 epoch-mismatch` if its `Bronzeward-Expected-Epoch` names an earlier epoch (§7.2, §12.4) |
 | Idempotency records from before *T* | earlier epoch once entry commits | a retry is refused `409 conflict` (§7.2) |
 | Display names written after *T* | as at *T*, or none for a row the backup lacks | rewritten by the subject's next admitted mutating request whose token carries the claim (§10) |
+| Machine names written after *T* | as at *T*, or none; the `name-change` timeline entries and acts after *T* are absent | the operator renames again (§3.5) |
 | Principals created after *T* | absent | `GET /principals` answers their identifiers `unknown` (§9.2); a human's row is created again, under a new identifier, by its next admitted mutating request, or, for a human `deniedSubjects` refuses, by its identity revocation, recorded or re-recorded (§10, §10.4) |
 | Identity revocations after *T* | absent | re-recorded by `recovery-admin`; the subject, human or service identity, is already refused by `deniedSubjects`, and the tool reissues no token to a listed service identity (§10.2, §10.4). A service identity also created after *T* has no row to re-record a revocation on: the list keeps it refused, and the tool creates no identity under its listed name, so it is not admitted again under that name (§10.4) |
 | Automation tokens | earlier epoch | refused; reissued with the tool **(choice §17.27)** |
@@ -4824,6 +4870,37 @@ design and evidence do not settle the question. Each is marked in place as
     keeps `talos-access` (§3.3 is still "Talos access"); `GET
     /clusters/{id}/first-keys` would pair with the supply route and read oddly
     as a collection.
+
+43. **A machine has an optional stored name, unique within its cluster, set at
+    inventory and replaced by an `author`** (§3.5; gap G8 of operator experience
+    §11). Owner decision, 2026-11-20 (BW-machine-name-1, ginsys/bronzeward#951;
+    Serge, typed 11:33 CET in the bronzeward lead's session, answering the four
+    alternatives below): "A. Stored name in the API - can optionally become the
+    hostname too, or can be different?" The answer to the question is §3.5: the
+    name and the Talos hostname are independent, and the name's grammar makes it
+    a valid hostname label so that a later specification can offer it as the
+    hostname's default; Serge's direction for that specification (typed 11:36
+    CET: "when setting the hostname, the default could be the machine name (if
+    set)") is carried by ginsys/bronzeward#976, not decided
+    here. Design choices, owned by the specification and open to review: the
+    route follows the endpoint replacement (§3.3), so a rename is an `author`,
+    human-only write that leaves a timeline entry and an act and is accepted in
+    recovery mode; the grammar is lowercase only and a name with uppercase is
+    refused, never folded, so there is one spelling for one name; the route
+    cannot clear a name, which leaves clients two states, at the cost that a
+    machine once named stays named; and no new immutable entity is added, since
+    the timeline entry and the act are the record. Alternatives: labels kept by
+    each client (a file for the CLI, browser storage for the web), which splits
+    one fact between devices, shows a second browser none and does not survive a
+    restore; a name composed by the client from the cluster name, endpoint and a
+    short node ID, which is what the tables show today; the hostname read from the
+    rendered configuration of the applied or desired release, which has no
+    value before a first publish, costs a review read for each
+    machine and is not unique. A route that clears the name, or `name: null` on
+    the replacement, was left out for the fewer client states. The cost of the
+    chosen course is an API revision, a migration of one nullable column and a
+    unique index, one write route, and titles that change when a machine is
+    renamed, so a copied title is stale.
 
 ## 18. Traceability
 

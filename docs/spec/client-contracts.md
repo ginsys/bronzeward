@@ -170,6 +170,7 @@ no role included (`internal/api/api.go:339`).
 | `cluster add` | `POST /clusters` | author | yes | | 201 | | |
 | `machine add` | `POST /machines` | author | yes | | 201 | | |
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | | 201 | | |
+| `machine rename` | `POST /machines/{id}/names` | author | yes | | 201 | | |
 | `cluster first-key` | `POST /clusters/{id}/first-keys` | author | yes | | 200 | `document` | |
 | `import start` | `POST /ingestions` | author | yes | draft's | 202 | `document` | |
 | `import mark` | `POST /ingestions/{id}/marks` | author | yes | | 202 | `marks` | |
@@ -267,7 +268,7 @@ supported.
 | G5 | No render of a draft before publication | no such route in `internal/api/routes.go:78-136` | later design issue L1: a compilation design change, not a client contract |
 | G6 | Provenance covers secret-reference occurrences only, not "which fragment set this field" | [compilation §8.1](compilation.md#81-provenance-by-tracer-composition) attributes stand-ins to reference occurrences | later design issue L1, as G5 |
 | G7 | Drift content is not served | the machine's drift and observation reads name the observation, its time and a matched release, and no configuration (`internal/api/drift.go:150-155`, `internal/api/inventory.go:251-257`, `internal/api/observations.go:16-17`) | later design issue L2: serving observed configuration is a redaction design question; until then clients use a drift-adoption import with review |
-| G8 | Machines have no human-readable name | the machine resource has no name member (`internal/api/inventory.go:260-275`) | accepted limitation for this milestone; clients show endpoint and node ID |
+| G8 | Machines have no human-readable name | the machine resource has no name member (`internal/api/inventory.go:260-275`) | decided: an optional stored name, unique within its cluster, from API revision 10 ([persistence and API §3.5](persistence-api.md#35-a-machines-name), choice §17.43; Serge, typed 2026-11-20 11:33 CET: "A. Stored name in the API"); until a server serves it, and for a machine without one, clients show the identifier, the endpoint and the node ID (rule A9) |
 | G9 | No list filters on machines, plans, releases, drafts or acts; no machine timeline stream | `internal/api/acts.go:135-145` refuses any key but `limit`, `cursor` and the route's filters; before [#280](https://github.com/ginsys/bronzeward/issues/280), filters existed only on operations and dependencies | API issue A4 for the filters the journeys need first: plans by `state` and `machine`, machines by `cluster`; accepted limitation for the release, draft and act filters, which clients apply over the pages they read; timeline polling accepted. A4's filters are served ([#280](https://github.com/ginsys/bronzeward/issues/280)): plans by `state` and `machine` (`internal/api/plans.go:429-451`), machines by `cluster` (`internal/api/reads.go:199-218`) |
 | G10 | No ingestion list | before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/routes.go:90`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/routes.go#L90) | closed by API issue A4 ([#280](https://github.com/ginsys/bronzeward/issues/280)): `GET /ingestions`, filtered by `state` and `machine` (`internal/api/ingestions.go:280-299`) |
 | G11 | Recovery marks, releases and accountings have no list route | `internal/api/routes.go:128-135` | accepted limitation: `GET /recovery` and the machine timeline |
@@ -1971,12 +1972,12 @@ one. The rule is one for both clients:
 | Object | Title | Built from | Reads beyond the object's own |
 | --- | --- | --- | --- |
 | Release | "`<draft title>`, published `<date>`" | `draft` and `publishedAt` of the release, `title` of `GET /drafts/{id}` | 1: the draft |
-| Plan | "`<apply or adopt>` of `<machine>` to `<release title>`" | `operation` (`apply-config` or `adopt`), `machine` and `release` of the plan | 2: its release, then that release's draft |
-| Operation | `publish`: "Publish of `<draft title>`"; `ingest`: "Import of `<machine>`", or "Import" when its `subject` names no machine; `apply-config` and `adopt`: "`<apply or adopt>` of `<plan title>`" | `kind` and `subject` | `publish`: 1; `ingest`: none; `apply-config` and `adopt`: up to 3 (its plan, that plan's release, then that release's draft) |
+| Plan | "`<apply or adopt>` of `<machine>` to `<release title>`" | `operation` (`apply-config` or `adopt`), `machine` and `release` of the plan | 3: its release, that release's draft and its machine |
+| Operation | `publish`: "Publish of `<draft title>`"; `ingest`: "Import of `<machine>`", or "Import" when its `subject` names no machine; `apply-config` and `adopt`: "`<apply or adopt>` of `<plan title>`" | `kind` and `subject` | `publish`: 1; `ingest`: 1 (the machine) or none; `apply-config` and `adopt`: up to 4 (its plan, that plan's release, that release's draft and the plan's machine) |
 
-1. `<machine>` is the machine's identifier (shortened in the web client, whole in the CLI) until the
-   owner decides G8; a stored machine name then replaces it without changing this rule.
-2. Each distinct draft, release and plan is read once for each web view, each read again and each
+1. `<machine>` is the machine's name where it has one (A9), else its identifier (shortened in the
+   web client, whole in the CLI).
+2. Each distinct draft, release, plan and machine is read once for each web view, each read again and each
    return to a view after one with no title, as A7 says of names, by the same store and the same
    safe-text rule; the CLI reads each once for each command. A read that fails keeps the
    identifier, under the retry bound the 503 row states for the names read (the web client keeps it
@@ -1989,6 +1990,28 @@ one. The rule is one for both clients:
 4. A title can name a person, so a client keeps it in memory for the web view's generation or for
    the command, and never in storage, a log or an error.
 5. `-o json` and `-o yaml` print the resource unchanged.
+
+**A9. A machine's name (client rule; API revision 10).** Closes G8. A client shows a machine by its
+name where the body carries one, with the identifier kept as the stable reference: in the web
+client the name as the text and the whole identifier as the title attribute, in the CLI the name
+beside the identifier as a cluster's is (`mch_9fd… (node-a)`, [operator experience §4](operator-experience.md#4-command-tree)).
+A machine with no name, and a server older than revision 10, which serves no member, read the same
+way: the identifier, the Talos endpoint and the node ID, as before.
+
+1. The name's grammar makes it safe text by construction (lowercase `a-z`, digits and hyphen), so
+   the remote-text rule of A7 and A8 is not needed for it. A client still renders it as a text node.
+2. The commands keep taking identifiers. A name is unique only within a cluster
+   ([persistence and API §3.5](persistence-api.md#35-a-machines-name)), so a command taking a name
+   would need the cluster too; that is a separate decision, and no client resolves a name to an
+   identifier.
+3. `machine add` takes an optional `--name`, and `machine rename <id> --name <name>` is a write
+   with the role and keying of the table in §3.2. A refusal `409 conflict` names the machine that
+   holds the name; a `400 invalid-request` names the grammar.
+4. A `name-change` entry on `GET /machines/{id}/timeline` is rendered from its members like any
+   other kind, and a client must not fail or drop the row for a kind it does not know:
+   `api/openapi.yaml:4178` types `kind` as a free string.
+5. A8's derived titles name the machine, so a title held before a rename is stale; A8 rule 4
+   already keeps no title beyond the view or the command.
 
 **C1. Contract correction.** Add the `reset` event to the stream contract of
 [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) (G15). A
