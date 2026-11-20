@@ -21,14 +21,13 @@ const (
 	caKeyDelete    = `path "secret/data/access/talos-ca/*" { capabilities = ["delete"] }`
 	caKeyList      = `path "secret/metadata/access/talos-ca/*" { capabilities = ["list"] }`
 	caKeyMetaRead  = `path "secret/metadata/access/talos-ca/*" { capabilities = ["read"] }`
-	accessWrite    = `path "secret/data/access/talos/*" { capabilities = ["create", "update"] }`
 	genCreateOnlyS = `path "secret/data/gen/*" { capabilities = ["create"] }`
 )
 
 func signerGrants(b *baotest.Bao) {
 	for name, hcl := range map[string]string{
 		"ca-key-read": caKeyRead, "ca-key-delete": caKeyDelete, "ca-key-list": caKeyList,
-		"ca-key-meta-read": caKeyMetaRead, "access-write": accessWrite, "gen-create-only-s": genCreateOnlyS,
+		"ca-key-meta-read": caKeyMetaRead, "gen-create-only-s": genCreateOnlyS,
 	} {
 		b.Policy(name, hcl)
 	}
@@ -37,7 +36,7 @@ func signerGrants(b *baotest.Bao) {
 func TestLiveSignerPolicyExact(t *testing.T) {
 	b := live(t)
 	policyExact(t, b, "bw-signer", map[string][]string{"secret/data/access/talos-ca/*": {"create", "read", "update"}}, []string{
-		caKeyDelete, caKeyList, caKeyMetaRead, accessRead, accessWrite, genRead, encryptArtifact, decryptArtifact,
+		caKeyDelete, caKeyList, caKeyMetaRead, genRead, encryptArtifact, decryptArtifact,
 		`path "secret/data/access/talos-ca/*" { capabilities = ["create", "read", "update", "delete"] }`,
 	})
 }
@@ -188,21 +187,6 @@ func TestLiveSignerIdentity(t *testing.T) {
 		_, err := raw(t, b, tok, http.MethodDelete, "/v1/secret/data/"+otherPath, nil)
 		return err
 	})
-	talos, err := TalosAccessPath(cl)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status, body, err := b.Do(b.Admin(), http.MethodPost, "/v1/secret/data/"+talos, map[string]any{"data": map[string]string{"talosconfig": "synthetic"}}); err != nil || status != http.StatusOK {
-		t.Fatalf("control: the operator's write: status %d, %v: %s", status, err, body)
-	}
-	deniedWithout(t, b, "the signer reading the Talos access", []string{"bw-signer"}, "access-read", func(tok string) error {
-		_, err := raw(t, b, tok, http.MethodGet, "/v1/secret/data/"+talos, nil)
-		return err
-	})
-	deniedWithout(t, b, "the signer writing the Talos access", []string{"bw-signer"}, "access-write", func(tok string) error {
-		_, err := raw(t, b, tok, http.MethodPost, "/v1/secret/data/access/talos/"+id.New(id.Cluster), map[string]any{"data": map[string]string{"talosconfig": "x"}})
-		return err
-	})
 	deniedWithout(t, b, "the signer creating a generation", []string{"bw-signer"}, "gen-create-only-s", func(tok string) error {
 		fresh, err := NewGenerationPath(id.New(id.Cluster), id.New(id.Ingestion), NewValueID())
 		if err != nil {
@@ -219,7 +203,7 @@ func TestLiveSignerIdentity(t *testing.T) {
 
 	// Every other identity is refused the CA key path, each beside the same request with a read
 	// grant added. The compiler read of a generation is the control that the token is live.
-	for _, who := range []string{"bw-ingestion", "bw-compiler", "bw-executor", "bw-metadata", "bw-orphan-report", "bw-onboard"} {
+	for _, who := range []string{"bw-ingestion", "bw-compiler", "bw-executor", "bw-metadata", "bw-orphan-report"} {
 		deniedWithout(t, b, who+" reading the CA key", []string{who}, "ca-key-read", func(tok string) error {
 			_, err := raw(t, b, tok, http.MethodGet, dataPath, nil)
 			return err

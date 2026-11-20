@@ -360,7 +360,7 @@ describe("the write views (#338)", () => {
     // The cluster is chosen by typing its name into the list, the platform left at metal.
     const [ip, next] = [`192.0.2.${1 + randomBytes(1)[0]! % 254}`, `198.51.100.${1 + randomBytes(1)[0]! % 254}`];
     await type([["cluster", name], ["talosNodeId", `synthetic-node-${randomBytes(4).toString("hex")}`], ["talosEndpoint", ip]]);
-    await expect(result()).toHaveText(expect.stringContaining(`Endpoint ${ip}:50000. Next: give Bronzeward the cluster's Talos access in the provider`), { wait: 20_000 });
+    await expect(result()).toHaveText(expect.stringContaining(`Endpoint ${ip}:50000. Next: supply the cluster's first key with bronzewardctl cluster first-key`), { wait: 20_000 });
     await result().$("a").click();
     await expect($("main h2")).toHaveText(expect.stringContaining("Machine "));
     await type([["talosEndpoint", next]], true);

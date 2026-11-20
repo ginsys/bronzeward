@@ -245,8 +245,8 @@ func TestLiveReportIdentity(t *testing.T) {
 	}
 	t.Logf("the identity listed gen/, the cluster and the claim, and read the metadata")
 
-	access := "access/talos/" + cl
-	if status, _, err := b.Do(b.Admin(), http.MethodPost, "/v1/secret/data/"+access, map[string]any{"data": map[string]string{"talosconfig": "synthetic"}}); err != nil || status != http.StatusOK {
+	access := "access/talos-ca/" + cl
+	if status, _, err := b.Do(b.Admin(), http.MethodPost, "/v1/secret/data/"+access, map[string]any{"data": map[string]string{"crt": "synthetic", "key": "synthetic"}}); err != nil || status != http.StatusOK {
 		t.Fatalf("seeding the access path: status %d, %v", status, err)
 	}
 	removeAtEnd(t, b, access)
@@ -263,7 +263,7 @@ func TestLiveReportIdentity(t *testing.T) {
 
 	grants := map[string]string{
 		"read-gen-data":      `path "secret/data/gen/*" { capabilities = ["read"] }`,
-		"read-access-data":   `path "secret/data/access/talos/*" { capabilities = ["read"] }`,
+		"read-access-data":   `path "secret/data/access/talos-ca/*" { capabilities = ["read"] }`,
 		"list-access-meta":   `path "secret/metadata/access/*" { capabilities = ["list"] }`,
 		"read-access-meta":   `path "secret/metadata/access/*" { capabilities = ["read"] }`,
 		"encrypt-staging":    `path "transit/encrypt/bw-staging" { capabilities = ["update"] }`,
@@ -285,7 +285,7 @@ func TestLiveReportIdentity(t *testing.T) {
 		{"a secret/data/gen/* read", "read-gen-data", func(tok string) int {
 			return statusOf(t, b, tok, http.MethodGet, "/v1/secret/data/"+p, "", nil)
 		}},
-		{"a secret/data/access/talos/* read", "read-access-data", func(tok string) int {
+		{"a secret/data/access/talos-ca/* read", "read-access-data", func(tok string) int {
 			return statusOf(t, b, tok, http.MethodGet, "/v1/secret/data/"+access, "", nil)
 		}},
 		{"a list of secret/metadata/access/", "list-access-meta", func(tok string) int {

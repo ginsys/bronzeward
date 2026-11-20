@@ -295,8 +295,8 @@ export function RecordMachine({ query }: { query: string }) {
     const m = data as Machine;
     return (
       <>
-        Machine <Ref to={`/machines/${m.id}`} id={m.id} /> recorded in cluster {short(m.cluster)}. Endpoint {m.talosEndpoint}. Next: give
-        Bronzeward the cluster's Talos access in the provider, outside Bronzeward, then import its configuration.
+        Machine <Ref to={`/machines/${m.id}`} id={m.id} /> recorded in cluster {short(m.cluster)}. Endpoint {m.talosEndpoint}. Next: supply
+        the cluster's first key with bronzewardctl cluster first-key, then import its configuration.
       </>
     );
   };

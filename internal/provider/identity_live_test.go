@@ -88,7 +88,7 @@ func policyExact(t *testing.T, b *baotest.Bao, name string, grant map[string][]s
 func TestLiveCompilerPolicyExact(t *testing.T) {
 	b := live(t)
 	policyExact(t, b, "bw-compiler", compilerGrant, []string{
-		decryptArtifact, genMetaRead, accessRead,
+		decryptArtifact, genMetaRead, caKeyRead,
 		`path "secret/data/gen/*" { capabilities = ["read", "create"] }`,
 		`path "transit/encrypt/*" { capabilities = ["update"] }`,
 	})
@@ -113,8 +113,7 @@ func liveGrants(b *baotest.Bao) {
 
 // TestLiveCompilerIdentity: the compiler client reads a pinned generation and encrypts under the
 // artifact key, which the executor decrypts; the identity is refused an artifact decrypt, a
-// generation create and a generation's metadata. (Its refusal of the Talos access is
-// TestLiveTalosAccess's.)
+// generation create and a generation's metadata.
 func TestLiveCompilerIdentity(t *testing.T) {
 	b := live(t)
 	liveGrants(b)

@@ -10,9 +10,8 @@ import (
 )
 
 // Executor is the executor identity's provider client (compilation.md §1, persistence-api.md
-// §3.3, execution-recovery.md §3.1). It reads the Talos access its observations use and decrypts
-// the rendered artifact it dispatches under the artifact key; no other identity may decrypt that
-// key (TestExecutorMethodSet).
+// §3.3, execution-recovery.md §3.1). It decrypts the rendered artifact it dispatches under the
+// artifact key; no other identity may decrypt that key (TestExecutorMethodSet).
 type Executor struct {
 	c        *client
 	artifact string
@@ -34,12 +33,6 @@ func NewExecutor(addr string, tok Token, artifactKey string) (*Executor, error) 
 // ArtifactKey is the name of the Transit key the executor decrypts artifacts under, as a use-time
 // check records it next to the key version.
 func (e *Executor) ArtifactKey() string { return e.artifact }
-
-// TalosAccess reads the latest version of cluster's Talos credential, as Ingestion.TalosAccess
-// does, under the executor's token.
-func (e *Executor) TalosAccess(ctx context.Context, cluster string) (TalosAccess, error) {
-	return readTalosAccess(ctx, e.c, cluster)
-}
 
 // Artifact is a decrypted rendered artifact: the machine configuration a dispatch sends. It renders
 // as a placeholder under every fmt verb and refuses JSON, YAML and text marshalling, so a log line,

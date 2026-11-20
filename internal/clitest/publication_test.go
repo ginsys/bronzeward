@@ -38,8 +38,8 @@ import (
 const standInNodeID = "7x1SuC8Ege5BGXdAfTEff5iQnlWZLfv9h1LGMxA2pYkC"
 
 // standIn is the seeded machine's Talos stand-in (talostest) on loopback. It reports the machine's
-// identity and a configuration the test generates; the cluster's talosconfig in the provider is
-// one the test generates for it. secrets are the values of both that the leak scan looks for.
+// identity and a configuration the test generates; the cluster's first key is the CA the test
+// generates for it. secrets are the values of both that the leak scan looks for.
 type standIn struct {
 	node    *talostest.Node
 	secrets []string
@@ -49,11 +49,11 @@ type standIn struct {
 // configSecret is a secret-bearing line of a generated configuration: a token, a secret or a key.
 var configSecret = regexp.MustCompile(`(?m)^\s*(?:token|secret|key|aescbcEncryptionSecret|secretboxEncryptionSecret): (\S{16,})$`)
 
-// newStandIn serves the stand-in, writes its talosconfig to the provider at
-// access/talos/<cluster> under the administrative identity, as the operator does (persistence-api
-// §5.4), and points the machine at it through the CLI. Each of unmarked is a synthetic secret its
-// configuration holds in a file's content, /var/etc/bwsynth-<n>.conf, which the schema does not
-// recognise, so only an operator's mark extracts it; the leak scan looks for it too.
+// newStandIn serves the stand-in, supplies the cluster's first key for it through the API, as the
+// operator does (persistence-api §5.4), and points the machine at it through the CLI. Each of
+// unmarked is a synthetic secret its configuration holds in a file's content,
+// /var/etc/bwsynth-<n>.conf, which the schema does not recognise, so only an operator's mark extracts
+// it; the leak scan looks for it too.
 func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(...string) result, unmarked ...string) *standIn {
 	t.Helper()
 	// The node trusts one CA: the cluster's first key supplies it, the server signs a certificate from it
@@ -94,12 +94,6 @@ func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(..
 	if len(st.secrets) < 5 {
 		t.Fatalf("the generated configuration holds %d secrets the scan can find", len(st.secrets)-3)
 	}
-	access := "/v1/secret/data/access/talos/" + s.cluster
-	data := map[string]any{"data": map[string]any{"talosconfig": string(pki.Talosconfig("", "", ""))}}
-	if status, body, err := b.Do(b.Admin(), http.MethodPost, access, data); err != nil || status/100 != 2 {
-		t.Fatalf("writing the talosconfig: %d %v %s", status, err, body)
-	}
-	t.Cleanup(func() { b.Do(b.Admin(), http.MethodDelete, "/v1/secret/metadata/access/talos/"+s.cluster, nil) })
 	// The first key, as a secrets bundle tried at the node: the server stores the CA key and records the act.
 	bundle := "certs:\n  os:\n    crt: " + base64.StdEncoding.EncodeToString(ca.Crt) + "\n    key: " + base64.StdEncoding.EncodeToString(ca.Key) + "\n"
 	fk, err := json.Marshal(map[string]string{"kind": "secrets-bundle", "document": bundle, "endpoint": node.Endpoint})
