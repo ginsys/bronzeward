@@ -183,6 +183,7 @@ type machineInput struct {
 	SMBIOSUUID    *string `json:"smbiosUuid"`
 	TalosNodeID   *string `json:"talosNodeId"`
 	Serial        *string `json:"serial"`
+	Name          *string `json:"name"`
 	Platform      string  `json:"platform"`
 	TalosEndpoint string  `json:"talosEndpoint"`
 }
@@ -211,6 +212,11 @@ func (in *machineInput) check(*API) error {
 	}
 	if in.Serial != nil {
 		if err := text("serial", *in.Serial, 128); err != nil {
+			return err
+		}
+	}
+	if in.Name != nil {
+		if err := machineName(*in.Name); err != nil {
 			return err
 		}
 	}
@@ -269,6 +275,7 @@ type observedBody struct {
 type machineBody struct {
 	ID                 string         `json:"id"`
 	Cluster            string         `json:"cluster"`
+	Name               *string        `json:"name"`
 	Hardware           hardware       `json:"hardware"`
 	Platform           string         `json:"platform"`
 	TalosEndpoint      string         `json:"talosEndpoint"`
@@ -292,25 +299,33 @@ func inventoryMachine(ctx context.Context, _ *API, tx *sql.Tx, q *request) (resu
 	if err := clusterExists(ctx, tx, in.Cluster); err != nil {
 		return result{}, err
 	}
-	b := machineBody{ID: id.New(id.Machine), Cluster: in.Cluster,
+	b := machineBody{ID: id.New(id.Machine), Cluster: in.Cluster, Name: in.Name,
 		Hardware: hardware{SMBIOSUUID: in.SMBIOSUUID, TalosNodeID: in.TalosNodeID, Serial: in.Serial},
 		Platform: in.Platform, TalosEndpoint: in.TalosEndpoint, ScopeState: "normal"}
 	if q.recovery {
 		b.ScopeState = "pre-restore-unaccounted"
 	}
-	// No conflict target: the two identity keys' indexes are the only ones a fresh identifier can
-	// meet, and the request carries exactly one key.
+	// No conflict target: a fresh identifier can meet three unique indexes, the two identity keys'
+	// (the request carries exactly one key) and the machine's name within its cluster. Which one
+	// stopped the insert is read afterwards, the identity key first: a recorded key is a `conflict`
+	// naming that machine, and only when none holds it is the name another machine's (§3.5).
 	var inserted string
-	err := tx.QueryRowContext(ctx, `INSERT INTO machine (id, cluster, smbios_uuid, talos_node_id, serial, scope_state, talos_endpoint, platform, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now()) ON CONFLICT DO NOTHING RETURNING id`,
-		b.ID, b.Cluster, b.Hardware.SMBIOSUUID, b.Hardware.TalosNodeID, b.Hardware.Serial, b.ScopeState, b.TalosEndpoint, b.Platform).Scan(&inserted)
+	err := tx.QueryRowContext(ctx, `INSERT INTO machine (id, cluster, name, smbios_uuid, talos_node_id, serial, scope_state, talos_endpoint, platform, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now()) ON CONFLICT DO NOTHING RETURNING id`,
+		b.ID, b.Cluster, in.Name, b.Hardware.SMBIOSUUID, b.Hardware.TalosNodeID, b.Hardware.Serial, b.ScopeState, b.TalosEndpoint, b.Platform).Scan(&inserted)
 	if errors.Is(err, sql.ErrNoRows) {
 		var existing string
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM machine WHERE smbios_uuid = $1 OR talos_node_id = $2`,
-			b.Hardware.SMBIOSUUID, b.Hardware.TalosNodeID).Scan(&existing); err != nil {
+		switch err := tx.QueryRowContext(ctx, `SELECT id FROM machine WHERE smbios_uuid = $1 OR talos_node_id = $2`,
+			b.Hardware.SMBIOSUUID, b.Hardware.TalosNodeID).Scan(&existing); {
+		case err == nil:
+			return result{}, refuse(http.StatusConflict, "conflict", "a machine with this identity key is already inventoried").with("machine", existing)
+		case !errors.Is(err, sql.ErrNoRows):
 			return result{}, err
 		}
-		return result{}, refuse(http.StatusConflict, "conflict", "a machine with this identity key is already inventoried").with("machine", existing)
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM machine WHERE cluster = $1 AND name = $2`, b.Cluster, in.Name).Scan(&existing); err != nil {
+			return result{}, err
+		}
+		return result{}, nameInUse(existing)
 	}
 	if err != nil {
 		return result{}, err

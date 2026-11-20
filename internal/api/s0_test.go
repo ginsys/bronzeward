@@ -51,8 +51,8 @@ func TestS0DeniedWalk(t *testing.T) {
 			humanOnly++
 		}
 	}
-	if humanOnly != 22 {
-		t.Fatalf("%d human-only routes; §9.2 marks 22", humanOnly)
+	if humanOnly != 23 {
+		t.Fatalf("%d human-only routes; §9.2 marks 23", humanOnly)
 	}
 	for _, s := range walk {
 		rec := e.do(e.api, call{method: s.method, path: path(s.pattern), token: s.token, key: "k0123456789abcdef", ifMatch: `"1-x"`, body: `{}`})

@@ -1466,6 +1466,38 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/EndpointChangeBody'}
         default: {$ref: '#/components/responses/Problem'}
+  /machines/{id}/names:
+    post:
+      operationId: postMachinesIdNames
+      tags: [machines]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ExpectedEpoch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NameInput'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Location: {$ref: '#/components/headers/Location'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NameChangeBody'}
+        default: {$ref: '#/components/responses/Problem'}
   /machines/{id}/timeline:
     get:
       operationId: getMachinesIdTimeline
@@ -2440,6 +2472,7 @@ components:
           - urn:bronzeward:problem:dependency-unavailable
           - urn:bronzeward:problem:machine-identity-mismatch
           - urn:bronzeward:problem:talos-access-unavailable
+          - urn:bronzeward:problem:name-in-use
         title: {type: string}
         status: {type: integer}
         instance: {type: string}
@@ -2944,6 +2977,35 @@ components:
       properties:
         talosEndpoint: {type: string}
       additionalProperties: false
+    NameChangeBody:
+      type: object
+      required:
+      - machine
+      - revision
+      - previousName
+      - name
+      - changedBy
+      - role
+      - act
+      - epoch
+      - at
+      properties:
+        machine: {type: string}
+        revision: {type: integer}
+        previousName: {type: [string, 'null'], description: The name before the change; null when the machine had none.}
+        name: {type: string}
+        changedBy: {type: string}
+        role: {type: string}
+        act: {type: string}
+        epoch: {type: string}
+        at: {type: string, format: date-time}
+      additionalProperties: false
+    NameInput:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'}
+      additionalProperties: false
     EntryBody:
       type: object
       required:
@@ -3233,6 +3295,7 @@ components:
       required:
       - id
       - cluster
+      - name
       - hardware
       - platform
       - talosEndpoint
@@ -3246,6 +3309,7 @@ components:
       properties:
         id: {type: string}
         cluster: {type: string}
+        name: {type: [string, 'null'], description: 'The machine''s name, unique within its cluster; null when it has none (persistence and API §3.5, API revision 10).'}
         hardware: {$ref: '#/components/schemas/Hardware'}
         platform: {type: string}
         talosEndpoint: {type: string}
@@ -3276,6 +3340,7 @@ components:
         smbiosUuid: {type: [string, 'null'], description: A UUID in its 8-4-4-4-12 hexadecimal form.}
         talosNodeId: {type: [string, 'null'], description: The node ID `talosctl get identity` prints.}
         serial: {type: [string, 'null']}
+        name: {type: [string, 'null'], pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$', description: 'An optional name, unique within the cluster (persistence and API §3.5).'}
         platform: {type: string, enum: [metal, container, cloud]}
         talosEndpoint: {type: string}
       additionalProperties: false

@@ -331,7 +331,7 @@ bronzewardctl
   cluster discover                    --talosconfig required; reads Talos, prints commands, writes nothing
   cluster first-key                   supply or replace the cluster's first key; the server keeps the Talos CA key
   cluster onboard                     discover, record, supply the first key, import each machine
-  machine list | show | add | set-endpoint | rename    (rename: not served yet, G8)
+  machine list | show | add | set-endpoint | rename    (rename: served from API revision 10, the command is not built yet, G8)
   machine timeline | observations    paged; --follow polls (G9)
   machine freeze | unfreeze           --reason required
 
@@ -1532,7 +1532,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `cluster onboard` | `POST /clusters`, `POST /machines`, `POST /clusters/{id}/first-keys`, `POST /drafts`, `POST /ingestions` | author (human) | yes | draft's |
 | `machine add` | `POST /machines` | author | yes | no |
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | no |
-| `machine rename` (not served yet: [persistence and API §3.5](persistence-api.md#35-a-machines-name)) | `POST /machines/{id}/names` | author | yes | no |
+| `machine rename` (served from API revision 10, [persistence and API §3.5](persistence-api.md#35-a-machines-name); the command is not built yet) | `POST /machines/{id}/names` | author | yes | no |
 | `import start` | `POST /ingestions` | author | yes | draft's |
 | `import review` | `GET /ingestions/{id}/review` | author | yes | no |
 | `import base` (web: the import base summary) | `GET /import-base-revisions/{id}` | author | yes | no |

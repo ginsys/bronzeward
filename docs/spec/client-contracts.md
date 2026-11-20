@@ -170,7 +170,7 @@ no role included (`internal/api/api.go:339`).
 | `cluster add` | `POST /clusters` | author | yes | | 201 | | |
 | `machine add` | `POST /machines` | author | yes | | 201 | | |
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | | 201 | | |
-| `machine rename` (not served yet: [persistence and API §3.5](persistence-api.md#35-a-machines-name)) | `POST /machines/{id}/names` | author | yes | | 201 | | |
+| `machine rename` (served from API revision 10, [persistence and API §3.5](persistence-api.md#35-a-machines-name); the command is not built yet) | `POST /machines/{id}/names` | author | yes | | 201 | | |
 | `cluster first-key` | `POST /clusters/{id}/first-keys` | author | yes | | 200 | `document` | |
 | `import start` | `POST /ingestions` | author | yes | draft's | 202 | `document` | |
 | `import mark` | `POST /ingestions/{id}/marks` | author | yes | | 202 | `marks` | |

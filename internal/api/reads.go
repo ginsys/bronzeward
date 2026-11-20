@@ -207,7 +207,7 @@ var (
 // Pending convergence (execution-recovery §1) compares the Desired release's artifact digest for
 // the machine with the Applied digest, which after an adoption is the import base's, never the
 // release identifiers; a machine with a Desired release and no Applied state is pending.
-const selectMachine = `SELECT m.id, m.cluster, m.smbios_uuid::text, m.talos_node_id, m.serial, m.platform, m.talos_endpoint, m.frozen, m.scope_state, s.desired,
+const selectMachine = `SELECT m.id, m.cluster, m.name, m.smbios_uuid::text, m.talos_node_id, m.serial, m.platform, m.talos_endpoint, m.frozen, m.scope_state, s.desired,
 		s.applied_release, s.applied_source, ra.import_base_revision, ob.id, ob.at,
 		CASE WHEN ob.configuration_digest = s.applied_digest THEN s.applied_release
 			WHEN ob.configuration_digest = rd.configuration_digest THEN s.desired END,
@@ -225,7 +225,7 @@ func scanMachine(r interface{ Scan(...any) error }) (machineBody, error) {
 	var rel, source, base, obs, observedRelease, driftObs, driftLast, late sql.NullString
 	var observedAt sql.NullTime
 	var opened sql.NullInt64
-	err := r.Scan(&b.ID, &b.Cluster, &b.Hardware.SMBIOSUUID, &b.Hardware.TalosNodeID, &b.Hardware.Serial, &b.Platform, &b.TalosEndpoint, &b.Frozen, &b.ScopeState, &b.Desired, &rel, &source, &base,
+	err := r.Scan(&b.ID, &b.Cluster, &b.Name, &b.Hardware.SMBIOSUUID, &b.Hardware.TalosNodeID, &b.Hardware.Serial, &b.Platform, &b.TalosEndpoint, &b.Frozen, &b.ScopeState, &b.Desired, &rel, &source, &base,
 		&obs, &observedAt, &observedRelease, &opened, &driftObs, &driftLast, &late, &b.PendingConvergence)
 	if opened.Valid {
 		b.OpenDrift = &openDriftBody{Revision: opened.Int64, Observation: driftObs.String, LastObservation: driftLast.String}
