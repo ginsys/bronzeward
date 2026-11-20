@@ -33,7 +33,7 @@ func TestMachineTimeline(t *testing.T) {
 		entry(5, "refusal", `{"transaction":"T6","comparison":"6","plan":"pln_b","operation":"op_b","cause":"the machine's Desired moved","controller":"ctl_b","generation":1}`),
 		entry(6, "commitment", `{"plan":"pln_c","operation":"op_c","approval":"apr_c","observation":"obs_c","controller":"ctl_b","generation":9007199254740993}`),
 		entry(7, "drift", `{"observation":"obs_d","digest":"BWSYNTH"}`),
-		// A kind this client was built before (API revision 10's name-change) is printed as its record.
+		// API revision 10's name-change entry (client contracts A9 item 4) is told from its members.
 		entry(8, "name-change", `{"previous":null,"new":"web-1","principal":"h-all","role":"author"}`),
 	}
 	var mu sync.Mutex
@@ -102,7 +102,7 @@ func TestMachineTimeline(t *testing.T) {
 		"refusal              operation op_b, plan pln_b, comparison 6, cause the machine's Desired moved",
 		"commitment           operation op_c, plan pln_c, approval apr_c, observation obs_c, controller ctl_b, generation 9007199254740993",
 		`drift                {"digest":"BWSYNTH","observation":"obs_d"}`,
-		`name-change          {"new":"web-1","previous":null,"principal":"h-all","role":"author"}`,
+		"name-change          none -> web-1, by h-all (author)",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("machine timeline: no line %q in\n%s", want, out.String())

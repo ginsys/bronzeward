@@ -82,6 +82,9 @@ type apiFake struct {
 	keyAnswer func(n int, w http.ResponseWriter)
 	// onPost, when set, runs for every write before it is answered and may set headers on the answer.
 	onPost func(path string, w http.ResponseWriter)
+	// machineRefusal, when set, is the code of a 409 that answers every POST /machines, naming the
+	// machine mch_holder as the server's `conflict` and `name-in-use` both do.
+	machineRefusal string
 }
 
 func (f *apiFake) writes() []string {
@@ -191,6 +194,10 @@ func (f *apiFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.SmbiosUuid != nil {
 			key = strings.ToLower(*in.SmbiosUuid)
+		}
+		if f.machineRefusal != "" {
+			f.problem(w, http.StatusConflict, f.machineRefusal, `,"machine":"mch_holder"`)
+			return
 		}
 		for _, m := range f.machines {
 			if m.key == key {

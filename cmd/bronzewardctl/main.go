@@ -63,7 +63,8 @@ commands:
               Ctrl-C stops it with exit 130; -o json prints one entry per line, -o yaml one
               document per entry
   machine add --cluster <id> (--talos-node-id <id> | --smbios-uuid <uuid>) [--serial <s>]
-              --platform metal|container|cloud --talos-endpoint <ip>[:<port>]
+              --platform metal|container|cloud --talos-endpoint <ip>[:<port>] [--name <name>]
+  machine rename <id> --name <name>
   machine set-endpoint <id> --talos-endpoint <ip>[:<port>]
               writes, by a person signed in as author, repeat a write whose outcome was unknown
               exactly with --idempotency-key, --expect-epoch and --expect-principal as printed

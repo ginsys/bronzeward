@@ -222,6 +222,13 @@ func (e *env) timelineText(kind string, entry any) string {
 		return strings.Join(kept, ", ")
 	}
 	switch kind {
+	case "name-change":
+		// A name stays remote text: tf and sf escape it when the line is printed. previous is null on a first naming.
+		prev := "none"
+		if s, ok := d["previous"].(string); ok {
+			prev = s
+		}
+		return join(prev+" -> "+field(d, "new"), by)
 	case "plan":
 		return join(fields(d, "plan ", "plan", "operation ", "operation", "release ", "release"), by)
 	case "approval":
