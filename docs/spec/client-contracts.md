@@ -1548,16 +1548,17 @@ Plaintext can pass through a client in these places only:
 Not protected: rendered release reviews, plan diffs and provenance are redacted by the server
 ([compilation §8.3](compilation.md#83-redaction)) and are handled as ordinary reads.
 
-**Open: a fragment revision.** `GET /fragment-revisions/{id}` is read by every role and answers a
+**Decided: a fragment revision stays readable by every role, with the limit recorded.** `GET /fragment-revisions/{id}` is read by every role and answers a
 fragment's sanitized text, which can hold a value nobody marked: a fragment update ingests under a
 transient claim, so no review reads it before it is stored (`internal/api/fragments.go:126`,
 [persistence and API §9.3](persistence-api.md#93-examples), [compilation §3.6](compilation.md#36-operator-review)),
 and detection is not promised ([compilation §2.4](compilation.md#24-what-identification-does-not-promise),
-[§8.4](compilation.md#84-what-redaction-does-not-cover)). The route is not in the table above, and
-until the owner decides, both clients handle it as an ordinary read under that accepted limit; the
-web view's display rules are in [operator experience §9](operator-experience.md#9-secret-handling-in-the-clients)
-item 9. Whether the read becomes a protected one is
-[#974](https://github.com/ginsys/bronzeward/issues/974).
+[§8.4](compilation.md#84-what-redaction-does-not-cover)). The route is not in the table above:
+both clients handle it as an ordinary read under that accepted limit. The owner decided it (Serge,
+typed 2026-11-20 11:36 CET in the bronzeward lead's session, answering
+[ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974): "1. Every role, limit
+recorded."), so making the read a protected one is a new decision. The web view's display rules
+are in [operator experience §9](operator-experience.md#9-secret-handling-in-the-clients) item 9.
 
 The review is served to any human `author`, not only the one who started the ingestion
 (`internal/api/routes.go:99`), as the contract intends: "only to the roles that may mark"

@@ -1500,8 +1500,9 @@ restore nobody entered stays the same residual
    [§8.4](compilation.md#84-what-redaction-does-not-cover),
    [persistence and API §9.3](persistence-api.md#93-examples)). The route is open to every role, so
    it is not a protected read like items 2 and 8: the clients treat it as an ordinary read under
-   that accepted limit, and whether it becomes a protected one is
-   [ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974). The web view that
+   that accepted limit. The owner decided it (Serge, typed 2026-11-20 11:36 CET, answering
+   [ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974): "1. Every role, limit
+   recorded."), so making the read a protected one is a new decision. The web view that
    exists (`/fragment-revisions/{id}`, reached from a fragment's revisions list and a release's
    source rows) has these display rules, which are the web view's own. It shows the text as served
    in a text node in a `pre` (`web/src/resources.tsx:215`), never parsed or rendered as markup, with
@@ -1513,8 +1514,8 @@ restore nobody entered stays the same residual
    cannot promise it holds no value nobody marked, as item 8 says of the import base text. The view
    shows no such notice today (`web/src/resources.tsx:198-225`), and an implementation issue
    carries it. The CLI's `fragment show` is unchanged (`-o json` prints the body
-   whole), as are the draft editor's and the composition views' reads of the same text: a rule on
-   one client only would half-decide ginsys/bronzeward#974.
+   whole), as are the draft editor's and the composition views' reads of the same text: the limit
+   is the same on every client.
 
 ## 10. Action, route and role matrix
 
@@ -1614,7 +1615,7 @@ general secret browser (milestone exclusion).
 | C5 | Concurrency and retries | last-seen ETag; re-read then write; journal of requests | Last-seen ETag per draft, stop on 412; repeat an ambiguous write with its key only on request, for the exact request held in memory, the same principal and the same epoch ([§8](#8-states-every-view-must-handle)), an epoch the write's own transaction checks against the one the client last saw (G13, closed by #293); no body journal: re-reading before writing is a silent overwrite, and a journal would store documents and marks | accepted, within the limits of §8; any persistence across restarts is #253's |
 | C6 | Names of plans, releases and operations | a stored name set at creation (API revision, a field on three bodies); a title derived from fields the body already carries; the identifier only | A derived title: it needs no API change and no new place for an operator to type a name, and an operation has no author who could name it. The cost is up to three extra reads for an operation, which both clients bound to one read per object (client contracts A8). A stored name stays open for a plan or a release if the derived title proves too weak | accepted for the specification; the implementation issues carry it; usability unmeasured |
 | C7 | The cluster page | the page that exists (cluster fields, its machines with counts, its open drafts); add plans and releases; add Talos credential state | The page that exists, and no more: the plan list has no cluster filter (G20), releases are filtered in the browser (G9 of the client contracts), and credential state is [#856](https://github.com/ginsys/bronzeward/issues/856)'s. A page that read every machine's plans to show a count would cost one read per machine on every visit | accepted; usability unmeasured |
-| C8 | The fragment revision view | none (reads only through the draft editor and the composition views); a read-only page with display rules; a page for authors only | A read-only page with display rules that the web view alone applies (§9 item 9): text node in a `pre`, a notice that the server cannot promise the text holds no unmarked value, no copy or download, memory only. The access rule (every role, or authors only) is not decided here | display rules accepted; access rule open, [#974](https://github.com/ginsys/bronzeward/issues/974) |
+| C8 | The fragment revision view | none (reads only through the draft editor and the composition views); a read-only page with display rules; a page for authors only | A read-only page with display rules that the web view alone applies (§9 item 9): text node in a `pre`, a notice that the server cannot promise the text holds no unmarked value, no copy or download, memory only. The access rule stays every role, the limit recorded (§9 item 9); an authors-only read would break the release source rows, the draft editor and the composition views for the other roles | accepted; the access rule is the owner's, 2026-11-20 ([ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974)); the notice is not built yet |
 
 ## 13. Usability and accessibility acceptance
 
