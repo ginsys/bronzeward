@@ -571,7 +571,7 @@ Its `endpoint` is the IP address of the first control-plane member that answered
 address that member was read at (never the name `--endpoint` was given: a DNS name was resolved once
 for the first reads and no member address comes from it); a first key of any other kind is tried at
 the same address. A cluster where no control-plane member answered stops at discovery, exit 1 with nothing
-sent, because no address could carry the first key. `cluster discover` prints that same address in
+sent, because no address could carry the first key; `--skip-first-key` sends none and needs no address. `cluster discover` prints that same address in
 its `cluster first-key` command.
 
 A second run finds what exists and changes nothing that stands, except the first key, which it supplies

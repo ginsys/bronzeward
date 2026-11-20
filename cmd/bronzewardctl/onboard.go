@@ -206,7 +206,7 @@ func (e *env) clusterOnboard(args []string) (err error) {
 		return errors.New("no https Kubernetes endpoint to record: the first control-plane member gave none, so give --kubernetes-endpoint <https url>. Nothing was recorded")
 	}
 	address, ok := firstControlPlane(res)
-	if !ok {
+	if !ok && !a.skipFirstKey {
 		return errors.New("no control-plane member answered, so no address can carry the first key. Nothing was recorded: run the command again once one does")
 	}
 	obj := &onboarding{FirstKey: onboardPart{State: stateNotRun.s()}, Cluster: onboardCluster{onboardPart: onboardPart{State: stateNotRun.s()}}}
