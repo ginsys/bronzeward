@@ -11,17 +11,17 @@ const KNOWN: Record<string, Record<string, [now: string, next: string | undefine
     running: ["A worker is compiling the draft and writing the release.", "Wait; nothing to do."],
     succeeded: [
       "The draft became an immutable release. Nothing was sent to any machine.",
-      "Create a plan for each machine (publisher): an adopt plan where it has no Applied configuration, which sends nothing; an apply plan otherwise, which sends the release.",
+      "Create a plan for each machine (publisher): an adopt plan where it has no Applied configuration or has open drift to take over, which sends nothing; an apply plan otherwise, or to revert open drift, which sends the release.",
     ],
     failed: ["The draft was not published; no release was made.", "Fix the cause named above and publish again; a publish is safe to repeat."],
   },
   ingest: {
     running: [
-      "The import is reading the machine's configuration into the draft, waits for review, or has stalled with its runner gone.",
+      "The import is reading its source into the draft, waits for review, or has stalled with its runner gone.",
       "Open the import to see which; an author reviews a paused one and takes a stalled one over or abandons it.",
     ],
-    succeeded: ["The machine's configuration is stored in the draft. Nothing was written to the machine.", "Publish the draft (publisher)."],
-    failed: ["No configuration was stored from the machine, and nothing was written to it.", "Start the import again (author)."],
+    succeeded: ["The imported configuration is stored in the draft. Nothing was written to any machine.", "Publish the draft (publisher)."],
+    failed: ["No configuration was stored from the import's source, and nothing was written to any machine.", "Start the import again (author)."],
   },
   "apply-config": {
     committed: ["The controller committed the plan and holds the machine; no request is sent yet.", "Wait for the controller."],
