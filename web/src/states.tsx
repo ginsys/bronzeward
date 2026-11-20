@@ -62,6 +62,15 @@ export function Status({ children, actions, testid = "status", role = "status" }
     mirror?.(id, role === "status" ? (shown.current?.textContent ?? "") : undefined);
   });
   useEffect(() => () => mirror?.(id, undefined), [mirror, id]);
+  // A child that changes on its own, such as a title arriving for an identifier, changes the text with no
+  // render of the message: the mirror follows it.
+  useEffect(() => {
+    const el = shown.current;
+    if (mirror === undefined || el === null || role !== "status") return;
+    const watcher = new MutationObserver(() => mirror(id, el.textContent ?? ""));
+    watcher.observe(el, { subtree: true, childList: true, characterData: true });
+    return () => watcher.disconnect();
+  }, [mirror, id, role]);
   return (
     <div className={role === "alert" ? "alert danger" : "alert"}>
       <Icon name={role === "alert" ? "error" : "info"} />

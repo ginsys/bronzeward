@@ -6,6 +6,7 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useR
 import type { Client, ReadResult } from "./request.ts";
 import { follow } from "./router.ts";
 import { Empty, Loading, Status } from "./states.tsx";
+import { bodiesOf, genOf } from "./bodies.ts";
 
 export type Load<T> = { kind: "loading" } | ReadResult<T>;
 export type Failed = Exclude<ReadResult<unknown>, { kind: "ok" | "discarded" }>;
@@ -178,6 +179,8 @@ export function useItem<T>(path: string, keep?: Keep, n = 0, onSettled?: () => v
       put({ kind: "loading" });
     }
     void client.read<T>(path).then((res) => {
+      // The body the page reads is the one a title built on this object uses, and is read no more.
+      if (res.kind === "ok" && live && ok()) bodiesOf(client).offer(genOf(view, again), path, res.data);
       settleKept(settle, lost, res, put, () => live && ok(), held);
       if (live && ok()) told.current?.();
     });

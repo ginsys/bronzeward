@@ -4,7 +4,8 @@
 // behaviours of the principal names' store (principals.ts) and adds a bound on reads in flight.
 
 import { describe, expect, test } from "vitest";
-import { createBodies, draftText, operationTitle, planTitle, releaseTitle, TITLE_READS } from "./titles.ts";
+import { createBodies, TITLE_READS } from "./bodies.ts";
+import { draftText, operationTitle, planTitle, releaseTitle } from "./titles.ts";
 import type { ReadResult } from "./request.ts";
 import { when } from "./states.tsx";
 
