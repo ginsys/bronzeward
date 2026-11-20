@@ -38,9 +38,10 @@ func (e *env) machineTimeline(args []string) error {
 	}
 	path := "/machines/" + url.PathEscape(pos[0]) + "/timeline"
 	if !follow {
-		return list(e, l, path, url.Values{}, nil, "REVISION\tAT\tKIND\tENTRY", "", func(w *tabwriter.Writer, t *apitypes.TimelineEntry) {
-			tf(w, "%d\t%s\t%s\t%s\n", t.Revision, when(t.At), t.Kind, timelineText(t.Kind, t.Entry))
-		})
+		return listWho(e, l, path, url.Values{}, nil, func(t *apitypes.TimelineEntry) []string { return entryPrincipals(t.Entry) },
+			"REVISION\tAT\tKIND\tENTRY", "", func(w *tabwriter.Writer, t *apitypes.TimelineEntry) {
+				tf(w, "%d\t%s\t%s\t%s\n", t.Revision, when(t.At), t.Kind, e.timelineText(t.Kind, t.Entry))
+			})
 	}
 	if l.all || l.cursor != "" {
 		return usageError{errors.New("--follow starts at the newest entries: give no --cursor or --all")}
@@ -163,6 +164,15 @@ func (e *env) followTimeline(c *client.Client, path string, limit int, machine s
 // entries prints timeline entries as they arrive: in a table, a line each; with -o json each entry
 // unchanged on its own line; with -o yaml each as its own document.
 func (e *env) entries(c *client.Client, items []json.RawMessage) error {
+	if e.output == "table" {
+		var ids []string
+		for _, raw := range items {
+			if ts, err := decode[apitypes.TimelineEntry](c, raw); err == nil {
+				ids = append(ids, entryPrincipals(ts[0].Entry)...)
+			}
+		}
+		e.preload(c, ids...)
+	}
 	for _, raw := range items {
 		switch e.output {
 		case "table":
@@ -171,7 +181,7 @@ func (e *env) entries(c *client.Client, items []json.RawMessage) error {
 				return err
 			}
 			t := ts[0]
-			if err := tf(e.out, "%-8d  %-23s  %-20s  %s\n", t.Revision, when(t.At), t.Kind, timelineText(t.Kind, t.Entry)); err != nil {
+			if err := tf(e.out, "%-8d  %-23s  %-20s  %s\n", t.Revision, when(t.At), t.Kind, e.timelineText(t.Kind, t.Entry)); err != nil {
 				return err
 			}
 		case "yaml":
@@ -191,12 +201,13 @@ func (e *env) entries(c *client.Client, items []json.RawMessage) error {
 // timelineText says what a timeline entry records, by its kind (decision T24 of #258): a plan,
 // its approval, an approval's revocation and a plan's cancellation by name, an operation's entry
 // as its event says it with the operation first; any other kind prints its record as JSON.
-func timelineText(kind string, entry any) string {
+func (e *env) timelineText(kind string, entry any) string {
 	raw, _ := json.Marshal(entry)
 	var d map[string]any
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber() // a number keeps its digits: float64 would round 9007199254740993
 	_ = dec.Decode(&d)
+	e.named(d)
 	by := ""
 	if p := field(d, "principal"); p != "" {
 		by = "by " + p + " (" + field(d, "role") + ")"

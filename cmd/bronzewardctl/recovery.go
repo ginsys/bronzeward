@@ -64,17 +64,23 @@ func (e *env) recoveryStatus(args []string) error {
 			return fmt.Errorf("the epoch changed from %s to %s while the next steps were read; nothing is shown. Read it again with: recovery status",
 				client.ShellWord(rec.Epoch), client.ShellWord(now))
 		}
+		if rec.Entry != nil {
+			e.preload(c, rec.Entry.EnteredBy)
+		}
+		if rec.Exit != nil {
+			e.preload(c, rec.Exit.ExitedBy)
+		}
 		return e.emit(r.Body, func(w *tabwriter.Writer) {
 			fmt.Fprintf(w, "Epoch\t%s\n", client.Printable(rec.Epoch))
 			fmt.Fprintf(w, "Recovery mode\t%s\n", map[bool]string{true: "on", false: "off"}[rec.RecoveryMode])
 			fmt.Fprintf(w, "Start mode\t%s (GET /server)\n", client.ShownStartMode(c.Context.StartMode))
 			if en := rec.Entry; en != nil {
-				fmt.Fprintf(w, "Entered\t%s by %s: %s\n", when(en.EnteredAt), client.Printable(en.EnteredBy), client.Printable(en.Reason))
+				fmt.Fprintf(w, "Entered\t%s by %s: %s\n", when(en.EnteredAt), client.Printable(e.who(en.EnteredBy)), client.Printable(en.Reason))
 				fmt.Fprintf(w, "Restore stopped\t%s\n", when(en.StoppedAt))
 				fmt.Fprintf(w, "Restored\t%s\n", restoredList(en.Restored))
 			}
 			if x := rec.Exit; x != nil {
-				fmt.Fprintf(w, "Exited\t%s by %s (act %s)\n", when(x.At), client.Printable(x.ExitedBy), client.Printable(x.Act))
+				fmt.Fprintf(w, "Exited\t%s by %s (act %s)\n", when(x.At), client.Printable(e.who(x.ExitedBy)), client.Printable(x.Act))
 			}
 			if len(rows) == 0 {
 				fmt.Fprintln(w, "Scopes\tnone in recovery")

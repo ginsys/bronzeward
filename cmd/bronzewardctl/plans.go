@@ -45,7 +45,7 @@ func (e *env) planCmd(args []string) error {
 			return nil
 		}
 		var change string
-		if lines, change = planSnapshot(c, r, p); change != "" {
+		if lines, change = e.planSnapshot(c, r, p); change != "" {
 			return fmt.Errorf("%s while the plan was read; nothing is shown. Read it again with: plan show %s", change, client.ShellWord(p.Id))
 		}
 		return nil
@@ -58,8 +58,8 @@ func (e *env) planCmd(args []string) error {
 // section 8.5). The plan answer's own epoch is compared, and so is the count of moves since that
 // answer, the GET /server it called for included, so that an epoch changed and changed back is
 // seen too.
-func planSnapshot(c *client.Client, r *client.Response, p *apitypes.PlanBody) ([]string, string) {
-	return snapshot(c, r, func() []string { return planView(c, p) })
+func (e *env) planSnapshot(c *client.Client, r *client.Response, p *apitypes.PlanBody) ([]string, string) {
+	return snapshot(c, r, func() []string { return e.planView(c, p) })
 }
 
 // snapshot is planSnapshot for any lines that read builds from the answer r and further reads.
@@ -232,7 +232,7 @@ func (e *env) planCreateOn(c *client.Client, req *planRequest, opts planOpts) er
 		var change string
 		// The extra lines read further, so they belong to the snapshot the epoch checks cover.
 		if view, change = snapshot(c, r, func() []string {
-			v := planView(c, &p)
+			v := e.planView(c, &p)
 			if extra != nil {
 				v = append(v, extra(c, &p)...)
 			}
@@ -296,7 +296,8 @@ func createWords(release, machine, operation string) string {
 // planView is T20's plan display: every PlanBody field, the machine and cluster reads, the
 // evidence, the expiry with the time left by this client's clock, and the state lines. A read it
 // cannot make is named in its line, never guessed.
-func planView(c *client.Client, p *apitypes.PlanBody) []string {
+func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
+	e.preload(c, p.CreatedBy.Principal)
 	var m apitypes.MachineBody
 	mErr := getJSON(c, "/machines/"+url.PathEscape(p.Machine), &m)
 	var cl apitypes.ClusterBody
@@ -332,7 +333,7 @@ func planView(c *client.Client, p *apitypes.PlanBody) []string {
 		sf("  Limits\ttransport %s, verification %s, observation age %ds, check validity %ds, attempts %s, rollout %d",
 			secs(p.TransportDeadlineSeconds), secs(p.VerificationDeadlineSeconds), p.MaxObservationAgeSeconds, p.CheckValiditySeconds,
 			orInt(p.MaxAttempts, "-"), p.RolloutLimit),
-		sf("  Created by\t%s (%s)\tepoch %s, %s, plan revision %d, timeline revision %d", p.CreatedBy.Principal, p.CreatedBy.Role,
+		sf("  Created by\t%s (%s)\tepoch %s, %s, plan revision %d, timeline revision %d", e.who(p.CreatedBy.Principal), p.CreatedBy.Role,
 			p.Epoch, when(p.CreatedAt), p.Revision, p.TimelineRevision),
 		sf("  Approval\t%s\tpolicy %s, committed operation %s", or(p.Approval, "none"), p.ApprovalPolicy, or(p.CommittedOperation, "none")),
 	}
@@ -364,13 +365,13 @@ func planView(c *client.Client, p *apitypes.PlanBody) []string {
 			lines = append(lines, "    "+client.Printable(l))
 		}
 	}
-	return append(lines, stateLines(c, p, m, mErr)...)
+	return append(lines, e.stateLines(c, p, m, mErr)...)
 }
 
 // stateLines say what a plan's state means and what can be done next (T20). An approved plan's
 // approval is read for its epoch; an uncommitted one is checked against the machine and its
 // assignment, a prediction the controller's commitment settles.
-func stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.MachineBody, mErr error) []string {
+func (e *env) stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.MachineBody, mErr error) []string {
 	again := "Create a new plan: " + createLine(p.Release, p.Machine, p.Operation)
 	switch p.State {
 	case "proposed":
@@ -395,12 +396,12 @@ func stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.MachineBody, 
 		lines = append(lines, "Approved, but the plan names no approval.")
 	} else if err := getJSON(c, "/approvals/"+url.PathEscape(*p.Approval), &a); err != nil {
 		lines = append(lines, sf("Approved by %s, which cannot be read: %v", *p.Approval, err))
-	} else if a.Epoch != c.Context.LastEpoch {
+	} else if e.preload(c, a.Approver.Principal); a.Epoch != c.Context.LastEpoch {
 		return []string{sf("Approved by %s (%s) in epoch %s. This approval is from before the last recovery entry and authorizes nothing; "+
-			"an approver may approve again: bronzewardctl approve ", a.Approver.Principal, a.Approver.Role, a.Epoch) + client.ShellWord(p.Id), again}
+			"an approver may approve again: bronzewardctl approve ", e.who(a.Approver.Principal), a.Approver.Role, a.Epoch) + client.ShellWord(p.Id), again}
 	} else {
 		lines = append(lines, sf("Approved by %s (%s) as %s. Not committed: the controller commits it only if its own checks pass; plan show then names the operation.",
-			a.Approver.Principal, a.Approver.Role, a.Id))
+			e.who(a.Approver.Principal), a.Approver.Role, a.Id))
 	}
 	var stale, unread []string
 	if mErr != nil {
@@ -503,7 +504,8 @@ func (e *env) planCancel(args []string) error {
 		if err := json.Unmarshal(r.Body, &x); err != nil || e.output != "table" {
 			return nil, err
 		}
-		lines := []string{sf("Cancellation of plan %s recorded by %s (%s), act %s.", x.Plan, x.CancelledBy, x.Role, x.Act)}
+		e.preload(c, x.CancelledBy)
+		lines := []string{sf("Cancellation of plan %s recorded by %s (%s), act %s.", x.Plan, e.who(x.CancelledBy), x.Role, x.Act)}
 		var p apitypes.PlanBody
 		var err error
 		// A restore between the answer and the read can undo the cancellation, so the read says what
