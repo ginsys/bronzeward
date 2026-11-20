@@ -788,7 +788,12 @@ in the database and is not part of any configuration, release or plan.
   name: it is a malformed body, `400 invalid-request`, with nothing committed.
 - **Unique within a cluster**, by a partial unique index on the machine's cluster and name over the
   machines that have one (§7.3); two clusters may use the same name. A request that would give a
-  name another machine of the cluster holds is `409 conflict` naming that machine.
+  name another machine of the cluster holds is `409 name-in-use` (§9.4), a code of its own, naming
+  that machine. It is not `conflict`, which on `POST /machines` already means an identity key
+  that is recorded and names the existing machine (`internal/api/inventory.go:313`): a client that
+  adopts the machine a `conflict` names (client contracts, `cluster onboard`) must not read a name
+  clash as an existing node, and tells the two apart by the code. Where both hold, the identity
+  key's `conflict` is answered first.
 - **Set at inventory or replaced.** `POST /machines` takes an optional `name`.
   `POST /machines/{id}/names` replaces the name (`{"name": "<name>"}`): under the machine row
   `FOR UPDATE` (T11), it records a `name-change` entry on the machine's timeline at the next
@@ -796,10 +801,14 @@ in the database and is not part of any configuration, release or plan.
   recovery §4.1, read through `GET /machines/{id}/timeline`), and its act (§10.5, action
   `machine.name`, the machine as subject), in one transaction. Its `201` answer holds `machine`,
   `revision`, `previousName` (`null` when there was none), `name`, `changedBy`, `role`, `act`,
-  `epoch` and `at`. A request that names the machine's current name is `409 conflict`, as the
-  endpoint route's is; the replay of a request under the same `Idempotency-Key` returns the stored
-  `201` (§7.2), so only a new key with the same name draws the `409`. The route cannot clear a
-  name: a machine that has one keeps one, which leaves clients two states, no name and a name.
+  `epoch` and `at`. A machine read serves `name: null` for a machine with none. **A request that
+  names the machine's own current name is `409 conflict`, and `machine` names the machine itself**,
+  on this route and on the endpoint route alike (`internal/api/endpoint.go:58-64` for the endpoint
+  route, which §3.3 leaves unsaid): nothing changed, so no entry is recorded. The replay of a
+  request under the same `Idempotency-Key` in the same epoch returns the stored `201` (§7.2), so
+  only a new key with the same name draws the `409`; a replay from an earlier epoch is `409
+  conflict` as §7.2 says. The route cannot clear a name: a machine that has one keeps one, which
+  leaves clients two states, no name and a name.
 - **It changes nothing on a machine.** No existing plan, observation or release is touched, and no
   plan is needed: publication evidence reads only `endpoint-change` entries
   (`internal/api/publication_observation.go:113`). Like the endpoint route (§3.3) and inventory,
@@ -1743,7 +1752,7 @@ retries with a new idempotency key:
 | Active operation per rollout scope | at the PoC rollout limit of one, a partial unique index on the rollout scope over `committed`, `sending`, `verifying`, `unresolved` (execution and recovery §3.2, comparison 5); not evidenced there | execution and recovery's refusal |
 | Machine | its identity key: `smbiosUuid` or `talosNodeId`, exactly one of which `POST /machines` requires, each by its own unique index across the installation | `409 conflict` naming the existing machine |
 | Cluster | its `talosClusterId`, required by `POST /clusters`, by unique index across the installation | `409 conflict` naming the existing cluster |
-| Machine name | its cluster and `name`, where a machine has one, by a partial unique index (§3.5) | `409 conflict` naming the existing machine |
+| Machine name | its cluster and `name`, where a machine has one, by a partial unique index (§3.5) | `409 name-in-use` naming the existing machine, never `conflict`, which names a machine with the same identity key |
 
 The publish and ingest indexes are separate, each over its own kind, so a
 `publish` and an `ingest` operation bound to one draft revision never collide,
@@ -3083,6 +3092,7 @@ counter, not the ETag token, so the token is not named.
 | 409 | `machine-identity-mismatch` | the error of a failed `ingest` operation: its `source: machine` read reached a node whose identity key is not the machine record's or whose Talos cluster ID is not its cluster record's, whose identity read failed, or whose SMBIOS UUID is absent for a machine recorded by one or present for a machine recorded by node ID (§3.3); its claim is abandoned and nothing read is kept. The body names the machine and, when the node's identity differed, a `cause` member with the field: `smbios-uuid`, `node-id` or `cluster-id`, a closed set of field names and never a value. A failed identity read has no `cause` member |
 | 409 | `ingestion-abandoned` | the error of a failed `ingest` operation whose staging claim was abandoned: by an operator's abandonment, by the sweep at the claim's absolute expiry or, under transient staging, at its lease lapse, by an ingestion start of the same draft revision once the claim is due, by a takeover with nothing to decrypt, or by recovery-mode entry (§8.2); the generations it created are orphans (§6.4) |
 | 409 | `recovery-mode-entered` | the error of a failed `publish` operation that was `queued` or `running` when recovery-mode entry committed (§8.2, §12.2); nothing it compiled was published |
+| 409 | `name-in-use` | a machine name that another machine of the cluster holds (`POST /machines`, `POST /machines/{id}/names`, §3.5); the body's `machine` names that machine |
 | 409 | `scope-busy` | an assignment change while an operation holds the machine scope |
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry, and plan creation, approval or unfreezing under it after entry (§12.2); only a scope refusal's body carries a `scope` member; a refusal by the recovery-start flag concerns no scope and carries none |
 | 412 | `precondition-failed` | `If-Match` does not match |

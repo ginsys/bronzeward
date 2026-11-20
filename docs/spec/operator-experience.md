@@ -582,7 +582,8 @@ its `cluster first-key` command.
 A second run finds what exists and changes nothing that stands, except the first key, which it supplies
 again (below). A `409 conflict` on the cluster or
 on a machine names the existing record, which the command reads and shows as it is recorded (the
-flags are not applied to it). A machine that is recorded in another cluster stops the command, naming
+flags are not applied to it); a `409 name-in-use`, which a machine name another machine holds draws
+(client contracts A9), names no existing node and is never read that way. A machine that is recorded in another cluster stops the command, naming
 both cluster IDs, before the first key. The draft is titled `onboard <name>`, and an open draft of that
 title is reused. A machine whose import was released into that draft is skipped; an import that is
 held, resumed or paused stops the command, with `import status` for it (a paused one is exit 0, as
@@ -1496,15 +1497,10 @@ restore nobody entered stays the same residual
    action to any `author` and show the server's refusal (`not-the-importer`,
    `import-not-reviewed`) as it comes, with no body.
 9. **A fragment revision's text** (`GET /fragment-revisions/{id}`, every role) is the server's
-   sanitized text, and it can still hold a value nobody marked: a fragment update ingests under a
-   transient claim that no review reads before it is stored, and detection is not promised
-   ([compilation §2.4](compilation.md#24-what-identification-does-not-promise),
-   [§8.4](compilation.md#84-what-redaction-does-not-cover),
-   [persistence and API §9.3](persistence-api.md#93-examples)). The route is open to every role, so
-   it is not a protected read like items 2 and 8: the clients treat it as an ordinary read under
-   that accepted limit. The owner decided it (Serge, typed 2026-11-20 11:36 CET, answering
-   [ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974): "1. Every role, limit
-   recorded."), so making the read a protected one is a new decision. The web view that
+   sanitized text, and it can still hold a value nobody marked. The route is open to every role, so
+   it is not a protected read like items 2 and 8: the clients treat it as an ordinary read under the
+   accepted limit that [persistence and API §9.1](persistence-api.md#91-conventions) states, with
+   the reasons and the owner's decision (ginsys/bronzeward#974). The web view that
    exists (`/fragment-revisions/{id}`, reached from a fragment's revisions list and a release's
    source rows) has these display rules, which are the web view's own. It shows the text as served
    in a text node in a `pre` (`web/src/resources.tsx:215`), never parsed or rendered as markup, with
