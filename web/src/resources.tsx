@@ -21,7 +21,8 @@ import { RecoveryConsole } from "./recovery.tsx";
 import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
-import { type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useMachineText } from "./titles.tsx";
+import { startedBy } from "./operation-words.ts";
+import { type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
 
 type S = components["schemas"];
 type Col<T> = readonly [string, (t: T) => ReactNode];
@@ -81,6 +82,23 @@ const Fields = ({ rows }: { rows: readonly Row[] }) => <dl>{rows.map(([k, v]) =>
 const Ids = ({ ids, titled = false }: { ids: readonly string[] | null; titled?: boolean }) =>
   ids === null || ids.length === 0 ? "none" : ids.map((id, i) => <Group key={id}>{i > 0 && ", "}{titled ? <Named id={id} /> : <Id id={id} />}</Group>);
 export const by = (c: { principal: string; role: string } | null) => (c === null ? "none" : <><Who id={c.principal} /> ({c.role})</>);
+// Who started an operation (client contracts A10): the principal that made the request, or for an apply or an
+// adoption, which the controller creates itself, the controller, the plan it committed and who created that plan.
+export function StartedBy({ o }: { o: S["OperationBody"] }) {
+  const planId = o.createdBy === null && (o.kind === "apply-config" || o.kind === "adopt") ? o.subject?.plan : undefined;
+  const plan = useBody<S["PlanBody"]>(planId === undefined ? undefined : `/plans/${encodeURIComponent(planId)}`);
+  const title = usePlanTitle(planId);
+  const s = startedBy(o.kind, o.createdBy, planId === undefined ? undefined : { plan: planId, creator: plan?.createdBy });
+  if ("person" in s) return by(s.person);
+  if ("none" in s) return "none";
+  return (
+    <>
+      {s.controller}
+      {s.plan !== undefined && <> <Ref to={`/plans/${encodeURIComponent(s.plan)}`} id={s.plan}>{title}</Ref></>}
+      {s.creator !== undefined && <> (created by {by(s.creator)})</>}
+    </>
+  );
+}
 const cap = (s: string) => s[0]!.toUpperCase() + s.slice(1);
 export const seconds = (n: number | null) => (n === null ? "none" : n % 60 === 0 && n > 0 ? `${n / 60} min` : `${n} s`);
 
@@ -458,7 +476,7 @@ const Subject = ({ s }: { s: S["OperationSubject"] | null }) => {
 };
 const OPERATIONS: readonly Col<S["OperationBody"]>[] = [
   ["Operation", (o) => <OperationRef o={o} />], ["Kind", (o) => o.kind], ["State", (o) => o.state], ["Subject", (o) => <Subject s={o.subject} />],
-  ["Created by", (o) => by(o.createdBy)], CREATED,
+  ["Started by", (o) => <StartedBy o={o} />], CREATED,
 ];
 
 export function Operations({ query, go }: { query: string; go: (to: string) => void }) {
@@ -496,7 +514,7 @@ export function OperationItem({ id }: { id: string }) {
         <>
           <OperationTimeline id={id} o={o} reread={reread} />
           <Fields rows={[
-            ["Kind", o.kind], ["State", o.state], ["Subject", <Subject s={o.subject} />], ["Created", <>{when(o.createdAt)} by {by(o.createdBy)}</>],
+            ["Kind", o.kind], ["State", o.state], ["Subject", <Subject s={o.subject} />], ["Created", <>{when(o.createdAt)} by <StartedBy o={o} /></>],
             ["Epoch", o.epoch], ["Last event", o.lastEvent], ["Result", <Record v={o.result} />], ["Error", <Record v={o.error} />],
           ]} />
           <h3>Attempts</h3>
