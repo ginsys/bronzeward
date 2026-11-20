@@ -202,7 +202,8 @@ func TestRecordReads(t *testing.T) {
 			"transport -, verification -, observation age 300s, check validity 60s, attempts -"}},
 		{[]string{"release", "list", "--draft", "drf_y", "--limit", "1"}, []string{"None on this page.", "Next page: --cursor c2"}},
 		{[]string{"release", "list", "--draft", "drf_x", "--cursor", "c2"}, []string{"None on this page."}},
-		{[]string{"operation", "show", "op_test"}, []string{"Operation op_test  apply-config  unresolved", "plan pln_test, machine " + m, "by the controller",
+		{[]string{"operation", "show", "op_test"}, []string{"Operation op_test  apply-config  unresolved", "plan pln_test, machine " + m, "by the controller, committing plan pln_test",
+			"The controller keeps examining it and may settle it on its own.",
 			"Attempt 1", "controller ctl-b, generation 3", "Unresolved: completion and retry safety are unknown", "must account for attempt 1."}},
 		{[]string{"operation", "show", "op_none"}, []string{"Operation op_none  apply-config  unresolved", "no attempt was recorded",
 			"The server retries it", "the controller cancels it", "a recovery administrator resolves it as cancelled"}},
@@ -237,7 +238,7 @@ func TestRecordReads(t *testing.T) {
 		{[]string{"machine", "timeline", m}, "adoption", "1 2026-10-22 10:00:00 UTC adoption operation op_adopt, plan pln_adopt, approval apr_a, " +
 			"observation obs_a, controller ctl-b"},
 		{[]string{"plan", "list"}, "pln_test", "pln_test - proposed " + m + " apply-config rel_test 2026-10-23 10:04:00 UTC"},
-		{[]string{"operation", "list"}, "op_test", "op_test - apply-config unresolved plan pln_test, machine " + m + " 2026-10-22 10:06:00 UTC"},
+		{[]string{"operation", "list"}, "op_test", "op_test - apply-config unresolved plan pln_test, machine " + m + " 2026-10-22 10:06:00 UTC the controller"},
 	} {
 		r := f.ctl(nil, "", c.args...)
 		i := slices.IndexFunc(strings.Split(r.out, "\n"), func(l string) bool { return strings.Contains(l, c.key) })

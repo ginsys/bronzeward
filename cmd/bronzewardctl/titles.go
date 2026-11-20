@@ -43,6 +43,12 @@ func titleBody[T any](e *env, c *client.Client, path string) *T {
 	return t
 }
 
+// heldBody is the body titleBody already read at path in this run, nil when none was read or the read failed.
+func heldBody[T any](e *env, path string) *T {
+	t, _ := e.bodies[path].(*T)
+	return t
+}
+
 func titlePath(kind, id string) string { return "/" + kind + "/" + url.PathEscape(id) }
 
 // draftTitle is a draft's title, "" when it could not be read or holds none.

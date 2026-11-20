@@ -1377,8 +1377,11 @@ func TestOperationWatchCompletionEvent(t *testing.T) {
 		if code != wantCode || !strings.Contains(out, c.want) {
 			t.Errorf("%s: exit %d, want %d and %q in\n%s", c.name, code, wantCode, c.want, out)
 		}
-		if noPlan := c.kind == "publish" || c.kind == "ingest"; noPlan && c.state == "failed" && !strings.Contains(out, "Read it: bronzewardctl operation show 'op_BWSYNTH'\n") {
-			t.Errorf("%s: no plan, so the next step is to read the operation; want it in\n%s", c.name, out)
+		if noPlan := c.kind == "publish" || c.kind == "ingest"; noPlan && c.state == "failed" {
+			want := map[string]string{"publish": "Fix the cause named above and publish again; a publish is safe to repeat.\n", "ingest": "Start the import again (author).\n"}[c.kind]
+			if !strings.Contains(out, want) || strings.Contains(out, "operation show") {
+				t.Errorf("%s: no plan, so the next step is the table's, never a line back to operation show; want %q in\n%s", c.name, want, out)
+			}
 		}
 	}
 }

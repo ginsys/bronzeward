@@ -323,17 +323,18 @@ func TestOperationWatch(t *testing.T) {
 	}
 
 	// A publish or ingest operation has a draft for its subject and no plan, machine or attempts member. It records
-	// the problem that ended it (a title, no cause). With no plan the next step is to read the operation: no
-	// command names a plan or a machine (the missing-plan case of endNextStep).
+	// the problem that ended it (a title, no cause). With no plan no command names a plan or a machine, so the next
+	// step is the one the pair's table gives (the missing-plan case of endNextStep), never a line that sends the
+	// reader to the operation they are reading.
 	for _, c := range []struct{ name, kind, subject, header, errBody, want string }{
 		{"publish failed", "publish", publishSubject, "publish  draft drf_BWSYNTH, draft revision 3",
 			`{"title":"Recovery-mode entry ended the job","status":409}`,
 			"Failed at 2026-11-01 06:00:02 UTC (server): Recovery-mode entry ended the job.\n" +
-				"Read it: bronzewardctl operation show 'op_BWSYNTH'"},
+				"Fix the cause named above and publish again; a publish is safe to repeat."},
 		{"ingest failed", "ingest", ingestSubject, "ingest  draft drf_BWSYNTH, ingestion ing_BWSYNTH, draft revision 3",
 			`{"title":"The ingestion was abandoned","status":409,"detail":"the staging claim passed its lease","instance":"op_BWSYNTH"}`,
 			"Failed at 2026-11-01 06:00:02 UTC (server): The ingestion was abandoned: the staging claim passed its lease (instance op_BWSYNTH).\n" +
-				"Read it: bronzewardctl operation show 'op_BWSYNTH'"},
+				"Start the import again (author)."},
 	} {
 		f.mu.Lock()
 		f.body = fmt.Sprintf(opJSONNoPlan, c.kind, "failed", c.subject, "null", c.errBody)
@@ -429,17 +430,20 @@ func TestEventLineKeepsLargeNumbers(t *testing.T) {
 	}
 }
 
-// TestFailedNextStepWithoutMachine: a failed operation whose subject has a plan and no machine reads
-// the operation; it never prints machine show with an empty word. With a machine it keeps machine show.
+// TestFailedNextStepWithoutMachine: a failed operation whose subject has a plan and no machine gives the
+// pair's table step; it never prints machine show with an empty word, nor a line that sends the reader back
+// to operation show. With a machine it keeps machine show. A pair the table does not know has no line.
 func TestFailedNextStepWithoutMachine(t *testing.T) {
-	for _, c := range []struct{ name, state, plan, machine, want string }{
-		{"failed, plan, no machine", "failed", "pln_BWSYNTH", "", "Read it: bronzewardctl operation show 'op_BWSYNTH'"},
-		{"failed, plan and machine", "failed", "pln_BWSYNTH", "mch_a", "bronzewardctl machine show 'mch_a'"},
-		{"rejected, plan, no machine", "rejected", "pln_BWSYNTH", "", "bronzewardctl plan show 'pln_BWSYNTH'"},
+	for _, c := range []struct{ name, kind, state, plan, machine, want string }{
+		{"failed, plan, no machine", "apply-config", "failed", "pln_BWSYNTH", "", "Read the machine's drift and observations, then create a new plan."},
+		{"failed, plan and machine", "apply-config", "failed", "pln_BWSYNTH", "mch_a", "bronzewardctl machine show 'mch_a'"},
+		{"rejected, plan, no machine", "apply-config", "rejected", "pln_BWSYNTH", "", "bronzewardctl plan show 'pln_BWSYNTH'"},
+		{"failed publish, no plan", "publish", "failed", "", "", "Fix the cause named above and publish again; a publish is safe to repeat."},
+		{"failed, unknown kind", "frobnicate", "failed", "", "", ""},
 	} {
-		got := endNextStep(c.state, "op_BWSYNTH", c.plan, c.machine)
-		if !strings.Contains(got, c.want) || strings.Contains(got, "show ''") {
-			t.Errorf("%s: next step %q, want it to hold %q and no empty word", c.name, got, c.want)
+		got := endNextStep(c.kind, c.state, c.plan, c.machine)
+		if !strings.Contains(got, c.want) || (c.want == "" && got != "") || strings.Contains(got, "show ''") || strings.Contains(got, "operation show") {
+			t.Errorf("%s: next step %q, want it to hold %q, no empty word and no operation show", c.name, got, c.want)
 		}
 	}
 }
