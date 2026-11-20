@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { namesOf } from "./principals.ts";
+import { createNames, namesOf } from "./principals.ts";
 import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, lostSince, MachineShown, nextTimeline, NO_KEEP, positionShown, type Observation, Observations, pacer, POLL_MS, polled, queued, readLater, readOlder, recovery, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
 import { type Load, type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
@@ -307,6 +307,25 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     settle(res, () => {}, () => true, () => false);
     settle(res, () => {}, () => true, () => false);
     expect(a).toEqual({ key: k, n: 0, left: 0, dirty: false });
+  });
+
+  // G23: the timeline shows principals, and their names are read under the page's own settle. The page counts
+  // exactly three reads (the machine, its observations, its position), so the names read must not be a fourth.
+  test("the page counts three reads and not the names read of a principal its timeline shows", async () => {
+    const k = "A\n0";
+    let a = advanceReads(k);
+    const outer: unknown[] = [];
+    const settle = countingSettle((res) => outer.push(res) < 0, (e) => (a = stepAdvance(a, e)), k, a.n);
+    const id = `idn_${"a".repeat(26)}`;
+    const names = createNames(async () => ({ kind: "ok", data: { items: [{ id, kind: "human", issuer: "https://idp.example", subject: "ada", display: null, service: null }] } }));
+    names.want("g", [id], (res) => void settle(res, () => {}, () => true, () => false));
+    await names.idle();
+    // The machine and its observations settled: one read is left. A names read answered meanwhile counts for none.
+    const res = { kind: "ok", status: 200, data: {} } as unknown as Parameters<typeof settle>[0];
+    settle(res, () => {}, () => true, () => false);
+    settle(res, () => {}, () => true, () => false);
+    expect(a).toEqual({ key: k, n: 0, left: 1, dirty: false });
+    expect(outer).toHaveLength(2);
   });
 
   test("#424 item 1: the timeline's restart notice stays through a read again in the same view, and goes with the view", () => {

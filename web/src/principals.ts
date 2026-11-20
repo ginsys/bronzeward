@@ -33,8 +33,8 @@ export function principalText(p: Principal | undefined): string | undefined {
 export interface Names {
   // Reads the names of the identifiers not yet asked for under `gen`, in the next microtask so that
   // every identifier of one render goes out together. A new `gen` forgets what an older one held.
-  // `settle` gets every answer of the read, for the page's shell: a refusal of the credentials, a new
-  // epoch or the process's refusal is the shell's to handle, whichever read meets it first.
+  // `settle` gets the refusals of the read that the page's shell must act on (the credentials, a
+  // revocation, the process's refusal), whichever read meets them first.
   want(gen: string, ids: readonly string[], settle?: (res: ReadResult<unknown>) => void): void;
   // The name read for `id` under `gen`; undefined while pending, when the read failed, and for any
   // other generation.
@@ -52,7 +52,8 @@ export function createNames(read: (path: string) => Promise<ReadResult<{ items: 
   let tail: Promise<unknown> = Promise.resolve();
   const listeners = new Set<() => void>();
   const tell = () => listeners.forEach((l) => l());
-  // The page's, from its latest want: every page of a client shares one shell.
+  // The page's, from its latest want. One batch serves the identifiers of many `Who`, and every closure
+  // of one generation settles the same page's reads the same way, so the latest is as good as any.
   let settle: ((res: ReadResult<unknown>) => void) | undefined;
 
   // An answer belongs to the map that was current when its read went out: the same generation can come
@@ -62,7 +63,9 @@ export function createNames(read: (path: string) => Promise<ReadResult<{ items: 
     const settleHere = settle;
     return read(`/principals?${new URLSearchParams(ids.map((i) => ["id", i]))}`).then(
       (res) => {
-        settleHere?.(res);
+        // Only a refusal the shell must act on goes to it: any other answer would count as one of a
+        // page's own reads (machine.tsx countingSettle), and a failed lookup raises no banner.
+        if (res.kind === "unauthenticated" || res.kind === "revoked" || res.kind === "refused") settleHere?.(res);
         if (mine !== known) return;
         // An identifier the answer leaves out, a failed read or a refusal show the identifier.
         const items = res.kind === "ok" ? res.data.items : [];

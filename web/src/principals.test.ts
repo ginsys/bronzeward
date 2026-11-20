@@ -185,19 +185,25 @@ describe("the store: at most 100 identifiers a read, each once", () => {
     expect(names.get("g", id(1))?.kind).toBe("human");
   });
 
-  test("every names read is handed to the page's settle, a refusal of the credentials included, and the name stays the fallback", async () => {
-    const settled: ReadResult<unknown>[] = [];
-    const refused = createNames(async () => ({ kind: "unauthenticated", problem: null }));
-    refused.want("g", [id(1)], (res) => void settled.push(res));
-    await refused.idle();
-    expect(settled).toEqual([{ kind: "unauthenticated", problem: null }]);
-    expect(refused.get("g", id(1))).toBeUndefined();
-    // An answer is handed over too, and so is one whose generation has gone: the shell decides what a stale one does.
-    const { names } = stub();
-    names.want("g", [id(1)], (res) => void settled.push(res));
-    await names.idle();
-    expect(settled).toHaveLength(2);
-    expect(settled[1]?.kind).toBe("ok");
+  test("a refusal the shell must act on is handed to the page's settle, and the name stays the fallback; no other answer is", async () => {
+    const problem = { type: "t", title: "t", status: 401 } as never;
+    const results: ReadResult<{ items: P[] }>[] = [
+      { kind: "unauthenticated", problem: null },
+      { kind: "revoked", problem },
+      { kind: "refused", status: 409, problem: null },
+      answer([human(1)]),
+      { kind: "unavailable", status: 503, problem: null },
+      { kind: "transport" },
+      { kind: "discarded" },
+    ];
+    const settled: string[] = [];
+    for (const res of results) {
+      const names = createNames(async () => res);
+      names.want("g", [id(1)], (r) => void settled.push(r.kind));
+      await names.idle();
+      if (res.kind !== "ok") expect(names.get("g", id(1))).toBeUndefined();
+    }
+    expect(settled).toEqual(["unauthenticated", "revoked", "refused"]);
   });
 
   test("it tells its subscribers when an answer arrives", async () => {
