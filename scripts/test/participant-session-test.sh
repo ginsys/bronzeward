@@ -829,7 +829,7 @@ else bad "t9_watch_ready and t9_watch_end were not found in the session"; fi
 # prepare t9-hold, HOLD_INT sends the shell a Ctrl-C during it, SQL_FAIL ends every database read,
 # and ERREXIT runs the function under set -e. Calls go to the log.
 sed -n -e '/^cleanup_stopped() {$/,/^}$/p' -e '/^handback() {$/,/^}$/p' -e '/^t9_clean() {$/,/^}$/p' \
-  -e '/^t9_release() {$/,/^}$/p' -e '/^t9() {$/,/^}$/p' -e '/^t9_disconnect() {$/,/^}$/p' "$session" >"$t/clean.sh"
+  -e '/^t9_release() {$/,/^}$/p' -e '/^t9() {$/,/^}$/p' -e '/^t9_disconnect() {$/,/^}$/p' -e '/^web_stop() {$/,/^}$/p' "$session" >"$t/clean.sh"
 mkdir -p "$t/cbin"
 cat >"$t/cbin/inject" <<'EOF'
 #!/bin/sh
@@ -1012,5 +1012,16 @@ rc=$?
 if [ "$rc" != 0 ] && [ $((SECONDS - s0)) -lt 6 ]; then
   ok "idp_reached ends a docker client that ignores TERM"
 else bad "idp_reached with a docker client that ignores TERM: rc $rc after $((SECONDS - s0)) s"; fi
+
+# web_stop ends the web driver by its own pid (web.pid) as well as the wrapper that started it: a driver that
+# the wrapper's kill does not reach is the leak it exists for.
+mkdir "$t/web"
+# shellcheck disable=SC2016 # the inner shell's own text
+out=$(bash -c '. "$0"; sleep 300 & echo $! >"$1/web.pid"; sleep 300 & t9_web=$!; t9_web_dir=$1
+  drv=$(<"$1/web.pid"); wrap=$t9_web; web_stop
+  for p in $drv $wrap; do ! kill -0 "$p" 2>/dev/null || { echo "alive $p"; kill "$p"; }; done
+  [ -z "$t9_web" ] && echo cleared' "$t/clean.sh" "$t/web" 2>&1)
+if [ "$out" = cleared ]; then ok "web_stop ends the driver by its pid and the wrapper, and clears the handle"
+else bad "web_stop: $out"; fi
 
 exit "$fail"
