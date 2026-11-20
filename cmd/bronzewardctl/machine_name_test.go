@@ -78,6 +78,10 @@ func TestMachineAddName(t *testing.T) {
 	}{
 		{"with a name", `{"id":"mch_new","name":"web-1","cluster":"cl_c","talosEndpoint":"10.0.0.5:50000"}`,
 			"Machine mch_new (web-1) recorded in cluster cl_c (lab-a). Endpoint 10.0.0.5:50000.", append(slices.Clone(base), "--name", "web-1"), `"name":"web-1"`, true},
+		// A supplied empty value is a malformed named request for the server to refuse (400), never a
+		// nameless machine: the flag's presence decides, not its value.
+		{"with an explicitly empty name", `{"id":"mch_new","name":null,"cluster":"cl_c","talosEndpoint":"10.0.0.5:50000"}`,
+			"Machine mch_new recorded in cluster cl_c (lab-a). Endpoint 10.0.0.5:50000.", append(slices.Clone(base), "--name", ""), `"name":""`, true},
 		{"without one", `{"id":"mch_new","name":null,"cluster":"cl_c","talosEndpoint":"10.0.0.5:50000"}`,
 			"Machine mch_new recorded in cluster cl_c (lab-a). Endpoint 10.0.0.5:50000.", base, `"name"`, false},
 	} {
