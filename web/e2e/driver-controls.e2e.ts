@@ -1,8 +1,9 @@
 // Positive controls for the harness's own commands. wdio.conf.ts changes four commands in Safari
 // (getText, keys, the select commands and Tab), and a worker hook that throws is logged and ignored:
 // a command that was not changed leaves every later case failing on the driver's own behaviour
-// (ginsys/bronzeward#892). These cases pass in every browser (the disabled-select case runs only in Safari), and fail in Safari when a change did not
-// take, so the run says so, and names the command, before the cases that depend on it.
+// (ginsys/bronzeward#892). These cases pass in every browser (the disabled-select case and the click case
+// run only in Safari), and fail in Safari when a change did not take, so the run says so, and names the
+// command, before the cases that depend on it.
 import { $, browser, expect } from "@wdio/globals";
 
 describe("the harness's own commands", () => {
@@ -58,6 +59,10 @@ describe("the harness's own commands", () => {
   });
 
   it("a click waits for the element to hold still, and lands on it after a shift", async function () {
+    // The wait is Safari's harness change. Every other driver clicks the point it resolved, so a shift between
+    // that point and its press misses the element: a forced shift on the first mouse move missed 10 of 10 in Chrome,
+    // and the timer below failed the same way twice in a Chrome merge group (ginsys/bronzeward#954).
+    if ((browser.capabilities as { browserName?: string }).browserName?.toLowerCase() !== "safari") return this.skip();
     // The element is pushed down once, a moment after the command starts: the point it had is then another's.
     await browser.execute(() => {
       const hits: string[] = [];
@@ -76,10 +81,8 @@ describe("the harness's own commands", () => {
     const before = (globalThis as { bwStillClicks?: number }).bwStillClicks ?? 0;
     await $("#shift").click();
     expect(await browser.execute(() => (window as unknown as { hits: string[] }).hits)).toEqual(["shift"]);
-    // Only Safari's harness holds the click still: the count says the change took.
-    if ((browser.capabilities as { browserName?: string }).browserName?.toLowerCase() === "safari") {
-      expect((globalThis as { bwStillClicks?: number }).bwStillClicks ?? 0).toBeGreaterThan(before);
-    }
+    // The count says the change took.
+    expect((globalThis as { bwStillClicks?: number }).bwStillClicks ?? 0).toBeGreaterThan(before);
   });
 
   it("keys sends repeated characters and spaces whole", async () => {

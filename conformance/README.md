@@ -122,7 +122,8 @@ browser-auth`), and a failure of either opens one issue (ginsys/bronzeward#892).
 
 The run on 19 November 2026 ([run 44556204194](https://github.com/ginsys/bronzeward/actions/runs/44556204194))
 ran Safari 27.2 on macOS: `browser` passed 3 of 3 spec files, and `browser-auth` passed 15 of 15 (the 14
-specs and `driver-controls.e2e.ts`, which checks the harness's own commands in every browser). Nine cases are
+specs and `driver-controls.e2e.ts`, which checks the harness's own commands in every browser, except that its
+click case and its disabled-select case run only in Safari). Nine cases are
 skipped there, each listed below. The artifact scan found 32 artifacts clean, and its planted control found
 each planted value. The jobs took 2 min 20 s for `safari` and 16 min 19 s for `safari-auth` (14 min 47 s of
 them in the specs; an earlier run took 22 min 10 s), which is why that job's limit is 45 minutes. The tested
