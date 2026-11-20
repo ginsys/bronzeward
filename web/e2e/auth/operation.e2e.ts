@@ -246,6 +246,14 @@ describe("the operation page's stream (#359)", () => {
     await expect($('[data-testid="outcome"]')).toHaveText(expect.stringContaining("Cancelled: resolution"), { wait: 30_000 });
     // The outcome change reached the status region, the list is still polite, and focus did not move.
     await browser.waitUntil(async () => (await region()).text.includes("Cancelled: resolution"), { timeout: 30_000, timeoutMsg: "the status region did not receive the outcome" });
+    // The watch has ended and the server's rows have replaced the received ones (the last change the page makes to the list), so the checks below read the final page.
+    await browser.waitUntil(
+      async () => browser.execute(() => {
+        const li = [...document.querySelectorAll('[data-testid="events"] li[data-event-id]')];
+        return document.body.innerText.includes("Live: ended.") && li.length > 0 && li.every((x) => !(x.textContent ?? "").startsWith("received "));
+      }),
+      { timeout: 30_000, timeoutMsg: "the page did not end the watch with the server's rows" },
+    );
     expect(await live()).toBe("polite");
     expect(await active()).toBe(focused);
     await storageEmpty();

@@ -5,7 +5,8 @@
 // `fixtures/participants/session passwords --only <human> --exec node <this file> ...` (the password is
 // in this process's environment only; it prints addresses and titles, never a password).
 // Usage: node fixtures/participants/web-watch.mjs <human> <dir> <operation id> <server base URL> <token file>
-//   <dir>/mark-stop and <dir>/mark-restart: when either appears, the log gets that mark (an outage run).
+//   <dir>/mark-stop and <dir>/mark-restart: when either appears, the log gets that mark (an outage run)
+//   and <dir>/mark-<name>.ack is written. <dir>/web.pid holds this process's pid.
 //   <dir>/web-ready: written once the page shows the live notice and one received row.
 // Run from the repository root; the file ends the run with exit 0 once the page shows the watch ended.
 import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
@@ -50,6 +51,9 @@ const browser = await remote({
   logLevel: "silent",
   capabilities: { browserName: "chrome", "goog:chromeOptions": { args: ["--headless=new", `--user-data-dir=${profile}`] } },
 });
+// The session ends a driver it must stop by this pid (the wrapper that started it does not pass the signal on), and the browser goes with it.
+writeFileSync(join(dir, "web.pid"), `${process.pid}\n`);
+process.on("SIGTERM", () => browser.deleteSession().finally(() => process.exit(143)));
 const say = async (what) => out(`${what}: ${await browser.getTitle()} <${new URL(await browser.getUrl()).pathname}>`);
 async function submit(selector, value) {
   const field = await browser.$(selector);
@@ -94,6 +98,8 @@ try {
       if (!marks.has(name) && existsSync(join(dir, `mark-${name}`))) {
         marks.add(name);
         await browser.execute((n) => window.__bw.push({ op: "mark", name: n }), name);
+        // The session waits for this acknowledgement before it goes on, so that no row arrives between the event and its mark.
+        writeFileSync(join(dir, `mark-${name}.ack`), "ok\n");
         out(`mark ${name}`);
       }
     }
