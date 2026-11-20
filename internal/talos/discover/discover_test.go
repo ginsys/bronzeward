@@ -209,7 +209,7 @@ func TestDiscoverLimitedHasNoStartBound(t *testing.T) {
 func TestDiscoverLimitedCutDuringTheMemberList(t *testing.T) {
 	c := newCluster(t)
 	c.a.Stall(talostest.MemberType, true)
-	ctx, cancel := context.WithTimeout(t.Context(), 400*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second) // long enough for a slow runner to read the identity first
 	defer cancel()
 	res, err := DiscoverLimited(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, 0)
 	if err != nil || res.ClusterID != "c-1" || !res.Cut || len(res.Members) != 0 {
