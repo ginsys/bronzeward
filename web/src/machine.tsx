@@ -7,7 +7,7 @@ import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useReducer, 
 import type { components } from "./api/v1";
 import { ChangeEndpoint } from "./forms.tsx";
 import { type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
-import { type Machine, node, release } from "./machines.tsx";
+import { type Machine, machineName, node, release } from "./machines.tsx";
 import { NextStep, type Position } from "./nextstep.tsx";
 import { principalId } from "./principals.ts";
 import { Who } from "./principals.tsx";
@@ -239,13 +239,16 @@ export const attribution = (r: string | null) => (r === null ? "matches neither 
 // A timeline entry's members that name what it is about; the rest stays in the API.
 const SHOWN = ["change", "resolution", "from", "to", "principal", "role", "reason", "cause", "observation", "operation", "plan"];
 // An identifier is shortened, and links to its page where its prefix has one (a plan, an operation: W3);
-// a principal shows its name (G23).
+// a principal shows its name (G23). A name-change entry (client contracts A9 item 4) stores the
+// machine's previous name (null on a first naming) and its new one: they show, old then new, only
+// where they pass the name grammar. Other kinds store `previous` and `new` too (endpoint-change), so
+// this is by kind. Any other kind, known or not, renders from the members it has.
 export function details(e: Entry): ReactNode {
   const r = (e.entry ?? {}) as Record<string, unknown>;
-  return SHOWN.filter((k) => typeof r[k] === "string" && r[k] !== "").map((k, i) => {
-    const v = r[k] as string;
-    return <Fragment key={k}>{i > 0 && " "}{k === "reason" ? `"${v}"` : k === "principal" && principalId(v) ? <Who id={v} /> : /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Id id={v} /> : v}</Fragment>;
-  });
+  const names = e.kind === "name-change" ? [r["previous"], r["new"]].map(machineName).filter((n): n is string => n !== undefined) : [];
+  return [...names.map((n, i) => ({ k: `name${i}`, v: n })), ...SHOWN.filter((k) => typeof r[k] === "string" && r[k] !== "").map((k) => ({ k, v: r[k] as string }))].map(({ k, v }, i) => (
+    <Fragment key={k}>{i > 0 && " "}{k === "reason" ? `"${v}"` : k === "principal" && principalId(v) ? <Who id={v} /> : /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Id id={v} /> : v}</Fragment>
+  ));
 }
 
 const byBasis = (items: Observation[]) => [...items].sort((x, y) => y.basis - x.basis);
@@ -430,7 +433,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
   const list = read === undefined ? [] : byBasis(read.items);
   return (
     <>
-      <h2>Machine {d.id}</h2>
+      <h2>Machine {machineName(d.name) === undefined ? d.id : <span title={d.id}>{machineName(d.name)}</span>}</h2>
       {m.kind !== "ok" && pm}
       {obs.kind !== "ok" && po}
       <p>Cluster <Ref to={`/clusters/${d.cluster}`} id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
