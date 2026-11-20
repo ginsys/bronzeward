@@ -53,7 +53,8 @@ const DefaultMaxCertLifetime = 15 * time.Minute
 // Talos is the limit a use's certificate lifetime is held under (persistence-api.md §3.4). A block
 // that is present names the limit: an omitted or zero value is refused, never defaulted.
 type Talos struct {
-	// MaxCertLifetime bounds the validity of a signed certificate, NotAfter minus NotBefore. A
+	// MaxCertLifetime bounds how far past its signing instant a signed certificate reaches, NotAfter
+	// minus the signing instant; the 300 s its NotBefore is backed up by is outside it. A
 	// certificate states whole seconds, so a use may ask for at most this less two seconds; one that
 	// needs more is refused, never given a shorter certificate.
 	MaxCertLifetime time.Duration `yaml:"maxCertLifetime"`
