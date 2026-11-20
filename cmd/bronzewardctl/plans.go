@@ -308,12 +308,14 @@ func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
 	e.preload(c, p.CreatedBy.Principal)
 	var m apitypes.MachineBody
 	mErr := getJSON(c, "/machines/"+url.PathEscape(p.Machine), &m)
-	if mErr == nil && e.output == "table" {
-		// The plan's title names this machine: it is read once for the command (client contracts A8 rule 2).
-		if e.bodies == nil {
-			e.bodies = map[string]any{}
+	if e.output == "table" {
+		// The plan's title names this machine: it is read once for the command, whether the read answered
+		// or failed (client contracts A8 rule 2).
+		var held *apitypes.MachineBody
+		if mErr == nil {
+			held = &m
 		}
-		e.bodies[titlePath("machines", p.Machine)] = &m
+		e.holdBody(titlePath("machines", p.Machine), held)
 	}
 	var cl apitypes.ClusterBody
 	var cluster string

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -159,13 +162,53 @@ func titleServerSeenReset(seen func() []string) func() []string {
 	return func() []string { return seen()[before:] }
 }
 
-func TestTitlesFailedReadKeepsTheIdentifier(t *testing.T) {
+// A draft that cannot be read leaves no title and keeps the row and the identifier: a dash in the list,
+// no Title line in the show, and the rest of the output as it is.
+func TestTitlesFailedDraftKeepsTheIdentifier(t *testing.T) {
 	titleServer(t, func(a map[string]string) { delete(a, "GET /api/v1/drafts/drf_a") })
-	for _, args := range [][]string{{"release", "list"}, {"release", "show", "rel_BWSYNTH"}, {"plan", "list"}, {"plan", "show", "pln_BWSYNTH"}, {"operation", "list"}} {
+	for _, c := range []struct {
+		args []string
+		keep []string
+	}{
+		{[]string{"release", "list"}, []string{`rel_BWSYNTH +- `}},
+		{[]string{"release", "show", "rel_BWSYNTH"}, []string{"Release rel_BWSYNTH", "Draft"}},
+		{[]string{"plan", "list"}, []string{`pln_BWSYNTH +- `}},
+		{[]string{"plan", "show", "pln_BWSYNTH"}, []string{"Plan pln_BWSYNTH  proposed", "Machine"}},
+		{[]string{"operation", "list"}, []string{`op_pub +- `}},
+	} {
+		code, out, errOut := runCtl(t, c.args...)
+		if code != 0 || strings.Contains(out, titleDraft) || strings.Contains(out, "Title") && c.args[1] == "show" || errOut != "" {
+			t.Errorf("%v: exit %d, out\n%s\nerr\n%s", c.args, code, out, errOut)
+		}
+		for _, k := range c.keep {
+			if !regexp.MustCompile(k).MatchString(out) {
+				t.Errorf("%v: out lacks %q\n%s", c.args, k, out)
+			}
+		}
+	}
+}
+
+// A machine that cannot be read is named by its identifier in a title, once, in the plan list and in the
+// plan show, whose own read of it is the one that failed; an ingestion that cannot be read is an import
+// with no machine to name.
+func TestTitlesFailedMachineAndIngestion(t *testing.T) {
+	seen := titleServer(t, func(a map[string]string) {
+		delete(a, "GET /api/v1/machines/mch_a")
+		a["GET /api/v1/operations"] = titleItems(titleOp("op_x", "ingest", `{"draft":"drf_a","draftRevision":1,"ingestion":"ing_gone"}`))
+	})
+	want := "Apply of mch_a to " + titleRelease + when(titleAt)
+	for _, args := range [][]string{{"plan", "list"}, {"plan", "show", "pln_BWSYNTH"}} {
 		code, out, errOut := runCtl(t, args...)
-		if code != 0 || strings.Contains(out, titleRelease) || strings.Contains(out, "Title") && args[1] == "show" {
+		if code != 0 || !strings.Contains(out, want) {
 			t.Errorf("%v: exit %d, out\n%s\nerr\n%s", args, code, out, errOut)
 		}
+	}
+	if n := reads(seen(), "/machines/mch_a"); n != 2 {
+		t.Errorf("a failed machine was read %d times over plan list and plan show; want once for each", n)
+	}
+	code, out, errOut := runCtl(t, "operation", "list")
+	if code != 0 || !regexp.MustCompile(`op_x +Import +ingest`).MatchString(out) {
+		t.Errorf("operation list: exit %d, out\n%s\nerr\n%s", code, out, errOut)
 	}
 }
 
@@ -178,13 +221,27 @@ func TestTitlesRemoteTextIsEscaped(t *testing.T) {
 }
 
 func TestTitlesJSONAndYAMLReadNothingMore(t *testing.T) {
-	seen := titleServer(t, nil)
-	for _, o := range []string{"json", "yaml"} {
-		for _, args := range [][]string{{"release", "list"}, {"plan", "list"}, {"operation", "list"}, {"release", "show", "rel_BWSYNTH"}, {"operation", "show", "op_pub"}} {
-			code, out, errOut := runCtl(t, append(args, "-o", o)...)
-			if code != 0 || strings.Contains(out, titleDraft) {
-				t.Errorf("%v -o %s: exit %d, out\n%s\nerr\n%s", args, o, code, out, errOut)
-			}
+	var served map[string]string
+	seen := titleServer(t, func(a map[string]string) { served = a })
+	for _, c := range []struct {
+		args []string
+		key  string // the served answer the output must be
+		id   string
+	}{
+		{[]string{"release", "list"}, "GET /api/v1/releases", "rel_BWSYNTH"},
+		{[]string{"plan", "list"}, "GET /api/v1/plans", "pln_BWSYNTH"},
+		{[]string{"operation", "list"}, "GET /api/v1/operations", "op_pub"},
+		{[]string{"release", "show", "rel_BWSYNTH"}, "GET /api/v1/releases/rel_BWSYNTH", "rel_BWSYNTH"},
+		{[]string{"operation", "show", "op_pub"}, "GET /api/v1/operations/op_pub", "op_pub"},
+	} {
+		code, out, errOut := runCtl(t, append(c.args, "-o", "json")...)
+		var got, want any
+		if code != 0 || json.Unmarshal([]byte(out), &got) != nil || json.Unmarshal([]byte(served[c.key]), &want) != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("%v -o json: exit %d, out\n%s\nwant the served resource\n%s\nerr\n%s", c.args, code, out, served[c.key], errOut)
+		}
+		code, out, errOut = runCtl(t, append(c.args, "-o", "yaml")...)
+		if code != 0 || !strings.Contains(out, "id: "+c.id) || strings.Contains(out, titleDraft) || strings.Contains(out, "Title") || errOut != "" {
+			t.Errorf("%v -o yaml: exit %d, out\n%s\nerr\n%s", c.args, code, out, errOut)
 		}
 	}
 	for _, p := range []string{"/drafts/drf_a", "/machines/mch_a", "/ingestions/ing_a"} {
