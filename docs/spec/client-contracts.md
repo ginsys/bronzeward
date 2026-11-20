@@ -1968,7 +1968,7 @@ one. The rule is one for both clients:
 | --- | --- | --- | --- |
 | Release | "`<draft title>`, published `<date>`" | `draft` and `publishedAt` of the release, `title` of `GET /drafts/{id}` | 1: the draft |
 | Plan | "`<apply or adopt>` of `<machine>` to `<release title>`" | `operation` (`apply-config` or `adopt`), `machine` and `release` of the plan | 3: its release, that release's draft and its machine |
-| Operation | `publish`: "Publish of `<draft title>`"; `ingest`: "Import of `<machine>`", or "Import" when its `subject` names no machine; `apply-config` and `adopt`: "`<apply or adopt>` of `<plan title>`" | `kind` and `subject` | `publish`: 1; `ingest`: 1 (the machine) or none; `apply-config` and `adopt`: up to 4 (its plan, that plan's release, that release's draft and the plan's machine) |
+| Operation | `publish`: "Publish of `<draft title>`"; `ingest`: "Import of `<machine>`", or "Import" when its `subject` names no machine; `apply-config` and `adopt`: the title of its plan, which already reads "`<apply or adopt>` of `<machine>` to `<release title>`" (an operation is its plan's execution) | `kind` and `subject` | `publish`: 1; `ingest`: 1 (the machine) or none; `apply-config` and `adopt`: up to 4 (its plan, that plan's release, that release's draft and the plan's machine) |
 
 1. `<machine>` is the machine's name where it has one (A9), else its identifier (shortened in the
    web client, whole in the CLI).
