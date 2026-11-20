@@ -250,6 +250,25 @@ func TestDiscoverLimitedStopsDialling(t *testing.T) {
 	}
 }
 
+// TestEnded: the caller's time is up when its context has ended or its deadline is within the tolerance,
+// as a node's DeadlineExceeded can arrive before the caller's own timer has set ctx.Err().
+func TestEnded(t *testing.T) {
+	near, cancelNear := context.WithTimeout(t.Context(), deadlineTolerance/4)
+	defer cancelNear()
+	far, cancelFar := context.WithTimeout(t.Context(), time.Hour)
+	defer cancelFar()
+	gone, cancelGone := context.WithCancel(t.Context())
+	cancelGone()
+	for name, c := range map[string]struct {
+		ctx  context.Context
+		want bool
+	}{"no deadline": {t.Context(), false}, "far deadline": {far, false}, "deadline within the tolerance": {near, true}, "cancelled": {gone, true}} {
+		if got := ended(c.ctx); got != c.want {
+			t.Errorf("%s: ended is %t, want %t", name, got, c.want)
+		}
+	}
+}
+
 func TestDiscoverUnsupportedContract(t *testing.T) {
 	c := newCluster(t)
 	old := supportedMinor
