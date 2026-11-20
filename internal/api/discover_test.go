@@ -332,6 +332,22 @@ func TestDiscoveryDeadlineDuringTheMemberList(t *testing.T) {
 	}
 }
 
+// §9.2: the deadline covers the whole call, the extraction included. A talosconfig is read at the endpoint
+// before the walk; with that read stalled and a node timeout much longer than the deadline, the call
+// still ends at the deadline (503), not after the node timeout.
+func TestDiscoveryDeadlineCoversTheExtraction(t *testing.T) {
+	d := newDiscoveryEnv(t, options{nodeTimeout: 20 * time.Second, discoverWithin: time.Second}, 0)
+	ca := newTalosCA(t)
+	n, pki := discoveryNode(t, ca, refusingMembers...)
+	n.Stall(talostest.MachineConfigType, true)
+	start := time.Now()
+	wantProblem(t, d.do(d.api, discoveryCall(d.author, "talosconfig", string(pki.Talosconfig("a:1", "", "")), n.Endpoint)),
+		http.StatusServiceUnavailable, "talos-access-unavailable")
+	if took := time.Since(start); took < 500*time.Millisecond || took > 10*time.Second {
+		t.Fatalf("the call took %v: want it to end at the 1 s deadline, not at the 20 s node timeout", took)
+	}
+}
+
 // §9.2: an endpoint that gives no cluster ID gives no identity: 503 talos-access-unavailable.
 func TestDiscoveryNoClusterID(t *testing.T) {
 	d := newDiscoveryEnv(t, options{}, 0)

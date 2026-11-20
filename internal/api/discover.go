@@ -88,10 +88,12 @@ func (a *API) discoverCluster(q *request) (discoveryBody, error) {
 		return discoveryBody{}, ref
 	}
 	in := q.input.(*firstKeyInput)
-	ctx := q.r.Context()
+	// The deadline covers the whole call, the extraction included: the call lasts the deadline at most.
+	dctx, cancel := context.WithTimeout(q.r.Context(), a.o.discoverWithin)
+	defer cancel()
 	// A talosconfig is read at the endpoint, which may accept the connection and stall: the extraction is
-	// bounded like every node read. The discovery below has its own, longer deadline.
-	ca, err := nodeRead(ctx, a.o.nodeTimeout, func(c context.Context) (provider.CAKey, error) {
+	// bounded like every node read, inside the deadline. The walk below has the deadline alone.
+	ca, err := nodeRead(dctx, a.o.nodeTimeout, func(c context.Context) (provider.CAKey, error) {
 		return signer.Extract(c, signer.Kind(in.Kind), in.Document.bytes(), in.Endpoint)
 	})
 	if err != nil {
@@ -111,8 +113,6 @@ func (a *API) discoverCluster(q *request) (discoveryBody, error) {
 		return discoveryBody{}, err
 	}
 	defer clear(tc)
-	dctx, cancel := context.WithTimeout(ctx, a.o.discoverWithin)
-	defer cancel()
 	res, err := discover.DiscoverLimited(dctx, tc, "", in.Endpoint, maxDiscoveryMembers)
 	if err == nil && res.ClusterID == "" {
 		err = errors.New("the endpoint gave no cluster ID")
