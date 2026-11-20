@@ -3,7 +3,7 @@
 // stream; it is polled with its cursor no more often than every 5 s while the page is visible
 // (client contracts §8.6 item 6).
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { ChangeEndpoint } from "./forms.tsx";
 import { type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
@@ -236,11 +236,13 @@ export const attribution = (r: string | null) => (r === null ? "matches neither 
 
 // A timeline entry's members that name what it is about; the rest stays in the API.
 const SHOWN = ["change", "resolution", "from", "to", "principal", "role", "reason", "cause", "observation", "operation", "plan"];
-export function details(e: Entry): string {
+// An identifier is shortened, and links to its page where its prefix has one (a plan, an operation: W3).
+export function details(e: Entry): ReactNode {
   const r = (e.entry ?? {}) as Record<string, unknown>;
-  return SHOWN.filter((k) => typeof r[k] === "string" && r[k] !== "")
-    .map((k) => (k === "reason" ? `"${r[k] as string}"` : /^[a-z]+_[a-z2-7]{26}$/.test(r[k] as string) ? short(r[k] as string) : (r[k] as string)))
-    .join(" ");
+  return SHOWN.filter((k) => typeof r[k] === "string" && r[k] !== "").map((k, i) => {
+    const v = r[k] as string;
+    return <Fragment key={k}>{i > 0 && " "}{k === "reason" ? `"${v}"` : /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Id id={v} /> : v}</Fragment>;
+  });
 }
 
 const byBasis = (items: Observation[]) => [...items].sort((x, y) => y.basis - x.basis);
