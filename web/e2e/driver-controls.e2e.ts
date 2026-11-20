@@ -1,5 +1,5 @@
-// Positive controls for the harness's own commands. wdio.conf.ts changes four commands in Safari
-// (getText, keys, the select commands and Tab), and a worker hook that throws is logged and ignored:
+// Positive controls for the harness's own commands. wdio.conf.ts changes five commands in Safari
+// (getText, keys, click, the select commands and Tab), and a worker hook that throws is logged and ignored:
 // a command that was not changed leaves every later case failing on the driver's own behaviour
 // (ginsys/bronzeward#892). These cases pass in every browser (the disabled-select case and the click case
 // run only in Safari), and fail in Safari when a change did not take, so the run says so, and names the
