@@ -372,7 +372,11 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
   full disk, say); 130 a read command or `operation watch` stopped by Ctrl-C (3 stays when an unknown outcome is reported beside the stop). Code 6 takes the place of 0 and of the
   plain 1 that a failed write gave. A more specific code wins: 2, 3, 4, 5 and 130 stay, and so does the
   1 of a refusal by the server. The write error is printed beside them. A closed pipe has no code
-  (see [§5.7](#57-operation-tracking)).
+  (see [§5.7](#57-operation-tracking)). A write the server acknowledged stays done when the client then cannot
+  save the context (the epoch, start mode and maximum token lifetime it learned): the result is printed, the
+  exit is 1 beside it, and the error says the write is stored. Nothing advises repeating it: a later
+  command that reads the server keeps the context again, and `import start` and `import resume` still
+  follow the import they started.
 - `-o json` prints the API resource with the same members and values, so scripts never depend on
   table layout. DEL, C1 and bidirectional control characters are written as `\uNNNN`
   ([client contracts §6](client-contracts.md#6-tls-trust) item 8). `-o yaml` prints the same document
