@@ -7,6 +7,7 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "rea
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { type Load, Id, type Reads, settledRead, short, useItem, useReads } from "./list.tsx";
+import { Who } from "./principals.tsx";
 import { REASON_MAX, reasonProblem } from "./plan.tsx";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
@@ -174,7 +175,7 @@ export function RevokeControl({ p, reread }: { p: Plan; reread: () => void }) {
   }, [done, reread]);
   const recorded = (data: unknown) => {
     const r = data as S["ApprovalRevocationBody"];
-    return <>Revocation of approval <Id id={r.approval} /> recorded by <Id id={r.revokedBy} /> ({r.role}), act <Id id={r.act} />. {REVOKE_LIMIT} The plan's state above is read again.</>;
+    return <>Revocation of approval <Id id={r.approval} /> recorded by <Who id={r.revokedBy} /> ({r.role}), act <Id id={r.act} />. {REVOKE_LIMIT} The plan's state above is read again.</>;
   };
   const approval = p.approval;
   const submit = (e: FormEvent<HTMLFormElement>) => {
@@ -237,5 +238,6 @@ function Reason({ machine, approval }: { machine: string; approval: string }) {
   }, [client, settle, undropped, again, view, machine, approval]);
   if (e.kind !== "ok") return null;
   const r = e.data;
-  return <Status testid="revocation-reason">{r?.reason === undefined ? "The machine's timeline holds no reason for this revocation." : `Revoked by ${r.principal === undefined ? "an approver" : short(r.principal)}: ${r.reason}`}</Status>;
+  return <Status testid="revocation-reason">{r?.reason === undefined ? "The machine's timeline holds no reason for this revocation." : <RevokedBy principal={r.principal} reason={r.reason} />}</Status>;
 }
+export const RevokedBy = ({ principal, reason }: { principal: string | undefined; reason: string }) => <>Revoked by <Who id={principal} none="an approver" />{`: ${reason}`}</>;

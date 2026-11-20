@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { namesOf } from "./principals.ts";
 import { ADOPTED, advanced, advanceReads, countingSettle, at, attribution, details, EITHER, type Entry, FROZEN, HEALTH, keepW3, kept, keptW3, latestUnread, lostSince, MachineShown, nextTimeline, NO_KEEP, positionShown, type Observation, Observations, pacer, POLL_MS, polled, queued, readLater, readOlder, recovery, sentences, stepAdvance, type Timeline, TimelineRows, UNREAD, type W3Kept } from "./machine.tsx";
 import { type ShellEvents, ShellReads } from "./shell.tsx";
 import { type Load, type Reads, ReadsProvider, RESTARTED } from "./list.tsx";
@@ -751,8 +752,10 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
   });
 
   // The Details cell, rendered under the reads context that a link reads (as the attribution case above does).
-  const detailsCell = (kind: string, entry: unknown) => {
-    const reads = { go: () => {} } as unknown as Reads;
+  // Its client answers the names read (G23) with the display name `Ada` for every identifier.
+  const named = { read: async (path: string) => ({ kind: "ok", data: { items: new URL(path, "http://x").searchParams.getAll("id").map((id) => ({ id, kind: "human", issuer: "https://idp.example", subject: "ada", display: "Ada", service: null })) } }) };
+  const detailsCell = (kind: string, entry: unknown, client: object = { read: async () => ({ kind: "transport" }) }) => {
+    const reads = { go: () => {}, client, view: "v", again: 0 } as unknown as Reads;
     return renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, details({ revision: 1, epoch: "ep", at: READ, kind, entry })));
   };
   const plainText = (html: string) => html.replace(/<[^>]*>/g, "").replaceAll("&quot;", '"');
@@ -761,8 +764,17 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(plainText(detailsCell("freeze", { principal: "h-author", role: "author", reason: "synthetic incident" }))).toBe('h-author author "synthetic incident"');
     expect(plainText(detailsCell("drift", { record: 3, change: "opened", observation: "obs_abcdefghijklmnopqrstuvwxyz" }))).toBe("opened obs_abcdâ€¦wxyz");
     expect(detailsCell("unknown-kind", null)).toBe("");
-    // A principal is an identifier with no view: its text, with the whole identifier as the title.
-    expect(detailsCell("freeze", { principal: "idn_abcdefghijklmnopqrstuvwxyz", role: "author" })).toBe('<span title="idn_abcdefghijklmnopqrstuvwxyz">idn_abcdâ€¦wxyz</span> author');
+    // A principal the names read has not named (yet) shows its shortened identifier, the whole one as the title.
+    expect(detailsCell("freeze", { principal: "idn_abcdefghijklmnopqrstuvwxya", role: "author" })).toBe('<span title="idn_abcdefghijklmnopqrstuvwxya">idn_abcdâ€¦wxya</span> author');
+  });
+
+  // G23: the principal an entry names shows its name once the names read answered, with the identifier as the title.
+  test("an entry's details: a principal is named once the names read answered", async () => {
+    const principal = "idn_abcdefghijklmnopqrstuvwxya";
+    namesOf(named as never).want("v|0", [principal]);
+    await namesOf(named as never).idle();
+    expect(detailsCell("freeze", { principal, role: "author" }, named)).toBe(`<span title="${principal}">Ada</span> author`);
+    expect(detailsCell("approval", { plan: "pln_abcdefghijklmnopqrstuvwxyz", principal }, named)).toContain(`<span title="${principal}">Ada</span> <a href="/plans/`);
   });
 
   // W3's links (ginsys/bronzeward#359): a plan or an operation an entry names opens its page; the text is the shortened id as before.

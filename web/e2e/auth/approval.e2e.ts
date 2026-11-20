@@ -245,7 +245,7 @@ describe("approval and revocation (#358)", () => {
       await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: revoked$/), { wait: 20_000 });
       await focusSettles(focusKept, "the page, not the body");
       await focusSettles(() => focusIn(REVOKE_ANSWER), "the revocation's answer");
-      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by \S+: seeded reason$/), { wait: 20_000 });
+      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by h-\S+ at \S+: seeded reason$/), { wait: 20_000 });
       expect(await posts()).toEqual([expect.stringMatching(/^POST \/approvals\/apr_\w+\/revocations$/)]);
     });
 
@@ -276,7 +276,7 @@ describe("approval and revocation (#358)", () => {
       await $("main").$("button=Revoke approval").click();
       // The page reads the plan again and shows it revoked, with the reason on the machine's timeline.
       await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan \S+: revoked$/), { wait: 20_000 });
-      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by \S+: seeded reason$/), { wait: 20_000 });
+      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by h-\S+ at \S+: seeded reason$/), { wait: 20_000 });
       expect(await posts()).toEqual([expect.stringMatching(/^POST \/approvals\/apr_\w+\/revocations$/)]);
       expect((await api(at, "h-viewer", "GET", `/plans/${seed.plans.approved}`)).body!["state"]).toBe("revoked");
     });
@@ -284,7 +284,7 @@ describe("approval and revocation (#358)", () => {
     it("a revoked plan shows the reason its revocation recorded on the machine's timeline", async function () {
       this.timeout(60_000);
       await open("h-all", undefined, "revoked", {}, seed.plans.revoked);
-      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by \S+: seeded$/), { wait: 20_000 });
+      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by h-\S+ at \S+: seeded$/), { wait: 20_000 });
     });
 
     // AMB-05: the first send is committed and its answer dropped, then the epoch changes. The repeat
