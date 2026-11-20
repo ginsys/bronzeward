@@ -1504,15 +1504,19 @@ restore nobody entered stays the same residual
    the reasons and the owner's decision (ginsys/bronzeward#974). The web view that
    exists (`/fragment-revisions/{id}`, reached from a fragment's revisions list and a release's
    source rows) has these display rules, which are the web view's own. It shows the text as served
-   in a text node in a `pre` (`web/src/resources.tsx:215`), never parsed or rendered as markup, with
-   the declared references and the embedded documents (`web/src/resources.tsx:216-219`); it has no
+   in a text node in a `pre` (`web/src/resources.tsx:266`), never parsed or rendered as markup, with
+   the declared references and the embedded documents (`web/src/resources.tsx:267-270`); it has no
    copy-to-clipboard button and no download, as item 4 has for a field that can hold a value nobody
    marked; it keeps the text in memory for the page only, never in browser storage; a refused read
-   repeats the server's problem without a body (item 6), and item 7 holds. **One rule is not
-   built yet:** a one-line notice that the text is sanitized by the server and that the server
-   cannot promise it holds no value nobody marked, as item 8 says of the import base text. The view
-   shows no such notice today (`web/src/resources.tsx:198-225`), and an implementation issue
-   carries it. The CLI's `fragment show` is unchanged (`-o json` prints the body
+   repeats the server's problem without a body (item 6), and item 7 holds. **The profile page and
+   the profile revision page show the same text** for each fragment revision the profile pins, in
+   the pinned order (`PinnedFragments`, `web/src/resources.tsx`, ginsys/bronzeward#997), under the
+   same rules and the same limit: a row whose read fails shows the identifier and the reason while
+   the others still show, and a profile of more than 20 pins reads the first 20 and the rest on a
+   button. **One rule is not built yet:** a one-line notice that the text is sanitized by the server
+   and that the server cannot promise it holds no value nobody marked, as item 8 says of the import
+   base text. None of these views shows such a notice today (`web/src/resources.tsx:243-275`), and
+   an implementation issue carries it. The CLI's `fragment show` is unchanged (`-o json` prints the body
    whole), as are the draft editor's and the composition views' reads of the same text: the limit
    is the same on every client.
 

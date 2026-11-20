@@ -182,12 +182,57 @@ export function SourceItem({ kind, id }: { kind: Kind; id: string }) {
             ...("machine" in s ? [["Machine", <Id id={s.machine} />] as const] : []),
             ["Current revision", <Id id={s.revision} none="removed" />], ["Head revision", s.headRevision], ["Created", when(s.createdAt)],
           ]} />
+          {kind === "profile" && (
+            <>
+              <h3>Documents of the current revision</h3>
+              {s.revision === null ? <p>No revision yet.</p> : <CurrentDocuments key={s.revision} id={s.revision} />}
+            </>
+          )}
           <h3>Revisions</h3>
           <ListOf<Revision> label="Revisions" path={`${path}/revisions`} cols={REVISIONS} empty="No revisions recorded." />
         </>
       )}
     </ItemOf>
   );
+}
+
+// The configuration a profile pins (ginsys/bronzeward#997): each pinned fragment revision's name, layer and
+// document, in the pinned order. A revision lists the identifiers it pins (the server refuses a repeat), so
+// a row reads its own fragment revision once; one that fails shows its identifier and the reason, and the
+// others still show. The text follows the fragment revision view's display rules (operator experience §9
+// item 9): a text node in a `pre`, no copy or download, held by the row only. The first 20 rows read at
+// once and a button reads the rest, so a profile of 256 pins never starts 256 reads together.
+const PINNED_SHOWN = 20;
+
+function PinnedFragment({ id }: { id: string }) {
+  const item = useItem<S["FragmentRevisionBody"]>(`/fragment-revisions/${encodeURIComponent(id)}`);
+  const pending = usePending(item, "the fragment revision");
+  const f = item.kind === "ok" ? item.data : undefined;
+  return (
+    <div data-testid="pinned-fragment">
+      <h4>{f === undefined ? <Id id={id} /> : `${f.name} (${f.layer})`}</h4>
+      {f === undefined ? pending : <><p>Revision <Id id={id} /></p><pre data-testid="fragment-document">{f.document}</pre></>}
+    </div>
+  );
+}
+
+function PinnedFragments({ ids }: { ids: readonly string[] }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? ids : ids.slice(0, PINNED_SHOWN);
+  return (
+    <>
+      {ids.length === 0 && <p>No fragments pinned.</p>}
+      {shown.map((id) => <PinnedFragment key={id} id={id} />)}
+      {shown.length < ids.length && <p><button type="button" onClick={() => setAll(true)}>Show the remaining {ids.length - shown.length}</button></p>}
+    </>
+  );
+}
+
+// The profile page's own documents: those of its current revision, read here so the page that was opened shows them.
+function CurrentDocuments({ id }: { id: string }) {
+  const item = useItem<S["ProfileRevisionBody"]>(`/profile-revisions/${encodeURIComponent(id)}`);
+  const pending = usePending(item, "the profile revision");
+  return item.kind === "ok" ? <PinnedFragments ids={item.data.fragments} /> : pending;
 }
 
 type AnyRevision = S["FragmentRevisionBody"] | S["ProfileRevisionBody"] | S["AssignmentRevisionBody"];
@@ -205,10 +250,16 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
             ["Identifier", r.id], ["Cluster", <Id id={r.cluster} />], ...("layer" in r ? [["Layer", r.layer] as const] : []),
             ...("machine" in r ? [["Machine", <Id id={r.machine} />] as const] : []),
             ...("profiles" in r ? [["Profiles", r.profiles.join(", ") || "none"] as const] : []),
-            ...("fragments" in r ? [["Fragments", Array.isArray(r.fragments) ? <Ids ids={r.fragments} />
-              : Object.entries(r.fragments).map(([layer, names]) => `${layer}: ${names.join(", ")}`).join("; ") || "none"] as const] : []),
+            ...("fragments" in r && !Array.isArray(r.fragments)
+              ? [["Fragments", Object.entries(r.fragments).map(([layer, names]) => `${layer}: ${names.join(", ")}`).join("; ") || "none"] as const] : []),
             ["Author", <Who id={r.author} />], ["Created", when(r.createdAt)],
           ]} />
+          {"fragments" in r && Array.isArray(r.fragments) && (
+            <>
+              <h3>Fragments</h3>
+              <PinnedFragments key={r.id} ids={r.fragments} />
+            </>
+          )}
           {"document" in r && (
             <>
               <h3>Document</h3>
