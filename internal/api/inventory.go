@@ -310,14 +310,10 @@ func inventoryMachine(ctx context.Context, _ *API, tx *sql.Tx, q *request) (resu
 	// stopped the insert is read afterwards, the identity key first: a recorded key is a `conflict`
 	// naming that machine, and only when none holds it is the name another machine's (§3.5).
 	var inserted string
-	var err error
-	for attempt := 1; ; attempt++ {
-		err = tx.QueryRowContext(ctx, `INSERT INTO machine (id, cluster, name, smbios_uuid, talos_node_id, serial, scope_state, talos_endpoint, platform, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now()) ON CONFLICT DO NOTHING RETURNING id`,
-			b.ID, b.Cluster, in.Name, b.Hardware.SMBIOSUUID, b.Hardware.TalosNodeID, b.Hardware.Serial, b.ScopeState, b.TalosEndpoint, b.Platform).Scan(&inserted)
-		if !errors.Is(err, sql.ErrNoRows) {
-			break
-		}
+	err := tx.QueryRowContext(ctx, `INSERT INTO machine (id, cluster, name, smbios_uuid, talos_node_id, serial, scope_state, talos_endpoint, platform, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now()) ON CONFLICT DO NOTHING RETURNING id`,
+		b.ID, b.Cluster, in.Name, b.Hardware.SMBIOSUUID, b.Hardware.TalosNodeID, b.Hardware.Serial, b.ScopeState, b.TalosEndpoint, b.Platform).Scan(&inserted)
+	if errors.Is(err, sql.ErrNoRows) {
 		var existing string
 		switch err := tx.QueryRowContext(ctx, `SELECT id FROM machine WHERE smbios_uuid = $1 OR talos_node_id = $2`,
 			b.Hardware.SMBIOSUUID, b.Hardware.TalosNodeID).Scan(&existing); {
@@ -333,14 +329,10 @@ func inventoryMachine(ctx context.Context, _ *API, tx *sql.Tx, q *request) (resu
 				return result{}, err
 			}
 		}
-		if holder != "" {
-			return result{}, nameInUse(holder)
-		}
-		// Neither index holds the row any longer: its holder renamed away after the insert was
-		// refused, so the insert is tried again.
-		if attempt == maxAttempts {
+		if holder == "" { // the holder renamed away after the insert was refused
 			return result{}, nameRace()
 		}
+		return result{}, nameInUse(holder)
 	}
 	if err != nil {
 		return result{}, err

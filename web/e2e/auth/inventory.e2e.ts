@@ -280,7 +280,7 @@ describe("the machine detail (W3)", () => {
     const m1 = obs("m", 4, "2026-10-26T08:46:00Z");
     const p = obs("p", 5, "2026-10-26T08:51:00Z", { configDigest: { code: "unreachable", cause: "node unreachable" } });
     const machine: Machine = {
-      id: id!, cluster: cl.id, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
+      id: id!, cluster: cl.id, name: null, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
       desired: rel("b"), applied: { release: rel("a"), source: "operation", importBase: null }, pendingConvergence: true,
       observed: { observation: m1.id, at: m1.at, release: rel("b") }, frozen: true, scopeState: "normal",
       openDrift: { revision: 3, observation: k.id, lastObservation: m1.id, lateLanding: null },
@@ -447,7 +447,7 @@ describe("the machine detail (W3)", () => {
     });
     const [m1, m2] = [obs("m", 2, "2026-10-26T08:46:00Z"), obs("n", 3, "2026-10-26T08:51:00Z")];
     const machine = (o: Observation, frozen: boolean): Machine => ({
-      id: id!, cluster: cl.id, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
+      id: id!, cluster: cl.id, name: null, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
       desired: null, applied: null, pendingConvergence: false, observed: { observation: o.id, at: o.at, release: null }, frozen, scopeState: "normal", openDrift: null,
     });
     const bodies = (o: Observation[], frozen: boolean) => ({ [`/machines/${id}`]: machine(o[0]!, frozen), [`/machines/${id}/observations`]: { items: o } });
@@ -758,7 +758,7 @@ describe("the rendered review of a release's machine", () => {
       ...over,
     };
     const machine: Machine = {
-      id: m!, cluster: cl.id, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
+      id: m!, cluster: cl.id, name: null, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
       desired: s.rel.id, applied, pendingConvergence: true, observed: null, frozen: false, scopeState: "normal", openDrift: null,
     };
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: { ...s.bodies, [path]: review, [`/machines/${m}`]: machine } })).toMatch(SERVER);
