@@ -152,6 +152,20 @@ describe("the styled client", () => {
     );
   });
 
+  it("a select shows a whole line of text, and is still a 24 px target", async () => {
+    // A fixed height with Oat's block padding left the content box shorter than one line, so the text was
+    // cut off (ginsys/bronzeward#981). The content box is the border box less padding and borders.
+    const s = await browser.execute(() => {
+      const c = getComputedStyle(document.getElementById("g969-select")!);
+      const lh = parseFloat(c.lineHeight);
+      const content = parseFloat(c.height) - parseFloat(c.paddingTop) - parseFloat(c.paddingBottom) - parseFloat(c.borderTopWidth) - parseFloat(c.borderBottomWidth);
+      return { lineHeight: Number.isNaN(lh) ? parseFloat(c.fontSize) * 1.2 : lh, content, box: parseFloat(c.height), sizing: c.boxSizing };
+    });
+    expect(s.sizing).toBe("border-box");
+    expect(s.content).toBeGreaterThanOrEqual(s.lineHeight);
+    expect(s.box).toBeGreaterThanOrEqual(24);
+  });
+
   it("a disabled button keeps its contrast", async () => {
     const o = await browser.execute(() => getComputedStyle(document.getElementById("g969-off")!).opacity);
     expect(o).toBe("1");

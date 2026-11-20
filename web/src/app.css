@@ -48,7 +48,9 @@ button:disabled { color: var(--muted-foreground); background-color: var(--backgr
 /* The controls are the browser's own: Oat draws a select arrow, a check mark and a radio dot as data:
    images, which the content policy's img-src 'self' refuses. */
 select, input[type="checkbox"], input[type="radio"] { appearance: auto; accent-color: var(--primary); }
-select { background-image: none; width: auto; max-width: 100%; height: 1.75rem; margin-inline-start: 0.25rem; }
+/* A native select ignores min-height in Safari, so it gets a height; Oat's block padding would leave that
+   height less than one line of text, so the padding goes and the line fills the box. */
+select { background-image: none; width: auto; max-width: 100%; height: 2rem; padding-block: 0; margin-inline-start: 0.25rem; }
 input[type="checkbox"]::after, input[type="radio"]::after { content: none; mask-image: none; }
 textarea { max-width: 100%; box-sizing: border-box; }
 
