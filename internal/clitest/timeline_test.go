@@ -132,7 +132,7 @@ func TestTimeline(t *testing.T) {
 		r.out, r.err = out.String(), errb.String()
 		f.scan(r, args)
 		f.want(r, 130, "REVISION  ", "Stopped following the timeline of machine "+e.s.machine+" at your request.")
-		if !regexp.MustCompile(`(?m)^\d+ +.+  plan +plan ` + p + `, operation apply-config, release ` + e.rel + `, by idn_[a-z2-7]{26} \(publisher\)$`).MatchString(r.out) {
+		if !regexp.MustCompile(`(?m)^\d+ +.+  plan +plan ` + p + `, operation apply-config, release ` + e.rel + `, by h-[a-z]+ at http://127\.0\.0\.1:\d+ \(publisher\)$`).MatchString(r.out) {
 			t.Errorf("the follow did not show plan %s's entry:\n%s", p, r.out)
 		}
 		mu.Lock()
@@ -160,12 +160,16 @@ func TestTimeline(t *testing.T) {
 		f.want(r, 0)
 		for _, want := range []string{
 			`refusal +plan ` + p + `, comparison \S+, cause [^,]+`,
-			`plan-cancellation +plan ` + p + `, by idn_[a-z2-7]{26} \(publisher\), reason BWSYNTH stale: Desired moved$`,
-			`approval +approval apr_[a-z2-7]{26}, plan ` + p + `, by idn_[a-z2-7]{26} \(approver\), no self-approval reason$`,
+			`plan-cancellation +plan ` + p + `, by h-[a-z]+ at http://127\.0\.0\.1:\d+ \(publisher\), reason BWSYNTH stale: Desired moved$`,
+			`approval +approval apr_[a-z2-7]{26}, plan ` + p + `, by h-[a-z]+ at http://127\.0\.0\.1:\d+ \(approver\), no self-approval reason$`,
 		} {
 			if !regexp.MustCompile(`(?m)^\d+ +.+  ` + want).MatchString(r.out) {
 				t.Errorf("machine timeline: no line %s in\n%s", want, r.out)
 			}
+		}
+		// The names were read, so no table line names a principal by its identifier.
+		if regexp.MustCompile(`(?m)^\d+ +.+  (plan|plan-cancellation|approval) .*by idn_`).MatchString(r.out) {
+			t.Errorf("machine timeline: a plan or approval line names its principal by identifier:\n%s", r.out)
 		}
 	})
 	f.scanFiles()
