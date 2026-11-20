@@ -107,6 +107,7 @@ describe("the shell", () => {
     await announced("deprecation", deprecated("/api/v1/identity"));
     await nav("Audit").click();
     await expect($("main h2")).toHaveText("Audit");
+    await browser.waitUntil(async () => (await seen()).includes("/principals"), { timeout: 10_000, timeoutMsg: "the Audit page did not read the names" });
     await nav("Sources").click();
     await expect($("main h2")).toHaveText("Sources");
     // The Audit page names the principals of the acts it lists with one read of GET /principals (G23), once for the visit.
