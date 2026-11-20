@@ -40,6 +40,12 @@ export interface Faults {
   bodies?: Record<string, unknown>;
   // The write cases (#338): each write to `path` takes the next step, and passes once none is left.
   steps?: { path: string; take: Step[] };
+  // The operation page's stream cases (ginsys/bronzeward#359): the next event stream passes on `after`
+  // events (a block with an `id:`; keep-alives and `reset` pass without counting), reads and drops the
+  // next `withhold` events, and then closes the page's connection, as a dropped network does. The
+  // server ran on: a dropped event is one it wrote and the page never got. Used once, by the first stream
+  // that opens after it is set. `after` is at least 1.
+  cut?: { after: number; withhold?: number };
 }
 
 // drop: the request read and its connection closed, nothing forwarded; commit-drop: forwarded, the
@@ -67,12 +73,16 @@ export interface Injector {
   release: () => Promise<void>;
   // Every write received, as "<method> <route> <Idempotency-Key> <Bronzeward-Expected-Epoch>".
   writes: string[];
-  // Commits a new epoch in the deployment the writes go to, as a recovery entry does.
-  epoch: () => void;
+  // Commits a new epoch in the deployment the writes go to, as a recovery entry does; with an operation
+  // that is unresolved, also the entry's ownership-transition event for it (auth.conf.ts).
+  epoch: (operation?: string) => void;
   // The requests that reached REDIRECTED: a redirect the page followed.
   redirected: number;
   // Retires the versions of the digest key of the deployment the writes go to (AMB-06).
   retire: () => Promise<void>;
+  // Every event stream opened, as "<path> <Last-Event-ID, or - for none>", and how many the `cut` fault closed.
+  streams: string[];
+  cuts: number;
 }
 
 // Where every injected redirect points: a path on the page's own origin, which the page's CSP admits
@@ -91,7 +101,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
   // Each held answer: its release, and its having been sent.
   const waiting: { go: () => void; sent: Promise<void> }[] = [];
   const inj: Injector = {
-    faults: {}, seen: [], answered: [], holding: [], writes: [], redirected: 0, server: undefined as never, epoch: () => {}, retire: async () => {},
+    faults: {}, seen: [], answered: [], holding: [], writes: [], redirected: 0, streams: [], cuts: 0, server: undefined as never, epoch: () => {}, retire: async () => {},
     release: async () => {
       inj.holding = [];
       const now = waiting.splice(0);
@@ -176,7 +186,43 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
         const reader = up.body.getReader();
         res.once("close", () => void reader.cancel().catch(() => {}));
         res.writeHead(up.status, back);
-        for (let r = await reader.read().catch(() => undefined); r !== undefined && !r.done; r = await reader.read().catch(() => undefined)) res.write(r.value);
+        inj.streams.push(`${route} ${req.headers["last-event-id"] ?? "-"}`);
+        const cut = f.cut;
+        delete f.cut;
+        let pending = "";
+        let [passed, dropped] = [0, 0];
+        const text = new TextDecoder();
+        for (let r = await reader.read().catch(() => undefined); r !== undefined && !r.done; r = await reader.read().catch(() => undefined)) {
+          if (cut === undefined) {
+            res.write(r.value);
+            continue;
+          }
+          // Whole blocks only, so the page never gets half an event.
+          pending += text.decode(r.value, { stream: true });
+          for (let end = pending.indexOf("\n\n"); end >= 0; end = pending.indexOf("\n\n")) {
+            const block = pending.slice(0, end + 2);
+            pending = pending.slice(end + 2);
+            if (!/^id: /m.test(block)) {
+              res.write(block);
+              continue;
+            }
+            if (passed < cut.after) {
+              res.write(block);
+              passed++;
+            } else {
+              dropped++;
+            }
+            if (passed === cut.after && dropped === (cut.withhold ?? 0)) {
+              inj.cuts++;
+              void reader.cancel().catch(() => {});
+              // A moment after the last block passed: the browser errors its stream body on a cut and drops what it
+              // had not read yet, so a cut at once shows the page a stream that failed before its first event.
+              // No terminating chunk is sent, so the page sees a cut connection.
+              setTimeout(() => req.socket.destroy(), 400);
+              return;
+            }
+          }
+        }
         inj.answered.push(`${route}${search} ${up.status}`);
         return void res.end();
       }

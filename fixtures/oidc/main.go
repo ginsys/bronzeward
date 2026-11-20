@@ -24,7 +24,7 @@ import (
 
 const usage = `usage: oidc keygen  -out <key file>
        oidc serve   -key <key file> -issuer <url> [-listen 127.0.0.1:5556]
-       oidc mint    -key <key file> -issuer <url> [-audience bronzeward] -human <name> [-defect <name> | -without-group <group>]
+       oidc mint    -key <key file> -issuer <url> [-audience bronzeward] -human <name> [-defect <name> | -without-group <group>] [-age <duration>]
        oidc defects
        oidc groups  -signing-key <file> -project <id> [-listen 127.0.0.1:5556]`
 
@@ -50,6 +50,7 @@ func run(args []string, stdout io.Writer) error {
 	human := fs.String("human", "", "synthetic human (mint): "+strings.Join(slices.Sorted(maps.Keys(issuer.Humans)), ", "))
 	defect := fs.String("defect", "", "defect to put in the token (mint): see oidc defects")
 	withoutGroup := fs.String("without-group", "", "group of the human's left out of a valid token (mint)")
+	age := fs.Duration("age", 0, "issue the token this long ago, so it expires sooner (mint)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -90,13 +91,14 @@ func run(args []string, stdout io.Writer) error {
 			return serve(iss.Handler(), *listen)
 		}
 		var tok string
+		issued := time.Now().Add(-*age)
 		switch {
 		case *withoutGroup == "":
-			tok, err = iss.Mint(*human, *defect, time.Now())
+			tok, err = iss.Mint(*human, *defect, issued)
 		case *defect != "":
 			return errors.New("mint takes -defect or -without-group, not both")
 		default:
-			tok, err = iss.MintWithoutGroup(*human, *withoutGroup, time.Now())
+			tok, err = iss.MintWithoutGroup(*human, *withoutGroup, issued)
 		}
 		if err != nil {
 			return err

@@ -129,7 +129,9 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // POST /faults sets the injector's faults, GET /seen lists the API paths it passed on and GET
 // /answered the server's answers to them, GET /held the paths whose answers it holds now, POST
 // /release lets its held answers go and answers once they are sent, GET /writes lists the writes
-// it received, GET /redirected counts the requests that followed its redirects, and POST /epoch commits a new epoch where they go; the next sign-in clears all. POST /disposable answers the URL of B's
+// it received, GET /redirected counts the requests that followed its redirects, GET /streams lists
+// the event streams it opened with their Last-Event-ID and GET /cuts counts the ones its `cut` fault
+// closed, and POST /epoch commits a new epoch where they go; the next sign-in clears all. POST /disposable answers the URL of B's
 // deployment just started on a fresh database, replacing any earlier one: ?start=recovery with
 // -recovery-start, its entry not yet made, and with &keep on the earlier one's database. POST
 // /bao/hold?ms= holds each KV write of that deployment's provider this long (AMB-02), and POST
@@ -168,7 +170,7 @@ export interface Chaos {
   kill: () => Promise<void>;
   interrupt: (line: string) => void;
 }
-function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean, short: boolean, seed: boolean) => Promise<string>, seeded: () => string | undefined, kv: (ms: number) => void, chaos: Chaos): Server {
+function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean, short: boolean, seed: string | undefined) => Promise<string>, seeded: () => string | undefined, kv: (ms: number) => void, chaos: Chaos): Server {
   let go: string | undefined;
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", CONTROL);
@@ -178,9 +180,11 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     if (url.pathname === "/held") return res.end(JSON.stringify(injector.holding));
     if (url.pathname === "/writes") return res.end(JSON.stringify(injector.writes));
     if (url.pathname === "/redirected") return res.end(JSON.stringify(injector.redirected));
+    if (url.pathname === "/streams") return res.end(JSON.stringify(injector.streams));
+    if (url.pathname === "/cuts") return res.end(JSON.stringify(injector.cuts));
     if (url.pathname === "/epoch" && req.method === "POST") {
       try {
-        injector.epoch();
+        injector.epoch(url.searchParams.get("operation") ?? undefined);
       } catch (e) {
         return res.writeHead(500).end(String(e));
       }
@@ -222,7 +226,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     if (url.pathname === "/bao/retire" && req.method === "POST") return void injector.retire().then(() => res.end(), (e: unknown) => res.writeHead(500).end(String(e)));
     if (url.pathname === "/release" && req.method === "POST") return void injector.release().then(() => res.end());
     if (url.pathname === "/disposable" && req.method === "POST") {
-      const started = disposable(url.searchParams.get("start") === "recovery", url.searchParams.has("keep"), url.searchParams.get("expiry") === "short", url.searchParams.has("seed"));
+      const started = disposable(url.searchParams.get("start") === "recovery", url.searchParams.has("keep"), url.searchParams.get("expiry") === "short", url.searchParams.get("seed") ?? undefined);
       return void started.then((at) => res.end(at), (e: unknown) => res.writeHead(500).end(String(e)));
     }
     if (url.pathname === "/seeded" && req.method === "GET") {
@@ -246,9 +250,12 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     }
     if (url.pathname !== "/next") return res.writeHead(404).end();
     const q = url.searchParams;
-    const mint = (human: string) => {
+    // `age` (seconds) issues the sign-in's token that long ago, so it expires that much sooner; a renewal
+    // (grant.fresh) is minted when the provider answers it, not aged (AUTH-06's stream half).
+    const mint = (human: string, aged = true) => {
       const args = ["mint", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-human", human];
       for (const f of ["defect", "without-group"]) if (q.has(f)) args.push(`-${f}`, q.get(f)!);
+      if (aged && q.has("age")) args.push("-age", `${Number(q.get("age"))}s`);
       return { access: execFileSync(`${root}bin/oidc-fixture`, args).toString().trim(), sub: human };
     };
     // A failed mint fails the spec that asked for it, not the launcher, whose cleanup must still run.
@@ -256,6 +263,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       // AUTH-07 and AUTH-11: a short expires_in, rotation, a renewal as another human, held answers.
       const grant: Grant = { ...mint(q.get("human") ?? ""), rotate: q.has("rotate"), hold: Number(q.get("hold") ?? 0), bare: q.has("bare") };
       if (q.has("lifetime")) grant.lifetime = Number(q.get("lifetime"));
+      if (q.has("age")) grant.fresh = () => mint(q.get("human") ?? "", false).access;
       if (q.has("renew-as")) grant.renewed = { ...mint(q.get("renew-as")!), lifetime: 300 };
       next.grant = grant;
     } catch (e) {
@@ -270,6 +278,8 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       injector.answered.length = 0;
       injector.writes.length = 0;
       injector.redirected = 0;
+      injector.streams.length = 0;
+      injector.cuts = 0;
       if (bao !== undefined) (bao.hold = 0), (bao.fail = "none"), (bao.decryptHold = 0);
       rmSync(interruptFile, { force: true });
       res.end();
@@ -369,18 +379,19 @@ async function prepare() {
   // The identifiers of the records bin/e2eseed.test wrote into the disposable deployment's database.
   let seeded: string | undefined;
   const ctl = control(provider, next, injector, async (recovery, keep, short, seed) => {
-    if (seed && keep) throw new Error("a seed is written once, into a fresh database: give ?seed or ?keep, not both");
+    if (seed !== undefined && keep) throw new Error("a seed is written once, into a fresh database: give ?seed or ?keep, not both");
+    if (seed !== undefined && seed !== "" && seed !== "noattempt") throw new Error(`a seed of ${seed}: give ?seed or ?seed=noattempt`);
     if (disposable !== undefined) await stop(disposable.p);
     if (!keep) seeded = undefined;
     disposable = server("disposable", DISPOSABLE_API.slice(7), fixtureOidc, short ? deploymentWith("45s") : disposableDeployment, recovery ? ["-recovery-start"] : [], keep ? disposable?.db : undefined, true);
     await ready(`${DISPOSABLE_API}/livez`, disposable.p);
-    if (seed) {
+    if (seed !== undefined) {
       const out = `${state}/seeded.json`;
       // From the package's own directory: the API tests read the OpenAPI description by a path relative to it.
       execFileSync(`${root}bin/e2eseed.test`, ["-test.run", "^TestE2ESeed$", "-test.count=1"], {
         cwd: `${root}internal/api`,
         stdio: "inherit",
-        env: { ...process.env, BW_E2E_SEED_DSN: `postgres://bronzeward@127.0.0.1:${PG_PORT}/${disposable.db}?sslmode=disable`, BW_E2E_SEED_OUT: out },
+        env: { ...process.env, BW_E2E_SEED_ATTEMPT: seed === "noattempt" ? "none" : "", BW_E2E_SEED_DSN:`postgres://bronzeward@127.0.0.1:${PG_PORT}/${disposable.db}?sslmode=disable`, BW_E2E_SEED_OUT: out },
       });
       seeded = readFileSync(out, "utf8");
       rmSync(out);
@@ -398,10 +409,23 @@ async function prepare() {
   // A new epoch in the disposable deployment's database, as a recovery entry commits it; the server
   // reads the epoch on each request. Only a database this run created for that deployment: any
   // other, B's included, is refused, so no case changes a database it does not own.
-  injector.epoch = () => {
+  // With an operation (ginsys/bronzeward#359, EVT-05), the entry's own write for an operation that is already
+  // unresolved follows the commit (recovery_entries.go: its owner generation and epoch move, and an
+  // ownership-transition event of the new epoch is the machine's last), so an open stream meets an event of
+  // another epoch while the operation stays open. The identifier of an event takes the epoch of the
+  // request that reads it (operations.go scanEvent), whoever wrote the row.
+  injector.epoch = (operation) => {
     const db = owned("a new epoch is committed");
     const ep = `ep_${base32(randomBytes(16))}`;
-    execFileSync("psql", [...PG, "-v", "ON_ERROR_STOP=1", "-q", "-d", db, "-c", `INSERT INTO recovery_epoch (epoch, entered_at) VALUES ('${ep}', now())`, "-c", `UPDATE installation_state SET epoch = '${ep}'`]);
+    const op = operation ?? "";
+    if (operation !== undefined && !/^op_[a-z2-7]+$/.test(op)) throw new Error(`an operation of ${op}: give an operation identifier`);
+    const event = operation === undefined ? [] : ["-c", `WITH old AS (SELECT machine, owner, owner_gen, owner_epoch FROM operation WHERE id = '${op}' AND state = 'unresolved'),
+      o AS (UPDATE operation SET owner_gen = owner_gen + 1, owner_epoch = '${ep}' WHERE id = '${op}' AND state = 'unresolved' RETURNING machine),
+      m AS (UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = (SELECT machine FROM o) RETURNING id, revision_counter)
+      INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+      SELECT m.id, m.revision_counter, '${ep}', 'ownership-transition', jsonb_build_object('operation', '${op}', 'from', old.owner, 'to', old.owner,
+        'generation', old.owner_gen + 1, 'fromGeneration', old.owner_gen, 'fromEpoch', old.owner_epoch, 'epoch', '${ep}', 'reason', 'recovery-entry'), clock_timestamp() FROM m, old`];
+    execFileSync("psql", [...PG, "-v", "ON_ERROR_STOP=1", "-q", "-d", db, "-c", `INSERT INTO recovery_epoch (epoch, entered_at) VALUES ('${ep}', now())`, "-c", `UPDATE installation_state SET epoch = '${ep}'`, ...event]);
   };
   // This run's digest key only (bao.ts), and only while the writes go to the disposable deployment.
   injector.retire = async () => {
