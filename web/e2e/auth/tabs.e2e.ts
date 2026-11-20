@@ -4,7 +4,7 @@ import { $, browser, expect } from "@wdio/globals";
 import { PRINCIPAL_CHANGED } from "../../src/app.tsx";
 import { FIXTURE_PAGE } from "../auth.conf.ts";
 import type { Counts } from "../provider.ts";
-import { absent, counts, fixtureSignIn, newTab, settled, storageEmpty, where } from "./helpers.ts";
+import { absent, counts, fixtureSignIn, newTab, noAppLocks, settled, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -14,6 +14,8 @@ const SERVER = /^Server .+, API revision \d+$/;
 async function signInTab(flags: Record<string, string>): Promise<string> {
   await newTab("about:blank");
   expect(await fixtureSignIn("h-viewer", flags)).toMatch(SERVER);
+  // A sign-in the provider never saw took a pair from a page of the case before (ginsys/bronzeward#964).
+  if ((await counts()).authorize === 0) throw new Error("the first sign-in took another page's pair: the provider saw no authorize");
   return browser.getWindowHandle();
 }
 
@@ -139,4 +141,6 @@ afterEach(async () => {
   const [idle, ...more] = await browser.getWindowHandles();
   if (idle === undefined || more.length > 0) throw new Error(`${more.length + (idle === undefined ? 0 : 1)} windows are open, one expected`);
   await browser.switchToWindow(idle);
+  // The windows are gone from the list; the next case needs the pages gone too (noAppLocks).
+  await noAppLocks();
 });
