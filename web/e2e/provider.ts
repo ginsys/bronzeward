@@ -126,7 +126,8 @@ export function startProvider(o: ProviderOptions): Promise<Provider> {
           spent.add(token);
           if ((grant.hold ?? 0) > 0) return void grant.hold!--;
           const renewal = grant.renewed ?? grant;
-          return answer(res, headers, grant.fresh === undefined ? renewal : { ...renewal, access: grant.fresh() });
+          // A renewal minted at this moment has the token's full lifetime, so its advertised one is the default, not the sign-in's short one.
+          return answer(res, headers, grant.fresh === undefined ? renewal : { ...renewal, access: grant.fresh(), lifetime: 300 });
         }
         const code = codes.get(form.get("code") ?? "");
         codes.delete(form.get("code") ?? "");
