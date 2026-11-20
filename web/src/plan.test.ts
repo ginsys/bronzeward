@@ -7,7 +7,9 @@ import { Change } from "./resources.tsx";
 import { planFor } from "./review.tsx";
 
 const go = () => {};
-const reads = { go, failure: () => null } as unknown as Reads;
+// A client that never answers: the objects a plan names by identifier are read for their titles, and a
+// static render shows them by their shortened identifiers.
+const reads = { go, failure: () => null, client: { read: () => new Promise(() => {}) }, settle: () => true, undropped: () => () => true, view: "", again: 0, regained: 0 } as unknown as Reads;
 type M = Parameters<typeof planFor>[1];
 const machine = (desired: string | null, applied: string | null, pendingConvergence: boolean) => ({ desired, applied: applied === null ? null : { release: applied }, pendingConvergence }) as unknown as M;
 const html = (e: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: reads }, e));

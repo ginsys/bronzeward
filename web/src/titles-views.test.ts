@@ -10,7 +10,9 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
 import { when } from "./states.tsx";
-import { MachineById, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef } from "./titles.tsx";
+import { PlanState } from "./plan.tsx";
+import { ACTS, Change, DependencyItem, Plans, ReleaseItem } from "./resources.tsx";
+import { MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef } from "./titles.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -44,7 +46,8 @@ const freshReads = (): Reads => ({
   client: {
     read: async <T,>(path: string) => {
       asked.push(path);
-      return (answers[path] ?? missing) as ReadResult<T>;
+      // A list is asked for with a query; its answer is kept under its path alone.
+      return (answers[path] ?? answers[path.split("?")[0]!] ?? missing) as ReadResult<T>;
     },
   },
   settle, undropped: () => () => true, view: "v", again: 0, regained: 0, go: () => {}, failure: () => "FAILED",
@@ -320,5 +323,122 @@ describe("ginsys/bronzeward#987: the reads of a view", () => {
     await mount(h(ReleaseRef, { r: release() as never }), { ...reads, again: 1 });
     await settled();
     expect(asked).toEqual([`/drafts/${DRF}`, `/drafts/${DRF}`]);
+  });
+});
+
+// An object a view names by its identifier (ginsys/bronzeward#996): the same titles, the whole identifier
+// as the title attribute, the shortened identifier where a read does not answer.
+describe("ginsys/bronzeward#996: an object named by its identifier", () => {
+  const released = `Add the office labels, published ${when(at)}`;
+  const VIEW: Record<string, string> = { drf: "drafts", rel: "releases", pln: "plans", op: "operations", ing: "ingestions", mch: "machines" };
+  const pathOf = (id: string) => `/${VIEW[id.slice(0, id.indexOf("_"))]}/${id}`;
+  const KINDS: [string, string, string, () => void][] = [
+    ["a draft", DRF, "Add the office labels", () => {}],
+    ["a release", REL, released, () => {}],
+    ["a plan", PLN, `Apply of worker-1 to ${released}`, () => {}],
+    ["an operation", OP, "Publish of Add the office labels", () => (answers[`/operations/${OP}`] = ok(operation("publish", { draft: DRF, draftRevision: 3 })))],
+    ["an import", ING, "Import of worker-1", () => (answers[`/ingestions/${ING}`] = ok({ id: ING, machine: MCH }))],
+    ["a machine", MCH, "worker-1", () => {}],
+  ];
+
+  test.each(KINDS)("%s shows its title as the text and its whole identifier as the title attribute", async (_, id, title, set) => {
+    set();
+    await mount(h(Named, { id }));
+    await settled();
+    expect(text()).toBe(title);
+    expect(box.querySelector("a")?.getAttribute("title")).toBe(id);
+    expect(box.querySelector("a")?.getAttribute("href")).toBe(pathOf(id));
+  });
+
+  test.each(KINDS)("%s keeps the shortened identifier, and the whole one as its title attribute, when its read fails", async (_, id, _title, set) => {
+    set();
+    for (const p of Object.keys(answers)) answers[p] = missing;
+    answers[pathOf(id)] = missing;
+    await mount(h(Named, { id }));
+    await settled();
+    expect(text()).toBe(`${id.slice(0, id.indexOf("_") + 5)}…${id.slice(-4)}`);
+    expect(box.querySelector("a")?.getAttribute("title")).toBe(id);
+  });
+
+  test("a draft whose title is not safe is shown by its shortened identifier", async () => {
+    answers[`/drafts/${DRF}`] = ok({ id: DRF, title: "a\nb" });
+    await mount(h(Named, { id: DRF }));
+    await settled();
+    expect(text()).toBe("drf_k2pq…cdef");
+  });
+
+  test("an operation named by its identifier reads its body, then what its subject names", async () => {
+    answers[`/operations/${OP}`] = ok(operation("publish", { draft: DRF, draftRevision: 3 }));
+    await mount(h(Named, { id: OP }));
+    await settled();
+    expect(asked).toEqual([`/operations/${OP}`, `/drafts/${DRF}`]);
+  });
+
+  test("an import with no machine is Import, as the operation of an import is", async () => {
+    answers[`/ingestions/${ING}`] = ok({ id: ING, machine: null });
+    await mount(h(Named, { id: ING }));
+    await settled();
+    expect(text()).toBe("Import");
+  });
+
+  test("an identifier of another shape is shown as any other is, with no read, and no identifier is none", async () => {
+    await mount(h("div", null, h(Named, { id: "machine-one" }), " ", h(Named, { id: null })));
+    await settled();
+    expect(text()).toBe("mach…-one none");
+    expect(asked).toEqual([]);
+  });
+
+  // The views that name them: each family shows the title and keeps the identifier.
+  const hrefs = () => [...box.querySelectorAll("a")].map((a) => a.getAttribute("title"));
+
+  test("the audit's Subjects name each object by its title", async () => {
+    const subjects = ACTS.find(([name]) => name === "Subjects")![1];
+    await mount(h("div", null, subjects({ subjects: [REL, PLN, DRF] } as never)));
+    await settled();
+    expect(text()).toBe(`${released}, Apply of worker-1 to ${released}, Add the office labels`);
+    expect(hrefs()).toEqual([REL, PLN, DRF]);
+  });
+
+  test("a plan's change names the applied and the planned release", async () => {
+    await mount(h(Change, { p: { operation: "apply-config", evidence: { diff: { from: REL, to: REL, withheld: false, unified: "-a\n+b\n" } } } as never }));
+    await settled();
+    expect(text()).toContain(`applied ${released} → ${released}.`);
+    expect(asked).toEqual([`/releases/${REL}`, `/drafts/${DRF}`]);
+  });
+
+  test("a committed plan names its operation", async () => {
+    answers[`/operations/${OP}`] = ok(operation("publish", { draft: DRF, draftRevision: 3 }));
+    await mount(h(PlanState, { p: { ...plan("apply-config"), state: "committed", committedOperation: OP } as never, reread: () => {} }));
+    await settled();
+    expect(text()).toContain("Committed: operation Publish of Add the office labels.");
+    expect(hrefs()).toContain(OP);
+  });
+
+  test("a release's page names its draft and its publication", async () => {
+    answers[`/operations/${OP}`] = ok(operation("publish", { draft: DRF, draftRevision: 3 }));
+    await mount(h(ReleaseItem, { id: REL }));
+    await settled();
+    expect(text()).toContain("DraftAdd the office labels, revision 3");
+    expect(text()).toContain("PublicationPublish of Add the office labels");
+    expect(hrefs()).toEqual(expect.arrayContaining([DRF, OP]));
+  });
+
+  test("the plans list names each plan's release, the dependency's releases theirs", async () => {
+    answers["/plans"] = ok({ items: [plan("apply-config")], next: null });
+    await mount(h(Plans, { query: "", go: () => {} }));
+    await settled();
+    expect(box.querySelector("td:last-child, tbody")?.textContent).toContain(released);
+    answers["/dependencies/dep_x"] = ok({ id: "dep_x", provider: "p", object: "o", version: "1", created: "c", class: null, reason: null, firstRetainedAt: at, unknownSince: null, observedFrom: at, recordedAt: at });
+    answers["/dependencies/dep_x/releases"] = ok({ items: [{ release: REL, cluster: "cl_a", publishedAt: at, records: [] }], next: null });
+    answers["/dependencies/dep_x/alerts"] = ok({ items: [], next: null });
+    await mount(h(DependencyItem, { id: "dep_x" }), { ...reads, view: "w" });
+    await settled();
+    expect(text()).toContain(released);
+  });
+
+  test("a view that names one object in several places, and objects of one release, reads each distinct body once", async () => {
+    await mount(h("div", null, h(Named, { id: REL }), h(Named, { id: REL }), h(Named, { id: PLN }), h(Named, { id: DRF }), h(Named, { id: MCH }), h(Named, { id: MCH })));
+    await settled();
+    expect([...asked].sort()).toEqual([`/drafts/${DRF}`, `/machines/${MCH}`, `/plans/${PLN}`, `/releases/${REL}`]);
   });
 });

@@ -10,6 +10,7 @@ import { planPath } from "./plan.tsx";
 import { Action } from "./shell.tsx";
 import { MachineRef, machineText } from "./machines.tsx";
 import { Withheld } from "./states.tsx";
+import { Named } from "./titles.tsx";
 
 type S = components["schemas"];
 type Review = S["ReviewBody"];
@@ -154,7 +155,7 @@ export function ReviewBody({ r, name }: { r: Review; name?: unknown }) {
   return (
     <>
       <dl>
-        <dt>Release</dt><dd><Id id={r.release} /></dd>
+        <dt>Release</dt><dd><Named id={r.release} /></dd>
         <dt>Machine</dt><dd><MachineRef id={r.machine} name={name} /></dd>
         <dt>Validated in mode</dt><dd>{r.mode}</dd>
       </dl>

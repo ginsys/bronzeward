@@ -43,6 +43,10 @@ async function api(human: string, method: string, path: string, body?: unknown, 
   return { status: r.status, etag: r.headers.get("ETag") ?? "", body: (await r.json().catch(() => undefined)) as Record<string, unknown> | undefined };
 }
 
+// The release is named by its draft's title and the date it was published (ginsys/bronzeward#996); every
+// draft here is titled "synthetic" and one word.
+const releasePublished = () => expect.stringMatching(/^Publication succeeded: release synthetic \S+, published .+ was published\. Nothing has been sent to any machine\.$/);
+
 describe("the publication page (#342)", () => {
   before(async () => {
     const res = await fetch(`${CONTROL}/disposable?start=normal`, { method: "POST" });
@@ -129,7 +133,7 @@ describe("the publication page (#342)", () => {
     await expect($("main h2")).toHaveText(expect.stringContaining(`Publish draft ${short(id)}`), { wait: 20_000 });
     await $("main").$("button=Publish").click();
     await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
-    await expect($('[data-testid="ended"]')).toHaveText(`Publication succeeded: release ${short(REL)} was published. Nothing has been sent to any machine.`, { wait: 120_000 });
+    await expect($('[data-testid="ended"]')).toHaveText(releasePublished(), { wait: 120_000 });
     await expect($(`main a[title="${REL}"]`)).toBeExisting();
     // A published draft takes no second write: Publish stays disabled.
     await expect($("main").$("button=Publish")).toBeDisabled();
@@ -167,7 +171,7 @@ describe("the publication page (#342)", () => {
     expect(await $("main").$("button=Publish").isEnabled()).toBe(false);
     await focusSettles(focusKept, "the page, not the body");
     await focusSettles(() => focusIn(ANSWER), "the answer");
-    await expect($('[data-testid="ended"]')).toHaveText(`Publication succeeded: release ${short(REL)} was published. Nothing has been sent to any machine.`, { wait: 120_000 });
+    await expect($('[data-testid="ended"]')).toHaveText(releasePublished(), { wait: 120_000 });
     await focusSettles(() => focusIn(ANSWER), "the answer after the end");
     expect(await statusRegions()).toBe(1);
     const seen = await measure();
@@ -195,7 +199,7 @@ describe("the publication page (#342)", () => {
       await $("main").$("button=Publish").click();
       await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
       expect(["the accepted line", await overflows()]).toEqual(["the accepted line", 0]);
-      await expect($('[data-testid="ended"]')).toHaveText(`Publication succeeded: release ${short(REL)} was published. Nothing has been sent to any machine.`, { wait: 120_000 });
+      await expect($('[data-testid="ended"]')).toHaveText(releasePublished(), { wait: 120_000 });
       expect(["the end", await overflows()]).toEqual(["the end", 0]);
       await $(`main a[title="${REL}"]`).click();
       await releaseHeading(REL);
