@@ -246,5 +246,7 @@ func (e *env) timelineText(kind string, entry any) string {
 	if text, known := eventFields(kind, d); known {
 		return join(fields(d, "operation ", "operation"), text)
 	}
-	return eventText(kind, d, raw)
+	// Any other kind prints its record, with the names in the place of the principals.
+	named, _ := json.Marshal(d)
+	return eventText(kind, d, named)
 }

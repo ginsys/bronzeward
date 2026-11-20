@@ -58,17 +58,18 @@ func (e *env) recoveryStatus(args []string) error {
 			}
 			rows = append(rows, client.Printable(s.Machine)+"\t"+client.Printable(string(s.State))+"\t"+nextStep(c, s))
 		}
-		if now := c.Context.LastEpoch; now != "" && now != rec.Epoch {
-			// A next-step read saw a new entry: the snapshot above is stale and could advise a release
-			// that the entry has reset.
-			return fmt.Errorf("the epoch changed from %s to %s while the next steps were read; nothing is shown. Read it again with: recovery status",
-				client.ShellWord(rec.Epoch), client.ShellWord(now))
-		}
+		// The names are read before the epoch check, so a restore that a names read sees is seen too.
 		if rec.Entry != nil {
 			e.preload(c, rec.Entry.EnteredBy)
 		}
 		if rec.Exit != nil {
 			e.preload(c, rec.Exit.ExitedBy)
+		}
+		if now := c.Context.LastEpoch; now != "" && now != rec.Epoch {
+			// A next-step read saw a new entry: the snapshot above is stale and could advise a release
+			// that the entry has reset.
+			return fmt.Errorf("the epoch changed from %s to %s while the next steps were read; nothing is shown. Read it again with: recovery status",
+				client.ShellWord(rec.Epoch), client.ShellWord(now))
 		}
 		return e.emit(r.Body, func(w *tabwriter.Writer) {
 			fmt.Fprintf(w, "Epoch\t%s\n", client.Printable(rec.Epoch))
