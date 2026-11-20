@@ -80,11 +80,11 @@ function start(bin: Binary, args: string[], env: Record<string, string> = {}): C
 
 async function ready(url: string, p?: ChildProcess) {
   for (let i = 0; ; i++) {
+    // A child that could not start fails the run even where something else answers on its port.
+    const why = p === undefined ? undefined : died(p);
+    if (why !== undefined) throw new SevereServiceError(`the process behind ${url} could not start: ${why}`);
     if (await fetch(url).then((r) => r.ok, () => false)) return;
-    if (i === 75 || p?.exitCode != null) {
-      const why = p === undefined ? undefined : died(p);
-      throw new SevereServiceError(why === undefined ? `${url} did not answer within 15 s` : `the process behind ${url} could not start: ${why}`);
-    }
+    if (i === 75 || p?.exitCode != null) throw new SevereServiceError(`${url} did not answer within 15 s`);
     await new Promise((r) => setTimeout(r, 200));
   }
 }
@@ -456,7 +456,10 @@ function stop(p: ChildProcess): Promise<void> {
   return new Promise((resolve) => {
     if (p.exitCode !== null || p.signalCode !== null) return resolve();
     const kill = setTimeout(() => p.kill("SIGKILL"), 10_000);
-    p.once("exit", () => (clearTimeout(kill), resolve()));
+    const done = () => (clearTimeout(kill), resolve());
+    p.once("exit", done);
+    // A signal that cannot be sent leaves no exit to wait for: report it and go on with the cleanup.
+    p.once("error", () => (console.error(`could not stop a child: ${died(p)}`), done()));
     p.kill();
   });
 }
