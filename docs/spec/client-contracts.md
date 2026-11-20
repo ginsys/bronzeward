@@ -268,7 +268,7 @@ supported.
 | G5 | No render of a draft before publication | no such route in `internal/api/routes.go:78-136` | later design issue L1: a compilation design change, not a client contract |
 | G6 | Provenance covers secret-reference occurrences only, not "which fragment set this field" | [compilation §8.1](compilation.md#81-provenance-by-tracer-composition) attributes stand-ins to reference occurrences | later design issue L1, as G5 |
 | G7 | Drift content is not served | the machine's drift and observation reads name the observation, its time and a matched release, and no configuration (`internal/api/drift.go:150-155`, `internal/api/inventory.go:251-257`, `internal/api/observations.go:16-17`) | later design issue L2: serving observed configuration is a redaction design question; until then clients use a drift-adoption import with review |
-| G8 | Machines have no human-readable name | the machine resource has no name member (`internal/api/inventory.go:260-275`) | decided: an optional stored name, unique within its cluster, from API revision 10 ([persistence and API §3.5](persistence-api.md#35-a-machines-name), choice §17.43; Serge, typed 2026-11-20 11:33 CET: "A. Stored name in the API"); until a server serves it, and for a machine without one, clients show the identifier, the endpoint and the node ID (rule A9) |
+| G8 | Machines have no human-readable name | the machine resource has no name member (`internal/api/inventory.go:260-275`) | decided: an optional stored name, unique within its cluster, from the API revision that adds it ([persistence and API §3.5](persistence-api.md#35-a-machines-name), choice §17.43; Serge, typed 2026-11-20 11:33 CET: "A. Stored name in the API"); until a server serves it, and for a machine without one, clients show the identifier, the endpoint and the node ID (rule A9) |
 | G9 | No list filters on machines, plans, releases, drafts or acts; no machine timeline stream | `internal/api/acts.go:135-145` refuses any key but `limit`, `cursor` and the route's filters; before [#280](https://github.com/ginsys/bronzeward/issues/280), filters existed only on operations and dependencies | API issue A4 for the filters the journeys need first: plans by `state` and `machine`, machines by `cluster`; accepted limitation for the release, draft and act filters, which clients apply over the pages they read; timeline polling accepted. A4's filters are served ([#280](https://github.com/ginsys/bronzeward/issues/280)): plans by `state` and `machine` (`internal/api/plans.go:429-451`), machines by `cluster` (`internal/api/reads.go:199-218`) |
 | G10 | No ingestion list | before [#280](https://github.com/ginsys/bronzeward/issues/280): [`internal/api/routes.go:90`](https://github.com/ginsys/bronzeward/blob/23c1bc2a233cbdf0916076e62016a82892107053/internal/api/routes.go#L90) | closed by API issue A4 ([#280](https://github.com/ginsys/bronzeward/issues/280)): `GET /ingestions`, filtered by `state` and `machine` (`internal/api/ingestions.go:280-299`) |
 | G11 | Recovery marks, releases and accountings have no list route | `internal/api/routes.go:128-135` | accepted limitation: `GET /recovery` and the machine timeline |
@@ -1986,11 +1986,11 @@ one. The rule is one for both clients:
    the command, and never in storage, a log or an error.
 5. `-o json` and `-o yaml` print the resource unchanged.
 
-**A9. A machine's name (client rule; API revision 10).** Closes G8. A client shows a machine by its
+**A9. A machine's name (client rule; the API revision that adds the name).** Closes G8. A client shows a machine by its
 name where the body carries one, with the identifier kept as the stable reference: in the web
 client the name as the text and the whole identifier as the title attribute, in the CLI the name
 beside the identifier as a cluster's is (`mch_9fd… (node-a)`, [operator experience §4](operator-experience.md#4-command-tree)).
-A machine with no name, and a server older than revision 10, which serves no member, read the same
+A machine with no name, and a server older than the revision that adds it, which serves no member, read the same
 way: the identifier, the Talos endpoint and the node ID, as before.
 
 1. The name's grammar makes it safe text by construction (lowercase `a-z`, digits and hyphen), so
