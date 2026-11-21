@@ -205,7 +205,7 @@ describe("ginsys/bronzeward#987: a plan", () => {
     const fresh: Reads = { ...reads, settle: answering, client: { read: async <T,>(path: string) => { asked.push(path); return structuredClone(answers[path] ?? missing) as ReadResult<T>; } } };
     await mount(h(PlanItem, { id: PLN }), fresh);
     await settled();
-    expect(asked.filter((p) => p === `/machines/${MCH}`).length).toBeLessThanOrEqual(2);
+    expect(asked.filter((p) => p === `/machines/${MCH}`)).toHaveLength(1);
     expect(box.querySelector("h2")?.textContent).toContain("worker-1");
   });
 
