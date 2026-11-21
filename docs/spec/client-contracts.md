@@ -2090,8 +2090,8 @@ way: the identifier, the Talos endpoint and the node ID, as before.
    `unrecorded` (a release made before the source was recorded), "Hostname: not recorded for this release." and
    no more: it never claims the node chose its own.
    For `machine-name` on a machine whose applied release recorded `none` or `legacy-stable`, the review adds: "This
-   release sets the machine's hostname to node-a, taken from its name. Until now the node chose its own hostname.
-   The machine's Kubernetes node name normally follows the hostname, so it may change too." followed by the
+   release sets the machine's hostname to node-a, taken from its name. The last release applied to it left the
+   hostname to the node. The machine's Kubernetes node name normally follows the hostname, so it may change too." followed by the
    restart sentence of item 6. For a machine whose applied release recorded `unrecorded`, the review says only:
    "This release sets the machine's hostname to node-a, taken from its name." followed by the restart sentence of
    item 6. For a machine whose applied release recorded another name: "This release sets the
