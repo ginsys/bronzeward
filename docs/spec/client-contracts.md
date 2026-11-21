@@ -1380,8 +1380,9 @@ current token expires
    never holds the page back. A provider that lists `profile` and then refuses it to this client
    answers the sign-in with `invalid_scope`. The sign-in view then shows that refusal and its button
    signs in again without the scope the page added itself (item 3 leaves a refused page only by the
-   operator's button). That sign-in's pending entry (item 1) carries one boolean saying so, which
-   its callback returns, so the page and every renewal redirect after it go on without `profile`.
+   operator's button). That sign-in's pending entry (item 1) carries one boolean saying so. The page
+   reads it before the callback consumes the entry, so the callback, a callback that fails, and
+   every renewal redirect after it go on without `profile`.
    Limit: a new sign-in on such a provider, and a new tab that joins another tab's tokens (it
    discovers the provider afresh), still meets one refusal on its first sign-in or redirect
    renewal; the header then has a name only if the provider's userinfo gives one without `profile`. The server's `auth.oidc.displayClaim` names the claim the server shows for a
