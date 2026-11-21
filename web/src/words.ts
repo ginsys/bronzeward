@@ -14,6 +14,8 @@ export const COPY = "Copy";
 export const THE_MACHINE = "the machine";
 /** The text of a cluster's link when its name has not been read, or is not safe to show; no word stands before it. */
 export const THIS_CLUSTER = "This cluster";
+/** What stands where a fragment's or profile's name is not safe text, so no identifier or rejected text is shown. */
+export const NAME_NOT_SHOWN = "(name not shown)";
 /** Said beside the Copy control once the identifier is on the clipboard. */
 export const COPIED = "Copied";
 /** Said beside the Copy control where the browser would not copy. */

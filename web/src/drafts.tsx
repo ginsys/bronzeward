@@ -17,6 +17,7 @@ import { Action, useFocusOn } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
 import { ClusterRef, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
 import { draftCalled, draftText, safeText } from "./titles.ts";
+import { NAME_NOT_SHOWN } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
 
 type S = components["schemas"];
@@ -112,7 +113,7 @@ const called = (d: Pick<Draft, "id" | "title">): string => draftCalled(d, short(
 function EntryName({ e }: { e: Source }) {
   const machine = useMachineText(e.kind === "assignment" && nameOf(e) !== "" ? nameOf(e) : undefined);
   const name = nameOf(e);
-  return <>{e.kind} {e.kind === "assignment" ? machine ?? short(name) : safeText(name) ?? short(name)}</>;
+  return <>{e.kind} {e.kind === "assignment" ? machine ?? short(name) : safeText(name) ?? NAME_NOT_SHOWN}</>;
 }
 
 // What an entry changes against its base (journeys §5.4's draft show).
