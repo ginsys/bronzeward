@@ -63,7 +63,7 @@ python3 scripts/ci/previous-major-pins.py --write web/e2e/previous-majors.json
 
 then update the build numbers in conformance/README.md. The pull request runs the Previous majors
 workflow, because the file is among its paths. This issue closes at the next weekly run, or the next
-manual run of the Previous-major pins workflow, after the file matches the sources.
+manual run on main of the Previous-major pins workflow, after the file matches the sources.
 
 Run: $RUN_URL
 Event: $EVENT

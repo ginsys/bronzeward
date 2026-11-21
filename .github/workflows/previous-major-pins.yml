@@ -3,7 +3,7 @@ name: Previous-major pins
 # Once a week, compares web/e2e/previous-majors.json with the previous major of Chrome, Edge and
 # Firefox that the vendors publish (ginsys/bronzeward#907), through scripts/ci/previous-major-pins.py.
 # A pin that is behind opens one issue (or edits the open one) naming the new pins, Edge's .deb URL
-# and checksum with them, and the run fails; the pins match again and the issue closes. A source
+# and checksum with them, and the run fails; the next run on main after the pins match closes it. A source
 # that cannot be read fails the run and leaves the issue alone, so an outage never reads as "no
 # drift". Applying the pins is one command in a pull request, which runs previous-majors.yml.
 # A run of another branch than main reports into a separate "[test]" issue, never the real one.
