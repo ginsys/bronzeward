@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -125,13 +126,17 @@ func runMigrate(args []string, out io.Writer) error {
 func serve(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return serveContext(ctx, args)
+	return serveContext(ctx, args, os.Stdout)
 }
 
-// serveContext is serve until ctx ends. With -recovery-start, the process is persistence-api §12.2's
+// serveContext is serve until ctx ends. It binds the configured address before it touches the
+// database, so that a taken address ends it at once with the address in the error, and writes the
+// address as the kernel bound it, one line "listening on <host:port>", to out: with `listen:
+// 127.0.0.1:0` that is how a caller learns the port. A bound address is not a ready server: /livez
+// answers once the server serves. With -recovery-start, the process is persistence-api §12.2's
 // recovery start: it runs no publish worker, adoption or drift loop or executor, and until its
 // entry commits it runs no sweep or dependency monitor and serves only the recovery entry.
-func serveContext(ctx context.Context, args []string) error {
+func serveContext(ctx context.Context, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	path := fs.String("config", "", "deployment configuration file")
 	recovery := fs.Bool("recovery-start", false, "start after a restore: serve only the recovery entry until it commits")
@@ -142,6 +147,14 @@ func serveContext(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	ln, err := net.Listen("tcp", cfg.Listen)
+	if err != nil {
+		return err
+	}
+	// A no-op once Serve has closed it; every earlier return closes it here. A closed output must not
+	// stop a server, so the write's error is dropped.
+	defer ln.Close()
+	_, _ = fmt.Fprintf(out, "listening on %s\n", ln.Addr())
 	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	db, err := database.Open(startCtx, cfg.Database.DSN)
@@ -198,9 +211,9 @@ func serveContext(ctx context.Context, args []string) error {
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
 	// The ingest runners and the publish worker stop with the signal; a claim or job left held
 	// lapses with its lease.
-	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, exe, sg, pr, cfg.Talos.MaxCertLifetime, cfg.Ingestion, epoch, *recovery, onEntry)))
+	srv := server.NewHTTP(ln.Addr().String(), server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, exe, sg, pr, cfg.Talos.MaxCertLifetime, cfg.Ingestion, epoch, *recovery, onEntry)))
 	errc := make(chan error, 1)
-	go func() { errc <- srv.ListenAndServe() }()
+	go func() { errc <- srv.Serve(ln) }()
 	select {
 	case err := <-errc:
 		return err
