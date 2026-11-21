@@ -17,6 +17,7 @@ export interface WriteSpec {
   // The epoch the caller's reads were taken under, sent as the reference epoch in place of the last one the
   // client saw: a caller that acts on what it read over some time (the handover button's press) cannot send
   // a write under a later epoch than the reads it decided from, and the server refuses it (412 epoch-mismatch).
+  // The recovery entry (`entry`) sends no epoch header, so it ignores this.
   epoch?: string;
   // The page that shows the resource, named in the notice and opened by [Show current state].
   resource: string;
@@ -330,7 +331,8 @@ export class Writes {
       w.principal = who;
       w.sentThrough = client;
       if (!entry) {
-        // The last epoch seen before the first send, else one GET /recovery (§8.4 item 3).
+        // The epoch the caller names, else the last epoch seen before the first send, else one GET /recovery
+        // (§8.4 item 3; the press of the handover button names its own, client contracts A11 item 4).
         w.epoch = w.spec.epoch ?? client.currentEpoch ?? (await this.confirm(client, end));
         if (end.e !== undefined) return { kind: "not-done", why: SIGN_IN_REFUSED, problem: end.e.problem };
         if (end.pre !== undefined) return { kind: "not-done", why: RECOVERY_START, problem: end.pre };

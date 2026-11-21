@@ -5,6 +5,7 @@
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { DraftItem, EDITOR_FIRST, forgetETag, keptETag } from "./drafts.tsx";
 import { unsaved, WritesProvider } from "./forms.tsx";
 import { Handover } from "./handover.tsx";
 import { LINES, NOT_PUBLISHED, UNSAVED } from "./handover.ts";
@@ -73,22 +74,34 @@ describe("the handover button with unsaved text in the draft editor", () => {
   });
 
   test("a publication refused 412 offers Show their change, and the press after it carries the new ETag", async () => {
-    // The page keeps one ETag per draft read: after the refusal the page reads again and keeps the new one only
-    // through Show their change, so the next press must send what the page holds then, not the first ETag.
-    let kept = '"1"';
+    // On the real draft page (DraftItem): the page keeps one ETag per draft read, and after the refusal it keeps a
+    // newer one only through Show their change, so the next press must send what the page holds then. Unsaved
+    // text in the editor holds that reread back, as it does for the discard's 412.
+    const DRF = "drf_k2pq3rstuvwxyz234567abcdef";
+    forgetETag(DRF);
+    let served = '"1"';
+    let draftReads = 0;
+    const draft = { id: DRF, title: "Add the office labels", state: "open", revision: 3, cluster: "cl_a", entries: [{ kind: "import-base", machine: "mch_a", revision: "ibr_a" }] };
     const reads = {
-      client: { read: vi.fn(async () => ({ kind: "ok", data: { state: "open" }, etag: kept })) },
-      settle: (res: unknown, set: (r: unknown) => void, live: () => boolean) => (live() && set(res), true),
+      client: {
+        read: vi.fn(async (path: string) => {
+          if (path !== `/drafts/${DRF}`) return { kind: "refused", status: 404, problem: null };
+          draftReads++;
+          return { kind: "ok", data: draft, etag: served };
+        }),
+      },
+      settle: (res: { kind: string }, set: (r: unknown) => void, live: () => boolean, held: () => boolean) => {
+        if (res.kind !== "ok" && held()) return true;
+        if (live()) set(res);
+        return false;
+      },
       undropped: () => () => true,
       view: "", again: 0, regained: 0, go: () => {}, failure: () => null,
     } as unknown as Reads;
     const writes = new Writes(() => "p");
     const sent: (string | undefined)[] = [];
-    // The epoch each write is pinned to: the one the press began under (write.test.ts shows the layer sends it
-    // even when the client has seen a later one, and the server then refuses).
-    const clientEpoch = { currentEpoch: "e0" };
-    writes.client = clientEpoch as unknown as Writes["client"];
     const epochs: (string | undefined)[] = [];
+    writes.client = { currentEpoch: "e0" } as unknown as Writes["client"];
     vi.spyOn(writes, "submit").mockImplementation(async (w) => {
       sent.push(w.spec.ifMatch);
       epochs.push(w.spec.epoch);
@@ -96,22 +109,35 @@ describe("the handover button with unsaved text in the draft editor", () => {
       w.outcome = sent.length === 1 ? { kind: "refused", status: 412, problem: null, replayed: false } : { kind: "done", status: 202, data: {}, replayed: false };
       return w.outcome;
     });
-    const seeChange = vi.fn(() => void (kept = '"2"'));
+    const settled = () => act(async () => void (await new Promise((r) => setTimeout(r, 40))));
+    const click = (label: string) => act(async () => void [...box.querySelectorAll("button")].find((b) => b.textContent === label)!.click());
     await act(async () =>
-      root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(Handover, { draft: "drf_1", machines: ["mch_a"], etag: () => kept, seeChange: () => (seeChange(), undefined), written: () => {} }))))),
+      root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(DraftItem, { id: DRF }))))),
     );
-    await press();
-    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
-    const line = box.querySelector('[data-testid="handover-line"]')!;
-    expect(line.textContent).toContain(NOT_PUBLISHED);
+    await settled();
+    expect(keptETag(DRF, "e0")).toBe('"1"');
+    await click("Start managing these machines");
+    await settled();
+    expect(box.querySelector('[data-testid="handover-line"]')!.textContent).toContain(NOT_PUBLISHED);
     expect(sent).toEqual(['"1"']);
-    await act(async () => void [...line.querySelectorAll("button")].find((b) => b.textContent === "Show their change")!.click());
-    expect(seeChange).toHaveBeenCalledTimes(1);
-    clientEpoch.currentEpoch = "e1";
-    await press();
-    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+    // The draft changed on the server. With unsaved text in the editor, Show their change reads nothing and names why.
+    served = '"2"';
+    unsaved.add("the fragment editor");
+    const before = draftReads;
+    await click("Show their change");
+    await settled();
+    expect(box.querySelector('[data-testid="handover-note"]')!.textContent).toBe(EDITOR_FIRST);
+    expect(draftReads).toBe(before);
+    expect(keptETag(DRF, "e0")).toBe('"1"');
+    // Without it, the page reads the draft again, keeps that read's ETag, and the next press sends it.
+    unsaved.clear();
+    await click("Show their change");
+    await settled();
+    expect(keptETag(DRF, "e0")).toBe('"2"');
+    await click("Start managing these machines");
+    await settled();
     expect(sent).toEqual(['"1"', '"2"']);
-    expect(epochs).toEqual(["e0", "e1"]);
+    expect(epochs).toEqual(["e0", "e0"]);
   });
 
   test("with nothing unsaved the press starts: no unsaved notice, and the draft is read", async () => {
