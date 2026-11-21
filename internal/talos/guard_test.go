@@ -465,7 +465,9 @@ func isPkgSel(e ast.Expr, local map[string]string, path, name string) bool {
 		return false
 	}
 	x, ok := s.X.(*ast.Ident)
-	return ok && local[x.Name] == path && s.Sel.Name == name
+	// x.Obj is nil for an imported package name and set for a local binding of the same spelling, which
+	// would otherwise pass for the package (a parse without object resolution leaves every Obj nil).
+	return ok && x.Obj == nil && local[x.Name] == path && s.Sel.Name == name
 }
 
 // isSafeRead reports whether fun is one of the named functions of COSI's safe package, with or
@@ -1328,6 +1330,7 @@ func TestDialOptionGuard(t *testing.T) {
 		"the server name kept in a variable":        {"func f(n string) { _ = grpc.WithAuthority(n) }\n", "grpc.WithAuthority is used other than as an argument of client.WithGRPCDialOptions"},
 		"a dial of the connection's own":            {"func f() { _, _ = grpc.NewClient(\"x\") }\n", "grpc.NewClient is not allowlisted"},
 		"the option function passed as a value":     {"func f(ctx context.Context) { c, err := client.New(ctx,client.WithGRPCDialOptions(grpc.WithAuthority)) }\n", "not called with exactly one grpc.WithAuthority(x)"},
+		"a local variable spelled like the package": {"func f(ctx context.Context, n string) { grpc := box(); c, err := client.New(ctx, client.WithGRPCDialOptions(grpc.WithAuthority(n))) }\nfunc box() struct{ WithAuthority func(string) any } { return struct{ WithAuthority func(string) any }{} }\n", "not called with exactly one grpc.WithAuthority(x)"},
 		"the option without the machinery's setter": {"func f(n string) []grpc.DialOption { return []grpc.DialOption{grpc.WithAuthority(n)} }\n", "grpc.WithAuthority is used other than as an argument of client.WithGRPCDialOptions"},
 	}
 	for polName, pol := range map[string]policy{"reader": readerPolicy, "discover": discoverPolicy} {
