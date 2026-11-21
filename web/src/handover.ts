@@ -122,6 +122,8 @@ async function publish(id: string, io: Io, etag: string | undefined): Promise<bo
   if (d.data.state === "published") return say({ state: "done", text: "Already published." }), true;
   if (d.data.state !== "open") return say({ state: "stopped", text: LINES.draftGone(d.data.state) }), false;
   if (etag === undefined) return say({ state: "stopped", text: NO_ETAG }), false;
+  // Every write is preceded by this check: the press stops where the page left or the shell invalidated its reads.
+  if (!io.live()) return false;
   say({ state: "working", text: LINES.publishing });
   // The server answers a publication already queued or running for this draft revision with that operation
   // (persistence and API §7.3, its natural key), so a press while one runs follows it and creates no second.
@@ -166,6 +168,8 @@ async function machine(m: string, io: Io): Promise<void> {
     const key = a.kind === "plan" ? `plan:${a.release}` : `approve:${a.plan}`;
     if (did.has(key)) return say({ state: "stopped", text: LINES.repeated });
     did.add(key);
+    // The position was read before the wait for this turn: the press may since have been invalidated.
+    if (!io.live()) return;
     if (a.kind === "plan") {
       say({ state: "working", text: LINES.planning });
       const made = planBody(a.release, m, "adopt", {});

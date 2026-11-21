@@ -282,7 +282,7 @@ export function DraftItem({ id }: { id: string }) {
             <AssignmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
           <Status testid="not-rendered">{NOT_RENDERED}</Status>
-          {handedOver.length > 0 && d.state !== "discarded" && <Handover key={d.id} draft={d.id} machines={handedOver} etag={() => keptETag(d.id, epoch)} seeChange={() => (unsaved.size > 0 ? EDITOR_FIRST : (seeChange(), undefined))} written={written} />}
+          {handedOver.length > 0 && d.state !== "discarded" && <Handover key={d.id} draft={d.id} machines={handedOver} etag={() => keptETag(d.id, epoch)} seeChange={() => showTheirChange(seeChange)} written={written} />}
           {d.state === "open" && <p><Ref to={publishPath(d.id)} id={d.id}>Publish this draft</Ref></p>}
           {d.state === "open" && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}
         </>
@@ -297,7 +297,10 @@ export const NOT_DISCARDED = "Not discarded: someone changed this draft since th
 // The new ETag would also let the fragment editor's Save overwrite their change unseen, so an editor
 // with unsaved text is saved or left first.
 export const EDITOR_FIRST = "Not read: the fragment editor holds unsaved text. Save it or switch entries first.";
-export const DiscardRefused = ({ onShow }: { onShow: () => void }) => (
+// Show their change from a refused write: reads the draft again and keeps that read's ETag, unless the editor
+// holds unsaved text, which it names instead. The one callback of the discard's 412 and the handover's.
+export const showTheirChange = (seeChange: () => void): string | undefined => (unsaved.size > 0 ? EDITOR_FIRST : (seeChange(), undefined));
+export const DiscardRefused =({ onShow }: { onShow: () => void }) => (
   <Status testid="write-result" role="alert" actions={<button type="button" onClick={onShow}>Show their change</button>}>{NOT_DISCARDED}</Status>
 );
 
@@ -321,7 +324,7 @@ function DiscardDraft({ draft, written, seeChange }: { draft: Draft; written: ()
     <>
       <p><Action label="Discard draft" needs={["author"]} onClick={discard} busy={w !== undefined && w.outcome === undefined} /></p>
       {note !== undefined && <Status>{note}</Status>}
-      <WriteResult w={w} conflict={<DiscardRefused onShow={() => (unsaved.size > 0 ? setNote(EDITOR_FIRST) : seeChange())} />} done={() => `Draft ${draftCalled(draft)} discarded.`} />
+      <WriteResult w={w} conflict={<DiscardRefused onShow={() => setNote(showTheirChange(seeChange))} />} done={() => `Draft ${draftCalled(draft)} discarded.`} />
     </>
   );
 }
