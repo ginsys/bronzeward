@@ -1,5 +1,5 @@
-// Positive controls for the harness's own commands. wdio.conf.ts changes five commands in Safari
-// (getText, keys, click, the select commands and Tab), and a worker hook that throws is logged and ignored:
+// Positive controls for the harness's own commands. wdio.conf.ts changes six commands in Safari
+// (getText, url, keys, click, the select commands and Tab), and a worker hook that throws is logged and ignored:
 // a command that was not changed leaves every later case failing on the driver's own behaviour
 // (ginsys/bronzeward#892). These cases pass in every browser (the disabled-select case and the click case
 // run only in Safari), and fail in Safari when a change did not take, so the run says so, and names the
@@ -126,5 +126,17 @@ describe("the harness's own commands", () => {
     expect(await browser.execute(() => document.activeElement?.id)).toBe("b1");
     await browser.keys("Tab");
     expect(await browser.execute(() => document.activeElement?.id)).toBe("a1");
+  });
+});
+
+// Apart from the cases above, which build their page in `before`: this one navigates away from it.
+describe("the harness's navigation command", () => {
+  it("returns once the new document is complete, as the other drivers' does", async () => {
+    // safaridriver answered while the document was `interactive` in most navigations (ginsys/bronzeward#1028),
+    // so five in a row cannot all pass by luck where the wait is missing.
+    for (let i = 0; i < 5; i++) {
+      await browser.url("/signed-out");
+      expect([i, await browser.execute(() => document.readyState)]).toEqual([i, "complete"]);
+    }
   });
 });

@@ -146,6 +146,20 @@ export const config: WebdriverIO.Config = {
         }
       }, this as unknown as HTMLElement);
     }, { attachToElement: true });
+    // safaridriver answers "Navigate To" while the new document is still `interactive` (1088 of 1759
+    // navigations on the runner), and a find that follows can fail with "Stale element found when trying to
+    // create the node handle", which an assertion's wait does not retry (ginsys/bronzeward#1028: 14 runs of
+    // 180 without this wait, none with it). The command returns once the document is complete, as the
+    // other four drivers' does; the read is an execute, which creates no node handle.
+    await browser.overwriteCommand("url", async function (this: WebdriverIO.Browser, orig: (path: string, options?: unknown) => Promise<unknown>, path: string, options?: unknown) {
+      const result = await orig(path, options);
+      let state = "";
+      // The message names the state the page was last seen in, so a timeout reads as this cause.
+      await this.waitUntil(async () => (state = await this.execute(() => document.readyState)) === "complete", { timeout: 15_000 }).catch(() => {
+        throw new Error(`navigation to ${path} left readyState "${state}" after 15 s`);
+      });
+      return result;
+    });
     // A key sequence sent as one action loses its spaces and its repeated characters in safaridriver
     // ("machine:\n  nodeLabels:" arrives as "machine:\n nodeLabels:"), where the same keys one at a time
     // arrive whole. safari-keys.ts decides the calls: text goes one character at a time, as an array of
