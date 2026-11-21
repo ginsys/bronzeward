@@ -1100,7 +1100,11 @@ unmeasured.
    from both ends. So `node-a.example.org`,
    `NODE_A.example.org` and `_node-a_` clash with a filled `node-a`, and with
    `registerWithFQDN` set `node-a.example.org` does not. A domain that DHCP or
-   a cloud supplies is not in the configuration and is not compared.
+   a cloud supplies is not in the configuration and is not compared. An
+   explicit hostname that carries a secret reference is not compared either,
+   and a clash with one is therefore not caught: comparing it would make the
+   refusal an equality test on a secret, and an author could confirm a guess
+   by renaming a machine and publishing.
    Publication refuses it, before any release is committed,
    `422 validation-failed` with the rule `hostname`, naming both machines by
    name where they have one and by identifier only where they have none, and
