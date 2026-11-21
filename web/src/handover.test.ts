@@ -51,10 +51,6 @@ function world(draft: { state: string; running?: boolean }, machines: Record<str
       const machine = /^\/machines\/(mch_\w+)\/position$/.exec(path)?.[1];
       if (machine !== undefined) return Promise.resolve({ kind: "ok", data: position(machine) } as never);
       if (path.startsWith("/drafts/")) return Promise.resolve({ kind: "ok", data: draft, etag: '"1"' } as never);
-      if (path.startsWith("/operations?kind=publish")) {
-        const items = draft.running === true && path.endsWith("state=running") ? [{ id: "op_1", subject: { draft: "drf_1" } }, { id: "op_9", subject: { draft: "drf_other" } }] : [];
-        return Promise.resolve({ kind: "ok", data: { items } } as never);
-      }
       if (path.startsWith("/operations/")) {
         // A running publication ends when it is read as ended.
         if (draft.running === true) {
@@ -69,7 +65,8 @@ function world(draft: { state: string; running?: boolean }, machines: Record<str
       log.push(`${spec.method} ${spec.path}`);
       if (spec.path.endsWith("/publications")) {
         if (draft.state !== "open") return Promise.resolve(wrote(spec, refused(412)));
-        publishNow();
+        // A publication already running for this draft revision is answered with its operation, not a second one.
+        if (draft.running !== true) publishNow();
         return Promise.resolve(wrote(spec, done({ id: "op_1" })));
       }
       if (spec.path === "/plans") {
@@ -119,10 +116,11 @@ describe("the handover button (ginsys/bronzeward#1066): one press, every act the
     expect(LINES.managed).toContain("nothing was sent to it");
   });
 
-  test("a publication already running for the draft is followed, never sent again, and the machines then go on", async () => {
+  test("a publication already running for the draft is followed through the operation the server answers, and the machines then go on", async () => {
     const w = world({ state: "open", running: true }, { [A]: fresh() });
     await handOver("drf_1", [A], w.io);
-    expect(w.log.filter((l) => l.endsWith("/publications"))).toEqual([]);
+    // One request, answered with the running operation: no second publication exists, and the press waits for that one.
+    expect(w.log.filter((l) => l.endsWith("/publications"))).toHaveLength(1);
     expect(text(w.lines[DRAFT])).toBe(`done: ${LINES.published}`);
     expect(text(w.lines[A])).toBe(`done: ${LINES.managed}`);
   });
