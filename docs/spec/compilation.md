@@ -1146,7 +1146,9 @@ unmeasured.
    equal to the name that another machine's last applied release recorded
    (source `machine-name`, persistence and API §9.2) is refused the same way,
    naming both machines, until that machine's applied release no longer holds
-   it. Each machine has its own plan, so a release that renames machine node-a
+   it. That comparison is also made on the derived Kubernetes node names where
+   `registerWithFQDN` is not true, because applied `a.x.org` and a new name
+   `a.y.org` give two nodes the name `a` although the full names differ. Each machine has its own plan, so a release that renames machine node-a
    and gives its old name to machine node-b could be applied in the wrong
    order and leave two nodes with one hostname. Once both renames are stored,
    every release carries machine node-b's new name and is refused, so the

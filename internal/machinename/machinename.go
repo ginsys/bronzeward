@@ -24,15 +24,27 @@ func Valid(s string) bool {
 	return len(s) <= 253 && shape.MatchString(s) && !numberTail.MatchString(s)
 }
 
+// lowerASCII lowercases A to Z and nothing else, as the web client does: a name is ASCII, and a Unicode
+// lowercasing differs between languages (U+0130 becomes two code points in JavaScript), so one client
+// would name a machine that the other leaves unnamed.
+func lowerASCII(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}, s)
+}
+
 // FromHostname is the name a machine takes from the hostname its node reports (operator experience
-// §5.2): the hostname lowercased, when that is a valid name. Otherwise name is empty and note says why;
+// §5.2): the hostname lowercased (A to Z only), when that is a valid name. Otherwise name is empty and note says why;
 // note is also set, with the name, where lowercasing changed it. The hostname is remote text: note holds
 // it quoted and cut at 64 characters.
 func FromHostname(hostname string) (name, note string) {
 	if hostname == "" {
 		return "", "no name: the node reported no hostname"
 	}
-	name = strings.ToLower(hostname)
+	name = lowerASCII(hostname)
 	if !Valid(name) {
 		shown := hostname
 		if r := []rune(shown); len(r) > 64 {

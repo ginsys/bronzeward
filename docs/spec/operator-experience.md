@@ -462,7 +462,7 @@ ginsys/bronzeward#976). **Onboarding names a machine by the hostname its node re
 that the web page and `cluster onboard` both follow** (owner decision, Serge, typed 2026-11-21 17:46 CET
 in the bronzeward lead's session: "A machine is named by it's FQDN hostname"; ginsys/bronzeward#1065).
 The node reports its full name where it has a domain (the cluster member's hostname is the node's
-fully qualified name) and a short one where it has none. The client lowercases that hostname, and the
+fully qualified name) and a short one where it has none. The client lowercases that hostname (the letters A to Z only, the same in both clients), and the
 result is the machine's name when it is a valid name
 ([persistence and API §3.5](persistence-api.md#35-a-machines-name)). Otherwise the machine is left
 unnamed, and the client says why in the machine's line and never drops it without a word: "no name: the
@@ -479,7 +479,9 @@ by the name or address its other pages give it, and the command's object carries
 its address. Where onboarding names a machine by a hostname that was already in lower case, the
 machine's import base holds that hostname, equal to the
 name; a hostname that only lowercasing made a name differs from it in case and stays in the base as an
-explicit hostname (compilation §2.3 step 2a). Where it is equal, the import removes that document from the stored base and records the hostname as filled from
+explicit hostname (compilation §2.3 step 2a). Where the node's configuration holds a `HostnameConfig` whose
+`hostname` equals the name (a hostname a DHCP lease gave, with `auto: off` alone, is not one, and nothing is filled for it,
+compilation §6.1 item 2), the import removes that document from the stored base and records the hostname as filled from
 the name (compilation §2.3 step 2a), so a later rename reaches the machine through a new release and
 an approved plan, and the clients say so where they offer the rename (client contracts A9 item 6).
 
