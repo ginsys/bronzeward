@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # The `check` job of previous-major-pins.yml (ginsys/bronzeward#907): keeps one issue that names the
 # previous-major browser pins web/e2e/previous-majors.json should hold. STATUS is the exit status of
-# `previous-major-pins.py --check` and DIFF its output: 1 (drift) opens the issue, or edits the open
-# one's body; 0 (no drift) closes the open one; 2 (a source could not be read) touches nothing, so a
-# vendor outage never reads as "no drift" and never closes the issue.
+# `previous-major-pins.py --check` and DIFF its output: 1 (drift) opens the issue, or comments on the
+# open one (its body is written once and never edited); 0 (no drift) closes the open one; 2 (a source
+# could not be read) touches nothing, so a vendor outage never reads as "no drift" and never closes
+# the issue.
 #
 # The open issue is found by its marker, as scripts/ci/report-browser-run.sh finds its own: a failed
 # gh or jq stops the script before anything is created. KEY and TITLE_PREFIX let a test of the job use
@@ -49,7 +50,7 @@ if [ "$STATUS" = 0 ]; then
   exit 0
 fi
 
-body="The pins in web/e2e/previous-majors.json are behind the previous major of Chrome, Edge and Firefox:
+note="The pins in web/e2e/previous-majors.json are behind the previous major of Chrome, Edge and Firefox:
 
 \`\`\`
 $DIFF
@@ -67,14 +68,17 @@ manual run on main of the Previous-major pins workflow, after the file matches t
 
 Run: $RUN_URL
 Event: $EVENT
-Commit: $SHA
+Commit: $SHA"
+
+# The body is written once and never edited, so a person's text in it stays; a later run adds a comment.
+if [ -n "$number" ]; then
+  gh issue comment "$number" --repo "$REPO" --body "$note"
+  echo "report-pin-drift: commented on #$number"
+else
+  gh issue create --repo "$REPO" --title "$title" --label type/implementation --label area/ci --body "$note
+
+A later run adds a comment with the newer pins, and the newest comment is current.
 
 $marker"
-
-if [ -n "$number" ]; then
-  gh issue edit "$number" --repo "$REPO" --body "$body"
-  echo "report-pin-drift: edited #$number"
-else
-  gh issue create --repo "$REPO" --title "$title" --label type/implementation --label area/ci --body "$body"
   echo "report-pin-drift: opened a new issue"
 fi
