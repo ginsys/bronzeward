@@ -238,7 +238,7 @@ func TestApprovals(t *testing.T) {
 		}
 		r = e.ctl(append(h, "approval", "revoke", a, "--reason", "BWSYNTH revoked after commitment")...)
 		release()
-		f.want(r, 0, "The plan "+p+" stays committed to operation "+op+". A revocation ends an uncommitted approval and undoes no commitment; "+
+		f.want(r, 0, "The plan "+p+" stays committed to operation "+op, ". A revocation ends an uncommitted approval and undoes no commitment; "+
 			"it does not stop an attempt already recorded.\nFollow it with: bronzewardctl operation watch '"+op+"'\n")
 		if state := f.ended(op); state != "completed" {
 			t.Errorf("the operation with a recorded attempt ended %s: %s", state, f.events(op))

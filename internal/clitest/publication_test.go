@@ -335,7 +335,7 @@ func TestPublication(t *testing.T) {
 	t.Run("review and provenance", func(t *testing.T) {
 		in.set(nil, nil)
 		r := ctl("--context", "human", "release", "review", rel, s.machine)
-		f.want(r, 0, "Release "+rel+", machine "+s.machine+", validated: container\n", "machine:\n", "<redacted:")
+		f.want(r, 0, "Release "+rel, ", machine "+s.machine+", validated: container\n", "machine:\n", "<redacted:")
 		raw := ctl("--context", "human", "-o", "json", "release", "review", rel, s.machine)
 		var served struct {
 			Configuration *string
@@ -451,7 +451,7 @@ func (f *fixture) publicationJourneys(t *testing.T, in *injector, s seeded, ctl 
 			}
 			fmt.Fprintf(&out, "$ bronzewardctl %s\n%s%s[exit %d]\n\n", strings.Join(step, " "), r.out, r.err, r.code)
 		}
-		keepJourney(t, name, out.String(), dir)
+		keepJourney(t, name, localTimes.ReplaceAllString(out.String(), "<local time>"), dir)
 	}
 	h := []string{"--context", "human"}
 	script("t6", [][]string{

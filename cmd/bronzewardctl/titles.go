@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/url"
+	"strings"
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
@@ -157,4 +158,111 @@ func (e *env) titleOperations(c *client.Client, ops ...apitypes.OperationBody) {
 			e.titleSet("operation", ops[i].Id, e.operationTitle(c, &ops[i]))
 		}
 	}
+}
+
+// kindOfID is the kind an identifier's prefix names (persistence-api.md section 2), for the six kinds that
+// have a title; any other prefix is "" and its identifier is shown as it is.
+func kindOfID(id string) string {
+	prefix, _, ok := strings.Cut(id, "_")
+	if !ok {
+		return ""
+	}
+	return map[string]string{"rel": "release", "pln": "plan", "op": "operation", "drf": "draft", "ing": "ingestion", "mch": "machine"}[prefix]
+}
+
+// titleRef keeps the title of the object kind/id that a command names beside its identifier, read once
+// for the command through the cache above; a failed read keeps none (client contracts A8, ginsys/bronzeward#1017).
+func (e *env) titleRef(c *client.Client, kind, id string) {
+	if e.output != "table" || id == "" || e.titleOf(kind, id) != "" {
+		return
+	}
+	var t string
+	switch kind {
+	case "draft":
+		t = e.draftTitle(c, id)
+	case "machine":
+		if m := titleBody[apitypes.MachineBody](e, c, titlePath("machines", id)); m != nil {
+			t = machineLabel(id, m.Name)
+		}
+	case "release":
+		if r := titleBody[apitypes.ReleaseBody](e, c, titlePath("releases", id)); r != nil {
+			t = e.releaseTitle(c, r)
+		}
+	case "plan":
+		if p := titleBody[apitypes.PlanBody](e, c, titlePath("plans", id)); p != nil {
+			t = e.planTitle(c, p)
+		}
+	case "operation":
+		if o := titleBody[apitypes.OperationBody](e, c, titlePath("operations", id)); o != nil {
+			t = e.operationTitle(c, o)
+		}
+	case "ingestion":
+		if ing := titleBody[apitypes.IngestionBody](e, c, titlePath("ingestions", id)); ing != nil {
+			t = "Import"
+			if ing.Machine != nil {
+				t += " of " + e.machineTitle(c, *ing.Machine)
+			}
+		}
+	}
+	e.titleSet(kind, id, t)
+}
+
+// titleRefs is titleRef for each identifier of one kind; "" is skipped.
+func (e *env) titleRefs(c *client.Client, kind string, ids ...string) {
+	for _, id := range ids {
+		e.titleRef(c, kind, id)
+	}
+}
+
+// titleIngestion holds an ingestion the command read, so a title built on it is not read again, and
+// reads the titles of the draft and the operation it names.
+func (e *env) titleIngestion(c *client.Client, b *apitypes.IngestionBody) {
+	if e.output == "table" {
+		e.holdBody(titlePath("ingestions", b.Id), b)
+	}
+	e.titleRefs(c, "draft", b.Draft)
+	e.titleRefs(c, "operation", or(b.Operation, ""))
+}
+
+// titleSubjects is titleRef for each act subject whose prefix names a kind.
+func (e *env) titleSubjects(c *client.Client, subjects []string) {
+	for _, s := range subjects {
+		if k := kindOfID(s); k != "" {
+			e.titleRef(c, k, s)
+		}
+	}
+}
+
+// ref is an identifier followed by its title in parentheses, as a machine is by its name (A9): the
+// identifier alone when no title was kept. A machine's kept title is that whole label already.
+func (e *env) ref(kind, id string) string {
+	t := e.titleOf(kind, id)
+	switch {
+	case t == "":
+		return id
+	case kind == "machine":
+		return t
+	}
+	return id + " (" + t + ")"
+}
+
+// refp is ref for an optional identifier: nil for none.
+func (e *env) refp(kind string, id *string) *string {
+	if id == nil {
+		return nil
+	}
+	r := e.ref(kind, *id)
+	return &r
+}
+
+// refSubjects is an act's subjects, each followed by its title where its prefix names a kind.
+func (e *env) refSubjects(subjects []string) string {
+	out := make([]string, len(subjects))
+	for i, s := range subjects {
+		out[i] = s
+		if k := kindOfID(s); k != "" {
+			out[i] = e.ref(k, s)
+		}
+	}
+	return strings.Join(out, ", ")
 }

@@ -42,7 +42,7 @@ Assignment saved (draft revision 4).
 
 $ bronzewardctl --context human publish {draft}
 Publishing draft drf_… revision 4 (operation op_…).
-Publication succeeded: release rel_… is now Desired for 1 machine. Nothing has been sent to any machine.
+Publication succeeded: release rel_… (import worker, published <local time>) is now Desired for 1 machine. Nothing has been sent to any machine.
   mch_… has no Applied release: hand it over with an adopt plan:
     bronzewardctl plan create --release 'rel_…' --machine 'mch_…' --operation 'adopt'
 Review a machine's rendered configuration: bronzewardctl release review rel_… <machine>
@@ -70,8 +70,8 @@ $ bronzewardctl --context human plan create --release {release} --machine {machi
 Plan pln_…  proposed                                         expires <local time> <local time>
   Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
   Operation                          adopt: records Applied from the node's own bytes and sends nothing to the machine
-  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
-  Assignment                         asr_…  baseline revision none, drift record none
+  Release                            rel_… (import worker, published <local time>)  machine Desired: rel_… (import worker, published <local time>) at plan creation, rel_… (import worker, published <local time>) now
+  Assignment                         asr_…                                                     baseline revision none, drift record none
   Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
   Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
   Approval                           none                                         policy one-approver, committed operation none
@@ -89,8 +89,8 @@ The controller records the adoption without sending anything; Applied becomes re
 Plan pln_…  proposed                                         expires <local time> <local time>
   Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
   Operation                          adopt: records Applied from the node's own bytes and sends nothing to the machine
-  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
-  Assignment                         asr_…  baseline revision none, drift record none
+  Release                            rel_… (import worker, published <local time>)  machine Desired: rel_… (import worker, published <local time>) at plan creation, rel_… (import worker, published <local time>) now
+  Assignment                         asr_…                                                     baseline revision none, drift record none
   Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
   Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
   Approval                           none                                         policy one-approver, committed operation none
@@ -109,17 +109,17 @@ Plan pln_…  committed  expires <local time> <local time>
   Title                              Adopt of mch_… to import worker, published <local time>
   Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
   Operation                          adopt: records Applied from the node's own bytes and sends nothing to the machine
-  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
-  Assignment                         asr_…  baseline revision none, drift record none
+  Release                            rel_… (import worker, published <local time>)  machine Desired: rel_… (import worker, published <local time>) at plan creation, rel_… (import worker, published <local time>) now
+  Assignment                         asr_…                                                     baseline revision none, drift record none
   Limits                             transport -, verification -, observation age 300s, check validity 300s, attempts -, rollout 1
   Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 3, timeline revision 4
-  Approval                           apr_…               policy one-approver, committed operation op_…
+  Approval                           apr_…               policy one-approver, committed operation op_… (Adopt of mch_… to import worker, published <local time>)
 Evidence
   Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run              not available: no dry run is available for this operation
   Baseline             import base ibr_…, the node's own bytes
   Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
-Committed: operation op_…. Follow it with: bronzewardctl operation watch 'op_…'
+Committed: operation op_… (Adopt of mch_… to import worker, published <local time>). Follow it with: bronzewardctl operation watch 'op_…'
 [exit 0]
 
 $ bronzewardctl --context human operation watch {operation}

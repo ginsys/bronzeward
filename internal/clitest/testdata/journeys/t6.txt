@@ -23,7 +23,7 @@ Assignment saved (draft revision 5).
 
 $ bronzewardctl --context human publish {draft}
 Publishing draft drf_… revision 5 (operation op_…).
-Publication succeeded: release rel_… is now Desired for 1 machine. Nothing has been sent to any machine.
+Publication succeeded: release rel_… (worker labels, published <local time>) is now Desired for 1 machine. Nothing has been sent to any machine.
   mch_… has no Applied release: hand it over with an adopt plan:
     bronzewardctl plan create --release 'rel_…' --machine 'mch_…' --operation 'adopt'
 Review a machine's rendered configuration: bronzewardctl release review rel_… <machine>
@@ -33,7 +33,7 @@ Review a machine's rendered configuration: bronzewardctl release review rel_… 
 [exit 0]
 
 $ bronzewardctl --context human release review {release} {machine}
-Release rel_…, machine mch_…, validated: container
+Release rel_… (worker labels, published <local time>), machine mch_…, validated: container
 version: v1alpha1
 debug: false
 persist: true

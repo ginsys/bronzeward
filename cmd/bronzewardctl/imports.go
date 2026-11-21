@@ -309,16 +309,23 @@ func (e *env) importStatus(args []string) error {
 		return err
 	}
 	if len(pos) == 0 {
-		return list(e, l, "/ingestions", values(f), nil, "INGESTION\tSTATE\tLEASE\tMACHINE\tDRAFT\tOPERATION", "", func(w *tabwriter.Writer, b *apitypes.IngestionBody) {
-			tf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", b.Id, b.State, lease(b), or(b.Machine, "-"), b.Draft, or(b.Operation, "-"))
+		return listWith(e, l, "/ingestions", values(f), nil, nil, func(c *client.Client, bs []apitypes.IngestionBody) {
+			for i := range bs {
+				e.titleIngestion(c, &bs[i])
+			}
+		}, "INGESTION\tSTATE\tLEASE\tMACHINE\tDRAFT\tOPERATION", "", func(w *tabwriter.Writer, b *apitypes.IngestionBody) {
+			tf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", b.Id, b.State, lease(b), or(b.Machine, "-"), e.ref("draft", b.Draft), or(e.refp("operation", b.Operation), "-"))
 		})
 	}
 	if len(pos) > 1 || state != "" || machine != "" || l != (listing{}) {
 		return usageError{errors.New("import status takes one ingestion, or the list's --state, --machine and paging flags")}
 	}
-	return show(e, "/ingestions/"+url.PathEscape(pos[0]), func(w *tabwriter.Writer, b *apitypes.IngestionBody) {
+	return showThen(e, "/ingestions/"+url.PathEscape(pos[0]), func(c *client.Client, _ *client.Response, b *apitypes.IngestionBody) error {
+		e.titleIngestion(c, b)
+		return nil
+	}, func(w *tabwriter.Writer, b *apitypes.IngestionBody) {
 		tf(w, "Import %s\tstate %s\t%s, %s staging\n", b.Id, b.State, b.Kind, b.Mode)
-		tf(w, "Machine\t%s\tdraft %s, operation %s\n", or(b.Machine, "-"), b.Draft, or(b.Operation, "-"))
+		tf(w, "Machine\t%s\tdraft %s, operation %s\n", or(b.Machine, "-"), e.ref("draft", b.Draft), or(e.refp("operation", b.Operation), "-"))
 		tf(w, "Owner generation\t%d\treview %s\n", b.OwnerGeneration, or(b.Review, "not requested"))
 		tf(w, "Lease\t%s\texpires %s\n", lease(b), when(b.ExpiresAt))
 		for _, l := range allowed(b) {

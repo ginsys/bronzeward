@@ -154,7 +154,7 @@ func TestTimeline(t *testing.T) {
 		e.rel = e.publishLabels(t, "timeline tier", "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  node.example.test/pool: workers\n  node.example.test/tier: c\n")
 		e.approve(t, p)
 		e.until(t, "true", `SELECT EXISTS (SELECT FROM machine_event WHERE machine = $1 AND kind = 'refusal' AND entry->>'plan' = $2)::text`, e.s.machine, p)
-		f.want(e.ctl(append(h, "plan", "show", p)...), 0, rel+" at plan creation, "+e.rel+" now")
+		f.want(e.ctl(append(h, "plan", "show", p)...), 0, rel, " at plan creation, "+e.rel, " now")
 		f.want(e.ctl(append(h, "plan", "cancel", p, "--reason", "BWSYNTH stale: Desired moved")...), 0)
 		r := e.ctl(append(h, "machine", "timeline", e.s.machine, "--all")...)
 		f.want(r, 0)
