@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { remote, SevereServiceError } from "webdriverio";
 import { binPath, died, missingBinaries, spawnChild } from "./children.ts";
 import { safariKeys } from "./safari-keys.ts";
+import { settled } from "./safari-navigation.ts";
 import { FAKE_ISSUER, PAGE_LISTEN, PAGE_ORIGIN, TARGET_ORIGIN } from "./ports.ts";
 import { printFailure } from "./print-failure.ts";
 import { startProvider } from "./provider.ts";
@@ -150,15 +151,11 @@ export const config: WebdriverIO.Config = {
     // navigations on the runner), and a find that follows can fail with "Stale element found when trying to
     // create the node handle", which an assertion's wait does not retry (ginsys/bronzeward#1028: 14 runs of
     // 180 without this wait, none with it). The command returns once the document is complete, as the
-    // other four drivers' does; the read is an execute, which creates no node handle.
+    // other four drivers' does; the read is an execute, which creates no node handle. safari-navigation.ts
+    // holds the wait.
     await browser.overwriteCommand("url", async function (this: WebdriverIO.Browser, orig: (path: string, options?: unknown) => Promise<unknown>, path: string, options?: unknown) {
       const result = await orig(path, options);
-      let state = "";
-      // The message names the state the page was last seen in, so a timeout reads as this cause, and the
-      // wait's own error, so a failed read (a lost session, an alert) does not read as a slow page.
-      await this.waitUntil(async () => (state = await this.execute(() => document.readyState)) === "complete", { timeout: 15_000 }).catch((e: unknown) => {
-        throw new Error(`navigation to ${path} left readyState "${state}" after 15 s: ${e instanceof Error ? e.message : String(e)}`);
-      });
+      await settled(() => this.execute(() => document.readyState), path, (until, timeout) => this.waitUntil(until, { timeout }));
       return result;
     });
     // A key sequence sent as one action loses its spaces and its repeated characters in safaridriver
