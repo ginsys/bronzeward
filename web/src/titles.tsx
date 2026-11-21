@@ -1,7 +1,8 @@
 // What shows a release, a plan, an operation, a draft, an import or a machine by a title instead of its
 // identifier (client contracts A8 and A9): the hooks that read the bodies a title names through the page's
 // own store, and the links and headings that show it. The title is the text and the whole identifier the title attribute; a
-// read that did not answer, or text that is not safe, leaves the shortened identifier, as every other is.
+// read that did not answer, or text that is not safe, leaves the shortened identifier, as every other is (a machine's
+// failed read in a title reads "the machine" instead, so the title survives: A8 rule 1).
 
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import type { components } from "./api/v1";

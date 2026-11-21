@@ -10,7 +10,7 @@ export const UNNAMED_MACHINE = "an unnamed machine";
 export const IDENTIFIER = "Identifier";
 /** The control that copies an identifier. */
 export const COPY = "Copy";
-/** The text standing for a machine whose body has not been read yet, in a heading. */
+/** The text standing for a machine whose body has not been read yet, in a heading, and for one whose read gave no body, in a title. */
 export const THE_MACHINE = "the machine";
 /** The text of a cluster's link when its name has not been read, or is not safe to show; no word stands before it. */
 export const THIS_CLUSTER = "This cluster";

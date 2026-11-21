@@ -2028,7 +2028,7 @@ one. The rule is one for both clients:
 2. Each distinct draft, release, plan and machine is read once for each web view, each read again and each
    return to a view after one with no title, as A7 says of names, by the same store and the same
    safe-text rule; the CLI reads each once for each command. A read that fails keeps the
-   identifier, under the retry bound the 503 row states for the names read (the web client keeps it
+   identifier (a machine's, in a title: rule 1), under the retry bound the 503 row states for the names read (the web client keeps it
    behind the identifier, the CLI tries once). A draft ends `published` or `discarded` and is never
    deleted ([persistence and API §3.1](persistence-api.md#31-sources-drafts-and-heads)), so a missing
    draft is a failed read, not a fallback of its own.
@@ -2040,7 +2040,7 @@ one. The rule is one for both clients:
 5. `-o json` and `-o yaml` print the resource unchanged.
 6. **Applied in the web client** ([#987](https://github.com/ginsys/bronzeward/issues/987)): a release's, plan's and operation's
    list link and item heading show the title (the heading keeps the plan's state and the
-   operation's kind and state), the identifier is the title attribute, and a failed read, an unsafe draft title or a
+   operation's kind and state), the identifier is the title attribute, and a failed read other than a machine's (rule 1), an unsafe draft title or a
    `subject` lacking what its kind needs leaves the shortened identifier. A view reads at most four title bodies
    at a time, each distinct one once. A view that names a release, plan, operation, draft or import by its
    identifier shows the same title, the identifier as the title attribute and the shortened identifier where the read
