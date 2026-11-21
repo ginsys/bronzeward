@@ -186,7 +186,7 @@ export function poll(reread: () => void, wait = 5000) {
 // read of the plan (`answers` counts them, so a read the shell did not answer counts too) starts the three reads, and
 // five seconds after they are all answered the plan is read again. A read the shell did not answer (offline, a
 // transport failure) keeps what is shown, and the poll goes on, for the supporting reads and for the plan's own.
-function Approved({ p, reread, answers, onMachine }: { p: Plan; reread: () => void; answers: number; onMachine?: ((m: Machine) => void) | undefined }) {
+function Approved({ p, reread, answers, onMachine }: { p: Plan; reread: () => void; answers: number; onMachine?: ((m: Machine | null) => void) | undefined }) {
   const settled = useSettled();
   const [seen, setSeen] = useState<Reads>(LOADING);
   const timer = useMemo(() => poll(reread), [reread]);
@@ -203,7 +203,8 @@ function Approved({ p, reread, answers, onMachine }: { p: Plan; reread: () => vo
       if (!live) return;
       setSeen((s) => ({ approval: approval ?? s.approval, now: now ?? s.now, machine: machine ?? s.machine }));
       // The plan's heading and target name the machine from this read: no read of their own (A8 rule 2).
-      if (machine?.kind === "ok") onMachine?.(machine.data);
+      // A read that answered with no body (a 404, an exhausted 503) is reported as null, so the title survives it.
+      if (machine !== undefined) onMachine?.(machine.kind === "ok" ? machine.data : null);
       timer.settled();
     })();
     return () => void (live = false);
@@ -229,7 +230,7 @@ function Approved({ p, reread, answers, onMachine }: { p: Plan; reread: () => vo
   );
 }
 
-export function PlanState({ p, reread, answers = 0, onMachine }: { p: Plan; reread: () => void; answers?: number; onMachine?: (m: Machine) => void }) {
+export function PlanState({ p, reread, answers = 0, onMachine }: { p: Plan; reread: () => void; answers?: number; onMachine?: (m: Machine | null) => void }) {
   const terminal = TERMINAL[p.state];
   return (
     <>

@@ -437,8 +437,9 @@ export function PlanItem({ id }: { id: string }) {
   const settled = useCallback(() => setAnswers((x) => x + 1), []);
   // An approved plan reads its machine itself (and again at each poll): its heading and target name the
   // machine from that body and ask the titles' store for nothing (A8 rule 2).
-  const [machine, setMachine] = useState<S["MachineBody"]>();
-  const held = (p: S["PlanBody"]): Held | undefined => (p.state === "approved" ? { body: machine?.id === p.machine ? machine : undefined } : undefined);
+  // `null` is a read that answered with no body: the title then says "the machine" and survives (A8 rule 1).
+  const [machine, setMachine] = useState<S["MachineBody"] | null>();
+  const held = (p: S["PlanBody"]): Held | undefined => (p.state === "approved" ? { body: machine === null ? null : machine?.id === p.machine ? machine : undefined } : undefined);
   return (
     <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" n={n} onSettled={settled} title={(p) => (p === undefined ? `Plan ${short(id)}` : <PlanHeading id={id} p={p} {...(held(p) !== undefined && { machine: held(p)! })} />)}>
       {(p) => {
@@ -446,7 +447,7 @@ export function PlanItem({ id }: { id: string }) {
         return (
           <>
             {proposed && p.state === "proposed" && <Status testid="plan-proposed">{PROPOSED}</Status>}
-            <PlanState p={p} reread={reread} answers={answers} onMachine={setMachine} />
+            <PlanState p={p} reread={reread} answers={answers} onMachine={(m) => setMachine((was) => m ?? was ?? null)} />
             <Fields rows={[
               ["State", `${p.state}; expires ${when(p.expiresAt)}`],
               ["Target", <>machine <MachineById id={p.machine} {...(held(p) !== undefined && { held: held(p)! })} />, cluster <Id id={p.cluster} />, route {p.route}</>],
