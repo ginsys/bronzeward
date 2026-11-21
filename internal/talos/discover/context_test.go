@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -93,6 +94,27 @@ func TestOneContext(t *testing.T) {
 		if len(got.Endpoints) != 0 || len(got.Nodes) != 0 || got.Auth.Basic != nil || got.Auth.SideroV1 != nil || strings.Contains(string(out), "10.9.9.9") {
 			t.Errorf("context %q: the document keeps an endpoint, a node or an auth block", name)
 		}
+	}
+}
+
+// TestOneContextGolden: the bytes OneContext writes for context b of the shared sample are the golden's.
+// The web client cuts a talosconfig the same way in the browser (web/src/onboard.ts cutContext), and its
+// test reads the same two files and compares the parsed documents, so the two cuts cannot drift apart.
+func TestOneContextGolden(t *testing.T) {
+	sample, err := os.ReadFile("testdata/two-contexts.talosconfig")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("testdata/two-contexts.b.talosconfig")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := OneContext(sample, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("OneContext(sample, b) wrote:\n%s\nthe golden holds:\n%s", got, want)
 	}
 }
 

@@ -1,0 +1,7 @@
+context: b
+contexts:
+    b:
+        endpoints: []
+        ca: Qi1DQQ==
+        crt: Qi1DUlQ=
+        key: Qi1LRVk=

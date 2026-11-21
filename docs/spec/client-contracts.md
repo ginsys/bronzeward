@@ -1598,6 +1598,7 @@ Plaintext can pass through a client in these places only:
 | Tokens | every request | credentials | [§9](#9-authentication) |
 | The talosconfig file of `cluster discover` | none: it is read from a file the operator names and goes to Talos nodes only | holds the cluster's client key | [§3.3](#33-client-actions-with-no-route) |
 | A first key file of `cluster first-key` or `cluster onboard` | `POST /clusters/{id}/first-keys`: it is read from a file the operator names and sent once | may hold the cluster's CA key | [§3.2](#32-writes), [persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer) |
+| The talosconfig chosen in the web client's Onboard cluster page | `POST /discoveries` and `POST /clusters/{id}/first-keys`, as its cut to one context (`discover.OneContext`'s document) and nothing else | holds the cluster's client key | [operator experience §6](operator-experience.md#6-web-interface) |
 
 Not protected: rendered release reviews, plan diffs and provenance are redacted by the server
 ([compilation §8.3](compilation.md#83-redaction)) and are handled as ordinary reads.
@@ -2233,6 +2234,16 @@ Limits:
   through the same route and takes no OpenBao address or token. [§3.3](#33-client-actions-with-no-route)
   and [operator experience §5.2](operator-experience.md#52-inventory) describe it, including a second
   run that supplies the first key again.
+- The web client's Onboard cluster page
+  ([ginsys/bronzeward#1001](https://github.com/ginsys/bronzeward/issues/1001), operator experience
+  [§6](operator-experience.md#6-web-interface)) does the same steps through the same routes, with the
+  talosconfig chosen in the page. It reads no Talos node and holds no OpenBao address: the server's
+  discovery reads the nodes. The page cuts the file to one context in memory, as `OneContext` does (a
+  golden file read by a Go test and by the page's test keeps the two cuts equal), sends that cut to the
+  discovery and to the first key only, and drops its copy when the first key's write is released.
+  The browser case ONBOARD-01 runs the flow against two stand-in nodes, so what a real node answers
+  to the deployment's address policy
+  ([ginsys/bronzeward#1009](https://github.com/ginsys/bronzeward/issues/1009)) is not proven by it.
 - For a person signed in as recovery-admin
   ([#361](https://github.com/ginsys/bronzeward/issues/361)), bronzewardctl reads recovery status
   and sends recovery enter, recovery exit and identity revoke; enter and revoke are sent only when
