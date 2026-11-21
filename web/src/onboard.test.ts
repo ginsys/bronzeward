@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
-import { describe, expect, test } from "vitest";
-import { cutContext, discoverCluster, type Env, type Line, onboardCluster, type Plan } from "./onboard.ts";
-import type { Outcome, WriteSpec } from "./write.ts";
+import { describe, expect, test, vi } from "vitest";
+import { cutContext, discoverCluster, type Env, type Line, onboardCluster, type Plan, sender } from "./onboard.ts";
+import { type Outcome, Write, type WriteSpec } from "./write.ts";
 
 const CANARY = "BWSYNTH-onboard-canary";
 const ID = "YnJvbnpld2FyZC1lMmUtb25ib2FyZC1jbHVzdGVyLTA=";
@@ -32,6 +32,8 @@ class Server {
   keys = 0;
   discovery: typeof DISCOVERY = DISCOVERY;
   fail = new Map<string, Outcome>();
+  // A route whose next send commits and then answers with this outcome: the answer was lost.
+  lost = new Map<string, Outcome>();
   private n = 0;
   private id = (p: string) => `${p}_${++this.n}`;
 
@@ -47,6 +49,11 @@ class Server {
         return f;
       }
       const o = this.write(spec);
+      const gone = this.lost.get(route);
+      if (gone !== undefined) {
+        this.lost.delete(route);
+        return gone;
+      }
       if (o.kind !== "unknown") spec.released?.({} as never);
       return o;
     },
@@ -165,6 +172,58 @@ describe("the cut of one context (cutContext)", () => {
       expect(why).not.toContain(CANARY);
     }
   });
+
+  test("the parser's warnings reach no console call, whatever the file holds", () => {
+    const spies = [vi.spyOn(console, "warn"), vi.spyOn(console, "error"), vi.spyOn(console, "log"), vi.spyOn(console, "info"), vi.spyOn(process, "emitWarning")];
+    try {
+      cutContext(`context: a\ncontexts:\n  a:\n    ca: QQ==\n    crt: QQ==\n    key: !secret ${CANARY}-tag\n`, undefined);
+      for (const s of spies) expect(s).not.toHaveBeenCalled();
+    } finally {
+      for (const s of spies) s.mockRestore();
+    }
+  });
+});
+
+describe("the page's send (sender)", () => {
+  const secret: WriteSpec = { method: "POST", path: "/clusters/cl_1/first-keys", resource: "/clusters/cl_1", body: { document: CANARY }, released: () => {} };
+  const plain: WriteSpec = { method: "POST", path: "/machines", resource: "/machines", body: {} };
+  // A write layer that answers each submit with the next scripted outcome and repeats only an unknown one.
+  const layer = (script: Outcome[]) => {
+    const seen: Write[] = [];
+    return {
+      seen,
+      repeatable: (w: Write) => w.outcome?.kind === "unknown",
+      submit: async (w: Write) => {
+        seen.push(w);
+        w.outcome = script.shift()!;
+        return w.outcome;
+      },
+    };
+  };
+  const unknown: Outcome = { kind: "unknown", why: "the connection ended", problem: null };
+
+  test("repeats an unknown write that carries the document under its own key, then starts a new one once it has settled", async () => {
+    const l = layer([unknown, unknown, done({}, 200), done({}, 200)]);
+    const send = sender(l as never, () => true);
+    await send(secret);
+    await send(secret);
+    await send(secret);
+    await send(secret);
+    expect(l.seen[1]).toBe(l.seen[0]);
+    expect(l.seen[2]).toBe(l.seen[0]);
+    expect(l.seen[3]).not.toBe(l.seen[0]);
+  });
+
+  test("starts a new write for what carries no document, and sends nothing once the page is left", async () => {
+    const l = layer([unknown, unknown]);
+    const send = sender(l as never, () => true);
+    await send(plain);
+    await send(plain);
+    expect(l.seen[1]).not.toBe(l.seen[0]);
+    const gone = sender(l as never, () => false);
+    expect((await gone(secret)).kind).toBe("not-done");
+    expect(l.seen).toHaveLength(2);
+  });
 });
 
 describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an in-memory server)", () => {
@@ -205,7 +264,7 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
     ["a machine", "POST /machines", refused(422, "validation-failed"), "machine:n1"],
     ["the draft", "POST /drafts", refused(422, "validation-failed"), "draft"],
     ["an import", "POST /ingestions", refused(409, "conflict"), "import:n1"],
-    ["an import that may have committed", "POST /ingestions", { kind: "unknown", why: "the connection ended", problem: null }, "import:n1"],
+    ["an import whose answer was lost before it committed", "POST /ingestions", { kind: "unknown", why: "the connection ended", problem: null }, "import:n1"],
   ];
   test.each(failures)("%s fails: the run stops at it, and running again finishes, then changes nothing", async (_n, route, outcome, key) => {
     const s = new Server();
@@ -236,6 +295,35 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
     expect(s.machines.size).toBe(2);
     expect(s.drafts.size).toBe(1);
     expect(s.ingestions.size).toBe(2);
+  });
+
+  test("an import that committed but whose answer was lost is found through GET /ingestions?machine= on the next run, and not started again", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.lost.set("POST /ingestions", { kind: "unknown", why: "the connection ended", problem: null });
+    const first = await run(s, plan);
+    expect(first.ok).toBe(false);
+    expect(first.lines.at(-1)).toMatchObject({ key: "import:n1", state: "unknown" });
+    const machine = plan.machines["n1"]!;
+    expect([...s.ingestions.values()].filter((i) => i.machine === machine)).toHaveLength(1);
+    const sent = s.requests.length;
+    const second = await run(s, plan);
+    expect(second.ok).toBe(true);
+    const after = s.requests.slice(sent);
+    expect(after).toContain(`GET /ingestions?machine=${machine}`);
+    // Only the second machine's import is started: the first was adopted.
+    expect(after.filter((r) => r === "POST /ingestions")).toHaveLength(1);
+    expect([...s.ingestions.values()].filter((i) => i.machine === machine)).toHaveLength(1);
+    expect(second.lines.find((l) => l.key === "import:n1")?.state).toBe("existing");
+  });
+
+  test("an IPv6 member is sent bracketed, for the first key and for its machine", async () => {
+    const s = new Server();
+    s.discovery = { ...DISCOVERY, members: [{ ...MEMBERS[0]!, address: "fd00::1" }, { ...MEMBERS[1]!, address: "fd00::2" }, MEMBERS[2]!] };
+    expect((await run(s, await planOf(s))).ok).toBe(true);
+    expect((s.sends.find((x) => x.route.endsWith("/first-keys"))!.body as { endpoint: string }).endpoint).toBe("[fd00::1]");
+    const endpoints = s.sends.filter((x) => x.route === "POST /machines").map((x) => (x.body as { talosEndpoint: string }).talosEndpoint);
+    expect(endpoints).toEqual(["[fd00::1]", "[fd00::2]"]);
   });
 
   test("after a reload the same file finds what the server holds: cluster, machines, draft and imports are adopted, the first key is sent again", async () => {
