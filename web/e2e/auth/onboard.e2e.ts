@@ -128,7 +128,7 @@ describe("Connect a cluster (#1001)", () => {
     await $("main form").$("button=Onboard cluster").click();
     await expect(result()).toHaveText(expect.stringMatching(/^Onboarded\./), { wait: 180_000 });
     await result().$("a").click();
-    await expect($("main h2")).toHaveText(expect.stringContaining("Draft "));
+    await expect($("main h2")).toHaveText(expect.stringContaining("Draft: "));
     // The sentence above the button says what the press does, and that it sends nothing to any machine.
     await expect($('[data-testid="handover-sentence"]')).toHaveText(expect.stringContaining("It sends nothing to any machine."));
     await $("main").$("button=Start managing these machines").click();
