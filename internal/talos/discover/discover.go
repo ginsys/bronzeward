@@ -47,7 +47,8 @@ type Member struct {
 type Result struct {
 	ClusterID, Version, Contract, KubernetesEndpoint string
 	// Endpoint is the address Discover dialled, as host:port. ResolvedFrom is the DNS name it was
-	// resolved from, or "" when the endpoint was an IP literal.
+	// resolved from, by the walk or by the caller that passed it as DiscoverLimited's serverName, or ""
+	// when the endpoint was an IP literal given with no name.
 	Endpoint, ResolvedFrom string
 	Supported              bool
 	Members                []Member
