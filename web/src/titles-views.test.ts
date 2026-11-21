@@ -12,7 +12,7 @@ import type { ReadResult } from "./request.ts";
 import { Status, StatusPage, when } from "./states.tsx";
 import { Outcome } from "./operation.tsx";
 import { PlanState } from "./plan.tsx";
-import { ACTS, Change, DependencyItem, OperationItem, Operations, Plans, ReleaseItem } from "./resources.tsx";
+import { ACTS, Change, DependencyItem, OperationItem, Operations, PlanItem, Plans, ReleaseItem } from "./resources.tsx";
 import { MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useClusterText } from "./titles.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -196,6 +196,17 @@ describe("ginsys/bronzeward#987: a plan", () => {
       await settled();
       expect(seen).toEqual([expected]);
     }
+  });
+
+  test("an approved plan's page reads its machine once, though every read answers with a new object", async () => {
+    answers[`/plans/${PLN}`] = ok({ ...plan("adopt"), state: "approved", approval: "apr_k2pq3rstuvwxyz234567abcdef", createdBy: null, createdAt: at, evidence: { diff: null, validation: {}, dryRun: { available: false, reason: "none" } } });
+    answers[`/machines/${MCH}`] = ok({ id: MCH, name: "worker-1" });
+    // The page re-reads when a callback it passes changes, so a body that is a new object each time exposes a loop.
+    const fresh: Reads = { ...reads, settle: answering, client: { read: async <T,>(path: string) => { asked.push(path); return structuredClone(answers[path] ?? missing) as ReadResult<T>; } } };
+    await mount(h(PlanItem, { id: PLN }), fresh);
+    await settled();
+    expect(asked.filter((p) => p === `/machines/${MCH}`).length).toBeLessThanOrEqual(2);
+    expect(box.querySelector("h2")?.textContent).toContain("worker-1");
   });
 
   test("the heading keeps its state, with the title or without it", async () => {

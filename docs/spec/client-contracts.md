@@ -2023,11 +2023,12 @@ one. The rule is one for both clients:
 
 1. `<machine>` is the machine's name where it has one (A9), else, in the web client once the machine
    is read, its address, or "an unnamed machine" where it has no usable address, never its
-   identifier; the CLI shows its identifier, whole. A machine read that the shell answered with no
-   body (a 404, an exhausted 503), whether the titles' store made it or a view's own read of the
-   machine (an approved plan's, rule 2), reads "the machine" in a title, so the title survives. A
-   read still pending leaves the title waiting, and so does a transport failure, which the shell
-   holds and which keeps the view as it is until a read answers.
+   identifier; the CLI shows its identifier, whole. A machine read that gave no body reads "the
+   machine" in a title, so the title survives: the titles' store's read on any failure, and a view's
+   own read of the machine (an approved plan's, rule 2) where the shell answered it (a 404, an
+   exhausted 503). A read still pending leaves the title waiting, and so does a view's own read
+   after a transport failure, which the shell holds and which keeps the view as it is until a read
+   answers.
 2. Each distinct draft, release, plan and machine is read once for each web view, each read again and each
    return to a view after one with no title, as A7 says of names, by the same store and the same
    safe-text rule; the CLI reads each once for each command. A read that fails keeps the
