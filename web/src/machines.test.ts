@@ -71,7 +71,7 @@ describe("sharedAddresses: two unnamed machines of the list in hand on one addre
   const c = at("mch_c", null, "172.31.104.16:50000", { talosNodeId: "other" });
   test("the shared address gets the shortened node ID or UUID, and an address held once gets none", () => {
     const shared = sharedAddresses([a, b, c]);
-    expect([...shared]).toEqual(["172.31.104.15"]);
+    expect([...shared.keys()]).toEqual(["172.31.104.15"]);
     expect(machineText(a, shared)).toBe("172.31.104.15 (node 4c1f…)");
     expect(machineText(b, shared)).toBe("172.31.104.15 (UUID 9a3e…)");
     expect(machineText(c, shared)).toBe("172.31.104.16");
@@ -80,6 +80,21 @@ describe("sharedAddresses: two unnamed machines of the list in hand on one addre
     const shared = sharedAddresses([at("mch_d", null, "10.0.0.1:1", { talosNodeId: "n1" }), at("mch_e", null, "10.0.0.1:2")]);
     expect(machineText(at("mch_d", null, "10.0.0.1:1", { talosNodeId: "n1" }), shared)).toBe("10.0.0.1 (node n1)");
     expect(machineText(at("mch_e", null, "10.0.0.1:2"), shared)).toBe("10.0.0.1 (UUID unknown)");
+  });
+  test("machines whose values share a prefix get a longer suffix, until they differ", () => {
+    const vm = (id: string, uuid: string) => at(id, null, "10.0.0.3:50000", { smbiosUuid: uuid });
+    const pair = [vm("mch_h", "564d1a2b-0000-0000-0000-000000000001"), vm("mch_i", "564d1a2c-0000-0000-0000-000000000002")];
+    const shared = sharedAddresses(pair);
+    expect(machineText(pair[0]!, shared)).toBe("10.0.0.3 (UUID 564d1a2b…)");
+    expect(machineText(pair[1]!, shared)).toBe("10.0.0.3 (UUID 564d1a2c…)");
+  });
+  test("two machines with one value cannot be told apart, and show it whole, not forever lengthened", () => {
+    const same = [at("mch_j", null, "10.0.0.4:1", { talosNodeId: "abcdef0123" }), at("mch_k", null, "10.0.0.4:2", { talosNodeId: "abcdef0123" })];
+    expect(machineText(same[0]!, sharedAddresses(same))).toBe("10.0.0.4 (node abcdef0123)");
+  });
+  test("an unsafe node ID falls back to a safe UUID", () => {
+    const pair = [at("mch_l", null, "10.0.0.5:1", { talosNodeId: "bad‮id", smbiosUuid: "9a3e1c5d-0000" }), at("mch_m", null, "10.0.0.5:2", { talosNodeId: "n2" })];
+    expect(machineText(pair[0]!, sharedAddresses(pair))).toBe("10.0.0.5 (UUID 9a3e…)");
   });
   test("a node ID or UUID that is not safe text, or not text, reads unknown in the suffix", () => {
     const pair = [at("mch_f", null, "10.0.0.2:1", { talosNodeId: "bad‮id" }), at("mch_g", null, "10.0.0.2:2", { talosNodeId: null, smbiosUuid: "ok\nid" })];
@@ -97,6 +112,9 @@ describe("sharedAddresses: two unnamed machines of the list in hand on one addre
 describe("machineOption: the text, and the endpoint beside it where the text is a name", () => {
   test("a name shows its endpoint; an address is not repeated", () => {
     expect(machineOption(at(ID, "cp1", "172.31.104.15:50000"))).toBe("cp1 172.31.104.15:50000");
+    // An endpoint that is not of its stored form is not shown beside the name.
+    expect(machineOption(at(ID, "cp1", "172.31.104.15:50000‮"))).toBe("cp1");
+    expect(machineOption(at(ID, "cp1", "cp1.office:50000"))).toBe("cp1");
     expect(machineOption(at(ID, null, "172.31.104.15:50000"))).toBe("172.31.104.15");
     expect(machineOption(at(ID, null, null))).toBe("an unnamed machine");
   });
