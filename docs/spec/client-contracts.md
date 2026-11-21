@@ -2094,8 +2094,10 @@ way: the identifier, the Talos endpoint and the node ID, as before.
    The machine's Kubernetes node name normally follows the hostname, so it may change too." followed by the
    restart sentence of item 6. For a machine whose applied release recorded `unrecorded`, the review says only:
    "This release sets the machine's hostname to node-a, taken from its name." followed by the restart sentence of
-   item 6. For a machine whose applied release recorded another name: "This release changes
-   the machine's hostname from node-a to node-b, taken from its name." Where the machine's current name differs
+   item 6. For a machine whose applied release recorded another name: "This release sets the
+   machine's hostname to node-b, taken from its name. The last release applied to it set node-a." The sentence
+   describes the release and never claims what the machine reports, since an adopted release may not match what
+   the machine holds. Where the machine's current name differs
    from the name the release recorded: "This release used the earlier name node-a. The next release will use
    node-b." A `source` the client does not know shows its raw value and no sentence. A publication refused for a
    hostname clash (compilation §6.1 item 6) shows the refusal's own sentence. The CLI and the web console are
