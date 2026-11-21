@@ -206,6 +206,24 @@ describe("the handover button (ginsys/bronzeward#1066): one press, every act the
     expect(w.lines[A]).toBeUndefined();
   });
 
+  test("a press invalidated after a read and before its write sends nothing: the draft's publication and a machine's plan and approval alike", async () => {
+    // The page left, or the shell invalidated the press's reads (an epoch change), between a read answering and the
+    // write that read decided: the write is not sent, whatever the read said.
+    for (const stop of ["draft", "position"] as const) {
+      const w = world({ state: stop === "draft" ? "open" : "published" }, { [A]: { ...fresh(), desired: true } });
+      let alive = true;
+      const read = w.io.read;
+      w.io.read = async <T,>(path: string) => {
+        const r = await read<T>(path);
+        if (path.startsWith(stop === "draft" ? "/drafts/" : "/machines/")) alive = false;
+        return r;
+      };
+      w.io.live = () => alive;
+      await handOver("drf_1", [A], w.io, SHOWN);
+      expect(w.log, stop).toEqual([]);
+    }
+  });
+
   test("the publication carries the ETag the page showed, even where the press's own read of the draft is newer", async () => {
     const w = world({ state: "open" }, { [A]: fresh() });
     await handOver("drf_1", [A], w.io, SHOWN);

@@ -3,7 +3,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
-import { change, type Clash, createdId, WriteResult, declaredOf, DiscardRefused, NOT_DISCARDED, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FRESH, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, NOT_SENT_CONFLICT, NOT_SENT_UNREAD, NOT_SENT_UNSHOWN, paneEntry, rows, selection, sendRefusal, settledFragment, spotOfMark, staleRead, unread, watchWrites, where } from "./drafts.tsx";
+import { change, type Clash, createdId, WriteResult, declaredOf, DiscardRefused, EDITOR_FIRST, NOT_DISCARDED, showTheirChange, doneOnce, type Editor, type EditorEvent, editor, EMPTY, FRESH, FragmentPane, forgetETag, type Held, holdsUnsaved, inUse, keepETag, keepOnDone, keptETag, LAYERS, lastGood, markLine, mayDrop, mayRevert, maySend, NOT_RENDERED, NOT_REVERTED, NOT_SENT_CONFLICT, NOT_SENT_UNREAD, NOT_SENT_UNSHOWN, paneEntry, rows, selection, sendRefusal, settledFragment, spotOfMark, staleRead, unread, watchWrites, where } from "./drafts.tsx";
 import { leaving, signingOut, startsNew, unsaved, WritesProvider } from "./forms.tsx";
 import { type Load, type Reads, ReadsProvider } from "./list.tsx";
 import { references, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
@@ -1276,6 +1276,16 @@ test("ginsys/bronzeward#517 H15: a Discard's 412 says the draft changed and offe
   expect(markup).toContain(NOT_DISCARDED);
   expect(markup).toContain(">Show their change</button>");
   expect(markup).toContain('<p role="alert" data-testid="write-result">');
+});
+
+test("ginsys/bronzeward#1066: Show their change, for the discard's 412 and the handover's alike, reads again unless the editor holds unsaved text", () => {
+  const seeChange = vi.fn();
+  unsaved.add("the fragment editor");
+  expect(showTheirChange(seeChange)).toBe(EDITOR_FIRST);
+  expect(seeChange).not.toHaveBeenCalled();
+  unsaved.clear();
+  expect(showTheirChange(seeChange)).toBeUndefined();
+  expect(seeChange).toHaveBeenCalledTimes(1);
 });
 
 test("ginsys/bronzeward#815: the conflict view is an alert for a refused write and a status for the editor's own conflict", () => {
