@@ -1,202 +1,76 @@
 name: Safari
 
-# The browser cases and the AUTH cases in Safari (decision B6, ginsys/bronzeward#892), outside the required checks (ginsys/bronzeward#612).
-# GitHub's macOS arm64 pool sometimes has no capacity, and a job that never gets a runner is
-# cancelled after 15 minutes. A failed or cancelled check that is not required still leaves a pull
-# request UNSTABLE, not CLEAN, so this workflow never runs on pull_request or merge_group. It runs
-# on main, once a day, and on request. A failed run opens one issue (or comments on the open one);
-# a run cancelled for want of a runner opens nothing. Safari 16 or later stays a tested target
-# (docs/spec/client-contracts.md).
-
+# PROBE for ginsys/bronzeward#1028, never merged and never a pull request: the Safari signed-out and styling
+# specs run many times on a hosted macOS runner, to count how often a find fails with a stale element.
+# It takes the name of the real workflow so that a dispatch finds it; no report job, so a failure opens no issue.
 on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: '17 5 * * *'  # daily, 05:17 UTC; GitHub stops a schedule after 60 days without repository activity
   workflow_dispatch:
-    inputs:
-      simulate-failure:
-        description: Skip the Safari job and report as if it failed, into a separate "[test]" issue
-        type: boolean
-        default: false
-
-concurrency:
-  group: safari-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
 
 env:
-  # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
-  # not stop a task run from installing. Tools come from jdx/mise-action's install step only.
   MISE_TASK_RUN_AUTO_INSTALL: "false"
 
 jobs:
-  safari:
-    # The same cases in Safari, on a GitHub-hosted macOS runner (decision B6).
-    if: ${{ !inputs.simulate-failure }}
+  probe:
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+        # 0 runs the specs as they are; 1 reads the document's time origin around the navigation in the styling hook.
+        instrument: [0, 1]
     env:
       BW_BROWSERS: safari
-      # node comes from actions/setup-node below; mise leaves it out, so its tasks run that one.
       MISE_DISABLE_TOOLS: node
+      BW_PROBE_1028: ${{ matrix.instrument }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # ginsys/bronzeward#415: mise fetches node from nodejs.org, which served this macOS runner at
-      # under 1 to 60 kB/s, so after a mise.toml change left the job without a cache every run
-      # timed out installing it. actions/setup-node fetches the same version from GitHub's
-      # actions/node-versions releases instead. mise.toml stays the one place naming it.
       - id: node
         run: |
           v=$(sed -n 's/^node = "\(.*\)"$/\1/p' mise.toml)
-          [ -n "$v" ] || { echo "safari: no node = \"<version>\" line in mise.toml" >&2; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ steps.node.outputs.version }}
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         with:
-          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          cache_save: false
           install_args: go
-      # The tasks below run under mise: it must find setup-node's node, at mise.toml's version.
-      # `mise exec` would otherwise install every missing tool of mise.toml first, which the
-      # workflow's MISE_TASK_RUN_AUTO_INSTALL does not stop.
+      - run: sudo safaridriver --enable
+      - run: defaults write -g NSAutomaticInlinePredictionEnabled -bool false
       - env:
           MISE_EXEC_AUTO_INSTALL: "false"
-          WANT: ${{ steps.node.outputs.version }}
-        run: |
-          got=$(mise exec -- node --version)
-          [ "$got" = "v$WANT" ] || { echo "safari: mise runs node $got, not v$WANT" >&2; exit 1; }
-          mise exec -- npm --version
-      - run: sudo safaridriver --enable
-      # Safari's inline prediction starts a composition on the word being typed, and a late
-      # deleteCompositionText removes it ("aabb seeded  reason" arrived as "aabb seeded  son",
-      # ginsys/bronzeward#1005). Off before Safari starts. The read-back shows the value written, not
-      # that it took effect: the typed read-back of the keys case in web/e2e/driver-controls.e2e.ts does.
-      - run: |
-          defaults write -g NSAutomaticInlinePredictionEnabled -bool false
-          defaults read -g NSAutomaticInlinePredictionEnabled
-      - run: mise run browser
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: browser-safari
-          path: web/e2e/out
-          retention-days: 14
-
-  safari-auth:
-    # The AUTH cases (mise run browser-auth) in Safari (ginsys/bronzeward#892). The hosted macOS
-    # runner has no Docker, so PostgreSQL, OpenBao and the test identity provider run natively
-    # (scripts/dev/native-services.sh), at the ports the Linux fixture uses. A separate job from
-    # `safari`, so that a failure here does not hide the other's result, and the artifact scan
-    # runs on this job's own files.
-    if: ${{ !inputs.simulate-failure }}
-    runs-on: macos-latest
-    timeout-minutes: 45
-    env:
-      BW_BROWSERS: safari
-      MISE_DISABLE_TOOLS: node
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # As in the `safari` job (ginsys/bronzeward#415).
-      - id: node
-        run: |
-          v=$(sed -n 's/^node = "\(.*\)"$/\1/p' mise.toml)
-          [ -n "$v" ] || { echo "safari: no node = \"<version>\" line in mise.toml" >&2; exit 1; }
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: ${{ steps.node.outputs.version }}
-      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
-        with:
-          cache_save: ${{ github.ref == 'refs/heads/main' }}
-          install_args: go
-      - env:
+        run: mise run web
+      - run: go build -o bin/webhost ./fixtures/webhost
+      - name: Repeat the two specs
+        env:
           MISE_EXEC_AUTO_INSTALL: "false"
-          WANT: ${{ steps.node.outputs.version }}
+          RUNS: "30"
         run: |
-          got=$(mise exec -- node --version)
-          [ "$got" = "v$WANT" ] || { echo "safari: mise runs node $got, not v$WANT" >&2; exit 1; }
-          mise exec -- npm --version
-      - run: sudo safaridriver --enable
-      - run: scripts/dev/native-services.sh up
-      # The cases call createdb, psql and dropdb from PATH; Homebrew's PostgreSQL is keg-only, so
-      # native-services.sh adds its bin directory to GITHUB_PATH. Fail here, not inside a case, if
-      # that did not take.
-      - run: |
-          want=$(brew --prefix postgresql@17)/bin
-          for t in createdb psql dropdb; do
-            got=$(command -v "$t") || { echo "safari: $t is not on PATH" >&2; exit 1; }
-            [ "$got" = "$want/$t" ] || { echo "safari: $t is $got, not $want/$t" >&2; exit 1; }
+          cd web
+          export BW_WDIO_CACHE=${TMPDIR:-/tmp}
+          ok=0; bad=0; stale=0
+          mkdir -p ../probe-out
+          for i in $(seq 1 "$RUNS"); do
+            tmp=$(bash ../scripts/ci/browser-tmp.sh start browser)
+            if TMPDIR=$tmp BW_WEB_CANARY=BWSYNTH-probe mise exec -- npx wdio run e2e/wdio.conf.ts --spec e2e/signed-out.e2e.ts --spec e2e/styling.e2e.ts > "../probe-out/run-$i.log" 2>&1; then
+              ok=$((ok+1))
+            else
+              bad=$((bad+1))
+            fi
+            n=$(grep -c 'Stale element found' "../probe-out/run-$i.log" || true)
+            [ "$n" -eq 0 ] || stale=$((stale+1))
+            rm -rf "$tmp" e2e/out
           done
-      # The onboarding cases' Talos stand-ins listen on 127.0.0.2:50000 and 127.0.0.3:50000 (a discovery
-      # dials each member at port 50000), and macOS carries only 127.0.0.1 on lo0: without these aliases
-      # POST /talos answers 500 (ginsys/bronzeward#1001, ginsys/bronzeward#946). Fail here if one is missing.
-      - run: |
-          for a in 127.0.0.2 127.0.0.3; do sudo ifconfig lo0 alias "$a" up; done
-          for a in 127.0.0.2 127.0.0.3; do
-            ifconfig lo0 | grep -q "inet $a " || { echo "safari: lo0 has no $a" >&2; exit 1; }
-          done
-      # Safari's Tab skips buttons and links by default (Option+Tab reaches them), so the keyboard
-      # cases would fail on a setting and not on the page. These are the settings a tester turns on
-      # in Safari's Advanced pane and System Settings > Keyboard ("Press Tab to highlight each item",
-      # "Keyboard navigation"); the read-back shows what the runner holds. Inline prediction is off
-      # too, as in the `safari` job (ginsys/bronzeward#1005): the read-back shows the value written,
-      # not that it took effect.
-      - run: |
-          defaults write com.apple.Safari WebKitTabToLinksPreferenceKey -bool true
-          defaults write com.apple.Safari WebKit2TabsToLinks -bool true
-          defaults write -g AppleKeyboardUIMode -int 2
-          defaults write -g NSAutomaticInlinePredictionEnabled -bool false
-          defaults read com.apple.Safari WebKitTabToLinksPreferenceKey
-          defaults read com.apple.Safari WebKit2TabsToLinks
-          defaults read -g AppleKeyboardUIMode
-          defaults read -g NSAutomaticInlinePredictionEnabled
-      - run: mise run browser-auth
-      # After a failed run too: the whole directory goes up only when the scan passed, otherwise only
-      # the listing the task scanned does, if it passed (as in ci.yml's browser-auth job).
-      - id: publish
-        if: always()
-        run: bash scripts/ci/browser-artifact.sh publish web/e2e/out .dev/browser-auth/scan.status .dev/browser-auth/listing >> "$GITHUB_OUTPUT"
+          echo "instrument ${{ matrix.instrument }} shard ${{ matrix.shard }}: runs=$RUNS passed=$ok failed=$bad runs_with_stale_element=$stale" | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -h 'probe1028' ../probe-out/run-*.log | sed 's/.*probe1028/probe1028/' > ../probe-out/origin.txt || true
+          echo "origin lines: $(wc -l < ../probe-out/origin.txt) replaced: $(grep -c 'replaced=true' ../probe-out/origin.txt || true)" | tee -a "$GITHUB_STEP_SUMMARY"
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: browser-auth-safari
-          path: ${{ steps.publish.outputs.path }}
-          include-hidden-files: true
-          retention-days: 14
-      - if: always()
-        run: scripts/dev/native-services.sh down
-
-  report:
-    # Runs after every Safari job, and decides in scripts/ci/report-browser-run.sh: only `failure`, or a
-    # simulated failure, reports. It is the only job here with a write permission.
-    needs: [safari, safari-auth]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      issues: write
-    # One report at a time, so two failed runs cannot both create the issue.
-    concurrency:
-      group: safari-report
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          sparse-checkout: scripts/ci
-      - name: Report a failed Safari run
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          # A failure of either job reports; otherwise the first job's result stands (cancelled and
-          # skipped stay quiet, as before).
-          RESULT: ${{ (needs.safari.result == 'failure' || needs.safari-auth.result == 'failure') && 'failure' || needs.safari.result }}
-          REF: ${{ github.ref }}
-          SIMULATED: ${{ inputs.simulate-failure }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          EVENT: ${{ github.event_name }}
-          SHA: ${{ github.sha }}
-        run: scripts/ci/report-browser-run.sh
+          name: probe-${{ matrix.instrument }}-${{ matrix.shard }}
+          path: probe-out
+          retention-days: 7
