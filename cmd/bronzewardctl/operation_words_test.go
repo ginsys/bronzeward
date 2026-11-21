@@ -48,8 +48,16 @@ const webDecl = "const KNOWN: Record<string, Record<string, [now: string, next: 
 
 // webWords reads the table of web/src/operation-words.ts: each `state: [now, next]` row of each kind, `next`
 // being a string or `undefined`. It fails on a row it cannot take whole (a template string, a single quote, a
-// row it cut short), and on a table that does not hold exactly the 16 pairs, each with a sentence.
+// row it cut short), and on a table that does not hold exactly the 16 pairs, each with a sentence. It guards
+// against an honest edit of the table drifting from the Go table, not against a source written to deceive it:
+// a carriage return, a block comment or a second declaration are refused as forms it does not read.
 func webWords(src string) ([]webRow, error) {
+	if strings.Contains(src, "\r") || strings.Contains(src, "/*") {
+		return nil, fmt.Errorf("the source holds a carriage return or a block comment, which the reader does not read")
+	}
+	if strings.Count(src, "const KNOWN") != 1 {
+		return nil, fmt.Errorf("the source must declare KNOWN exactly once")
+	}
 	start := strings.Index(src, "const KNOWN")
 	end := strings.Index(src, "\n};\n")
 	if start < 0 || end < start {
@@ -170,6 +178,10 @@ func TestWebWordsReaderRefusesWhatItCannotRead(t *testing.T) {
 		{"a row with extra indentation", "  ingest: {\n", "  ingest: {\n      queued: [\"New web sentence.\", \"New web step.\"],\n"},
 		{"a row at no indentation", "  ingest: {\n", "  ingest: {\nqueued: [\"New web sentence.\", \"New web step.\"],\n"},
 		{"a pair after the declaration's brace", "undefined]>> = {\n", "undefined]>> = { extra: { queued: [\"Hidden sentence.\", undefined] },\n"},
+		{"a carriage return ending a comment", "  ingest: {\n", "  ingest: {\n    // comment\r    queued: [\"Hidden sentence.\", undefined],\n"},
+		{"a commented copy of the table", "const KNOWN", "/* const KNOWN */\nconst KNOWN"},
+		{"a block comment", "  ingest: {\n", "  ingest: {\n    /* note */\n"},
+		{"a second declaration", "const known =", "const KNOWN = {};\nconst known ="},
 		{"a kind added", "  adopt: {\n", "  adopt2: {\n    queued: [\"New web sentence.\", undefined],\n  },\n  adopt: {\n"},
 	} {
 		if !strings.Contains(src, c.old) {
