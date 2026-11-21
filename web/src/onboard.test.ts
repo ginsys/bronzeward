@@ -418,6 +418,8 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
     expect(line).toMatchObject({ key: "import:n1", state: "unknown", reference: { status: 503 } });
     expect(line.detail).toMatch(/^unknown whether it was saved: the connection ended\. Check the current state before you do it again\. /);
     expect(line.detail).not.toMatch(/req_u|dependency-unavailable/);
+    // The problem's own next step ("Try again ...") would send the person to repeat an act that may have happened.
+    expect(line.detail).not.toMatch(/try again/i);
   });
 
   test("an import that committed but whose answer was lost is found through GET /ingestions?machine= on the next run, and not started again", async () => {
