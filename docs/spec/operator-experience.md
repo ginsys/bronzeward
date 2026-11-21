@@ -1318,7 +1318,7 @@ refused.
 
 **Proposed** navigation ([§12](#12-alternatives-and-recommendations), C2): a persistent header
 with context, identity, roles, epoch and a recovery-mode banner; a left navigation of
-**Machines**, **Clusters**, **Changes**, **Plans**, **Operations**, **Sources**, **Audit** and, for a
+**Machines**, **Clusters**, **Drafts and releases**, **Plans**, **Operations**, **Fragments and profiles**, **Audit** and, for a
 `recovery-admin` or during recovery mode, **Recovery**. The machine page is the hub; a change
 moves through separate pages for draft, release, plan and approval, each with its own button and
 role. **Clusters** lists the clusters, and a cluster's page shows its machines with a count for

@@ -547,8 +547,8 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   );
 }
 
-// The root is the machine list, the hub of the journeys (§6).
-const current = (path: string) => (path === "/" ? "/machines" : path);
+// The root is the machine list, the hub of the journeys (§6); /drafts and /releases open the page that lists both.
+export const current = (path: string) => (path === "/" ? "/machines" : path === "/drafts" || path === "/releases" ? "/changes" : path);
 
 function Page({ path, query, go }: { path: string; query: string; go: (to: string) => void }) {
   return view(path, query, go) ?? <><h2>Not found</h2><Status>No page at {path}.</Status></>;

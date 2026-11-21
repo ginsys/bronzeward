@@ -94,15 +94,15 @@ item 2).
 ## W2. Machines
 
 ```text
-Machines                          Cluster: all ▾   State: all ▾   [Record machine] [Add cluster]  (author, human)
-+------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
-| Machine    | Endpoint       | Desired     | Applied (source)         | Observed                 | State                   |
-+------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
-| mch_k2p…7x | 10.5.0.2:50000 | rel_fgqv…   | rel_fgqv… (operation)    | = applied, 2 min ago     | (•) Matches applied     |
-| mch_tqhc…35| 10.5.0.3:50000 | rel_fgqv…   | rel_p4nx… (adoption)     | = applied, 1 min ago     | (•) Pending convergence |
-| mch_w4ze…n3| 10.5.0.4:50000 | rel_fgqv…   | rel_fgqv… (operation)    | no match, 5 min ago      | (•) Drifted (•) Frozen  |
-| mch_b3c…aa | 10.5.0.5:50000 | none        | none                     | —                        | (•) Not handed over     |
-+------------+----------------+-------------+--------------------------+--------------------------+-------------------------+
+Machines                          Cluster: all ▾   State: all ▾   [Add machine] [Enter a cluster by hand]  (author, human)
++------------+----------------+-------------+--------------------------+--------------------------+----------------------------------------+
+| Machine    | Endpoint       | Desired     | Applied (source)         | Observed                 | State                                  |
++------------+----------------+-------------+--------------------------+--------------------------+----------------------------------------+
+| mch_k2p…7x | 10.5.0.2:50000 | rel_fgqv…   | rel_fgqv… (operation)    | = applied, 2 min ago     | (•) Last read matched what was applied |
+| mch_tqhc…35| 10.5.0.3:50000 | rel_fgqv…   | rel_p4nx… (adoption)     | = applied, 1 min ago     | (•) Release not applied yet            |
+| mch_w4ze…n3| 10.5.0.4:50000 | rel_fgqv…   | rel_fgqv… (operation)    | no match, 5 min ago      | (•) Changed on the machine (•) Frozen  |
+| mch_b3c…aa | 10.5.0.5:50000 | none        | none                     | —                        | (•) Not managed yet                    |
++------------+----------------+-------------+--------------------------+--------------------------+----------------------------------------+
 The server filters by cluster; the browser filters by state over all pages (gap G9). Showing 4 of 4. Health is not checked.
 ```
 
@@ -111,11 +111,11 @@ All four rows are at one moment: just after `mch_b3c…aa2q` was recorded
 ([§5.3](operator-experience.md#53-protected-import-with-review)), so it has no `Desired` and no
 `Applied` yet.
 
-[Add cluster] opens the form of `cluster add`
+[Enter a cluster by hand] opens the form of `cluster add`
 ([journeys §10](operator-experience.md#10-action-route-and-role-matrix)). (2026-11-01, lead
-ruling: #338 found no wireframe placing Add cluster; Machines is the hub and already reads
+ruling: #338 found no wireframe placing Enter a cluster by hand; Machines is the hub and already reads
 `GET /clusters`.) The Clusters entry of the navigation lists the clusters (name, Kubernetes
-endpoint, contract and Talos cluster ID, with [Add cluster]). A cluster's page shows those facts,
+endpoint, contract and Talos cluster ID, with [Enter a cluster by hand]). A cluster's page shows those facts,
 then **Machines**: the count of machines and, per state badge above, how many carry it (a machine
 can carry several), with one row per machine (machine, endpoint, node, state), or "No machines
 recorded in this cluster."; then **Open drafts**: one row per open draft of the cluster (draft,
@@ -157,7 +157,7 @@ Observation rows with unread parts show each field with its cause ("configDigest
 unreachable)"), because the API gives several fields the same cause, and never a healthy badge.
 The `Observed` row keeps its attribution under an open drift too, where the sentences speak of the
 drift. The web client shows each time with its date, since the page covers the machine's whole
-history. "Drifted" comes from the open drift record, which compares
+history. "Changed on the machine" comes from the open drift record, which compares
 with `Applied`; an observation equal to `Desired` or an older release is still drift. With no
 `Applied`, `Desired` or observation the row says so ("Not applied or adopted by Bronzeward",
 "No release selected", "No configuration read recorded") and shows no time. The status

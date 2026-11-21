@@ -17,7 +17,7 @@ import { Action, useFocusOn } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
 import { ClusterRef, DraftHead, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
 import { draftCalled, draftText, safeText } from "./titles.ts";
-import { NAME_NOT_SHOWN } from "./words.ts";
+import { DRAFTS_AND_RELEASES, NAME_NOT_SHOWN } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
 
 type S = components["schemas"];
@@ -175,7 +175,7 @@ export function CreateDraft() {
   const submit = (d: FormData) => send({ method: "POST", path: "/drafts", resource: "/changes", body: { cluster: field(d, "cluster"), title: field(d, "title") }, settled });
   const done = (data: unknown) => {
     const id = createdId(data);
-    if (id === undefined) return <>Draft created, but the answer names no draft. Read <Ref to="/changes" id="/changes">the Changes page</Ref>.</>;
+    if (id === undefined) return <>Draft created, but the answer names no draft. Read <Ref to="/changes" id="/changes">the {DRAFTS_AND_RELEASES} page</Ref>.</>;
     const d = data as Draft;
     return <>Draft <Ref to={`/drafts/${id}`} id={id}>{draftText(d) ?? short(id)}</Ref> created (<ClusterRef id={d.cluster} />).</>;
   };

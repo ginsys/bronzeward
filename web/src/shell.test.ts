@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
-import { Action, connection, Deprecations, deprecated, ending, Failure, focusLost, heldPage, type Identity, identityMain, incompatible, KEPT_PAGE, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
+import { Action, connection, current, Deprecations, deprecated, ending, Failure, focusLost, heldPage, type Identity, identityMain, incompatible, KEPT_PAGE, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
 import { CHECK_STATE, Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SCOPE_NO_MODE, SET_ASIDE, SetAside, StatusPage, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
 import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
@@ -524,5 +524,15 @@ describe("focus after an action", () => {
   test("kept: a user who moved on to a field or another control keeps focus", () => {
     expect(focusLost({ disabled: false }, body)).toBe(false);
     expect(focusLost({}, body)).toBe(false);
+  });
+});
+
+describe("the navigation's current page", () => {
+  test("the root is the machine list, and /drafts and /releases are the page that lists both", () => {
+    expect(current("/")).toBe("/machines");
+    expect(current("/drafts")).toBe("/changes");
+    expect(current("/releases")).toBe("/changes");
+    expect(current("/changes")).toBe("/changes");
+    expect(current("/plans")).toBe("/plans");
   });
 });
