@@ -143,8 +143,31 @@ expect("write exit", p.returncode == 0, f"rc={p.returncode} {p.stderr}")
 expect("write result", json.loads(after) == NEW, after)
 expect("write keeps the sources block and the layout", after == json.dumps(NEW, indent=2) + "\n", after)
 
+# --write replaces the file whole: its mode stays, nothing is left beside it, and a directory it cannot
+# write into leaves the file as it was and exits 2.
+def write_in(dir_mode, file_mode):
+    with tempfile.TemporaryDirectory() as d:
+        pin = os.path.join(d, "previous-majors.json")
+        with open(pin, "w", encoding="utf-8") as f:
+            f.write(json.dumps(OLD, indent=2) + "\n")
+        os.chmod(pin, file_mode)
+        before = read(pin)
+        os.chmod(d, dir_mode)
+        try:
+            p = subprocess.run([sys.executable, "-I", SCRIPT, "--write", pin], check=False, capture_output=True, text=True, env={"PATH": os.environ["PATH"], "PINS_MIRROR": MIRROR}, timeout=60)
+            return p, before, read(pin), oct(os.stat(pin).st_mode & 0o777), sorted(os.listdir(d))
+        finally:
+            os.chmod(d, 0o755)
+
+
+serve()
+p, before, after, mode_after, left = write_in(0o755, 0o640)
+expect("write keeps the mode", p.returncode == 0 and mode_after == "0o640" and json.loads(after) == NEW and left == ["previous-majors.json"], f"rc={p.returncode} mode={mode_after} left={left}")
+p, before, after, mode_after, left = write_in(0o555, 0o644)
+expect("write into a directory it cannot write", p.returncode == 2 and before == after and left == ["previous-majors.json"] and p.stderr.startswith("previous-major-pins: "), f"rc={p.returncode} left={left} {p.stderr}")
+
 p, _, _ = run(None, OLD)
-expect("print mode", p.returncode == 0 and json.loads(p.stdout) == NEW, p.stdout + p.stderr)
+expect("print mode",p.returncode == 0 and json.loads(p.stdout) == NEW, p.stdout + p.stderr)
 
 # "equal file" above is also the rules check: the fixtures hold a beta Edge of a higher major, a dev Firefox,
 # an old Firefox "3.6.3plugin1", builds that sort higher as strings than the highest (8103.78, 4341.60) and

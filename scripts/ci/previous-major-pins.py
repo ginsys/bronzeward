@@ -111,8 +111,15 @@ def main(argv):
         text = json.dumps(new, indent=2) + "\n"
         diff = differences(old, new)
         if mode == "--write" and diff:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(text)
+            tmp = path + ".tmp"  # written whole, then renamed, so a failed write leaves FILE as it was
+            try:
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                os.chmod(tmp, os.stat(path).st_mode)
+                os.replace(tmp, path)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
     except Exception as e:  # noqa: BLE001  any failure is exit 2: an uncaught exception would exit 1, which reads as drift
         print(f"previous-major-pins: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
