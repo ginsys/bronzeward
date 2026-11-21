@@ -1146,9 +1146,7 @@ unmeasured.
    equal to the name that another machine's last applied release recorded
    (source `machine-name`, persistence and API §9.2) is refused the same way,
    naming both machines, until that machine's applied release no longer holds
-   it. That comparison is also made on the derived Kubernetes node names where
-   `registerWithFQDN` is not true, because applied `a.x.org` and a new name
-   `a.y.org` give two nodes the name `a` although the full names differ. Each machine has its own plan, so a release that renames machine node-a
+   it. That comparison is on full names only. Each machine has its own plan, so a release that renames machine node-a
    and gives its old name to machine node-b could be applied in the wrong
    order and leave two nodes with one hostname. Once both renames are stored,
    every release carries machine node-b's new name and is refused, so the
@@ -1167,7 +1165,9 @@ unmeasured.
    each machine's applied release, so it does not cover a hostname set
    explicitly or held by a secret reference (not recorded per release), an
    apply that is committed but not finished, or an adopted baseline whose
-   record names a hostname the node does not run; those cases are
+   record names a hostname the node does not run, or two nodes that share a
+   Kubernetes node name only because the record holds no `registerWithFQDN`
+   setting (applied `a.x.org` against a new `a.y.org`); those cases are
    ginsys/bronzeward#1052.
    The check reads the machines of one release, and a release covers every
    machine of its cluster that has an import base
