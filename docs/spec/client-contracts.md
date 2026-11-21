@@ -2039,7 +2039,8 @@ one. The rule is one for both clients:
    and an act's subjects, each of the kind its identifier's prefix names (persistence and API §2: `rel`, `pln`, `op`,
    `drf`, `ing`, `mch`), any other prefix staying as it is. A command a line tells the operator to run, an
    identifier inside a sentence built as plain text, the machine list's Desired and Applied columns, and an operation's
-   subject and outcome line (until [#1014](https://github.com/ginsys/bronzeward/issues/1014) lands) stay identifiers.
+   subject and outcome line stay identifiers: A10 adds words beside them (the `Now` and `Next` rows), and gives no title to
+   either.
 
 **A9. A machine's name (client rule; the API revision that adds the name).** Closes G8. A client shows a machine by its
 name where the body carries one, with the identifier kept as the stable reference: in the web
