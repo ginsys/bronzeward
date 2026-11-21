@@ -712,7 +712,7 @@ describe("the read-only lists and items", () => {
     expect((await answers()).some((a) => a.startsWith(`/operations?plan=${s.plan.id} `))).toBe(true);
     await nav("Fragments and profiles");
     await expect($('[data-testid="last-pass"]')).toHaveText(/^Last completed monitor pass: .+\.$/);
-    await expect($(`(//main//tbody/tr[contains(., "${short(s.dep.id)}")])[1]`)).toHaveText(expect.stringContaining("unknown (stale: not observed recently)"));
+    await expect($(`(//main//tbody/tr[.//a[@title="${s.dep.id}"]])[1]`)).toHaveText(expect.stringContaining("unknown (stale: not observed recently)"));
     // Linked from the dependencies table and from its alert's row: the first is the dependency's own.
     await $(`(//main//a[@title="${s.dep.id}"])[1]`).click();
     await expect($("main h2")).toHaveText("Dependency registry/example-pass, version 1");
