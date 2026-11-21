@@ -26,7 +26,8 @@ detail. Every screen has the [header](#header-on-every-screen) and the state var
 | RECOVERY MODE since 10:42, epoch ep_r2l…. 4 of 4 scopes not released: none can commit.   |  <- only in recovery mode
 | Drafts editable. Recovery-start server: no plans; publications wait for restart. [Open]  |
 +------------------------------------------------------------------------------------------+
-| Machines | Clusters | Changes | Plans | Operations | Sources | Audit | Recovery         |
+| Machines | Clusters | Drafts and releases | Plans | Operations                           |
+| Fragments and profiles | Audit | Recovery                                                |
 +------------------------------------------------------------------------------------------+
 ```
 
@@ -54,8 +55,8 @@ corrected by the next one. It never disables actions recovery mode allows
 ([§5.9](operator-experience.md#59-recovery-after-a-restore)): an action is disabled only on a
 scope whose state refuses it, with that reason.
 
-The read-only lists sit under the navigation as follows. Changes lists the releases; the drafts
-list joins it with the draft editor. Sources lists fragments, profiles, assignments, the monitored
+The read-only lists sit under the navigation as follows. Drafts and releases lists the releases; the drafts
+list joins it with the draft editor. Fragments and profiles lists fragments, profiles, assignments, the monitored
 dependencies with the last completed monitor pass, and the dependency alerts. Audit lists the
 acts. Each resource opens at its own path: `/fragments/{id}` with its revisions, `/fragment-revisions/{id}`
 and likewise for profiles and assignments, `/releases/{id}`, `/plans/{id}`, `/operations/{id}`
@@ -174,7 +175,7 @@ reads the page before the oldest entry shown and is gone once the machine's firs
 ## W4. Draft editor
 
 ```text
-Changes › Draft drf_8kdq…z6pa "worker labels"   open, revision 6   cluster cl_9fd… (lab-a)
+Drafts and releases › Draft drf_8kdq…z6pa "worker labels"   open, revision 6   cluster cl_9fd… (lab-a)
 +------------------------------+------------------------------------------------------------+
 | Entries                      | Fragment worker-labels   layer: role ▾                      |
 |  import base  mch_b3c… ibr_… |  changed: base frv_1ab… -> unsaved                           |
@@ -558,7 +559,7 @@ restart. Imports complete on it.
 | Drafts, imports and publication remain available: a scope blocked by a lost key leaves    |
 | that state through a newly published release that leaves unreleased scopes' assignments   |
 | unchanged; one that changes them fails recovery-mode-active, or scope-busy first where an |
-| operation holds the scope.  [Open Changes]                                                |
+| operation holds the scope.  [Open Drafts and releases]                                    |
 +-------------------------------------------------------------------------------------------+
 
 Account scope mch_k2p…7xqa (pre-restore unaccounted)
