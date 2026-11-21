@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
-import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, REFRESH_WAIT_MS, renewDelay, returnPath, Session, SIGN_OUT_WAIT_MS, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
+import { beginSignIn, claims, completeSignIn, discover, localReading, PENDING_KEY, type Provider, profileRefused, REFRESH_WAIT_MS, renewDelay, returnPath, Session, SIGN_OUT_WAIT_MS, SIGNED_OUT_PATH, type Tokens, withoutProfile } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
 
 const ORIGIN = "http://localhost:16000";
@@ -179,6 +179,21 @@ describe("§9.3 item 1 callback", () => {
     expect(res.kind).toBe(kind);
     expect(f).not.toHaveBeenCalled();
     expect(storage.items.size).toBe(0);
+  });
+
+  test("a provider that refuses the scope the page added is signed in to again without it", async () => {
+    const listed = { ...provider, scopesSupported: ["openid", "profile", "offline_access"] };
+    const { storage, pending } = await begun();
+    const res = await completeSignIn(config, listed, `?error=invalid_scope&state=${pending["state"]}`, { storage, origin: ORIGIN, fetch: answers([]) as unknown as typeof fetch });
+    expect(res.kind).toBe("refused");
+    if (res.kind === "ok") return;
+    expect(profileRefused(res)).toBe(true);
+    const again = new URL((await beginSignIn(config, withoutProfile(listed), "/", storage, ORIGIN))!);
+    expect(again.searchParams.get("scope")).toBe("openid offline_access urn:example:aud");
+    // Any other refusal, or a transport failure, leaves the scope alone.
+    expect(profileRefused({ kind: "refused", reason: "the identity provider refused the sign-in (access_denied)" })).toBe(false);
+    expect(profileRefused({ kind: "transport" })).toBe(false);
+    expect(withoutProfile(provider).scopesSupported).toBeUndefined();
   });
 
   test("a callback with no sign-in in progress, or replayed, is refused", async () => {

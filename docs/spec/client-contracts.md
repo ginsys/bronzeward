@@ -1374,7 +1374,9 @@ current token expires
    whose `sub` is the signed-in subject, and only when the endpoint has the issuer's origin. The
    name is for display: it is never sent to the server, stored or used to decide anything. Any
    failure leaves the header at "Signed in as a person"; it never shows the subject number and
-   never holds the page back. The server's `auth.oidc.displayClaim` names the claim the server
+   never holds the page back. A provider that lists `profile` and then refuses it to this client
+   answers the sign-in with `invalid_scope`: the sign-in view then offers the sign-in again without
+   the scope the page added itself, for that page's life (nothing is stored). The server's `auth.oidc.displayClaim` names the claim the server
    shows for a person in its own records; the page does not follow it (limit: a provider whose
    userinfo `name` differs from that claim shows the userinfo name in the header).
    An automation shows "Signed in as the automation <service>" with no userinfo read. The header

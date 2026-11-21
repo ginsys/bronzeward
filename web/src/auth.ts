@@ -125,6 +125,12 @@ export async function beginSignIn(config: ClientConfig, provider: Provider, retu
   return url.href;
 }
 
+// A provider that lists `profile` may still refuse it to this client. The page then offers the sign-in
+// again without the scope it added itself, so the name in the header never costs a person the sign-in.
+// Held in memory for the page's life (item 1 of §9.3 allows no other storage).
+export const profileRefused = (f: Failure) => f.kind === "refused" && f.reason.endsWith("(invalid_scope)");
+export const withoutProfile = (p: Provider): Provider => ({ ...p, scopesSupported: p.scopesSupported?.filter((s) => s !== "profile") });
+
 export interface CallbackDeps {
   storage: Storage;
   origin: string;
