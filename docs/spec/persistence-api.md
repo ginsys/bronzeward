@@ -822,12 +822,19 @@ as the machine's hostname where nothing sets one and records the name used (the 
 revision 10 (§9.1), which adds `name` on a machine and on `POST /machines`, the route
 `POST /machines/{id}/names`, the `name-change` timeline entry and the `name-in-use` problem code.
 
-- **Grammar.** 1 to 63 characters: lowercase `a-z`, digits and the hyphen, neither the first nor
-  the last character a hyphen. A name is therefore always a valid DNS hostname label, and since
-  every identifier (§2) holds an underscore after its prefix and a name never does, a name never
-  reads as an identifier. Uppercase is not folded to
+- **Grammar** **(choice §17.43, widened by the owner on 2026-11-21)**. A name is a hostname: one or more
+  labels separated by a dot, 1 to 253 characters in all. A label is 1 to 63 characters: lowercase
+  `a-z`, digits and the hyphen, neither the first nor the last character a hyphen. A name with a dot
+  does not end in a dot, and its last label is not all digits, so that `10.0.0.1` is never a name;
+  a name of one label has no such limit, so `42` stays valid, as it was. A name is therefore always a
+  valid DNS hostname (RFC 1123), and since every identifier (§2) holds an underscore after its
+  prefix and a name never does, a name never reads as an identifier. Uppercase is not folded to
   lowercase, because a stored name that differs from the typed one is a second spelling for one
-  name: it is a malformed body, `400 invalid-request`, with nothing committed.
+  name: it is a malformed body, `400 invalid-request`, with nothing committed. The database
+  enforces the same grammar as a `CHECK` on the column, so no route can store another. Every name
+  stored before the grammar widened is one label and stays valid; none is rewritten. The widening
+  adds no field, route or problem code, so the API revision stays 13; a client built for one label
+  shows a dotted name as an identifier until it is updated (client contracts A9 item 1).
 - **Unique within a cluster**, by a partial unique index on the machine's cluster and name over the
   machines that have one (§7.3); two clusters may use the same name. A request that would give a
   name another machine of the cluster holds is `409 name-in-use` (§9.4), a code of its own, naming
@@ -5009,8 +5016,16 @@ design and evidence do not settle the question. Each is marked in place as
     alternatives below): "A. Stored name in the API - can optionally become the
     hostname too, or can be different?" The answer to the question is §3.5: the
     name and the Talos hostname are independent, and the name's grammar makes it
-    a valid hostname label so that a later specification can offer it as the
-    hostname's default; Serge's direction for that specification (typed 11:36
+    a valid hostname so that a later specification can offer it as the
+    hostname's default. **The grammar was one label until 2026-11-21, when the
+    owner decided that a machine is named by its full hostname** (Serge, typed
+    17:46 CET in the bronzeward lead's session: "A machine is named by it's FQDN
+    hostname", and "for the talos node name, I'd prefer having the FQDN name
+    shown in bronzeward"; ginsys/bronzeward#1065): the grammar of §3.5 now allows
+    dots, and a machine with no name shows its address. Alternatives he had: the
+    first label only, which two nodes of different domains would share. Cost: a
+    node name Kubernetes derives from the first label can clash across two
+    names, which compilation §6.1 item 6 now says. Serge's direction for that specification (typed 11:36
     CET: "when setting the hostname, the default could be the machine name (if
     set)") was carried by ginsys/bronzeward#976, which choices §17.44 and §17.45
     and compilation §6.1 have since decided: the independence stated here
