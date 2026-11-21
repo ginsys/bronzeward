@@ -133,8 +133,8 @@ describe("the harness's own commands", () => {
 describe("the harness's navigation command", () => {
   it("returns once the new document is complete, as the other drivers' does", async () => {
     // safaridriver answered while the document was `interactive` in most navigations (ginsys/bronzeward#1028),
-    // so five in a row cannot all pass by luck where the wait is missing.
-    for (let i = 0; i < 5; i++) {
+    // so eight in a row rarely all pass where the wait is missing.
+    for (let i = 0; i < 8; i++) {
       await browser.url("/signed-out");
       expect([i, await browser.execute(() => document.readyState)]).toEqual([i, "complete"]);
     }
