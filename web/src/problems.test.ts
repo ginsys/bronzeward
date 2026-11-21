@@ -179,34 +179,42 @@ describe("the copy control", () => {
     expect(box.textContent).not.toContain(COPIED);
   });
 
-  test("an older copy that fails after a newer one succeeded does not hide the newer one's line", async () => {
-    let refuse: () => void = () => {};
-    const writes = [new Promise<void>((_, reject) => (refuse = () => reject(new Error("denied")))), Promise.resolve()];
-    vi.stubGlobal("navigator", { clipboard: { writeText: () => writes.shift()! } });
+  test("a slow copy of the old text leaves the clipboard holding it: no line beside the new text, the line beside the old one", async () => {
+    let finish: () => void = () => {};
+    vi.stubGlobal("navigator", { clipboard: { writeText: () => new Promise<void>((r) => (finish = r)) } });
     await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
     await press();
     await act(async () => root.render(h(CopyButton, { text: "Request: req_b", byHand: "By hand." })));
-    await press();
-    expect(box.textContent).toContain(COPIED);
-    await act(async () => refuse());
-    expect(box.textContent).toContain(COPIED);
-    expect(box.textContent).not.toContain("By hand.");
-  });
-
-  test("an older copy that succeeds after a newer one leaves the clipboard holding the older text, and the line follows the clipboard", async () => {
-    let land: () => void = () => {};
-    const writes = [new Promise<void>((resolve) => (land = resolve)), Promise.resolve()];
-    vi.stubGlobal("navigator", { clipboard: { writeText: () => writes.shift()! } });
-    await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
-    await press();
-    await act(async () => root.render(h(CopyButton, { text: "Request: req_b", byHand: "By hand." })));
-    await press();
-    expect(box.textContent).toContain(COPIED);
-    await act(async () => land());
-    // The clipboard now holds req_a: no "Copied." beside req_b, and one beside req_a.
+    await act(async () => finish());
     expect(box.textContent).not.toContain(COPIED);
     await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
     expect(box.textContent).toContain(COPIED);
+  });
+
+  test("one copy at a time: the button is off while a write is pending, so writes cannot end out of order", async () => {
+    let finish: () => void = () => {};
+    const writeText = vi.fn(() => new Promise<void>((r) => (finish = r)));
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
+    await press();
+    expect(box.querySelector("button")!.disabled).toBe(true);
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_b", byHand: "By hand." })));
+    expect(box.querySelector("button")!.disabled).toBe(true);
+    await press();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    await act(async () => finish());
+    expect(box.querySelector("button")!.disabled).toBe(false);
+  });
+
+  test("a refused copy says to select by hand, and a later success of the same text replaces that", async () => {
+    const outcomes = [() => Promise.reject(new Error("denied")), () => Promise.resolve()];
+    vi.stubGlobal("navigator", { clipboard: { writeText: () => outcomes.shift()!() } });
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
+    await press();
+    expect(box.textContent).toContain("By hand.");
+    await press();
+    expect(box.textContent).toContain(COPIED);
+    expect(box.textContent).not.toContain("By hand.");
   });
 
   test("the reference block passes its own by-hand sentence", async () => {
