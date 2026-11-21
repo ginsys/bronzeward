@@ -347,8 +347,9 @@ that can cover it is one carrying an import base revision.
 
 **A filled hostname is released at import and adoption (choice §17.45).** Where
 ingestion removed a `HostnameConfig` whose hostname equals the machine's name
-(compilation §2.3 step 4a), the request that started it read that name, and the
-draft transaction (T1) reads the machine's name again under the machine row
+(compilation §2.3 step 2a), the request that started it read that name and the
+claim's staged payload keeps it, unchanged through a mark, a continuation and a
+takeover, and the draft transaction (T1) reads the machine's name again under the machine row
 `FOR SHARE` and refuses `409 stale-input`, naming the machine with the expected
 and the actual name, when it is not the one ingestion used. A rename takes the
 machine row `FOR UPDATE` (§3.5), so the two are ordered. The refusal abandons
@@ -792,7 +793,8 @@ there.
 ### 3.5 A machine's name
 
 A machine may carry a name, an operator's label for finding it **(choice §17.43)**. It is stored
-in the database and is not part of any configuration, release or plan. It is served from API
+in the database and is not part of any fragment or plan; since API revision 13 a release compiles it
+as the machine's hostname where nothing sets one and records the name used (the last bullet below). It is served from API
 revision 10 (§9.1), which adds `name` on a machine and on `POST /machines`, the route
 `POST /machines/{id}/names`, the `name-change` timeline entry and the `name-in-use` problem code.
 
@@ -2988,9 +2990,10 @@ one of `machine-name` (filled from the machine's name), `configuration` (the
 configuration sets one), `none` (nothing sets one: the machine has no name, or
 its configuration says `auto: off` with no hostname) or `legacy-stable` (the
 configuration sets the legacy stable-hostname feature on a machine that has a
-name, so no name is used), and,
-for `machine-name`, `name`, the name used **(choice §17.44, API revision 13)**.
-A release made before revision 13 answers `source: none`. The stored value
+name, so no name is used) or `unrecorded` (a release made before revision 13,
+whose hostname source was never recorded: it is no confirmed absence, and
+the migration sets it for every such release), and,
+for `machine-name`, `name`, the name used **(choice §17.44, API revision 13)**. The stored value
 outside that enumeration is `500 internal-error`, as a provenance record is. It
 is a fact about the release and never read again from the machine, whose name
 may have changed since. `GET /releases` lists releases in identifier order, each as the
@@ -3992,7 +3995,7 @@ or Desired change; it does not erase earlier evidence.
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
 | Draft | Compilation refuses the input | `422`, paths only; a retry under the same key replays it (§7.2) | claim row with its principal and key, the refusal's idempotency record and act; orphans if past compilation §2.3 step 6 |
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
-| Draft | The machine's name is not the one ingestion used when it removed a filled hostname (§3.2, compilation §2.3 step 4a) | `409 stale-input` naming the machine, expected and actual name; claim abandoned | claim row; orphans |
+| Draft | The machine's name is not the one ingestion used when it removed a filled hostname (§3.2, compilation §2.3 step 2a) | `409 stale-input` naming the machine, expected and actual name; claim abandoned | claim row; orphans |
 | Publish | A covered machine's name changed since the snapshot (§4.2) | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A hostname filled from a machine's name that another machine holds explicitly (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
 | Publish | Moved head, a covered machine's import base changed (§4.2), a machine of the cluster covered since the snapshot (§6.2, expected "absent"), or T3 finds missing, misbound or superseded publication evidence (§6.1.1) | operation `failed`, `409 stale-input` | operation, act |
@@ -4939,8 +4942,10 @@ design and evidence do not settle the question. Each is marked in place as
     a valid hostname label so that a later specification can offer it as the
     hostname's default; Serge's direction for that specification (typed 11:36
     CET: "when setting the hostname, the default could be the machine name (if
-    set)") is carried by ginsys/bronzeward#976, not decided
-    here. Design choices, owned by the specification and open to review: the
+    set)") was carried by ginsys/bronzeward#976, which choices §17.44 and §17.45
+    and compilation §6.1 have since decided: the independence stated here
+    holds no longer for a machine whose hostname the configuration leaves
+    unset. Design choices, owned by the specification and open to review: the
     route follows the endpoint replacement (§3.3), so a rename is an `author`,
     human-only write that leaves a timeline entry and an act and is accepted in
     recovery mode; the grammar is lowercase only and a name with uppercase is
