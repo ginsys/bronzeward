@@ -1613,14 +1613,14 @@ the client's rule wins wherever the two meet.
    no role, and every fill is an opaque colour so the contrast measure can read it. The filters and
    actions above a list sit in one wrapping row (the `toolbar` class), each action keeping its refusal
    note beside it, with the markup order unchanged. The web client's words for what a person meets
-   ([#1055](https://github.com/ginsys/bronzeward/issues/1055); the command line keeps the specification's):
+   ([#1055](https://github.com/ginsys/bronzeward/issues/1055); the specification states the words and sentences once, for both clients; the command line still prints the old state words and sentences until [#1071](https://github.com/ginsys/bronzeward/issues/1071) merges):
    "Drafts and releases" is the page that lists both, and `/drafts` and `/releases` open it; "Fragments and profiles"
    is the page the word "sources" named, and a release's count of what it is built from is headed "Built from"; the
    buttons read "Enter a cluster by hand" (it records a cluster Bronzeward did not create) and "Add machine"; a
    machine's state badges read "Changed on the machine", "Release not applied yet", "Last read matched what was
    applied" (the specification says a match never by itself means healthy, fresh or converged) and "Not managed
    yet", with "Frozen" as before. An assignments row and an imports row are headed by what they are, "Assignment of
-   cp1" and "Import of cp1", with the identifier as the link's title.
+   cp1" and "Import of cp1", and a dependency by "Dependency <object>, version <n>", with the identifier as the link's title.
 7. **Icons are decorative inline SVG** (Heroicons 2.2.0 outline, MIT, the paths vendored in one module
    with the notice kept). An icon is an `<svg>` element with `aria-hidden="true"`, no title and no
    style attribute, drawn with presentation attributes, so it is markup and not an image load:

@@ -22,6 +22,13 @@ export const draftCalled = (d: Pick<S["DraftBody"], "id" | "title">): string => 
   return title === undefined ? short(d.id) : `"${title}"`;
 };
 
+// A dependency by its object and version, in its page's heading and in its list row; an object that is not safe
+// text (A8 rule 3) leaves the shortened identifier.
+export const dependencyName = (d: Pick<S["DependencyBody"], "id" | "object" | "version">): string => {
+  const object = safeText(d.object);
+  return object === undefined ? `Dependency ${short(d.id)}` : `Dependency ${object}, version ${d.version}`;
+};
+
 export const releaseTitle = (r: Pick<S["ReleaseBody"], "publishedAt">, d: Pick<S["DraftBody"], "title"> | null | undefined): string | undefined => {
   const text = draftText(d);
   return text === undefined ? undefined : `${text}, published ${when(r.publishedAt)}`;

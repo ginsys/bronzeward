@@ -23,7 +23,7 @@ import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { startedBy } from "./operation-words.ts";
-import { importedConfigurationTitle, operationTitle, safeText, savedTitle } from "./titles.ts";
+import { dependencyName, importedConfigurationTitle, operationTitle, safeText, savedTitle } from "./titles.ts";
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
 import { BUILT_FROM, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES } from "./words.ts";
 
@@ -162,11 +162,10 @@ const ASSIGNMENTS: readonly Col<S["AssignmentBody"]>[] = [["Assignment", (a) => 
 
 // Never a colour alone: the class and its staleness are words.
 export const klass = (d: { class: string | null; stale?: boolean }) => `${d.class ?? "none"}${d.stale === true ? " (stale: not observed recently)" : ""}`;
-// A dependency's first column names it as its page's heading does, "Dependency <object>, version <n>", and keeps
-// the identifier as the link's title; an object that is not safe text leaves the shortened identifier.
+// A dependency's first column names it as its page's heading does (`dependencyName`), and keeps the identifier as
+// the link's title.
 function DependencyName({ d }: { d: S["DependencyBody"] }) {
-  const object = safeText(d.object);
-  return <Ref to={`/dependencies/${encodeURIComponent(d.id)}`} id={d.id}>{object === undefined ? `Dependency ${short(d.id)}` : `Dependency ${object}, version ${d.version}`}</Ref>;
+  return <Ref to={`/dependencies/${encodeURIComponent(d.id)}`} id={d.id}>{dependencyName(d)}</Ref>;
 }
 const DEPENDENCIES: readonly Col<S["DependencyBody"]>[] = [
   ["Dependency", (d) => <DependencyName d={d} />], ["Provider", (d) => d.provider], ["Object", (d) => `${d.object}, version ${d.version}`],
@@ -590,7 +589,7 @@ const DEPENDENT: readonly Col<S["DependencyReleaseBody"]>[] = [
 export function DependencyItem({ id }: { id: string }) {
   const path = `/dependencies/${encodeURIComponent(id)}`;
   return (
-    <ItemOf<S["DependencyBody"]> path={path} what="the dependency" title={(d) => `Dependency ${d === undefined ? short(id) : `${d.object}, version ${d.version}`}`}>
+    <ItemOf<S["DependencyBody"]> path={path} what="the dependency" title={(d) => (d === undefined ? `Dependency ${short(id)}` : dependencyName(d))}>
       {(d) => (
         <>
           <Fields rows={[

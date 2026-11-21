@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "vitest";
 import { createBodies, TITLE_READS } from "./bodies.ts";
-import { draftText, operationTitle, planTitle, releaseTitle } from "./titles.ts";
+import { dependencyName, draftText, operationTitle, planTitle, releaseTitle } from "./titles.ts";
 import type { ReadResult } from "./request.ts";
 import { when } from "./states.tsx";
 
@@ -156,5 +156,12 @@ describe("ginsys/bronzeward#987: the builders", () => {
     expect(operationTitle("adopt", { ...none, plan: "Adopt of worker-1 to X" })).toBe("Adopt of worker-1 to X");
     expect(operationTitle("apply-config", none)).toBeUndefined();
     expect(operationTitle("something-new", none)).toBeUndefined();
+  });
+});
+
+describe("a dependency's name (ginsys/bronzeward#1055)", () => {
+  test("its object and version, or the shortened identifier where the object is not safe text", () => {
+    expect(dependencyName({ id: "dep_k2pq3rstuvwxyz234567abcdef", object: "registry.test/app", version: 3 })).toBe("Dependency registry.test/app, version 3");
+    expect(dependencyName({ id: "dep_k2pq3rstuvwxyz234567abcdef", object: "bad\u0007object", version: 3 })).toBe("Dependency dep_k2pq…cdef");
   });
 });
