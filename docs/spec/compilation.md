@@ -1045,8 +1045,10 @@ unmeasured.
    `machine.features.stableHostname: true`, because the document refuses to
    coexist with it and the compiler does not edit that field (the composition
    decides, as step 5a does: a base that sets it and a fragment that turns it
-   off compose to a configuration without it, and that machine gets the fill);
-   and a machine
+   off compose to a configuration without it, and that machine gets the fill;
+   a `stableHostname` held in a secret reference counts as set whatever its
+   value, so that machine gets no fill and, where it has a name, its source is
+   `legacy-stable`, and neither the fill nor the source tells the value); and a machine
    with no name. The review says the last two in words (persistence and API
    §9.2). Alternatives: the name always wins, so an operator could never
    differ from it, against "default"; a refusal where both exist, which
@@ -1124,13 +1126,21 @@ unmeasured.
    naming both machines, until that machine's applied release no longer holds
    it. Each machine has its own plan, so a release that renames machine node-a
    and gives its old name to machine node-b could be applied in the wrong
-   order and leave two nodes with one hostname. The operator publishes the
-   first rename, applies it, and then renames the second machine: "Machine
-   node-b would take the hostname node-a from its name, but the last release
-   applied to machine node-a still sets that hostname. Apply the release that
-   renames machine node-a first." A hostname set explicitly, or held by a
-   secret reference, is not recorded per release and is not covered; that
-   case is ginsys/bronzeward#1052.
+   order and leave two nodes with one hostname. Once both renames are stored,
+   every release carries machine node-b's new name and is refused, so the
+   operator first gives machine node-b its earlier name or another one,
+   publishes and applies the release for machine node-a, and then renames
+   machine node-b again. A temporary name is itself filled as the hostname
+   where nothing else sets one. The refusal says so: "Machine node-b would take
+   the hostname node-a from its name, but the last release applied to machine
+   node-a still sets that hostname. Give machine node-b another name for now,
+   apply the release for machine node-a, then give machine node-b the name
+   node-a." The check is no guarantee. It reads only the hostname record of
+   each machine's applied release, so it does not cover a hostname set
+   explicitly or held by a secret reference (not recorded per release), an
+   apply that is committed but not finished, or an adopted baseline whose
+   record names a hostname the node does not run; those cases are
+   ginsys/bronzeward#1052.
    The check reads the machines of one release, and a release covers every
    machine of its cluster that has an import base
    ([persistence and API choice §17.33](persistence-api.md)); a machine with no
