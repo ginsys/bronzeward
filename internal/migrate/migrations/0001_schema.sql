@@ -361,8 +361,9 @@ CREATE TABLE staging_claim (
   review          text CHECK (review IN ('pending', 'continued')),
   -- The principal that continued the review (compilation §3.6 item 5), recorded by the continuation
   -- itself in the UPDATE that sets review to continued: a mark leaves it null. The import base text
-  -- read answers only the import's author when this names that author (persistence-api §9.2); a
-  -- continuation before the column existed has none, and that read refuses it.
+  -- read of a file import answers only the import's author when this names that author
+  -- (persistence-api §9.2); a continuation before the column existed has none, and that read refuses
+  -- it. An import read from a node does not consult it.
   continued_by    text REFERENCES principal (id),
   -- Where an import's configuration came from, as its request named it: `document`, a file a person
   -- provided, or `machine`, read from the node. Written by the claim's creation; a draft update has
