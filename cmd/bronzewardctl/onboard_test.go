@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
 	"github.com/ginsys/bronzeward/internal/talos/discover"
 )
@@ -350,6 +351,69 @@ func TestOnboardNamesMachines(t *testing.T) {
 	} {
 		if !strings.Contains(out, line) {
 			t.Errorf("stdout lacks %q:\n%s", line, out)
+		}
+	}
+}
+
+// TestOnboardNameHeldByAnotherMachine: two nodes that report one hostname (a replaced node whose old
+// record keeps the name) are both recorded: the first is named, the second is recorded without a name and
+// says which machine holds it, and the run goes on to the end.
+func TestOnboardNameHeldByAnotherMachine(t *testing.T) {
+	e := newOnboard(t)
+	r := obTwoMembers
+	r.Members = append([]discover.Member(nil), obTwoMembers.Members...)
+	r.Members[0].Hostname = "alcorak.office.ginsys.net"
+	r.Members[1].Hostname = "alcorak.office.ginsys.net"
+	e.result = r
+	code, out, errOut := e.run("--no-import", "-o", "json")
+	if code != 0 {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	var obj onboarding
+	if err := json.Unmarshal([]byte(out), &obj); err != nil || len(obj.Machines) != 2 {
+		t.Fatalf("stdout %q (%v); want two machines", out, err)
+	}
+	first, second := obj.Machines[0], obj.Machines[1]
+	if first.Name != "alcorak.office.ginsys.net" || first.Add.State != obCreated {
+		t.Errorf("first machine %+v; want it created and named by its hostname", first)
+	}
+	if second.Add.State != obCreated || second.Name != "" || second.Machine == "" {
+		t.Errorf("second machine %+v; want it created, with no name", second)
+	}
+	if want := "held by machine " + first.Machine; !strings.Contains(second.NameNote, want) {
+		t.Errorf("second machine's nameNote %q; want it to say %q", second.NameNote, want)
+	}
+	var posts int
+	for _, p := range e.api.writes() {
+		if strings.HasPrefix(p, "POST /machines") {
+			posts++
+		}
+	}
+	if posts != 3 {
+		t.Errorf("%d machine writes, want 3 (the first, the second with its name refused, the second again without)", posts)
+	}
+}
+
+// TestNameRefusal: only a refusal of a name that was sent is a reason to record the machine unnamed.
+func TestNameRefusal(t *testing.T) {
+	problem := func(code string) error {
+		return &client.Problem{Status: 400, Doc: map[string]any{"type": "urn:bronzeward:problem:" + code, "machine": "mch_HOLDER"}}
+	}
+	for _, c := range []struct {
+		what string
+		err  error
+		name string
+		want string
+	}{
+		{"a name another machine holds", problem("name-in-use"), "cp-1", `no name: the hostname "cp-1" is held by machine mch_HOLDER; rename or remove that record, then name this one`},
+		{"a grammar the server does not take", problem("invalid-request"), "a.b", `no name: the server refused the hostname "a.b" as a name`},
+		{"another refusal", problem("forbidden"), "cp-1", ""},
+		{"no refusal", nil, "cp-1", ""},
+		{"a refusal when no name was sent", problem("invalid-request"), "", ""},
+		{"an error that is no problem", errors.New("boom"), "cp-1", ""},
+	} {
+		if got := nameRefusal(c.err, c.name); got != c.want {
+			t.Errorf("%s: nameRefusal = %q, want %q", c.what, got, c.want)
 		}
 	}
 }

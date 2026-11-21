@@ -43,7 +43,7 @@ func twoContextTalosconfig() string {
 }
 
 // obMachine is a machine of the API fake.
-type obMachine struct{ id, cluster, key, platform, endpoint string }
+type obMachine struct{ id, cluster, key, platform, endpoint, name string }
 
 // obIngestion is an import of the API fake.
 type obIngestion struct {
@@ -205,7 +205,18 @@ func (f *apiFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		m := obMachine{id: id.New(id.Machine), cluster: in.Cluster, key: key, platform: string(in.Platform), endpoint: in.TalosEndpoint}
+		name := ""
+		if in.Name != nil {
+			name = *in.Name
+		}
+		for _, m := range f.machines {
+			// A name another machine of the cluster holds, as the server refuses it (§3.5).
+			if name != "" && m.cluster == in.Cluster && m.name == name {
+				f.problem(w, http.StatusConflict, "name-in-use", `,"machine":`+fmt.Sprintf("%q", m.id))
+				return
+			}
+		}
+		m := obMachine{id: id.New(id.Machine), cluster: in.Cluster, key: key, platform: string(in.Platform), endpoint: in.TalosEndpoint, name: name}
 		f.machines = append(f.machines, m)
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprint(w, f.machineJSON(m))

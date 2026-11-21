@@ -147,6 +147,24 @@ func conflictID(err error, member string) string {
 	return ""
 }
 
+// nameRefusal is the note for a machine whose name the server refused, "" when err is no refusal of a
+// name that was sent: `name-in-use` names the machine that holds it (§9.4), and `invalid-request` is a
+// grammar the server does not take (a server older than the widened one takes one label).
+func nameRefusal(err error, name string) string {
+	var p *client.Problem
+	if name == "" || !errors.As(err, &p) {
+		return ""
+	}
+	switch p.Code() {
+	case "name-in-use":
+		holder, _ := p.Doc["machine"].(string)
+		return fmt.Sprintf("no name: the hostname %q is held by machine %s; rename or remove that record, then name this one", name, client.Printable(holder))
+	case "invalid-request":
+		return fmt.Sprintf("no name: the server refused the hostname %q as a name", name)
+	}
+	return ""
+}
+
 // clusterOnboard records a cluster, its machines and its first key, then imports each machine into one
 // draft (operator-experience.md §5.2, §5.9): the steps of cluster discover, cluster add, machine add,
 // cluster first-key and import start, in that order, each safe to run again. Nothing it does is
@@ -372,11 +390,21 @@ func (e *env) onboardRecords(a *onboardArgs, res discover.Result, obj *onboardin
 			min.TalosNodeId = &m.NodeID
 		}
 		var mb apitypes.MachineBody
-		err := e.quietly(func() error {
-			return e.writeAfter(nil, machineWrite(min, m.NodeID, m.SMBIOSUUID, nil), func(_ *client.Client, r *client.Response) ([]string, error) {
-				return nil, json.Unmarshal(r.Body, &mb)
+		record := func() error {
+			mb = apitypes.MachineBody{}
+			return e.quietly(func() error {
+				return e.writeAfter(nil, machineWrite(min, m.NodeID, m.SMBIOSUUID, nil), func(_ *client.Client, r *client.Response) ([]string, error) {
+					return nil, json.Unmarshal(r.Body, &mb)
+				})
 			})
-		})
+		}
+		err := record()
+		// A name the server refuses (another machine holds it, or the grammar rejects it) never stops the
+		// run: the machine is recorded without it, with the reason, to be named afterwards.
+		if refused := nameRefusal(err, name); refused != "" {
+			min.Name, name, note = nil, "", refused
+			err = record()
+		}
 		saved := errors.As(err, &lost)
 		state := obCreated
 		if existing := conflictID(err, "machine"); existing != "" {

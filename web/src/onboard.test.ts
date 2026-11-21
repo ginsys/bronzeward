@@ -27,7 +27,7 @@ class Server {
   sends: { route: string; body: unknown }[] = [];
   released: string[] = [];
   clusters = new Map<string, { id: string; name: string; talosClusterId: string }>();
-  machines = new Map<string, { id: string; cluster: string; key: string }>();
+  machines = new Map<string, { id: string; cluster: string; key: string; name?: unknown }>();
   drafts = new Map<string, { id: string; cluster: string; title: string; state: string; rev: number }>();
   ingestions = new Map<string, { id: string; machine: string; draft: string; state: string; polls: number }>();
   keys = 0;
@@ -81,7 +81,10 @@ class Server {
         const key = b["smbiosUuid"] ?? b["talosNodeId"]!;
         const have = [...this.machines.values()].find((m) => m.key === key);
         if (have !== undefined) return refused(409, "conflict", { machine: have.id });
-        const m = { id: this.id("mch"), cluster: b["cluster"]!, key };
+        // A name another machine of the cluster holds, as the server refuses it.
+        const holder = b["name"] === undefined ? undefined : [...this.machines.values()].find((m) => m.cluster === b["cluster"] && m.name === b["name"]);
+        if (holder !== undefined) return refused(409, "name-in-use", { machine: holder.id });
+        const m = { id: this.id("mch"), cluster: b["cluster"]!, key, name: b["name"] };
         this.machines.set(m.id, m);
         return done({ ...m, name: b["name"] ?? null });
       }
@@ -363,7 +366,8 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
   const failures: [string, string, Outcome, string][] = [
     ["the cluster", "POST /clusters", refused(422, "validation-failed"), "cluster"],
     ["the first key", "POST /clusters/cl_1/first-keys", refused(422, "validation-failed"), "first-key"],
-    ["a machine", "POST /machines", refused(422, "validation-failed"), "machine:n1"],
+    // Not a refusal of the name, which the run goes past (the tests of onboard naming).
+    ["a machine", "POST /machines", refused(403, "forbidden"), "machine:n1"],
     ["the draft", "POST /drafts", refused(422, "validation-failed"), "draft"],
     ["an import", "POST /ingestions", refused(409, "conflict"), "import:n1"],
     ["an import whose answer was lost before it committed", "POST /ingestions", { kind: "unknown", why: "the connection ended", problem: null }, "import:n1"],
@@ -727,5 +731,35 @@ describe("onboard naming: a machine is named by the hostname its node reports", 
       ["machine:n4", "no name: the node reported no hostname, so it shows its address"],
       ["machine:n5", "named by its hostname in lower case"],
     ]);
+  });
+
+  test("a name another machine holds never stops the run: the machine is recorded without it and the line names the holder", async () => {
+    const s = new Server();
+    s.discovery = {
+      ...DISCOVERY,
+      members: [
+        { ...MEMBERS[0]!, hostname: "alcorak.office.ginsys.net" },
+        { ...MEMBERS[1]!, hostname: "alcorak.office.ginsys.net" },
+      ],
+    };
+    const { ok, lines } = await run(s, await planOf(s));
+    expect(ok).toBe(true);
+    expect(s.sends.filter((x) => x.route === "POST /machines").map((x) => (x.body as { name?: string }).name)).toEqual(["alcorak.office.ginsys.net", "alcorak.office.ginsys.net", undefined]);
+    const holder = [...s.machines.values()].find((m) => m.name === "alcorak.office.ginsys.net")!.id;
+    expect(lines.filter((l) => l.key.startsWith("machine:")).map((l) => [l.key, l.state, l.detail])).toEqual([
+      ["machine:n1", "done", undefined],
+      ["machine:n2", "done", `no name: the hostname "alcorak.office.ginsys.net" is held by machine ${holder}; rename or remove that record, then name this one`],
+    ]);
+    expect(s.machines.size).toBe(2);
+  });
+
+  test("a name the server's grammar refuses is treated the same: the machine is recorded without it", async () => {
+    const s = new Server();
+    s.discovery = { ...DISCOVERY, members: [{ ...MEMBERS[0]!, hostname: "cp-1" }] };
+    s.fail.set("POST /machines", refused(400, "invalid-request"));
+    const { ok, lines } = await run(s, await planOf(s));
+    expect(ok).toBe(true);
+    expect(s.sends.filter((x) => x.route === "POST /machines").map((x) => (x.body as { name?: string }).name)).toEqual(["cp-1", undefined]);
+    expect(lines.find((l) => l.key === "machine:n1")?.detail).toBe('no name: the server refused the hostname "cp-1" as a name');
   });
 });
