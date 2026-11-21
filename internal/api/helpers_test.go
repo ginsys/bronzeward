@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -158,7 +160,7 @@ func (e *env) human(name string) string {
 	e.t.Helper()
 	tok, err := e.iss.Mint(name, "", time.Now())
 	if err != nil {
-		e.t.Fatal(err)
+		fatalf(e.t, "%v", err)
 	}
 	return tok
 }
@@ -207,16 +209,19 @@ func (e *env) do(h http.Handler, c call) *httptest.ResponseRecorder {
 func problem(t *testing.T, rec *httptest.ResponseRecorder) (code string, doc map[string]any) {
 	t.Helper()
 	if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
-		t.Fatalf("status %d, Content-Type %q, body %s: not a problem", rec.Code, ct, rec.Body)
+		fatalf(t, "status %d, Content-Type %q, body %s: not a problem", rec.Code, ct, rec.Body)
+		return "", nil
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
+		return "", nil
 	}
 	typ, _ := doc["type"].(string)
 	instance, _ := doc["instance"].(string)
 	code, ok := strings.CutPrefix(typ, "urn:bronzeward:problem:")
 	if !ok || doc["status"] != float64(rec.Code) || !strings.HasPrefix(instance, "req_") {
-		t.Fatalf("malformed problem %s", rec.Body)
+		fatalf(t, "malformed problem %s", rec.Body)
+		return "", nil
 	}
 	return code, doc
 }
@@ -225,7 +230,8 @@ func wantProblem(t *testing.T, rec *httptest.ResponseRecorder, status int, code 
 	t.Helper()
 	got, doc := problem(t, rec)
 	if rec.Code != status || got != code {
-		t.Fatalf("got %d %s (%s); want %d %s", rec.Code, got, rec.Body, status, code)
+		fatalf(t, "got %d %s (%s); want %d %s", rec.Code, got, rec.Body, status, code)
+		return nil
 	}
 	return doc
 }
@@ -263,11 +269,45 @@ func testAuth(issuerURL string) config.Auth {
 	}
 }
 
+// fataler is what fatalf needs of a *testing.T, so a test can pass a recording stand-in.
+type fataler interface {
+	Helper()
+	Fatalf(format string, args ...any)
+	Errorf(format string, args ...any)
+}
+
+// onTestGoroutine reports whether the caller runs on a test's own goroutine: only that stack has a
+// testing.tRunner frame, at its bottom. runtime.Stack cuts the bottom first when the buffer is short, so
+// the buffer grows until the whole stack fits.
+func onTestGoroutine() bool {
+	buf := make([]byte, 4096)
+	for {
+		n := runtime.Stack(buf, false)
+		if n < len(buf) {
+			return bytes.Contains(buf[:n], []byte("testing.tRunner("))
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+}
+
+// fatalf is t.Fatalf for a helper that a hook may call: a hook runs on the goroutine of the executor, the
+// runner or the adopter, where t.FailNow marks the test finished from the wrong goroutine and ends that
+// goroutine, so the loop under test stops and the test waits for a timeout. Off the test's goroutine it
+// reports with t.Errorf and returns, and the caller gets the zero value of whatever it was reading.
+func fatalf(t fataler, format string, args ...any) {
+	t.Helper()
+	if onTestGoroutine() {
+		t.Fatalf(format, args...)
+		return
+	}
+	t.Errorf(format, args...)
+}
+
 func count(t *testing.T, db *sql.DB, q string, args ...any) int {
 	t.Helper()
 	var n int
 	if err := db.QueryRow(q, args...).Scan(&n); err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
 	}
 	return n
 }
@@ -280,7 +320,7 @@ type execer interface {
 func mustExec(t *testing.T, db execer, q string, args ...any) {
 	t.Helper()
 	if _, err := db.Exec(q, args...); err != nil {
-		t.Fatalf("%s: %v", q, err)
+		fatalf(t, "%s: %v", q, err)
 	}
 }
 
@@ -318,7 +358,7 @@ func epoch(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	var ep string
 	if err := db.QueryRow("SELECT epoch FROM installation_state").Scan(&ep); err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
 	}
 	return ep
 }

@@ -165,6 +165,9 @@ func TestTakeoverResumesToT1(t *testing.T) {
 		}
 		gens[n] = g
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	rows.Close()
 	if len(gens) != 2 || !maps.Equal(gens, want.Generations) {
 		t.Fatalf("references %v, sealed %v", gens, want.Generations)

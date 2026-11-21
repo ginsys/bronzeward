@@ -91,7 +91,7 @@ func latestActVersion(t *testing.T, db *sql.DB, cluster string) provider.CAKeyVe
 	var v provider.CAKeyVersion
 	if err := db.QueryRow(`SELECT k.key_path, k.key_version, k.key_created_time FROM first_key_act k JOIN act a ON a.id = k.act
 		WHERE k.cluster = $1 ORDER BY a.seq DESC LIMIT 1`, cluster).Scan(&v.Path, &v.Version, &v.CreatedTime); err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
 	}
 	return v
 }

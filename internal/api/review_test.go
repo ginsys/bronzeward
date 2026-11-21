@@ -45,7 +45,7 @@ func (ie *ingestEnv) pausedRow(t *testing.T, claim string) pausedRow {
 		FROM staging_claim c JOIN operation o ON o.ingestion = c.id WHERE c.id = $1`, claim).
 		Scan(&r.state, &r.review, &r.gen, &r.payload, &r.digest, &r.lease, &r.pausedAt, &r.opState, &r.opLease, &r.opOwner, &r.opGen,
 			&r.owner); err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
 	}
 	return r
 }

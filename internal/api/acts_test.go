@@ -172,7 +172,8 @@ type lockProbe struct {
 func (p *lockProbe) WriteHeader(code int) {
 	tx, err := p.db.Begin()
 	if err != nil {
-		p.t.Fatal(err)
+		fatalf(p.t, "%v", err)
+		return
 	}
 	defer func() { _ = tx.Rollback() }()
 	_, p.held = tx.Exec(`SELECT 1 FROM installation_state FOR UPDATE NOWAIT`)

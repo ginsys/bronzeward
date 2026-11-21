@@ -49,7 +49,7 @@ func (ie *ingestEnv) stagedPayload(t *testing.T, claim string) (provider.Ciphert
 	var sum []byte
 	if err := ie.db.QueryRow(`SELECT convert_from(payload, 'UTF8'), payload_digest FROM staging_claim WHERE id = $1`, claim).
 		Scan(&ct, &sum); err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
 	}
 	return provider.Ciphertext(ct), sum
 }

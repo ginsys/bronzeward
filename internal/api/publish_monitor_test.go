@@ -40,7 +40,7 @@ func metaAnswer(data map[string]any) classify.Answer {
 func lockWaits(t *testing.T, db *sql.DB) int {
 	n, err := lockWaiting(db)
 	if err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
 	}
 	return n
 }

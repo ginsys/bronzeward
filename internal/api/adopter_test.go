@@ -88,7 +88,8 @@ func waitIdle(t *testing.T, idle <-chan struct{}, n int) {
 		select {
 		case <-idle:
 		case <-time.After(10 * time.Second):
-			t.Fatal("the adoption loop did not pass")
+			fatalf(t, "the adoption loop did not pass")
+			return
 		}
 	}
 }

@@ -742,14 +742,15 @@ func waitForLockWaits(t *testing.T, db *sql.DB, n int) {
 		var got int
 		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity
 			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&got); err != nil {
-			t.Fatal(err)
+			fatalf(t, "%v", err)
+			return
 		}
 		if got >= n {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("fewer than %d sessions waiting on a lock within 10s", n)
+	fatalf(t, "fewer than %d sessions waiting on a lock within 10s", n)
 }
 
 // A creation queued on the act-order lock already holds its creator's principal against a

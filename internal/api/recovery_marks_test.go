@@ -42,12 +42,14 @@ func (me *markEnv) recordedIdentity(t *testing.T, m string) talos.Identity {
 	var smbios, node, cluster sql.NullString
 	if err := me.db.QueryRow(`SELECT m.smbios_uuid::text, m.talos_node_id, c.talos_cluster_id FROM machine m
 		JOIN cluster c ON c.id = m.cluster WHERE m.id = $1`, m).Scan(&smbios, &node, &cluster); err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
+		return talos.Identity{}
 	}
 	// A machine keyed by its SMBIOS UUID records no node ID; the node still reports one.
 	got := talos.Identity{SMBIOSUUID: smbios.String, NodeID: cmp.Or(node.String, "node-of-"+m), ClusterID: cluster.String}
 	if !validIdentity(got) {
-		t.Fatalf("the fixture's machine %s binds no readable identity: %+v", m, got)
+		fatalf(t, "the fixture's machine %s binds no readable identity: %+v", m, got)
+		return talos.Identity{}
 	}
 	return got
 }
