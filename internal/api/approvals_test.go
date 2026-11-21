@@ -25,7 +25,8 @@ func (e *env) principalOf(sub string) string {
 		ON CONFLICT (iss, sub) DO NOTHING`, id.New(id.Principal), e.iss.URL, sub)
 	var v string
 	if err := e.db.QueryRow(`SELECT id FROM principal WHERE iss = $1 AND sub = $2`, e.iss.URL, sub).Scan(&v); err != nil {
-		e.t.Fatal(err)
+		fatalf(e.t, "%v", err)
+		return ""
 	}
 	return v
 }
