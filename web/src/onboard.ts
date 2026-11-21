@@ -76,28 +76,29 @@ export function cutContext(text: string, name: string | undefined): { document: 
   return { document: stringify({ context: picked, contexts: { [picked]: { endpoints: [], ca, crt, key } } }), endpoint };
 }
 
-// The page's `send`. A write that carries the document (it has a `released` hook) is kept per write layer
-// and route, which outlives this page: one such write is open at a time. The same body again repeats the
-// open one (in flight, or unknown and repeatable) and hands it this call's hook; another body dismisses it
-// first. A second write beside the first would leave the first, repeatable, holding the document.
-const kept = new WeakMap<object, Map<string, Write>>();
-export function sender(writes: Pick<Writes, "submit" | "repeatable" | "dismiss">, alive: () => boolean): Env["send"] {
-  const open = kept.get(writes) ?? new Map<string, Write>();
-  kept.set(writes, open);
+// The page's `send`. A write that carries the document (it has a `released` hook) is kept per write layer,
+// which outlives this page, and at most one such write stays open: the same request again repeats it (in
+// flight, or unknown and repeatable) and hands it this call's hook; any other waits for the open one's
+// answer, then dismisses what that left open. A second write beside an open one would leave the first,
+// repeatable, holding the document.
+const kept = new WeakMap<object, Write[]>();
+export function sender(writes: Pick<Writes, "submit" | "repeatable" | "dismiss" | "open">, alive: () => boolean): Env["send"] {
+  const held = kept.get(writes) ?? [];
+  kept.set(writes, held);
   return async (spec) => {
     if (!alive()) return { kind: "not-done", why: "the page was left", problem: null };
     if (spec.released === undefined) return writes.submit(new Write(spec));
-    const key = `${spec.method} ${spec.path}`;
-    let w = open.get(key);
-    if (w !== undefined) {
-      if (JSON.stringify(w.spec.body) === JSON.stringify(spec.body) && (w.running !== undefined || writes.repeatable(w))) w.spec.released = spec.released;
-      else {
-        writes.dismiss(w);
-        w = undefined;
+    const same = (w: Write) => w.spec.method === spec.method && w.spec.path === spec.path && JSON.stringify(w.spec.body) === JSON.stringify(spec.body);
+    let w = held.find((x) => same(x) && (x.running !== undefined || writes.repeatable(x)));
+    if (w !== undefined) w.spec.released = spec.released;
+    else {
+      for (const old of held.splice(0)) {
+        await old.running?.catch(() => undefined);
+        if (writes.open.includes(old)) writes.dismiss(old);
       }
+      w = new Write(spec);
+      held.push(w);
     }
-    w ??= new Write(spec);
-    open.set(key, w);
     return writes.submit(w);
   };
 }

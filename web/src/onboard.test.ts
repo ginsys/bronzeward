@@ -252,6 +252,26 @@ describe("the page's send (sender)", () => {
     expect(holding(writes).map((w) => (w.spec.body as { document: string }).document)).toEqual(["second-document"]);
   });
 
+  test("a write on another route dismisses the open one: onboarding another cluster after an unknown first key holds one document", async () => {
+    const { writes } = layer(lose, lose);
+    const send = sender(writes, () => true);
+    await send(secret());
+    await send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { document: "other-document" }, released: () => {} });
+    expect(holding(writes).map((w) => (w.spec.body as { document: string }).document)).toEqual(["other-document"]);
+  });
+
+  test("another body sent while the first is in flight waits for its answer, then dismisses what it left open", async () => {
+    let lost!: () => void;
+    const { writes } = layer(() => new Promise((_r, rej) => (lost = () => rej(new Error("synthetic: the answer was lost")))), lose);
+    const send = sender(writes, () => true);
+    const first = send(secret("first-document"));
+    const second = send(secret("second-document"));
+    await Promise.resolve();
+    lost();
+    expect([(await first).kind, (await second).kind]).toEqual(["unknown", "unknown"]);
+    expect(holding(writes).map((w) => (w.spec.body as { document: string }).document)).toEqual(["second-document"]);
+  });
+
   test("a write that carries no document is a new write each time, and nothing is sent once the page is left", async () => {
     const { writes, calls } = layer(lose, lose);
     const plain: WriteSpec = { method: "POST", path: "/machines", resource: "/machines", body: {} };
