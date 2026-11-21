@@ -17,8 +17,13 @@ const B = `mch_${"b".repeat(26)}`;
 interface M { applied: boolean; desired: boolean; plan: "none" | "proposed" | "approved"; drift?: boolean; unresolved?: boolean; refusePlan?: boolean; holdsAfterApproval?: number }
 
 // A server for the handover: the draft, the machines and what each write does to them. `log` is every write sent.
-function world(draft: { state: string }, machines: Record<string, M>) {
+function world(draft: { state: string; running?: boolean }, machines: Record<string, M>) {
   const log: string[] = [];
+  // A publication takes effect once: the draft is published and each machine's Desired is the release.
+  const publishNow = () => {
+    draft.state = "published";
+    for (const m of Object.values(machines)) m.desired = true;
+  };
   let waits = 0;
   const waitsAfter: Record<string, number> = {};
   const step = (m: M): Position["step"] =>
@@ -40,24 +45,39 @@ function world(draft: { state: string }, machines: Record<string, M>) {
   const done = (data: unknown) => ({ kind: "done" as const, status: 201, data, replayed: false });
   const refused = (status: number) => ({ kind: "refused" as const, status, problem: null, replayed: false });
   const lines: Record<string, Line> = {};
+  const plans: { machine: string; operation: string; releaseId: string }[] = [];
   const io: Io = {
     read: <T,>(path: string) => {
       const machine = /^\/machines\/(mch_\w+)\/position$/.exec(path)?.[1];
       if (machine !== undefined) return Promise.resolve({ kind: "ok", data: position(machine) } as never);
       if (path.startsWith("/drafts/")) return Promise.resolve({ kind: "ok", data: draft, etag: '"1"' } as never);
-      if (path.startsWith("/operations/")) return Promise.resolve({ kind: "ok", data: { state: "succeeded" } } as never);
+      if (path.startsWith("/operations?kind=publish")) {
+        const items = draft.running === true && path.endsWith("state=running") ? [{ id: "op_1", subject: { draft: "drf_1" } }, { id: "op_9", subject: { draft: "drf_other" } }] : [];
+        return Promise.resolve({ kind: "ok", data: { items } } as never);
+      }
+      if (path.startsWith("/operations/")) {
+        // A running publication ends when it is read as ended.
+        if (draft.running === true) {
+          draft.running = false;
+          publishNow();
+        }
+        return Promise.resolve({ kind: "ok", data: { state: "succeeded" } } as never);
+      }
       return Promise.resolve(undefined as T);
     },
     send: (spec) => {
       log.push(`${spec.method} ${spec.path}`);
       if (spec.path.endsWith("/publications")) {
         if (draft.state !== "open") return Promise.resolve(wrote(spec, refused(412)));
-        draft.state = "published";
-        for (const m of Object.values(machines)) m.desired = true;
+        publishNow();
         return Promise.resolve(wrote(spec, done({ id: "op_1" })));
       }
       if (spec.path === "/plans") {
-        const id = (spec.body as { machine: string }).machine;
+        const body = spec.body as { machine: string; operation: string; releaseId: string };
+        // The button only ever hands over: an adopt plan for the machine's Desired release.
+        if (body.operation !== "adopt" || body.releaseId !== REL) throw new Error(`unexpected plan ${JSON.stringify(body)}`);
+        plans.push(body);
+        const id = body.machine;
         const m = machines[id]!;
         if (m.refusePlan === true) return Promise.resolve(wrote(spec, refused(409)));
         if (m.holdsAfterApproval !== -1) m.plan = "proposed";
@@ -77,7 +97,7 @@ function world(draft: { state: string }, machines: Record<string, M>) {
     say: (key, line) => void (lines[key] = line),
     live: () => true,
   };
-  return { io, log, lines, machines };
+  return { io, log, lines, machines, plans };
 }
 const fresh = (): M => ({ applied: false, desired: false, plan: "none" });
 const text = (l: Line | undefined) => `${l?.state}: ${l?.text}`;
@@ -93,8 +113,18 @@ describe("the handover button (ginsys/bronzeward#1066): one press, every act the
     expect(text(w.lines[DRAFT])).toBe(`done: ${LINES.published}`);
     expect(text(w.lines[A])).toBe(`done: ${LINES.managed}`);
     expect(text(w.lines[B])).toBe(`done: ${LINES.managed}`);
-    // Only adopt plans are made: the button never applies.
+    // Only adopt plans for the Desired release are made: the button never applies (the mock refuses any other plan).
+    expect(w.plans.map((p) => p.machine).sort()).toEqual([A, B]);
+    expect(w.plans.every((p) => p.operation === "adopt" && p.releaseId === REL)).toBe(true);
     expect(LINES.managed).toContain("nothing was sent to it");
+  });
+
+  test("a publication already running for the draft is followed, never sent again, and the machines then go on", async () => {
+    const w = world({ state: "open", running: true }, { [A]: fresh() });
+    await handOver("drf_1", [A], w.io);
+    expect(w.log.filter((l) => l.endsWith("/publications"))).toEqual([]);
+    expect(text(w.lines[DRAFT])).toBe(`done: ${LINES.published}`);
+    expect(text(w.lines[A])).toBe(`done: ${LINES.managed}`);
   });
 
   test("a second press after the page closed halfway: A's plan waits for approval, B is managed, so exactly one approval is sent", async () => {

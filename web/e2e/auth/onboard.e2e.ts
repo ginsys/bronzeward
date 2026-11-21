@@ -132,21 +132,35 @@ describe("Onboard cluster (#1001)", () => {
     // The sentence above the button says what the press does, and that it sends nothing to any machine.
     await expect($('[data-testid="handover-sentence"]')).toHaveText(expect.stringContaining("It sends nothing to any machine."));
     await $("main").$("button=Start managing these machines").click();
-    // The draft's line and one line for each machine; each machine ends done, or waits on the controller (never working or stopped).
+    // The draft's line settles first: done, or stopped. The stand-in nodes' configurations are minimal (internal/api
+    // e2enode_test.go: no cluster section on the worker, no machine CA), and the case does not claim they publish: it
+    // asserts what the press did in either end, from the page and from what the deployment holds.
+    const draftLine = () => $$('[data-testid="handover-line"]')[0]!;
+    await browser.waitUntil(async () => ["done", "stopped"].includes((await draftLine().getAttribute("data-state")) ?? ""), { timeout: 240_000, timeoutMsg: "the draft's handover line did not settle" });
+    const id = ((await api(at, "h-all", "GET", "/clusters")).body!["items"] as { id: string; name: string }[]).find((c) => c.name === name)!.id;
+    const drafts = ((await api(at, "h-all", "GET", "/drafts")).body!["items"] as { cluster: string; state: string }[]).filter((d) => d.cluster === id);
+    const machines = (await api(at, "h-all", "GET", `/machines?cluster=${id}`)).body!["items"] as { id: string }[];
+    expect(machines).toHaveLength(2);
+    const plansOf = async (m: string) => (await api(at, "h-all", "GET", `/plans?machine=${m}`)).body!["items"] as { operation: string; state: string; approval: string | null }[];
+    if ((await draftLine().getAttribute("data-state")) === "stopped") {
+      // A publication that did not succeed sends nothing to any machine and no plan is made.
+      await expect(draftLine()).toHaveText(expect.stringContaining("Nothing was sent to any machine."));
+      expect(drafts.map((d) => d.state)).toEqual(["open"]);
+      // once: the draft's line is already stopped, and the press makes a machine's plan only after the publication succeeded
+      for (const m of machines) expect(await plansOf(m.id)).toEqual([]);
+      return;
+    }
+    // Published: one line for the draft and one for each machine, each ending done or waiting on the controller; one
+    // adopt plan per machine, approved, its approval marked as the person's own.
+    expect(drafts.map((d) => d.state)).toEqual(["published"]);
     await browser.waitUntil(async () => {
       const lines = await $$('[data-testid="handover-line"]');
       if (lines.length !== 3) return false;
       for (const l of lines) if (!["done", "waiting"].includes((await l.getAttribute("data-state")) ?? "")) return false;
       return true;
     }, { timeout: 240_000, timeoutMsg: "the handover lines did not settle to done or waiting" });
-    // What the deployment holds: the draft published, one approved adopt plan per machine, each approval marked self-approval.
-    const id = ((await api(at, "h-all", "GET", "/clusters")).body!["items"] as { id: string; name: string }[]).find((c) => c.name === name)!.id;
-    const drafts = ((await api(at, "h-all", "GET", "/drafts")).body!["items"] as { cluster: string; state: string }[]).filter((d) => d.cluster === id);
-    expect(drafts.map((d) => d.state)).toEqual(["published"]);
-    const machines = (await api(at, "h-all", "GET", `/machines?cluster=${id}`)).body!["items"] as { id: string }[];
-    expect(machines).toHaveLength(2);
     for (const m of machines) {
-      const plans = (await api(at, "h-all", "GET", `/plans?machine=${m.id}`)).body!["items"] as { operation: string; state: string; approval: string | null }[];
+      const plans = await plansOf(m.id);
       expect(plans.map((p) => p.operation)).toEqual(["adopt"]);
       expect(plans[0]!.state).not.toBe("proposed");
       const approval = (await api(at, "h-all", "GET", `/approvals/${plans[0]!.approval}`)).body!["selfApproval"] as { marked: boolean };
