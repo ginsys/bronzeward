@@ -46,13 +46,22 @@ func discoveryNode(t *testing.T, ca *x509.PEMEncodedCertificateAndKey, members .
 	return n, pki
 }
 
-// memberPort listens on 127.0.0.1:50000, the port a discovery dials each member at, accepts every
+// hungMember is the address of the member that hangs. Port 50000, where a discovery dials each member,
+// lies inside the ephemeral port range, and a live outbound connection from 127.0.0.1:50000 would make
+// listening there fail; a connection to a loopback address is made from 127.0.0.1, so no outbound
+// connection can take this address's port 50000, and nothing else in the repository binds it. The
+// member never answers, so no TLS handshake completes and the certificate, which names 127.0.0.1 to
+// 127.0.0.3, is not checked. macOS carries only 127.0.0.1 on lo0, so a developer there adds this alias
+// first (no workflow runs this package on macOS).
+const hungMember = "127.0.0.4"
+
+// memberPort listens on hungMember:50000, the port a discovery dials each member at, accepts every
 // connection and answers none of them, as a member that hangs does. The count is the connections made.
 func memberPort(t *testing.T) *atomic.Int32 {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:50000")
+	l, err := net.Listen("tcp", hungMember+":50000")
 	if err != nil {
-		t.Fatalf("a discovery dials its members at port 50000, and this test needs 127.0.0.1:50000: %v", err)
+		t.Fatalf("a discovery dials its members at port 50000, and this test needs %s:50000 (macOS carries only 127.0.0.1 on lo0: sudo ifconfig lo0 alias %[1]s up): %[2]v", hungMember, err)
 	}
 	var accepted atomic.Int32
 	t.Cleanup(func() { l.Close() })
@@ -276,7 +285,7 @@ func TestDiscoveryTooManyMembers(t *testing.T) {
 	members := func(n int) []talostest.Member {
 		var ms []talostest.Member
 		for i := range n {
-			ms = append(ms, talostest.Member{NodeID: "n" + string(rune('a'+i/26)) + string(rune('a'+i%26)), Hostname: "h", Addresses: []string{"127.0.0.1"}})
+			ms = append(ms, talostest.Member{NodeID: "n" + string(rune('a'+i/26)) + string(rune('a'+i%26)), Hostname: "h", Addresses: []string{hungMember}})
 		}
 		return ms
 	}
@@ -302,10 +311,10 @@ func TestDiscoveryTooManyMembers(t *testing.T) {
 func TestDiscoveryDeadlineKeepsTheMembersRead(t *testing.T) {
 	// The node timeout bounds the extraction and nothing else: the walk lasts the 2 s deadline, twenty times the node timeout, and is still answered. The deadline is long enough for a slow runner to read the identity first.
 	d := newDiscoveryEnv(t, options{nodeTimeout: 100 * time.Millisecond, discoverWithin: 2 * time.Second}, 0)
-	memberPort(t) // 127.0.0.1:50000 accepts and never answers, so a read of that member waits for the deadline
+	memberPort(t) // hungMember:50000 accepts and never answers, so a read of that member waits for the deadline
 	ca := newTalosCA(t)
 	n, _ := discoveryNode(t, ca,
-		talostest.Member{NodeID: "n1", Hostname: "cp-1", Addresses: []string{"127.0.0.1"}, ControlPlanePort: 6443},
+		talostest.Member{NodeID: "n1", Hostname: "cp-1", Addresses: []string{hungMember}, ControlPlanePort: 6443},
 		talostest.Member{NodeID: "n2", Hostname: "w-1", Addresses: []string{"127.0.0.2"}})
 	start := time.Now()
 	b := decode[discoveryBody](t, d.do(d.api, discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), n.Endpoint)), http.StatusOK)
