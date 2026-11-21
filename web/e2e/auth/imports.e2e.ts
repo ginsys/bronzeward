@@ -9,7 +9,6 @@
 // h-author.
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
-import { UNNAMED_MACHINE } from "../../src/words.ts";
 import { CONTROL, FIXTURE_ISSUER, syntheticDocument } from "../auth.conf.ts";
 import { faults, fixtureSignIn, holding, mint, release, seen, storageEmpty } from "./helpers.ts";
 
@@ -17,6 +16,8 @@ const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
 let cluster = "";
 let machine = "";
+// The machine has no name, so the pages name it by its address, which is its stored endpoint (it has no port here).
+let address = "";
 
 const hex = () => randomBytes(4).toString("hex");
 const writes = async (): Promise<string[][]> => ((await (await fetch(`${CONTROL}/writes`)).json()) as string[]).map((w) => w.split(" "));
@@ -110,7 +111,8 @@ describe("the import pages (#340)", () => {
     const c = await api("h-author", "POST", "/clusters", { name, endpoint: `https://${name}.example.test:6443`, contract: "v1.14", talosClusterId: `${randomBytes(32).toString("base64url")}=` });
     expect(c.status).toBe(201);
     cluster = c.body!["id"] as string;
-    const m = await api("h-author", "POST", "/machines", { cluster, talosNodeId: `synthetic-node-${hex()}`, platform: "metal", talosEndpoint: `192.0.2.${1 + randomBytes(1)[0]! % 254}` });
+    address = `192.0.2.${1 + randomBytes(1)[0]! % 254}`;
+    const m = await api("h-author", "POST", "/machines", { cluster, talosNodeId: `synthetic-node-${hex()}`, platform: "metal", talosEndpoint: address });
     expect(m.status).toBe(201);
     machine = m.body!["id"] as string;
   });
@@ -124,7 +126,7 @@ describe("the import pages (#340)", () => {
     await staging("transient");
     await start();
     await ingestion();
-    await expect(ended()).toHaveText(expect.stringMatching(new RegExp(`^This import released into draft ${called(id)} \\(revision (\\d+)\\), with Imported configuration of ${UNNAMED_MACHINE} as its base\\.$`)), { wait: 60_000 });
+    await expect(ended()).toHaveText(expect.stringMatching(new RegExp(`^This import released into draft ${called(id)} \\(revision (\\d+)\\), with Imported configuration of ${address.replaceAll(".", "\\.")} as its base\\.$`)), { wait: 60_000 });
     await expect(events()).toHaveText(expect.stringMatching(/^started\n(.*\n)*succeeded$/));
     await expect(allowed()).toHaveText(`Released into draft ${called(id)}. Nothing is left to do.`, { wait: 20_000 });
     expect(await revision(id)).toBe(Number(/\(revision (\d+)\)/.exec(await ended().getText())![1]));
@@ -143,7 +145,7 @@ describe("the import pages (#340)", () => {
     expect((await writes()).filter(([m]) => m === "POST").map(([, r]) => r)).toEqual(["/ingestions", "/ingestions"]);
     // A reload: the page signs in again and shows the import's state and what it allows.
     await browser.refresh();
-    await expect($("main h2")).toHaveText(`Import of ${UNNAMED_MACHINE}: released`, { wait: 20_000 });
+    await expect($("main h2")).toHaveText(`Import of ${address}: released`, { wait: 20_000 });
     await expect(allowed()).toHaveText(`Released into draft ${called(id)}. Nothing is left to do.`);
   });
 
@@ -187,7 +189,7 @@ describe("the import pages (#340)", () => {
     await expect(ended()).toHaveText(expect.stringMatching(/^Paused for review \(expires .+\)\.$/), { wait: 20_000 });
     await expect(allowed()).toHaveText("Paused for review. Continue it, or abandon it.", { wait: 20_000 });
     await browser.refresh();
-    await expect($("main h2")).toHaveText(`Import of ${UNNAMED_MACHINE}: paused`, { wait: 20_000 });
+    await expect($("main h2")).toHaveText(`Import of ${address}: paused`, { wait: 20_000 });
     await expect(allowed()).toHaveText("Paused for review. Continue it, or abandon it.");
     await $('nav[aria-label="Main"]').$("a=Changes").click();
     await $("main").$("a=Imports").click();

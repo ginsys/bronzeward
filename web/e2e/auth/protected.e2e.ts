@@ -13,7 +13,6 @@
 // check finds no answer of that case's review. The cases sign in as h-author.
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
-import { UNNAMED_MACHINE } from "../../src/words.ts";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE } from "../auth.conf.ts";
 import { absent, cacheControl, cacheHolds, eventually, faults, fixtureSignIn, interrupt, mint, settled, storageControl, storageEmptyAfterPause } from "./helpers.ts";
 
@@ -23,6 +22,8 @@ const TIER = "doc[0]/machine/nodeLabels/example.test~1tier";
 let at = "";
 let cluster = "";
 let machine = "";
+// The machine has no name, so the pages name it by its address, which is its stored endpoint (it has no port here).
+let address = "";
 // The case's import and the name of the document it staged, set by pausedImport and cleared after the case.
 let importId = "";
 let docName = "";
@@ -54,7 +55,8 @@ async function deployment(query: string) {
   const c = await api("h-author", "POST", "/clusters", { name, endpoint: `https://${name}.example.test:6443`, contract: "v1.14", talosClusterId: `${randomBytes(32).toString("base64url")}=` });
   expect(c.status).toBe(201);
   cluster = c.body!["id"] as string;
-  const m = await api("h-author", "POST", "/machines", { cluster, talosNodeId: `synthetic-node-${hex()}`, platform: "metal", talosEndpoint: `192.0.2.${1 + (randomBytes(1)[0]! % 254)}` });
+  address = `192.0.2.${1 + (randomBytes(1)[0]! % 254)}`;
+  const m = await api("h-author", "POST", "/machines", { cluster, talosNodeId: `synthetic-node-${hex()}`, platform: "metal", talosEndpoint: address });
   expect(m.status).toBe(201);
   machine = m.body!["id"] as string;
 }
@@ -465,7 +467,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await browser.waitUntil(async () => {
       await browser.refresh();
       const heading = await $("main h2").getText();
-      return heading === `Import of ${UNNAMED_MACHINE}: released`;
+      return heading === `Import of ${address}: released`;
     }, { timeout: 60_000, interval: 3_000, timeoutMsg: "the import does not show its claim released after the commit went" });
     await absent(() => $("button=Abandon import").isExisting(), "Abandon import after the claim was released");
   });
@@ -494,7 +496,7 @@ describe("an expired claim (ginsys/bronzeward#341)", () => {
     // The page can offer a continuation until it reads the state the sweep left, so the state is read by reload.
     await browser.waitUntil(async () => {
       await browser.refresh();
-      return (await $("main h2").getText()).startsWith(`Import of ${UNNAMED_MACHINE}: `) && !(await $("main h2").getText()).endsWith(": paused");
+      return (await $("main h2").getText()).startsWith(`Import of ${address}: `) && !(await $("main h2").getText()).endsWith(": paused");
     }, { timeout: 150_000, interval: 5_000, timeoutMsg: "the import still shows paused long after its absolute expiry" });
     await expect(allowed()).toHaveText(holds("Ended: "));
     await absent(() => $("button=Review import").isExisting(), "Review import after the import ended");
