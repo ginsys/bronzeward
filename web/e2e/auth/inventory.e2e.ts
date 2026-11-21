@@ -655,7 +655,7 @@ describe("the read-only lists and items", () => {
     await loaded();
     await tabTo((f) => f.title === s.frv.id && f.tag === "A", "the revision");
     await browser.keys("Enter");
-    await expect($("main h2")).toHaveText(`Fragment revision ${short(s.frv.id)} of registries`);
+    await expect($("main h2")).toHaveText(expect.stringMatching(/^Fragment registries, saved /));
     await expect($('[data-testid="document"]')).toHaveText(expect.stringContaining("registry.example.test"));
     await expect($("main")).toHaveText(expect.stringContaining("registry/example-pass"));
     // The sanitized-text notice (ginsys/bronzeward#988, operator experience §9 item 9) is a paragraph that comes

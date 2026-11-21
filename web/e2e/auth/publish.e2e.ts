@@ -74,7 +74,7 @@ describe("the publication page (#342)", () => {
     await $(`main a[title="${id}"]`).click();
     await expect($("main h2")).toHaveText(expect.stringContaining("synthetic"));
     await $("main").$("a=Publish this draft").click();
-    await expect($("main h2")).toHaveText(expect.stringContaining(`Publish draft ${short(id)}`), { wait: 20_000 });
+    await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });
     await $("main").$("button=Publish").click();
     // The server accepts the write (202, which needs the kept ETag as If-Match) and the operation fails
     // at its node evidence check: the page names the operation, then says nothing was sent.
@@ -130,7 +130,7 @@ describe("the publication page (#342)", () => {
     await $('nav[aria-label="Main"]').$("a=Changes").click();
     await $(`main a[title="${id}"]`).click();
     await $("main").$("a=Publish this draft").click();
-    await expect($("main h2")).toHaveText(expect.stringContaining(`Publish draft ${short(id)}`), { wait: 20_000 });
+    await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });
     await $("main").$("button=Publish").click();
     await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
     await expect($('[data-testid="ended"]')).toHaveText(releasePublished(), { wait: 120_000 });
@@ -160,7 +160,7 @@ describe("the publication page (#342)", () => {
     await focusSettles(onMain, "the new page");
     await tabTo((f) => f.tag === "A" && f.text === "Publish this draft", "the Publish this draft link");
     await browser.keys("Enter");
-    await expect($("main h2")).toHaveText(expect.stringContaining(`Publish draft ${short(id)}`), { wait: 20_000 });
+    await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });
     await focusSettles(onMain, "the new page");
     await tabTo((f) => f.tag === "BUTTON" && f.text === "Publish", "Publish");
     await browser.keys("Enter");
@@ -194,7 +194,7 @@ describe("the publication page (#342)", () => {
       await $('nav[aria-label="Main"]').$("a=Changes").click();
       await $(`main a[title="${id}"]`).click();
       await $("main").$("a=Publish this draft").click();
-      await expect($("main h2")).toHaveText(expect.stringContaining(`Publish draft ${short(id)}`), { wait: 20_000 });
+      await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });
       expect(["the publication page", await overflows()]).toEqual(["the publication page", 0]);
       await $("main").$("button=Publish").click();
       await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });

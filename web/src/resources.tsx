@@ -13,7 +13,7 @@ import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { OnboardCluster } from "./onboard.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
-import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
+import { Detail, EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { Who } from "./principals.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
@@ -23,7 +23,8 @@ import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { startedBy } from "./operation-words.ts";
-import { type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
+import { importedConfigurationTitle, safeText, savedTitle } from "./titles.ts";
+import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
 
 type S = components["schemas"];
 type Col<T> = readonly [string, (t: T) => ReactNode];
@@ -269,14 +270,24 @@ const REFERENCES: readonly Col<[string, S["Reference"]]>[] = [
   ["Reference", ([name]) => name], ["Kind", ([, r]) => r.kind], ["Version", ([, r]) => r.version], ["Encoding", ([, r]) => r.encoding ?? "none"],
 ];
 
+// A revision has no number a person could read: "Fragment network-base, saved 21 Nov 2026, 14:02", and for an
+// assignment, which has no name, "Assignment of cp1, saved ...". The shortened identifier stands in until it is read.
+function RevisionHeading({ kind, id, r }: { kind: Kind; id: string; r: AnyRevision | undefined }) {
+  const machine = useMachineText(r !== undefined && "machine" in r ? r.machine : undefined);
+  const name = r !== undefined && "name" in r ? safeText(r.name) : undefined;
+  const what = r === undefined ? undefined : "name" in r ? name === undefined ? undefined : `${cap(kind)} ${name}` : machine === undefined ? undefined : `${cap(kind)} of ${machine}`;
+  return <>{r === undefined || what === undefined ? `${cap(kind)} revision ${short(id)}` : savedTitle(what, r.createdAt)}</>;
+}
+
 export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
   return (
     <ItemOf<AnyRevision> path={`/${kind}-revisions/${encodeURIComponent(id)}`} what={`the ${kind} revision`}
-      title={(r) => `${cap(kind)} revision ${short(id)}${r !== undefined && "name" in r ? ` of ${r.name}` : ""}`}>
+      title={(r) => <RevisionHeading kind={kind} id={id} r={r} />}>
       {(r) => (
         <>
+          <Detail id={r.id} />
           <Fields rows={[
-            ["Identifier", r.id], ["Cluster", <Id id={r.cluster} />], ...("layer" in r ? [["Layer", r.layer] as const] : []),
+            ["Cluster", <ClusterLink id={r.cluster} />], ...("layer" in r ? [["Layer", r.layer] as const] : []),
             ...("machine" in r ? [["Machine", <MachineById id={r.machine} />] as const] : []),
             ...("profiles" in r ? [["Profiles", r.profiles.join(", ") || "none"] as const] : []),
             ...("fragments" in r && !Array.isArray(r.fragments)
@@ -311,17 +322,25 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
 // wrote it is not recorded on the revision, so none is shown.
 export const ImportBaseRows = ({ r }: { r: S["ImportBaseSummary"] }) => (
   <>
+    <Detail id={r.id} />
     <Fields rows={[
-      ["Identifier", r.id], ["Machine", <MachineById id={r.machine} />], ["Author", <Who id={r.author} />], ["Created", when(r.createdAt)],
+      ["Machine", <MachineById id={r.machine} />], ["Author", <Who id={r.author} />], ["Imported", when(r.createdAt)],
       ["Document size", `${r.documentBytes} bytes`], ["References", r.references], ["Embedded documents", r.embedded],
     ]} />
     <p>The digests and reference names are not shown. The document text is read on request, and only the author who imported it and reviewed it may read it.</p>
   </>
 );
 
+// "Imported configuration of cp1, imported 21 Nov 2026, 14:02": an import base has no number, so the day tells two of
+// one machine apart. Until the machine is read, the shortened identifier stands in.
+function ImportBaseHeading({ id, r }: { id: string; r: S["ImportBaseSummary"] | undefined }) {
+  const machine = useMachineText(r?.machine);
+  return <>{r === undefined || machine === undefined ? `Imported configuration ${short(id)}` : importedConfigurationTitle(machine, r.createdAt)}</>;
+}
+
 export const ImportBaseItem = ({ id }: { id: string }) => (
-  <ItemOf<S["ImportBaseSummary"]> path={`/import-base-revisions/${encodeURIComponent(id)}`} what="the import base revision"
-    title={() => `Import base revision ${short(id)}`}>
+  <ItemOf<S["ImportBaseSummary"]> path={`/import-base-revisions/${encodeURIComponent(id)}`} what="the imported configuration"
+    title={(r) => <ImportBaseHeading id={id} r={r} />}>
     {(r) => <><ImportBaseRows r={r} /><BaseDocument id={r.id} /></>}
   </ItemOf>
 );

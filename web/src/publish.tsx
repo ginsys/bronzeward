@@ -9,11 +9,12 @@ import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag, lastGood, NO_ETAG, WriteResult } from "./drafts.tsx";
 import { startsNew, useSend, useWrites } from "./forms.tsx";
 import { settledReads, watchView } from "./imports.tsx";
-import { Id, Ref, short, useItem, usePending, useReads } from "./list.tsx";
+import { Ref, short, useItem, usePending, useReads } from "./list.tsx";
 import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
-import { Named } from "./titles.tsx";
+import { ClusterRef, Named } from "./titles.tsx";
+import { draftText } from "./titles.ts";
 import type { Outcome } from "./write.ts";
 
 type S = components["schemas"];
@@ -148,7 +149,8 @@ function Publish({ id }: { id: string }) {
   const busy = publishLocked(writes !== undefined && w !== undefined && !startsNew(writes, w), o, failed);
   return (
     <>
-      <h2>Publish draft {short(id)}{d !== undefined && <> "{d.title}" {d.state}, revision {d.revision}, cluster <Id id={d.cluster} /></>}</h2>
+      <h2>{d === undefined ? `Publish draft ${short(id)}` : `Publish draft: ${draftText(d) ?? short(id)}`}</h2>
+      {d !== undefined && <p>{d.state}, revision {d.revision}, <ClusterRef id={d.cluster} />.</p>}
       {pending}
       {d !== undefined && d.state !== "open" && <Status testid="not-open">{NOT_OPEN(d.state)}</Status>}
       {d !== undefined && d.state === "open" && (

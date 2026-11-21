@@ -9,7 +9,7 @@
 // h-author.
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
-import { short } from "../../src/list.tsx";
+import { UNNAMED_MACHINE } from "../../src/words.ts";
 import { CONTROL, FIXTURE_ISSUER, syntheticDocument } from "../auth.conf.ts";
 import { faults, fixtureSignIn, holding, mint, release, seen, storageEmpty } from "./helpers.ts";
 
@@ -37,10 +37,16 @@ async function api(human: string, method: string, path: string, body?: unknown, 
 
 // An open draft in the case's cluster.
 async function draft(): Promise<string> {
-  const d = await api("h-author", "POST", "/drafts", { cluster, title: `synthetic ${hex()}` });
+  const title = `synthetic ${hex()}`;
+  const d = await api("h-author", "POST", "/drafts", { cluster, title });
   expect(d.status).toBe(201);
+  titles.set(d.body!["id"] as string, title);
   return d.body!["id"] as string;
 }
+// The page names a draft by its title, so the checks do too. The machines here carry an endpoint with no port, which the
+// page does not show as an address, so it names each as "an unnamed machine".
+const titles = new Map<string, string>();
+const called = (id: string) => titles.get(id)!;
 
 // The wizard from the Changes page, with the case's machine and the draft `id` chosen and the
 // document source selected.
@@ -117,10 +123,10 @@ describe("the import pages (#340)", () => {
     await putDocument(`paste-${hex()}`, false);
     await staging("transient");
     await start();
-    const first = await ingestion();
-    await expect(ended()).toHaveText(expect.stringMatching(new RegExp(`^Import ${short(first)} released into draft ${short(id)} \\(revision (\\d+)\\), import base ibr_\\S+\\.$`)), { wait: 60_000 });
+    await ingestion();
+    await expect(ended()).toHaveText(expect.stringMatching(new RegExp(`^This import released into draft ${called(id)} \\(revision (\\d+)\\), with Imported configuration of ${UNNAMED_MACHINE} as its base\\.$`)), { wait: 60_000 });
     await expect(events()).toHaveText(expect.stringMatching(/^started\n(.*\n)*succeeded$/));
-    await expect(allowed()).toHaveText(`Released into draft ${short(id)}. Nothing is left to do.`, { wait: 20_000 });
+    await expect(allowed()).toHaveText(`Released into draft ${called(id)}. Nothing is left to do.`, { wait: 20_000 });
     expect(await revision(id)).toBe(Number(/\(revision (\d+)\)/.exec(await ended().getText())![1]));
     // The second import, from a file: its start reads no draft, so its If-Match is the ETag kept
     // after the first; the server accepting it shows that ETag is the draft's current one.
@@ -129,16 +135,16 @@ describe("the import pages (#340)", () => {
     await staging("transient");
     const from = (await seen()).length;
     await start();
-    const second = await ingestion();
-    await expect(ended()).toHaveText(expect.stringContaining(`Import ${short(second)} released into draft ${short(id)}`), { wait: 60_000 });
+    await ingestion();
+    await expect(ended()).toHaveText(expect.stringContaining(`This import released into draft ${called(id)}`), { wait: 60_000 });
     const after = (await seen()).slice(from);
     expect(after.indexOf("/ingestions")).toBeGreaterThanOrEqual(0);
     expect(after.indexOf(`/drafts/${id}`)).toBeGreaterThan(after.indexOf("/ingestions"));
     expect((await writes()).filter(([m]) => m === "POST").map(([, r]) => r)).toEqual(["/ingestions", "/ingestions"]);
     // A reload: the page signs in again and shows the import's state and what it allows.
     await browser.refresh();
-    await expect($("main h2")).toHaveText(`Import ${short(second)}: released`, { wait: 20_000 });
-    await expect(allowed()).toHaveText(`Released into draft ${short(id)}. Nothing is left to do.`);
+    await expect($("main h2")).toHaveText(`Import of ${UNNAMED_MACHINE}: released`, { wait: 20_000 });
+    await expect(allowed()).toHaveText(`Released into draft ${called(id)}. Nothing is left to do.`);
   });
 
   it("ETAG-02, refused: another write moves the draft before the page re-reads it after released; the ETag is not kept, and Review the change shows the newer revision", async function () {
@@ -161,9 +167,9 @@ describe("the import pages (#340)", () => {
     expect(other.status).toBe(200);
     await faults({ upstream: at });
     await release();
-    await expect(ended()).toHaveText(expect.stringContaining(`Draft ${short(id)} is now revision ${imported + 1}: another write followed this import's revision ${imported}. Its ETag is not kept. Review the change before writing again.`), { wait: 20_000 });
+    await expect(ended()).toHaveText(expect.stringContaining(`Draft ${called(id)} is now revision ${imported + 1}: another write followed this import's revision ${imported}. Its ETag is not kept. Review the change before writing again.`), { wait: 20_000 });
     await ended().$("a=Review the change").click();
-    await expect($("main h2")).toHaveText(expect.stringContaining(`revision ${imported + 1}`), { wait: 20_000 });
+    await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining(`revision ${imported + 1}`), { wait: 20_000 });
   });
 
   it("encrypted staging with review: the import pauses, the page says so, and after a reload shows paused with continue or abandon; the paused filter lists it", async function () {
@@ -181,7 +187,7 @@ describe("the import pages (#340)", () => {
     await expect(ended()).toHaveText(expect.stringMatching(/^Paused for review \(expires .+\)\.$/), { wait: 20_000 });
     await expect(allowed()).toHaveText("Paused for review. Continue it, or abandon it.", { wait: 20_000 });
     await browser.refresh();
-    await expect($("main h2")).toHaveText(`Import ${short(ing)}: paused`, { wait: 20_000 });
+    await expect($("main h2")).toHaveText(`Import of ${UNNAMED_MACHINE}: paused`, { wait: 20_000 });
     await expect(allowed()).toHaveText("Paused for review. Continue it, or abandon it.");
     await $('nav[aria-label="Main"]').$("a=Changes").click();
     await $("main").$("a=Imports").click();

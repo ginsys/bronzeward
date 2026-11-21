@@ -9,14 +9,15 @@ import type { components } from "./api/v1";
 import { Claim } from "./claim.tsx";
 import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
 import { Form, field, useSend, useUnsaved, useWrites } from "./forms.tsx";
-import { Id, type Load, type Reads, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
+import { Detail, Id, type Load, type Reads, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
 import { markLines } from "./marks.tsx";
 import { eventLine, type Refusal, refusalOf, refusalText, terminal, type Watch, type Watched, watch } from "./progress.ts";
 import type { Client, ReadResult } from "./request.ts";
 import { machineOptions, sharedAddresses } from "./machines.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
-import { MachineById, Named } from "./titles.tsx";
+import { ImportedConfigurationRef, MachineById, Named, useMachineText } from "./titles.tsx";
+import { operationTitle } from "./titles.ts";
 import type { Outcome, WriteSpec } from "./write.ts";
 
 type S = components["schemas"];
@@ -63,7 +64,7 @@ export function allowed(b: Ingestion, now: number): ReactNode {
         ? "Its run stopped renewing the lease. Take it over to resume, or abandon it."
         : "Its run holds the claim. Once the lease lapses it can be taken over. It can be abandoned now.";
     case "released":
-      return <>Released into draft <Id id={b.draft} />. Nothing is left to do.</>;
+      return <>Released into draft <Named id={b.draft} />. Nothing is left to do.</>;
   }
   return <>Ended: {b.state}. <ImportAgain b={b} /></>;
 }
@@ -100,7 +101,8 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
     if (r === null || typeof r.draftRevision !== "number") return `Import operation ${short(o.id)} succeeded without naming its draft revision.`;
     // A mark that no pause applied is not applied, whatever released the import after it (the CLI's markOutcome).
     const lost = run !== undefined && ((run.marked && (last !== "paused" || run.refused !== undefined)) || run.replacedBy !== undefined) ? `The mark was not applied: ${notApplied(last, run, o)} ` : "";
-    const done = <>{lost}Import {short(b.id)} released into draft <Id id={r.draft} /> (revision {r.draftRevision}), import base {short(r.importBaseRevision)}.</>;
+    const base = b.machine == null ? <Id id={r.importBaseRevision} /> : <ImportedConfigurationRef machine={b.machine} revision={r.importBaseRevision} />;
+    const done = <>{lost}This import released into draft <Named id={r.draft} /> (revision {r.draftRevision}), with {base} as its base.</>;
     const own = started.get(b.id);
     if (own?.draft !== r.draft) return done;
     if (own.epoch === undefined || own.epoch !== epoch) return <>{done} The installation entered recovery mode or was restored since this import started, so the draft's ETag is not kept. Open it before writing again.</>;
@@ -108,7 +110,7 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
     if (d.kind !== "ok" || d.etag === undefined) return <>{done} The draft could not be read again, so its ETag is not kept. Open it before writing again.</>;
     if (read !== epoch) return <>{done} The installation entered recovery mode or was restored while the draft was read again, so its ETag is not kept. Open it before writing again.</>;
     if (d.data.revision !== r.draftRevision) {
-      return <>{done} Draft {short(r.draft)} is now revision {d.data.revision}: another write followed this import's revision {r.draftRevision}. Its ETag is not kept. <Ref to={`/drafts/${r.draft}`} id={r.draft}>Review the change</Ref> before writing again.</>;
+      return <>{done} Draft <Named id={r.draft} /> is now revision {d.data.revision}: another write followed this import's revision {r.draftRevision}. Its ETag is not kept. <Ref to={`/drafts/${r.draft}`} id={r.draft}>Review the change</Ref> before writing again.</>;
     }
     keepETag(r.draft, d.etag, epoch);
     return done;
@@ -141,6 +143,14 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
   return undefined;
 }
 
+// An import page's heading: "Import of cp1: released". While the machine is not read, or the import is not, the shortened
+// identifier stands in, as it does in every other title.
+export function importHeading(id: string, b: Pick<Ingestion, "machine" | "state"> | undefined, machine: string | undefined): string {
+  if (b === undefined) return `Import ${short(id)}`;
+  if (b.machine != null && machine === undefined) return `Import ${short(id)}: ${b.state}`;
+  return `${operationTitle("ingest", { machine }) ?? "Import"}: ${b.state}`;
+}
+
 // The import page (/ingestions/{id}): a reload reads the ingestion and shows what its state allows.
 export function IngestionItem({ id }: { id: string }) {
   const [n, setN] = useState(0);
@@ -156,14 +166,16 @@ export function IngestionItem({ id }: { id: string }) {
   has.current = item.kind === "ok";
   const pending = usePending(item, "the import");
   const b = item.kind === "ok" ? item.data : undefined;
+  const machine = useMachineText(b?.machine);
   const now = Date.now();
   const stamp = useRef<ReadStamp>({ keys: [], began: now, read: undefined });
   stamp.current = stampRead(stamp.current, b, [n, shellAgain, view], now);
   return (
     <>
-      <h2>Import {short(id)}{b === undefined ? "" : `: ${b.state}`}</h2>
+      <h2>{importHeading(id, b, machine)}</h2>
       {b === undefined ? pending : (
         <>
+          <Detail id={b.id} />
           <dl>
             <dt>State</dt><dd>{b.state}, {b.kind}, {b.mode} staging</dd>
             <dt>Machine</dt><dd><MachineById id={b.machine} /></dd>
@@ -668,7 +680,7 @@ export function StartImport({ query }: { query: string }) {
     <>
       <h2>{label}</h2>
       {params.refusal !== undefined && <Status testid="start-refused">{params.refusal}</Status>}
-      <Form label={label} onSubmit={(d) => void submit(d)} w={w} done={(data) => `Import ${short((data as { ingestion: string }).ingestion)} started.`}>
+      <Form label={label} onSubmit={(d) => void submit(d)} w={w} done={(data) => <><Named id={(data as { ingestion: string }).ingestion} /> started.</>}>
         <p>
           <label>Machine:{" "}
             <select name="machine" required value={machine} onChange={(e) => setMachine(e.target.value)}>

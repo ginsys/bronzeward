@@ -13,7 +13,7 @@
 // check finds no answer of that case's review. The cases sign in as h-author.
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
-import { short } from "../../src/list.tsx";
+import { UNNAMED_MACHINE } from "../../src/words.ts";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE } from "../auth.conf.ts";
 import { absent, cacheControl, cacheHolds, eventually, faults, fixtureSignIn, interrupt, mint, settled, storageControl, storageEmptyAfterPause } from "./helpers.ts";
 
@@ -249,7 +249,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // The review ends with the paused state it was read in; the page holds no text of it.
     await absent(reviewShown, "the review text");
     await $("button=Continue import").click();
-    await expect(ended()).toHaveText(holds(`Import ${short(id)} released into draft`), { wait: 60_000 });
+    await expect(ended()).toHaveText(holds("This import released into draft"), { wait: 60_000 });
     // The import base this release wrote, for the document case that follows (ginsys/bronzeward#858).
     const ing = await api("h-author", "GET", `/ingestions/${id}`);
     const op = await api("h-author", "GET", `/operations/${ing.body!["operation"] as string}`);
@@ -465,7 +465,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await browser.waitUntil(async () => {
       await browser.refresh();
       const heading = await $("main h2").getText();
-      return heading === `Import ${short(id)}: released`;
+      return heading === `Import of ${UNNAMED_MACHINE}: released`;
     }, { timeout: 60_000, interval: 3_000, timeoutMsg: "the import does not show its claim released after the commit went" });
     await absent(() => $("button=Abandon import").isExisting(), "Abandon import after the claim was released");
   });
@@ -494,7 +494,7 @@ describe("an expired claim (ginsys/bronzeward#341)", () => {
     // The page can offer a continuation until it reads the state the sweep left, so the state is read by reload.
     await browser.waitUntil(async () => {
       await browser.refresh();
-      return (await $("main h2").getText()).startsWith(`Import ${short(id)}: `) && !(await $("main h2").getText()).endsWith(": paused");
+      return (await $("main h2").getText()).startsWith(`Import of ${UNNAMED_MACHINE}: `) && !(await $("main h2").getText()).endsWith(": paused");
     }, { timeout: 150_000, interval: 5_000, timeoutMsg: "the import still shows paused long after its absolute expiry" });
     await expect(allowed()).toHaveText(holds("Ended: "));
     await absent(() => $("button=Review import").isExisting(), "Review import after the import ended");

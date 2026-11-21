@@ -13,7 +13,7 @@
 // (retention.test.ts reads this source). After each case the storage check finds nothing in storage,
 // IndexedDB or caches, and the protected cases find no cached answer of their review.
 import { $, browser, expect } from "@wdio/globals";
-import { short } from "../../src/list.tsx";
+import { UNNAMED_MACHINE } from "../../src/words.ts";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
 import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, itNarrow, measure, narrow, onMain, overflows, pickByKeys, storageControl, storageEmptyAfterPause, syntheticMachine, tab, tabTo } from "./helpers.ts";
 
@@ -57,7 +57,7 @@ async function startImport(staging: "encrypted" | "transient", review: boolean, 
 async function openImport(id: string, heading: string) {
   expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
   await browser.url(`${FIXTURE_PAGE}/ingestions/${id}`);
-  await expect($("main h2")).toHaveText(`Import ${short(id)}: ${heading}`, { wait: 30_000 });
+  await expect($("main h2")).toHaveText(`Import of ${UNNAMED_MACHINE}: ${heading}`, { wait: 30_000 });
 }
 
 // What every protected case leaves behind: nothing in storage, IndexedDB or caches, and no cached
@@ -208,7 +208,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await $("main form").$("label*=Document").$("textarea").waitForExist({ timeout: 10_000 });
       expect(["the wizard", await overflows()]).toEqual(["the wizard", 0]);
       await browser.url(`${FIXTURE_PAGE}/ingestions/${released}`);
-      await expect($("main h2")).toHaveText(`Import ${short(released)}: released`, { wait: 30_000 });
+      await expect($("main h2")).toHaveText(`Import of ${UNNAMED_MACHINE}: released`, { wait: 30_000 });
       expect(["the import page", await overflows()]).toEqual(["the import page", 0]);
     });
   });
@@ -247,7 +247,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await focusSettles(() => focusIn(CLAIM), "the claim section");
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Continue import", "Continue import");
       await browser.keys("Enter");
-      await expect(ended()).toHaveText(holds(`Import ${short(id)} released into draft`), { wait: 60_000 });
+      await expect(ended()).toHaveText(holds("This import released into draft"), { wait: 60_000 });
       await focusSettles(() => focusIn(CLAIM), "the claim section");
     });
 
@@ -350,7 +350,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await focusSettles(() => focusIn(PANE), "the editor pane");
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Show their change", "Show their change");
       await browser.keys("Enter");
-      await expect($("main h2")).toHaveText(holds(`revision ${now}`), { wait: 20_000 });
+      await expect($('[data-testid="draft-line"]')).toHaveText(holds(`revision ${now}`), { wait: 20_000 });
       await expect($("label*=Their text")).toBeExisting();
       await w.after("their change shown");
       const seen = await measure();
@@ -378,7 +378,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await pane().$("button=Save").click();
       await expect(pane().$('[data-testid="status"]')).toHaveText(holds("Someone changed this draft"), { wait: 20_000 });
       await pane().$("button=Show their change").click();
-      await expect($("main h2")).toHaveText(holds(`revision ${now}`), { wait: 20_000 });
+      await expect($('[data-testid="draft-line"]')).toHaveText(holds(`revision ${now}`), { wait: 20_000 });
       await expect($("label*=Their text")).toBeExisting();
       await narrow(async () => {
         expect(["the conflict view", await overflows()]).toEqual(["the conflict view", 0]);

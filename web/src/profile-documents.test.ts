@@ -10,6 +10,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
+import { COPY } from "./words.ts";
 import type { ReadResult } from "./request.ts";
 import { RevisionItem, SANITIZED_NOTICE, SourceItem, view } from "./resources.tsx";
 import { ShellContext } from "./shell.tsx";
@@ -123,7 +124,8 @@ describe.each(["profile", "revision"] as const)("ginsys/bronzeward#997: the %s p
     await mount(page);
     await settled();
     expect(documents()).toHaveLength(3);
-    expect(box.querySelector("button")).toBeNull();
+    // The revision page's one control is the identifier's Copy on its detail line, none of the documents'.
+    expect([...box.querySelectorAll("button")].map((b) => b.textContent)).toEqual(page === "revision" ? [COPY] : []);
     expect(box.querySelector("a[download]")).toBeNull();
     expect(box.querySelector("textarea")).toBeNull();
     expect(localStorage.length + sessionStorage.length).toBe(0);
@@ -271,7 +273,7 @@ describe("ginsys/bronzeward#988: the fragment revision view", () => {
     expect(pre.tagName).toBe("PRE");
     expect(pre.textContent).toBe(text);
     expect(pre.children).toHaveLength(0);
-    expect(box.querySelector("button")).toBeNull();
+    expect([...box.querySelectorAll("button")].map((b) => b.textContent)).toEqual([COPY]);
     expect(box.querySelector("a[download]")).toBeNull();
     expect(box.querySelector("textarea, input")).toBeNull();
     expect(box.querySelector("script, b")).toBeNull();

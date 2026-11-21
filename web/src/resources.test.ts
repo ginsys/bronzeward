@@ -133,15 +133,16 @@ describe("the import base summary (ginsys/bronzeward#857)", () => {
 
   test("it is loading until the read answers (§8)", () => {
     const out = html(h(ImportBaseItem, { id: ibr }));
-    expect(out).toContain("Import base revision ibr_2xxa…qa4m");
-    expect(out).toContain("Loading the import base revision");
+    expect(out).toContain("Imported configuration ibr_2xxa…qa4m");
+    expect(out).toContain("Loading the imported configuration");
   });
 
   test("it shows the size and counts, and nothing of the document, a digest or a reference", () => {
     // A read that wrongly carried the text or a digest must still not reach the page: the rows name their fields.
     const wrong = { ...summary, document: "machine:\n  hostname: bw-sentinel-text", configurationDigest: "ab".repeat(32), baselineDigest: "cd".repeat(32), names: ["registry/secret-name"] };
     const out = html(h(ImportBaseRows, { r: wrong }));
-    for (const s of ["Identifier", ibr, "Machine", "Author", "Created", "Document size", "1234 bytes", "References", "Embedded documents"]) expect(out).toContain(s);
+    // The identifier is on the detail line, and the day is "Imported".
+    for (const s of ["Identifier", ibr, "Machine", "Author", "Imported", "Document size", "1234 bytes", "References", "Embedded documents"]) expect(out).toContain(s);
     for (const s of ["bw-sentinel-text", "ab".repeat(32), "cd".repeat(32), "registry/secret-name", "Digest</dt>"]) expect(out).not.toContain(s);
     expect(out).toContain("The digests and reference names are not shown.");
     expect(out).toContain("only the author who imported it and reviewed it may read it");
