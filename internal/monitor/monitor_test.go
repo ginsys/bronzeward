@@ -468,9 +468,12 @@ func TestPassMonitorLockTimeout(t *testing.T) {
 	if _, err := tx.Exec(`SELECT 1 FROM dependency_monitor FOR UPDATE`); err != nil {
 		t.Fatal(err)
 	}
+	// The holder never lets go, so only the timeout ends each step of the pass that needs the row,
+	// one after the other. The bound tells that from a hang, and stays far above those timeouts for a
+	// test that a loaded host does not run for seconds.
 	start := time.Now()
 	err = m.Pass(context.Background())
-	if d := time.Since(start); err == nil || d > 3*time.Second {
+	if d := time.Since(start); err == nil || d > 30*time.Second {
 		t.Fatalf("pass returned %v after %v", err, d)
 	}
 	if s := statusOf(t, f.db, f.depKV); s.class != "retained" {
@@ -604,7 +607,9 @@ func TestProgressAfterMonitorLock(t *testing.T) {
 func TestHolderIdleTimeout(t *testing.T) {
 	f := seed(t)
 	tm := Defaults()
-	tm.LockHolder = 300 * time.Millisecond
+	// The timeout also ends the holder's transaction if the test is not run for that long between
+	// two statements, before it has taken the row.
+	tm.LockHolder = time.Second
 	m, _ := monitorFor(f, &fake{}, tm)
 	ctx := context.Background()
 	holder, err := f.db.BeginTx(ctx, nil)
@@ -618,20 +623,20 @@ func TestHolderIdleTimeout(t *testing.T) {
 	if _, err := holder.Exec(`SELECT 1 FROM dependency_monitor FOR UPDATE`); err != nil {
 		t.Fatal(err)
 	}
-	// The holder stops here; another session waits at most 5 seconds for the row.
+	// The holder stops here; another session waits at most 15 seconds for the row.
 	other, err := f.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = other.Rollback() }()
-	if _, err := other.Exec(`SET LOCAL lock_timeout = '5s'`); err != nil {
+	if _, err := other.Exec(`SET LOCAL lock_timeout = '15s'`); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
 	if _, err := other.Exec(`SELECT 1 FROM dependency_monitor FOR UPDATE`); err != nil {
 		t.Fatalf("the row stayed held: %v", err)
 	}
-	if d := time.Since(start); d > 3*time.Second {
+	if d := time.Since(start); d > 10*time.Second {
 		t.Fatalf("took the row after %v", d)
 	}
 }

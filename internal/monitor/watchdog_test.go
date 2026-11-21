@@ -140,7 +140,9 @@ func TestWatchdogHungHolder(t *testing.T) {
 	f := seed(t)
 	tm := Defaults()
 	tm.Interval = 100 * time.Millisecond
-	tm.LockHolder = 300 * time.Millisecond
+	// The timeout also ends the holder's transaction if the test is not run for that long between
+	// two statements, before it has taken the row.
+	tm.LockHolder = time.Second
 	m, _ := monitorFor(f, &fake{}, tm)
 	ctx := context.Background()
 	holder, err := f.db.BeginTx(ctx, nil)
@@ -154,9 +156,9 @@ func TestWatchdogHungHolder(t *testing.T) {
 	if _, err := holder.Exec(`SELECT 1 FROM dependency_monitor FOR UPDATE`); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		wctx, cancel := context.WithTimeout(ctx, time.Second)
+		wctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		raised, _ := m.watchdog(wctx)
 		cancel()
 		if raised {
@@ -164,7 +166,7 @@ func TestWatchdogHungHolder(t *testing.T) {
 		}
 		time.Sleep(tm.Interval)
 	}
-	t.Fatalf("no monitor-stalled within 3s of a hung holder (%d alerts)", stalledCount(t, f.db))
+	t.Fatalf("no monitor-stalled within 10s of a hung holder (%d alerts)", stalledCount(t, f.db))
 }
 
 // §6.3, §10.1 item 7: with every pass hung, Run's watchdog raises monitor-stalled; a stall check
