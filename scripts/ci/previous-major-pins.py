@@ -108,22 +108,19 @@ def main(argv):
         with open(path, encoding="utf-8") as fh:
             old = json.load(fh)
         new = build(old)
-    except Exception as e:  # noqa: BLE001  anything that stops the read is exit 2: an uncaught exception would exit 1, which reads as drift
+        text = json.dumps(new, indent=2) + "\n"
+        diff = differences(old, new)
+        if mode == "--write" and diff:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+    except Exception as e:  # noqa: BLE001  any failure is exit 2: an uncaught exception would exit 1, which reads as drift
         print(f"previous-major-pins: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
-    text = json.dumps(new, indent=2) + "\n"
     if mode == "print":
         sys.stdout.write(text)
         return 0
-    diff = differences(old, new)
-    if mode == "--check":
-        print("\n".join(diff))
-        return 1 if diff else 0
-    if diff:
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(text)
     print("\n".join(diff))
-    return 0
+    return 1 if diff and mode == "--check" else 0
 
 
 if __name__ == "__main__":
