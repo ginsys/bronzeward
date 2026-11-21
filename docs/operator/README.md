@@ -76,7 +76,7 @@ The blocks:
 
 | Block | What you set |
 |---|---|
-| `listen` | The address to serve on. Plain HTTP: terminate TLS in front of it. |
+| `listen` | The address to serve on. Plain HTTP: terminate TLS in front of it. Port `0` takes a free port, which `serve` reports when it starts (see [Migrate, then serve](#migrate-then-serve)). |
 | `database.dsn` | Your PostgreSQL DSN, with credentials. |
 | `auth.oidc` | Your identity provider's issuer, the audience, the groups claim, the longest token lifetime accepted (default 15 minutes). |
 | `auth.roles` | Which groups grant `viewer`, `author`, `publisher`, `approver` and `recovery-admin`. |
@@ -114,6 +114,13 @@ From another shell:
 ```sh
 curl -i http://127.0.0.1:8080/livez           # 204 once serving
 ```
+
+`serve` binds its listen address first, before it opens the database, and prints one line on standard
+output: `listening on <host:port>`. The address is the one the kernel bound, so `listen: 127.0.0.1:0`
+reports the port it took and `listen: :0` reports `[::]:<port>`. An address that is taken ends `serve`
+with an error naming it, before any database work. The reported address is bound, not ready: the
+kernel accepts connections while `serve` opens the database, and `/livez` answers `204` only once
+`serve` is serving.
 
 `migrate` is the only way the schema changes. Run it with every server stopped. It applies the
 binary's migrations, records the installation epoch on first use, and prints

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -326,18 +325,12 @@ func (f *fixture) another(t *testing.T, flags ...string) (string, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := l.Addr().String()
-	l.Close()
 	old := []byte("listen: " + strings.TrimPrefix(f.base, "http://") + "\n")
 	if !bytes.Contains(b, old) {
 		t.Fatalf("the configuration holds no %q", old)
 	}
 	cfg := filepath.Join(t.TempDir(), "another.yaml")
-	if err := os.WriteFile(cfg, bytes.Replace(b, old, []byte("listen: "+addr+"\n"), 1), 0o600); err != nil {
+	if err := os.WriteFile(cfg, bytes.Replace(b, old, []byte("listen: 127.0.0.1:0\n"), 1), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	s := &served{cfg: cfg}
@@ -351,16 +344,15 @@ func (f *fixture) another(t *testing.T, flags ...string) (string, func()) {
 			t.Logf("serve %s log:\n%s", flags, s.log.String())
 		}
 	})
-	base := "http://" + addr
-	for i := 0; ; i++ {
-		if r, err := http.Get(base + "/livez"); err == nil && r.StatusCode == http.StatusNoContent {
-			r.Body.Close()
-			return base, stop
-		} else if i == 100 {
-			t.Fatalf("the second serve did not answer /livez: %v", err)
-		}
-		time.Sleep(100 * time.Millisecond)
+	addr, err := s.reported()
+	if err == nil {
+		err = awaitLive("http://"+addr, s.done)
 	}
+	if err != nil {
+		stop()
+		t.Fatalf("the second serve: %v\n%s", err, s.log.String())
+	}
+	return "http://" + addr, stop
 }
 
 // operationCases are the client-contracts.md §12 cases of operation watch (#354);

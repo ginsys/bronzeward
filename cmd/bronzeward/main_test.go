@@ -72,7 +72,7 @@ func TestServeReadsEachTokenFile(t *testing.T) {
 			writeFile(t, cfg, body, 0o600)
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
-			err := serveContext(ctx, []string{"-config", cfg})
+			err := serveContext(ctx, []string{"-config", cfg}, io.Discard)
 			if err == nil || !strings.Contains(err.Error(), "provider."+missing) {
 				t.Fatalf("serve: %v; want a refusal naming provider.%s", err, missing)
 			}

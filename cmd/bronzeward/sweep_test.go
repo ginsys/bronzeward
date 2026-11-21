@@ -5,11 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
-	"math/rand/v2"
-	"net"
 	"net/http"
-	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -238,9 +234,7 @@ func TestServeSweepsWithoutIngestion(t *testing.T) {
 	fallbackSweep = 20 * time.Millisecond
 	t.Cleanup(func() { fallbackSweep = old })
 	cfg := configFile(t, dsn) // before the goroutine: its t.Fatal must not leave errc unsent
-	ctx, cancel := context.WithCancel(t.Context())
-	errc := make(chan error, 1)
-	go func() { errc <- serveContext(ctx, []string{"-config", cfg}) }()
+	_, cancel, errc := startServe(t, cfg)
 	defer func() {
 		cancel()
 		if err := <-errc; err != nil {
@@ -252,125 +246,43 @@ func TestServeSweepsWithoutIngestion(t *testing.T) {
 	waitAbandoned(t, db, after, "the claim another instance left after startup")
 }
 
-// serveUntilLive starts serve on a free port with extra flags and returns once it answers /livez,
-// so its startup, the startup sweep included, has completed; stop ends it. The port is picked and
-// freed before serve binds it, so another test's server can take it in between
-// (ginsys/bronzeward#940): serve then ends on the bind, and the other server answers /livez in its
-// place. Such an end is tried again on a new port. The proper fix is for serve to report the address
-// it bound, which is product code.
+// serveUntilLive starts serve on a port it binds itself (listen port 0) with extra flags and returns
+// once it answers /livez, so its startup, the startup sweep included, has completed; stop ends it.
+// serve reports the address it bound (ginsys/bronzeward#948), so no port is picked and no start is
+// repeated.
 func serveUntilLive(t *testing.T, dsn string, extra ...string) (stop func()) {
 	t.Helper()
-	for attempt := 1; ; attempt++ {
-		stop, err := tryServeUntilLive(t, dsn, extra...)
-		if err == nil {
-			return stop
-		}
-		if attempt == 5 {
-			t.Fatal(err)
-		}
-		t.Logf("%v, trying another port", err)
-	}
-}
-
-// pickAddr returns a local address that nothing listens on now, on a port below Linux's ephemeral
-// range (32768 and up): the kernel hands that range to every listener on port 0 and every outgoing
-// connection, so a port from it is the one most likely taken before serve binds it. A test may
-// replace it.
-var pickAddr = func(t *testing.T) string {
-	t.Helper()
-	for range 50 {
-		addr := "127.0.0.1:" + strconv.Itoa(20000+rand.IntN(12000))
-		if l, err := net.Listen("tcp", addr); err == nil {
-			_ = l.Close()
-			return addr
-		}
-	}
-	t.Fatal("no free port below the ephemeral range")
-	return ""
-}
-
-// A port another server took before serve bound it is not serve's own: serveUntilLive must end on a
-// port where its serve runs (ginsys/bronzeward#940). The control: the first port is held by a server
-// that answers /livez with 204, as a server of another test does.
-func TestServeUntilLiveTakenPort(t *testing.T) {
-	_, dsn, _, _, _ := sweepFixtureDSN(t)
-	// It answers after 2 s, which serve's end on the bind precedes even on a loaded host, so the
-	// control does not depend on how fast serve fails.
-	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Second)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer held.Close()
-	real := pickAddr
-	picks := 0
-	pickAddr = func(t *testing.T) string {
-		picks++
-		if picks == 1 {
-			return held.Listener.Addr().String()
-		}
-		return real(t)
-	}
-	defer func() { pickAddr = real }()
-	stop := serveUntilLive(t, dsn)
-	stop()
-	if picks != 2 {
-		t.Fatalf("serve was started on %d addresses, want the held one and one more", picks)
-	}
-}
-
-// bindGrace is how long a /livez answer must be followed by a running serve before it counts as
-// serve's own: serve binds after it opens the database, so a server that holds the address already
-// answers first, and serve then ends on the bind.
-const bindGrace = 500 * time.Millisecond
-
-// tryServeUntilLive is serveUntilLive on one port, which returns the end of serve, before or within
-// bindGrace of the first /livez answer, instead of failing the test.
-func tryServeUntilLive(t *testing.T, dsn string, extra ...string) (stop func(), _ error) {
-	t.Helper()
-	addr := pickAddr(t)
-	cfg := configFileAt(t, dsn, addr)
-	ctx, cancel := context.WithCancel(t.Context())
-	errc := make(chan error, 1)
-	go func() { errc <- serveContext(ctx, append([]string{"-config", cfg}, extra...)) }()
+	cfg := configFile(t, dsn) // before the goroutine: its t.Fatal must not leave errc unsent
+	out, cancel, errc := startServe(t, cfg, extra...)
 	stop = func() {
 		cancel()
 		if err := <-errc; err != nil {
 			t.Errorf("serve: %v", err)
 		}
 	}
-	for deadline := time.Now().Add(15 * time.Second); ; {
-		if r, err := http.Get("http://" + addr + "/livez"); err == nil {
+	var addr string
+	select {
+	case addr = <-out.addr:
+	case err := <-errc:
+		t.Fatalf("serve ended before it bound its address: %v", err)
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if r, err := client.Get("http://" + addr + "/livez"); err == nil {
 			_ = r.Body.Close()
 			if r.StatusCode == http.StatusNoContent {
-				// An end within bindGrace is the bind failing; the timer and the end may both be ready
-				// when this goroutine runs again, so the end is read again after the wait.
-				var ended error
-				select {
-				case ended = <-errc:
-				case <-time.After(bindGrace):
-					select {
-					case ended = <-errc:
-					default:
-					}
-				}
-				if ended != nil {
-					cancel()
-					return nil, fmt.Errorf("serve ended after /livez answered: %w", ended)
-				}
-				return stop, nil
+				return stop
 			}
 		}
 		select {
 		case err := <-errc:
-			cancel()
-			return nil, fmt.Errorf("serve ended before it answered /livez: %w", err)
+			t.Fatalf("serve ended before it answered /livez: %v", err)
 		default:
 		}
 		if time.Now().After(deadline) {
 			stop()
 			t.Fatal("serve never answered /livez")
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 

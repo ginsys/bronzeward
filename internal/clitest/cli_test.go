@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -22,7 +21,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -156,9 +154,8 @@ func startConfigExec(t *testing.T, roles, issuerURL, audience, execution, extra 
 		issuerURL = f.iss.URL
 	}
 	cfg := filepath.Join(t.TempDir(), "bronzeward.yaml")
-	// listenOn points the fixture and its configuration at a new address.
+	// listenOn writes the server's configuration listening on addr.
 	listenOn := func(addr string) {
-		f.base = "http://" + addr
 		body := "listen: " + addr + "\ndatabase:\n  dsn: " + dsn + "\nauth:\n  oidc:\n    issuer: " + issuerURL + "\n    audience: " + audience + "\n" +
 			"  roles: {viewer: [bw-viewers], author: [bw-authors], publisher: [bw-publishers], approver: [bw-approvers], recovery-admin: [bw-recovery]}\n" +
 			"  deniedSubjects: [{iss: \"" + f.iss.URL + "\", sub: h-denied}]\n" +
@@ -167,7 +164,7 @@ func startConfigExec(t *testing.T, roles, issuerURL, audience, execution, extra 
 			t.Fatal(err)
 		}
 	}
-	listenOn(pickAddr(t))
+	listenOn("127.0.0.1:0")
 	f.server("migrate", "-config", cfg)
 	f.token = tokenPattern.FindString(f.server("token", "issue", "-config", cfg, "-name", "ci", "-roles", roles,
 		"-responsible", "h-all", "-operator", "h-operator"))
@@ -185,43 +182,12 @@ func startConfigExec(t *testing.T, roles, issuerURL, audience, execution, extra 
 			t.Logf("serve log:\n%s", f.srv.log.String())
 		}
 	})
-	// The address is picked and freed before serve binds it, so another process can take it in
-	// between (ginsys/bronzeward#940): serve then exits on the bind, and a server of another test on
-	// that address answers /livez in its place. tryServeUp reports that exit, and a new address is
-	// tried. The proper fix is for serve to report the address it bound, which is product code.
-	for attempt := 1; ; attempt++ {
-		err := f.tryServeUp()
-		if err == nil {
-			return f
-		}
-		f.srv.stop() // the log is read only after the process, and its copy of the output, ended
-		if !errors.Is(err, errServeExited) || attempt == serveAttempts {
-			t.Fatalf("%v\n%s", err, f.srv.log.String())
-		}
-		t.Logf("serve on %s: %v, trying another address:\n%s", f.base, err, f.srv.log.String())
-		f.srv.log.Reset()
-		listenOn(pickAddr(t))
-	}
-}
-
-// serveAttempts is how many addresses startConfigExec tries for serve.
-const serveAttempts = 5
-
-// pickAddr returns a local address that nothing listens on now, on a port below Linux's ephemeral
-// range (32768 and up): the kernel hands that range to every listener on port 0 and every outgoing
-// connection, so a port from it is the one most likely taken before serve binds it. A test may
-// replace it.
-var pickAddr = func(t *testing.T) string {
-	t.Helper()
-	for range 50 {
-		addr := "127.0.0.1:" + strconv.Itoa(20000+rand.IntN(12000))
-		if l, err := net.Listen("tcp", addr); err == nil {
-			l.Close()
-			return addr
-		}
-	}
-	t.Fatal("no free port below the ephemeral range")
-	return ""
+	// serve binds the port the kernel picks and reports it (ginsys/bronzeward#948); the configuration
+	// then names that address, so a restart binds the same port again.
+	addr := f.serveUp()
+	f.base = "http://" + addr
+	listenOn(addr)
+	return f
 }
 
 // served is the fixture's bronzeward serve: its configuration, its process, and the output of
@@ -232,30 +198,61 @@ type served struct {
 	env  []string // added to the server's environment
 	cmd  *exec.Cmd
 	done chan struct{} // closed once cmd has exited and its output is copied
-	log  bytes.Buffer
+	addr chan string   // the address the running process reported, once
+	log  serveLog
 }
 
-var errServeExited = errors.New("serve exited before it was up")
+// serveLog is the text serve wrote, safe to read while it runs.
+type serveLog struct {
+	mu   sync.Mutex
+	text string
+}
 
-// bindGrace is how long a /livez answer must be followed by a running serve before it counts as
-// serve's own: serve binds its address after it opens the database, so a server that holds the
-// address already answers first, and serve then exits on the bind.
-const bindGrace = 500 * time.Millisecond
+func (l *serveLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.text += string(p)
+	return len(p), nil
+}
 
-// serveUp starts bronzeward serve on the fixture's configuration, with flags such as
-// -recovery-start, and waits until it answers.
-func (f *fixture) serveUp(flags ...string) {
-	f.t.Helper()
-	if err := f.tryServeUp(flags...); err != nil {
-		f.srv.stop()
-		f.t.Fatalf("%v\n%s", err, f.srv.log.String())
+func (l *serveLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.text
+}
+
+// reportScanner copies serve's output to the log and sends the address of the first complete
+// "listening on <address>" line on addr, once. A partial line is held until its newline arrives.
+type reportScanner struct {
+	log  *serveLog
+	addr chan string
+	buf  string
+	sent bool
+}
+
+func (w *reportScanner) Write(p []byte) (int, error) {
+	_, _ = w.log.Write(p)
+	if w.sent {
+		return len(p), nil
+	}
+	w.buf += string(p)
+	for {
+		line, rest, ok := strings.Cut(w.buf, "\n")
+		if !ok {
+			return len(p), nil
+		}
+		w.buf = rest
+		if a, ok := strings.CutPrefix(line, "listening on "); ok {
+			w.sent = true
+			w.addr <- a
+			return len(p), nil
+		}
 	}
 }
 
-// tryServeUp is serveUp that returns the failure. It returns errServeExited where serve has
-// exited, which is the one failure another address can cure, and counts a /livez answer only
-// while serve is running and still is after bindGrace.
-func (f *fixture) tryServeUp(flags ...string) error {
+// serveUp starts bronzeward serve on the fixture's configuration, with flags such as
+// -recovery-start, waits until it reports its address and answers /livez, and returns the address.
+func (f *fixture) serveUp(flags ...string) string {
 	f.t.Helper()
 	dir := f.srv.dir
 	if dir == "" {
@@ -264,47 +261,67 @@ func (f *fixture) tryServeUp(flags ...string) error {
 	if err := f.srv.start(dir, flags...); err != nil {
 		f.t.Fatal(err)
 	}
-	done := f.srv.done
-	for i := 0; ; i++ {
-		select {
-		case <-done:
-			return errServeExited
-		default:
-		}
-		r, err := http.Get(f.base + "/livez")
-		if err == nil {
-			r.Body.Close()
-		}
-		if err == nil && r.StatusCode == http.StatusNoContent {
-			select {
-			case <-done:
-			case <-time.After(bindGrace):
-			}
-			select { // read again: both may be ready, and select then picks either
-			case <-done:
-				return errServeExited
-			default:
-				return nil
-			}
-		}
-		if i == 100 {
-			return fmt.Errorf("serve did not answer /livez: %v", err)
-		}
-		time.Sleep(100 * time.Millisecond)
+	addr, err := f.srv.reported()
+	if err == nil {
+		err = awaitLive("http://"+addr, f.srv.done)
+	}
+	if err != nil {
+		f.srv.stop() // the log is complete only after the process, and its copy of the output, ended
+		f.t.Fatalf("%v\n%s", err, f.srv.log.String())
+	}
+	return addr
+}
+
+// reported waits for the address the running serve reports, which it does before its database work.
+func (s *served) reported() (string, error) {
+	select {
+	case a := <-s.addr:
+		return a, nil
+	case <-s.done:
+		return "", errors.New("serve exited before it reported its address")
+	case <-time.After(30 * time.Second):
+		return "", errors.New("serve reported no address in 30 seconds")
 	}
 }
 
+// awaitLive polls base's /livez until it answers 204 or serve (done) has exited.
+func awaitLive(base string, done <-chan struct{}) error {
+	c := &http.Client{Timeout: 2 * time.Second}
+	var last error
+	for range 100 {
+		select {
+		case <-done:
+			return errors.New("serve exited before it was up")
+		default:
+		}
+		r, err := c.Get(base + "/livez")
+		if err == nil {
+			r.Body.Close()
+			if r.StatusCode == http.StatusNoContent {
+				return nil
+			}
+			err = fmt.Errorf("/livez answered %d", r.StatusCode)
+		}
+		last = err
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("serve did not answer /livez: %v", last)
+}
+
 // start runs the bronzeward serve of the directory dir on the configuration, with flags. It is the
-// one place that sets cmd and done, so a served with a cmd always has a done for stop to wait on.
+// one place that sets cmd, done and addr, so a served with a cmd always has a done for stop to wait
+// on. One writer takes both output streams, so its writes never overlap.
 func (s *served) start(dir string, flags ...string) error {
 	cmd := exec.Command(filepath.Join(dir, "bronzeward"), append([]string{"serve", "-config", s.cfg}, flags...)...)
 	cmd.Env = append(os.Environ(), s.env...)
-	cmd.Stdout, cmd.Stderr = &s.log, &s.log
+	addr := make(chan string, 1)
+	w := &reportScanner{log: &s.log, addr: addr}
+	cmd.Stdout, cmd.Stderr = w, w
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	done := make(chan struct{})
-	s.cmd, s.done = cmd, done
+	s.cmd, s.done, s.addr = cmd, done, addr
 	go func() { cmd.Wait(); close(done) }()
 	return nil
 }
@@ -324,7 +341,9 @@ func (s *served) stop() {
 func (f *fixture) restart(flags ...string) {
 	f.t.Helper()
 	f.srv.stop()
-	f.serveUp(flags...)
+	if addr := f.serveUp(flags...); "http://"+addr != f.base {
+		f.t.Fatalf("serve restarted on %s, want %s", addr, f.base)
+	}
 }
 
 // server runs a bronzeward subcommand and returns its standard output.
