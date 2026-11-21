@@ -771,3 +771,31 @@ func TestTitlesReuseWhatTheCommandRead(t *testing.T) {
 		t.Errorf("approve read the release %d times and its draft %d times; want once each", rel, draft)
 	}
 }
+
+// The reads of the committed operation's title are part of the cancellation's snapshot: an epoch that
+// moves during them leaves the sentence about the plan out (client contracts section 8.5).
+func TestPlanCancelEpochMovesDuringTheOperationTitle(t *testing.T) {
+	f := planServer(t)
+	f.set(func(f *planFake) {
+		f.state = "committed"
+		f.raw = map[string]string{
+			"/operations/op_BWSYNTH-apply": titleOp("op_BWSYNTH-apply", "apply-config", `{"plan":"pln_BWSYNTH"}`),
+			"/releases/rel_BWSYNTH":        titleRel("drf_BWSYNTH"),
+			"/drafts/drf_BWSYNTH":          `{"id":"drf_BWSYNTH","title":"` + titleDraft + `"}`,
+		}
+		f.epochFor = func(path string) string {
+			if path == "/operations/op_BWSYNTH-apply" {
+				return "ep_BWSYNTH-3"
+			}
+			return "ep_BWSYNTH-2"
+		}
+		f.post = func(w http.ResponseWriter, _ string) {
+			fmt.Fprint(w, `{"plan":"pln_BWSYNTH","machine":"mch_a","cancelledBy":"svc_BWSYNTH","role":"publisher","reason":"BWSYNTH",`+
+				`"act":"act_BWSYNTH","epoch":"ep_BWSYNTH-2","at":"2026-11-01T06:10:00Z"}`)
+		}
+	})
+	code, out, errOut := runCtl(t, "plan", "cancel", "pln_BWSYNTH", "--reason", "BWSYNTH")
+	if code != 0 || strings.Contains(out, "stays committed") || !strings.Contains(out, "the epoch changed from ep_BWSYNTH-2") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want the epoch change named and no sentence about the plan", code, out, errOut)
+	}
+}
