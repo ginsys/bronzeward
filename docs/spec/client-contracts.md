@@ -2086,8 +2086,8 @@ way: the identifier, the Talos endpoint and the node ID, as before.
    it has one: `machine-name`, "Hostname: node-a, taken from the machine's name."; `configuration`, "Hostname:
    set in the configuration. The machine's name does not change it." with no value, since the release records
    none and the value may be a secret reference or withheld; `none`, "Hostname: not set in
-   the configuration; the node chooses its own."; `legacy-stable`, "Hostname: the configuration asks the node to
-   choose a stable hostname of its own, so the machine's name is not used. Remove that setting to use the name.";
+   the configuration; the node chooses its own."; `legacy-stable`, "Hostname: the configuration holds the legacy
+   stable-hostname setting, so the machine's name is not used. Remove that setting to use the name.";
    `unrecorded` (a release made before the source was recorded), "Hostname: not recorded for this release." and
    no more: it never claims the node chose its own.
    For `machine-name` on a machine whose applied release recorded `none` or `legacy-stable`, the review adds: "This

@@ -935,7 +935,12 @@ For each machine:
    holds, compose one more patch, a `HostnameConfig` with
    `auto: off` and `hostname` set to the name, as the last input. The decision
    is taken once, from this composition, and every trace and flip pass of §8.1
-   composes the same patch.
+   composes the same patch. Before it, the composition is read again with each
+   boolean reference flipped in turn, a boolean member of a `mapping`
+   reference included: where a flip changes whether `machine.features.stableHostname`
+   is set, its value depends on a secret, and it counts as set whatever the
+   resolved value is. The compiler does not know which leaf a reference holds
+   until step 6, so only the flip tells it.
 6. **Trace** the composition for provenance (§8.1).
 7. **Check the output**: no string scalar holds reserved text (§5.5), and no
    resolved `string` value's stored or placed form of six bytes or more (each
@@ -1046,8 +1051,8 @@ unmeasured.
    coexist with it and the compiler does not edit that field (the composition
    decides, as step 5a does: a base that sets it and a fragment that turns it
    off compose to a configuration without it, and that machine gets the fill;
-   a `stableHostname` held in a secret reference counts as set whatever its
-   value, so that machine gets no fill and, where it has a name, its source is
+   a `stableHostname` whose value depends on a secret reference (the flip of
+   step 5a) counts as set whatever its value, so that machine gets no fill and, where it has a name, its source is
    `legacy-stable`, and neither the fill nor the source tells the value); and a machine
    with no name. The review says the last two in words (persistence and API
    §9.2). Alternatives: the name always wins, so an operator could never
@@ -1135,7 +1140,10 @@ unmeasured.
    the hostname node-a from its name, but the last release applied to machine
    node-a still sets that hostname. Give machine node-b another name for now,
    apply the release for machine node-a, then give machine node-b the name
-   node-a." The check is no guarantee. It reads only the hostname record of
+   node-a." To exchange two names, restore one machine's earlier name if
+   needed, move the first machine to a third name and apply it, give the second
+   machine the first's old name and apply it, then give the first machine its
+   final name and apply it. The check is no guarantee. It reads only the hostname record of
    each machine's applied release, so it does not cover a hostname set
    explicitly or held by a secret reference (not recorded per release), an
    apply that is committed but not finished, or an adopted baseline whose
