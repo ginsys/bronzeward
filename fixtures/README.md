@@ -95,7 +95,7 @@ need more, which these figures do not show.
 | `fixtures/bin/selftest` (38 checks; `up` and `down` included, so without `--keep`) | 1164 s (19 min 24 s) | 1800 s |
 | `fixtures/scenarios/s1 run`, on a fresh `up` with `mise run dev-db` and `mise run dev-bao` up | 2190 s (36 min 30 s); `up` before it 162 s, `down` after it 11 s | 3300 s for `s1 run` alone |
 | `fixtures/scenarios/s5 pass`, after `s4 run` on the same `up` | 224 s (3 min 44 s) | 360 s for `s5 pass` alone |
-| `scenarios/integrated <record dir> up s1p s3h s2p s3rp s4 s5p down` | 963 s (16 min 3 s) in all | 1500 s |
+| `fixtures/scenarios/integrated <record dir> up s1p s3h s2p s3rp s4 s5p down` | 963 s (16 min 3 s) in all | 1500 s |
 
 The chain's step times, in order, were `up` 168 s, `s1 pass` 117 s, `s3 handover` 68 s, `s2 pass` 137 s,
 `s3 pass` 166 s, `s4 run` 77 s, `s5 pass` 224 s and `down` 6 s. Its evidence directories, copied
