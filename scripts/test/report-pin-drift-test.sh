@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fixture tests for scripts/ci/report-pin-drift.sh, the `check` job of previous-major-pins.yml, with a
 # stub `gh` that serves a fixed issue list and records what the script asks it to do. Drift (STATUS 1)
-# opens one issue or edits the open one; no drift (0) closes it; a source that could not be read (2)
+# opens one issue or comments on the open one (never edits its body); no drift (0) closes it; a source that could not be read (2)
 # touches nothing, and never closes the issue.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -11,7 +11,7 @@ trap 'rm -rf "$work"' EXIT
 mkdir "$work/bin"
 cat >"$work/bin/gh" <<'STUB'
 #!/usr/bin/env bash
-# gh api --paginate --slurp: print $LIST, an array of pages (or fail); gh issue create|edit|close:
+# gh api --paginate --slurp: print $LIST, an array of pages (or fail); gh issue create|comment|edit|close:
 # record the call and its arguments.
 echo "$1 $2" >>"$WORK/calls"
 case "$1 $2" in
@@ -59,20 +59,25 @@ if grep -q 'bronzeward-key: previous-major-pins -->' "$work/args-create" && grep
   && grep -q 'chrome: 156.0.8078.80 -> 157.0.8103.78' "$work/args-create" && grep -q 'edge.debSha256: aaaa -> cccc' "$work/args-create" \
   && grep -q 'previous-major-pins.py --write web/e2e/previous-majors.json' "$work/args-create"; then ok; else bad "the new issue lacks its marker, labels, pins, command or run URL"; fi
 
-# Drift with the issue open: its body is edited, and no second issue is opened.
+# The body of a new issue says that a later comment carries newer pins, since it is written once.
+if grep -q 'A later run adds a comment with the newer pins' "$work/args-create"; then ok; else bad "the new issue does not say that later comments supersede it"; fi
+
+# Drift with the issue open: one comment on it with the pins, the apply command and the run, no second
+# issue, and the body is never edited (a person may have written in it).
 run 1 "$real"
-if [ "$rc" -eq 0 ] && [ "$(calls 'issue create')" -eq 0 ] && [ "$(calls 'issue edit')" -eq 1 ] && grep -qx 7 "$work/args-edit" \
-  && grep -q 'chrome: 156.0.8078.80 -> 157.0.8103.78' "$work/args-edit"; then ok; else bad "drift with an open issue did not edit #7 only"; fi
+if [ "$rc" -eq 0 ] && [ "$(calls 'issue create')" -eq 0 ] && [ "$(calls 'issue edit')" -eq 0 ] && [ "$(calls 'issue comment')" -eq 1 ] && grep -qx 7 "$work/args-comment" \
+  && grep -q 'chrome: 156.0.8078.80 -> 157.0.8103.78' "$work/args-comment" && grep -q 'edge.debSha256: aaaa -> cccc' "$work/args-comment" \
+  && grep -q 'previous-major-pins.py --write web/e2e/previous-majors.json' "$work/args-comment" && grep -q 'https://example.test/run/1' "$work/args-comment"; then ok; else bad "drift with an open issue did not comment on #7 only"; fi
 
 # Issues without the marker do not count; one on a later page does; a pull request never does.
 run 1 "$other"
 if [ "$rc" -eq 0 ] && [ "$(calls 'issue create')" -eq 1 ]; then ok; else bad "an issue without the marker was taken for the report"; fi
 run 1 "$second_page"
-if [ "$rc" -eq 0 ] && [ "$(calls 'issue create')" -eq 0 ] && grep -qx 8 "$work/args-edit"; then ok; else bad "an issue on the second page was missed"; fi
+if [ "$rc" -eq 0 ] && [ "$(calls 'issue create')" -eq 0 ] && grep -qx 8 "$work/args-comment"; then ok; else bad "an issue on the second page was missed"; fi
 run 1 "$a_pull"
 if [ "$rc" -eq 0 ] && [ "$(calls 'issue create')" -eq 1 ] && [ "$(calls 'issue edit')" -eq 0 ]; then ok; else bad "a pull request was taken for the report"; fi
 run 1 "$twice"
-if [ "$rc" -eq 0 ] && [ "$(calls 'issue edit')" -eq 1 ] && grep -qx 7 "$work/args-edit"; then ok; else bad "two marked issues did not go to the lower number"; fi
+if [ "$rc" -eq 0 ] && [ "$(calls 'issue comment')" -eq 1 ] && grep -qx 7 "$work/args-comment"; then ok; else bad "two marked issues did not go to the lower number"; fi
 
 # No drift closes the open issue, with a comment, and opens nothing; with none open it does nothing.
 run 0 "$real"
