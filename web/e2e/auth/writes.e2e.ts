@@ -150,7 +150,7 @@ describe("the write views (#338)", () => {
     await expect(result()).toHaveText(expect.stringContaining(said), { wait: 30_000 });
     // The fixed sentence, then the last answer's problem in words with the injector's detail; its code and instance are in the reference.
     const text = await result().getText();
-    expect([text.slice(0, said.length), text.slice(said.length)]).toEqual([said, " Something the server depends on did not answer. Try again in a moment; if it keeps happening, ask an administrator. The server says: injected."]);
+    expect([text.slice(0, said.length), text.slice(said.length)]).toEqual([said, " Something the server depends on is not available or not set up. Try again in a moment; if it keeps happening, ask an administrator. The server says: injected."]);
     expect((await references()).join("\n")).toContain("Request: req-injected");
     await oneWrite(4);
     await absent(() => notice().isExisting(), "a notice after every attempt was answered 503");

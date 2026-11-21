@@ -62,8 +62,8 @@ describe("the sentences of a refusal", () => {
   });
 
   test("a next step that points at the explanation is left out when there is no detail", () => {
-    expect(problemSentences(problem("talos-access-unavailable", {}, 503), 503)).toBe("The server could not use Talos access for this machine or cluster.");
-    expect(problemSentences(problem("talos-access-unavailable", { detail: "no first key" }, 503), 503)).toBe("The server could not use Talos access for this machine or cluster. The server's explanation follows. The server says: no first key.");
+    expect(problemSentences(problem("talos-access-unavailable", {}, 503), 503)).toBe("The server could not use or check Talos access for this machine or cluster.");
+    expect(problemSentences(problem("talos-access-unavailable", { detail: "no first key" }, 503), 503)).toBe("The server could not use or check Talos access for this machine or cluster. The server's explanation follows. The server says: no first key.");
   });
 
   test("a refused mark names its position, and its detail, which may name a path, appears nowhere", () => {
@@ -154,6 +154,29 @@ describe("the copy control", () => {
     await act(async () => root.render(h(CopyButton, { text: "Code: y", byHand: "By hand." })));
     await press();
     expect(box.textContent).toContain("By hand.");
+  });
+
+  test("a reference that changes under the page leaves no \"Copied.\" for text the clipboard does not hold", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_old", byHand: "By hand." })));
+    await press();
+    expect(box.textContent).toContain(COPIED);
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_new", byHand: "By hand." })));
+    expect(box.textContent).not.toContain(COPIED);
+    await press();
+    expect(writeText).toHaveBeenLastCalledWith("Request: req_new");
+    expect(box.textContent).toContain(COPIED);
+  });
+
+  test("a slow copy of the old text cannot say it copied the new text", async () => {
+    let finish: () => void = () => {};
+    vi.stubGlobal("navigator", { clipboard: { writeText: () => new Promise<void>((r) => (finish = r)) } });
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_old", byHand: "By hand." })));
+    await press();
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_new", byHand: "By hand." })));
+    await act(async () => finish());
+    expect(box.textContent).not.toContain(COPIED);
   });
 
   test("the reference block passes its own by-hand sentence", async () => {
