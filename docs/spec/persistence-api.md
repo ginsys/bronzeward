@@ -4985,10 +4985,11 @@ design and evidence do not settle the question. Each is marked in place as
     dropped, so that a new release must state it and every older row reads
     `unrecorded` with no `UPDATE` (the table is immutable), and a nullable name
     column, served on the release read and its review, as API revision 13; a
-    rename changes no release; an explicit `auto: off` document leaves the name
-    unused, so "unless the configuration already sets one" means any hostname
-    setting, the `auto: off` document with no hostname and the legacy stable
-    feature included (compilation §6.1 item 2); the provenance records keep to
+    rename changes no release; "unless the configuration already sets one"
+    means three cases that leave the name unused: an explicit hostname, an
+    `auto: off` document with no hostname, and the legacy stable feature
+    (compilation §6.1 item 2); the stable automatic hostname that the generated
+    base carries is no setting and does get the fill; the provenance records keep to
     secret-reference occurrences. Alternatives: derive the source on read by
     comparing the redacted hostname with the current name, which is wrong after
     any rename; a machine member that says whether its hostname comes from its
