@@ -193,6 +193,22 @@ describe("the copy control", () => {
     expect(box.textContent).not.toContain("By hand.");
   });
 
+  test("an older copy that succeeds after a newer one leaves the clipboard holding the older text, and the line follows the clipboard", async () => {
+    let land: () => void = () => {};
+    const writes = [new Promise<void>((resolve) => (land = resolve)), Promise.resolve()];
+    vi.stubGlobal("navigator", { clipboard: { writeText: () => writes.shift()! } });
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
+    await press();
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_b", byHand: "By hand." })));
+    await press();
+    expect(box.textContent).toContain(COPIED);
+    await act(async () => land());
+    // The clipboard now holds req_a: no "Copied." beside req_b, and one beside req_a.
+    expect(box.textContent).not.toContain(COPIED);
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
+    expect(box.textContent).toContain(COPIED);
+  });
+
   test("the reference block passes its own by-hand sentence", async () => {
     vi.stubGlobal("navigator", {});
     await act(async () => root.render(h(RequestRef, { problem: problem("not-found", { instance: "req_x" }, 404), status: 404 })));
