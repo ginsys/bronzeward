@@ -2180,7 +2180,12 @@ API revisions:
 | 10 | `name` on a machine and on `POST /machines`, `POST /machines/{id}/names`, the `name-change` timeline entry and the `name-in-use` problem code (§3.5, choice §17.43) |
 | 11 | `POST /discoveries`, a `POST` that only reads (§9.2) |
 | 12 | `GET /clusters/{id}/talos-access` (§9.2, §3.3 "Presence") |
-| 13 | `hostname` (`source`, and `name` for `machine-name`) on each machine of a release and its review, and the `hostname` rule of `422 validation-failed` (§9.2, §3.5, choice §17.44) |
+Revision 13 is specified and not yet served. It adds `hostname` (`source`, and
+`name` for `machine-name`) on each machine of a release and its review, and the
+`hostname` rule of `422 validation-failed` (§9.2, §3.5, choice §17.44). Its row
+joins this table in the change that serves it (ginsys/bronzeward#1041), because
+the table's last row is the revision the server serves and a test holds the two
+equal.
 
 ### 9.2 Resources and routes
 
