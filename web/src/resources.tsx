@@ -500,7 +500,7 @@ export function PlanItem({ id }: { id: string }) {
             <Fields rows={[
               ["Validation", `${v.result} at ${v.at} (contract ${v.contract}, machinery ${v.machineryVersion}, Kubernetes ${v.kubernetesVersion}, ${v.platformMode})`],
               ["Dry run", dryRun.available ? "available" : `not available (${dryRun.reason})`],
-              ...(baseline == null ? [] : [["Baseline", <>import base <Id id={baseline.importBaseRevision} />{baseline.pendingConvergence && ", pending convergence"}</>] as const]),
+              ...(baseline == null ? [] : [["Baseline", <>import base <Id id={baseline.importBaseRevision} />{baseline.pendingConvergence && ", release not applied yet"}</>] as const]),
               ["Change", <Change p={p} />],
             ]} />
             <p><Ref to={`/operations?plan=${p.id}`} id={p.id}>Operations of this plan</Ref></p>

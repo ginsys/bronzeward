@@ -86,7 +86,7 @@ export function nextStep(release: string, m: Pick<Machine, "desired" | "applied"
   // After an adoption Applied can equal Desired while it does; after a publication Applied can name another release while it does not.
   const same = m.applied.release === release;
   if (m.pendingConvergence) {
-    return `${same ? "This release is Desired and Applied on this machine, but its configuration is pending convergence: it differs from what Bronzeward applied." : `This machine has an Applied configuration (release ${short(m.applied.release)}) that differs from this release.`} An apply-config plan sends this release to it. Nothing has been sent yet.`;
+    return `${same ? "This release is Desired and Applied on this machine, but the node does not run it yet (release not applied yet): its configuration differs from what Bronzeward applied." : `This machine has an Applied configuration (release ${short(m.applied.release)}) that differs from this release.`} An apply-config plan sends this release to it. Nothing has been sent yet.`;
   }
   return same
     ? "This release is the one Applied on this machine. Nothing is left to send."
