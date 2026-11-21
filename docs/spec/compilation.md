@@ -171,6 +171,27 @@ give a node a path that reads as an embedded document's.
    mapping key that is not a scalar, which no path token can name, an outer
    mapping key holding `|` (§2.2), and an outer `!!binary` key, which decodes
    to text its token does not show.
+2a. **Release a filled hostname** (§6.1, **choice §16.37**). For an import
+   (onboarding included) or a drift adoption of a machine that has a stored
+   name, a `HostnameConfig` document of the parsed stream whose `hostname`
+   equals that name exactly, as the API read it for this request, is removed
+   from the stream, whole, before anything is identified: it is recorded as
+   filled from the name, not kept as an explicit hostname. Talos's document
+   holds only `auto` and `hostname`, so nothing else is lost, and a document
+   that kept `auto: off` would stop the fill (§6.1). Only that document is
+   removed. A hostname that differs from the name, an FQDN, a different case, a
+   machine with no name, and a configuration without a `HostnameConfig` stay as
+   they are. The removal comes first so that nothing is minted for a value
+   that is then dropped: an operator mark that addresses a node of the removed
+   document refuses the input, as a mark that addresses no node does (step 3).
+   The decision and the name it used are kept beside the sanitized document, in
+   the claim's staged payload, and carried unchanged through a mark, a
+   continuation and a takeover, so that a recovered run still holds the name it
+   compared; the draft transaction refuses when the machine's name is no
+   longer that one
+   ([persistence and API §3.2](persistence-api.md), choice §17.45 there). It is
+   the one value ingestion removes that is not a secret, and the baseline of
+   step 8 stays the exact input.
 3. **Identify** the values to extract: every field the pinned Talos machinery
    marks secret (the `pkg/machinery` `RedactSecrets` field list, SP §2), and
    every path the operator marks in the request. A mark that addresses no node
@@ -199,20 +220,6 @@ give a node a path that reads as an embedded document's.
    until it no longer changes: the encoder moves a blank line inside a run of
    comments, as talosctl writes them, and a later mark (§3.6 item 3) refuses
    any text its re-encoding changes. The guard searches that final text.
-4a. **Release a filled hostname** (§6.1, **choice §16.37**). For an import
-   (onboarding included) or a drift adoption of a machine that has a stored
-   name, a `HostnameConfig` document of the candidate whose `hostname` equals
-   that name exactly, as the API read it for this request, is removed from the
-   candidate, whole: it is recorded as filled from the name, not kept as an
-   explicit hostname. Talos's document holds only `auto` and `hostname`, so
-   nothing else is lost, and a document that kept `auto: off` would stop the
-   fill (§6.1). Only that document is removed. A hostname that differs from
-   the name, an FQDN, a different case, a machine with no name, and a
-   configuration without a `HostnameConfig` stay as they are. It is the one
-   value ingestion removes that is not a secret, so the baseline of step 8 is
-   still the exact input, and the draft transaction refuses if the machine's
-   name is no longer the one this step used
-   ([persistence and API §3.2](persistence-api.md), choice §17.45 there).
 5. **Guard** (§4.2). A guard hit refuses the input; no provider object has been
    created yet.
 6. **Create** one provider generation per extracted value, create-only (`cas=0`)
@@ -248,8 +255,9 @@ give a node a path that reads as an embedded document's.
    contract.
 
 Under encrypted staging, the claim's payload is written after step 8, and not
-before: one envelope holding the sanitized document, its references and, for
-import and drift adoption, the baseline ciphertext with its keyed digest and
+before: one envelope holding the sanitized document, its references, the removed
+hostname's decision and name where step 2a made one (neither is secret) and,
+for import and drift adoption, the baseline ciphertext with its keyed digest and
 its configuration digest, so that a taker has everything the draft
 transaction persists; no identity can decrypt the baseline to compute them
 again.
@@ -1022,9 +1030,9 @@ unmeasured.
    measured reason; the legacy field, which v1.14 refuses beside the document.
    Cost: `container` and `cloud` behaviour is unmeasured, and the compiler
    issue measures both.
-2. **Which hostname wins (choice §16.37).** An explicit hostname always wins;
+2. **Which hostname wins (choice §16.36).** An explicit hostname always wins;
    the name fills only an absent one. A hostname is explicit when the
-   composition's accessor returns one. These compositions are absent and get
+   composition's accessor returns one (choice §16.36). These compositions are absent and get
    the fill: a `HostnameConfig` with `auto: stable` and no hostname, and no
    hostname document at all. These get **no** fill: a `HostnameConfig` with
    `auto: off` and no hostname (the operator chose another source, DHCP or the
@@ -1047,7 +1055,7 @@ unmeasured.
    alone: a hostname is not a reference, so no stand-in is placed for it and
    the trace and flip passes carry the same patch as the real composition.
 5. **Import, adoption and drift (choice §16.37).** The equality rule of
-   §2.3 step 4a: at import (onboarding included) and at drift adoption, a
+   §2.3 step 2a: at import (onboarding included) and at drift adoption, a
    `HostnameConfig` whose hostname equals the machine's name is removed from
    the stored base and recorded as filled. Why: an onboarded machine takes its
    name from its own hostname
@@ -1094,7 +1102,7 @@ are unmeasured; the compiler issue (ginsys/bronzeward#1040) measures them on
 the fixture, and the client sentences that mention a restart or the node name
 are conditional on that result (client contracts A9 items 6 and 7). A
 `cloud` node's own hostname is overridden by the static one (`hostname` has
-the highest priority, line 76), read and not measured. The import-equivalence
+the highest priority, line 73), read and not measured. The import-equivalence
 check of
 [the 20261118 evidence](../design/research/20261118-import-analysis-and-equivalence.md)
 needs an amendment, with its measurement: a filled hostname composes `auto:
@@ -1773,7 +1781,7 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Compilation | Contract newer than renderer or not the node's minor; Kubernetes outside the window | Publication refused | Nothing |
 | Compilation | Native composition or validation rejects | Publication refused; message redacted or withheld (§8.3) | Nothing |
 | Compilation | A hostname filled from a machine's name that another machine of the cluster holds explicitly (§6.1 item 6) | Publication refused, rule `hostname`, naming both machines | Nothing |
-| Ingestion | The machine's name changed between the removal of a filled hostname (§2.3 step 4a) and the draft transaction | The draft transaction is refused `409 stale-input`; re-ingest | Claim row, no payload |
+| Ingestion | The machine's name changed between the removal of a filled hostname (§2.3 step 2a) and the draft transaction | The draft transaction is refused `409 stale-input`; re-ingest | Claim row, no payload |
 | Compilation | Trace or flip fragment missing, shape differs, or passes disagree | Publication refused (§8.1) | Nothing |
 | Compilation | Reserved text or an unattributed exact copy in the output | Publication refused, naming paths | Nothing |
 | Compilation | Encryption fails, or persistence rejects a stale input | Publication refused | Nothing of the release |
@@ -2206,7 +2214,7 @@ in place as
     whole-configuration diff and needing approval, and that a filled hostname
     overrides one a DHCP or cloud source gave.
 37. **A hostname equal to the machine's name is released at import and
-    adoption** (§2.3 step 4a, §6.1 item 5). The document is removed from the
+    adoption** (§2.3 step 2a, §6.1 item 5). The document is removed from the
     stored base, whole, so the fill applies on every later release and a rename
     reaches the machine. Alternatives: keep it explicit and rely on the operator
     deleting it with a fragment, which fails the common case (an onboarded
@@ -2244,7 +2252,7 @@ in place as
 | §5.5 reserved text | §6.9 | SR §6.4, [SR §10](../design/research/20260924-structural-reference-composition.md#10-hand-off) |
 | §6 import base | §6.7, §18.2, A.3 | none: a departure recorded as choice §16.20 |
 | §6 early resolution, superset | §6.2, §6.9, §7.4 | SR §4, §5, [SR §6.2](../design/research/20260924-structural-reference-composition.md#62-criterion-2-effective-and-superset-dependencies), §6.4, §9 |
-| §2.3 step 4a, §6 step 5a, §6.1 hostname | none | Talos machinery v1.14.5 `config/types/network/hostname.go`, `config/generate/network.go`, `config/container/container.go`, the Talos 1.14 "Hostname" page; a scratch probe on the generated base, not kept (§6.1); none for `container` and `cloud`: choices §16.36 to §16.38 |
+| §2.3 step 2a, §6 step 5a, §6.1 hostname | none | Talos machinery v1.14.5 `config/types/network/hostname.go`, `config/generate/network.go`, `config/container/container.go`, the Talos 1.14 "Hostname" page; a scratch probe on the generated base, not kept (§6.1); none for `container` and `cloud`: choices §16.36 to §16.38 |
 | §6 step 7 literal copies | §6.9 | [SP §6.3](../design/research/20260925-sensitivity-provenance.md#63-criterion-3-remaining-leakage-risks-and-dependency-records), [SP §10](../design/research/20260925-sensitivity-provenance.md#10-hand-off) |
 | §7 validation stages | §6.9 | [SR §6.3](../design/research/20260924-structural-reference-composition.md#63-criterion-3-parity-validation-collisions-and-rejections) |
 | §8.1 tracer, fidelity | §6.9 | [SP §6.1](../design/research/20260925-sensitivity-provenance.md#61-criterion-1-sensitivity-through-each-transformation), [SP §8](../design/research/20260925-sensitivity-provenance.md#8-limits), [SP §9](../design/research/20260925-sensitivity-provenance.md#9-alternatives-and-decision-enabled) |
