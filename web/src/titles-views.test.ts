@@ -317,7 +317,8 @@ describe("ginsys/bronzeward#987: a machine", () => {
 describe("ginsys/bronzeward#1055: a cluster's name and the identifier's detail line", () => {
   const Cluster = ({ id }: { id: string }) => h("span", null, useClusterText(id) ?? "-");
   test("a cluster is named from its read where the name is safe, and by nothing where it is not or the read fails", async () => {
-    for (const [i, [answer, shown]] of [[ok({ id: "cl_a", name: "lab-a" }), "lab-a"], [ok({ id: "cl_a", name: "lab‮a" }), "-"], [missing, "-"]].entries() as Iterable<[number, [ReadResult<unknown>, string]]>) {
+    const malformed = [{ value: "bad" }, 7, null, ["lab-a"]].map((name) => [ok({ id: "cl_a", name }), "-"]);
+    for (const [i, [answer, shown]] of [[ok({ id: "cl_a", name: "lab-a" }), "lab-a"], [ok({ id: "cl_a", name: "lab‮a" }), "-"], [missing, "-"], ...malformed].entries() as Iterable<[number, [ReadResult<unknown>, string]]>) {
       answers["/clusters/cl_a"] = answer;
       await mount(h(Cluster, { id: "cl_a" }), { ...reads, view: `c${i}` });
       await settled();
