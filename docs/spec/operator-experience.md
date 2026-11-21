@@ -932,7 +932,7 @@ unknown and the exit is the read's own (3 for an answer that cannot be read), wi
 resource with `-o json` or `-o yaml`, is printed beside the outcome and the exit code of the outcome
 stays (0 becomes 6). If the server refused a request of the watch, its exit 1 stays with the write error
 beside it. A failure to keep the client's state after Ctrl-C is printed before the stop
-lines, so the follow line stays last, and the exit is 130. `operation show` prints the same outcome lines without the server's time. For a cancelled operation
+lines, so the follow line stays last, and the exit is 130. `operation show` prints the same outcome lines without the server's time, and above them the sentence for its kind and state and who started it, and below them the next step where the outcome gives none ([client contracts A10](client-contracts.md#14-proposed-api-gap-issues-and-downstream-refinement)). For a cancelled operation
 it reads the event that records the end once to take the cause, and keeps it only when the event is of the
 installation epoch in which the operation was read (the answer's `Bronzeward-Epoch`, not the epoch the
 operation was created in); otherwise the line says the machine timeline holds the entry that ended it.
