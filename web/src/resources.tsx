@@ -224,6 +224,14 @@ export function SourceItem({ kind, id }: { kind: Kind; id: string }) {
 // once and a button reads the rest, so a profile of 256 pins never starts 256 reads together.
 const PINNED_SHOWN = 20;
 
+// The one display rule item 9 adds (ginsys/bronzeward#988): the text of a fragment revision is the server's
+// sanitized text and can still hold a value nobody marked. A page shows this once above the text, a plain
+// paragraph in the reading order and not a live region (it is part of the page, not an event), and each `pre`
+// points at it with `aria-describedby`, so a reader who jumps straight to one document still hears it.
+export const SANITIZED_NOTICE = "This text is sanitized by the server, which cannot promise it holds no value nobody marked.";
+const NOTICE_ID = "sanitized-notice";
+const SanitizedNotice = () => <p id={NOTICE_ID} data-testid="sanitized-notice">{SANITIZED_NOTICE}</p>;
+
 function PinnedFragment({ id }: { id: string }) {
   const item = useItem<S["FragmentRevisionBody"]>(`/fragment-revisions/${encodeURIComponent(id)}`);
   const pending = usePending(item, "the fragment revision");
@@ -231,7 +239,7 @@ function PinnedFragment({ id }: { id: string }) {
   return (
     <div data-testid="pinned-fragment">
       <h4>{f === undefined ? <Id id={id} /> : `${f.name} (${f.layer})`}</h4>
-      {f === undefined ? pending : <><p>Revision <Id id={id} /></p><pre data-testid="fragment-document">{f.document}</pre></>}
+      {f === undefined ? pending : <><p>Revision <Id id={id} /></p><pre data-testid="fragment-document" aria-describedby={NOTICE_ID}>{f.document}</pre></>}
     </div>
   );
 }
@@ -241,7 +249,7 @@ function PinnedFragments({ ids }: { ids: readonly string[] }) {
   const shown = all ? ids : ids.slice(0, PINNED_SHOWN);
   return (
     <>
-      {ids.length === 0 && <p>No fragments pinned.</p>}
+      {ids.length === 0 ? <p>No fragments pinned.</p> : <SanitizedNotice />}
       {shown.map((id) => <PinnedFragment key={id} id={id} />)}
       {shown.length < ids.length && <p><button type="button" onClick={() => setAll(true)}>Show the remaining {ids.length - shown.length}</button></p>}
     </>
@@ -283,7 +291,8 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
           {"document" in r && (
             <>
               <h3>Document</h3>
-              <pre data-testid="document">{r.document}</pre>
+              <SanitizedNotice />
+              <pre data-testid="document" aria-describedby={NOTICE_ID}>{r.document}</pre>
               <h3>Declared references</h3>
               {Object.keys(r.declarations.references).length === 0 ? <p>No references declared.</p>
                 : <Rows label="Declared references" cols={REFERENCES} items={Object.entries(r.declarations.references)} keyOf={([n]) => n} />}
