@@ -2096,8 +2096,8 @@ way: the identifier, the Talos endpoint and the node ID, as before.
    "This release sets the machine's hostname to node-a, taken from its name." followed by the restart sentence of
    item 6. For a machine whose applied release recorded `configuration` (the route of compilation §6.1 item 5, a
    release that deletes the hostname setting so the name takes over): "This release now takes the machine's
-   hostname from its name, node-a, in place of the setting it had before. The last release applied to it set
-   node-c." followed by the Kubernetes node name sentence ("The machine's Kubernetes node name
+   hostname from its name, node-a, in place of the setting it had before." and never the earlier value, which
+   the release does not record and which may be a secret reference; it is followed by the Kubernetes node name sentence ("The machine's Kubernetes node name
    normally follows the hostname, so it may change too.") and the restart sentence of item 6. For a machine whose
    applied release recorded another name: "This release sets the
    machine's hostname to node-b, taken from its name. The last release applied to it set node-a." The sentence
