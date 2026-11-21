@@ -1382,8 +1382,9 @@ current token expires
    signs in again without the scope the page added itself (item 3 leaves a refused page only by the
    operator's button). That sign-in's pending entry (item 1) carries one boolean saying so, which
    its callback returns, so the page and every renewal redirect after it go on without `profile`.
-   Limit: a new sign-in on such a provider still meets one refusal first, and shows the header
-   without a name. The server's `auth.oidc.displayClaim` names the claim the server shows for a
+   Limit: a new sign-in on such a provider, and a new tab that joins another tab's tokens (it
+   discovers the provider afresh), still meets one refusal on its first sign-in or redirect
+   renewal; the header then has a name only if the provider's userinfo gives one without `profile`. The server's `auth.oidc.displayClaim` names the claim the server shows for a
    person in its own records; the page does not follow it (limit: a provider whose userinfo `name`
    differs from that claim shows the userinfo name in the header). An automation shows "Signed in as
    the automation <service>". The header shows no epoch: the recovery banner names it where it

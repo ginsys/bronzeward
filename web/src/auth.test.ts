@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
-import { beginSignIn, claims, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, profileRefused, REFRESH_WAIT_MS, renewDelay, returnPath, Session, SIGN_OUT_WAIT_MS, SIGNED_OUT_PATH, type Tokens, withoutProfile } from "./auth.ts";
+import { beginSignIn, claims, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, pendingNoProfile, profileRefused, REFRESH_WAIT_MS, renewDelay, returnPath, Session, SIGN_OUT_WAIT_MS, SIGNED_OUT_PATH, type Tokens, withoutProfile } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
 
 const ORIGIN = "http://localhost:16000";
@@ -160,7 +160,6 @@ describe("§9.3 item 1 callback", () => {
       kind: "ok",
       tokens: { iss: ISSUER, sub: "u1", access: "SYNTH-access", refresh: "SYNTH-refresh", expiresAt: 301_000 },
       returnTo: "/machines",
-      noProfile: false,
     });
     expect(storage.items.size).toBe(0);
     const [url, init] = f.mock.calls[0]!;
@@ -194,15 +193,18 @@ describe("§9.3 item 1 callback", () => {
     expect(again.searchParams.get("scope")).toBe("openid offline_access urn:example:aud");
     const next = JSON.parse(second.getItem(PENDING_KEY)!) as Record<string, string>;
     expect(next["noProfile"]).toBe(true);
-    const done = await completeSignIn(config, listed, `?code=c1&state=${next["state"]}`, { storage: second, origin: ORIGIN, fetch: answers([tokenAnswer(next["nonce"]!)]) as unknown as typeof fetch, now: () => 1000 });
-    expect(done).toMatchObject({ kind: "ok", noProfile: true });
-    // An ordinary sign-in asks for it and its callback says it was not refused.
+    // Read before the callback, which deletes the entry: it holds on a callback that fails as well.
+    expect(pendingNoProfile(second)).toBe(true);
+    const failed = await completeSignIn(config, listed, `?code=c1&state=${next["state"]}`, { storage: second, origin: ORIGIN, fetch: (() => Promise.reject(new TypeError("offline"))) as unknown as typeof fetch });
+    expect(failed.kind).toBe("transport");
+    expect(pendingNoProfile(second)).toBe(false);
+    // An ordinary sign-in asks for it and its pending entry carries no such flag.
     const plain = memory();
     expect(new URL((await beginSignIn(config, listed, "/", plain, ORIGIN))!).searchParams.get("scope")).toBe("openid offline_access profile urn:example:aud");
     const ordinary = JSON.parse(plain.getItem(PENDING_KEY)!) as Record<string, string>;
     expect("noProfile" in ordinary).toBe(false);
-    const ok = await completeSignIn(config, listed, `?code=c1&state=${ordinary["state"]}`, { storage: plain, origin: ORIGIN, fetch: answers([tokenAnswer(ordinary["nonce"]!)]) as unknown as typeof fetch, now: () => 1000 });
-    expect(ok).toMatchObject({ kind: "ok", noProfile: false });
+    expect(pendingNoProfile(plain)).toBe(false);
+    expect(pendingNoProfile(memory())).toBe(false);
     // Any other refusal, an error code the page cannot read, or a transport failure leaves the scope alone.
     expect(profileRefused({ kind: "refused", reason: "the identity provider refused the sign-in (access_denied)", code: "access_denied" })).toBe(false);
     expect(profileRefused({ kind: "refused", reason: "the identity provider refused the sign-in" })).toBe(false);

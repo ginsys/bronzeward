@@ -540,6 +540,8 @@ describe("what counts as an address follows the server's first split", () => {
     "",
     "[node.example.test]:50000",
     "[node.example.test]",
+    "[cafe]",
+    "[dead.beef]:50000",
     "[x:y@[::1]",
     "node:80:90",
   ])("%s is a name, or not an address at all, and is never sent", (endpoint) => {
