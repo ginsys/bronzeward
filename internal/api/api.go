@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/ginsys/bronzeward/internal/auth"
+	"github.com/ginsys/bronzeward/internal/classify"
 	"github.com/ginsys/bronzeward/internal/compile"
 	"github.com/ginsys/bronzeward/internal/config"
 	"github.com/ginsys/bronzeward/internal/id"
@@ -62,6 +63,13 @@ type Signer interface {
 	WriteCAKey(ctx context.Context, cluster string, k provider.CAKey, cas int) (provider.CAKeyVersion, error)
 }
 
+// Presence is what the Talos access presence read needs of *provider.Presence (persistence-api.md
+// §3.3): the access-presence identity's one read of the metadata of a cluster's CA key, as the
+// provider answered. It cannot read the key.
+type Presence interface {
+	CAKeyMetadata(ctx context.Context, cluster string) (classify.Answer, error)
+}
+
 // Publishers are publication's provider identities (compilation.md §1): the metadata identity's
 // reads by name, and the compiler identity's pinned reads and encryption under the artifact key.
 type Publishers struct {
@@ -95,6 +103,7 @@ type deps struct {
 	pub      *publishClients
 	exe      Executor
 	sg       Signer        // first keys' and certificates' provider identity; nil without a provider
+	presence Presence      // the Talos access presence read's provider identity; nil without a provider or a presenceTokenFile
 	maxCert  time.Duration // the most a certificate's span may be (talos.maxCertLifetime); the default when zero
 	timers   config.Ingestion
 	owner    staging.Owner
@@ -182,7 +191,8 @@ type ctxKey struct{}
 
 func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*request) }
 
-// New returns the /api/v1 handler. ing, pub, exe, sg and ic are nil without a provider. epoch is the
+// New returns the /api/v1 handler. ing, pub, exe, sg and ic are nil without a provider, and pr
+// without a provider or a presenceTokenFile. epoch is the
 // one this process read at its start: it owns claims and jobs under it, and under no later one
 // (§5.1). With a provider, it starts the publish worker and the adoption and drift loops. The
 // ingest runners, the worker and the loops stop when life ends. A recovery start (recovery is
@@ -190,8 +200,8 @@ func requestOf(r *http.Request) *request { return r.Context().Value(ctxKey{}).(*
 // start at the normal restart that entry allows (execution-recovery.md §7.2). onEntry runs once a
 // recovery start's entry has committed, after it owns under the new epoch.
 func New(life context.Context, db *sql.DB, a Authenticator, cfg config.Auth, ex config.Execution, ing Ingester, pub *Publishers,
-	exe Executor, sg Signer, maxCert time.Duration, ic *config.Ingestion, epoch string, recovery bool, onEntry func()) http.Handler {
-	d := deps{ing: ing, exe: exe, sg: sg, maxCert: maxCert, life: life, exec: ex, preEntry: new(atomic.Bool), recoveryStart: recovery, start: epoch,
+	exe Executor, sg Signer, pr Presence, maxCert time.Duration, ic *config.Ingestion, epoch string, recovery bool, onEntry func()) http.Handler {
+	d := deps{ing: ing, exe: exe, sg: sg, presence: pr, maxCert: maxCert, life: life, exec: ex, preEntry: new(atomic.Bool), recoveryStart: recovery, start: epoch,
 		onEntry: onEntry, entry: new(entryState)}
 	d.preEntry.Store(recovery)
 	if pub != nil {

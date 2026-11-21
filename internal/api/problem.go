@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/ginsys/bronzeward/internal/staging"
 )
@@ -45,6 +46,9 @@ type refusal struct {
 	detail string
 	extra  map[string]any
 	cause  string // a failed node read's cause, for its terminal event; the document names it only through extra, and only the identity field names of machine-identity-mismatch
+	// retryAfter, when positive, is the whole seconds a Retry-After header names: the refusal is
+	// worth repeating after them (the presence read's undecidable deletion).
+	retryAfter int
 }
 
 func refuse(status int, code, detail string) *refusal {
@@ -78,6 +82,9 @@ func (a *API) problem(w http.ResponseWriter, q *request, ref *refusal) {
 func writeProblem(w http.ResponseWriter, instance string, r *refusal) {
 	if r.status == http.StatusUnauthorized {
 		w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+	}
+	if r.retryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(r.retryAfter))
 	}
 	writeJSON(w, "application/problem+json", r.status, problemDoc(instance, r))
 }

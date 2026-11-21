@@ -219,6 +219,31 @@ func AnswerReason(p Provider, a Answer) Reason {
 	return None
 }
 
+// CurrentVersion is the current_version of a KV v2 metadata answer, for a caller that asks about
+// the latest version and does not hold one (the Talos access presence read, persistence-api.md
+// §3.3). False when the body does not parse as KV metadata. It reads the status of no answer:
+// AnswerReason does.
+func CurrentVersion(a Answer) (int64, bool) {
+	data, err := decodeKV(a.Body.Bytes())
+	if err != nil {
+		return 0, false
+	}
+	return *data.CurrentVersion, true
+}
+
+// EmptyErrors is true when the answer's body is exactly an empty errors list, `{"errors":[]}`: how
+// OpenBao's KV answers a path that holds no secret. A 404 with any other body (an error text for a
+// route no engine serves, a missing mount) is not that answer. It reads the status of no answer: the
+// Talos access presence read (persistence-api.md §3.3) asks it of a 404 before it says "not held".
+func EmptyErrors(a Answer) bool {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(a.Body.Bytes(), &doc); err != nil || len(doc) != 1 {
+		return false
+	}
+	var errs []json.RawMessage
+	return json.Unmarshal(doc["errors"], &errs) == nil && errs != nil && len(errs) == 0
+}
+
 // statusReason is §3's row for an answer that is not a 200, or None.
 func statusReason(a Answer) Reason {
 	switch {

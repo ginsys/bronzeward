@@ -61,7 +61,10 @@ execution:
 # orphan-report identity's token for `bronzeward orphans` (persistence-api.md §6.4), under the
 # same rules; the server never reads it. signerTokenFile, optional, holds the signer identity's
 # token (persistence-api.md §3.4), under the same rules; without it the server starts and answers
-# a first key with 503 dependency-unavailable.
+# a first key with 503 dependency-unavailable. presenceTokenFile, optional, holds the access-presence
+# identity's token (persistence-api.md §3.3): one `read` on the metadata of each cluster's CA key,
+# never its data, under the same rules; without it the server starts and answers
+# GET /clusters/{id}/talos-access with 503 dependency-unavailable.
 # provider:
 #   address: http://127.0.0.1:11200
 #   keys: {baseline: bw-baseline, staging: bw-staging, digest: bw-digest, artifact: bw-artifact}
@@ -71,6 +74,7 @@ execution:
 #   executorTokenFile: /etc/bronzeward/openbao-executor.token
 #   reportTokenFile: /etc/bronzeward/openbao-report.token
 #   signerTokenFile: /etc/bronzeward/openbao-signer.token
+#   presenceTokenFile: /etc/bronzeward/openbao-presence.token
 # Required with provider, refused without it: the staging claims' timers (compilation.md §3.2
 # requires only heartbeat < lease < absoluteExpiry; the values are open) and this instance's
 # name, which starts the owner identity of its claims. Publish jobs run under the same heartbeat

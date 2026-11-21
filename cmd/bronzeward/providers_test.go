@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -46,7 +47,7 @@ func tokenStandIn(t *testing.T) (*config.Provider, func() []string) {
 // ingestion's, not the compiler's.
 func TestProviderClientsMetadataToken(t *testing.T) {
 	p, sent := tokenStandIn(t)
-	_, pub, _, _, err := providerClients(p)
+	_, pub, _, _, _, err := providerClients(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +76,7 @@ func TestProviderClientsMetadataToken(t *testing.T) {
 // identity's token, read from executorTokenFile (persistence-api §3.3): not ingestion's.
 func TestProviderClientsExecutorToken(t *testing.T) {
 	p, sent := tokenStandIn(t)
-	_, _, exe, _, err := providerClients(p)
+	_, _, exe, _, _, err := providerClients(p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,5 +85,35 @@ func TestProviderClientsExecutorToken(t *testing.T) {
 	}
 	if tokens := sent(); len(tokens) != 1 || tokens[0] != "synthetic-executor-token" {
 		t.Fatalf("sent %q, want the executor identity's token once", tokens)
+	}
+}
+
+// The presence client is built only when presenceTokenFile is set, and then sends that identity's
+// token and no other's (persistence-api §3.3); unset, the interface stays nil, not a typed nil, so
+// the route answers 503 dependency-unavailable.
+func TestProviderClientsPresenceToken(t *testing.T) {
+	p, sent := tokenStandIn(t)
+	_, _, _, _, none, err := providerClients(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none != nil {
+		t.Fatalf("no presenceTokenFile built %T", none)
+	}
+	p.PresenceTokenFile = filepath.Join(t.TempDir(), "presence")
+	writeFile(t, p.PresenceTokenFile, "synthetic-presence-token\n", 0o600)
+	_, _, _, _, pr, err := providerClients(p)
+	if err != nil || pr == nil {
+		t.Fatalf("%v, %v", pr, err)
+	}
+	if _, err := pr.CAKeyMetadata(t.Context(), id.New(id.Cluster)); err != nil {
+		t.Fatal(err)
+	}
+	if tokens := sent(); len(tokens) != 1 || tokens[0] != "synthetic-presence-token" {
+		t.Fatalf("sent %q, want the presence identity's token once", tokens)
+	}
+	p.PresenceTokenFile = filepath.Join(t.TempDir(), "missing")
+	if _, _, _, _, _, err := providerClients(p); err == nil || !strings.Contains(err.Error(), "provider.presenceTokenFile") {
+		t.Fatalf("an unreadable presence token file: %v; want it named by its field", err)
 	}
 }

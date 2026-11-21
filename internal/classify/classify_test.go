@@ -408,6 +408,57 @@ func TestAnswerReason(t *testing.T) {
 	}
 }
 
+// EmptyErrors is true only for a body that is exactly an empty errors list.
+func TestEmptyErrors(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"empty list", `{"errors":[]}`, true},
+		{"empty list, spaced", ` { "errors" : [ ] } `, true},
+		{"an error text", `{"errors":["no handler for route"]}`, false},
+		{"errors null", `{"errors":null}`, false},
+		{"no errors key", `{}`, false},
+		{"another key beside it", `{"errors":[],"data":{}}`, false},
+		{"not an object", `[]`, false},
+		{"not json", `nope`, false},
+		{"no body", ``, false},
+	} {
+		if got := EmptyErrors(Answer{Status: 404, Body: NewBody([]byte(c.body))}); got != c.want {
+			t.Errorf("%s: EmptyErrors(%q) = %v; want %v", c.name, c.body, got, c.want)
+		}
+	}
+}
+
+// CurrentVersion is the answer's current_version, and false for a body that is not KV metadata.
+func TestCurrentVersion(t *testing.T) {
+	two := kv()
+	two["current_version"] = 2
+	zero := kv()
+	zero["current_version"] = 0
+	noCurrent := kv()
+	delete(noCurrent, "current_version")
+	for _, c := range []struct {
+		name string
+		a    Answer
+		want int64
+		ok   bool
+	}{
+		{"one", answer(t, kv()), 1, true},
+		{"two", answer(t, two), 2, true},
+		{"zero is still read, Classify refuses it", answer(t, zero), 0, true},
+		{"no current_version", answer(t, noCurrent), 0, false},
+		{"transit body", answer(t, transit()), 0, false},
+		{"not json", Answer{Status: 200, Body: NewBody([]byte("nope"))}, 0, false},
+		{"no body", Answer{Status: 404}, 0, false},
+	} {
+		if got, ok := CurrentVersion(c.a); got != c.want || ok != c.ok {
+			t.Errorf("%s: CurrentVersion = %d, %v; want %d, %v", c.name, got, ok, c.want, c.ok)
+		}
+	}
+}
+
 func TestParseDate(t *testing.T) {
 	if got, ok := ParseDate(dateText); !ok || !got.Equal(date) || got.Location() != time.UTC {
 		t.Fatalf("ParseDate(%q) = %v, %v; want %v, true", dateText, got, ok, date)

@@ -1322,9 +1322,17 @@ so the page reads every page of that list.
 **The cluster page** is that content and no more (decided with [#951](https://github.com/ginsys/bronzeward/issues/951),
 [§12](#12-alternatives-and-recommendations) C7; the web client has shown it since
 [#859](https://github.com/ginsys/bronzeward/issues/859)): the cluster's name, Kubernetes
-endpoint, contract and Talos cluster ID, its machines with the counts above, and its open drafts.
-It shows no plans, because `GET /plans` has no cluster filter (G20), and no Talos credential state
-([#856](https://github.com/ginsys/bronzeward/issues/856) owns that). A cluster's releases stay
+endpoint, contract and Talos cluster ID, its machines with the counts above, its open drafts, and,
+to an `author` only, the Talos access sign
+([#856](https://github.com/ginsys/bronzeward/issues/856), from `GET /clusters/{id}/talos-access`).
+The sign says in words whether Bronzeward holds the cluster's Talos CA key: held, with when it was
+supplied and which version ("Talos access key held: supplied 21 Nov 2026, 05:40 (version 2)", and
+that held means stored, a node having accepted it when it was supplied); not supplied yet, or deleted
+in the secret store, each with the **Onboard cluster** page named and linked as where to supply one;
+or that the page cannot tell, when the secret store gave no usable answer, which never reads as "not
+supplied". It never says the key works: a later CA replacement can make a held key stale. A person
+who does not hold `author` sees no sign and the page sends no request for it. It shows no plans,
+because `GET /plans` has no cluster filter (G20). A cluster's releases stay
 off it: the release list is filtered in the browser (G9 of the
 [client contracts](client-contracts.md#4-api-gap-audit)) and nothing yet needs them there.
 

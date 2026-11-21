@@ -581,7 +581,7 @@ func TestNewStartsPublisher(t *testing.T) {
 	node.SetClusterID(t, r.identity.ClusterID)
 	mustExec(t, b.db, `UPDATE machine SET talos_endpoint = $2 WHERE id = $1`, b.machine, node.Endpoint)
 	h := New(life, b.db, auth.NewVerifier(b.cfg, b.db, auth.Discover(b.cfg.OIDC)), b.cfg, testExecution(), nil,
-		&Publishers{Meta: b.held, Compiler: b.held}, &fakeExecutor{}, b.signer(), 0,
+		&Publishers{Meta: b.held, Compiler: b.held}, &fakeExecutor{}, b.signer(), nil, 0,
 		&config.Ingestion{Instance: "a", Heartbeat: 20 * time.Millisecond, Lease: time.Minute}, epoch, false, nil)
 	defer stopping(h.(*API), stop)
 	op := b.queuePublish(1)

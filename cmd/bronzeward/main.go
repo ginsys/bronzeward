@@ -167,8 +167,9 @@ func serveContext(ctx context.Context, args []string) error {
 	var pub *api.Publishers
 	var exe api.Executor
 	var sg api.Signer
+	var pr api.Presence
 	if cfg.Provider != nil {
-		if ing, pub, exe, sg, err = providerClients(cfg.Provider); err != nil {
+		if ing, pub, exe, sg, pr, err = providerClients(cfg.Provider); err != nil {
 			return err
 		}
 	}
@@ -197,7 +198,7 @@ func serveContext(ctx context.Context, args []string) error {
 	verifier := auth.NewVerifier(cfg.Auth, db, auth.Discover(cfg.Auth.OIDC))
 	// The ingest runners and the publish worker stop with the signal; a claim or job left held
 	// lapses with its lease.
-	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, exe, sg, cfg.Talos.MaxCertLifetime, cfg.Ingestion, epoch, *recovery, onEntry)))
+	srv := server.NewHTTP(cfg.Listen, server.New(api.New(ctx, db, verifier, cfg.Auth, cfg.Execution, ing, pub, exe, sg, pr, cfg.Talos.MaxCertLifetime, cfg.Ingestion, epoch, *recovery, onEntry)))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	select {
@@ -219,9 +220,10 @@ func serveContext(ctx context.Context, args []string) error {
 // providerClients builds the server's provider identities, each with its own token (compilation.md
 // §1): ingestion's, publication's metadata and compiler identities, and the executor's, which
 // observations read the Talos access under (persistence-api.md §3.3), and the signer's, which stores
-// each cluster's CA key (§3.4) and is nil when no signerTokenFile is configured. An unreadable token
-// file is named by its field.
-func providerClients(p *config.Provider) (api.Ingester, *api.Publishers, api.Executor, api.Signer, error) {
+// each cluster's CA key (§3.4) and is nil when no signerTokenFile is configured, and the access
+// presence identity's, which reads the metadata of that key (§3.3) and is nil when no
+// presenceTokenFile is configured. An unreadable token file is named by its field.
+func providerClients(p *config.Provider) (api.Ingester, *api.Publishers, api.Executor, api.Signer, api.Presence, error) {
 	token := func(field, path string) (provider.Token, error) {
 		tok, err := provider.ReadTokenFile(path)
 		if err != nil {
@@ -232,44 +234,53 @@ func providerClients(p *config.Provider) (api.Ingester, *api.Publishers, api.Exe
 	k := p.Keys
 	tok, err := token("ingestionTokenFile", p.IngestionTokenFile)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	ing, err := provider.NewIngestion(p.Address, tok, provider.Keys{Baseline: k.Baseline, Staging: k.Staging, Digest: k.Digest})
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	if tok, err = token("compilerTokenFile", p.CompilerTokenFile); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	compiler, err := provider.NewCompiler(p.Address, tok, k.Artifact)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	if tok, err = token("metadataTokenFile", p.MetadataTokenFile); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	meta, err := provider.NewMetadata(p.Address, tok)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	if tok, err = token("executorTokenFile", p.ExecutorTokenFile); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	exe, err := provider.NewExecutor(p.Address, tok, k.Artifact)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
-	if p.SignerTokenFile == "" {
-		return ing, &api.Publishers{Meta: meta, Compiler: compiler}, exe, nil, nil
+	// The two optional identities stay a nil interface, never a typed nil, when unconfigured.
+	var sg api.Signer
+	if p.SignerTokenFile != "" {
+		if tok, err = token("signerTokenFile", p.SignerTokenFile); err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+		if sg, err = provider.NewSigner(p.Address, tok); err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
 	}
-	if tok, err = token("signerTokenFile", p.SignerTokenFile); err != nil {
-		return nil, nil, nil, nil, err
+	var pr api.Presence
+	if p.PresenceTokenFile != "" {
+		if tok, err = token("presenceTokenFile", p.PresenceTokenFile); err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+		if pr, err = provider.NewPresence(p.Address, tok); err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
 	}
-	sg, err := provider.NewSigner(p.Address, tok)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	return ing, &api.Publishers{Meta: meta, Compiler: compiler}, exe, sg, nil
+	return ing, &api.Publishers{Meta: meta, Compiler: compiler}, exe, sg, pr, nil
 }
 
 // startMonitor starts the dependency monitor with a normal start. A recovery start records no
