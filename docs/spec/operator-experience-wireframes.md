@@ -20,8 +20,8 @@ detail. Every screen has the [header](#header-on-every-screen) and the state var
 
 ```text
 +------------------------------------------------------------------------------------------+
-| Bronzeward   Context: lab ▾   ops-anna@example.invalid (human)   Roles: author, publisher |
-|              Epoch ep_bqek…ekgi                                   [Sign out]              |
+| Bronzeward   Context: lab ▾   Signed in as Anna Example.   Roles: author, publisher       |
+|                                                                   [Sign out]              |
 +------------------------------------------------------------------------------------------+
 | RECOVERY MODE since 10:42, epoch ep_r2l…. 4 of 4 scopes not released: none can commit.   |  <- only in recovery mode
 | Drafts editable. Recovery-start server: no plans; publications wait for restart. [Open]  |
@@ -30,8 +30,11 @@ detail. Every screen has the [header](#header-on-every-screen) and the state var
 +------------------------------------------------------------------------------------------+
 ```
 
-The header shows the identity, the roles and the epoch that `GET /identity` serves
-([gap G1](operator-experience.md#11-api-gap-audit)); an action the roles do not allow is disabled,
+The header says who is signed in by name, from the identity provider's userinfo answer ("Signed in
+as a person" when it gives none, never the subject number; [client contracts §9.3](client-contracts.md#93-browser-sign-in)
+item 6), and shows the roles that `GET /identity` serves
+([gap G1](operator-experience.md#11-api-gap-audit)). It shows no epoch: the recovery banner names it
+where it matters. An action the roles do not allow is disabled,
 and the server's refusal stays authoritative. A read of `GET /identity` that fails after a good one
 (a refusal other than the two below, or a `503` after its retries) keeps the header
 and the page, so the page keeps its unsaved text ([client contracts §11.4](client-contracts.md#114-web-review-and-document-input)),
