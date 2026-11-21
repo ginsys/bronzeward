@@ -3,7 +3,7 @@ import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import { Action, connection, Deprecations, deprecated, ending, Failure, focusLost, heldPage, type Identity, identityMain, incompatible, KEPT_PAGE, keepsPage, Kept, MIN_API_REVISION, observed, offlineSince, reading, regaining, ShellContext, type ShellEvents, ShellReads, moveFree, showCurrent } from "./shell.tsx";
-import { Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SCOPE_NO_MODE, SET_ASIDE, SetAside, StatusPage, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
+import { CHECK_STATE, Conflict, Disconnected, Empty, HUMAN_ONLY, Loading, NOT_ACCEPTED, NotAccepted, Offline, Refused, REPEATING, REPLAYED, Replayed, SCOPE_NO_MODE, SET_ASIDE, SetAside, StatusPage, Unknown, UNKNOWN, Unread, Withheld, WITHHELD } from "./states.tsx";
 import { NO_EPOCH, SHELL_GONE, Write, Writes } from "./write.ts";
 import { type Attempt, type Client, TRANSPORT_FAILURE } from "./request.ts";
 
@@ -28,10 +28,12 @@ describe("W11 state catalogue: every text a status message", () => {
     expect(status(h(Disconnected))).toBe(TRANSPORT_FAILURE);
   });
 
-  test("a refusal shows its code, rule, title, detail and instance, never a body; another answer only its status", () => {
+  test("a refusal says it in words with the server's detail, and keeps its code, rule and request in the reference, never a body; another answer only its status", () => {
     const problem = { type: "urn:bronzeward:problem:validation-failed", title: "Validation failed", status: 422, detail: '"registry/x" has no declaration.', instance: "req-7", rule: "unknown-reference" };
-    expect(status(h(Refused, { problem, status: 422, verb: "saved" }))).toBe('Not saved: validation-failed (rule unknown-reference). Validation failed: "registry/x" has no declaration. Request req-7.');
-    expect(status(h(Refused, { problem: { type: problem.type, title: problem.title, status: 422 }, status: 422, verb: "read" }))).toBe("Not read: validation-failed. Validation failed");
+    expect(status(h(Refused, { problem, status: 422, verb: "saved" }))).toBe('Not saved. The server checked this and found it not valid. Change what it points at; the server\'s explanation follows. The server says: "registry/x" has no declaration.');
+    const reference = html(h(Refused, { problem, status: 422, verb: "saved" }));
+    for (const line of ["Code: validation-failed", "Rule: unknown-reference", "Request: req-7", "Status: 422"]) expect(reference).toContain(line);
+    expect(status(h(Refused, { problem: { type: problem.type, title: problem.title, status: 422 }, status: 422, verb: "read" }))).toBe("Not read. The server checked this and found it not valid.");
     expect(status(h(Refused, { problem: null, status: 502, verb: "read" }))).toBe("Not read: the server answered 502.");
   });
 
@@ -63,43 +65,46 @@ describe("W11 state catalogue: every text a status message", () => {
 
   test("a write's 403 names what the route accepts, as a read's does (§8.2 403 row)", () => {
     const forbidden = (extra: Record<string, unknown>) => ({ type: "urn:bronzeward:problem:forbidden", title: "Forbidden", status: 403, instance: "req-2", ...extra });
-    expect(status(h(Refused, { problem: forbidden({ roles: ["author"] }), status: 403, verb: "saved" }))).toBe("Not saved: forbidden. Needs author. Forbidden Request req-2.");
-    expect(status(h(Refused, { problem: forbidden({ humanOnly: true, roles: ["approver"] }), status: 403, verb: "saved" }))).toBe(`Not saved: forbidden. ${HUMAN_ONLY} Forbidden Request req-2.`);
-    // The plan cancellation's creator check says it in its detail.
-    expect(status(h(Refused, { problem: forbidden({ plan: "pln_1", roles: ["publisher"], detail: "only the creator" }), status: 403, verb: "saved" }))).toBe("Not saved: forbidden. Forbidden: only the creator Request req-2.");
+    const NOT_ALLOWED = "Not saved. Your account is not allowed to do this. Ask someone who has the right role.";
+    expect(status(h(Refused, { problem: forbidden({ roles: ["author"] }), status: 403, verb: "saved" }))).toBe(`${NOT_ALLOWED} Needs author.`);
+    expect(status(h(Refused, { problem: forbidden({ humanOnly: true, roles: ["approver"] }), status: 403, verb: "saved" }))).toBe(`${NOT_ALLOWED} ${HUMAN_ONLY}`);
+    // The plan cancellation's creator check says it in its detail, and the caller holds the route's roles.
+    expect(status(h(Refused, { problem: forbidden({ plan: "pln_1", roles: ["publisher"], detail: "only the creator" }), status: 403, verb: "saved" }))).toBe("Not saved. You may not do this to this plan. The server's explanation follows. The server says: only the creator.");
   });
 
-  test("a recovery-mode refusal with a scope names the scope and says nothing about the start mode (§8.5 item 1)", () => {
+  test("a recovery-mode refusal with a scope says it is about one part and says nothing about the start mode (§8.5 item 1)", () => {
     const refusal = (extra: Record<string, unknown>) => ({ type: "urn:bronzeward:problem:recovery-mode-active", title: "Recovery mode active", status: 409, detail: "injected", instance: "req-3", ...extra });
-    // A scope's refusal: the scope is named, and no word about a recovery start.
+    const RECOVERY = "The server refuses this until a recovery is finished. Wait for an administrator to finish the recovery.";
+    // A scope's refusal: one part of the installation, with the scope in the reference, and no word about a recovery start.
     const scoped = status(h(Refused, { problem: refusal({ scope: "mch_a" }), status: 409, verb: "saved" }));
-    expect(scoped).toBe(`Not saved: recovery-mode-active. Scope mch_a refuses this request. ${SCOPE_NO_MODE} Recovery mode active: injected Request req-3.`);
-    expect(scoped).not.toMatch(/started for recovery|recovery start/i);
-    // The process's refusal has no scope member: its text is unchanged.
-    expect(status(h(Refused, { problem: refusal({}), status: 409, verb: "saved" }))).toBe("Not saved: recovery-mode-active. Recovery mode active: injected Request req-3.");
-    // A scope that is not text is not named: today's text stands.
-    expect(status(h(Refused, { problem: refusal({ scope: 7 }), status: 409, verb: "saved" }))).toBe("Not saved: recovery-mode-active. Recovery mode active: injected Request req-3.");
+    expect(scoped).toBe(`Not saved. ${RECOVERY} This applies to one part of the installation only. ${SCOPE_NO_MODE} The server says: injected.`);
+    expect(scoped).not.toMatch(/started for recovery|recovery start|mch_a/i);
+    expect(html(h(Refused, { problem: refusal({ scope: "mch_a" }), status: 409, verb: "saved" }))).toContain("Scope: mch_a");
+    // The process's refusal has no scope member: it says nothing of a scope.
+    expect(status(h(Refused, { problem: refusal({}), status: 409, verb: "saved" }))).toBe(`Not saved. ${RECOVERY} The server says: injected.`);
+    // A scope that is not text is not named.
+    expect(status(h(Refused, { problem: refusal({ scope: 7 }), status: 409, verb: "saved" }))).toBe(`Not saved. ${RECOVERY} The server says: injected.`);
     // Another code that carries a scope member is not a recovery refusal.
-    expect(status(h(Refused, { problem: { ...refusal({ scope: "mch_a" }), type: "urn:bronzeward:problem:scope-busy" }, status: 409, verb: "saved" }))).toBe("Not saved: scope-busy. Recovery mode active: injected Request req-3.");
+    expect(status(h(Refused, { problem: { ...refusal({ scope: "mch_a" }), type: "urn:bronzeward:problem:scope-busy" }, status: 409, verb: "saved" }))).toBe("Not saved. Another operation is working on the same part of the installation. Wait for it to finish, then try again. The server says: injected.");
     // A read's refusal shows it the same way.
-    expect(status(h(Refused, { problem: refusal({ scope: "mch_a" }), status: 409, verb: "read" }))).toContain("Scope mch_a refuses this request.");
+    expect(status(h(Refused, { problem: refusal({ scope: "mch_a" }), status: 409, verb: "read" }))).toContain("This applies to one part of the installation only.");
   });
 
   test("write states, exercised from #257 on", () => {
     expect(status(h(Conflict, { what: "draft", revision: 7, onShow: noop }))).toBe("Someone changed this draft (revision 7). Your text is not saved.");
     expect(html(h(Conflict, { what: "draft", revision: 7, onShow: noop }))).toContain(">Show their change</button>");
-    expect(status(h(Unknown, { onShow: noop }))).toBe(UNKNOWN);
+    expect(status(h(Unknown, { onShow: noop }))).toBe(`${UNKNOWN} ${CHECK_STATE}`);
     // A transport failure of a write names a refused redirect as one possible cause (client contracts §6 item 7).
     expect(UNKNOWN).toBe("Unknown whether this was saved: the connection failed. The network may be down, or the server answered with a redirect, which this page refuses.");
     // Repeat exactly only while the page holds the request.
     expect(html(h(Unknown, { onRepeat: noop, onShow: noop }))).toContain(">Repeat exactly</button>");
     expect(html(h(Unknown, { onShow: noop }))).not.toContain("Repeat exactly");
     // The reason it was set aside comes first: an epoch read with no answer is not an epoch change.
-    expect(status(h(SetAside, { why: NO_EPOCH, onShow: noop }))).toBe(`Set aside: ${NO_EPOCH}. ${SET_ASIDE}`);
+    expect(status(h(SetAside, { why: NO_EPOCH, onShow: noop }))).toBe(`Set aside: ${NO_EPOCH}. ${SET_ASIDE} ${CHECK_STATE}`);
     expect(html(h(SetAside, { why: NO_EPOCH, onShow: noop }))).toContain('<button type="button" disabled="">Repeat exactly</button>');
     // While [Repeat exactly] runs, the notice stays, with no second repeat and no dismissal.
     const notice = h(Unknown, { onRepeat: noop, onShow: noop, onDismiss: noop, repeating: true });
-    expect(status(notice)).toBe(`${UNKNOWN}${REPEATING}`);
+    expect(status(notice)).toBe(`${UNKNOWN} ${CHECK_STATE}${REPEATING}`);
     const repeating = html(notice);
     expect(repeating).toContain(">Show current state</button>");
     expect(repeating).not.toContain("Repeat exactly");
@@ -165,7 +170,7 @@ describe("the shell", () => {
       expect(shown).toContain('<p role="alert" data-testid="problem">');
     }
     // §8.2: each row's problem fields under it.
-    const fields = '<p role="alert" data-testid="problem">Not read: Forbidden (needs author). Request req-1.</p>';
+    const fields = '<p role="alert" data-testid="problem">Not read. Your account is not allowed to do this. Ask someone who has the right role. The server says: needs author.</p>';
     expect(html(h(Failure, { res: forbidden({ roles: ["author"], detail: "needs author", instance: "req-1" }), sub: "u" }))).toContain(fields);
     expect(html(h(Failure, { res: forbidden({ humanOnly: true, detail: "needs author", instance: "req-1" }), sub: "u" }))).toContain(fields);
     expect(status(h(Failure, { res: { kind: "transport" }, sub: "" }))).toBe(TRANSPORT_FAILURE);

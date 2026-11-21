@@ -8,7 +8,7 @@ import { deprecated, incompatible } from "../../src/shell.tsx";
 import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_API, FIXTURE_PAGE } from "../auth.conf.ts";
 import type { Faults } from "../injector.ts";
-import { absent, answered, eventually, faults, fixtureSignIn, mint, mirrored, release, seen, settled, storageEmpty, where } from "./helpers.ts";
+import { absent, answered, eventually, faults, fixtureSignIn, mint, mirrored, references, release, seen, settled, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 const testid = (id: string) => $(`[data-testid="${id}"]`);
@@ -195,8 +195,11 @@ describe("the state catalogue", () => {
     expect(await testid("server").getText()).toMatch(SERVER);
   });
 
-  it("error: the problem's code, detail and instance", async () => {
-    expect(await fixtureSignIn("h-viewer", {}, { missing: "/identity" })).toBe("Not read: not-found. Not found: injected Request req-injected.");
+  it("error: the problem in words with its detail, and its code and instance in the reference", async () => {
+    expect(await fixtureSignIn("h-viewer", {}, { missing: "/identity" })).toBe(NOT_FOUND);
+    const reference = (await references()).join("\n");
+    expect(reference).toContain("Code: not-found");
+    expect(reference).toContain("Request: req-injected");
     expect(await testid("status").getAttribute("role")).toBe("alert");
     expect(await testid("server").getText()).toMatch(SERVER);
   });
@@ -244,7 +247,7 @@ describe("the state catalogue", () => {
     await announced("offline", /^Offline since /);
     await faults({ missing: "/identity" });
     await nav("Changes").click();
-    await announced("status", "Not read: not-found. Not found: injected Request req-injected.", "alert");
+    await announced("status", NOT_FOUND, "alert");
     await absent(() => testid("offline").isExisting(), "the offline banner after a refusal the server answered");
   });
 
@@ -252,7 +255,7 @@ describe("the state catalogue", () => {
     await fixtureSignIn("h-viewer");
     await faults({ missing: "/identity" });
     await nav("Changes").click();
-    await announced("status", "Not read: not-found. Not found: injected Request req-injected.", "alert");
+    await announced("status", NOT_FOUND, "alert");
     // The page's two lists have answered, and the online event's reads of them are held: an answer
     // to either would end the banner before the case looks at it.
     await browser.waitUntil(async () => (await answered("/drafts", 1)) && (await answered("/releases", 1)), { timeout: 10_000, timeoutMsg: "the lists were not read" });
@@ -271,7 +274,7 @@ describe("the state catalogue", () => {
     await announced("offline", /^Offline since /);
     await faults({ missing: "/identity" });
     await nav("Changes").click();
-    await announced("status", "Not read: not-found. Not found: injected Request req-injected.", "alert");
+    await announced("status", NOT_FOUND, "alert");
     expect(await testid("offline").isExisting()).toBe(true);
     await faults({});
     await event("online");
@@ -293,7 +296,7 @@ describe("the state catalogue", () => {
     await fixtureSignIn("h-viewer");
     await faults({ missing: "/identity" });
     await event("online");
-    await announced("status", "Not read: not-found. Not found: injected Request req-injected.", "alert");
+    await announced("status", NOT_FOUND, "alert");
     // The first online event read the machine list and its cluster filter again with the identity.
     // The refusal does not unmount the page, so this one reads the three again: 7 reads, then 3 more.
     await faults({ held: "/identity", missing: "/identity" });
@@ -338,8 +341,11 @@ describe("the state catalogue", () => {
   });
 });
 
+// A read refused 404 by the injector, in words, with the injector's detail.
+const NOT_FOUND = "Not read. This does not exist on this server. Go back to the list and check that it is still there. The server says: injected.";
 const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const INJECTED_REFUSAL = "Not read: Recovery mode active (injected). Request req-injected.";
+// The page before the entry is where the entry is made, so the refusal carries no "wait for an administrator".
+const INJECTED_REFUSAL = "Not read. The server refuses this until a recovery is finished. The server says: injected.";
 
 describe("recovery", () => {
   it("REC-01: a recovery start before its entry names the process's restriction; after it, the banner, the scopes and the epoch change", async () => {
@@ -351,8 +357,9 @@ describe("recovery", () => {
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toBe("Server unknown");
     await announced("status", PRE_ENTRY);
     expect(await testid("status").getAttribute("role")).toBeNull();
-    // §8.2: the refusal's own title, detail and request ID stay shown under the restriction.
-    expect(await testid("problem").getText()).toMatch(/^Not read: .+\. Request \S+\.$/);
+    // §8.2: the refusal in words, its detail and its request number (in the reference) stay shown under the restriction.
+    expect(await testid("problem").getText()).toMatch(/^Not read\. .+\. The server says: .+\.$/);
+    expect((await references()).join("\n")).toMatch(/Request: \S+/);
     await absent(() => testid("principal").isExisting(), "the principal under the process's restriction");
     expect(await testid("server").getText()).toBe("Server unknown");
     expect(await seen()).toEqual(["/server"]);

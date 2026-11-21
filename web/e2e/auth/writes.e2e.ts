@@ -13,7 +13,7 @@ import { PRE_ENTRY, RECOVERY_START } from "../../src/recovery.tsx";
 import { REPEATING, REPLAYED, SCOPE_NO_MODE, SET_ASIDE, UNKNOWN, unknown } from "../../src/states.tsx";
 import { CONTROL } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, REDIRECTED, type Step } from "../injector.ts";
-import { absent, answers, dialogsDuring, faults, fixtureSignIn, holding, mirrored, release, storageEmpty } from "./helpers.ts";
+import { absent, answers, dialogsDuring, faults, fixtureSignIn, holding, mirrored, references, release, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
@@ -146,11 +146,12 @@ describe("the write views (#338)", () => {
   it("AMB-08: a write answered 503 dependency-unavailable each time is repeated 3 times with the same key, then not done", async function () {
     this.timeout(60_000);
     await add(["503", "503", "503", "503"]);
-    const said = "Not saved: every attempt was answered 503 dependency-unavailable, which commits nothing.";
+    const said = "Not saved: every attempt was answered 503, which commits nothing.";
     await expect(result()).toHaveText(expect.stringContaining(said), { wait: 30_000 });
-    // The fixed sentence, then the last answer's problem fields (the injector's title, detail and instance).
+    // The fixed sentence, then the last answer's problem in words with the injector's detail; its code and instance are in the reference.
     const text = await result().getText();
-    expect([text.slice(0, said.length), text.slice(said.length)]).toEqual([said, " dependency-unavailable: injected. Request req-injected."]);
+    expect([text.slice(0, said.length), text.slice(said.length)]).toEqual([said, " Something the server depends on is not available or not set up. Try again in a moment; if it keeps happening, ask an administrator. The server says: injected."]);
+    expect((await references()).join("\n")).toContain("Request: req-injected");
     await oneWrite(4);
     await absent(() => notice().isExisting(), "a notice after every attempt was answered 503");
   });
@@ -158,7 +159,7 @@ describe("the write views (#338)", () => {
   it("AMB-09: a write dropped after the commit, each repeat answered 503, is unknown with its key and resource, never not done", async function () {
     this.timeout(60_000);
     await add(["commit-drop", "503", "503", "503"]);
-    await expect(notice()).toHaveText(expect.stringContaining(unknown("the server answered 503 dependency-unavailable")), { wait: 30_000 });
+    await expect(notice()).toHaveText(expect.stringContaining(unknown("the server answered 503")), { wait: 30_000 });
     const { key } = await oneWrite(4);
     expect(await seen()).toEqual(["failed", "503", "503", "503"]);
     // The first send committed before its answer was dropped; the 503s reached no server.
@@ -218,8 +219,8 @@ describe("the write views (#338)", () => {
   it("AMB-07: a new epoch after the confirming read meets the earlier epoch's record: 409, set aside, no new key", async () => {
     await add(["commit-drop", "epoch"]);
     await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 20_000 });
-    // The record the first attempt left, by its request and epoch (§8.4 item 7).
-    await expect(notice()).toHaveText(expect.stringMatching(/The key's earlier record: request \S+, epoch \S+\./));
+    // The record the first attempt left, by its request and epoch (§8.4 item 7), in the reference.
+    await browser.waitUntil(async () => /Earlier record: request \S+, epoch \S+/.test((await references()).join("\n")), { timeout: 20_000, timeoutMsg: "the earlier record was not shown in the reference" });
     await oneWrite(2);
     expect(await seen()).toEqual(["failed", "409"]);
     expect(await writeAnswers()).toEqual(["/clusters 201", "/clusters 409"]);
@@ -235,9 +236,12 @@ describe("the write views (#338)", () => {
 
   it("REC-01 (scope): a write refused 409 recovery-mode-active with a scope names that scope and says nothing about the start mode; sent once", async () => {
     await add(["scope-refused"]);
-    await expect(result()).toHaveText(expect.stringContaining(`Scope ${INJECTED_SCOPE} refuses this request. ${SCOPE_NO_MODE}`), { wait: 20_000 });
+    await expect(result()).toHaveText(expect.stringContaining(`This applies to one part of the installation only. ${SCOPE_NO_MODE}`), { wait: 20_000 });
     const text = await result().getText();
-    expect(text).toMatch(/^Not saved: recovery-mode-active\./);
+    expect(text).toMatch(/^Not saved\. The server refuses this until a recovery is finished\./);
+    // once: the text of the awaited result itself, drawn from a refused outcome that is final, as the line below reads it.
+    expect(text).not.toContain(INJECTED_SCOPE);
+    expect((await references()).join("\n")).toContain(`Scope: ${INJECTED_SCOPE}`);
     // once: the text of the awaited result itself, drawn from a refused outcome that is final (web/src/forms.tsx:196-204).
     expect(text).not.toMatch(/started for recovery|recovery start/i);
     // One send, never repeated: a definite refusal, so no notice either. It reached no server.
