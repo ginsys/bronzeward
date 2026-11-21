@@ -3133,7 +3133,11 @@ A `stale-input` conflict names a head by its identifier, with head revisions
 as integers: the draft's base, or the compilation snapshot's for a head used
 unchanged, and the one T3 read under its lock; `"absent"` for a name the draft
 introduces. It names a machine by its identifier, with import base revision
-identifiers, `"absent"` where there is none. A draft keeps only the base
+identifiers, `"absent"` where there is none. A machine whose name moved
+since the snapshot (§4.2, the fourth form, **choice §17.45**) is named by its
+identifier with `expected` the name the snapshot read and `actual` the name
+now stored, both strings, and `"absent"` for a machine with no name on that
+side. A draft keeps only the base
 counter, not the ETag token, so the token is not named.
 
 | Status | Code | When |
