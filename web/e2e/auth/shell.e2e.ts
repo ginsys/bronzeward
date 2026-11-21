@@ -51,13 +51,14 @@ async function announced(id: string, text: string | RegExp, role: "status" | "al
 }
 
 describe("the shell", () => {
-  it("shows the identity, roles and epoch GET /identity serves, and navigates by path", async () => {
+  it("says in words who is signed in, shows the roles GET /identity serves and no epoch, and navigates by path", async () => {
     expect(await fixtureSignIn("h-viewer")).toMatch(SERVER);
     const res = await fetch(`${FIXTURE_API}/api/v1/identity`, { headers: { Authorization: `Bearer ${mint("h-viewer")}` } });
-    const served = (await res.json()) as { roles: string[]; epoch: string };
-    expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
+    const served = (await res.json()) as { roles: string[] };
+    // The fixture's provider publishes no userinfo endpoint, so the page has no name to show: a person, never the subject.
+    expect(await testid("principal").getText()).toBe("Signed in as a person");
     expect(await testid("roles").getText()).toBe(`Roles: ${served.roles.join(", ")}`);
-    expect(await testid("epoch").getText()).toBe(`Epoch ${served.epoch}`);
+    await absent(() => testid("epoch").isExisting(), "the epoch in the header");
     expect(await $("footer").getText()).toMatch(/^Client .+\. Server .+, API revision \d+$/);
     expect(await nav("Machines").getAttribute("aria-current")).toBe("page");
     await nav("Plans").click();
@@ -206,7 +207,7 @@ describe("the state catalogue", () => {
     await faults({ redirect: "/identity", hold: { path: "/operations", ms: 8000 } });
     await nav("Operations").click();
     await announced("offline", /^Offline since \d\d:\d\d\. Showing data read at \d\d:\d\d\. Actions are disabled\.$/);
-    expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
+    expect(await testid("principal").getText()).toBe("Signed in as a person");
     await faults({});
     await nav("Changes").click();
     await expect($("main h2")).toHaveText("Changes");
@@ -259,7 +260,7 @@ describe("the state catalogue", () => {
     await event("online");
     // The identity answered before, so the page and the identity stay and the banner says the rest.
     await announced("offline", /^Offline since /);
-    expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
+    expect(await testid("principal").getText()).toBe("Signed in as a person");
     await expect($("main h2")).toHaveText("Changes");
     await release();
   });
@@ -274,7 +275,7 @@ describe("the state catalogue", () => {
     expect(await testid("offline").isExisting()).toBe(true);
     await faults({});
     await event("online");
-    await expect(testid("principal")).toHaveText("Signed in as h-viewer");
+    await expect(testid("principal")).toHaveText("Signed in as a person");
     // The online event ends the banner at once and reads again: wait until every one of those reads has answered
     // (the third identity answer, the second of each list), so a banner a late answer would bring shows in the reads below.
     await browser.waitUntil(async () => (await answered("/identity", 3)) && (await answered("/drafts", 2)) && (await answered("/releases", 2)), {
@@ -303,12 +304,12 @@ describe("the state catalogue", () => {
     // The newer read's data replaces the refusal while the older read is still held. The header
     // keeps its principal through the refusal, so the refusal's going is what shows the newer answer.
     await browser.waitUntil(async () => !(await $("main").getText()).includes("Not read"), { timeout: 10_000, timeoutMsg: "the newer answer did not replace the refusal" });
-    await expect(testid("principal")).toHaveText("Signed in as h-viewer");
+    await expect(testid("principal")).toHaveText("Signed in as a person");
     // The held read's refusal arrives after it and must not replace it.
     await release();
     await browser.waitUntil(() => answered("/identity", 4), { timeout: 10_000, timeoutMsg: "the held read's answer did not reach the page" });
     await browser.pause(500);
-    expect(await testid("principal").getText()).toBe("Signed in as h-viewer");
+    expect(await testid("principal").getText()).toBe("Signed in as a person");
     // once: read after the held read's answer reached the page (waitUntil above) and a 500 ms pause; the machine list's own state may be shown, the refusal is not.
     expect(await $("main").getText()).not.toContain("Not read");
   });
@@ -378,7 +379,6 @@ describe("recovery", () => {
     await eventually(async () => !(await testid("recovery-read").isExisting()), "the banner's read state gone after the next page's read");
     await absent(() => testid("recovery-read").isExisting(), "the banner's read state after the next page's read");
     await announced("recovery", new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}\\. No machine scopes\\. Drafts can be edited\\. ${literal(RECOVERY_START)}$`));
-    expect(await testid("epoch").getText()).toBe(`Epoch ${epoch}`);
     expect(await testid("server").getText()).toMatch(SERVER);
     // The process restarts for recovery again, under the same epoch: whichever of the page's next
     // reads meets its refusal first, nothing read before stays shown, the other read's late answer
@@ -398,7 +398,7 @@ describe("recovery", () => {
       expect(await testid("recovery").getText()).toBe(`Recovery mode. Drafts can be edited. ${RECOVERY_START}`);
       await faults({ upstream: at });
       await $("button=Read again").click();
-      await expect(testid("principal")).toHaveText("Signed in as h-viewer");
+      await expect(testid("principal")).toHaveText("Signed in as a person");
       await announced("recovery", since);
     }
   });
@@ -417,7 +417,7 @@ describe("recovery", () => {
     expect((await seen()).filter((p) => p !== "/releases" && p !== "/drafts").slice(-2)).toEqual(["/identity", "/server"]);
     await faults({});
     await $("button=Read again").click();
-    await expect(testid("principal")).toHaveText("Signed in as h-viewer");
+    await expect(testid("principal")).toHaveText("Signed in as a person");
     expect(await testid("server").getText()).toMatch(SERVER);
   });
 });

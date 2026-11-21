@@ -116,6 +116,54 @@ export function sender(writes: Pick<Writes, "submit" | "repeatable" | "dismiss" 
   };
 }
 
+// A sentence from a reason that starts in lower case and ends with no full stop.
+const sentence = (reason: string) => `${reason.charAt(0).toUpperCase()}${reason.slice(1)}${reason.endsWith(".") ? "" : "."}`;
+
+// Whether an endpoint is shaped like an IP address, by the server's own first split
+// (internal/talos/endpoint.go ParseEndpoint): text in brackets is an IPv6 address, more than one colon is
+// an IPv6 address the server will ask to have bracketed, and with at most one colon the host before it
+// must be a dotted IPv4 address. Everything else is a name. The port and its range stay the server's to
+// judge. The server cannot use a name yet; when it can, this check and its two sentences go.
+const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
+export function isAddress(endpoint: string): boolean {
+  if (endpoint.startsWith("[")) return true;
+  const colons = endpoint.split(":").length - 1;
+  return colons > 1 || IPV4.test(colons === 1 ? endpoint.slice(0, endpoint.indexOf(":")) : endpoint);
+}
+
+const NO_ENDPOINT = "The talosconfig's context names no endpoint: type the IP address of a control-plane node.";
+const nameNote = (endpoint: string) =>
+  `This talosconfig's endpoint is ${endpoint}, which is a name. The server cannot use a name yet: type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.`;
+
+// The endpoint a read will use: the one typed, else the chosen context's first. Undefined when the text is
+// not a talosconfig the page can cut (the read's own sentence says why).
+function readEndpoint(text: string, context: string | undefined, typed: string | undefined): string | undefined {
+  if (typed !== undefined && typed !== "") return typed;
+  try {
+    return cutContext(text, context).endpoint;
+  } catch {
+    return undefined;
+  }
+}
+
+// What the page says, before the button, about the endpoint the read will use. Nothing without a file the
+// page can cut.
+export function endpointNote(text: string | undefined, context: string, typed: string): string | undefined {
+  if (text === undefined) return undefined;
+  const endpoint = readEndpoint(text, context, typed.trim());
+  if (endpoint === undefined) return undefined;
+  if (endpoint === "") return NO_ENDPOINT;
+  return isAddress(endpoint) ? `The page will read the cluster at ${endpoint}.` : nameNote(endpoint);
+}
+
+// A discovery's failure as whole sentences, with no lead of its own: the page writes "Nothing was
+// recorded." once, because a discovery only reads.
+function discoveryWhy(o: Outcome): string {
+  if (o.kind === "refused") return `The server answered ${o.status}.${problemTail(o.problem)}`;
+  if (o.kind === "done") return "";
+  return `${sentence(o.why)}${problemTail(o.problem)}`;
+}
+
 // A step's failure in the words of the form's own notice, from the outcome and nothing of the request.
 function reason(o: Outcome): string {
   if (o.kind === "refused") return `not saved: the server answered ${o.status}.${problemTail(o.problem)}`;
@@ -132,21 +180,25 @@ const keyAddress = (f: Discovery) => members(f).find((m) => m.role === "controlp
 
 // Reads the cluster's members with the cut talosconfig, and refuses what the CLI refuses before it records
 // anything: a contract this server does not render, and a cluster with no control-plane member to carry the
-// first key. The file's text is held only as its cut.
+// first key. The file's text is held only as its cut. A name is never sent: the server takes only an IP
+// address (endpointNote says so before the button). Each `why` is whole sentences with no lead of its own,
+// because the page writes "Nothing was recorded." once: a discovery only reads.
 export async function discoverCluster(env: Env, text: string, o: { context?: string; endpoint?: string }): Promise<{ ok: true; plan: Plan } | { ok: false; why: string }> {
   let cut;
   try {
     cut = cutContext(text, o.context);
   } catch (e) {
-    return { ok: false, why: (e as Error).message };
+    return { ok: false, why: sentence((e as Error).message) };
   }
-  const endpoint = o.endpoint !== undefined && o.endpoint !== "" ? o.endpoint : cut.endpoint;
-  if (endpoint === "") return { ok: false, why: "the talosconfig's context names no endpoint: give one" };
+  const typed = (o.endpoint ?? "").trim();
+  const endpoint = typed !== "" ? typed : cut.endpoint;
+  if (endpoint === "") return { ok: false, why: NO_ENDPOINT };
+  if (!isAddress(endpoint)) return { ok: false, why: nameNote(endpoint) };
   const out = await env.send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", document: cut.document, endpoint }, released: () => {} });
-  if (out.kind !== "done") return { ok: false, why: reason(out) };
+  if (out.kind !== "done") return { ok: false, why: discoveryWhy(out) };
   const found = out.data as Discovery;
-  if (!found.supported) return { ok: false, why: `contract ${found.contract} is not the contract of the machinery in this server, so it would refuse the cluster. Nothing was recorded` };
-  if (keyAddress(found) === undefined) return { ok: false, why: "no control-plane member answered, so no address can carry the first key. Nothing was recorded: run it again once one does" };
+  if (!found.supported) return { ok: false, why: `Contract ${found.contract} is not the contract of the machinery in this server, so it would refuse the cluster.` };
+  if (keyAddress(found) === undefined) return { ok: false, why: "No control-plane member answered, so no address can carry the first key. Run it again once one does." };
   return { ok: true, plan: { found, endpoint, name: "", kube: found.kubernetesEndpoint, document: cut.document, keyed: false, machines: {}, imports: {}, lines: [] } };
 }
 

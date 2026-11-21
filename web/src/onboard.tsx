@@ -6,7 +6,7 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useReads, Ref, useSettled } from "./list.tsx";
-import { type Env, type Line, onboardCluster, type Plan, discoverCluster, sender } from "./onboard.ts";
+import { type Env, endpointNote, type Line, onboardCluster, type Plan, discoverCluster, sender } from "./onboard.ts";
 import { Action } from "./shell.tsx";
 import { useUnsaved, useWrites } from "./forms.tsx";
 
@@ -34,6 +34,10 @@ export function OnboardCluster() {
   const [busy, setBusy] = useState(false);
   const [ended, setEnded] = useState<boolean>();
   const [note, setNote] = useState<string>();
+  // What the page says about the endpoint the read will use, from the file, the context and the endpoint
+  // field. The file is read again at each change and only this sentence is kept, never its text.
+  const [said, setSaid] = useState<string>();
+  const latest = useRef(0);
   useUnsaved(HELD, held);
   useEffect(() => {
     alive.current = true;
@@ -50,6 +54,15 @@ export function OnboardCluster() {
     wait: (ms) => new Promise((r) => setTimeout(r, ms)),
   };
 
+  const say = async (form: HTMLFormElement) => {
+    const mine = ++latest.current;
+    const d = new FormData(form);
+    const file = d.get("file");
+    const text = file instanceof File && file.size > 0 && file.size <= MAX_FILE ? await file.text().catch(() => undefined) : undefined;
+    const s = endpointNote(text, String(d.get("context") ?? ""), String(d.get("endpoint") ?? ""));
+    if (alive.current && mine === latest.current) setSaid(s);
+  };
+
   const read = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const d = new FormData(e.currentTarget);
@@ -59,10 +72,12 @@ export function OnboardCluster() {
     setBusy(true);
     setNote(undefined);
     const text = await file.text().catch(() => undefined);
-    const r = text === undefined ? ({ ok: false, why: "the file could not be read" } as const) : await discoverCluster(env, text, { context: String(d.get("context") ?? ""), endpoint: String(d.get("endpoint") ?? "") });
+    const r = text === undefined ? ({ ok: false, why: "The file could not be read." } as const) : await discoverCluster(env, text, { context: String(d.get("context") ?? ""), endpoint: String(d.get("endpoint") ?? "") });
     if (!alive.current) return;
     setBusy(false);
-    if (!r.ok) return setNote(`Nothing was recorded: ${r.why}.`);
+    // A discovery only reads, so this lead is true; its reasons are whole sentences with none of their own.
+    if (!r.ok) return setNote(`Nothing was recorded. ${r.why}`);
+    setSaid(undefined);
     plan.current = r.plan;
     setHeld(r.plan.document !== undefined);
     setLines([]);
@@ -109,7 +124,7 @@ export function OnboardCluster() {
       <h2>Onboard cluster</h2>
       {note !== undefined && <p role="alert" data-testid="onboard-note">{note}</p>}
       {phase === "file" && (
-        <form onSubmit={(e) => void read(e)} aria-label="Read the cluster">
+        <form onSubmit={(e) => void read(e)} onChange={(e) => void say(e.currentTarget)} aria-label="Read the cluster">
           <p>
             Choose the talosconfig of the cluster. It is read in this page and sent only as the one context it names, to the server, which uses it
             to read the cluster's nodes and to supply the cluster's first key. It is not stored here.
@@ -117,6 +132,7 @@ export function OnboardCluster() {
           <p><label>Talosconfig file: <input type="file" name="file" required /></label></p>
           <p><label>Talos context: <input name="context" autoComplete="off" /></label> the current one when empty</p>
           <p><label>Talos endpoint: <input name="endpoint" autoComplete="off" /></label> the context's first endpoint when empty</p>
+          {said !== undefined && <p role="status" data-testid="onboard-endpoint">{said}</p>}
           <p><Action label="Read cluster" needs={["author"]} submit busy={busy} /></p>
           {busy && <p role="status">Reading the cluster's nodes</p>}
         </form>
@@ -164,7 +180,7 @@ export function OnboardCluster() {
           {ended === false && (
             <p>
               {choose
-                ? <Action label="Choose the file again" needs={["author"]} onClick={() => { setPhase("file"); setNote(undefined); }} />
+                ? <Action label="Choose the file again" needs={["author"]} onClick={() => { setPhase("file"); setNote(undefined); setSaid(undefined); }} />
                 : <Action label="Run again" needs={["author"]} onClick={() => void run()} busy={busy} />}
             </p>
           )}

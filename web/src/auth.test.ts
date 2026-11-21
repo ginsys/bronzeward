@@ -78,6 +78,22 @@ describe("discovery", () => {
     expect((await discover(ISSUER, answers([json(bad)]) as unknown as typeof fetch)).kind).toBe("invalid");
     expect((await discover(ISSUER, answers([new TypeError("x")]) as unknown as typeof fetch)).kind).toBe("transport");
   });
+
+  test("reads the userinfo endpoint and the scopes the provider lists, and drops what it cannot trust or read", async () => {
+    const full = { ...doc, userinfo_endpoint: `${ISSUER}/oidc/v1/userinfo`, scopes_supported: ["openid", "profile", "offline_access"] };
+    expect(await discover(ISSUER, answers([json(full)]) as unknown as typeof fetch)).toEqual({
+      kind: "ok",
+      provider: { ...provider, userinfoEndpoint: `${ISSUER}/oidc/v1/userinfo`, scopesSupported: ["openid", "profile", "offline_access"] },
+    });
+    // A userinfo endpoint that is neither https nor loopback http is no reason to refuse the sign-in: only no name.
+    const untrusted = { ...doc, userinfo_endpoint: "http://idp.example.invalid/userinfo", scopes_supported: ["profile", 7, "openid"] };
+    expect(await discover(ISSUER, answers([json(untrusted)]) as unknown as typeof fetch)).toEqual({
+      kind: "ok",
+      provider: { ...provider, userinfoEndpoint: undefined, scopesSupported: ["profile", "openid"] },
+    });
+    const odd = { ...doc, userinfo_endpoint: 7, scopes_supported: "profile" };
+    expect(await discover(ISSUER, answers([json(odd)]) as unknown as typeof fetch)).toEqual({ kind: "ok", provider });
+  });
 });
 
 // A sign-in begun with the storage, and the pending values the request carried.
@@ -106,6 +122,20 @@ describe("§9.3 item 1 authorization request", () => {
     expect(pending["verifier"]!.length).toBe(43);
     expect(pending["returnTo"]).toBe("/machines?cluster=c1");
     expect([...storage.items.keys()]).toEqual([PENDING_KEY]);
+  });
+
+  // The header's name comes from the provider's userinfo answer, which needs the `profile` scope. It is
+  // asked for only where discovery lists it, so a provider that would refuse an unknown scope is never
+  // asked, and once even where the configuration already lists it.
+  test.each([
+    ["discovery lists profile", { ...provider, scopesSupported: ["openid", "profile", "offline_access"] }, config, "openid offline_access profile urn:example:aud"],
+    ["discovery lists profile and the configuration does too", { ...provider, scopesSupported: ["profile"] }, { ...config, scopes: ["profile", "urn:example:aud"] }, "openid offline_access profile urn:example:aud"],
+    ["discovery lists scopes without profile", { ...provider, scopesSupported: ["openid", "offline_access"] }, config, "openid offline_access urn:example:aud"],
+    ["discovery lists no scopes", provider, config, "openid offline_access urn:example:aud"],
+    ["discovery lists no scopes and the configuration asks for profile", provider, { ...config, scopes: ["profile"] }, "openid offline_access profile"],
+  ])("%s", async (_what, p, c, scope) => {
+    const url = new URL((await beginSignIn(c, p, "/", memory(), ORIGIN))!);
+    expect(url.searchParams.get("scope")).toBe(scope);
   });
 
   test("a page that moves during the PKCE digest stores no pending entry and gets no URL", async () => {

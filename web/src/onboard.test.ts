@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { describe, expect, test, vi } from "vitest";
-import { cutContext, discoverCluster, type Env, type Line, onboardCluster, type Plan, sender } from "./onboard.ts";
+import { cutContext, discoverCluster, type Env, endpointNote, isAddress, type Line, onboardCluster, type Plan, sender } from "./onboard.ts";
 import type { Client } from "./request.ts";
 import { type Outcome, Writes, type WriteSpec } from "./write.ts";
 
@@ -502,6 +502,99 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
     if (!r.ok) {
       expect(r.why).toContain("talos-access-unavailable");
       expect(r.why).not.toContain(CANARY);
+    }
+  });
+});
+
+// The endpoint, in words, before anything is sent (ginsys/bronzeward#1049). The server takes only an IP
+// address as a Talos endpoint (internal/talos/endpoint.go), so a name from the file is said to be a name.
+const named = (endpoint: string) => talosconfig().replace("[10.0.0.1:50000]", `[${endpoint}]`);
+
+describe("what counts as an address follows the server's first split", () => {
+  test.each(["10.0.0.1", "10.0.0.1:50000", "[::1]", "[::1]:50000", "::1", "fd00::1", "[fd00::1]"])("%s is an address", (endpoint) => {
+    expect(isAddress(endpoint)).toBe(true);
+  });
+  test.each(["node.example.test", "node.example.test:50000", "cafe:50000", "cafe", "10.0.0.1.example.test", "10.0.0:50000", ""])("%s is a name", (endpoint) => {
+    expect(isAddress(endpoint)).toBe(false);
+  });
+});
+
+describe("the endpoint the page will use, said before the button", () => {
+  test("an address from the file, or typed, is the endpoint the page will read the cluster at", () => {
+    expect(endpointNote(talosconfig(), "", "")).toBe("The page will read the cluster at 10.0.0.1:50000.");
+    expect(endpointNote(talosconfig(), "b", "")).toBe("The page will read the cluster at 10.1.0.1.");
+    expect(endpointNote(named("node.example.test"), "", "10.2.0.1")).toBe("The page will read the cluster at 10.2.0.1.");
+  });
+
+  test("a name, from the file or typed, is said to be a name, with what to type instead", () => {
+    const say = (endpoint: string) =>
+      `This talosconfig's endpoint is ${endpoint}, which is a name. The server cannot use a name yet: type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.`;
+    expect(endpointNote(named("node.example.test"), "", "")).toBe(say("node.example.test"));
+    expect(endpointNote(named("cafe:50000"), "", "")).toBe(say("cafe:50000"));
+    expect(endpointNote(talosconfig(), "", "lb.example.test")).toBe(say("lb.example.test"));
+  });
+
+  test("a context with no endpoint and none typed asks for an IP address", () => {
+    const none = talosconfig().replace("    endpoints: [10.0.0.1:50000]\n", "");
+    expect(endpointNote(none, "", "")).toBe("The talosconfig's context names no endpoint: type the IP address of a control-plane node.");
+  });
+
+  test("no file, or a file that is not a talosconfig, says nothing", () => {
+    expect(endpointNote(undefined, "", "")).toBeUndefined();
+    expect(endpointNote("hello: world", "", "")).toBeUndefined();
+    expect(endpointNote(talosconfig(), "c", "")).toBeUndefined();
+  });
+});
+
+describe("a name is never sent, and discovery's failures are whole sentences with no lead of their own", () => {
+  test("a name from the file, and a typed one, send nothing", async () => {
+    for (const [text, typed] of [[named("node.example.test"), ""], [talosconfig(), "lb.example.test:50000"]] as const) {
+      const s = new Server();
+      const r = await discoverCluster(s.env(), text, { endpoint: typed });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.why).toMatch(/^This talosconfig's endpoint is .+, which is a name\. The server cannot use a name yet: /);
+      expect(s.requests).toEqual([]);
+    }
+  });
+
+  test("a typed address wins over a name in the file and is sent", async () => {
+    const s = new Server();
+    const r = await discoverCluster(s.env(), named("node.example.test"), { endpoint: "10.2.0.1" });
+    expect(r.ok).toBe(true);
+    expect((s.sends[0]!.body as { endpoint: string }).endpoint).toBe("10.2.0.1");
+  });
+
+  test.each([
+    ["a file that is not a talosconfig", "hello: world", {}, "The file is not a talosconfig."],
+    ["a context the file does not hold", talosconfig(), { context: "c" }, "The talosconfig holds no context of that name."],
+    ["a context with no endpoint", talosconfig().replace("    endpoints: [10.0.0.1:50000]\n", ""), {}, "The talosconfig's context names no endpoint: type the IP address of a control-plane node."],
+  ])("%s", async (_what, text, options, why) => {
+    const s = new Server();
+    const r = await discoverCluster(s.env(), text, options);
+    expect(r).toEqual({ ok: false, why });
+    expect(s.requests).toEqual([]);
+  });
+
+  test("a refused read reads as one sentence: the status, then the problem, with one full stop each", async () => {
+    const s = new Server();
+    s.fail.set("POST /discoveries", refused(400, "invalid-request", { title: "The request is malformed", detail: "endpoint must be an IP literal", instance: "req_x" }));
+    const r = await discoverCluster(s.env(), talosconfig(), {});
+    expect(r).toEqual({ ok: false, why: "The server answered 400. The request is malformed: endpoint must be an IP literal. Request req_x." });
+  });
+
+  test("a failed send names what happened, capitalised and with one full stop", async () => {
+    const env: Env = { ...new Server().env(), send: async () => ({ kind: "not-done", why: "the page was left", problem: null }) };
+    expect(await discoverCluster(env, talosconfig(), {})).toEqual({ ok: false, why: "The page was left." });
+  });
+
+  test("an unsupported contract and a cluster with no control-plane member answer in whole sentences", async () => {
+    for (const [found, why] of [
+      [{ ...DISCOVERY, supported: false }, "Contract v1.14 is not the contract of the machinery in this server, so it would refuse the cluster."],
+      [{ ...DISCOVERY, members: MEMBERS.map((m) => ({ ...m, answered: false })) }, "No control-plane member answered, so no address can carry the first key. Run it again once one does."],
+    ] as const) {
+      const s = new Server();
+      s.discovery = found;
+      expect(await discoverCluster(s.env(), talosconfig(), {})).toEqual({ ok: false, why });
     }
   });
 });

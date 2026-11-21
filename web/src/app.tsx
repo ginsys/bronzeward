@@ -10,6 +10,7 @@ import { navigate, PageState, renewals } from "./page.ts";
 import { type Channel, Renewer } from "./renewer.ts";
 import { TRANSPORT_FAILURE } from "./request.ts";
 import { Deprecations, SignedIn, type SignedInProps, VersionFooter } from "./shell.tsx";
+import { readName } from "./userinfo.ts";
 import { NOT_ACCEPTED, ProblemFields, problemFields, Status, StatusPage } from "./states.tsx";
 import { SIGN_IN_CHANGED, Writes } from "./write.ts";
 
@@ -160,6 +161,7 @@ export function App() {
           },
           principal: `${s.principal?.iss} ${s.principal?.sub}`,
           sub: s.principal?.sub ?? "",
+          readName: () => readName(provider, s.token(), s.principal?.sub ?? ""),
           onUnauthenticated: (res) => {
             if (!refused()) return;
             // Signing in again is the operator's (W1).

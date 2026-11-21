@@ -78,7 +78,6 @@ describe("the recovery entry (#364)", () => {
     await $("main form").$("button=Enter recovery").click();
     // The refusal carries the epoch, so §8.5 moves the page off the entry form to the recovery
     // state at that epoch: read as a recovery start, never as a normal one.
-    await expect($('[data-testid="epoch"]')).toHaveText(`Epoch ${epoch}`, { wait: 20_000 });
     await expect($('[data-testid="recovery"]')).toHaveText(expect.stringContaining(`epoch ${epoch}`), { wait: 20_000 });
     await absent(async () => (await $("body").getText()).includes(NORMAL_START), "the normal-start text after the move to the recovery state");
     // The form is gone with the move, so the header keeps the refusal: its reading and its problem.
