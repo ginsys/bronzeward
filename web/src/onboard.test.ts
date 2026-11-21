@@ -272,6 +272,35 @@ describe("the page's send (sender)", () => {
     expect(holding(writes).map((w) => (w.spec.body as { document: string }).document)).toEqual(["second-document"]);
   });
 
+  test("three callers in a row leave one document held: each waits for the one before it", async () => {
+    let lost!: () => void;
+    const { writes } = layer(() => new Promise((_r, rej) => (lost = () => rej(new Error("synthetic: the answer was lost")))), lose, lose);
+    const send = sender(writes, () => true);
+    const a = send(secret("a-document"));
+    const b = send(secret("b-document"));
+    const c = send(secret("c-document"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(holding(writes).map((w) => (w.spec.body as { document: string }).document)).toEqual(["a-document"]);
+    lost();
+    await Promise.all([a, b, c]);
+    expect(holding(writes).map((w) => (w.spec.body as { document: string }).document)).toEqual(["c-document"]);
+  });
+
+  test("a request whose page is left while it waits for the open write sends nothing", async () => {
+    let lost!: () => void;
+    const { writes, calls } = layer(() => new Promise((_r, rej) => (lost = () => rej(new Error("synthetic: the answer was lost")))));
+    let here = true;
+    const a = sender(writes, () => true)(secret("a-document"));
+    const b = sender(writes, () => here)(secret("b-document"));
+    await new Promise((r) => setTimeout(r, 0));
+    here = false;
+    lost();
+    expect((await a).kind).toBe("unknown");
+    expect((await b).kind).toBe("not-done");
+    expect(calls).toHaveLength(1);
+    expect(holding(writes)).toHaveLength(0);
+  });
+
   test("a write that carries no document is a new write each time, and nothing is sent once the page is left", async () => {
     const { writes, calls } = layer(lose, lose);
     const plain: WriteSpec = { method: "POST", path: "/machines", resource: "/machines", body: {} };
