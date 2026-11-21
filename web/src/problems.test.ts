@@ -9,7 +9,7 @@ import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { COPIED, COPY, CopyButton } from "./copy.tsx";
+import { COPIED, COPY, CopyButton, WRITE_WAIT_MS } from "./copy.tsx";
 import { PROBLEM_WORDS, referenceText, RequestRef, RULE_WORDS, wordsFor } from "./problems.tsx";
 import type { Problem } from "./request.ts";
 import { problemSentences, Refused, SetAside, Unknown } from "./states.tsx";
@@ -204,6 +204,29 @@ describe("the copy control", () => {
     expect(writeText).toHaveBeenCalledTimes(1);
     await act(async () => finish());
     expect(box.querySelector("button")!.disabled).toBe(false);
+  });
+
+  test("a write that throws at once is a refused copy: the by-hand sentence, and the button stays usable", async () => {
+    vi.stubGlobal("navigator", { clipboard: { writeText: () => { throw new Error("not allowed"); } } });
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
+    await press();
+    expect(box.textContent).toContain("By hand.");
+    expect(box.querySelector("button")!.disabled).toBe(false);
+  });
+
+  test("a write that never settles is a refused copy after the wait: by-hand sentence, button back", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("navigator", { clipboard: { writeText: () => new Promise<void>(() => {}) } });
+      await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
+      await press();
+      expect(box.querySelector("button")!.disabled).toBe(true);
+      await act(async () => void vi.advanceTimersByTime(WRITE_WAIT_MS));
+      expect(box.textContent).toContain("By hand.");
+      expect(box.querySelector("button")!.disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("a refused copy says to select by hand, and a later success of the same text replaces that", async () => {
