@@ -22,8 +22,14 @@ export const NOT_ACCEPTED = "Not accepted by this installation. Sign in again.";
 
 // A time as the wireframes show it, 10:12.
 export const clock = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-// A recorded instant in a list or record, 26 Oct 2026, 10:12; none when absent.
-export const when = (at: string | null | undefined) => (at == null ? "none" : new Date(at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }));
+// A recorded instant in a list or record, 26 Oct 2026, 10:12; none when absent. The date and the time are
+// formatted apart and joined here: one call with both styles lets the browser pick the joiner, and Safari
+// writes " at " (ginsys/bronzeward#946).
+export const when = (at: string | null | undefined) => {
+  if (at == null) return "none";
+  const d = new Date(at);
+  return `${d.toLocaleDateString("en-GB", { dateStyle: "medium" })}, ${clock(d)}`;
+};
 
 // A page has one role="status" region, for progress and outcomes (design B25, B37). It is hidden
 // from sight and mirrors the text of every status message the page shows, so a screen reader hears
