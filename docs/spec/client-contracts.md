@@ -2254,6 +2254,8 @@ The web client's draft page offers "Start managing these machines" for a draft t
    the machine instead of looping.
 5. The roles are the routes': `publisher` for the publication and the plan, `approver` for the approval. Without either,
    the button is off and the page names the missing role and the separate steps.
+   A press while the draft editor holds unsaved text sends nothing and says to save or discard it first, because the
+   publication sends only what is stored.
 6. After the approval the controller records the adoption unasked
    ([execution and recovery §6.3](execution-recovery.md#63-adopt)). The page follows each machine for a bounded time and
    says that the person may leave: the handover finishes without the page.

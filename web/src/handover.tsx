@@ -3,8 +3,8 @@
 // failed. A press is read-then-act (handover.ts), so pressing again continues and repeats nothing.
 
 import { useEffect, useRef, useState } from "react";
-import { Result, useWrites } from "./forms.tsx";
-import { DRAFT, handOver, HANDOVER_SENTENCE, HANDOVER_TITLE, type Io, type Line, MISSING, missingRoles } from "./handover.ts";
+import { Result, unsaved, useWrites } from "./forms.tsx";
+import { DRAFT, handOver, HANDOVER_SENTENCE, HANDOVER_TITLE, type Io, type Line, MISSING, missingRoles, UNSAVED } from "./handover.ts";
 import { Ref, useSettled } from "./list.tsx";
 import { useGate, useRoles } from "./shell.tsx";
 import { MachineById } from "./titles.tsx";
@@ -29,6 +29,7 @@ export function Handover({ draft, machines, written }: { draft: string; machines
   const gate = useGate(["publisher"]);
   const [lines, setLines] = useState<Readonly<Record<string, Line>>>({});
   const [running, setRunning] = useState(false);
+  const [held, setHeld] = useState(false);
   const live = useRef(true);
   useEffect(() => {
     live.current = true;
@@ -38,6 +39,9 @@ export function Handover({ draft, machines, written }: { draft: string; machines
   const reason = missing.length > 0 ? MISSING(missing) : gate;
   const press = () => {
     if (running || reason !== undefined) return;
+    // The press publishes what is stored, so text the editor holds unsaved would be left out of the release.
+    if (unsaved.size > 0) return setHeld(true);
+    setHeld(false);
     setRunning(true);
     setLines({});
     const io: Io = {
@@ -66,6 +70,7 @@ export function Handover({ draft, machines, written }: { draft: string; machines
         <button type="button" onClick={press} disabled={reason !== undefined || running}>{HANDOVER_TITLE}</button>
         {reason !== undefined && <span data-testid="handover-reason"> {reason}</span>}
       </p>
+      {held && <p role="alert" data-testid="handover-unsaved">{UNSAVED}</p>}
       {shown.length > 0 && <ul aria-label="Handover progress" aria-live="polite">{shown.map(([k, l]) => <LineView key={k} k={k} line={l} />)}</ul>}
     </section>
   );
