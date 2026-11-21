@@ -163,11 +163,12 @@ def write_in(dir_mode, file_mode):
 serve()
 p, before, after, mode_after, left = write_in(0o755, 0o640)
 expect("write keeps the mode", p.returncode == 0 and mode_after == "0o640" and json.loads(after) == NEW and left == ["previous-majors.json"], f"rc={p.returncode} mode={mode_after} left={left}")
-p, before, after, mode_after, left = write_in(0o555, 0o644)
-expect("write into a directory it cannot write", p.returncode == 2 and before == after and left == ["previous-majors.json"] and p.stderr.startswith("previous-major-pins: "), f"rc={p.returncode} left={left} {p.stderr}")
+if os.geteuid() != 0:  # root writes into a 0555 directory anyway
+    p, before, after, mode_after, left = write_in(0o555, 0o644)
+    expect("write into a directory it cannot write", p.returncode == 2 and before == after and left == ["previous-majors.json"] and p.stderr.startswith("previous-major-pins: "), f"rc={p.returncode} left={left} {p.stderr}")
 
 p, _, _ = run(None, OLD)
-expect("print mode",p.returncode == 0 and json.loads(p.stdout) == NEW, p.stdout + p.stderr)
+expect("print mode", p.returncode == 0 and json.loads(p.stdout) == NEW, p.stdout + p.stderr)
 
 # "equal file" above is also the rules check: the fixtures hold a beta Edge of a higher major, a dev Firefox,
 # an old Firefox "3.6.3plugin1", builds that sort higher as strings than the highest (8103.78, 4341.60) and

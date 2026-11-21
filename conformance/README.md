@@ -118,7 +118,7 @@ Chrome for Testing, Mozilla's release list and Microsoft's apt index). A pin tha
 `.deb` URL and sha256, and fails the run; a source that cannot be read fails the run and changes nothing. To move
 the pins, run `python3 scripts/ci/previous-major-pins.py --write web/e2e/previous-majors.json` in a pull request,
 which runs `previous-majors.yml`, and update the build numbers in the table above in the same pull request. The
-issue closes at the next weekly or manual run after the file matches the sources. Not run: the previous release of Firefox ESR, and Safari's
+issue closes at the next weekly run, or the next manual run on main, after the file matches the sources. Not run: the previous release of Firefox ESR, and Safari's
 previous major.
 
 ### Safari
