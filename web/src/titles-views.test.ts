@@ -18,7 +18,7 @@ import type { ReadResult } from "./request.ts";
 import { Status, StatusPage, when } from "./states.tsx";
 import { Outcome } from "./operation.tsx";
 import { PlanState } from "./plan.tsx";
-import { ACTS, Change, DependencyItem, ImportBaseItem, OperationItem, Operations, PlanItem, Plans, ReleaseItem, RevisionItem } from "./resources.tsx";
+import { ACTS, Change, DependencyItem, ImportBaseItem, Imports, OperationItem, Operations, PlanItem, Plans, ReleaseItem, RevisionItem, Sources } from "./resources.tsx";
 import { MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useClusterText } from "./titles.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -530,6 +530,19 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
     await mount(h(DependencyItem, { id: "dep_x" }), { ...reads, view: "w" });
     await settled();
     expect(text()).toContain(released);
+  });
+
+  test("ginsys/bronzeward#1055: the assignments list and the imports list name each row by its machine, the identifier staying the link's title", async () => {
+    const ASG = "asg_k2pq3rstuvwxyz234567abcdef";
+    answers["/assignments"] = ok({ items: [{ id: ASG, cluster: "cl_a", machine: MCH, revision: null, headRevision: 1, createdAt: at }], next: null });
+    await mount(h(Sources, { query: "", go: () => {} }));
+    await settled();
+    const row = box.querySelector('a[title="' + ASG + '"]');
+    expect(row?.textContent).toBe("Assignment of worker-1");
+    answers["/ingestions"] = ok({ items: [{ id: ING, machine: MCH, draft: DRF, operation: OP, state: "released", kind: "import", mode: "durable", review: null, ownerGeneration: 1, leaseUntil: at, expiresAt: at, createdAt: at }], next: null });
+    await mount(h(Imports, { query: "", go: () => {} }), { ...reads, view: "i" });
+    await settled();
+    expect(box.querySelector('a[title="' + ING + '"]')?.textContent).toBe("Import of worker-1");
   });
 
   test("an operation's Subject cell names its machine, plan, draft and import by their titles", async () => {

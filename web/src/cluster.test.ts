@@ -29,7 +29,7 @@ const plain = machine({ id: "mch_c", desired: "rel_1", applied: { release: "rel_
 describe("the Clusters entry in the main navigation", () => {
   test("it follows Machines and goes to the cluster list", () => {
     expect(PAGES.slice(0, 2)).toEqual([["/machines", "Machines"], ["/clusters", "Clusters"]]);
-    expect(PAGES.map(([, title]) => title)).toEqual(["Machines", "Clusters", "Changes", "Plans", "Operations", "Sources", "Audit", "Recovery"]);
+    expect(PAGES.map(([, title]) => title)).toEqual(["Machines", "Clusters", "Drafts and releases", "Plans", "Operations", "Fragments and profiles", "Audit", "Recovery"]);
   });
 });
 
@@ -37,7 +37,7 @@ describe("a cluster's machines by state", () => {
   test("counts each badge, how many show none, and how many machines there are", () => {
     expect(machineStates([drifted, matches, plain])).toEqual({
       total: 3,
-      counts: [["Drifted", 1], ["Frozen", 1], ["Matches applied", 1], ["Not handed over", 1]],
+      counts: [["Changed on the machine", 1], ["Frozen", 1], ["Last read matched what was applied", 1], ["Not managed yet", 1]],
       none: 1,
     });
     expect(machineStates([])).toEqual({ total: 0, counts: [], none: 0 });
@@ -46,11 +46,11 @@ describe("a cluster's machines by state", () => {
   test("the summary says the states overlap, lists each machine with its states, and says plainly when there are none", () => {
     const out = html(h(MachineSummary, { machines: [drifted, matches, plain] }));
     expect(out).toContain("3 machines");
-    expect(out).toContain("1 Drifted");
+    expect(out).toContain("1 Changed on the machine");
     expect(out).toContain("1 with no state shown");
     expect(out).toContain("A machine can carry several states");
     expect(out).toContain('href="/machines/mch_a"');
-    expect(out).toContain("Drifted, Frozen, Not handed over");
+    expect(out).toContain("Changed on the machine, Frozen, Not managed yet");
     expect(html(h(MachineSummary, { machines: [] }))).toContain("No machines recorded in this cluster.");
   });
 });

@@ -26,6 +26,8 @@ describe("paths (B3)", () => {
       ["/operations", Operations], ["/sources", Sources], ["/audit", Audit], ["/recovery", RecoveryConsole],
     ];
     for (const [path, type] of pages) expect(at(path)?.type, path).toBe(type);
+    // ginsys/bronzeward#1055: /drafts and /releases open the page that lists both.
+    for (const path of ["/drafts", "/releases"]) expect(at(path)?.type, path).toBe(Changes);
     const items: [string, unknown, Record<string, unknown>][] = [
       ["/machines/mch_a", MachineItem, { id: "mch_a" }], ["/clusters/cl_a", ClusterItem, { id: "cl_a" }],
       ["/fragments/frg_a", SourceItem, { kind: "fragment", id: "frg_a" }], ["/profiles/prf_a", SourceItem, { kind: "profile", id: "prf_a" }],
@@ -44,6 +46,12 @@ describe("paths (B3)", () => {
     expect(at("/publications/new", "draft=drf_a")?.props).toEqual({ query: "draft=drf_a" });
     expect(at("/publications")).toBeUndefined();
     expect(at("/publications/pub_a")).toBeUndefined();
+  });
+
+  test("ginsys/bronzeward#1055: the page of drafts and releases and the page of fragments and profiles say so in their headings", () => {
+    expect(html(h(Changes))).toContain("<h2>Drafts and releases</h2>");
+    expect(html(h(Sources, { query: "", go }))).toContain("<h2>Fragments and profiles</h2>");
+    expect(html(h(Sources, { query: "", go }))).not.toContain("Sources");
   });
 
   test("ginsys/bronzeward#517 H2: each draft's page is its own, so a move to another draft keeps none of its reads or editor", () => {

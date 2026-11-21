@@ -10,6 +10,7 @@ import { RequestRef } from "./problems.tsx";
 import { Action, useOffline } from "./shell.tsx";
 import type { Problem } from "./request.ts";
 import { CHECK_STATE, CUT_OFF, problemSentences, Refused, Repeated, REPLAYED, SetAside, Status, unknown, Unknown } from "./states.tsx";
+import { ADD_MACHINE, ENTER_A_CLUSTER_BY_HAND } from "./words.ts";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 type EndpointChange = components["schemas"]["EndpointChangeBody"];
@@ -252,8 +253,8 @@ export function AddCluster() {
   };
   return (
     <>
-      <h2>Add cluster</h2>
-      <Form label="Add cluster" onSubmit={submit} w={w} done={done}>
+      <h2>{ENTER_A_CLUSTER_BY_HAND}</h2>
+      <Form label={ENTER_A_CLUSTER_BY_HAND} onSubmit={submit} w={w} done={done}>
         <Text label="Name:" name="name" />
         <Text label="Kubernetes endpoint:" name="endpoint" hint="https://host or https://host:port" />
         <Text label="Talos contract:" name="contract" hint="a minor version, as v1.14" />
@@ -306,8 +307,8 @@ export function RecordMachine({ query }: { query: string }) {
   };
   return (
     <>
-      <h2>Record machine</h2>
-      <Form label="Record machine" onSubmit={submit} w={w} done={done}>
+      <h2>{ADD_MACHINE}</h2>
+      <Form label={ADD_MACHINE} onSubmit={submit} w={w} done={done}>
         <ClusterField clusters={clusters} chosen={chosen} choose={choose} />
         <Text label="Talos node ID:" name="talosNodeId" hint="as talosctl get identity prints it" />
         <p>
@@ -347,9 +348,9 @@ export function ChangeEndpoint({ machine, onChanged }: { machine: Machine; onCha
 // The list pages' entries to the forms.
 export const AddClusterAction = () => {
   const { go } = useReads();
-  return <Action label="Add cluster" needs={["author"]} onClick={() => go("/clusters/new")} />;
+  return <Action label={ENTER_A_CLUSTER_BY_HAND} needs={["author"]} onClick={() => go("/clusters/new")} />;
 };
 export const RecordMachineAction = ({ cluster }: { cluster: string }) => {
   const { go } = useReads();
-  return <Action label="Record machine" needs={["author"]} onClick={() => go(cluster === "" ? "/machines/new" : `/machines/new?${new URLSearchParams({ cluster })}`)} />;
+  return <Action label={ADD_MACHINE} needs={["author"]} onClick={() => go(cluster === "" ? "/machines/new" : `/machines/new?${new URLSearchParams({ cluster })}`)} />;
 };

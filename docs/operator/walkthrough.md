@@ -126,7 +126,7 @@ same way, with `machine_w`, `marks: ["doc[0]/machine/files/0/content"]` and its 
 Bronzeward never writes to a node during an import. S1 shows this by comparing each node's
 configuration digest and apid log before and after.
 
-**The same import in the web page.** Sign in as an author. Open Changes, then Imports, then
+**The same import in the web page.** Sign in as an author. Open Drafts and releases, then Imports, then
 Start import. A machine page also links to "Import this machine". Take these steps:
 
 1. Choose the machine, then an open draft of its cluster. The page needs a draft, and it can

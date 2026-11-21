@@ -125,9 +125,9 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
     const w = watch();
     await fromTitle();
-    await tabTo((f) => f.text === "Changes", "the Changes link");
+    await tabTo((f) => f.text === "Drafts and releases", "the Drafts and releases link");
     await browser.keys("Enter");
-    await expect($("main h2")).toHaveText("Changes");
+    await expect($("main h2")).toHaveText("Drafts and releases");
     await focusSettles(onMain, "the new page");
     await tabTo((f) => f.tag === "A" && f.text === "Imports", "the Imports link");
     await browser.keys("Enter");
@@ -198,7 +198,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     const released = await startImport("transient", false, "released");
     expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
     await narrow(async () => {
-      await $('nav[aria-label="Main"]').$("a=Changes").click();
+      await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
       await $("main").$("a=Imports").click();
       await expect($("main h2")).toHaveText("Imports");
       expect(["imports", await overflows()]).toEqual(["imports", 0]);
@@ -304,7 +304,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       const f = await api(at, "h-author", "PUT", `/drafts/${d.id}/fragments/${name}`, { layer: "role", document: syntheticDocument(name), marks: null, declarations: null }, d.etag);
       expect(f.status).toBe(200);
       expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
-      await $('nav[aria-label="Main"]').$("a=Changes").click();
+      await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
       await $(`main a[title="${d.id}"]`).click();
       await expect($("main h2")).toHaveText(holds("synthetic"));
       return { id: d.id, name, etag: f.etag };

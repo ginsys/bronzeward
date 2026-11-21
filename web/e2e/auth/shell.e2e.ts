@@ -140,8 +140,8 @@ describe("the shell", () => {
     await nav("Audit").click();
     await expect($("main h2")).toHaveText("Audit");
     await browser.waitUntil(async () => (await seen()).includes("/principals"), { timeout: 10_000, timeoutMsg: "the Audit page did not read the names" });
-    await nav("Sources").click();
-    await expect($("main h2")).toHaveText("Sources");
+    await nav("Fragments and profiles").click();
+    await expect($("main h2")).toHaveText("Fragments and profiles");
     // The Audit page names the principals of the acts it lists with one read of GET /principals (G23), once for the visit.
     await reads(13);
     expect(await ordered()).toEqual(sorted([
@@ -212,8 +212,8 @@ describe("the state catalogue", () => {
     await announced("offline", /^Offline since \d\d:\d\d\. Showing data read at \d\d:\d\d\. Actions are disabled\.$/);
     expect(await testid("principal").getText()).toBe("Signed in as a person");
     await faults({});
-    await nav("Changes").click();
-    await expect($("main h2")).toHaveText("Changes");
+    await nav("Drafts and releases").click();
+    await expect($("main h2")).toHaveText("Drafts and releases");
     // The held operations read of the first step can still answer late, so the banner is read again after it ended.
     await eventually(async () => !(await testid("offline").isExisting()), "the offline banner gone after the next page's read");
     await absent(() => testid("offline").isExisting(), "the offline banner after the next page's read");
@@ -226,8 +226,8 @@ describe("the state catalogue", () => {
   // messages. Changes shows the drafts list's status and the releases list's.
   it("a page that shows two status messages has one status region, which holds both", async () => {
     await fixtureSignIn("h-viewer");
-    await nav("Changes").click();
-    await expect($("main h2")).toHaveText("Changes");
+    await nav("Drafts and releases").click();
+    await expect($("main h2")).toHaveText("Drafts and releases");
     // Both lists have answered: each shows its own empty text, and the region holds both.
     await browser.waitUntil(async () => {
       const held = await mirrored();
@@ -246,7 +246,7 @@ describe("the state catalogue", () => {
     await nav("Operations").click();
     await announced("offline", /^Offline since /);
     await faults({ missing: "/identity" });
-    await nav("Changes").click();
+    await nav("Drafts and releases").click();
     await announced("status", NOT_FOUND, "alert");
     await absent(() => testid("offline").isExisting(), "the offline banner after a refusal the server answered");
   });
@@ -254,7 +254,7 @@ describe("the state catalogue", () => {
   it("offline: after a refusal the shell kept above the page, a read without answer keeps the data under the banner", async () => {
     await fixtureSignIn("h-viewer");
     await faults({ missing: "/identity" });
-    await nav("Changes").click();
+    await nav("Drafts and releases").click();
     await announced("status", NOT_FOUND, "alert");
     // The page's two lists have answered, and the online event's reads of them are held: an answer
     // to either would end the banner before the case looks at it.
@@ -264,7 +264,7 @@ describe("the state catalogue", () => {
     // The identity answered before, so the page and the identity stay and the banner says the rest.
     await announced("offline", /^Offline since /);
     expect(await testid("principal").getText()).toBe("Signed in as a person");
-    await expect($("main h2")).toHaveText("Changes");
+    await expect($("main h2")).toHaveText("Drafts and releases");
     await release();
   });
 
@@ -273,7 +273,7 @@ describe("the state catalogue", () => {
     await event("offline");
     await announced("offline", /^Offline since /);
     await faults({ missing: "/identity" });
-    await nav("Changes").click();
+    await nav("Drafts and releases").click();
     await announced("status", NOT_FOUND, "alert");
     expect(await testid("offline").isExisting()).toBe(true);
     await faults({});
@@ -382,7 +382,7 @@ describe("recovery", () => {
     await announced("recovery-read", TRANSPORT_FAILURE);
     // The next page reads it again.
     await faults({ upstream: at });
-    await nav("Changes").click();
+    await nav("Drafts and releases").click();
     await eventually(async () => !(await testid("recovery-read").isExisting()), "the banner's read state gone after the next page's read");
     await absent(() => testid("recovery-read").isExisting(), "the banner's read state after the next page's read");
     await announced("recovery", new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}\\. No machine scopes\\. Drafts can be edited\\. ${literal(RECOVERY_START)}$`));
@@ -391,7 +391,7 @@ describe("recovery", () => {
     // reads meets its refusal first, nothing read before stays shown, the other read's late answer
     // included, and the page reads again on request.
     const since = new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}\\.`);
-    for (const [refused, late, page] of [["/recovery", "/identity", "Machines"], ["/identity", "/recovery", "Changes"]] as const) {
+    for (const [refused, late, page] of [["/recovery", "/identity", "Machines"], ["/identity", "/recovery", "Drafts and releases"]] as const) {
       await faults({ upstream: at, processRefused: [refused, "/server"], held: late });
       await nav(page).click();
       await announced("status", PRE_ENTRY);
@@ -414,7 +414,7 @@ describe("recovery", () => {
     await fixtureSignIn("h-viewer");
     // A restart for recovery keeps the epoch until the entry: the injected refusal carries none.
     await faults({ processRefused: ["/identity", "/server"] });
-    await nav("Changes").click();
+    await nav("Drafts and releases").click();
     await announced("status", PRE_ENTRY);
     expect(await testid("problem").getText()).toBe(INJECTED_REFUSAL);
     await absent(() => testid("principal").isExisting(), "the principal after the process's refusal");

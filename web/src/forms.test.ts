@@ -346,10 +346,10 @@ describe("the form's result", () => {
 });
 
 describe("the forms", () => {
-  test("Add cluster is disabled with its reason without the author role", () => {
+  test("Enter a cluster by hand is disabled with its reason without the author role", () => {
     const writes = new Writes(() => PRINCIPAL);
-    expect(html(writes, h(AddCluster), ["viewer"])).toMatch(/<button type="submit" disabled="" aria-describedby="(.+?)">Add cluster<\/button><span id="\1"> Needs author<\/span>/);
-    expect(html(writes, h(AddCluster))).toMatch(/<button type="submit">Add cluster<\/button>/);
+    expect(html(writes, h(AddCluster), ["viewer"])).toMatch(/<button type="submit" disabled="" aria-describedby="(.+?)">Enter a cluster by hand<\/button><span id="\1"> Needs author<\/span>/);
+    expect(html(writes, h(AddCluster))).toMatch(/<button type="submit">Enter a cluster by hand<\/button>/);
   });
 
   test("Record machine shows why its cluster read failed, and only waits while the read runs", () => {

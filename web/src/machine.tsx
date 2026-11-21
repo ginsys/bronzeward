@@ -9,6 +9,7 @@ import { ChangeEndpoint } from "./forms.tsx";
 import { Detail, type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, machineHeading, machineName, node, release } from "./machines.tsx";
 import { ClusterRef } from "./titles.tsx";
+import { CHANGED_ON_THE_MACHINE, RELEASE_NOT_APPLIED_YET } from "./words.ts";
 import { NextStep, type Position } from "./nextstep.tsx";
 import { principalId } from "./principals.ts";
 import { Who } from "./principals.tsx";
@@ -51,7 +52,7 @@ export function sentences(m: Machine, obs: Observation[]): string[] {
   const out: string[] = [];
   if (drift !== null) {
     const opened = obs.find((x) => x.id === drift.observation);
-    out.push(`Drifted since ${opened === undefined ? `the read ${short(drift.observation)}` : at(opened.at)}: a read differed from what Bronzeward last verified (${a === null ? "none" : short(a.release)}).`);
+    out.push(`${CHANGED_ON_THE_MACHINE} since ${opened === undefined ? `the read ${short(drift.observation)}` : at(opened.at)}: a read differed from what Bronzeward last verified (${a === null ? "none" : short(a.release)}).`);
     if (o?.release != null && o.release === d) out.push("It equals the selected release; that does not close the drift.");
   } else if (o === null) {
     out.push("No configuration read recorded.");
@@ -69,8 +70,8 @@ export function sentences(m: Machine, obs: Observation[]): string[] {
   if (late !== undefined) out.push(`The latest read at ${at(late.at)} could not read: ${causes(late).join("; ")}.`);
   if (a === null) out.push("Not applied or adopted by Bronzeward.");
   if (d === null) out.push("No release selected.");
-  else if (m.pendingConvergence && a === null) out.push(`Pending convergence: the selected release ${short(d)} has not been applied to this machine.`);
-  else if (m.pendingConvergence && drift === null) out.push(`Pending convergence: the configuration of the selected release ${short(d)} for this machine differs from what Bronzeward applied.`);
+  else if (m.pendingConvergence && a === null) out.push(`${RELEASE_NOT_APPLIED_YET}: the selected release ${short(d)} has not been applied to this machine.`);
+  else if (m.pendingConvergence && drift === null) out.push(`${RELEASE_NOT_APPLIED_YET}: the configuration of the selected release ${short(d)} for this machine differs from what Bronzeward applied.`);
   else if (!m.pendingConvergence && drift === null && a !== null && d !== a.release) out.push(`The selected release ${short(d)} carries this machine's applied configuration unchanged.`);
   if (m.frozen) out.push(FROZEN);
   out.push(HEALTH);

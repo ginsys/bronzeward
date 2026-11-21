@@ -69,7 +69,7 @@ async function putFragment(id: string, name: string, etag: string, human = "h-au
 // Signs in as h-author on the disposable deployment and opens the draft from the Changes list.
 async function openDraft(id: string) {
   expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
-  await $('nav[aria-label="Main"]').$("a=Changes").click();
+  await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
   await $(`main a[title="${id}"]`).click();
   await expect($("main h2")).toHaveText(expect.stringContaining("synthetic"));
 }
@@ -195,7 +195,7 @@ describe("the draft editor (#339)", () => {
 
   it("Create draft, then a fragment saved: the entry is new, the footer says the draft is not rendered, and unsaved text is guarded", async () => {
     expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
-    await $('nav[aria-label="Main"]').$("a=Changes").click();
+    await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
     await $("main").$("button=Create draft").click();
     await expect($("main h2")).toHaveText("Create draft");
     await $('select[name="cluster"]').selectByVisibleText(cluster.name);
@@ -215,7 +215,7 @@ describe("the draft editor (#339)", () => {
     await expect(pane().$("p*=Layer:")).toHaveText(expect.stringContaining("new -> unsaved"));
     // The guard asks before the page leaves unsaved text, and the text stays.
     expect(await guarded()).toBe(true);
-    const asked = await dialogs(false, () => $('nav[aria-label="Main"]').$("a=Changes").click());
+    const asked = await dialogs(false, () => $('nav[aria-label="Main"]').$("a=Drafts and releases").click());
     expect(asked[0]).toContain(`Unsaved text in fragment ${name} of draft`);
     await expect($("main h2")).toHaveText(expect.stringContaining(title));
     const draft = (await browser.execute(() => location.pathname)).split("/").pop()!;
@@ -250,8 +250,8 @@ describe("the draft editor (#339)", () => {
       expect((await fetch(`${CONTROL}/next?human=h-all`)).ok).toBe(true);
       await faults({ upstream: at });
       await other.url(`${FIXTURE_PAGE}/`);
-      await other.$('nav[aria-label="Main"]').$("a=Changes").waitForClickable({ timeout: 20_000 });
-      await other.$('nav[aria-label="Main"]').$("a=Changes").click();
+      await other.$('nav[aria-label="Main"]').$("a=Drafts and releases").waitForClickable({ timeout: 20_000 });
+      await other.$('nav[aria-label="Main"]').$("a=Drafts and releases").click();
       await other.$(`main a[title="${id}"]`).click();
       await select(name, other);
       await openDraft(id);
@@ -701,7 +701,7 @@ describe("the draft editor (#339)", () => {
     expect(d.status).toBe(201);
     const id = d.body!["id"] as string;
     expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
-    await $('nav[aria-label="Main"]').$("a=Changes").click();
+    await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
     await $(`main a[title="${id}"]`).waitForExist({ timeout: 20_000 });
     expect(await narrow('main [role="region"][aria-label="Drafts"]')).toEqual({ page: 0, region: true });
     await $(`main a[title="${id}"]`).click();

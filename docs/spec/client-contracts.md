@@ -1604,7 +1604,7 @@ the client's rule wins wherever the two meet.
    effort below that). A top bar holds the product name, the principal line, the banners and Sign
    out, in the order they already have, so Tab order after the skip link does not change. A left
    navigation, one `nav` landmark and no `aside`, groups the pages as Inventory (Machines, Clusters,
-   Sources), Delivery (Changes, Plans, Operations) and Governance (Audit, Recovery) and marks the
+   Fragments and profiles), Delivery (Drafts and releases, Plans, Operations) and Governance (Audit, Recovery) and marks the
    current page by `aria-current`, a bar and a bold label, never by colour alone. The page sits in a
    column of at most 90 rem. Below 68 rem the navigation stacks above the page, which keeps the
    reflow of 1.4.10 at 320 CSS pixels. One spacing scale (`--s1` to `--s6`, 0.25 to 2 rem) is the only
@@ -1612,7 +1612,15 @@ the client's rule wins wherever the two meet.
    panel holds a page section, and a detail list is a two-column grid; the box is a class and changes
    no role, and every fill is an opaque colour so the contrast measure can read it. The filters and
    actions above a list sit in one wrapping row (the `toolbar` class), each action keeping its refusal
-   note beside it, with the markup order unchanged.
+   note beside it, with the markup order unchanged. The web client's words for what a person meets
+   ([#1055](https://github.com/ginsys/bronzeward/issues/1055); the command line keeps the specification's):
+   "Drafts and releases" is the page that lists both, and `/drafts` and `/releases` open it; "Fragments and profiles"
+   is the page the word "sources" named, and a release's count of what it is built from is headed "Built from"; the
+   buttons read "Enter a cluster by hand" (it records a cluster Bronzeward did not create) and "Add machine"; a
+   machine's state badges read "Changed on the machine", "Release not applied yet", "Last read matched what was
+   applied" (the specification says a match never by itself means healthy, fresh or converged) and "Not managed
+   yet", with "Frozen" as before. An assignments row and an imports row are headed by what they are, "Assignment of
+   cp1" and "Import of cp1", with the identifier as the link's title.
 7. **Icons are decorative inline SVG** (Heroicons 2.2.0 outline, MIT, the paths vendored in one module
    with the notice kept). An icon is an `<svg>` element with `aria-hidden="true"`, no title and no
    style attribute, drawn with presentation attributes, so it is markup and not an image load:

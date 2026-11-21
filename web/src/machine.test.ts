@@ -41,19 +41,19 @@ describe("journeys §2.4 status sentences, field by field", () => {
 
   test("pendingConvergence, applied not null and applied null", () => {
     expect(sentences(machine({ desired: "rel_next", pendingConvergence: true }), [obsA])).toContain(
-      "Pending convergence: the configuration of the selected release rel_next for this machine differs from what Bronzeward applied.");
+      "Release not applied yet: the configuration of the selected release rel_next for this machine differs from what Bronzeward applied.");
     expect(sentences(machine({ applied: null, pendingConvergence: true, observed: null }), [])).toEqual([
-      "No configuration read recorded.", "Not applied or adopted by Bronzeward.", "Pending convergence: the selected release rel_new has not been applied to this machine.", HEALTH,
+      "No configuration read recorded.", "Not applied or adopted by Bronzeward.", "Release not applied yet: the selected release rel_new has not been applied to this machine.", HEALTH,
     ]);
   });
 
   test("openDrift is the only authority for drift, even when the read equals the selected release", () => {
     const m = machine({ desired: "rel_next", openDrift: drift, pendingConvergence: true, observed: { observation: "obs_a", at: READ, release: "rel_next" } });
     expect(sentences(m, [obsA, opened])).toEqual([
-      `Drifted since ${T(opened.at)}: a read differed from what Bronzeward last verified (rel_new).`, "It equals the selected release; that does not close the drift.", HEALTH,
+      `Changed on the machine since ${T(opened.at)}: a read differed from what Bronzeward last verified (rel_new).`, "It equals the selected release; that does not close the drift.", HEALTH,
     ]);
     // observed = applied does not hide an open drift record.
-    expect(sentences(machine({ openDrift: drift }), [obsA, opened])[0]).toMatch(/^Drifted since/);
+    expect(sentences(machine({ openDrift: drift }), [obsA, opened])[0]).toMatch(/^Changed on the machine since/);
   });
 
   test("no open drift and a read matching neither", () => {

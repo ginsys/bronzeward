@@ -149,15 +149,15 @@ const machine = (over: Partial<Machine>): Machine => ({
 
 describe("W2 badges and the observed column", () => {
   test("each state from the list's fields", () => {
-    expect(badges(machine({}))).toEqual(["Matches applied"]);
-    expect(badges(machine({ pendingConvergence: true, desired: "rel_next" }))).toEqual(["Pending convergence"]);
-    expect(badges(machine({ openDrift: { revision: 1, observation: "obs_k", lastObservation: "obs_m", lateLanding: null }, frozen: true }))).toEqual(["Drifted", "Frozen"]);
-    expect(badges(machine({ desired: null, applied: null, observed: null }))).toEqual(["Not handed over"]);
+    expect(badges(machine({}))).toEqual(["Last read matched what was applied"]);
+    expect(badges(machine({ pendingConvergence: true, desired: "rel_next" }))).toEqual(["Release not applied yet"]);
+    expect(badges(machine({ openDrift: { revision: 1, observation: "obs_k", lastObservation: "obs_m", lateLanding: null }, frozen: true }))).toEqual(["Changed on the machine", "Frozen"]);
+    expect(badges(machine({ desired: null, applied: null, observed: null }))).toEqual(["Not managed yet"]);
   });
 
   test("openDrift is the only authority for drift: an observation equal to Desired with drift open is no match of Applied", () => {
     const m = machine({ desired: "rel_next", observed: { observation: "obs_b", at: "2026-10-26T09:46:00Z", release: "rel_next" }, openDrift: { revision: 2, observation: "obs_b", lastObservation: "obs_b", lateLanding: null } });
-    expect(badges(m)).toEqual(["Drifted"]);
+    expect(badges(m)).toEqual(["Changed on the machine"]);
     expect(observed(m, NOW)).toBe("= desired, 2 d ago");
     // A read that matched neither, without drift open, is not drift and not a match.
     expect(badges(machine({ observed: { observation: "obs_c", at: "2026-10-26T09:46:00Z", release: null } }))).toEqual([]);
