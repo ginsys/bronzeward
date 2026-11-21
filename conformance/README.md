@@ -108,10 +108,18 @@ so none is recorded as untested. The jobs took 1 min 30 s for `browser` and 14 m
 `browser-auth` leg.
 
 A failed run on main opens one issue, "Previous-major browsers run failed on main" (marker
-`previous-majors-main-failure`, labels `type/implementation` and `area/ci`), and a later failure comments on it. The
-pins are moved by hand until ginsys/bronzeward#907 adds a tool: a pin more than one major behind still
-passes against an older browser, and a green run does not say so. Not run: the previous release of
-Firefox ESR, and Safari's previous major.
+`previous-majors-main-failure`, labels `type/implementation` and `area/ci`), and a later failure comments on it.
+
+A pin that falls behind still passes against an older browser, and a green run does not say so, so
+`previous-major-pins.yml` compares the file with the vendors' sources every Monday
+(`scripts/ci/previous-major-pins.py`: the highest build of the major before the current one, read from
+Chrome for Testing, Mozilla's release list and Microsoft's apt index). A pin that is behind opens one issue,
+"The previous-major browser pins are behind" (marker `previous-major-pins`), naming the new pins with Edge's
+`.deb` URL and sha256, and fails the run; a source that cannot be read fails the run and changes nothing. To move
+the pins, run `python3 scripts/ci/previous-major-pins.py --write web/e2e/previous-majors.json` in a pull request,
+which runs `previous-majors.yml`, and update the build numbers in the table above in the same pull request. The
+issue closes when the file matches the sources. Not run: the previous release of Firefox ESR, and Safari's
+previous major.
 
 ### Safari
 
