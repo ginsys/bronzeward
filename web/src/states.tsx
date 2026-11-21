@@ -4,7 +4,7 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import { Icon } from "./icons.tsx";
-import { codeOf, earlierOf, refusedAt, RequestRef, sentence, visibleDetail } from "./problems.tsx";
+import { codeOf, refusedAt, RequestRef, sentence, visibleDetail } from "./problems.tsx";
 import { type Problem, type ReadResult, TRANSPORT_FAILURE, WRITE_TRANSPORT_FAILURE } from "./request.ts";
 
 export const WITHHELD = "Configuration not shown: it could not be redacted.";
