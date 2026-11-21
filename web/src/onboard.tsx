@@ -82,7 +82,11 @@ export function OnboardCluster() {
     if (!alive.current) return;
     setBusy(false);
     // A discovery only reads, so this lead is true; its reasons are whole sentences with none of their own.
-    if (!r.ok) return setNote(`Nothing was recorded. ${r.why}`);
+    if (!r.ok) {
+      // A refused name is said once, in the note, not again under the field.
+      if (r.why === said) unsay();
+      return setNote(`Nothing was recorded. ${r.why}`);
+    }
     unsay();
     plan.current = r.plan;
     setHeld(r.plan.document !== undefined);

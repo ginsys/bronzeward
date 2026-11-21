@@ -214,7 +214,7 @@ export function App() {
       if (done.kind !== "ok") return offer(failure(done), config.config, profileRefused(done) ? withoutProfile(found.provider) : found.provider);
       history.replaceState(null, "", done.returnTo);
       renewer.post(done.tokens);
-      await signedIn(config.config, found.provider, done.tokens);
+      await signedIn(config.config, done.noProfile ? withoutProfile(found.provider) : found.provider, done.tokens);
     })();
 
     return () => {

@@ -34,6 +34,8 @@ export interface Provider {
   // `profile` is asked for only where it is known. Both are absent when the document has none.
   userinfoEndpoint?: string | undefined;
   scopesSupported?: string[] | undefined;
+  // Set by withoutProfile: this provider refused `profile` to this client, so the page asks for no more.
+  noProfile?: boolean | undefined;
 }
 
 export type Principal = { iss: string; sub: string };
@@ -46,7 +48,8 @@ export interface Tokens extends Principal {
 }
 
 // A provider refusal is the provider's answer; invalid is a defect in what it or the page sent.
-export type Failure = { kind: "transport" } | { kind: "refused"; reason: string } | { kind: "invalid"; reason: string };
+// `code` is the provider's own error code for a refused sign-in, when it is one the page can read.
+export type Failure = { kind: "transport" } | { kind: "refused"; reason: string; code?: string } | { kind: "invalid"; reason: string };
 
 const invalid = (reason: string): Failure => ({ kind: "invalid", reason });
 
@@ -100,12 +103,14 @@ interface Pending {
   state: string;
   nonce: string;
   returnTo: string;
+  // The sign-in was made without `profile`, because the provider refused it to this client.
+  noProfile?: boolean;
 }
 
 // The authorization request (§9.3 item 1): its URL, after the pending entry is stored; nothing is
 // stored, and there is no URL, unless `still` holds after the PKCE digest (no redirect follows).
 export async function beginSignIn(config: ClientConfig, provider: Provider, returnTo: string, storage: Storage, origin: string, still: () => boolean = () => true): Promise<string | undefined> {
-  const pending: Pending = { verifier: random(32), state: random(16), nonce: random(16), returnTo: returnPath(returnTo) };
+  const pending: Pending = { verifier: random(32), state: random(16), nonce: random(16), returnTo: returnPath(returnTo), ...(provider.noProfile === true ? { noProfile: true } : {}) };
   const challenge = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pending.verifier))));
   if (!still()) return undefined;
   storage.setItem(PENDING_KEY, JSON.stringify(pending));
@@ -115,7 +120,7 @@ export async function beginSignIn(config: ClientConfig, provider: Provider, retu
     client_id: config.webClientId,
     redirect_uri: origin + CALLBACK_PATH,
     // `profile` only where the provider lists it: the name in the header is worth one sentence, not the sign-in.
-    scope: [...new Set([...BASE_SCOPES, ...(provider.scopesSupported?.includes("profile") === true ? ["profile"] : []), ...config.scopes])].join(" "),
+    scope: [...new Set([...BASE_SCOPES, ...(provider.noProfile !== true && provider.scopesSupported?.includes("profile") === true ? ["profile"] : []), ...config.scopes])].join(" "),
     state: pending.state,
     nonce: pending.nonce,
     code_challenge: challenge,
@@ -125,11 +130,11 @@ export async function beginSignIn(config: ClientConfig, provider: Provider, retu
   return url.href;
 }
 
-// A provider that lists `profile` may still refuse it to this client. The page then offers the sign-in
-// again without the scope it added itself, so the name in the header never costs a person the sign-in.
-// Held in memory for the page's life (item 1 of §9.3 allows no other storage).
-export const profileRefused = (f: Failure) => f.kind === "refused" && f.reason.endsWith("(invalid_scope)");
-export const withoutProfile = (p: Provider): Provider => ({ ...p, scopesSupported: p.scopesSupported?.filter((s) => s !== "profile") });
+// A provider that lists `profile` may still refuse it to this client. The sign-in view then offers the
+// sign-in again without the scope the page added itself, and that sign-in's pending entry says so, so its
+// callback and every renewal redirect after it go on without `profile`.
+export const profileRefused = (f: Failure) => f.kind === "refused" && f.code === "invalid_scope";
+export const withoutProfile = (p: Provider): Provider => ({ ...p, noProfile: true });
 
 export interface CallbackDeps {
   storage: Storage;
@@ -139,7 +144,7 @@ export interface CallbackDeps {
 }
 
 // The callback: the pending entry is deleted first, whatever the answer (§9.3 item 1).
-export async function completeSignIn(config: ClientConfig, provider: Provider, search: string, deps: CallbackDeps): Promise<{ kind: "ok"; tokens: Tokens; returnTo: string } | Failure> {
+export async function completeSignIn(config: ClientConfig, provider: Provider, search: string, deps: CallbackDeps): Promise<{ kind: "ok"; tokens: Tokens; returnTo: string; noProfile: boolean } | Failure> {
   const raw = deps.storage.getItem(PENDING_KEY);
   deps.storage.removeItem(PENDING_KEY);
   const pending = readPending(raw);
@@ -147,7 +152,10 @@ export async function completeSignIn(config: ClientConfig, provider: Provider, s
   const q = new URLSearchParams(search);
   if (q.get("state") !== pending.state) return invalid("the sign-in answer does not belong to the request this tab sent");
   const error = q.get("error");
-  if (error !== null) return { kind: "refused", reason: `the identity provider refused the sign-in${/^[a-z_]{1,64}$/.test(error) ? ` (${error})` : ""}` };
+  if (error !== null) {
+    const known = /^[a-z_]{1,64}$/.test(error);
+    return { kind: "refused", reason: `the identity provider refused the sign-in${known ? ` (${error})` : ""}`, ...(known ? { code: error } : {}) };
+  }
   const code = q.get("code");
   if (code === null || code === "") return invalid("the sign-in answer carries no code");
   const answer = await tokenRequest(provider, {
@@ -169,7 +177,7 @@ export async function completeSignIn(config: ClientConfig, provider: Provider, s
   const now = (deps.now ?? Date.now)();
   // Item 9: the current time is before its expiry, which it must carry.
   if (typeof id["exp"] !== "number" || id["exp"] * 1000 <= now) return invalid("the ID token has expired or carries no expiry");
-  return { kind: "ok", tokens: toTokens(answer.body, { iss: provider.issuer, sub: id["sub"] }, now), returnTo: pending.returnTo };
+  return { kind: "ok", tokens: toTokens(answer.body, { iss: provider.issuer, sub: id["sub"] }, now), returnTo: pending.returnTo, noProfile: pending.noProfile === true };
 }
 
 export interface SessionOptions {

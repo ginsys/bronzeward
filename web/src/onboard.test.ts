@@ -511,7 +511,23 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
 const named = (endpoint: string) => talosconfig().replace("[10.0.0.1:50000]", `[${endpoint}]`);
 
 describe("what counts as an address follows the server's first split", () => {
-  test.each(["10.0.0.1", "10.0.0.1:50000", "255.255.255.255:65535", "[::1]", "[::1]:50000", "[fd00::1]", "[::ffff:10.0.0.1]:50000"])("%s is an address the server takes", (endpoint) => {
+  // The shape is all the page judges: what has it is sent, and the server's own sentence says what is wrong
+  // with it (an octet, a port, the brackets).
+  test.each([
+    "10.0.0.1",
+    "10.0.0.1:50000",
+    "[::1]",
+    "[::1]:50000",
+    "[fd00::1]",
+    "[::ffff:10.0.0.1]:50000",
+    "::1",
+    "fd00::3",
+    "999.0.0.1",
+    "10.0.0.1:99999",
+    "[::1]50000",
+    "[::1",
+    "[10.0.0.1]",
+  ])("%s has the shape of an address and is sent", (endpoint) => {
     expect(isAddress(endpoint)).toBe(true);
   });
   test.each([
@@ -522,41 +538,29 @@ describe("what counts as an address follows the server's first split", () => {
     "10.0.0.1.example.test",
     "10.0.0:50000",
     "",
-    // The shapes the server refuses though they look like addresses (internal/talos/endpoint.go).
-    "::1",
-    "fd00::3",
     "[node.example.test]:50000",
-    "[::1",
-    "[::1]50000",
-    "[::1]:",
-    "[fe80::1%eth0]",
-    "[10.0.0.1]",
-    "999.0.0.1",
-    "010.0.0.1",
-    "10.0.0.1:",
-    "10.0.0.1:0",
-    "10.0.0.1:65536",
-    "10.0.0.1:050",
-    "10.0.0.1:50000:1",
-  ])("%s is not one", (endpoint) => {
+    "[node.example.test]",
+    "[x:y@[::1]",
+    "node:80:90",
+  ])("%s is a name, or not an address at all, and is never sent", (endpoint) => {
     expect(isAddress(endpoint)).toBe(false);
   });
 });
 
 describe("the endpoint the page will use, said before the button", () => {
-  test("an address from the file, or typed, is the endpoint the page will read the cluster at", () => {
-    expect(endpointNote(talosconfig(), "", "")).toBe("The page will read the cluster at 10.0.0.1:50000.");
-    expect(endpointNote(talosconfig(), "b", "")).toBe("The page will read the cluster at 10.1.0.1.");
-    expect(endpointNote(named("node.example.test"), "", "10.2.0.1")).toBe("The page will read the cluster at 10.2.0.1.");
+  test("an address from the file, or typed, is the endpoint the page will try", () => {
+    expect(endpointNote(talosconfig(), "", "")).toBe("The page will try the cluster at 10.0.0.1:50000.");
+    expect(endpointNote(talosconfig(), "b", "")).toBe("The page will try the cluster at 10.1.0.1.");
+    expect(endpointNote(named("node.example.test"), "", "10.2.0.1")).toBe("The page will try the cluster at 10.2.0.1.");
   });
 
   test("a name, from the file or typed, is said to be a name, with what to type instead", () => {
     const say = (endpoint: string) =>
-      `This talosconfig's endpoint is ${endpoint}, which the server cannot use: it takes an IP address, not a name, and an IPv6 address goes in square brackets. Type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.`;
+      `This talosconfig's endpoint is ${endpoint}, which is not an IP address. The server cannot use a name yet: type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.`;
     expect(endpointNote(named("node.example.test"), "", "")).toBe(say("node.example.test"));
     expect(endpointNote(named("cafe:50000"), "", "")).toBe(say("cafe:50000"));
-    expect(endpointNote(named("fd00::3"), "", "")).toBe(say("fd00::3"));
-    expect(endpointNote(named("999.0.0.1"), "", "")).toBe(say("999.0.0.1"));
+    expect(endpointNote(talosconfig(), "", "[node.example.test]:50000")).toBe(say("[node.example.test]:50000"));
+    expect(endpointNote(named("999.0.0.1"), "", "")).toBe("The page will try the cluster at 999.0.0.1.");
     expect(endpointNote(talosconfig(), "", "lb.example.test")).toBe(say("lb.example.test"));
   });
 
@@ -578,7 +582,7 @@ describe("a name is never sent, and discovery's failures are whole sentences wit
       const s = new Server();
       const r = await discoverCluster(s.env(), text, { endpoint: typed });
       expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.why).toMatch(/^This talosconfig's endpoint is .+, which the server cannot use: it takes an IP address, not a name/);
+      if (!r.ok) expect(r.why).toMatch(/^This talosconfig's endpoint is .+, which is not an IP address\. The server cannot use a name yet: /);
       expect(s.requests).toEqual([]);
     }
   });

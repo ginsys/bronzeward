@@ -47,8 +47,8 @@ async function chooseFile() {
 // Through the file, the read and the confirmation, to the run's start.
 async function start(name: string) {
   await chooseFile();
-  // Before the button, the page says which endpoint it will read the cluster at: the file's, an IP address.
-  await expect($('[data-testid="onboard-endpoint"]')).toHaveText(expect.stringMatching(/^The page will read the cluster at \d+\.\d+\.\d+\.\d+(:\d+)?\.$/));
+  // Before the button, the page says which endpoint it will try: the file's, an IP address.
+  await expect($('[data-testid="onboard-endpoint"]')).toHaveText(expect.stringMatching(/^The page will try the cluster at \d+\.\d+\.\d+\.\d+(:\d+)?\.$/));
   await $("main form").$("button=Read cluster").click();
   await expect($('[data-testid="onboard-found"]')).toHaveText(expect.stringContaining("2 members"), { wait: 60_000 });
   await $('input[name="name"]').setValue(name);

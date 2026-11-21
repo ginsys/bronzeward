@@ -119,36 +119,29 @@ export function sender(writes: Pick<Writes, "submit" | "repeatable" | "dismiss" 
 // A sentence from a reason that starts in lower case and ends with no full stop.
 const sentence = (reason: string) => `${reason.charAt(0).toUpperCase()}${reason.slice(1)}${reason.endsWith(".") ? "" : "."}`;
 
-// Whether the server will take an endpoint (internal/talos/endpoint.go ParseEndpoint): an IPv4 address
-// with an optional `:port`, or an IPv6 address in square brackets with an optional `:port`. A name, an
-// IPv6 address with no brackets and an address with a bad octet or port are not. The server cannot use a
-// name yet; when it can, this check and its sentence go.
-const IPV4 = /^(?:(?:0|[1-9]\d{0,2})\.){3}(?:0|[1-9]\d{0,2})$/;
-const PORT = /^[1-9]\d{0,4}$/;
-const validPort = (port: string) => PORT.test(port) && Number(port) <= 65535;
-const validV4 = (host: string) => IPV4.test(host) && host.split(".").every((o) => Number(o) <= 255);
-const validV6 = (host: string) => {
-  try {
-    return host.includes(":") && !host.includes("%") && new URL(`http://[${host}]`).hostname !== "";
-  } catch {
-    return false;
-  }
-};
+// Whether an endpoint has the shape of an IP address, by the server's own first split
+// (internal/talos/endpoint.go ParseEndpoint): text in brackets holds only hex digits, colons and dots
+// (an IPv6 address); more than one colon, with only those characters, is an IPv6 address the server will
+// ask to have bracketed; and with at most one colon the host before it is four dotted numbers. Anything
+// else is a name, and is never sent. What has the shape is sent as it is, and the server's own sentence
+// says what is wrong with an octet, a port or the brackets: the page copies the shape, never the parser.
+// The server cannot use a name yet; when it can, this check and its sentence go.
+const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
+const V6_TEXT = /^[0-9a-f:.]+$/i;
 export function isAddress(endpoint: string): boolean {
   if (endpoint.startsWith("[")) {
     const end = endpoint.indexOf("]");
-    if (end < 0) return false;
-    const rest = endpoint.slice(end + 1);
-    return validV6(endpoint.slice(1, end)) && (rest === "" || (rest.startsWith(":") && validPort(rest.slice(1))));
+    const inner = endpoint.slice(1, end < 0 ? undefined : end);
+    return V6_TEXT.test(inner);
   }
-  const colon = endpoint.indexOf(":");
-  if (colon < 0) return validV4(endpoint);
-  return validV4(endpoint.slice(0, colon)) && validPort(endpoint.slice(colon + 1));
+  const colons = endpoint.split(":").length - 1;
+  if (colons > 1) return V6_TEXT.test(endpoint);
+  return IPV4.test(colons === 1 ? endpoint.slice(0, endpoint.indexOf(":")) : endpoint);
 }
 
 const NO_ENDPOINT = "The talosconfig's context names no endpoint: type the IP address of a control-plane node.";
 const nameNote = (endpoint: string) =>
-  `This talosconfig's endpoint is ${endpoint}, which the server cannot use: it takes an IP address, not a name, and an IPv6 address goes in square brackets. Type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.`;
+  `This talosconfig's endpoint is ${endpoint}, which is not an IP address. The server cannot use a name yet: type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.`;
 
 // The endpoint a read will use: the one typed, else the chosen context's first. Undefined when the text is
 // not a talosconfig the page can cut (the read's own sentence says why).
@@ -168,7 +161,7 @@ export function endpointNote(text: string | undefined, context: string, typed: s
   const endpoint = readEndpoint(text, context, typed.trim());
   if (endpoint === undefined) return undefined;
   if (endpoint === "") return NO_ENDPOINT;
-  return isAddress(endpoint) ? `The page will read the cluster at ${endpoint}.` : nameNote(endpoint);
+  return isAddress(endpoint) ? `The page will try the cluster at ${endpoint}.` : nameNote(endpoint);
 }
 
 // A discovery's failure as whole sentences, with no lead of its own: the page writes "Nothing was

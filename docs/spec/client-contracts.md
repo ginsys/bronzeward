@@ -328,7 +328,9 @@ it. It holds no secret.
    [§9.1](#91-identity-provider-requirements) item 2, and an optional string member `scopes`:
    space-separated scopes requested after `openid offline_access`, as the CLI's `oidc.scopes`,
    for a provider that puts the audience into a token only when a scope asks for it (Zitadel's
-   project audience scope is one). Absent is none; repeating `openid` or `offline_access` is a
+   project audience scope is one). The web client also asks for `profile` itself where the
+   provider's discovery lists it, for the name in its header ([§9.3](#93-browser-sign-in) item 6), so
+   `scopes` need not name it. Absent is none; repeating `openid` or `offline_access` is a
    configuration error, as is any other member's wrong type (lead decision under the owner's
    2026-10-07 grant, 26 October 2026, recorded in
    [#332](https://github.com/ginsys/bronzeward/issues/332)). The
@@ -1227,7 +1229,8 @@ current token expires
 
 1. The web interface is a public client using the authorization-code grant with PKCE `S256`,
    `state` and `nonce`, with a full-page redirect to the provider. The PKCE verifier, `state`,
-   `nonce` and the page path to return to are held in one `sessionStorage` entry only between the
+   `nonce` and the page path to return to, and one boolean when the sign-in leaves out `profile`
+   (item 6), are held in one `sessionStorage` entry only between the
    redirect and the callback, stored only when the redirect follows, and are deleted when the
    callback is handled; this is the one storage
    use the web client makes, and it holds no token. The return path starts with `/` and not `//`,
@@ -1375,12 +1378,16 @@ current token expires
    name is for display: it is never sent to the server, stored or used to decide anything. Any
    failure leaves the header at "Signed in as a person"; it never shows the subject number and
    never holds the page back. A provider that lists `profile` and then refuses it to this client
-   answers the sign-in with `invalid_scope`: the sign-in view then offers the sign-in again without
-   the scope the page added itself, for that page's life (nothing is stored). The server's `auth.oidc.displayClaim` names the claim the server
-   shows for a person in its own records; the page does not follow it (limit: a provider whose
-   userinfo `name` differs from that claim shows the userinfo name in the header).
-   An automation shows "Signed in as the automation <service>" with no userinfo read. The header
-   shows no epoch: the recovery banner names it where it matters.
+   answers the sign-in with `invalid_scope`. The sign-in view then shows that refusal and its button
+   signs in again without the scope the page added itself (item 3 leaves a refused page only by the
+   operator's button). That sign-in's pending entry (item 1) carries one boolean saying so, which
+   its callback returns, so the page and every renewal redirect after it go on without `profile`.
+   Limit: a new sign-in on such a provider still meets one refusal first, and shows the header
+   without a name. The server's `auth.oidc.displayClaim` names the claim the server shows for a
+   person in its own records; the page does not follow it (limit: a provider whose userinfo `name`
+   differs from that claim shows the userinfo name in the header). An automation shows "Signed in as
+   the automation <service>". The header shows no epoch: the recovery banner names it where it
+   matters.
 
 ### 9.4 Automation token input
 
