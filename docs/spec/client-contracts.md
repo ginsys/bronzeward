@@ -2084,7 +2084,8 @@ way: the identifier, the Talos endpoint and the node ID, as before.
 7. **A release says where each machine's hostname came from** (persistence and API §9.2, the `hostname` member).
    A release review shows, per machine, one of these sentences by `source`, naming the machine by its name where
    it has one: `machine-name`, "Hostname: node-a, taken from the machine's name."; `configuration`, "Hostname:
-   node-a, written in the configuration. The machine's name does not change it."; `none`, "Hostname: not set in
+   set in the configuration. The machine's name does not change it." with no value, since the release records
+   none and the value may be a secret reference or withheld; `none`, "Hostname: not set in
    the configuration; the node chooses its own."; `legacy-stable`, "Hostname: the configuration asks the node to
    choose a stable hostname of its own, so the machine's name is not used. Remove that setting to use the name.";
    `unrecorded` (a release made before the source was recorded), "Hostname: not recorded for this release." and

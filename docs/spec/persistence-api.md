@@ -3139,8 +3139,8 @@ introduces. It names a machine by its identifier, with import base revision
 identifiers, `"absent"` where there is none. A machine whose name moved
 since the snapshot (§4.2, the fourth form, **choice §17.45**) is named by its
 identifier with `expected` the name the snapshot read and `actual` the name
-now stored, both strings, and `"absent"` for a machine with no name on that
-side. A draft keeps only the base
+now stored, each a string or `null` for a machine with no name on that side
+(never the word `"absent"`, which the name grammar permits). A draft keeps only the base
 counter, not the ETag token, so the token is not named.
 
 | Status | Code | When |
