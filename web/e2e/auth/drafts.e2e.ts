@@ -203,7 +203,8 @@ describe("the draft editor (#339)", () => {
     await $('input[name="title"]').setValue(title);
     await $("main form").$("button=Create draft").click();
     await expect($('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`Draft ${title} created (`), { wait: 20_000 });
-    await $('[data-testid="write-result"]').$("a").click();
+    // The message links the draft and its cluster: take the draft's link by its text.
+    await $('[data-testid="write-result"]').$(`a=${title}`).click();
     await expect($("main h2")).toHaveText(`Draft: ${title}`);
     await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining("open, revision"));
     await expect($('[data-testid="not-rendered"]')).toHaveText(NOT_RENDERED);
@@ -365,7 +366,7 @@ describe("the draft editor (#339)", () => {
     await expect(pane().$("p*=Layer:")).toHaveText(expect.stringContaining("-> unsaved"));
     // Dismissed, nothing is sent; accepted, the draft is discarded.
     const before = (await writes()).length;
-    expect((await dialogs(false, () => $("main").$("button=Discard draft").click()))[0]).toContain(`Discard draft ${id}`);
+    expect((await dialogs(false, () => $("main").$("button=Discard draft").click()))[0]).toContain(`Discard draft "synthetic ${name}"? It cannot be published afterwards.`);
     await browser.pause(500);
     expect(await writes()).toHaveLength(before);
     await dialogs(true, () => $("main").$("button=Discard draft").click());

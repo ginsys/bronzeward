@@ -13,7 +13,6 @@
 // (retention.test.ts reads this source). After each case the storage check finds nothing in storage,
 // IndexedDB or caches, and the protected cases find no cached answer of their review.
 import { $, browser, expect } from "@wdio/globals";
-import { UNNAMED_MACHINE } from "../../src/words.ts";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
 import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, itNarrow, measure, narrow, onMain, overflows, pickByKeys, storageControl, storageEmptyAfterPause, syntheticMachine, tab, tabTo } from "./helpers.ts";
 
@@ -25,6 +24,8 @@ const TYPED = "machine:\n  nodeLabels:\n    example.test/kbd: synthetic\n";
 let at = "";
 let cluster = "";
 let machine = "";
+// The machine has no name, so the pages name it by its address, which is its stored endpoint (it has no port here).
+let address = "";
 // The review's import of the running protected case, for the cache check after it.
 let importId = "";
 let docName = "";
@@ -57,7 +58,7 @@ async function startImport(staging: "encrypted" | "transient", review: boolean, 
 async function openImport(id: string, heading: string) {
   expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
   await browser.url(`${FIXTURE_PAGE}/ingestions/${id}`);
-  await expect($("main h2")).toHaveText(`Import of ${UNNAMED_MACHINE}: ${heading}`, { wait: 30_000 });
+  await expect($("main h2")).toHaveText(`Import of ${address}: ${heading}`, { wait: 30_000 });
 }
 
 // What every protected case leaves behind: nothing in storage, IndexedDB or caches, and no cached
@@ -104,7 +105,9 @@ describe("the import wizard, the protected review and the conflict view, by keyb
   before(async () => {
     at = await disposable("start=normal");
     machine = await syntheticMachine(at);
-    cluster = (await api(at, "h-author", "GET", `/machines/${machine}`)).body!["cluster"] as string;
+    const body = (await api(at, "h-author", "GET", `/machines/${machine}`)).body!;
+    cluster = body["cluster"] as string;
+    address = body["talosEndpoint"] as string;
   });
   afterEach(leavesNothing);
 
@@ -208,7 +211,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       await $("main form").$("label*=Document").$("textarea").waitForExist({ timeout: 10_000 });
       expect(["the wizard", await overflows()]).toEqual(["the wizard", 0]);
       await browser.url(`${FIXTURE_PAGE}/ingestions/${released}`);
-      await expect($("main h2")).toHaveText(`Import of ${UNNAMED_MACHINE}: released`, { wait: 30_000 });
+      await expect($("main h2")).toHaveText(`Import of ${address}: released`, { wait: 30_000 });
       expect(["the import page", await overflows()]).toEqual(["the import page", 0]);
     });
   });
