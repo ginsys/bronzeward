@@ -2130,9 +2130,13 @@ not part of this rule.
 1. The name is remote text like every server string: a declared format binds a correct server, not
    the bytes received (§6 item 8, as A7 cites it). The
    CLI escapes it as it does every other server string. The web client renders it as a text node
-   and shows it only when the received value matches the grammar (1 to 63 characters, lowercase
-   `a-z`, digits and hyphen, neither first nor last a hyphen), else the address; that check
-   replaces A7's control and format character test, which a name that passes it cannot fail.
+   and shows it only when the received value matches the grammar (dot-separated labels of 1 to 63
+   characters, lowercase `a-z`, digits and hyphen, neither first nor last a hyphen; 253 characters at
+   most; with a dot, no trailing dot and a last label that is not all digits;
+   [persistence and API §3.5](persistence-api.md#35-a-machines-name)), else the address; that check
+   replaces A7's control and format character test, which a name that passes it cannot fail. The web
+   client keeps that grammar in one place, and the onboarding page tests the node's hostname against
+   the same constant.
 2. The commands keep taking identifiers. A name is unique only within a cluster
    ([persistence and API §3.5](persistence-api.md#35-a-machines-name)), so a command taking a name
    would need the cluster too; that is a separate decision, and no client resolves a name to an

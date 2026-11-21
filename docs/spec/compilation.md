@@ -994,8 +994,9 @@ Design: none. Owner direction, 2026-11-20 (ginsys/bronzeward#951; Serge, typed
 11:36 CET in the bronzeward lead's session): "when setting the hostname, the
 default could be the machine name (if set)". This section specifies it
 (ginsys/bronzeward#976). A machine may carry a stored name, unique within its
-cluster, 1 to 63 characters of lowercase letters, digits and hyphen, so always
-a valid hostname label ([persistence and API §3.5](persistence-api.md)). Until
+cluster, a hostname of one or more dot-separated labels of lowercase letters,
+digits and hyphen, so always a valid hostname, a full one where the machine has
+a domain ([persistence and API §3.5](persistence-api.md)). Until
 this section the compiler wrote no hostname, and the name and the hostname were
 independent.
 
@@ -1092,9 +1093,14 @@ unmeasured.
    [the import-equivalence evidence](../design/research/evidence/20261118-import-equivalence/gen.sh))
    hands it to the fill. A filled hostname needs no such step.
 6. **A filled hostname that another machine already holds (choice §16.38).**
-   Names are unique within a cluster, so two filled hostnames never clash.
-   The one new clash is a hostname filled from a name against another
-   machine's explicit hostname that gives the same Kubernetes node name: two
+   Names are unique within a cluster, so two filled hostnames are never equal,
+   but a name with dots can still clash: where the effective `RegisterWithFQDN`
+   value is not true, Talos derives the node name from the first label, so the
+   names `a.x.org` and `a.y.org` give one node name, `a`. Two clashes follow.
+   One is a hostname filled from a name against another machine's filled
+   hostname that gives the same Kubernetes node name. The other is a hostname
+   filled from a name against another machine's explicit hostname that gives
+   the same one. In both, two
    nodes would register one Node object, and the second kubelet would take over
    the first's. The compared value is the node name Talos derives, copied here
    because the Talos package that computes it is internal (`nodename.go`,
@@ -1124,7 +1130,16 @@ unmeasured.
    configured on machine node-b gives the same Kubernetes node name. Rename
    machine node-a, or change the hostname in the configuration of machine
    node-b." Renaming node-b would not help, since its explicit hostname does
-   not follow its name (item 2).
+   not follow its name (item 2). Where both hostnames are filled from names, the
+   refusal reads: "Machine a.x.org and machine a.y.org would both register the
+   Kubernetes node name a. Rename one of them, or set `registerWithFQDN` on
+   both." Either rename helps, since both hostnames follow the names. Each
+   machine's node name is computed from its own composition, so with
+   `registerWithFQDN` true on both the node names are the full names and
+   differ, and with it true on one only the compared values are `a.x.org` and
+   `a`, which differ too. The check is built with the hostname fill
+   (ginsys/bronzeward#1040), whose acceptance cases include `a.x.org` against
+   `a.y.org` with `registerWithFQDN` unset (refused) and true on both (accepted).
    A name that moves between machines is the second clash: a filled hostname
    equal to the name that another machine's last applied release recorded
    (source `machine-name`, persistence and API §9.2) is refused the same way,
