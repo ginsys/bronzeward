@@ -1140,10 +1140,11 @@ unmeasured.
    the hostname node-a from its name, but the last release applied to machine
    node-a still sets that hostname. Give machine node-b another name for now,
    apply the release for machine node-a, then give machine node-b the name
-   node-a." To exchange two names, restore one machine's earlier name if
-   needed, move the first machine to a third name and apply it, give the second
-   machine the first's old name and apply it, then give the first machine its
-   final name and apply it. The check is no guarantee. It reads only the hostname record of
+   node-a." To exchange the names of two machines, give the first a third
+   name; if the second already holds the first's old name, give the second its
+   earlier name. Publish and apply the release for the first machine. Give the
+   second machine the first's old name, publish and apply. Then give the first
+   machine its final name, publish and apply. The check is no guarantee. It reads only the hostname record of
    each machine's applied release, so it does not cover a hostname set
    explicitly or held by a secret reference (not recorded per release), an
    apply that is committed but not finished, or an adopted baseline whose
