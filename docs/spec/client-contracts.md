@@ -2225,6 +2225,27 @@ outcome line, and under it the next step an operator can take, from the steps of
    import) it gives the table's text and never a line that sends the reader back to `operation show`; (b) an unknown
    pair says "this command has no description of it". `operation watch` prints the same outcome lines.
 
+**A11. One button takes a draft's machines under management (client rule, no API change).**
+The web client's draft page offers "Start managing these machines" for a draft that holds an import base
+([#1066](https://github.com/ginsys/bronzeward/issues/1066)).
+
+1. It has no route of its own. It sends the draft's publication, then for each machine an adopt plan and that plan's
+   approval, each through its existing route and each recorded as a typed act is. It never creates an apply-config plan.
+   The approval's self-approval reasons are the server's, computed when it is recorded.
+2. The sentence above the button is the confirmation, in place of the plan ID typed back
+   ([operator experience §5.6](operator-experience.md#56-plan-and-approval)). The typed plan ID stays for every other web
+   approval and for every CLI approval.
+3. It acts only on a machine with no `Applied`. A machine with an `Applied`, a drift record included, keeps its separate steps.
+4. Each act is chosen from the draft's state and the `step` of `GET /machines/{id}/position`, read at that moment. A
+   second press, after a closed page or a failed step, therefore sends no act whose result exists. A machine whose step
+   fails stops alone with the refusal in words, and a later press retries it alone. The same act twice in one press stops
+   the machine instead of looping.
+5. The roles are the routes': `publisher` for the publication and the plan, `approver` for the approval. Without either,
+   the button is off and the page names the missing role and the separate steps.
+6. After the approval the controller records the adoption unasked
+   ([execution and recovery §6.3](execution-recovery.md#63-adopt)). The page follows each machine for a bounded time and
+   says that the person may leave: the handover finishes without the page.
+
 **C1. Contract correction.** Add the `reset` event to the stream contract of
 [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) (G15). A
 documentation change for the landing of this specification or its own small change. Applied: both

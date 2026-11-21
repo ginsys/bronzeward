@@ -22,9 +22,9 @@ async function nodes() {
   expect(r.status).toBe(200);
 }
 
-// Signs in as h-author and opens the page from the machine list.
-async function open() {
-  expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
+// Signs in as `human` (h-author, or h-all for the handover) and opens the page from the machine list.
+async function open(human = "h-author") {
+  expect(await fixtureSignIn(human, {}, { upstream: at })).toMatch(SERVER);
   await $('nav[aria-label="Main"]').$("a=Machines").click();
   await $("main").$("button=Onboard cluster").click();
   await expect($("main h2")).toHaveText("Onboard cluster");
@@ -117,5 +117,40 @@ describe("Onboard cluster (#1001)", () => {
     await expect(result()).toHaveText(expect.stringMatching(/^Onboarded\./), { wait: 180_000 });
     expect(await recorded(name)).toEqual({ clusters: 1, machines: 2, imports: ["released", "released"], drafts: 1 });
     await storageEmptyAfterPause();
+  });
+
+  it("ONBOARD-03 (ginsys/bronzeward#1066): the draft page's [Start managing these machines], pressed as the one-person identity, publishes the draft and creates and approves one adopt plan per machine, the approval marked as the person's own", async function () {
+    this.timeout(300_000);
+    await nodes();
+    await open("h-all");
+    const name = `synthetic-${hex()}`;
+    await start(name);
+    await $("main form").$("button=Onboard cluster").click();
+    await expect(result()).toHaveText(expect.stringMatching(/^Onboarded\./), { wait: 180_000 });
+    await result().$("a").click();
+    await expect($("main h2")).toHaveText(expect.stringContaining("Draft "));
+    // The sentence above the button says what the press does, and that it sends nothing to any machine.
+    await expect($('[data-testid="handover-sentence"]')).toHaveText(expect.stringContaining("It sends nothing to any machine."));
+    await $("main").$("button=Start managing these machines").click();
+    // The draft's line and one line for each machine; each machine ends done, or waits on the controller (never working or stopped).
+    await browser.waitUntil(async () => {
+      const lines = await $$('[data-testid="handover-line"]');
+      if (lines.length !== 3) return false;
+      for (const l of lines) if (!["done", "waiting"].includes((await l.getAttribute("data-state")) ?? "")) return false;
+      return true;
+    }, { timeout: 240_000, timeoutMsg: "the handover lines did not settle to done or waiting" });
+    // What the deployment holds: the draft published, one approved adopt plan per machine, each approval marked self-approval.
+    const id = ((await api(at, "h-all", "GET", "/clusters")).body!["items"] as { id: string; name: string }[]).find((c) => c.name === name)!.id;
+    const drafts = ((await api(at, "h-all", "GET", "/drafts")).body!["items"] as { cluster: string; state: string }[]).filter((d) => d.cluster === id);
+    expect(drafts.map((d) => d.state)).toEqual(["published"]);
+    const machines = (await api(at, "h-all", "GET", `/machines?cluster=${id}`)).body!["items"] as { id: string }[];
+    expect(machines).toHaveLength(2);
+    for (const m of machines) {
+      const plans = (await api(at, "h-all", "GET", `/plans?machine=${m.id}`)).body!["items"] as { operation: string; state: string; approval: string | null }[];
+      expect(plans.map((p) => p.operation)).toEqual(["adopt"]);
+      expect(plans[0]!.state).not.toBe("proposed");
+      const approval = (await api(at, "h-all", "GET", `/approvals/${plans[0]!.approval}`)).body!["selfApproval"] as { marked: boolean };
+      expect(approval.marked).toBe(true);
+    }
   });
 });
