@@ -2086,11 +2086,15 @@ way: the identifier, the Talos endpoint and the node ID, as before.
    it has one: `machine-name`, "Hostname: node-a, taken from the machine's name."; `configuration`, "Hostname:
    node-a, written in the configuration. The machine's name does not change it."; `none`, "Hostname: not set in
    the configuration; the node chooses its own."; `legacy-stable`, "Hostname: the configuration asks the node to
-   choose a stable hostname of its own, so the machine's name is not used. Remove that setting to use the name."
+   choose a stable hostname of its own, so the machine's name is not used. Remove that setting to use the name.";
+   `unrecorded` (a release made before the source was recorded), "Hostname: not recorded for this release." and
+   no more: it never claims the node chose its own.
    For `machine-name` on a machine whose applied release recorded `none` or `legacy-stable`, the review adds: "This
    release sets the machine's hostname to node-a, taken from its name. Until now the node chose its own hostname.
    The machine's Kubernetes node name normally follows the hostname, so it may change too." followed by the
-   restart sentence of item 6. For a machine whose applied release recorded another name: "This release changes
+   restart sentence of item 6. For a machine whose applied release recorded `unrecorded`, the review says only:
+   "This release sets the machine's hostname to node-a, taken from its name." followed by the restart sentence of
+   item 6. For a machine whose applied release recorded another name: "This release changes
    the machine's hostname from node-a to node-b, taken from its name." Where the machine's current name differs
    from the name the release recorded: "This release used the earlier name node-a. The next release will use
    node-b." A `source` the client does not know shows its raw value and no sentence. A publication refused for a
