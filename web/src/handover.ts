@@ -20,7 +20,10 @@ export const HANDOVER_SENTENCE =
 export const UNSAVED = "The draft editor holds text you have not saved, and a press publishes only what is saved. Save it or discard it, then press again. Nothing was sent.";
 // The press publishes (publisher), creates each plan (publisher) and approves it (approver), and the draft
 // page's author role is what reads the draft's machines and their configurations: all three are needed.
-export const ROLES = ["author", "publisher", "approver"] as const;
+// A write of an earlier press that stays open (unknown outcome, its notice not dismissed) may still commit or be
+// repeated, so a new press would send the same act under a new key: it waits for the notice's resolution.
+export const UNRESOLVED = "A request of the last press has an unknown outcome and its notice is still open. Repeat it exactly or dismiss the notice, then press again, so no step is sent twice. Nothing was sent.";
+export const ROLES =["author", "publisher", "approver"] as const;
 export const missingRoles = (held: readonly string[]) => ROLES.filter((r) => !held.includes(r));
 export const MISSING = (missing: readonly string[]) =>
   `Needs the ${missing.join(" and ")} role. The separate steps stay: publish this draft, then on each machine's release page plan the adopt (handover), then approve each plan.`;

@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { DraftItem, EDITOR_FIRST, forgetETag, keptETag } from "./drafts.tsx";
 import { unsaved, WritesProvider } from "./forms.tsx";
 import { Handover } from "./handover.tsx";
-import { LINES, NOT_PUBLISHED, UNSAVED } from "./handover.ts";
+import { LINES, NOT_PUBLISHED, UNRESOLVED, UNSAVED } from "./handover.ts";
+import { Client } from "./request.ts";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
 import { Writes } from "./write.ts";
@@ -138,6 +139,42 @@ describe("the handover button with unsaved text in the draft editor", () => {
     await settled();
     expect(sent).toEqual(['"1"', '"2"']);
     expect(epochs).toEqual(["e0", "e0"]);
+  });
+
+  test("a write of an earlier press that stays open (unknown outcome) holds the next press back until its notice is resolved", async () => {
+    // The first publication's request fails every attempt: its outcome is unknown and the write stays open. A new
+    // press would send the same act under a new key, so it sends and reads nothing and says why; once the write is
+    // dismissed the press goes on.
+    let draftReads = 0;
+    const reads = {
+      client: { read: vi.fn(async () => (draftReads++, { kind: "ok", data: { state: "open" }, etag: '"1"' })) },
+      settle: (res: unknown, set: (r: unknown) => void, live: () => boolean) => (live() && set(res), true),
+      undropped: () => () => true,
+      view: "", again: 0, regained: 0, go: () => {}, failure: () => null,
+    } as unknown as Reads;
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/recovery")) return new Response(JSON.stringify({ mode: "normal" }), { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": "e1" } });
+      throw new TypeError("Failed to fetch");
+    });
+    const writes = new Writes(() => "p", async () => {});
+    writes.client = new Client({ token: () => "SYNTH-token", fetch: fetchMock as unknown as typeof fetch });
+    await act(async () =>
+      root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(Handover, { draft: "drf_1", machines: ["mch_a"], etag: () => '"1"', seeChange: () => undefined, written: () => {} }))))),
+    );
+    const settled = () => act(async () => void (await new Promise((r) => setTimeout(r, 40))));
+    await press();
+    await settled();
+    expect(writes.open).toHaveLength(1);
+    expect(draftReads).toBe(1);
+    await press();
+    await settled();
+    expect(box.querySelector('[data-testid="handover-note"]')!.textContent).toBe(UNRESOLVED);
+    expect(draftReads).toBe(1);
+    writes.dismiss(writes.open[0]!);
+    await press();
+    await settled();
+    expect(draftReads).toBe(2);
+    expect(box.querySelector('[data-testid="handover-note"]')).toBeNull();
   });
 
   test("with nothing unsaved the press starts: no unsaved notice, and the draft is read", async () => {
