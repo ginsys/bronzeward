@@ -170,6 +170,12 @@ func kindOfID(id string) string {
 	return map[string]string{"rel": "release", "pln": "plan", "op": "operation", "drf": "draft", "ing": "ingestion", "mch": "machine"}[prefix]
 }
 
+// heldBody is the body of type T read at path earlier in this run, nil when none was read or the read failed.
+func heldBody[T any](e *env, path string) *T {
+	t, _ := e.bodies[path].(*T)
+	return t
+}
+
 // titleRef keeps the title of the object kind/id that a command names beside its identifier, read once
 // for the command through the cache above; a failed read keeps none (client contracts A8, ginsys/bronzeward#1017).
 func (e *env) titleRef(c *client.Client, kind, id string) {

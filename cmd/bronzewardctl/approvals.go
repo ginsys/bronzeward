@@ -65,7 +65,7 @@ func (e *env) approve(args []string) error {
 			if view = e.planView(c, &p); p.State == "proposed" {
 				view = view[:len(view)-1] // its one state line points at this approve command
 			}
-			prediction = predict(c, &p)
+			prediction = e.predict(c, &p)
 			return nil
 		}); change != "" {
 			return fmt.Errorf("%s while the plan was read; nothing is shown and nothing was sent. Approve it again with: approve %s", change, client.ShellWord(p.Id))
@@ -109,7 +109,7 @@ func (e *env) approve(args []string) error {
 // revisions its draft introduced (internal/api/approvals.go selfApprovalReasons). Import-base
 // authorship and owned automation cannot be predicted, so the approver is never presented as clear.
 // A failed read leaves out what it would have shown, rather than saying "did not".
-func predict(c *client.Client, p *apitypes.PlanBody) []string {
+func (e *env) predict(c *client.Client, p *apitypes.PlanBody) []string {
 	var unread []string
 	said := "nothing."
 	var id apitypes.IdentityBody
@@ -120,12 +120,18 @@ func predict(c *client.Client, p *apitypes.PlanBody) []string {
 		var w selfWork
 		w.created = me != "" && p.CreatedBy.Principal == me
 		var rel apitypes.ReleaseBody
-		if err := getJSON(c, "/releases/"+url.PathEscape(p.Release), &rel); err != nil {
+		var err error
+		if h := heldBody[apitypes.ReleaseBody](e, titlePath("releases", p.Release)); h != nil {
+			rel = *h // the plan's view read it for its title
+		} else {
+			err = getJSON(c, "/releases/"+url.PathEscape(p.Release), &rel)
+		}
+		if err != nil {
 			unread = append(unread, sf("the release: %v", err))
 		} else {
 			w.knowPublished, w.published = true, me != "" && rel.PublishedBy.Principal == me
 			var unreadAuthors []string
-			w.change, w.reused, unreadAuthors = authored(c, &rel, me)
+			w.change, w.reused, unreadAuthors = e.authored(c, &rel, me)
 			w.knowAuthored = len(unreadAuthors) == 0
 			unread = append(unread, unreadAuthors...)
 		}
@@ -179,7 +185,7 @@ func (w selfWork) String() string {
 
 // authored reports authored-change and authored-reused for me in rel: a source revision me
 // authored is a change when rel's draft introduced it, else reused.
-func authored(c *client.Client, rel *apitypes.ReleaseBody, me string) (change, reused bool, unread []string) {
+func (e *env) authored(c *client.Client, rel *apitypes.ReleaseBody, me string) (change, reused bool, unread []string) {
 	if me == "" {
 		return false, false, nil // a human with no principal row has authored nothing
 	}
@@ -188,7 +194,16 @@ func authored(c *client.Client, rel *apitypes.ReleaseBody, me string) (change, r
 			Revision *string `json:"revision"`
 		} `json:"entries"`
 	}
-	if err := getJSON(c, "/drafts/"+url.PathEscape(rel.Draft), &d); err != nil {
+	var err error
+	if h := heldBody[apitypes.DraftBody](e, titlePath("drafts", rel.Draft)); h != nil {
+		var b []byte // the release's title read the draft: its entries are the same bytes
+		if b, err = json.Marshal(h); err == nil {
+			err = json.Unmarshal(b, &d)
+		}
+	} else {
+		err = getJSON(c, "/drafts/"+url.PathEscape(rel.Draft), &d)
+	}
+	if err != nil {
 		return false, false, []string{sf("the release's draft: %v", err)}
 	}
 	introduced := map[string]bool{}

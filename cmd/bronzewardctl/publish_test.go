@@ -26,6 +26,8 @@ type publishFake struct {
 	replaced     bool
 	// titled gives the release the draft and publication time its title is built from.
 	titled bool
+	// releaseGets counts the GETs of the release.
+	releaseGets int
 	// machineEpoch, when not empty, is the epoch the machine answers carry: the epoch moved after
 	// the release was read.
 	machineEpoch string
@@ -106,6 +108,9 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/operations/op_BWSYNTH-pub":
 		fmt.Fprintf(w, publishOp, state, result, problem)
 	case path == "/releases/rel_BWSYNTH":
+		f.mu.Lock()
+		f.releaseGets++
+		f.mu.Unlock()
 		from := ""
 		if titled {
 			from = `"draft":"drf_BWSYNTH","publishedAt":"2026-11-19T10:00:00Z",`
@@ -284,9 +289,18 @@ func TestPublicationNamesTheReleaseByItsTitle(t *testing.T) {
 		{[]string{"publish", "drf_BWSYNTH"}, "Publication succeeded: release " + title + " is now Desired for 2 machines."},
 		{[]string{"release", "review", "rel_BWSYNTH", "mch_a"}, "Release " + title + ", machine mch_a, validated: metal"},
 	} {
+		f.mu.Lock()
+		before := f.releaseGets
+		f.mu.Unlock()
 		var o, e bytes.Buffer
 		if code := run(c.args, &o, &e); code != 0 || !strings.Contains(o.String(), c.want) {
 			t.Errorf("%v: exit %d, stdout %q, stderr %q; want %q", c.args, code, o.String(), e.String(), c.want)
+		}
+		f.mu.Lock()
+		got := f.releaseGets - before
+		f.mu.Unlock()
+		if c.args[0] == "publish" && got != 1 {
+			t.Errorf("publish read the release %d times; want once, its title is built on that read", got)
 		}
 	}
 	var o, e bytes.Buffer

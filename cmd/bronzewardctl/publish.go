@@ -144,6 +144,9 @@ func (e *env) nextSteps(c *client.Client, release string) ([]string, error) {
 	if err := json.Unmarshal(r.Body, &rel); err != nil {
 		return nil, fmt.Errorf("GET /api/v1/releases/%s cannot be read: %w", url.PathEscape(release), err)
 	}
+	if e.output == "table" {
+		e.holdBody(titlePath("releases", rel.Id), &rel)
+	}
 	e.titleRef(c, "release", rel.Id)
 	machines := fmt.Sprintf("%d machines", len(rel.Machines))
 	if len(rel.Machines) == 1 {
