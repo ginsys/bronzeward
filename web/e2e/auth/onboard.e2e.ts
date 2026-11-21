@@ -39,6 +39,8 @@ async function chooseFile() {
     const files = new DataTransfer();
     files.items.add(new File([await r.text()], "talosconfig", { type: "application/yaml" }));
     input.files = files.files;
+    // A script sets the files without the `change` event a person's choice fires; the form's note answers that event.
+    input.dispatchEvent(new Event("change", { bubbles: true }));
     return input.files.length === 1;
   }, FIXTURE_ISSUER);
   expect(ok).toBe(true);
