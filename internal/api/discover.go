@@ -106,8 +106,9 @@ func (a *API) discoverCluster(q *request) (discoveryBody, error) {
 		return discoveryBody{}, ref
 	}
 	in := &q.input.(*discoveryInput).firstKeyInput
-	// A name is resolved once, here, and every dial of the call goes to the address it gave (persistence-api.md
-	// §3.3, choice §17.46): no later lookup can send a request to another node than the one the key was read from.
+	// A name is resolved once, here, and the key read, the signing and the first reads of the cluster go to the
+	// address it gave (persistence-api.md §3.3, choice §17.46): no later lookup can send a request to another
+	// node than the one the key was read from. The walk dials each member at an address the member list gives.
 	endpoint, _, err := a.o.resolve(dctx, in.Endpoint)
 	if err != nil {
 		return discoveryBody{}, discoveryRefusal(err)

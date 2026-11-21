@@ -1259,7 +1259,7 @@ type DiscoveryBody struct {
 	// Endpoint The address dialled, as host:port.
 	Endpoint string `json:"endpoint"`
 
-	// KubernetesEndpoint The cluster endpoint (https, host and port) that every control-plane member that answered reports as its own, when at least one answered and all report the same usable value (an IP address that is not the unspecified one, or a DNS name that is not localhost, and a port from 1 to 65535); otherwise a proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member.
+	// KubernetesEndpoint The cluster endpoint (https, host and port) that every control-plane member that answered reports as its own, when at least one answered and all report the same usable value (an IP address that is not the unspecified one, or a DNS name of letters, digits and hyphens with no trailing dot that is not localhost, and a port from 1 to 65535); otherwise a proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member.
 	KubernetesEndpoint string            `json:"kubernetesEndpoint"`
 	Members            []DiscoveryMember `json:"members"`
 
@@ -1275,7 +1275,7 @@ type DiscoveryInput struct {
 	// Document The first key's text, at most 512 KiB, never stored, logged or returned.
 	Document string `json:"document"`
 
-	// Endpoint An IP literal or a DNS name, with an optional port. A name is resolved once, and every dial of the call goes to the address it gave.
+	// Endpoint An IP literal or a DNS name, with an optional port. A name is resolved once, and the key read, the signing and the first reads of the cluster go to the address it gave; each member is then dialled at an address the member list gives.
 	Endpoint string             `json:"endpoint"`
 	Kind     DiscoveryInputKind `json:"kind"`
 }

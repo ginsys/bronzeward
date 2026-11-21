@@ -91,7 +91,7 @@ const sourceRequest = "the request's endpoint"
 
 // ResolveEndpoint is the address a server dials for s, an endpoint from a request body: an IP literal
 // or a DNS name, with an optional port. A name is resolved here, once, and the caller dials the address
-// it gets for every connection of the call (resolveEndpoint). name is s's host when it was resolved, and
+// it gets for the connections to the endpoint itself (resolveEndpoint). name is s's host when it was resolved, and
 // "" for an IP literal.
 func ResolveEndpoint(ctx context.Context, s string) (addr, name string, err error) {
 	return resolveEndpoint(ctx, s, sourceRequest)

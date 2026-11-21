@@ -319,8 +319,9 @@ func readMember(ctx context.Context, creds *clientconfig.Context, a netip.Addr, 
 
 // clusterEndpoint is the Kubernetes endpoint (https, host and port) that es, a node's KubePrism
 // endpoints, give as the cluster's own, or "" for no value: the first entry counts, and only when its
-// host is an IP address with no zone that is not unspecified, or a DNS name (validName) other than
-// localhost, and its port is 1 to 65535. The list holds localhost on a control-plane node with no
+// host is an IP address with no zone that is not unspecified, or a DNS name other than localhost, in
+// the grammar the cluster record takes (validName, with no trailing dot and no underscore, as
+// internal/api hostShape), and its port is 1 to 65535. The list holds localhost on a control-plane node with no
 // cluster endpoint, and the other members' addresses after the first entry, so no other entry says
 // anything about the cluster's endpoint.
 func clusterEndpoint(es []k8s.KubePrismEndpoint) string {
@@ -332,7 +333,7 @@ func clusterEndpoint(es []k8s.KubePrismEndpoint) string {
 		if a.Zone() != "" || a.IsUnspecified() {
 			return ""
 		}
-	} else if !validName(host) || strings.EqualFold(strings.TrimSuffix(host, "."), "localhost") {
+	} else if !validName(host) || strings.HasSuffix(host, ".") || strings.Contains(host, "_") || strings.EqualFold(host, "localhost") {
 		return ""
 	}
 	return "https://" + net.JoinHostPort(host, strconv.FormatUint(uint64(es[0].Port), 10))
