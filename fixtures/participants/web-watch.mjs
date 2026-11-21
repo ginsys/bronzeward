@@ -28,15 +28,16 @@ const web = "http://localhost:58443";
 const out = (line) => console.log(String(line).replaceAll(password, "[password]"));
 
 // The log lives in the page: one entry per row the page adds, a clear when the list empties, and the
-// marks the driver adds. A row's text is read when it is added; a row kept under the same key is updated
-// in place, so the server's replacement adds nothing.
+// marks the driver adds. A row's text and its <time datetime> attribute, as written (a received row's is
+// the browser's arrival instant, a final row's the server's `at`), are read when it is added; a row kept
+// under the same key is updated in place, so the server's replacement adds nothing.
 function observe() {
   const log = (window.__bw = []);
   const rows = (n) => (n.nodeType === 1 ? [...(n.matches("li[data-event-id]") ? [n] : []), ...n.querySelectorAll("li[data-event-id]")] : []);
   new MutationObserver((records) => {
     let removed = false;
     for (const r of records) {
-      for (const n of r.addedNodes) for (const li of rows(n)) log.push({ op: "add", id: li.dataset.eventId, text: li.textContent, received: li.textContent.startsWith("received ") });
+      for (const n of r.addedNodes) for (const li of rows(n)) log.push({ op: "add", id: li.dataset.eventId, text: li.textContent, received: li.textContent.startsWith("received "), dateTime: li.querySelector("time")?.getAttribute("datetime") ?? null });
       for (const n of r.removedNodes) removed ||= rows(n).length > 0;
     }
     if (removed && document.querySelector("li[data-event-id]") === null) log.push({ op: "clear" });
@@ -116,7 +117,7 @@ try {
     await browser.pause(250);
   }
   const log = await browser.execute(() => window.__bw);
-  const final = await browser.execute(() => [...document.querySelectorAll('[data-testid="events"] li[data-event-id]')].map((li) => ({ id: li.dataset.eventId, text: li.textContent, received: li.textContent.startsWith("received ") })));
+  const final = await browser.execute(() => [...document.querySelectorAll('[data-testid="events"] li[data-event-id]')].map((li) => ({ id: li.dataset.eventId, text: li.textContent, received: li.textContent.startsWith("received "), dateTime: li.querySelector("time")?.getAttribute("datetime") ?? null })));
   // The server's side, as the automation token: the events in order, and the operation's attempts.
   const auth = { authorization: `Bearer ${readFileSync(tokenFile, "utf8").trim()}`, accept: "application/json" };
   const get = async (path) => {
@@ -131,10 +132,7 @@ try {
     if ((cursor = page.next) === undefined) break;
   }
   const attempts = ((await get(`/operations/${encodeURIComponent(op)}`)).attempts ?? []).length;
-  // The page's own clock format, read in the browser that rendered the rows.
-  const times = {};
-  for (const e of server) times[e.at] = await browser.execute((at) => new Date(at).toLocaleTimeString("en-GB"), e.at);
-  writeFileSync(join(dir, "web-watch.json"), `${JSON.stringify({ op, log, final, server, attempts, times }, null, 1)}\n`);
+  writeFileSync(join(dir, "web-watch.json"), `${JSON.stringify({ op, log, final, server, attempts }, null, 1)}\n`);
   out(`web-watch.json: ${log.length} log entries, ${final.length} final rows, ${server.length} server events, ${attempts} attempts`);
 } catch (e) {
   failed = true;
