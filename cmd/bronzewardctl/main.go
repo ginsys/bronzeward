@@ -112,8 +112,9 @@ commands:
               a paused import's staged document, only on a terminal, in a pager (space or f
               forward, b back, q quit) that writes nothing else; then marks from the prompt
   import-base document <import base revision>
-              the stored document of an import base, only for the author who made the import and
-              continued its review, only on a terminal, in the same pager; no marks prompt
+              the stored document of an import base: any author for an import read from a node,
+              and for a file import only the author who made it and continued its review; only
+              on a terminal, in the same pager; no marks prompt
   import mark <ingestion> [--no-wait]
               mark values as secret by their paths, one per line from the prompt or standard
               input, never an argument; waits until the import pauses again

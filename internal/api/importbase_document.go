@@ -19,11 +19,13 @@ type importBaseDocumentBody struct {
 }
 
 // getImportBaseDocument is GET /import-base-revisions/{id}/document (§9.2, choice §17.41): the
-// sanitized document of an import base revision, to the author who made the import from a file they
-// provided and only when that same author continued its operator review, under no-store, recording
-// no act. The document
-// can still hold a value nobody marked, so a caller who is not the importer is refused before
-// anything of the review is revealed, and a refused request never selects the text.
+// sanitized document of an import base revision, to any `author` when the claim recorded the source
+// machine (the owner's decision of 2026-11-21: the author role may read a node's configuration), a
+// drift adoption included. An import from a file a person provided is read only by the author who
+// made it, and only when that same author continued its operator review; no-store, recording no
+// act. The document can still hold a value nobody marked, so for a file import a caller who is not
+// the importer is refused before anything of the review is revealed, and a refused request never
+// selects the text.
 func getImportBaseDocument(a *API, w http.ResponseWriter, q *request) {
 	w.Header().Set("Cache-Control", "no-store")
 	rev := q.r.PathValue("id")
@@ -50,13 +52,15 @@ func getImportBaseDocument(a *API, w http.ResponseWriter, q *request) {
 			return refuse(http.StatusNotFound, "not-found", "no such import base revision")
 		case err != nil:
 			return err
+		case source == "machine":
+			// The author role may read a node's configuration (the route admits only that role): no
+			// importer, review or kind test applies, a drift adoption included.
 		case q.principal.ID != author:
 			// Whatever the review state: the refusal tells another identity nothing about it.
 			return refuse(http.StatusForbidden, "forbidden", "only the author of this import reads its document").
 				with("rule", "not-the-importer")
 		case source != "document":
-			// Only a file a person provided has a provider: a machine import read a node, and a claim
-			// with no recorded source cannot say (fail closed).
+			// A claim with no recorded source cannot say what it read (fail closed).
 			return refuse(http.StatusConflict, "conflict", "this import's configuration was not provided as a file").
 				with("rule", "import-not-reviewed")
 		case kind != "import" || review != "continued" || continuedBy != author:

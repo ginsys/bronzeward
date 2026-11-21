@@ -150,7 +150,7 @@ no role included (`internal/api/api.go:339`).
 | import list / status | `GET /ingestions`, `/ingestions/{id}` | list | no | filters `state`, `machine` (`internal/api/ingestions.go:280-299`) |
 | import review | `GET /ingestions/{id}/review` | no | no | `author`, human; `no-store`; only while `paused` (`internal/api/review.go:30-52`) |
 | import base summary | `GET /import-base-revisions/{id}` | no | no | `author`, human; `no-store`; size and counts only, no text, no digest (choice §17.38) |
-| import base text | `GET /import-base-revisions/{id}/document` | no | no | `author`, human, and the importer of a file who continued the review; `no-store` also on refusals (choice §17.41) |
+| import base text | `GET /import-base-revisions/{id}/document` | no | no | `author`, human; for an import read from a node any `author`, for a file import only its importer who continued the review; `no-store` also on refusals (choice §17.41) |
 | release list / show | `GET /releases`, `/releases/{id}` | list | no | |
 | release review, provenance | `GET /releases/{id}/machines/{m}/review` | no | no | redacted |
 | plan list / show | `GET /plans`, `/plans/{id}` | list | no | filters `state`, `machine` (`internal/api/plans.go:429-451`) |
@@ -1655,9 +1655,10 @@ both clients handle it as an ordinary read under the accepted limit that
 The review is served to any human `author`, not only the one who started the ingestion
 (`internal/api/routes.go:99`), as the contract intends: "only to the roles that may mark"
 ([compilation §3.6](compilation.md#36-operator-review)). A client does not narrow this.
-The import base text is stricter: the server answers it only to the author who made the
-import and continued its review, and a client offers the action to any `author` and shows
-the refusal.
+The import base text of an import read from a node is served to any `author` too (the
+author role may read a node's configuration: choice §17.41). The text of a file import is
+stricter: the server answers it only to the author who made the import and continued its
+review, and a client offers the action to any `author` and shows the refusal.
 
 ### 11.2 Rules for both clients
 
@@ -1792,8 +1793,8 @@ the text. The requirement is proposed with that limit stated.
 §17.41](persistence-api.md#17-choices-for-owner-review)) as item 1 shows the review: only when
 standard input and output are a terminal, through the same in-process pager, after the item 2
 notice, with no `-o json`, `-o yaml`, save or export form, no override, and no marks prompt, since
-a stored document is not marked. The server answers only the author who made the import from a file
-they provided and continued its review; the command shows its refusal (`403 forbidden` with `not-the-importer`, or
+a stored document is not marked. The server answers any `author` for an import read from a node, and for a
+file import only the author who made it from a file they provided and continued its review; the command shows its refusal (`403 forbidden` with `not-the-importer`, or
 `409 conflict` with `import-not-reviewed`) as it comes and prints no body.
 
 ### 11.4 Web review and document input
@@ -1896,7 +1897,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | PROT-05 | refusal | mark accepted (`202`), then the run cannot decrypt the staged envelope | after the `marked` event, a `resume-failed` event with `dependency-unavailable`; the watch ends with the operation still `running`; the mark reported as not applied; `import takeover` offered once the lease lapses, and `import abandon`; no wait without end |
 | PROT-06 | disconnect | mark accepted (`202`), then the serving process is killed before the run writes any event; second case: the same during a continuation; third case: the same during a takeover; fourth case: during a continuation, the run releases the claim before its lease lapses and its draft transaction is delayed past `leaseUntil` before `COMMIT`, which the fixture's interrupt build does (`-tags fixtureinterrupt`, step `draft-commit`, action `stall`, `internal/seam`) and the default server binary cannot | the client reads the ingestion once its `leaseUntil` has passed; `held` (mark, continuation) or `resumed` (takeover) with `leaseUntil` passed ends the watch with the operation still `running`; the mark, continuation or takeover reported as of unknown outcome, never as not applied; a later read, `import takeover` and `import abandon` offered; in the fourth case the outcome stays unknown, the claim `held` with its lease lapsed, until a later read shows the operation `succeeded`; the read of the operation answers while the commit stalls ([#803](https://github.com/ginsys/bronzeward/issues/803)), and an `abandoned` read is unreachable on a continuation, because an encrypted claim is not due until its `expiresAt` (`internal/staging/sweep.go:13`); no wait until the claim's absolute expiry |
 | PROT-04 | disconnect | connection dropped during the review read | nothing persisted; review read again |
-| PROT-07 | success, refusal | an import base's document, read by the author who imported and reviewed it, then by another author | the first: the text shows on request only (the CLI on a terminal, in the pager; the web in a read-only field with the notice and no copy, download or print control), is gone on leaving the page and in the pager's quit, and leaves nothing in storage or the HTTP cache; the second: `403 forbidden` with `not-the-importer`, shown as it came, with no text |
+| PROT-07 | success, refusal | an import base's document from a file, read by the author who imported and reviewed it, then by another author; and an import read from a node, read by any `author` | the first: the text shows on request only (the CLI on a terminal, in the pager; the web in a read-only field with the notice and no copy, download or print control), is gone on leaving the page and in the pager's quit, and leaves nothing in storage or the HTTP cache; the second: `403 forbidden` with `not-the-importer`, shown as it came, with no text; the third: the text shows the same way for each author |
 | COMP-01 | refusal | `GET /server` serves an API revision below the client's minimum | refused before any write, both revisions named; the recovery entry is the exception, since a recovery start refuses that read until its entry commits: the revision shows after the commit, the entry's success stands, and the client says that the read failed |
 | COMP-02 | success | response carrying a `Deprecation` header | warning shown once, naming the route |
 | ETAG-02 | success | edit after the client's own import succeeded; second case: another author writes between the import and the re-read | first: draft `revision` equals the import's `result.draftRevision`, the next write uses the new ETag, no `412`; second: revision is higher, treated as `412`, newer state shown |

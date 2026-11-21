@@ -366,8 +366,9 @@ CREATE TABLE staging_claim (
   continued_by    text REFERENCES principal (id),
   -- Where an import's configuration came from, as its request named it: `document`, a file a person
   -- provided, or `machine`, read from the node. Written by the claim's creation; a draft update has
-  -- none. The import base text read answers only a `document` import (persistence-api §9.2, choice
-  -- §17.41), so a claim with no source refuses it.
+  -- none. The import base text read tells the two apart (persistence-api §9.2, choice §17.41): a
+  -- `machine` import is read by any author, a `document` import by its importer, and a claim with no
+  -- source refuses it.
   source          text CHECK (source IN ('document', 'machine')),
   CHECK (payload IS NULL OR (mode = 'encrypted' AND state IN ('held', 'paused', 'resumed'))),
   CHECK (review IS NULL OR mode = 'encrypted'),

@@ -126,8 +126,9 @@ func TestImportBaseDocumentRoleAndNotFound(t *testing.T) {
 // rule not-the-importer, whatever the review state, so the refusal tells them nothing about it; the
 // importer is refused 409 conflict with the rule import-not-reviewed when no review of theirs
 // continued: an import made without review, an import continued by another author, a continued
-// claim with no recorded continuer, and a drift adoption. Control: the same revision answers the
-// importer 200 before each change.
+// claim with no recorded continuer, a file claim of a kind other than import and a claim with no
+// recorded source (a source machine claim is read by any author: its own test). Control: the same
+// revision answers the importer 200 before each change.
 func TestImportBaseDocumentRefusals(t *testing.T) {
 	ie := newIngestEnv(t, options{})
 	importer, other := ie.human("h-author"), ie.human("h-all")
@@ -182,8 +183,7 @@ func TestImportBaseDocumentRefusals(t *testing.T) {
 	}
 	for name, mutate := range map[string]string{
 		"no recorded continuer": `UPDATE staging_claim SET continued_by = NULL WHERE id = $1`,
-		"a drift adoption":      `UPDATE staging_claim SET kind = 'drift-adoption' WHERE id = $1`,
-		"a machine source":      `UPDATE staging_claim SET source = 'machine' WHERE id = $1`,
+		"a file drift adoption": `UPDATE staging_claim SET kind = 'drift-adoption' WHERE id = $1`,
 		"no recorded source":    `UPDATE staging_claim SET source = NULL WHERE id = $1`,
 		"a pending review":      `UPDATE staging_claim SET continued_by = NULL, review = 'pending' WHERE id = $1`,
 	} {
@@ -200,42 +200,94 @@ func TestImportBaseDocumentRefusals(t *testing.T) {
 	}
 }
 
-// The owner's decision of ginsys/bronzeward#858 limits the text to the person who provided the
-// configuration file, and a source machine import has none (ginsys/bronzeward#902). The same
-// author, having continued the review of both, reads the file import and is refused the machine
-// import with 409 import-not-reviewed; another author is still 403 not-the-importer for either.
-// Control: each claim records the source it was started with.
-func TestImportBaseDocumentRefusesMachineSource(t *testing.T) {
+// machineBase runs an import of the machine's own configuration, started with over on top of a
+// machine source, and returns the import base revision it wrote and its claim.
+func (me *machineEnv) machineBase(t *testing.T, over map[string]any) (ibr, claim string) {
+	t.Helper()
+	body := map[string]any{"source": "machine", "document": nil, "staging": "encrypted"}
+	maps.Copy(body, over)
+	op, j := me.startJob(t, body)
+	me.runWith(t, options{}, j)
+	r := readOp(t, me.db, op)
+	ibr, _ = r.result["importBaseRevision"].(string)
+	if r.state != "succeeded" || ibr == "" {
+		t.Fatalf("operation %+v", r)
+	}
+	return ibr, j.claim.ID
+}
+
+// The owner's decision of 2026-11-21, 20:36 CET (BW-node-config-readers-1, answer B, reversing
+// ginsys/bronzeward#902): the author role may read a node's configuration, so any `author` reads the
+// stored text of an import whose claim records the source machine, with or without a review, whoever
+// started it, and a drift adoption (a claim of the same source) is read the same way. The answer is
+// exactly {id, machine, document} under no-store, and records no act. Control: each claim records
+// the source it was started with.
+func TestImportBaseDocumentAnswersAnyAuthorForMachineSource(t *testing.T) {
+	me := newMachineEnv(t)
+	starter, other := me.human("h-author"), me.human("h-all")
+	withReview := map[string]any{"source": "machine", "document": nil, "staging": "encrypted", "review": true}
+	reviewed, reviewedClaim := me.reviewedBaseOf(t, "h-author", withReview)
+	// A review continued by a second author does not change who reads the text.
+	byOther, _ := me.reviewedBaseOf(t, "h-all", withReview)
+	plain, plainClaim := me.machineBase(t, nil)
+	adoption, adoptionClaim := me.machineBase(t, nil)
+	if _, err := me.db.Exec(`UPDATE staging_claim SET kind = 'drift-adoption' WHERE id = $1`, adoptionClaim); err != nil {
+		t.Fatal(err)
+	}
+	for _, claim := range []string{reviewedClaim, plainClaim, adoptionClaim} {
+		var got string
+		if err := me.db.QueryRow(`SELECT coalesce(source, '') FROM staging_claim WHERE id = $1`, claim).Scan(&got); err != nil || got != "machine" {
+			t.Fatalf("claim %s records source %q, %v; want machine", claim, got, err)
+		}
+	}
+	acts := count(t, me.db, "SELECT count(*) FROM act")
+	for name, ibr := range map[string]string{"reviewed": reviewed, "continued by another author": byOther, "no review": plain, "a drift adoption": adoption} {
+		var stored string
+		if err := me.db.QueryRow(`SELECT document FROM import_base_revision WHERE id = $1`, ibr).Scan(&stored); err != nil || stored == "" {
+			t.Fatalf("%s: control: the stored document is %q, %v", name, stored, err)
+		}
+		for who, tok := range map[string]string{"the starter": starter, "another author": other} {
+			rec := me.do(me.api, importBaseDocumentCall(tok, ibr))
+			if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("%s, %s: %d %v %s", name, who, rec.Code, rec.Header(), rec.Body)
+			}
+			b := decode[map[string]any](t, rec, http.StatusOK)
+			if len(b) != 3 || b["id"] != ibr || b["machine"] != me.machine || b["document"] != stored {
+				t.Errorf("%s, %s: body %s; want exactly id, machine and the stored document", name, who, rec.Body)
+			}
+		}
+	}
+	if n := count(t, me.db, "SELECT count(*) FROM act"); n != acts {
+		t.Errorf("the reads wrote %d act rows", n-acts)
+	}
+}
+
+// A file import keeps the rule of 2026-11-18 (ginsys/bronzeward#858): only its importer after their
+// own review reads it, so another author is refused 403 not-the-importer for it while the same
+// author reads a machine import of the same environment; a claim with no recorded source reads
+// nothing, 409 import-not-reviewed for its author and 403 for another (the check fails closed).
+func TestImportBaseDocumentKeepsFileRuleBesideMachineRead(t *testing.T) {
 	me := newMachineEnv(t)
 	importer, other := me.human("h-author"), me.human("h-all")
 	file, fileClaim := me.reviewedBase(t, "h-author")
-	machine, machineClaim := me.reviewedBaseOf(t, "h-author", map[string]any{"source": "machine", "document": nil,
-		"staging": "encrypted", "review": true})
-	for claim, want := range map[string]string{fileClaim: "document", machineClaim: "machine"} {
-		var got string
-		if err := me.db.QueryRow(`SELECT coalesce(source, '') FROM staging_claim WHERE id = $1`, claim).Scan(&got); err != nil {
-			t.Fatal(err)
-		}
-		if got != want {
-			t.Fatalf("claim %s records source %q, want %q", claim, got, want)
-		}
+	machine, _ := me.machineBase(t, nil)
+	if rec := me.do(me.api, importBaseDocumentCall(other, machine)); rec.Code != http.StatusOK {
+		t.Fatalf("control: another author reads the machine import: %d %s", rec.Code, rec.Body)
 	}
-	if rec := me.do(me.api, importBaseDocumentCall(importer, file)); rec.Code != http.StatusOK {
-		t.Fatalf("the file import: %d %s", rec.Code, rec.Body)
+	p := wantProblem(t, me.refused(importBaseDocumentCall(other, file)), http.StatusForbidden, "forbidden")
+	if p["rule"] != "not-the-importer" {
+		t.Errorf("file import, another author: problem %v", p)
 	}
-	var stored string
-	if err := me.db.QueryRow(`SELECT document FROM import_base_revision WHERE id = $1`, machine).Scan(&stored); err != nil || stored == "" {
-		t.Fatalf("control: the machine import's stored document is %q, %v", stored, err)
+	if _, err := me.db.Exec(`UPDATE staging_claim SET source = NULL WHERE id = $1`, fileClaim); err != nil {
+		t.Fatal(err)
 	}
-	rec := me.refused(importBaseDocumentCall(importer, machine))
-	p := wantProblem(t, rec, http.StatusConflict, "conflict")
-	if p["rule"] != "import-not-reviewed" || rec.Header().Get("Cache-Control") != "no-store" || strings.Contains(rec.Body.String(), stored) {
-		t.Fatalf("%v %v %s", p, rec.Header(), rec.Body)
+	rec := me.refused(importBaseDocumentCall(importer, file))
+	p = wantProblem(t, rec, http.StatusConflict, "conflict")
+	if p["rule"] != "import-not-reviewed" || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("no recorded source, its author: %v %v", p, rec.Header())
 	}
-	for name, ibr := range map[string]string{"file": file, "machine": machine} {
-		p := wantProblem(t, me.refused(importBaseDocumentCall(other, ibr)), http.StatusForbidden, "forbidden")
-		if p["rule"] != "not-the-importer" {
-			t.Errorf("%s import, another author: problem %v", name, p)
-		}
+	p = wantProblem(t, me.refused(importBaseDocumentCall(other, file)), http.StatusForbidden, "forbidden")
+	if p["rule"] != "not-the-importer" {
+		t.Errorf("no recorded source, another author: problem %v", p)
 	}
 }

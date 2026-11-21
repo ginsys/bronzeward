@@ -1055,10 +1055,11 @@ paths:
     get:
       operationId: getImportBaseRevisionsIdDocument
       tags: [import-base-revisions]
-      description: The sanitized document of one import base revision (API revision 7; persistence and API §9.2, choice §17.41), to the author who
-        made the import from a file they provided and only when that author continued its operator review. Another identity is refused
-        403 forbidden with the rule not-the-importer; an import not continued by its author, a drift adoption, an import read from a
-        machine, an import with no recorded source and an import made without review are refused 409 conflict with the rule
+      description: The sanitized document of one import base revision (API revision 7; persistence and API §9.2, choice §17.41). For an import
+        read from a node (source machine, a drift adoption included) any author reads it, whatever the review state; the author role may read a
+        node's configuration. For an import from a file a person provided, only the author who made it, and only when that author continued
+        its operator review. Another identity is refused 403 forbidden with the rule not-the-importer; an import from a file not continued by
+        its author, an import with no recorded source and an import made without review are refused 409 conflict with the rule
         import-not-reviewed. The document can still hold a value nobody marked.
       x-bronzeward-roles: [author]
       x-bronzeward-human-only: true
