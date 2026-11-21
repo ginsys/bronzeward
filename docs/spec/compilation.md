@@ -175,7 +175,12 @@ give a node a path that reads as an embedded document's.
    (onboarding included) or a drift adoption of a machine that has a stored
    name, a `HostnameConfig` document of the parsed stream whose `hostname`
    equals that name exactly, as the API read it for this request, is removed
-   from the stream, whole, before anything is identified: it is recorded as
+   from the stream, whole, before anything is identified. The stream's
+   positions (§2.2) stay those of the input: an initial operator mark is
+   resolved against the stream as step 2 parsed it, with the removed document
+   still counted, so no surviving document changes its `doc[N]`. Only the
+   stored sanitized document is shorter, and a later mark on a staged document
+   (§3) uses that document's own positions. The document is recorded as
    filled from the name, not kept as an explicit hostname. Talos's document
    holds only `auto` and `hostname`, so nothing else is lost, and a document
    that kept `auto: off` would stop the fill (§6.1). Only that document is
@@ -1086,7 +1091,9 @@ unmeasured.
    naming both machines by name where they have one and by identifier only
    where they have none: "Machine node-a would take the hostname node-a from
    its name, but machine node-b already has that hostname in its
-   configuration. Rename one of them, or set a different hostname on one."
+   configuration. Rename machine node-a, or change the hostname in the
+   configuration of machine node-b." Renaming node-b would not help, since its
+   explicit hostname does not follow its name (item 2).
    The check reads the machines of one release, and a release covers every
    machine of its cluster that has an import base
    ([persistence and API choice §17.33](persistence-api.md)); a machine with no
