@@ -134,13 +134,20 @@ describe("ginsys/bronzeward#987: a plan", () => {
     expect([...asked].sort()).toEqual([`/drafts/${DRF}`, `/machines/${MCH}`, `/releases/${REL}`]);
   });
 
-  test("names a machine with no name, or a name outside the grammar, by its shortened identifier", async () => {
-    for (const [i, body] of [{ id: MCH }, { id: MCH, name: "Worker 1" }, { id: MCH, name: "worker-1\n" }].entries()) {
+  test("names a machine with no name, or a name outside the grammar, by its address, and one with no usable address as an unnamed machine", async () => {
+    const cases = [
+      [{ id: MCH, talosEndpoint: "172.31.104.15:50000" }, "172.31.104.15"],
+      [{ id: MCH, name: "Worker 1", talosEndpoint: "172.31.104.15:50000" }, "172.31.104.15"],
+      [{ id: MCH, name: "worker-1\n", talosEndpoint: "[fd00::1]:50000" }, "fd00::1"],
+      [{ id: MCH }, "an unnamed machine"],
+      [{ id: MCH, talosEndpoint: "cp1.office:50000" }, "an unnamed machine"],
+    ] as const;
+    for (const [i, [body, named]] of cases.entries()) {
       answers[`/machines/${MCH}`] = ok(body);
       // Each reads under a generation of its own, as each visit to a view does.
       await mount(h(PlanRef, { p: plan("adopt") as never }), { ...reads, view: `v${i}` });
       await settled();
-      expect(text()).toBe(`Adopt of mch_k2pq…cdef to Add the office labels, published ${when(at)}`);
+      expect(text()).toBe(`Adopt of ${named} to Add the office labels, published ${when(at)}`);
     }
   });
 

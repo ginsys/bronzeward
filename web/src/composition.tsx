@@ -13,7 +13,8 @@ import { change, declaredOf, doneOnce, editor, EMPTY, FRESH, type Held, holdsUns
 import { startsNew, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { LAYERS } from "./layers.ts";
 import { short, useList, usePending, useSettled } from "./list.tsx";
-import { machineText } from "./machines.tsx";
+import { machineOption, machineText, sharedAddresses } from "./machines.tsx";
+import { THE_MACHINE } from "./words.ts";
 import { type EmbeddedPath, references } from "./position.ts";
 import { Action } from "./shell.tsx";
 import { Conflict, Status } from "./states.tsx";
@@ -565,8 +566,9 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const [profiles] = useList<Profile>("/profiles", "", true);
   const [fragments] = useList<Fragment>("/fragments", "", true);
   const [machines] = useList<Machine>("/machines", new URLSearchParams({ cluster: draft.cluster }).toString(), true);
-  // The machine's name is in the list the page reads already (A9): no read of its own.
-  const called = machine === "" ? "(new)" : machineText(machine, machines.kind === "ok" ? machines.data.items.find((m) => m.id === machine)?.name : undefined);
+  // The machine's name and address are in the list the page reads already (A9): no read of its own.
+  const found = machines.kind === "ok" ? machines.data.items.find((m) => m.id === machine) : undefined;
+  const called = machine === "" ? "(new)" : found === undefined ? THE_MACHINE : machineText(found, sharedAddresses(machines.kind === "ok" ? machines.data.items : []));
   useUnsaved(`assignment ${called} of draft ${short(draft.id)}`, unsavedList);
   const [layers, setLayers] = useState<Record<string, string>>({});
   const asked = useRef(new Set<string>());
@@ -726,6 +728,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   const pendingProfiles = usePending(profiles, "profiles");
   const pendingFragments = usePending(fragments, "fragments");
   const chooseable = machineOffers(draft, machines.kind === "ok" ? machines.data.items : []);
+  const sharedOffers = sharedAddresses(chooseable);
   return (
     <section aria-label={`Assignment ${called}`}>
       <h3>
@@ -734,7 +737,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
           <label>machine{" "}
             <select value={typed} onChange={(e) => setMachine(e.target.value)} required>
               <option value="">choose</option>
-              {chooseable.map((m) => <option key={m.id} value={m.id}>{machineText(m.id, m.name)} {m.talosEndpoint}</option>)}
+              {chooseable.map((m) => <option key={m.id} value={m.id}>{machineOption(m, sharedOffers)}</option>)}
             </select>
           </label>
         ) : called}

@@ -6,9 +6,10 @@
 import type { components } from "./api/v1";
 import { AddClusterAction, RecordMachineAction } from "./forms.tsx";
 import { OnboardClusterAction } from "./onboard.tsx";
-import { EmptyList, Head, Id, type Listed, More, Ref, RESTARTED, Scroll, short, useItem, useList, usePending } from "./list.tsx";
+import { Detail, EmptyList, Head, Id, type Listed, More, Ref, RESTARTED, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { Status } from "./states.tsx";
 import { TalosAccessSign } from "./talosaccess.tsx";
+import { UNNAMED_MACHINE, UNNAMED_MACHINE_HEADING } from "./words.ts";
 
 export type Machine = components["schemas"]["MachineBody"];
 export type Cluster = components["schemas"]["ClusterBody"];
@@ -66,11 +67,69 @@ export const release = (id: string | null) => <Id id={id} />;
 // feed), else the identifier is shown. It replaces A7's control and format character test.
 const MACHINE_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 export const machineName = (name: unknown): string | undefined => (typeof name === "string" && MACHINE_NAME.test(name) ? name : undefined);
-// A machine as text, where a title names it (A8 rule 1): its name, else the shortened identifier.
-export const machineText = (id: string, name?: unknown): string => machineName(name) ?? short(id);
-// A machine's link: its name as the text, else the shortened identifier, the whole identifier the title.
-// The one display of a machine for every view (the views that carry only an identifier pass the name they read).
-export const MachineRef = ({ id, name }: { id: string; name?: unknown }) => <Ref to={`/machines/${id}`} id={id}>{machineName(name)}</Ref>;
+
+// What a display reads of a machine: a body, a list row, or the part of one a view holds.
+export type MachineLike = { id: string; name?: unknown; talosEndpoint?: unknown; hardware?: Pick<Machine["hardware"], "talosNodeId" | "smbiosUuid"> };
+
+// A9 item 1: an endpoint is remote text, shown only when it has the stored form (an IPv4 address or a
+// bracketed IPv6 address, then a port; `0001_schema.sql` talos_endpoint_form). The port is dropped, and
+// the brackets with it. A value of another shape shows nothing: it is split by the form and never on ":",
+// which would cut an IPv6 address.
+const ENDPOINT = /^(?:((?:\d{1,3}\.){3}\d{1,3})|\[([0-9a-f:.]+)\]):([1-9]\d{0,4})$/;
+export function machineAddress(endpoint: unknown): string | undefined {
+  if (typeof endpoint !== "string" || endpoint.length > 64) return undefined;
+  const m = ENDPOINT.exec(endpoint);
+  if (m === null || Number(m[3]) > 65535) return undefined;
+  const v4 = m[1];
+  if (v4 !== undefined) return v4.split(".").every((o) => Number(o) <= 255) ? v4 : undefined;
+  return m[2];
+}
+
+// The node ID or UUID of G8, shortened for a suffix: `node 4c1f…`, `UUID 9a3e…`.
+const nodeShort = (h: MachineLike["hardware"]): string => {
+  const [kind, value] = h?.talosNodeId != null ? ["node", h.talosNodeId] : ["UUID", h?.smbiosUuid ?? "unknown"];
+  return `${kind} ${value.length > 8 ? `${value.slice(0, 4)}…` : value}`;
+};
+
+// The addresses that two or more unnamed machines of a list in hand share. Only such a list can tell:
+// a pair on different pages, or a page that shows one machine, gets no suffix.
+export function sharedAddresses(machines: readonly MachineLike[]): ReadonlySet<string> {
+  const seen = new Set<string>();
+  const shared = new Set<string>();
+  for (const m of machines) {
+    const address = machineName(m.name) === undefined ? machineAddress(m.talosEndpoint) : undefined;
+    if (address !== undefined) (seen.has(address) ? shared : seen).add(address);
+  }
+  return shared;
+}
+
+// A machine as text, where a title or a link names it (A8 rule 1, as ginsys/bronzeward#1055 amends it for the web): its
+// name, else its address, with the shortened node ID or UUID where the list in hand holds two with that
+// address, else "an unnamed machine". Never its identifier: that stays on the detail line.
+export function machineText(m: MachineLike, shared?: ReadonlySet<string>): string {
+  const name = machineName(m.name);
+  if (name !== undefined) return name;
+  const address = machineAddress(m.talosEndpoint);
+  if (address === undefined) return UNNAMED_MACHINE;
+  return shared?.has(address) ? `${address} (${nodeShort(m.hardware)})` : address;
+}
+
+// A machine page's heading: "Machine cp1", "Machine 172.31.104.15", or "Unnamed machine".
+export function machineHeading(m: MachineLike): string {
+  const text = machineText(m);
+  return text === UNNAMED_MACHINE ? UNNAMED_MACHINE_HEADING : `Machine ${text}`;
+}
+
+// A choice in a list of machines: the text, and the endpoint beside it where the text is a name.
+export function machineOption(m: MachineLike, shared?: ReadonlySet<string>): string {
+  const text = machineText(m, shared);
+  return machineName(m.name) === undefined || typeof m.talosEndpoint !== "string" ? text : `${text} ${m.talosEndpoint}`;
+}
+
+// A machine's link: the text above, the whole identifier the title. The one display of a machine for every view.
+export const MachineRef = ({ machine, shared }: { machine: MachineLike; shared?: ReadonlySet<string> }) => (
+  <Ref to={`/machines/${machine.id}`} id={machine.id}>{machineText(machine, shared)}</Ref>
+);
 
 export function Filter({ label, value, options, onChange }: { label: string; value: string; options: readonly (readonly [string, string])[]; onChange: (v: string) => void }) {
   return (
@@ -104,6 +163,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
   if (list.kind === "ok") {
     const now = Date.now();
     const shown = list.data.items.filter((m) => state === undefined || badges(m).includes(state[1]));
+    const shared = sharedAddresses(list.data.items);
     body = shown.length === 0 && more === undefined
       ? <EmptyList list={list.data} text={cluster === "" && state === undefined ? "No machines recorded yet." : "No machine matches this filter."} />
       : (
@@ -113,7 +173,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
             <tbody>
               {shown.map((m) => (
                 <tr key={m.id}>
-                  <th scope="row"><MachineRef id={m.id} name={m.name} /></th>
+                  <th scope="row"><MachineRef machine={m} shared={shared} /></th>
                   <td>{m.talosEndpoint}</td>
                   <td>{node(m)}</td>
                   <td>{release(m.desired)}</td>
@@ -179,7 +239,8 @@ export function ClusterItem({ id }: { id: string }) {
   return (
     <>
       <h2>Cluster {d.name}</h2>
-      <p>{d.id}: Kubernetes endpoint {d.endpoint}, contract {d.contract}, Talos cluster ID {d.talosClusterId}.</p>
+      <Detail id={d.id} />
+      <p>Kubernetes endpoint {d.endpoint}, contract {d.contract}, Talos cluster ID {d.talosClusterId}.</p>
       <p><Ref to={`/machines?cluster=${d.id}`} id={d.id}>Machines in this cluster</Ref></p>
       <TalosAccessSign cluster={d.id} />
       <ClusterMachines id={d.id} />
@@ -201,6 +262,7 @@ export const Restarted = ({ list }: { list: Listed<unknown> }) => (list.restarte
 export function MachineSummary({ machines }: { machines: readonly Machine[] }) {
   if (machines.length === 0) return <Status>No machines recorded in this cluster.</Status>;
   const { total, counts, none } = machineStates(machines);
+  const shared = sharedAddresses(machines);
   const parts = [...counts.map(([text, n]) => `${n} ${text}`), ...(none > 0 ? [`${none} with no state shown`] : [])];
   return (
     <>
@@ -210,7 +272,7 @@ export function MachineSummary({ machines }: { machines: readonly Machine[] }) {
         <tbody>
           {machines.map((m) => (
             <tr key={m.id}>
-              <th scope="row"><MachineRef id={m.id} name={m.name} /></th>
+              <th scope="row"><MachineRef machine={m} shared={shared} /></th>
               <td>{m.talosEndpoint}</td>
               <td>{node(m)}</td>
               <td>{badges(m).join(", ")}</td>

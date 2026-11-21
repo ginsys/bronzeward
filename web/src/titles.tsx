@@ -9,6 +9,7 @@ import { Id, Ref, short, useReads, viewOf } from "./list.tsx";
 import { MachineRef, machineText } from "./machines.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
 import { draftText, operationTitle, planTitle, releaseTitle } from "./titles.ts";
+import { SAFE } from "./principals.ts";
 
 type S = components["schemas"];
 
@@ -30,11 +31,17 @@ export function useBody<T>(path: string | undefined): T | null | undefined {
 
 const at = (kind: string, id: string | null | undefined) => (id == null ? undefined : `/${kind}/${encodeURIComponent(id)}`);
 
-// The text for a machine: its name where it has a valid one, else its identifier shortened; undefined
+// The text for a machine: its name where it has a valid one, else its address, else "an unnamed machine"; undefined
 // while its read is pending, so a title built on it waits for it.
 export function useMachineText(id: string | null | undefined): string | undefined {
   const m = useBody<S["MachineBody"]>(at("machines", id));
-  return id == null || m === undefined ? undefined : machineText(id, m?.name);
+  return id == null || m == null ? undefined : machineText(m);
+}
+
+// The name of a cluster, as its read gives it; undefined while the read is pending, or when the name is not safe to show.
+export function useClusterText(id: string | null | undefined): string | undefined {
+  const c = useBody<S["ClusterBody"]>(at("clusters", id));
+  return c == null || !SAFE.test(c.name) ? undefined : c.name;
 }
 
 // A machine as a link: its name as the text where it has one, the shortened identifier until then and
@@ -46,7 +53,10 @@ export function MachineById({ id, none = "none", held }: { id: string | null | u
   const asked = id != null && viewOf(id) === "machines";
   const m = useBody<S["MachineBody"]>(asked && held === undefined ? at("machines", id) : undefined);
   if (id == null) return none;
-  return asked ? <MachineRef id={id} name={(held === undefined ? m : held.body)?.name} /> : <Id id={id} />;
+  const body = held === undefined ? m : held.body;
+  if (!asked) return <Id id={id} />;
+  // A machine not read yet shows as any identifier does, until its body arrives.
+  return body == null ? <Id id={id} /> : <MachineRef machine={body} />;
 }
 
 // A title wants the body it is built on: held, as a list row holds it, or read by its identifier.
@@ -65,7 +75,7 @@ export function usePlanTitle(id: string | undefined, held?: S["PlanBody"], machi
   const p = useOwn("plans", id, held);
   const release = useReleaseTitle(p?.release);
   const read = useMachineText(machineHeld === undefined ? p?.machine : undefined);
-  const machine = machineHeld === undefined ? read : machineHeld.body === undefined || p === undefined ? undefined : machineText(p.machine, machineHeld.body.name);
+  const machine = machineHeld === undefined ? read : machineHeld.body === undefined || p === undefined ? undefined : machineText(machineHeld.body);
   return p === undefined || machine === undefined ? undefined : planTitle(p, machine, release);
 }
 

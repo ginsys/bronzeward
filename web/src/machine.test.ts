@@ -220,12 +220,12 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     const m = machine({ frozen: true });
     const read = { items: [obsA], next: undefined, restarted: false };
     const failed = { kind: "unavailable" as const, status: 503, problem: null };
-    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const reads = { go: () => {}, failure: () => "FAILED", client: {} } as unknown as Reads;
     const out = renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
       id: "mch_a", m: failed, obs: { kind: "ok", data: read }, km: { view: "v", data: m, restarted: false }, ko: { view: "v", data: read, restarted: true },
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
-    expect(out).toMatch(/<h2>Machine mch_a<\/h2>FAILED<p>Cluster /);
+    expect(out).toMatch(/<h2>Machine 10\.5\.0\.2<\/h2><p class="detail">.*?<\/p>FAILED<p>Cluster /);
     expect(out).toContain(FROZEN);
     expect(out).toContain('data-testid="observations-restarted"');
   });
@@ -335,7 +335,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     const tl = (restarted: boolean) => ({ kind: "ok" as const, data: { ...UNREAD, read: true, restarted } });
     const after = keptW3(keptW3(undefined, m, obs, tl(true), "v"), m, obs, tl(false), "v");
     expect(after[2].restarted).toBe(true);
-    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const reads = { go: () => {}, failure: () => "FAILED", client: {} } as unknown as Reads;
     const out = renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
       id: "mch_a", m, obs, km: after[0], ko: after[1], tl: tl(false), kt: after[2], older: undefined, busy: false,
     })));
@@ -345,7 +345,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
 
   test("ginsys/bronzeward#857: the Applied release's import base links to its summary; a machine with none says none", () => {
     const ibr = "ibr_2xxaaaaaaaaaaaaaaaaaaaqa4m";
-    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const reads = { go: () => {}, failure: () => "FAILED", client: {} } as unknown as Reads;
     const shown = (m: Machine) => renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
       id: "mch_a", m: { kind: "ok", data: m }, obs: { kind: "ok", data: { items: [obsA], next: undefined, restarted: false } },
       km: { view: "v", data: undefined, restarted: false }, ko: { view: "v", data: undefined, restarted: false },
@@ -358,7 +358,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
   });
 
   test("ginsys/bronzeward#879: the next-step line follows the position answer's own recovery mode, and a read without answer draws no line", () => {
-    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const reads = { go: () => {}, failure: () => "FAILED", client: {} } as unknown as Reads;
     const body = { machine: machine({ scopeState: "normal" }), ingestion: null, draft: null, plan: { id: "pln_1", state: "approved", operation: "adopt", release: "rel_new", approvalCurrent: true, createdAt: READ, expiresAt: READ }, operation: null, rolloutHeldBy: null, step: "awaiting-dispatch" } as unknown as Position;
     const line = (pos: Load<Position>) => {
       const { position, recovery } = positionShown(pos);
@@ -376,17 +376,17 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
   });
 
   test("#424: a machine read again that fails shows its failure even when the observations keep nothing", () => {
-    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const reads = { go: () => {}, failure: () => "FAILED", client: {} } as unknown as Reads;
     const out = renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
       id: "mch_a", m: { kind: "refused", status: 404, problem: null }, obs: { kind: "dropped", failed: { kind: "transport" } },
       km: { view: "v", data: machine({}), restarted: false }, ko: { view: "v", data: undefined, restarted: false },
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
-    expect(out).toMatch(/<\/h2>FAILED<div class="alert"><svg[^>]*aria-hidden="true"[^>]*><path[^>]*><\/path><\/svg><p data-testid="restarted">/);
+    expect(out).toMatch(/<\/h2><p class="detail">.*?<\/p>FAILED<div class="alert"><svg[^>]*aria-hidden="true"[^>]*><path[^>]*><\/path><\/svg><p data-testid="restarted">/);
   });
 
   test("#443: an observations read again that fails shows its failure after the heading, and the observations kept still show", () => {
-    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const reads = { go: () => {}, failure: () => "FAILED", client: {} } as unknown as Reads;
     const read = { items: [obsA], next: undefined, restarted: false };
     const failed = { kind: "unavailable" as const, status: 503, problem: null };
     const shown = (m: Load<Machine>) => renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
@@ -394,12 +394,12 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
     const out = shown({ kind: "ok", data: machine({ frozen: true }) });
-    expect(out).toMatch(/<h2>Machine mch_a<\/h2>FAILED<p>Cluster /);
+    expect(out).toMatch(/<h2>Machine 10\.5\.0\.2<\/h2><p class="detail">.*?<\/p>FAILED<p>Cluster /);
     expect(out).toContain('data-testid="observations"');
     expect(out).toContain('title="obs_a"');
     // Both reads failed, both kept: both failures, then the machine's rows and the observations.
     const both = shown(failed);
-    expect(both).toMatch(/<h2>Machine mch_a<\/h2>FAILEDFAILED<p>Cluster /);
+    expect(both).toMatch(/<h2>Machine 10\.5\.0\.2<\/h2><p class="detail">.*?<\/p>FAILEDFAILED<p>Cluster /);
     expect(both).toContain(FROZEN);
     expect(both).toContain('data-testid="observations"');
   });
@@ -576,14 +576,14 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
   });
 
   test("#443 case 5: with no observations kept, W3 still shows the machine's own rows under the observations' failure", () => {
-    const reads = { go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+    const reads = { go: () => {}, failure: () => "FAILED", client: {} } as unknown as Reads;
     const shown = (m: Load<Machine>, km: Machine | undefined) => renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, createElement(MachineShown, {
       id: "mch_a", m, obs: { kind: "unavailable", status: 503, problem: null },
       km: { view: "v", data: km, restarted: false }, ko: { view: "v", data: undefined, restarted: false },
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
     const answered = shown({ kind: "ok", data: machine({ frozen: true }) }, undefined);
-    expect(answered).toMatch(/<h2>Machine mch_a<\/h2>FAILED<p>Cluster /);
+    expect(answered).toMatch(/<h2>Machine 10\.5\.0\.2<\/h2><p class="detail">.*?<\/p>FAILED<p>Cluster /);
     expect(answered).toContain('data-testid="sentences"');
     expect(answered).toContain(FROZEN);
     expect(answered).toContain("<dt>Desired</dt>");
@@ -592,7 +592,7 @@ describe("the timeline: newest page, Load older and the poll (client contracts Â
     expect(answered).not.toContain("<h3>Observations</h3>");
     expect(answered).not.toContain("No observation recorded.");
     // Both reads failed, the machine kept: both failures, then the kept machine's rows.
-    expect(shown({ kind: "unavailable", status: 503, problem: null }, machine({ frozen: true }))).toMatch(/<\/h2>FAILEDFAILED<p>Cluster [^]*data-testid="sentences"/);
+    expect(shown({ kind: "unavailable", status: 503, problem: null }, machine({ frozen: true }))).toMatch(/<\/h2><p class="detail">.*?<\/p>FAILEDFAILED<p>Cluster [^]*data-testid="sentences"/);
   });
 
   test("review R1-F1: a restart that fails drops the timeline read before it and its refused cursor", async () => {
@@ -857,13 +857,23 @@ describe("the machine heading (client contracts A9)", () => {
     km: { view: "v", data: m, restarted: false }, ko: { view: "v", data: undefined, restarted: false },
     tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
   }))).match(/<h2>.*?<\/h2>/)?.[0];
-  test("a named machine shows its name, a machine with none or a bad name its identifier", () => {
-    expect(heading(machine({ name: "web-1" }))).toBe('<h2>Machine <span title="mch_a">web-1</span></h2>');
-    expect(heading(machine({ name: null }))).toBe("<h2>Machine mch_a</h2>");
-    expect(heading(machine({ name: "Web-1" }))).toBe("<h2>Machine mch_a</h2>");
+  test("a named machine shows its name, a machine with none or a bad name its address, never its identifier", () => {
+    expect(heading(machine({ name: "web-1" }))).toBe("<h2>Machine web-1</h2>");
+    expect(heading(machine({ name: null }))).toBe("<h2>Machine 10.5.0.2</h2>");
+    expect(heading(machine({ name: "Web-1" }))).toBe("<h2>Machine 10.5.0.2</h2>");
     // A server older than revision 10 serves no member at all.
     const old = machine({});
     delete (old as { name?: unknown }).name;
-    expect(heading(old)).toBe("<h2>Machine mch_a</h2>");
+    expect(heading(old)).toBe("<h2>Machine 10.5.0.2</h2>");
+  });
+  test("a machine with no usable address is an unnamed machine, and the identifier is on the detail line", () => {
+    expect(heading(machine({ name: null, talosEndpoint: "not an endpoint" }))).toBe("<h2>Unnamed machine</h2>");
+    const page = renderToStaticMarkup(createElement(ReadsProvider, { value: { go: () => {}, failure: () => "FAILED", client: {}, view: "v", again: 0 } as unknown as Reads }, createElement(MachineShown, {
+      id: "mch_a", m: { kind: "ok", data: machine({}) }, obs: { kind: "ok", data: { items: [], next: undefined, restarted: false } },
+      km: { view: "v", data: machine({}), restarted: false }, ko: { view: "v", data: undefined, restarted: false },
+      tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
+    })));
+    expect(page).toContain('<p class="detail"><small>Identifier <code>mch_a</code> <button type="button">Copy</button></small></p>');
+    expect(page).toContain(">this cluster</a>");
   });
 });
