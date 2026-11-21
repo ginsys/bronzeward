@@ -107,15 +107,17 @@ export function sharedAddresses(machines: readonly MachineLike[]): ReadonlyMap<s
     if (address !== undefined) groups.set(address, [...(groups.get(address) ?? []), m]);
   }
   const shared = new Map<string, number>();
-  for (const [address, group] of groups) {
-    if (group.length < 2) continue;
-    // Lengthen until the suffixes tell as many apart as the whole values do; equal values never will.
-    const whole = new Set(group.map((m) => nodeShort(m.hardware, 300))).size;
-    let cut = SHORT;
-    while (new Set(group.map((m) => nodeShort(m.hardware, cut))).size < whole) cut++;
-    shared.set(address, cut);
-  }
+  for (const [address, group] of groups) if (group.length > 1) shared.set(address, suffixCut(group));
   return shared;
+}
+
+// The length a group's suffixes are cut to: lengthened until they tell as many apart as the whole values do;
+// equal values never will.
+function suffixCut(group: readonly MachineLike[]): number {
+  const whole = new Set(group.map((m) => nodeShort(m.hardware, 300))).size;
+  let cut = SHORT;
+  while (new Set(group.map((m) => nodeShort(m.hardware, cut))).size < whole) cut++;
+  return cut;
 }
 
 // A machine as text, where a title or a link names it (A8 rule 1, as ginsys/bronzeward#1055 amends it for the web): its
@@ -141,6 +143,21 @@ export function machineHeading(m: MachineLike): string {
 export function machineOption(m: MachineLike, shared?: ReadonlyMap<string, number>): string {
   const text = machineText(m, shared);
   return machineName(m.name) === undefined || machineAddress(m.talosEndpoint) === undefined ? text : `${text} ${String(m.talosEndpoint)}`;
+}
+
+// The choices of a list that spans clusters, by machine id. A name is unique only within its cluster and an endpoint
+// is not unique at all, so two named machines of different clusters can read alike: those choices carry the
+// machine's node ID or UUID, as unnamed machines of one address do.
+export function machineOptions(machines: readonly MachineLike[], shared?: ReadonlyMap<string, number>): ReadonlyMap<string, string> {
+  const rows = machines.map((m) => ({ m, text: machineOption(m, shared) }));
+  const alike = new Map<string, MachineLike[]>();
+  for (const { m, text } of rows) if (machineName(m.name) !== undefined) alike.set(text, [...(alike.get(text) ?? []), m]);
+  const cuts = new Map<string, number>();
+  for (const [text, group] of alike) if (group.length > 1) cuts.set(text, suffixCut(group));
+  return new Map(rows.map(({ m, text }) => {
+    const cut = machineName(m.name) === undefined ? undefined : cuts.get(text);
+    return [m.id, cut === undefined ? text : `${text} (${nodeShort(m.hardware, cut)})`];
+  }));
 }
 
 // A machine's link: the text above, the whole identifier the title. The one display of a machine for every view.

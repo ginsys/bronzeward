@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { type Reads, ReadsProvider } from "./list.tsx";
-import { machineAddress, machineHeading, type Machine, machineName, machineOption, MachineRef, MachineSummary, machineText, sharedAddresses } from "./machines.tsx";
+import { machineAddress, machineHeading, type Machine, machineName, machineOption, machineOptions, MachineRef, MachineSummary, machineText, sharedAddresses } from "./machines.tsx";
 
 // A machine as the list reads it (client contracts A9, ginsys/bronzeward#986, as ginsys/bronzeward#1055 amends them for
 // the web): its name the text of its link, else its address, the whole identifier the title.
@@ -123,6 +123,33 @@ describe("machineOption: the text, and the endpoint beside it where the text is 
     expect(machineOption(at(ID, "cp1", "cp1.office:50000"))).toBe("cp1");
     expect(machineOption(at(ID, null, "172.31.104.15:50000"))).toBe("172.31.104.15");
     expect(machineOption(at(ID, null, null))).toBe("an unnamed machine");
+  });
+});
+
+describe("machineOptions: choices of a list across clusters tell alike named machines apart", () => {
+  const two = [
+    at("mch_1", "cp1", "10.0.0.1:50000", { talosNodeId: "4c1f9a2b3c4d" }),
+    at("mch_2", "cp1", "10.0.0.1:50000", { talosNodeId: "9b22d0aa11bb" }),
+  ];
+  test("two machines named alike with one endpoint carry their node ID, and no other choice does", () => {
+    const three = [...two, at("mch_3", "cp2", "10.0.0.1:50000", { talosNodeId: "7777aa889900" })];
+    const shown = machineOptions(three);
+    expect(shown.get("mch_1")).toBe("cp1 10.0.0.1:50000 (node 4c1f…)");
+    expect(shown.get("mch_2")).toBe("cp1 10.0.0.1:50000 (node 9b22…)");
+    expect(shown.get("mch_3")).toBe("cp2 10.0.0.1:50000");
+  });
+  test("the suffix is lengthened until the two differ, and a UUID is named as one", () => {
+    const shown = machineOptions([
+      at("mch_1", "cp1", null, { smbiosUuid: "564d1111-aaaa" }),
+      at("mch_2", "cp1", null, { smbiosUuid: "564d2222-bbbb" }),
+    ]);
+    expect(shown.get("mch_1")).toBe("cp1 (UUID 564d1…)");
+    expect(shown.get("mch_2")).toBe("cp1 (UUID 564d2…)");
+  });
+  test("a list with no alike choices is the plain options; unnamed machines keep the suffix of their address only", () => {
+    expect([...machineOptions([at("mch_1", "cp1", "10.0.0.1:50000"), at("mch_2", "cp2", "10.0.0.1:50000")]).values()]).toEqual(["cp1 10.0.0.1:50000", "cp2 10.0.0.1:50000"]);
+    const unnamed = [at("mch_1", null, "10.0.0.1:50000", { talosNodeId: "aaaa1111" }), at("mch_2", null, "10.0.0.1:50000", { talosNodeId: "bbbb2222" })];
+    expect(machineOptions(unnamed, sharedAddresses(unnamed)).get("mch_1")).toBe("10.0.0.1 (node aaaa1111)");
   });
 });
 

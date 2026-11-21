@@ -2088,7 +2088,8 @@ when the endpoint is `a.b.c.d:port` or `[v6]:port` and otherwise not at all. Whe
 machines on one address, each gets a suffix, `(node 4c1f…)` from its Talos node ID or `(UUID 9a3e…)` from its
 SMBIOS UUID (a machine holds one of the two), cut to four characters when longer than eight, or longer where machines
 of one address would otherwise read alike, and `unknown` where the value is not safe text
-(item 1); a list on another page does not count. A machine with
+(item 1); a list on another page does not count. A choice list that spans clusters gives the same suffix to
+named machines whose choices would read alike, since a name is unique only within its cluster. A machine with
 no usable address reads "an unnamed machine" in a sentence and "Unnamed machine" as a heading. Its identifier
 stays as the title attribute of its link, and on a machine's own page on a detail line with a Copy button that
 says "Copied", or "Select the identifier to copy it" where the browser would not copy.
