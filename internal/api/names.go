@@ -5,23 +5,20 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
-	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/machinename"
 )
 
-// A machine's name (persistence-api.md §3.5): an operator's label, 1 to 63 characters of lowercase
-// a-z, digits and the hyphen, neither the first nor the last a hyphen, so that it is always a valid
-// DNS hostname label and never reads as an identifier. Uppercase is refused, never folded.
-var nameShape = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
-
-// machineName checks a name's grammar. The error never quotes the value.
+// machineName checks a name's grammar (persistence-api.md §3.5, internal/machinename): a hostname, so
+// that the fill can write it as one and it never reads as an identifier. The database CHECK on
+// machine.name states the same grammar. The error never quotes the value.
 func machineName(s string) error {
-	if !nameShape.MatchString(s) {
-		return errors.New("name must be 1 to 63 characters of lowercase a-z, digits and the hyphen, neither the first nor the last a hyphen (persistence-api.md §3.5)")
+	if !machinename.Valid(s) {
+		return errors.New("name must be a hostname of 1 to 253 characters: labels of 1 to 63 lowercase a-z, digits and hyphens, joined by dots, no label starting or ending with a hyphen, and with a dot, a last label that is not all digits (persistence-api.md §3.5)")
 	}
 	return nil
 }

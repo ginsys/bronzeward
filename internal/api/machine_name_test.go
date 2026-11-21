@@ -83,9 +83,9 @@ func TestMachineNameAtInventory(t *testing.T) {
 	}
 }
 
-// PA §3.5: 1 to 63 characters of a-z, digits and the hyphen, neither first nor last a hyphen.
-// Anything else is 400 invalid-request without the value, on inventory and on the route, and
-// nothing is committed. Uppercase is refused, never folded.
+// PA §3.5: a hostname of dot-separated labels (shapes in nameCases). Anything else is 400
+// invalid-request without the value, on inventory and on the route, and nothing is committed.
+// Uppercase is refused, never folded.
 func TestMachineNameGrammar(t *testing.T) {
 	e := newEnv(t, options{})
 	author := e.human("h-author")
@@ -98,7 +98,9 @@ func TestMachineNameGrammar(t *testing.T) {
 		"underscore":         `"web_1"`,
 		"leading hyphen":     `"-web"`,
 		"trailing hyphen":    `"web-"`,
-		"a dot":              `"web.1"`,
+		"a trailing dot":     `"web.example."`,
+		"an address":         `"10.0.0.1"`,
+		"254 characters":     `"` + strings.Repeat(strings.Repeat("a", 63)+".", 3) + strings.Repeat("a", 62) + `"`,
 		"a space":            `"web 1"`,
 		"empty":              `""`,
 		"64 characters":      `"` + strings.Repeat("a", 64) + `"`,
@@ -132,11 +134,32 @@ func TestMachineNameGrammar(t *testing.T) {
 	}
 	// The longest and the shortest legal names pass the same checks.
 	long := strings.Repeat("a", 63)
-	for i, n := range []string{"a", "0", "a-b", long} {
+	longest := strings.Repeat(strings.Repeat("a", 63)+".", 3) + strings.Repeat("a", 61)
+	for i, n := range []string{"a", "0", "42", "a-b", long, "alcorak.office.ginsys.net", longest} {
 		rec := e.do(e.api, renameCall(author, "k-good-"+string(rune('a'+i))+"-0123456789", m, `{"name":"`+n+`"}`))
 		if b := decode[nameChangeBody](t, rec, http.StatusCreated); b.Name != n {
 			t.Fatalf("name %q answered %+v", n, b)
 		}
+	}
+}
+
+// PA §3.5: the CHECK on machine.name refuses and accepts exactly what the API check does, over every
+// shape of nameCases, so no route can store a name the API would refuse.
+func TestMachineNameCheckMatchesAPI(t *testing.T) {
+	e := newEnv(t, options{})
+	author := e.human("h-author")
+	cl := e.createCluster(e.api, author, "k-cluster-0123456789")
+	m := e.nameMachine(author, "k-machine-0123456789", cl, uuidA, "")
+	for _, c := range nameCases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := e.db.Exec("UPDATE machine SET name = $2 WHERE id = $1", m, c.value)
+			switch {
+			case c.ok && err != nil:
+				t.Errorf("the CHECK refuses %q: %v", c.value, err)
+			case !c.ok && err == nil:
+				t.Errorf("the CHECK accepts %q", c.value)
+			}
+		})
 	}
 }
 

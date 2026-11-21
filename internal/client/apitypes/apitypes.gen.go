@@ -1636,7 +1636,7 @@ type MachineBody struct {
 type MachineInput struct {
 	Cluster string `json:"cluster"`
 
-	// Name An optional name, unique within the cluster (persistence and API §3.5).
+	// Name An optional name, a hostname, unique within the cluster (persistence and API §3.5). The server also refuses a name with a dot whose last label is all digits, so that an address is no name.
 	Name     *string              `json:"name,omitempty"`
 	Platform MachineInputPlatform `json:"platform"`
 	Serial   *string              `json:"serial,omitempty"`
@@ -1674,6 +1674,7 @@ type NameChangeBody struct {
 
 // NameInput defines model for NameInput.
 type NameInput struct {
+	// Name A hostname (persistence and API §3.5). The server also refuses a name with a dot whose last label is all digits, so that an address is no name.
 	Name string `json:"name"`
 }
 

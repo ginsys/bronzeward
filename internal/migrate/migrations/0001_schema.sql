@@ -183,9 +183,11 @@ CREATE TABLE machine (
   smbios_uuid      uuid,
   serial           text CHECK (serial IS NULL OR (btrim(serial) <> '' AND octet_length(serial) <= 128
                      AND serial !~ '[[:cntrl:]]')),
-  -- An operator's label for the machine (persistence-api.md §3.5): a DNS hostname label, unique within
+  -- An operator's label for the machine (persistence-api.md §3.5): a DNS hostname, one or more labels
+  -- joined by a dot, 253 characters at most; a dotted name does not end in digits only. It is unique within
   -- its cluster by the partial index below. It is set at inventory or replaced by a name-change entry.
-  name             text CONSTRAINT machine_name CHECK (name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'),
+  name             text CONSTRAINT machine_name CHECK (name ~
+                     '^(?=.{1,253}$)(?!.*\.[0-9]+$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'),
   frozen           boolean NOT NULL DEFAULT false,
   scope_state      text NOT NULL CHECK (scope_state IN ('normal', 'pre-restore-unaccounted', 'unresolved',
                      'blocked', 'ready', 'released')),
