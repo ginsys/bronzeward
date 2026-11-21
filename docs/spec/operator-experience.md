@@ -1523,8 +1523,8 @@ restore nobody entered stays the same residual
    the reasons and the owner's decision (ginsys/bronzeward#974). The web view that
    exists (`/fragment-revisions/{id}`, reached from a fragment's revisions list and a release's
    source rows) has these display rules, which are the web view's own. It shows the text as served
-   in a text node in a `pre` (`web/src/resources.tsx:266`), never parsed or rendered as markup, with
-   the declared references and the embedded documents (`web/src/resources.tsx:267-270`); it has no
+   in a text node in a `pre` (`RevisionItem`, `web/src/resources.tsx`), never parsed or rendered as markup, with
+   the declared references and the embedded documents (the same component); it has no
    copy-to-clipboard button and no download, as item 4 has for a field that can hold a value nobody
    marked; it keeps the text in memory for the page only, never in browser storage; a refused read
    repeats the server's problem without a body (item 6), and item 7 holds. **The profile page and
@@ -1532,10 +1532,12 @@ restore nobody entered stays the same residual
    the pinned order (`PinnedFragments`, `web/src/resources.tsx`, ginsys/bronzeward#997), under the
    same rules and the same limit: a row whose read fails shows the identifier and the reason while
    the others still show, and a profile of more than 20 pins reads the first 20 and the rest on a
-   button. **One rule is not built yet:** a one-line notice that the text is sanitized by the server
-   and that the server cannot promise it holds no value nobody marked, as item 8 says of the import
-   base text. None of these views shows such a notice today (`web/src/resources.tsx:243-275`), and
-   an implementation issue carries it. The CLI's `fragment show` is unchanged (`-o json` prints the body
+   button. **Each of these three pages shows a one-line notice** that the text is sanitized by the
+   server and that the server cannot promise it holds no value nobody marked, as item 8 says of the
+   import base text (`SANITIZED_NOTICE`, ginsys/bronzeward#988). It is a plain paragraph above the
+   text, in the reading order and not in a live region, and each `pre` names it with
+   `aria-describedby`, so a reader who jumps to one document still hears it. A profile page shows it
+   once above its pinned fragments, not once per row, and not when nothing is pinned. The CLI's `fragment show` is unchanged (`-o json` prints the body
    whole), as are the draft editor's and the composition views' reads of the same text: the limit
    is the same on every client.
 
@@ -1638,7 +1640,7 @@ general secret browser (milestone exclusion).
 | C5 | Concurrency and retries | last-seen ETag; re-read then write; journal of requests | Last-seen ETag per draft, stop on 412; repeat an ambiguous write with its key only on request, for the exact request held in memory, the same principal and the same epoch ([§8](#8-states-every-view-must-handle)), an epoch the write's own transaction checks against the one the client last saw (G13, closed by #293); no body journal: re-reading before writing is a silent overwrite, and a journal would store documents and marks | accepted, within the limits of §8; any persistence across restarts is #253's |
 | C6 | Names of plans, releases and operations | a stored name set at creation (API revision, a field on three bodies); a title derived from fields the body already carries; the identifier only | A derived title: it needs no API change and no new place for an operator to type a name, and an operation has no author who could name it. The cost is up to four extra reads for an operation, which both clients bound to one read per object (client contracts A8). A stored name stays open for a plan or a release if the derived title proves too weak | accepted for the specification; the implementation issues carry it; usability unmeasured |
 | C7 | The cluster page | the page that exists (cluster fields, its machines with counts, its open drafts); add plans and releases; add Talos credential state | The page that exists, and no more: the plan list has no cluster filter (G20), releases are filtered in the browser (G9 of the client contracts), and credential state is [#856](https://github.com/ginsys/bronzeward/issues/856)'s. A page that read every machine's plans to show a count would cost one read per machine on every visit | accepted; usability unmeasured |
-| C8 | The fragment revision view | none (reads only through the draft editor and the composition views); a read-only page with display rules; a page for authors only | A read-only page with display rules that the web view alone applies (§9 item 9): text node in a `pre`, a notice that the server cannot promise the text holds no unmarked value, no copy or download, memory only. The access rule stays every role, the limit recorded (§9 item 9); an authors-only read would break the release source rows, the draft editor and the composition views for the other roles | accepted; the access rule is the owner's, 2026-11-20 ([ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974)); the notice is not built yet |
+| C8 | The fragment revision view | none (reads only through the draft editor and the composition views); a read-only page with display rules; a page for authors only | A read-only page with display rules that the web view alone applies (§9 item 9): text node in a `pre`, a notice that the server cannot promise the text holds no unmarked value, no copy or download, memory only. The access rule stays every role, the limit recorded (§9 item 9); an authors-only read would break the release source rows, the draft editor and the composition views for the other roles | accepted; the access rule is the owner's, 2026-11-20 ([ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974)); the notice is built on the fragment revision view and on the profile pages ([ginsys/bronzeward#988](https://github.com/ginsys/bronzeward/issues/988)) |
 | C9 | A machine's name (G8) | an optional stored name in the API; labels kept by each client; a name composed from the cluster name, endpoint and node ID; the hostname read from the rendered configuration | A stored name: one fact that every operator and both clients share and that a restore keeps. Labels per client split it between devices; the composed name repeats what the tables already show beside the identifier and is no name an operator chose; the hostname has no value before a first publish and costs a read for each machine. The grammar (lowercase, digits, hyphen) keeps it a valid hostname label, and a client still treats the received name as remote text (client contracts A9); it is unique within a cluster; an `author` sets it at inventory and replaces it (client contracts A9, [persistence and API §3.5](persistence-api.md#35-a-machines-name), choice §17.43) | decided by the owner, Serge, typed 2026-11-20 11:33 CET: "A. Stored name in the API"; the name and the Talos hostname are independent, and filling the hostname from the name is a separate specification issue |
 
 ## 13. Usability and accessibility acceptance

@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
-import { RevisionItem, SourceItem, view } from "./resources.tsx";
+import { RevisionItem, SANITIZED_NOTICE, SourceItem, view } from "./resources.tsx";
 import { ShellContext } from "./shell.tsx";
 import { Writes } from "./write.ts";
 
@@ -186,5 +186,95 @@ describe("ginsys/bronzeward#997: a move from one profile page to another", () =>
     await settled();
     expect(fragmentReads()).toHaveLength(20);
     expect(documents()).toHaveLength(20);
+  });
+});
+
+// ginsys/bronzeward#988: every page that shows a fragment revision's text says that the server sanitized it and
+// cannot promise it holds no value nobody marked (operator experience §9 item 9). One notice per page, above the
+// text, in the reading order and not in a live region; each `pre` points at it, so a reader who jumps straight to
+// one document still hears it.
+const notices = () => [...box.querySelectorAll('[data-testid="sanitized-notice"]')];
+const mountFragment = () =>
+  act(async () => {
+    root.render(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["viewer"], offline: false } }, h(ReadsProvider, { value: reads }, h(RevisionItem, { kind: "fragment", id: "frv_1" })))));
+  });
+const before = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+describe.each(["profile", "revision"] as const)("ginsys/bronzeward#988: the %s page's sanitized-text notice", (page) => {
+  test("shows once above the pinned documents, however many are pinned", async () => {
+    await mount(page);
+    await settled();
+    expect(documents()).toHaveLength(3);
+    expect(notices()).toHaveLength(1);
+    expect(notices()[0]!.textContent).toBe(SANITIZED_NOTICE);
+    expect(before(notices()[0]!, box.querySelector('[data-testid="fragment-document"]')!)).toBe(true);
+  });
+
+  test("is a plain paragraph in the reading order, never in a live region", async () => {
+    await mount(page);
+    await settled();
+    const n = notices()[0]!;
+    expect(n.tagName).toBe("P");
+    expect(n.closest('[role="status"], [role="alert"], [aria-live]')).toBeNull();
+  });
+
+  test("is the description of every pinned document", async () => {
+    await mount(page);
+    await settled();
+    const pres = [...box.querySelectorAll('[data-testid="fragment-document"]')];
+    expect(pres).toHaveLength(3);
+    for (const pre of pres) expect(pre.getAttribute("aria-describedby")).toBe(notices()[0]!.id);
+    expect(notices()[0]!.id).not.toBe("");
+  });
+
+  test("is absent when nothing is pinned", async () => {
+    answers["/profile-revisions/prv_a"] = ok(profileRevision([]));
+    await mount(page);
+    await settled();
+    expect(box.textContent).toContain("No fragments pinned.");
+    expect(notices()).toHaveLength(0);
+  });
+});
+
+describe("ginsys/bronzeward#988: the fragment revision view", () => {
+  beforeEach(() => {
+    answers["/fragment-revisions/frv_1"] = ok(fragment("frv_1", "base", "cluster", "machine:\n  type: controlplane\n"));
+  });
+
+  test("shows the notice above its document, and the document points at it", async () => {
+    await mountFragment();
+    await settled();
+    const pre = box.querySelector('[data-testid="document"]')!;
+    expect(pre.textContent).toBe("machine:\n  type: controlplane\n");
+    expect(notices()).toHaveLength(1);
+    expect(notices()[0]!.textContent).toBe(SANITIZED_NOTICE);
+    expect(notices()[0]!.tagName).toBe("P");
+    expect(notices()[0]!.closest('[role="status"], [role="alert"], [aria-live]')).toBeNull();
+    expect(before(notices()[0]!, pre)).toBe(true);
+    expect(pre.getAttribute("aria-describedby")).toBe(notices()[0]!.id);
+  });
+
+  test("shows no notice for a read that failed, since no text is shown", async () => {
+    answers["/fragment-revisions/frv_1"] = { kind: "refused", status: 404, problem: null };
+    await mountFragment();
+    await settled();
+    expect(box.querySelector('[data-testid="document"]')).toBeNull();
+    expect(notices()).toHaveLength(0);
+  });
+
+  test("keeps its display rules: a text node in a pre, no copy control, no download, nothing in browser storage", async () => {
+    const text = "<script>alert(1)</script>\n&amp; <b>bold</b>\n";
+    answers["/fragment-revisions/frv_1"] = ok(fragment("frv_1", "base", "cluster", text));
+    await mountFragment();
+    await settled();
+    const pre = box.querySelector('[data-testid="document"]')!;
+    expect(pre.tagName).toBe("PRE");
+    expect(pre.textContent).toBe(text);
+    expect(pre.children).toHaveLength(0);
+    expect(box.querySelector("button")).toBeNull();
+    expect(box.querySelector("a[download]")).toBeNull();
+    expect(box.querySelector("textarea, input")).toBeNull();
+    expect(box.querySelector("script, b")).toBeNull();
+    expect(localStorage.length + sessionStorage.length).toBe(0);
   });
 });

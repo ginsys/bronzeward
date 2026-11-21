@@ -656,6 +656,16 @@ describe("the read-only lists and items", () => {
     await expect($("main h2")).toHaveText(`Fragment revision ${short(s.frv.id)} of registries`);
     await expect($('[data-testid="document"]')).toHaveText(expect.stringContaining("registry.example.test"));
     await expect($("main")).toHaveText(expect.stringContaining("registry/example-pass"));
+    // The sanitized-text notice (ginsys/bronzeward#988, operator experience §9 item 9) is a paragraph that comes
+    // before the document in the reading order, and the document is described by it.
+    await expect($('[data-testid="sanitized-notice"]')).toHaveText("This text is sanitized by the server, which cannot promise it holds no value nobody marked.");
+    expect(
+      await browser.execute(() => {
+        const note = document.querySelector('[data-testid="sanitized-notice"]')!;
+        const text = document.querySelector('[data-testid="document"]')!;
+        return { tag: note.tagName, first: (note.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0, describes: text.getAttribute("aria-describedby") === note.id };
+      }),
+    ).toEqual({ tag: "P", first: true, describes: true });
     // A filter set by keyboard lands in the query.
     await nav("Plans");
     await loaded();
