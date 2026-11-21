@@ -307,7 +307,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     expect(await fixtureSignIn("h-all", {}, { upstream: at })).toMatch(SERVER);
     await browser.url(base);
     await shows().$("button=Show document").click();
-    await expect(shows()).toHaveText(holds("not-the-importer"), { wait: 20_000 });
+    await expect(shows()).toHaveText(holds("Only the person who imported this can read it, and you are signed in as someone else."), { wait: 20_000 });
     await absent(reviewShown, "the document text of a refused author");
     await storageEmptyAfterPause();
     await absent(() => cacheHolds(documentPath), "the document in the HTTP cache after a refused author");

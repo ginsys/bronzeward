@@ -318,7 +318,7 @@ describe("the draft editor (#339)", () => {
     await pane().$("label*=Document").$("textarea").setValue("machine:\n  nodeLabels:\n    example.test/ref: !bwref ghost\n");
     await pane().$("button=Declare").click();
     await save(id, name);
-    await expect(result()).toHaveText(expect.stringContaining("validation-failed (rule unknown-reference)"), { wait: 30_000 });
+    await expect(result()).toHaveText(expect.stringContaining("The server checked this and found it not valid"), { wait: 30_000 });
     await pane().$("button=Go to field").click();
     const chosen = await browser.execute(() => {
       const a = document.activeElement as HTMLTextAreaElement | null;
@@ -513,7 +513,7 @@ describe("the draft editor (#339)", () => {
       await faults({ upstream: at });
       await profilePane().$("button=Save").click();
       const refused = profilePane().$('[data-testid="write-result"]');
-      await expect(refused).toHaveText(expect.stringContaining("validation-failed"), { wait: 30_000 });
+      await expect(refused).toHaveText(expect.stringContaining("The server checked this and found it not valid"), { wait: 30_000 });
       await expect(profilePane().$('[data-testid="write-where"]')).toHaveText("At fragments[0].");
       // once: the refusal and its path are drawn in one render (web/src/drafts.tsx:720-721), so the text awaited above is the whole text.
       expect(await refused.getText()).not.toContain(seed.revision);
@@ -628,7 +628,7 @@ describe("the draft editor (#339)", () => {
       await faults({ upstream: at });
       await asg().$("button=Save").click();
       const refused = asg().$('[data-testid="write-result"]');
-      await expect(refused).toHaveText(expect.stringContaining("validation-failed"), { wait: 30_000 });
+      await expect(refused).toHaveText(expect.stringContaining("The server checked this and found it not valid"), { wait: 30_000 });
       // The rule the server states (updateAssignment), beside the path.
       await expect(refused).toHaveText(expect.stringContaining("a name must have a head or be proposed by this draft, not removed by it"));
       await expect(asg().$('[data-testid="write-where"]')).toHaveText(`At ${where}.`);

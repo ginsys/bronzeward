@@ -159,7 +159,7 @@ describe("approval and revocation (#358)", () => {
     // The refusal carries the entry's epoch, so the shell reads again and remounts the page. The
     // refusal is still shown, in the set-aside notice outside the page: the write's outcome is not
     // lost with the page.
-    await expect($("body")).toHaveText(expect.stringContaining("The server says: Recovery mode refuses the act on this scope"), { wait: 20_000 });
+    await expect($("body")).toHaveText(expect.stringContaining("The server says: this process started with the recovery-start flag"), { wait: 20_000 });
     expect((await answers()).filter((a) => a.startsWith("/plans "))).toEqual(["/plans 409"]);
     await expect($('[data-testid="recovery"]')).toHaveText(expect.stringContaining(RECOVERY_START), { wait: 20_000 });
   });
