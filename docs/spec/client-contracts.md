@@ -2103,8 +2103,8 @@ way: the identifier, the Talos endpoint and the node ID, as before.
    machine's hostname to node-b, taken from its name. The last release applied to it set node-a." The sentence
    describes the release and never claims what the machine reports, since an adopted release may not match what
    the machine holds. Where the machine's current name differs
-   from the name the release recorded: "This release used the earlier name node-a. The next release will use
-   node-b." A `source` the client does not know shows its raw value and no sentence. A publication refused for a
+   from the name the release recorded: "This release used the earlier name node-a. While its hostname comes from the
+   machine's name, the next release will use node-b." A `source` the client does not know shows its raw value and no sentence. A publication refused for a
    hostname clash (compilation §6.1 item 6) shows the refusal's own sentence. The CLI and the web console are
    ginsys/bronzeward#1042 and ginsys/bronzeward#1043, and each tests its sentences against these.
 

@@ -1084,7 +1084,12 @@ unmeasured.
 6. **A filled hostname that another machine already holds (choice §16.38).**
    Names are unique within a cluster, so two filled hostnames never clash.
    The one new clash is a hostname filled from a name against another
-   machine's explicit hostname of the same value: two nodes would report one
+   machine's explicit hostname of the same value, compared as Talos reads a
+   hostname: an explicit FQDN counts as its first label, since Talos splits it
+   at the first dot into hostname and domain (`hostname_spec.go`,
+   `ParseFQDN`) and registers the node under the hostname unless it is
+   told to use the FQDN. So `node-a.example.org` clashes with a filled
+   `node-a`. Two nodes would report one
    hostname and, by default, one Kubernetes node name, and the second kubelet
    would take over the first's Node object. Publication refuses it, before any
    release is committed, `422 validation-failed` with the rule `hostname`,
