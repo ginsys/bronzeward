@@ -40,12 +40,7 @@ type webRow struct{ kind, state, now, next string }
 
 var (
 	webKindStart = regexp.MustCompile(`(?m)^ {2}(?:"([a-z-]+)"|([a-z]+)): \{$`)
-	// webRowStart and webKindLine count every line that opens a row or a kind, in any form, so a row the
-	// whole-row pattern cannot take (a quoted state, a template string, a different layout) is counted and
-	// not taken, and the two counts differ.
-	webRowStart = regexp.MustCompile(`(?m)^ {4}[^\s\]}]`)
-	webKindLine = regexp.MustCompile(`(?m)^ {2}[^\s}]`)
-	webRowFull  = regexp.MustCompile(`(?m)^ {4}([a-z]+):\s*\[\s*("(?:[^"\\\n]|\\.)*")\s*,\s*("(?:[^"\\\n]|\\.)*"|undefined)\s*,?\s*\],?$`)
+	webRowFull   = regexp.MustCompile(`(?m)^ {4}([a-z]+):\s*\[\s*("(?:[^"\\\n]|\\.)*")\s*,\s*("(?:[^"\\\n]|\\.)*"|undefined)\s*,?\s*\],?$`)
 )
 
 // webWords reads the table of web/src/operation-words.ts: each `state: [now, next]` row of each kind, `next`
@@ -65,12 +60,20 @@ func webWords(src string) ([]webRow, error) {
 	}
 	block := strings.Join(lines, "\n")
 	kinds := webKindStart.FindAllStringSubmatchIndex(block, -1)
-	if lines := webKindLine.FindAllStringIndex(block, -1); len(lines) != len(kinds) {
-		return nil, fmt.Errorf("the table has %d kinds and the reader took %d whole", len(lines), len(kinds))
-	}
 	taken := webRowFull.FindAllStringSubmatchIndex(block, -1)
-	if loose := webRowStart.FindAllStringIndex(block, -1); len(loose) != len(taken) {
-		return nil, fmt.Errorf("the table has %d rows and the reader took %d whole", len(loose), len(taken))
+	// Blank what the reader took (each kind header and each row). Whatever is left must be a kind's closing
+	// brace or the declaration line, at any indentation: any other text is table content the reader did not
+	// read, whatever its layout.
+	left := []byte(block)
+	for _, m := range append(slices.Clone(kinds), taken...) {
+		for i := m[0]; i < m[1]; i++ {
+			left[i] = ' '
+		}
+	}
+	for _, l := range strings.Split(string(left), "\n") {
+		if l = strings.TrimSpace(l); l != "" && l != "}," && !strings.HasPrefix(l, "const KNOWN") {
+			return nil, fmt.Errorf("the table holds text the reader did not take: %q", l)
+		}
 	}
 	var rows []webRow
 	for _, m := range taken {
@@ -161,6 +164,8 @@ func TestWebWordsReaderRefusesWhatItCannotRead(t *testing.T) {
 		// A row in a form the whole-row pattern cannot take, added beside a real one: it must be counted and refused.
 		{"a quoted state key", "  ingest: {\n", "  ingest: {\n    \"queued\": [\"New web sentence.\", \"New web step.\"],\n"},
 		{"a row in another layout", "  ingest: {\n", "  ingest: {\n    queued: [\"New web sentence.\",\n      \"New web step.\"],\n"},
+		{"a row with extra indentation", "  ingest: {\n", "  ingest: {\n      queued: [\"New web sentence.\", \"New web step.\"],\n"},
+		{"a row at no indentation", "  ingest: {\n", "  ingest: {\nqueued: [\"New web sentence.\", \"New web step.\"],\n"},
 		{"a kind added", "  adopt: {\n", "  adopt2: {\n    queued: [\"New web sentence.\", undefined],\n  },\n  adopt: {\n"},
 	} {
 		if !strings.Contains(src, c.old) {

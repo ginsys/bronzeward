@@ -2102,7 +2102,7 @@ outcome line, and under it the next step an operator can take, from the steps of
    a `Now` row, the next step as a `Next` row, and who started the operation in its `Created` row: the principal and role,
    or for an apply or an adoption the controller, the plan and the plan's creator, from the plan read A8 already makes.
    `operation list` has a `STARTED BY` column with the principal and role, or "the controller", never the plan. It makes
-   no read beyond the plan read A8 already makes and the principal names every table reads, and `-o json` and `-o yaml`
+   no read beyond the title reads A8 already makes and the principal names every table reads, and `-o json` and `-o yaml`
    read nothing and print the resource unchanged. Two differences from the web client, each
    tested: (a) for an operation that ended without success, or is unresolved, the outcome's own next step stands in for
    the table's `Next` row, so the step is said once, and where the outcome has no command to give (a failed publish or
