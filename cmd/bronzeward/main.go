@@ -151,8 +151,9 @@ func serveContext(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// A no-op once Serve has closed it; every earlier return closes it here. A closed output must not
-	// stop a server, so the write's error is dropped.
+	// A no-op once Serve has closed it; every earlier return closes it here. The report is not a
+	// precondition of serving, so the write's error is dropped. A pipe closed by its reader still ends
+	// the process by SIGPIPE, as it does for any write to standard output.
 	defer ln.Close()
 	_, _ = fmt.Fprintf(out, "listening on %s\n", ln.Addr())
 	startCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
