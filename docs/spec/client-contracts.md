@@ -2082,7 +2082,8 @@ until then, and where the read gave none, a link shows the shortened identifier 
 A machine with no name shows its address: the host of its stored endpoint, without the port, shown only
 when the endpoint is `a.b.c.d:port` or `[v6]:port` and otherwise not at all. Where one list holds two unnamed
 machines on one address, each gets a suffix, `(node 4c1f…)` from its Talos node ID or `(UUID 9a3e…)` from its
-SMBIOS UUID, cut to four characters when longer than eight, and `unknown` where the value is not safe text
+SMBIOS UUID (a machine holds one of the two), cut to four characters when longer than eight, or longer where machines
+of one address would otherwise read alike, and `unknown` where the value is not safe text
 (item 1); a list on another page does not count. A machine with
 no usable address reads "an unnamed machine" in a sentence and "Unnamed machine" as a heading. Its identifier
 stays as the title attribute of its link, and on a machine's own page on a detail line with a Copy button that

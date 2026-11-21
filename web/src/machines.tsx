@@ -87,14 +87,12 @@ export function machineAddress(endpoint: unknown): string | undefined {
 }
 
 // The node ID or UUID of G8 for a suffix, cut to `cut` characters when longer than eight: `node 4c1f…`,
-// `UUID 9a3e…`. It is remote text like a name: the node ID, else the UUID, whichever is safe to show (A8 rule 3),
-// else "unknown".
+// `UUID 9a3e…`. A machine holds exactly one of the two (`machine_identity_key`). It is remote text like a name: a
+// value that is not safe to show (A8 rule 3) reads "unknown".
 const SHORT = 4;
 const nodeShort = (h: MachineLike["hardware"], cut = SHORT): string => {
-  const safe = (v: unknown) => (typeof v === "string" && SAFE.test(v) ? v : undefined);
-  const node = safe(h?.talosNodeId);
-  const uuid = safe(h?.smbiosUuid);
-  const [kind, value] = node !== undefined ? ["node", node] : uuid !== undefined ? ["UUID", uuid] : [h?.talosNodeId != null ? "node" : "UUID", "unknown"];
+  const [kind, given] = h?.talosNodeId != null ? ["node", h.talosNodeId] : ["UUID", h?.smbiosUuid];
+  const value = typeof given === "string" && SAFE.test(given) ? given : "unknown";
   return `${kind} ${value.length > Math.max(8, cut) ? `${value.slice(0, cut)}…` : value}`;
 };
 
@@ -111,10 +109,10 @@ export function sharedAddresses(machines: readonly MachineLike[]): ReadonlyMap<s
   const shared = new Map<string, number>();
   for (const [address, group] of groups) {
     if (group.length < 2) continue;
-    // Lengthen until the suffixes differ; past the longest whole value no cut remains, and equal values stay equal.
-    const longest = Math.max(...group.map((m) => nodeShort(m.hardware, 300).length));
+    // Lengthen until the suffixes tell as many apart as the whole values do; equal values never will.
+    const whole = new Set(group.map((m) => nodeShort(m.hardware, 300))).size;
     let cut = SHORT;
-    while (cut < longest && new Set(group.map((m) => nodeShort(m.hardware, cut))).size < group.length) cut++;
+    while (new Set(group.map((m) => nodeShort(m.hardware, cut))).size < whole) cut++;
     shared.set(address, cut);
   }
   return shared;
