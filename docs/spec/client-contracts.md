@@ -2248,7 +2248,9 @@ The web client's draft page offers "Start managing these machines" for a draft t
    the editor holds unsaved text), and the next press sends that ETag. With no ETag kept the press sends nothing and
    says to read the draft again. Every write of one press carries the epoch the press began under as its reference
    epoch, so one made after the installation's epoch changed is refused by the server and set aside in the page's
-   words; the press also stops, quietly, before such a write. A machine whose step
+   words; the press also stops, quietly, before such a write. A write of an earlier press whose outcome stayed unknown
+   holds the next press back, with a note, until its notice is repeated exactly or dismissed: a new press would send the
+   same act under a new key. A machine whose step
    fails stops alone with the refusal in words, and a later press retries it alone. The same act twice in one press stops
    the machine instead of looping.
 5. The roles are the routes' and the draft page's: `author` for the draft page and the machines' configurations,

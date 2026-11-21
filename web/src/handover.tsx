@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Result, unsaved, useWrites } from "./forms.tsx";
-import { DRAFT, type Followed, handOver, HANDOVER_SENTENCE, HANDOVER_TITLE, type Io, type Line, MISSING, missingRoles, NOT_PUBLISHED, UNSAVED } from "./handover.ts";
+import { DRAFT, type Followed, handOver, HANDOVER_SENTENCE, HANDOVER_TITLE, type Io, type Line, MISSING, missingRoles, NOT_PUBLISHED, UNRESOLVED, UNSAVED } from "./handover.ts";
 import { settledReads } from "./imports.tsx";
 import { Ref, useReads, useSettled } from "./list.tsx";
 import { watch } from "./progress.ts";
@@ -15,6 +15,9 @@ import { MachineById } from "./titles.tsx";
 import { Write } from "./write.ts";
 
 const STATES: Record<Line["state"], string> = { working: "Working", waiting: "Waiting", done: "Done", left: "Left as it is", stopped: "Stopped" };
+
+// The writes the handover sent, per write layer (which outlives the page): a press waits while one stays open.
+const sentBy = new WeakMap<object, Write[]>();
 
 const changed = (line: Line) => line.write?.outcome?.kind === "refused" && line.write.outcome.status === 412;
 
@@ -46,6 +49,7 @@ export function Handover({ draft, machines, etag, seeChange, written }: { draft:
   const live = useRef(true);
   // The press in progress: aborted when the page leaves, and when the shell invalidates the reads it began with.
   const run = useRef<AbortController>(undefined);
+  const sent = (sentBy.get(writes) ?? sentBy.set(writes, []).get(writes))!;
   useEffect(() => {
     live.current = true;
     return () => {
@@ -60,6 +64,11 @@ export function Handover({ draft, machines, etag, seeChange, written }: { draft:
     // The press publishes what is stored, so text the editor holds unsaved would be left out of the release.
     if (unsaved.size > 0) return setHeld(true);
     setHeld(false);
+    // An earlier press's write still open (unknown outcome) may commit or be repeated from its notice: a new key
+    // for the same act would send it twice, as useSend's form is held back until its write is settled.
+    const pending = sent.filter((w) => writes.open.includes(w));
+    sent.splice(0, sent.length, ...pending);
+    if (pending.length > 0) return setNote(UNRESOLVED);
     setNote(undefined);
     setRunning(true);
     setLines({});
@@ -94,6 +103,7 @@ export function Handover({ draft, machines, etag, seeChange, written }: { draft:
       follow,
       send: async (spec) => {
         const w = new Write({ ...spec, ...(epoch !== undefined && { epoch }) });
+        sent.push(w);
         await writes.submit(w);
         return w;
       },
