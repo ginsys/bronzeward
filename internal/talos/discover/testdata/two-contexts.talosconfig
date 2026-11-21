@@ -1,0 +1,24 @@
+# Synthetic: no value below is a real certificate or key. Two contexts, each with endpoints, nodes and
+# an auth block, and a comment that no cut keeps. The Go test (TestOneContextGolden) and the web test
+# (web/src/onboard.test.ts) read this file and the golden beside it.
+context: a
+contexts:
+  a:
+    endpoints: [10.0.0.1:50000, 10.0.0.2]
+    nodes: [10.9.9.9]
+    ca: QS1DQQ==
+    crt: QS1DUlQ=
+    key: QS1LRVk=
+    auth:
+      basic:
+        username: a-user
+        password: a-password
+  b:
+    endpoints: [10.1.0.1]
+    nodes: [10.8.8.8, 10.8.8.9]
+    ca: Qi1DQQ==
+    crt: Qi1DUlQ=
+    key: Qi1LRVk=
+    auth:
+      siderov1:
+        identity: b-identity

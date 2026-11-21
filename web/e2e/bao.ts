@@ -32,7 +32,8 @@ export interface Bao {
 }
 
 const KEYS = ["bw-artifact", "bw-baseline", "bw-staging", "bw-digest"];
-const ROLES = ["ingestion", "compiler", "metadata", "executor"];
+// The signer's is the first key's (persistence-api.md §3.4): without it the first-keys route answers 503.
+const ROLES = ["ingestion", "compiler", "metadata", "executor", "signer"];
 
 // mise run dev-bao's root token (mise.toml), which only a dev server accepts.
 export const DEV_ROOT_TOKEN = "bw-dev-root-token";

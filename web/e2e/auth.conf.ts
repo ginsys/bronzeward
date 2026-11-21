@@ -12,8 +12,8 @@
 //     OpenBao behind a proxy (bao.ts), so the draft cases (#339) can ingest fragment documents.
 // It removes the databases with the processes, and fails the run when it cannot; then the state
 // directory, which names them, is kept, and the next run refuses to start until it is removed.
-import { execFileSync, type ChildProcess } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, type ChildProcess, type StdioOptions } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -72,8 +72,8 @@ let bao: Bao | undefined;
 // Set once this run has made the state directory; before that it may be another run's.
 let ownState = false;
 
-function start(bin: Binary, args: string[], env: Record<string, string> = {}): ChildProcess {
-  const p = spawnChild(binPath(root, bin), args, { stdio: "inherit", env: { ...process.env, ...env } });
+function start(bin: Binary, args: string[], env: Record<string, string> = {}, cwd?: string, stdio: StdioOptions = "inherit"): ChildProcess {
+  const p = spawnChild(binPath(root, bin), args, { stdio, cwd, env: { ...process.env, ...env } });
   procs.push(p);
   return p;
 }
@@ -176,7 +176,7 @@ export interface Chaos {
   kill: () => Promise<void>;
   interrupt: (line: string) => void;
 }
-function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean, short: boolean, seed: string | undefined) => Promise<string>, seeded: () => string | undefined, kv: (ms: number) => void, chaos: Chaos): Server {
+function control(provider: Provider, next: { grant: Grant }, injector: Injector, disposable: (recovery: boolean, keep: boolean, short: boolean, seed: string | undefined) => Promise<string>, seeded: () => string | undefined, kv: (ms: number) => void, chaos: Chaos, talos: () => Promise<string>): Server {
   let go: string | undefined;
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", CONTROL);
@@ -235,6 +235,7 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       const started = disposable(url.searchParams.get("start") === "recovery", url.searchParams.has("keep"), url.searchParams.get("expiry") === "short", url.searchParams.get("seed") ?? undefined);
       return void started.then((at) => res.end(at), (e: unknown) => res.writeHead(500).end(String(e)));
     }
+    if (url.pathname === "/talos" && req.method === "POST") return void talos().then((doc) => res.writeHead(200, { "Content-Type": "application/json" }).end(doc), (e: unknown) => res.writeHead(500).end(String(e)));
     if (url.pathname === "/seeded" && req.method === "GET") {
       const doc = seeded();
       return doc === undefined ? res.writeHead(404).end() : res.writeHead(200, { "Content-Type": "application/json" }).end(doc);
@@ -320,7 +321,11 @@ async function prepare() {
   const keys = start("oidc-fixture", ["serve", "-key", `${state}/fixture.key`, "-issuer", FIXTURE_ISSUER, "-listen", KEYS]);
   await ready(`http://${KEYS}/jwks`, keys);
   const next = { grant: { access: "", sub: "" } };
-  const provider = await startProvider({ issuer: FIXTURE_ISSUER, pageOrigin: FIXTURE_PAGE, clientId: "synthetic-web-client", next: () => next.grant, keys: `http://${KEYS}`, refresh: canary, document: syntheticDocument });
+  // The talosconfig of the Talos stand-ins POST /talos started. The page fetches it from the provider as it
+  // fetches a synthetic document (name "talosconfig"), so it never crosses WebDriver, whose log the artifact
+  // scan reads.
+  let talosconfig: string | undefined;
+  const provider = await startProvider({ issuer: FIXTURE_ISSUER, pageOrigin: FIXTURE_PAGE, clientId: "synthetic-web-client", next: () => next.grant, keys: `http://${KEYS}`, refresh: canary, document: (n) => (n === "talosconfig" && talosconfig !== undefined ? talosconfig : syntheticDocument(n)) });
   servers.push(provider.server);
   const injector = await startInjector(FIXTURE_API, Number(new URL(INJECTOR).port));
   servers.push(injector.server);
@@ -387,6 +392,8 @@ async function prepare() {
   };
   // The identifiers of the records bin/e2eseed.test wrote into the disposable deployment's database.
   let seeded: string | undefined;
+  // The Talos stand-ins POST /talos started; stopped with the other children (procs).
+  let talosNode: ChildProcess | undefined;
   const ctl = control(provider, next, injector, async (recovery, keep, short, seed) => {
     if (seed !== undefined && keep) throw new Error("a seed is written once, into a fresh database: give ?seed or ?keep, not both");
     if (seed !== undefined && seed !== "" && seed !== "noattempt") throw new Error(`a seed of ${seed}: give ?seed or ?seed=noattempt`);
@@ -406,7 +413,28 @@ async function prepare() {
       rmSync(out);
     }
     return DISPOSABLE_API;
-  }, () => seeded, kv, chaos);
+  }, () => seeded, kv, chaos, async () => {
+    // A cluster of two stand-in Talos nodes on loopback (TestE2ENode), started again for each case that asks:
+    // its members listen on 127.0.0.2:50000 and 127.0.0.3:50000, so one runs at a time, and a case that asks
+    // twice replaces the earlier. The answer is the endpoint and the cluster ID; the talosconfig is served at
+    // /synthetic-document?name=talosconfig and read from the file once, then the file is removed.
+    if (talosNode !== undefined) await stop(talosNode);
+    const out = `${state}/talos.json`;
+    rmSync(out, { force: true });
+    talosconfig = undefined;
+    talosNode = start("e2eseed.test", ["-test.run", "^TestE2ENode$", "-test.count=1", "-test.timeout=2h"], { BW_E2E_NODE_OUT: out }, `${root}internal/api`, ["pipe", "inherit", "inherit"]);
+    for (let i = 0; ; i++) {
+      if (existsSync(out)) {
+        const { talosconfig: doc, ...rest } = JSON.parse(readFileSync(out, "utf8")) as { talosconfig: string };
+        rmSync(out);
+        talosconfig = doc;
+        return JSON.stringify(rest);
+      }
+      const why = died(talosNode);
+      if (why !== undefined || talosNode.exitCode !== null || i === 100) throw new Error(`the Talos stand-ins did not start: ${why ?? "no answer within 20 s"} (a bind failure names the address)`);
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  });
   await new Promise<void>((resolve, reject) => {
     ctl.once("error", reject);
     ctl.listen(Number(new URL(CONTROL).port), "127.0.0.1", resolve);

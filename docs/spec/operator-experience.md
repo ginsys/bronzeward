@@ -1328,6 +1328,24 @@ It shows no plans, because `GET /plans` has no cluster filter (G20), and no Talo
 off it: the release list is filtered in the browser (G9 of the
 [client contracts](client-contracts.md#4-api-gap-audit)) and nothing yet needs them there.
 
+**Onboard cluster** is `cluster onboard` ([§5.2](#52-inventory)) as a page, reached from the
+**Onboard cluster** button of the Machines and Clusters pages for an `author`. The operator chooses
+the cluster's talosconfig, and may name a context (else the current one) and an endpoint (else the
+context's first). The page cuts the file to that one context in memory, reads the cluster's members
+through `POST /discoveries`, and shows the Talos version, the contract and the members, with a
+name and a Kubernetes endpoint (proposed by the first control-plane member) to confirm. It refuses an
+unsupported contract and a cluster where no control-plane member answered before anything is
+recorded. Then it runs, in order, the cluster, the first key (to the first control-plane member that
+answered), each machine (by SMBIOS UUID where the node reports one, else by node ID, with the
+hostname as its name where that is a valid name), the draft titled `onboard <name>` and one import
+for each machine, following each to its release, and shows one line for each step. A step that fails
+stops the run with its line saying why, and [Run again] finds what the server holds (a `409` naming the
+cluster or a machine, the open draft, an import already released) and finishes the rest, as a second
+`cluster onboard` does; the first key is sent again after a reload, since a reload drops the page's
+memory of it. A first key that did not end well releases the file, so the page asks for it again. The
+file is never stored, logged, shown or kept past the first key's write, and the page leaves the review
+of what was imported to the draft's own page. The page does not enrol, bootstrap or upgrade anything.
+
 **Titles.** A release, a plan and an operation are shown with a title derived from their fields,
 never a stored name: client contracts A8 holds the rule and G19 the gap. A machine has an
 optional stored name (G8, [§12](#12-alternatives-and-recommendations) C9), which a title uses
@@ -1338,6 +1356,7 @@ where there is one.
 | Sign-in and context | [W1](operator-experience-wireframes.md#w1-sign-in-and-context) | (#253) |
 | Machines | [W2](operator-experience-wireframes.md#w2-machines) | `GET /machines`, `GET /clusters` |
 | Clusters and a cluster's page | none (see the note under W2) | `GET /clusters[/{id}]`, `GET /machines?cluster=`, `GET /drafts` |
+| Onboard cluster | none (a form and a list of steps) | `POST /discoveries`, `POST /clusters`, `POST /clusters/{id}/first-keys`, `POST /machines`, `POST /drafts`, `POST /ingestions` |
 | Machine detail | [W3](operator-experience-wireframes.md#w3-machine-detail) | `GET /machines/{id}`, `/observations`, `/timeline`, `/position` (G18) |
 | Draft editor | [W4](operator-experience-wireframes.md#w4-draft-editor) | `GET /drafts/{id}`, draft `PUT`/`DELETE`, discard |
 | Protected review | [W5](operator-experience-wireframes.md#w5-protected-import-review) | `GET /ingestions/{id}/review`, marks, continuations |

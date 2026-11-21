@@ -63,7 +63,11 @@ const (
 	PlatformMetadataType  = runtime.PlatformMetadataType
 )
 
-// PKI is a certificate authority with a server certificate for 127.0.0.1 and a client certificate
+// serverIPs are the addresses a server certificate names: 127.0.0.1 and two more, for the members a
+// discovery dials at their own loopback address.
+var serverIPs = []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("127.0.0.2"), net.ParseIP("127.0.0.3")}
+
+// PKI is a certificate authority with a server certificate for serverIPs and a client certificate
 // in the os:admin role, as a Talos cluster's CA signs both apid's certificate and a talosconfig's.
 type PKI struct {
 	CAPEM, CrtPEM, KeyPEM []byte
@@ -112,7 +116,7 @@ func NewPKI(t testing.TB) PKI {
 		}
 		return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kder})
 	}
-	srvCrt, srvKey := leaf(2, x509.ExtKeyUsageServerAuth, []net.IP{net.ParseIP("127.0.0.1")})
+	srvCrt, srvKey := leaf(2, x509.ExtKeyUsageServerAuth, serverIPs)
 	srv, err := tls.X509KeyPair(srvCrt, srvKey)
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +128,7 @@ func NewPKI(t testing.TB) PKI {
 }
 
 // NewPKIFromCA is a PKI whose certificate authority is ca, a cluster's os CA as a signer holds it:
-// the CA signs the server's certificate for 127.0.0.1 and an os:admin client certificate, and the
+// the CA signs the server's certificate for serverIPs and an os:admin client certificate, and the
 // node trusts it, so a certificate a signer makes from the same CA key is accepted.
 func NewPKIFromCA(t testing.TB, ca *cx509.PEMEncodedCertificateAndKey) PKI {
 	t.Helper()
@@ -133,7 +137,7 @@ func NewPKIFromCA(t testing.TB, ca *cx509.PEMEncodedCertificateAndKey) PKI {
 		t.Fatal("talostest: the certificate authority does not load")
 	}
 	now := time.Now()
-	srv, err := cx509.NewKeyPair(authority, cx509.IPAddresses([]net.IP{net.ParseIP("127.0.0.1")}),
+	srv, err := cx509.NewKeyPair(authority, cx509.IPAddresses(serverIPs),
 		cx509.KeyUsage(x509.KeyUsageDigitalSignature), cx509.ExtKeyUsage([]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}),
 		cx509.NotBefore(now.Add(-time.Hour)), cx509.NotAfter(now.Add(time.Hour)))
 	if err != nil {
@@ -197,11 +201,15 @@ func (n *Node) StallVersion(on bool) {
 
 // Serve runs a node behind mutual TLS with p's CA until the test ends. It reports no resource
 // until the test sets one.
-func Serve(t testing.TB, p PKI) *Node {
+func Serve(t testing.TB, p PKI) *Node { return ServeOn(t, p, "127.0.0.1:0") }
+
+// ServeOn is Serve at addr, one of the loopback addresses the server certificate names
+// (serverIPs), so that a discovery can dial a member at its own address and port 50000.
+func ServeOn(t testing.TB, p PKI, addr string) *Node {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := net.Listen("tcp", addr)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("talostest: %s cannot be listened on: %v", addr, err)
 	}
 	n := &Node{Endpoint: l.Addr().String(), st: namespaced.NewState(inmem.Build), failures: map[resource.Type]codes.Code{}, stalls: map[resource.Type]bool{}}
 	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{

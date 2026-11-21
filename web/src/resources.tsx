@@ -11,6 +11,7 @@ import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { CancelPlan, PlanNew, PlanState, PROPOSED, takeFresh } from "./plan.tsx";
 import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
+import { OnboardCluster } from "./onboard.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
 import { EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { Who } from "./principals.tsx";
@@ -555,6 +556,8 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   const revision = /^(fragment|profile|assignment)-revisions$/.exec(kind ?? "")?.[1] as Kind | undefined;
   // No identifier is "new": every one starts with its type's prefix.
   if (id === "new" && kind === "clusters") return <AddCluster />;
+  // Not an identifier either: every cluster's starts with cl_.
+  if (id === "onboard" && kind === "clusters") return <OnboardCluster />;
   if (id === "new" && kind === "machines") return <RecordMachine query={query} />;
   if (id === "new" && kind === "drafts") return <CreateDraft />;
   if (id === "new" && kind === "ingestions") return <StartImport query={query} />;

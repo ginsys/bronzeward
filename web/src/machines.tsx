@@ -5,6 +5,7 @@
 
 import type { components } from "./api/v1";
 import { AddClusterAction, RecordMachineAction } from "./forms.tsx";
+import { OnboardClusterAction } from "./onboard.tsx";
 import { EmptyList, Head, Id, type Listed, More, Ref, RESTARTED, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { Status } from "./states.tsx";
 
@@ -135,6 +136,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
         <Filter label="State:" value={state?.[0] ?? ""} options={STATES} onChange={(v) => filter("state", v)} />
         <RecordMachineAction cluster={cluster} />
         <AddClusterAction />
+        <OnboardClusterAction />
       </div>
       {body}
       <p>Health is not checked.</p>
@@ -165,7 +167,7 @@ export function Clusters() {
       </>
     );
   }
-  return <><h2>Clusters</h2><div className="toolbar"><AddClusterAction /></div>{body}</>;
+  return <><h2>Clusters</h2><div className="toolbar"><AddClusterAction /><OnboardClusterAction /></div>{body}</>;
 }
 
 export function ClusterItem({ id }: { id: string }) {
