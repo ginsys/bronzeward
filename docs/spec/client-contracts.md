@@ -288,7 +288,7 @@ supported.
 | G25 | No read answers a machine's whole position at once (the journeys' G18). The lists a client could combine (`GET /ingestions?machine=`, `GET /plans?machine=&state=`, `GET /operations?machine=&state=`) are separate reads at the default isolation level, so an operation that moves between two of them leaves every list empty, and a committed plan says nothing of its operation | `internal/api/reads.go:40-57`; [persistence and API §8.1](persistence-api.md#81-plans-and-their-operations); the unique scope indexes `internal/migrate/migrations/0001_schema.sql:457-464` | served: `GET /machines/{id}/position` answers the machine, its newest ingestion, draft and plan, the operation holding its scope and one `step` from one snapshot ([persistence and API §9.3](persistence-api.md#93-examples)), implemented by [ginsys/bronzeward#879](https://github.com/ginsys/bronzeward/issues/879), and the web client draws its line from the `step` |
 | G26 | Plans, releases and operations carry no name, so both clients show them by identifier (the journeys' G19, [#564](https://github.com/ginsys/bronzeward/issues/564) item 1). A draft has a `title`; a plan names its `machine`, `release` and `operation`, a release its `draft`, an operation its `kind` and `subject` | `api/openapi.yaml` `DraftBody`, `PlanBody`, `ReleaseBody`, `OperationBody` and `OperationSubject` | client rule A8: both clients show a title derived from those fields; no API change; applied in the web client for the three objects' lists and headings (A8 item 6) and in the CLI for their lists and shows (A8 item 7) ([#987](https://github.com/ginsys/bronzeward/issues/987)), the other cross-references not yet ([#996](https://github.com/ginsys/bronzeward/issues/996)) |
 | G27 | `GET /plans` filters by `state` and `machine` and not by `cluster`, so a cluster page cannot list its open plans without reading each machine's plans or the whole list (the journeys' G20) | `internal/api/plans.go:429-451` | accepted limitation: the cluster page does not list plans; the filters for releases and drafts stay G9's accepted client-side filtering |
-| G28 | An operation body states a kind, a state, a subject and a `createdBy` and says in words nothing of what it did or what comes next, and `createdBy` is null for the `apply-config` and `adopt` operations the controller creates itself, so a client that shows it raw prints `none` | `api/openapi.yaml` `OperationBody`; `internal/api/commit.go:314`, `internal/api/adoption.go:298` (no `created_by` column); `internal/api/publications.go:59`, `internal/api/ingestions.go:202` (set it) | client rule A10: the web client derives the sentence, the next step and the starter from the body and the plan it names; no API change; applied in the web client's operation list and page ([#998](https://github.com/ginsys/bronzeward/issues/998)), not yet in the CLI ([#1014](https://github.com/ginsys/bronzeward/issues/1014)) |
+| G28 | An operation body states a kind, a state, a subject and a `createdBy` and says in words nothing of what it did or what comes next, and `createdBy` is null for the `apply-config` and `adopt` operations the controller creates itself, so a client that shows it raw prints `none` | `api/openapi.yaml` `OperationBody`; `internal/api/commit.go:314`, `internal/api/adoption.go:298` (no `created_by` column); `internal/api/publications.go:59`, `internal/api/ingestions.go:202` (set it) | client rule A10: the web client derives the sentence, the next step and the starter from the body and the plan it names; no API change; applied in the web client's operation list and page ([#998](https://github.com/ginsys/bronzeward/issues/998)) and in the CLI's `operation list` and `operation show` ([#1014](https://github.com/ginsys/bronzeward/issues/1014)) |
 
 Not gaps, by design: no dispatch or apply route, no token administration route, no secret
 browser, and no WebSocket (polling and SSE only, [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)).
@@ -2081,7 +2081,8 @@ outcome line, and under it the next step an operator can take, from the steps of
 1. The pairs are `publish` with `queued`, `running`, `succeeded` or `failed`; `ingest` with `running`, `succeeded` or
    `failed` (never `queued`); `apply-config` with `committed`, `sending`, `verifying`, `completed`, `rejected`, `failed`,
    `cancelled` or `unresolved`; and `adopt` with `completed` only. The sentences and next steps are the table in
-   `web/src/operation-words.ts`, and a unit test lists each pair against its text.
+   `web/src/operation-words.ts`, and a unit test lists each pair against its text. The CLI keeps the same table in
+   `cmd/bronzewardctl/operation_words.go`, and a Go test reads the web table's source and compares every pair word for word.
 2. The outcome facts a state carries stay with the outcome line: the cause, the attempts, the applied release or the
    adoption record, and the Recovery route of an `unresolved` operation, which is its next step too. The sentence says what
    the state means and the outcome line says what happened in it, so neither repeats the other.
@@ -2097,8 +2098,15 @@ outcome line, and under it the next step an operator can take, from the steps of
    `createdBy` on a `publish` or an `ingest`, which the server never writes, shows as none.
 5. An adopt operation's outcome line says the machine's configuration was recorded as Applied, from the adoption record its
    result names. It does not say that no applied release is recorded, which was true of no adopt operation.
-6. Not applied in the CLI: its operation views keep the kind, the state and A8's title, tracked by
-   [#1014](https://github.com/ginsys/bronzeward/issues/1014).
+6. The CLI applies A10 ([#1014](https://github.com/ginsys/bronzeward/issues/1014)). `operation show` prints the sentence as
+   a `Now` row, the next step as a `Next` row, and who started the operation in its `Created` row: the principal and role,
+   or for an apply or an adoption the controller, the plan and the plan's creator, from the plan read A8 already makes.
+   `operation list` has a `STARTED BY` column with the principal and role, or "the controller", never the plan. It reads
+   nothing more, and `-o json` and `-o yaml` print the resource unchanged. Two differences from the web client, each
+   tested: (a) for an operation that ended without success, or is unresolved, the outcome's own next step stands in for
+   the table's `Next` row, so the step is said once, and where the outcome has no command to give (a failed publish or
+   import) it gives the table's text and never a line that sends the reader back to `operation show`; (b) an unknown
+   pair says "this command has no description of it". `operation watch` prints the same outcome lines.
 
 **C1. Contract correction.** Add the `reset` event to the stream contract of
 [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) (G15). A
