@@ -7,7 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { unsaved, WritesProvider } from "./forms.tsx";
 import { Handover } from "./handover.tsx";
-import { LINES, UNSAVED } from "./handover.ts";
+import { LINES, NOT_PUBLISHED, UNSAVED } from "./handover.ts";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
 import { Writes } from "./write.ts";
@@ -33,7 +33,7 @@ describe("the handover button with unsaved text in the draft editor", () => {
   });
   const mount = () =>
     act(async () =>
-      root.render(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: noReads }, h(Handover, { draft: "drf_1", machines: ["mch_a"], etag: () => '"1"', written: () => {} }))))),
+      root.render(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: noReads }, h(Handover, { draft: "drf_1", machines: ["mch_a"], etag: () => '"1"', seeChange: () => undefined, written: () => {} }))))),
     );
   const press = () => act(async () => void box.querySelector("button")!.click());
 
@@ -64,12 +64,46 @@ describe("the handover button with unsaved text in the draft editor", () => {
     const writes = new Writes(() => "p");
     const submit = vi.spyOn(writes, "submit");
     await act(async () =>
-      root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(Handover, { draft: "drf_1", machines: ["mch_a"], etag: () => (generation++, '"1"'), written: () => {} }))))),
+      root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(Handover, { draft: "drf_1", machines: ["mch_a"], etag: () => (generation++, '"1"'), seeChange: () => undefined, written: () => {} }))))),
     );
     await press();
     await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
     expect(submit).not.toHaveBeenCalled();
     expect(box.querySelector('[data-testid="handover-line"]')?.textContent).toContain(LINES.noRead);
+  });
+
+  test("a publication refused 412 offers Show their change, and the press after it carries the new ETag", async () => {
+    // The page keeps one ETag per draft read: after the refusal the page reads again and keeps the new one only
+    // through Show their change, so the next press must send what the page holds then, not the first ETag.
+    let kept = '"1"';
+    const reads = {
+      client: { read: vi.fn(async () => ({ kind: "ok", data: { state: "open" }, etag: kept })) },
+      settle: (res: unknown, set: (r: unknown) => void, live: () => boolean) => (live() && set(res), true),
+      undropped: () => () => true,
+      view: "", again: 0, regained: 0, go: () => {}, failure: () => null,
+    } as unknown as Reads;
+    const writes = new Writes(() => "p");
+    const sent: (string | undefined)[] = [];
+    vi.spyOn(writes, "submit").mockImplementation(async (w) => {
+      sent.push(w.spec.ifMatch);
+      // The first publication meets a draft changed since; the second is accepted without naming an operation.
+      w.outcome = sent.length === 1 ? { kind: "refused", status: 412, problem: null, replayed: false } : { kind: "done", status: 202, data: {}, replayed: false };
+      return w.outcome;
+    });
+    const seeChange = vi.fn(() => void (kept = '"2"'));
+    await act(async () =>
+      root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(Handover, { draft: "drf_1", machines: ["mch_a"], etag: () => kept, seeChange: () => (seeChange(), undefined), written: () => {} }))))),
+    );
+    await press();
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+    const line = box.querySelector('[data-testid="handover-line"]')!;
+    expect(line.textContent).toContain(NOT_PUBLISHED);
+    expect(sent).toEqual(['"1"']);
+    await act(async () => void [...line.querySelectorAll("button")].find((b) => b.textContent === "Show their change")!.click());
+    expect(seeChange).toHaveBeenCalledTimes(1);
+    await press();
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+    expect(sent).toEqual(['"1"', '"2"']);
   });
 
   test("with nothing unsaved the press starts: no unsaved notice, and the draft is read", async () => {

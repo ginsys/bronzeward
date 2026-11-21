@@ -282,7 +282,7 @@ export function DraftItem({ id }: { id: string }) {
             <AssignmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
           <Status testid="not-rendered">{NOT_RENDERED}</Status>
-          {handedOver.length > 0 && d.state !== "discarded" && <Handover key={d.id} draft={d.id} machines={handedOver} etag={() => keptETag(d.id, epoch)} written={written} />}
+          {handedOver.length > 0 && d.state !== "discarded" && <Handover key={d.id} draft={d.id} machines={handedOver} etag={() => keptETag(d.id, epoch)} seeChange={() => (unsaved.size > 0 ? EDITOR_FIRST : (seeChange(), undefined))} written={written} />}
           {d.state === "open" && <p><Ref to={publishPath(d.id)} id={d.id}>Publish this draft</Ref></p>}
           {d.state === "open" && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}
         </>

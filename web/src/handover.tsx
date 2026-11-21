@@ -4,29 +4,34 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Result, unsaved, useWrites } from "./forms.tsx";
-import { DRAFT, type Followed, handOver, HANDOVER_SENTENCE, HANDOVER_TITLE, type Io, type Line, MISSING, missingRoles, UNSAVED } from "./handover.ts";
+import { DRAFT, type Followed, handOver, HANDOVER_SENTENCE, HANDOVER_TITLE, type Io, type Line, MISSING, missingRoles, NOT_PUBLISHED, UNSAVED } from "./handover.ts";
 import { settledReads } from "./imports.tsx";
 import { Ref, useReads, useSettled } from "./list.tsx";
-import { terminal, watch } from "./progress.ts";
-import { notEstablished, publishEnd } from "./publish.tsx";
+import { watch } from "./progress.ts";
+import { established, notEstablished, publishEnd } from "./publish.tsx";
 import { useGate, useRoles } from "./shell.tsx";
+import { Status } from "./states.tsx";
 import { MachineById } from "./titles.tsx";
 import { Write } from "./write.ts";
 
 const STATES: Record<Line["state"], string> = { working: "Working", waiting: "Waiting", done: "Done", left: "Left as it is", stopped: "Stopped" };
 
-function LineView({ k, line }: { k: string; line: Line }) {
+const changed = (line: Line) => line.write?.outcome?.kind === "refused" && line.write.outcome.status === 412;
+
+function LineView({ k, line, show }: { k: string; line: Line; show: () => void }) {
   return (
     <li data-testid="handover-line" data-state={line.state}>
       {k === DRAFT ? "Draft" : <MachineById id={k} />}: {STATES[line.state]}.{" "}
-      {line.write === undefined ? line.text : <Result w={line.write} done={() => null} />}
+      {line.write === undefined ? line.text : k === DRAFT && changed(line) ? <>{NOT_PUBLISHED} <button type="button" onClick={show}>Show their change</button></> : <Result w={line.write} done={() => null} />}
       {k !== DRAFT && line.state !== "working" && <>{" "}<Ref to={`/machines/${k}`} id={k}>Open the machine</Ref></>}
     </li>
   );
 }
 
-// `etag` reads the draft's ETag as this page shows it, at the moment of the press.
-export function Handover({ draft, machines, etag, written }: { draft: string; machines: readonly string[]; etag: () => string | undefined; written: () => void }) {
+// `etag` reads the draft's ETag as this page shows it, at the moment of the press. `seeChange` is the page's
+// "Show their change" for a draft that changed under it: it reads the draft again and keeps that read's ETag, and
+// answers the note to show where it did not read.
+export function Handover({ draft, machines, etag, seeChange, written }: { draft: string; machines: readonly string[]; etag: () => string | undefined; seeChange: () => string | undefined; written: () => void }) {
   const writes = useWrites()!;
   const read = useSettled();
   const reads = useReads();
@@ -37,6 +42,7 @@ export function Handover({ draft, machines, etag, written }: { draft: string; ma
   const [lines, setLines] = useState<Readonly<Record<string, Line>>>({});
   const [running, setRunning] = useState(false);
   const [held, setHeld] = useState(false);
+  const [note, setNote] = useState<string | undefined>();
   const live = useRef(true);
   // The press in progress: aborted when the page leaves, and when the shell invalidates the reads it began with.
   const run = useRef<AbortController>(undefined);
@@ -54,6 +60,7 @@ export function Handover({ draft, machines, etag, written }: { draft: string; ma
     // The press publishes what is stored, so text the editor holds unsaved would be left out of the release.
     if (unsaved.size > 0) return setHeld(true);
     setHeld(false);
+    setNote(undefined);
     setRunning(true);
     setLines({});
     // The press goes on only while the page is here and the shell has not invalidated the reads it began with
@@ -75,7 +82,7 @@ export function Handover({ draft, machines, etag, written }: { draft: string; ma
       const r = await watch(reading, op, { show: () => {}, clear: () => {}, signal: ctl.signal });
       if (r.kind === "stopped" || !current()) return { kind: "stopped" };
       if (r.kind === "failed") return { kind: "unread" };
-      if (!terminal(r.operation.state) || r.epoch === undefined || r.epoch !== client.currentEpoch) return { kind: "ended", text: notEstablished(op) };
+      if (!established(r, client.currentEpoch)) return { kind: "ended", text: notEstablished(op) };
       const e = publishEnd(r.operation);
       return "release" in e ? { kind: "released" } : { kind: "ended", text: e.text };
     };
@@ -107,7 +114,8 @@ export function Handover({ draft, machines, etag, written }: { draft: string; ma
         {reason !== undefined && <span data-testid="handover-reason"> {reason}</span>}
       </p>
       {held && <p role="alert" data-testid="handover-unsaved">{UNSAVED}</p>}
-      {shown.length > 0 && <ul aria-label="Handover progress" aria-live="polite">{shown.map(([k, l]) => <LineView key={k} k={k} line={l} />)}</ul>}
+      {shown.length > 0 && <ul aria-label="Handover progress" aria-live="polite">{shown.map(([k, l]) => <LineView key={k} k={k} line={l} show={() => setNote(seeChange())} />)}</ul>}
+      {note !== undefined && <Status testid="handover-note">{note}</Status>}
     </section>
   );
 }

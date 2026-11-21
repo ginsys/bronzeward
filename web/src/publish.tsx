@@ -58,6 +58,10 @@ export const operationId = (data: unknown): string | undefined => {
 export const notEstablished = (op: string) =>
   `Publication operation ${short(op)} ended when it was read, but the installation was restored or entered recovery mode after that, so its outcome is not established. Read the operation again.`;
 
+// Whether a watched operation's end decides anything: it is terminal and was read under the client's epoch.
+export const established = (r: { operation: Operation; epoch: string | undefined }, epoch: string | undefined) =>
+  terminal(r.operation.state) && r.epoch !== undefined && r.epoch === epoch;
+
 // Whether Publish stays locked. A write still open (in flight, or unknown with its notice not yet dismissed)
 // locks it. An accepted one keeps it locked until its operation is known to have failed, because only then
 // has the draft stayed open. A dismissed unknown outcome locks nothing: the write is no longer open.
@@ -86,8 +90,7 @@ function Progress({ op, draft, onFailed }: { op: string; draft: string; onFailed
     }).then((r) => {
       if (r.kind === "stopped" || abort.signal.aborted) return;
       if (r.kind === "failed") return show({ type: "end", text: now.current.failure(r.res) });
-      if (!terminal(r.operation.state)) return show({ type: "end", text: notEstablished(op) });
-      if (r.epoch === undefined || r.epoch !== client.currentEpoch) return show({ type: "end", text: notEstablished(op) });
+      if (!established(r, client.currentEpoch)) return show({ type: "end", text: notEstablished(op) });
       const e = publishEnd(r.operation);
       // A published draft takes no write: its ETag is forgotten once the operation is known to have succeeded,
       // whether or not its result names the release (the CLI does the same).

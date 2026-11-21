@@ -268,7 +268,7 @@ describe("the act a position calls for", () => {
 describe("the page: the sentence, and the roles", () => {
   const noReads: Reads = { client: { read: () => new Promise(() => {}) }, settle: () => true, undropped: () => () => true, view: "", again: 0, regained: 0, go: () => {}, failure: () => null };
   const page = (roles: readonly ("author" | "publisher" | "approver")[]) =>
-    renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles, offline: false } }, h(ReadsProvider, { value: noReads }, h(Handover, { draft: "drf_1", machines: [A], etag: () => SHOWN, written: () => {} })))));
+    renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles, offline: false } }, h(ReadsProvider, { value: noReads }, h(Handover, { draft: "drf_1", machines: [A], etag: () => SHOWN, seeChange: () => undefined, written: () => {} })))));
   const button = (markup: string) => /<button[^>]*>Start managing these machines<\/button>/.exec(markup)![0];
 
   test("with all three roles the button is on and the sentence says what the press does in order, and that nothing is sent to a machine", () => {

@@ -2251,7 +2251,9 @@ The web client's draft page offers "Start managing these machines" for a draft t
    revision with that operation ([persistence and API §7.3](persistence-api.md#73-natural-keys)), and the press follows
    it with the progress reader the publication page uses, ending in its words. The publication carries the draft's
    ETag as the page showed it (the one the publication page and the discard keep), so a draft another author changed
-   is refused with 412, in the page's words, and never published unseen; with no ETag kept the press sends nothing and
+   is refused with 412 and never published unseen. The draft's line then says so and offers "Show their change", the
+   page's own route for a refused draft write: it reads the draft again and keeps that read's ETag (and asks first while
+   the editor holds unsaved text), and the next press sends that ETag. With no ETag kept the press sends nothing and
    says to read the draft again. A machine whose step
    fails stops alone with the refusal in words, and a later press retries it alone. The same act twice in one press stops
    the machine instead of looping.
