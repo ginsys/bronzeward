@@ -88,13 +88,19 @@ describe("sharedAddresses: two unnamed machines of the list in hand on one addre
     expect(machineText(pair[0]!, shared)).toBe("10.0.0.3 (UUID 564d1a2b…)");
     expect(machineText(pair[1]!, shared)).toBe("10.0.0.3 (UUID 564d1a2c…)");
   });
-  test("two machines with one value cannot be told apart, and show it whole, not forever lengthened", () => {
+  test("two machines with one value cannot be told apart, and the cut stays at four", () => {
     const same = [at("mch_j", null, "10.0.0.4:1", { talosNodeId: "abcdef0123" }), at("mch_k", null, "10.0.0.4:2", { talosNodeId: "abcdef0123" })];
-    expect(machineText(same[0]!, sharedAddresses(same))).toBe("10.0.0.4 (node abcdef0123)");
+    expect(machineText(same[0]!, sharedAddresses(same))).toBe("10.0.0.4 (node abcd…)");
   });
-  test("an unsafe node ID falls back to a safe UUID", () => {
-    const pair = [at("mch_l", null, "10.0.0.5:1", { talosNodeId: "bad‮id", smbiosUuid: "9a3e1c5d-0000" }), at("mch_m", null, "10.0.0.5:2", { talosNodeId: "n2" })];
-    expect(machineText(pair[0]!, sharedAddresses(pair))).toBe("10.0.0.5 (UUID 9a3e…)");
+  test("machines that can never differ do not drag a distinct one out to its whole value", () => {
+    const three = [
+      at("mch_l", null, "10.0.0.5:1", { talosNodeId: "bad‮id-one" }),
+      at("mch_m", null, "10.0.0.5:2", { talosNodeId: "bad‮id-two" }),
+      at("mch_n", null, "10.0.0.5:3", { smbiosUuid: "9a3e1c5d-0000-0000-0000-000000000009" }),
+    ];
+    const shared = sharedAddresses(three);
+    expect(machineText(three[0]!, shared)).toBe("10.0.0.5 (node unknown)");
+    expect(machineText(three[2]!, shared)).toBe("10.0.0.5 (UUID 9a3e…)");
   });
   test("a node ID or UUID that is not safe text, or not text, reads unknown in the suffix", () => {
     const pair = [at("mch_f", null, "10.0.0.2:1", { talosNodeId: "bad‮id" }), at("mch_g", null, "10.0.0.2:2", { talosNodeId: null, smbiosUuid: "ok\nid" })];
