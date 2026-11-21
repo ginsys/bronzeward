@@ -11,8 +11,9 @@
 // shape, and the real files are read byte for byte.
 // A member named by a string key (`expect(x)["toEqual"]([])`, `helpers["storageEmpty"]`, `import { "storageEmpty" as e }`)
 // is the same read as the property form. Stated limits, because the parser cannot see them: a computed key (`x[name]`), a
-// key built at run time (`"storage" + "Empty"`), a read through an alias (`const e = expect`), a count range that
-// excludes zero without naming it (`{ lt: 1 }`), and a matcher that a later expect-webdriverio adds to the list.
+// key built at run time (`"storage" + "Empty"`), a read through an alias (`const e = expect`), a string-keyed destructuring
+// assignment target (`({ "storageEmpty": e } = helpers)`), a count that means zero without a literal `0` (`expect.oneOf(0)`,
+// a fractional bound such as `{ lte: 0.5 }`), and a matcher that a later expect-webdriverio adds to the list.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -419,7 +420,7 @@ test("the negative control: a string key that names no absence read, and a compu
   expect(absenceReads(sample.join("\n"))).toEqual([]);
 });
 
-// expect-webdriverio 8.0.0 exports these and the guard's list used to hold eleven of them.
+// The expect-webdriverio 8.0.0 matchers the guard's list used to miss.
 const ADDED_MATCHERS = [
   "toBeDisabled", "toBeDisplayedInViewport", "toBeSelected", "toBeChecked", "toBeStable", "toBeRequired", "toBeReadOnly",
   "toHaveChildren", "toHaveComputedLabel", "toHaveComputedRole", "toHaveElementProperty", "toHaveHeight", "toHaveHref",
@@ -437,7 +438,7 @@ test("the positive control: every wdio matcher the list used to miss is a read o
   ]);
 });
 
-test("the negative control: the list holds no name that wdio 8.0.0 does not export, and the positive form of each is not a read", () => {
+test("the negative control: toBeVisible, which wdio 8.0.0 does not export, is off the list, and the positive form of each added matcher is not a read", () => {
   const sample = [
     'await expect($("a")).not.toBeVisible();',
     ...ADDED_MATCHERS.filter((m) => m !== "toBeElementsArrayOfSize" && m !== "toHaveChildren" && m !== "toBeRequestedTimes").map((m) => `await expect(subject).${m}(arg);`),
