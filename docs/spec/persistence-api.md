@@ -4920,10 +4920,13 @@ design and evidence do not settle the question. Each is marked in place as
     the source `machine`, to any `author` with no review, importer or kind
     test, or when the import's source is `document`, the caller is the
     revision's `author` and that same principal continued the import's
-    operator review (compilation §3.6 item 5). It holds the same reach as
-    `GET /ingestions/{id}/review`, which already shows any `author` the staged
-    document of any paused claim, and it states no more than the server
-    already allows. The change takes no API revision (§9.1): the table's
+    operator review (compilation §3.6 item 5). The readers are the same as
+    those of `GET /ingestions/{id}/review`, which already shows any `author`
+    the staged document of any paused claim. The documents and the time are
+    wider: the review shows the staged text of a claim that asked for a
+    review, while it is paused, and this read shows the stored text of every
+    import read from a node, reviewed or not, for as long as the revision
+    exists. The change takes no API revision (§9.1): the table's
     "Adds" column names a route, a field, a header or a problem code, and this
     adds none, only who the existing route answers; the narrowing of the same
     route by ginsys/bronzeward#902 took none either. Servers of the same
