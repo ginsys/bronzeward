@@ -9,7 +9,7 @@ import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag, lastGood, NO_ETAG, WriteResult } from "./drafts.tsx";
 import { startsNew, useSend, useWrites } from "./forms.tsx";
 import { settledReads, watchView } from "./imports.tsx";
-import { Ref, short, useItem, usePending, useReads } from "./list.tsx";
+import { Detail, Ref, short, useItem, usePending, useReads } from "./list.tsx";
 import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
@@ -150,7 +150,12 @@ function Publish({ id }: { id: string }) {
   return (
     <>
       <h2>{d === undefined ? `Publish draft ${short(id)}` : `Publish draft: ${draftText(d) ?? short(id)}`}</h2>
-      {d !== undefined && <p>{d.state}, revision {d.revision}, <ClusterRef id={d.cluster} />.</p>}
+      {d !== undefined && (
+        <>
+          <p data-testid="draft-line">{d.state}, revision {d.revision}, <ClusterRef id={d.cluster} />.</p>
+          <Detail id={d.id} />
+        </>
+      )}
       {pending}
       {d !== undefined && d.state !== "open" && <Status testid="not-open">{NOT_OPEN(d.state)}</Status>}
       {d !== undefined && d.state === "open" && (

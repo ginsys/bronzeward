@@ -660,11 +660,23 @@ describe("ginsys/bronzeward#1055: the draft and publish pages", () => {
     expect(headings()[0]).toBe("Draft: drf_k2pq…cdef");
   });
 
-  test("the publish page is headed by the same title and says the same line", async () => {
+  test("an entry whose name is not safe text shows no part of it, not even a short one", async () => {
+    const entry = (name: string) => ({ kind: "fragment", name, layer: "role", revision: "frv_a", head: "frv_a", base: null });
+    answers[`/drafts/${DRF}`] = ok({ ...draft, entries: [entry("a‮b"), entry("a\nb"), entry("ok-name")] });
+    await mount(providers(h(DraftItem, { id: DRF })));
+    await settled();
+    const names = [...box.querySelectorAll('ul[aria-label="Entries"] li button')].map((b) => b.textContent);
+    expect(names).toEqual(["fragment (name not shown)", "fragment (name not shown)", "fragment ok-name"]);
+  });
+
+  test("the publish page is headed by the same title, says the same line and carries the identifier with Copy", async () => {
     await mount(providers(h(PublishDraft, { query: `draft=${DRF}` })));
     await settled();
     expect(headings()[0]).toBe("Publish draft: Add the office labels");
     expect(text()).toContain("open, revision 3, Cluster office.");
+    expect(box.querySelector('[data-testid="draft-line"]')?.textContent).toBe("open, revision 3, Cluster office.");
+    expect(text()).toContain(`Identifier ${DRF}`);
+    expect([...box.querySelectorAll("button")].map((b) => b.textContent)).toContain("Copy");
   });
 });
 

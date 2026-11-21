@@ -202,7 +202,7 @@ describe("the draft editor (#339)", () => {
     const title = `synthetic ${hex()}`;
     await $('input[name="title"]').setValue(title);
     await $("main form").$("button=Create draft").click();
-    await expect($('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`"${title}" created in cluster`), { wait: 20_000 });
+    await expect($('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`Draft ${title} created (`), { wait: 20_000 });
     await $('[data-testid="write-result"]').$("a").click();
     await expect($("main h2")).toHaveText(`Draft: ${title}`);
     await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining("open, revision"));
