@@ -35,6 +35,7 @@ type planFake struct {
 	busy                      func(path string) bool
 	post                      func(w http.ResponseWriter, path string)
 	bodies                    []string
+	gets                      map[string]int // GETs answered, by path
 }
 
 const planJSON = `{"id":"pln_BWSYNTH","revision":2,"state":%q,"committedOperation":%s,"approval":%s,"cluster":"cl_BWSYNTH",` +
@@ -116,6 +117,10 @@ func (f *planFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.gets == nil {
+		f.gets = map[string]int{}
+	}
+	f.gets[path]++
 	switch path {
 	case "/server":
 		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
@@ -165,6 +170,15 @@ func (f *planFake) set(do func(*planFake)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	do(f)
+}
+
+// got is the GETs of path answered since the last call, and forgets them.
+func (f *planFake) got(path string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := f.gets[path]
+	f.gets = nil
+	return n
 }
 
 func (f *planFake) took() []string {
@@ -702,5 +716,58 @@ func TestPlanCreateSaveFails(t *testing.T) {
 	code, out, errOut := runCtl(t, "plan", "create", "--release", "rel_BWSYNTH", "--machine", "mch_a", "--operation", "apply-config")
 	if code != 1 || !strings.Contains(out, "Plan pln_BWSYNTH  proposed") || !strings.Contains(errOut, "keeping the epoch") {
 		t.Errorf("exit %d, stdout %q, stderr %q; want the plan shown and the save failure reported", code, out, errOut)
+	}
+}
+
+// A body the command already read is not read again for a title built on it (ginsys/bronzeward#1017): a
+// cancelled committed plan names its operation, whose title is built on the plan; an approval's prediction
+// reads the release and its draft that the plan's view read for the release's title.
+func TestTitlesReuseWhatTheCommandRead(t *testing.T) {
+	f := planServer(t)
+	f.set(func(f *planFake) {
+		f.state = "committed"
+		f.post = func(w http.ResponseWriter, _ string) {
+			fmt.Fprint(w, `{"plan":"pln_BWSYNTH","machine":"mch_a","cancelledBy":"svc_BWSYNTH","role":"publisher","reason":"BWSYNTH",`+
+				`"act":"act_BWSYNTH","epoch":"ep_BWSYNTH-2","at":"2026-11-01T06:10:00Z"}`)
+		}
+	})
+	cancel := []string{"plan", "cancel", "pln_BWSYNTH", "--reason", "BWSYNTH"}
+	if code, _, errOut := runCtl(t, cancel...); code != 0 {
+		t.Fatalf("cancel without a title: exit %d, %s", code, errOut)
+	}
+	without := f.got("/plans/pln_BWSYNTH")
+	f.set(func(f *planFake) {
+		f.raw = map[string]string{
+			"/operations/op_BWSYNTH-apply": titleOp("op_BWSYNTH-apply", "apply-config", `{"plan":"pln_BWSYNTH"}`),
+			"/releases/rel_BWSYNTH":        titleRel("drf_BWSYNTH"),
+			"/drafts/drf_BWSYNTH":          `{"id":"drf_BWSYNTH","title":"` + titleDraft + `"}`,
+		}
+	})
+	code, out, errOut := runCtl(t, cancel...)
+	if code != 0 || !strings.Contains(out, "committed to operation op_BWSYNTH-apply (Apply of mch_a to ") {
+		t.Fatalf("cancel with a title: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if with := f.got("/plans/pln_BWSYNTH"); with != without {
+		t.Errorf("cancel read the plan %d times with the operation's title, %d without; want the same", with, without)
+	}
+
+	f.set(func(f *planFake) {
+		f.raw = nil
+		f.state = "proposed"
+		f.post = func(w http.ResponseWriter, _ string) {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprintf(w, approvalJSON, false)
+		}
+	})
+	f.got("/releases/rel_BWSYNTH")
+	setStdin(t, "pln_BWSYNTH\n")
+	if code, _, errOut := runCtl(t, "approve", "pln_BWSYNTH"); code != 0 {
+		t.Fatalf("approve: exit %d, %s", code, errOut)
+	}
+	f.mu.Lock()
+	rel, draft := f.gets["/releases/rel_BWSYNTH"], f.gets["/drafts/drf_BWSYNTH"]
+	f.mu.Unlock()
+	if rel != 1 || draft != 1 {
+		t.Errorf("approve read the release %d times and its draft %d times; want once each", rel, draft)
 	}
 }

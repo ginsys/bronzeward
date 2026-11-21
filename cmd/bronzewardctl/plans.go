@@ -553,6 +553,9 @@ func (e *env) planCancel(args []string) error {
 			return append(lines, "The plan is "+p.State+": it cannot be committed."), nil
 		}
 		op := or(p.CommittedOperation, "?")
+		if e.output == "table" {
+			e.holdBody(titlePath("plans", p.Id), &p)
+		}
 		e.titleRef(c, "operation", op)
 		return append(lines, sf("The plan stays committed to operation %s. ", e.ref("operation", op))+cancelLimits,
 			"Follow it with: bronzewardctl operation watch "+client.ShellWord(op)), nil
