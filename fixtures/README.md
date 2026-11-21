@@ -83,12 +83,12 @@ fixtures/bin/down
 ## How long a run takes
 
 The scripts bound each request they send to a service, but set no limit on a whole run, so that limit
-is the caller's. Each figure below is one
-run, measured once on 2026-11-21 on the maintainer's workstation `goldorak` (20 CPUs, 64 GiB RAM,
-Linux 7.2.12, Docker; other load on the host was not measured): one reading has no spread, so none
-of them is a typical value. The limit given with each is that duration times 1.5, rounded up to a whole minute; a caller that sees a
-run end at its limit should raise it and not read it as a failure of the run. A slower host or a cold
-image cache needs more, and `up`'s image build and pulls are the part that varies most.
+is the caller's. Each figure below is one run, measured once on 2026-11-21 on the maintainer's
+workstation `goldorak` (20 CPUs, 64 GiB RAM, Linux 7.2.12, Docker; other load on the host was not
+measured): one reading has no spread, so none of them is a typical value. The limit given with each
+is that duration times 1.5, rounded up to a whole minute. A caller that sees a run end at its limit
+should raise it and not read that as a failure of the run. A slower host or a cold image cache may
+need more, which these figures do not show.
 
 | Run | Measured once | Limit to give it |
 |---|---|---|
