@@ -30,7 +30,7 @@ func Valid(s string) bool {
 // it quoted and cut at 64 characters.
 func FromHostname(hostname string) (name, note string) {
 	if hostname == "" {
-		return "", "no name: the node reported no hostname, so it shows its address"
+		return "", "no name: the node reported no hostname"
 	}
 	name = strings.ToLower(hostname)
 	if !Valid(name) {

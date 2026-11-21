@@ -701,7 +701,7 @@ describe("onboard naming: a machine is named by the hostname its node reports", 
     ["a one-label hostname of digits", "42", { name: "42" }],
     ["the longest hostname", long, { name: long }],
     ["upper case, lowered and said so", "Alcorak.Office.Ginsys.Net", { name: "alcorak.office.ginsys.net", note: "named by its hostname in lower case" }],
-    ["no hostname", "", { note: "no name: the node reported no hostname, so it shows its address" }],
+    ["no hostname", "", { note: "no name: the node reported no hostname" }],
     ["an underscore", "W_2", { note: 'no name: the hostname "W_2" is not a valid name' }],
     ["a trailing dot", "alcorak.office.", { note: 'no name: the hostname "alcorak.office." is not a valid name' }],
     ["an address", "10.0.0.1", { note: 'no name: the hostname "10.0.0.1" is not a valid name' }],
@@ -728,7 +728,7 @@ describe("onboard naming: a machine is named by the hostname its node reports", 
     expect(lines.filter((l) => l.key.startsWith("machine:")).map((l) => [l.key, l.detail])).toEqual([
       ["machine:n1", undefined],
       ["machine:n2", 'no name: the hostname "W_2" is not a valid name'],
-      ["machine:n4", "no name: the node reported no hostname, so it shows its address"],
+      ["machine:n4", "no name: the node reported no hostname"],
       ["machine:n5", "named by its hostname in lower case"],
     ]);
   });
@@ -749,7 +749,7 @@ describe("onboard naming: a machine is named by the hostname its node reports", 
     // The words never carry the holder's identifier; the line carries it beside them, for the link.
     expect(lines.filter((l) => l.key.startsWith("machine:")).map((l) => [l.key, l.state, l.detail, l.holder])).toEqual([
       ["machine:n1", "done", undefined, undefined],
-      ["machine:n2", "done", 'no name: the name "alcorak.office.ginsys.net" is already held by another machine of the cluster; rename or remove that machine, then name this one', holder],
+      ["machine:n2", "done", 'no name: the name "alcorak.office.ginsys.net" is already held by another machine of the cluster; rename that machine, then name this one', holder],
     ]);
     expect(s.machines.size).toBe(2);
   });

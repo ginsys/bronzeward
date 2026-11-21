@@ -184,7 +184,8 @@ give a node a path that reads as an embedded document's.
    filled from the name, not kept as an explicit hostname. Talos's document
    holds only `auto` and `hostname`, so nothing else is lost, and a document
    that kept `auto: off` would stop the fill (§6.1). Only that document is
-   removed. A hostname that differs from the name, an FQDN, a different case, a
+   removed. A hostname that differs from the name (a different case
+   included; a full hostname equal to a full name is removed like any other), a
    machine with no name, and a configuration without a `HostnameConfig` stay as
    they are. The removal comes first so that nothing is minted for a value
    that is then dropped: an operator mark that addresses a node of the removed

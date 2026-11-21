@@ -163,7 +163,7 @@ func nameRefusal(err error, name string) (note, heldBy string) {
 	switch p.Code() {
 	case "name-in-use":
 		heldBy, _ = p.Doc["machine"].(string)
-		return fmt.Sprintf("no name: the name %q is already held by another machine of the cluster; rename or remove that machine, then name this one", name), heldBy
+		return fmt.Sprintf("no name: the name %q is already held by another machine of the cluster; rename that machine, then name this one", name), heldBy
 	case "invalid-request":
 		return fmt.Sprintf("no name: the server refused the hostname %q as a name", name), ""
 	}

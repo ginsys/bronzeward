@@ -16,7 +16,7 @@ func TestFromHostname(t *testing.T) {
 		{"a one-label hostname of digits", "42", "42", ""},
 		{"the longest hostname", long, long, ""},
 		{"upper case", "Alcorak.Office.Ginsys.Net", "alcorak.office.ginsys.net", "named by its hostname in lower case"},
-		{"no hostname", "", "", "no name: the node reported no hostname, so it shows its address"},
+		{"no hostname", "", "", "no name: the node reported no hostname"},
 		{"an underscore", "W_2", "", `no name: the hostname "W_2" is not a valid name`},
 		{"a trailing dot", "alcorak.office.", "", `no name: the hostname "alcorak.office." is not a valid name`},
 		{"an address", "10.0.0.1", "", `no name: the hostname "10.0.0.1" is not a valid name`},
