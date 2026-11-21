@@ -2246,7 +2246,10 @@ The web client's draft page offers "Start managing these machines" for a draft t
    approval and for every CLI approval.
 3. It acts only on a machine with no `Applied`. A machine with an `Applied`, a drift record included, keeps its separate steps.
 4. Each act is chosen from the draft's state and the `step` of `GET /machines/{id}/position`, read at that moment. A
-   second press, after a closed page or a failed step, therefore sends no act whose result exists. A machine whose step
+   second press, after a closed page or a failed step, therefore sends no act whose result exists. The one request that
+   can meet a result is the publication: the server answers a publication already queued or running for the draft's
+   revision with that operation ([persistence and API §7.3](persistence-api.md#73-natural-keys)), and the press follows
+   it. A machine whose step
    fails stops alone with the refusal in words, and a later press retries it alone. The same act twice in one press stops
    the machine instead of looping.
 5. The roles are the routes': `publisher` for the publication and the plan, `approver` for the approval. Without either,
