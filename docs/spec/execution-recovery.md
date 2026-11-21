@@ -1098,7 +1098,7 @@ state is being accepted (design §12.1).
    the handover below compares against the same digest. Where the machine has
    a name and the drifted configuration holds a `HostnameConfig` whose hostname
    equals it, ingestion removes that document from the sanitized document, as an
-   import does (compilation contract §2.3 step 4a, §6.1): the hostname is then
+   import does (compilation contract §2.3 step 2a, §6.1): the hostname is then
    filled from the name again, and a rename reaches the machine through a release.
    The baseline stays the exact input, so this step's comparison below is
    unchanged.
