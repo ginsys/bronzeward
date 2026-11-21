@@ -70,7 +70,7 @@ describe("the publication page (#342)", () => {
     const f = await api("h-author", "PUT", `/drafts/${id}/fragments/${name}`, { layer: "role", document: syntheticDocument(name), marks: null, declarations: null }, d.etag);
     expect(f.status).toBe(200);
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at })).toMatch(SERVER);
-    await $('nav[aria-label="Main"]').$("a=Changes").click();
+    await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
     await $(`main a[title="${id}"]`).click();
     await expect($("main h2")).toHaveText(expect.stringContaining("synthetic"));
     await $("main").$("a=Publish this draft").click();
@@ -127,7 +127,7 @@ describe("the publication page (#342)", () => {
     const id = await staged(`synthetic ${hex()}`);
     const bodies = succeeded(id);
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies })).toMatch(SERVER);
-    await $('nav[aria-label="Main"]').$("a=Changes").click();
+    await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
     await $(`main a[title="${id}"]`).click();
     await $("main").$("a=Publish this draft").click();
     await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });
@@ -150,9 +150,9 @@ describe("the publication page (#342)", () => {
     const id = await staged(`synthetic ${hex()}`);
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies: succeeded(id) })).toMatch(SERVER);
     await fromTitle();
-    await tabTo((f) => f.text === "Changes", "the Changes link");
+    await tabTo((f) => f.text === "Drafts and releases", "the Drafts and releases link");
     await browser.keys("Enter");
-    await expect($("main h2")).toHaveText("Changes");
+    await expect($("main h2")).toHaveText("Drafts and releases");
     await focusSettles(onMain, "the new page");
     await tabTo((f) => f.title === id, "the draft's link");
     await browser.keys("Enter");
@@ -191,7 +191,7 @@ describe("the publication page (#342)", () => {
     const id = await staged(`synthetic w${"x".repeat(119)}`);
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies: succeeded(id) })).toMatch(SERVER);
     await narrow(async () => {
-      await $('nav[aria-label="Main"]').$("a=Changes").click();
+      await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
       await $(`main a[title="${id}"]`).click();
       await $("main").$("a=Publish this draft").click();
       await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });

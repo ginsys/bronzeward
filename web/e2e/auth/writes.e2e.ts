@@ -59,8 +59,8 @@ async function open(flags: Record<string, string> = {}): Promise<string> {
   // The sign-in cleared the write log, and no write of an earlier case reached it since.
   expect(await writes()).toEqual([]);
   await $('nav[aria-label="Main"]').$("a=Machines").click();
-  await $("main").$("button=Add cluster").click();
-  await expect($("main h2")).toHaveText("Add cluster");
+  await $("main").$("button=Enter a cluster by hand").click();
+  await expect($("main h2")).toHaveText("Enter a cluster by hand");
   return `synthetic-${randomBytes(4).toString("hex")}`;
 }
 
@@ -77,7 +77,7 @@ async function add(take: Step[], f: Faults = {}, flags: Record<string, string> =
   await fill(name);
   await faults({ upstream: at, steps: { path: "/clusters", take }, ...f });
   await watch();
-  await $("main form").$("button=Add cluster").click();
+  await $("main form").$("button=Enter a cluster by hand").click();
   return name;
 }
 
@@ -265,7 +265,7 @@ describe("the write views (#338)", () => {
     // pre-entry view in place of the page (§8.5 item 1). The shell reads /server again as soon as
     // that view replaces it, so /server is refused too, or the answer would end the view at once.
     await faults({ upstream: at, processRefused: ["/clusters", "/server"] });
-    await $("main form").$("button=Add cluster").click();
+    await $("main form").$("button=Enter a cluster by hand").click();
     await browser.waitUntil(async () => {
       for (const el of await $$('[data-testid="status"]')) if ((await el.getText().catch(() => "")).includes(PRE_ENTRY)) return true;
       return false;
@@ -297,13 +297,13 @@ describe("the write views (#338)", () => {
     const name = await add([], { held: "/clusters" });
     await browser.waitUntil(async () => (await holding()).includes("/clusters"), { timeout: 20_000, timeoutMsg: "the write was not held" });
     // once: busy disables the button (web/src/shell.tsx:53-58), so an early read fails rather than passes.
-    expect(await $("main form").$("button=Add cluster").isEnabled()).toBe(false);
+    expect(await $("main form").$("button=Enter a cluster by hand").isEnabled()).toBe(false);
     // A second submit event of the same form, its button disabled or not: the form sends nothing new.
     await browser.execute(() => document.querySelector<HTMLFormElement>("main form")!.requestSubmit());
     await browser.pause(500);
     expect(await writes()).toHaveLength(1);
     // once: the submit above ignores the button, so a button enabled during the hold fails nothing there; busy disables it (web/src/shell.tsx:53-58), so an early read fails rather than passes.
-    expect(await $("main form").$("button=Add cluster").isEnabled()).toBe(false);
+    expect(await $("main form").$("button=Enter a cluster by hand").isEnabled()).toBe(false);
     await release();
     await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
     await oneWrite(1);
@@ -314,7 +314,7 @@ describe("the write views (#338)", () => {
     await browser.waitUntil(async () => (await holding()).includes("/clusters"), { timeout: 20_000, timeoutMsg: "the write was not held" });
     const { key } = await oneWrite(1);
     const asked = await dialogsDuring(false, () => $('nav[aria-label="Main"]').$("a=Machines").click(), "no leave dialog");
-    await expect($("main h2")).toHaveText("Add cluster");
+    await expect($("main h2")).toHaveText("Enter a cluster by hand");
     // Back to the machine list: refused, the page and its address stay on the form, and the
     // history returns to the form's own entry rather than adding one.
     const entry = JSON.stringify(await browser.execute(() => history.state));
@@ -322,7 +322,7 @@ describe("the write views (#338)", () => {
     await browser.waitUntil(async () => JSON.stringify(await browser.execute(() => history.state)) === entry, { timeout: 10_000, timeoutMsg: "the history did not return to the form's entry" });
     expect(asked).toHaveLength(2);
     for (const a of asked) expect(a).toContain(`Sent, with no answer yet. Key ${key}, POST /api/v1/clusters.`);
-    await expect($("main h2")).toHaveText("Add cluster");
+    await expect($("main h2")).toHaveText("Enter a cluster by hand");
     expect(new URL(await browser.getUrl()).pathname).toBe("/clusters/new");
     await release();
     await expect(result()).toHaveText(expect.stringContaining("recorded as"), { wait: 20_000 });
@@ -359,8 +359,8 @@ describe("the write views (#338)", () => {
     const name = await add([]);
     await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
     await $('nav[aria-label="Main"]').$("a=Machines").click();
-    await $("main").$("button=Record machine").click();
-    await expect($("main h2")).toHaveText("Record machine");
+    await $("main").$("button=Add machine").click();
+    await expect($("main h2")).toHaveText("Add machine");
     // The cluster is chosen by typing its name into the list, the platform left at metal.
     const [ip, next] = [`192.0.2.${1 + randomBytes(1)[0]! % 254}`, `198.51.100.${1 + randomBytes(1)[0]! % 254}`];
     await type([["cluster", name], ["talosNodeId", `synthetic-node-${randomBytes(4).toString("hex")}`], ["talosEndpoint", ip]]);

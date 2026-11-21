@@ -2,16 +2,17 @@
 // static host answers every path outside /api/v1/ and /livez with the application.
 
 import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
+import { DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES } from "./words.ts";
 
 // The navigation of the header wireframe. Recovery is the recovery console's (#261, #364): the shell
 // shows it to a recovery-admin, and to every role while recovery mode is on.
 export const PAGES = [
   ["/machines", "Machines"],
   ["/clusters", "Clusters"],
-  ["/changes", "Changes"],
+  ["/changes", DRAFTS_AND_RELEASES],
   ["/plans", "Plans"],
   ["/operations", "Operations"],
-  ["/sources", "Sources"],
+  ["/sources", FRAGMENTS_AND_PROFILES],
   ["/audit", "Audit"],
   ["/recovery", "Recovery"],
 ] as const;

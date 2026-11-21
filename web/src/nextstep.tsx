@@ -8,13 +8,14 @@ import type { components } from "./api/v1";
 import { Ref } from "./list.tsx";
 import { planPath } from "./plan.tsx";
 import { planFor } from "./review.tsx";
+import { NOT_MANAGED_YET } from "./words.ts";
 
 export type Position = components["schemas"]["PositionBody"];
 
 export interface Step { text: string; links: { to: string; label: string; id: string }[] }
 
 export const NOT_HANDED_OVER =
-  "Not handed over: no Desired and no Applied configuration is recorded for this machine. Next: import its configuration. An import reads the node and writes nothing to it.";
+  `${NOT_MANAGED_YET}: no Desired and no Applied configuration is recorded for this machine. Next: import its configuration. An import reads the node and writes nothing to it.`;
 
 // What holds an approved plan, by the plan's kind (§2.3): an apply-config plan waits for a frozen machine, a scope
 // state the scope-state rule refuses and another machine's rollout holder; an adopt plan waits only for the machine

@@ -97,7 +97,7 @@ async function pausedImport(): Promise<string> {
   const draft = d.body!["id"] as string;
   docName = `protected-${hex()}`;
   expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
-  await $('nav[aria-label="Main"]').$("a=Changes").click();
+  await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
   await $("main").$("a=Imports").click();
   await expect($("main h2")).toHaveText("Imports", { wait: 30_000 });
   await $("main").$("button=Start import").click();

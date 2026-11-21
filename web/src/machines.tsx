@@ -10,7 +10,7 @@ import { Detail, EmptyList, Head, Id, type Listed, More, Ref, RESTARTED, Scroll,
 import { SAFE } from "./principals.ts";
 import { Status } from "./states.tsx";
 import { TalosAccessSign } from "./talosaccess.tsx";
-import { UNNAMED_MACHINE, UNNAMED_MACHINE_HEADING } from "./words.ts";
+import { CHANGED_ON_THE_MACHINE, LAST_READ_MATCHED, NOT_MANAGED_YET, RELEASE_NOT_APPLIED_YET, UNNAMED_MACHINE, UNNAMED_MACHINE_HEADING } from "./words.ts";
 
 export type Machine = components["schemas"]["MachineBody"];
 export type Cluster = components["schemas"]["ClusterBody"];
@@ -18,22 +18,22 @@ type Draft = components["schemas"]["DraftBody"];
 
 // The state filter's values, each a badge text.
 export const STATES = [
-  ["drifted", "Drifted"],
+  ["drifted", CHANGED_ON_THE_MACHINE],
   ["frozen", "Frozen"],
-  ["pending", "Pending convergence"],
-  ["matches", "Matches applied"],
-  ["not-handed-over", "Not handed over"],
+  ["pending", RELEASE_NOT_APPLIED_YET],
+  ["matches", LAST_READ_MATCHED],
+  ["not-handed-over", NOT_MANAGED_YET],
 ] as const;
 
 // A machine's badges, from the list's fields alone: openDrift is the only authority for drift, and a
 // match is never health (journeys §2.4).
 export function badges(m: Machine): string[] {
   const out: string[] = [];
-  if (m.openDrift !== null) out.push("Drifted");
+  if (m.openDrift !== null) out.push(CHANGED_ON_THE_MACHINE);
   if (m.frozen) out.push("Frozen");
-  if (m.pendingConvergence) out.push("Pending convergence");
-  if (m.desired === null && m.applied === null) out.push("Not handed over");
-  else if (m.openDrift === null && !m.pendingConvergence && m.applied !== null && m.observed?.release === m.applied.release) out.push("Matches applied");
+  if (m.pendingConvergence) out.push(RELEASE_NOT_APPLIED_YET);
+  if (m.desired === null && m.applied === null) out.push(NOT_MANAGED_YET);
+  else if (m.openDrift === null && !m.pendingConvergence && m.applied !== null && m.observed?.release === m.applied.release) out.push(LAST_READ_MATCHED);
   return out;
 }
 

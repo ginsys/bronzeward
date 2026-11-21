@@ -23,8 +23,9 @@ import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { startedBy } from "./operation-words.ts";
-import { importedConfigurationTitle, safeText, savedTitle } from "./titles.ts";
+import { importedConfigurationTitle, operationTitle, safeText, savedTitle } from "./titles.ts";
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
+import { BUILT_FROM, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES } from "./words.ts";
 
 type S = components["schemas"];
 type Col<T> = readonly [string, (t: T) => ReactNode];
@@ -147,7 +148,17 @@ const named = (kind: string): Col<{ id: string; name: string }> => [cap(kind), (
 
 const FRAGMENTS: readonly Col<S["FragmentBody"]>[] = [named("fragment"), CLUSTER, ["Scope", (f) => f.scope], ["Layer", (f) => f.layer], CURRENT, CREATED];
 const PROFILES: readonly Col<S["ProfileBody"]>[] = [named("profile"), CLUSTER, ["Scope", (p) => p.scope], CURRENT, CREATED];
-const ASSIGNMENTS: readonly Col<S["AssignmentBody"]>[] = [["Assignment", (a) => <Id id={a.id} />], CLUSTER, ["Machine", (a) => <MachineById id={a.machine} />], CURRENT, CREATED];
+// A row's first column names the thing, "Assignment of cp1", and keeps the identifier as the link's title; the
+// shortened identifier stands in until the machine is read.
+function AssignmentName({ a }: { a: S["AssignmentBody"] }) {
+  const machine = useMachineText(a.machine);
+  return <Ref to={`/assignments/${encodeURIComponent(a.id)}`} id={a.id}>{machine === undefined ? `Assignment ${short(a.id)}` : `Assignment of ${machine}`}</Ref>;
+}
+function ImportName({ b }: { b: S["IngestionBody"] }) {
+  const machine = useMachineText(b.machine);
+  return <Ref to={`/ingestions/${encodeURIComponent(b.id)}`} id={b.id}>{machine === undefined ? `Import ${short(b.id)}` : operationTitle("ingest", { machine }) ?? "Import"}</Ref>;
+}
+const ASSIGNMENTS: readonly Col<S["AssignmentBody"]>[] = [["Assignment", (a) => <AssignmentName a={a} />], CLUSTER, ["Machine", (a) => <MachineById id={a.machine} />], CURRENT, CREATED];
 
 // Never a colour alone: the class and its staleness are words.
 export const klass = (d: { class: string | null; stale?: boolean }) => `${d.class ?? "none"}${d.stale === true ? " (stale: not observed recently)" : ""}`;
@@ -169,8 +180,8 @@ export function Sources({ query, go }: { query: string; go: (to: string) => void
   const cls = q.get("class") ?? "";
   return (
     <>
-      <h2>Sources</h2>
-      <p>What releases are built from. Sources are not configuration: a machine's configuration is a release's.</p>
+      <h2>{FRAGMENTS_AND_PROFILES}</h2>
+      <p>What releases are built from. These are not configuration: a machine's configuration is a release's.</p>
       <h3>Fragments</h3>
       <ListOf label="Fragments" path="/fragments" cols={FRAGMENTS} empty="No fragments recorded yet." />
       <h3>Profiles</h3>
@@ -347,13 +358,13 @@ export const ImportBaseItem = ({ id }: { id: string }) => (
 
 const RELEASES: readonly Col<S["ReleaseBody"]>[] = [
   ["Release", (r) => <ReleaseRef r={r} />], CLUSTER, ["Published", (r) => when(r.publishedAt)], ["By", (r) => by(r.publishedBy)],
-  ["Sources", (r) => r.sources.length], ["Machines", (r) => r.machines.length],
+  [BUILT_FROM, (r) => r.sources.length], ["Machines", (r) => r.machines.length],
 ];
 
 // The imports (#340): GET /ingestions filtered by state finds paused and lapsed imports (G10), and
 // by machine, as a machine's page links them.
 const INGESTIONS: readonly Col<S["IngestionBody"]>[] = [
-  ["Import", (b) => <Id id={b.id} />], ["State", (b) => b.state], ["Machine", (b) => <MachineById id={b.machine} />], ["Draft", (b) => <Named id={b.draft} />],
+  ["Import", (b) => <ImportName b={b} />], ["State", (b) => b.state], ["Machine", (b) => <MachineById id={b.machine} />], ["Draft", (b) => <Named id={b.draft} />],
   ["Staging", (b) => b.mode], ["Lease until", (b) => (b.state === "held" || b.state === "resumed" ? when(b.leaseUntil) : "none")],
   ["Expires", (b) => when(b.expiresAt)], CREATED,
 ];
@@ -372,11 +383,11 @@ export function Imports({ query, go }: { query: string; go: (to: string) => void
   );
 }
 
-// The Changes page: drafts (#339) and the imports into them, then releases.
+// The Drafts and releases page: drafts (#339) and the imports into them, then releases.
 export function Changes() {
   return (
     <>
-      <h2>Changes</h2>
+      <h2>{DRAFTS_AND_RELEASES}</h2>
       <h3>Drafts</h3>
       <Drafts />
       <p><Ref to="/ingestions" id="ingestions">Imports</Ref>, of every machine.</p>
@@ -611,7 +622,9 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   if (id === "new" && kind === "plans") return <PlanNew query={query} />;
   if (id === undefined) {
     const pages: Record<string, () => ReactNode> = {
-      machines: () => <Machines query={query} go={go} />, clusters: () => <Clusters />, changes: () => <Changes />,
+      machines: () => <Machines query={query} go={go} />, clusters: () => <Clusters />,
+      // /drafts and /releases open the page that lists both.
+      changes: () => <Changes />, drafts: () => <Changes />, releases: () => <Changes />,
       plans: () => <Plans query={query} go={go} />, operations: () => <Operations query={query} go={go} />,
       sources: () => <Sources query={query} go={go} />, audit: () => <Audit />, recovery: () => <RecoveryConsole />,
       ingestions: () => <Imports query={query} go={go} />,

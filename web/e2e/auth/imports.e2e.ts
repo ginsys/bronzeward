@@ -52,7 +52,7 @@ const called = (id: string) => titles.get(id)!;
 // The wizard from the Changes page, with the case's machine and the draft `id` chosen and the
 // document source selected.
 async function wizard(id: string) {
-  await $('nav[aria-label="Main"]').$("a=Changes").click();
+  await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
   await $("main").$("a=Imports").click();
   await expect($("main h2")).toHaveText("Imports");
   await $("main").$("button=Start import").click();
@@ -191,7 +191,7 @@ describe("the import pages (#340)", () => {
     await browser.refresh();
     await expect($("main h2")).toHaveText(`Import of ${address}: paused`, { wait: 20_000 });
     await expect(allowed()).toHaveText("Paused for review. Continue it, or abandon it.");
-    await $('nav[aria-label="Main"]').$("a=Changes").click();
+    await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
     await $("main").$("a=Imports").click();
     await $("label*=State").$("select").selectByAttribute("value", "paused");
     await expect($(`main a[title="${ing}"]`)).toBeExisting({ wait: 20_000 });

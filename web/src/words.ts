@@ -16,6 +16,20 @@ export const THE_MACHINE = "the machine";
 export const THIS_CLUSTER = "This cluster";
 /** What stands where a fragment's or profile's name is not safe text, so no identifier or rejected text is shown. */
 export const NAME_NOT_SHOWN = "(name not shown)";
+/** The page that lists drafts and releases (navigation label and heading; /drafts and /releases open it too). */
+export const DRAFTS_AND_RELEASES = "Drafts and releases";
+/** The page that lists fragments and profiles, which the word "source" no longer names. */
+export const FRAGMENTS_AND_PROFILES = "Fragments and profiles";
+/** The column of a release that counts what it is built from. */
+export const BUILT_FROM = "Built from";
+/** The state words of a machine. */
+export const CHANGED_ON_THE_MACHINE = "Changed on the machine";
+export const NOT_MANAGED_YET = "Not managed yet";
+export const LAST_READ_MATCHED = "Last read matched what was applied";
+export const RELEASE_NOT_APPLIED_YET = "Release not applied yet";
+/** The buttons and headings that record a cluster by hand and add a machine. */
+export const ENTER_A_CLUSTER_BY_HAND = "Enter a cluster by hand";
+export const ADD_MACHINE = "Add machine";
 /** Said beside the Copy control once the identifier is on the clipboard. */
 export const COPIED = "Copied";
 /** Said beside the Copy control where the browser would not copy. */

@@ -78,7 +78,7 @@ describe("the machines", () => {
     await shows(4);
     expect(await count()).toBe("Showing 4 of 4.");
     const row = await $(`a[title="${ids[0]}"]`).parentElement().parentElement().$$("td").map((td) => td.getText());
-    expect(row).toEqual([expect.stringMatching(/^192\.0\.2\.\d+:50000$/), expect.stringMatching(/^node synthetic-node-\d$/), "none", "none", "none", "Frozen, Not handed over"]);
+    expect(row).toEqual([expect.stringMatching(/^192\.0\.2\.\d+:50000$/), expect.stringMatching(/^node synthetic-node-\d$/), "none", "none", "none", "Frozen, Not managed yet"]);
     await $("label*=State").$("select").selectByAttribute("value", "frozen");
     await shows(1);
     expect(await rows()).toEqual([ids[0]]);
@@ -103,7 +103,7 @@ describe("the machines", () => {
     await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`);
     expect(await where()).toBe(`${FIXTURE_PAGE}/machines/${id}`);
     // A machine just recorded has no Desired and no Applied: the page says it is not handed over and offers the import.
-    await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("Not handed over"), { wait: 20_000 });
+    await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("Not managed yet"), { wait: 20_000 });
     await expect($('[data-testid="next-step"]').$("a=Import this machine")).toBeDisplayed();
     await $(`a[title="${cl.id}"]`).click();
     await expect($("main h2")).toHaveText("Cluster lab-a");
@@ -295,14 +295,14 @@ describe("the machine detail (W3)", () => {
     await browser.waitUntil(async () => (await $$('[data-testid="sentences"] li').length) === want.length, { timeout: 20_000, timeoutMsg: `the sentences did not all appear (${want.length} expected)` });
     const said = await texts('[data-testid="sentences"] li');
     expect(said).toEqual(want);
-    expect(said[0]).toMatch(new RegExp(`^Drifted since 2026-10-2\\d \\d\\d:\\d\\d: a read differed from what Bronzeward last verified \\(${short(rel("a"))}\\)\\.$`));
+    expect(said[0]).toMatch(new RegExp(`^Changed on the machine since 2026-10-2\\d \\d\\d:\\d\\d: a read differed from what Bronzeward last verified \\(${short(rel("a"))}\\)\\.$`));
     expect(said).toContain("It equals the selected release; that does not close the drift.");
     expect(said).toEqual(expect.arrayContaining([expect.stringMatching(/^The latest read at 2026-10-2\d \d\d:\d\d could not read: configDigest \(node unreachable\)\.$/)]));
     // The observed read's attribution is shown under the open drift too (#423 C5).
     expect(await $('[data-testid="observed"]').getText()).toMatch(new RegExp(`^read at 2026-10-2\\d \\d\\d:\\d\\d \\(${short(m1.id)}\\): attributed to ${short(rel("b"))}$`));
     expect(said.at(-1)).toBe(HEALTH);
     // once: `said` is the snapshot asserted equal to the expected sentences above; pending convergence is not stated while the drift is open (§2.4).
-    expect(said.join(" ")).not.toContain("Pending convergence");
+    expect(said.join(" ")).not.toContain("Release not applied yet");
     expect(await texts('[data-testid="observations"] tbody tr td:last-child')).toEqual(["configDigest (node unreachable)", "nothing", "nothing"]);
     // The principal is the identity Bronzeward recorded for h-author, named by GET /principals (G23).
     await expect($('[data-testid="timeline"]')).toHaveText(expect.stringMatching(/freeze h-\S+ at \S+ author "synthetic incident"/), { wait: 20_000 });
@@ -605,11 +605,11 @@ describe("the read-only lists and items", () => {
     const at = await disposable();
     const cl = await cluster(at, "lab-a");
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
-    await nav("Sources");
+    await nav("Fragments and profiles");
     await loaded();
     expect(await texts('main [data-testid="status"]')).toEqual(expect.arrayContaining(["No fragments recorded yet.", "No profiles recorded yet.", "No assignments recorded yet.", "No dependency alerts raised."]));
     await expect($('[data-testid="last-pass"]')).toHaveText(/^(Last completed monitor pass: .+|No monitor pass has completed yet)\.$/);
-    for (const [page, empty] of [["Changes", "No releases published yet."], ["Plans", "No plans created yet."], ["Operations", "No operations recorded yet."]] as const) {
+    for (const [page, empty] of [["Drafts and releases", "No releases published yet."], ["Plans", "No plans created yet."], ["Operations", "No operations recorded yet."]] as const) {
       await nav(page);
       // Changes shows the drafts list's own status too, before the releases list's.
       await browser.waitUntil(async () => (await texts('main [data-testid="status"]')).includes(empty), { timeout: 20_000, timeoutMsg: `${page} did not show ${empty}` });
@@ -642,9 +642,9 @@ describe("the read-only lists and items", () => {
     await expect($("main dl")).toHaveText(expect.stringContaining("Desired"));
     // T1: Sign out is on the way to the navigation.
     await fromTitle();
-    expect(await tabTo((f) => f.text === "Sources", "the Sources link")).toContain("Sign out");
+    expect(await tabTo((f) => f.text === "Fragments and profiles", "the Sources link")).toContain("Sign out");
     await browser.keys("Enter");
-    await expect($("main h2")).toHaveText("Sources");
+    await expect($("main h2")).toHaveText("Fragments and profiles");
     await focusSettles(onMain, "the new page");
     expect(await where()).toBe(`${FIXTURE_PAGE}/sources`);
     await loaded();
@@ -685,7 +685,7 @@ describe("the read-only lists and items", () => {
     const [m] = await machines(at, cl.id, 1);
     const s = synthetic(cl.id, m!);
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: s.bodies })).toMatch(SERVER);
-    await nav("Changes");
+    await nav("Drafts and releases");
     await $(`a[title="${s.rel.id}"]`).click();
     await expect($("main h2")).toHaveText(`Release ${short(s.rel.id)}`);
     await expect($("main")).toHaveText(expect.stringContaining("Source revisions this release was built from (these are not configuration)"));
@@ -710,7 +710,7 @@ describe("the read-only lists and items", () => {
     await expect($("main h2")).toHaveText(`Operation ${short(s.op.id)}: apply-config, unresolved`);
     await expect($$("main tbody tr")).toBeElementsArrayOfSize(1);
     expect((await answers()).some((a) => a.startsWith(`/operations?plan=${s.plan.id} `))).toBe(true);
-    await nav("Sources");
+    await nav("Fragments and profiles");
     await expect($('[data-testid="last-pass"]')).toHaveText(/^Last completed monitor pass: .+\.$/);
     await expect($(`(//main//tbody/tr[contains(., "${short(s.dep.id)}")])[1]`)).toHaveText(expect.stringContaining("unknown (stale: not observed recently)"));
     // Linked from the dependencies table and from its alert's row: the first is the dependency's own.
@@ -733,7 +733,7 @@ describe("the read-only lists and items", () => {
       // The clusters are a read of their own: measure once the long option is in the filter.
       await expect($(`main option[value="${cl.id}"]`)).toHaveElementProperty("text", long);
       expect(["machines", await overflows()]).toEqual(["machines", 0]);
-      for (const [page, item, title] of [["Plans", s.plan.id, "Plan"], ["Sources", s.frg.id, "Fragment"], ["Operations", s.op.id, "Operation"]] as const) {
+      for (const [page, item, title] of [["Plans", s.plan.id, "Plan"], ["Fragments and profiles", s.frg.id, "Fragment"], ["Operations", s.op.id, "Operation"]] as const) {
         await nav(page);
         await loaded();
         expect([page, await overflows()]).toEqual([page, 0]);
@@ -742,7 +742,7 @@ describe("the read-only lists and items", () => {
         await loaded();
         expect([item, await overflows()]).toEqual([item, 0]);
       }
-      await nav("Sources");
+      await nav("Fragments and profiles");
       await $(`a[title="${s.frg.id}"]`).click();
       await $(`main tbody a[title="${s.frv.id}"]`).click();
       await expect($('[data-testid="document"]')).toBeExisting();
@@ -779,7 +779,7 @@ describe("the rendered review of a release's machine", () => {
   const reviewOf = (rel: string, machine: string) => `/releases/${rel}/machines/${machine}/review`;
   // From the Changes list to the release, and from its covered machines to the machine's review.
   async function open(rel: string, m: string) {
-    await nav("Changes");
+    await nav("Drafts and releases");
     await $(`a[title="${rel}"]`).click();
     await expect($("main h2")).toHaveText(`Release ${short(rel)}`);
     await $("main").$(`a=Rendered configuration of ${ADDRESS}`).click();
@@ -823,7 +823,7 @@ describe("the rendered review of a release's machine", () => {
 
   it("keyboard only: Tab reaches the review link and Enter opens it; contrast and target size hold on the page", async () => {
     const { s, m } = await served();
-    await nav("Changes");
+    await nav("Drafts and releases");
     await loaded();
     await tabTo((f) => f.title === s.rel.id, "the release");
     await browser.keys("Enter");
@@ -846,7 +846,7 @@ describe("the rendered review of a release's machine", () => {
   itNarrow("reflow at 320 CSS pixels: neither the release nor its review scrolls the page sideways", async () => {
     const { s, m } = await served();
     await narrow(async () => {
-      await nav("Changes");
+      await nav("Drafts and releases");
       await $(`a[title="${s.rel.id}"]`).click();
       await expect($("main h2")).toHaveText(`Release ${short(s.rel.id)}`);
       await loaded();
