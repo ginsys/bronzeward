@@ -19,6 +19,7 @@ type Operation = components["schemas"]["OperationBody"];
 export const HANDOVER_TITLE = "Start managing these machines";
 export const HANDOVER_SENTENCE =
   "This publishes the draft, then creates a handover plan for each machine and approves each plan as you, recorded as your own approval. It sends nothing to any machine. A change you apply later keeps its own plan and approval.";
+export const UNSAVED = "The draft editor holds text you have not saved, and a press publishes only what is saved. Save it or discard it, then press again. Nothing was sent.";
 export const ROLES = ["publisher", "approver"] as const;
 export const missingRoles = (held: readonly string[]) => ROLES.filter((r) => !held.includes(r));
 export const MISSING = (missing: readonly string[]) =>
