@@ -23,8 +23,11 @@ func TestEndpointServerName(t *testing.T) {
 		ips  []net.IP
 		run  func(c *oneNode) (Result, error) // what the test calls
 		ok   bool
+		// memberNotAnswered: the one member, dialled at its address with no server name, is refused by
+		// a certificate that lists the name only. Were the name passed on to the member dial, it would answer.
+		memberNotAnswered bool
 	}{
-		{name: "the caller resolved, the certificate lists the name only", dns: []string{name}, ok: true,
+		{name: "the caller resolved, the certificate lists the name only", dns: []string{name}, ok: true, memberNotAnswered: true,
 			run: func(c *oneNode) (Result, error) { return c.limited(t, c.addr, name) }},
 		{name: "the caller resolved, no name is given", dns: []string{name},
 			run: func(c *oneNode) (Result, error) { return c.limited(t, c.addr, "") }},
@@ -50,6 +53,9 @@ func TestEndpointServerName(t *testing.T) {
 			if tc.ok {
 				if err != nil || got.ClusterID != "c-1" {
 					t.Fatalf("got %+v, %v; want the cluster read", got, err)
+				}
+				if tc.memberNotAnswered && (len(got.Members) != 1 || got.Members[0].Answered) {
+					t.Fatalf("the member was dialled with the name: %+v, want one member that did not answer", got.Members)
 				}
 				return
 			}
