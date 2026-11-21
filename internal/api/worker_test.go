@@ -179,6 +179,9 @@ func (d *draftEnv) ended(op string) (string, int64, []string) {
 		}
 		types = append(types, s)
 	}
+	if err := rows.Err(); err != nil {
+		d.t.Fatal(err)
+	}
 	return state, gen, types
 }
 

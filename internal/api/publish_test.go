@@ -327,7 +327,7 @@ func (p *publishEnv) count(query string, args ...any) int {
 	p.t.Helper()
 	var n int
 	if err := p.db.QueryRow(query, args...).Scan(&n); err != nil {
-		p.t.Fatal(err)
+		fatalf(p.t, "%v", err)
 	}
 	return n
 }

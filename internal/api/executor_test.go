@@ -1273,6 +1273,9 @@ func TestExecutorSendsWithTheObservedCertificate(t *testing.T) {
 			}
 			tables = append(tables, s)
 		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
 		_ = rows.Close()
 		for _, tbl := range tables {
 			n += count(t, xe.db, `SELECT count(*) FROM "`+tbl+`" r WHERE r::text LIKE '%' || $1 || '%'`, needle)

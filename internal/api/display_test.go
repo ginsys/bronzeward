@@ -42,7 +42,7 @@ func subjectID(t *testing.T, db *sql.DB, sub string) string {
 	t.Helper()
 	var idn string
 	if err := db.QueryRow(`SELECT id FROM principal WHERE kind = 'human' AND sub = $1`, sub).Scan(&idn); err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
 	}
 	return idn
 }

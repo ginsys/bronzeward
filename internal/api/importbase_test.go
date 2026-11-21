@@ -58,6 +58,9 @@ func TestImportBaseSummary(t *testing.T) {
 		}
 		names = append(names, n)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	_ = rows.Close()
 	var baseline, config []byte
 	if err := ie.db.QueryRow(`SELECT baseline_digest, configuration_digest FROM import_base_revision WHERE id = $1`, ibr).Scan(&baseline, &config); err != nil {

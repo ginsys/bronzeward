@@ -65,7 +65,8 @@ func (ie *ingestEnv) currentETag(t *testing.T) string {
 	var rev int
 	var tok string
 	if err := ie.db.QueryRow(`SELECT revision, etag_token FROM draft WHERE id = $1`, ie.draft).Scan(&rev, &tok); err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
+		return ""
 	}
 	return etag(rev, tok)
 }
@@ -104,7 +105,8 @@ func events(t *testing.T, db *sql.DB, op string) []map[string]any {
 	t.Helper()
 	rows, err := db.Query(`SELECT number, kind, entry::text FROM operation_event WHERE operation = $1 ORDER BY number`, op)
 	if err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
+		return nil
 	}
 	defer rows.Close()
 	var out []map[string]any
@@ -112,19 +114,23 @@ func events(t *testing.T, db *sql.DB, op string) []map[string]any {
 		var n int
 		var kind, entry string
 		if err := rows.Scan(&n, &kind, &entry); err != nil {
-			t.Fatal(err)
+			fatalf(t, "%v", err)
+			return nil
 		}
 		if n != len(out)+1 || kind != "ingest" {
-			t.Fatalf("event %d (want %d) of kind %s", n, len(out)+1, kind)
+			fatalf(t, "event %d (want %d) of kind %s", n, len(out)+1, kind)
+			return nil
 		}
 		m := map[string]any{}
 		if err := json.Unmarshal([]byte(entry), &m); err != nil {
-			t.Fatal(err)
+			fatalf(t, "%v", err)
+			return nil
 		}
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
-		t.Fatal(err)
+		fatalf(t, "%v", err)
+		return nil
 	}
 	return out
 }

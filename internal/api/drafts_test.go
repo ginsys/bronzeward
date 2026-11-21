@@ -274,6 +274,9 @@ func TestProfileUpdate(t *testing.T) {
 		}
 		pins = append(pins, p)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if len(pins) != 2 || pins[0] != head || pins[1] != proposed {
 		t.Fatalf("pins %v", pins)
 	}

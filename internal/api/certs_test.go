@@ -222,6 +222,9 @@ func TestObservationsFollowAReplacedKey(t *testing.T) {
 		}
 		got = append(got, x)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 || !got[0].signedFrom(oe.keyAct) || !got[1].signedFrom(second) || got[0].Serial == got[1].Serial {
 		t.Fatalf("the two observations name %+v; want one from %+v, then another, with its own serial, from %+v", got, oe.keyAct, second)
 	}
