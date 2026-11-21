@@ -28,6 +28,7 @@ import (
 	"github.com/ginsys/bronzeward/internal/provider"
 	"github.com/ginsys/bronzeward/internal/staging"
 	"github.com/ginsys/bronzeward/internal/talos"
+	"github.com/ginsys/bronzeward/internal/talos/discover"
 )
 
 const prefix = "/api/v1"
@@ -160,6 +161,7 @@ type options struct {
 	beforeT1       func()                                                                               // runs before T1 begins
 	stopAt         func(step string) bool                                                               // a draft update's ingestion stops at step, as a killed process would
 	dial           func(ctx context.Context, talosconfig []byte, endpoint string) (talos.Reader, error) // talos.Dial by default
+	resolve        func(ctx context.Context, endpoint string) (addr, name string, err error)            // discover.ResolveEndpoint by default: a discovery's endpoint name, resolved once
 	nodeTimeout    time.Duration                                                                        // bounds each node request; nodeTimeout by default
 	discoverWithin time.Duration                                                                        // bounds a whole discovery (POST /discoveries); discoverDeadline by default
 	quoteErrors    bool                                                                                 // the pass-through control (§16): a node read's failure logs its error text
@@ -229,6 +231,9 @@ func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *AP
 	}
 	if o.dial == nil {
 		o.dial = talos.Dial
+	}
+	if o.resolve == nil {
+		o.resolve = discover.ResolveEndpoint
 	}
 	if o.nodeTimeout == 0 {
 		o.nodeTimeout = nodeTimeout

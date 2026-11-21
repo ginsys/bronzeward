@@ -221,6 +221,7 @@ var readerPolicy = policy{selectors: allowedSelectors, members: clientMembers, h
 const (
 	machineryMachine = "github.com/siderolabs/talos/pkg/machinery/api/machine"
 	machineryRuntime = "github.com/siderolabs/talos/pkg/machinery/resources/runtime"
+	machineryK8s     = "github.com/siderolabs/talos/pkg/machinery/resources/k8s"
 	applyFile        = "apply.go"
 	discoverDir      = "discover"
 	discoverPackage  = thisPackage + "/" + discoverDir
@@ -239,6 +240,7 @@ var discoverPolicy = policy{
 		cosiState:        {"IsNotFoundError"},
 		machineryHW:      {"SystemInformation", "SystemInformationID"},
 		machineryCl:      {"Identity", "Info", "InfoID", "LocalIdentity", "Member"},
+		machineryK8s:     {"KubePrismEndpoint", "KubePrismEndpoints", "KubePrismEndpointsID"},
 		machineryRuntime: {"PlatformMetadata", "PlatformMetadataID"},
 	},
 	members: clientMembers,
@@ -820,8 +822,8 @@ func TestMachineryCallsAllowlisted(t *testing.T) {
 }
 
 var discoverSurface = []string{
-	"Discover", "DiscoverLimited", "ErrNoEndpoint", "ErrUnknownContext", "Member", "Member.Address", "Member.Answered", "Member.Hostname",
-	"Member.NodeID", "Member.Platform", "Member.Role", "Member.SMBIOSUUID", "OneContext", "Result", "Result.ClusterID", "Result.Contract",
+	"CheckEndpoint", "Discover", "DiscoverLimited", "ErrNoEndpoint", "ErrUnknownContext", "Member", "Member.Address", "Member.Answered", "Member.Hostname",
+	"Member.NodeID", "Member.Platform", "Member.Role", "Member.SMBIOSUUID", "OneContext", "ResolveEndpoint", "Result", "Result.ClusterID", "Result.Contract",
 	"Result.Cut", "Result.Endpoint", "Result.KubernetesEndpoint", "Result.Members", "Result.ResolvedFrom", "Result.Supported", "Result.Version",
 	"TooManyMembers", "TooManyMembers.Error", "TooManyMembers.Limit", "node.close",
 }
@@ -847,13 +849,13 @@ func TestDiscoverCallsAllowlisted(t *testing.T) {
 	// Controls. The head uses every name the policy adds; it is clean under discoverPolicy and
 	// flagged under Reader's, so the additions are what loosens the guard and nothing else.
 	head := "package discover\nimport (\n\t\"context\"\n\t\"github.com/cosi-project/runtime/pkg/safe\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n" +
-		"\t\"github.com/siderolabs/talos/pkg/machinery/resources/cluster\"\n\t\"github.com/siderolabs/talos/pkg/machinery/resources/runtime\"\n)\n" +
-		"var _ = context.Background\nvar _ = safe.StateListAll[*cluster.Member]\nvar _ *runtime.PlatformMetadata\ntype node struct{ api *client.Client }\n"
+		"\t\"github.com/siderolabs/talos/pkg/machinery/resources/cluster\"\n\t\"github.com/siderolabs/talos/pkg/machinery/resources/k8s\"\n\t\"github.com/siderolabs/talos/pkg/machinery/resources/runtime\"\n)\n" +
+		"var _ = context.Background\nvar _ = safe.StateListAll[*cluster.Member]\nvar _ *k8s.KubePrismEndpoints\nvar _ *runtime.PlatformMetadata\ntype node struct{ api *client.Client }\n"
 	if got := policyViolations(t, "control.go", []byte(head), discoverPolicy); len(got) != 0 {
 		t.Errorf("the clean discover control is flagged: %q", got)
 	}
 	under := strings.Join(policyViolations(t, "control.go", []byte(head), readerPolicy), "\n")
-	for _, want := range []string{"safe.StateListAll is not allowlisted", "cluster.Member is not allowlisted", "runtime is not allowlisted"} {
+	for _, want := range []string{"safe.StateListAll is not allowlisted", "cluster.Member is not allowlisted", "k8s is not allowlisted", "runtime is not allowlisted"} {
 		if !strings.Contains(under, want) {
 			t.Errorf("Reader's policy does not flag %q in the discover control:\n%s", want, under)
 		}
@@ -862,6 +864,7 @@ func TestDiscoverCallsAllowlisted(t *testing.T) {
 		"another safe call":     {"var _ = safe.StateList[*cluster.Member]\n", "safe.StateList is not allowlisted"},
 		"another runtime type":  {"var _ = runtime.NewKmsgLogConfig\n", "runtime.NewKmsgLogConfig is not allowlisted"},
 		"another cluster type":  {"var _ = cluster.NewAffiliate\n", "cluster.NewAffiliate is not allowlisted"},
+		"another k8s type":      {"var _ = k8s.NewAPIServerConfig\n", "k8s.NewAPIServerConfig is not allowlisted"},
 		"an apply":              {"func (n *node) f(ctx context.Context) { n.api.ApplyConfiguration(ctx, nil) }\n", "ApplyConfiguration is denied"},
 		"a COSI destroy":        {"func (n *node) f(ctx context.Context) { n.api.COSI.Destroy(ctx, nil) }\n", "Destroy is denied"},
 		"a COSI create":         {"func (n *node) f(ctx context.Context) { n.api.COSI.Create(ctx, nil) }\n", "Create is denied"},

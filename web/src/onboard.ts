@@ -123,9 +123,9 @@ const sentence = (reason: string) => `${reason.charAt(0).toUpperCase()}${reason.
 // (internal/talos/endpoint.go ParseEndpoint): text in brackets holds only hex digits, colons and dots
 // (an IPv6 address); more than one colon, with only those characters, is an IPv6 address the server will
 // ask to have bracketed; and with at most one colon the host before it is four dotted numbers. Anything
-// else is a name, and is never sent. What has the shape is sent as it is, and the server's own sentence
-// says what is wrong with an octet, a port or the brackets: the page copies the shape, never the parser.
-// The server cannot use a name yet; when it can, this check and its sentence go.
+// else is a name. Both are sent as they are and the server's own sentence says what is wrong with an
+// octet, a port or the brackets: the page copies the shape, never the parser. The page asks only to say,
+// after a read, whether the server resolved a name.
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 const V6_TEXT = /^[0-9a-f:.]+$/i;
 export function isAddress(endpoint: string): boolean {
@@ -141,8 +141,10 @@ export function isAddress(endpoint: string): boolean {
 }
 
 const NO_ENDPOINT = "The talosconfig's context names no endpoint: type the IP address of a control-plane node.";
-const nameNote = (endpoint: string) =>
-  `This talosconfig's endpoint is ${endpoint}, which is not an IP address. The server cannot use a name yet: type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.`;
+// After a refused read of a name: the server resolves the name once and dials that address, so a name in
+// front of a load balancer, or one that does not resolve, is a 503 a node's own address does not meet.
+const nameHint = (endpoint: string) =>
+  ` The endpoint ${endpoint} is a name: if the server cannot use it, type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.`;
 
 // The endpoint a read will use: the one typed, else the chosen context's first. Undefined when the text is
 // not a talosconfig the page can cut (the read's own sentence says why).
@@ -162,7 +164,7 @@ export function endpointNote(text: string | undefined, context: string, typed: s
   const endpoint = readEndpoint(text, context, typed.trim());
   if (endpoint === undefined) return undefined;
   if (endpoint === "") return NO_ENDPOINT;
-  return isAddress(endpoint) ? `The page will try the cluster at ${endpoint}.` : nameNote(endpoint);
+  return `The page will try the cluster at ${endpoint}.`;
 }
 
 // A discovery's failure as whole sentences, with no lead of its own: the page writes "Nothing was
@@ -189,9 +191,9 @@ const keyAddress = (f: Discovery) => members(f).find((m) => m.role === "controlp
 
 // Reads the cluster's members with the cut talosconfig, and refuses what the CLI refuses before it records
 // anything: a contract this server does not render, and a cluster with no control-plane member to carry the
-// first key. The file's text is held only as its cut. A name is never sent: the server takes only an IP
-// address (endpointNote says so before the button). Each `why` is whole sentences with no lead of its own,
-// because the page writes "Nothing was recorded." once: a discovery only reads.
+// first key. The file's text is held only as its cut. A name is sent as it is: the server resolves it once
+// and answers the address it dialled (found.endpoint). Each `why` is whole sentences with no lead of its
+// own, because the page writes "Nothing was recorded." once: a discovery only reads.
 export async function discoverCluster(env: Env, text: string, o: { context?: string; endpoint?: string }): Promise<{ ok: true; plan: Plan } | { ok: false; why: string }> {
   let cut;
   try {
@@ -202,9 +204,8 @@ export async function discoverCluster(env: Env, text: string, o: { context?: str
   const typed = (o.endpoint ?? "").trim();
   const endpoint = typed !== "" ? typed : cut.endpoint;
   if (endpoint === "") return { ok: false, why: NO_ENDPOINT };
-  if (!isAddress(endpoint)) return { ok: false, why: nameNote(endpoint) };
   const out = await env.send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", document: cut.document, endpoint }, released: () => {} });
-  if (out.kind !== "done") return { ok: false, why: discoveryWhy(out) };
+  if (out.kind !== "done") return { ok: false, why: `${discoveryWhy(out)}${out.kind === "refused" && out.status === 503 && !isAddress(endpoint) ? nameHint(endpoint) : ""}` };
   const found = out.data as Discovery;
   if (!found.supported) return { ok: false, why: `Contract ${found.contract} is not the contract of the machinery in this server, so it would refuse the cluster.` };
   if (keyAddress(found) === undefined) return { ok: false, why: "No control-plane member answered, so no address can carry the first key. Run it again once one does." };

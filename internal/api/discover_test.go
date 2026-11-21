@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -174,16 +177,18 @@ func TestDiscoveryInputRefusals(t *testing.T) {
 		status int
 		code   string
 	}{
-		"viewer":            {discoveryCall(d.human("h-viewer"), "machine-config", doc, n.Endpoint), 403, "forbidden"},
-		"automation":        {discoveryCall(d.robot, "machine-config", doc, n.Endpoint), 403, "forbidden"},
-		"no endpoint":       {discoveryCall(d.author, "machine-config", doc, ""), 400, "invalid-request"},
-		"DNS endpoint":      {discoveryCall(d.author, "machine-config", doc, "node.example.test:50000"), 400, "invalid-request"},
-		"unknown kind":      {discoveryCall(d.author, "kubeconfig", doc, n.Endpoint), 400, "invalid-request"},
-		"empty document":    {discoveryCall(d.author, "machine-config", "", n.Endpoint), 400, "invalid-request"},
-		"no document":       {raw(`{"kind":"machine-config","endpoint":"` + n.Endpoint + `"}`), 400, "invalid-request"},
-		"document not text": {raw(`{"kind":"machine-config","document":1,"endpoint":"` + n.Endpoint + `"}`), 400, "invalid-request"},
-		"a Talos context":   {raw(`{"kind":"machine-config","document":` + q(doc) + `,"endpoint":"` + n.Endpoint + `","talosContext":"x"}`), 400, "invalid-request"},
-		"a query":           {withQuery, 400, "invalid-request"},
+		"viewer":             {discoveryCall(d.human("h-viewer"), "machine-config", doc, n.Endpoint), 403, "forbidden"},
+		"automation":         {discoveryCall(d.robot, "machine-config", doc, n.Endpoint), 403, "forbidden"},
+		"no endpoint":        {discoveryCall(d.author, "machine-config", doc, ""), 400, "invalid-request"},
+		"a URL endpoint":     {discoveryCall(d.author, "machine-config", doc, "https://node.example.test"), 400, "invalid-request"},
+		"a name, port 0":     {discoveryCall(d.author, "machine-config", doc, "node.example.test:0"), 400, "invalid-request"},
+		"a name with a path": {discoveryCall(d.author, "machine-config", doc, "node.example.test/x"), 400, "invalid-request"},
+		"unknown kind":       {discoveryCall(d.author, "kubeconfig", doc, n.Endpoint), 400, "invalid-request"},
+		"empty document":     {discoveryCall(d.author, "machine-config", "", n.Endpoint), 400, "invalid-request"},
+		"no document":        {raw(`{"kind":"machine-config","endpoint":"` + n.Endpoint + `"}`), 400, "invalid-request"},
+		"document not text":  {raw(`{"kind":"machine-config","document":1,"endpoint":"` + n.Endpoint + `"}`), 400, "invalid-request"},
+		"a Talos context":    {raw(`{"kind":"machine-config","document":` + q(doc) + `,"endpoint":"` + n.Endpoint + `","talosContext":"x"}`), 400, "invalid-request"},
+		"a query":            {withQuery, 400, "invalid-request"},
 	} {
 		rec := d.do(d.api, c.call)
 		wantProblem(t, rec, c.status, c.code)
@@ -244,6 +249,81 @@ func TestDiscoveryRuleRefusals(t *testing.T) {
 		}
 	}
 	d.noWrites(t, "refusals")
+}
+
+// stubResolver is the options' resolver for a test: it answers from table (name to address) and
+// records the endpoints it was asked to resolve. An endpoint not in the table does not resolve.
+func stubResolver(table map[string]string) (func(context.Context, string) (string, string, error), func() []string) {
+	var mu sync.Mutex
+	var asked []string
+	return func(_ context.Context, s string) (string, string, error) {
+			mu.Lock()
+			asked = append(asked, s)
+			mu.Unlock()
+			if addr, ok := table[s]; ok {
+				return addr, s, nil
+			}
+			return "", "", errors.New("does not resolve")
+		}, func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]string(nil), asked...)
+		}
+}
+
+// §3.3, §9.2: a DNS name endpoint is resolved once, the address it gave is the one dialled (the
+// extraction, the certificate and the walk), the answer names that address, and nothing is recorded.
+func TestDiscoveryTakesAName(t *testing.T) {
+	ca := newTalosCA(t)
+	n, _ := discoveryNode(t, ca, refusingMembers...)
+	resolve, asked := stubResolver(map[string]string{"cluster.example.test:" + portOfEndpoint(t, n.Endpoint): n.Endpoint})
+	d := newDiscoveryEnv(t, options{resolve: resolve}, 0)
+	name := "cluster.example.test:" + portOfEndpoint(t, n.Endpoint)
+	rec := d.do(d.api, discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), name))
+	b := decode[discoveryBody](t, rec, http.StatusOK)
+	if b.ClusterID != "c-disc" || b.Endpoint != n.Endpoint || len(b.Members) != 2 {
+		t.Fatalf("answer %+v", b)
+	}
+	if got := asked(); len(got) != 1 || got[0] != name {
+		t.Errorf("the resolver was asked for %v, want the name once", got)
+	}
+	if len(n.Seen()) == 0 {
+		t.Error("control: no request reached the node at the resolved address")
+	}
+	if d.logged("cluster.example.test") {
+		t.Error("the log holds the name")
+	}
+	d.noWrites(t, "a discovery by name")
+}
+
+// §9.2: a name that does not resolve is 503 talos-access-unavailable, quotes neither the name nor the
+// document, reaches no node and records nothing.
+func TestDiscoveryNameDoesNotResolve(t *testing.T) {
+	ca := newTalosCA(t)
+	n, _ := discoveryNode(t, ca, refusingMembers...)
+	resolve, asked := stubResolver(nil)
+	d := newDiscoveryEnv(t, options{resolve: resolve}, 0)
+	rec := d.do(d.api, discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), "gone.example.test"))
+	wantProblem(t, rec, http.StatusServiceUnavailable, "talos-access-unavailable")
+	if strings.Contains(rec.Body.String(), "gone.example.test") || strings.Contains(rec.Body.String(), b64(ca.Key)) {
+		t.Errorf("the problem quotes the name or the document: %s", rec.Body)
+	}
+	if got := asked(); len(got) != 1 {
+		t.Errorf("control: the resolver was asked %d times, want 1", len(got))
+	}
+	if len(n.Seen()) != 0 {
+		t.Errorf("%d requests reached a node", len(n.Seen()))
+	}
+	d.noWrites(t, "an unresolved name")
+}
+
+func portOfEndpoint(t *testing.T, endpoint string) string {
+	t.Helper()
+	_, p, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // §9.2: an endpoint that does not answer, and an endpoint that refuses a certificate signed from the key,

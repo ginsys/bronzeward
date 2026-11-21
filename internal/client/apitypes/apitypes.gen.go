@@ -11,6 +11,27 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for DiscoveryInputKind.
+const (
+	DiscoveryInputKindMachineConfig DiscoveryInputKind = "machine-config"
+	DiscoveryInputKindSecretsBundle DiscoveryInputKind = "secrets-bundle"
+	DiscoveryInputKindTalosconfig   DiscoveryInputKind = "talosconfig"
+)
+
+// Valid indicates whether the value is a known member of the DiscoveryInputKind enum.
+func (e DiscoveryInputKind) Valid() bool {
+	switch e {
+	case DiscoveryInputKindMachineConfig:
+		return true
+	case DiscoveryInputKindSecretsBundle:
+		return true
+	case DiscoveryInputKindTalosconfig:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DiscoveryMemberRole.
 const (
 	DiscoveryMemberRoleControlplane DiscoveryMemberRole = "controlplane"
@@ -1238,7 +1259,7 @@ type DiscoveryBody struct {
 	// Endpoint The address dialled, as host:port.
 	Endpoint string `json:"endpoint"`
 
-	// KubernetesEndpoint A proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member.
+	// KubernetesEndpoint The cluster endpoint (https, host and port) that every control-plane member that answered reports as its own, when at least one answered and all report the same usable value (an IP address that is not the unspecified one, or a DNS name that is not localhost, and a port from 1 to 65535); otherwise a proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member.
 	KubernetesEndpoint string            `json:"kubernetesEndpoint"`
 	Members            []DiscoveryMember `json:"members"`
 
@@ -1248,6 +1269,19 @@ type DiscoveryBody struct {
 	// Version The Talos version the dialled node reports.
 	Version string `json:"version"`
 }
+
+// DiscoveryInput defines model for DiscoveryInput.
+type DiscoveryInput struct {
+	// Document The first key's text, at most 512 KiB, never stored, logged or returned.
+	Document string `json:"document"`
+
+	// Endpoint An IP literal or a DNS name, with an optional port. A name is resolved once, and every dial of the call goes to the address it gave.
+	Endpoint string             `json:"endpoint"`
+	Kind     DiscoveryInputKind `json:"kind"`
+}
+
+// DiscoveryInputKind defines model for DiscoveryInput.Kind.
+type DiscoveryInputKind string
 
 // DiscoveryMember defines model for DiscoveryMember.
 type DiscoveryMember struct {
@@ -2982,7 +3016,7 @@ type PostClustersJSONRequestBody = ClusterInput
 type PostClustersIdFirstKeysJSONRequestBody = FirstKeyInput
 
 // PostDiscoveriesJSONRequestBody defines body for PostDiscoveries for application/json ContentType.
-type PostDiscoveriesJSONRequestBody = FirstKeyInput
+type PostDiscoveriesJSONRequestBody = DiscoveryInput
 
 // PostDraftsJSONRequestBody defines body for PostDrafts for application/json ContentType.
 type PostDraftsJSONRequestBody = DraftInput

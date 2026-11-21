@@ -502,8 +502,9 @@ paths:
       description: Finds a cluster's identity and members from a first key, as bronzewardctl cluster discover does from a talosconfig,
         and records nothing (API revision 11; persistence and API §9.2). The only POST that only reads, so it takes no Idempotency-Key
         and no Bronzeward-Expected-Epoch, records no act and no idempotency record, and has no replay. The document is the first-key
-        input's (kind, document, endpoint) and is never stored, logged or returned. A refused or unusable document is 422
-        validation-failed with the signer's rule; an endpoint that does not answer, does not accept the key or gives no cluster identity
+        input's (kind, document, endpoint) and is never stored, logged or returned; the endpoint may be a DNS name, which the server
+        resolves once and dials as that address. A refused or unusable document is 422
+        validation-failed with the signer's rule; an endpoint that does not resolve, does not answer, does not accept the key or gives no cluster identity
         is 503 talos-access-unavailable, and a refused key is not told apart from an unreachable endpoint; a cluster with more members
         than the bound is 422 validation-failed with the rule too-many-members and the limit. At the deadline the members read so far are
         answered and the rest listed unanswered, with complete false.
@@ -513,7 +514,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/FirstKeyInput'}
+            schema: {$ref: '#/components/schemas/DiscoveryInput'}
       responses:
         '200':
           description: OK.
@@ -2994,7 +2995,7 @@ components:
         contract: {type: string, description: The minor of version; empty when it has none.}
         supported: {type: boolean, description: Whether contract is the minor this server renders.}
         endpoint: {type: string, description: 'The address dialled, as host:port.'}
-        kubernetesEndpoint: {type: string, description: 'A proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member.'}
+        kubernetesEndpoint: {type: string, description: 'The cluster endpoint (https, host and port) that every control-plane member that answered reports as its own, when at least one answered and all report the same usable value (an IP address that is not the unspecified one, or a DNS name that is not localhost, and a port from 1 to 65535); otherwise a proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member.'}
         members:
           type: array
           items: {$ref: '#/components/schemas/DiscoveryMember'}
@@ -3228,6 +3229,17 @@ components:
           minLength: 1
           description: The first key's text, at most 512 KiB, never stored, logged or returned.
         endpoint: {type: string, description: 'The one address dialled, in the machine endpoint grammar.'}
+      additionalProperties: false
+    DiscoveryInput:
+      type: object
+      required: [kind, document, endpoint]
+      properties:
+        kind: {type: string, enum: [machine-config, secrets-bundle, talosconfig]}
+        document:
+          type: string
+          minLength: 1
+          description: The first key's text, at most 512 KiB, never stored, logged or returned.
+        endpoint: {type: string, description: 'An IP literal or a DNS name, with an optional port. A name is resolved once, and every dial of the call goes to the address it gave.'}
       additionalProperties: false
     FragmentBody:
       type: object
