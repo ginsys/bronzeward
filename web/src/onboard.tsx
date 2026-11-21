@@ -6,10 +6,9 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useReads, Ref, useSettled } from "./list.tsx";
-import { type Env, type Line, onboardCluster, type Plan, discoverCluster } from "./onboard.ts";
+import { type Env, type Line, onboardCluster, type Plan, discoverCluster, sender } from "./onboard.ts";
 import { Action } from "./shell.tsx";
 import { useUnsaved, useWrites } from "./forms.tsx";
-import { Write } from "./write.ts";
 
 // The most a first key may be (the API's bound), so a larger file is refused before it is read.
 const MAX_FILE = 512 * 1024;
@@ -27,6 +26,8 @@ export function OnboardCluster() {
   const { go } = useReads();
   const plan = useRef<Plan>(undefined);
   const alive = useRef(true);
+  // One sender per plan: a file chosen again starts with no write of the last file's to repeat.
+  const send = useRef<Env["send"]>(sender(writes, () => alive.current));
   const [phase, setPhase] = useState<"file" | "confirm" | "run">("file");
   const [lines, setLines] = useState<Line[]>([]);
   const [held, setHeld] = useState(false);
@@ -45,7 +46,7 @@ export function OnboardCluster() {
       const r = await settled<T>(path, () => alive.current);
       return r === undefined || r.kind === "loading" ? { kind: "discarded" } : r;
     },
-    send: async (spec) => (alive.current ? writes.submit(new Write(spec)) : { kind: "not-done", why: "the page was left", problem: null }),
+    send: (spec) => send.current(spec),
     wait: (ms) => new Promise((r) => setTimeout(r, ms)),
   };
 
@@ -63,6 +64,7 @@ export function OnboardCluster() {
     setBusy(false);
     if (!r.ok) return setNote(`Nothing was recorded: ${r.why}.`);
     plan.current = r.plan;
+    send.current = sender(writes, () => alive.current);
     setHeld(r.plan.document !== undefined);
     setLines([]);
     setEnded(undefined);

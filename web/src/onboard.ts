@@ -13,7 +13,7 @@ import { startBody } from "./imports.tsx";
 import { type Listed, readPages } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
 import { problemTail } from "./states.tsx";
-import type { Outcome, WriteSpec } from "./write.ts";
+import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 export type Discovery = components["schemas"]["DiscoveryBody"];
 type Draft = components["schemas"]["DraftBody"];
@@ -59,7 +59,8 @@ export function cutContext(text: string, name: string | undefined): { document: 
   if (text.length > MAX_FILE) throw new Error("the file is larger than 512 KiB, the most a first key may be");
   let cfg: unknown;
   try {
-    cfg = parse(text);
+    // "error": the parser's warnings (an unresolved tag, say) go to the console with the line they came from.
+    cfg = parse(text, { logLevel: "error" });
   } catch {
     throw new Error(NOT_TALOSCONFIG);
   }
@@ -75,6 +76,21 @@ export function cutContext(text: string, name: string | undefined): { document: 
   return { document: stringify({ context: picked, contexts: { [picked]: { endpoints: [], ca, crt, key } } }), endpoint };
 }
 
+// The page's `send` for one plan. A write that carries the document (it has a `released` hook) and ended
+// unknown is repeated under its own key when it still can be, never started anew beside it: a second write
+// would leave the first, repeatable, holding the document after the page's copy was dropped.
+export function sender(writes: Pick<Writes, "submit" | "repeatable">, alive: () => boolean): Env["send"] {
+  const open = new Map<string, Write>();
+  return async (spec) => {
+    if (!alive()) return { kind: "not-done", why: "the page was left", problem: null };
+    const key = spec.released === undefined ? undefined : `${spec.method} ${spec.path}`;
+    const old = key === undefined ? undefined : open.get(key);
+    const w = old !== undefined && writes.repeatable(old) ? old : new Write(spec);
+    if (key !== undefined) open.set(key, w);
+    return writes.submit(w);
+  };
+}
+
 // A step's failure in the words of the form's own notice, from the outcome and nothing of the request.
 function reason(o: Outcome): string {
   if (o.kind === "refused") return `not saved: the server answered ${o.status}.${problemTail(o.problem)}`;
@@ -84,6 +100,8 @@ function reason(o: Outcome): string {
 const stateOf = (o: Outcome): LineState => (o.kind === "unknown" || (o.kind === "set-aside" && o.ambiguous) ? "unknown" : "failed");
 
 const members = (f: Discovery) => f.members;
+// An IPv6 address is bracketed where the server takes an endpoint, as the CLI's endpointArg does.
+const endpointOf = (address: string) => (address.includes(":") && !address.startsWith("[") ? `[${address}]` : address);
 // The address that carries the first key: the first control-plane member that answered.
 const keyAddress = (f: Discovery) => members(f).find((m) => m.role === "controlplane" && m.answered)?.address;
 
@@ -150,7 +168,7 @@ async function firstKey(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolea
   if (p.document === undefined || address === undefined) return fail("first-key", label, "the talosconfig is no longer held here: choose the file again, which finds what is recorded");
   const o = await env.send({
     method: "POST", path: `/clusters/${enc(p.cluster!)}/first-keys`, resource: `/clusters/${p.cluster}`,
-    body: { kind: "talosconfig", document: p.document, endpoint: address },
+    body: { kind: "talosconfig", document: p.document, endpoint: endpointOf(address) },
     // The page's copy goes with the write's: nothing holds the document once it can no longer be repeated.
     released: () => void (p.document = undefined),
   });
@@ -170,7 +188,7 @@ async function machines(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolea
       continue;
     }
     // By the SMBIOS UUID where the node reports one, else by its node ID: the import checks that identity.
-    const body = { cluster: p.cluster, ...(m.smbiosUuid !== "" ? { smbiosUuid: m.smbiosUuid } : { talosNodeId: m.nodeId }), platform: m.platform, talosEndpoint: m.address, ...(NAME.test(m.hostname) && { name: m.hostname }) };
+    const body = { cluster: p.cluster, ...(m.smbiosUuid !== "" ? { smbiosUuid: m.smbiosUuid } : { talosNodeId: m.nodeId }), platform: m.platform, talosEndpoint: endpointOf(m.address), ...(NAME.test(m.hostname) && { name: m.hostname }) };
     const o = await env.send({ method: "POST", path: "/machines", resource: `/machines?${new URLSearchParams({ cluster: p.cluster! })}`, body });
     const named = o.kind === "refused" ? existing(o.status, o.problem, "/machines") : undefined;
     const id = o.kind === "done" ? (o.data as { id?: string } | null)?.id : named?.kind === "machine" ? named.id : undefined;
