@@ -380,8 +380,11 @@ func TestOnboardNameHeldByAnotherMachine(t *testing.T) {
 	if second.Add.State != obCreated || second.Name != "" || second.Machine == "" {
 		t.Errorf("second machine %+v; want it created, with no name", second)
 	}
-	if want := "held by machine " + first.Machine; !strings.Contains(second.NameNote, want) {
+	if want := `the name "alcorak.office.ginsys.net" is already held by another machine`; !strings.Contains(second.NameNote, want) {
 		t.Errorf("second machine's nameNote %q; want it to say %q", second.NameNote, want)
+	}
+	if strings.Contains(second.NameNote, "mch_") || second.NameHeldBy != first.Machine {
+		t.Errorf("second machine's nameNote %q and nameHeldBy %q; want no identifier in the note and the first machine's %q for a script", second.NameNote, second.NameHeldBy, first.Machine)
 	}
 	var posts int
 	for _, p := range e.api.writes() {
@@ -400,20 +403,20 @@ func TestNameRefusal(t *testing.T) {
 		return &client.Problem{Status: 400, Doc: map[string]any{"type": "urn:bronzeward:problem:" + code, "machine": "mch_HOLDER"}}
 	}
 	for _, c := range []struct {
-		what string
-		err  error
-		name string
-		want string
+		what         string
+		err          error
+		name         string
+		want, holder string
 	}{
-		{"a name another machine holds", problem("name-in-use"), "cp-1", `no name: the hostname "cp-1" is held by machine mch_HOLDER; rename or remove that record, then name this one`},
-		{"a grammar the server does not take", problem("invalid-request"), "a.b", `no name: the server refused the hostname "a.b" as a name`},
-		{"another refusal", problem("forbidden"), "cp-1", ""},
-		{"no refusal", nil, "cp-1", ""},
-		{"a refusal when no name was sent", problem("invalid-request"), "", ""},
-		{"an error that is no problem", errors.New("boom"), "cp-1", ""},
+		{"a name another machine holds", problem("name-in-use"), "cp-1", `no name: the name "cp-1" is already held by another machine of the cluster; rename or remove that machine, then name this one`, "mch_HOLDER"},
+		{"a grammar the server does not take", problem("invalid-request"), "a.b", `no name: the server refused the hostname "a.b" as a name`, ""},
+		{"another refusal", problem("forbidden"), "cp-1", "", ""},
+		{"no refusal", nil, "cp-1", "", ""},
+		{"a refusal when no name was sent", problem("invalid-request"), "", "", ""},
+		{"an error that is no problem", errors.New("boom"), "cp-1", "", ""},
 	} {
-		if got := nameRefusal(c.err, c.name); got != c.want {
-			t.Errorf("%s: nameRefusal = %q, want %q", c.what, got, c.want)
+		if got, holder := nameRefusal(c.err, c.name); got != c.want || holder != c.holder {
+			t.Errorf("%s: nameRefusal = %q, %q; want %q, %q", c.what, got, holder, c.want, c.holder)
 		}
 	}
 }

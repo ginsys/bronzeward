@@ -746,9 +746,10 @@ describe("onboard naming: a machine is named by the hostname its node reports", 
     expect(ok).toBe(true);
     expect(s.sends.filter((x) => x.route === "POST /machines").map((x) => (x.body as { name?: string }).name)).toEqual(["alcorak.office.ginsys.net", "alcorak.office.ginsys.net", undefined]);
     const holder = [...s.machines.values()].find((m) => m.name === "alcorak.office.ginsys.net")!.id;
-    expect(lines.filter((l) => l.key.startsWith("machine:")).map((l) => [l.key, l.state, l.detail])).toEqual([
-      ["machine:n1", "done", undefined],
-      ["machine:n2", "done", `no name: the hostname "alcorak.office.ginsys.net" is held by machine ${holder}; rename or remove that record, then name this one`],
+    // The words never carry the holder's identifier; the line carries it beside them, for the link.
+    expect(lines.filter((l) => l.key.startsWith("machine:")).map((l) => [l.key, l.state, l.detail, l.holder])).toEqual([
+      ["machine:n1", "done", undefined, undefined],
+      ["machine:n2", "done", 'no name: the name "alcorak.office.ginsys.net" is already held by another machine of the cluster; rename or remove that machine, then name this one', holder],
     ]);
     expect(s.machines.size).toBe(2);
   });

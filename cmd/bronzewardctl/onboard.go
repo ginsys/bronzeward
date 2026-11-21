@@ -60,10 +60,13 @@ type onboardMachine struct {
 	Machine string `json:"machine,omitempty"`
 	// Name is the name the machine this run recorded was given from its hostname; NameNote says how, or
 	// why it has none (operator experience §5.2). Neither is set for a machine that already existed.
-	Name     string      `json:"name,omitempty"`
-	NameNote string      `json:"nameNote,omitempty"`
-	Add      onboardPart `json:"add"`
-	Import   onboardPart `json:"import"`
+	// NameHeldBy is the identifier of the machine that holds the name this one was refused, for a script:
+	// the note says it in words, and never by identifier.
+	Name       string      `json:"name,omitempty"`
+	NameNote   string      `json:"nameNote,omitempty"`
+	NameHeldBy string      `json:"nameHeldBy,omitempty"`
+	Add        onboardPart `json:"add"`
+	Import     onboardPart `json:"import"`
 }
 
 // onboarding is the object cluster onboard prints for -o json and yaml, once, when its last step has
@@ -148,21 +151,23 @@ func conflictID(err error, member string) string {
 }
 
 // nameRefusal is the note for a machine whose name the server refused, "" when err is no refusal of a
-// name that was sent: `name-in-use` names the machine that holds it (§9.4), and `invalid-request` is a
-// grammar the server does not take (a server older than the widened one takes one label).
-func nameRefusal(err error, name string) string {
+// name that was sent: `name-in-use` names the machine that holds it (§9.4), whose identifier is the
+// second result for a script, and `invalid-request` is a grammar the server does not take (a server older
+// than the widened one takes one label). The note names that machine by the name it holds, never by its
+// identifier.
+func nameRefusal(err error, name string) (note, heldBy string) {
 	var p *client.Problem
 	if name == "" || !errors.As(err, &p) {
-		return ""
+		return "", ""
 	}
 	switch p.Code() {
 	case "name-in-use":
-		holder, _ := p.Doc["machine"].(string)
-		return fmt.Sprintf("no name: the hostname %q is held by machine %s; rename or remove that record, then name this one", name, client.Printable(holder))
+		heldBy, _ = p.Doc["machine"].(string)
+		return fmt.Sprintf("no name: the name %q is already held by another machine of the cluster; rename or remove that machine, then name this one", name), heldBy
 	case "invalid-request":
-		return fmt.Sprintf("no name: the server refused the hostname %q as a name", name)
+		return fmt.Sprintf("no name: the server refused the hostname %q as a name", name), ""
 	}
-	return ""
+	return "", ""
 }
 
 // clusterOnboard records a cluster, its machines and its first key, then imports each machine into one
@@ -401,8 +406,9 @@ func (e *env) onboardRecords(a *onboardArgs, res discover.Result, obj *onboardin
 		err := record()
 		// A name the server refuses (another machine holds it, or the grammar rejects it) never stops the
 		// run: the machine is recorded without it, with the reason, to be named afterwards.
-		if refused := nameRefusal(err, name); refused != "" {
-			min.Name, name, note = nil, "", refused
+		var heldBy string
+		if refused, holder := nameRefusal(err, name); refused != "" {
+			min.Name, name, note, heldBy = nil, "", refused, holder
 			err = record()
 		}
 		saved := errors.As(err, &lost)
@@ -426,7 +432,7 @@ func (e *env) onboardRecords(a *onboardArgs, res discover.Result, obj *onboardin
 		}
 		om.Machine, om.Add = mb.Id, onboardPart{State: state, ID: mb.Id}
 		if state == obCreated {
-			om.Name, om.NameNote = name, note // a machine already recorded keeps the name it has
+			om.Name, om.NameNote, om.NameHeldBy = name, note, heldBy // a machine already recorded keeps the name it has
 		}
 		if saved {
 			om.Add.Command, om.Add.Error = rerun(), client.Shown(err)
