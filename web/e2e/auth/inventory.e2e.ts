@@ -371,7 +371,7 @@ describe("the machine detail (W3)", () => {
     const path = `/machines/${id}`;
     const machineReads = async () => (await seen()).filter((p) => p === path).length;
     // The injected 404, as Refused shows it.
-    const refused = "Not read: not-found.";
+    const refused = "Not read. This does not exist on this server.";
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
     await $(`a[title="${id}"]`).click();
     await expect($('[data-testid="sentences"]')).toBeExisting({ wait: 20_000 });
@@ -384,7 +384,7 @@ describe("the machine detail (W3)", () => {
     await browser.execute(() => void dispatchEvent(new Event("online")));
     await $('[data-testid="offline"]').waitForExist({ timeout: 20_000 });
     const shown = await $("main").getText();
-    expect(shown.split("Not read:").length - 1).toBe(1);
+    expect(shown.split("Not read.").length - 1).toBe(1);
     expect(shown).toContain(refused);
     await absent(async () => (await $("main").getText()).includes(TRANSPORT_FAILURE), "the transport failure line beside the offline banner");
     expect(await $('[data-testid="sentences"]').isExisting()).toBe(true);

@@ -6,9 +6,10 @@ import { createContext, type FormEvent, type ReactNode, useContext, useEffect, u
 import type { components } from "./api/v1";
 import { type Dropped, type Listed, type Load, Ref, short, useList, usePending, useReads } from "./list.tsx";
 import type { Cluster, Machine } from "./machines.tsx";
+import { RequestRef } from "./problems.tsx";
 import { Action, useOffline } from "./shell.tsx";
 import type { Problem } from "./request.ts";
-import { CUT_OFF, problemTail, Refused, Repeated, REPLAYED, SetAside, Status, Unknown } from "./states.tsx";
+import { CHECK_STATE, CUT_OFF, problemSentences, Refused, Repeated, REPLAYED, SetAside, Status, unknown, Unknown } from "./states.tsx";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 type EndpointChange = components["schemas"]["EndpointChangeBody"];
@@ -38,17 +39,20 @@ export function record(w: Write): { named: string; to: string } {
 }
 
 // A settled [Repeat exactly]'s result, as its notice shows it (journeys §8, the Replayed row).
-function settled(o: Outcome): string {
+function settled(o: Outcome): { line: string; problem: Problem | null } {
   const earlier = "replayed" in o && o.replayed ? `${REPLAYED} ` : "";
-  // The answer's problem with what the route accepts (§8.2), as every notice shows it.
-  const fields = "problem" in o ? problemTail(o.problem) : "";
+  const problem = "problem" in o ? o.problem : null;
+  // Where the outcome is still unknown the problem's next step is left out, and the line says how to check.
+  const doubt = o.kind === "unknown" || (o.kind === "set-aside" && o.ambiguous);
+  // The answer's problem in words, with what the route accepts (§8.2), as every notice shows it.
+  const words = problem === null ? "" : ` ${problemSentences(problem, problem.status, !doubt)}`;
   switch (o.kind) {
     case "done":
-      return `${earlier}Saved (the server answered ${o.status}).${o.defect !== undefined ? ` ${o.defect}` : ""}`;
+      return { line: `${earlier}Saved (the server answered ${o.status}).${o.defect !== undefined ? ` ${o.defect}` : ""}`, problem };
     case "refused":
-      return `${earlier}Not saved: the server answered ${o.status}.${o.cut ? ` ${CUT_OFF}` : ""}${fields}`;
+      return { line: `${earlier}Not saved${problem === null ? `: the server answered ${o.status}.` : "."}${o.cut ? ` ${CUT_OFF}` : ""}${words}`, problem };
     default:
-      return `Not saved: ${o.why}.${fields}`;
+      return { line: `${doubt ? unknown(o.why) : `Not saved: ${o.why}.`}${doubt ? ` ${CHECK_STATE}` : ""}${words}`, problem };
   }
 }
 
@@ -63,7 +67,7 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
     const o = w.outcome;
     const { named, to } = record(w);
     const props = { onShow: () => go(to), detail: named + detail(w, to), onDismiss: () => writes.dismiss(w), testid: "write-notice" };
-    if (o !== undefined && w.kept) return <Repeated key={w.key} line={settled(o)} role={o.kind === "refused" ? "alert" : "status"} {...props} detail={`${named} Key ${w.key}, ${w.route}. Read ${to}.`} />;
+    if (o !== undefined && w.kept) return <Repeated key={w.key} {...settled(o)} role={o.kind === "refused" ? "alert" : "status"} {...props} detail={`${named} Key ${w.key}, ${w.route}. Read ${to}.`} />;
     if (o?.kind === "unknown") return <Unknown key={w.key} why={o.why} problem={o.problem} onRepeat={writes.repeatable(w) && !offline ? () => void writes.submit(w) : undefined} {...props} />;
     if (o?.kind === "set-aside") return <SetAside key={w.key} why={o.why} problem={o.problem} {...props} />;
     // While the run is in flight, the latest state that made the outcome unknown: an attempt of
@@ -204,11 +208,11 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
     }
     case "not-done":
       // The last answer's problem, when it carried one (§8.2).
-      return <Status testid="write-result">Not saved: {o.why}.{problemTail(o.problem)}</Status>;
+      return <Status testid="write-result" reference={o.problem === null ? undefined : <RequestRef problem={o.problem} status={o.problem.status} />}>Not saved: {o.why}.{o.problem !== null && ` ${problemSentences(o.problem, o.problem.status)}`}</Status>;
     case "set-aside":
     case "unknown":
       // Set aside before any attempt that may have committed, nothing was; otherwise the notice says.
-      if (o.kind === "set-aside" && !o.ambiguous) return <Status testid="write-result">Not saved: {o.why}. Nothing of it was committed.{problemTail(o.problem)}</Status>;
+      if (o.kind === "set-aside" && !o.ambiguous) return <Status testid="write-result" reference={o.problem === null ? undefined : <RequestRef problem={o.problem} status={o.problem.status} />}>Not saved: {o.why}. Nothing of it was committed.{o.problem !== null && ` ${problemSentences(o.problem, o.problem.status)}`}</Status>;
       if (writes?.notices.includes(w) !== false) return <Status testid="write-result">See the notice at the top of the page: its key and what to read.</Status>;
       // Its notice was dismissed: the form says what the notice said of it.
       return <Status testid="write-result">Unknown whether this was saved, and its notice was dismissed.{record(w).named}{detail(w, record(w).to)}</Status>;

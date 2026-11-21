@@ -9,7 +9,8 @@ import { Who } from "./principals.tsx";
 import type { Problem, ReadResult } from "./request.ts";
 import type { Outcome } from "./write.ts";
 import { useGate, useOffline, useRecoveryState } from "./shell.tsx";
-import { clock, Disconnected, ProblemFields, problemFields, problemTail, Refused, Status, when } from "./states.tsx";
+import { RequestRef } from "./problems.tsx";
+import { clock, Disconnected, ProblemFields, problemFields, problemSentences, Refused, Status, when } from "./states.tsx";
 import { MachineById } from "./titles.tsx";
 import type { components } from "./api/v1";
 
@@ -72,7 +73,8 @@ export function RecoveryRead({ res }: { res: ReadResult<Recovery> }) {
 export const PreEntry = ({ res, onRead }: { res: ReadResult<unknown>; onRead: () => void }) => (
   <>
     <Status actions={<button type="button" onClick={onRead}>Read again</button>}>{PRE_ENTRY}</Status>
-    <ProblemFields text={problemFields(res)} />
+    {/* The sentence above is the next step: this page is where the entry is made, so no "wait for an administrator". */}
+    <ProblemFields problem={problemFields(res)} next={false} />
     <EnterRecovery onRead={onRead} />
   </>
 );
@@ -154,7 +156,7 @@ export function Entered() {
     return <Status testid="entered" actions={dismiss}>Recovery entry saved (the server answered), but its answer could not be read. Read the Recovery page.</Status>;
   }
   if ("refused" in entered) {
-    return <Status testid="entered" role="alert" actions={dismiss}>{reading(entered.refused)}{problemTail(entered.refused)}</Status>;
+    return <Status testid="entered" role="alert" actions={dismiss} reference={<RequestRef problem={entered.refused} status={entered.refused.status} />}>{reading(entered.refused)} {problemSentences(entered.refused, entered.refused.status)}</Status>;
   }
   return (
     <Status testid="entered" actions={dismiss}>

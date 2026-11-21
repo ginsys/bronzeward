@@ -17,7 +17,7 @@ import { RECOVERY_START } from "../../src/recovery.tsx";
 import { SCOPE_NO_MODE, SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, type Step } from "../injector.ts";
-import { absent, answers, api, approvalReadsAnswered, approvalRoute, disposable, eventually, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, inSafari, measure, mint, mirrored, narrow, overflows, planHeading, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
+import { absent, answers, api, approvalReadsAnswered, approvalRoute, disposable, eventually, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, inSafari, measure, mint, mirrored, narrow, overflows, planHeading, references, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The page's answer to Approve and to Revoke approval: each control's Result, in an element that takes
@@ -159,7 +159,7 @@ describe("approval and revocation (#358)", () => {
     // The refusal carries the entry's epoch, so the shell reads again and remounts the page. The
     // refusal is still shown, in the set-aside notice outside the page: the write's outcome is not
     // lost with the page.
-    await expect($("body")).toHaveText(expect.stringContaining("Not saved: the server answered 409. Recovery mode refuses the act on this scope"), { wait: 20_000 });
+    await expect($("body")).toHaveText(expect.stringContaining("The server says: Recovery mode refuses the act on this scope"), { wait: 20_000 });
     expect((await answers()).filter((a) => a.startsWith("/plans "))).toEqual(["/plans 409"]);
     await expect($('[data-testid="recovery"]')).toHaveText(expect.stringContaining(RECOVERY_START), { wait: 20_000 });
   });
@@ -203,7 +203,7 @@ describe("approval and revocation (#358)", () => {
         expect(await approve().isEnabled()).toBe(false);
         await expect($('main form[aria-label="Approve plan"]')).toHaveText(expect.stringContaining("Needs approver"));
         await browser.execute(() => document.querySelector<HTMLFormElement>('main form[aria-label="Approve plan"]')!.requestSubmit());
-        await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Not saved: /), { wait: 20_000 });
+        await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Not saved[:.] /), { wait: 20_000 });
         expect(await posts()).toEqual([`POST ${route}`]);
         expect((await answers()).filter((a) => a.startsWith(`${route} `))).toEqual([`${route} 403`]);
       });
@@ -312,7 +312,7 @@ describe("approval and revocation (#358)", () => {
       this.timeout(90_000);
       const { route } = await approving(["commit-drop", "epoch"]);
       await expect(notice()).toHaveText(expect.stringContaining(SET_ASIDE), { wait: 30_000 });
-      await expect(notice()).toHaveText(expect.stringMatching(/The key's earlier record: request \S+, epoch \S+\./));
+      await browser.waitUntil(async () => /Earlier record: request \S+, epoch \S+/.test((await references()).join("\n")), { timeout: 20_000, timeoutMsg: "the earlier record was not shown in the reference" });
       expect((await answers()).filter((a) => a.startsWith(`${route} `))).toEqual([`${route} 201`, `${route} 409`]);
       const sent = await sends(route);
       expect(sent).toHaveLength(2);
@@ -337,7 +337,8 @@ describe("approval and revocation (#358)", () => {
     it("REC-03 (scope): an approval refused 409 recovery-mode-active with a scope names that scope and says nothing about the start mode; sent once", async function () {
       this.timeout(60_000);
       const { route } = await approving(["scope-refused"]);
-      await expect($('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`Scope ${INJECTED_SCOPE} refuses this request. ${SCOPE_NO_MODE}`), { wait: 20_000 });
+      await expect($('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`This applies to one part of the installation only. ${SCOPE_NO_MODE}`), { wait: 20_000 });
+      expect((await references()).join("\n")).toContain(`Scope: ${INJECTED_SCOPE}`);
       expect(await posts()).toEqual([`POST ${route}`]);
       await absent(() => $('[data-testid="recovery"]').isExisting(), "the recovery banner after a scope's refusal");
       await absent(async () => (await $("body").getText()).includes(RECOVERY_START), "the recovery start text after a scope's refusal");

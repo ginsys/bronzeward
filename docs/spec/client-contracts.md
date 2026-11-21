@@ -569,9 +569,25 @@ than relying on the server's `400`.
 
 **Proposed** client behaviour per problem code, from the code table of
 [persistence and API §9.4](persistence-api.md#94-errors) and `internal/api/problem.go:11-36`. The
-client always shows `title`, `detail` when present, and `instance`, each escaped as
+command-line client always shows `title`, `detail` when present, and `instance`, each escaped as
 [§6 item 4](#6-tls-trust) states, and never shows a request body. Exit codes are the journeys'
 (journeys §4).
+
+**The web client says it in words** (ginsys/bronzeward#1049). For each of the 26 codes of
+`internal/api/problem.go` it shows one sentence for what happened and one for what to do, from one
+table (`web/src/problems.tsx`), and never a code, a rule, a scope identifier or a request number
+in a sentence. A rule can narrow a code where the general sentence would misstate the cause: a
+`409 conflict` with rule `import-not-reviewed` reads "Only a file import that you continued yourself
+after its review can be shown here, and this import is not one. Nothing needs doing: the import
+itself is not affected.", true for both causes the server's `detail` names. The server's `detail` is
+shown after the sentences as "The server says: …", except where the table above says a path may be
+in it (a refused mark: the position only), where it is shown nowhere, copy included. A code with no
+entry shows the server's `title`. The status, `code`, `rule`, `scope` (when text), `instance` and
+the `request` and `epoch` of an earlier record sit in a closed reference block ("Reference for a bug
+report") with one Copy control that copies them as plain text and says whether it copied. Where
+the outcome of a write is unknown, the notice says so and says how to check ("Check the current
+state before you do it again.") and never says to try again, whatever the code: the next step of a
+code's sentence is left out there.
 
 | Status, code | Client behaviour |
 | --- | --- |

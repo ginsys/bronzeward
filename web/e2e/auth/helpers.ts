@@ -31,6 +31,9 @@ export async function releaseHeading(id: string, wait = 20_000) {
 export const where = () => browser.execute(() => location.origin + location.pathname);
 export const param = (name: string) => browser.execute((n: string) => new URLSearchParams(location.search).get(n), name);
 export const status = () => $('[data-testid="status"]').getText();
+// The text of every reference block on the page (the code, rule, scope and request number of a refusal). The
+// block is a closed details element, so its text is read as text content, never as visible text.
+export const references = () => browser.execute(() => [...document.querySelectorAll('[data-testid="request-ref"]')].map((d) => d.textContent ?? ""));
 // The text of every message the page's one role="status" region holds: each status message is
 // mirrored into it and carries no role of its own (ginsys/bronzeward#830).
 export const mirrored = () => browser.execute(() => [...document.querySelectorAll('[role="status"] > p')].map((p) => p.textContent ?? ""));

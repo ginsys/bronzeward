@@ -17,29 +17,31 @@ const problem = (code: string, status: number, detail?: string) => ({
   ...(detail === undefined ? {} : { detail }),
 });
 
-test("§8.2: a problem shows its title, its detail when present and its instance", () => {
+test("§8.2: a problem is read in words, with the server's detail when present", () => {
   const auth = problem("dependency-unavailable", 503, "authentication could not reach the identity provider or the database; nothing was committed");
   expect(problemText({ kind: "unavailable", status: 503, problem: auth })).toBe(
-    "Not read: A dependency is unavailable (authentication could not reach the identity provider or the database; nothing was committed). Request req-1.",
+    "Not read. Something the server depends on did not answer. Try again in a moment; if it keeps happening, ask an administrator. The server says: authentication could not reach the identity provider or the database; nothing was committed.",
   );
-  expect(problemText({ kind: "refused", status: 401, problem: problem("other", 401) })).toBe("Not read: A dependency is unavailable. Request req-1.");
+  expect(problemText({ kind: "refused", status: 401, problem: problem("other", 401) })).toBe("Not read. A dependency is unavailable.");
   expect(problemText({ kind: "refused", status: 502, problem: null })).toBe("Not read: the server answered 502.");
 });
 
-test("§8.2: the problem fields shown under a 403 row's, a 401's or a revocation's own message", () => {
+test("§8.2: the problem shown under a 403 row's, a 401's or a revocation's own message", () => {
   const forbidden = { ...problem("forbidden", 403, "needs viewer"), title: "Forbidden", roles: ["viewer"] };
-  expect(problemFields({ kind: "refused", status: 403, problem: forbidden })).toBe("Not read: Forbidden (needs viewer). Request req-1.");
-  expect(problemFields({ kind: "revoked", problem: { ...problem("identity-revoked", 403), title: "Identity revoked" } })).toBe("Not read: Identity revoked. Request req-1.");
+  expect(problemFields({ kind: "refused", status: 403, problem: forbidden })).toBe(forbidden);
+  const revoked = { ...problem("identity-revoked", 403), title: "Identity revoked" };
+  expect(problemFields({ kind: "revoked", problem: revoked })).toBe(revoked);
   expect(problemFields({ kind: "unauthenticated", problem: null })).toBeUndefined();
   expect(problemFields({ kind: "transport" })).toBeUndefined();
 });
 
 // The shell's 403 rows: shell.test.ts.
-test("§8.2: each refusal view renders the problem fields under its own message", () => {
-  const fields = "Not read: Forbidden (needs viewer). Request req-1.";
-  const paragraph = `<p data-testid="problem">${fields}</p>`;
-  expect(shown({ kind: "sign-in", message: "W1", problem: fields, signIn: () => {} })).toContain(paragraph);
-  expect(shown({ kind: "failed", message: "revoked", problem: fields })).toContain(paragraph);
+test("§8.2: each refusal view renders the problem in words under its own message, with its reference", () => {
+  const forbidden = { ...problem("forbidden", 403, "needs viewer"), title: "Forbidden", roles: ["viewer"] };
+  const paragraph = '<p data-testid="problem">Not read. Your account is not allowed to do this. Ask someone who has the right role. The server says: needs viewer.</p>';
+  expect(shown({ kind: "sign-in", message: "W1", problem: forbidden, signIn: () => {} })).toContain(paragraph);
+  expect(shown({ kind: "failed", message: "revoked", problem: forbidden })).toContain(paragraph);
+  expect(shown({ kind: "failed", message: "revoked", problem: forbidden })).toContain("Request: req-1");
   expect(shown({ kind: "failed", message: "revoked" })).not.toContain('data-testid="problem"');
 });
 

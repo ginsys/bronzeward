@@ -97,6 +97,7 @@ h1 .icon, button .icon { margin-inline-end: var(--s2); }
    changes no role (the paragraph keeps its own). */
 .alert { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s3); margin: 0 0 var(--s3); padding: var(--s3) var(--s4); background-color: var(--muted); border: 1px solid var(--border); border-radius: 0.375rem; }
 .alert p { margin: 0; flex: 1 1 12rem; min-width: 0; }
+.alert details { flex: 1 1 100%; font-size: 0.875rem; }
 .alert .icon { margin-top: 0.1rem; color: var(--primary); }
 .alert.danger { border-color: var(--danger); }
 .alert.danger .icon { color: var(--danger); }

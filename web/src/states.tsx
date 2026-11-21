@@ -4,6 +4,7 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import { Icon } from "./icons.tsx";
+import { codeOf, earlierOf, refusedAt, RequestRef, sentence, visibleDetail } from "./problems.tsx";
 import { type Problem, type ReadResult, TRANSPORT_FAILURE, WRITE_TRANSPORT_FAILURE } from "./request.ts";
 
 export const WITHHELD = "Configuration not shown: it could not be redacted.";
@@ -59,7 +60,9 @@ export function StatusPage({ children }: { children: ReactNode }) {
 
 // `role` is "alert" for a server refusal, which a screen reader then announces at once. Any other
 // message carries no role: the page's one status region mirrors it.
-export function Status({ children, actions, testid = "status", role = "status" }: { children: ReactNode; actions?: ReactNode; testid?: string | undefined; role?: "status" | "alert" | undefined }) {
+// `reference` sits beside the message and not inside it: a details element is not allowed in a paragraph, and the
+// status region mirrors the paragraph's text only.
+export function Status({ children, actions, reference, testid = "status", role = "status" }: { children: ReactNode; actions?: ReactNode; reference?: ReactNode; testid?: string | undefined; role?: "status" | "alert" | undefined }) {
   const mirror = useContext(Mirror);
   const id = useId();
   const shown = useRef<HTMLParagraphElement>(null);
@@ -82,6 +85,7 @@ export function Status({ children, actions, testid = "status", role = "status" }
       <Icon name={role === "alert" ? "error" : "info"} />
       <p ref={shown} role={role === "alert" ? "alert" : undefined} data-testid={testid}>{children}</p>
       {actions}
+      {reference}
     </div>
   );
 }
@@ -102,8 +106,8 @@ export const Unread = ({ at, causes }: { at: Date; causes: string[] }) => (
   <Status>Observed: not read at {clock(at)} — {causes.join("; ")}.</Status>
 );
 
-// A Bronzeward problem: its code, rule, title, detail and instance (client contracts §8.2), never a
-// request body. Any other answer is named by its status alone. A replayed refusal is the earlier
+// A Bronzeward problem: a sentence per code, its detail, and its code, rule, scope and instance in a reference
+// block (client contracts §8.2), never a request body. Any other answer is named by its status alone. A replayed refusal is the earlier
 // attempt's, and says so (§8.4 item 2).
 // A 403 forbidden names what the route accepts (§8.2 403 row): "humans only" when `humanOnly` is
 // true, else its `roles`. The plan cancellation's creator check, which carries `plan`, says it in
@@ -115,64 +119,68 @@ export function needs(status: number, problem: Problem): string {
   return Array.isArray(roles) && roles.length > 0 && roles.every((r) => typeof r === "string") ? ` Needs ${roles.join(" or ")}.` : "";
 }
 
-// A problem's `position` member when it is a whole number (a mark refused by its index).
-const positionOf = (p: Problem): number | undefined => {
-  const n = p["position"];
-  return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : undefined;
-};
-// A refused mark is named by its position in the request, never its path (§8.2 422 row): its detail
-// is left out of every notice too, because the server's text may name the path.
-const VALIDATION_FAILED = "urn:bronzeward:problem:validation-failed";
-const refusedAt = (p: Problem) => (p.status === 422 && p.type === VALIDATION_FAILED && positionOf(p) !== undefined ? ` The mark at position ${positionOf(p)} (the first is 0) is refused.` : "");
-
-// A problem's title, its detail when present and its instance (§8.2), as one sentence or two.
+// The onboarding page's text: a problem's title, its detail when present and its instance (§8.2), as one
+// sentence or two. Every other notice uses the sentences below.
 export const problemLine = (p: Problem) => `${p.title}${p.detail !== undefined && refusedAt(p) === "" ? `: ${p.detail}` : ""}.${p.instance !== undefined ? ` Request ${p.instance}.` : ""}`;
 // An earlier-epoch idempotency record's 409 (§8.2 409 row, §8.4 item 7): the request it recorded
 // and that request's epoch, which the operator reads and reports.
-export const earlierRecord = (p: Problem) =>
-  p.status === 409 && typeof p["request"] === "string" && typeof p["epoch"] === "string" ? ` The key's earlier record: request ${p["request"]}, epoch ${p["epoch"]}.` : "";
-// The problem an unknown or set-aside write's last answer carried, after its sentence: what the
-// route accepts (a 403's), then its fields. Nothing when no answer carried one.
+export const earlierRecord = (p: Problem) => {
+  const earlier = earlierOf(p);
+  return earlier === undefined ? "" : ` The key's earlier record: request ${earlier.request}, epoch ${earlier.epoch}.`;
+};
+// The onboarding page's tail: what the route accepts (a 403's), then the problem's fields. Nothing when no
+// answer carried one.
 export const problemTail = (p: Problem | null) => (p === null ? "" : `${needs(p.status, p)}${refusedAt(p)} ${problemLine(p)}${earlierRecord(p)}`);
 
-// A `409 recovery-mode-active` with a `scope` member is that scope's refusal. It says nothing about
-// the process's start mode (client contracts §8.5 item 1, §8.2 409 row). Any other problem, and a
-// `scope` that is not text, add nothing. The process's own refusal has no `scope` member.
+// A `409 recovery-mode-active` with a `scope` member is that scope's refusal, about one part of the
+// installation. It says nothing about the process's start mode (client contracts §8.5 item 1, §8.2 409
+// row), and the scope's identifier is in the reference. Any other problem, and a `scope` that is not text,
+// add nothing. The process's own refusal has no `scope` member.
 export const SCOPE_NO_MODE = "This answer says nothing about the start mode.";
 export function scopeRefusal(code: string, problem: Problem): string {
-  const scope = problem["scope"];
-  return code === "recovery-mode-active" && typeof scope === "string" ? ` Scope ${scope} refuses this request. ${SCOPE_NO_MODE}` : "";
+  return code === "recovery-mode-active" && typeof problem["scope"] === "string" ? ` This applies to one part of the installation only. ${SCOPE_NO_MODE}` : "";
+}
+
+// A problem in words (client contracts §8.2): the sentence and its next step unless `next` is false, what the
+// route accepts, then the server's own detail where one may be shown. The code, rule, scope and request
+// number are in the reference.
+export function problemSentences(p: Problem, status: number, next = true): string {
+  const detail = visibleDetail(p);
+  const said = detail === undefined ? "" : ` The server says: ${/[.!?]$/.test(detail) ? detail : `${detail}.`}`;
+  return `${sentence(p, next)}${refusedAt(p)}${needs(status, p)}${scopeRefusal(codeOf(p), p)}${said}`;
 }
 
 export function Refused({ problem, status, verb, testid, replayed = false, cut = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean; cut?: boolean }) {
   const earlier = replayed && `${REPLAYED} `;
   if (problem === null) return <Status testid={testid} role="alert">{earlier}Not {verb}: the server answered {status}.{cut && ` ${CUT_OFF}`}</Status>;
-  const code = problem.type.slice("urn:bronzeward:problem:".length);
-  const rule = typeof problem["rule"] === "string" ? ` (rule ${problem["rule"]})` : "";
-  const at = refusedAt(problem);
   return (
-    <Status testid={testid} role="alert">
-      {earlier}Not {verb}: {code}{rule}.{at}{needs(status, problem)}{scopeRefusal(code, problem)} {problem.title}{problem.detail !== undefined && at === "" && `: ${problem.detail}`}
-      {problem.instance !== undefined && ` Request ${problem.instance}.`}
+    <Status testid={testid} role="alert" reference={<RequestRef problem={problem} status={status} />}>
+      {earlier}Not {verb}. {problemSentences(problem, status)}
     </Status>
   );
 }
 
-// §8.2: a problem's title, its detail when present and its instance, never a request body. The
-// authentication 503's detail is W1's text.
+// §8.2: a read's problem in words, with the sentences a person needs. The authentication 503's detail is W1's text.
 export function problemText(res: ReadResult<unknown>): string {
   const p = "problem" in res ? res.problem : null;
   if (p === null) return `Not read: the server answered ${"status" in res ? res.status : res.kind}.`;
-  return `Not read: ${p.title}${p.detail !== undefined ? ` (${p.detail})` : ""}.${p.instance !== undefined ? ` Request ${p.instance}.` : ""}`;
+  return `Not read. ${problemSentences(p, p.status)}`;
 }
 
 // The answer's problem, when it carries one.
-export function problemFields(res: ReadResult<unknown>): string | undefined {
-  return "problem" in res && res.problem !== null ? problemText(res) : undefined;
+export function problemFields(res: ReadResult<unknown>): Problem | undefined {
+  return "problem" in res && res.problem !== null ? res.problem : undefined;
 }
 
-// The problem fields under a message of their own (a 403 row, W1, a revocation).
-export const ProblemFields = ({ text, role }: { text: string | undefined; role?: "alert" }) => (text === undefined ? null : <p role={role} data-testid="problem">{text}</p>);
+// The problem in words under a message of its own (a 403 row, W1, a revocation), with its reference. The message
+// above it already says what the route accepts, so the sentences are asked for with no status.
+export const ProblemFields = ({ problem, role, next = true }: { problem: Problem | undefined; role?: "alert"; next?: boolean }) =>
+  problem === undefined ? null : (
+    <>
+      <p role={role} data-testid="problem">Not read. {problemSentences(problem, 0, next)}</p>
+      <RequestRef problem={problem} status={problem.status} />
+    </>
+  );
 
 export const Conflict = ({ what, revision, onShow, role }: { what: string; revision: number; onShow: () => void; role?: "status" | "alert" | undefined }) => (
   <Status role={role} actions={button("Show their change", onShow)}>Someone changed this {what} (revision {revision}). Your text is not saved.</Status>
@@ -186,19 +194,25 @@ const dismiss = (onDismiss: (() => void) | undefined) => onDismiss !== undefined
 // [Repeat exactly] only while the page holds the request, for the same sign-in and epoch. While
 // the repeat runs (`repeating`), the notice stays, with no second repeat and no dismissal.
 export const REPEATING = " Repeating it exactly; no answer yet.";
+// After a write whose outcome is unknown the notice says how to find out, and never to try again: the change may
+// already be saved, and the problem's own next step would send the person to do it twice.
+export const CHECK_STATE = "Check the current state before you do it again.";
+const unsure = (problem: Problem | null) => ` ${CHECK_STATE}${problem === null ? "" : ` ${problemSentences(problem, problem.status, false)}`}`;
+const reference = (problem: Problem | null) => (problem === null ? undefined : <RequestRef problem={problem} status={problem.status} />);
+
 export const Unknown = ({ why, problem = null, onRepeat, onShow, detail, onDismiss, testid, repeating = false }: Notice & { why?: string; problem?: Problem | null; onRepeat?: (() => void) | undefined; repeating?: boolean }) => (
-  <Status testid={testid} actions={<>{onRepeat !== undefined && !repeating ? button("Repeat exactly", onRepeat) : button("Show current state", onShow)}{!repeating && dismiss(onDismiss)}</>}>
-    {why === undefined ? UNKNOWN : unknown(why)}{problemTail(problem)}{repeating && REPEATING}{detail}
+  <Status testid={testid} reference={reference(problem)} actions={<>{onRepeat !== undefined && !repeating ? button("Repeat exactly", onRepeat) : button("Show current state", onShow)}{!repeating && dismiss(onDismiss)}</>}>
+    {why === undefined ? UNKNOWN : unknown(why)}{unsure(problem)}{repeating && REPEATING}{detail}
   </Status>
 );
 
 export const SetAside = ({ why, problem = null, onShow, detail, onDismiss, testid }: Notice & { why: string; problem?: Problem | null }) => (
-  <Status testid={testid} actions={<>{button("Repeat exactly", () => {}, true)}{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{setAside(why)}{problemTail(problem)}{detail}</Status>
+  <Status testid={testid} reference={reference(problem)} actions={<>{button("Repeat exactly", () => {}, true)}{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{setAside(why)}{unsure(problem)}{detail}</Status>
 );
 
 // A [Repeat exactly] that settled: its result, until dismissed.
-export const Repeated = ({ line, onShow, detail, onDismiss, testid, role }: Notice & { line: string; role?: "status" | "alert" }) => (
-  <Status testid={testid} role={role} actions={<>{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{line}{detail}</Status>
+export const Repeated = ({ line, problem = null, onShow, detail, onDismiss, testid, role }: Notice & { line: string; problem?: Problem | null; role?: "status" | "alert" }) => (
+  <Status testid={testid} role={role} reference={reference(problem)} actions={<>{button("Show current state", onShow)}{dismiss(onDismiss)}</>}>{line}{detail}</Status>
 );
 
 export const Replayed = () => <Status>{REPLAYED}</Status>;
