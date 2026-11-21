@@ -154,9 +154,10 @@ export const config: WebdriverIO.Config = {
     await browser.overwriteCommand("url", async function (this: WebdriverIO.Browser, orig: (path: string, options?: unknown) => Promise<unknown>, path: string, options?: unknown) {
       const result = await orig(path, options);
       let state = "";
-      // The message names the state the page was last seen in, so a timeout reads as this cause.
-      await this.waitUntil(async () => (state = await this.execute(() => document.readyState)) === "complete", { timeout: 15_000 }).catch(() => {
-        throw new Error(`navigation to ${path} left readyState "${state}" after 15 s`);
+      // The message names the state the page was last seen in, so a timeout reads as this cause, and the
+      // wait's own error, so a failed read (a lost session, an alert) does not read as a slow page.
+      await this.waitUntil(async () => (state = await this.execute(() => document.readyState)) === "complete", { timeout: 15_000 }).catch((e: unknown) => {
+        throw new Error(`navigation to ${path} left readyState "${state}" after 15 s: ${e instanceof Error ? e.message : String(e)}`);
       });
       return result;
     });
