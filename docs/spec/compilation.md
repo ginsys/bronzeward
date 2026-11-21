@@ -1089,11 +1089,15 @@ unmeasured.
    the first's. The compared value is the node name Talos derives, copied here
    because the Talos package that computes it is internal (`nodename.go`,
    `FromHostname`, v1.14.5): take the hostname, or only its first label when
-   the machine's composition does not set `machine.kubelet.registerWithFQDN`
-   (Talos splits at the first dot into hostname and domain, `hostname_spec.go`,
-   `ParseFQDN`); lower-case the letters; turn each underscore into a hyphen;
-   drop every character that is not a letter, a digit, a hyphen or a dot; then
-   trim hyphens and dots from both ends. So `node-a.example.org`,
+   the composition's effective `RegisterWithFQDN` value is not true (the
+   accessor Talos reads, `K8sNodeConfig().RegisterWithFQDN()`: the
+   `KubeNodeConfig` document's field where that document exists, else
+   `machine.kubelet.registerWithFQDN`, `container.go`; Talos splits at the
+   first dot into hostname and domain, `hostname_spec.go`, `ParseFQDN`);
+   lower-case `A` to `Z`; turn each underscore into a hyphen; keep only `a` to
+   `z`, `0` to `9`, the hyphen and the dot, ASCII only, and drop every other
+   character, Unicode letters and digits included; then trim hyphens and dots
+   from both ends. So `node-a.example.org`,
    `NODE_A.example.org` and `_node-a_` clash with a filled `node-a`, and with
    `registerWithFQDN` set `node-a.example.org` does not. A domain that DHCP or
    a cloud supplies is not in the configuration and is not compared.
