@@ -542,7 +542,15 @@ func (e *env) planCancel(args []string) error {
 		var err error
 		// A restore between the answer and the read can undo the cancellation, so the read says what
 		// it stopped only from the answer's epoch (client-contracts.md section 8.5).
-		if _, change := snapshot(c, r, func() []string { err = getJSON(c, path, &p); return nil }); change != "" {
+		if _, change := snapshot(c, r, func() []string {
+			// The title of the committed operation reads more, inside the snapshot, so an epoch that moves
+			// during those reads is seen too.
+			if err = getJSON(c, path, &p); err == nil && p.State == "committed" {
+				e.holdBody(titlePath("plans", p.Id), &p)
+				e.titleRef(c, "operation", or(p.CommittedOperation, "?"))
+			}
+			return nil
+		}); change != "" {
 			return append(lines, sf("%s after the cancellation was recorded, so whether it still stands is not known. Read the plan with: plan show ", change)+
 				client.ShellWord(plan), cancelLimits), nil
 		}
@@ -553,10 +561,6 @@ func (e *env) planCancel(args []string) error {
 			return append(lines, "The plan is "+p.State+": it cannot be committed."), nil
 		}
 		op := or(p.CommittedOperation, "?")
-		if e.output == "table" {
-			e.holdBody(titlePath("plans", p.Id), &p)
-		}
-		e.titleRef(c, "operation", op)
 		return append(lines, sf("The plan stays committed to operation %s. ", e.ref("operation", op))+cancelLimits,
 			"Follow it with: bronzewardctl operation watch "+client.ShellWord(op)), nil
 	})
