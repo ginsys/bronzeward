@@ -36,12 +36,12 @@ describe("the Talos access sign's words", () => {
 
   test("a key never supplied, or removed, says to supply one and where", () => {
     expect(talosAccessWords(ok({ present: false, reason: "never-written-or-removed" }))).toEqual([NOT_SUPPLIED]);
-    expect(NOT_SUPPLIED).toContain("Onboard cluster page");
+    expect(NOT_SUPPLIED).toContain("Connect a cluster page");
   });
 
   test("a key whose latest version was deleted says so, and says where to supply one again", () => {
     expect(talosAccessWords(ok({ present: false, reason: "latest-version-deleted" }))).toEqual([DELETED]);
-    expect(DELETED).toContain("Onboard cluster page");
+    expect(DELETED).toContain("Connect a cluster page");
   });
 
   test("a read that gave no usable answer says it cannot tell, and never that no key was supplied", () => {
@@ -75,12 +75,12 @@ describe("the Talos access sign's words", () => {
 });
 
 describe("the Talos access sign's markup", () => {
-  test("a held key shows its words, and the Onboard cluster page is a link where it is named", () => {
+  test("a held key shows its words, and the Connect a cluster page is a link where it is named", () => {
     expect(html(h(TalosAccessView, { load: held }))).toContain(`Talos access key held: supplied ${when(created)} (version 2).`);
     const out = html(h(TalosAccessView, { load: ok({ present: false, reason: "never-written-or-removed" }) }));
     expect(out).toContain("Talos access key not supplied yet. Supply one on the ");
     expect(out).toContain(`<a href="${ONBOARD_PATH}"`);
-    expect(out).toContain(">Onboard cluster page</a>.");
+    expect(out).toContain(">Connect a cluster page</a>.");
   });
 
   test("the sign marks nothing for a discarded read", () => {

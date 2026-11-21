@@ -162,8 +162,14 @@ const ASSIGNMENTS: readonly Col<S["AssignmentBody"]>[] = [["Assignment", (a) => 
 
 // Never a colour alone: the class and its staleness are words.
 export const klass = (d: { class: string | null; stale?: boolean }) => `${d.class ?? "none"}${d.stale === true ? " (stale: not observed recently)" : ""}`;
+// A dependency's first column names it as its page's heading does, "Dependency <object>, version <n>", and keeps
+// the identifier as the link's title; an object that is not safe text leaves the shortened identifier.
+function DependencyName({ d }: { d: S["DependencyBody"] }) {
+  const object = safeText(d.object);
+  return <Ref to={`/dependencies/${encodeURIComponent(d.id)}`} id={d.id}>{object === undefined ? `Dependency ${short(d.id)}` : `Dependency ${object}, version ${d.version}`}</Ref>;
+}
 const DEPENDENCIES: readonly Col<S["DependencyBody"]>[] = [
-  ["Dependency", (d) => <Id id={d.id} />], ["Provider", (d) => d.provider], ["Object", (d) => `${d.object}, version ${d.version}`],
+  ["Dependency", (d) => <DependencyName d={d} />], ["Provider", (d) => d.provider], ["Object", (d) => `${d.object}, version ${d.version}`],
   ["Class", klass], ["Observed from", (d) => when(d.observedFrom)],
 ];
 const ALERTS: readonly Col<S["AlertBody"]>[] = [

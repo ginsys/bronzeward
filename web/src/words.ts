@@ -30,6 +30,8 @@ export const RELEASE_NOT_APPLIED_YET = "Release not applied yet";
 /** The buttons and headings that record a cluster by hand and add a machine. */
 export const ENTER_A_CLUSTER_BY_HAND = "Enter a cluster by hand";
 export const ADD_MACHINE = "Add machine";
+/** The label, heading and page name for taking an existing cluster in; it replaces "Onboard cluster". */
+export const CONNECT_A_CLUSTER = "Connect a cluster";
 /** Said beside the Copy control once the identifier is on the clipboard. */
 export const COPIED = "Copied";
 /** Said beside the Copy control where the browser would not copy. */

@@ -1,4 +1,4 @@
-// Onboard cluster (ginsys/bronzeward#1001) against the disposable deployment, whose provider is
+// Connect a cluster (ginsys/bronzeward#1001) against the disposable deployment, whose provider is
 // mise run dev-bao's OpenBao (bao.ts) and whose Talos nodes are two stand-ins on loopback that
 // POST /talos starts (internal/api e2enode_test.go). ONBOARD-01: a talosconfig chosen in the page onboards
 // the cluster end to end, its first key stored through OpenBao and each machine imported to a release.
@@ -26,8 +26,8 @@ async function nodes() {
 async function open() {
   expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
   await $('nav[aria-label="Main"]').$("a=Machines").click();
-  await $("main").$("button=Onboard cluster").click();
-  await expect($("main h2")).toHaveText("Onboard cluster");
+  await $("main").$("button=Connect a cluster").click();
+  await expect($("main h2")).toHaveText("Connect a cluster");
 }
 
 // Chooses the synthetic talosconfig in the file field, fetched by the page: only whether a file was chosen leaves it.
@@ -74,7 +74,7 @@ async function recorded(name: string) {
   return { clusters: clusters.length, machines: machines.length, imports, drafts: drafts.length };
 }
 
-describe("Onboard cluster (#1001)", () => {
+describe("Connect a cluster (#1001)", () => {
   // A deployment of its own for each case: the stand-in nodes carry the same cluster ID and machine
   // identities each time, so a second case on one deployment would find the first's records.
   beforeEach(async () => {
@@ -87,7 +87,7 @@ describe("Onboard cluster (#1001)", () => {
     await open();
     const name = `synthetic-${hex()}`;
     await start(name);
-    await $("main form").$("button=Onboard cluster").click();
+    await $("main form").$("button=Connect a cluster").click();
     await expect(result()).toHaveText(expect.stringMatching(/^Onboarded\./), { wait: 180_000 });
     expect(await states()).toEqual([
       `Cluster ${name}=done`, "First key=done", "Machine cp-1=done", "Machine w-1=done", "Draft onboard " + name + "=done", "Import cp-1=done", "Import w-1=done",
@@ -110,7 +110,7 @@ describe("Onboard cluster (#1001)", () => {
     const name = `synthetic-${hex()}`;
     await start(name);
     await faults({ upstream: at, steps: { path: "/drafts", take: ["scope-refused"] } });
-    await $("main form").$("button=Onboard cluster").click();
+    await $("main form").$("button=Connect a cluster").click();
     await expect(result()).toHaveText(expect.stringContaining(`Stopped at Draft onboard ${name}`), { wait: 120_000 });
     expect(await states()).toEqual([`Cluster ${name}=done`, "First key=done", "Machine cp-1=done", "Machine w-1=done", `Draft onboard ${name}=failed`]);
     await $("main").$("button=Run again").click();

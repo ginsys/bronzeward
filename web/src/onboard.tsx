@@ -1,4 +1,4 @@
-// The Onboard cluster page (ginsys/bronzeward#1001): choose a talosconfig, read the cluster it names,
+// The Connect a cluster page (ginsys/bronzeward#1001): choose a talosconfig, read the cluster it names,
 // confirm the cluster's name and Kubernetes endpoint, and let the steps of onboard.ts record it, supply the
 // first key and import each machine. The file is read in the page, cut to one context in memory, and sent
 // only as that cut: to the discovery and to the first key. It is never stored, logged or shown, and the
@@ -10,6 +10,7 @@ import { type Env, endpointNote, isAddress, type Line, onboardCluster, type Plan
 import { RequestRef } from "./problems.tsx";
 import { Action } from "./shell.tsx";
 import { useUnsaved, useWrites } from "./forms.tsx";
+import { CONNECT_A_CLUSTER } from "./words.ts";
 
 // The most a first key may be (the API's bound), so a larger file is refused before it is read.
 const MAX_FILE = 512 * 1024;
@@ -18,7 +19,7 @@ const AGAIN = "choose the file again";
 
 export const OnboardClusterAction = () => {
   const { go } = useReads();
-  return <Action label="Onboard cluster" needs={["author"]} onClick={() => go("/clusters/onboard")} />;
+  return <Action label={CONNECT_A_CLUSTER} needs={["author"]} onClick={() => go("/clusters/onboard")} />;
 };
 
 export function OnboardCluster() {
@@ -132,7 +133,7 @@ export function OnboardCluster() {
   const choose = failed?.key === "first-key" && p?.document === undefined;
   return (
     <>
-      <h2>Onboard cluster</h2>
+      <h2>{CONNECT_A_CLUSTER}</h2>
       {note !== undefined && <p role="alert" data-testid="onboard-note">{note.text}</p>}
       {note?.reference !== undefined && <RequestRef problem={note.reference.problem} status={note.reference.status} />}
       {phase === "file" && (
@@ -167,7 +168,7 @@ export function OnboardCluster() {
           <p><label>Name: <input name="name" required autoComplete="off" /></label> for the cluster in Bronzeward</p>
           <p><label>Kubernetes endpoint: <input name="kube" required defaultValue={p.kube} autoComplete="off" /></label> https://host or https://host:port, the cluster's own where its control-plane members agree on one, else the first control-plane member's address</p>
           <p>Onboarding records the cluster and each member that answered, supplies the cluster's first key, and imports each machine into one draft.</p>
-          <p><Action label="Onboard cluster" needs={["author"]} submit busy={busy} /></p>
+          <p><Action label={CONNECT_A_CLUSTER} needs={["author"]} submit busy={busy} /></p>
         </form>
       )}
       {phase === "run" && (

@@ -1,4 +1,4 @@
-// The first write views (ginsys/bronzeward#338): Add cluster, Record machine and Change endpoint
+// The first write views (ginsys/bronzeward#338): Enter a cluster by hand, Add machine and Change endpoint
 // (journeys §5.2 and §10), each a human author's act, over the write layer of write.ts. Also the
 // notice of a write whose outcome is unknown and the leave guards (#257 B11).
 
@@ -165,8 +165,8 @@ export function useSend(): [Write | undefined, (spec: WriteSpec) => void] {
   return [current.current, send];
 }
 
-// A 409 conflict that names another cluster or machine already recorded, as Add cluster's or
-// Record machine's does: the record to read (§8.2 409 row). Not the write's own resource, which a
+// A 409 conflict that names another cluster or machine already recorded, as Enter a cluster by hand's or
+// Add machine's does: the record to read (§8.2 409 row). Not the write's own resource, which a
 // Change endpoint conflict names.
 export function existing(status: number, p: Problem | null, resource: string): { kind: "cluster" | "machine"; id: string; to: string } | undefined {
   if (status !== 409 || p?.type !== "urn:bronzeward:problem:conflict") return undefined;
@@ -264,7 +264,7 @@ export function AddCluster() {
   );
 }
 
-// Record machine's cluster choice. A cluster read that ended without data shows why, as the list
+// Add machine's cluster choice. A cluster read that ended without data shows why, as the list
 // views do (§8.2): its problem's title, detail and instance, or what the route accepts.
 export function ClusterField({ clusters, chosen, choose }: { clusters: Load<Listed<Cluster>> | Dropped; chosen: string; choose: (id: string) => void }) {
   const pending = usePending(clusters, "clusters");
