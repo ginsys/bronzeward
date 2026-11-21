@@ -140,6 +140,10 @@ export const withoutProfile = (p: Provider): Provider => ({ ...p, noProfile: tru
 export function pendingNoProfile(storage: Storage): boolean {
   return readPending(storage.getItem(PENDING_KEY))?.noProfile === true;
 }
+// The provider the page uses for a callback, and for the sign-in it offers after a refused one: the app's
+// two uses of the choice, kept here so a test reads the whole chain.
+export const providerForCallback = (found: Provider, storage: Storage): Provider => (pendingNoProfile(storage) ? withoutProfile(found) : found);
+export const providerAfter = (provider: Provider, f: Failure): Provider => (profileRefused(f) ? withoutProfile(provider) : provider);
 
 export interface CallbackDeps {
   storage: Storage;
