@@ -81,25 +81,36 @@ export function cutContext(text: string, name: string | undefined): { document: 
 // flight, or unknown and repeatable) and hands it this call's hook; any other waits for the open one's
 // answer, then dismisses what that left open. A second write beside an open one would leave the first,
 // repeatable, holding the document.
-const kept = new WeakMap<object, Write[]>();
+// The choice of write is made one request at a time (`gate`), and the answer is awaited outside it.
+const kept = new WeakMap<object, { held: Write[]; gate: Promise<unknown> }>();
 export function sender(writes: Pick<Writes, "submit" | "repeatable" | "dismiss" | "open">, alive: () => boolean): Env["send"] {
-  const held = kept.get(writes) ?? [];
-  kept.set(writes, held);
+  const s = kept.get(writes) ?? { held: [], gate: Promise.resolve() };
+  kept.set(writes, s);
+  const left: Outcome = { kind: "not-done", why: "the page was left", problem: null };
   return async (spec) => {
-    if (!alive()) return { kind: "not-done", why: "the page was left", problem: null };
-    if (spec.released === undefined) return writes.submit(new Write(spec));
+    if (!alive()) return left;
+    const hook = spec.released;
+    if (hook === undefined) return writes.submit(new Write(spec));
     const same = (w: Write) => w.spec.method === spec.method && w.spec.path === spec.path && JSON.stringify(w.spec.body) === JSON.stringify(spec.body);
-    let w = held.find((x) => same(x) && (x.running !== undefined || writes.repeatable(x)));
-    if (w !== undefined) w.spec.released = spec.released;
-    else {
-      for (const old of held.splice(0)) {
-        await old.running?.catch(() => undefined);
-        if (writes.open.includes(old)) writes.dismiss(old);
+    const choose = async (): Promise<{ sent: Promise<Outcome> }> => {
+      let w = s.held.find((x) => same(x) && (x.running !== undefined || writes.repeatable(x)));
+      if (w !== undefined) w.spec.released = hook;
+      else {
+        for (const old of s.held) {
+          await old.running?.catch(() => undefined);
+          if (writes.open.includes(old)) writes.dismiss(old);
+        }
+        s.held.length = 0;
+        // The page may have been left while the open write was answered.
+        if (!alive()) return { sent: Promise.resolve(left) };
+        w = new Write(spec);
+        s.held.push(w);
       }
-      w = new Write(spec);
-      held.push(w);
-    }
-    return writes.submit(w);
+      return { sent: writes.submit(w) };
+    };
+    const chosen = s.gate.then(choose);
+    s.gate = chosen.catch(() => undefined);
+    return (await chosen).sent;
   };
 }
 
