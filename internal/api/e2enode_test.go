@@ -14,7 +14,8 @@ import (
 // TestE2ENode is the Talos target of the browser cases that onboard a cluster (web/e2e/auth.conf.ts runs
 // the compiled test as bin/e2eseed.test, as it runs TestE2ESeed): a two-member cluster of stand-ins on
 // loopback that the disposable deployment can dial. A discovery dials each member at its own address and
-// port 50000, so the control plane listens on 127.0.0.2:50000 and the worker on 127.0.0.3:50000; the
+// port 50000, so the control plane listens on 127.0.0.2:50000 and the worker on 127.0.0.3:50000 (macOS
+// carries only 127.0.0.1 on lo0: the Safari job adds the two aliases first); the
 // talosconfig names the control plane as its endpoint and a second context that no case uses.
 //
 // It writes the endpoint and the talosconfig as JSON to BW_E2E_NODE_OUT and then serves until its standard

@@ -130,6 +130,14 @@ jobs:
             got=$(command -v "$t") || { echo "safari: $t is not on PATH" >&2; exit 1; }
             [ "$got" = "$want/$t" ] || { echo "safari: $t is $got, not $want/$t" >&2; exit 1; }
           done
+      # The onboarding cases' Talos stand-ins listen on 127.0.0.2:50000 and 127.0.0.3:50000 (a discovery
+      # dials each member at port 50000), and macOS carries only 127.0.0.1 on lo0: without these aliases
+      # POST /talos answers 500 (ginsys/bronzeward#1001, ginsys/bronzeward#946). Fail here if one is missing.
+      - run: |
+          for a in 127.0.0.2 127.0.0.3; do sudo ifconfig lo0 alias "$a" up; done
+          for a in 127.0.0.2 127.0.0.3; do
+            ifconfig lo0 | grep -q "inet $a " || { echo "safari: lo0 has no $a" >&2; exit 1; }
+          done
       # Safari's Tab skips buttons and links by default (Option+Tab reaches them), so the keyboard
       # cases would fail on a setting and not on the page. These are the settings a tester turns on
       # in Safari's Advanced pane and System Settings > Keyboard ("Press Tab to highlight each item",
