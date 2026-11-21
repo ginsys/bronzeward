@@ -86,6 +86,15 @@ for list in '[[]]' "$real"; do
   if [ "$rc" -eq 0 ] && [ ! -s "$work/calls" ]; then ok; else bad "STATUS 2 called gh"; fi
 done
 
+# Drift with no pin named is a crash that exited 1: an error, and nothing is created, edited or closed.
+for list in '[[]]' "$real"; do
+  rc=0
+  rm -f "$work/calls" "$work"/args-*
+  PATH="$work/bin:$PATH" WORK=$work LIST=$list REPO=o/r STATUS=1 DIFF='' RUN_URL=u EVENT=e SHA=s "$script" >/dev/null 2>&1 || rc=$?
+  touch "$work/calls"
+  if [ "$rc" -ne 0 ] && [ ! -s "$work/calls" ]; then ok; else bad "STATUS 1 with an empty DIFF reported"; fi
+done
+
 # Any other status is an error and calls nothing.
 run 3 "$real"
 if [ "$rc" -ne 0 ] && [ ! -s "$work/calls" ]; then ok; else bad "an unknown STATUS did not stop the script"; fi
