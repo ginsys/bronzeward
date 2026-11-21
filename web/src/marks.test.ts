@@ -9,7 +9,7 @@ import { type Reads, ReadsProvider } from "./list.tsx";
 import { candidates, markLines, markRefusal, markSent, MarksPanel, markSpec, MAX_CANDIDATES, MAX_MARKS, withMark } from "./marks.tsx";
 import { eventLine, refusalOf, refusalText } from "./progress.ts";
 import { ShellContext } from "./shell.tsx";
-import { problemTail, Refused, Unknown } from "./states.tsx";
+import { problemSentences, Refused, Unknown } from "./states.tsx";
 import { Writes } from "./write.ts";
 
 type Operation = components["schemas"]["OperationBody"];
@@ -165,17 +165,18 @@ describe("a refused mark is named by rule and position, never a path (§11.3, PR
     const unknown = renderToStaticMarkup(h(Unknown, { why: "timeout", problem: p, onShow: () => {} }));
     expect(unknown).toContain("The mark at position 2 (the first is 0) is refused.");
     expect(unknown).not.toContain("BWSYNTH");
-    expect(problemTail(p)).not.toContain("BWSYNTH");
-    expect(problemTail(problem({ status: 409, detail: "kept" }))).toContain("kept");
+    expect(problemSentences(p, p.status)).not.toContain("BWSYNTH");
+    const kept = problem({ status: 409, detail: "kept" });
+    expect(problemSentences(kept, kept.status)).toContain("kept");
     // A 422 of another rule is not a mark refusal, even with a position member: it keeps its detail.
     const other = problem({ type: "urn:bronzeward:problem:idempotency-key-reused", position: 2, detail: "kept" });
-    expect(problemTail(other)).toContain("kept");
-    expect(problemTail(other)).not.toContain("The mark at position");
+    expect(problemSentences(other, other.status)).toContain("kept");
+    expect(problemSentences(other, other.status)).not.toContain("The mark at position");
     expect(renderToStaticMarkup(h(Refused, { problem: other, status: 422, verb: "saved" }))).toContain("kept");
     // The whole type counts: a longer type that ends in validation-failed is another problem.
     const longer = problem({ type: "urn:bronzeward:problem:other:validation-failed", position: 2, detail: "kept" });
-    expect(problemTail(longer)).toContain("kept");
-    expect(problemTail(longer)).not.toContain("The mark at position");
+    expect(problemSentences(longer, longer.status)).toContain("kept");
+    expect(problemSentences(longer, longer.status)).not.toContain("The mark at position");
   });
 });
 

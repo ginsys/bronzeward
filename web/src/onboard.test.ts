@@ -399,6 +399,27 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
     expect(s.ingestions.size).toBe(2);
   });
 
+  test("a failed step's line is in words, with the problem's code and request number only in its reference", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.fail.set("POST /drafts", refused(422, "validation-failed", { detail: "a title is needed", instance: "req_d" }));
+    const line = (await run(s, plan)).lines.at(-1)!;
+    expect(line).toMatchObject({ key: "draft", state: "failed", reference: { status: 422 } });
+    expect(line.detail).toMatch(/^not saved\. /);
+    expect(line.detail).not.toMatch(/validation-failed|req_d|The server answered/);
+    expect(line.detail).toContain("The server says: a title is needed.");
+  });
+
+  test("a step whose outcome is unknown says to check the current state, with no next step to repeat", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.fail.set("POST /ingestions", { kind: "unknown", why: "the connection ended", problem: problem(503, "dependency-unavailable", { instance: "req_u" }) });
+    const line = (await run(s, plan)).lines.at(-1)!;
+    expect(line).toMatchObject({ key: "import:n1", state: "unknown", reference: { status: 503 } });
+    expect(line.detail).toMatch(/^unknown whether it was saved: the connection ended\. Check the current state before you do it again\. /);
+    expect(line.detail).not.toMatch(/req_u|dependency-unavailable/);
+  });
+
   test("an import that committed but whose answer was lost is found through GET /ingestions?machine= on the next run, and not started again", async () => {
     const s = new Server();
     const plan = await planOf(s);
@@ -500,8 +521,12 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
     const r = await discoverCluster(env, talosconfig(), {});
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.why).toContain("talos-access-unavailable");
+      // In words: no code, and the problem goes to the reference the page shows beside the note.
+      expect(r.why).toContain("The server could not work with Talos for this machine or cluster.");
+      expect(r.why).not.toContain("talos-access-unavailable");
       expect(r.why).not.toContain(CANARY);
+      expect(r.reference?.status).toBe(503);
+      expect(r.reference?.problem.type).toBe("urn:bronzeward:problem:talos-access-unavailable");
     }
   });
 });
@@ -607,7 +632,8 @@ describe("a name is sent as it stands, and discovery's failures are whole senten
       const r = await discoverCluster(s.env(), talosconfig(), { endpoint: typed });
       expect(r.ok).toBe(false);
       if (r.ok) continue;
-      expect(r.why.startsWith("The server answered 503. Talos is unavailable: the endpoint did not resolve. Request req_x.")).toBe(true);
+      expect(r.why.startsWith("The server could not work with Talos for this machine or cluster. The server's explanation follows. The server says: the endpoint did not resolve.")).toBe(true);
+      expect(r.why).not.toMatch(/req_x|Talos is unavailable|The server answered/);
       expect(r.why.includes(" is a name: the nodes' certificates may not list it. Add the name to machine.certSANs of the control-plane machines, or type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.")).toBe(hint);
     }
   });
@@ -630,11 +656,18 @@ describe("a name is sent as it stands, and discovery's failures are whole senten
     expect(s.requests).toEqual([]);
   });
 
-  test("a refused read reads as one sentence: the status, then the problem, with one full stop each", async () => {
+  test("a refused read says what happened and what to do, with the problem's code, title and request number only in the reference", async () => {
     const s = new Server();
     s.fail.set("POST /discoveries", refused(400, "invalid-request", { title: "The request is malformed", detail: "endpoint must be an IP literal", instance: "req_x" }));
     const r = await discoverCluster(s.env(), talosconfig(), {});
-    expect(r).toEqual({ ok: false, why: "The server answered 400. The request is malformed: endpoint must be an IP literal. Request req_x." });
+    expect(r).toMatchObject({ ok: false, why: "The request was malformed, so the server did not act on it. Check what you entered and change it before sending again. If nothing looks wrong, report it with the reference below. The server says: endpoint must be an IP literal.", reference: { status: 400 } });
+    expect(JSON.stringify(r)).toContain("req_x");
+    if (!r.ok) expect(r.why).not.toMatch(/req_x|invalid-request|The request is malformed|The server answered/);
+  });
+
+  test("a refusal with no problem document is the status alone, and carries no reference", async () => {
+    const env: Env = { ...new Server().env(), send: async () => ({ kind: "refused", status: 502, problem: null, replayed: false }) };
+    expect(await discoverCluster(env, talosconfig(), {})).toEqual({ ok: false, why: "The server answered 502." });
   });
 
   test("a failed send names what happened, capitalised and with one full stop", async () => {

@@ -119,19 +119,6 @@ export function needs(status: number, problem: Problem): string {
   return Array.isArray(roles) && roles.length > 0 && roles.every((r) => typeof r === "string") ? ` Needs ${roles.join(" or ")}.` : "";
 }
 
-// The onboarding page's text: a problem's title, its detail when present and its instance (§8.2), as one
-// sentence or two. Every other notice uses the sentences below.
-export const problemLine = (p: Problem) => `${p.title}${p.detail !== undefined && refusedAt(p) === "" ? `: ${p.detail}` : ""}.${p.instance !== undefined ? ` Request ${p.instance}.` : ""}`;
-// An earlier-epoch idempotency record's 409 (§8.2 409 row, §8.4 item 7): the request it recorded
-// and that request's epoch, which the operator reads and reports.
-export const earlierRecord = (p: Problem) => {
-  const earlier = earlierOf(p);
-  return earlier === undefined ? "" : ` The key's earlier record: request ${earlier.request}, epoch ${earlier.epoch}.`;
-};
-// The onboarding page's tail: what the route accepts (a 403's), then the problem's fields. Nothing when no
-// answer carried one.
-export const problemTail = (p: Problem | null) => (p === null ? "" : `${needs(p.status, p)}${refusedAt(p)} ${problemLine(p)}${earlierRecord(p)}`);
-
 // A `409 recovery-mode-active` with a `scope` member is that scope's refusal, about one part of the
 // installation. It says nothing about the process's start mode (client contracts §8.5 item 1, §8.2 409
 // row), and the scope's identifier is in the reference. Any other problem, and a `scope` that is not text,

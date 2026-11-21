@@ -6,7 +6,8 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useReads, Ref, useSettled } from "./list.tsx";
-import { type Env, endpointNote, isAddress, type Line, onboardCluster, type Plan, discoverCluster, sender } from "./onboard.ts";
+import { type Env, endpointNote, isAddress, type Line, onboardCluster, type Plan, discoverCluster, type Reference, sender } from "./onboard.ts";
+import { RequestRef } from "./problems.tsx";
 import { Action } from "./shell.tsx";
 import { useUnsaved, useWrites } from "./forms.tsx";
 
@@ -33,7 +34,8 @@ export function OnboardCluster() {
   const [held, setHeld] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ended, setEnded] = useState<boolean>();
-  const [note, setNote] = useState<string>();
+  // The page's note, and the reference of the problem a refused read carried (its sentences point to it).
+  const [note, setNote] = useState<{ text: string; reference?: Reference }>();
   // What the page says about the endpoint the read will use, from the file, the context and the endpoint
   // field. The file is read again at each change and only this sentence is kept, never its text.
   const [said, setSaid] = useState<string>();
@@ -74,7 +76,7 @@ export function OnboardCluster() {
     const d = new FormData(e.currentTarget);
     const file = d.get("file");
     if (busy || !(file instanceof File) || file.size === 0) return;
-    if (file.size > MAX_FILE) return setNote("The file is larger than 512 KiB, the most a first key may be.");
+    if (file.size > MAX_FILE) return setNote({ text: "The file is larger than 512 KiB, the most a first key may be." });
     setBusy(true);
     setNote(undefined);
     // The read's own answer says what is wrong; a note for the previous text, or a preview still being read,
@@ -85,7 +87,7 @@ export function OnboardCluster() {
     if (!alive.current) return;
     setBusy(false);
     // A discovery only reads, so this lead is true; its reasons are whole sentences with none of their own.
-    if (!r.ok) return setNote(`Nothing was recorded. ${r.why}`);
+    if (!r.ok) return setNote({ text: `Nothing was recorded. ${r.why}`, ...("reference" in r && r.reference !== undefined && { reference: r.reference }) });
     unsay();
     plan.current = r.plan;
     setHeld(r.plan.document !== undefined);
@@ -116,7 +118,7 @@ export function OnboardCluster() {
     if (p === undefined) return;
     const d = new FormData(e.currentTarget);
     const kube = String(d.get("kube") ?? "").trim();
-    if (!/^https:\/\/[^/\s]+$/.test(kube)) return setNote("Give the Kubernetes endpoint as https://host or https://host:port.");
+    if (!/^https:\/\/[^/\s]+$/.test(kube)) return setNote({ text: "Give the Kubernetes endpoint as https://host or https://host:port." });
     setNote(undefined);
     p.name = String(d.get("name") ?? "").trim();
     p.kube = kube;
@@ -131,7 +133,8 @@ export function OnboardCluster() {
   return (
     <>
       <h2>Onboard cluster</h2>
-      {note !== undefined && <p role="alert" data-testid="onboard-note">{note}</p>}
+      {note !== undefined && <p role="alert" data-testid="onboard-note">{note.text}</p>}
+      {note?.reference !== undefined && <RequestRef problem={note.reference.problem} status={note.reference.status} />}
       {phase === "file" && (
         <form onSubmit={(e) => void read(e)} onChange={(e) => void say(e.currentTarget)} aria-label="Read the cluster">
           <p>
@@ -173,6 +176,7 @@ export function OnboardCluster() {
             {lines.map((l) => (
               <li key={l.key} data-testid="onboard-line" data-state={l.state}>
                 {l.label}: {l.state}{l.detail !== undefined && `, ${l.detail}`}{l.to !== undefined && <> (<Ref to={l.to} id={l.to}>open</Ref>)</>}
+                {l.reference !== undefined && <RequestRef problem={l.reference.problem} status={l.reference.status} />}
               </li>
             ))}
           </ul>
