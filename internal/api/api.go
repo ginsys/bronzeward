@@ -230,7 +230,9 @@ func newAPI(db *sql.DB, a Authenticator, cfg config.Auth, d deps, o options) *AP
 		o.logf = log.Printf
 	}
 	if o.dial == nil {
-		o.dial = talos.Dial
+		o.dial = func(ctx context.Context, talosconfig []byte, endpoint string) (talos.Reader, error) {
+			return talos.Dial(ctx, talosconfig, endpoint)
+		}
 	}
 	if o.resolve == nil {
 		o.resolve = discover.ResolveEndpoint

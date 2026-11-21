@@ -503,9 +503,10 @@ paths:
         and records nothing (API revision 11; persistence and API §9.2). The only POST that only reads, so it takes no Idempotency-Key
         and no Bronzeward-Expected-Epoch, records no act and no idempotency record, and has no replay. The document is the first-key
         input's (kind, document, endpoint) and is never stored, logged or returned; the endpoint may be a DNS name, which the server
-        resolves once and dials as that address. A refused or unusable document is 422
-        validation-failed with the signer's rule; an endpoint that does not resolve, does not answer, does not accept the key or gives no cluster identity
-        is 503 talos-access-unavailable, and a refused key is not told apart from an unreachable endpoint; a cluster with more members
+        resolves once and dials as that address, checking the node's certificate against the name. A refused or unusable document is 422
+        validation-failed with the signer's rule; an endpoint that does not resolve, does not answer, does not accept the key, for a name does not hold the name among its
+        certificate names, or gives no cluster identity
+        is 503 talos-access-unavailable, and a refused key or name is not told apart from an unreachable endpoint; a cluster with more members
         than the bound is 422 validation-failed with the rule too-many-members and the limit. At the deadline the members read so far are
         answered and the rest listed unanswered, with complete false.
       x-bronzeward-roles: [author]
@@ -3239,7 +3240,7 @@ components:
           type: string
           minLength: 1
           description: The first key's text, at most 512 KiB, never stored, logged or returned.
-        endpoint: {type: string, description: 'An IP literal or a DNS name, with an optional port. A name is resolved once, and the key read, the signing and the first reads of the cluster go to the address it gave; each member is then dialled at an address the member list gives.'}
+        endpoint: {type: string, description: 'An IP literal or a DNS name, with an optional port. A name is resolved once, and the key read, the signing and the first reads of the cluster go to the address it gave, with the node certificate checked against the name (a name needs itself among the nodes certificate names, machine.certSANs; a typed address is checked as an address); each member is then dialled at an address the member list gives, and checked against that address.'}
       additionalProperties: false
     FragmentBody:
       type: object

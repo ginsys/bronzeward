@@ -22,6 +22,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/resources/cluster"
 	cfgres "github.com/siderolabs/talos/pkg/machinery/resources/config"
 	"github.com/siderolabs/talos/pkg/machinery/resources/hardware"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -46,12 +47,22 @@ type Identity struct {
 	SMBIOSUUID, NodeID, ClusterID string
 }
 
+// DialOption changes how Dial checks the node's certificate; it never changes the address dialled.
+type DialOption func(*dialOptions)
+
+type dialOptions struct{ serverName string }
+
+// ServerName is the name the node's certificate is checked against, in place of the address dialled:
+// the name an endpoint was resolved from, as talosctl checks it. The connection still goes to the
+// address and the CA still decides what is trusted. name is a bare host, no port; "" adds nothing.
+func ServerName(name string) DialOption { return func(o *dialOptions) { o.serverName = name } }
+
 // Dial makes a Reader for the node at endpoint (ParseEndpoint's grammar) from a talosconfig's
 // bytes. Only the current context's certificate authority, client certificate and key are used:
 // its endpoints, nodes and auth block are not, and nothing is read from or written to disk. It
 // makes no request; a request's deadline is its context's. Its errors never quote the talosconfig,
 // which holds the client key.
-func Dial(ctx context.Context, talosconfig []byte, endpoint string) (Reader, error) {
+func Dial(ctx context.Context, talosconfig []byte, endpoint string, opts ...DialOption) (Reader, error) {
 	ep, err := ParseEndpoint(endpoint)
 	if err != nil {
 		return nil, err
@@ -60,7 +71,15 @@ func Dial(ctx context.Context, talosconfig []byte, endpoint string) (Reader, err
 	if err != nil {
 		return nil, err
 	}
-	c, err := client.New(ctx, client.WithConfigContext(creds), client.WithEndpoints(ep))
+	var o dialOptions
+	for _, f := range opts {
+		f(&o)
+	}
+	co := []client.OptionFunc{client.WithConfigContext(creds), client.WithEndpoints(ep)}
+	if o.serverName != "" {
+		co = append(co, client.WithGRPCDialOptions(grpc.WithAuthority(o.serverName)))
+	}
+	c, err := client.New(ctx, co...)
 	if err != nil {
 		return nil, errors.New("talos: the talosconfig's certificate authority, certificate or key is unusable")
 	}

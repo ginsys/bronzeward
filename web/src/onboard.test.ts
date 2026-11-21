@@ -565,6 +565,15 @@ describe("the endpoint the page will use, said before the button", () => {
     expect(endpointNote(talosconfig(), "", "lb.example.test")).toBe(say("lb.example.test"));
   });
 
+  test("a context that lists several endpoints says the page tries the first of them; a typed one is alone", () => {
+    const several = talosconfig().replace("endpoints: [10.0.0.1:50000]", "endpoints: [cp.example.test, 10.0.0.2, 10.0.0.3]");
+    expect(endpointNote(several, "", "")).toBe("The page will try the first of 3 endpoints, cp.example.test.");
+    expect(endpointNote(several, "", "10.9.9.9")).toBe("The page will try the cluster at 10.9.9.9.");
+    // One entry, and an entry that is not text, are not a list.
+    expect(endpointNote(talosconfig(), "", "")).toBe("The page will try the cluster at 10.0.0.1:50000.");
+    expect(endpointNote(talosconfig().replace("endpoints: [10.0.0.1:50000]", "endpoints: [10.0.0.1:50000, 7]"), "", "")).toBe("The page will try the cluster at 10.0.0.1:50000.");
+  });
+
   test("a context with no endpoint and none typed asks for an IP address", () => {
     const none = talosconfig().replace("    endpoints: [10.0.0.1:50000]\n", "");
     expect(endpointNote(none, "", "")).toBe("The talosconfig's context names no endpoint: type the IP address of a control-plane node.");
@@ -599,7 +608,7 @@ describe("a name is sent as it stands, and discovery's failures are whole senten
       expect(r.ok).toBe(false);
       if (r.ok) continue;
       expect(r.why.startsWith("The server answered 503. Talos is unavailable: the endpoint did not resolve. Request req_x.")).toBe(true);
-      expect(r.why.includes(" is a name: if the server cannot use it, type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.")).toBe(hint);
+      expect(r.why.includes(" is a name: the nodes' certificates may not list it. Add the name to machine.certSANs of the control-plane machines, or type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.")).toBe(hint);
     }
   });
 

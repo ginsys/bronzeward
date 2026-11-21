@@ -108,8 +108,11 @@ var ErrNoEndpoint = errors.New("discover: the talosconfig names no endpoint")
 // "") and reads the cluster. No other context is used. A name that the file does not hold is
 // ErrUnknownContext, before any dial. A DNS name is resolved once and the address it gave is dialled
 // (resolveEndpoint). A member that does not answer is listed as such, not an error.
+//
+// A name endpoint's certificate check is against the name, and the dial is on the address
+// (persistence-api §3.3): the name is the one resolveEndpoint resolved.
 func Discover(ctx context.Context, talosconfig []byte, contextName, endpoint string) (Result, error) {
-	return walk(ctx, talosconfig, contextName, endpoint, 0, false)
+	return walk(ctx, talosconfig, contextName, endpoint, "", 0, false)
 }
 
 // DiscoverLimited is Discover for a caller that bounds its work, the server, with its ctx alone: the
@@ -118,13 +121,18 @@ func Discover(ctx context.Context, talosconfig []byte, contextName, endpoint str
 // read and before any member is dialled. A caller whose ctx ends once the cluster's identity is read
 // gets that identity, the members read so far, the rest listed unanswered, and Result.Cut set: only an
 // identity that was not read is an error.
-func DiscoverLimited(ctx context.Context, talosconfig []byte, contextName, endpoint string, maxMembers int) (Result, error) {
-	return walk(ctx, talosconfig, contextName, endpoint, maxMembers, true)
+//
+// serverName is for a caller that resolved a name itself and passes the address as endpoint: the
+// bare name the endpoint's certificate is checked against, in place of that address. "" adds no
+// option, and an endpoint that is itself a name is checked against its own name, as in Discover. The
+// members are dialled at the addresses the member list gives, with no server name.
+func DiscoverLimited(ctx context.Context, talosconfig []byte, contextName, endpoint, serverName string, maxMembers int) (Result, error) {
+	return walk(ctx, talosconfig, contextName, endpoint, serverName, maxMembers, true)
 }
 
 // walk is both: limited says the caller's ctx is the only bound on the reads from the endpoint, and
 // that a ctx that ends after the identity is read is a Cut result, not an error.
-func walk(ctx context.Context, talosconfig []byte, contextName, endpoint string, maxMembers int, limited bool) (Result, error) {
+func walk(ctx context.Context, talosconfig []byte, contextName, endpoint, serverName string, maxMembers int, limited bool) (Result, error) {
 	creds, first, err := credentials(talosconfig, contextName)
 	if err != nil {
 		return Result{}, err
@@ -149,7 +157,10 @@ func walk(ctx context.Context, talosconfig []byte, contextName, endpoint string,
 	if err != nil {
 		return Result{}, err
 	}
-	n, err := dial(startCtx, creds, ep)
+	if name == "" {
+		name = serverName
+	}
+	n, err := dial(startCtx, creds, ep, name)
 	if err != nil {
 		return Result{}, err
 	}
@@ -285,7 +296,7 @@ func readMemberAt(ctx context.Context, creds *clientconfig.Context, addrs []neti
 func readMember(ctx context.Context, creds *clientconfig.Context, a netip.Addr, nodeID string, controlPlane bool) (Member, string, bool) {
 	ctx, cancel := context.WithTimeout(ctx, memberTimeout)
 	defer cancel()
-	n, err := dial(ctx, creds, memberEndpoint(a))
+	n, err := dial(ctx, creds, memberEndpoint(a), "")
 	if err != nil {
 		return Member{}, "", false
 	}

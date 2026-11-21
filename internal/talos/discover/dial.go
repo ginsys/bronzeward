@@ -11,6 +11,7 @@ import (
 	"github.com/cosi-project/runtime/pkg/state"
 	"github.com/siderolabs/talos/pkg/machinery/client"
 	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -114,9 +115,15 @@ type node struct {
 func (n *node) close() { n.api.Close() } //nolint:errcheck // a read-only client has nothing to flush
 
 // dial makes a node for host:port. It sends no node metadata, so the node that answers is the one
-// dialled, whatever the talosconfig names. It makes no request.
-func dial(ctx context.Context, creds *clientconfig.Context, endpoint string) (*node, error) {
-	c, err := client.New(ctx, client.WithConfigContext(creds), client.WithEndpoints(endpoint))
+// dialled, whatever the talosconfig names. serverName, when not "", is the bare name the node's
+// certificate is checked against in place of the address; the connection still goes to the address.
+// It makes no request.
+func dial(ctx context.Context, creds *clientconfig.Context, endpoint, serverName string) (*node, error) {
+	opts := []client.OptionFunc{client.WithConfigContext(creds), client.WithEndpoints(endpoint)}
+	if serverName != "" {
+		opts = append(opts, client.WithGRPCDialOptions(grpc.WithAuthority(serverName)))
+	}
+	c, err := client.New(ctx, opts...)
 	if err != nil {
 		return nil, errors.New("discover: the talosconfig's certificate authority, certificate or key is unusable")
 	}
