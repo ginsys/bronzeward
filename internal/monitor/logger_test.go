@@ -237,41 +237,48 @@ func TestLoggerOneWriter(t *testing.T) {
 	f := seed(t)
 	first, second := stalledAlert(t, f.db), stalledAlert(t, f.db)
 	tm := Defaults()
-	tm.LockHolder = 300 * time.Millisecond
+	// The timeout also ends a logger transaction left idle that long: a test process that a loaded
+	// host does not run for that long between two statements loses its transaction and reports it.
+	tm.LockHolder = 2 * time.Second
 	m, s := withSink(f, &fake{}, tm)
-	var reports atomic.Int32
-	m.logf = func(string, ...any) { reports.Add(1) }
+	var mu sync.Mutex
+	var reports []string
+	m.logf = func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		reports = append(reports, fmt.Sprintf(format, args...))
+	}
 	gate := make(chan struct{})
 	s.mu.Lock()
 	s.gate = gate
 	s.mu.Unlock()
-	var wg sync.WaitGroup
+	// Each call returns by itself: the first once its blocked write outlasts the batch, the others
+	// once they have waited the timeout for the writer the blocked write still holds.
 	for range 3 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			m.logAlerts(context.Background())
-		}()
-		time.Sleep(400 * time.Millisecond)
+		m.logAlerts(context.Background())
 	}
 	s.mu.Lock()
 	most := s.most
 	s.gate = nil
 	s.mu.Unlock()
 	close(gate)
-	wg.Wait()
 	// The blocked write returns now; take the writer once it lets go.
 	m.writer <- struct{}{}
 	<-m.writer
-	if most != 1 || reports.Load() != 0 {
-		t.Fatalf("%d writes at once on one instance, %d reports", most, reports.Load())
+	mu.Lock()
+	got := slices.Clone(reports)
+	mu.Unlock()
+	if most != 1 || len(got) != 0 {
+		t.Fatalf("%d writes at once on one instance, reports %q", most, got)
 	}
 	if got := s.dals(); !slices.Equal(got, []string{first}) {
 		t.Fatalf("an expired batch wrote on: %v", got)
 	}
 	m.logAlerts(context.Background())
 	if got := s.dals(); !slices.Equal(got, []string{first, first, second}) || lastLogged(t, f.db) != maxSeq(t, f.db) {
-		t.Fatalf("logged %v, cursor %d of %d", got, lastLogged(t, f.db), maxSeq(t, f.db))
+		mu.Lock()
+		defer mu.Unlock()
+		t.Fatalf("logged %v, cursor %d of %d, reports %q", got, lastLogged(t, f.db), maxSeq(t, f.db), reports)
 	}
 }
 
