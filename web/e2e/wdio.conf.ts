@@ -116,12 +116,14 @@ export const config: WebdriverIO.Config = {
   // every assertion on a text stays as strict as it is in the other four browsers.
   async before(capabilities, _specs, browser) {
     if ((capabilities as WebdriverIO.Capabilities).browserName?.toLowerCase() !== "safari") return;
-    if (process.env["BW_PROBE_1028"] === "2") {
+    if (process.env["BW_PROBE_1028"] === "2" || process.env["BW_PROBE_1028"] === "3") {
       // Probe only (ginsys/bronzeward#1028): a mark on the page before the navigation, read right after the command
       // returns. A mark still there means the command returned while the old document was the current one.
       await browser.overwriteCommand("url", async function (this: WebdriverIO.Browser, orig: (p: string) => Promise<unknown>, path: string) {
         await this.execute(() => { (globalThis as unknown as { m1028: number }).m1028 = 1; }).catch(() => undefined);
         const r = await orig(path);
+        // Variant 3: the fix under test, the command returns once the new document is complete.
+        if (process.env["BW_PROBE_1028"] === "3") await this.waitUntil(() => this.execute(() => document.readyState === "complete"), { timeout: 15_000, timeoutMsg: "the page did not complete" });
         const s = await this.execute(() => [(globalThis as unknown as { m1028?: number }).m1028 === 1, document.readyState, location.pathname]).catch(() => ["err"]);
         console.log(`probe1028 old=${String(s[0])} state=${String(s[1])} at=${String(s[2])} to=${path}`);
         return r;

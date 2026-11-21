@@ -21,7 +21,7 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
         # 2 marks the page before each navigation and reads the mark right after the command returns (wdio.conf.ts).
-        instrument: [2]
+        instrument: [3]
     env:
       BW_BROWSERS: safari
       MISE_DISABLE_TOOLS: node
