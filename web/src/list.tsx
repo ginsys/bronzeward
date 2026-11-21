@@ -7,6 +7,7 @@ import type { Client, ReadResult } from "./request.ts";
 import { follow } from "./router.ts";
 import { Empty, Loading, Status } from "./states.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
+import { COPY, IDENTIFIER } from "./words.ts";
 
 export type Load<T> = { kind: "loading" } | ReadResult<T>;
 export type Failed = Exclude<ReadResult<unknown>, { kind: "ok" | "discarded" }>;
@@ -232,6 +233,16 @@ export function Id({ id, none = "none" }: { id: string | null | undefined; none?
   if (id == null) return none;
   const view = viewOf(id);
   return view === undefined ? <span title={id}>{short(id)}</span> : <Ref to={`/${view}/${encodeURIComponent(id)}`} id={id} />;
+}
+
+// The detail line under a heading: the machine-made identifier, in small type, with a control that copies it. The
+// identifier is shown here, in the address bar and in a copy, and never in a heading or a link's text.
+export function Detail({ id }: { id: string }) {
+  return (
+    <p className="detail">
+      <small>{IDENTIFIER} <code>{id}</code>{" "}<button type="button" onClick={() => void navigator.clipboard?.writeText(id)}>{COPY}</button></small>
+    </p>
+  );
 }
 
 export const Head = ({ cols }: { cols: readonly string[] }) => <thead><tr>{cols.map((c) => <th key={c} scope="col">{c}</th>)}</tr></thead>;

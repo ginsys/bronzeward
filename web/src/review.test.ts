@@ -133,7 +133,7 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
 
   test("the page reads before it shows anything, and the release page links to it by both identifiers", () => {
     const page = html(h(ReviewItem, { release: "rel_a", machine: "mch_b" }));
-    expect(page).toContain("Rendered configuration of mch_b in release rel_a");
+    expect(page).toContain("Rendered configuration of the machine in release rel_a");
     expect(page).toContain("Loading the rendered review");
   });
 

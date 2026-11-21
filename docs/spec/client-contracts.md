@@ -2021,8 +2021,9 @@ one. The rule is one for both clients:
 | Plan | "`<apply or adopt>` of `<machine>` to `<release title>`" | `operation` (`apply-config` or `adopt`), `machine` and `release` of the plan | 3: its release, that release's draft and its machine |
 | Operation | `publish`: "Publish of `<draft title>`"; `ingest`: "Import of `<machine>`", the machine being the one on the ingestion that `subject.ingestion` names, or "Import" when the subject names no ingestion, the ingestion names no machine or its read fails (an operation's `subject` never names a machine for an import: `internal/api/reads.go:436-486` fills `machine` only for a plan's operation); `apply-config` and `adopt`: the title of its plan, which already reads "`<apply or adopt>` of `<machine>` to `<release title>`" (an operation is its plan's execution) | `kind` and `subject` | `publish`: 1; `ingest`: 2 (its ingestion, then that ingestion's machine) or none; `apply-config` and `adopt`: up to 4 (its plan, that plan's release, that release's draft and the plan's machine) |
 
-1. `<machine>` is the machine's name where it has one (A9), else its identifier (shortened in the
-   web client, whole in the CLI).
+1. `<machine>` is the machine's name where it has one (A9), else, in the web client, its address, or
+   "an unnamed machine" where it has no usable address, never its identifier; the CLI shows its
+   identifier, whole.
 2. Each distinct draft, release, plan and machine is read once for each web view, each read again and each
    return to a view after one with no title, as A7 says of names, by the same store and the same
    safe-text rule; the CLI reads each once for each command. A read that fails keeps the
@@ -2073,7 +2074,16 @@ name where the body carries one, with the identifier kept as the stable referenc
 client the name as the text and the whole identifier as the title attribute, in the CLI the name
 beside the identifier as a cluster's is (`mch_9fd… (node-a)`, [operator experience §4](operator-experience.md#4-command-tree)).
 A machine with no name, and a server older than the revision that adds it, which serves no member, read the same
-way: the identifier, the Talos endpoint and the node ID, as before.
+way: in the CLI the identifier, the Talos endpoint and the node ID, as before.
+
+The web client shows no identifier as a machine's text ([#1055](https://github.com/ginsys/bronzeward/issues/1055)).
+A machine with no name shows its address: the host of its stored endpoint, without the port, shown only
+when the endpoint is `a.b.c.d:port` or `[v6]:port` and otherwise not at all. Where one list holds two unnamed
+machines on one address, each gets a suffix, `(node 4c1f…)` from its Talos node ID or `(UUID 9a3e…)` from its
+SMBIOS UUID, cut to four characters when longer than eight; a list on another page does not count. A machine with
+no usable address reads "an unnamed machine" in a sentence and "Unnamed machine" as a heading. Its identifier
+stays as the title attribute of its link, and on a machine's own page on a detail line with a Copy button.
+A cluster is shown by its name where the read gives a safe one, else "this cluster".
 
 1. The name is remote text like every server string: a declared format binds a correct server, not
    the bytes received (§6 item 8, as A7 cites it). The
