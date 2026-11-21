@@ -86,22 +86,36 @@ export function machineAddress(endpoint: unknown): string | undefined {
   return m[2];
 }
 
-// The node ID or UUID of G8, shortened for a suffix: `node 4c1f…`, `UUID 9a3e…`. It is remote text like a name:
-// a value that is not safe to show (A8 rule 3) reads "unknown".
-const nodeShort = (h: MachineLike["hardware"]): string => {
-  const [kind, given] = h?.talosNodeId != null ? ["node", h.talosNodeId] : ["UUID", h?.smbiosUuid];
-  const value = typeof given === "string" && SAFE.test(given) ? given : "unknown";
-  return `${kind} ${value.length > 8 ? `${value.slice(0, 4)}…` : value}`;
+// The node ID or UUID of G8 for a suffix, cut to `cut` characters when longer than eight: `node 4c1f…`,
+// `UUID 9a3e…`. It is remote text like a name: the node ID, else the UUID, whichever is safe to show (A8 rule 3),
+// else "unknown".
+const SHORT = 4;
+const nodeShort = (h: MachineLike["hardware"], cut = SHORT): string => {
+  const safe = (v: unknown) => (typeof v === "string" && SAFE.test(v) ? v : undefined);
+  const node = safe(h?.talosNodeId);
+  const uuid = safe(h?.smbiosUuid);
+  const [kind, value] = node !== undefined ? ["node", node] : uuid !== undefined ? ["UUID", uuid] : [h?.talosNodeId != null ? "node" : "UUID", "unknown"];
+  return `${kind} ${value.length > Math.max(8, cut) ? `${value.slice(0, cut)}…` : value}`;
 };
 
-// The addresses that two or more unnamed machines of a list in hand share. Only such a list can tell:
-// a pair on different pages, or a page that shows one machine, gets no suffix.
-export function sharedAddresses(machines: readonly MachineLike[]): ReadonlySet<string> {
-  const seen = new Set<string>();
-  const shared = new Set<string>();
+// The addresses that two or more unnamed machines of a list in hand share, each with the length its suffixes are
+// cut to: four characters, or longer where machines of one address would otherwise read alike (VMware UUIDs
+// share a prefix). Only such a list can tell: a pair on different pages, or a page that shows one machine, gets
+// no suffix.
+export function sharedAddresses(machines: readonly MachineLike[]): ReadonlyMap<string, number> {
+  const groups = new Map<string, MachineLike[]>();
   for (const m of machines) {
     const address = machineName(m.name) === undefined ? machineAddress(m.talosEndpoint) : undefined;
-    if (address !== undefined) (seen.has(address) ? shared : seen).add(address);
+    if (address !== undefined) groups.set(address, [...(groups.get(address) ?? []), m]);
+  }
+  const shared = new Map<string, number>();
+  for (const [address, group] of groups) {
+    if (group.length < 2) continue;
+    // Lengthen until the suffixes differ; past the longest whole value no cut remains, and equal values stay equal.
+    const longest = Math.max(...group.map((m) => nodeShort(m.hardware, 300).length));
+    let cut = SHORT;
+    while (cut < longest && new Set(group.map((m) => nodeShort(m.hardware, cut))).size < group.length) cut++;
+    shared.set(address, cut);
   }
   return shared;
 }
@@ -109,12 +123,13 @@ export function sharedAddresses(machines: readonly MachineLike[]): ReadonlySet<s
 // A machine as text, where a title or a link names it (A8 rule 1, as ginsys/bronzeward#1055 amends it for the web): its
 // name, else its address, with the shortened node ID or UUID where the list in hand holds two with that
 // address, else "an unnamed machine". Never its identifier: that stays on the detail line.
-export function machineText(m: MachineLike, shared?: ReadonlySet<string>): string {
+export function machineText(m: MachineLike, shared?: ReadonlyMap<string, number>): string {
   const name = machineName(m.name);
   if (name !== undefined) return name;
   const address = machineAddress(m.talosEndpoint);
   if (address === undefined) return UNNAMED_MACHINE;
-  return shared?.has(address) ? `${address} (${nodeShort(m.hardware)})` : address;
+  const cut = shared?.get(address);
+  return cut === undefined ? address : `${address} (${nodeShort(m.hardware, cut)})`;
 }
 
 // A machine page's heading: "Machine cp1", "Machine 172.31.104.15", or "Unnamed machine".
@@ -123,14 +138,15 @@ export function machineHeading(m: MachineLike): string {
   return text === UNNAMED_MACHINE ? UNNAMED_MACHINE_HEADING : `Machine ${text}`;
 }
 
-// A choice in a list of machines: the text, and the endpoint beside it where the text is a name.
-export function machineOption(m: MachineLike, shared?: ReadonlySet<string>): string {
+// A choice in a list of machines: the text, and the endpoint beside it where the text is a name and the endpoint
+// has its stored form (A9 item 1).
+export function machineOption(m: MachineLike, shared?: ReadonlyMap<string, number>): string {
   const text = machineText(m, shared);
-  return machineName(m.name) === undefined || typeof m.talosEndpoint !== "string" ? text : `${text} ${m.talosEndpoint}`;
+  return machineName(m.name) === undefined || machineAddress(m.talosEndpoint) === undefined ? text : `${text} ${String(m.talosEndpoint)}`;
 }
 
 // A machine's link: the text above, the whole identifier the title. The one display of a machine for every view.
-export const MachineRef = ({ machine, shared }: { machine: MachineLike; shared?: ReadonlySet<string> }) => (
+export const MachineRef = ({ machine, shared }: { machine: MachineLike; shared?: ReadonlyMap<string, number> }) => (
   <Ref to={`/machines/${machine.id}`} id={machine.id}>{machineText(machine, shared)}</Ref>
 );
 
