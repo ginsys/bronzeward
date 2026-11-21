@@ -1041,9 +1041,12 @@ unmeasured.
    the fill: a `HostnameConfig` with `auto: stable` and no hostname, and no
    hostname document at all. These get **no** fill: a `HostnameConfig` with
    `auto: off` and no hostname (the operator chose another source, DHCP or the
-   cloud, and the fill would override it); a base whose v1alpha1 document sets
+   cloud, and the fill would override it); a composition whose v1alpha1 document sets
    `machine.features.stableHostname: true`, because the document refuses to
-   coexist with it and the compiler does not edit that field; and a machine
+   coexist with it and the compiler does not edit that field (the composition
+   decides, as step 5a does: a base that sets it and a fragment that turns it
+   off compose to a configuration without it, and that machine gets the fill);
+   and a machine
    with no name. The review says the last two in words (persistence and API
    §9.2). Alternatives: the name always wins, so an operator could never
    differ from it, against "default"; a refusal where both exist, which
@@ -2238,11 +2241,12 @@ in place as
     every platform mode; it reads the composition's hostname first, because the
     renderer's merge alone lets the last writer win (measured, §6.1); an
     explicit hostname wins; a `HostnameConfig` with `auto: off` and no
-    hostname, a base with the legacy stable-hostname feature, and a machine
+    hostname, a composition with the legacy stable-hostname feature, and a machine
     with no name get no fill. Alternatives: the name always wins; a conflict
     refusal; a per-cluster switch, off by default, which would make the default
-    Serge asked for off. The cost is that every named machine with no explicit
-    hostname changes its hostname at its next release, shown in the plan's
+    Serge asked for off. The cost is that every named machine the fill applies to
+    (the exceptions above excluded) may change its hostname at its next release,
+    where the hostname it runs differs from its name, shown in the plan's
     whole-configuration diff and needing approval, and that a filled hostname
     overrides one a DHCP or cloud source gave.
 37. **A hostname equal to the machine's name is released at import and
