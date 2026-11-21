@@ -11,6 +11,7 @@ import type { components } from "./api/v1";
 import { existing } from "./forms.tsx";
 import { startBody } from "./imports.tsx";
 import { type Listed, readPages } from "./list.tsx";
+import { MACHINE_NAME } from "./machine-name.ts";
 import type { Problem, ReadResult } from "./request.ts";
 import { CHECK_STATE, problemSentences } from "./states.tsx";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
@@ -55,7 +56,15 @@ const MAX_FILE = 512 * 1024;
 const NOT_TALOSCONFIG = "the file is not a talosconfig";
 const NO_CREDENTIALS = "the talosconfig's context has no certificate authority, certificate and key";
 const enc = encodeURIComponent;
-const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+// The name a machine takes from its node's hostname (operator experience §5.2): the hostname lowercased, when it
+// is a valid name (persistence and API §3.5); else no name, and the reason, which the machine's line says.
+export function nameOf(hostname: string): { name: string; note?: string } | { name?: undefined; note: string } {
+  if (hostname === "") return { note: "no name: the node reported no hostname, so it shows its address" };
+  const name = hostname.toLowerCase();
+  if (!MACHINE_NAME.test(name)) return { note: `no name: the hostname ${JSON.stringify(hostname.length > 64 ? `${hostname.slice(0, 64)}…` : hostname)} is not a valid name` };
+  return name === hostname ? { name } : { name, note: "named by its hostname in lower case" };
+}
 
 // The talosconfig cut to one context: the one `name` gives, else the current one, with its certificate
 // authority, certificate and key and nothing else, as discover.OneContext writes it (the Go golden and
@@ -297,7 +306,8 @@ async function machines(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolea
       continue;
     }
     // By the SMBIOS UUID where the node reports one, else by its node ID: the import checks that identity.
-    const body = { cluster: p.cluster, ...(m.smbiosUuid !== "" ? { smbiosUuid: m.smbiosUuid } : { talosNodeId: m.nodeId }), platform: m.platform, talosEndpoint: endpointOf(m.address), ...(NAME.test(m.hostname) && { name: m.hostname }) };
+    const nm = nameOf(m.hostname);
+    const body = { cluster: p.cluster, ...(m.smbiosUuid !== "" ? { smbiosUuid: m.smbiosUuid } : { talosNodeId: m.nodeId }), platform: m.platform, talosEndpoint: endpointOf(m.address), ...(nm.name !== undefined && { name: nm.name }) };
     const o = await env.send({ method: "POST", path: "/machines", resource: `/machines?${new URLSearchParams({ cluster: p.cluster! })}`, body });
     const named = o.kind === "refused" ? existing(o.status, o.problem, "/machines") : undefined;
     const id = o.kind === "done" ? (o.data as { id?: string } | null)?.id : named?.kind === "machine" ? named.id : undefined;
@@ -308,7 +318,8 @@ async function machines(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolea
       if (r.data.cluster !== p.cluster) return fail(key, label, `it is recorded in another cluster, ${r.data.cluster}: nothing after the machines ran. Remove it from that cluster or leave the node out of this one`);
     }
     p.machines[m.nodeId] = id;
-    set({ key, label, state: o.kind === "done" ? "done" : "existing", to: `/machines/${id}` });
+    // A machine this run recorded says how it was named, or why it was not: never a silent drop.
+    set({ key, label, state: o.kind === "done" ? "done" : "existing", to: `/machines/${id}`, ...(o.kind === "done" && nm.note !== undefined && { detail: nm.note }) });
   }
   return true;
 }

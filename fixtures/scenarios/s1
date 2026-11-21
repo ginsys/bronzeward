@@ -960,16 +960,48 @@ ob_discovery() {
   printf '%s\n' "$want" >"$EV/onboard-cluster-endpoint.txt"
   jq -r '[.members[] | select(.role == "controlplane")][0].address' "$EV/last.body" >"$EV/onboard-first-controlplane.txt"
 }
+# ob_full_hostname: the control plane's hostname becomes a full name, `<its hostname>.fixture.test`, set by a
+# HostnameConfig document and applied without a reboot (ginsys/bronzeward#1065): the node then reports a
+# hostname and a domain, as a node with a domain does. Prints the full name once the node reports it, else
+# fails. Only this scenario does it, on an up of its own.
+ob_full_hostname() {
+  local short patch n
+  short=$(node_talos "$TALOS_CONTROLPLANE_IP" get hostname -o json | jq -er '.spec.hostname') || return 1
+  patch=$(mktemp -- "$STATE/hostname-patch.XXXXXX") || return 1
+  printf 'apiVersion: v1alpha1\nkind: HostnameConfig\nauto: off\nhostname: %s.fixture.test\n' "$short" >"$patch" || return 1
+  talosctl_timed 60 -e "$TALOS_CONTROLPLANE_IP" -n "$TALOS_CONTROLPLANE_IP" patch machineconfig --mode no-reboot --patch "@$patch" >/dev/null || {
+    rm -f -- "$patch"
+    return 1
+  }
+  rm -f -- "$patch"
+  for n in $(seq 1 30); do
+    if [ "$(node_talos "$TALOS_CONTROLPLANE_IP" get hostname -o json | jq -r '.spec.domainname')" = fixture.test ]; then
+      printf '%s.fixture.test\n' "$short"
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+# ob_machine_name <node ip>: the name the onboarded machine at that address holds, empty for none.
+ob_machine_name() {
+  sql "SELECT coalesce(name, '') FROM machine WHERE cluster = '$cluster' AND talos_endpoint LIKE '$1%'"
+}
 onboard() {
-  local ctl_file args
+  local ctl_file args cp_full w_short
   preconditions
   cli_prepare 'S1 onboard' h-author
   check 'S1 onboard' "POST /discoveries with the talosconfig: 200, two members and the control plane's cluster endpoint as kubernetesEndpoint" ob_discovery
   mkdir -p -- "$cli_dir/nopath"
+  cp_full=$(ob_full_hostname) || die "s1: the control plane did not take a full hostname"
+  w_short=$(node_talos "$TALOS_WORKER_IP" get hostname -o json | jq -er '.spec.hostname') || die "s1: cannot read the worker's hostname"
   mapfile -t args < <(ob_args)
   check 'S1 onboard' 'cluster onboard: the talosconfig is the first key; no OpenBao address, token or bao anywhere: exit 0' ob_run onboard-first "${args[@]}"
   cluster=$(sql "SELECT id FROM cluster WHERE name = 'bw-fixture'") || die "s1: onboard recorded no cluster"
   check 'S1 onboard' 'the cluster is recorded once, with both machines' same "$(sql "SELECT count(*) FROM cluster WHERE name = 'bw-fixture'") $(sql "SELECT count(*) FROM machine WHERE cluster = '$cluster'")" '1 2'
+  check 'S1 onboard' "the member list gives the control plane's full hostname (the node's own, with its domain)" cli_kept onboard-first "^  .*  ${cp_full//./\\.}  "
+  check 'S1 onboard' "the control plane is named by its full hostname, the worker by its short one, which has no domain (ginsys/bronzeward#1065)" \
+    same "$(ob_machine_name "$TALOS_CONTROLPLANE_IP") $(ob_machine_name "$TALOS_WORKER_IP")" "$cp_full $w_short"
   check 'S1 onboard' 'the output says the first key was stored' cli_kept onboard-first '^First key: stored'
   check 'S1 onboard' 'the stored CA key is version 1 and one act records it' same "$(fk_version) $(fk_acts)" '1 1'
   check 'S1 onboard' "the stored key is the fixture's os CA key, and the act records its certificate's fingerprint" fk_stored_is_fixtures 1
