@@ -14,6 +14,10 @@ export interface WriteSpec {
   body: unknown;
   // Where the route takes one (§8.3).
   ifMatch?: string;
+  // The epoch the caller's reads were taken under, sent as the reference epoch in place of the last one the
+  // client saw: a caller that acts on what it read over some time (the handover button's press) cannot send
+  // a write under a later epoch than the reads it decided from, and the server refuses it (412 epoch-mismatch).
+  epoch?: string;
   // The page that shows the resource, named in the notice and opened by [Show current state].
   resource: string;
   // A fragment write, which ingests: a repeat's in-progress 409 waits for the first request.
@@ -327,7 +331,7 @@ export class Writes {
       w.sentThrough = client;
       if (!entry) {
         // The last epoch seen before the first send, else one GET /recovery (§8.4 item 3).
-        w.epoch = client.currentEpoch ?? (await this.confirm(client, end));
+        w.epoch = w.spec.epoch ?? client.currentEpoch ?? (await this.confirm(client, end));
         if (end.e !== undefined) return { kind: "not-done", why: SIGN_IN_REFUSED, problem: end.e.problem };
         if (end.pre !== undefined) return { kind: "not-done", why: RECOVERY_START, problem: end.pre };
         const gone = this.gone(w, client);

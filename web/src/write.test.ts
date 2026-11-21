@@ -94,6 +94,20 @@ describe("each send (§8.4 item 3)", () => {
     expect(sent[1]!.body).toBe('{"name":"lab"}');
   });
 
+  test("a spec that names its epoch sends that one, though the client has seen a later one, and reads none", async () => {
+    const { client, writes, sent } = page([problem(412, "epoch-mismatch", {}, "e2")], []);
+    await client.attempt("GET", "/recovery");
+    expect(client.currentEpoch).toBe(EPOCH);
+    sent.length = 0;
+    // The press began under "e0"; the client has since seen "e1": the write carries "e0" and the refusal is the server's.
+    const w = new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters", epoch: "e0" });
+    await writes.submit(w);
+    expect(sent.map((s) => s.path)).toEqual(["/clusters"]);
+    expect(sent[0]!.headers["Bronzeward-Expected-Epoch"]).toBe("e0");
+    // The layer reads an epoch-mismatch as the epoch having changed: the write is set aside, in its own words.
+    expect(w.outcome).toMatchObject({ kind: "set-aside", why: EPOCH_CHANGED_ASIDE });
+  });
+
   test("§8.5: a success without a Bronzeward-Epoch header is saved, sent once, and reports the defect", async () => {
     const bare = new Response(JSON.stringify({ id: "c1" }), { status: 201, headers: { "Content-Type": "application/json" } });
     const { writes, writesSent } = page([bare]);
