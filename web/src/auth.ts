@@ -30,6 +30,10 @@ export interface Provider {
   tokenEndpoint: string;
   revocationEndpoint: string | undefined;
   endSessionEndpoint: string | undefined;
+  // The header's name (userinfo.ts): the userinfo endpoint, and the scopes the provider lists, so that
+  // `profile` is asked for only where it is known. Both are absent when the document has none.
+  userinfoEndpoint?: string | undefined;
+  scopesSupported?: string[] | undefined;
 }
 
 export type Principal = { iss: string; sub: string };
@@ -72,7 +76,15 @@ export async function discover(issuer: string, fetchImpl: typeof fetch = fetch):
   if (!authorizationEndpoint || !tokenEndpoint || revocationEndpoint === null || endSessionEndpoint === null) {
     return invalid("an identity provider endpoint is missing, or neither https nor http to a loopback address");
   }
-  return { kind: "ok", provider: { issuer, authorizationEndpoint, tokenEndpoint, revocationEndpoint, endSessionEndpoint } };
+  // Only a name hangs on these two: an endpoint that cannot be trusted, or a list that is not one, is
+  // left out and the sign-in goes on without a name.
+  const userinfo = endpoint("userinfo_endpoint", false);
+  const listed = doc["scopes_supported"];
+  const scopesSupported = Array.isArray(listed) ? listed.filter((s): s is string => typeof s === "string") : undefined;
+  return {
+    kind: "ok",
+    provider: { issuer, authorizationEndpoint, tokenEndpoint, revocationEndpoint, endSessionEndpoint, userinfoEndpoint: userinfo ?? undefined, scopesSupported },
+  };
 }
 
 // B2: a path on this origin, never a full URL. A browser reads `\` and a tab or newline inside a
@@ -102,7 +114,8 @@ export async function beginSignIn(config: ClientConfig, provider: Provider, retu
     response_type: "code",
     client_id: config.webClientId,
     redirect_uri: origin + CALLBACK_PATH,
-    scope: [...BASE_SCOPES, ...config.scopes].join(" "),
+    // `profile` only where the provider lists it: the name in the header is worth one sentence, not the sign-in.
+    scope: [...new Set([...BASE_SCOPES, ...(provider.scopesSupported?.includes("profile") === true ? ["profile"] : []), ...config.scopes])].join(" "),
     state: pending.state,
     nonce: pending.nonce,
     code_challenge: challenge,

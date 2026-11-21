@@ -160,7 +160,7 @@ no role included (`internal/api/api.go:339`).
 | act list | `GET /acts` | yes | no | |
 | recovery status | `GET /recovery` | no | no | |
 | dependency list / show / releases / alerts | `GET /dependencies` (`class` filter), `/dependencies/{id}`, `/dependencies/{id}/releases`, `/dependencies/{id}/alerts`, `/dependency-alerts` | lists | no | |
-| `whoami`, roles in the web header | `GET /identity` | no | no | the caller's kind, issuer and subject or service, principal, roles, expiry and epoch; takes no query (`internal/api/identity.go:22-59`) |
+| `whoami`, roles in the web header | `GET /identity` | no | no | the caller's kind, issuer and subject or service, principal, roles, expiry and epoch; takes no query (`internal/api/identity.go:22-59`). The web header shows the roles and says who is signed in by name from the provider's userinfo, not from this answer ([§9.3](#93-browser-sign-in) item 6), and shows no epoch |
 | version check, server settings, start mode | `GET /server` | no | no | the answering process's version, API revision, features, start mode and read-only settings ([persistence and API §9.2](persistence-api.md#92-resources-and-routes)); refused before a recovery start's entry |
 
 ### 3.2 Writes
@@ -1363,7 +1363,22 @@ current token expires
 4. Silent renewal through a hidden frame is not used: browsers that block third-party cookies make
    it fail unpredictably (assumption S2), and a failure would surface as an unexplained sign-out.
 5. Every API call goes to the page's own origin ([§10.1](#101-hosting-and-origin)); only the
-   provider's authorization, token, revocation and end-session endpoints are called elsewhere.
+   provider's authorization, token, revocation, end-session and (item 6) userinfo endpoints are
+   called elsewhere.
+6. The header says who is signed in by name, which `GET /identity` does not serve and the access
+   token does not carry on every provider. The page adds `profile` to the scopes it requests,
+   once, when the provider's discovery document lists it in `scopes_supported` (never otherwise,
+   so a provider that does not know it is not refused), then makes one `GET` on the provider's
+   `userinfo_endpoint` per sign-in, with the access token, no cookies, no redirect and a 5 s
+   bound. It reads only the `name` member, else `preferred_username`, and only from an answer
+   whose `sub` is the signed-in subject, and only when the endpoint has the issuer's origin. The
+   name is for display: it is never sent to the server, stored or used to decide anything. Any
+   failure leaves the header at "Signed in as a person"; it never shows the subject number and
+   never holds the page back. The server's `auth.oidc.displayClaim` names the claim the server
+   shows for a person in its own records; the page does not follow it (limit: a provider whose
+   userinfo `name` differs from that claim shows the userinfo name in the header).
+   An automation shows "Signed in as the automation <service>" with no userinfo read. The header
+   shows no epoch: the recovery banner names it where it matters.
 
 ### 9.4 Automation token input
 

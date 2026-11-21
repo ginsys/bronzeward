@@ -12,6 +12,7 @@ import { view } from "./resources.tsx";
 import { type IconName, Icon } from "./icons.tsx";
 import { follow, GROUPS, PAGES, usePath } from "./router.ts";
 import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status, StatusPage } from "./states.tsx";
+import { signedInAs } from "./userinfo.ts";
 import { type Ending, EPOCH_CHANGED_ASIDE, type Writes } from "./write.ts";
 import type { components } from "./api/v1";
 
@@ -139,6 +140,9 @@ export interface SignedInProps {
   // §7 item 4: the page keeps the notices, so one on a refusal's answer outlives the shell.
   onDeprecation: (route: string) => void;
   signOut: () => void;
+  // The person's name as the identity provider gives it (userinfo.ts), asked for once, in the background:
+  // the header says "a person" until it answers and when it does not, and nothing waits on it.
+  readName: () => Promise<string | undefined>;
   // The page's writes, which outlive the shell (B10, B11).
   writes: Writes;
 }
@@ -342,7 +346,13 @@ const mendable = (r: Load<unknown>) => r.kind === "loading" || r.kind === "trans
 export const keepsPage = (kept: boolean, server: Load<Server>, identity: Load<Identity>) =>
   kept && (server.kind === "ok" ? server.data.apiRevision >= MIN_API_REVISION && identity.kind !== "ok" && mendable(identity) : mendable(server));
 
-export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, writes, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
+export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, onDeprecation, signOut, readName, writes, notices = [] }: SignedInProps & { notices?: readonly string[] }) {
+  const [name, setName] = useState<string>();
+  useEffect(() => {
+    let live = true;
+    void readName().then((n) => live && setName(n));
+    return () => void (live = false);
+  }, [readName]);
   // B11: a move to another page while a write is pending or unknown asks first, Back and Forward
   // included.
   const [path, move, query, returning] = usePath((to, from) => leaving(writes, to, false, from));
@@ -504,9 +514,8 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
         <h1><Icon name="machines" />Bronzeward</h1>
         {id !== undefined && (
           <p>
-            <span data-testid="principal">Signed in as {id.subject ?? id.service}</span> ({id.kind}).{" "}
-            <span data-testid="roles">Roles: {id.roles.length > 0 ? id.roles.join(", ") : "none"}</span>.{" "}
-            <span data-testid="epoch">Epoch {id.epoch}</span>
+            <span data-testid="principal">{signedInAs(id.kind, id.service, name)}</span>.{" "}
+            <span data-testid="roles">Roles: {id.roles.length > 0 ? id.roles.join(", ") : "none"}</span>.
           </p>
         )}
         <button type="button" onClick={() => signingOut() && reads.signOut(signOut)}><Icon name="signOut" />Sign out</button>

@@ -92,7 +92,9 @@ no secret: both clients are public, and the file is read before anyone signs in.
 ```
 
 Leave `scopes` out when the provider needs none, and never list `openid` or `offline_access`
-in it. The web interface reads the file from its own origin. The CLI imports it with
+in it. The web interface also asks for `profile` by itself when the provider lists it, to read the
+signed-in person's name from the provider's userinfo for the page header, so `profile` need not be listed.
+The web interface reads the file from its own origin. The CLI imports it with
 `bronzewardctl context add <name> --from https://bronzeward.example.com`, which stores the CLI
 client's ID. The [identity-provider page](identity-provider.md) gives Zitadel's values.
 

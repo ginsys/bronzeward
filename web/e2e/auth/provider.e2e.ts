@@ -10,7 +10,9 @@ const issuer = idpEnv()["BW_TEST_IDP_ISSUER"]!;
 describe("signed in through the test provider", () => {
   it("AUTH-01: sign in and read", async () => {
     expect(await idpSignIn("h-viewer")).toMatch(/^Server .+, API revision \d+$/);
-    expect(await $('[data-testid="principal"]').getText()).toBe(`Signed in as ${userId("h-viewer")}`);
+    // The provider's userinfo answer names the person (a name, else a preferred username, both built from the
+    // seeded user "h-viewer"), so the header never shows the subject number and is not the fallback sentence.
+    await expect($('[data-testid="principal"]')).toHaveText(expect.stringMatching(/^Signed in as h-viewer/), { wait: 20_000 });
     await storageEmpty();
   });
 
