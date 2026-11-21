@@ -51,8 +51,9 @@ export function useClusterText(id: string | null | undefined): string | undefine
 // whole identifier as the title attribute. Until the body arrives, or where the read gave none, and for an
 // identifier of another shape (no read), it is shown as any other identifier is.
 // A view that reads the machine itself passes it as `held` (its body, once read): nothing is asked.
-// The view's own read of the machine: its body, or undefined until the read answers (a failure it holds keeps the view as it is).
-export type Held = { body: S["MachineBody"] | undefined };
+// The view's own read of the machine: its body, null once it answered with no body (an HTTP failure), and undefined
+// until it answers (a transport failure the shell holds keeps the view as it is).
+export type Held = { body: S["MachineBody"] | null | undefined };
 export function MachineById({ id, none = "none", held }: { id: string | null | undefined; none?: string; held?: Held }): ReactNode {
   const asked = id != null && viewOf(id) === "machines";
   const m = useBody<S["MachineBody"]>(asked && held === undefined ? at("machines", id) : undefined);
@@ -79,7 +80,7 @@ export function usePlanTitle(id: string | undefined, held?: S["PlanBody"], machi
   const p = useOwn("plans", id, held);
   const release = useReleaseTitle(p?.release);
   const read = useMachineText(machineHeld === undefined ? p?.machine : undefined);
-  const machine = machineHeld === undefined ? read : machineHeld.body === undefined || p === undefined ? undefined : machineText(machineHeld.body);
+  const machine = machineHeld === undefined ? read : machineHeld.body === undefined || p === undefined ? undefined : machineHeld.body === null ? THE_MACHINE : machineText(machineHeld.body);
   return p === undefined || machine === undefined ? undefined : planTitle(p, machine, release);
 }
 

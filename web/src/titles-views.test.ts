@@ -175,6 +175,27 @@ describe("ginsys/bronzeward#987: a plan", () => {
     await settled();
     expect(text()).toBe(`Plan: Apply of worker-7 to Add the office labels, published ${when(at)} (proposed)`);
     expect(asked).not.toContain(`/machines/${MCH}`);
+    // A held read that answered with no body keeps the title, as a read the store makes does.
+    await heading({ body: null }, "x");
+    await settled();
+    expect(text()).toBe(`Plan: Apply of the machine to Add the office labels, published ${when(at)} (proposed)`);
+    expect(asked).not.toContain(`/machines/${MCH}`);
+  });
+
+  // The shell answers an HTTP failure (a 404, an exhausted 503) and holds a transport failure: this settle answers.
+  const answering: Reads["settle"] = (res, set, live) => {
+    if (live()) set(res);
+    return false;
+  };
+  test("an approved plan hands its machine read to the page, as the body, or as null where the read answered with none", async () => {
+    const p = { ...plan("adopt"), state: "approved", approval: "apr_k2pq3rstuvwxyz234567abcdef" };
+    for (const [i, [answer, expected]] of [[missing, null], [ok({ id: MCH, name: "worker-1" }), { id: MCH, name: "worker-1" }]].entries() as Iterable<[number, [ReadResult<unknown>, unknown]]>) {
+      const seen: unknown[] = [];
+      answers[`/machines/${MCH}`] = answer;
+      await mount(h(PlanState, { p: p as never, reread: () => {}, onMachine: (m: unknown) => void seen.push(m) } as never), { ...reads, settle: answering, view: `a${i}` });
+      await settled();
+      expect(seen).toEqual([expected]);
+    }
   });
 
   test("the heading keeps its state, with the title or without it", async () => {
@@ -303,6 +324,10 @@ describe("ginsys/bronzeward#987: a machine", () => {
     await settled();
     expect(text()).toBe("worker-9");
     await mount(h(MachineById, { id: MCH, held: { body: undefined } }), { ...reads, view: "w" });
+    await settled();
+    expect(text()).toBe("mch_k2pq…cdef");
+    // A held read that answered with no body shows the identifier as any unread machine does.
+    await mount(h(MachineById, { id: MCH, held: { body: null } }), { ...reads, view: "x" });
     await settled();
     expect(text()).toBe("mch_k2pq…cdef");
     expect(asked).toEqual([]);
