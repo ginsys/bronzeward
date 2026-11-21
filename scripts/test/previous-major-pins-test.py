@@ -72,6 +72,10 @@ NEW = {
     "sources": SOURCES_BLOCK,
 }
 
+# The script's environment: the whole one (a toolcache Python needs its LD_LIBRARY_PATH to start), without a
+# proxy, so the fixture server on 127.0.0.1 is reached directly.
+CHILD_ENV = {k: v for k, v in os.environ.items() if "proxy" not in k.lower()}
+
 failures = []
 served = {}
 
@@ -111,7 +115,7 @@ def run(mode, content, mirror=MIRROR):
         with open(pin, "w", encoding="utf-8") as f:
             f.write(json.dumps(content, indent=2) + "\n")
         before = read(pin)
-        env = {"PATH": os.environ["PATH"], "PINS_MIRROR": mirror}
+        env = {**CHILD_ENV, "PINS_MIRROR": mirror}
         args = [sys.executable, "-I", SCRIPT] + ([mode] if mode else []) + [pin]
         p = subprocess.run(args, check=False, capture_output=True, text=True, env=env, timeout=60)
         return p, before, read(pin)
@@ -154,7 +158,7 @@ def write_in(dir_mode, file_mode):
         before = read(pin)
         os.chmod(d, dir_mode)
         try:
-            p = subprocess.run([sys.executable, "-I", SCRIPT, "--write", pin], check=False, capture_output=True, text=True, env={"PATH": os.environ["PATH"], "PINS_MIRROR": MIRROR}, timeout=60)
+            p = subprocess.run([sys.executable, "-I", SCRIPT, "--write", pin], check=False, capture_output=True, text=True, env={**CHILD_ENV, "PINS_MIRROR": MIRROR}, timeout=60)
             return p, before, read(pin), oct(os.stat(pin).st_mode & 0o777), sorted(os.listdir(d))
         finally:
             os.chmod(d, 0o755)
