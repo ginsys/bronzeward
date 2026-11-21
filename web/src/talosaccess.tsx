@@ -8,11 +8,12 @@ import type { components } from "./api/v1";
 import { type Load, Ref, useItem } from "./list.tsx";
 import { useRoles } from "./shell.tsx";
 import { when } from "./states.tsx";
+import { CONNECT_A_CLUSTER } from "./words.ts";
 
 export type TalosAccess = components["schemas"]["TalosAccessBody"];
 
 // The page where an operator supplies a key, named in words and linked.
-const ONBOARD = "Onboard cluster page";
+const ONBOARD = `${CONNECT_A_CLUSTER} page`;
 export const ONBOARD_PATH = "/clusters/onboard";
 
 export const CHECKING = "Checking whether the Talos access key is held.";

@@ -1337,7 +1337,7 @@ to an `author` only, the Talos access sign
 The sign says in words whether Bronzeward holds the cluster's Talos CA key: held, with when it was
 supplied and which version ("Talos access key held: supplied 21 Nov 2026, 05:40 (version 2)", and
 that held means stored, a node having accepted it when it was supplied); not supplied yet, or deleted
-in the secret store, each with the **Onboard cluster** page named and linked as where to supply one;
+in the secret store, each with the **Connect a cluster** page named and linked as where to supply one;
 or that the page cannot tell, when the secret store gave no usable answer, which never reads as "not
 supplied". It never says the key works: a later CA replacement can make a held key stale. A person
 who does not hold `author` sees no sign and the page sends no request for it. It shows no plans,
@@ -1345,8 +1345,8 @@ because `GET /plans` has no cluster filter (G20). A cluster's releases stay
 off it: the release list is filtered in the browser (G9 of the
 [client contracts](client-contracts.md#4-api-gap-audit)) and nothing yet needs them there.
 
-**Onboard cluster** is `cluster onboard` ([§5.2](#52-inventory)) as a page, reached from the
-**Onboard cluster** button of the Machines and Clusters pages for an `author`. The operator chooses
+**Connect a cluster** is `cluster onboard` ([§5.2](#52-inventory)) as a page, reached from the
+**Connect a cluster** button of the Machines and Clusters pages for an `author`. The operator chooses
 the cluster's talosconfig, and may name a context (else the current one) and an endpoint (else the
 context's first), which may be an address or a DNS name: before the button the page says which
 endpoint it will use (the context's first, and how many it lists), the server resolves a name once,
@@ -1379,7 +1379,7 @@ where there is one.
 | Sign-in and context | [W1](operator-experience-wireframes.md#w1-sign-in-and-context) | (#253) |
 | Machines | [W2](operator-experience-wireframes.md#w2-machines) | `GET /machines`, `GET /clusters` |
 | Clusters and a cluster's page | none (see the note under W2) | `GET /clusters[/{id}]`, `GET /machines?cluster=`, `GET /drafts` |
-| Onboard cluster | none (a form and a list of steps) | `POST /discoveries`, `POST /clusters`, `POST /clusters/{id}/first-keys`, `POST /machines`, `POST /drafts`, `POST /ingestions` |
+| Connect a cluster | none (a form and a list of steps) | `POST /discoveries`, `POST /clusters`, `POST /clusters/{id}/first-keys`, `POST /machines`, `POST /drafts`, `POST /ingestions` |
 | Machine detail | [W3](operator-experience-wireframes.md#w3-machine-detail) | `GET /machines/{id}`, `/observations`, `/timeline`, `/position` (G18) |
 | Draft editor | [W4](operator-experience-wireframes.md#w4-draft-editor) | `GET /drafts/{id}`, draft `PUT`/`DELETE`, discard |
 | Protected review | [W5](operator-experience-wireframes.md#w5-protected-import-review) | `GET /ingestions/{id}/review`, marks, continuations |

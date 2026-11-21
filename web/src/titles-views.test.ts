@@ -535,10 +535,15 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
   test("ginsys/bronzeward#1055: the assignments list and the imports list name each row by its machine, the identifier staying the link's title", async () => {
     const ASG = "asg_k2pq3rstuvwxyz234567abcdef";
     answers["/assignments"] = ok({ items: [{ id: ASG, cluster: "cl_a", machine: MCH, revision: null, headRevision: 1, createdAt: at }], next: null });
+    const dep = (id: string, object: string) => ({ id, provider: "p", object, version: 3, created: at, class: "retained", reason: null, firstRetainedAt: null, unknownSince: null, observedFrom: at, recordedAt: at, stale: false });
+    answers["/dependencies"] = ok({ items: [dep("dep_k2pq3rstuvwxyz234567abcdef", "registry.test/app"), dep("dep_k2pq3rstuvwxyz234567abcdeg", "bad\u0007object")], next: null, lastPass: null });
     await mount(h(Sources, { query: "", go: () => {} }));
     await settled();
     const row = box.querySelector('a[title="' + ASG + '"]');
     expect(row?.textContent).toBe("Assignment of worker-1");
+    // A dependency is named as its page is headed, and an object that is not safe text leaves the shortened identifier.
+    expect(box.querySelector('a[title="dep_k2pq3rstuvwxyz234567abcdef"]')?.textContent).toBe("Dependency registry.test/app, version 3");
+    expect(box.querySelector('a[title="dep_k2pq3rstuvwxyz234567abcdeg"]')?.textContent).toBe("Dependency dep_k2pq…cdeg");
     answers["/ingestions"] = ok({ items: [{ id: ING, machine: MCH, draft: DRF, operation: OP, state: "released", kind: "import", mode: "durable", review: null, ownerGeneration: 1, leaseUntil: at, expiresAt: at, createdAt: at }], next: null });
     await mount(h(Imports, { query: "", go: () => {} }), { ...reads, view: "i" });
     await settled();
