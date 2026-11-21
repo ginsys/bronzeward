@@ -116,6 +116,17 @@ export const config: WebdriverIO.Config = {
   // every assertion on a text stays as strict as it is in the other four browsers.
   async before(capabilities, _specs, browser) {
     if ((capabilities as WebdriverIO.Capabilities).browserName?.toLowerCase() !== "safari") return;
+    if (process.env["BW_PROBE_1028"] === "2") {
+      // Probe only (ginsys/bronzeward#1028): a mark on the page before the navigation, read right after the command
+      // returns. A mark still there means the command returned while the old document was the current one.
+      await browser.overwriteCommand("url", async function (this: WebdriverIO.Browser, orig: (p: string) => Promise<unknown>, path: string) {
+        await this.execute(() => { (globalThis as unknown as { m1028: number }).m1028 = 1; }).catch(() => undefined);
+        const r = await orig(path);
+        const s = await this.execute(() => [(globalThis as unknown as { m1028?: number }).m1028 === 1, document.readyState, location.pathname]).catch(() => ["err"]);
+        console.log(`probe1028 old=${String(s[0])} state=${String(s[1])} at=${String(s[2])} to=${path}`);
+        return r;
+      });
+    }
     // An override is not wrapped as the commands are, so it waits for the element itself: an assertion
     // on an element that appears after the call must wait for it, as it does with the driver's own text.
     await browser.overwriteCommand("getText", async function (this: WebdriverIO.Element) {

@@ -19,9 +19,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
-        # 0 runs the specs as they are; 1 reads the document's time origin around the navigation in the styling hook.
-        instrument: [0, 1]
+        shard: [1, 2, 3, 4, 5, 6]
+        # 2 marks the page before each navigation and reads the mark right after the command returns (wdio.conf.ts).
+        instrument: [2]
     env:
       BW_BROWSERS: safari
       MISE_DISABLE_TOOLS: node
@@ -67,7 +67,7 @@ jobs:
           done
           echo "instrument ${{ matrix.instrument }} shard ${{ matrix.shard }}: runs=$RUNS passed=$ok failed=$bad runs_with_stale_element=$stale" | tee -a "$GITHUB_STEP_SUMMARY"
           grep -h 'probe1028' ../probe-out/run-*.log | sed 's/.*probe1028/probe1028/' > ../probe-out/origin.txt || true
-          echo "origin lines: $(wc -l < ../probe-out/origin.txt) replaced: $(grep -c 'replaced=true' ../probe-out/origin.txt || true)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "origin lines: $(wc -l < ../probe-out/origin.txt) old_document_current: $(grep -c 'old=true' ../probe-out/origin.txt || true) not_complete: $(grep -vc 'state=complete' ../probe-out/origin.txt || true)" | tee -a "$GITHUB_STEP_SUMMARY"
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
