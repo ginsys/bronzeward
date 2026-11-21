@@ -13,7 +13,7 @@ import { Id, type Load, type Reads, Ref, short, useItem, useList, usePending, us
 import { markLines } from "./marks.tsx";
 import { eventLine, type Refusal, refusalOf, refusalText, terminal, type Watch, type Watched, watch } from "./progress.ts";
 import type { Client, ReadResult } from "./request.ts";
-import { machineOption, sharedAddresses } from "./machines.tsx";
+import { machineOptions, sharedAddresses } from "./machines.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { MachineById, Named } from "./titles.tsx";
@@ -629,7 +629,8 @@ export function StartImport({ query }: { query: string }) {
   // The draft of the start last sent, for the link a 412 shows.
   const sentDraft = useRef<string>(undefined);
   const [machines] = useList<Machine>("/machines", "", true);
-  const shared = sharedAddresses(machines.kind === "ok" ? machines.data.items : []);
+  const items = machines.kind === "ok" ? machines.data.items : [];
+  const choices = machineOptions(items, sharedAddresses(items));
   const [drafts] = useList<Draft>("/drafts", "", true);
   const m = machines.kind === "ok" ? machines.data.items.find((x) => x.id === machine) : undefined;
   const open = drafts.kind === "ok" && m !== undefined ? drafts.data.items.filter((d) => d.cluster === m.cluster && d.state === "open") : [];
@@ -672,7 +673,7 @@ export function StartImport({ query }: { query: string }) {
           <label>Machine:{" "}
             <select name="machine" required value={machine} onChange={(e) => setMachine(e.target.value)}>
               <option value="" disabled>{machines.kind === "ok" ? "choose" : "machines not read"}</option>
-              {(machines.kind === "ok" ? machines.data.items : []).map((x) => <option key={x.id} value={x.id}>{machineOption(x, shared)}</option>)}
+              {(machines.kind === "ok" ? machines.data.items : []).map((x) => <option key={x.id} value={x.id}>{choices.get(x.id)}</option>)}
             </select>
           </label>
         </p>

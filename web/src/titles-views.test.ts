@@ -7,7 +7,11 @@
 import { act, createElement as h, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { WritesProvider } from "./forms.tsx";
+import { StartImport } from "./imports.tsx";
 import { Detail, type Reads, ReadsProvider, useItem } from "./list.tsx";
+import { ShellContext } from "./shell.tsx";
+import { Writes } from "./write.ts";
 import type { ReadResult } from "./request.ts";
 import { Status, StatusPage, when } from "./states.tsx";
 import { Outcome } from "./operation.tsx";
@@ -595,5 +599,17 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
     await mount(h("div", null, h(Named, { id: REL }), h(Named, { id: REL }), h(Named, { id: PLN }), h(Named, { id: DRF }), h(Named, { id: MCH }), h(Named, { id: MCH })));
     await settled();
     expect([...asked].sort()).toEqual([`/drafts/${DRF}`, `/machines/${MCH}`, `/plans/${PLN}`, `/releases/${REL}`]);
+  });
+});
+
+describe("ginsys/bronzeward#1055: the machine choices of Start import", () => {
+  test("two clusters' machines named alike with one endpoint are offered apart, by node ID", async () => {
+    const named = (id: string, node: string) => ({ id, cluster: id === MCH ? "cl_a" : "cl_b", name: "cp1", talosEndpoint: "10.0.0.1:50000", hardware: { smbiosUuid: null, talosNodeId: node, serial: null } });
+    answers["/machines"] = ok({ items: [named(MCH, "4c1f9a2b3c4d"), named(MCH2, "9b22d0aa11bb")] });
+    answers["/drafts"] = ok({ items: [] });
+    await mount(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["author"], offline: false } }, h(StartImport, { query: "" }))));
+    await settled();
+    const shown = [...box.querySelectorAll('select[name="machine"] option')].map((o) => o.textContent);
+    expect(shown).toEqual(["choose", "cp1 10.0.0.1:50000 (node 4c1f…)", "cp1 10.0.0.1:50000 (node 9b22…)"]);
   });
 });
