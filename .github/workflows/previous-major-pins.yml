@@ -60,5 +60,5 @@ jobs:
         env:
           STATUS: ${{ steps.check.outputs.status }}
         run: |
-          echo "previous-major-pins: exit status $STATUS (1 = behind the sources, 2 = a source could not be read)" >&2
+          echo "previous-major-pins: exit status $STATUS (1 = behind the sources, 2 = a source or the pin file could not be read, or the script failed: see the step above)" >&2
           exit 1
