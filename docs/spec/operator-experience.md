@@ -465,9 +465,16 @@ The node reports its full name where it has a domain (the cluster member's hostn
 fully qualified name) and a short one where it has none. The client lowercases that hostname, and the
 result is the machine's name when it is a valid name
 ([persistence and API §3.5](persistence-api.md#35-a-machines-name)). Otherwise the machine is left
-unnamed, and the client says why in the machine's line and never drops it without a word: "no
-hostname reported" for none, and "the hostname `X` is not a valid name" for one that stays invalid
-after lowercasing. An unnamed machine is shown by its address. Where onboarding names a machine, the
+unnamed, and the client says why in the machine's line and never drops it without a word: "no name: the
+node reported no hostname, so it shows its address" for none, and "no name: the hostname `X` is not a
+valid name" for one that stays invalid after lowercasing. **A name the server refuses never stops the
+run.** Where another machine of the cluster holds the name (`409 name-in-use`, the replaced node whose
+old record keeps its hostname) or the server does not take its grammar (`400 invalid-request`, a server
+older than the widened grammar), the client records that machine again without a name, goes on to the
+rest, and says so in the machine's line: "no name: the hostname `X` is held by machine `mch_…`; rename or
+remove that record, then name this one", or "no name: the server refused the hostname `X` as a name".
+The machine is never adopted on that code (client contracts A9 item 3). An unnamed machine is shown by
+its address. Where onboarding names a machine, the
 machine's import base holds that hostname, equal to the
 name. The import removes that document from the stored base and records the hostname as filled from
 the name (compilation §2.3 step 2a), so a later rename reaches the machine through a new release and
@@ -602,7 +609,8 @@ again (below). A `409 conflict` on the cluster or
 on a machine names the existing record, which the command reads and shows as it is recorded (the
 flags are not applied to it); a `409 name-in-use`, which a machine name another machine holds draws
 (client contracts A9), names the machine that holds the name, which is not established as the
-discovered node, so the command never adopts it. A machine that is recorded in another cluster stops the command, naming
+discovered node, so the command never adopts it: it records the machine without a name and goes on (§5.2,
+"A name the server refuses never stops the run"). A machine that is recorded in another cluster stops the command, naming
 both cluster IDs, before the first key. The draft is titled `onboard <name>`, and an open draft of that
 title is reused. A machine whose import was released into that draft is skipped; an import that is
 held, resumed or paused stops the command, with `import status` for it (a paused one is exit 0, as
@@ -626,7 +634,9 @@ request, like a file name that cannot be printed back in a command.
 
 The text output lists the cluster, the first key, the draft and one row per member, then the next
 commands. `-o json` and `-o yaml` print one object once, at the end:
-`{cluster, firstKey, draft, machines[]}`, each member with `{node, machine, add, import}`, each step
+`{cluster, firstKey, draft, machines[]}`, each member with `{node, machine, add, import}` and, only for a
+machine this run recorded, `name` (the name it was given, absent when it has none) and `nameNote` (how it was
+named, or why it was not), each step
 with a `state` and, when it did not finish, the `command` that carries on and the `error` line. The
 answer of an import start is never printed. The exit code is that of the step that stopped the run (the
 usual exit codes: 1 a refusal, 3 an unknown outcome, 4 an import that ended failed). With `--review` the

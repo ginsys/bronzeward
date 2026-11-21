@@ -2148,7 +2148,10 @@ not part of this rule.
    `cluster onboard` adopts the machine a `409 conflict` on `POST /machines` names, as an existing
    node (`cmd/bronzewardctl/onboard.go:372-376`, [operator experience §5.2](operator-experience.md#52-inventory)):
    it must not read `name-in-use` that way, and a client that sends a name tells the two by the
-   code.
+   code. A client that names machines as it records them (`cluster onboard` and the onboarding page)
+   takes a `name-in-use` or a `400 invalid-request` on a name it sent as the refusal of the name, never
+   of the machine: it records the machine again without the name, goes on, and says in the machine's
+   line why it has none and, for `name-in-use`, which machine holds the name.
 4. A `name-change` entry on `GET /machines/{id}/timeline` is rendered from its members like any
    other kind, and a client must not fail or drop the row for a kind it does not know:
    `api/openapi.yaml:4178` types `kind` as a free string.

@@ -296,6 +296,19 @@ async function firstKey(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolea
   return true;
 }
 
+// The note for a machine whose name the server refused, undefined when the answer is no refusal of a name
+// that was sent: `name-in-use` names the machine that holds it, and `invalid-request` is a grammar the
+// server does not take (a server older than the widened one takes one label).
+function nameRefusal(o: Outcome, name: string): string | undefined {
+  if (o.kind !== "refused") return undefined;
+  if (o.problem?.type === "urn:bronzeward:problem:name-in-use") {
+    const holder = o.problem["machine"];
+    return `no name: the hostname "${name}" is held by machine ${typeof holder === "string" ? holder : "another machine"}; rename or remove that record, then name this one`;
+  }
+  if (o.problem?.type === "urn:bronzeward:problem:invalid-request") return `no name: the server refused the hostname "${name}" as a name`;
+  return undefined;
+}
+
 async function machines(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolean> {
   for (const m of members(p.found)) {
     const key = `machine:${m.nodeId}`;
@@ -308,7 +321,17 @@ async function machines(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolea
     // By the SMBIOS UUID where the node reports one, else by its node ID: the import checks that identity.
     const nm = nameOf(m.hostname);
     const body = { cluster: p.cluster, ...(m.smbiosUuid !== "" ? { smbiosUuid: m.smbiosUuid } : { talosNodeId: m.nodeId }), platform: m.platform, talosEndpoint: endpointOf(m.address), ...(nm.name !== undefined && { name: nm.name }) };
-    const o = await env.send({ method: "POST", path: "/machines", resource: `/machines?${new URLSearchParams({ cluster: p.cluster! })}`, body });
+    const write = (b: object) => env.send({ method: "POST", path: "/machines", resource: `/machines?${new URLSearchParams({ cluster: p.cluster! })}`, body: b });
+    let o = await write(body);
+    let note = nm.note;
+    // A name the server refuses (another machine holds it, or the grammar rejects it) never stops the run:
+    // the machine is recorded without it, with the reason, to be named afterwards.
+    const refused = nm.name === undefined ? undefined : nameRefusal(o, nm.name);
+    if (refused !== undefined) {
+      const { name: _unsent, ...unnamed } = body;
+      o = await write(unnamed);
+      note = refused;
+    }
     const named = o.kind === "refused" ? existing(o.status, o.problem, "/machines") : undefined;
     const id = o.kind === "done" ? (o.data as { id?: string } | null)?.id : named?.kind === "machine" ? named.id : undefined;
     if (id === undefined) return o.kind === "done" ? fail(key, label, "the machine was recorded, but its answer names no machine") : fail(key, label, o);
@@ -319,7 +342,7 @@ async function machines(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolea
     }
     p.machines[m.nodeId] = id;
     // A machine this run recorded says how it was named, or why it was not: never a silent drop.
-    set({ key, label, state: o.kind === "done" ? "done" : "existing", to: `/machines/${id}`, ...(o.kind === "done" && nm.note !== undefined && { detail: nm.note }) });
+    set({ key, label, state: o.kind === "done" ? "done" : "existing", to: `/machines/${id}`, ...(o.kind === "done" && note !== undefined && { detail: note }) });
   }
   return true;
 }

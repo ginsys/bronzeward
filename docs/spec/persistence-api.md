@@ -833,7 +833,7 @@ revision 10 (§9.1), which adds `name` on a machine and on `POST /machines`, the
   name: it is a malformed body, `400 invalid-request`, with nothing committed. The database
   enforces the same grammar as a `CHECK` on the column, so no route can store another. Every name
   stored before the grammar widened is one label and stays valid; none is rewritten. The widening
-  adds no field, route or problem code, so the API revision stays 13; a client built for one label
+  adds no field, route or problem code, so the API revision does not change; a client built for one label
   shows a dotted name as an identifier until it is updated (client contracts A9 item 1).
 - **Unique within a cluster**, by a partial unique index on the machine's cluster and name over the
   machines that have one (§7.3); two clusters may use the same name. A request that would give a
