@@ -8,15 +8,17 @@ import { act, createElement as h, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
-import { StartImport } from "./imports.tsx";
-import { Detail, type Reads, ReadsProvider, useItem } from "./list.tsx";
+import { DraftItem } from "./drafts.tsx";
+import { IngestionItem, StartImport } from "./imports.tsx";
+import { PublishDraft } from "./publish.tsx";
+import { Detail, type Reads, ReadsProvider, short, useItem } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
 import { Writes } from "./write.ts";
 import type { ReadResult } from "./request.ts";
 import { Status, StatusPage, when } from "./states.tsx";
 import { Outcome } from "./operation.tsx";
 import { PlanState } from "./plan.tsx";
-import { ACTS, Change, DependencyItem, OperationItem, Operations, PlanItem, Plans, ReleaseItem } from "./resources.tsx";
+import { ACTS, Change, DependencyItem, ImportBaseItem, OperationItem, Operations, PlanItem, Plans, ReleaseItem, RevisionItem } from "./resources.tsx";
 import { MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useClusterText } from "./titles.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -611,5 +613,109 @@ describe("ginsys/bronzeward#1055: the machine choices of Start import", () => {
     await settled();
     const shown = [...box.querySelectorAll('select[name="machine"] option')].map((o) => o.textContent);
     expect(shown).toEqual(["choose", "cp1 10.0.0.1:50000 (node 4c1f…)", "cp1 10.0.0.1:50000 (node 9b22…)"]);
+  });
+});
+
+// ginsys/bronzeward#1055, part 2: the draft, publish, import and import base pages are headed by what a person knows.
+const IBR = "ibr_k2pq3rstuvwxyz234567abcdef";
+const ASR = "asr_k2pq3rstuvwxyz234567abcdef";
+const FRV = "frv_k2pq3rstuvwxyz234567abcdef";
+const providers = (view: ReactElement) => h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["author"], offline: false } }, view));
+const headings = () => [...box.querySelectorAll("h2")].map((e) => e.textContent);
+
+describe("ginsys/bronzeward#1055: the draft and publish pages", () => {
+  const draft = {
+    id: DRF, title: "Add the office labels", state: "open", revision: 3, cluster: "cl_a",
+    entries: [
+      { kind: "assignment", machine: MCH, name: null, revision: ASR, head: ASR, base: null },
+      { kind: "import-base", machine: MCH, revision: IBR },
+    ],
+  };
+  beforeEach(() => {
+    answers[`/drafts/${DRF}`] = ok(draft);
+    answers["/clusters/cl_a"] = ok({ id: "cl_a", name: "office" });
+  });
+
+  test("the draft page is headed by its stored title, with state, revision and cluster on a line and the identifier below", async () => {
+    await mount(providers(h(DraftItem, { id: DRF })));
+    await settled();
+    expect(headings()[0]).toBe("Draft: Add the office labels");
+    expect(text()).toContain("open, revision 3, Cluster office.");
+    expect(text()).toContain(`Identifier ${DRF}`);
+  });
+
+  test("its entries name the machine, and the imported configuration is one link titled by the import base", async () => {
+    await mount(providers(h(DraftItem, { id: DRF })));
+    await settled();
+    const entries = [...box.querySelectorAll('ul[aria-label="Entries"] li')];
+    expect(entries.map((e) => e.querySelector("button, a")?.textContent)).toEqual(["assignment worker-1", "Imported configuration of worker-1"]);
+    expect(entries[1]!.querySelector("a")?.getAttribute("title")).toBe(IBR);
+    expect(entries[1]!.textContent).not.toContain("ibr_");
+  });
+
+  test("a title that is not safe text leaves the shortened identifier", async () => {
+    answers[`/drafts/${DRF}`] = ok({ ...draft, title: "Add‮evil" });
+    await mount(providers(h(DraftItem, { id: DRF })));
+    await settled();
+    expect(headings()[0]).toBe("Draft: drf_k2pq…cdef");
+  });
+
+  test("the publish page is headed by the same title and says the same line", async () => {
+    await mount(providers(h(PublishDraft, { query: `draft=${DRF}` })));
+    await settled();
+    expect(headings()[0]).toBe("Publish draft: Add the office labels");
+    expect(text()).toContain("open, revision 3, Cluster office.");
+  });
+});
+
+describe("ginsys/bronzeward#1055: the import and the import base pages", () => {
+  const ingestion = (state: string) => ({
+    id: ING, machine: MCH, draft: DRF, operation: OP, state, kind: "import", mode: "durable", review: null, ownerGeneration: 1,
+    leaseUntil: at, expiresAt: at, createdAt: at,
+  });
+
+  test("the import page is headed by its machine and its state, with the identifier on a detail line", async () => {
+    answers[`/ingestions/${ING}`] = ok(ingestion("released"));
+    await mount(providers(h(IngestionItem, { id: ING })));
+    await settled();
+    expect(headings()[0]).toBe("Import of worker-1: released");
+    expect(text()).toContain(`Identifier ${ING}`);
+  });
+
+  test("an import whose machine read gave no body says so by the machine, and never by an identifier", async () => {
+    answers[`/ingestions/${ING}`] = ok(ingestion("paused"));
+    answers[`/machines/${MCH}`] = missing;
+    await mount(providers(h(IngestionItem, { id: ING })));
+    await settled();
+    expect(headings()[0]).toBe("Import of the machine: paused");
+  });
+
+  test("the import base page is headed by its machine and the day it was imported, with no number", async () => {
+    answers[`/import-base-revisions/${IBR}`] = ok({ id: IBR, machine: MCH, author: "idn_k2pq3rstuvwxyz234567abcdef", createdAt: at, documentBytes: 12, references: 0, embedded: 0 });
+    await mount(providers(h(ImportBaseItem, { id: IBR })));
+    await settled();
+    expect(headings()[0]).toBe(`Imported configuration of worker-1, imported ${when(at)}`);
+    expect(text()).toContain(`Identifier ${IBR}`);
+  });
+
+  test("a fragment revision and an assignment revision are headed by what they revise and the day they were saved", async () => {
+    answers[`/fragment-revisions/${FRV}`] = ok({ id: FRV, name: "network-base", cluster: "cl_a", layer: "base", author: "idn_k2pq3rstuvwxyz234567abcdef", createdAt: at, document: "a: 1", declarations: { references: {}, embedded: [] } });
+    await mount(providers(h(RevisionItem, { kind: "fragment", id: FRV })));
+    await settled();
+    expect(headings()[0]).toBe(`Fragment network-base, saved ${when(at)}`);
+    answers[`/assignment-revisions/${ASR}`] = ok({ id: ASR, machine: MCH, cluster: "cl_a", profiles: [], fragments: {}, author: "idn_k2pq3rstuvwxyz234567abcdef", createdAt: at });
+    await mount(providers(h(RevisionItem, { kind: "assignment", id: ASR })));
+    await settled();
+    expect(headings()[0]).toBe(`Assignment of worker-1, saved ${when(at)}`);
+  });
+
+  test("a fragment name that is not safe text leaves the shortened identifier, and the cluster row names the cluster", async () => {
+    answers[`/fragment-revisions/${FRV}`] = ok({ id: FRV, name: "network‮evil", cluster: "cl_a", layer: "base", author: "idn_k2pq3rstuvwxyz234567abcdef", createdAt: at, document: "a: 1", declarations: { references: {}, embedded: [] } });
+    answers["/clusters/cl_a"] = ok({ id: "cl_a", name: "office" });
+    await mount(providers(h(RevisionItem, { kind: "fragment", id: FRV })));
+    await settled();
+    expect(headings()[0]).toBe(`Fragment revision ${short(FRV)}`);
+    expect(text()).toContain("Clusteroffice");
+    expect(text()).not.toContain("cl_a");
   });
 });

@@ -9,13 +9,14 @@ import type { components } from "./api/v1";
 import { AssignmentPane, ProfilePane } from "./composition.tsx";
 import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { LAYERS } from "./layers.ts";
-import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
+import { Detail, Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { type EmbeddedPath, references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import type { Problem } from "./request.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
-import { MachineById } from "./titles.tsx";
+import { ClusterRef, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
+import { draftCalled, draftText, safeText } from "./titles.ts";
 import type { Outcome, Write } from "./write.ts";
 
 type S = components["schemas"];
@@ -28,7 +29,7 @@ type Embedded = S["Embedded"];
 
 export { LAYERS };
 export const KINDS = ["string", "integer", "boolean", "mapping"] as const;
-export const NOT_RENDERED = "Not rendered yet. A machine's configuration exists only after publication (gap G5).";
+export const NOT_RENDERED = "Not rendered yet. A machine's configuration exists only in a release, once this draft is published.";
 // The publication page of a draft (publish.tsx).
 export const publishPath = (draft: string) => `/publications/new?${new URLSearchParams({ draft })}`;
 export const NO_ETAG = "Not sent: this page has not read the draft under the current epoch. Read it again first.";
@@ -104,6 +105,15 @@ const enc = encodeURIComponent;
 const isSource = (e: Draft["entries"][number]): e is Source => e.kind !== "import-base";
 const nameOf = (e: Source) => e.name ?? e.machine ?? "";
 const keyOf = (e: Source) => `${e.kind}:${nameOf(e)}`;
+// A draft in a sentence: its stored title in quotes where the title is safe text, else the shortened identifier.
+const called = (d: Pick<Draft, "id" | "title">): string => draftCalled(d, short(d.id));
+// An entry as the list names it: a fragment's or a profile's own name, and an assignment's machine as a machine is
+// named everywhere (the shortened identifier until it is read).
+function EntryName({ e }: { e: Source }) {
+  const machine = useMachineText(e.kind === "assignment" && nameOf(e) !== "" ? nameOf(e) : undefined);
+  const name = nameOf(e);
+  return <>{e.kind} {e.kind === "assignment" ? machine ?? short(name) : safeText(name) ?? short(name)}</>;
+}
 
 // What an entry changes against its base (journeys §5.4's draft show).
 export function change(e: Source): string {
@@ -168,7 +178,7 @@ export function CreateDraft() {
     const id = createdId(data);
     if (id === undefined) return <>Draft created, but the answer names no draft. Read <Ref to="/changes" id="/changes">the Changes page</Ref>.</>;
     const d = data as Draft;
-    return <>Draft <Ref to={`/drafts/${id}`} id={id} /> "{d.title}" created in cluster {short(d.cluster)}.</>;
+    return <>Draft <Ref to={`/drafts/${id}`} id={id}>{draftText(d) ?? short(id)}</Ref> created (<ClusterRef id={d.cluster} />).</>;
   };
   const options = clusters.kind === "ok" ? clusters.data.items : [];
   return (
@@ -242,7 +252,13 @@ export function DraftItem({ id }: { id: string }) {
   };
   return (
     <>
-      <h2>Draft {short(id)}{d !== undefined && <> "{d.title}" {d.state}, revision {d.revision}, cluster <Id id={d.cluster} /></>}</h2>
+      <h2>{d === undefined ? `Draft ${short(id)}` : `Draft: ${draftText(d) ?? short(id)}`}</h2>
+      {d !== undefined && (
+        <>
+          <p data-testid="draft-line">{d.state}, revision {d.revision}, <ClusterRef id={d.cluster} />.</p>
+          <Detail id={d.id} />
+        </>
+      )}
       {pending}
       {/* That read failed, also when the page keeps the data read before (no answer): reading it
           again keeps the editor, and lets Save and Remove send again. */}
@@ -253,10 +269,10 @@ export function DraftItem({ id }: { id: string }) {
           <ul aria-label="Entries">
             {d.entries.map((e) => isSource(e) ? (
               <li key={keyOf(e)}>
-                <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}>{e.kind} {e.kind === "assignment" ? short(nameOf(e)) : nameOf(e)}</button>
+                <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}><EntryName e={e} /></button>
                 {" "}{change(e)}
               </li>
-            ) : <li key={`import-base:${e.machine}`}>import base <MachineById id={e.machine} /> <Id id={e.revision} /></li>)}
+            ) : <li key={`import-base:${e.machine}`}><ImportedConfigurationRef machine={e.machine} revision={e.revision} /></li>)}
           </ul>
           {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} />{" "}<Action label="Add profile" needs={["author"]} onClick={() => pick("profile:")} />{" "}<Action label="Add assignment" needs={["author"]} onClick={() => pick("assignment:")} /></p>}
           {selected !== undefined && selected.startsWith("fragment:") && (
@@ -298,7 +314,7 @@ function DiscardDraft({ draft, written, seeChange }: { draft: Draft; written: ()
   // A discarded draft takes no write: its ETag is forgotten as the discard settles.
   const settled = (s: Outcome) => void (s.kind === "done" && forgetETag(draft.id));
   const discard = () => {
-    if (!confirm(`Discard draft ${draft.id} "${draft.title}"? It cannot be published afterwards.`)) return;
+    if (!confirm(`Discard draft ${called(draft)}? It cannot be published afterwards.`)) return;
     const ifMatch = keptETag(draft.id, writes?.client?.currentEpoch);
     setNote(ifMatch === undefined ? NO_ETAG : undefined);
     if (ifMatch !== undefined) send({ method: "POST", path: `/drafts/${enc(draft.id)}/discard`, body: {}, ifMatch, resource: `/drafts/${draft.id}`, settled });
@@ -307,7 +323,7 @@ function DiscardDraft({ draft, written, seeChange }: { draft: Draft; written: ()
     <>
       <p><Action label="Discard draft" needs={["author"]} onClick={discard} busy={w !== undefined && w.outcome === undefined} /></p>
       {note !== undefined && <Status>{note}</Status>}
-      <WriteResult w={w} conflict={<DiscardRefused onShow={() => (unsaved.size > 0 ? setNote(EDITOR_FIRST) : seeChange())} />} done={() => `Draft ${short(draft.id)} discarded.`} />
+      <WriteResult w={w} conflict={<DiscardRefused onShow={() => (unsaved.size > 0 ? setNote(EDITOR_FIRST) : seeChange())} />} done={() => `Draft ${called(draft)} discarded.`} />
     </>
   );
 }
@@ -763,7 +779,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   const editable = open && !waits;
   // Guarded also once the draft no longer takes writes (discarded by another author): the text is
   // still shown, and leaving drops it.
-  useUnsaved(`fragment ${name || "(new)"} of draft ${short(draft.id)}`, holdsUnsaved(held, saved, conflict?.mine));
+  useUnsaved(`fragment ${name || "(new)"} of draft ${called(draft)}`, holdsUnsaved(held, saved, conflict?.mine));
   // The draft revision the page shows now, for a revision read that answers later.
   const drafted = useRef(draft.revision);
   // The done writes now, for a revision read that answers after one finished.
@@ -960,11 +976,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       {/* A conflict a done write kept stays shown, with its Copy my text. */}
       {!(o?.kind === "refused" && o.status === 412) && conflictView()}
       <div ref={answer} tabIndex={-1} data-testid="fragment-write">
-        <WriteResult w={w} conflict={conflictView("alert") || undefined} goTo={() => void goTo()} marks={sent?.text.marks ?? ""} done={(data) => {
-          if (w?.spec.method === "DELETE") return `Fragment ${name} removed from draft ${short(draft.id)}.`;
-          const r = (data as Partial<S["SourceUpdate"]>).entry?.revision;
-          return `Fragment ${name} saved in draft ${short(draft.id)}${typeof r === "string" ? ` (revision ${short(r)})` : ""}.`;
-        }} />
+        <WriteResult w={w} conflict={conflictView("alert") || undefined} goTo={() => void goTo()} marks={sent?.text.marks ?? ""} done={() => `Fragment ${name} ${w?.spec.method === "DELETE" ? "removed from" : "saved in"} draft ${called(draft)}.`} />
       </div>
     </section>
   );

@@ -1488,7 +1488,7 @@ describe("the fragment entry (W4, §11.4 item 2)", () => {
     for (const a of out.match(/<textarea[^>]*>/g)!) expect(a).toContain("readOnly");
   });
 
-  test("the footer text names gap G5", () => {
-    expect(NOT_RENDERED).toBe("Not rendered yet. A machine's configuration exists only after publication (gap G5).");
+  test("the footer text names the release as the place, and no gap", () => {
+    expect(NOT_RENDERED).toBe("Not rendered yet. A machine's configuration exists only in a release, once this draft is published.");
   });
 });

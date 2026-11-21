@@ -204,7 +204,8 @@ describe("the draft editor (#339)", () => {
     await $("main form").$("button=Create draft").click();
     await expect($('[data-testid="write-result"]')).toHaveText(expect.stringContaining(`"${title}" created in cluster`), { wait: 20_000 });
     await $('[data-testid="write-result"]').$("a").click();
-    await expect($("main h2")).toHaveText(expect.stringContaining(`"${title}" open, revision`));
+    await expect($("main h2")).toHaveText(`Draft: ${title}`);
+    await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining("open, revision"));
     await expect($('[data-testid="not-rendered"]')).toHaveText(NOT_RENDERED);
     await $("main").$("button=Add fragment").click();
     const name = `save-${hex()}`;
@@ -271,7 +272,7 @@ describe("the draft editor (#339)", () => {
       await absent(() => storedHolds(id, name, "mine"), "this browser's text in the stored entry after the 412");
       const now =(await api("h-author", "GET", `/drafts/${id}`)).body!["revision"] as number;
       await pane().$("button=Show their change").click();
-      await expect($("main h2")).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
+      await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
       await browser.waitUntil(() => holds("theirs", browser, true), { timeout: 20_000, timeoutMsg: "the conflict view does not show the other browser's text" });
       await pane().$("button=Copy my text into the new revision").click();
       expect(await holds("mine")).toBe(true);
@@ -302,7 +303,7 @@ describe("the draft editor (#339)", () => {
     await browser.pause(3_000);
     await oneWrite(1);
     await pane().$("button=Show their change").click();
-    await expect($("main h2")).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
+    await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
     await expect($('main ul[aria-label="Entries"]')).toHaveText(expect.stringContaining("fragment other-"));
     await pane().$("button=Copy my text into the new revision").click();
     await save(id, name);
@@ -368,7 +369,7 @@ describe("the draft editor (#339)", () => {
     await browser.pause(500);
     expect(await writes()).toHaveLength(before);
     await dialogs(true, () => $("main").$("button=Discard draft").click());
-    await expect($("main h2")).toHaveText(expect.stringContaining("discarded"), { wait: 20_000 });
+    await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining("discarded"), { wait: 20_000 });
     expect((await writes()).map(([m, r]) => `${m} ${r}`).slice(before)).toEqual([`POST /drafts/${id}/discard`]);
   });
 
@@ -480,7 +481,7 @@ describe("the draft editor (#339)", () => {
       await oneWrite(1);
       expect(await order()).toEqual([b, a]);
       await profilePane().$("button=Show their change").click();
-      await expect($("main h2")).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
+      await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
       // Their list shows, and mine waits aside until Copy puts it back.
       await browser.waitUntil(async () => (await order()).join(",") === b, { timeout: 20_000, timeoutMsg: "Show their change did not show the other author's pins" });
       await profilePane().$("button=Copy my text into the new revision").click();
@@ -603,7 +604,7 @@ describe("the draft editor (#339)", () => {
       await oneWrite(1);
       expect(await names("Layer role")).toEqual([b, a]);
       await asg().$("button=Show their change").click();
-      await expect($("main h2")).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
+      await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
       await browser.waitUntil(async () => (await names("Layer role")).join(",") === b, { timeout: 20_000, timeoutMsg: "Show their change did not show the other author's list" });
       await asg().$("button=Copy my text into the new revision").click();
       expect(await names("Layer role")).toEqual([b, a]);

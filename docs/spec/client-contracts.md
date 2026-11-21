@@ -2112,6 +2112,20 @@ says "Copied", or "Select the identifier to copy it" where the browser would not
 A cluster's link on that page shows its name where the read gives a safe one, preceded by the word "Cluster",
 else "This cluster" alone.
 
+The draft, import and import-base pages follow the same rule ([#1055](https://github.com/ginsys/bronzeward/issues/1055)).
+A draft page's heading is "Draft: `<title>`" (the shortened identifier where the draft has no safe title), with a line
+under it giving its state, revision and cluster (named as above), and the identifier on a detail line with Copy. A draft's
+entries read as the machine's name, or the fragment's. A publication page heads "Publish draft: `<title>`" with the same
+line. An import page heads "Import of `<machine>`: `<state>`" (A8 gives the first part; the state stays so a person sees
+at once where it stands), with the identifier on a detail line, and its sentences name the draft by its title and the
+imported configuration as "Imported configuration of `<machine>`", never by identifier or revision number. An
+imported configuration's page heads "Imported configuration of `<machine>`, imported `<date>`", and a fragment or
+assignment revision's "Fragment `<name>`, saved `<date>`" or "Assignment of `<machine>`, saved `<date>`", each with
+the identifier on a detail line. A name or title that is not safe text (item 1, A8 rule 3) is not shown: the heading
+carries the shortened identifier, as it does until the draft, machine or revision is read. A machine whose read gave
+no body reads "the machine" (A8 rule 1), so the heading survives. The words that show a mark or a rule on an import page, the document view and the publish shortcut are
+not part of this rule.
+
 1. The name is remote text like every server string: a declared format binds a correct server, not
    the bytes received (§6 item 8, as A7 cites it). The
    CLI escapes it as it does every other server string. The web client renders it as a text node

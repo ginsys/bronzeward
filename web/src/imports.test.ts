@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
-import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, catchUpLoss, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, type Ingestion, keepTyped, lapsedRead, MAX_DOCUMENT, onEvent, REFRESH_FAILED, type ReadStamp, refreshDelay, refreshRetry, refreshWait, REVIEW_FIRST, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, stampRead, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
+import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, catchUpLoss, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, importHeading, type Ingestion, keepTyped, lapsedRead, MAX_DOCUMENT, onEvent, REFRESH_FAILED, type ReadStamp, refreshDelay, refreshRetry, refreshWait, REVIEW_FIRST, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, stampRead, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
 import { type Load, type Reads, ReadsProvider, short } from "./list.tsx";
 import { eventLine, watch } from "./progress.ts";
 import { Client, type ReadResult } from "./request.ts";
@@ -70,6 +70,17 @@ describe("what an import's state allows (B15, as the CLI's import status)", () =
   });
 });
 
+describe("an import page's heading (ginsys/bronzeward#1055)", () => {
+  const ID = "ing_k2pq3rstuvwxyz234567abcdef";
+  test("names the machine and the state; the shortened identifier stands in until the import and its machine are read", () => {
+    expect(importHeading(ID, undefined, undefined)).toBe("Import ing_k2pq…cdef");
+    expect(importHeading(ID, { machine: "mch_a", state: "paused" }, undefined)).toBe("Import ing_k2pq…cdef: paused");
+    expect(importHeading(ID, { machine: "mch_a", state: "paused" }, "cp1")).toBe("Import of cp1: paused");
+    expect(importHeading(ID, { machine: "mch_a", state: "released" }, "the machine")).toBe("Import of the machine: released");
+    expect(importHeading(ID, { machine: null, state: "released" }, undefined)).toBe("Import: released");
+  });
+});
+
 test("an event line names its type, generation and code, and nothing else of its data", () => {
   expect(eventLine({ id: "e1:2", type: "paused", data: { generation: 1 } })).toBe("paused (generation 1)");
   expect(eventLine({ id: "e1:3", type: "resume-failed", data: { code: "dependency-unavailable", extra: "x" } })).toBe("resume-failed: dependency-unavailable");
@@ -90,7 +101,8 @@ describe("ETAG-02: after a released import the draft's ETag is adopted only at t
     keepETag("drf_2rmp457a", '"1-a"', "e1");
     const r = reading({ kind: "ok", data: { revision: 2 }, etag: '"2-b"' });
     const out = text(await ended(r.client, ing(), op({ state: "succeeded", result }), "succeeded", NOW, "e1"));
-    expect(out).toBe("Import ing_6fdq2la released into draft drf_2rmp457a (revision 2), import base ibr_1.");
+    // The titles are not read here (no reads answer), so the draft stands as its identifier and the configuration as its words.
+    expect(out).toBe("This import released into draft drf_2rmp457a (revision 2), with Imported configuration as its base.");
     expect(r.paths).toEqual(["/drafts/drf_2rmp457a"]);
     expect(keptETag("drf_2rmp457a", "e1")).toBe('"2-b"');
   });

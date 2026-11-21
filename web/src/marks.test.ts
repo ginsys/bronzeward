@@ -248,7 +248,7 @@ describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () =>
       const flat = (n: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: noReads }, n)).replace(/<[^>]+>/g, "");
       const done = op({ state: "succeeded", result: { draft: "drf_2rmp457a", draftRevision: 5, importBaseRevision: "rev_1" } });
       expect(flat(await ended(unused, ing({ state: "released" }), done, "paused", NOW, "e1", { replacedBy: 3 }))).toMatch(
-        /^The mark was not applied: a takeover at generation 3 resumed the import without it, and operation op_zcfw5mcm then released it\. Import ing_6fdq2la released/);
+        /^The mark was not applied: a takeover at generation 3 resumed the import without it, and operation op_zcfw5mcm then released it\. This import released/);
     });
     test("a takeover run that stalls and lapses is unknown, and the earlier mark is still said not applied (local review)", async () => {
       const out = String(await ended(unused, ing({ state: "held" }), op(), "", Date.parse("2026-11-01T07:06:00Z"), "e1", { replacedBy: 3 }));
@@ -261,7 +261,7 @@ describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () =>
     const flat = (n: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: noReads }, n)).replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'");
     const text = async (run: Parameters<typeof ended>[6], last = "paused") => flat(await ended(unused, ing({ state: "released" }), done, last, NOW, "e1", run));
     test("a success with no pause at the mark's generation says the mark was not applied", async () => {
-      expect(await text({ marked: true }, "")).toMatch(/^The mark was not applied: operation op_zcfw5mcm succeeded without pausing at the mark's generation\. Import ing_6fdq2la released/);
+      expect(await text({ marked: true }, "")).toMatch(/^The mark was not applied: operation op_zcfw5mcm succeeded without pausing at the mark's generation\. This import released/);
     });
     test("a refusal or a resume-failed before the release is named, and the mark is not applied", async () => {
       expect(await text({ marked: true, refused: { code: "validation-failed", rule: "mark-kind", position: 0 } })).toMatch(

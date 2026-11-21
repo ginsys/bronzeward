@@ -12,13 +12,29 @@ type S = components["schemas"];
 export const draftText = (d: Pick<S["DraftBody"], "title"> | null | undefined): string | undefined =>
   d != null && SAFE.test(d.title) ? d.title : undefined;
 
-export const releaseTitle = (r: Pick<S["ReleaseBody"], "publishedAt">, d: Pick<S["DraftBody"], "title"> | null | undefined): string | undefined => {
+// A name an author typed, shown only when it is safe text (A8 rule 3), else undefined.
+export const safeText = (s: string): string | undefined => (SAFE.test(s) ? s : undefined);
+
+// A draft in a sentence: its title in quotes where the title is safe text, else `fallback` (the shortened identifier).
+export const draftCalled = (d: Pick<S["DraftBody"], "title"> | null | undefined, fallback: string): string => {
+  const title = draftText(d);
+  return title === undefined ? fallback : `"${title}"`;
+};
+
+export const releaseTitle =(r: Pick<S["ReleaseBody"], "publishedAt">, d: Pick<S["DraftBody"], "title"> | null | undefined): string | undefined => {
   const text = draftText(d);
   return text === undefined ? undefined : `${text}, published ${when(r.publishedAt)}`;
 };
 
 export const planTitle = (p: Pick<S["PlanBody"], "operation">, machine: string, release: string | undefined): string | undefined =>
   release === undefined ? undefined : `${p.operation === "adopt" ? "Adopt" : "Apply"} of ${machine} to ${release}`;
+
+// A machine's imported configuration, as a link and, with the date, as its page's title. An import base has
+// no number a person could read, so the day it was imported is what tells two of one machine apart.
+export const importedConfiguration = (machine: string | undefined): string => (machine === undefined ? "Imported configuration" : `Imported configuration of ${machine}`);
+export const importedConfigurationTitle = (machine: string | undefined, createdAt: string): string => `${importedConfiguration(machine)}, imported ${when(createdAt)}`;
+// A revision of a fragment, profile or assignment has no number either: what it revises and when it was saved.
+export const savedTitle = (what: string, createdAt: string): string => `${what}, saved ${when(createdAt)}`;
 
 // `parts` holds the text of what the operation's subject names, each undefined where the subject names
 // nothing of the kind or the read gave none: a draft's title, a machine's text, a plan's title.

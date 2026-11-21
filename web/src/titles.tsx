@@ -9,9 +9,9 @@ import type { components } from "./api/v1";
 import { Id, Ref, short, useReads, viewOf } from "./list.tsx";
 import { MachineRef, machineText } from "./machines.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
-import { draftText, operationTitle, planTitle, releaseTitle } from "./titles.ts";
+import { draftText, importedConfiguration, operationTitle, planTitle, releaseTitle } from "./titles.ts";
 import { SAFE } from "./principals.ts";
-import { THE_MACHINE } from "./words.ts";
+import { THE_MACHINE, THIS_CLUSTER } from "./words.ts";
 
 type S = components["schemas"];
 
@@ -45,6 +45,24 @@ export function useMachineText(id: string | null | undefined): string | undefine
 export function useClusterText(id: string | null | undefined): string | undefined {
   const c = useBody<S["ClusterBody"]>(at("clusters", id));
   return typeof c?.name === "string" && SAFE.test(c.name) ? c.name : undefined;
+}
+
+// A cluster as a link: its name where the read gives a safe one, preceded by the word "Cluster", else "This cluster" alone.
+export function ClusterRef({ id }: { id: string }) {
+  const text = useClusterText(id);
+  return <>{text !== undefined && "Cluster "}<ClusterLink id={id} /></>;
+}
+// The same link without the word "Cluster", for a row or sentence that already has one.
+export function ClusterLink({ id }: { id: string }) {
+  const text = useClusterText(id);
+  return <Ref to={`/clusters/${encodeURIComponent(id)}`} id={id}>{text ?? THIS_CLUSTER}</Ref>;
+}
+
+// A machine's imported configuration as a link: "Imported configuration of cp1" once the machine is read, "Imported
+// configuration" until then. The identifier of the import base is the link's title attribute.
+export function ImportedConfigurationRef({ machine, revision }: { machine: string; revision: string }) {
+  const text = useMachineText(machine);
+  return <Ref to={`/import-base-revisions/${encodeURIComponent(revision)}`} id={revision}>{importedConfiguration(text)}</Ref>;
 }
 
 // A machine as a link once its body is read: its name, else its address, else "an unnamed machine", and the
