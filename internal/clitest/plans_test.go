@@ -380,7 +380,7 @@ func TestPlans(t *testing.T) {
 		release()
 		f.want(r, 0, "Cancellation of plan "+p+" recorded by ", "The plan stays committed to operation "+op,
 			". A cancellation ends a committed plan's operation only while no attempt is recorded; it does not stop an attempt already recorded.\n"+
-			"Follow it with: bronzewardctl operation watch '"+op+"'\n")
+				"Follow it with: bronzewardctl operation watch '"+op+"'\n")
 		// The released stand-in applies the configuration, so the attempt verifies: only
 		// "completed" shows that the cancellation did not stop it, and not a failure for another cause.
 		if state := f.ended(op); state != "completed" {
