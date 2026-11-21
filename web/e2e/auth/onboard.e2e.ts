@@ -125,7 +125,7 @@ describe("Onboard cluster (#1001)", () => {
     await open("h-all");
     const name = `synthetic-${hex()}`;
     await start(name);
-    await $("main form").$("button=Onboard cluster").click();
+    await $("main form").$("button=Connect a cluster").click();
     await expect(result()).toHaveText(expect.stringMatching(/^Onboarded\./), { wait: 180_000 });
     // The result has two links, the draft and the machines list: the draft's is the one this journey opens.
     await result().$('a[href^="/drafts/"]').click();
