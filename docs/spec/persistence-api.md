@@ -834,7 +834,7 @@ revision 10 (§9.1), which adds `name` on a machine and on `POST /machines`, the
   what the next release compiles, as the next bullet says.
 - **The name is the Talos hostname when nothing else sets one** (compilation §6.1, choices
   compilation §16.36 and §17.44 here). The compiler writes a machine's name as its hostname
-  unless the configuration already sets one, so a machine whose hostname comes from its name takes
+  unless the configuration already sets one (an explicit hostname, an `auto: off` document with none, or the legacy stable-hostname feature: choice §17.44), so a machine whose hostname comes from its name takes
   a new name only from a new release and an approved plan; a release keeps the name it was
   compiled with, and a rename changes no release. The release records, per machine, where its
   hostname came from (§9.2). A publication whose snapshot read another name than the machine has
@@ -976,7 +976,8 @@ Rules for every transaction:
    began. In a request's transaction that means after the act-order lock, its
    last wait (rule 5).
 5. **Lock order.** The request's idempotency-key lock (§7.2), installation
-   state, machine rows by id (each with its MachineState), heads by id, the
+   state, machine rows by id (each with its MachineState; T1 takes one `FOR SHARE`
+   to read a name, choice §17.45), heads by id, the
    draft, principals by id, approvals by id, plan states by id, then operations
    by id. A commitment then takes its cluster's rollout lock, which only
    commitments take (execution and recovery choice §10.29). The act-order lock comes last, just before the act is written, and is
@@ -1022,7 +1023,7 @@ The transactions this contract defines or constrains:
 
 | # | Transaction | Locks and checks | Writes |
 | --- | --- | --- | --- |
-| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; the fragment and profile heads a profile's pins or an assignment's selections are checked against (§3.1), `FOR SHARE` in id order, a head created after this step counting as no head; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a moved draft fails the operation `412 precondition-failed`, and a draft no longer `open`, compared before its revision so that a discarded draft is this case, or one with an active publication fails it `409 conflict` (naming that publication), each with its terminal event, in the owner-checked transaction that abandons its claim once the draft transaction has rolled back (§8.2). An import of a machine already in the draft replaces its draft entry. Its claim owner and generation are the operation's (§5.1), and the transaction that releases the claim also writes the operation `succeeded`, with its result and terminal event (T7), under the same owner check, so no `running` operation outlives its released claim |
+| T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; for an `ingest` job that removed a filled hostname (compilation §2.3 step 2a), the machine row `FOR SHARE`, its name equal to the one the claim's staged payload keeps, else the operation fails `409 stale-input` (choice §17.45); the fragment and profile heads a profile's pins or an assignment's selections are checked against (§3.1), `FOR SHARE` in id order, a head created after this step counting as no head; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a machine whose name moved fails the operation `409 stale-input`, with its terminal event and in the owner-checked transaction that abandons its claim, as the `412` case does; a moved draft fails the operation `412 precondition-failed`, and a draft no longer `open`, compared before its revision so that a discarded draft is this case, or one with an active publication fails it `409 conflict` (naming that publication), each with its terminal event, in the owner-checked transaction that abandons its claim once the draft transaction has rolled back (§8.2). An import of a machine already in the draft replaces its draft entry. Its claim owner and generation are the operation's (§5.1), and the transaction that releases the claim also writes the operation `succeeded`, with its result and terminal event (T7), under the same owner check, so no `running` operation outlives its released claim |
 | T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active `publish` one, §7.3), idempotency record, act |
 | T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
 | T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published and covering the machine; for an `apply-config` plan, the release the machine's `Desired` (execution and recovery choice §10.24), an `Applied` to diff from, and an open drift record makes the plan a revert, which binds it and expects its observed digest (execution and recovery §2, §6.4); for an `adopt` plan, no `Applied` (§9.3) or an open drift record, which the plan binds with the baseline revision (execution and recovery choice §10.38); the machine's assignment head `FOR SHARE`, still the revision the release was compiled from for it; execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
@@ -1204,7 +1205,8 @@ or moved, is `409 conflict`, as T3 would refuse it), the cluster's contract
 and the release's coverage: every machine of the cluster with an import base
 after the draft (its entry, else its `Applied` release's, §3.2), each with its
 assignment after the draft, or with none, compiling on its base alone
-**(choice §17.33)**. A machine with an assignment but no import base is not
+**(choice §17.33)**, and each covered machine's name, or none, as stored
+**(choice §17.45)**: T3 compares against these names. A machine with an assignment but no import base is not
 covered: a draft that changes or removes its assignment is refused
 `422 validation-failed` naming the machine, and a release covering no machine
 is refused `422` naming the cluster. Within a layer, the profiles' pins come
@@ -2992,7 +2994,8 @@ its configuration says `auto: off` with no hostname) or `legacy-stable` (the
 configuration sets the legacy stable-hostname feature on a machine that has a
 name, so no name is used) or `unrecorded` (a release made before revision 13,
 whose hostname source was never recorded: it is no confirmed absence, and
-the migration sets it for every such release), and,
+the migration gives every such release that value by a column default, never
+an `UPDATE`, since `release_machine` is immutable), and,
 for `machine-name`, `name`, the name used **(choice §17.44, API revision 13)**. The stored value
 outside that enumeration is `500 internal-error`, as a provenance record is. It
 is a fact about the release and never read again from the machine, whose name
@@ -4977,16 +4980,22 @@ design and evidence do not settle the question. Each is marked in place as
     be the machine name (if set)" (ginsys/bronzeward#976, ruled by the
     bronzeward lead on 2026-11-21 on the plan's decisions). Design choices,
     owned by the specification and open to review: a release machine records a
-    `hostname` member (`source` and, for `machine-name`, the `name` used), one
-    nullable column pair, served on the release read and its review, as API
-    revision 13; a rename changes no release; the provenance records keep to
+    `hostname` member (`source` and, for `machine-name`, the `name` used), a
+    source column added `NOT NULL DEFAULT 'unrecorded'` with the default then
+    dropped, so that a new release must state it and every older row reads
+    `unrecorded` with no `UPDATE` (the table is immutable), and a nullable name
+    column, served on the release read and its review, as API revision 13; a
+    rename changes no release; an explicit `auto: off` document leaves the name
+    unused, so "unless the configuration already sets one" means any hostname
+    setting, the `auto: off` document with no hostname and the legacy stable
+    feature included (compilation §6.1 item 2); the provenance records keep to
     secret-reference occurrences. Alternatives: derive the source on read by
     comparing the redacted hostname with the current name, which is wrong after
     any rename; a machine member that says whether its hostname comes from its
     name, which costs a release read for each machine, the cost choice §17.43
     rejected for the name itself; extra fields on a provenance record, which the
     read refuses (§9.2). The cost is an API revision and a migration of two
-    nullable columns.
+    columns, one with a dropped default.
 45. **A rename races neither a publication nor an ingestion**
     (§3.2, §4.2, §6.2). T3 compares each covered machine's name with the
     snapshot's, and the draft transaction of an ingestion that removed a filled
