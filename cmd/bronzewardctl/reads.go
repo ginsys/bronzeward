@@ -262,13 +262,13 @@ func stateCell(m apitypes.MachineBody) string {
 	for _, x := range []struct {
 		on   bool
 		text string
-	}{{m.OpenDrift != nil, "drifted"}, {m.PendingConvergence, "pending convergence"}, {m.Frozen, "frozen"}, {m.ScopeState != "normal", "scope " + m.ScopeState}} {
+	}{{m.OpenDrift != nil, "changed on the machine"}, {m.PendingConvergence, "release not applied yet"}, {m.Frozen, "frozen"}, {m.ScopeState != "normal", "scope " + m.ScopeState}} {
 		if x.on {
 			s = append(s, x.text)
 		}
 	}
 	if len(s) == 0 && strings.HasPrefix(observedCell(m), "=applied") {
-		return "matches applied"
+		return "last read matched what was applied"
 	}
 	if len(s) == 0 {
 		return "-"
@@ -352,7 +352,7 @@ func sentences(m apitypes.MachineBody, obs []apitypes.ObservationBody) []string 
 		if i := slices.IndexFunc(obs, func(x apitypes.ObservationBody) bool { return x.Id == since }); i >= 0 {
 			since = at(obs[i].At)
 		}
-		add("Drifted since %s: a read differed from what Bronzeward last verified (%s).", since, applied)
+		add("Changed on the machine since %s: a read differed from what Bronzeward last verified (%s).", since, applied)
 		if o.Release != nil && m.Desired != nil && *o.Release == *m.Desired {
 			add("It equals the selected release; that does not close the drift.")
 		}
@@ -376,11 +376,11 @@ func sentences(m apitypes.MachineBody, obs []apitypes.ObservationBody) []string 
 	case m.Desired == nil:
 		add("No release selected.")
 	case m.PendingConvergence && m.Applied == nil:
-		add("Pending convergence: the selected release %s has not been applied to this machine.", *m.Desired)
+		add("Release not applied yet: the selected release %s has not been applied to this machine.", *m.Desired)
 	case m.OpenDrift != nil:
-		// Drift is the sentence above; pending convergence and drift are different (§2.4).
+		// Drift is the sentence above; a release not applied yet and drift are different (§2.4).
 	case m.PendingConvergence:
-		add("Pending convergence: the configuration of the selected release %s for this machine differs from what Bronzeward applied.", *m.Desired)
+		add("Release not applied yet: the configuration of the selected release %s for this machine differs from what Bronzeward applied.", *m.Desired)
 	case m.Applied != nil && *m.Desired != m.Applied.Release:
 		add("The selected release %s carries this machine's applied configuration unchanged.", *m.Desired)
 	}

@@ -243,8 +243,8 @@ func TestPlanView(t *testing.T) {
 		{"an adopt plan's baseline", func(f *planFake) { f.op, f.evidence = "adopt", adoptEvidence }, []string{
 			"adopt: records Applied from the node's own bytes and sends nothing to the machine",
 			"transport -, verification -", "attempts -",
-			"Baseline             import base ibr_BWSYNTH, the node's own bytes",
-			"Pending convergence  yes: the release's compiled configuration differs from the node's",
+			"Baseline                 import base ibr_BWSYNTH, the node's own bytes",
+			"Release not applied yet  yes: the release's compiled configuration differs from the node's",
 		}},
 		{"committed", func(f *planFake) { f.op, f.evidence, f.state = "apply-config", diffEvidence, "committed" },
 			[]string{"Committed: operation op_BWSYNTH-apply. Follow it with: bronzewardctl operation watch 'op_BWSYNTH-apply'"}},

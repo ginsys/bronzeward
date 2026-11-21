@@ -383,7 +383,7 @@ func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
 		if b.PendingConvergence {
 			pending = "yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff"
 		}
-		lines = append(lines, "  Baseline\timport base "+pr(b.ImportBaseRevision)+", the node's own bytes", "  Pending convergence\t"+pending)
+		lines = append(lines, "  Baseline\timport base "+pr(b.ImportBaseRevision)+", the node's own bytes", "  Release not applied yet\t"+pending)
 	}
 	switch d := ev.Diff; {
 	case d == nil:

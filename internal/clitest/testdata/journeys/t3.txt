@@ -76,10 +76,10 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
   Approval                           none                                         policy one-approver, committed operation none
 Evidence
-  Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
-  Dry run              not available: no dry run is available for this operation
-  Baseline             import base ibr_…, the node's own bytes
-  Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
+  Validation               passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
+  Dry run                  not available: no dry run is available for this operation
+  Baseline                 import base ibr_…, the node's own bytes
+  Release not applied yet  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
 It is not approved and nothing runs until an approver approves: bronzewardctl approve 'pln_…'
 [exit 0]
 
@@ -95,10 +95,10 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 4
   Approval                           none                                         policy one-approver, committed operation none
 Evidence
-  Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
-  Dry run              not available: no dry run is available for this operation
-  Baseline             import base ibr_…, the node's own bytes
-  Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
+  Validation               passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
+  Dry run                  not available: no dry run is available for this operation
+  Baseline                 import base ibr_…, the node's own bytes
+  Release not applied yet  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
 Self-approval  predicted: you created this plan and published this release, and authored a fragment, profile or assignment revision its draft introduced.
                Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
 Type the plan ID to send it, or press Enter to stop:
@@ -115,10 +115,10 @@ Plan pln_…  committed  expires <local time> <local time>
   Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 3, timeline revision 4
   Approval                           apr_…               policy one-approver, committed operation op_… (Adopt of mch_… to import worker, published <local time>)
 Evidence
-  Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
-  Dry run              not available: no dry run is available for this operation
-  Baseline             import base ibr_…, the node's own bytes
-  Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
+  Validation               passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
+  Dry run                  not available: no dry run is available for this operation
+  Baseline                 import base ibr_…, the node's own bytes
+  Release not applied yet  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
 Committed: operation op_… (Adopt of mch_… to import worker, published <local time>). Follow it with: bronzewardctl operation watch 'op_…'
 [exit 0]
 
@@ -138,6 +138,6 @@ Scope     normal
 The configuration read at <local time> is attributed to rel_…, which is the Applied release (by adoption).
 Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's pendingConvergence evidence shows whether it does; a later apply-config plan withholds its diff when it does.
 The read may match the adopted bytes or this release's compiled configuration; the API does not say which.
-Pending convergence: the configuration of the selected release rel_… for this machine differs from what Bronzeward applied.
+Release not applied yet: the configuration of the selected release rel_… for this machine differs from what Bronzeward applied.
 Health: not checked.
 [exit 0]
