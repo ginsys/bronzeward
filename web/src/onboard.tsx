@@ -26,7 +26,7 @@ export function OnboardCluster() {
   const { go } = useReads();
   const plan = useRef<Plan>(undefined);
   const alive = useRef(true);
-  // One sender per plan: a file chosen again starts with no write of the last file's to repeat.
+  // The open write that carries the document is kept per write layer, so it outlives this page.
   const send = useRef<Env["send"]>(sender(writes, () => alive.current));
   const [phase, setPhase] = useState<"file" | "confirm" | "run">("file");
   const [lines, setLines] = useState<Line[]>([]);
@@ -64,7 +64,6 @@ export function OnboardCluster() {
     setBusy(false);
     if (!r.ok) return setNote(`Nothing was recorded: ${r.why}.`);
     plan.current = r.plan;
-    send.current = sender(writes, () => alive.current);
     setHeld(r.plan.document !== undefined);
     setLines([]);
     setEnded(undefined);

@@ -76,17 +76,28 @@ export function cutContext(text: string, name: string | undefined): { document: 
   return { document: stringify({ context: picked, contexts: { [picked]: { endpoints: [], ca, crt, key } } }), endpoint };
 }
 
-// The page's `send` for one plan. A write that carries the document (it has a `released` hook) and ended
-// unknown is repeated under its own key when it still can be, never started anew beside it: a second write
-// would leave the first, repeatable, holding the document after the page's copy was dropped.
-export function sender(writes: Pick<Writes, "submit" | "repeatable">, alive: () => boolean): Env["send"] {
-  const open = new Map<string, Write>();
+// The page's `send`. A write that carries the document (it has a `released` hook) is kept per write layer
+// and route, which outlives this page: one such write is open at a time. The same body again repeats the
+// open one (in flight, or unknown and repeatable) and hands it this call's hook; another body dismisses it
+// first. A second write beside the first would leave the first, repeatable, holding the document.
+const kept = new WeakMap<object, Map<string, Write>>();
+export function sender(writes: Pick<Writes, "submit" | "repeatable" | "dismiss">, alive: () => boolean): Env["send"] {
+  const open = kept.get(writes) ?? new Map<string, Write>();
+  kept.set(writes, open);
   return async (spec) => {
     if (!alive()) return { kind: "not-done", why: "the page was left", problem: null };
-    const key = spec.released === undefined ? undefined : `${spec.method} ${spec.path}`;
-    const old = key === undefined ? undefined : open.get(key);
-    const w = old !== undefined && writes.repeatable(old) ? old : new Write(spec);
-    if (key !== undefined) open.set(key, w);
+    if (spec.released === undefined) return writes.submit(new Write(spec));
+    const key = `${spec.method} ${spec.path}`;
+    let w = open.get(key);
+    if (w !== undefined) {
+      if (JSON.stringify(w.spec.body) === JSON.stringify(spec.body) && (w.running !== undefined || writes.repeatable(w))) w.spec.released = spec.released;
+      else {
+        writes.dismiss(w);
+        w = undefined;
+      }
+    }
+    w ??= new Write(spec);
+    open.set(key, w);
     return writes.submit(w);
   };
 }
@@ -117,7 +128,7 @@ export async function discoverCluster(env: Env, text: string, o: { context?: str
   }
   const endpoint = o.endpoint !== undefined && o.endpoint !== "" ? o.endpoint : cut.endpoint;
   if (endpoint === "") return { ok: false, why: "the talosconfig's context names no endpoint: give one" };
-  const out = await env.send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", document: cut.document, endpoint } });
+  const out = await env.send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", document: cut.document, endpoint }, released: () => {} });
   if (out.kind !== "done") return { ok: false, why: reason(out) };
   const found = out.data as Discovery;
   if (!found.supported) return { ok: false, why: `contract ${found.contract} is not the contract of the machinery in this server, so it would refuse the cluster. Nothing was recorded` };
