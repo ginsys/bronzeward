@@ -345,6 +345,15 @@ the machine's new import base, and a release compiled from it is published"
 (adopt, step 2). A machine with no `Applied` has no import base; the only draft
 that can cover it is one carrying an import base revision.
 
+**A filled hostname is released at import and adoption (choice §17.45).** Where
+ingestion removed a `HostnameConfig` whose hostname equals the machine's name
+(compilation §2.3 step 4a), the request that started it read that name, and the
+draft transaction (T1) reads the machine's name again under the machine row
+`FOR SHARE` and refuses `409 stale-input`, naming the machine with the expected
+and the actual name, when it is not the one ingestion used. A rename takes the
+machine row `FOR UPDATE` (§3.5), so the two are ordered. The refusal abandons
+the claim and the operator ingests again.
+
 Between an adoption's publication and its adoption record, another publication
 covering the machine compiles on the old base and becomes the machine's
 `Desired` (§6.2). The adopt plan binds the machine's `Desired` at its creation,
@@ -816,15 +825,21 @@ revision 10 (§9.1), which adds `name` on a machine and on `POST /machines`, the
   only a new key with the same name draws the `409`; a replay from an earlier epoch is `409
   conflict` as §7.2 says. The route cannot clear a name: a machine that has one keeps one, which
   leaves clients two states, no name and a name.
-- **It changes nothing on a machine.** No existing plan, observation or release is touched, and no
-  plan is needed: publication evidence reads only `endpoint-change` entries
-  (`internal/api/publication_observation.go:113`). Like the endpoint route (§3.3) and inventory,
-  it is accepted installation-wide in recovery mode (§12.2).
-- **The name and the Talos hostname are independent.** The hostname is the machine's
-  configuration, written by the operator in a document of the draft; the name is a label that is
-  always a valid hostname, so that a later specification can offer it as a default. Filling the
-  hostname from the name is a separate compiler feature, specified in
-  ginsys/bronzeward#976, and nothing here does it.
+- **It changes nothing on a machine by itself.** No existing plan, observation or release is
+  touched, and no plan is needed for the rename: publication evidence reads only `endpoint-change`
+  entries (`internal/api/publication_observation.go:113`). Like the endpoint route (§3.3) and
+  inventory, it is accepted installation-wide in recovery mode (§12.2). What a rename changes is
+  what the next release compiles, as the next bullet says.
+- **The name is the Talos hostname when nothing else sets one** (compilation §6.1, choices
+  compilation §16.36 and §17.44 here). The compiler writes a machine's name as its hostname
+  unless the configuration already sets one, so a machine whose hostname comes from its name takes
+  a new name only from a new release and an approved plan; a release keeps the name it was
+  compiled with, and a rename changes no release. The release records, per machine, where its
+  hostname came from (§9.2). A publication whose snapshot read another name than the machine has
+  at commit is refused `409 stale-input` (§6.2, choice §17.45), so a release never carries a name
+  older than the rename that preceded it. The clients say this where they offer the rename
+  (client contracts A9 item 6). The name stays a label that nothing else reads: no other hostname
+  source, and no part of a fragment.
 - **A name is operational data, not a principal's display name.** It is kept with the machine and,
   in its previous and new values, in the machine's append-only timeline, so a value put there
   cannot be erased, and there is no retention rule beyond that of the timeline, as for a cluster's
@@ -899,9 +914,9 @@ through `If-Match` by the API in the PoC: heads move only by publication
 
 ### 4.2 Concurrency conflicts in publication
 
-Publication rejects stale input (design §7.4 step 4) in three forms, all
+Publication rejects stale input (design §7.4 step 4) in four forms, all
 `409 stale-input`, which names each head, or machine, with its expected and
-actual revision:
+actual revision (the fourth, a name, with the names):
 
 - a head the draft changes has moved since the draft's base: another
   publication changed the same fragment, profile or assignment, or introduced
@@ -910,9 +925,15 @@ actual revision:
   (compilation §6 step 1);
 - a covered machine's import base (§3.2), where the draft carries none for it,
   is no longer the import base revision the snapshot read: an adoption record
-  or a completed operation changed its `Applied` in between.
+  or a completed operation changed its `Applied` in between;
+- a covered machine's name (§3.5), which compilation may have filled into the
+  hostname (compilation §6.1), is no longer the name the snapshot read: a rename
+  committed in between **(choice §17.45)**. The check holds for every covered
+  machine, whether or not its hostname was filled, so it needs no read of the
+  compiled result. Names are compared as stored, and a machine with no name at
+  the snapshot and none at commit passes.
 
-The second and third checks cover inputs the draft did not touch
+The second, third and fourth checks cover inputs the draft did not touch
 **(choice §17.4)**: DB row 011 is exactly that case, a release committed on a
 superseded source. The
 author's remedy is a new draft revision from the current heads; how the edit
@@ -1211,7 +1232,11 @@ can only refuse more.
 Kubernetes version, ingestion's rules applied while composing) is
 `422 validation-failed` naming the rule, the machine, the input and the
 redacted paths and message (compilation §8.3); covered machines naming
-different Kubernetes versions are `422` with rule `kubernetes`. A dependency
+different Kubernetes versions are `422` with rule `kubernetes`, and a hostname
+filled from a machine's name that another machine of the release holds
+explicitly is `422` with rule `hostname`, naming both machines in words
+(compilation §6.1 item 6; the release covers every machine of the cluster with
+an import base, choice §17.33, so one release holds every such pair). A dependency
 classified `blocked` or `lost`, or whose identity changed (a creation time
 other than the recorded one, the first read's, or none), is
 `422 validation-failed` naming its provider, object, version and reference.
@@ -1320,6 +1345,9 @@ SELECT id, digest FROM release
   -- $unchanged head revisions equal the snapshot
   -- each covered machine's import base, where the draft carries none,
   --   equals the snapshot's (§4.2), read under the MachineState lock
+  -- each covered machine's name equals the one the snapshot read (§4.2,
+  --   choice §17.45), read under the machine row's FOR SHARE lock above; a
+  --   rename takes that row FOR UPDATE (§3.5), so the two are ordered
   -- no machine of the cluster the release does not cover has an import
   --   base: one covered since the snapshot is 409 stale-input naming the
   --   machine, expected "absent"
@@ -1346,7 +1374,9 @@ INSERT INTO release ...;             -- unique (draft_id, draft_revision);
                                      -- requested $op, in its role
 INSERT INTO release_machine ...;     -- per machine: ciphertext and its digest,
                                      -- the Transit key it was encrypted under,
-                                     -- configuration digest, review data; its
+                                     -- configuration digest, review data, the
+                                     -- hostname record (source, and the name
+                                     -- used where it was filled; §9.2); its
                                      -- assignment revision its assignment
                                      -- source's (checked at commit)
 INSERT INTO release_source ...;      -- every revision and head revision used:
@@ -2146,6 +2176,7 @@ API revisions:
 | 10 | `name` on a machine and on `POST /machines`, `POST /machines/{id}/names`, the `name-change` timeline entry and the `name-in-use` problem code (§3.5, choice §17.43) |
 | 11 | `POST /discoveries`, a `POST` that only reads (§9.2) |
 | 12 | `GET /clusters/{id}/talos-access` (§9.2, §3.3 "Presence") |
+| 13 | `hostname` (`source`, and `name` for `machine-name`) on each machine of a release and its review, and the `hostname` rule of `422 validation-failed` (§9.2, §3.5, choice §17.44) |
 
 ### 9.2 Resources and routes
 
@@ -2952,7 +2983,17 @@ effect.
 A release answers its renderer and contract record (compilation §10.2) and,
 per source, the head, the revision the release left it at (`null`: removed)
 and the head revision; per machine, the mode it was validated in and its
-review route. `GET /releases` lists releases in identifier order, each as the
+review route. A machine of a release also answers its `hostname`: `source`,
+one of `machine-name` (filled from the machine's name), `configuration` (the
+configuration sets one), `none` (nothing sets one: the machine has no name, or
+its configuration says `auto: off` with no hostname) or `legacy-stable` (the
+configuration sets the legacy stable-hostname feature on a machine that has a
+name, so no name is used), and,
+for `machine-name`, `name`, the name used **(choice §17.44, API revision 13)**.
+A release made before revision 13 answers `source: none`. The stored value
+outside that enumeration is `500 internal-error`, as a provenance record is. It
+is a fact about the release and never read again from the machine, whose name
+may have changed since. `GET /releases` lists releases in identifier order, each as the
 item read answers it. The review answers the redacted configuration and the
 provenance records publication stored (compilation §8.2, §8.3, §11), never
 traced again. Each record carries §8.2's fields alone: `reference`,
@@ -3951,6 +3992,9 @@ or Desired change; it does not erase earlier evidence.
 | Draft | Update or discard while a publish operation for it is queued or running | `409 conflict` naming the operation | nothing |
 | Draft | Compilation refuses the input | `422`, paths only; a retry under the same key replays it (§7.2) | claim row with its principal and key, the refusal's idempotency record and act; orphans if past compilation §2.3 step 6 |
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
+| Draft | The machine's name is not the one ingestion used when it removed a filled hostname (§3.2, compilation §2.3 step 4a) | `409 stale-input` naming the machine, expected and actual name; claim abandoned | claim row; orphans |
+| Publish | A covered machine's name changed since the snapshot (§4.2) | operation `failed`, `409 stale-input` | operation, act |
+| Publish | A hostname filled from a machine's name that another machine holds explicitly (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
 | Publish | Moved head, a covered machine's import base changed (§4.2), a machine of the cluster covered since the snapshot (§6.2, expected "absent"), or T3 finds missing, misbound or superseded publication evidence (§6.1.1) | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
@@ -4917,6 +4961,34 @@ design and evidence do not settle the question. Each is marked in place as
     unique index, one write route, and titles that change when a machine is
     renamed, so a copied title is stale.
 
+44. **A release pins the name it compiled with and records where each
+    machine's hostname came from** (§3.5, §9.2; compilation §6.1, choice
+    compilation §16.36). Owner direction: Serge, typed 2026-11-20 11:36 CET in
+    the bronzeward lead's session, "when setting the hostname, the default could
+    be the machine name (if set)" (ginsys/bronzeward#976, ruled by the
+    bronzeward lead on 2026-11-21 on the plan's decisions). Design choices,
+    owned by the specification and open to review: a release machine records a
+    `hostname` member (`source` and, for `machine-name`, the `name` used), one
+    nullable column pair, served on the release read and its review, as API
+    revision 13; a rename changes no release; the provenance records keep to
+    secret-reference occurrences. Alternatives: derive the source on read by
+    comparing the redacted hostname with the current name, which is wrong after
+    any rename; a machine member that says whether its hostname comes from its
+    name, which costs a release read for each machine, the cost choice §17.43
+    rejected for the name itself; extra fields on a provenance record, which the
+    read refuses (§9.2). The cost is an API revision and a migration of two
+    nullable columns.
+45. **A rename races neither a publication nor an ingestion**
+    (§3.2, §4.2, §6.2). T3 compares each covered machine's name with the
+    snapshot's, and the draft transaction of an ingestion that removed a filled
+    hostname compares the machine's name with the one ingestion used, each
+    `409 stale-input`. Both read the name under the machine row lock a rename
+    takes `FOR UPDATE`. Alternatives: no check, which lets a release carry a
+    hostname the machine no longer has a name for, and lets a removed hostname
+    leave a machine with neither the old nor the new one; a retry inside the
+    transaction, which hides a rename from the operator who made it. The cost is
+    a refusal an operator meets only when a rename and a publication overlap.
+
 ## 18. Traceability
 
 | Clause | Design | Evidence |
@@ -4926,7 +4998,8 @@ design and evidence do not settle the question. Each is marked in place as
 | §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31, §17.32 |
 | §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.14.5, the same result as on v1.13.6); signing from a control plane configuration or a secrets bundle, a key read through an `os:admin` talosconfig, and a node accepting the signed certificate: [signing locally](../design/research/20261118-local-talos-signing.md) and [the extraction](../design/research/20261118-local-talos-signing-extract.md), Talos v1.14.5 only; revocation, CA rotation and a held connection across a CA replacement not measured; the provider grants on `secret/data/access/talos-ca/*` not measured (choice §17.29); the presence read's answers for a never-written path and a path whose metadata was deleted (HTTP 404, no tombstone) and for a soft-deleted and a destroyed latest version are [RC §4.1](../design/research/20260924-retention-metadata-classification.md#41-openbao) rows 010, 024, 021 and 022 on OpenBao 2.6.1; the access-presence identity's policy (exactly `read` on the metadata path), its refusal of a data read, a list, a delete, a generation read and the Transit calls beside the same request with the grant added, and the classification of its read for a stored, a soft-deleted, an undeleted and a destroyed latest version are measured by `TestLivePresencePolicyExact` and `TestLivePresenceIdentity` against the fixture's OpenBao (choice §17.42); §16 names what they leave unmeasured |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7; bodies and bindings: choice §17.35 |
-| §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011 |
+| §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011; none for the name check: choice §17.45 |
+| §3.5 name and hostname, §9.2 release `hostname` | none | none: choices §17.44, §17.45; compilation §6.1 and its choices §16.36 to §16.38 |
 | §5 transactions | §7.2, §7.4 | DB §4.2 rows 059, 061; [DB §6.3](../design/research/20260924-database-semantics.md#63-criterion-3-backend-specific-limitations-and-costs); [DB §7](../design/research/20260924-database-semantics.md#7-limits); [DS §7](../design/research/20260925-dispatch-safety.md#7-limits) |
 | §5.1 fences, claims | §7.2, §12.5 | [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions) rows 015–018; [DB §4.5](../design/research/20260924-database-semantics.md#45-s5-queue-claims) rows 019–021; publish job timers: choice §17.34 |
 | §6 publication | §7.4, §7.8, §11.2 | DB §4.2 rows 004–011, 058–061; KL §7 item 1; choice §17.33 |
