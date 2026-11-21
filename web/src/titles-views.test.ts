@@ -12,7 +12,7 @@ import type { ReadResult } from "./request.ts";
 import { Status, StatusPage, when } from "./states.tsx";
 import { Outcome } from "./operation.tsx";
 import { PlanState } from "./plan.tsx";
-import { ACTS, Change, DependencyItem, Operations, Plans, ReleaseItem } from "./resources.tsx";
+import { ACTS, Change, DependencyItem, OperationItem, Operations, Plans, ReleaseItem } from "./resources.tsx";
 import { MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef } from "./titles.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -462,6 +462,17 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
     await settled();
     expect(box.querySelector("[data-testid=outcome]")?.textContent).toContain(`this operation applied release ${released}, confirmed by observation obs_aaaa`);
     expect(titled(released)).toBe(REL);
+  });
+
+  test("an operation's page reads each distinct body once for its heading, Subject and outcome", async () => {
+    answers[`/operations/${OP}`] = ok({ ...operation("apply-config", { plan: PLN, machine: MCH }), state: "completed", result: { appliedRelease: REL, observation: "obs_aaaaaaaaaaaaaaaaaaaaaaaaaa" } });
+    await mount(h(OperationItem, { id: OP }));
+    await settled();
+    expect(box.querySelector("[data-testid=outcome]")?.textContent).toContain(`this operation applied release ${released}`);
+    expect(box.querySelector("dl")?.textContent).toContain(`Subjectworker-1, Apply of worker-1 to ${released}`);
+    const bodies = asked.filter((p) => /^\/(machines|drafts|releases|plans)\//.test(p));
+    expect(new Set(bodies).size).toBe(bodies.length);
+    expect([...bodies].sort()).toEqual([`/drafts/${DRF}`, `/machines/${MCH}`, `/plans/${PLN}`, `/releases/${REL}`]);
   });
 
   test("an object the page reads itself is not read again for a title built on it", async () => {
