@@ -61,7 +61,7 @@ const enc = encodeURIComponent;
 // The name a machine takes from its node's hostname (operator experience §5.2): the hostname lowercased, when it
 // is a valid name (persistence and API §3.5); else no name, and the reason, which the machine's line says.
 export function nameOf(hostname: string): { name: string; note?: string } | { name?: undefined; note: string } {
-  if (hostname === "") return { note: "no name: the node reported no hostname, so it shows its address" };
+  if (hostname === "") return { note: "no name: the node reported no hostname" };
   const name = hostname.toLowerCase();
   if (!MACHINE_NAME.test(name)) return { note: `no name: the hostname ${JSON.stringify(hostname.length > 64 ? `${hostname.slice(0, 64)}…` : hostname)} is not a valid name` };
   return name === hostname ? { name } : { name, note: "named by its hostname in lower case" };
@@ -305,7 +305,7 @@ function nameRefusal(o: Outcome, name: string): { note: string; holder?: string 
   if (o.kind !== "refused") return undefined;
   if (o.problem?.type === "urn:bronzeward:problem:name-in-use") {
     const holder = o.problem["machine"];
-    return { note: `no name: the name "${name}" is already held by another machine of the cluster; rename or remove that machine, then name this one`, ...(typeof holder === "string" && { holder }) };
+    return { note: `no name: the name "${name}" is already held by another machine of the cluster; rename that machine, then name this one`, ...(typeof holder === "string" && { holder }) };
   }
   if (o.problem?.type === "urn:bronzeward:problem:invalid-request") return { note: `no name: the server refused the hostname "${name}" as a name` };
   return undefined;

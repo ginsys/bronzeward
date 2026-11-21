@@ -347,7 +347,7 @@ func TestOnboardNamesMachines(t *testing.T) {
 	for _, line := range []string{
 		"(named by its hostname in lower case)",
 		`(no name: the hostname "W_2" is not a valid name)`,
-		"(no name: the node reported no hostname, so it shows its address)",
+		"(no name: the node reported no hostname)",
 	} {
 		if !strings.Contains(out, line) {
 			t.Errorf("stdout lacks %q:\n%s", line, out)
@@ -408,7 +408,7 @@ func TestNameRefusal(t *testing.T) {
 		name         string
 		want, holder string
 	}{
-		{"a name another machine holds", problem("name-in-use"), "cp-1", `no name: the name "cp-1" is already held by another machine of the cluster; rename or remove that machine, then name this one`, "mch_HOLDER"},
+		{"a name another machine holds", problem("name-in-use"), "cp-1", `no name: the name "cp-1" is already held by another machine of the cluster; rename that machine, then name this one`, "mch_HOLDER"},
 		{"a grammar the server does not take", problem("invalid-request"), "a.b", `no name: the server refused the hostname "a.b" as a name`, ""},
 		{"another refusal", problem("forbidden"), "cp-1", "", ""},
 		{"no refusal", nil, "cp-1", "", ""},

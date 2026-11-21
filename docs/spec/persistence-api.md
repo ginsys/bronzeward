@@ -834,7 +834,7 @@ revision 10 (§9.1), which adds `name` on a machine and on `POST /machines`, the
   enforces the same grammar as a `CHECK` on the column, so no route can store another. Every name
   stored before the grammar widened is one label and stays valid; none is rewritten. The widening
   adds no field, route or problem code, so the API revision does not change; a client built for one label
-  shows a dotted name as an identifier until it is updated (client contracts A9 item 1).
+  may show the machine's address in place of a dotted name until it is updated (client contracts A9 item 1).
 - **Unique within a cluster**, by a partial unique index on the machine's cluster and name over the
   machines that have one (§7.3); two clusters may use the same name. A request that would give a
   name another machine of the cluster holds is `409 name-in-use` (§9.4), a code of its own, naming

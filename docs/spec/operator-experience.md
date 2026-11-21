@@ -466,19 +466,20 @@ fully qualified name) and a short one where it has none. The client lowercases t
 result is the machine's name when it is a valid name
 ([persistence and API §3.5](persistence-api.md#35-a-machines-name)). Otherwise the machine is left
 unnamed, and the client says why in the machine's line and never drops it without a word: "no name: the
-node reported no hostname, so it shows its address" for none, and "no name: the hostname `X` is not a
+node reported no hostname" for none, and "no name: the hostname `X` is not a
 valid name" for one that stays invalid after lowercasing. **A name the server refuses never stops the
 run.** Where another machine of the cluster holds the name (`409 name-in-use`, the replaced node whose
 old record keeps its hostname) or the server does not take its grammar (`400 invalid-request`, a server
 older than the widened grammar), the client records that machine again without a name, goes on to the
 rest, and says so in the machine's line: "no name: the name `X` is already held by another machine of the
-cluster; rename or remove that machine, then name this one", or "no name: the server refused the hostname
+cluster; rename that machine, then name this one", or "no name: the server refused the hostname
 `X` as a name". The words never carry the holder's identifier: the page adds a link to the holding machine,
 by the name or address its other pages give it, and the command's object carries the identifier as
 `nameHeldBy`, for a script. The machine is never adopted on that code (client contracts A9 item 3). An unnamed machine is shown by
-its address. Where onboarding names a machine, the
+its address. Where onboarding names a machine by a hostname that was already in lower case, the
 machine's import base holds that hostname, equal to the
-name. The import removes that document from the stored base and records the hostname as filled from
+name; a hostname that only lowercasing made a name differs from it in case and stays in the base as an
+explicit hostname (compilation §2.3 step 2a). Where it is equal, the import removes that document from the stored base and records the hostname as filled from
 the name (compilation §2.3 step 2a), so a later rename reaches the machine through a new release and
 an approved plan, and the clients say so where they offer the rename (client contracts A9 item 6).
 
