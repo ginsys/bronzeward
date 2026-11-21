@@ -17,9 +17,9 @@ reads as "no drift". PINS_MIRROR, a base URL, replaces the three vendor roots wi
 <base>/firefox/ and <base>/edge/, for the test.
 """
 
-import http.client
 import json
 import os
+import re
 import sys
 import urllib.request
 
@@ -65,6 +65,7 @@ def chrome(root):
 def firefox(root):
     latest = json.loads(get(root + "firefox_versions.json"))["LATEST_FIREFOX_VERSION"]
     releases = [r["version"] for r in json.loads(get(root + "firefox.json"))["releases"].values() if r["category"] in ("major", "stability")]
+    releases = [v for v in releases if re.fullmatch(r"\d+(\.\d+)*", v)]  # not an old "3.6.3plugin1"
     return previous(releases, ver(latest)[0], "firefox")
 
 
@@ -107,7 +108,7 @@ def main(argv):
         with open(path, encoding="utf-8") as fh:
             old = json.load(fh)
         new = build(old)
-    except (Failure, OSError, http.client.HTTPException, ValueError, KeyError, TypeError, AttributeError) as e:  # a failure to read is exit 2, never drift
+    except Exception as e:  # noqa: BLE001  anything that stops the read is exit 2: an uncaught exception would exit 1, which reads as drift
         print(f"previous-major-pins: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
     text = json.dumps(new, indent=2) + "\n"

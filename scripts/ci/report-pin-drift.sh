@@ -30,6 +30,12 @@ case "$STATUS" in
     ;;
 esac
 
+# Drift always names at least one pin. A STATUS 1 with no DIFF is a crash that exited 1, not drift.
+if [ "$STATUS" = 1 ] && [ -z "$DIFF" ]; then
+  echo "report-pin-drift: STATUS 1 with an empty DIFF is not drift: nothing reported" >&2
+  exit 1
+fi
+
 number=$(gh api --paginate --slurp "repos/$REPO/issues?state=open&per_page=100" |
   jq -r --arg m "$marker" '[.[][] | select(.pull_request == null) | select((.body // "") | contains($m)) | .number] | min // empty')
 

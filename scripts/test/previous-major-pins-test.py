@@ -29,7 +29,7 @@ def stanza(package, version, sha):
 GOOD = {
     "/cft/last-known-good-versions.json": json.dumps({"channels": {"Stable": {"version": "158.0.8127.36"}, "Beta": {"version": "159.0.8154.13"}}}),
     "/cft/known-good-versions.json": json.dumps(
-        {"versions": [{"version": v} for v in ("156.0.8078.80", "157.0.8100.1", "157.0.8103.78", "157.0.8103.5", "158.0.8127.36", "159.0.8154.13")]}
+        {"versions": [{"version": v} for v in ("156.0.8078.80", "157.0.8100.1", "157.0.8103.100", "157.0.8103.78", "157.0.8103.5", "158.0.8127.36", "159.0.8154.13")]}
     ),
     "/firefox/firefox_versions.json": json.dumps({"LATEST_FIREFOX_VERSION": "160.0.1"}),
     "/firefox/firefox.json": json.dumps(
@@ -41,15 +41,17 @@ GOOD = {
                 "firefox-159.0esr": {"category": "esr", "version": "159.0esr"},
                 "firefox-160.0b3": {"category": "dev", "version": "160.0b3"},
                 "firefox-160.0.1": {"category": "stability", "version": "160.0.1"},
+                "firefox-3.6.3plugin1": {"category": "stability", "version": "3.6.3plugin1"},
             }
         }
     ),
     "/edge/dists/stable/main/binary-amd64/Packages": "\n".join(
         [
             stanza("microsoft-edge-stable", "156.0.4314.58", "a" * 64),
-            stanza("microsoft-edge-beta", "158.0.4400.1", "b" * 64),
-            stanza("microsoft-edge-stable", "157.0.4341.60", "c" * 64),
+            stanza("microsoft-edge-beta", "159.0.4500.1", "b" * 64),
             stanza("microsoft-edge-stable", "157.0.4338.9", "d" * 64),
+            stanza("microsoft-edge-stable", "157.0.4341.60", "f" * 64),
+            stanza("microsoft-edge-stable", "157.0.4341.100", "c" * 64),
             stanza("microsoft-edge-stable", "158.0.4370.33", "e" * 64),
         ]
     ),
@@ -63,8 +65,8 @@ OLD = {
     "sources": SOURCES_BLOCK,
 }
 NEW = {
-    "chrome": "157.0.8103.78",
-    "edge": {"version": "157.0.4341.60", "debUrl": EDGE_ROOT + "pool/main/m/microsoft-edge-stable/microsoft-edge-stable_157.0.4341.60-1_amd64.deb", "debSha256": "c" * 64},
+    "chrome": "157.0.8103.100",
+    "edge": {"version": "157.0.4341.100", "debUrl": EDGE_ROOT + "pool/main/m/microsoft-edge-stable/microsoft-edge-stable_157.0.4341.100-1_amd64.deb", "debSha256": "c" * 64},
     "firefox": "159.0.1",
     "sources": SOURCES_BLOCK,
 }
@@ -127,8 +129,8 @@ expect("equal file", p.returncode == 0, f"rc={p.returncode} {p.stderr}")
 p, before, after = run("--check", OLD)
 expect("drift exit", p.returncode == 1, f"rc={p.returncode} {p.stderr}")
 for want in (
-    "chrome: 156.0.8078.80 -> 157.0.8103.78",
-    "edge.version: 156.0.4314.58 -> 157.0.4341.60",
+    "chrome: 156.0.8078.80 -> 157.0.8103.100",
+    "edge.version: 156.0.4314.58 -> 157.0.4341.100",
     "edge.debSha256: " + "a" * 64 + " -> " + "c" * 64,
 ):
     expect("drift lines", want in p.stdout, f"missing {want!r} in {p.stdout!r}")
@@ -143,10 +145,9 @@ expect("write keeps the sources block and the layout", after == json.dumps(NEW, 
 p, _, _ = run(None, OLD)
 expect("print mode", p.returncode == 0 and json.loads(p.stdout) == NEW, p.stdout + p.stderr)
 
-# The rules: the beta Edge, the dev Firefox, the other Chrome builds and the lower builds are not picked.
-serve()
-p, _, _ = run("--check", NEW)
-expect("rules", p.returncode == 0, "the picked builds differ from the highest build of the previous major")
+# "equal file" above is also the rules check: the fixtures hold a beta Edge of a higher major, a dev Firefox,
+# an old Firefox "3.6.3plugin1", builds that sort higher as strings than the highest (8103.78, 4341.60) and
+# an earlier stanza of the previous major, and none of them is picked.
 
 # Exit 2: a source that cannot be read or does not say what the script needs. Nothing is written.
 BAD = {
@@ -162,6 +163,8 @@ BAD = {
     "edge no stable stanza": {"/edge/dists/stable/main/binary-amd64/Packages": (200, stanza("microsoft-edge-beta", "158.0.4400.1", "b" * 64))},
     "edge empty index": {"/edge/dists/stable/main/binary-amd64/Packages": (200, "")},
     "edge no build of the previous major": {"/edge/dists/stable/main/binary-amd64/Packages": (200, stanza("microsoft-edge-stable", "158.0.4370.33", "e" * 64))},
+    # An exception no handler names must still be exit 2: Python's own exit for it is 1, which reads as drift.
+    "chrome nested too deeply": {"/cft/last-known-good-versions.json": (200, "[" * 200000)},
 }
 for name, override in BAD.items():
     for mode in ("--check", "--write"):
@@ -183,6 +186,10 @@ ahead["chrome"] = "158.0.8127.36"
 for mode in ("--check", "--write"):
     p, before, after = run(mode, ahead)
     expect(f"downgrade {mode}", p.returncode == 2 and before == after and p.stderr.startswith("previous-major-pins: "), f"rc={p.returncode} {p.stderr}")
+ahead = json.loads(json.dumps(OLD))
+ahead["firefox"] = "159.0.2"
+p, before, after = run("--write", ahead)
+expect("firefox downgrade", p.returncode == 2 and before == after and p.stderr.startswith("previous-major-pins: "), f"rc={p.returncode} {p.stderr}")
 ahead = json.loads(json.dumps(OLD))
 ahead["edge"]["version"] = "157.0.4399.1"
 p, before, after = run("--write", ahead)
