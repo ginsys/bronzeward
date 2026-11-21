@@ -9,6 +9,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/role"
 
 	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/talos"
 	"github.com/ginsys/bronzeward/internal/talos/discover"
 	"github.com/ginsys/bronzeward/internal/talos/signer"
 )
@@ -108,15 +109,17 @@ func (a *API) discoverCluster(q *request) (discoveryBody, error) {
 	in := &q.input.(*discoveryInput).firstKeyInput
 	// A name is resolved once, here, and the key read, the signing and the first reads of the cluster go to the
 	// address it gave (persistence-api.md §3.3, choice §17.46): no later lookup can send a request to another
-	// node than the one the key was read from. The walk dials each member at an address the member list gives.
-	endpoint, _, err := a.o.resolve(dctx, in.Endpoint)
+	// node than the one the key was read from. For a name the node's certificate is checked against the name,
+	// as talosctl does, and the dial stays on the address (name is "" for an IP literal). The walk dials each
+	// member at an address the member list gives, with no name.
+	endpoint, name, err := a.o.resolve(dctx, in.Endpoint)
 	if err != nil {
 		return discoveryBody{}, discoveryRefusal(err)
 	}
 	// A talosconfig is read at the endpoint, which may accept the connection and stall: the extraction is
 	// bounded like every node read, inside the deadline. The walk below has the deadline alone.
 	ca, err := nodeRead(dctx, a.o.nodeTimeout, func(c context.Context) (provider.CAKey, error) {
-		return signer.Extract(c, signer.Kind(in.Kind), in.Document.bytes(), endpoint)
+		return signer.Extract(c, signer.Kind(in.Kind), in.Document.bytes(), endpoint, talos.ServerName(name))
 	})
 	if err != nil {
 		return discoveryBody{}, discoveryRefusal(err)
@@ -135,7 +138,7 @@ func (a *API) discoverCluster(q *request) (discoveryBody, error) {
 		return discoveryBody{}, err
 	}
 	defer clear(tc)
-	res, err := discover.DiscoverLimited(dctx, tc, "", endpoint, maxDiscoveryMembers)
+	res, err := discover.DiscoverLimited(dctx, tc, "", endpoint, name, maxDiscoveryMembers)
 	if err == nil && res.ClusterID == "" {
 		err = errors.New("the endpoint gave no cluster ID")
 	}

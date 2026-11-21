@@ -1275,7 +1275,7 @@ type DiscoveryInput struct {
 	// Document The first key's text, at most 512 KiB, never stored, logged or returned.
 	Document string `json:"document"`
 
-	// Endpoint An IP literal or a DNS name, with an optional port. A name is resolved once, and the key read, the signing and the first reads of the cluster go to the address it gave; each member is then dialled at an address the member list gives.
+	// Endpoint An IP literal or a DNS name, with an optional port. A name is resolved once, and the key read, the signing and the first reads of the cluster go to the address it gave, with the node certificate checked against the name (a name needs itself among the nodes certificate names, machine.certSANs; a typed address is checked as an address); each member is then dialled at an address the member list gives, and checked against that address.
 	Endpoint string             `json:"endpoint"`
 	Kind     DiscoveryInputKind `json:"kind"`
 }
