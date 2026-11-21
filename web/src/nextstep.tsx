@@ -6,8 +6,7 @@
 
 import type { components } from "./api/v1";
 import { Ref } from "./list.tsx";
-import { planPath } from "./plan.tsx";
-import { planFor } from "./review.tsx";
+import { planFor, planPath } from "./plan.tsx";
 import { NOT_MANAGED_YET } from "./words.ts";
 
 export type Position = components["schemas"]["PositionBody"];

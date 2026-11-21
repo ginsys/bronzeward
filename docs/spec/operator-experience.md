@@ -219,6 +219,13 @@ configuration is unchanged (above), and `no-step` claims nothing. A line is show
 is the latest one the page holds; a failed read of it removes the line rather than keeping guidance the page can no
 longer vouch for.
 
+The rendered review of a machine for a release (journeys §5.5) reads the same answer in place of the plain machine read,
+and draws the same line when this release is the machine's Desired release and the `step` is `awaiting-approval`,
+`awaiting-dispatch`, `operation-in-flight` or `operation-unresolved`. It offers no plan button then and words nothing about
+what was sent. Otherwise it keeps its own sentence about what this release is to the machine, and the plan button. Where the
+machine page removes the line on a failed read, this page shows the failure with a way to read again and no sentence, line
+or plan button, because the button depends on the answer.
+
 The read is served since API revision 6
 ([ginsys/bronzeward#879](https://github.com/ginsys/bronzeward/issues/879)), and the page reads it as a third read
 beside the machine and its observations, under the page's own reads. The line is not drawn from

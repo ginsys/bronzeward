@@ -5,8 +5,10 @@
 
 import { Fragment as Group, type ReactNode } from "react";
 import type { components } from "./api/v1";
-import { Head, Id, Ref, Scroll, short, useItem, usePending, useReads, viewOf } from "./list.tsx";
-import { planPath } from "./plan.tsx";
+import { Head, Id, type Load, Ref, Scroll, short, useItem, usePending, useReads, viewOf } from "./list.tsx";
+import { NO_KEEP, positionShown } from "./machine.tsx";
+import { NextStep, type Position } from "./nextstep.tsx";
+import { planFor, planPath } from "./plan.tsx";
 import { Action } from "./shell.tsx";
 import { MachineRef, type MachineLike, machineText } from "./machines.tsx";
 import { Withheld } from "./states.tsx";
@@ -76,8 +78,16 @@ export function parts(configuration: string): Part[] {
   return out;
 }
 
-// What the machine needs next for this release (B18), from its Desired, Applied and pendingConvergence.
-export function nextStep(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence">): string {
+// The steps of the machine's position that name a plan or an operation open on it. For the machine's Desired
+// release the page draws the position's own line then (operator experience §2.3) and nothing from `releaseNote`:
+// one function words a machine with a plan or an operation open, the other words the rest. A plan or an operation
+// open for a machine whose Desired is another release is not about this release, so that page keeps its sentence.
+const OPEN_STEPS = ["operation-in-flight", "operation-unresolved", "awaiting-approval", "awaiting-dispatch"];
+export const positionOwns = (p: Position, release: string): boolean => p.machine.desired === release && OPEN_STEPS.includes(p.step);
+
+// What this release is to the machine (B18), from its Desired, Applied and pendingConvergence. It says nothing of
+// what was sent: the machine record cannot show that, and a plan or an operation open on it is the position's line.
+export function releaseNote(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence">): string {
   if (m.desired !== release) {
     return `This release is not the Desired release of this machine${m.desired === null ? "" : ` (Desired is ${short(m.desired)})`}, so it needs no step for this release.`;
   }
@@ -86,19 +96,11 @@ export function nextStep(release: string, m: Pick<Machine, "desired" | "applied"
   // After an adoption Applied can equal Desired while it does; after a publication Applied can name another release while it does not.
   const same = m.applied.release === release;
   if (m.pendingConvergence) {
-    return `${same ? "This release is Desired and Applied on this machine, but its configuration differs from what Bronzeward applied (release not applied yet)." : `This machine has an Applied configuration (release ${short(m.applied.release)}) that differs from this release.`} An apply-config plan sends this release to it. Nothing has been sent yet.`;
+    return `${same ? "This release is Desired and Applied on this machine, but its configuration differs from what Bronzeward applied (release not applied yet)." : `This machine has an Applied configuration (release ${short(m.applied.release)}) that differs from this release.`} An apply-config plan sends this release to it.`;
   }
   return same
     ? "This release is the one Applied on this machine. Nothing is left to send."
     : `This release carries this machine's Applied configuration (release ${short(m.applied.release)}) unchanged. Nothing is left to send.`;
-}
-
-// The plan this machine's state offers for this release (B18): a handover for a machine with no Applied, an
-// apply-config plan while the configuration differs. None where the text says nothing is left to send.
-export function planFor(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence">): "adopt" | "apply-config" | undefined {
-  if (m.desired !== release) return undefined;
-  if (m.applied === null) return "adopt";
-  return m.pendingConvergence ? "apply-config" : undefined;
 }
 
 export const EMPTY_NOTE = "A field that shows as empty is empty in the rendered review. A redacted field shows as a badge, so an empty one was not redacted.";
@@ -174,21 +176,39 @@ function PlanButton({ release, machine, m }: { release: string; machine: string;
   return <p><Action label={op === "adopt" ? "Plan adopt (handover)" : "Plan apply"} needs={["publisher"]} onClick={() => go(planPath(release, machine, op))} /></p>;
 }
 
+// The page's next step. A position that was not read draws the failure and a way to read again, and no sentence, line or
+// plan button: the button depends on the answer, so the page does not guess (the machine page removes its line instead,
+// operator experience §2.3).
+export function NextStepSection({ release, machine, pos }: { release: string; machine: string; pos: Load<Position> }) {
+  const { go } = useReads();
+  const pending = usePending(pos, "the machine's position");
+  if (pos.kind !== "ok") {
+    const again = reviewPath(release, machine);
+    return <>{pending}{pos.kind !== "loading" && pos.kind !== "discarded" && again !== undefined && <p><button type="button" onClick={() => go(again)}>Read again</button></p>}</>;
+  }
+  const { position, recovery } = positionShown(pos);
+  if (position !== undefined && positionOwns(position, release)) return <NextStep position={position} recovery={recovery} />;
+  return (
+    <>
+      <p data-testid="next-step">{releaseNote(release, pos.data.machine)}</p>
+      <PlanButton release={release} machine={machine} m={pos.data.machine} />
+    </>
+  );
+}
+
 export function ReviewItem({ release, machine }: { release: string; machine: string }) {
   const review = useItem<Review>(`/releases/${enc(release)}/machines/${enc(machine)}/review`);
   const pending = usePending(review, "the rendered review");
-  const mach = useItem<Machine>(`/machines/${enc(machine)}`);
-  const machinePending = usePending(mach, "the machine");
-  // The page holds the machine already, so its name and address cost no read.
-  const held = mach.kind === "ok" ? mach.data : undefined;
+  // The position holds the machine record, so the page's name and address cost no further read.
+  const pos = useItem<Position>(`/machines/${enc(machine)}/position`, NO_KEEP);
+  const held = pos.kind === "ok" ? pos.data.machine : undefined;
   return (
     <>
       <h2>Rendered configuration of {held === undefined ? THE_MACHINE : machineText(held)} in release {short(release)}</h2>
       <p><Ref to={`/releases/${enc(release)}`} id={release}>Back to the release</Ref></p>
       {review.kind === "ok" ? <ReviewBody r={review.data} {...(held !== undefined && { machine: held })} /> : pending}
       <h3>Next step</h3>
-      {mach.kind === "ok" ? <p data-testid="next-step">{nextStep(release, mach.data)}</p> : machinePending}
-      {mach.kind === "ok" && <PlanButton release={release} machine={machine} m={mach.data} />}
+      <NextStepSection release={release} machine={machine} pos={pos} />
     </>
   );
 }
