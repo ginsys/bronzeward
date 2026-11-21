@@ -10,6 +10,7 @@ import { MachineRef, machineText } from "./machines.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
 import { draftText, operationTitle, planTitle, releaseTitle } from "./titles.ts";
 import { SAFE } from "./principals.ts";
+import { THE_MACHINE } from "./words.ts";
 
 type S = components["schemas"];
 
@@ -31,11 +32,12 @@ export function useBody<T>(path: string | undefined): T | null | undefined {
 
 const at = (kind: string, id: string | null | undefined) => (id == null ? undefined : `/${kind}/${encodeURIComponent(id)}`);
 
-// The text for a machine: its name where it has a valid one, else its address, else "an unnamed machine"; undefined
-// while its read is pending, so a title built on it waits for it.
+// The text for a machine: its name where it has a valid one, else its address, else "an unnamed machine";
+// undefined while its read is pending, so a title built on it waits for it, and "the machine" where the read
+// gave no body, so a title survives a failed read.
 export function useMachineText(id: string | null | undefined): string | undefined {
   const m = useBody<S["MachineBody"]>(at("machines", id));
-  return id == null || m == null ? undefined : machineText(m);
+  return id == null || m === undefined ? undefined : m === null ? THE_MACHINE : machineText(m);
 }
 
 // The name of a cluster, as its read gives it; undefined while the read is pending, or when the name is not safe to show.
@@ -44,9 +46,9 @@ export function useClusterText(id: string | null | undefined): string | undefine
   return c == null || !SAFE.test(c.name) ? undefined : c.name;
 }
 
-// A machine as a link: its name as the text where it has one, the shortened identifier until then and
-// when it has none, and the whole identifier as the title attribute. An identifier of another shape is
-// shown as any other is, with no read.
+// A machine as a link once its body is read: its name, else its address, else "an unnamed machine", and the
+// whole identifier as the title attribute. Until the body arrives, or where the read gave none, and for an
+// identifier of another shape (no read), it is shown as any other identifier is.
 // A view that reads the machine itself passes it as `held` (its body, once read): nothing is asked.
 export type Held = { body: S["MachineBody"] | undefined };
 export function MachineById({ id, none = "none", held }: { id: string | null | undefined; none?: string; held?: Held }): ReactNode {

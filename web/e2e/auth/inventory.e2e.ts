@@ -38,6 +38,8 @@ async function write(at: string, path: string, body: object, human = "h-author")
 // Synthetic values only: a random cluster ID and documentation-range endpoints.
 const cluster = (at: string, name: string) =>
   write(at, "/clusters", { name, endpoint: `https://${name}.example.test:6443`, contract: "v1.14", talosClusterId: randomBytes(32).toString("base64url") + "=" });
+// The first machine `machines` records has no name, so every page names it by this address (client contracts A9).
+const ADDRESS = "192.0.2.1";
 async function machines(at: string, cl: string, n: number, from = 0): Promise<string[]> {
   const ids: string[] = [];
   for (let i = from; i < from + n; i++) {
@@ -98,7 +100,7 @@ describe("the machines", () => {
     const [id] = await machines(at, cl.id, 1);
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
     await $(`a[title="${id}"]`).click();
-    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`);
     expect(await where()).toBe(`${FIXTURE_PAGE}/machines/${id}`);
     // A machine just recorded has no Desired and no Applied: the page says it is not handed over and offers the import.
     await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("Not handed over"), { wait: 20_000 });
@@ -118,7 +120,7 @@ describe("the machines", () => {
     // switch to it.
     const first = await browser.getWindowHandle();
     await newTab(`${FIXTURE_PAGE}/machines/${id}`);
-    await expect($("main h2")).toHaveText(`Machine ${id}`, { wait: 20_000 });
+    await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`, { wait: 20_000 });
     expect(await where()).toBe(`${FIXTURE_PAGE}/machines/${id}`);
     await browser.closeWindow();
     await browser.switchToWindow(first);
@@ -287,7 +289,7 @@ describe("the machine detail (W3)", () => {
     };
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: { [`/machines/${id}`]: machine, [`/machines/${id}/observations`]: { items: [k, m1, p] } } })).toMatch(SERVER);
     await $(`a[title="${id}"]`).click();
-    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`);
     // The sentences of the observations come with their read, after the machine's: wait for all of them.
     const want = sentences(machine, [p, m1, k]);
     await browser.waitUntil(async () => (await $$('[data-testid="sentences"] li').length) === want.length, { timeout: 20_000, timeoutMsg: `the sentences did not all appear (${want.length} expected)` });
@@ -314,7 +316,7 @@ describe("the machine detail (W3)", () => {
     const [id] = await machines(at, cl.id, 1);
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
     await $(`a[title="${id}"]`).click();
-    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`);
     expect(await texts('[data-testid="sentences"] li')).toEqual(["No configuration read recorded.", "Not applied or adopted by Bronzeward.", "No release selected.", HEALTH]);
     await expect($("main")).toHaveText(expect.stringContaining("No observation recorded."));
     // A freeze made outside the page reaches the shown timeline by a poll.
@@ -342,7 +344,7 @@ describe("the machine detail (W3)", () => {
     const path = `/machines/${id}/timeline`;
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
     await $(`a[title="${id}"]`).click();
-    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`);
     await expect($("main")).toHaveText(expect.stringContaining("No timeline entry recorded."));
     // The next poll is held; once the injector holds it, the view moves while it is in flight, so
     // the client discards its answer.
@@ -352,7 +354,7 @@ describe("the machine detail (W3)", () => {
       history.pushState(null, "", to);
       dispatchEvent(new PopStateEvent("popstate"));
     }, `/machines/${id}?from=c4`);
-    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`);
     await faults({ upstream: at });
     await release();
     // The timeline still polls under the new view.
@@ -414,7 +416,7 @@ describe("the machine detail (W3)", () => {
     expect(total).toBeGreaterThan(50);
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
     await $(`a[title="${id}"]`).click();
-    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`);
     const entries = () => $$('[data-testid="timeline"] tbody tr');
     await browser.waitUntil(async () => (await entries().length) === 50, { timeout: 20_000, timeoutMsg: "the timeline did not show its newest page" });
     const steps = async () => (await texts('[data-testid="timeline"] tbody tr td:last-child')).map((t) => /synthetic step (\d+)/.exec(t)?.[1]).filter((s) => s !== undefined).map(Number);
@@ -453,7 +455,7 @@ describe("the machine detail (W3)", () => {
     const bodies = (o: Observation[], frozen: boolean) => ({ [`/machines/${id}`]: machine(o[0]!, frozen), [`/machines/${id}/observations`]: { items: o } });
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: bodies([m1], false) })).toMatch(SERVER);
     await $(`a[title="${id}"]`).click();
-    await expect($("main h2")).toHaveText(`Machine ${id}`);
+    await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`);
     // The sentences come with their own read, after the machine's: with none shown yet, the Frozen line would be absent for any reason.
     await browser.waitUntil(async () => (await texts('[data-testid="sentences"] li')).length > 0, { timeout: 20_000, timeoutMsg: "the sentences did not appear" });
     await absent(async () => (await texts('[data-testid="sentences"] li')).includes(FROZEN), "the Frozen line before the freeze");
@@ -635,7 +637,7 @@ describe("the read-only lists and items", () => {
     await loaded();
     await tabTo((f) => f.title === m, "the machine");
     await browser.keys("Enter");
-    await expect($("main h2")).toHaveText(`Machine ${m}`);
+    await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`);
     await focusSettles(onMain, "the new page");
     await expect($("main dl")).toHaveText(expect.stringContaining("Desired"));
     // T1: Sign out is on the way to the navigation.
@@ -780,8 +782,8 @@ describe("the rendered review of a release's machine", () => {
     await nav("Changes");
     await $(`a[title="${rel}"]`).click();
     await expect($("main h2")).toHaveText(`Release ${short(rel)}`);
-    await $("main").$(`a=Rendered configuration of ${short(m)}`).click();
-    await expect($("main h2")).toHaveText(`Rendered configuration of ${short(m)} in release ${short(rel)}`);
+    await $("main").$(`a=Rendered configuration of ${ADDRESS}`).click();
+    await expect($("main h2")).toHaveText(`Rendered configuration of ${ADDRESS} in release ${short(rel)}`);
   }
 
   it("T6, T7: a redaction token is a badge with its kind in words, an empty value stays empty, provenance and the next step are served", async () => {
@@ -828,9 +830,11 @@ describe("the rendered review of a release's machine", () => {
     await expect($("main h2")).toHaveText(`Release ${short(s.rel.id)}`);
     await focusSettles(onMain, "the new page");
     await loaded();
-    await tabTo((f) => f.text === `Rendered configuration of ${short(m)}`, "the review link");
+    // The link shows the shortened identifier until the machine's read answers.
+    await expect($("main").$(`a=Rendered configuration of ${ADDRESS}`)).toBeExisting({ wait: 20_000 });
+    await tabTo((f) => f.text === `Rendered configuration of ${ADDRESS}`, "the review link");
     await browser.keys("Enter");
-    await expect($("main h2")).toHaveText(`Rendered configuration of ${short(m)} in release ${short(s.rel.id)}`);
+    await expect($("main h2")).toHaveText(`Rendered configuration of ${ADDRESS} in release ${short(s.rel.id)}`);
     await focusSettles(onMain, "the new page");
     await expect($('[data-testid="document"]')).toBeExisting();
     await loaded();
@@ -847,7 +851,7 @@ describe("the rendered review of a release's machine", () => {
       await expect($("main h2")).toHaveText(`Release ${short(s.rel.id)}`);
       await loaded();
       expect(["the release", await overflows()]).toEqual(["the release", 0]);
-      await $("main").$(`a=Rendered configuration of ${short(m)}`).click();
+      await $("main").$(`a=Rendered configuration of ${ADDRESS}`).click();
       await expect($('[data-testid="document"]')).toBeExisting();
       await loaded();
       expect(["the review", await overflows()]).toEqual(["the review", 0]);

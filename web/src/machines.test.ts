@@ -81,6 +81,12 @@ describe("sharedAddresses: two unnamed machines of the list in hand on one addre
     expect(machineText(at("mch_d", null, "10.0.0.1:1", { talosNodeId: "n1" }), shared)).toBe("10.0.0.1 (node n1)");
     expect(machineText(at("mch_e", null, "10.0.0.1:2"), shared)).toBe("10.0.0.1 (UUID unknown)");
   });
+  test("a node ID or UUID that is not safe text, or not text, reads unknown in the suffix", () => {
+    const pair = [at("mch_f", null, "10.0.0.2:1", { talosNodeId: "bad‮id" }), at("mch_g", null, "10.0.0.2:2", { talosNodeId: null, smbiosUuid: "ok\nid" })];
+    const shared = sharedAddresses(pair);
+    expect(machineText(pair[0]!, shared)).toBe("10.0.0.2 (node unknown)");
+    expect(machineText(pair[1]!, shared)).toBe("10.0.0.2 (UUID unknown)");
+  });
   test("a named machine neither counts nor gets a suffix, and a pair on different pages gets none", () => {
     expect(sharedAddresses([at("mch_a", "cp1", "172.31.104.15:50000"), at("mch_b", null, "172.31.104.15:50000")]).size).toBe(0);
     expect(machineText(a)).toBe("172.31.104.15");

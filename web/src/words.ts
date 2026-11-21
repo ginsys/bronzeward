@@ -12,5 +12,9 @@ export const IDENTIFIER = "Identifier";
 export const COPY = "Copy";
 /** The text standing for a machine whose body has not been read yet, in a heading. */
 export const THE_MACHINE = "the machine";
-/** The text standing for a cluster whose name has not been read. */
-export const THIS_CLUSTER = "this cluster";
+/** The text of a cluster's link when its name has not been read, or is not safe to show; no word stands before it. */
+export const THIS_CLUSTER = "This cluster";
+/** Said beside the Copy control once the identifier is on the clipboard. */
+export const COPIED = "Copied";
+/** Said beside the Copy control where the browser would not copy. */
+export const COPY_BY_HAND = "Select the identifier to copy it";
