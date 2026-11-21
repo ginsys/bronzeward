@@ -8,6 +8,7 @@ import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } 
 import type { components } from "./api/v1";
 import { AssignmentPane, ProfilePane } from "./composition.tsx";
 import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
+import { Handover } from "./handover.tsx";
 import { LAYERS } from "./layers.ts";
 import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
@@ -236,6 +237,8 @@ export function DraftItem({ id }: { id: string }) {
   }, [item]);
   useEffect(() => watchWrites(id, written), [id, written]);
   const sources = d?.entries.filter(isSource) ?? [];
+  // The machines this draft holds an import of: the handover button takes them under management.
+  const handedOver = d?.entries.flatMap((e) => (isSource(e) ? [] : [e.machine])) ?? [];
   const entry = paneEntry(sources, selected, claimed);
   const current = entry === undefined ? selected : keyOf(entry);
   // A switch to another entry, or to a new one, asks first while the editor holds unsaved text.
@@ -278,6 +281,7 @@ export function DraftItem({ id }: { id: string }) {
             <AssignmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
           <Status testid="not-rendered">{NOT_RENDERED}</Status>
+          {handedOver.length > 0 && d.state !== "discarded" && <Handover key={d.id} draft={d.id} machines={handedOver} written={written} />}
           {d.state === "open" && <p><Ref to={publishPath(d.id)} id={d.id}>Publish this draft</Ref></p>}
           {d.state === "open" && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}
         </>

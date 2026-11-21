@@ -869,6 +869,16 @@ class: an automation credential gets `403` with `humanOnly: true`
 (`internal/api/api.go:380-392`), and the CLI says so before sending when the context holds an
 automation token.
 
+**The one exception, the web client's handover button** (the owner's decision of 2026-11-21, typed in the
+campaign lead's session). On a draft that holds an import base, the web client's "Start managing these
+machines" publishes the draft, creates an adopt plan for each machine with no `Applied` and approves each
+plan as the signed-in person, without the typed plan ID: the sentence above the button, which says what the
+press does and that it sends nothing to any machine, is the confirmation. Every act is the existing route,
+recorded one by one, and the approval records self-approval as the server computes it. A handover plan
+binds no drift record, and a machine with an `Applied` keeps the separate steps. The CLI keeps the typed
+plan ID, and so does every approval of a change applied later
+([client contracts A11](client-contracts.md#14-proposed-api-gap-issues-and-downstream-refinement)).
+
 A revert approval adds one line, from `unseenOverwrite` (`internal/api/approvals.go:49-51`):
 
 ```text
@@ -1423,7 +1433,7 @@ the plan leaves its hands. Automation may publish and plan (`internal/api/routes
 
 **Approver.** Open a proposed plan; read target machine, route, operation, mode, release,
 assignment revision, baseline, drift record, deadlines, expiry, epoch, evidence, self-approval
-reasons and `unseenOverwrite`; approve by typing the plan ID; watch the operation; revoke an
+reasons and `unseenOverwrite`; approve by typing the plan ID (the handover button of [§5.6](#56-plan-and-approval) is the one exception); watch the operation; revoke an
 approval or cancel a plan; unfreeze. Human only for approval. Sees: that revoking after the
 controller committed does not stop an attempt already recorded
 ([design §13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy)).
