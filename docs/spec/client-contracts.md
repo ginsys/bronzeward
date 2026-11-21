@@ -2072,6 +2072,30 @@ way: the identifier, the Talos endpoint and the node ID, as before.
    `api/openapi.yaml:4178` types `kind` as a free string.
 5. A8's derived titles name the machine, so a title held before a rename is stale; A8 rule 4
    already keeps no title beyond the view or the command.
+6. **A rename says when it reaches the machine** (compilation §6.1, [persistence and API §3.5](persistence-api.md)).
+   Where a client offers the rename (`machine rename`, the web rename form) it says, in words and with no field
+   name: "If this machine's hostname comes from its name, the new name reaches the machine only after the next
+   release is published and a plan for it is approved. Until then the machine keeps its current hostname." Two
+   more sentences depend on a measurement the compiler issue (ginsys/bronzeward#1040) makes, and the client
+   carries the one the measurement picks. A restart: "The machine takes the new name when it next restarts." or
+   "The machine takes the new name when the plan is applied." Until measured: "Whether the machine needs a restart
+   to take the new name is not yet confirmed." The Kubernetes node name: "On the node, the Kubernetes node name
+   normally follows the hostname."
+7. **A release says where each machine's hostname came from** (persistence and API §9.2, the `hostname` member).
+   A release review shows, per machine, one of these sentences by `source`, naming the machine by its name where
+   it has one: `machine-name`, "Hostname: node-a, taken from the machine's name."; `configuration`, "Hostname:
+   node-a, written in the configuration. The machine's name does not change it."; `none`, "Hostname: not set in
+   the configuration; the node chooses its own."; `legacy-stable`, "Hostname: the configuration asks the node to
+   choose a stable hostname of its own, so the machine's name is not used. Remove that setting to use the name."
+   For `machine-name` on a machine whose applied release recorded `none` or `legacy-stable`, the review adds: "This
+   release sets the machine's hostname to node-a, taken from its name. Until now the node chose its own hostname.
+   The machine's Kubernetes node name normally follows the hostname, so it may change too." followed by the
+   restart sentence of item 6. For a machine whose applied release recorded another name: "This release changes
+   the machine's hostname from node-a to node-b, taken from its name." Where the machine's current name differs
+   from the name the release recorded: "This release used the earlier name node-a. The next release will use
+   node-b." A `source` the client does not know shows its raw value and no sentence. A publication refused for a
+   hostname clash (compilation §6.1 item 6) shows the refusal's own sentence. The CLI and the web console are
+   ginsys/bronzeward#1042 and ginsys/bronzeward#1043, and each tests its sentences against these.
 
 **A10. An operation says in words what it did, who started it and what comes next (client rule, no API change).**
 Closes G28 ([#998](https://github.com/ginsys/bronzeward/issues/998)). The web client's operation page shows one sentence

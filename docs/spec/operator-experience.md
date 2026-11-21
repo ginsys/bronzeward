@@ -457,6 +457,13 @@ means it equals neither `Applied` nor `Desired`, and "drifted" comes from the op
 `GET /machines` filters by `cluster` (`internal/api/reads.go:199-218`), so `machine list --cluster`
 passes it to the server ([§11](#11-api-gap-audit), G9).
 
+A machine's name is also its Talos hostname when its configuration sets none (compilation §6.1,
+ginsys/bronzeward#976). Where onboarding names a machine from the node's own hostname, as the web
+page does where that is a valid name, the machine's import base holds that hostname, equal to the
+name. The import removes that document from the stored base and records the hostname as filled from
+the name (compilation §2.3 step 4a), so a later rename reaches the machine through a new release and
+an approved plan, and the clients say so where they offer the rename (client contracts A9 item 6).
+
 `cluster discover` reads that identity for a whole cluster with the operator's own talosconfig and
 prints the commands that record it. It calls no Bronzeward route, writes nothing and runs none of
 the commands. The flag is required, and no default file is looked up:

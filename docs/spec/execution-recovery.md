@@ -1095,10 +1095,20 @@ state is being accepted (design §12.1).
    §17.22) **(choice §10.14)**. Ingestion records the baseline's
    configuration digest (§1) over the same input it encrypts (compilation
    contract §2.3 step 8). An existing-cluster import records it the same way, so
-   the handover below compares against the same digest.
+   the handover below compares against the same digest. Where the machine has
+   a name and the drifted configuration holds a `HostnameConfig` whose hostname
+   equals it, ingestion removes that document from the sanitized document, as an
+   import does (compilation contract §2.3 step 4a, §6.1): the hostname is then
+   filled from the name again, and a rename reaches the machine through a release.
+   The baseline stays the exact input, so this step's comparison below is
+   unchanged.
 2. **Publish.** The sanitized document becomes the machine's new import base,
    and a release compiled from it is published (compilation contract §6, §11).
-   Publication resolves nothing and authorizes nothing.
+   Publication resolves nothing and authorizes nothing. A release compiled
+   from a base with that document removed writes it again as `auto: off` with
+   `hostname`, so its artifact digest can differ from the baseline's and the
+   machine is then pending convergence, as the paragraph after the record
+   describes.
 3. **Plan and approve.** An adoption is requested as a plan with operation
    `adopt` **(choice §10.13)**, created by a `publisher` like every plan (§2;
    design §13.7 item 2) and approved by an `approver`, as design §13.7 item 3

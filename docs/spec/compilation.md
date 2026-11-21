@@ -199,6 +199,20 @@ give a node a path that reads as an embedded document's.
    until it no longer changes: the encoder moves a blank line inside a run of
    comments, as talosctl writes them, and a later mark (§3.6 item 3) refuses
    any text its re-encoding changes. The guard searches that final text.
+4a. **Release a filled hostname** (§6.1, **choice §16.37**). For an import
+   (onboarding included) or a drift adoption of a machine that has a stored
+   name, a `HostnameConfig` document of the candidate whose `hostname` equals
+   that name exactly, as the API read it for this request, is removed from the
+   candidate, whole: it is recorded as filled from the name, not kept as an
+   explicit hostname. Talos's document holds only `auto` and `hostname`, so
+   nothing else is lost, and a document that kept `auto: off` would stop the
+   fill (§6.1). Only that document is removed. A hostname that differs from
+   the name, an FQDN, a different case, a machine with no name, and a
+   configuration without a `HostnameConfig` stay as they are. It is the one
+   value ingestion removes that is not a secret, so the baseline of step 8 is
+   still the exact input, and the draft transaction refuses if the machine's
+   name is no longer the one this step used
+   ([persistence and API §3.2](persistence-api.md), choice §17.45 there).
 5. **Guard** (§4.2). A guard hit refuses the input; no provider object has been
    created yet.
 6. **Create** one provider generation per extracted value, create-only (`cas=0`)
@@ -902,6 +916,13 @@ For each machine:
    The compiler performs no merge of its own (design §6.9). JSON6902 patches
    are refused: they were not tested and are refused for the v1.13
    multi-document configuration (SR §8; not rerun on v1.14).
+5a. **Fill the hostname** (§6.1, **choice §16.36**). For a machine that has a
+   name, read the composed configuration's hostname with the machinery's
+   accessor. Where none is set and none of the exceptions of §6.1 item 2
+   holds, compose one more patch, a `HostnameConfig` with
+   `auto: off` and `hostname` set to the name, as the last input. The decision
+   is taken once, from this composition, and every trace and flip pass of §8.1
+   composes the same patch.
 6. **Trace** the composition for provenance (§8.1).
 7. **Check the output**: no string scalar holds reserved text (§5.5), and no
    resolved `string` value's stored or placed form of six bytes or more (each
@@ -943,10 +964,145 @@ For each machine:
    deprecation the node still accepts, does not refuse a publication.
 
 The compiler's only transformations of native YAML are step 4's replacement of
-tagged nodes and re-serialization of identified embedded documents. Everything
+tagged nodes and re-serialization of identified embedded documents, and the
+one hostname patch of step 5a. Everything
 else about the output is the renderer's, which is what "preserving native merge
 semantics" means here. Overrides, aliases, list changes and multi-document
 streams are the renderer's behaviour, observed by §8.1, never modelled.
+
+### 6.1 The hostname, filled from the machine's name
+
+Design: none. Owner direction, 2026-11-20 (ginsys/bronzeward#951; Serge, typed
+11:36 CET in the bronzeward lead's session): "when setting the hostname, the
+default could be the machine name (if set)". This section specifies it
+(ginsys/bronzeward#976). A machine may carry a stored name, unique within its
+cluster, 1 to 63 characters of lowercase letters, digits and hyphen, so always
+a valid hostname label ([persistence and API §3.5](persistence-api.md)). Until
+this section the compiler wrote no hostname, and the name and the hostname were
+independent.
+
+**What Talos does** (read from the pinned machinery, v1.14.5,
+`pkg/machinery/config/types/network/hostname.go`, and the Talos 1.14 page
+"Hostname"). A `HostnameConfig` document has two fields, `auto` (`stable` or
+`off`) and `hostname` (lines 69 and 80). `hostname` "has the highest priority
+over any other hostname sources: DHCP, cloud-init", and `auto` is the lowest.
+`hostname` beside an `auto` other than `off` fails validation (line 125), and
+a document with neither fails too (line 121). The document refuses to coexist
+with a v1alpha1 `machine.network.hostname`, or with the v1alpha1
+`machine.features.stableHostname` feature set (lines 159-167,
+`config/types/v1alpha1/v1alpha1_network_bridge.go:39-50`). For the contracts
+above v1.11 the machinery generates `auto: stable` in a `HostnameConfig`
+(`config/generate/network.go:39-43`, `config/contract.go:231-234`), and its
+own patch for a static hostname is `auto: off` with `hostname`
+(`config/generate/stdpatches/stdpatches.go:24-31`). The accessor
+`NetworkHostnameConfig()` returns the first `HostnameConfig` document, else the
+v1alpha1 configuration (`config/container/container.go:544-556`). The
+Kubernetes node name is derived from the hostname by default (Talos 1.14,
+troubleshooting, "kubectl get nodes reports wrong node name").
+
+**Measured at specification time** with a scratch test on the generated v1.14
+base (the compiler issue, ginsys/bronzeward#1040, turns each case into a
+test): the base reads hostname empty and `auto: stable`; the patch of choice
+§16.36 merges and validates in `metal` and `cloud`; a fragment `hostname` alone
+over the generated `auto: stable` fails validation in every mode; a patch
+composed after a fragment's hostname, or after an `auto: off` fragment,
+overwrites it. So the merge alone never lets an explicit hostname win: the
+compiler reads the composition first (step 5a). In `container` mode the
+generated base fails validation with and without the patch, so that mode is
+unmeasured.
+
+1. **What the compiler writes (choice §16.36).** A `HostnameConfig` document
+   with `auto: off` and `hostname` set to the machine's name, composed as one
+   patch by the renderer's native merge, in `metal`, `container` and `cloud`
+   alike: the document's validation reads no mode (line 115). Only the
+   contract the PoC compiles is concerned (§10.2: the node's running minor,
+   v1.12 or above for this document); the legacy `machine.network.hostname` is
+   never written. Alternatives: `metal` only, which leaves a named container
+   or cloud node with a name and no effect and needs a second rule for no
+   measured reason; the legacy field, which v1.14 refuses beside the document.
+   Cost: `container` and `cloud` behaviour is unmeasured, and the compiler
+   issue measures both.
+2. **Which hostname wins (choice §16.37).** An explicit hostname always wins;
+   the name fills only an absent one. A hostname is explicit when the
+   composition's accessor returns one. These compositions are absent and get
+   the fill: a `HostnameConfig` with `auto: stable` and no hostname, and no
+   hostname document at all. These get **no** fill: a `HostnameConfig` with
+   `auto: off` and no hostname (the operator chose another source, DHCP or the
+   cloud, and the fill would override it); a base whose v1alpha1 document sets
+   `machine.features.stableHostname: true`, because the document refuses to
+   coexist with it and the compiler does not edit that field; and a machine
+   with no name. The review says the last two in words (persistence and API
+   §9.2). Alternatives: the name always wins, so an operator could never
+   differ from it, against "default"; a refusal where both exist, which
+   refuses every imported machine that already has a hostname.
+3. **A rename needs a release and a plan.** A release compiles with the name
+   the machine had at its snapshot and records it (persistence and API §3.5,
+   §6.2, choice §17.44); a rename changes no release. A machine whose
+   hostname comes from its name takes the new name only from the next release
+   and an approved plan. Where the clients offer the rename they say so
+   (client contracts A9 item 6).
+4. **What a release records.** The hostname's source and, where it came from
+   the name, the name used, per release machine (§11, persistence and API
+   §9.2). The provenance records of §8.2 stay secret-reference occurrences
+   alone: a hostname is not a reference, so no stand-in is placed for it and
+   the trace and flip passes carry the same patch as the real composition.
+5. **Import, adoption and drift (choice §16.37).** The equality rule of
+   §2.3 step 4a: at import (onboarding included) and at drift adoption, a
+   `HostnameConfig` whose hostname equals the machine's name is removed from
+   the stored base and recorded as filled. Why: an onboarded machine takes its
+   name from its own hostname
+   ([operator experience §5.2](operator-experience.md)), so its import base
+   holds that hostname explicitly, and without the rule a rename would never
+   reach it; every adoption would likewise freeze a filled hostname as
+   explicit. The whole document goes: it holds only `auto` and `hostname`, and
+   an `auto: off` left behind would stop the fill (decision 2). The baseline
+   stays the exact input, so the adoption comparison
+   ([execution and recovery §6.3](execution-recovery.md)) is unchanged. A
+   release compiled from the thinner base writes the document again, as
+   `auto: off` with `hostname`, so its artifact digest can differ from the
+   baseline's and the machine is then pending convergence, which §6.3 already
+   covers. Drift is otherwise ordinary: a hostname changed on the node by hand
+   is a configuration edit and a digest mismatch; a hostname from DHCP, cloud
+   or `auto: stable` is not in the configuration and is not drift. A machine
+   with no name at import keeps its hostname explicit when it is named later;
+   deleting that document with a fragment `$patch: delete` (the form of
+   [the import-equivalence evidence](../design/research/evidence/20261118-import-equivalence/gen.sh))
+   hands it to the fill. A filled hostname needs no such step.
+6. **A filled hostname that another machine already holds (choice §16.38).**
+   Names are unique within a cluster, so two filled hostnames never clash.
+   The one new clash is a hostname filled from a name against another
+   machine's explicit hostname of the same value: two nodes would report one
+   hostname and, by default, one Kubernetes node name, and the second kubelet
+   would take over the first's Node object. Publication refuses it, before any
+   release is committed, `422 validation-failed` with the rule `hostname`,
+   naming both machines by name where they have one and by identifier only
+   where they have none: "Machine node-a would take the hostname node-a from
+   its name, but machine node-b already has that hostname in its
+   configuration. Rename one of them, or set a different hostname on one."
+   The check reads the machines of one release, and a release covers every
+   machine of its cluster that has an import base
+   ([persistence and API choice §17.33](persistence-api.md)); a machine with no
+   import base is not compared, and a later change to that coverage must carry
+   this check with it. Two explicit hostnames that were already equal are not
+   new and are not refused here, since the feature creates only the filled
+   case. Alternative: a review warning only, which leaves the failure on the
+   live cluster to whoever approves the plan.
+
+**Left open.** Whether a live node applies a changed hostname without a reboot,
+what becomes of its Kubernetes node name, and `container` and `cloud` modes
+are unmeasured; the compiler issue (ginsys/bronzeward#1040) measures them on
+the fixture, and the client sentences that mention a restart or the node name
+are conditional on that result (client contracts A9 items 6 and 7). A
+`cloud` node's own hostname is overridden by the static one (`hostname` has
+the highest priority, line 76), read and not measured. The import-equivalence
+check of
+[the 20261118 evidence](../design/research/20261118-import-analysis-and-equivalence.md)
+needs an amendment, with its measurement: a filled hostname composes `auto:
+off` with `hostname`, a form that differs from the original document at every
+level that reads it, so the check must treat a filled hostname as equal to
+the original where the hostname equals the name. The fill is implemented by
+ginsys/bronzeward#1040, the API record by ginsys/bronzeward#1041, and the
+client words by ginsys/bronzeward#1042 and ginsys/bronzeward#1043.
 
 ## 7. Validation stages
 
@@ -1469,8 +1625,9 @@ or encrypted values:
 - per machine: the artifact ciphertext and its digest, the configuration
   digest of its plaintext
   ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)),
-  the redacted review data, the provenance records (§8.2) and both dependency
-  records with the encryption dependency (§9);
+  the redacted review data, the provenance records (§8.2), the hostname record
+  (§6.1 item 4: its source and, where filled, the name used) and both
+  dependency records with the encryption dependency (§9);
 - per pinned version and encryption dependency: the classification step 3 and
   §11 made, as the dependency monitor seeds it
   ([dependency monitor §5.2](dependency-monitor.md#52-seeding-at-publication)):
@@ -1615,6 +1772,8 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Compilation | An ordinary fragment overrides or deletes an import-base reference (§6) | Publication refused, naming the fragment and path | Nothing |
 | Compilation | Contract newer than renderer or not the node's minor; Kubernetes outside the window | Publication refused | Nothing |
 | Compilation | Native composition or validation rejects | Publication refused; message redacted or withheld (§8.3) | Nothing |
+| Compilation | A hostname filled from a machine's name that another machine of the cluster holds explicitly (§6.1 item 6) | Publication refused, rule `hostname`, naming both machines | Nothing |
+| Ingestion | The machine's name changed between the removal of a filled hostname (§2.3 step 4a) and the draft transaction | The draft transaction is refused `409 stale-input`; re-ingest | Claim row, no payload |
 | Compilation | Trace or flip fragment missing, shape differs, or passes disagree | Publication refused (§8.1) | Nothing |
 | Compilation | Reserved text or an unattributed exact copy in the output | Publication refused, naming paths | Nothing |
 | Compilation | Encryption fails, or persistence rejects a stale input | Publication refused | Nothing of the release |
@@ -2030,6 +2189,37 @@ in place as
     back the secrets it created, against choice §16.1; or re-run the whole
     pipeline from the exact input, which needs baseline decryption that no
     identity holds (choice §16.4).
+36. **A named machine's name is its Talos hostname when nothing sets one**
+    (§6 step 5a, §6.1 decisions 1 and 2). Owner direction, 2026-11-20
+    (ginsys/bronzeward#976; Serge, typed 11:36 CET in the bronzeward lead's
+    session): "when setting the hostname, the default could be the machine name
+    (if set)". Design choices, owned by this specification and open to review:
+    the compiler writes `HostnameConfig` with `auto: off` and `hostname`, in
+    every platform mode; it reads the composition's hostname first, because the
+    renderer's merge alone lets the last writer win (measured, §6.1); an
+    explicit hostname wins; a `HostnameConfig` with `auto: off` and no
+    hostname, a base with the legacy stable-hostname feature, and a machine
+    with no name get no fill. Alternatives: the name always wins; a conflict
+    refusal; a per-cluster switch, off by default, which would make the default
+    Serge asked for off. The cost is that every named machine with no explicit
+    hostname changes its hostname at its next release, shown in the plan's
+    whole-configuration diff and needing approval, and that a filled hostname
+    overrides one a DHCP or cloud source gave.
+37. **A hostname equal to the machine's name is released at import and
+    adoption** (§2.3 step 4a, §6.1 item 5). The document is removed from the
+    stored base, whole, so the fill applies on every later release and a rename
+    reaches the machine. Alternatives: keep it explicit and rely on the operator
+    deleting it with a fragment, which fails the common case (an onboarded
+    machine is named from its own hostname); compare the name at each
+    publication and ignore an equal hostname, which leaves a second copy of the
+    hostname in the stored base that a rename makes stale and a review that
+    cannot tell filled from explicit. The cost is one value ingestion changes
+    that is not a secret, an amendment of the import-equivalence check, and a
+    release that can read as pending convergence against the baseline.
+38. **Publication refuses a filled hostname another machine holds
+    explicitly** (§6.1 item 6). Alternative: a review warning only. The failure
+    lands on a live cluster and is not cheap to undo, so a refusal is chosen
+    over a warning that leaves it to whoever approves the plan.
 
 ## 17. Traceability
 
@@ -2054,6 +2244,7 @@ in place as
 | §5.5 reserved text | §6.9 | SR §6.4, [SR §10](../design/research/20260924-structural-reference-composition.md#10-hand-off) |
 | §6 import base | §6.7, §18.2, A.3 | none: a departure recorded as choice §16.20 |
 | §6 early resolution, superset | §6.2, §6.9, §7.4 | SR §4, §5, [SR §6.2](../design/research/20260924-structural-reference-composition.md#62-criterion-2-effective-and-superset-dependencies), §6.4, §9 |
+| §2.3 step 4a, §6 step 5a, §6.1 hostname | none | Talos machinery v1.14.5 `config/types/network/hostname.go`, `config/generate/network.go`, `config/container/container.go`, the Talos 1.14 "Hostname" page; a scratch probe on the generated base, not kept (§6.1); none for `container` and `cloud`: choices §16.36 to §16.38 |
 | §6 step 7 literal copies | §6.9 | [SP §6.3](../design/research/20260925-sensitivity-provenance.md#63-criterion-3-remaining-leakage-risks-and-dependency-records), [SP §10](../design/research/20260925-sensitivity-provenance.md#10-hand-off) |
 | §7 validation stages | §6.9 | [SR §6.3](../design/research/20260924-structural-reference-composition.md#63-criterion-3-parity-validation-collisions-and-rejections) |
 | §8.1 tracer, fidelity | §6.9 | [SP §6.1](../design/research/20260925-sensitivity-provenance.md#61-criterion-1-sensitivity-through-each-transformation), [SP §8](../design/research/20260925-sensitivity-provenance.md#8-limits), [SP §9](../design/research/20260925-sensitivity-provenance.md#9-alternatives-and-decision-enabled) |
