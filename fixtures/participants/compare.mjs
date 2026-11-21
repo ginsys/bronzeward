@@ -5,8 +5,10 @@
 // comparison made then compares the server with itself. The driver therefore logs each row the page
 // adds while the watch runs (an observer on the events list), and the rules read that log as well as
 // the final rows:
-//   log   entries {op: "add", id, text, received}, {op: "clear"}, {op: "mark", name: "stop"|"restart"}
-//   final the rows shown after the watch, {id, text, received}
+//   log   entries {op: "add", id, text, received, dateTime}, {op: "clear"}, {op: "mark", name: "stop"|"restart"}
+//   final the rows shown after the watch, {id, text, received, dateTime}
+//         (dateTime is the row's <time datetime> attribute as written: a received row carries the
+//         browser's arrival instant, a final row the server's `at`)
 //   server the events the server serves, {id, type, at, data}, in order
 // Every function returns rows {rule, ok, detail}.
 
@@ -16,10 +18,10 @@ import { fileURLToPath } from "node:url";
 const row = (rule, ok, detail) => ({ rule, ok, detail: ok ? "" : detail });
 
 // compare: R1 no event shown twice without a clear between; R2 what was received is, in order, a
-// subsequence of what the server sent; R3 after the end the page shows exactly the server's events
-// with the server's times and no receipt prefix; R4 (an outage run only) rows were received both
+// subsequence of what the server sent; R3 after the end the page shows exactly the server's events,
+// each row's <time dateTime> equal to the event's `at`, and no receipt prefix; R4 (an outage run only) rows were received both
 // before the stop and after the restart; R5 each shown line names what its event holds.
-export function compare({ server, log, final, timeOf, outage = false }) {
+export function compare({ server, log, final, outage = false }) {
   const out = [];
   const ids = server.map((e) => e.id);
   const seen = new Set();
@@ -50,7 +52,7 @@ export function compare({ server, log, final, timeOf, outage = false }) {
     const f = final[i];
     if (f === undefined) return;
     if (f.id !== e.id) wrong.push(`row ${i} is ${f.id}, not ${e.id}`);
-    else if (f.received || !f.text.startsWith(`${timeOf(e.at)} `)) wrong.push(`${e.id} is not shown with the server's time`);
+    else if (f.received || f.dateTime !== e.at) wrong.push(`${e.id} is not shown with the server's time`);
   });
   out.push(row("R3", wrong.length === 0, wrong.join("; ")));
 
@@ -105,7 +107,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const w = JSON.parse(readFileSync(file, "utf8"));
   const i = opts.indexOf("--flow");
   const rows = [
-    ...compare({ server: w.server, log: w.log, final: w.final, timeOf: (at) => w.times[at], outage: opts.includes("--outage") }),
+    ...compare({ server: w.server, log: w.log, final: w.final, outage: opts.includes("--outage") }),
     ...(i < 0 ? [] : flow({ events: w.server, approvals: Number(opts[i + 2]), attempts: Number(opts[i + 1]) })),
   ];
   for (const r of rows) console.log(`${r.rule}\t${r.ok ? "ok" : "FAIL"}\t${r.detail}`);

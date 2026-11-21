@@ -20,17 +20,19 @@ const server = [
   op(5, "operation-state", { from: "sending", to: "verifying" }),
   op(6, "operation-state", { from: "verifying", to: "completed" }),
 ];
-// The page's clock, as the driver evaluates it in the browser: the server's time as shown.
+// The time the page shows in a row's text, and the instant its <time dateTime> carries: a received row
+// shows the browser's arrival (ARRIVAL), a final row the server's `at`.
 const timeOf = (at) => at.slice(11, 19);
+const ARRIVAL = "2026-11-20T09:59:59.123Z";
 const line = (e) => (e.type === "operation-state" ? `operation-state: ${e.data.from} → ${e.data.to}` : e.type);
-const row = (e, received) => ({ id: e.id, received, text: `${received ? "received " : ""}${received ? "09:59:59" : timeOf(e.at)} ${line(e)}` });
+const row = (e, received) => ({ id: e.id, received, dateTime: received ? ARRIVAL : e.at, text: `${received ? "received " : ""}${received ? "09:59:59" : timeOf(e.at)} ${line(e)}` });
 const added = (e) => ({ op: "add", ...row(e, true) });
 const run = () => ({
   // Three rows before the outage, three after it, then the end of the watch.
   log: [added(server[0]), added(server[1]), added(server[2]), { op: "mark", name: "stop" }, { op: "mark", name: "restart" }, added(server[3]), added(server[4]), added(server[5])],
   final: server.map((e) => row(e, false)),
 });
-const verdict = (r, o = {}) => Object.fromEntries(compare({ server, timeOf, outage: true, ...r, ...o }).map((x) => [x.rule, x.ok]));
+const verdict = (r, o = {}) => Object.fromEntries(compare({ server, outage: true, ...r, ...o }).map((x) => [x.rule, x.ok]));
 const only = (v, rule) => assert.deepEqual(Object.entries(v).filter(([, ok]) => !ok).map(([k]) => k), [rule]);
 
 test("a clean run passes every rule, and each rule is present", () => {
@@ -65,7 +67,7 @@ test("R2: a received id the server never sent, or one out of the server's order,
   assert.equal(verdict(restart)["R2"], true);
 });
 
-test("R3: a missing row, a leftover received prefix and a time from the receipt each fail", () => {
+test("R3: a missing row, a leftover received prefix, a dateTime from the receipt and a row with no dateTime each fail", () => {
   const missing = run();
   missing.final.splice(2, 1);
   // The rows after the gap move up a place, so R5's alignment fails with it.
@@ -73,9 +75,14 @@ test("R3: a missing row, a leftover received prefix and a time from the receipt 
   const prefix = run();
   prefix.final[0] = row(server[0], true);
   only(verdict(prefix), "R3");
+  // The row's text is right and its dateTime is the browser's arrival, not the server's time.
   const receipt = run();
-  receipt.final[1] = { ...receipt.final[1], text: `09:59:59 ${line(server[1])}` };
+  receipt.final[1] = { ...receipt.final[1], dateTime: ARRIVAL };
   only(verdict(receipt), "R3");
+  // A driver that stops logging the attribute cannot pass: the row has no dateTime at all.
+  const none = run();
+  delete none.final[2].dateTime;
+  only(verdict(none), "R3");
 });
 
 test("R4: no received row before the stop, or none after the restart, fails; no outage skips the rule", () => {
@@ -123,16 +130,15 @@ test("flow: one commitment, the expected attempts, one approval entry, the trans
 test("the command line prints one line per rule, exits 0 on a clean web-watch.json and 1 with a FAIL line on a defect", () => {
   const dir = mkdtempSync(join(tmpdir(), "watch-compare-"));
   try {
-    const times = Object.fromEntries(server.map((e) => [e.at, timeOf(e.at)]));
     const file = join(dir, "web-watch.json");
     const script = fileURLToPath(new URL("../../fixtures/participants/compare.mjs", import.meta.url));
-    writeFileSync(file, JSON.stringify({ server, times, ...run() }));
+    writeFileSync(file, JSON.stringify({ server, ...run() }));
     const clean = spawnSync("node", [script, file, "--outage", "--flow", "1", "1"], { encoding: "utf8" });
     assert.equal(clean.status, 0, clean.stdout);
     assert.deepEqual(clean.stdout.trim().split("\n").map((l) => l.split("\t").slice(0, 2).join(" ")), ["R1 ok", "R2 ok", "R3 ok", "R4 ok", "R5 ok", "F1 ok", "F2 ok", "F3 ok", "F4 ok"]);
     const bad = run();
-    bad.final.pop();
-    writeFileSync(file, JSON.stringify({ server, times, ...bad }));
+    bad.final[0].dateTime = ARRIVAL;
+    writeFileSync(file, JSON.stringify({ server, ...bad }));
     const broken = spawnSync("node", [script, file, "--outage"], { encoding: "utf8" });
     assert.equal(broken.status, 1);
     assert.match(broken.stdout, /^R3\tFAIL\t/m);
