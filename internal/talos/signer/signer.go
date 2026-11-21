@@ -63,8 +63,8 @@ var ErrUnavailable = errors.New("signer: the endpoint did not answer, or did not
 var tryLifetime = 2 * time.Minute
 
 // Extract is the CA certificate and key a first key holds. The endpoint is dialled only for a
-// talosconfig, whose own endpoints are ignored; the document is never kept.
-func Extract(ctx context.Context, kind Kind, document []byte, endpoint string) (provider.CAKey, error) {
+// talosconfig, whose own endpoints are ignored; the document is never kept. opts reach that dial only.
+func Extract(ctx context.Context, kind Kind, document []byte, endpoint string, opts ...talos.DialOption) (provider.CAKey, error) {
 	var ca *x509.PEMEncodedCertificateAndKey
 	switch kind {
 	case MachineConfig:
@@ -80,7 +80,7 @@ func Extract(ctx context.Context, kind Kind, document []byte, endpoint string) (
 		}
 		ca = b
 	case Talosconfig:
-		return fromTalosconfig(ctx, document, endpoint)
+		return fromTalosconfig(ctx, document, endpoint, opts)
 	default:
 		return provider.CAKey{}, &Refusal{RuleUnusable}
 	}
@@ -92,8 +92,8 @@ func Extract(ctx context.Context, kind Kind, document []byte, endpoint string) (
 
 // fromTalosconfig reads a control plane's machine configuration through the talosconfig at endpoint
 // and keeps the os CA key from the answer. The read needs `os:admin`.
-func fromTalosconfig(ctx context.Context, document []byte, endpoint string) (provider.CAKey, error) {
-	r, err := talos.Dial(ctx, document, endpoint)
+func fromTalosconfig(ctx context.Context, document []byte, endpoint string, opts []talos.DialOption) (provider.CAKey, error) {
+	r, err := talos.Dial(ctx, document, endpoint, opts...)
 	if err != nil {
 		return provider.CAKey{}, &Refusal{RuleUnusable}
 	}

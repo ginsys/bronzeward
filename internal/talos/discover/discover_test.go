@@ -31,7 +31,8 @@ type stand struct {
 
 func newCluster(t *testing.T) *stand {
 	t.Helper()
-	p := talostest.NewPKI(t)
+	// The certificate names node.test as well: a name endpoint is checked against its name.
+	p := talostest.NewPKIWithNames(t, "node.test")
 	c := &stand{p: p, a: talostest.Serve(t, p), b: talostest.Serve(t, p)}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -152,7 +153,7 @@ func TestDiscoverLimitedRefusesTooManyMembers(t *testing.T) {
 	c := newCluster(t)
 	tried := route(t, silent(t), map[string]string{"10.0.0.1": c.a.Endpoint, "10.0.0.2": c.b.Endpoint})
 	tc := c.p.Talosconfig(c.a.Endpoint, "", "")
-	_, err := DiscoverLimited(t.Context(), tc, "", c.a.Endpoint, 1)
+	_, err := DiscoverLimited(t.Context(), tc, "", c.a.Endpoint, "", 1)
 	var many *TooManyMembers
 	if !errors.As(err, &many) || many.Limit != 1 {
 		t.Fatalf("a bound of 1 over two members: %v; want *TooManyMembers with Limit 1", err)
@@ -161,7 +162,7 @@ func TestDiscoverLimitedRefusesTooManyMembers(t *testing.T) {
 		t.Fatalf("a member was dialled before the refusal: %v", got)
 	}
 	for _, bound := range []int{2, 0} {
-		res, err := DiscoverLimited(t.Context(), tc, "", c.a.Endpoint, bound)
+		res, err := DiscoverLimited(t.Context(), tc, "", c.a.Endpoint, "", bound)
 		if err != nil || len(res.Members) != 2 || res.Cut {
 			t.Fatalf("a bound of %d: %d members, cut %t, error %v; want the two members read whole", bound, len(res.Members), res.Cut, err)
 		}
@@ -184,7 +185,7 @@ func TestDiscoverLimitedCutByTheCaller(t *testing.T) {
 		}
 		return by[a.String()]
 	}
-	res, err := DiscoverLimited(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, 0)
+	res, err := DiscoverLimited(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, "", 0)
 	if err != nil {
 		t.Fatalf("a cut walk with the identity read is not an error: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestDiscoverLimitedCutByTheCaller(t *testing.T) {
 func TestDiscoverLimitedHasNoStartBound(t *testing.T) {
 	c := newCluster(t)
 	shorten(t, memberTimeout, time.Nanosecond)
-	res, err := DiscoverLimited(t.Context(), c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, 0)
+	res, err := DiscoverLimited(t.Context(), c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, "", 0)
 	if err != nil || res.ClusterID != "c-1" || res.Cut || len(res.Members) != 2 {
 		t.Fatalf("got %+v, %v; want the cluster read whole with the start timeout spent", res, err)
 	}
@@ -212,7 +213,7 @@ func TestDiscoverLimitedCutDuringTheMemberList(t *testing.T) {
 	c.a.Stall(talostest.MemberType, true)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second) // long enough for a slow runner to read the identity first
 	defer cancel()
-	res, err := DiscoverLimited(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, 0)
+	res, err := DiscoverLimited(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, "", 0)
 	if err != nil || res.ClusterID != "c-1" || !res.Cut || len(res.Members) != 0 {
 		t.Fatalf("got %+v, %v; want the identity, no members and Cut", res, err)
 	}
@@ -220,7 +221,7 @@ func TestDiscoverLimitedCutDuringTheMemberList(t *testing.T) {
 	d.a.Stall(talostest.InfoType, true)
 	ctx, cancel = context.WithTimeout(t.Context(), 400*time.Millisecond)
 	defer cancel()
-	if _, err := DiscoverLimited(ctx, d.p.Talosconfig(d.a.Endpoint, "", ""), "", d.a.Endpoint, 0); err == nil {
+	if _, err := DiscoverLimited(ctx, d.p.Talosconfig(d.a.Endpoint, "", ""), "", d.a.Endpoint, "", 0); err == nil {
 		t.Fatal("a context that ended before the identity was read is an error")
 	}
 }
@@ -242,7 +243,7 @@ func TestDiscoverLimitedStopsDialling(t *testing.T) {
 		cancel() // the caller's time runs out as the first address is dialled
 		return c.closed
 	}
-	res, err := DiscoverLimited(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, 0)
+	res, err := DiscoverLimited(ctx, c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint, "", 0)
 	if err != nil || !res.Cut || len(res.Members) != 1 || res.Members[0].Answered || res.Members[0].Address != "10.0.0.1" {
 		t.Fatalf("got %+v, %v; want one unanswered member at its first address and Cut", res, err)
 	}

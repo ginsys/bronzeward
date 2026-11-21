@@ -85,3 +85,26 @@ func validName(h string) bool {
 	last := labels[len(labels)-1]
 	return strings.Trim(last, "0123456789") != ""
 }
+
+// sourceRequest is where the server's endpoint comes from, as a refusal names it.
+const sourceRequest = "the request's endpoint"
+
+// ResolveEndpoint is the address a server dials for s, an endpoint from a request body: an IP literal
+// or a DNS name, with an optional port. A name is resolved here, once, and the caller dials the address
+// it gets for the connections to the endpoint itself (resolveEndpoint). name is s's host when it was resolved, and
+// "" for an IP literal.
+func ResolveEndpoint(ctx context.Context, s string) (addr, name string, err error) {
+	return resolveEndpoint(ctx, s, sourceRequest)
+}
+
+// CheckEndpoint is nil when s is an IP literal or a DNS name, with an optional port, and does no
+// lookup.
+func CheckEndpoint(s string) error {
+	if _, err := parseEndpoint(s); err == nil {
+		return nil
+	}
+	if _, _, ok := splitName(s); ok {
+		return nil
+	}
+	return errEndpoint
+}

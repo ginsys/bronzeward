@@ -132,7 +132,7 @@ func routes() []*route {
 		endpointReplacement().on(human(m(post, "/machines/{id}/talos-endpoints", author))),
 		nameReplacement().on(human(m(post, "/machines/{id}/names", author))),
 		firstKeySupply().on(human(m(post, "/clusters/{id}/first-keys", author))),
-		read(human(readOnlyPost(m(post, "/discoveries", author), func() input { return &firstKeyInput{} })), postDiscovery),
+		read(human(readOnlyPost(m(post, "/discoveries", author), func() input { return &discoveryInput{} })), postDiscovery),
 		draftCreation().on(m(post, "/drafts", author)),
 	)
 	rs = append(rs,

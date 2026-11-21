@@ -55,7 +55,7 @@ const NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 // The talosconfig cut to one context: the one `name` gives, else the current one, with its certificate
 // authority, certificate and key and nothing else, as discover.OneContext writes it (the Go golden and
 // this one's test read the same two files). The reasons name no text of the file.
-export function cutContext(text: string, name: string | undefined): { document: string; endpoint: string } {
+export function cutContext(text: string, name: string | undefined): { document: string; endpoint: string; count: number } {
   if (text.length > MAX_FILE) throw new Error("the file is larger than 512 KiB, the most a first key may be");
   let cfg: unknown;
   try {
@@ -72,8 +72,10 @@ export function cutContext(text: string, name: string | undefined): { document: 
   const { ca, crt, key, endpoints } = c ?? {};
   if (![ca, crt, key].every((v) => typeof v === "string" && v !== "")) throw new Error(NO_CREDENTIALS);
   const endpoint = Array.isArray(endpoints) && typeof endpoints[0] === "string" ? endpoints[0] : "";
+  // How many endpoints the context lists: the page uses the first and says so.
+  const count = Array.isArray(endpoints) ? endpoints.filter((e) => typeof e === "string").length : 0;
   // `endpoints: []` as Talos writes it, so the two cuts parse to one document.
-  return { document: stringify({ context: picked, contexts: { [picked]: { endpoints: [], ca, crt, key } } }), endpoint };
+  return { document: stringify({ context: picked, contexts: { [picked]: { endpoints: [], ca, crt, key } } }), endpoint, count };
 }
 
 // The page's `send`. A write that carries the document (it has a `released` hook) is kept per write layer,
@@ -123,9 +125,9 @@ const sentence = (reason: string) => `${reason.charAt(0).toUpperCase()}${reason.
 // (internal/talos/endpoint.go ParseEndpoint): text in brackets holds only hex digits, colons and dots
 // (an IPv6 address); more than one colon, with only those characters, is an IPv6 address the server will
 // ask to have bracketed; and with at most one colon the host before it is four dotted numbers. Anything
-// else is a name, and is never sent. What has the shape is sent as it is, and the server's own sentence
-// says what is wrong with an octet, a port or the brackets: the page copies the shape, never the parser.
-// The server cannot use a name yet; when it can, this check and its sentence go.
+// else is a name. Both are sent as they are and the server's own sentence says what is wrong with an
+// octet, a port or the brackets: the page copies the shape, never the parser. The page asks only to say,
+// after a read, whether the server resolved a name.
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 const V6_TEXT = /^[0-9a-f:.]+$/i;
 export function isAddress(endpoint: string): boolean {
@@ -141,15 +143,20 @@ export function isAddress(endpoint: string): boolean {
 }
 
 const NO_ENDPOINT = "The talosconfig's context names no endpoint: type the IP address of a control-plane node.";
-const nameNote = (endpoint: string) =>
-  `This talosconfig's endpoint is ${endpoint}, which is not an IP address. The server cannot use a name yet: type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.`;
+// After a refused read of a name: the server resolves the name once, dials that address and checks the node's
+// certificate against the name, so a name that does not resolve, or one the nodes' certificates do not list, is
+// a 503 a node's own address does not meet. The server's 503 does not say which of the two, so the page names both.
+const nameHint = (endpoint: string) =>
+  ` The endpoint ${endpoint} is a name: the nodes' certificates may not list it. Add the name to machine.certSANs of the control-plane machines, or type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.`;
 
-// The endpoint a read will use: the one typed, else the chosen context's first. Undefined when the text is
-// not a talosconfig the page can cut (the read's own sentence says why).
-function readEndpoint(text: string, context: string | undefined, typed: string | undefined): string | undefined {
-  if (typed !== undefined && typed !== "") return typed;
+// The endpoint a read will use: the one typed, else the chosen context's first, with how many the context
+// lists when it is the context's. Undefined when the text is not a talosconfig the page can cut (the read's
+// own sentence says why).
+function readEndpoint(text: string, context: string | undefined, typed: string | undefined): { endpoint: string; count: number } | undefined {
+  if (typed !== undefined && typed !== "") return { endpoint: typed, count: 1 };
   try {
-    return cutContext(text, context).endpoint;
+    const { endpoint, count } = cutContext(text, context);
+    return { endpoint, count };
   } catch {
     return undefined;
   }
@@ -159,10 +166,12 @@ function readEndpoint(text: string, context: string | undefined, typed: string |
 // page can cut.
 export function endpointNote(text: string | undefined, context: string, typed: string): string | undefined {
   if (text === undefined) return undefined;
-  const endpoint = readEndpoint(text, context, typed.trim());
-  if (endpoint === undefined) return undefined;
-  if (endpoint === "") return NO_ENDPOINT;
-  return isAddress(endpoint) ? `The page will try the cluster at ${endpoint}.` : nameNote(endpoint);
+  const read = readEndpoint(text, context, typed.trim());
+  if (read === undefined) return undefined;
+  if (read.endpoint === "") return NO_ENDPOINT;
+  // The page uses one endpoint: the first of a list says so, and says how long the list is.
+  if (read.count > 1) return `The page will try the first of ${read.count} endpoints, ${read.endpoint}.`;
+  return `The page will try the cluster at ${read.endpoint}.`;
 }
 
 // A discovery's failure as whole sentences, with no lead of its own: the page writes "Nothing was
@@ -189,9 +198,9 @@ const keyAddress = (f: Discovery) => members(f).find((m) => m.role === "controlp
 
 // Reads the cluster's members with the cut talosconfig, and refuses what the CLI refuses before it records
 // anything: a contract this server does not render, and a cluster with no control-plane member to carry the
-// first key. The file's text is held only as its cut. A name is never sent: the server takes only an IP
-// address (endpointNote says so before the button). Each `why` is whole sentences with no lead of its own,
-// because the page writes "Nothing was recorded." once: a discovery only reads.
+// first key. The file's text is held only as its cut. A name is sent as it is: the server resolves it once
+// and answers the address it dialled (found.endpoint). Each `why` is whole sentences with no lead of its
+// own, because the page writes "Nothing was recorded." once: a discovery only reads.
 export async function discoverCluster(env: Env, text: string, o: { context?: string; endpoint?: string }): Promise<{ ok: true; plan: Plan } | { ok: false; why: string }> {
   let cut;
   try {
@@ -202,9 +211,8 @@ export async function discoverCluster(env: Env, text: string, o: { context?: str
   const typed = (o.endpoint ?? "").trim();
   const endpoint = typed !== "" ? typed : cut.endpoint;
   if (endpoint === "") return { ok: false, why: NO_ENDPOINT };
-  if (!isAddress(endpoint)) return { ok: false, why: nameNote(endpoint) };
   const out = await env.send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", document: cut.document, endpoint }, released: () => {} });
-  if (out.kind !== "done") return { ok: false, why: discoveryWhy(out) };
+  if (out.kind !== "done") return { ok: false, why: `${discoveryWhy(out)}${out.kind === "refused" && out.status === 503 && !isAddress(endpoint) ? nameHint(endpoint) : ""}` };
   const found = out.data as Discovery;
   if (!found.supported) return { ok: false, why: `Contract ${found.contract} is not the contract of the machinery in this server, so it would refuse the cluster.` };
   if (keyAddress(found) === undefined) return { ok: false, why: "No control-plane member answered, so no address can carry the first key. Run it again once one does." };

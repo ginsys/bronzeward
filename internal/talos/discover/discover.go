@@ -17,6 +17,7 @@ import (
 	"net/netip"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cosi-project/runtime/pkg/safe"
@@ -24,6 +25,7 @@ import (
 	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
 	"github.com/siderolabs/talos/pkg/machinery/resources/cluster"
 	"github.com/siderolabs/talos/pkg/machinery/resources/hardware"
+	"github.com/siderolabs/talos/pkg/machinery/resources/k8s"
 	"github.com/siderolabs/talos/pkg/machinery/resources/runtime"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -40,11 +42,13 @@ type Member struct {
 
 // Result is what a cluster reports. Contract is the minor of Version; Supported is whether it is
 // the minor of the machinery this binary links, the one the server renders. KubernetesEndpoint is
-// a proposal from the first control-plane member, for the operator to replace.
+// a proposal for the operator to replace: the endpoint the control-plane members that answered all
+// report as the cluster's own (clusterEndpoint), else the first control-plane member's address.
 type Result struct {
 	ClusterID, Version, Contract, KubernetesEndpoint string
 	// Endpoint is the address Discover dialled, as host:port. ResolvedFrom is the DNS name it was
-	// resolved from, or "" when the endpoint was an IP literal.
+	// resolved from, by the walk or by the caller that passed it as DiscoverLimited's serverName, or ""
+	// when the endpoint was an IP literal given with no name.
 	Endpoint, ResolvedFrom string
 	Supported              bool
 	Members                []Member
@@ -105,8 +109,11 @@ var ErrNoEndpoint = errors.New("discover: the talosconfig names no endpoint")
 // "") and reads the cluster. No other context is used. A name that the file does not hold is
 // ErrUnknownContext, before any dial. A DNS name is resolved once and the address it gave is dialled
 // (resolveEndpoint). A member that does not answer is listed as such, not an error.
+//
+// A name endpoint's certificate check is against the name, and the dial is on the address
+// (persistence-api §3.3): the name is the one resolveEndpoint resolved.
 func Discover(ctx context.Context, talosconfig []byte, contextName, endpoint string) (Result, error) {
-	return walk(ctx, talosconfig, contextName, endpoint, 0, false)
+	return walk(ctx, talosconfig, contextName, endpoint, "", 0, false)
 }
 
 // DiscoverLimited is Discover for a caller that bounds its work, the server, with its ctx alone: the
@@ -115,13 +122,18 @@ func Discover(ctx context.Context, talosconfig []byte, contextName, endpoint str
 // read and before any member is dialled. A caller whose ctx ends once the cluster's identity is read
 // gets that identity, the members read so far, the rest listed unanswered, and Result.Cut set: only an
 // identity that was not read is an error.
-func DiscoverLimited(ctx context.Context, talosconfig []byte, contextName, endpoint string, maxMembers int) (Result, error) {
-	return walk(ctx, talosconfig, contextName, endpoint, maxMembers, true)
+//
+// serverName is for a caller that resolved a name itself and passes the address as endpoint: the
+// bare name the endpoint's certificate is checked against, in place of that address. "" adds no
+// option, and an endpoint that is itself a name is checked against its own name, as in Discover. The
+// members are dialled at the addresses the member list gives, with no server name.
+func DiscoverLimited(ctx context.Context, talosconfig []byte, contextName, endpoint, serverName string, maxMembers int) (Result, error) {
+	return walk(ctx, talosconfig, contextName, endpoint, serverName, maxMembers, true)
 }
 
 // walk is both: limited says the caller's ctx is the only bound on the reads from the endpoint, and
 // that a ctx that ends after the identity is read is a Cut result, not an error.
-func walk(ctx context.Context, talosconfig []byte, contextName, endpoint string, maxMembers int, limited bool) (Result, error) {
+func walk(ctx context.Context, talosconfig []byte, contextName, endpoint, serverName string, maxMembers int, limited bool) (Result, error) {
 	creds, first, err := credentials(talosconfig, contextName)
 	if err != nil {
 		return Result{}, err
@@ -146,7 +158,10 @@ func walk(ctx context.Context, talosconfig []byte, contextName, endpoint string,
 	if err != nil {
 		return Result{}, err
 	}
-	n, err := dial(startCtx, creds, ep)
+	if name == "" {
+		name = serverName
+	}
+	n, err := dial(startCtx, creds, ep, name)
 	if err != nil {
 		return Result{}, err
 	}
@@ -173,20 +188,35 @@ func walk(ctx context.Context, talosconfig []byte, contextName, endpoint string,
 	if maxMembers > 0 && list.Len() > maxMembers {
 		return Result{}, &TooManyMembers{Limit: maxMembers}
 	}
+	// The cluster's own endpoint, as the control-plane members that answered report it: set once one
+	// reports a value, and dropped for good when a member reports none or another one.
+	var own string
+	var cpAnswered int
+	agree := true
 	for ms := range list.All() {
 		s := ms.TypedSpec()
 		m := Member{NodeID: s.NodeID, Hostname: s.Hostname, Role: "worker"}
 		if s.MachineType.IsControlPlane() {
 			m.Role = "controlplane"
 		}
-		readMemberAt(ctx, creds, s.Addresses, &m)
+		reported := readMemberAt(ctx, creds, s.Addresses, &m)
 		if !m.Answered && ended(ctx) {
 			res.Cut = true
 		}
 		if m.Role == "controlplane" && s.ControlPlane != nil && res.KubernetesEndpoint == "" && m.Address != "" {
 			res.KubernetesEndpoint = "https://" + net.JoinHostPort(m.Address, strconv.Itoa(s.ControlPlane.APIServerPort))
 		}
+		if m.Role == "controlplane" && m.Answered {
+			cpAnswered++
+			if reported == "" || own != "" && reported != own {
+				agree = false
+			}
+			own = reported
+		}
 		res.Members = append(res.Members, m)
+	}
+	if cpAnswered > 0 && agree {
+		res.KubernetesEndpoint = own
 	}
 	return res, nil
 }
@@ -237,20 +267,22 @@ func version(ctx context.Context, n *node) (string, error) {
 // a member is therefore the number of its listed addresses times memberTimeout, or less when the caller's
 // ctx ends first: no address is dialled after that. Address is the one
 // that answered, or the first listed when none did, and a member that did not answer keeps the
-// NodeID of its list entry and nothing else from any address.
-func readMemberAt(ctx context.Context, creds *clientconfig.Context, addrs []netip.Addr, m *Member) {
+// NodeID of its list entry and nothing else from any address. It returns the cluster endpoint a
+// control-plane member that answered reports (readMember), "" for any other member.
+func readMemberAt(ctx context.Context, creds *clientconfig.Context, addrs []netip.Addr, m *Member) (reported string) {
 	for _, a := range addrs {
 		if m.Address == "" {
 			m.Address = a.String()
 		}
 		if ctx.Err() != nil { // strict: an address is still tried while the deadline is near and has not passed
-			return
+			return ""
 		}
-		if read, ok := readMember(ctx, creds, a, m.NodeID); ok {
+		if read, own, ok := readMember(ctx, creds, a, m.NodeID, m.Role == "controlplane"); ok {
 			m.Address, m.SMBIOSUUID, m.Platform, m.Answered = a.String(), read.SMBIOSUUID, read.Platform, true
-			return
+			return own
 		}
 	}
+	return ""
 }
 
 // readMember reads the member at address a under memberTimeout and reports what it said, and whether
@@ -259,29 +291,62 @@ func readMemberAt(ctx context.Context, creds *clientconfig.Context, addrs []neti
 // PlatformMetadata read fails. Only the
 // SystemInformation and PlatformMetadata resources may be missing: a container node has no SMBIOS
 // information, and an old node may report no platform. Nothing is returned for an address that did
-// not answer in full.
-func readMember(ctx context.Context, creds *clientconfig.Context, a netip.Addr, nodeID string) (Member, bool) {
+// not answer in full. For a control-plane member (controlPlane) it also reads the cluster endpoint the
+// node reports, "" when it reports none a caller can use (clusterEndpoint): that read is no part of the
+// answer, so a node that refuses it, or does not have the resource, is still an answering member.
+func readMember(ctx context.Context, creds *clientconfig.Context, a netip.Addr, nodeID string, controlPlane bool) (Member, string, bool) {
 	ctx, cancel := context.WithTimeout(ctx, memberTimeout)
 	defer cancel()
-	n, err := dial(ctx, creds, memberEndpoint(a))
+	n, err := dial(ctx, creds, memberEndpoint(a), "")
 	if err != nil {
-		return Member{}, false
+		return Member{}, "", false
 	}
 	defer n.close()
 	id, err := safe.StateGetByID[*cluster.Identity](ctx, n.api.COSI, cluster.LocalIdentity)
 	if err != nil || nodeID == "" || id.TypedSpec().NodeID != nodeID { // an empty ID names no node, on either side
-		return Member{}, false
+		return Member{}, "", false
 	}
 	var read Member
 	if si, err := safe.StateGetByID[*hardware.SystemInformation](ctx, n.api.COSI, hardware.SystemInformationID); err == nil {
 		read.SMBIOSUUID = si.TypedSpec().UUID
 	} else if !state.IsNotFoundError(err) {
-		return Member{}, false
+		return Member{}, "", false
 	}
 	if pm, err := safe.StateGetByID[*runtime.PlatformMetadata](ctx, n.api.COSI, runtime.PlatformMetadataID); err == nil {
 		read.Platform = platform(pm.TypedSpec().Platform)
 	} else if !state.IsNotFoundError(err) {
-		return Member{}, false
+		return Member{}, "", false
 	}
-	return read, true
+	var own string
+	if controlPlane {
+		// KubePrismEndpoints is not sensitive, unlike the API server's own configuration, which a reader
+		// certificate cannot read: its first entry is the cluster's endpoint where the machine
+		// configuration names one, and localhost where it names none.
+		if kp, err := safe.StateGetByID[*k8s.KubePrismEndpoints](ctx, n.api.COSI, k8s.KubePrismEndpointsID); err == nil {
+			own = clusterEndpoint(kp.TypedSpec().Endpoints)
+		}
+	}
+	return read, own, true
+}
+
+// clusterEndpoint is the Kubernetes endpoint (https, host and port) that es, a node's KubePrism
+// endpoints, give as the cluster's own, or "" for no value: the first entry counts, and only when its
+// host is an IP address with no zone that is not unspecified, or a DNS name other than localhost, in
+// the grammar the cluster record takes (validName, with no trailing dot and no underscore, as
+// internal/api hostShape), and its port is 1 to 65535. The list holds localhost on a control-plane node with no
+// cluster endpoint, and the other members' addresses after the first entry, so no other entry says
+// anything about the cluster's endpoint.
+func clusterEndpoint(es []k8s.KubePrismEndpoint) string {
+	if len(es) == 0 || es[0].Port < 1 || es[0].Port > 65535 {
+		return ""
+	}
+	host := es[0].Host
+	if a, err := netip.ParseAddr(host); err == nil {
+		if a.Zone() != "" || a.IsUnspecified() {
+			return ""
+		}
+	} else if !validName(host) || strings.HasSuffix(host, ".") || strings.Contains(host, "_") || strings.EqualFold(host, "localhost") {
+		return ""
+	}
+	return "https://" + net.JoinHostPort(host, strconv.FormatUint(uint64(es[0].Port), 10))
 }

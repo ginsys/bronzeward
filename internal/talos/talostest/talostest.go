@@ -42,6 +42,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/resources/cluster"
 	cfgres "github.com/siderolabs/talos/pkg/machinery/resources/config"
 	"github.com/siderolabs/talos/pkg/machinery/resources/hardware"
+	"github.com/siderolabs/talos/pkg/machinery/resources/k8s"
 	"github.com/siderolabs/talos/pkg/machinery/resources/runtime"
 	"github.com/siderolabs/talos/pkg/machinery/role"
 	"google.golang.org/grpc"
@@ -61,6 +62,7 @@ const (
 	MachineConfigType     = cfgres.MachineConfigType
 	MemberType            = cluster.MemberType
 	PlatformMetadataType  = runtime.PlatformMetadataType
+	KubePrismType         = k8s.KubePrismEndpointsType
 )
 
 // serverIPs are the addresses a server certificate names: 127.0.0.1 and two more, for the members a
@@ -76,7 +78,17 @@ type PKI struct {
 }
 
 // NewPKI generates a PKI.
-func NewPKI(t testing.TB) PKI {
+func NewPKI(t testing.TB) PKI { return NewPKIFor(t, nil, serverIPs) }
+
+// NewPKIWithNames is NewPKI whose server certificate also names dnsNames, as a node's does for the
+// DNS name its cluster is reached by (machine.certSANs).
+func NewPKIWithNames(t testing.TB, dnsNames ...string) PKI {
+	t.Helper()
+	return NewPKIFor(t, dnsNames, serverIPs)
+}
+
+// NewPKIFor is NewPKI whose server certificate names dnsNames and ips, and nothing else.
+func NewPKIFor(t testing.TB, dnsNames []string, ips []net.IP) PKI {
 	t.Helper()
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -96,7 +108,7 @@ func NewPKI(t testing.TB) PKI {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaf := func(serial int64, usage x509.ExtKeyUsage, ips []net.IP) ([]byte, []byte) {
+	leaf := func(serial int64, usage x509.ExtKeyUsage, names []string, ips []net.IP) ([]byte, []byte) {
 		k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
 			t.Fatal(err)
@@ -104,7 +116,7 @@ func NewPKI(t testing.TB) PKI {
 		tmpl := &x509.Certificate{
 			SerialNumber: big.NewInt(serial), Subject: pkix.Name{CommonName: "leaf", Organization: []string{"os:admin"}},
 			NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
-			KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}, IPAddresses: ips,
+			KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}, DNSNames: names, IPAddresses: ips,
 		}
 		der, err := x509.CreateCertificate(rand.Reader, tmpl, ca, &k.PublicKey, caKey)
 		if err != nil {
@@ -116,12 +128,12 @@ func NewPKI(t testing.TB) PKI {
 		}
 		return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kder})
 	}
-	srvCrt, srvKey := leaf(2, x509.ExtKeyUsageServerAuth, serverIPs)
+	srvCrt, srvKey := leaf(2, x509.ExtKeyUsageServerAuth, dnsNames, ips)
 	srv, err := tls.X509KeyPair(srvCrt, srvKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	crt, key := leaf(3, x509.ExtKeyUsageClientAuth, nil)
+	crt, key := leaf(3, x509.ExtKeyUsageClientAuth, nil, nil)
 	pool := x509.NewCertPool()
 	pool.AddCert(ca)
 	return PKI{CAPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), CrtPEM: crt, KeyPEM: key, Server: srv, Pool: pool}
@@ -129,15 +141,22 @@ func NewPKI(t testing.TB) PKI {
 
 // NewPKIFromCA is a PKI whose certificate authority is ca, a cluster's os CA as a signer holds it:
 // the CA signs the server's certificate for serverIPs and an os:admin client certificate, and the
-// node trusts it, so a certificate a signer makes from the same CA key is accepted.
-func NewPKIFromCA(t testing.TB, ca *cx509.PEMEncodedCertificateAndKey) PKI {
+// node trusts it, so a certificate a signer makes from the same CA key is accepted. The server's
+// certificate also names dnsNames.
+func NewPKIFromCA(t testing.TB, ca *cx509.PEMEncodedCertificateAndKey, dnsNames ...string) PKI {
+	t.Helper()
+	return NewPKIFromCAFor(t, ca, dnsNames, serverIPs)
+}
+
+// NewPKIFromCAFor is NewPKIFromCA whose server certificate names dnsNames and ips, and nothing else.
+func NewPKIFromCAFor(t testing.TB, ca *cx509.PEMEncodedCertificateAndKey, dnsNames []string, ips []net.IP) PKI {
 	t.Helper()
 	authority, err := cx509.NewCertificateAuthorityFromCertificateAndKey(ca)
 	if err != nil {
 		t.Fatal("talostest: the certificate authority does not load")
 	}
 	now := time.Now()
-	srv, err := cx509.NewKeyPair(authority, cx509.IPAddresses(serverIPs),
+	srv, err := cx509.NewKeyPair(authority, cx509.IPAddresses(ips), cx509.DNSNames(dnsNames),
 		cx509.KeyUsage(x509.KeyUsageDigitalSignature), cx509.ExtKeyUsage([]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}),
 		cx509.NotBefore(now.Add(-time.Hour)), cx509.NotAfter(now.Add(time.Hour)))
 	if err != nil {
@@ -495,6 +514,24 @@ func (n *Node) SetMembers(t testing.TB, ms ...Member) {
 		}
 		n.set(t, r)
 	}
+}
+
+// Endpoint is one entry of a node's KubePrismEndpoints: the host and port a node reaches the
+// Kubernetes API server at.
+type Endpoint struct {
+	Host string
+	Port uint32
+}
+
+// SetKubePrismEndpoints makes the node report exactly these KubePrism endpoints, in order. A control
+// plane node of a cluster with its own endpoint lists that endpoint first.
+func (n *Node) SetKubePrismEndpoints(t testing.TB, es ...Endpoint) {
+	t.Helper()
+	r := k8s.NewKubePrismEndpoints(k8s.NamespaceName, k8s.KubePrismEndpointsID)
+	for _, e := range es {
+		r.TypedSpec().Endpoints = append(r.TypedSpec().Endpoints, k8s.KubePrismEndpoint{Host: e.Host, Port: e.Port})
+	}
+	n.set(t, r)
 }
 
 // SetPlatform makes the node report name as its Talos platform ("metal", "container", "aws" ...).

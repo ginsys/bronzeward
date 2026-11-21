@@ -9,6 +9,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/role"
 
 	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/talos"
 	"github.com/ginsys/bronzeward/internal/talos/discover"
 	"github.com/ginsys/bronzeward/internal/talos/signer"
 )
@@ -42,6 +43,20 @@ func postDiscovery(a *API, w http.ResponseWriter, q *request) {
 	}
 	a.o.logf("%s %s %s: 200 discovery by %s, %d members, complete %t", q.id, q.r.Method, q.r.URL.EscapedPath(), q.principal.ID, len(body.Members), body.Complete)
 	writeJSON(w, "application/json", http.StatusOK, body)
+}
+
+// discoveryInput is a first key as POST /discoveries takes it: the endpoint is an IP literal or a DNS name,
+// with an optional port. The first-key and machine routes keep the IP literal rule (§3.3).
+type discoveryInput struct{ firstKeyInput }
+
+func (in *discoveryInput) check(*API) error {
+	if err := in.checkKey(); err != nil {
+		return err
+	}
+	if discover.CheckEndpoint(in.Endpoint) != nil {
+		return errors.New("endpoint must be an IP literal (an IPv6 literal in brackets) or a DNS name, with an optional port from 1 to 65535")
+	}
+	return nil
 }
 
 // discoveryMember is one member of a discovered cluster. SMBIOSUUID and Platform are empty when the
@@ -91,11 +106,20 @@ func (a *API) discoverCluster(q *request) (discoveryBody, error) {
 		}
 		return discoveryBody{}, ref
 	}
-	in := q.input.(*firstKeyInput)
+	in := &q.input.(*discoveryInput).firstKeyInput
+	// A name is resolved once, here, and the key read, the signing and the first reads of the cluster go to the
+	// address it gave (persistence-api.md §3.3, choice §17.46): no later lookup can send a request to another
+	// node than the one the key was read from. For a name the node's certificate is checked against the name,
+	// as talosctl does, and the dial stays on the address (name is "" for an IP literal). The walk dials each
+	// member at an address the member list gives, with no name.
+	endpoint, name, err := a.o.resolve(dctx, in.Endpoint)
+	if err != nil {
+		return discoveryBody{}, discoveryRefusal(err)
+	}
 	// A talosconfig is read at the endpoint, which may accept the connection and stall: the extraction is
 	// bounded like every node read, inside the deadline. The walk below has the deadline alone.
 	ca, err := nodeRead(dctx, a.o.nodeTimeout, func(c context.Context) (provider.CAKey, error) {
-		return signer.Extract(c, signer.Kind(in.Kind), in.Document.bytes(), in.Endpoint)
+		return signer.Extract(c, signer.Kind(in.Kind), in.Document.bytes(), endpoint, talos.ServerName(name))
 	})
 	if err != nil {
 		return discoveryBody{}, discoveryRefusal(err)
@@ -109,12 +133,12 @@ func (a *API) discoverCluster(q *request) (discoveryBody, error) {
 	if err != nil {
 		return discoveryBody{}, discoveryRefusal(&signer.Refusal{Rule: signer.RuleUnusable}) // a key that parses and cannot sign is an unusable document
 	}
-	tc, err := cert.Config(in.Endpoint)
+	tc, err := cert.Config(endpoint)
 	if err != nil {
 		return discoveryBody{}, err
 	}
 	defer clear(tc)
-	res, err := discover.DiscoverLimited(dctx, tc, "", in.Endpoint, maxDiscoveryMembers)
+	res, err := discover.DiscoverLimited(dctx, tc, "", endpoint, name, maxDiscoveryMembers)
 	if err == nil && res.ClusterID == "" {
 		err = errors.New("the endpoint gave no cluster ID")
 	}
@@ -132,7 +156,7 @@ func (a *API) discoverCluster(q *request) (discoveryBody, error) {
 
 // discoveryRefusal is the answer to a failed extraction or discovery. The signer's own rules are 422,
 // as they are for a first key; a cluster with more members than the bound is 422 too. Anything else is
-// 503 talos-access-unavailable, whether the endpoint did not answer, did not accept the key or did not
+// 503 talos-access-unavailable, whether the endpoint's name did not resolve, the endpoint did not answer, did not accept the key or did not
 // give the cluster's identity: a refused key is not told apart from an unreachable endpoint. No answer
 // quotes the document or a node's text.
 func discoveryRefusal(err error) error {
@@ -146,5 +170,5 @@ func discoveryRefusal(err error) error {
 		return refuse(http.StatusUnprocessableEntity, "validation-failed", "the first key is refused; nothing was recorded").with("rule", rf.Rule)
 	}
 	return refuse(http.StatusServiceUnavailable, "talos-access-unavailable",
-		"the endpoint did not answer, did not accept a certificate signed from the key, or did not give the cluster's identity; check the key and the endpoint; nothing was recorded")
+		"the endpoint did not resolve, did not answer, did not accept a certificate signed from the key, or did not give the cluster's identity; check the key and the endpoint; nothing was recorded")
 }

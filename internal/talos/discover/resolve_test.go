@@ -187,3 +187,22 @@ func TestResolveEndpointGrammar(t *testing.T) {
 		t.Errorf("the resolver was asked %q for an input the grammar refuses", asked()[before:])
 	}
 }
+
+// TestCheckEndpoint: an IP literal or a DNS name, each with an optional port, passes and nothing is
+// looked up; every other shape is refused.
+func TestCheckEndpoint(t *testing.T) {
+	asked := names(t, nil)
+	for in, ok := range map[string]bool{
+		"10.5.0.5": true, "10.5.0.5:50000": true, "[2001:db8::1]:6443": true, "node.example.org": true,
+		"node.example.org:6443": true, "": false, "https://node.example.org": false, "user@node.example.org": false,
+		"node.example.org:0": false, "node.example.org:65536": false, "node.example.org/x": false, "10.5.0.256": false,
+		"fe80::1%eth0": false, " node.example.org": false,
+	} {
+		if err := CheckEndpoint(in); (err == nil) != ok {
+			t.Errorf("%q: %v, want accepted %v", in, err, ok)
+		}
+	}
+	if got := asked(); len(got) != 0 {
+		t.Errorf("a check looked up %v", got)
+	}
+}

@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,7 +40,18 @@ func newDiscoveryEnv(t *testing.T, o options, maxCert time.Duration) *discoveryE
 // control plane configuration with ca's key, so every kind of first key can be read through it.
 func discoveryNode(t *testing.T, ca *x509.PEMEncodedCertificateAndKey, members ...talostest.Member) (*talostest.Node, talostest.PKI) {
 	t.Helper()
-	pki := talostest.NewPKIFromCA(t, ca)
+	return discoveryNodeNamed(t, ca, nil, members...)
+}
+
+// discoveryNodeNamed is discoveryNode whose certificate also names dnsNames.
+func discoveryNodeNamed(t *testing.T, ca *x509.PEMEncodedCertificateAndKey, dnsNames []string, members ...talostest.Member) (*talostest.Node, talostest.PKI) {
+	t.Helper()
+	return discoveryNodeFor(t, talostest.NewPKIFromCA(t, ca, dnsNames...), ca, members...)
+}
+
+// discoveryNodeFor is discoveryNode serving with pki, whatever names its certificate holds.
+func discoveryNodeFor(t *testing.T, pki talostest.PKI, ca *x509.PEMEncodedCertificateAndKey, members ...talostest.Member) (*talostest.Node, talostest.PKI) {
+	t.Helper()
 	n := talostest.Serve(t, pki)
 	n.SetMachineConfig(t, []byte(controlPlaneConfig(ca)))
 	n.SetNodeID(t, "n1")
@@ -174,16 +188,18 @@ func TestDiscoveryInputRefusals(t *testing.T) {
 		status int
 		code   string
 	}{
-		"viewer":            {discoveryCall(d.human("h-viewer"), "machine-config", doc, n.Endpoint), 403, "forbidden"},
-		"automation":        {discoveryCall(d.robot, "machine-config", doc, n.Endpoint), 403, "forbidden"},
-		"no endpoint":       {discoveryCall(d.author, "machine-config", doc, ""), 400, "invalid-request"},
-		"DNS endpoint":      {discoveryCall(d.author, "machine-config", doc, "node.example.test:50000"), 400, "invalid-request"},
-		"unknown kind":      {discoveryCall(d.author, "kubeconfig", doc, n.Endpoint), 400, "invalid-request"},
-		"empty document":    {discoveryCall(d.author, "machine-config", "", n.Endpoint), 400, "invalid-request"},
-		"no document":       {raw(`{"kind":"machine-config","endpoint":"` + n.Endpoint + `"}`), 400, "invalid-request"},
-		"document not text": {raw(`{"kind":"machine-config","document":1,"endpoint":"` + n.Endpoint + `"}`), 400, "invalid-request"},
-		"a Talos context":   {raw(`{"kind":"machine-config","document":` + q(doc) + `,"endpoint":"` + n.Endpoint + `","talosContext":"x"}`), 400, "invalid-request"},
-		"a query":           {withQuery, 400, "invalid-request"},
+		"viewer":             {discoveryCall(d.human("h-viewer"), "machine-config", doc, n.Endpoint), 403, "forbidden"},
+		"automation":         {discoveryCall(d.robot, "machine-config", doc, n.Endpoint), 403, "forbidden"},
+		"no endpoint":        {discoveryCall(d.author, "machine-config", doc, ""), 400, "invalid-request"},
+		"a URL endpoint":     {discoveryCall(d.author, "machine-config", doc, "https://node.example.test"), 400, "invalid-request"},
+		"a name, port 0":     {discoveryCall(d.author, "machine-config", doc, "node.example.test:0"), 400, "invalid-request"},
+		"a name with a path": {discoveryCall(d.author, "machine-config", doc, "node.example.test/x"), 400, "invalid-request"},
+		"unknown kind":       {discoveryCall(d.author, "kubeconfig", doc, n.Endpoint), 400, "invalid-request"},
+		"empty document":     {discoveryCall(d.author, "machine-config", "", n.Endpoint), 400, "invalid-request"},
+		"no document":        {raw(`{"kind":"machine-config","endpoint":"` + n.Endpoint + `"}`), 400, "invalid-request"},
+		"document not text":  {raw(`{"kind":"machine-config","document":1,"endpoint":"` + n.Endpoint + `"}`), 400, "invalid-request"},
+		"a Talos context":    {raw(`{"kind":"machine-config","document":` + q(doc) + `,"endpoint":"` + n.Endpoint + `","talosContext":"x"}`), 400, "invalid-request"},
+		"a query":            {withQuery, 400, "invalid-request"},
 	} {
 		rec := d.do(d.api, c.call)
 		wantProblem(t, rec, c.status, c.code)
@@ -244,6 +260,131 @@ func TestDiscoveryRuleRefusals(t *testing.T) {
 		}
 	}
 	d.noWrites(t, "refusals")
+}
+
+// stubResolver is the options' resolver for a test: it answers from table (name to address) and
+// records the endpoints it was asked to resolve. An endpoint not in the table does not resolve.
+func stubResolver(table map[string]string) (func(context.Context, string) (string, string, error), func() []string) {
+	var mu sync.Mutex
+	var asked []string
+	return func(_ context.Context, s string) (string, string, error) {
+			mu.Lock()
+			asked = append(asked, s)
+			mu.Unlock()
+			if addr, ok := table[s]; ok {
+				host, _, _ := net.SplitHostPort(s)
+				return addr, host, nil
+			}
+			return "", "", errors.New("does not resolve")
+		}, func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]string(nil), asked...)
+		}
+}
+
+// §3.3, §9.2: a DNS name endpoint is resolved once, the address it gave is the one dialled (the
+// extraction, the certificate and the walk), the answer names that address, and nothing is recorded.
+func TestDiscoveryTakesAName(t *testing.T) {
+	ca := newTalosCA(t)
+	n, _ := discoveryNodeNamed(t, ca, []string{"cluster.example.test"}, refusingMembers...)
+	resolve, asked := stubResolver(map[string]string{"cluster.example.test:" + portOfEndpoint(t, n.Endpoint): n.Endpoint})
+	d := newDiscoveryEnv(t, options{resolve: resolve}, 0)
+	name := "cluster.example.test:" + portOfEndpoint(t, n.Endpoint)
+	rec := d.do(d.api, discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), name))
+	b := decode[discoveryBody](t, rec, http.StatusOK)
+	if b.ClusterID != "c-disc" || b.Endpoint != n.Endpoint || len(b.Members) != 2 {
+		t.Fatalf("answer %+v", b)
+	}
+	if got := asked(); len(got) != 1 || got[0] != name {
+		t.Errorf("the resolver was asked for %v, want the name once", got)
+	}
+	if len(n.Seen()) == 0 {
+		t.Error("control: no request reached the node at the resolved address")
+	}
+	if d.logged("cluster.example.test") {
+		t.Error("the log holds the name")
+	}
+	d.noWrites(t, "a discovery by name")
+}
+
+// §3.3, §9.2: a name endpoint is checked against its name, with the dial on the resolved address. A
+// certificate that lists the name and no address is accepted for the name; the same certificate is
+// refused for the typed address; a certificate that lists the address and not the name is refused for the
+// name; one that lists neither is refused. A refusal is the one undifferentiated 503 and records nothing.
+func TestDiscoveryNameIsCheckedAgainstTheCertificate(t *testing.T) {
+	const host = "cluster.example.test"
+	loop := []net.IP{net.ParseIP("127.0.0.1")}
+	tests := []struct {
+		name  string
+		dns   []string
+		ips   []net.IP
+		typed bool // the request names the address, not the name
+		reads bool
+	}{
+		{name: "the name, the certificate lists the name only", dns: []string{host}, reads: true},
+		{name: "a typed address, the certificate lists the name only", dns: []string{host}, typed: true},
+		{name: "the name, the certificate lists the address only", ips: loop},
+		{name: "the name, the certificate lists neither", dns: []string{"other.example.test"}, ips: []net.IP{net.ParseIP("127.0.0.9")}},
+		{name: "a typed address, the certificate lists the address only", ips: loop, typed: true, reads: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ca := newTalosCA(t)
+			n, _ := discoveryNodeFor(t, talostest.NewPKIFromCAFor(t, ca, tc.dns, tc.ips), ca, refusingMembers...)
+			name := host + ":" + portOfEndpoint(t, n.Endpoint)
+			resolve, _ := stubResolver(map[string]string{name: n.Endpoint})
+			d := newDiscoveryEnv(t, options{resolve: resolve}, 0)
+			endpoint := name
+			if tc.typed {
+				endpoint = n.Endpoint
+				resolve, _ = stubResolver(map[string]string{n.Endpoint: n.Endpoint}) // an address resolves to itself
+				d = newDiscoveryEnv(t, options{resolve: func(ctx context.Context, s string) (string, string, error) {
+					addr, _, err := resolve(ctx, s)
+					return addr, "", err
+				}}, 0)
+			}
+			rec := d.do(d.api, discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), endpoint))
+			if tc.reads {
+				if b := decode[discoveryBody](t, rec, http.StatusOK); b.ClusterID != "c-disc" {
+					t.Fatalf("answer %+v", b)
+				}
+			} else {
+				wantProblem(t, rec, http.StatusServiceUnavailable, "talos-access-unavailable")
+			}
+			d.noWrites(t, "a discovery")
+		})
+	}
+}
+
+// §9.2: a name that does not resolve is 503 talos-access-unavailable, quotes neither the name nor the
+// document, reaches no node and records nothing.
+func TestDiscoveryNameDoesNotResolve(t *testing.T) {
+	ca := newTalosCA(t)
+	n, _ := discoveryNode(t, ca, refusingMembers...)
+	resolve, asked := stubResolver(nil)
+	d := newDiscoveryEnv(t, options{resolve: resolve}, 0)
+	rec := d.do(d.api, discoveryCall(d.author, "machine-config", controlPlaneConfig(ca), "gone.example.test"))
+	wantProblem(t, rec, http.StatusServiceUnavailable, "talos-access-unavailable")
+	if strings.Contains(rec.Body.String(), "gone.example.test") || strings.Contains(rec.Body.String(), b64(ca.Key)) {
+		t.Errorf("the problem quotes the name or the document: %s", rec.Body)
+	}
+	if got := asked(); len(got) != 1 {
+		t.Errorf("control: the resolver was asked %d times, want 1", len(got))
+	}
+	if len(n.Seen()) != 0 {
+		t.Errorf("%d requests reached a node", len(n.Seen()))
+	}
+	d.noWrites(t, "an unresolved name")
+}
+
+func portOfEndpoint(t *testing.T, endpoint string) string {
+	t.Helper()
+	_, p, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // §9.2: an endpoint that does not answer, and an endpoint that refuses a certificate signed from the key,

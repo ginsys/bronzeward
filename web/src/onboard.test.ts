@@ -506,13 +506,13 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
   });
 });
 
-// The endpoint, in words, before anything is sent (ginsys/bronzeward#1049). The server takes only an IP
-// address as a Talos endpoint (internal/talos/endpoint.go), so a name from the file is said to be a name.
+// The endpoint, in words, before anything is sent (ginsys/bronzeward#1049). The discovery route takes an IP
+// address or a DNS name and resolves a name once (persistence-api.md §3.3), so a name from the file is sent.
 const named = (endpoint: string) => talosconfig().replace("[10.0.0.1:50000]", `[${endpoint}]`);
 
 describe("what counts as an address follows the server's first split", () => {
-  // The shape is all the page judges: what has it is sent, and the server's own sentence says what is wrong
-  // with it (an octet, a port, the brackets).
+  // The shape is all the page judges, to say whether the server resolved a name: everything is sent, and
+  // the server's own sentence says what is wrong with it (an octet, a port, the brackets).
   test.each([
     "10.0.0.1",
     "10.0.0.1:50000",
@@ -527,7 +527,7 @@ describe("what counts as an address follows the server's first split", () => {
     "[::1]50000",
     "[::1",
     "[10.0.0.1]",
-  ])("%s has the shape of an address and is sent", (endpoint) => {
+  ])("%s has the shape of an address", (endpoint) => {
     expect(isAddress(endpoint)).toBe(true);
   });
   test.each([
@@ -544,7 +544,7 @@ describe("what counts as an address follows the server's first split", () => {
     "[dead.beef]:50000",
     "[x:y@[::1]",
     "node:80:90",
-  ])("%s is a name, or not an address at all, and is never sent", (endpoint) => {
+  ])("%s is a name, or not an address at all", (endpoint) => {
     expect(isAddress(endpoint)).toBe(false);
   });
 });
@@ -556,14 +556,22 @@ describe("the endpoint the page will use, said before the button", () => {
     expect(endpointNote(named("node.example.test"), "", "10.2.0.1")).toBe("The page will try the cluster at 10.2.0.1.");
   });
 
-  test("a name, from the file or typed, is said to be a name, with what to type instead", () => {
-    const say = (endpoint: string) =>
-      `This talosconfig's endpoint is ${endpoint}, which is not an IP address. The server cannot use a name yet: type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.`;
+  test("a name, from the file or typed, is the endpoint the page will try, as it stands", () => {
+    const say = (endpoint: string) => `The page will try the cluster at ${endpoint}.`;
     expect(endpointNote(named("node.example.test"), "", "")).toBe(say("node.example.test"));
     expect(endpointNote(named("cafe:50000"), "", "")).toBe(say("cafe:50000"));
     expect(endpointNote(talosconfig(), "", "[node.example.test]:50000")).toBe(say("[node.example.test]:50000"));
-    expect(endpointNote(named("999.0.0.1"), "", "")).toBe("The page will try the cluster at 999.0.0.1.");
+    expect(endpointNote(named("999.0.0.1"), "", "")).toBe(say("999.0.0.1"));
     expect(endpointNote(talosconfig(), "", "lb.example.test")).toBe(say("lb.example.test"));
+  });
+
+  test("a context that lists several endpoints says the page tries the first of them; a typed one is alone", () => {
+    const several = talosconfig().replace("endpoints: [10.0.0.1:50000]", "endpoints: [cp.example.test, 10.0.0.2, 10.0.0.3]");
+    expect(endpointNote(several, "", "")).toBe("The page will try the first of 3 endpoints, cp.example.test.");
+    expect(endpointNote(several, "", "10.9.9.9")).toBe("The page will try the cluster at 10.9.9.9.");
+    // One entry, and an entry that is not text, are not a list.
+    expect(endpointNote(talosconfig(), "", "")).toBe("The page will try the cluster at 10.0.0.1:50000.");
+    expect(endpointNote(talosconfig().replace("endpoints: [10.0.0.1:50000]", "endpoints: [10.0.0.1:50000, 7]"), "", "")).toBe("The page will try the cluster at 10.0.0.1:50000.");
   });
 
   test("a context with no endpoint and none typed asks for an IP address", () => {
@@ -578,14 +586,29 @@ describe("the endpoint the page will use, said before the button", () => {
   });
 });
 
-describe("a name is never sent, and discovery's failures are whole sentences with no lead of their own", () => {
-  test("a name from the file, and a typed one, send nothing", async () => {
-    for (const [text, typed] of [[named("node.example.test"), ""], [talosconfig(), "lb.example.test:50000"]] as const) {
+describe("a name is sent as it stands, and discovery's failures are whole sentences with no lead of their own", () => {
+  test("a name from the file, and a typed one, are sent as they are, and the plan keeps what was sent", async () => {
+    for (const [text, typed, sent] of [
+      [named("node.example.test"), "", "node.example.test"],
+      [talosconfig(), "lb.example.test:50000", "lb.example.test:50000"],
+    ] as const) {
       const s = new Server();
       const r = await discoverCluster(s.env(), text, { endpoint: typed });
+      expect(r.ok).toBe(true);
+      expect((s.sends[0]!.body as { endpoint: string }).endpoint).toBe(sent);
+      if (r.ok) expect(r.plan.endpoint).toBe(sent);
+    }
+  });
+
+  test("a refused read of a name says to type a control-plane node's address; one of an address does not", async () => {
+    for (const [typed, hint] of [["lb.example.test", true], ["10.0.0.1", false]] as const) {
+      const s = new Server();
+      s.fail.set("POST /discoveries", refused(503, "talos-access-unavailable", { title: "Talos is unavailable", detail: "the endpoint did not resolve", instance: "req_x" }));
+      const r = await discoverCluster(s.env(), talosconfig(), { endpoint: typed });
       expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.why).toMatch(/^This talosconfig's endpoint is .+, which is not an IP address\. The server cannot use a name yet: /);
-      expect(s.requests).toEqual([]);
+      if (r.ok) continue;
+      expect(r.why.startsWith("The server answered 503. Talos is unavailable: the endpoint did not resolve. Request req_x.")).toBe(true);
+      expect(r.why.includes(" is a name: the nodes' certificates may not list it. Add the name to machine.certSANs of the control-plane machines, or type the IP address, and the port if it is not 50000, of a control-plane node in the endpoint field.")).toBe(hint);
     }
   });
 

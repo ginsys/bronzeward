@@ -40,6 +40,20 @@ type firstKeyInput struct {
 }
 
 func (in *firstKeyInput) check(*API) error {
+	if err := in.checkKey(); err != nil {
+		return err
+	}
+	ep, err := talosEndpoint(in.Endpoint)
+	if err != nil {
+		return errors.New("endpoint must be an IP literal (an IPv6 literal in brackets) with an optional port from 1 to 65535")
+	}
+	in.Endpoint = ep
+	return nil
+}
+
+// checkKey is what a first key's input must hold whatever the endpoint's grammar: a known kind, a
+// document and an endpoint.
+func (in *firstKeyInput) checkKey() error {
 	switch signer.Kind(in.Kind) {
 	case signer.MachineConfig, signer.SecretsBundle, signer.Talosconfig:
 	default:
@@ -51,11 +65,6 @@ func (in *firstKeyInput) check(*API) error {
 	if in.Endpoint == "" {
 		return errors.New("endpoint is required (persistence-api.md §3.4)")
 	}
-	ep, err := talosEndpoint(in.Endpoint)
-	if err != nil {
-		return errors.New("endpoint must be an IP literal (an IPv6 literal in brackets) with an optional port from 1 to 65535")
-	}
-	in.Endpoint = ep
 	return nil
 }
 

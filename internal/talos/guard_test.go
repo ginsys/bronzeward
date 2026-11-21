@@ -36,6 +36,7 @@ const (
 	cosiState       = "github.com/cosi-project/runtime/pkg/state"
 	machineryHW     = "github.com/siderolabs/talos/pkg/machinery/resources/hardware"
 	machineryCl     = "github.com/siderolabs/talos/pkg/machinery/resources/cluster"
+	grpcRoot        = "google.golang.org/grpc"
 	thisPackage     = "github.com/ginsys/bronzeward/internal/talos"
 )
 
@@ -146,11 +147,11 @@ var surface = []string{
 	"ClassInvalidArgument", "ClassRejected", "ClassTransport", "ClassUnrecognised",
 	"Config", "Config.Bytes", "Config.Digest", "Config.Format", "Config.GoString", "Config.MarshalJSON",
 	"Config.MarshalText", "Config.MarshalYAML", "Config.ResourceVersion", "Config.String",
-	"ConfigurationDigest", "Dial", "DialApplier", "ErrNoDeadline", "ErrUndecodable", "Identity",
+	"ConfigurationDigest", "Dial", "DialApplier", "DialOption", "ErrNoDeadline", "ErrUndecodable", "Identity",
 	"Identity.ClusterID", "Identity.NodeID", "Identity.SMBIOSUUID",
 	"ParseEndpoint",
 	"Reader", "Reader.Close", "Reader.Identity", "Reader.MachineConfig", "Reader.Version",
-	"Response", "Response.Accounts", "Response.Class", "Response.Code", "Response.Text", "TransportFailure",
+	"Response", "Response.Accounts", "Response.Class", "Response.Code", "Response.Text", "ServerName", "TransportFailure",
 	"applier.ApplyNoReboot", "applier.Close",
 	"bound.Close", "bound.ctx", "bound.shut", "boundApplier.<embedded>", "boundApplier.ApplyNoReboot",
 	"boundReader.<embedded>", "boundReader.Identity", "boundReader.MachineConfig", "boundReader.Version",
@@ -191,7 +192,8 @@ var denied = []string{
 // (WithConfigFromFile, WithDefaultConfig) or sends node metadata (WithNode, WithNodes) is listed
 // (persistence-api §3.3).
 var allowedSelectors = map[string][]string{
-	machineryClient: {"Client", "New", "WithConfigContext", "WithEndpoints"},
+	machineryClient: {"Client", "New", "OptionFunc", "WithConfigContext", "WithEndpoints", "WithGRPCDialOptions"},
+	grpcRoot:        {"WithAuthority"},
 	machineryConfig: {"ActiveID", "MachineConfig"},
 	clientConfig:    {"Context", "FromBytes"},
 	cosiSafe:        {"StateGetByID"},
@@ -221,6 +223,7 @@ var readerPolicy = policy{selectors: allowedSelectors, members: clientMembers, h
 const (
 	machineryMachine = "github.com/siderolabs/talos/pkg/machinery/api/machine"
 	machineryRuntime = "github.com/siderolabs/talos/pkg/machinery/resources/runtime"
+	machineryK8s     = "github.com/siderolabs/talos/pkg/machinery/resources/k8s"
 	applyFile        = "apply.go"
 	discoverDir      = "discover"
 	discoverPackage  = thisPackage + "/" + discoverDir
@@ -233,12 +236,14 @@ const (
 // request that changes a node, and no node routing metadata.
 var discoverPolicy = policy{
 	selectors: map[string][]string{
-		machineryClient:  {"Client", "New", "WithConfigContext", "WithEndpoints"},
+		machineryClient:  {"Client", "New", "OptionFunc", "WithConfigContext", "WithEndpoints", "WithGRPCDialOptions"},
+		grpcRoot:         {"WithAuthority"},
 		clientConfig:     {"Config", "Context", "FromBytes"},
 		cosiSafe:         {"StateGetByID", "StateListAll"},
 		cosiState:        {"IsNotFoundError"},
 		machineryHW:      {"SystemInformation", "SystemInformationID"},
 		machineryCl:      {"Identity", "Info", "InfoID", "LocalIdentity", "Member"},
+		machineryK8s:     {"KubePrismEndpoint", "KubePrismEndpoints", "KubePrismEndpointsID"},
 		machineryRuntime: {"PlatformMetadata", "PlatformMetadataID"},
 	},
 	members: clientMembers,
@@ -254,6 +259,7 @@ var applierMembers = []string{"ApplyConfiguration", "Close"}
 var applierPolicy = policy{
 	selectors: map[string][]string{
 		machineryClient:  {"Client", "New", "NodeError", "WithConfigContext", "WithEndpoints"},
+		grpcRoot:         {"MaxRetryRPCBufferSize"}, // the one call option of the apply
 		machineryMachine: {"ApplyConfigurationRequest", "ApplyConfigurationRequest_NO_REBOOT", "ApplyConfigurationResponse"},
 	},
 	members: applierMembers,
@@ -283,7 +289,10 @@ func policyViolations(t *testing.T, name string, src []byte, pol policy) []strin
 	local := map[string]string{} // local package name → import path, for the machinery imports
 	for _, im := range f.Imports {
 		p, _ := strconv.Unquote(im.Path.Value)
-		if !strings.HasPrefix(p, "github.com/siderolabs/") && !strings.HasPrefix(p, "github.com/cosi-project/") {
+		// gRPC's root package is held because client.WithGRPCDialOptions takes any dial option, a
+		// custom dialer included, which would move the dial target; its subpackages (codes, status,
+		// metadata) carry no option and stay free.
+		if p != grpcRoot && !strings.HasPrefix(p, "github.com/siderolabs/") && !strings.HasPrefix(p, "github.com/cosi-project/") {
 			continue
 		}
 		if _, ok := pol.selectors[p]; !ok {
@@ -394,6 +403,37 @@ func policyViolations(t *testing.T, name string, src []byte, pol policy) []strin
 		return true
 	})
 
+	// The one gRPC dial option is the server name, and only as the sole argument of
+	// client.WithGRPCDialOptions: that call takes any option, so an argument that is not a plain
+	// grpc.WithAuthority(x) (another option, a helper's result, a spread slice, a second option beside
+	// it) is flagged, and so is grpc.WithAuthority anywhere else.
+	ast.Inspect(f, func(n ast.Node) bool {
+		s, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if isPkgSel(s, local, grpcRoot, "WithAuthority") {
+			call, _ := parents[s].(*ast.CallExpr)
+			outer, _ := parents[call].(*ast.CallExpr)
+			if call == nil || call.Fun != s || outer == nil || !isPkgSel(outer.Fun, local, machineryClient, "WithGRPCDialOptions") {
+				flag(s, "grpc.WithAuthority is used other than as an argument of client.WithGRPCDialOptions")
+			}
+			return true
+		}
+		if !isPkgSel(s, local, machineryClient, "WithGRPCDialOptions") {
+			return true
+		}
+		call, _ := parents[s].(*ast.CallExpr)
+		if call == nil || call.Fun != s || call.Ellipsis.IsValid() || len(call.Args) != 1 {
+			flag(s, "client.WithGRPCDialOptions is not called with exactly one grpc.WithAuthority(x)")
+			return true
+		}
+		if arg, ok := call.Args[0].(*ast.CallExpr); !ok || !isPkgSel(arg.Fun, local, grpcRoot, "WithAuthority") || len(arg.Args) != 1 {
+			flag(s, "client.WithGRPCDialOptions is not called with exactly one grpc.WithAuthority(x)")
+		}
+		return true
+	})
+
 	// The client type appears only as reader's api field.
 	ast.Inspect(f, func(n ast.Node) bool {
 		s, ok := n.(*ast.SelectorExpr)
@@ -425,7 +465,9 @@ func isPkgSel(e ast.Expr, local map[string]string, path, name string) bool {
 		return false
 	}
 	x, ok := s.X.(*ast.Ident)
-	return ok && local[x.Name] == path && s.Sel.Name == name
+	// x.Obj is nil for an imported package name and set for a local binding of the same spelling, which
+	// would otherwise pass for the package (a parse without object resolution leaves every Obj nil).
+	return ok && x.Obj == nil && local[x.Name] == path && s.Sel.Name == name
 }
 
 // isSafeRead reports whether fun is one of the named functions of COSI's safe package, with or
@@ -820,8 +862,8 @@ func TestMachineryCallsAllowlisted(t *testing.T) {
 }
 
 var discoverSurface = []string{
-	"Discover", "DiscoverLimited", "ErrNoEndpoint", "ErrUnknownContext", "Member", "Member.Address", "Member.Answered", "Member.Hostname",
-	"Member.NodeID", "Member.Platform", "Member.Role", "Member.SMBIOSUUID", "OneContext", "Result", "Result.ClusterID", "Result.Contract",
+	"CheckEndpoint", "Discover", "DiscoverLimited", "ErrNoEndpoint", "ErrUnknownContext", "Member", "Member.Address", "Member.Answered", "Member.Hostname",
+	"Member.NodeID", "Member.Platform", "Member.Role", "Member.SMBIOSUUID", "OneContext", "ResolveEndpoint", "Result", "Result.ClusterID", "Result.Contract",
 	"Result.Cut", "Result.Endpoint", "Result.KubernetesEndpoint", "Result.Members", "Result.ResolvedFrom", "Result.Supported", "Result.Version",
 	"TooManyMembers", "TooManyMembers.Error", "TooManyMembers.Limit", "node.close",
 }
@@ -847,13 +889,13 @@ func TestDiscoverCallsAllowlisted(t *testing.T) {
 	// Controls. The head uses every name the policy adds; it is clean under discoverPolicy and
 	// flagged under Reader's, so the additions are what loosens the guard and nothing else.
 	head := "package discover\nimport (\n\t\"context\"\n\t\"github.com/cosi-project/runtime/pkg/safe\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n" +
-		"\t\"github.com/siderolabs/talos/pkg/machinery/resources/cluster\"\n\t\"github.com/siderolabs/talos/pkg/machinery/resources/runtime\"\n)\n" +
-		"var _ = context.Background\nvar _ = safe.StateListAll[*cluster.Member]\nvar _ *runtime.PlatformMetadata\ntype node struct{ api *client.Client }\n"
+		"\t\"github.com/siderolabs/talos/pkg/machinery/resources/cluster\"\n\t\"github.com/siderolabs/talos/pkg/machinery/resources/k8s\"\n\t\"github.com/siderolabs/talos/pkg/machinery/resources/runtime\"\n)\n" +
+		"var _ = context.Background\nvar _ = safe.StateListAll[*cluster.Member]\nvar _ *k8s.KubePrismEndpoints\nvar _ *runtime.PlatformMetadata\ntype node struct{ api *client.Client }\n"
 	if got := policyViolations(t, "control.go", []byte(head), discoverPolicy); len(got) != 0 {
 		t.Errorf("the clean discover control is flagged: %q", got)
 	}
 	under := strings.Join(policyViolations(t, "control.go", []byte(head), readerPolicy), "\n")
-	for _, want := range []string{"safe.StateListAll is not allowlisted", "cluster.Member is not allowlisted", "runtime is not allowlisted"} {
+	for _, want := range []string{"safe.StateListAll is not allowlisted", "cluster.Member is not allowlisted", "k8s is not allowlisted", "runtime is not allowlisted"} {
 		if !strings.Contains(under, want) {
 			t.Errorf("Reader's policy does not flag %q in the discover control:\n%s", want, under)
 		}
@@ -862,6 +904,7 @@ func TestDiscoverCallsAllowlisted(t *testing.T) {
 		"another safe call":     {"var _ = safe.StateList[*cluster.Member]\n", "safe.StateList is not allowlisted"},
 		"another runtime type":  {"var _ = runtime.NewKmsgLogConfig\n", "runtime.NewKmsgLogConfig is not allowlisted"},
 		"another cluster type":  {"var _ = cluster.NewAffiliate\n", "cluster.NewAffiliate is not allowlisted"},
+		"another k8s type":      {"var _ = k8s.NewAPIServerConfig\n", "k8s.NewAPIServerConfig is not allowlisted"},
 		"an apply":              {"func (n *node) f(ctx context.Context) { n.api.ApplyConfiguration(ctx, nil) }\n", "ApplyConfiguration is denied"},
 		"a COSI destroy":        {"func (n *node) f(ctx context.Context) { n.api.COSI.Destroy(ctx, nil) }\n", "Destroy is denied"},
 		"a COSI create":         {"func (n *node) f(ctx context.Context) { n.api.COSI.Create(ctx, nil) }\n", "Create is denied"},
@@ -1266,5 +1309,43 @@ func TestDialApplierCallers(t *testing.T) {
 	}
 	if got := dialApplierViolations(t, "internal/api/adopter.go", []byte("package api\nimport \""+thisPackage+"\"\nvar _ = talos.Dial\n")); len(got) != 0 {
 		t.Errorf("control: Dial is flagged: %q", got)
+	}
+}
+
+// TestDialOptionGuard: the allowlist holds one gRPC dial option, the server name, as the only argument
+// of client.WithGRPCDialOptions, in the Reader's package and in discover's. Each control is a source
+// the guard must report, and the clean one is not reported, so a checker that stopped matching would
+// fail here.
+func TestDialOptionGuard(t *testing.T) {
+	head := "package p\nimport (\n\t\"context\"\n\t\"net\"\n\t\"github.com/siderolabs/talos/pkg/machinery/client\"\n\t\"google.golang.org/grpc\"\n)\n" +
+		"var _ = context.Background\nvar _ net.Conn\n"
+	clean := head + "func f(ctx context.Context, n string) { c, err := client.New(ctx,client.WithGRPCDialOptions(grpc.WithAuthority(n))) }\n"
+	cases := map[string]struct{ body, want string }{
+		"another dial option":                       {"func f(ctx context.Context) { c, err := client.New(ctx,client.WithGRPCDialOptions(grpc.WithContextDialer(nil))) }\n", "grpc.WithContextDialer is not allowlisted"},
+		"the server name together with another":     {"func f(ctx context.Context, n string) { c, err := client.New(ctx,client.WithGRPCDialOptions(grpc.WithAuthority(n), grpc.WithContextDialer(nil))) }\n", "grpc.WithContextDialer is not allowlisted"},
+		"two server names":                          {"func f(ctx context.Context, n string) { c, err := client.New(ctx,client.WithGRPCDialOptions(grpc.WithAuthority(n), grpc.WithAuthority(n))) }\n", "not called with exactly one grpc.WithAuthority(x)"},
+		"an option from a helper":                   {"func f(ctx context.Context) { c, err := client.New(ctx,client.WithGRPCDialOptions(helper())) }\nfunc helper() grpc.DialOption { return nil }\n", "not called with exactly one grpc.WithAuthority(x)"},
+		"a spread slice":                            {"func f(ctx context.Context, o []grpc.DialOption) { c, err := client.New(ctx,client.WithGRPCDialOptions(o...)) }\n", "not called with exactly one grpc.WithAuthority(x)"},
+		"no option":                                 {"func f(ctx context.Context) { c, err := client.New(ctx,client.WithGRPCDialOptions()) }\n", "not called with exactly one grpc.WithAuthority(x)"},
+		"the server name kept in a variable":        {"func f(n string) { _ = grpc.WithAuthority(n) }\n", "grpc.WithAuthority is used other than as an argument of client.WithGRPCDialOptions"},
+		"a dial of the connection's own":            {"func f() { _, _ = grpc.NewClient(\"x\") }\n", "grpc.NewClient is not allowlisted"},
+		"the option function passed as a value":     {"func f(ctx context.Context) { c, err := client.New(ctx,client.WithGRPCDialOptions(grpc.WithAuthority)) }\n", "not called with exactly one grpc.WithAuthority(x)"},
+		"a local variable spelled like the package": {"func f(ctx context.Context, n string) { grpc := box(); c, err := client.New(ctx, client.WithGRPCDialOptions(grpc.WithAuthority(n))) }\nfunc box() struct{ WithAuthority func(string) any } { return struct{ WithAuthority func(string) any }{} }\n", "not called with exactly one grpc.WithAuthority(x)"},
+		"the option without the machinery's setter": {"func f(n string) []grpc.DialOption { return []grpc.DialOption{grpc.WithAuthority(n)} }\n", "grpc.WithAuthority is used other than as an argument of client.WithGRPCDialOptions"},
+	}
+	for polName, pol := range map[string]policy{"reader": readerPolicy, "discover": discoverPolicy} {
+		if got := policyViolations(t, "control.go", []byte(clean), pol); len(got) != 0 {
+			t.Errorf("%s: the clean source is flagged: %q", polName, got)
+		}
+		for name, c := range cases {
+			got := strings.Join(policyViolations(t, "control.go", []byte(head+c.body), pol), "\n")
+			if !strings.Contains(got, c.want) {
+				t.Errorf("%s policy, control %s: no violation %q in:\n%s", polName, name, c.want, got)
+			}
+		}
+	}
+	// The applier holds neither the dial option nor the setter.
+	if got := strings.Join(policyViolations(t, "control.go", []byte(clean), applierPolicy), "\n"); !strings.Contains(got, "client.WithGRPCDialOptions is not allowlisted") || !strings.Contains(got, "grpc.WithAuthority is not allowlisted") {
+		t.Errorf("the applier's policy does not refuse the dial option:\n%s", got)
 	}
 }
