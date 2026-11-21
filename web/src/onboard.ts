@@ -11,8 +11,8 @@ import type { components } from "./api/v1";
 import { existing } from "./forms.tsx";
 import { startBody } from "./imports.tsx";
 import { type Listed, readPages } from "./list.tsx";
-import type { ReadResult } from "./request.ts";
-import { problemTail } from "./states.tsx";
+import type { Problem, ReadResult } from "./request.ts";
+import { CHECK_STATE, problemSentences } from "./states.tsx";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 export type Discovery = components["schemas"]["DiscoveryBody"];
@@ -28,7 +28,12 @@ export interface Env {
 // What a step ended in: `existing` for a record the server already held, `skipped` for a member that
 // cannot be recorded, `stopped` for an import that waits on a person.
 export type LineState = "done" | "existing" | "skipped" | "stopped" | "failed" | "unknown";
-export interface Line { key: string; label: string; state: LineState; detail?: string; to?: string }
+// The problem a failure carries, which the page shows as the reference for a bug report (the words point to it).
+export interface Reference { problem: Problem; status: number }
+export interface Line { key: string; label: string; state: LineState; detail?: string; to?: string; reference?: Reference }
+// The reference of an outcome that carried a problem document, as a member to spread; nothing otherwise.
+export const referenceOf = (o: Outcome): { reference?: Reference } =>
+  "problem" in o && o.problem !== null ? { reference: { problem: o.problem, status: o.kind === "refused" ? o.status : o.problem.status } } : {};
 
 // One onboarding in this page's memory. `document` is the cut talosconfig: held until the first key's
 // write is released, which is the one place it is needed again after the discovery.
@@ -177,17 +182,21 @@ export function endpointNote(text: string | undefined, context: string, typed: s
 // A discovery's failure as whole sentences, with no lead of its own: the page writes "Nothing was
 // recorded." once, because a discovery only reads.
 function discoveryWhy(o: Outcome): string {
-  if (o.kind === "refused") return `The server answered ${o.status}.${problemTail(o.problem)}`;
+  if (o.kind === "refused") return o.problem === null ? `The server answered ${o.status}.` : problemSentences(o.problem, o.status);
   if (o.kind === "done") return "";
-  return `${sentence(o.why)}${problemTail(o.problem)}`;
+  return `${sentence(o.why)}${words(o.problem, true)}`;
 }
 
-// A step's failure in the words of the form's own notice, from the outcome and nothing of the request.
+// A step's failure in the words of the form's own notice (client contracts §8.2), from the outcome and nothing of
+// the request: the problem's sentence and next step, never its code, rule or request number. Where the outcome is
+// unknown the next step is left out and the line says to check the current state.
 function reason(o: Outcome): string {
-  if (o.kind === "refused") return `not saved: the server answered ${o.status}.${problemTail(o.problem)}`;
+  if (o.kind === "refused") return o.problem === null ? `not saved: the server answered ${o.status}.` : `not saved. ${problemSentences(o.problem, o.status)}`;
   if (o.kind === "done") return "";
-  return `${o.kind === "not-done" ? "not saved" : "unknown whether it was saved"}: ${o.why}.${problemTail(o.problem)}`;
+  const doubt = stateOf(o) === "unknown";
+  return `${doubt ? `unknown whether it was saved: ${o.why}. ${CHECK_STATE}` : `not saved: ${o.why}.`}${words(o.problem, !doubt)}`;
 }
+const words = (p: Problem | null, next: boolean) => (p === null ? "" : ` ${problemSentences(p, p.status, next)}`);
 const stateOf = (o: Outcome): LineState => (o.kind === "unknown" || (o.kind === "set-aside" && o.ambiguous) ? "unknown" : "failed");
 
 const members = (f: Discovery) => f.members;
@@ -201,7 +210,7 @@ const keyAddress = (f: Discovery) => members(f).find((m) => m.role === "controlp
 // first key. The file's text is held only as its cut. A name is sent as it is: the server resolves it once
 // and answers the address it dialled (found.endpoint). Each `why` is whole sentences with no lead of its
 // own, because the page writes "Nothing was recorded." once: a discovery only reads.
-export async function discoverCluster(env: Env, text: string, o: { context?: string; endpoint?: string }): Promise<{ ok: true; plan: Plan } | { ok: false; why: string }> {
+export async function discoverCluster(env: Env, text: string, o: { context?: string; endpoint?: string }): Promise<{ ok: true; plan: Plan } | { ok: false; why: string; reference?: Reference }> {
   let cut;
   try {
     cut = cutContext(text, o.context);
@@ -212,7 +221,7 @@ export async function discoverCluster(env: Env, text: string, o: { context?: str
   const endpoint = typed !== "" ? typed : cut.endpoint;
   if (endpoint === "") return { ok: false, why: NO_ENDPOINT };
   const out = await env.send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", document: cut.document, endpoint }, released: () => {} });
-  if (out.kind !== "done") return { ok: false, why: `${discoveryWhy(out)}${out.kind === "refused" && out.status === 503 && !isAddress(endpoint) ? nameHint(endpoint) : ""}` };
+  if (out.kind !== "done") return { ok: false, why: `${discoveryWhy(out)}${out.kind === "refused" && out.status === 503 && !isAddress(endpoint) ? nameHint(endpoint) : ""}`, ...referenceOf(out) };
   const found = out.data as Discovery;
   if (!found.supported) return { ok: false, why: `Contract ${found.contract} is not the contract of the machinery in this server, so it would refuse the cluster.` };
   if (keyAddress(found) === undefined) return { ok: false, why: "No control-plane member answered, so no address can carry the first key. Run it again once one does." };
@@ -229,7 +238,7 @@ export async function onboardCluster(env: Env, p: Plan, report: (lines: Line[]) 
     report([...p.lines]);
   };
   const fail: Fail = (key, label, o) => {
-    set({ key, label, state: typeof o === "string" ? "failed" : stateOf(o), detail: typeof o === "string" ? o : reason(o) });
+    set({ key, label, state: typeof o === "string" ? "failed" : stateOf(o), detail: typeof o === "string" ? o : reason(o), ...(typeof o !== "string" && referenceOf(o)) });
     return false;
   };
   const list = async <T>(path: string, query: string) => {
