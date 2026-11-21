@@ -78,9 +78,9 @@ function ItemOf<T>({ path, what, title, children, n, onSettled }: { path: string
 
 type Row = readonly [string, ReactNode];
 const Fields = ({ rows }: { rows: readonly Row[] }) => <dl>{rows.map(([k, v]) => <Group key={k}><dt>{k}</dt><dd>{v}</dd></Group>)}</dl>;
-// `titled` shows each object by its title (ginsys/bronzeward#996); an operation's Subject cell does not yet.
-const Ids = ({ ids, titled = false }: { ids: readonly string[] | null; titled?: boolean }) =>
-  ids === null || ids.length === 0 ? "none" : ids.map((id, i) => <Group key={id}>{i > 0 && ", "}{titled ? <Named id={id} /> : <Id id={id} />}</Group>);
+// Each object is shown by its title (A8 rule 6).
+const Ids = ({ ids }: { ids: readonly string[] | null }) =>
+  ids === null || ids.length === 0 ? "none" : ids.map((id, i) => <Group key={id}>{i > 0 && ", "}<Named id={id} /></Group>);
 export const by = (c: { principal: string; role: string } | null) => (c === null ? "none" : <><Who id={c.principal} /> ({c.role})</>);
 // Who started an operation (client contracts A10): the principal that made the request, or for an apply or an
 // adoption, which the controller creates itself, the controller, the plan it committed and who created that plan.
@@ -155,7 +155,7 @@ const DEPENDENCIES: readonly Col<S["DependencyBody"]>[] = [
 ];
 const ALERTS: readonly Col<S["AlertBody"]>[] = [
   ["Alert", (a) => <Id id={a.id} />], ["Kind", (a) => a.kind], ["Dependency", (a) => <Id id={a.dependency} />], ["Class", klass],
-  ["Reason", (a) => a.reason ?? "none"], ["Releases", (a) => <Ids ids={a.releases} titled />], ["Recorded", (a) => when(a.recordedAt)],
+  ["Reason", (a) => a.reason ?? "none"], ["Releases", (a) => <Ids ids={a.releases} />], ["Recorded", (a) => when(a.recordedAt)],
 ];
 const lastPass = (l: Listed<unknown>) => {
   const at = l.extra?.["lastPass"];
@@ -468,12 +468,9 @@ export function PlanItem({ id }: { id: string }) {
   );
 }
 
-// A subject's machine is named (A9); its plan, draft and import stay identifiers.
-const Subject = ({ s }: { s: S["OperationSubject"] | null }) => {
-  if (s === null) return "none";
-  const rest = [s.plan, s.draft, s.ingestion].filter((x) => x !== undefined);
-  return <>{s.machine !== undefined && <MachineById id={s.machine} />}{s.machine !== undefined && rest.length > 0 && ", "}{rest.length > 0 && <Ids ids={rest} />}{s.machine === undefined && rest.length === 0 && "none"}</>;
-};
+// A subject's machine, plan, draft and import are each shown by its name or title (A8 rule 6, A9).
+const Subject = ({ s }: { s: S["OperationSubject"] | null }) =>
+  <Ids ids={s === null ? null : [s.machine, s.plan, s.draft, s.ingestion].filter((x) => x !== undefined)} />;
 const OPERATIONS: readonly Col<S["OperationBody"]>[] = [
   ["Operation", (o) => <OperationRef o={o} />], ["Kind", (o) => o.kind], ["State", (o) => o.state], ["Subject", (o) => <Subject s={o.subject} />],
   ["Started by", (o) => <StartedBy o={o} />], CREATED,
@@ -528,7 +525,7 @@ export function OperationItem({ id }: { id: string }) {
 
 export const ACTS: readonly Col<S["ActItem"]>[] = [
   ["At", (a) => when(a.at)], ["Principal", (a) => <><Who id={a.principal} /> ({a.principalKind})</>], ["Via", (a) => a.via],
-  ["Role", (a) => a.role ?? "none"], ["Action", (a) => a.action], ["Subjects", (a) => <Ids ids={a.subjects} titled />],
+  ["Role", (a) => a.role ?? "none"], ["Action", (a) => a.action], ["Subjects", (a) => <Ids ids={a.subjects} />],
   ["Request", (a) => a.requestId ?? "none"], ["Act", (a) => <Id id={a.id} />],
 ];
 

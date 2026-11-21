@@ -10,6 +10,7 @@ import { useWrites } from "./forms.tsx";
 import { settledReads } from "./imports.tsx";
 import { type Failed, Id, readPages, Ref, useReads } from "./list.tsx";
 import { operationNext, operationNow } from "./operation-words.ts";
+import { Named } from "./titles.tsx";
 import { eventLine, RESTORED, watch } from "./progress.ts";
 import { Status } from "./states.tsx";
 
@@ -96,7 +97,7 @@ export function Outcome({ o, cause: why }: { o: Operation; cause?: string | unde
         ? <Status testid="outcome">Completed. No applied release is recorded, so nothing is shown as applied.</Status>
         : (
           <Status testid="outcome">
-            Applied: this operation applied release <Id id={applied.appliedRelease} />, confirmed by observation <Id id={applied.observation} />.
+            Applied: this operation applied release <Named id={applied.appliedRelease} />, confirmed by observation <Id id={applied.observation} />.
             {machine !== undefined && <> <Ref to={`/machines/${encodeURIComponent(machine)}`} id={machine}>Desired, Applied and Observed of the machine</Ref></>}
           </Status>
         );
