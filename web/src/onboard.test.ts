@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { describe, expect, test, vi } from "vitest";
 import { cutContext, discoverCluster, type Env, type Line, onboardCluster, type Plan, sender } from "./onboard.ts";
-import { type Outcome, Write, type WriteSpec } from "./write.ts";
+import type { Client } from "./request.ts";
+import { type Outcome, Writes, type WriteSpec } from "./write.ts";
 
 const CANARY = "BWSYNTH-onboard-canary";
 const ID = "YnJvbnpld2FyZC1lMmUtb25ib2FyZC1jbHVzdGVyLTA=";
@@ -184,45 +185,82 @@ describe("the cut of one context (cutContext)", () => {
   });
 });
 
+// The page's send over the real write layer, whose client answers from a script.
 describe("the page's send (sender)", () => {
-  const secret: WriteSpec = { method: "POST", path: "/clusters/cl_1/first-keys", resource: "/clusters/cl_1", body: { document: CANARY }, released: () => {} };
-  const plain: WriteSpec = { method: "POST", path: "/machines", resource: "/machines", body: {} };
-  // A write layer that answers each submit with the next scripted outcome and repeats only an unknown one.
-  const layer = (script: Outcome[]) => {
-    const seen: Write[] = [];
-    return {
-      seen,
-      repeatable: (w: Write) => w.outcome?.kind === "unknown",
-      submit: async (w: Write) => {
-        seen.push(w);
-        w.outcome = script.shift()!;
-        return w.outcome;
-      },
-    };
+  const ok = async () => ({ status: 200, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: {} });
+  const lose = async () => {
+    throw new Error("synthetic: the answer was lost");
   };
-  const unknown: Outcome = { kind: "unknown", why: "the connection ended", problem: null };
+  const layer = (...script: (() => Promise<unknown>)[]) => {
+    const writes = new Writes(() => "p", async () => {});
+    const calls: string[] = [];
+    writes.client = { currentEpoch: "e1", attempt: async (m: string, path: string) => (m === "GET" ? ok() : (calls.push(path), script.shift()!())) } as unknown as Client;
+    return { writes, calls };
+  };
+  const secret = (document = CANARY, released: () => void = () => {}): WriteSpec => ({ method: "POST", path: "/clusters/cl_1/first-keys", resource: "/clusters/cl_1", body: { document }, released });
+  // What the layer still holds of the document: an open write with its body.
+  const holding = (w: Writes) => w.open.filter((x) => x.spec.body !== undefined);
 
-  test("repeats an unknown write that carries the document under its own key, then starts a new one once it has settled", async () => {
-    const l = layer([unknown, unknown, done({}, 200), done({}, 200)]);
-    const send = sender(l as never, () => true);
-    await send(secret);
-    await send(secret);
-    await send(secret);
-    await send(secret);
-    expect(l.seen[1]).toBe(l.seen[0]);
-    expect(l.seen[2]).toBe(l.seen[0]);
-    expect(l.seen[3]).not.toBe(l.seen[0]);
+  test("an unknown write that carries the document is repeated as the same write: one body held, and none once it is done", async () => {
+    const { writes, calls } = layer(lose, lose, ok);
+    const send = sender(writes, () => true);
+    expect((await send(secret())).kind).toBe("unknown");
+    expect((await send(secret())).kind).toBe("unknown");
+    expect(holding(writes)).toHaveLength(1);
+    expect((await send(secret())).kind).toBe("done");
+    expect(calls).toHaveLength(3);
+    expect(holding(writes)).toHaveLength(0);
   });
 
-  test("starts a new write for what carries no document, and sends nothing once the page is left", async () => {
-    const l = layer([unknown, unknown]);
-    const send = sender(l as never, () => true);
+  test("the discovery, which carries the cut document too, is a write the sender keeps", async () => {
+    const specs: WriteSpec[] = [];
+    const s = new Server();
+    const env = { ...s.env(), send: async (spec: WriteSpec) => (specs.push(spec), s.env().send(spec)) };
+    expect((await discoverCluster(env, talosconfig(), {})).ok).toBe(true);
+    expect(specs[0]).toMatchObject({ path: "/discoveries", released: expect.any(Function) });
+  });
+
+  test("a second send while the first is in flight sends nothing and shares its answer", async () => {
+    let answer!: () => void;
+    const { writes, calls } = layer(() => new Promise((r) => (answer = () => r(ok()))));
+    const send = sender(writes, () => true);
+    const a = send(secret());
+    const b = send(secret());
+    await Promise.resolve();
+    answer();
+    expect([(await a).kind, (await b).kind]).toEqual(["done", "done"]);
+    expect(calls).toHaveLength(1);
+  });
+
+  test("a page entered again repeats what the page before it left open, and the new page's hook is the one told", async () => {
+    const { writes, calls } = layer(lose, ok);
+    expect((await sender(writes, () => true)(secret())).kind).toBe("unknown");
+    const released = vi.fn();
+    expect((await sender(writes, () => true)(secret(CANARY, released))).kind).toBe("done");
+    expect(calls).toHaveLength(2);
+    expect(released).toHaveBeenCalledTimes(1);
+    expect(holding(writes)).toHaveLength(0);
+  });
+
+  test("another file's body dismisses the open write first, releasing its body", async () => {
+    const { writes } = layer(lose, lose);
+    const first = vi.fn();
+    const send = sender(writes, () => true);
+    await send(secret("first-document", first));
+    await send(secret("second-document"));
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(holding(writes).map((w) => (w.spec.body as { document: string }).document)).toEqual(["second-document"]);
+  });
+
+  test("a write that carries no document is a new write each time, and nothing is sent once the page is left", async () => {
+    const { writes, calls } = layer(lose, lose);
+    const plain: WriteSpec = { method: "POST", path: "/machines", resource: "/machines", body: {} };
+    const send = sender(writes, () => true);
     await send(plain);
     await send(plain);
-    expect(l.seen[1]).not.toBe(l.seen[0]);
-    const gone = sender(l as never, () => false);
-    expect((await gone(secret)).kind).toBe("not-done");
-    expect(l.seen).toHaveLength(2);
+    expect(writes.open).toHaveLength(2);
+    expect((await sender(writes, () => false)(secret())).kind).toBe("not-done");
+    expect(calls).toHaveLength(2);
   });
 });
 
