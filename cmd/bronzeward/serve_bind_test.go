@@ -155,7 +155,8 @@ func TestServeReportsTheAddressItBound(t *testing.T) {
 	} else if port, _ := strconv.Atoi(m[1]); port == 0 || m[1] != addr[strings.LastIndex(addr, ":")+1:] {
 		t.Fatalf("port %s in %q: not a bound port of %s", m[1], out.String(), addr)
 	}
-	// The address is bound while serve is still in its database open: a dial is accepted by the kernel.
+	// The database stand-in never answers, so serve is not serving yet: the kernel accepts this dial
+	// for the bound address alone. The order of bind and database is TestServeBindsBeforeTheDatabase's.
 	c, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
 		t.Fatalf("the reported address %s takes no connection: %v", addr, err)
