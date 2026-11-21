@@ -102,6 +102,14 @@ const colours = (id: string) =>
 describe("the styled client", () => {
   beforeEach(async () => {
     await browser.url("/signed-out");
+    if (process.env["BW_PROBE_1028"] === "1") {
+      // Probe only: does the document change after the navigation command returned?
+      const read = () => browser.execute(() => [performance.timeOrigin, document.readyState, (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type ?? "", history.length]);
+      const a = await read();
+      await browser.pause(2_000);
+      const b = await read();
+      console.log(`probe1028 replaced=${a[0] !== b[0]} first=${JSON.stringify(a)} later=${JSON.stringify(b)}`);
+    }
     await expect($('[data-testid="status"]')).toHaveText(SIGNED_OUT);
     await inject();
   });
