@@ -54,6 +54,12 @@ export function OnboardCluster() {
     wait: (ms) => new Promise((r) => setTimeout(r, ms)),
   };
 
+  // Clearing the note also drops every answer still being read, so none can bring an old note back.
+  const unsay = () => {
+    latest.current++;
+    setSaid(undefined);
+  };
+
   const say = async (form: HTMLFormElement) => {
     const mine = ++latest.current;
     const d = new FormData(form);
@@ -77,7 +83,7 @@ export function OnboardCluster() {
     setBusy(false);
     // A discovery only reads, so this lead is true; its reasons are whole sentences with none of their own.
     if (!r.ok) return setNote(`Nothing was recorded. ${r.why}`);
-    setSaid(undefined);
+    unsay();
     plan.current = r.plan;
     setHeld(r.plan.document !== undefined);
     setLines([]);
@@ -180,7 +186,7 @@ export function OnboardCluster() {
           {ended === false && (
             <p>
               {choose
-                ? <Action label="Choose the file again" needs={["author"]} onClick={() => { setPhase("file"); setNote(undefined); setSaid(undefined); }} />
+                ? <Action label="Choose the file again" needs={["author"]} onClick={() => { setPhase("file"); setNote(undefined); unsay(); }} />
                 : <Action label="Run again" needs={["author"]} onClick={() => void run()} busy={busy} />}
             </p>
           )}

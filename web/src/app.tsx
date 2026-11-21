@@ -3,7 +3,7 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, Session, SIGNED_OUT_PATH, type Tokens } from "./auth.ts";
+import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, profileRefused, Session, SIGNED_OUT_PATH, type Tokens, withoutProfile } from "./auth.ts";
 import { type ClientConfig, loadClientConfig } from "./config.ts";
 import { PageNotices, useUnloadGuard, WritesProvider } from "./forms.tsx";
 import { navigate, PageState, renewals } from "./page.ts";
@@ -211,7 +211,7 @@ export function App() {
       }
       const done = await completeSignIn(config.config, found.provider, callback, { storage: sessionStorage, origin: location.origin });
       if (!still()) return;
-      if (done.kind !== "ok") return offer(failure(done), config.config, found.provider);
+      if (done.kind !== "ok") return offer(failure(done), config.config, profileRefused(done) ? withoutProfile(found.provider) : found.provider);
       history.replaceState(null, "", done.returnTo);
       renewer.post(done.tokens);
       await signedIn(config.config, found.provider, done.tokens);
