@@ -128,7 +128,8 @@ title, revision), or "No open draft in this cluster." No wireframe draws it; the
 ```text
 Machine mch_w4ze…n3fa   cluster cl_9fd… (lab-a)   10.5.0.4:50000   node 9Zs…=   metal
 +-------------------------------------------------------------------------------------------+
-| (•) Drifted since 09:41: a read differed from what Bronzeward last verified (rel_fgqv…).  |
+| (•) Changed on the machine since 09:41: a read differed from what Bronzeward last         |
+|     verified (rel_fgqv…).                                                                 |
 |     Opened by obs_k3d…, last seen 09:46. Late landing: no.         [Decide] -> W9         |
 | (•) Frozen: no new commitment or attempt until an approver unfreezes. An attempt already  |
 |     recorded is not stopped; an adoption can still be recorded.                           |

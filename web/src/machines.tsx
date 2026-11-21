@@ -325,7 +325,7 @@ function ClusterMachines({ id }: { id: string }) {
 }
 
 // GET /drafts has no cluster filter, so a cluster's open drafts are picked in the browser from every
-// page of the list, as the Changes page does.
+// page of the list, as the Drafts and releases page does.
 export const openDrafts = (drafts: readonly Draft[], cluster: string) => drafts.filter((d) => d.cluster === cluster && d.state === "open");
 
 export function OpenDraftsView({ drafts }: { drafts: readonly Draft[] }) {

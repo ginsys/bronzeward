@@ -201,7 +201,7 @@ fixes what the line says and links to. A client treats a `step` value it does no
 
 | `step` | The line says | Link | Who acts |
 | --- | --- | --- | --- |
-| `not-handed-over` | Not handed over: no Desired and no Applied configuration is recorded. Next: import its configuration. An import reads the node and writes nothing to it. | start the import for this machine | `author` |
+| `not-handed-over` | Not managed yet: no Desired and no Applied configuration is recorded. Next: import its configuration. An import reads the node and writes nothing to it. | start the import for this machine | `author` |
 | `import-stalled` | An import's runner has stopped: its lease lapsed and its staging is encrypted. Next: take it over to resume it, or abandon it ([§5.3](#53-protected-import-with-review)). | the ingestion | `author` |
 | `import-running` | An import of this machine is running. | the ingestion | nobody yet |
 | `import-paused` | An import waits for review of the staged change. | the protected review ([§5.3](#53-protected-import-with-review)) | `author` |
@@ -258,10 +258,10 @@ timeline:
 | --- | --- |
 | no open drift, observed.release = applied.release | "The configuration read at `<observed.at>` is attributed to `<observed.release>`, which is the `Applied` release (by `<applied.source>`)." |
 | as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's `pendingConvergence` evidence shows whether it does; a later `apply-config` plan withholds its diff when it does." If desired = applied.release, also adds "The read may match the adopted bytes or this release's compiled configuration; the API does not say which." (`internal/api/reads.go:163-164`) |
-| pendingConvergence, applied not null, no open drift | adds "Pending convergence: the configuration of the selected release `<desired>` for this machine differs from what Bronzeward applied." |
-| pendingConvergence, applied null | adds "Pending convergence: the selected release `<desired>` has not been applied to this machine." |
+| pendingConvergence, applied not null, no open drift | adds "Release not applied yet: the configuration of the selected release `<desired>` for this machine differs from what Bronzeward applied." |
+| pendingConvergence, applied null | adds "Release not applied yet: the selected release `<desired>` has not been applied to this machine." |
 | desired not null, desired ≠ applied.release, not pendingConvergence, no open drift | adds "The selected release `<desired>` carries this machine's applied configuration unchanged." |
-| openDrift not null | "Drifted since `<at of the openDrift.observation observation>`: a read differed from what Bronzeward last verified (`<applied.release>`)." If observed.release = desired, adds "It equals the selected release; that does not close the drift." |
+| openDrift not null | "Changed on the machine since `<at of the openDrift.observation observation>`: a read differed from what Bronzeward last verified (`<applied.release>`)." If observed.release = desired, adds "It equals the selected release; that does not close the drift." |
 | no open drift, observed.release null | "The configuration read at `<observed.at>` matched neither `Applied` nor `Desired`, and no drift is open; an operation may hold the machine. See the timeline." |
 | no open drift, observed.release = desired ≠ applied.release (an operation holds the machine: no drift opens while one does, [execution and recovery §6.1](execution-recovery.md#61-detection)) | "The configuration read at `<observed.at>` is attributed to the selected release `<observed.release>`." |
 | an observation with a higher `basis` than the one `observed` names (the machine read selects `observed` by highest basis, `internal/api/reads.go:171`; the observations list serves `basis`, `internal/api/observations.go:21`), with unread causes | adds "The latest read at `<time>` could not read: `<causes>`." |
@@ -270,10 +270,14 @@ timeline:
 | observed null | "No configuration read recorded." No time is shown. |
 | frozen | adds "Frozen: no new commitment or attempt until an approver unfreezes; an attempt already recorded is not stopped, and an adoption can still be recorded." |
 
+**Gap:** the sentences above (and the `not-handed-over` line of the `step` table) are the contract for both clients
+and the web client prints them. `bronzewardctl` still prints the old words, "Drifted since", "Pending convergence:",
+"Not handed over:" and "Matches applied", until #1071 merges; remove this paragraph then.
+
 A matching release ID never by itself means healthy, fresh or converged: no health check is
 bound in the PoC (`health: none-bound`, `internal/api/observe.go:86`), and every sentence says
-"Health: not checked". Pending convergence and drift are different
-([execution and recovery §6.1](execution-recovery.md#61-detection)). Pending convergence is the
+"Health: not checked". A release not applied yet (the `pendingConvergence` field) and drift are different
+([execution and recovery §6.1](execution-recovery.md#61-detection)). A release not applied yet is the
 `Desired` release's artifact digest for the machine differing from the `Applied` digest
 ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)),
 which after an adoption is the digest of the node's own bytes

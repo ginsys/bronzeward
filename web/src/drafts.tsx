@@ -133,7 +133,7 @@ export function paneEntry(sources: Source[], selected: string | undefined, claim
 // it would replace that entry unread (ginsys/bronzeward#517 H4).
 export const inUse = (draft: Pick<Draft, "entries">, name: string, kind: "fragment" | "profile" | "assignment" = "fragment") => draft.entries.some((e) => isSource(e) && e.kind === kind && nameOf(e) === name);
 
-// The Changes page's drafts, every page read, filtered by cluster in the browser (#339 scope).
+// The Drafts and releases page's drafts, every page read, filtered by cluster in the browser (#339 scope).
 export function Drafts() {
   const { go } = useReads();
   const [list] = useList<Draft>("/drafts", "", true);
