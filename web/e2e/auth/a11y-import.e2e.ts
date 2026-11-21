@@ -107,7 +107,8 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     machine = await syntheticMachine(at);
     const body = (await api(at, "h-author", "GET", `/machines/${machine}`)).body!;
     cluster = body["cluster"] as string;
-    address = body["talosEndpoint"] as string;
+    // The server stores the endpoint with its port ("192.0.2.7:50000"); the pages name the machine by the address alone.
+    address = (body["talosEndpoint"] as string).replace(/:\d+$/, "");
   });
   afterEach(leavesNothing);
 
