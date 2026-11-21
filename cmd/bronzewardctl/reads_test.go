@@ -29,7 +29,7 @@ func TestSentences(t *testing.T) {
 		{"read is the applied release", apitypes.MachineBody{Applied: applied, Desired: rel("rel_a"),
 			Observed: &apitypes.ObservedBody{At: at, Observation: "obs_1", Release: rel("rel_a")}}, []apitypes.ObservationBody{obs("obs_1", 1, nil)},
 			[]string{"The configuration read at 2026-10-26 10:00:00 UTC is attributed to rel_a, which is the Applied release (by operation)."},
-			[]string{"Adopted", "Pending", "carries"}},
+			[]string{"Adopted", "Release not applied yet", "carries"}},
 		{"adoption with the same desired release", apitypes.MachineBody{Applied: &apitypes.Applied{Release: "rel_a", Source: "adoption"}, Desired: rel("rel_a"),
 			Observed: &apitypes.ObservedBody{At: at, Release: rel("rel_a")}}, nil,
 			[]string{"Adopted from the node's own bytes", "the API does not say which."}, nil},
