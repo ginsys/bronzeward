@@ -144,7 +144,8 @@ describe("Connect a cluster (#1001)", () => {
     const plansOf = async (m: string) => (await api(at, "h-all", "GET", `/plans?machine=${m}`)).body!["items"] as { operation: string; state: string; approval: string | null }[];
     if ((await draftLine().getAttribute("data-state")) === "stopped") {
       // A publication that did not succeed sends nothing to any machine and no plan is made.
-      await expect(draftLine()).toHaveText(expect.stringContaining("Nothing was sent to any machine."));
+      // The line carries the publication's own end in the publication page's words (publishEnd), not the unread-watch words.
+      await expect(draftLine()).toHaveText(expect.stringMatching(/Publication operation .+\. Nothing has been sent to any machine\./));
       expect(drafts.map((d) => d.state)).toEqual(["open"]);
       // once: the draft's line is already stopped, and the press makes a machine's plan only after the publication succeeded
       for (const m of machines) expect(await plansOf(m.id)).toEqual([]);
