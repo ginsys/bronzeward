@@ -40,6 +40,7 @@ GOOD = {
                 "firefox-159.0.1": {"category": "stability", "version": "159.0.1"},
                 "firefox-159.0esr": {"category": "esr", "version": "159.0esr"},
                 "firefox-160.0b3": {"category": "dev", "version": "160.0b3"},
+                "firefox-159.9": {"category": "dev", "version": "159.9"},
                 "firefox-160.0.1": {"category": "stability", "version": "160.0.1"},
                 "firefox-3.6.3plugin1": {"category": "stability", "version": "3.6.3plugin1"},
             }
@@ -49,9 +50,9 @@ GOOD = {
         [
             stanza("microsoft-edge-stable", "156.0.4314.58", "a" * 64),
             stanza("microsoft-edge-beta", "159.0.4500.1", "b" * 64),
-            stanza("microsoft-edge-stable", "157.0.4338.9", "d" * 64),
             stanza("microsoft-edge-stable", "157.0.4341.60", "f" * 64),
             stanza("microsoft-edge-stable", "157.0.4341.100", "c" * 64),
+            stanza("microsoft-edge-stable", "157.0.4338.9", "d" * 64),
             stanza("microsoft-edge-stable", "158.0.4370.33", "e" * 64),
         ]
     ),
@@ -174,6 +175,14 @@ for name, override in BAD.items():
         expect(f"{name} {mode} writes nothing", before == after)
         # Python itself exits 2 for a script it cannot open, so the script's own message is the proof.
         expect(f"{name} {mode} says why", p.stderr.startswith("previous-major-pins: "), f"stderr={p.stderr!r}")
+
+# A pin file that lacks a field the comparison reads is a failure to read too, not drift.
+serve()
+broken = json.loads(json.dumps(OLD))
+del broken["edge"]["debUrl"]
+for mode in ("--check", "--write"):
+    p, before, after = run(mode, broken)
+    expect(f"pin file without debUrl {mode}", p.returncode == 2 and before == after and p.stderr.startswith("previous-major-pins: "), f"rc={p.returncode} {p.stderr}")
 
 serve()
 p, before, after = run("--check", OLD, mirror="http://127.0.0.1:1")
