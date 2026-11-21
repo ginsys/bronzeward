@@ -2995,9 +2995,9 @@ per source, the head, the revision the release left it at (`null`: removed)
 and the head revision; per machine, the mode it was validated in and its
 review route. A machine of a release also answers its `hostname`: `source`,
 one of `machine-name` (filled from the machine's name), `configuration` (the
-configuration sets one), `none` (nothing sets one: the machine has no name, whatever
-else its configuration holds, the legacy stable-hostname feature included, or
-its configuration says `auto: off` with no hostname) or `legacy-stable` (the
+configuration sets one), `none` (nothing sets one: the configuration has no explicit
+hostname, and either the machine has no name, with or without the legacy
+stable-hostname feature, or its configuration says `auto: off`) or `legacy-stable` (the
 configuration sets the legacy stable-hostname feature on a machine that has a
 name, so no name is used) or `unrecorded` (a release made before revision 13,
 whose hostname source was never recorded: it is no confirmed absence, and
