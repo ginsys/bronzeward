@@ -9,6 +9,7 @@ import { useReads, Ref, useSettled } from "./list.tsx";
 import { type Env, endpointNote, isAddress, type Line, onboardCluster, type Plan, discoverCluster, type Reference, sender } from "./onboard.ts";
 import { RequestRef } from "./problems.tsx";
 import { Action } from "./shell.tsx";
+import { MachineById } from "./titles.tsx";
 import { useUnsaved, useWrites } from "./forms.tsx";
 import { CONNECT_A_CLUSTER } from "./words.ts";
 
@@ -176,7 +177,7 @@ export function OnboardCluster() {
           <ul data-testid="onboard-lines">
             {lines.map((l) => (
               <li key={l.key} data-testid="onboard-line" data-state={l.state}>
-                {l.label}: {l.state}{l.detail !== undefined && `, ${l.detail}`}{l.to !== undefined && <> (<Ref to={l.to} id={l.to}>open</Ref>)</>}
+                {l.label}: {l.state}{l.detail !== undefined && `, ${l.detail}`}{l.holder !== undefined && <> (that machine: <MachineById id={l.holder} />)</>}{l.to !== undefined && <> (<Ref to={l.to} id={l.to}>open</Ref>)</>}
                 {l.reference !== undefined && <RequestRef problem={l.reference.problem} status={l.reference.status} />}
               </li>
             ))}

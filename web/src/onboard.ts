@@ -31,7 +31,8 @@ export interface Env {
 export type LineState = "done" | "existing" | "skipped" | "stopped" | "failed" | "unknown";
 // The problem a failure carries, which the page shows as the reference for a bug report (the words point to it).
 export interface Reference { problem: Problem; status: number }
-export interface Line { key: string; label: string; state: LineState; detail?: string; to?: string; reference?: Reference }
+// `holder` is the identifier of the machine that holds the name a machine was refused: the page links to it.
+export interface Line { key: string; label: string; state: LineState; detail?: string; to?: string; reference?: Reference; holder?: string }
 // The reference of an outcome that carried a problem document, as a member to spread; nothing otherwise.
 export const referenceOf = (o: Outcome): { reference?: Reference } =>
   "problem" in o && o.problem !== null ? { reference: { problem: o.problem, status: o.kind === "refused" ? o.status : o.problem.status } } : {};
@@ -297,15 +298,16 @@ async function firstKey(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolea
 }
 
 // The note for a machine whose name the server refused, undefined when the answer is no refusal of a name
-// that was sent: `name-in-use` names the machine that holds it, and `invalid-request` is a grammar the
-// server does not take (a server older than the widened one takes one label).
-function nameRefusal(o: Outcome, name: string): string | undefined {
+// that was sent: `name-in-use` names the machine that holds it, which the page shows as a link to it and
+// never as an identifier, and `invalid-request` is a grammar the server does not take (a server older than
+// the widened one takes one label).
+function nameRefusal(o: Outcome, name: string): { note: string; holder?: string } | undefined {
   if (o.kind !== "refused") return undefined;
   if (o.problem?.type === "urn:bronzeward:problem:name-in-use") {
     const holder = o.problem["machine"];
-    return `no name: the hostname "${name}" is held by machine ${typeof holder === "string" ? holder : "another machine"}; rename or remove that record, then name this one`;
+    return { note: `no name: the name "${name}" is already held by another machine of the cluster; rename or remove that machine, then name this one`, ...(typeof holder === "string" && { holder }) };
   }
-  if (o.problem?.type === "urn:bronzeward:problem:invalid-request") return `no name: the server refused the hostname "${name}" as a name`;
+  if (o.problem?.type === "urn:bronzeward:problem:invalid-request") return { note: `no name: the server refused the hostname "${name}" as a name` };
   return undefined;
 }
 
@@ -324,13 +326,14 @@ async function machines(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolea
     const write = (b: object) => env.send({ method: "POST", path: "/machines", resource: `/machines?${new URLSearchParams({ cluster: p.cluster! })}`, body: b });
     let o = await write(body);
     let note = nm.note;
+    let holder: string | undefined;
     // A name the server refuses (another machine holds it, or the grammar rejects it) never stops the run:
     // the machine is recorded without it, with the reason, to be named afterwards.
     const refused = nm.name === undefined ? undefined : nameRefusal(o, nm.name);
     if (refused !== undefined) {
       const { name: _unsent, ...unnamed } = body;
       o = await write(unnamed);
-      note = refused;
+      ({ note, holder } = refused);
     }
     const named = o.kind === "refused" ? existing(o.status, o.problem, "/machines") : undefined;
     const id = o.kind === "done" ? (o.data as { id?: string } | null)?.id : named?.kind === "machine" ? named.id : undefined;
@@ -342,7 +345,7 @@ async function machines(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolea
     }
     p.machines[m.nodeId] = id;
     // A machine this run recorded says how it was named, or why it was not: never a silent drop.
-    set({ key, label, state: o.kind === "done" ? "done" : "existing", to: `/machines/${id}`, ...(o.kind === "done" && note !== undefined && { detail: note }) });
+    set({ key, label, state: o.kind === "done" ? "done" : "existing", to: `/machines/${id}`, ...(o.kind === "done" && note !== undefined && { detail: note }), ...(o.kind === "done" && holder !== undefined && { holder }) });
   }
   return true;
 }

@@ -471,9 +471,11 @@ valid name" for one that stays invalid after lowercasing. **A name the server re
 run.** Where another machine of the cluster holds the name (`409 name-in-use`, the replaced node whose
 old record keeps its hostname) or the server does not take its grammar (`400 invalid-request`, a server
 older than the widened grammar), the client records that machine again without a name, goes on to the
-rest, and says so in the machine's line: "no name: the hostname `X` is held by machine `mch_…`; rename or
-remove that record, then name this one", or "no name: the server refused the hostname `X` as a name".
-The machine is never adopted on that code (client contracts A9 item 3). An unnamed machine is shown by
+rest, and says so in the machine's line: "no name: the name `X` is already held by another machine of the
+cluster; rename or remove that machine, then name this one", or "no name: the server refused the hostname
+`X` as a name". The words never carry the holder's identifier: the page adds a link to the holding machine,
+by the name or address its other pages give it, and the command's object carries the identifier as
+`nameHeldBy`, for a script. The machine is never adopted on that code (client contracts A9 item 3). An unnamed machine is shown by
 its address. Where onboarding names a machine, the
 machine's import base holds that hostname, equal to the
 name. The import removes that document from the stored base and records the hostname as filled from
@@ -636,7 +638,7 @@ The text output lists the cluster, the first key, the draft and one row per memb
 commands. `-o json` and `-o yaml` print one object once, at the end:
 `{cluster, firstKey, draft, machines[]}`, each member with `{node, machine, add, import}` and, only for a
 machine this run recorded, `name` (the name it was given, absent when it has none) and `nameNote` (how it was
-named, or why it was not), each step
+named, or why it was not) and, when the name was refused as held, `nameHeldBy` (the holder's identifier), each step
 with a `state` and, when it did not finish, the `command` that carries on and the `error` line. The
 answer of an import start is never printed. The exit code is that of the step that stopped the run (the
 usual exit codes: 1 a refusal, 3 an unknown outcome, 4 an import that ended failed). With `--review` the
