@@ -2017,8 +2017,8 @@ one. The rule is one for both clients:
    identifier shows the same title, the identifier as the title attribute and the shortened identifier where the read
    does not answer ([#996](https://github.com/ginsys/bronzeward/issues/996)): a plan's release, committed operation and
    change, a release's draft and publication, an import's draft and operation, the plans, imports and dependency
-   tables, an act's subjects, the review's release and the publication's result line and progress heading.
-   An operation's Subject cell and its outcome line stay identifiers until the operation page's own change lands. An
+   tables, an act's subjects, an operation's Subject cell (its machine, plan, draft and import), the applied release of
+   its outcome line, the review's release and the publication's result line and progress heading. An
    identifier inside a sentence built as plain text stays one. A machine
    a view names by identifier is shown by its name (A9) in the plan, operation, import, draft, assignment,
    release, review, recovery and dependency views, read through the same store, or taken from the machine body
@@ -2030,7 +2030,7 @@ one. The rule is one for both clients:
    be read is named by its identifier and an ingestion that cannot be read is an import with no machine. Each distinct
    draft, release, plan, ingestion and machine is read once for a command, and `plan show` takes the machine from the read its own view makes. `-o json` and `-o yaml` read nothing more. The other
    cross-references and the other commands that print a machine or a release stay identifiers, tracked by
-   [#996](https://github.com/ginsys/bronzeward/issues/996), so A8 is not fully met until that issue closes.
+   [#1017](https://github.com/ginsys/bronzeward/issues/1017) and [#1014](https://github.com/ginsys/bronzeward/issues/1014), so A8 is not fully met in the CLI until those close.
 
 **A9. A machine's name (client rule; the API revision that adds the name).** Closes G8. A client shows a machine by its
 name where the body carries one, with the identifier kept as the stable reference: in the web

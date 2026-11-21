@@ -10,8 +10,9 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { type Reads, ReadsProvider, useItem } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
 import { Status, StatusPage, when } from "./states.tsx";
+import { Outcome } from "./operation.tsx";
 import { PlanState } from "./plan.tsx";
-import { ACTS, Change, DependencyItem, Plans, ReleaseItem } from "./resources.tsx";
+import { ACTS, Change, DependencyItem, Operations, Plans, ReleaseItem } from "./resources.tsx";
 import { MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef } from "./titles.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -434,6 +435,33 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
     await mount(h(DependencyItem, { id: "dep_x" }), { ...reads, view: "w" });
     await settled();
     expect(text()).toContain(released);
+  });
+
+  test("an operation's Subject cell names its machine, plan, draft and import by their titles", async () => {
+    answers["/operations"] = ok({ items: [operation("apply-config", { machine: MCH, plan: PLN }), { ...operation("ingest", { draft: DRF, draftRevision: 1, ingestion: ING }), id: "op_k2pq3rstuvwxyz234567abcdeh" }], next: null });
+    answers[`/ingestions/${ING}`] = ok({ id: ING, machine: MCH });
+    await mount(h(Operations, { query: "", go: () => {} }));
+    await settled();
+    const cells = [...box.querySelectorAll("tbody tr")].map((tr) => tr.querySelector("td:nth-child(4)")?.textContent);
+    expect(cells).toEqual([`worker-1, Apply of worker-1 to ${released}`, "Add the office labels, Import of worker-1"]);
+    expect([...box.querySelectorAll("td:nth-child(4) a")].map((a) => a.getAttribute("title"))).toEqual([MCH, PLN, DRF, ING]);
+    expect(new Set(asked).size).toBe(asked.length);
+  });
+
+  test("a subject whose reads fail keeps the shortened identifiers, and one with nothing is none", async () => {
+    answers["/operations"] = ok({ items: [operation("apply-config", { plan: PLN }), { ...operation("publish", {}), id: "op_k2pq3rstuvwxyz234567abcdeh" }], next: null });
+    answers[`/plans/${PLN}`] = missing;
+    await mount(h(Operations, { query: "", go: () => {} }));
+    await settled();
+    expect([...box.querySelectorAll("tbody tr")].map((tr) => tr.querySelector("td:nth-child(4)")?.textContent)).toEqual(["pln_k2pq…cdef", "none"]);
+  });
+
+  test("the outcome line of a completed apply names the applied release by its title", async () => {
+    const o = { ...operation("apply-config", { plan: PLN, machine: MCH }), state: "completed", result: { appliedRelease: REL, observation: "obs_aaaaaaaaaaaaaaaaaaaaaaaaaa" } };
+    await mount(h(Outcome, { o: o as never }));
+    await settled();
+    expect(box.querySelector("[data-testid=outcome]")?.textContent).toContain(`this operation applied release ${released}, confirmed by observation obs_aaaa`);
+    expect(titled(released)).toBe(REL);
   });
 
   test("an object the page reads itself is not read again for a title built on it", async () => {
