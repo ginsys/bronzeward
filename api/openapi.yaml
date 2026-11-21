@@ -314,6 +314,50 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/FirstKeyBody'}
         default: {$ref: '#/components/responses/Problem'}
+  /clusters/{id}/talos-access:
+    get:
+      operationId: getClustersIdTalosAccess
+      tags: [clusters]
+      x-bronzeward-roles: [author]
+      x-bronzeward-human-only: true
+      description: >-
+        Whether a version of the cluster's Talos CA key is stored, read from the metadata of its path
+        under the access-presence identity and never from the key. It records no act. `503
+        talos-access-unavailable` means the secret store gave no usable answer, so the key may or may not
+        be held; it is never `present: false`.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TalosAccessBody'}
+        '503':
+          description: >-
+            A problem document: `dependency-unavailable` (the secret store is sealed or unreachable, or no
+            access-presence identity is configured) or `talos-access-unavailable` (no usable answer; with
+            `Retry-After` when a scheduled deletion cannot be told from a past one).
+          headers:
+            Bronzeward-Epoch: {$ref: '#/components/headers/OptionalEpoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Retry-After:
+              description: Whole seconds to wait before asking again.
+              schema: {type: string}
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
   /dependencies:
     get:
       operationId: getDependencies
@@ -3155,6 +3199,24 @@ components:
             createdTime: {type: string, format: date-time}
           additionalProperties: false
         replaced: {type: boolean, description: Whether the stored key replaced an earlier version.}
+      additionalProperties: false
+    TalosAccessBody:
+      type: object
+      required: [present]
+      description: >-
+        Whether the cluster's Talos CA key is stored. `version` and `createdTime` are set exactly when
+        `present` is true, `reason` exactly when it is false. The body carries nothing of the key, its path,
+        its policy or the secret store's answer.
+      properties:
+        present: {type: boolean}
+        version: {type: integer, description: The stored key's latest version.}
+        createdTime: {type: string, format: date-time, description: When that version was stored.}
+        reason:
+          type: string
+          enum: [latest-version-deleted, never-written-or-removed]
+          description: >-
+            `latest-version-deleted`: a version was stored and its latest was deleted.
+            `never-written-or-removed`: no key is stored, or every version was removed.
       additionalProperties: false
     FirstKeyInput:
       type: object

@@ -332,6 +332,16 @@ func TestProviderBlock(t *testing.T) {
 	if c.Provider.SignerTokenFile != "/etc/bronzeward/openbao-signer.token" {
 		t.Fatalf("signerTokenFile %q", c.Provider.SignerTokenFile)
 	}
+	if p.PresenceTokenFile != "" {
+		t.Fatalf("an absent presenceTokenFile reads %q", p.PresenceTokenFile)
+	}
+	c, err = Load(strings.NewReader(base + authBlock + providerBlock + "  presenceTokenFile: /etc/bronzeward/openbao-presence.token\n" + ingestionBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Provider.PresenceTokenFile != "/etc/bronzeward/openbao-presence.token" {
+		t.Fatalf("presenceTokenFile %q", c.Provider.PresenceTokenFile)
+	}
 	for name, in := range map[string]string{
 		"loopback http":  strings.Replace(providerBlock, "https://bao.example.test:8200", "http://127.0.0.1:58200", 1),
 		"listed http":    strings.Replace(providerBlock, "https://bao.example.test:8200", "http://openbao:8200", 1) + "  plainHTTPHosts: [openbao]\n",
@@ -381,6 +391,11 @@ func TestProviderBlock(t *testing.T) {
 		"signer shares report's":      {providerBlock + "  reportTokenFile: /etc/bronzeward/openbao-report.token\n  signerTokenFile: /etc/bronzeward/openbao-report.token\n", "provider.reportTokenFile and provider.signerTokenFile name the same file"},
 		"signer relative":             {providerBlock + "  signerTokenFile: openbao-signer.token\n", "provider.signerTokenFile must be an absolute path in clean form"},
 		"signer unclean":              {providerBlock + "  signerTokenFile: /etc/bronzeward/./openbao-signer.token\n", "provider.signerTokenFile must be an absolute path in clean form"},
+		"presence shares ingestion's": {providerBlock + "  presenceTokenFile: /etc/bronzeward/openbao-ingestion.token\n", "provider.ingestionTokenFile and provider.presenceTokenFile name the same file"},
+		"presence shares metadata's":  {providerBlock + "  presenceTokenFile: /etc/bronzeward/openbao-metadata.token\n", "provider.metadataTokenFile and provider.presenceTokenFile name the same file"},
+		"presence shares executor's":  {providerBlock + "  presenceTokenFile: /etc/bronzeward/openbao-executor.token\n", "provider.executorTokenFile and provider.presenceTokenFile name the same file"},
+		"presence shares signer's":    {providerBlock + "  signerTokenFile: /etc/bronzeward/openbao-signer.token\n  presenceTokenFile: /etc/bronzeward/openbao-signer.token\n", "provider.signerTokenFile and provider.presenceTokenFile name the same file"},
+		"presence relative":           {providerBlock + "  presenceTokenFile: openbao-presence.token\n", "provider.presenceTokenFile must be an absolute path in clean form"},
 	} {
 		_, err := Load(strings.NewReader(base + authBlock + c.block))
 		if err == nil || !strings.Contains(err.Error(), c.want) {

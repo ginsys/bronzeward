@@ -135,6 +135,11 @@ type Provider struct {
 	// same rules: it reads and writes each cluster's CA key and nothing else. Optional, like the
 	// report's: without it the server starts and answers a first key with 503 dependency-unavailable.
 	SignerTokenFile string `yaml:"signerTokenFile"`
+	// PresenceTokenFile holds the access-presence identity's static token (persistence-api.md
+	// §3.3), under the same rules: one `read` on the metadata of each cluster's CA key, never its
+	// data. Optional, like the signer's: without it the server starts and answers a presence read
+	// with 503 dependency-unavailable.
+	PresenceTokenFile string `yaml:"presenceTokenFile"`
 }
 
 // ProviderKeys names the Transit keys: the three ingestion uses and the one artifacts are
@@ -363,10 +368,11 @@ func (p *Provider) validate() error {
 		{"ingestionTokenFile", p.IngestionTokenFile}, {"compilerTokenFile", p.CompilerTokenFile},
 		{"metadataTokenFile", p.MetadataTokenFile}, {"executorTokenFile", p.ExecutorTokenFile},
 		{"reportTokenFile", p.ReportTokenFile}, {"signerTokenFile", p.SignerTokenFile},
+		{"presenceTokenFile", p.PresenceTokenFile},
 	}
 	for i, f := range files {
 		if f.path == "" {
-			if f.field == "reportTokenFile" || f.field == "signerTokenFile" {
+			if f.field == "reportTokenFile" || f.field == "signerTokenFile" || f.field == "presenceTokenFile" {
 				continue
 			}
 			return fmt.Errorf("config: provider.%s is required", f.field)

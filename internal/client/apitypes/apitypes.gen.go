@@ -719,6 +719,24 @@ func (e SourceEntryKind) Valid() bool {
 	}
 }
 
+// Defines values for TalosAccessBodyReason.
+const (
+	TalosAccessBodyReasonLatestVersionDeleted  TalosAccessBodyReason = "latest-version-deleted"
+	TalosAccessBodyReasonNeverWrittenOrRemoved TalosAccessBodyReason = "never-written-or-removed"
+)
+
+// Valid indicates whether the value is a known member of the TalosAccessBodyReason enum.
+func (e TalosAccessBodyReason) Valid() bool {
+	switch e {
+	case TalosAccessBodyReasonLatestVersionDeleted:
+		return true
+	case TalosAccessBodyReasonNeverWrittenOrRemoved:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetDependenciesParamsClass.
 const (
 	GetDependenciesParamsClassBlocked  GetDependenciesParamsClass = "blocked"
@@ -2338,6 +2356,22 @@ type TakeoverRequest struct {
 	// Reason 1 to 1024 bytes, not blank.
 	Reason string `json:"reason"`
 }
+
+// TalosAccessBody Whether the cluster's Talos CA key is stored. `version` and `createdTime` are set exactly when `present` is true, `reason` exactly when it is false. The body carries nothing of the key, its path, its policy or the secret store's answer.
+type TalosAccessBody struct {
+	// CreatedTime When that version was stored.
+	CreatedTime *time.Time `json:"createdTime,omitempty"`
+	Present     bool       `json:"present"`
+
+	// Reason `latest-version-deleted`: a version was stored and its latest was deleted. `never-written-or-removed`: no key is stored, or every version was removed.
+	Reason *TalosAccessBodyReason `json:"reason,omitempty"`
+
+	// Version The stored key's latest version.
+	Version *int `json:"version,omitempty"`
+}
+
+// TalosAccessBodyReason `latest-version-deleted`: a version was stored and its latest was deleted. `never-written-or-removed`: no key is stored, or every version was removed.
+type TalosAccessBodyReason string
 
 // TimelineEntry defines model for TimelineEntry.
 type TimelineEntry struct {

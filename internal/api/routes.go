@@ -120,6 +120,7 @@ func routes() []*route {
 		batch("/principals", getPrincipals, "id"), read(g("/server"), getServer),
 		ingestionStart().on(ifm(human(m(post, "/ingestions", author)))),
 		read(human(m(http.MethodGet, "/ingestions/{id}/review", author)), getIngestionReview),
+		read(human(m(http.MethodGet, "/clusters/{id}/talos-access", author)), getTalosAccess),
 		read(human(m(http.MethodGet, "/import-base-revisions/{id}", author)), getImportBase),
 		read(human(m(http.MethodGet, "/import-base-revisions/{id}/document", author)), getImportBaseDocument),
 		ingestionMark().on(human(m(post, "/ingestions/{id}/marks", author))),

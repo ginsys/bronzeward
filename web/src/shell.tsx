@@ -39,6 +39,8 @@ export const useRecoveryState = () => {
   const { mode = "unknown", recoveryMode = false } = useContext(Shell);
   return { mode, recoveryMode };
 };
+// The roles GET /identity served, for a view that shows something to a role only.
+export const useRoles = () => useContext(Shell).roles;
 // The offline banner shows: no action sends anything (journeys §8 Offline row).
 export const useOffline = () => useContext(Shell).offline;
 

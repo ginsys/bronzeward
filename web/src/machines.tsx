@@ -8,6 +8,7 @@ import { AddClusterAction, RecordMachineAction } from "./forms.tsx";
 import { OnboardClusterAction } from "./onboard.tsx";
 import { EmptyList, Head, Id, type Listed, More, Ref, RESTARTED, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { Status } from "./states.tsx";
+import { TalosAccessSign } from "./talosaccess.tsx";
 
 export type Machine = components["schemas"]["MachineBody"];
 export type Cluster = components["schemas"]["ClusterBody"];
@@ -180,6 +181,7 @@ export function ClusterItem({ id }: { id: string }) {
       <h2>Cluster {d.name}</h2>
       <p>{d.id}: Kubernetes endpoint {d.endpoint}, contract {d.contract}, Talos cluster ID {d.talosClusterId}.</p>
       <p><Ref to={`/machines?cluster=${d.id}`} id={d.id}>Machines in this cluster</Ref></p>
+      <TalosAccessSign cluster={d.id} />
       <ClusterMachines id={d.id} />
       <ClusterDrafts id={d.id} />
     </>
