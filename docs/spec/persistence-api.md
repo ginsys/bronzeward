@@ -2998,8 +2998,8 @@ one of `machine-name` (filled from the machine's name), `configuration` (the
 configuration sets one), `none` (nothing sets one: the configuration has no explicit
 hostname, and either the machine has no name, with or without the legacy
 stable-hostname feature, or its configuration says `auto: off`) or `legacy-stable` (the
-configuration sets the legacy stable-hostname feature on a machine that has a
-name, so no name is used) or `unrecorded` (a release made before revision 13,
+configuration sets the legacy stable-hostname feature and no explicit hostname,
+on a machine that has a name, so no name is used) or `unrecorded` (a release made before revision 13,
 whose hostname source was never recorded: it is no confirmed absence, and
 the migration gives every such release that value by a column default, never
 an `UPDATE`, since `release_machine` is immutable), and,
