@@ -107,7 +107,7 @@ export function OnboardCluster() {
     setEnded(undefined);
     // The press goes on only while the shell has not invalidated the reads it began with, and every write of
     // the plan is sent under the epoch its first press began under (onboard.ts, pressOnboarding).
-    const { ok, epochChanged } = await pressOnboarding(env, p, { epoch: writes.client?.currentEpoch, valid: undropped() }, (l) => {
+    const { ok, epochChanged } = await pressOnboarding(env, p, { epoch: writes.client?.currentEpoch, current: () => writes.client?.currentEpoch, valid: undropped() }, (l) => {
       if (!alive.current) return;
       setLines(l);
       setHeld(p.document !== undefined);

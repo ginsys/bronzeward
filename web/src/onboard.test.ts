@@ -781,7 +781,8 @@ describe("onboard naming: a machine is named by the hostname its node reports", 
 describe("every write of an onboarding is sent under the epoch its plan's first press began under (ginsys/bronzeward#1075)", () => {
   const press = async (s: Server, plan: Plan, epoch: string | undefined, valid: () => boolean = () => true) => {
     let lines: Line[] = [];
-    const r = await pressOnboarding(s.env(), plan, { epoch, valid }, (l) => (lines = l));
+    // The client's own epoch is the server's, as the client sees it through the answers it reads.
+    const r = await pressOnboarding(s.env(), plan, { epoch, current: () => s.epoch, valid }, (l) => (lines = l));
     return { ...r, lines };
   };
   const writes = (s: Server) => s.sends.map((x, i) => ({ route: x.route, epoch: s.epochs[i] })).filter((x) => x.route !== "POST /discoveries");
@@ -820,7 +821,41 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     expect(plan.unsent).toEqual(["Draft", "Imports"]);
   });
 
-  test("the shell invalidates the reads of the press: nothing more is sent, not even a write that would be refused", async () => {
+  test("an epoch stop before the first key drops the page's copy of the talosconfig, which nothing will send now", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.committed = (route) => {
+      if (route === "POST /clusters") s.epoch = "e2";
+    };
+    expect(plan.document).toBeDefined();
+    const r = await press(s, plan, "e1");
+    expect(r.epochChanged).toBe(true);
+    expect(plan.keyed).toBe(false);
+    expect(plan.document).toBeUndefined();
+    expect(plan.unsent).toEqual(["Machines", "Draft", "Imports"]);
+  });
+
+  test("the shell ends the reads of the press with the epoch moved: nothing more is sent, not even a write that would be refused, and the plan is retired", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.sends.length = 0;
+    s.epochs.length = 0;
+    let open = true;
+    s.committed = (route) => {
+      if (route.endsWith("/first-keys")) {
+        open = false;
+        s.epoch = "e2";
+      }
+    };
+    const r = await press(s, plan, "e1", () => open);
+    expect(r.ok).toBe(false);
+    expect(r.epochChanged).toBe(true);
+    expect(writes(s).map((w) => w.route.replace(/cl_[0-9]+/, "{cl}"))).toEqual(["POST /clusters", "POST /clusters/{cl}/first-keys"]);
+    expect(r.lines.find((l) => l.state === "failed")!.detail).toBe("not saved: the page's reads were ended by the shell.");
+    expect(plan.document).toBeUndefined();
+  });
+
+  test("the shell ends the reads with the epoch unchanged (a revocation, a sign-out): the press stops quietly, says nothing of an epoch, and the plan can be run again", async () => {
     const s = new Server();
     const plan = await planOf(s);
     s.sends.length = 0;
@@ -831,9 +866,13 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     };
     const r = await press(s, plan, "e1", () => open);
     expect(r.ok).toBe(false);
-    expect(r.epochChanged).toBe(true);
+    expect(r.epochChanged).toBe(false);
     expect(writes(s).map((w) => w.route.replace(/cl_[0-9]+/, "{cl}"))).toEqual(["POST /clusters", "POST /clusters/{cl}/first-keys"]);
-    expect(r.lines.find((l) => l.state === "failed")!.detail).toBe(`not saved: ${EPOCH_CHANGED_ASIDE}.`);
+    expect(stoppedSentence("Machine cp-1", r.epochChanged, false, plan.unsent)).toContain("Running it again");
+    open = true;
+    const again = await press(s, plan, "e1");
+    expect(again.ok).toBe(true);
+    expect(plan.epoch).toBe("e1");
   });
 
   test("a second press of the same plan sends under the epoch of the first, so the ids it holds are never sent under the new one; a new plan begins under the new epoch", async () => {
