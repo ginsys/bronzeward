@@ -1,12 +1,13 @@
 // The machine list (wireframe W2) and the clusters' list and items. The server filters machines
 // by cluster; the browser filters them by state over all pages (G9). A machine is shown by its name
-// where the body carries one and it passes the grammar, else by its identifier, with its endpoint and
-// node ID beside it (G8, client contracts A9).
+// where the body carries one and it passes the grammar, else by its address, else as an unnamed machine;
+// its identifier is the link's title (G8, client contracts A9).
 
 import type { components } from "./api/v1";
 import { AddClusterAction, RecordMachineAction } from "./forms.tsx";
 import { OnboardClusterAction } from "./onboard.tsx";
 import { Detail, EmptyList, Head, Id, type Listed, More, Ref, RESTARTED, Scroll, short, useItem, useList, usePending } from "./list.tsx";
+import { SAFE } from "./principals.ts";
 import { Status } from "./states.tsx";
 import { TalosAccessSign } from "./talosaccess.tsx";
 import { UNNAMED_MACHINE, UNNAMED_MACHINE_HEADING } from "./words.ts";
@@ -64,7 +65,7 @@ export const release = (id: string | null) => <Id id={id} />;
 
 // A9: a name is remote text, shown only when the received value matches the grammar (1 to 63 characters,
 // lowercase letters, digits and hyphen, neither end a hyphen; no `m` flag, so `$` refuses a trailing line
-// feed), else the identifier is shown. It replaces A7's control and format character test.
+// feed), else the machine is shown by its address. It replaces A7's control and format character test.
 const MACHINE_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 export const machineName = (name: unknown): string | undefined => (typeof name === "string" && MACHINE_NAME.test(name) ? name : undefined);
 
@@ -85,9 +86,11 @@ export function machineAddress(endpoint: unknown): string | undefined {
   return m[2];
 }
 
-// The node ID or UUID of G8, shortened for a suffix: `node 4c1f…`, `UUID 9a3e…`.
+// The node ID or UUID of G8, shortened for a suffix: `node 4c1f…`, `UUID 9a3e…`. It is remote text like a name:
+// a value that is not safe to show (A8 rule 3) reads "unknown".
 const nodeShort = (h: MachineLike["hardware"]): string => {
-  const [kind, value] = h?.talosNodeId != null ? ["node", h.talosNodeId] : ["UUID", h?.smbiosUuid ?? "unknown"];
+  const [kind, given] = h?.talosNodeId != null ? ["node", h.talosNodeId] : ["UUID", h?.smbiosUuid];
+  const value = typeof given === "string" && SAFE.test(given) ? given : "unknown";
   return `${kind} ${value.length > 8 ? `${value.slice(0, 4)}…` : value}`;
 };
 

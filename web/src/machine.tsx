@@ -440,7 +440,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
       <Detail id={d.id} />
       {m.kind !== "ok" && pm}
       {obs.kind !== "ok" && po}
-      <p>Cluster <Ref to={`/clusters/${d.cluster}`} id={d.cluster}>{clusterText ?? THIS_CLUSTER}</Ref>, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
+      <p>{clusterText !== undefined && "Cluster "}<Ref to={`/clusters/${d.cluster}`} id={d.cluster}>{clusterText ?? THIS_CLUSTER}</Ref>, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
       {changed !== undefined && <ChangeEndpoint machine={d} onChanged={changed} />}
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list).map((s) => <li key={s}>{s}</li>)}</ul>
       <NextStep position={position} recovery={recovery} />

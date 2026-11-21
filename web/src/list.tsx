@@ -7,7 +7,7 @@ import type { Client, ReadResult } from "./request.ts";
 import { follow } from "./router.ts";
 import { Empty, Loading, Status } from "./states.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
-import { COPY, IDENTIFIER } from "./words.ts";
+import { COPIED, COPY, COPY_BY_HAND, IDENTIFIER } from "./words.ts";
 
 export type Load<T> = { kind: "loading" } | ReadResult<T>;
 export type Failed = Exclude<ReadResult<unknown>, { kind: "ok" | "discarded" }>;
@@ -237,10 +237,17 @@ export function Id({ id, none = "none" }: { id: string | null | undefined; none?
 
 // The detail line under a heading: the machine-made identifier, in small type, with a control that copies it. The
 // identifier is shown here, in the address bar and in a copy, and never in a heading or a link's text.
+// The browser may have no clipboard (a page on plain http) or may refuse the write: either says so.
 export function Detail({ id }: { id: string }) {
+  const [said, say] = useState<string>();
+  const copy = () => {
+    const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+    if (clipboard === undefined) return say(COPY_BY_HAND);
+    clipboard.writeText(id).then(() => say(COPIED), () => say(COPY_BY_HAND));
+  };
   return (
-    <p className="detail">
-      <small>{IDENTIFIER} <code>{id}</code>{" "}<button type="button" onClick={() => void navigator.clipboard?.writeText(id)}>{COPY}</button></small>
+    <p>
+      <small>{IDENTIFIER} <code>{id}</code>{" "}<button type="button" onClick={copy}>{COPY}</button>{said !== undefined && <span role="status"> {said}</span>}</small>
     </p>
   );
 }

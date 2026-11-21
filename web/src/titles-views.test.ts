@@ -7,13 +7,13 @@
 import { act, createElement as h, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { type Reads, ReadsProvider, useItem } from "./list.tsx";
+import { Detail, type Reads, ReadsProvider, useItem } from "./list.tsx";
 import type { ReadResult } from "./request.ts";
 import { Status, StatusPage, when } from "./states.tsx";
 import { Outcome } from "./operation.tsx";
 import { PlanState } from "./plan.tsx";
 import { ACTS, Change, DependencyItem, OperationItem, Operations, Plans, ReleaseItem } from "./resources.tsx";
-import { MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef } from "./titles.tsx";
+import { MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useClusterText } from "./titles.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -151,6 +151,13 @@ describe("ginsys/bronzeward#987: a plan", () => {
     }
   });
 
+  test("a plan whose machine read fails keeps its title, naming the machine as 'the machine'", async () => {
+    answers[`/machines/${MCH}`] = missing;
+    await mount(h(PlanRef, { p: plan("adopt") as never }));
+    await settled();
+    expect(text()).toBe(`Adopt of the machine to Add the office labels, published ${when(at)}`);
+  });
+
   test("keeps the identifier when the release or the draft fails to read", async () => {
     answers[`/releases/${REL}`] = missing;
     await mount(h(PlanRef, { p: plan("apply-config") as never }));
@@ -197,6 +204,14 @@ describe("ginsys/bronzeward#987: an operation", () => {
     await settled();
     expect(text()).toBe("Import of worker-1");
     expect(asked).toEqual([`/ingestions/${ING}`, `/machines/${MCH}`]);
+  });
+
+  test("ingest whose machine read fails is an import of 'the machine'", async () => {
+    answers[`/ingestions/${ING}`] = ok({ id: ING, machine: MCH });
+    answers[`/machines/${MCH}`] = missing;
+    await mount(h(OperationRef, { o: operation("ingest", { draft: DRF, draftRevision: 1, ingestion: ING }) as never }));
+    await settled();
+    expect(text()).toBe("Import of the machine");
   });
 
   test.each([
@@ -296,6 +311,36 @@ describe("ginsys/bronzeward#987: a machine", () => {
   test("shows none for no identifier", async () => {
     await mount(h(MachineById, { id: null }));
     expect(text()).toBe("none");
+  });
+});
+
+describe("ginsys/bronzeward#1055: a cluster's name and the identifier's detail line", () => {
+  const Cluster = ({ id }: { id: string }) => h("span", null, useClusterText(id) ?? "-");
+  test("a cluster is named from its read where the name is safe, and by nothing where it is not or the read fails", async () => {
+    for (const [i, [answer, shown]] of [[ok({ id: "cl_a", name: "lab-a" }), "lab-a"], [ok({ id: "cl_a", name: "lab‮a" }), "-"], [missing, "-"]].entries() as Iterable<[number, [ReadResult<unknown>, string]]>) {
+      answers["/clusters/cl_a"] = answer;
+      await mount(h(Cluster, { id: "cl_a" }), { ...reads, view: `c${i}` });
+      await settled();
+      expect(text()).toBe(shown);
+    }
+  });
+
+  const click = () => act(async () => { box.querySelector("button")!.dispatchEvent(new MouseEvent("click", { bubbles: true })); await new Promise((r) => setTimeout(r, 10)); });
+  const clipboard = (v: unknown) => Object.defineProperty(navigator, "clipboard", { value: v, configurable: true });
+  test("Copy says Copied once the identifier is on the clipboard", async () => {
+    const copied: string[] = [];
+    clipboard({ writeText: async (s: string) => void copied.push(s) });
+    await mount(h(Detail, { id: MCH }));
+    expect(text()).toBe(`Identifier ${MCH} Copy`);
+    await click();
+    expect(copied).toEqual([MCH]);
+    expect(text()).toBe(`Identifier ${MCH} Copy Copied`);
+  });
+  test.each([["no clipboard", undefined], ["a refused write", { writeText: () => Promise.reject(new Error("denied")) }]])("Copy with %s says to select the identifier", async (_, board) => {
+    clipboard(board);
+    await mount(h(Detail, { id: MCH }));
+    await click();
+    expect(text()).toBe(`Identifier ${MCH} Copy Select the identifier to copy it`);
   });
 });
 
