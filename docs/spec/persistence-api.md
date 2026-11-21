@@ -1206,7 +1206,10 @@ and the release's coverage: every machine of the cluster with an import base
 after the draft (its entry, else its `Applied` release's, §3.2), each with its
 assignment after the draft, or with none, compiling on its base alone
 **(choice §17.33)**, and each covered machine's name, or none, as stored
-**(choice §17.45)**: T3 compares against these names. A machine with an assignment but no import base is not
+**(choice §17.45)**: T3 compares against these names. For the hostname swap
+check (compilation §6.1 item 6) it also reads, for each covered machine, the name
+its `Applied` release's hostname record holds (§9.2, source `machine-name`); a
+change of `Applied` before commit is the second form of §4.2's stale input. A machine with an assignment but no import base is not
 covered: a draft that changes or removes its assignment is refused
 `422 validation-failed` naming the machine, and a release covering no machine
 is refused `422` naming the cluster. Within a layer, the profiles' pins come
@@ -2183,7 +2186,10 @@ API revisions:
 
 Revision 13 is specified and not yet served. It adds `hostname` (`source`, and
 `name` for `machine-name`) on each machine of a release and its review, and the
-`hostname` rule of `422 validation-failed` (§9.2, §3.5, choice §17.44). Its row
+`hostname` rule of `422 validation-failed` (§9.2, §3.5, choice §17.44), and the
+name form of `409 stale-input` (§4.2, choice §17.45): the publication check and
+the `ingest` draft transaction (T1) return it, with `expected` and `actual` as
+machine names, each a string or `null`. Its row
 replaces this paragraph in the change that serves it (ginsys/bronzeward#1041),
 because the table's last row is the revision the server serves and a test holds
 the two equal.

@@ -1105,9 +1105,10 @@ unmeasured.
    `registerWithFQDN` set `node-a.example.org` does not. A domain that DHCP or
    a cloud supplies is not in the configuration and is not compared. An
    explicit hostname that carries a secret reference is not compared either,
-   and a clash with one is therefore not caught: comparing it would make the
-   refusal an equality test on a secret, and an author could confirm a guess
-   by renaming a machine and publishing.
+   nor one whose compared node name depends on a secret reference (a
+   `registerWithFQDN` value held in one), and a clash with one is therefore not
+   caught: comparing it would make the refusal an equality test on a secret,
+   and an author could confirm a guess by renaming a machine and publishing.
    Publication refuses it, before any release is committed,
    `422 validation-failed` with the rule `hostname`, naming both machines by
    name where they have one and by identifier only where they have none, and
@@ -1117,6 +1118,19 @@ unmeasured.
    machine node-a, or change the hostname in the configuration of machine
    node-b." Renaming node-b would not help, since its explicit hostname does
    not follow its name (item 2).
+   A name that moves between machines is the second clash: a filled hostname
+   equal to the name that another machine's last applied release recorded
+   (source `machine-name`, persistence and API §9.2) is refused the same way,
+   naming both machines, until that machine's applied release no longer holds
+   it. Each machine has its own plan, so a release that renames machine node-a
+   and gives its old name to machine node-b could be applied in the wrong
+   order and leave two nodes with one hostname. The operator publishes the
+   first rename, applies it, and then renames the second machine: "Machine
+   node-b would take the hostname node-a from its name, but the last release
+   applied to machine node-a still sets that hostname. Apply the release that
+   renames machine node-a first." A hostname set explicitly, or held by a
+   secret reference, is not recorded per release and is not covered; that
+   case is ginsys/bronzeward#1052.
    The check reads the machines of one release, and a release covers every
    machine of its cluster that has an import base
    ([persistence and API choice §17.33](persistence-api.md)); a machine with no
