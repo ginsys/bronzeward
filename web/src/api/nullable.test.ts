@@ -60,6 +60,10 @@ declare function ok<T extends true>(): void;
 type RI = components["schemas"]["ReferenceInput"];
 `;
 
+// Parsed source files by name. The name alone is a valid key only because `options` in diagnostics() is a
+// constant: a file parsed under other options could not be reused.
+const parsed = new Map<string, ts.SourceFile | undefined>();
+
 function diagnostics(lines: string[]): string[] {
   const options: ts.CompilerOptions = {
     strict: true,
@@ -70,9 +74,16 @@ function diagnostics(lines: string[]): string[] {
   };
   const host = ts.createCompilerHost(options);
   const source = prelude + lines.join("\n") + "\n";
-  const { readFile, fileExists } = host;
+  const { readFile, fileExists, getSourceFile } = host;
   host.readFile = (name) => (name === checkFile ? source : readFile(name));
   host.fileExists = (name) => name === checkFile || fileExists(name);
+  // Only the check file differs between the programs of this file; the library files and v1.d.ts are parsed
+  // once and shared, which is most of a program's cost (ginsys/bronzeward#972).
+  host.getSourceFile = (name, ...rest) => {
+    if (name === checkFile) return getSourceFile(name, ...rest);
+    if (!parsed.has(name)) parsed.set(name, getSourceFile(name, ...rest));
+    return parsed.get(name);
+  };
   const program = ts.createProgram([checkFile], options, host);
   return ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
 }
@@ -81,6 +92,9 @@ let fields: Field[] = [];
 let unnamed = -1;
 beforeAll(async () => {
   ({ fields, unnamed } = await nullableFields());
+  // The first program parses the library files and v1.d.ts; do that here, under the hook's own timeout, so the
+  // cases below time only their check.
+  diagnostics([]);
 });
 
 test("all 100 nullable fields are found, each named", () => {
