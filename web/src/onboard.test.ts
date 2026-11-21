@@ -782,7 +782,7 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
   const press = async (s: Server, plan: Plan, epoch: string | undefined, valid: () => boolean = () => true) => {
     let lines: Line[] = [];
     // The client's own epoch is the server's, as the client sees it through the answers it reads.
-    const r = await pressOnboarding(s.env(), plan, { epoch, current: () => s.epoch, valid }, (l) => (lines = l));
+    const r = await pressOnboarding(s.env(), plan, { current: () => (epoch === undefined ? undefined : s.epoch), valid }, (l) => (lines = l));
     return { ...r, lines };
   };
   const writes = (s: Server) => s.sends.map((x, i) => ({ route: x.route, epoch: s.epochs[i] })).filter((x) => x.route !== "POST /discoveries");
@@ -851,7 +851,7 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     expect(r.ok).toBe(false);
     expect(r.epochChanged).toBe(true);
     expect(writes(s).map((w) => w.route.replace(/cl_[0-9]+/, "{cl}"))).toEqual(["POST /clusters", "POST /clusters/{cl}/first-keys"]);
-    expect(r.lines.find((l) => l.state === "failed")!.detail).toBe("not saved: the page's reads were ended by the shell.");
+    expect(r.lines.find((l) => l.state === "failed")!.detail).toBe("not saved: the page's reads ended.");
     expect(plan.document).toBeUndefined();
   });
 
