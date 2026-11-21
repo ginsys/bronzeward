@@ -43,6 +43,9 @@ var (
 	webRowFull   = regexp.MustCompile(`(?m)^ {4}([a-z]+):\s*\[\s*("(?:[^"\\\n]|\\.)*")\s*,\s*("(?:[^"\\\n]|\\.)*"|undefined)\s*,?\s*\],?$`)
 )
 
+// webDecl is the table's declaration line, whole: nothing may follow its opening brace.
+const webDecl = "const KNOWN: Record<string, Record<string, [now: string, next: string | undefined]>> = {"
+
 // webWords reads the table of web/src/operation-words.ts: each `state: [now, next]` row of each kind, `next`
 // being a string or `undefined`. It fails on a row it cannot take whole (a template string, a single quote, a
 // row it cut short), and on a table that does not hold exactly the 16 pairs, each with a sentence.
@@ -71,7 +74,7 @@ func webWords(src string) ([]webRow, error) {
 		}
 	}
 	for _, l := range strings.Split(string(left), "\n") {
-		if l = strings.TrimSpace(l); l != "" && l != "}," && !strings.HasPrefix(l, "const KNOWN") {
+		if l = strings.TrimSpace(l); l != "" && l != "}," && l != webDecl {
 			return nil, fmt.Errorf("the table holds text the reader did not take: %q", l)
 		}
 	}
@@ -166,6 +169,7 @@ func TestWebWordsReaderRefusesWhatItCannotRead(t *testing.T) {
 		{"a row in another layout", "  ingest: {\n", "  ingest: {\n    queued: [\"New web sentence.\",\n      \"New web step.\"],\n"},
 		{"a row with extra indentation", "  ingest: {\n", "  ingest: {\n      queued: [\"New web sentence.\", \"New web step.\"],\n"},
 		{"a row at no indentation", "  ingest: {\n", "  ingest: {\nqueued: [\"New web sentence.\", \"New web step.\"],\n"},
+		{"a pair after the declaration's brace", "undefined]>> = {\n", "undefined]>> = { extra: { queued: [\"Hidden sentence.\", undefined] },\n"},
 		{"a kind added", "  adopt: {\n", "  adopt2: {\n    queued: [\"New web sentence.\", undefined],\n  },\n  adopt: {\n"},
 	} {
 		if !strings.Contains(src, c.old) {
