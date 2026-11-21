@@ -44,7 +44,7 @@ export const PROBLEM_WORDS: Readonly<Record<string, Words>> = {
   "dependency-unavailable": { what: "Something the server depends on is not available or not set up.", next: "Try again in a moment; if it keeps happening, ask an administrator." },
   "name-in-use": { what: "Another machine in this cluster already has this name.", next: "Choose a different name." },
   "machine-identity-mismatch": { what: "The machine at that address could not be confirmed as the one on record.", next: "Check which machine answers at that address; nothing it read was kept." },
-  "talos-access-unavailable": { what: "The server could not use or check Talos access for this machine or cluster.", next: "The server's explanation follows.", explains: true },
+  "talos-access-unavailable": { what: "The server could not work with Talos for this machine or cluster.", next: "The server's explanation follows.", explains: true },
 };
 
 // A rule narrows a code: the same code with a different cause that the general sentence would misstate.
