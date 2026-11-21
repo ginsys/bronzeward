@@ -21,8 +21,9 @@ func (e *env) importBaseCmd(args []string) error {
 }
 
 // importBaseDocument shows an import base's stored document (GET
-// /import-base-revisions/{id}/document, author, human only; the server answers only the author who
-// made the import and continued its review) the way import review shows a review
+// /import-base-revisions/{id}/document, author, human only; the server answers any author for an
+// import read from a node, and for a file import only the author who made it and continued its
+// review) the way import review shows a review
 // (client-contracts.md §11.3): only when standard input and output are a terminal, through the
 // in-process pager, after the protected-review notice, with no -o json, yaml, save or export form,
 // no override and no marks prompt. A refusal of the server is shown as it comes and prints no body.

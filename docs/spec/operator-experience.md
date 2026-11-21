@@ -1540,9 +1540,11 @@ restore nobody entered stays the same residual
    server's problem without a body. Items 1 (inputs) and 5 (redacted renders) do not. The
    stored document is the sanitized text and can still hold a value nobody marked, so the
    view says so as the review does and treats the whole text as protected. The server answers
-   it only to the author who made the import from a file they provided and continued its review: the clients offer the
-   action to any `author` and show the server's refusal (`not-the-importer`,
-   `import-not-reviewed`) as it comes, with no body.
+   any `author` for an import read from a node, a drift adoption included (the author role
+   may read a node's configuration), and for a file import only the author who made it from a
+   file they provided and continued its review: the clients offer the action to any `author`
+   and show the server's refusal (`not-the-importer`, `import-not-reviewed`) as it comes,
+   with no body.
 9. **A fragment revision's text** (`GET /fragment-revisions/{id}`, every role) is the server's
    sanitized text, and it can still hold a value nobody marked. The route is open to every role, so
    it is not a protected read like items 2 and 8: the clients treat it as an ordinary read under the
