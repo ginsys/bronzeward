@@ -1084,23 +1084,28 @@ unmeasured.
 6. **A filled hostname that another machine already holds (choice §16.38).**
    Names are unique within a cluster, so two filled hostnames never clash.
    The one new clash is a hostname filled from a name against another
-   machine's explicit hostname of the same value, compared as Talos reads a
-   hostname: an explicit FQDN counts as its first label, since Talos splits it
-   at the first dot into hostname and domain (`hostname_spec.go`,
-   `ParseFQDN`) and registers the node under the hostname unless it is
-   told to use the FQDN, after lower-casing it and turning underscores into
-   hyphens (`nodename.go`, `FromHostname`). The compared value is that node
-   name: `node-a.example.org` and `NODE_A.example.org` both clash with a
-   filled `node-a`. Two nodes would report one
-   hostname and, by default, one Kubernetes node name, and the second kubelet
-   would take over the first's Node object. Publication refuses it, before any
-   release is committed, `422 validation-failed` with the rule `hostname`,
-   naming both machines by name where they have one and by identifier only
-   where they have none: "Machine node-a would take the hostname node-a from
-   its name, but machine node-b already has that hostname in its
-   configuration. Rename machine node-a, or change the hostname in the
-   configuration of machine node-b." Renaming node-b would not help, since its
-   explicit hostname does not follow its name (item 2).
+   machine's explicit hostname that gives the same Kubernetes node name: two
+   nodes would register one Node object, and the second kubelet would take over
+   the first's. The compared value is the node name Talos derives, copied here
+   because the Talos package that computes it is internal (`nodename.go`,
+   `FromHostname`, v1.14.5): take the hostname, or only its first label when
+   the machine's composition does not set `machine.kubelet.registerWithFQDN`
+   (Talos splits at the first dot into hostname and domain, `hostname_spec.go`,
+   `ParseFQDN`); lower-case the letters; turn each underscore into a hyphen;
+   drop every character that is not a letter, a digit, a hyphen or a dot; then
+   trim hyphens and dots from both ends. So `node-a.example.org`,
+   `NODE_A.example.org` and `_node-a_` clash with a filled `node-a`, and with
+   `registerWithFQDN` set `node-a.example.org` does not. A domain that DHCP or
+   a cloud supplies is not in the configuration and is not compared.
+   Publication refuses it, before any release is committed,
+   `422 validation-failed` with the rule `hostname`, naming both machines by
+   name where they have one and by identifier only where they have none, and
+   printing no explicit value, which may be a secret reference: "Machine
+   node-a would take the hostname node-a from its name, but the hostname
+   configured on machine node-b gives the same Kubernetes node name. Rename
+   machine node-a, or change the hostname in the configuration of machine
+   node-b." Renaming node-b would not help, since its explicit hostname does
+   not follow its name (item 2).
    The check reads the machines of one release, and a release covers every
    machine of its cluster that has an import base
    ([persistence and API choice §17.33](persistence-api.md)); a machine with no
