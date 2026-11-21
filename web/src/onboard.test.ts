@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { describe, expect, test, vi } from "vitest";
-import { cutContext, discoverCluster, type Env, endpointNote, isAddress, type Line, nameOf, onboardCluster, type Plan, sender } from "./onboard.ts";
+import { cutContext, discoverCluster, type Env, endpointNote, isAddress, type Line, nameOf, onboardCluster, type Plan, pressOnboarding, sender, stoppedSentence } from "./onboard.ts";
 import type { Client } from "./request.ts";
-import { type Outcome, Writes, type WriteSpec } from "./write.ts";
+import { EPOCH_CHANGED_ASIDE, type Outcome, Writes, type WriteSpec } from "./write.ts";
 
 const CANARY = "BWSYNTH-onboard-canary";
 const ID = "YnJvbnpld2FyZC1lMmUtb25ib2FyZC1jbHVzdGVyLTA=";
@@ -35,6 +35,12 @@ class Server {
   fail = new Map<string, Outcome>();
   // A route whose next send commits and then answers with this outcome: the answer was lost.
   lost = new Map<string, Outcome>();
+  // The installation's epoch, and the epoch each write was sent under (`spec.epoch`, none when the caller named none).
+  // A write sent under another epoch than this one is set aside, as the write layer does on a 412 epoch-mismatch.
+  epoch = "e1";
+  epochs: (string | undefined)[] = [];
+  // Called with the route of each write the server committed: a test moves `epoch` here.
+  committed: (route: string) => void = () => {};
   private n = 0;
   private id = (p: string) => `${p}_${++this.n}`;
 
@@ -43,6 +49,11 @@ class Server {
       const route = `${spec.method} ${spec.path}`;
       this.requests.push(route);
       this.sends.push({ route, body: structuredClone(spec.body) });
+      this.epochs.push(spec.epoch);
+      if (spec.epoch !== undefined && spec.epoch !== this.epoch) {
+        spec.released?.({} as never);
+        return { kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: false, problem: null };
+      }
       const f = this.fail.get(route);
       if (f !== undefined) {
         this.fail.delete(route);
@@ -50,6 +61,7 @@ class Server {
         return f;
       }
       const o = this.write(spec);
+      this.committed(route);
       const gone = this.lost.get(route);
       if (gone !== undefined) {
         this.lost.delete(route);
@@ -763,5 +775,107 @@ describe("onboard naming: a machine is named by the hostname its node reports", 
     expect(ok).toBe(true);
     expect(s.sends.filter((x) => x.route === "POST /machines").map((x) => (x.body as { name?: string }).name)).toEqual(["cp-1", undefined]);
     expect(lines.find((l) => l.key === "machine:n1")?.detail).toBe('no name: the server refused the hostname "cp-1" as a name');
+  });
+});
+
+describe("every write of an onboarding is sent under the epoch its plan's first press began under (ginsys/bronzeward#1075)", () => {
+  const press = async (s: Server, plan: Plan, epoch: string | undefined, valid: () => boolean = () => true) => {
+    let lines: Line[] = [];
+    const r = await pressOnboarding(s.env(), plan, { epoch, valid }, (l) => (lines = l));
+    return { ...r, lines };
+  };
+  const writes = (s: Server) => s.sends.map((x, i) => ({ route: x.route, epoch: s.epochs[i] })).filter((x) => x.route !== "POST /discoveries");
+
+  test("the cluster, the first key, each machine, the draft and each import carry the epoch of the press, not a later one", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.epochs.length = 0;
+    s.sends.length = 0;
+    const r = await press(s, plan, "e1");
+    expect(r.ok).toBe(true);
+    expect(writes(s).map((w) => w.route.replace(/cl_[0-9]+/, "{cl}"))).toEqual(["POST /clusters", "POST /clusters/{cl}/first-keys", "POST /machines", "POST /machines", "POST /drafts", "POST /ingestions", "POST /ingestions"]);
+    expect(new Set(writes(s).map((w) => w.epoch))).toEqual(new Set(["e1"]));
+  });
+
+  test("the epoch changes after the first key: the next write carries the old epoch, is set aside in the write layer's words, and no later write goes out", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.committed = (route) => {
+      if (route.endsWith("/first-keys")) s.epoch = "e2";
+    };
+    s.sends.length = 0;
+    s.epochs.length = 0;
+    const r = await press(s, plan, "e1");
+    expect(r.ok).toBe(false);
+    expect(r.epochChanged).toBe(true);
+    expect(writes(s).map((w) => [w.route.replace(/cl_[0-9]+/, "{cl}"), w.epoch])).toEqual([
+      ["POST /clusters", "e1"],
+      ["POST /clusters/{cl}/first-keys", "e1"],
+      ["POST /machines", "e1"],
+    ]);
+    const done = r.lines.filter((l) => l.state === "done").map((l) => l.label);
+    expect(done).toEqual(["Cluster lab", "First key"]);
+    const stopped = r.lines.find((l) => l.state === "failed")!;
+    expect(stopped.detail).toBe(`not saved: ${EPOCH_CHANGED_ASIDE}.`);
+    expect(plan.unsent).toEqual(["Draft", "Imports"]);
+  });
+
+  test("the shell invalidates the reads of the press: nothing more is sent, not even a write that would be refused", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.sends.length = 0;
+    s.epochs.length = 0;
+    let open = true;
+    s.committed = (route) => {
+      if (route.endsWith("/first-keys")) open = false;
+    };
+    const r = await press(s, plan, "e1", () => open);
+    expect(r.ok).toBe(false);
+    expect(r.epochChanged).toBe(true);
+    expect(writes(s).map((w) => w.route.replace(/cl_[0-9]+/, "{cl}"))).toEqual(["POST /clusters", "POST /clusters/{cl}/first-keys"]);
+    expect(r.lines.find((l) => l.state === "failed")!.detail).toBe(`not saved: ${EPOCH_CHANGED_ASIDE}.`);
+  });
+
+  test("a second press of the same plan sends under the epoch of the first, so the ids it holds are never sent under the new one; a new plan begins under the new epoch", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.committed = (route) => {
+      if (route.endsWith("/first-keys")) s.epoch = "e2";
+    };
+    await press(s, plan, "e1");
+    s.sends.length = 0;
+    s.epochs.length = 0;
+    const again = await press(s, plan, "e2");
+    expect(again.ok).toBe(false);
+    expect(again.epochChanged).toBe(true);
+    expect(plan.epoch).toBe("e1");
+    expect(writes(s).map((w) => w.epoch)).toEqual(["e1"]);
+    s.committed = () => {};
+    const fresh = await planOf(s);
+    s.sends.length = 0;
+    s.epochs.length = 0;
+    const r = await press(s, fresh, "e2");
+    expect(r.ok).toBe(true);
+    expect(fresh.epoch).toBe("e2");
+    expect(new Set(writes(s).map((w) => w.epoch))).toEqual(new Set(["e2"]));
+  });
+
+  test("a client that has seen no epoch sends no epoch of its own: the write layer reads one", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.epochs.length = 0;
+    const r = await press(s, plan, undefined);
+    expect(r.ok).toBe(true);
+    expect(plan.epoch).toBeUndefined();
+    expect(new Set(s.epochs)).toEqual(new Set([undefined]));
+  });
+
+  test("the page's sentence after an epoch stop says what was not sent and offers the file, never the run again", () => {
+    expect(stoppedSentence("Machine cp-1", true, true, ["Draft", "Imports"])).toBe(
+      "Stopped at Machine cp-1. The installation's epoch changed after this onboarding began, so nothing more was sent under it (not sent: Draft, Imports). Choosing the file again finds what is recorded and finishes the rest under the new epoch.",
+    );
+    expect(stoppedSentence("Imports", true, true, [])).not.toContain("not sent");
+    expect(stoppedSentence("Draft", false, false, ["Imports"])).toBe("Stopped at Draft. Running it again finds what is recorded and finishes the rest.");
+    expect(stoppedSentence("First key", false, true, undefined)).toBe("Stopped at First key. Running it again finds what is recorded and finishes the rest: choose the file again.");
   });
 });

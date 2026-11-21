@@ -6,7 +6,7 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useReads, Ref, useSettled } from "./list.tsx";
-import { type Env, endpointNote, isAddress, type Line, onboardCluster, type Plan, discoverCluster, type Reference, sender } from "./onboard.ts";
+import { type Env, endpointNote, isAddress, type Line, pressOnboarding, type Plan, discoverCluster, type Reference, sender, stoppedSentence } from "./onboard.ts";
 import { RequestRef } from "./problems.tsx";
 import { Action } from "./shell.tsx";
 import { MachineById } from "./titles.tsx";
@@ -16,7 +16,6 @@ import { CONNECT_A_CLUSTER } from "./words.ts";
 // The most a first key may be (the API's bound), so a larger file is refused before it is read.
 const MAX_FILE = 512 * 1024;
 const HELD = "the talosconfig chosen for onboarding";
-const AGAIN = "choose the file again";
 
 export const OnboardClusterAction = () => {
   const { go } = useReads();
@@ -26,7 +25,7 @@ export const OnboardClusterAction = () => {
 export function OnboardCluster() {
   const writes = useWrites()!;
   const settled = useSettled();
-  const { go } = useReads();
+  const { go, undropped } = useReads();
   const plan = useRef<Plan>(undefined);
   const alive = useRef(true);
   // The open write that carries the document is kept per write layer, so it outlives this page.
@@ -36,6 +35,8 @@ export function OnboardCluster() {
   const [held, setHeld] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ended, setEnded] = useState<boolean>();
+  // The epoch changed after the plan's first press began: the plan cannot be run again, only chosen again.
+  const [moved, setMoved] = useState(false);
   // The page's note, and the reference of the problem a refused read carried (its sentences point to it).
   const [note, setNote] = useState<{ text: string; reference?: Reference }>();
   // What the page says about the endpoint the read will use, from the file, the context and the endpoint
@@ -95,6 +96,7 @@ export function OnboardCluster() {
     setHeld(r.plan.document !== undefined);
     setLines([]);
     setEnded(undefined);
+    setMoved(false);
     setPhase("confirm");
   };
 
@@ -103,7 +105,9 @@ export function OnboardCluster() {
     if (p === undefined || busy) return;
     setBusy(true);
     setEnded(undefined);
-    const ok = await onboardCluster(env, p, (l) => {
+    // The press goes on only while the shell has not invalidated the reads it began with, and every write of
+    // the plan is sent under the epoch its first press began under (onboard.ts, pressOnboarding).
+    const { ok, epochChanged } = await pressOnboarding(env, p, { epoch: writes.client?.currentEpoch, valid: undropped() }, (l) => {
       if (!alive.current) return;
       setLines(l);
       setHeld(p.document !== undefined);
@@ -111,6 +115,7 @@ export function OnboardCluster() {
     if (!alive.current) return;
     setHeld(p.document !== undefined);
     setBusy(false);
+    setMoved(epochChanged);
     setEnded(ok);
   };
 
@@ -131,7 +136,7 @@ export function OnboardCluster() {
   const p = plan.current;
   const failed = lines.find((l) => l.state === "failed" || l.state === "unknown" || l.state === "stopped");
   // A first key that did not end well is released with its write, and nothing here holds the file then.
-  const choose = failed?.key === "first-key" && p?.document === undefined;
+  const choose = moved || (failed?.key === "first-key" && p?.document === undefined);
   return (
     <>
       <h2>{CONNECT_A_CLUSTER}</h2>
@@ -190,7 +195,7 @@ export function OnboardCluster() {
           )}
           {ended === false && (
             <p role="alert" data-testid="onboard-result">
-              Stopped at {failed?.label ?? "a step"}. Running it again finds what is recorded and finishes the rest{choose ? `: ${AGAIN}` : ""}.
+              {stoppedSentence(failed?.label ?? "a step", moved, choose, p?.unsent)}
             </p>
           )}
           {ended === false && (

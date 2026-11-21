@@ -1402,7 +1402,12 @@ for each machine, following each to its release, and shows one line for each ste
 stops the run with its line saying why, and [Run again] finds what the server holds (a `409` naming the
 cluster or a machine, the open draft, an import already released) and finishes the rest, as a second
 `cluster onboard` does; the first key is sent again after a reload, since a reload drops the page's
-memory of it. A first key that did not end well releases the file, so the page asks for it again. The
+memory of it. A first key that did not end well releases the file, so the page asks for it again. Every
+write of one plan, in every press of it, is sent under the epoch the plan's first press began under: once
+the installation's epoch has changed, the next write is refused and set aside in words (or not sent, where the
+page's reads were already invalidated), no later write goes out, and the page names the steps not sent and
+offers the file again instead of [Run again], since the ids the plan holds were read under the old epoch;
+choosing the file again finds what is recorded and begins under the new epoch. The
 file is never stored, logged, shown or kept past the first key's write, and the page leaves the review
 of what was imported to the draft's own page. The page does not enrol, bootstrap or upgrade anything.
 
