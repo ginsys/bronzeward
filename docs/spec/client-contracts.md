@@ -2028,9 +2028,17 @@ one. The rule is one for both clients:
    print a `Title` line under the heading. A table prints a dash where no title could be built, and a detail no line;
    a draft, release or plan read that fails (and a draft with no title) leaves no title, while a machine that cannot
    be read is named by its identifier and an ingestion that cannot be read is an import with no machine. Each distinct
-   draft, release, plan, ingestion and machine is read once for a command, and `plan show` takes the machine from the read its own view makes. `-o json` and `-o yaml` read nothing more. The other
-   cross-references and the other commands that print a machine or a release stay identifiers, tracked by
-   [#1017](https://github.com/ginsys/bronzeward/issues/1017) and [#1014](https://github.com/ginsys/bronzeward/issues/1014), so A8 is not fully met in the CLI until those close.
+   draft, release, plan, ingestion and machine is read once for a command, and `plan show` takes the machine from the read its own view makes. `-o json` and `-o yaml` read nothing more. A command that names
+   a plan, release, operation, draft or import in a table or a detail prints that object's title after its identifier
+   in parentheses (a machine by its name, A9), read through the same cache and once for the command, and the
+   identifier alone where the read fails ([#1017](https://github.com/ginsys/bronzeward/issues/1017)): `plan list`'s release;
+   `plan show`'s releases (the plan's, the machine's Desired one and the two ends of the diff) and committed operation,
+   and `plan cancel`'s; `release list`'s draft; `release show`'s draft and publication; `import status`'s draft and
+   operation; the release in the result lines of `publish` and the header of `release review`; `approval show`'s plan;
+   and an act's subjects, each of the kind its identifier's prefix names (persistence and API §2: `rel`, `pln`, `op`,
+   `drf`, `ing`, `mch`), any other prefix staying as it is. A command a line tells the operator to run, an
+   identifier inside a sentence built as plain text, the machine list's Desired and Applied columns, and an operation's
+   subject and outcome line (until [#1014](https://github.com/ginsys/bronzeward/issues/1014) lands) stay identifiers.
 
 **A9. A machine's name (client rule; the API revision that adds the name).** Closes G8. A client shows a machine by its
 name where the body carries one, with the identifier kept as the stable reference: in the web

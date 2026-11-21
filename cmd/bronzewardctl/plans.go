@@ -37,9 +37,14 @@ func (e *env) planCmd(args []string) error {
 	}
 	if v == "list" {
 		return listWith(e, l, "/plans", values(f), nil, nil,
-			func(c *client.Client, ps []apitypes.PlanBody) { e.titlePlans(c, ps...) },
+			func(c *client.Client, ps []apitypes.PlanBody) {
+				e.titlePlans(c, ps...)
+				for _, p := range ps {
+					e.titleRefs(c, "release", p.Release)
+				}
+			},
 			"PLAN\tTITLE\tSTATE\tMACHINE\tOPERATION\tRELEASE\tEXPIRES", "", func(w *tabwriter.Writer, p *apitypes.PlanBody) {
-				tf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.Id, e.titleCell("plan", p.Id), p.State, p.Machine, p.Operation, p.Release, when(p.ExpiresAt))
+				tf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.Id, e.titleCell("plan", p.Id), p.State, p.Machine, p.Operation, e.ref("release", p.Release), when(p.ExpiresAt))
 			})
 	}
 	var lines []string
@@ -319,7 +324,14 @@ func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
 			held = &m
 		}
 		e.holdBody(titlePath("machines", p.Machine), held)
+		e.holdBody(titlePath("plans", p.Id), p)
 	}
+	// The releases and the operation the plan names are shown with their titles (ginsys/bronzeward#1017).
+	e.titleRefs(c, "release", p.Release, or(p.DesiredRelease, ""), or(m.Desired, ""))
+	if d := p.Evidence.Diff; d != nil {
+		e.titleRefs(c, "release", d.From, d.To)
+	}
+	e.titleRefs(c, "operation", or(p.CommittedOperation, ""))
 	var cl apitypes.ClusterBody
 	var cluster string
 	if err := getJSON(c, "/clusters/"+url.PathEscape(p.Cluster), &cl); err != nil {
@@ -336,7 +348,7 @@ func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
 	}
 	endpoint, desired := "endpoint unread", sf("unread: %v", mErr)
 	if mErr == nil {
-		endpoint, desired = pr(m.TalosEndpoint), pr(or(m.Desired, "none"))
+		endpoint, desired = pr(m.TalosEndpoint), pr(or(e.refp("release", m.Desired), "none"))
 	}
 	what := sf(", mode %s", or(p.Mode, "none"))
 	if p.Operation == "adopt" {
@@ -348,14 +360,14 @@ func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
 		sf("Plan %s\t%s\t", p.Id, p.State) + expiry,
 		sf("  Machine\t%s  ", p.Machine) + endpoint + "\tcluster " + cluster + sf(", route %s", p.Route),
 		sf("  Operation\t%s", p.Operation) + what,
-		sf("  Release\t%s\tmachine Desired: %s at plan creation, ", p.Release, or(p.DesiredRelease, "none")) + desired + " now",
+		sf("  Release\t%s\tmachine Desired: %s at plan creation, ", e.ref("release", p.Release), or(e.refp("release", p.DesiredRelease), "none")) + desired + " now",
 		sf("  Assignment\t%s\tbaseline revision %s, drift record %s", p.AssignmentRevision, orInt(p.BaselineRevision, "none"), orInt(p.DriftRecord, "none")),
 		sf("  Limits\ttransport %s, verification %s, observation age %ds, check validity %ds, attempts %s, rollout %d",
 			secs(p.TransportDeadlineSeconds), secs(p.VerificationDeadlineSeconds), p.MaxObservationAgeSeconds, p.CheckValiditySeconds,
 			orInt(p.MaxAttempts, "-"), p.RolloutLimit),
 		sf("  Created by\t%s (%s)\tepoch %s, %s, plan revision %d, timeline revision %d", e.who(p.CreatedBy.Principal), p.CreatedBy.Role,
 			p.Epoch, when(p.CreatedAt), p.Revision, p.TimelineRevision),
-		sf("  Approval\t%s\tpolicy %s, committed operation %s", or(p.Approval, "none"), p.ApprovalPolicy, or(p.CommittedOperation, "none")),
+		sf("  Approval\t%s\tpolicy %s, committed operation %s", or(p.Approval, "none"), p.ApprovalPolicy, or(e.refp("operation", p.CommittedOperation), "none")),
 	}
 	ev := p.Evidence
 	val := ev.Validation
@@ -376,11 +388,11 @@ func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
 	switch d := ev.Diff; {
 	case d == nil:
 	case d.Withheld:
-		lines = append(lines, sf("  Diff\tDiff withheld: the change cannot be shown (%s -> %s)", d.From, d.To))
+		lines = append(lines, sf("  Diff\tDiff withheld: the change cannot be shown (%s -> %s)", e.ref("release", d.From), e.ref("release", d.To)))
 	case d.Unified == "":
-		lines = append(lines, sf("  Diff\tNo differences in the redacted configurations (%s -> %s)", d.From, d.To))
+		lines = append(lines, sf("  Diff\tNo differences in the redacted configurations (%s -> %s)", e.ref("release", d.From), e.ref("release", d.To)))
 	default:
-		lines = append(lines, sf("  Diff\tChanges shown below: the whole redacted configuration, %s -> %s", d.From, d.To))
+		lines = append(lines, sf("  Diff\tChanges shown below: the whole redacted configuration, %s -> %s", e.ref("release", d.From), e.ref("release", d.To)))
 		for _, l := range strings.Split(strings.TrimSuffix(d.Unified, "\n"), "\n") {
 			lines = append(lines, "    "+client.Printable(l))
 		}
@@ -398,7 +410,7 @@ func (e *env) stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.Mach
 		return []string{"It is not approved and nothing runs until an approver approves: bronzewardctl approve " + client.ShellWord(p.Id)}
 	case "committed":
 		op := or(p.CommittedOperation, "?")
-		return []string{sf("Committed: operation %s. Follow it with: bronzewardctl operation watch ", op) + client.ShellWord(op)}
+		return []string{sf("Committed: operation %s. Follow it with: bronzewardctl operation watch ", e.ref("operation", op)) + client.ShellWord(op)}
 	case "expired":
 		return []string{"Expired: it can no longer be approved or committed. " + again}
 	case "revoked":
@@ -541,7 +553,8 @@ func (e *env) planCancel(args []string) error {
 			return append(lines, "The plan is "+p.State+": it cannot be committed."), nil
 		}
 		op := or(p.CommittedOperation, "?")
-		return append(lines, "The plan stays committed to operation "+op+". "+cancelLimits,
+		e.titleRef(c, "operation", op)
+		return append(lines, sf("The plan stays committed to operation %s. ", e.ref("operation", op))+cancelLimits,
 			"Follow it with: bronzewardctl operation watch "+client.ShellWord(op)), nil
 	})
 }

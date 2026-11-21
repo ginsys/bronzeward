@@ -2,15 +2,15 @@ $ bronzewardctl --context publisher plan create --release rel_… --machine mch_
 Plan pln_…  proposed                                         expires <local time> <local time>
   Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
   Operation                          apply-config, mode no-reboot
-  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
-  Assignment                         asr_…  baseline revision 2, drift record none
+  Release                            rel_… (worker tier, published <local time>)  machine Desired: rel_… (worker tier, published <local time>) at plan creation, rel_… (worker tier, published <local time>) now
+  Assignment                         asr_…                                                   baseline revision 2, drift record none
   Limits                             transport 60s, verification 600s, observation age 300s, check validity 300s, attempts 3, rollout 1
   Created by                         h-publisher at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 41
   Approval                           none                                               policy one-approver, committed operation none
 Evidence
   Validation  passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run     not available: no dry run is available for this operation
-  Diff        Changes shown below: the whole redacted configuration, rel_… -> rel_…
+  Diff        Changes shown below: the whole redacted configuration, rel_… (plans, published <local time>) -> rel_… (worker tier, published <local time>)
     @@ -3,19 +3,19 @@
      persist: true
      machine:
@@ -94,15 +94,15 @@ $ bronzewardctl --context approver approve pln_…
 Plan pln_…  proposed                                         expires <local time> <local time>
   Machine                            mch_…  127.0.0.1:<port>  cluster cl_… (lab-a), route 127.0.0.1:<port>
   Operation                          apply-config, mode no-reboot
-  Release                            rel_…  machine Desired: rel_… at plan creation, rel_… now
-  Assignment                         asr_…  baseline revision 2, drift record none
+  Release                            rel_… (worker tier, published <local time>)  machine Desired: rel_… (worker tier, published <local time>) at plan creation, rel_… (worker tier, published <local time>) now
+  Assignment                         asr_…                                                   baseline revision 2, drift record none
   Limits                             transport 60s, verification 600s, observation age 300s, check validity 300s, attempts 3, rollout 1
   Created by                         h-publisher at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision 41
   Approval                           none                                               policy one-approver, committed operation none
 Evidence
   Validation  passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
   Dry run     not available: no dry run is available for this operation
-  Diff        Changes shown below: the whole redacted configuration, rel_… -> rel_…
+  Diff        Changes shown below: the whole redacted configuration, rel_… (plans, published <local time>) -> rel_… (worker tier, published <local time>)
     @@ -3,19 +3,19 @@
      persist: true
      machine:

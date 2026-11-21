@@ -40,7 +40,7 @@ func (e *env) publish(args []string) (err error) {
 	if err != nil || release == "" {
 		return err
 	}
-	lines, err := nextSteps(c, release)
+	lines, err := e.nextSteps(c, release)
 	if err != nil || e.output != "table" {
 		return err
 	}
@@ -135,7 +135,7 @@ var pr = client.Printable
 // release, an apply-config plan the others. A machine whose Desired release is another one, after
 // a later publication or when a repeat recovered an earlier one, gets no plan from this release.
 // It names the commands and sends neither.
-func nextSteps(c *client.Client, release string) ([]string, error) {
+func (e *env) nextSteps(c *client.Client, release string) ([]string, error) {
 	r, err := c.Get("/releases/" + url.PathEscape(release))
 	if err != nil {
 		return nil, err
@@ -144,6 +144,7 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 	if err := json.Unmarshal(r.Body, &rel); err != nil {
 		return nil, fmt.Errorf("GET /api/v1/releases/%s cannot be read: %w", url.PathEscape(release), err)
 	}
+	e.titleRef(c, "release", rel.Id)
 	machines := fmt.Sprintf("%d machines", len(rel.Machines))
 	if len(rel.Machines) == 1 {
 		machines = "1 machine"
@@ -171,7 +172,7 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 				change = sf("The epoch changed and changed back from %s", client.ShellWord(first))
 			}
 			return []string{
-				sf("Publication succeeded: release %s was published for %s. Nothing has been sent to any machine.", pr(rel.Id), machines),
+				sf("Publication succeeded: release %s was published for %s. Nothing has been sent to any machine.", pr(e.ref("release", rel.Id)), machines),
 				sf("  %s while the machines were read, so no next step is shown. Read them again with: release show %s",
 					change, client.ShellWord(rel.Id)),
 				"Review a machine's rendered configuration: bronzewardctl release review " + pr(rel.Id) + " <machine>"}, nil
@@ -193,10 +194,10 @@ func nextSteps(c *client.Client, release string) ([]string, error) {
 				"    "+createLine(rel.Id, m.Machine, "apply-config"))
 		}
 	}
-	lines[0] = fmt.Sprintf("Publication succeeded: release %s is now Desired for %s. Nothing has been sent to any machine.", pr(rel.Id), machines)
+	lines[0] = fmt.Sprintf("Publication succeeded: release %s is now Desired for %s. Nothing has been sent to any machine.", pr(e.ref("release", rel.Id)), machines)
 	if replaced > 0 {
 		lines[0] = fmt.Sprintf("Publication succeeded: release %s was published for %s, but it is no longer Desired for %d of them. Nothing has been sent to any machine.",
-			pr(rel.Id), machines, replaced)
+			pr(e.ref("release", rel.Id)), machines, replaced)
 	}
 	return append(lines, "Review a machine's rendered configuration: bronzewardctl release review "+pr(rel.Id)+" <machine>"), nil
 }
@@ -211,7 +212,12 @@ func (e *env) releaseReview(verb string, args []string) error {
 	if err != nil {
 		return err
 	}
-	return show(e, "/releases/"+url.PathEscape(pos[0])+"/machines/"+url.PathEscape(pos[1])+"/review", func(w *tabwriter.Writer, r *apitypes.ReviewBody) {
+	return showThen(e, "/releases/"+url.PathEscape(pos[0])+"/machines/"+url.PathEscape(pos[1])+"/review", func(c *client.Client, _ *client.Response, r *apitypes.ReviewBody) error {
+		if verb != "provenance" {
+			e.titleRef(c, "release", r.Release)
+		}
+		return nil
+	}, func(w *tabwriter.Writer, r *apitypes.ReviewBody) {
 		if verb == "provenance" {
 			fmt.Fprintln(w, "REFERENCE\tVERSION\tFROM (REVISION, PATH)\tRENDERED AT")
 			for _, p := range r.Provenance {
@@ -227,7 +233,7 @@ func (e *env) releaseReview(verb string, args []string) error {
 			fmt.Fprintln(w, "Provenance covers secret references only; other fields are not traced.")
 			return
 		}
-		fmt.Fprintf(w, "Release %s, machine %s, validated: %s\n", pr(r.Release), pr(r.Machine), pr(r.Mode))
+		fmt.Fprintf(w, "Release %s, machine %s, validated: %s\n", pr(e.ref("release", r.Release)), pr(r.Machine), pr(r.Mode))
 		if r.Configuration == nil {
 			fmt.Fprintln(w, "Configuration not shown: it could not be redacted.")
 			if r.Notice != nil && *r.Notice != "" {

@@ -24,6 +24,8 @@ type publishFake struct {
 	bare         bool
 	pagesRefused bool
 	replaced     bool
+	// titled gives the release the draft and publication time its title is built from.
+	titled bool
 	// machineEpoch, when not empty, is the epoch the machine answers carry: the epoch moved after
 	// the release was read.
 	machineEpoch string
@@ -48,7 +50,7 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	f.mu.Lock()
 	state, first, bare, pagesRefused, machineEpoch, goneEpoch, goneMoved := f.state, f.first, f.bare, f.pagesRefused, f.machineEpoch, f.goneEpoch, f.goneMoved
-	goneBack := f.goneBack
+	goneBack, titled := f.goneBack, f.titled
 	desiredA, desiredB := `"rel_BWSYNTH"`, `"rel_BWSYNTH"`
 	if f.replaced {
 		desiredA, desiredB = `"rel_BWSYNTH-new"`, `null`
@@ -104,7 +106,11 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/operations/op_BWSYNTH-pub":
 		fmt.Fprintf(w, publishOp, state, result, problem)
 	case path == "/releases/rel_BWSYNTH":
-		fmt.Fprint(w, `{"id":"rel_BWSYNTH","cluster":"cl_BWSYNTH","machines":[{"machine":"mch_a"},{"machine":"mch_b"}]}`)
+		from := ""
+		if titled {
+			from = `"draft":"drf_BWSYNTH","publishedAt":"2026-11-19T10:00:00Z",`
+		}
+		fmt.Fprint(w, `{"id":"rel_BWSYNTH",`+from+`"cluster":"cl_BWSYNTH","machines":[{"machine":"mch_a"},{"machine":"mch_b"}]}`)
 	case path == "/machines/mch_a":
 		fmt.Fprintf(w, `{"id":"mch_a","desired":%s,"applied":{"release":"rel_BWSYNTH-old","source":"operation"}}`, desiredA)
 	case path == "/server" && goneMoved:
@@ -260,4 +266,31 @@ func TestPublication(t *testing.T) {
 		"Publication succeeded: release rel_BWSYNTH was published for 2 machines. Nothing has been sent to any machine.\n"+
 			"  The epoch changed and changed back from 'ep_BWSYNTH-1' while the machines were read, so no next step is shown. Read them again with: release show 'rel_BWSYNTH'\n",
 		"", "plan an", "hand it over", "is now Desired", "cannot be read")
+}
+
+// TestPublicationNamesTheReleaseByItsTitle: the result line of publish and the header of release review
+// follow the release's identifier with its title (ginsys/bronzeward#1017); -o json prints the answer unchanged.
+func TestPublicationNamesTheReleaseByItsTitle(t *testing.T) {
+	f := &publishFake{draftFake: &draftFake{rev: 1, state: "open"}, state: "succeeded", titled: true}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	title := "rel_BWSYNTH (BWSYNTH, published " + when(titleAt) + ")"
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"draft", "show", "drf_BWSYNTH"}, "drf_BWSYNTH"},
+		{[]string{"publish", "drf_BWSYNTH"}, "Publication succeeded: release " + title + " is now Desired for 2 machines."},
+		{[]string{"release", "review", "rel_BWSYNTH", "mch_a"}, "Release " + title + ", machine mch_a, validated: metal"},
+	} {
+		var o, e bytes.Buffer
+		if code := run(c.args, &o, &e); code != 0 || !strings.Contains(o.String(), c.want) {
+			t.Errorf("%v: exit %d, stdout %q, stderr %q; want %q", c.args, code, o.String(), e.String(), c.want)
+		}
+	}
+	var o, e bytes.Buffer
+	if code := run([]string{"release", "review", "rel_BWSYNTH", "mch_a", "-o", "json"}, &o, &e); code != 0 || strings.Contains(o.String(), "BWSYNTH, published") {
+		t.Errorf("-o json: exit %d, stdout %q, stderr %q", code, o.String(), e.String())
+	}
 }

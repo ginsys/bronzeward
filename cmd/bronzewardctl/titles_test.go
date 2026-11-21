@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -245,6 +246,208 @@ func TestTitlesJSONAndYAMLReadNothingMore(t *testing.T) {
 		}
 	}
 	for _, p := range []string{"/drafts/drf_a", "/machines/mch_a", "/ingestions/ing_a"} {
+		if n := reads(seen(), p); n != 0 {
+			t.Errorf("-o json and yaml read %s %d times; want none", p, n)
+		}
+	}
+}
+
+// Cross-references (ginsys/bronzeward#1017): where one command names another plan, release, operation, draft or
+// import, the identifier is followed by that object's title through the same cache, so each distinct
+// object is read once for the command; a failed read leaves the identifier alone.
+
+// flat collapses the padding of a table's columns, so a case reads one space where the table pads.
+func flat(out string) string { return regexp.MustCompile(" +").ReplaceAllString(out, " ") }
+
+func refOf(id, title string) string { return id + " (" + title + ")" }
+
+var (
+	refRelease = refOf("rel_BWSYNTH", titleRelease+when(titleAt))
+	refOldRel  = refOf("rel_BWSYNTH-old", "Earlier labels, published "+when(titleAt))
+	refPlan    = "Apply of mch_a (web-1) to " + titleRelease + when(titleAt)
+)
+
+// refServer is titleServer with the objects the cross-references name: an earlier release, a committed
+// operation, an import and its operation, an approval and a page of acts.
+func refServer(t *testing.T, edit func(map[string]string)) func() []string {
+	t.Helper()
+	return titleServer(t, func(a map[string]string) {
+		a["GET /api/v1/releases/rel_BWSYNTH-old"] = strings.Replace(titleRel("drf_b"), "rel_BWSYNTH", "rel_BWSYNTH-old", 1)
+		a["GET /api/v1/drafts/drf_b"] = `{"id":"drf_b","title":"Earlier labels"}`
+		a["GET /api/v1/operations/op_BWSYNTH-apply"] = titleOp("op_BWSYNTH-apply", "apply-config", `{"plan":"pln_BWSYNTH"}`)
+		a["GET /api/v1/operations/op_imp"] = titleOp("op_imp", "ingest", `{"ingestion":"ing_a"}`)
+		ing := `{"id":"ing_a","kind":"import","mode":"transient","state":"held","machine":"mch_a","draft":"drf_a","operation":"op_imp",` +
+			`"ownerGeneration":1,"expiresAt":"2026-11-19T11:00:00Z"}`
+		a["GET /api/v1/ingestions/ing_a"] = ing
+		a["GET /api/v1/ingestions"] = titleItems(ing)
+		a["GET /api/v1/approvals/apr_a"] = `{"id":"apr_a","plan":"pln_BWSYNTH","machine":"mch_a","approver":{"principal":"h-approver","role":"approver"},` +
+			`"selfApproval":{"reasons":[]},"unseenOverwrite":false,"epoch":"ep_BWSYNTH-1","at":"2026-11-19T10:00:00Z"}`
+		act := func(id string, subjects ...string) string {
+			s, _ := json.Marshal(subjects)
+			return `{"id":"` + id + `","at":"2026-11-19T10:00:00Z","epoch":"ep_BWSYNTH-1","action":"plan.create","principal":"h-a","principalKind":"human",` +
+				`"role":"approver","via":"cli","subjects":` + string(s) + `}`
+		}
+		a["GET /api/v1/acts"] = titleItems(act("act_1", "pln_BWSYNTH", "rel_BWSYNTH", "drf_a"), act("act_2", "rel_BWSYNTH", "mch_a", "op_pub", "ing_a", "prf_x"))
+		if edit != nil {
+			edit(a)
+		}
+	})
+}
+
+func TestTitlesRefsPlan(t *testing.T) {
+	seen := refServer(t, func(a map[string]string) {
+		a["GET /api/v1/plans/pln_BWSYNTH"] = (&planFake{state: "committed", op: "apply-config", evidence: diffEvidence, desired: "rel_BWSYNTH", assignment: "asr_BWSYNTH-1"}).plan()
+	})
+	code, out, errOut := runCtl(t, "plan", "list")
+	if code != 0 || !strings.Contains(out, refRelease) {
+		t.Fatalf("plan list: exit %d, out\n%s\nerr\n%s", code, out, errOut)
+	}
+	for _, p := range []string{"/releases/rel_BWSYNTH", "/drafts/drf_a"} {
+		if n := reads(seen(), p); n != 1 {
+			t.Errorf("plan list read %s %d times; want once", p, n)
+		}
+	}
+	code, out, errOut = runCtl(t, "plan", "show", "pln_BWSYNTH")
+	out = flat(out)
+	committed := refOf("op_BWSYNTH-apply", refPlan)
+	for _, w := range []string{"Release " + refRelease, "committed operation " + committed, committed + ". Follow it with: bronzewardctl operation watch 'op_BWSYNTH-apply'",
+		"Changes shown below: the whole redacted configuration, " + refOldRel + " -> " + refRelease} {
+		if code != 0 || !strings.Contains(out, w) {
+			t.Errorf("plan show lacks %q: exit %d, out\n%s\nerr\n%s", w, code, out, errOut)
+		}
+	}
+	for _, p := range []string{"/releases/rel_BWSYNTH-old", "/drafts/drf_b", "/operations/op_BWSYNTH-apply"} {
+		if n := reads(seen(), p); n != 1 {
+			t.Errorf("plan show read %s %d times; want once", p, n)
+		}
+	}
+}
+
+func TestTitlesRefsRelease(t *testing.T) {
+	seen := refServer(t, nil)
+	code, out, errOut := runCtl(t, "release", "list")
+	if code != 0 || !strings.Contains(out, refOf("drf_a", titleDraft)+" r3") {
+		t.Fatalf("release list: exit %d, out\n%s\nerr\n%s", code, out, errOut)
+	}
+	if n := reads(seen(), "/drafts/drf_a"); n != 1 {
+		t.Errorf("release list read the draft %d times; want once", n)
+	}
+	code, out, errOut = runCtl(t, "release", "show", "rel_BWSYNTH")
+	out = flat(out)
+	if want := "Draft " + refOf("drf_a", titleDraft) + " revision 3, operation " + refOf("op_pub", "Publish of "+titleDraft); code != 0 || !strings.Contains(out, want) {
+		t.Errorf("release show lacks %q: exit %d, out\n%s\nerr\n%s", want, code, out, errOut)
+	}
+	if n := reads(seen(), "/operations/op_pub"); n != 1 {
+		t.Errorf("release show read the publication %d times; want once", n)
+	}
+}
+
+func TestTitlesRefsImport(t *testing.T) {
+	seen := refServer(t, nil)
+	draft, op := refOf("drf_a", titleDraft), refOf("op_imp", "Import of mch_a (web-1)")
+	code, out, errOut := runCtl(t, "import", "status")
+	if code != 0 || !strings.Contains(out, draft) || !strings.Contains(out, op) {
+		t.Fatalf("import list: exit %d, out\n%s\nerr\n%s", code, out, errOut)
+	}
+	if n := reads(seen(), "/ingestions/ing_a"); n != 0 {
+		t.Errorf("import list read an ingestion it holds %d times; want none", n)
+	}
+	code, out, errOut = runCtl(t, "import", "status", "ing_a")
+	if want := "draft " + draft + ", operation " + op; code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("import status lacks %q: exit %d, out\n%s\nerr\n%s", want, code, out, errOut)
+	}
+	if n := reads(seen(), "/ingestions/ing_a"); n != 1 {
+		t.Errorf("import status read its own ingestion %d times; want once", n)
+	}
+	if n := reads(seen(), "/drafts/drf_a"); n != 2 {
+		t.Errorf("draft reads over import list and status = %d; want one for each command", n)
+	}
+}
+
+func TestTitlesRefsApproval(t *testing.T) {
+	seen := refServer(t, nil)
+	code, out, errOut := runCtl(t, "approval", "show", "apr_a")
+	if want := "Approval apr_a of plan " + refOf("pln_BWSYNTH", refPlan) + ", epoch"; code != 0 || !strings.Contains(out, want) {
+		t.Errorf("approval show lacks %q: exit %d, out\n%s\nerr\n%s", want, code, out, errOut)
+	}
+	for _, p := range []string{"/plans/pln_BWSYNTH", "/releases/rel_BWSYNTH", "/drafts/drf_a", "/machines/mch_a"} {
+		if n := reads(seen(), p); n != 1 {
+			t.Errorf("approval show read %s %d times; want once", p, n)
+		}
+	}
+}
+
+func TestTitlesRefsActSubjects(t *testing.T) {
+	seen := refServer(t, nil)
+	code, out, errOut := runCtl(t, "act", "list")
+	for _, w := range []string{refOf("pln_BWSYNTH", refPlan), refRelease, refOf("drf_a", titleDraft), refOf("mch_a", "web-1"),
+		refOf("op_pub", "Publish of "+titleDraft), refOf("ing_a", "Import of mch_a (web-1)"), "ing_a (Import of mch_a (web-1))" + ", prf_x"} {
+		if code != 0 || !strings.Contains(out, w) {
+			t.Errorf("act list lacks %q: exit %d, out\n%s\nerr\n%s", w, code, out, errOut)
+		}
+	}
+	for _, p := range []string{"/releases/rel_BWSYNTH", "/drafts/drf_a", "/machines/mch_a", "/operations/op_pub", "/ingestions/ing_a"} {
+		if n := reads(seen(), p); n != 1 {
+			t.Errorf("act list read %s %d times; want once for the page", p, n)
+		}
+	}
+}
+
+// The prefix of an identifier names its kind (persistence-api.md section 2); the CLI keeps its own map of
+// the six kinds that have a title, and any other prefix stays the bare identifier.
+func TestTitlesKindOfID(t *testing.T) {
+	doc, err := os.ReadFile("../../docs/spec/persistence-api.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for prefix, c := range map[string]struct{ kind, entity string }{
+		"rel": {"release", "release"}, "pln": {"plan", "plan"}, "op": {"operation", "operation"},
+		"drf": {"draft", "draft"}, "ing": {"ingestion", "ingestion claim"}, "mch": {"machine", "machine"},
+	} {
+		if !regexp.MustCompile("`" + prefix + "` \\| " + c.entity).Match(doc) {
+			t.Errorf("persistence-api.md section 2 does not map `%s` to %s", prefix, c.entity)
+		}
+		if got := kindOfID(prefix + "_abc"); got != c.kind {
+			t.Errorf("kindOfID(%s_abc) = %q; want %q", prefix, got, c.kind)
+		}
+	}
+	for _, id := range []string{"prf_abc", "apr_abc", "relx_abc", "rel", "", "_abc", "op-pub"} {
+		if got := kindOfID(id); got != "" {
+			t.Errorf("kindOfID(%q) = %q; want none", id, got)
+		}
+	}
+}
+
+func TestTitlesRefsKeepTheIdentifierWhenAReadFails(t *testing.T) {
+	refServer(t, func(a map[string]string) {
+		delete(a, "GET /api/v1/drafts/drf_a")
+		delete(a, "GET /api/v1/operations/op_pub")
+	})
+	code, out, errOut := runCtl(t, "release", "show", "rel_BWSYNTH")
+	out = flat(out)
+	if want := "Draft drf_a revision 3, operation op_pub\n"; code != 0 || !strings.Contains(out, want) {
+		t.Errorf("release show lacks %q: exit %d, out\n%s\nerr\n%s", want, code, out, errOut)
+	}
+}
+
+func TestTitlesRefsRemoteTextIsEscaped(t *testing.T) {
+	refServer(t, func(a map[string]string) { a["GET /api/v1/drafts/drf_a"] = `{"id":"drf_a","title":"x\u001b[31mred"}` })
+	code, out, errOut := runCtl(t, "import", "status", "ing_a")
+	if code != 0 || strings.Contains(out, "\x1b") || !strings.Contains(out, `drf_a (x\x1b[31mred)`) {
+		t.Errorf("import status: exit %d, out %q\nerr\n%s", code, out, errOut)
+	}
+}
+
+func TestTitlesRefsJSONAndYAMLReadNothingMore(t *testing.T) {
+	seen := refServer(t, nil)
+	for _, args := range [][]string{{"act", "list"}, {"import", "status"}, {"import", "status", "ing_a"}, {"approval", "show", "apr_a"}, {"plan", "show", "pln_BWSYNTH"}} {
+		for _, o := range []string{"json", "yaml"} {
+			if code, out, errOut := runCtl(t, append(args, "-o", o)...); code != 0 || strings.Contains(out, "Earlier") || strings.Contains(out, titleDraft) {
+				t.Errorf("%v -o %s: exit %d, out\n%s\nerr\n%s", args, o, code, out, errOut)
+			}
+		}
+	}
+	for _, p := range []string{"/releases/rel_BWSYNTH", "/releases/rel_BWSYNTH-old", "/drafts/drf_a", "/drafts/drf_b", "/operations/op_imp", "/operations/op_pub", "/machines/mch_a"} {
 		if n := reads(seen(), p); n != 0 {
 			t.Errorf("-o json and yaml read %s %d times; want none", p, n)
 		}

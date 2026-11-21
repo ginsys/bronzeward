@@ -383,22 +383,29 @@ func (e *env) releaseCmd(args []string) error {
 		return listWith(e, l, "/releases", url.Values{}, func(r *apitypes.ReleaseBody) bool {
 			return (cluster == "" || r.Cluster == cluster) && (draft == "" || r.Draft == draft)
 		}, func(r *apitypes.ReleaseBody) []string { return []string{r.PublishedBy.Principal} },
-			func(c *client.Client, rs []apitypes.ReleaseBody) { e.titleReleases(c, rs...) },
+			func(c *client.Client, rs []apitypes.ReleaseBody) {
+				e.titleReleases(c, rs...)
+				for _, r := range rs {
+					e.titleRefs(c, "draft", r.Draft)
+				}
+			},
 			"RELEASE\tTITLE\tCLUSTER\tDRAFT\tPUBLISHED\tBY\tMACHINES", "", func(w *tabwriter.Writer, r *apitypes.ReleaseBody) {
-				tf(w, "%s\t%s\t%s\t%s r%d\t%s\t%s (%s)\t%d\n", r.Id, e.titleCell("release", r.Id), r.Cluster, r.Draft, r.DraftRevision, when(r.PublishedAt),
+				tf(w, "%s\t%s\t%s\t%s r%d\t%s\t%s (%s)\t%d\n", r.Id, e.titleCell("release", r.Id), r.Cluster, e.ref("draft", r.Draft), r.DraftRevision, when(r.PublishedAt),
 					e.who(r.PublishedBy.Principal), r.PublishedBy.Role, len(r.Machines))
 			})
 	}
 	return showThen(e, "/releases/"+url.PathEscape(pos[0]), func(c *client.Client, _ *client.Response, r *apitypes.ReleaseBody) error {
 		e.preload(c, r.PublishedBy.Principal)
 		e.titleReleases(c, *r)
+		e.titleRefs(c, "draft", r.Draft)
+		e.titleRefs(c, "operation", r.Operation)
 		return nil
 	}, func(w *tabwriter.Writer, r *apitypes.ReleaseBody) {
 		tf(w, "Release %s\tcluster %s\tpublished by %s (%s) %s\n", r.Id, r.Cluster, e.who(r.PublishedBy.Principal), r.PublishedBy.Role, when(r.PublishedAt))
 		if t := e.titleOf("release", r.Id); t != "" {
 			tf(w, "Title\t%s\n", t)
 		}
-		tf(w, "Draft\t%s revision %d, operation %s\n", r.Draft, r.DraftRevision, r.Operation)
+		tf(w, "Draft\t%s revision %d, operation %s\n", e.ref("draft", r.Draft), r.DraftRevision, e.ref("operation", r.Operation))
 		tf(w, "Renderer\tcontract %s, machinery %s, Kubernetes %s\n", r.Renderer.Contract, r.Renderer.MachineryVersion, r.Renderer.KubernetesVersion)
 		fmt.Fprintln(w, "Built from (source revisions, not configuration):")
 		for _, s := range r.Sources {
@@ -531,9 +538,13 @@ func (e *env) actCmd(args []string) error {
 	if _, err := e.paged("act "+v, rest, 0, &l, nil); err != nil {
 		return err
 	}
-	return listWho(e, l, "/acts", url.Values{}, nil, func(a *apitypes.ActItem) []string { return []string{a.Principal} },
-		"ACT\tAT\tACTION\tPRINCIPAL\tROLE\tVIA\tSUBJECTS", "", func(w *tabwriter.Writer, a *apitypes.ActItem) {
+	return listWith(e, l, "/acts", url.Values{}, nil, func(a *apitypes.ActItem) []string { return []string{a.Principal} },
+		func(c *client.Client, as []apitypes.ActItem) {
+			for _, a := range as {
+				e.titleSubjects(c, a.Subjects)
+			}
+		}, "ACT\tAT\tACTION\tPRINCIPAL\tROLE\tVIA\tSUBJECTS", "", func(w *tabwriter.Writer, a *apitypes.ActItem) {
 			tf(w, "%s\t%s\t%s\t%s (%s)\t%s\t%s\t%s\n", a.Id, when(a.At), a.Action, e.who(a.Principal), a.PrincipalKind, or(a.Role, "-"),
-				a.Via, strings.Join(a.Subjects, ", "))
+				a.Via, e.refSubjects(a.Subjects))
 		})
 }

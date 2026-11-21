@@ -236,9 +236,10 @@ func (e *env) approvalCmd(args []string) error {
 			current = c.Context.LastEpoch
 		}
 		e.preload(c, a.Approver.Principal)
+		e.titleRefs(c, "plan", a.Plan)
 		return nil
 	}, func(w *tabwriter.Writer, a *apitypes.ApprovalBody) {
-		tf(w, "Approval %s of plan %s, epoch %s\n", a.Id, a.Plan, a.Epoch)
+		tf(w, "Approval %s of plan %s, epoch %s\n", a.Id, e.ref("plan", a.Plan), a.Epoch)
 		tf(w, "  Approver\t%s (%s)\n", e.who(a.Approver.Principal), a.Approver.Role)
 		tf(w, "  Self-approval\trecorded reasons: %s\n", orList(a.SelfApproval.Reasons))
 		if a.UnseenOverwrite {

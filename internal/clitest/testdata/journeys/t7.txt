@@ -1,5 +1,5 @@
 $ bronzewardctl --context human release review {release} {machine}
-Release rel_…, machine mch_…, validated: container
+Release rel_… (worker labels, published <local time>), machine mch_…, validated: container
 version: v1alpha1
 debug: false
 persist: true
