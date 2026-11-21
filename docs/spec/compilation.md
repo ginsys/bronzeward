@@ -1107,8 +1107,9 @@ unmeasured.
 what becomes of its Kubernetes node name, whether applying the rewritten
 document with an unchanged hostname needs a reboot (the commonest case: an
 onboarded machine whose hostname equals its name gets the document back as
-`auto: off` plus `hostname`, so the hostname is the same, the document differs
-and the machine reads as pending convergence), and `container` and `cloud`
+`auto: off` plus `hostname`, so the hostname is the same and the document can
+differ, which then reads as pending convergence where the configuration
+digests differ), and `container` and `cloud`
 modes are unmeasured; the compiler issue (ginsys/bronzeward#1040) measures them on
 the fixture, and the client sentences that mention a restart or the node name
 are conditional on that result (client contracts A9 items 6 and 7). A
