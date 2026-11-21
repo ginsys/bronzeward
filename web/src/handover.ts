@@ -26,7 +26,7 @@ export const MISSING = (missing: readonly string[]) =>
   `Needs the ${missing.join(" and ")} role. The separate steps stay: publish this draft, then on each machine's release page plan the adopt (handover), then approve each plan.`;
 // A press publishes the draft as the page showed it: with no ETag kept for it, nothing is sent. This is the
 // sentence of every draft write on the page (drafts.tsx re-exports it); it sits here so this file stays free of React.
-export const NO_ETAG ="Not sent: this page has not read the draft under the current epoch. Read it again first.";
+export const NO_ETAG = "Not sent: this page has not read the draft under the current epoch. Read it again first.";
 
 // The publication's 412: the draft changed since the page read it. The draft line offers "Show their change"
 // (the page's own route for a refused draft write), and the press after it carries the new ETag.

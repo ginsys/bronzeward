@@ -84,8 +84,14 @@ describe("the handover button with unsaved text in the draft editor", () => {
     } as unknown as Reads;
     const writes = new Writes(() => "p");
     const sent: (string | undefined)[] = [];
+    // The epoch each write is pinned to: the one the press began under (write.test.ts shows the layer sends it
+    // even when the client has seen a later one, and the server then refuses).
+    const clientEpoch = { currentEpoch: "e0" };
+    writes.client = clientEpoch as unknown as Writes["client"];
+    const epochs: (string | undefined)[] = [];
     vi.spyOn(writes, "submit").mockImplementation(async (w) => {
       sent.push(w.spec.ifMatch);
+      epochs.push(w.spec.epoch);
       // The first publication meets a draft changed since; the second is accepted without naming an operation.
       w.outcome = sent.length === 1 ? { kind: "refused", status: 412, problem: null, replayed: false } : { kind: "done", status: 202, data: {}, replayed: false };
       return w.outcome;
@@ -101,9 +107,11 @@ describe("the handover button with unsaved text in the draft editor", () => {
     expect(sent).toEqual(['"1"']);
     await act(async () => void [...line.querySelectorAll("button")].find((b) => b.textContent === "Show their change")!.click());
     expect(seeChange).toHaveBeenCalledTimes(1);
+    clientEpoch.currentEpoch = "e1";
     await press();
     await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
     expect(sent).toEqual(['"1"', '"2"']);
+    expect(epochs).toEqual(["e0", "e1"]);
   });
 
   test("with nothing unsaved the press starts: no unsaved notice, and the draft is read", async () => {

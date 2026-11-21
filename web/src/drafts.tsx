@@ -300,7 +300,7 @@ export const EDITOR_FIRST = "Not read: the fragment editor holds unsaved text. S
 // Show their change from a refused write: reads the draft again and keeps that read's ETag, unless the editor
 // holds unsaved text, which it names instead. The one callback of the discard's 412 and the handover's.
 export const showTheirChange = (seeChange: () => void): string | undefined => (unsaved.size > 0 ? EDITOR_FIRST : (seeChange(), undefined));
-export const DiscardRefused =({ onShow }: { onShow: () => void }) => (
+export const DiscardRefused = ({ onShow }: { onShow: () => void }) => (
   <Status testid="write-result" role="alert" actions={<button type="button" onClick={onShow}>Show their change</button>}>{NOT_DISCARDED}</Status>
 );
 

@@ -2254,7 +2254,9 @@ The web client's draft page offers "Start managing these machines" for a draft t
    is refused with 412 and never published unseen. The draft's line then says so and offers "Show their change", the
    page's own route for a refused draft write: it reads the draft again and keeps that read's ETag (and asks first while
    the editor holds unsaved text), and the next press sends that ETag. With no ETag kept the press sends nothing and
-   says to read the draft again. A machine whose step
+   says to read the draft again. Every write of one press carries the epoch the press began under as its reference
+   epoch, so one made after the installation's epoch changed is refused by the server and set aside in the page's
+   words; the press also stops, quietly, before such a write. A machine whose step
    fails stops alone with the refusal in words, and a later press retries it alone. The same act twice in one press stops
    the machine instead of looping.
 5. The roles are the routes' and the draft page's: `author` for the draft page and the machines' configurations,

@@ -66,6 +66,9 @@ export function Handover({ draft, machines, etag, seeChange, written }: { draft:
     // The press goes on only while the page is here and the shell has not invalidated the reads it began with
     // (an epoch change does, §8.5): a page barred from writes sends no further plan or approval.
     const valid = now.current.undropped();
+    // Every write carries the epoch the press began under: one made under a later epoch is refused by the
+    // server (412 epoch-mismatch), shown in words, and `current` below only stops the press quietly before it.
+    const epoch = writes.client?.currentEpoch;
     const ctl = new AbortController();
     run.current = ctl;
     const current = () => {
@@ -90,7 +93,7 @@ export function Handover({ draft, machines, etag, seeChange, written }: { draft:
       read: (path) => read(path, current),
       follow,
       send: async (spec) => {
-        const w = new Write(spec);
+        const w = new Write({ ...spec, ...(epoch !== undefined && { epoch }) });
         await writes.submit(w);
         return w;
       },
