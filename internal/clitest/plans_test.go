@@ -322,8 +322,9 @@ func TestPlans(t *testing.T) {
 		r := e.ctl(e.create("adopt")...)
 		p := planID.FindString(r.out)
 		f.want(r, 0, "Plan "+p, "proposed", "adopt: records Applied from the node's own bytes and sends nothing to the machine",
-			"machine Desired: "+e.rel, " at plan creation, "+e.rel, " now", "Baseline", "import base ibr_", "Pending convergence",
+			"Baseline", "import base ibr_", "Pending convergence",
 			"It is not approved and nothing runs until an approver approves: bronzewardctl approve '"+p+"'")
+		f.wantMatch(r, "machine Desired: "+titled(e.rel)+" at plan creation, "+titled(e.rel)+" now")
 		f.want(e.ctl(append(h, "plan", "cancel", p)...), 2, "--reason: give a reason of 1 to 1024 bytes; nothing was sent")
 		f.want(e.ctl(append(h, "plan", "cancel", p, "--reason", "BWSYNTH superseded")...), 0,
 			"Cancellation of plan "+p+" recorded by ", "(publisher), act act_", "The plan is cancelled: it cannot be committed.")
@@ -344,7 +345,8 @@ func TestPlans(t *testing.T) {
 		e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, adopted)
 		r := e.ctl(append(h, "plan", "show", adopted)...)
 		op := opID.FindString(r.out)
-		f.want(r, 0, "Committed: operation "+op, ". Follow it with: bronzewardctl operation watch '"+op+"'")
+		f.want(r, 0)
+		f.wantMatch(r, `Committed: operation `+titled(op)+`\. Follow it with: bronzewardctl operation watch '`+regexp.QuoteMeta(op)+`'`)
 		if state := f.ended(op); state != "completed" {
 			t.Fatalf("the adoption ended %s: %s", state, f.events(op))
 		}
@@ -378,7 +380,8 @@ func TestPlans(t *testing.T) {
 		}
 		r = e.ctl(append(h, "plan", "cancel", p, "--reason", "BWSYNTH cancelled after commitment")...)
 		release()
-		f.want(r, 0, "Cancellation of plan "+p+" recorded by ", "The plan stays committed to operation "+op,
+		f.wantMatch(r, `The plan stays committed to operation `+titled(op)+`\. A cancellation ends a committed plan's operation`)
+		f.want(r, 0, "Cancellation of plan "+p+" recorded by ",
 			". A cancellation ends a committed plan's operation only while no attempt is recorded; it does not stop an attempt already recorded.\n"+
 				"Follow it with: bronzewardctl operation watch '"+op+"'\n")
 		// The released stand-in applies the configuration, so the attempt verifies: only

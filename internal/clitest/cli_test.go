@@ -409,6 +409,18 @@ func (f *fixture) want(r result, code int, parts ...string) {
 	}
 }
 
+// titled is a pattern for id with the optional title in parentheses the CLI prints after it.
+func titled(id string) string { return regexp.QuoteMeta(id) + `( \([^)]*\))?` }
+
+// wantMatch fails unless the output holds a match of pattern, which pins a line's order and adjacency
+// where want's separate substrings would not.
+func (f *fixture) wantMatch(r result, pattern string) {
+	f.t.Helper()
+	if !regexp.MustCompile(pattern).MatchString(r.out + r.err) {
+		f.t.Errorf("output lacks a match of %q\nstdout: %s\nstderr: %s", pattern, r.out, r.err)
+	}
+}
+
 // leaks reports whether s holds token or its secret part.
 func leaks(s, token string) bool {
 	_, secret, _ := strings.Cut(token, ".")
