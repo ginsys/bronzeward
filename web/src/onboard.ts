@@ -93,6 +93,8 @@ export function sender(writes: Pick<Writes, "submit" | "repeatable" | "dismiss" 
     if (hook === undefined) return writes.submit(new Write(spec));
     const same = (w: Write) => w.spec.method === spec.method && w.spec.path === spec.path && JSON.stringify(w.spec.body) === JSON.stringify(spec.body);
     const choose = async (): Promise<{ sent: Promise<Outcome> }> => {
+      // The page may have been left while an earlier request was answered.
+      if (!alive()) return { sent: Promise.resolve(left) };
       let w = s.held.find((x) => same(x) && (x.running !== undefined || writes.repeatable(x)));
       if (w !== undefined) w.spec.released = hook;
       else {
@@ -101,7 +103,7 @@ export function sender(writes: Pick<Writes, "submit" | "repeatable" | "dismiss" 
           if (writes.open.includes(old)) writes.dismiss(old);
         }
         s.held.length = 0;
-        // The page may have been left while the open write was answered.
+        // And again while the open write's answer was awaited.
         if (!alive()) return { sent: Promise.resolve(left) };
         w = new Write(spec);
         s.held.push(w);
@@ -179,8 +181,14 @@ async function cluster(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolean
   const named = o.kind === "refused" ? existing(o.status, o.problem, "/clusters") : undefined;
   const id = o.kind === "done" ? (o.data as { id?: string } | null)?.id : named?.kind === "cluster" ? named.id : undefined;
   if (id === undefined) return o.kind === "done" ? fail("cluster", label, "the cluster was recorded, but its answer names no cluster") : fail("cluster", label, o);
+  // A cluster the server already held keeps its own name, which the draft's title and the lines then use.
+  if (o.kind !== "done") {
+    const r = await env.read<{ name: string }>(`/clusters/${enc(id)}`);
+    if (r.kind !== "ok") return fail("cluster", label, `the cluster already recorded could not be read: ${r.kind}`);
+    p.name = r.data.name;
+  }
   p.cluster = id;
-  set({ key: "cluster", label, state: o.kind === "done" ? "done" : "existing", to: `/clusters/${id}` });
+  set({ key: "cluster", label: `Cluster ${p.name}`, state: o.kind === "done" ? "done" : "existing", to: `/clusters/${id}` });
   return true;
 }
 
