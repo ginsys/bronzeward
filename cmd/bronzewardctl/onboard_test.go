@@ -316,6 +316,44 @@ func TestOnboardOtherFirstKey(t *testing.T) {
 	}
 }
 
+// TestOnboardNamesMachines: a machine is named by the hostname its node reports, lowercased
+// (operator experience §5.2); a node whose hostname is no valid name, or none, is recorded unnamed and
+// its line says why, in words, so that no hostname is dropped without a word.
+func TestOnboardNamesMachines(t *testing.T) {
+	e := newOnboard(t)
+	r := obTwoMembers
+	r.Members = append([]discover.Member(nil), obTwoMembers.Members...)
+	r.Members[0].Hostname = "Alcorak.Office.Ginsys.Net"
+	r.Members[1].Hostname = "W_2"
+	r.Members = append(r.Members, discover.Member{NodeID: "node-3", Address: "10.0.0.3", Role: "worker", Platform: "metal", Answered: true})
+	e.result = r
+	code, out, errOut := e.run("--no-import")
+	if code != 0 {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	a := e.api
+	if len(a.posts) < 4 {
+		t.Fatalf("%d writes: %q", len(a.posts), a.posts)
+	}
+	if !strings.Contains(a.posts[1], `"name":"alcorak.office.ginsys.net"`) {
+		t.Errorf("the first machine was sent as %q; want the hostname lowercased as its name", a.posts[1])
+	}
+	for i, p := range a.posts[2:4] {
+		if strings.Contains(p, `"name"`) {
+			t.Errorf("machine %d was sent as %q; want no name", i+2, p)
+		}
+	}
+	for _, line := range []string{
+		"(named by its hostname in lower case)",
+		`(no name: the hostname "W_2" is not a valid name)`,
+		"(no name: the node reported no hostname, so it shows its address)",
+	} {
+		if !strings.Contains(out, line) {
+			t.Errorf("stdout lacks %q:\n%s", line, out)
+		}
+	}
+}
+
 // TestOnboardSkipFirstKeyNeedsNoControlPlaneAddress: the address of the first control-plane member
 // carries the first key and nothing else, so a run that sends none is not refused for lacking it.
 func TestOnboardSkipFirstKeyNeedsNoControlPlaneAddress(t *testing.T) {

@@ -15,11 +15,13 @@ const ID = "mch_abcdefghijklmnopqrstuvwxyz";
 const link = (text: string) => `<a href="/machines/${ID}" title="${ID}">${text}</a>`;
 
 describe("machineName: the grammar a name is shown by", () => {
-  test("a name of 1 to 63 lowercase letters, digits and inner hyphens is shown as received", () => {
-    for (const n of ["a", "5", "web-1", "a-b", "web-1-2", "a".repeat(63), `a${"-".repeat(61)}a`]) expect(machineName(n)).toBe(n);
+  test("a hostname of dot-separated labels of 1 to 63 lowercase letters, digits and inner hyphens is shown as received", () => {
+    const longest = `${`${"a".repeat(63)}.`.repeat(3)}${"a".repeat(61)}`;
+    for (const n of ["a", "5", "42", "web-1", "a-b", "web-1-2", "a".repeat(63), `a${"-".repeat(61)}a`, "alcorak.office.ginsys.net", "a.b", "api.k8s2", "1.2.example", longest]) expect(machineName(n), n).toBe(n);
   });
   test("any other text, and anything that is not text, is not shown", () => {
-    const bad = ["", "Web-1", "WEB", "-web", "web-", "-", "a".repeat(64), "web\n1", "web-1\n", "web 1", "web_1", "web.1", "wéb", "web‮1", "web​1", " web"];
+    const bad = ["", "Web-1", "WEB", "-web", "web-", "-", "a".repeat(64), "web\n1", "web-1\n", "web 1", "web_1", "wéb", "web‮1", "web​1", " web",
+      "web.", ".web", "web..example", "web.-example", "web-.example", "web.Example", "a".repeat(64) + ".b", "10.0.0.1", "web.1", "web.123", `${`${"a".repeat(63)}.`.repeat(3)}${"a".repeat(62)}`];
     for (const n of bad) expect(machineName(n), JSON.stringify(n)).toBeUndefined();
     for (const n of [null, undefined, 5, true, {}, ["web-1"]]) expect(machineName(n)).toBeUndefined();
   });

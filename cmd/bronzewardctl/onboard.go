@@ -15,6 +15,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
+	"github.com/ginsys/bronzeward/internal/machinename"
 	"github.com/ginsys/bronzeward/internal/talos/discover"
 	"go.yaml.in/yaml/v3"
 )
@@ -54,11 +55,15 @@ type onboardDraft struct {
 }
 
 type onboardMachine struct {
-	Node    string      `json:"node"`
-	Host    string      `json:"hostname,omitempty"`
-	Machine string      `json:"machine,omitempty"`
-	Add     onboardPart `json:"add"`
-	Import  onboardPart `json:"import"`
+	Node    string `json:"node"`
+	Host    string `json:"hostname,omitempty"`
+	Machine string `json:"machine,omitempty"`
+	// Name is the name the machine this run recorded was given from its hostname; NameNote says how, or
+	// why it has none (operator experience §5.2). Neither is set for a machine that already existed.
+	Name     string      `json:"name,omitempty"`
+	NameNote string      `json:"nameNote,omitempty"`
+	Add      onboardPart `json:"add"`
+	Import   onboardPart `json:"import"`
 }
 
 // onboarding is the object cluster onboard prints for -o json and yaml, once, when its last step has
@@ -356,6 +361,11 @@ func (e *env) onboardRecords(a *onboardArgs, res discover.Result, obj *onboardin
 			continue
 		}
 		min := apitypes.MachineInput{Cluster: cl.Id, Platform: apitypes.MachineInputPlatform(m.Platform), TalosEndpoint: endpointArg(m.Address)}
+		// Named by the hostname the node reports, as the web page does (operator experience §5.2).
+		name, note := machinename.FromHostname(m.Hostname)
+		if name != "" {
+			min.Name = &name
+		}
 		if m.SMBIOSUUID != "" {
 			min.SmbiosUuid = &m.SMBIOSUUID
 		} else {
@@ -387,6 +397,9 @@ func (e *env) onboardRecords(a *onboardArgs, res discover.Result, obj *onboardin
 			return err
 		}
 		om.Machine, om.Add = mb.Id, onboardPart{State: state, ID: mb.Id}
+		if state == obCreated {
+			om.Name, om.NameNote = name, note // a machine already recorded keeps the name it has
+		}
 		if saved {
 			om.Add.Command, om.Add.Error = rerun(), client.Shown(err)
 			return err
@@ -654,7 +667,11 @@ func onboardLines(obj *onboarding) []string {
 			out = append(out, sf("  %s  %s  not recorded: %s", m.Node, m.Host, m.Add.Error))
 			continue
 		}
-		out = append(out, sf("  %s  %s  %s  add %s, import %s", m.Node, m.Host, cmp.Or(m.Machine, "-"), m.Add.State, m.Import.State))
+		line := sf("  %s  %s  %s  add %s, import %s", m.Node, m.Host, cmp.Or(m.Machine, "-"), m.Add.State, m.Import.State)
+		if m.NameNote != "" {
+			line += sf(" (%s)", m.NameNote)
+		}
+		out = append(out, line)
 		add(m.Add.Command, m.Import.Command)
 		if m.Import.State == statePaused.s() {
 			paused = true

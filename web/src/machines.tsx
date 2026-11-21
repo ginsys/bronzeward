@@ -5,6 +5,7 @@
 
 import type { components } from "./api/v1";
 import { AddClusterAction, RecordMachineAction } from "./forms.tsx";
+import { MACHINE_NAME } from "./machine-name.ts";
 import { OnboardClusterAction } from "./onboard.tsx";
 import { Detail, EmptyList, Head, Id, type Listed, More, Ref, RESTARTED, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { SAFE } from "./principals.ts";
@@ -63,10 +64,8 @@ export function observed(m: Machine, now: number): string {
 export const node = (m: Machine) => (m.hardware.talosNodeId != null ? `node ${m.hardware.talosNodeId}` : `UUID ${m.hardware.smbiosUuid ?? "unknown"}`);
 export const release = (id: string | null) => <Id id={id} />;
 
-// A9: a name is remote text, shown only when the received value matches the grammar (1 to 63 characters,
-// lowercase letters, digits and hyphen, neither end a hyphen; no `m` flag, so `$` refuses a trailing line
-// feed), else the machine is shown by its address. It replaces A7's control and format character test.
-const MACHINE_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+// A9: a name is remote text, shown only when the received value matches the grammar (machine-name.ts),
+// else the machine is shown by its address. It replaces A7's control and format character test.
 export const machineName = (name: unknown): string | undefined => (typeof name === "string" && MACHINE_NAME.test(name) ? name : undefined);
 
 // What a display reads of a machine: a body, a list row, or the part of one a view holds.

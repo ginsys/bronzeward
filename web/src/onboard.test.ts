@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { describe, expect, test, vi } from "vitest";
-import { cutContext, discoverCluster, type Env, endpointNote, isAddress, type Line, onboardCluster, type Plan, sender } from "./onboard.ts";
+import { cutContext, discoverCluster, type Env, endpointNote, isAddress, type Line, nameOf, onboardCluster, type Plan, sender } from "./onboard.ts";
 import type { Client } from "./request.ts";
 import { type Outcome, Writes, type WriteSpec } from "./write.ts";
 
@@ -686,5 +686,46 @@ describe("a name is sent as it stands, and discovery's failures are whole senten
       s.discovery = found;
       expect(await discoverCluster(s.env(), talosconfig(), {})).toEqual({ ok: false, why });
     }
+  });
+});
+
+describe("onboard naming: a machine is named by the hostname its node reports", () => {
+  const long = `${`${"a".repeat(63)}.`.repeat(3)}${"a".repeat(61)}`;
+  const names: [string, string, { name?: string; note?: string }][] = [
+    ["a short hostname", "cp-1", { name: "cp-1" }],
+    ["a full hostname", "alcorak.office.ginsys.net", { name: "alcorak.office.ginsys.net" }],
+    ["a one-label hostname of digits", "42", { name: "42" }],
+    ["the longest hostname", long, { name: long }],
+    ["upper case, lowered and said so", "Alcorak.Office.Ginsys.Net", { name: "alcorak.office.ginsys.net", note: "named by its hostname in lower case" }],
+    ["no hostname", "", { note: "no name: the node reported no hostname, so it shows its address" }],
+    ["an underscore", "W_2", { note: 'no name: the hostname "W_2" is not a valid name' }],
+    ["a trailing dot", "alcorak.office.", { note: 'no name: the hostname "alcorak.office." is not a valid name' }],
+    ["an address", "10.0.0.1", { note: 'no name: the hostname "10.0.0.1" is not a valid name' }],
+    ["254 characters", `${long}a`, { note: `no name: the hostname ${JSON.stringify(`${long.slice(0, 64)}…`)} is not a valid name` }],
+  ];
+  test.each(names)("%s", (_what, hostname, want) => {
+    expect(nameOf(hostname)).toEqual(want);
+  });
+
+  test("a run names each machine it records by its full hostname and says in its line why one stays unnamed", async () => {
+    const s = new Server();
+    s.discovery = {
+      ...DISCOVERY,
+      members: [
+        { ...MEMBERS[0]!, hostname: "alcorak.office.ginsys.net" },
+        { ...MEMBERS[1]!, hostname: "W_2" },
+        { ...MEMBERS[1]!, nodeId: "n4", address: "10.0.0.4", hostname: "" },
+        { ...MEMBERS[1]!, nodeId: "n5", address: "10.0.0.5", hostname: "Node-5.Example.Net" },
+      ],
+    };
+    const { ok, lines } = await run(s, await planOf(s));
+    expect(ok).toBe(true);
+    expect(s.sends.filter((x) => x.route === "POST /machines").map((x) => (x.body as { name?: string }).name)).toEqual(["alcorak.office.ginsys.net", undefined, undefined, "node-5.example.net"]);
+    expect(lines.filter((l) => l.key.startsWith("machine:")).map((l) => [l.key, l.detail])).toEqual([
+      ["machine:n1", undefined],
+      ["machine:n2", 'no name: the hostname "W_2" is not a valid name'],
+      ["machine:n4", "no name: the node reported no hostname, so it shows its address"],
+      ["machine:n5", "named by its hostname in lower case"],
+    ]);
   });
 });
