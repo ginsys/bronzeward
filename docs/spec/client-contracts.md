@@ -2122,7 +2122,8 @@ imported configuration as "Imported configuration of `<machine>`", never by iden
 imported configuration's page heads "Imported configuration of `<machine>`, imported `<date>`", and a fragment or
 assignment revision's "Fragment `<name>`, saved `<date>`" or "Assignment of `<machine>`, saved `<date>`", each with
 the identifier on a detail line. A name or title that is not safe text (item 1, A8 rule 3) is not shown: the heading
-carries the shortened identifier, as it does until the draft, machine or revision is read. A machine whose read gave
+carries the shortened identifier, as it does until the draft, machine or revision is read, and a draft entry for a
+fragment or profile reads "(name not shown)". A machine whose read gave
 no body reads "the machine" (A8 rule 1), so the heading survives. The words that show a mark or a rule on an import page, the document view and the publish shortcut are
 not part of this rule.
 

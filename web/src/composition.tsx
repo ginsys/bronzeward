@@ -104,7 +104,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const open = draft.state === "open";
   const editable = open && !waits;
   const unsavedList = holdsUnsaved(held, saved, conflict?.mine);
-  useUnsaved(`profile ${name || "(new)"} of draft ${draftCalled(draft, short(draft.id))}`, unsavedList);
+  useUnsaved(`profile ${name || "(new)"} of draft ${draftCalled(draft)}`, unsavedList);
   const drafted = useRef(draft.revision);
   // The done writes now, for a revision read that answers after one finished (as in the fragment pane).
   const finished = useRef(done);
@@ -301,7 +301,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
       )}
       {note !== undefined && <Status testid="editor-note">{note}</Status>}
       {!(o?.kind === "refused" && o.status === 412) && conflictView()}
-      <WriteResult w={w} conflict={conflictView("alert") || undefined} done={() => `Profile ${name} ${w?.spec.method === "DELETE" ? "removed from" : "saved in"} draft ${draftCalled(draft, short(draft.id))}.`} />
+      <WriteResult w={w} conflict={conflictView("alert") || undefined} done={() => `Profile ${name} ${w?.spec.method === "DELETE" ? "removed from" : "saved in"} draft ${draftCalled(draft)}.`} />
     </section>
   );
 }
@@ -566,7 +566,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
   // The machine's name and address are in the list the page reads already (A9): no read of its own.
   const found = machines.kind === "ok" ? machines.data.items.find((m) => m.id === machine) : undefined;
   const called = machine === "" ? "(new)" : found === undefined ? THE_MACHINE : machineText(found, sharedAddresses(machines.kind === "ok" ? machines.data.items : []));
-  useUnsaved(`assignment ${called} of draft ${draftCalled(draft, short(draft.id))}`, unsavedList);
+  useUnsaved(`assignment ${called} of draft ${draftCalled(draft)}`, unsavedList);
   const [layers, setLayers] = useState<Record<string, string>>({});
   const asked = useRef(new Set<string>());
   // A layer read that failed is asked again by the next draft read or by the button: the fragment
@@ -763,7 +763,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
       )}
       {note !== undefined && <Status testid="editor-note">{note}</Status>}
       {!(o?.kind === "refused" && o.status === 412) && conflictView()}
-      <WriteResult w={w} conflict={conflictView("alert") || undefined} done={() => `Assignment of machine ${called} ${w?.spec.method === "DELETE" ? "removed from" : "saved in"} draft ${draftCalled(draft, short(draft.id))}.`} />
+      <WriteResult w={w} conflict={conflictView("alert") || undefined} done={() => `Assignment of machine ${called} ${w?.spec.method === "DELETE" ? "removed from" : "saved in"} draft ${draftCalled(draft)}.`} />
       <h4>Composition and references</h4>
       <p>
         <button type="button" onClick={show} disabled={!showable(profiles, fragments) || reads !== undefined || total(lists) === 0}>Show composition and references</button>
