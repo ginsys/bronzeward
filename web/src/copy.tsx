@@ -7,16 +7,18 @@ export const COPY = "Copy";
 export const COPIED = "Copied.";
 
 export function CopyButton({ text, byHand }: { text: string; byHand: string }) {
-  const [said, say] = useState<string>();
+  // What was said belongs to the text it was said about: a reference that changes under the page (an automatic
+  // retry) leaves no "Copied." for text the clipboard does not hold, and a slow copy of the old text cannot say it.
+  const [said, say] = useState<{ of: string; line: string }>();
   const copy = () => {
     const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
-    if (clipboard === undefined) return say(byHand);
-    clipboard.writeText(text).then(() => say(COPIED), () => say(byHand));
+    if (clipboard === undefined) return say({ of: text, line: byHand });
+    clipboard.writeText(text).then(() => say({ of: text, line: COPIED }), () => say({ of: text, line: byHand }));
   };
   return (
     <>
       <button type="button" onClick={copy}>{COPY}</button>
-      {said !== undefined && <span role="status"> {said}</span>}
+      {said?.of === text && <span role="status"> {said.line}</span>}
     </>
   );
 }

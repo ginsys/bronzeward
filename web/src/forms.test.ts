@@ -339,7 +339,7 @@ describe("the form's result", () => {
   test("not done shows the last answer's problem fields (§8.2)", () => {
     const problem = { type: "urn:bronzeward:problem:epoch-superseded", title: "Epoch superseded", status: 503, detail: "this process started before the current epoch", instance: "req-9" };
     expect(result({ kind: "not-done", why: "every attempt was answered 503, which commits nothing", problem })).toContain(
-      ">Not saved: every attempt was answered 503, which commits nothing. This server process started before the last restore, so it may not change anything. Ask an administrator to restart the server. The server says: this process started before the current epoch.</p>",
+      ">Not saved: every attempt was answered 503, which commits nothing. This server process is out of date with the installation's recovery state, so it may not change anything. Ask an administrator to restart the server. The server says: this process started before the current epoch.</p>",
     );
     expect(result({ kind: "not-done", why: NO_EPOCH, problem: null })).toContain(`>Not saved: ${NO_EPOCH}.</p>`);
   });
@@ -359,7 +359,7 @@ describe("the forms", () => {
     const problem: Problem = { type: "urn:bronzeward:problem:dependency-unavailable", title: "Dependency unavailable", status: 503, detail: "the store is not reachable", instance: "/requests/SYNTH-1" };
     const failed = field({ kind: "unavailable", status: 503, problem });
     expect(failed).toContain("clusters not read");
-    expect(failed).toContain("Not read. Something the server depends on did not answer. Try again in a moment; if it keeps happening, ask an administrator. The server says: the store is not reachable.");
+    expect(failed).toContain("Not read. Something the server depends on is not available or not set up. Try again in a moment; if it keeps happening, ask an administrator. The server says: the store is not reachable.");
     expect(failed).toContain("Request: /requests/SYNTH-1");
     const loading = field({ kind: "loading" });
     expect(loading).toContain("clusters not read");
