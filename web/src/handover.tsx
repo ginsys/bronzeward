@@ -38,28 +38,15 @@ export function Handover({ draft, machines, etag, written }: { draft: string; ma
   const [running, setRunning] = useState(false);
   const [held, setHeld] = useState(false);
   const live = useRef(true);
-  const leave = useRef(new AbortController());
+  // The press in progress: aborted when the page leaves, and when the shell invalidates the reads it began with.
+  const run = useRef<AbortController>(undefined);
   useEffect(() => {
     live.current = true;
-    leave.current = new AbortController();
     return () => {
       live.current = false;
-      leave.current.abort();
+      run.current?.abort();
     };
   }, []);
-  // The publication is followed by the progress reader the publication page uses, and its end is read by
-  // the same words (publishEnd), under the epoch it was read in.
-  const follow = async (op: string): Promise<Followed> => {
-    const client = writes.client;
-    if (client === undefined) return { kind: "unread" };
-    const reading = settledReads(client, { settle: now.current.settle, undropped: now.current.undropped }, () => live.current);
-    const r = await watch(reading, op, { show: () => {}, clear: () => {}, signal: leave.current.signal });
-    if (r.kind === "stopped") return { kind: "stopped" };
-    if (r.kind === "failed") return { kind: "unread" };
-    if (!terminal(r.operation.state) || r.epoch === undefined || r.epoch !== client.currentEpoch) return { kind: "ended", text: notEstablished(op) };
-    const e = publishEnd(r.operation);
-    return "release" in e ? { kind: "released" } : { kind: "ended", text: e.text };
-  };
   const missing = missingRoles(roles);
   const reason = missing.length > 0 ? MISSING(missing) : gate;
   const press = () => {
@@ -69,8 +56,31 @@ export function Handover({ draft, machines, etag, written }: { draft: string; ma
     setHeld(false);
     setRunning(true);
     setLines({});
+    // The press goes on only while the page is here and the shell has not invalidated the reads it began with
+    // (an epoch change does, §8.5): a page barred from writes sends no further plan or approval.
+    const valid = now.current.undropped();
+    const ctl = new AbortController();
+    run.current = ctl;
+    const current = () => {
+      const ok = live.current && valid();
+      if (!ok) ctl.abort();
+      return ok;
+    };
+    // The publication is followed by the progress reader the publication page uses, and its end is read by
+    // the same words (publishEnd), under the epoch it was read in.
+    const follow = async (op: string): Promise<Followed> => {
+      const client = writes.client;
+      if (client === undefined) return { kind: "unread" };
+      const reading = settledReads(client, { settle: now.current.settle, undropped: now.current.undropped }, current);
+      const r = await watch(reading, op, { show: () => {}, clear: () => {}, signal: ctl.signal });
+      if (r.kind === "stopped" || !current()) return { kind: "stopped" };
+      if (r.kind === "failed") return { kind: "unread" };
+      if (!terminal(r.operation.state) || r.epoch === undefined || r.epoch !== client.currentEpoch) return { kind: "ended", text: notEstablished(op) };
+      const e = publishEnd(r.operation);
+      return "release" in e ? { kind: "released" } : { kind: "ended", text: e.text };
+    };
     const io: Io = {
-      read: (path) => read(path, () => live.current),
+      read: (path) => read(path, current),
       follow,
       send: async (spec) => {
         const w = new Write(spec);
@@ -79,7 +89,7 @@ export function Handover({ draft, machines, etag, written }: { draft: string; ma
       },
       wait: (ms) => new Promise((r) => setTimeout(r, ms)),
       say: (key, line) => live.current && setLines((was) => ({ ...was, [key]: line })),
-      live: () => live.current,
+      live: current,
     };
     void handOver(draft, machines, io, etag()).finally(() => {
       if (!live.current) return;
