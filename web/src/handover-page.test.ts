@@ -33,7 +33,7 @@ describe("the handover button with unsaved text in the draft editor", () => {
   });
   const mount = () =>
     act(async () =>
-      root.render(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["publisher", "approver"], offline: false } }, h(ReadsProvider, { value: noReads }, h(Handover, { draft: "drf_1", machines: ["mch_a"], written: () => {} }))))),
+      root.render(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: noReads }, h(Handover, { draft: "drf_1", machines: ["mch_a"], etag: () => '"1"', written: () => {} }))))),
     );
   const press = () => act(async () => void box.querySelector("button")!.click());
 

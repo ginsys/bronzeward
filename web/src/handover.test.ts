@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
 import { Handover } from "./handover.tsx";
-import { actFor, DRAFT, handOver, HANDOVER_SENTENCE, type Io, type Line, LINES, MISSING, missingRoles } from "./handover.ts";
+import { actFor, DRAFT, type Followed, handOver, HANDOVER_SENTENCE, type Io, type Line, LINES, MISSING, missingRoles, NO_ETAG } from "./handover.ts";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import type { Position } from "./nextstep.tsx";
 import { ShellContext } from "./shell.tsx";
@@ -17,8 +17,11 @@ const B = `mch_${"b".repeat(26)}`;
 interface M { applied: boolean; desired: boolean; plan: "none" | "proposed" | "approved"; drift?: boolean; unresolved?: boolean; refusePlan?: boolean; holdsAfterApproval?: number }
 
 // A server for the handover: the draft, the machines and what each write does to them. `log` is every write sent.
-function world(draft: { state: string; running?: boolean }, machines: Record<string, M>) {
+function world(draft: { state: string; running?: boolean; etag?: string; followed?: Followed }, machines: Record<string, M>) {
   const log: string[] = [];
+  // The If-Match each publication carried, and each operation followed to its end.
+  const ifMatches: (string | undefined)[] = [];
+  const follows: string[] = [];
   // A publication takes effect once: the draft is published and each machine's Desired is the release.
   const publishNow = () => {
     draft.state = "published";
@@ -50,21 +53,24 @@ function world(draft: { state: string; running?: boolean }, machines: Record<str
     read: <T,>(path: string) => {
       const machine = /^\/machines\/(mch_\w+)\/position$/.exec(path)?.[1];
       if (machine !== undefined) return Promise.resolve({ kind: "ok", data: position(machine) } as never);
-      if (path.startsWith("/drafts/")) return Promise.resolve({ kind: "ok", data: draft, etag: '"1"' } as never);
-      if (path.startsWith("/operations/")) {
-        // A running publication ends when it is read as ended.
-        if (draft.running === true) {
-          draft.running = false;
-          publishNow();
-        }
-        return Promise.resolve({ kind: "ok", data: { state: "succeeded" } } as never);
-      }
+      if (path.startsWith("/drafts/")) return Promise.resolve({ kind: "ok", data: draft, etag: draft.etag ?? '"1"' } as never);
       return Promise.resolve(undefined as T);
+    },
+    follow: (op) => {
+      follows.push(op);
+      // A running publication ends when it is followed to its end.
+      if (draft.running === true) {
+        draft.running = false;
+        publishNow();
+      }
+      return Promise.resolve(draft.followed ?? { kind: "released" });
     },
     send: (spec) => {
       log.push(`${spec.method} ${spec.path}`);
       if (spec.path.endsWith("/publications")) {
-        if (draft.state !== "open") return Promise.resolve(wrote(spec, refused(412)));
+        ifMatches.push(spec.ifMatch);
+        // The server's draft is at its own ETag: a publication that does not carry it is refused (412).
+        if (draft.state !== "open" || spec.ifMatch !== (draft.etag ?? '"1"')) return Promise.resolve(wrote(spec, refused(412)));
         // A publication already running for this draft revision is answered with its operation, not a second one.
         if (draft.running !== true) publishNow();
         return Promise.resolve(wrote(spec, done({ id: "op_1" })));
@@ -94,15 +100,17 @@ function world(draft: { state: string; running?: boolean }, machines: Record<str
     say: (key, line) => void (lines[key] = line),
     live: () => true,
   };
-  return { io, log, lines, machines, plans };
+  return { io, log, lines, machines, plans, ifMatches, follows };
 }
 const fresh = (): M => ({ applied: false, desired: false, plan: "none" });
+// The draft's ETag as the page shows it.
+const SHOWN = '"1"';
 const text = (l: Line | undefined) => `${l?.state}: ${l?.text}`;
 
 describe("the handover button (ginsys/bronzeward#1066): one press, every act the existing route, once", () => {
   test("all roles, a fresh draft of two machines: one publish, one plan and one approval each, nothing else, and both end managed", async () => {
     const w = world({ state: "open" }, { [A]: fresh(), [B]: fresh() });
-    await handOver("drf_1", [A, B], w.io);
+    await handOver("drf_1", [A, B], w.io, SHOWN);
     expect([...w.log].sort()).toEqual([
       "POST /drafts/drf_1/publications", "POST /plans", "POST /plans", `POST /plans/pln_${A}/approvals`, `POST /plans/pln_${B}/approvals`,
     ].sort());
@@ -118,7 +126,7 @@ describe("the handover button (ginsys/bronzeward#1066): one press, every act the
 
   test("a publication already running for the draft is followed through the operation the server answers, and the machines then go on", async () => {
     const w = world({ state: "open", running: true }, { [A]: fresh() });
-    await handOver("drf_1", [A], w.io);
+    await handOver("drf_1", [A], w.io, SHOWN);
     // One request, answered with the running operation: no second publication exists, and the press waits for that one.
     expect(w.log.filter((l) => l.endsWith("/publications"))).toHaveLength(1);
     expect(text(w.lines[DRAFT])).toBe(`done: ${LINES.published}`);
@@ -127,7 +135,7 @@ describe("the handover button (ginsys/bronzeward#1066): one press, every act the
 
   test("a second press after the page closed halfway: A's plan waits for approval, B is managed, so exactly one approval is sent", async () => {
     const w = world({ state: "published" }, { [A]: { ...fresh(), desired: true, plan: "proposed" }, [B]: { ...fresh(), desired: true, applied: true } });
-    await handOver("drf_1", [A, B], w.io);
+    await handOver("drf_1", [A, B], w.io, SHOWN);
     expect(w.log).toEqual([`POST /plans/pln_${A}/approvals`]);
     expect(text(w.lines[DRAFT])).toBe("done: Already published.");
     expect(text(w.lines[A])).toBe(`done: ${LINES.managed}`);
@@ -136,13 +144,13 @@ describe("the handover button (ginsys/bronzeward#1066): one press, every act the
 
   test("a machine whose plan is refused stops alone with its write shown; the other ends managed; pressing again acts on the failed one only", async () => {
     const w = world({ state: "open" }, { [A]: fresh(), [B]: { ...fresh(), refusePlan: true } });
-    await handOver("drf_1", [A, B], w.io);
+    await handOver("drf_1", [A, B], w.io, SHOWN);
     expect(w.lines[B]?.state).toBe("stopped");
     expect(w.lines[B]?.write?.outcome).toMatchObject({ kind: "refused", status: 409 });
     expect(text(w.lines[A])).toBe(`done: ${LINES.managed}`);
     w.log.length = 0;
     delete w.machines[B]!.refusePlan;
-    await handOver("drf_1", [A, B], w.io);
+    await handOver("drf_1", [A, B], w.io, SHOWN);
     expect(w.log).toEqual(["POST /plans", `POST /plans/pln_${B}/approvals`]);
     expect(text(w.lines[A])).toBe(`done: ${LINES.already}`);
     expect(text(w.lines[B])).toBe(`done: ${LINES.managed}`);
@@ -150,7 +158,7 @@ describe("the handover button (ginsys/bronzeward#1066): one press, every act the
 
   test("a machine with an Applied configuration and an open drift record gets no write and keeps its separate steps", async () => {
     const w = world({ state: "open" }, { [A]: fresh(), [B]: { ...fresh(), applied: true, desired: true, drift: true } });
-    await handOver("drf_1", [A, B], w.io);
+    await handOver("drf_1", [A, B], w.io, SHOWN);
     expect(w.log.filter((l) => l.includes(B))).toEqual([]);
     expect(w.log.filter((l) => l === "POST /plans")).toHaveLength(1);
     expect(text(w.lines[B])).toBe(`left: ${LINES.applied}`);
@@ -159,14 +167,14 @@ describe("the handover button (ginsys/bronzeward#1066): one press, every act the
 
   test("the same act never repeats in one press: a created plan the position does not show stops the machine", async () => {
     const w = world({ state: "published" }, { [A]: { ...fresh(), desired: true, holdsAfterApproval: -1 } });
-    await handOver("drf_1", [A], w.io);
+    await handOver("drf_1", [A], w.io, SHOWN);
     expect(w.log).toEqual(["POST /plans"]);
     expect(text(w.lines[A])).toBe(`stopped: ${LINES.repeated}`);
   });
 
   test("an approved plan the controller has not recorded is waited for, then left to a later press with the words for it", async () => {
     const w = world({ state: "published" }, { [A]: { ...fresh(), desired: true, plan: "approved", holdsAfterApproval: Infinity } });
-    await handOver("drf_1", [A], w.io);
+    await handOver("drf_1", [A], w.io, SHOWN);
     expect(w.log).toEqual([]);
     expect(text(w.lines[A])).toBe(`waiting: ${LINES.slow}`);
     // The line while it waits says the person need not stay.
@@ -175,14 +183,14 @@ describe("the handover button (ginsys/bronzeward#1066): one press, every act the
 
   test("an unresolved operation stops its machine in words", async () => {
     const w = world({ state: "published" }, { [A]: { ...fresh(), desired: true, plan: "none", unresolved: true } });
-    await handOver("drf_1", [A], w.io);
+    await handOver("drf_1", [A], w.io, SHOWN);
     expect(text(w.lines[A])).toBe(`stopped: ${LINES.unresolved}`);
     expect(w.log).toEqual([]);
   });
 
   test("a discarded draft is not published and no machine is read", async () => {
     const w = world({ state: "discarded" }, { [A]: fresh() });
-    await handOver("drf_1", [A], w.io);
+    await handOver("drf_1", [A], w.io, SHOWN);
     expect(w.log).toEqual([]);
     expect(text(w.lines[DRAFT])).toBe(`stopped: ${LINES.draftGone("discarded")}`);
     expect(w.lines[A]).toBeUndefined();
@@ -192,12 +200,53 @@ describe("the handover button (ginsys/bronzeward#1066): one press, every act the
     const w = world({ state: "open" }, { [A]: fresh() });
     const send = w.io.send;
     w.io.send = (spec) => (spec.path.endsWith("/publications") ? Promise.resolve(Object.assign(new Write(spec), { outcome: { kind: "refused" as const, status: 412, problem: null, replayed: false } })) : send(spec));
-    await handOver("drf_1", [A], w.io);
+    await handOver("drf_1", [A], w.io, SHOWN);
     expect(w.lines[DRAFT]?.state).toBe("stopped");
     expect(w.lines[DRAFT]?.write?.outcome).toMatchObject({ status: 412 });
     expect(w.lines[A]).toBeUndefined();
   });
 
+  test("the publication carries the ETag the page showed, even where the press's own read of the draft is newer", async () => {
+    const w = world({ state: "open" }, { [A]: fresh() });
+    await handOver("drf_1", [A], w.io, SHOWN);
+    expect(w.ifMatches).toEqual([SHOWN]);
+    // Another author changed the draft after the page showed it: the server's ETag differs, the page's is sent,
+    // the publication is refused (412) with that write shown, and nothing else is sent.
+    const other = world({ state: "open", etag: '"2"' }, { [A]: fresh() });
+    await handOver("drf_1", [A], other.io, SHOWN);
+    expect(other.ifMatches).toEqual([SHOWN]);
+    expect(other.log).toEqual(["POST /drafts/drf_1/publications"]);
+    expect(other.lines[DRAFT]?.write?.outcome).toMatchObject({ kind: "refused", status: 412 });
+    expect(other.lines[A]).toBeUndefined();
+  });
+
+  test("with no ETag kept for the draft nothing is sent, and the line says to read the draft again", async () => {
+    const w = world({ state: "open" }, { [A]: fresh() });
+    await handOver("drf_1", [A], w.io, undefined);
+    expect(w.log).toEqual([]);
+    expect(text(w.lines[DRAFT])).toBe(`stopped: ${NO_ETAG}`);
+    expect(w.lines[A]).toBeUndefined();
+  });
+
+  test("the publication is followed through the progress reader, and its end decides: a failed one stops everything in the reader's words", async () => {
+    const w = world({ state: "open", followed: { kind: "ended", text: "Publication operation op_1 failed: boom. Nothing has been sent to any machine." } }, { [A]: fresh() });
+    await handOver("drf_1", [A], w.io, SHOWN);
+    expect(w.follows).toEqual(["op_1"]);
+    expect(text(w.lines[DRAFT])).toBe("stopped: Publication operation op_1 failed: boom. Nothing has been sent to any machine.");
+    expect(w.log).toEqual(["POST /drafts/drf_1/publications"]);
+    expect(w.lines[A]).toBeUndefined();
+  });
+
+  test("a publication whose progress cannot be read stops in words, and one followed on a page that left says nothing", async () => {
+    const unread = world({ state: "open", followed: { kind: "unread" } }, { [A]: fresh() });
+    await handOver("drf_1", [A], unread.io, SHOWN);
+    expect(text(unread.lines[DRAFT])).toBe(`stopped: ${LINES.publishUnread}`);
+    expect(unread.lines[A]).toBeUndefined();
+    const left = world({ state: "open", followed: { kind: "stopped" } }, { [A]: fresh() });
+    await handOver("drf_1", [A], left.io, SHOWN);
+    expect(left.lines[A]).toBeUndefined();
+    expect(left.lines[DRAFT]?.text).toBe(LINES.publishing);
+  });
 });
 
 describe("the act a position calls for", () => {
@@ -219,11 +268,11 @@ describe("the act a position calls for", () => {
 describe("the page: the sentence, and the roles", () => {
   const noReads: Reads = { client: { read: () => new Promise(() => {}) }, settle: () => true, undropped: () => () => true, view: "", again: 0, regained: 0, go: () => {}, failure: () => null };
   const page = (roles: readonly ("author" | "publisher" | "approver")[]) =>
-    renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles, offline: false } }, h(ReadsProvider, { value: noReads }, h(Handover, { draft: "drf_1", machines: [A], written: () => {} })))));
+    renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles, offline: false } }, h(ReadsProvider, { value: noReads }, h(Handover, { draft: "drf_1", machines: [A], etag: () => SHOWN, written: () => {} })))));
   const button = (markup: string) => /<button[^>]*>Start managing these machines<\/button>/.exec(markup)![0];
 
-  test("with both roles the button is on and the sentence says what the press does in order, and that nothing is sent to a machine", () => {
-    const markup = page(["publisher", "approver"]);
+  test("with all three roles the button is on and the sentence says what the press does in order, and that nothing is sent to a machine", () => {
+    const markup = page(["author", "publisher", "approver"]);
     expect(button(markup)).not.toContain("disabled");
     expect(markup).toContain(HANDOVER_SENTENCE);
     expect(HANDOVER_SENTENCE).toMatch(/publishes the draft, then creates a handover plan for each machine and approves each plan as you/);
@@ -232,9 +281,10 @@ describe("the page: the sentence, and the roles", () => {
   });
 
   test("a missing role turns the button off and names the role and the separate steps", () => {
-    expect(missingRoles(["publisher"])).toEqual(["approver"]);
-    expect(missingRoles(["approver"])).toEqual(["publisher"]);
-    for (const roles of [["publisher"], ["approver"], ["author"]] as const) {
+    expect(missingRoles(["publisher", "approver"])).toEqual(["author"]);
+    expect(missingRoles(["author", "approver"])).toEqual(["publisher"]);
+    // Publisher and approver without author: the button is off and the separate steps are shown.
+    for (const roles of [["publisher", "approver"], ["author", "approver"], ["author", "publisher"], ["publisher"], ["approver"], ["author"]] as const) {
       const markup = page(roles);
       expect(button(markup), roles.join()).toContain("disabled");
       expect(markup).toContain(MISSING(missingRoles(roles)).replace(/'/g, "&#x27;"));

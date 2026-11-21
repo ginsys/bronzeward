@@ -8,6 +8,7 @@ import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } 
 import type { components } from "./api/v1";
 import { AssignmentPane, ProfilePane } from "./composition.tsx";
 import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
+import { NO_ETAG } from "./handover.ts";
 import { Handover } from "./handover.tsx";
 import { LAYERS } from "./layers.ts";
 import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
@@ -34,7 +35,7 @@ export const KINDS = ["string", "integer", "boolean", "mapping"] as const;
 export const NOT_RENDERED = "Not rendered yet. A machine's configuration exists only in a release, once this draft is published.";
 // The publication page of a draft (publish.tsx).
 export const publishPath = (draft: string) => `/publications/new?${new URLSearchParams({ draft })}`;
-export const NO_ETAG = "Not sent: this page has not read the draft under the current epoch. Read it again first.";
+export { NO_ETAG };
 
 // §8.3: the last ETag seen per draft, in this page's memory, valid only under the epoch it was
 // seen in (§8.5 item 1).
@@ -281,7 +282,7 @@ export function DraftItem({ id }: { id: string }) {
             <AssignmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
           <Status testid="not-rendered">{NOT_RENDERED}</Status>
-          {handedOver.length > 0 && d.state !== "discarded" && <Handover key={d.id} draft={d.id} machines={handedOver} written={written} />}
+          {handedOver.length > 0 && d.state !== "discarded" && <Handover key={d.id} draft={d.id} machines={handedOver} etag={() => keptETag(d.id, epoch)} written={written} />}
           {d.state === "open" && <p><Ref to={publishPath(d.id)} id={d.id}>Publish this draft</Ref></p>}
           {d.state === "open" && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}
         </>

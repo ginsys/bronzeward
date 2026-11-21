@@ -869,9 +869,12 @@ class: an automation credential gets `403` with `humanOnly: true`
 (`internal/api/api.go:380-392`), and the CLI says so before sending when the context holds an
 automation token.
 
-**The one exception, the web client's handover button** (the owner's decision of 2026-11-21, typed in the
-campaign lead's session). On a draft that holds an import base, the web client's "Start managing these
-machines" publishes the draft, creates an adopt plan for each machine with no `Applied` and approves each
+**The one exception, the web client's handover button** (the owner's decision of 2026-11-21 18:22 CET, typed in
+the campaign lead's session, answering "A" to the question whether one action may take a draft's machines
+under management). On a draft that holds an import base, for a person who holds the author, publisher and
+approver roles, the web client's "Start managing these machines" publishes the draft as the page showed it
+(the publication carries the draft's ETag from that page and is refused when another author changed the draft
+since), creates an adopt plan for each machine with no `Applied` and approves each
 plan as the signed-in person, without the typed plan ID: the sentence above the button, which says what the
 press does and that it sends nothing to any machine, is the confirmation. Every act is the existing route,
 recorded one by one, and the approval records self-approval as the server computes it. A handover plan
