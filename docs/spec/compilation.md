@@ -1104,8 +1104,12 @@ unmeasured.
    live cluster to whoever approves the plan.
 
 **Left open.** Whether a live node applies a changed hostname without a reboot,
-what becomes of its Kubernetes node name, and `container` and `cloud` modes
-are unmeasured; the compiler issue (ginsys/bronzeward#1040) measures them on
+what becomes of its Kubernetes node name, whether applying the rewritten
+document with an unchanged hostname needs a reboot (the commonest case: an
+onboarded machine whose hostname equals its name gets the document back as
+`auto: off` plus `hostname`, so the hostname is the same, the document differs
+and the machine reads as pending convergence), and `container` and `cloud`
+modes are unmeasured; the compiler issue (ginsys/bronzeward#1040) measures them on
 the fixture, and the client sentences that mention a restart or the node name
 are conditional on that result (client contracts A9 items 6 and 7). A
 `cloud` node's own hostname is overridden by the static one (`hostname` has
