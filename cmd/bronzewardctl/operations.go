@@ -88,8 +88,11 @@ func outcome(o *apitypes.OperationBody, last *lastEvent) ([]string, bool) {
 			attempts = sf(", after %d attempt%s", *e.Attempts, map[bool]string{false: "s"}[*e.Attempts == 1])
 		}
 		lines := []string{sf("%s%s: %s%s.", state, stamp, cause, attempts)}
-		if next := endNextStep(o.Kind, o.State, plan, machine); next != "" {
-			lines = append(lines, next)
+		// A pair the table does not know has no next step (A10 item 3): no command is made up for it.
+		if _, known := operationRow(o.Kind, o.State); known {
+			if next := endNextStep(o.Kind, o.State, plan, machine); next != "" {
+				lines = append(lines, next)
+			}
 		}
 		return lines, false
 	case "unresolved":

@@ -40,8 +40,12 @@ type webRow struct{ kind, state, now, next string }
 
 var (
 	webKindStart = regexp.MustCompile(`(?m)^ {2}(?:"([a-z-]+)"|([a-z]+)): \{$`)
-	webRowStart  = regexp.MustCompile(`(?m)^ {4}([a-z]+):\s*\[`)
-	webRowFull   = regexp.MustCompile(`(?m)^ {4}([a-z]+):\s*\[\s*("(?:[^"\\\n]|\\.)*")\s*,\s*("(?:[^"\\\n]|\\.)*"|undefined)\s*,?\s*\],?$`)
+	// webRowStart and webKindLine count every line that opens a row or a kind, in any form, so a row the
+	// whole-row pattern cannot take (a quoted state, a template string, a different layout) is counted and
+	// not taken, and the two counts differ.
+	webRowStart = regexp.MustCompile(`(?m)^ {4}[^\s\]}]`)
+	webKindLine = regexp.MustCompile(`(?m)^ {2}[^\s}]`)
+	webRowFull  = regexp.MustCompile(`(?m)^ {4}([a-z]+):\s*\[\s*("(?:[^"\\\n]|\\.)*")\s*,\s*("(?:[^"\\\n]|\\.)*"|undefined)\s*,?\s*\],?$`)
 )
 
 // webWords reads the table of web/src/operation-words.ts: each `state: [now, next]` row of each kind, `next`
@@ -61,6 +65,9 @@ func webWords(src string) ([]webRow, error) {
 	}
 	block := strings.Join(lines, "\n")
 	kinds := webKindStart.FindAllStringSubmatchIndex(block, -1)
+	if lines := webKindLine.FindAllStringIndex(block, -1); len(lines) != len(kinds) {
+		return nil, fmt.Errorf("the table has %d kinds and the reader took %d whole", len(lines), len(kinds))
+	}
 	taken := webRowFull.FindAllStringSubmatchIndex(block, -1)
 	if loose := webRowStart.FindAllStringIndex(block, -1); len(loose) != len(taken) {
 		return nil, fmt.Errorf("the table has %d rows and the reader took %d whole", len(loose), len(taken))
@@ -151,6 +158,10 @@ func TestWebWordsReaderRefusesWhatItCannotRead(t *testing.T) {
 		{"a template string", `["Accepted; no worker has taken it yet.", "Wait; nothing to do."]`, "[`Accepted; no worker has taken it yet.`, \"Wait; nothing to do.\"]"},
 		{"a single-quoted string", `"Wait for the controller."],` + "\n    sending", `'Wait for the controller.'],` + "\n    sending"},
 		{"an empty sentence", `["Accepted; no worker has taken it yet.",`, `["",`},
+		// A row in a form the whole-row pattern cannot take, added beside a real one: it must be counted and refused.
+		{"a quoted state key", "  ingest: {\n", "  ingest: {\n    \"queued\": [\"New web sentence.\", \"New web step.\"],\n"},
+		{"a row in another layout", "  ingest: {\n", "  ingest: {\n    queued: [\"New web sentence.\",\n      \"New web step.\"],\n"},
+		{"a kind added", "  adopt: {\n", "  adopt2: {\n    queued: [\"New web sentence.\", undefined],\n  },\n  adopt: {\n"},
 	} {
 		if !strings.Contains(src, c.old) {
 			t.Fatalf("%s: the case no longer matches the source", c.name)
@@ -247,10 +258,17 @@ func TestOperationShowUnknownPair(t *testing.T) {
 		{"frobnicate", "running", "An operation of kind frobnicate in state running; this command has no description of it."},
 		{"adopt", "queued", "An adopt operation in state queued; this command has no description of it."},
 		{"constructor", "toString", "An operation of kind constructor in state toString; this command has no description of it."},
+		// A state that ends an operation without success, on a pair the table does not know, gets no command
+		// from the outcome either: the server's plan and machine would otherwise make one up.
+		{"frobnicate", "failed", "An operation of kind frobnicate in state failed; this command has no description of it."},
+		{"frobnicate", "cancelled", "An operation of kind frobnicate in state cancelled; this command has no description of it."},
+		{"constructor", "failed", "An operation of kind constructor in state failed; this command has no description of it."},
+		{"publish", "rejected", "A publish operation in state rejected; this command has no description of it."},
 	} {
 		wordsServer(t, c.kind, c.state, `null`)
 		code, out, errOut := runCtl(t, "operation", "show", "op_x")
-		if code != 0 || !strings.Contains(out, "Now  ") || !strings.Contains(out, c.want) || regexp.MustCompile(`(?m)^Next`).MatchString(out) {
+		if code != 0 || !strings.Contains(out, "Now  ") || !strings.Contains(out, c.want) || regexp.MustCompile(`(?m)^Next`).MatchString(out) ||
+			strings.Contains(out, "bronzewardctl ") {
 			t.Errorf("%s %s: exit %d, want %q and no Next row in\n%s\nerr\n%s", c.kind, c.state, code, c.want, out, errOut)
 		}
 		if operationNextStep(c.kind, c.state) != "" {
