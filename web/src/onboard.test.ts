@@ -109,6 +109,7 @@ class Server {
     if (p === "/drafts") return { data: { items: [...this.drafts.values()] } };
     if (p === "/ingestions") return { data: { items: [...this.ingestions.values()].filter((i) => i.machine === query.get("machine")) } };
     const m = /^\/(machines|drafts|ingestions)\/(.+)$/.exec(p!);
+    if (/^\/clusters\/cl_[0-9]+$/.test(p!)) return { data: this.clusters.get(p!.slice("/clusters/".length)) };
     if (m?.[1] === "machines") return { data: this.machines.get(m[2]!) };
     if (m?.[1] === "drafts") return { data: this.drafts.get(m[2]!), etag: `"${this.drafts.get(m[2]!)!.rev}"` };
     if (m?.[1] === "ingestions") {
@@ -301,6 +302,20 @@ describe("the page's send (sender)", () => {
     expect(holding(writes)).toHaveLength(0);
   });
 
+  test("a queued request that would reuse an open write sends nothing once its page is left", async () => {
+    let lost!: () => void;
+    const { writes, calls } = layer(() => new Promise((_r, rej) => (lost = () => rej(new Error("synthetic: the answer was lost")))), lose);
+    let here = true;
+    const a = sender(writes, () => true)(secret("a-document"));
+    const b = sender(writes, () => true)(secret("b-document"));
+    const again = sender(writes, () => here)(secret("b-document"));
+    await new Promise((r) => setTimeout(r, 0));
+    here = false;
+    lost();
+    expect([(await a).kind, (await b).kind, (await again).kind]).toEqual(["unknown", "unknown", "not-done"]);
+    expect(calls).toHaveLength(2);
+  });
+
   test("a write that carries no document is a new write each time, and nothing is sent once the page is left", async () => {
     const { writes, calls } = layer(lose, lose);
     const plain: WriteSpec = { method: "POST", path: "/machines", resource: "/machines", body: {} };
@@ -402,6 +417,19 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
     expect(after.filter((r) => r === "POST /ingestions")).toHaveLength(1);
     expect([...s.ingestions.values()].filter((i) => i.machine === machine)).toHaveLength(1);
     expect(second.lines.find((l) => l.key === "import:n1")?.state).toBe("existing");
+  });
+
+  test("a cluster the server already holds keeps its own name: the file chosen again under another name finds the same draft and imports", async () => {
+    const s = new Server();
+    expect((await run(s, await planOf(s))).ok).toBe(true);
+    const again = await planOf(s);
+    again.name = "another";
+    const { ok, lines } = await run(s, again);
+    expect(ok).toBe(true);
+    expect(lines[0]).toMatchObject({ key: "cluster", label: "Cluster lab", state: "existing" });
+    expect(again.name).toBe("lab");
+    expect(s.drafts.size).toBe(1);
+    expect(s.ingestions.size).toBe(2);
   });
 
   test("an IPv6 member is sent bracketed, for the first key and for its machine", async () => {
