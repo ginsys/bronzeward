@@ -21,11 +21,11 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
         # 2 marks the page before each navigation and reads the mark right after the command returns (wdio.conf.ts).
-        instrument: [0]
+        # unfixed: main's wdio.conf.ts (no wait after a navigation); fixed: the pull request's.
+        variant: [unfixed, fixed]
     env:
       BW_BROWSERS: safari
       MISE_DISABLE_TOOLS: node
-      BW_PROBE_1028: ${{ matrix.instrument }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - id: node
@@ -45,6 +45,11 @@ jobs:
           MISE_EXEC_AUTO_INSTALL: "false"
         run: mise run web
       - run: go build -o bin/webhost ./fixtures/webhost
+      - if: matrix.variant == 'unfixed'
+        run: |
+          git fetch --depth 1 origin 85447baa432b9291a11b3592d250cfb3fb2974e4
+          git show 85447baa432b9291a11b3592d250cfb3fb2974e4:web/e2e/wdio.conf.ts > web/e2e/wdio.conf.ts
+          ! grep -q 'readyState' web/e2e/wdio.conf.ts
       - name: Repeat the two specs
         env:
           MISE_EXEC_AUTO_INSTALL: "false"
@@ -52,25 +57,26 @@ jobs:
         run: |
           cd web
           export BW_WDIO_CACHE=${TMPDIR:-/tmp}
-          ok=0; bad=0; stale=0
+          ok=0; bad=0; stale=0; red=0
           mkdir -p ../probe-out
           for i in $(seq 1 "$RUNS"); do
             tmp=$(bash ../scripts/ci/browser-tmp.sh start browser)
-            if TMPDIR=$tmp BW_WEB_CANARY=BWSYNTH-probe mise exec -- npx wdio run e2e/wdio.conf.ts --spec e2e/signed-out.e2e.ts --spec e2e/styling.e2e.ts > "../probe-out/run-$i.log" 2>&1; then
+            if TMPDIR=$tmp BW_WEB_CANARY=BWSYNTH-probe mise exec -- npx wdio run e2e/wdio.conf.ts --spec e2e/driver-controls.e2e.ts --spec e2e/signed-out.e2e.ts --spec e2e/styling.e2e.ts >"../probe-out/run-$i.log" 2>&1; then
               ok=$((ok+1))
             else
               bad=$((bad+1))
             fi
             n=$(grep -c 'Stale element found' "../probe-out/run-$i.log" || true)
             [ "$n" -eq 0 ] || stale=$((stale+1))
+            if grep -q '✖ returns once the new document is complete' "../probe-out/run-$i.log"; then red=$((red+1)); fi
             rm -rf "$tmp" e2e/out
           done
-          echo "instrument ${{ matrix.instrument }} shard ${{ matrix.shard }}: runs=$RUNS passed=$ok failed=$bad runs_with_stale_element=$stale" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "variant ${{ matrix.variant }} shard ${{ matrix.shard }}: runs=$RUNS passed=$ok failed=$bad runs_with_stale_element=$stale navigation_case_failed=$red" | tee -a "$GITHUB_STEP_SUMMARY"
           grep -h 'probe1028' ../probe-out/run-*.log | sed 's/.*probe1028/probe1028/' > ../probe-out/origin.txt || true
           echo "origin lines: $(wc -l < ../probe-out/origin.txt) old_document_current: $(grep -c 'old=true' ../probe-out/origin.txt || true) not_complete: $(grep -vc 'state=complete' ../probe-out/origin.txt || true)" | tee -a "$GITHUB_STEP_SUMMARY"
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: probe-${{ matrix.instrument }}-${{ matrix.shard }}
+          name: probe-${{ matrix.variant }}-${{ matrix.shard }}
           path: probe-out
           retention-days: 7

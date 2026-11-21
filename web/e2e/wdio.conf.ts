@@ -116,19 +116,6 @@ export const config: WebdriverIO.Config = {
   // every assertion on a text stays as strict as it is in the other four browsers.
   async before(capabilities, _specs, browser) {
     if ((capabilities as WebdriverIO.Capabilities).browserName?.toLowerCase() !== "safari") return;
-    if (process.env["BW_PROBE_1028"] === "2" || process.env["BW_PROBE_1028"] === "3") {
-      // Probe only (ginsys/bronzeward#1028): a mark on the page before the navigation, read right after the command
-      // returns. A mark still there means the command returned while the old document was the current one.
-      await browser.overwriteCommand("url", async function (this: WebdriverIO.Browser, orig: (p: string) => Promise<unknown>, path: string) {
-        await this.execute(() => { (globalThis as unknown as { m1028: number }).m1028 = 1; }).catch(() => undefined);
-        const r = await orig(path);
-        // Variant 3: the fix under test, the command returns once the new document is complete.
-        if (process.env["BW_PROBE_1028"] === "3") await this.waitUntil(() => this.execute(() => document.readyState === "complete"), { timeout: 15_000, timeoutMsg: "the page did not complete" });
-        const s = await this.execute(() => [(globalThis as unknown as { m1028?: number }).m1028 === 1, document.readyState, location.pathname]).catch(() => ["err"]);
-        console.log(`probe1028 old=${String(s[0])} state=${String(s[1])} at=${String(s[2])} to=${path}`);
-        return r;
-      });
-    }
     // An override is not wrapped as the commands are, so it waits for the element itself: an assertion
     // on an element that appears after the call must wait for it, as it does with the driver's own text.
     await browser.overwriteCommand("getText", async function (this: WebdriverIO.Element) {
@@ -159,6 +146,20 @@ export const config: WebdriverIO.Config = {
         }
       }, this as unknown as HTMLElement);
     }, { attachToElement: true });
+    // safaridriver answers "Navigate To" while the new document is still `interactive` (1088 of 1759
+    // navigations on the runner), and a find that follows can fail with "Stale element found when trying to
+    // create the node handle", which an assertion's wait does not retry (ginsys/bronzeward#1028: 14 runs of
+    // 180 without this wait, none with it). The command returns once the document is complete, as the
+    // other four drivers' does; the read is an execute, which creates no node handle.
+    await browser.overwriteCommand("url", async function (this: WebdriverIO.Browser, orig: (path: string, options?: unknown) => Promise<unknown>, path: string, options?: unknown) {
+      const result = await orig(path, options);
+      let state = "";
+      // The message names the state the page was last seen in, so a timeout reads as this cause.
+      await this.waitUntil(async () => (state = await this.execute(() => document.readyState)) === "complete", { timeout: 15_000 }).catch(() => {
+        throw new Error(`navigation to ${path} left readyState "${state}" after 15 s`);
+      });
+      return result;
+    });
     // A key sequence sent as one action loses its spaces and its repeated characters in safaridriver
     // ("machine:\n  nodeLabels:" arrives as "machine:\n nodeLabels:"), where the same keys one at a time
     // arrive whole. safari-keys.ts decides the calls: text goes one character at a time, as an array of
