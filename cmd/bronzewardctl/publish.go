@@ -147,13 +147,14 @@ func (e *env) nextSteps(c *client.Client, release string) ([]string, error) {
 	if e.output == "table" {
 		e.holdBody(titlePath("releases", rel.Id), &rel)
 	}
+	// The moves are counted before the title's reads, so an epoch that moves during them is seen too.
+	first, moves := r.Header.Get("Bronzeward-Epoch"), c.EpochMoves()
 	e.titleRef(c, "release", rel.Id)
 	machines := fmt.Sprintf("%d machines", len(rel.Machines))
 	if len(rel.Machines) == 1 {
 		machines = "1 machine"
 	}
 	lines, replaced := []string{""}, 0
-	first, moves := r.Header.Get("Bronzeward-Epoch"), c.EpochMoves()
 	for _, m := range rel.Machines {
 		r, err := c.Get("/machines/" + url.PathEscape(m.Machine))
 		var x apitypes.MachineBody

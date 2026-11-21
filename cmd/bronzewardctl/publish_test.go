@@ -34,6 +34,9 @@ type publishFake struct {
 	// goneEpoch, when not empty, makes mch_b answer 404 under that epoch, as the release's last machine.
 	goneEpoch string
 	goneMoved bool
+	// draftEpoch, when not empty, is the epoch the draft answers carry (the release's title reads it), and
+	// GET /server then answers the first epoch again: the refresh sets the epoch back.
+	draftEpoch string
 	// goneBack makes GET /server answer the first epoch again after that 404: the refresh sets the epoch back.
 	goneBack bool
 	// stall, when set, makes the event stream stall (see stallStream) under the epoch stallEpoch.
@@ -52,7 +55,7 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	f.mu.Lock()
 	state, first, bare, pagesRefused, machineEpoch, goneEpoch, goneMoved := f.state, f.first, f.bare, f.pagesRefused, f.machineEpoch, f.goneEpoch, f.goneMoved
-	goneBack, titled := f.goneBack, f.titled
+	goneBack, titled, draftEpoch := f.goneBack, f.titled, f.draftEpoch
 	desiredA, desiredB := `"rel_BWSYNTH"`, `"rel_BWSYNTH"`
 	if f.replaced {
 		desiredA, desiredB = `"rel_BWSYNTH-new"`, `null`
@@ -73,6 +76,11 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case draftEpoch != "" && r.Method == http.MethodGet && path == "/drafts/drf_BWSYNTH":
+		w.Header().Set("Bronzeward-Epoch", draftEpoch)
+		fmt.Fprint(w, `{"id":"drf_BWSYNTH","title":"BWSYNTH","state":"open","revision":1,"entries":[]}`)
+	case draftEpoch != "" && path == "/server":
+		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
 	case r.Method == http.MethodPost && path == "/drafts/drf_BWSYNTH/publications":
 		if r.Header.Get("If-Match") != f.etag() {
 			f.refuse(w)
@@ -306,5 +314,28 @@ func TestPublicationNamesTheReleaseByItsTitle(t *testing.T) {
 	var o, e bytes.Buffer
 	if code := run([]string{"release", "review", "rel_BWSYNTH", "mch_a", "-o", "json"}, &o, &e); code != 0 || strings.Contains(o.String(), "BWSYNTH, published") {
 		t.Errorf("-o json: exit %d, stdout %q, stderr %q", code, o.String(), e.String())
+	}
+}
+
+// The reads of the release's title are part of the machines' snapshot: an epoch that moves during
+// them, and that the refresh sets back, leaves no next step (client contracts section 8.5).
+func TestPublicationEpochMovesDuringTheReleaseTitle(t *testing.T) {
+	f := &publishFake{draftFake: &draftFake{rev: 1, state: "open"}, state: "succeeded", titled: true}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	automationContext(t, srv.URL)
+	var o, e bytes.Buffer
+	if code := run([]string{"draft", "show", "drf_BWSYNTH"}, &o, &e); code != 0 {
+		t.Fatalf("draft show: exit %d, stderr %q", code, e.String())
+	}
+	f.mu.Lock()
+	f.draftEpoch = "ep_BWSYNTH-2"
+	f.mu.Unlock()
+	o.Reset()
+	e.Reset()
+	code := run([]string{"publish", "drf_BWSYNTH"}, &o, &e)
+	if code != 0 || !strings.Contains(o.String(), "The epoch changed and changed back from 'ep_BWSYNTH-1' while the machines were read, so no next step is shown.") ||
+		strings.Contains(o.String(), "plan an") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want the change named and no next step", code, o.String(), e.String())
 	}
 }
