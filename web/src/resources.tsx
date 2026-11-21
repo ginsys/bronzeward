@@ -439,6 +439,8 @@ export function PlanItem({ id }: { id: string }) {
   // machine from that body and ask the titles' store for nothing (A8 rule 2).
   // `null` is a read that answered with no body: the title then says "the machine" and survives (A8 rule 1).
   const [machine, setMachine] = useState<S["MachineBody"] | null>();
+  // Stable: the approved plan's reads restart whenever this changes, and every body it reports is a new object.
+  const onMachine = useCallback((m: S["MachineBody"] | null) => setMachine((was) => m ?? was ?? null), []);
   const held = (p: S["PlanBody"]): Held | undefined => (p.state === "approved" ? { body: machine === null ? null : machine?.id === p.machine ? machine : undefined } : undefined);
   return (
     <ItemOf<S["PlanBody"]> path={`/plans/${encodeURIComponent(id)}`} what="the plan" n={n} onSettled={settled} title={(p) => (p === undefined ? `Plan ${short(id)}` : <PlanHeading id={id} p={p} {...(held(p) !== undefined && { machine: held(p)! })} />)}>
@@ -447,7 +449,7 @@ export function PlanItem({ id }: { id: string }) {
         return (
           <>
             {proposed && p.state === "proposed" && <Status testid="plan-proposed">{PROPOSED}</Status>}
-            <PlanState p={p} reread={reread} answers={answers} onMachine={(m) => setMachine((was) => m ?? was ?? null)} />
+            <PlanState p={p} reread={reread} answers={answers} onMachine={onMachine} />
             <Fields rows={[
               ["State", `${p.state}; expires ${when(p.expiresAt)}`],
               ["Target", <>machine <MachineById id={p.machine} {...(held(p) !== undefined && { held: held(p)! })} />, cluster <Id id={p.cluster} />, route {p.route}</>],
