@@ -1088,8 +1088,10 @@ unmeasured.
    hostname: an explicit FQDN counts as its first label, since Talos splits it
    at the first dot into hostname and domain (`hostname_spec.go`,
    `ParseFQDN`) and registers the node under the hostname unless it is
-   told to use the FQDN. So `node-a.example.org` clashes with a filled
-   `node-a`. Two nodes would report one
+   told to use the FQDN, after lower-casing it and turning underscores into
+   hyphens (`nodename.go`, `FromHostname`). The compared value is that node
+   name: `node-a.example.org` and `NODE_A.example.org` both clash with a
+   filled `node-a`. Two nodes would report one
    hostname and, by default, one Kubernetes node name, and the second kubelet
    would take over the first's Node object. Publication refuses it, before any
    release is committed, `422 validation-failed` with the rule `hostname`,
