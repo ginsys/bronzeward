@@ -99,8 +99,8 @@ func (e *env) operationTitle(c *client.Client, o *apitypes.OperationBody) string
 		}
 	case "ingest":
 		if s != nil && s.Ingestion != nil {
-			if ing := titleBody[apitypes.IngestionBody](e, c, titlePath("ingestions", *s.Ingestion)); ing != nil && ing.Machine != nil {
-				return "Import of " + e.machineTitle(c, *ing.Machine)
+			if ing := titleBody[apitypes.IngestionBody](e, c, titlePath("ingestions", *s.Ingestion)); ing != nil {
+				return e.ingestionTitle(c, ing)
 			}
 		}
 		return "Import"
@@ -112,6 +112,14 @@ func (e *env) operationTitle(c *client.Client, o *apitypes.OperationBody) string
 		}
 	}
 	return ""
+}
+
+// ingestionTitle is "Import of <machine>", "Import" when the ingestion names no machine.
+func (e *env) ingestionTitle(c *client.Client, ing *apitypes.IngestionBody) string {
+	if ing.Machine == nil {
+		return "Import"
+	}
+	return "Import of " + e.machineTitle(c, *ing.Machine)
 }
 
 // titleSet keeps the title of the object kind/id for the rows of the table, when there is one.
@@ -204,10 +212,7 @@ func (e *env) titleRef(c *client.Client, kind, id string) {
 		}
 	case "ingestion":
 		if ing := titleBody[apitypes.IngestionBody](e, c, titlePath("ingestions", id)); ing != nil {
-			t = "Import"
-			if ing.Machine != nil {
-				t += " of " + e.machineTitle(c, *ing.Machine)
-			}
+			t = e.ingestionTitle(c, ing)
 		}
 	}
 	e.titleSet(kind, id, t)
