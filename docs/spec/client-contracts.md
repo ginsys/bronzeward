@@ -775,7 +775,7 @@ contract's, and this specification does not close it.
    every write it sends has a `principal` to compare. Every write, its first send and each
    repeat, carries the reference epoch in `Bronzeward-Expected-Epoch`: the last epoch the client saw before the
    first send, or the epoch the caller names for the write where one that acts on its reads over time does (the
-   handover button's press names the epoch it began under, [A11](#14-proposed-api-gap-issues-and-downstream-refinement) item 4). An empty or repeated header is `400 invalid-request`, never taken as absent
+   handover button's press names the epoch it began under, and the Onboard cluster page names the epoch its plan's first press began under for every press of that plan, [A11](#14-proposed-api-gap-issues-and-downstream-refinement) item 4). An empty or repeated header is `400 invalid-request`, never taken as absent
    (`internal/api/api.go:426-433`). The header needs API revision 2
    ([persistence and API §9.1](persistence-api.md#91-conventions)): an earlier server ignores it
    without error, so a client that relies on it declares revision 2 as its minimum
@@ -2438,6 +2438,11 @@ Limits:
   discovery reads the nodes. The page cuts the file to one context in memory, as `OneContext` does (a
   golden file read by a Go test and by the page's test keeps the two cuts equal), sends that cut to the
   discovery and to the first key only, and drops its copy when the first key's write is released.
+  It sends every write of a plan, in every press of it, under the epoch the plan's first press began under
+  ([§8.4](#84-idempotency-and-ambiguous-responses) item 3): once the installation's epoch has changed, the
+  next write is refused by the server (or not sent, where the shell has already invalidated the page's reads) and set
+  aside in the page's words, no later write goes out, and the page names the steps not sent and offers the file
+  again, which finds what is recorded and begins under the new epoch, never a second run of the same plan.
   The browser case ONBOARD-01 runs the flow against two stand-in nodes, so what a real node answers
   to the deployment's address policy
   ([ginsys/bronzeward#1009](https://github.com/ginsys/bronzeward/issues/1009)) is not proven by it.

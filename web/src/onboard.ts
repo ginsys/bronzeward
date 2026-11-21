@@ -14,7 +14,7 @@ import { type Listed, readPages } from "./list.tsx";
 import { MACHINE_NAME } from "./machine-name.ts";
 import type { Problem, ReadResult } from "./request.ts";
 import { CHECK_STATE, problemSentences } from "./states.tsx";
-import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
+import { EPOCH_CHANGED_ASIDE, type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 export type Discovery = components["schemas"]["DiscoveryBody"];
 type Draft = components["schemas"]["DraftBody"];
@@ -51,6 +51,11 @@ export interface Plan {
   draft?: string;
   imports: Record<string, string>;
   lines: Line[];
+  // The epoch the plan's first press began under. Every write of every press of this plan is sent under it: a
+  // press that resumes from the ids the plan holds (read under that epoch) is refused once the epoch has moved.
+  epoch?: string | undefined;
+  // The steps after the one that stopped the last press, by name.
+  unsent?: string[] | undefined;
 }
 
 const MAX_FILE = 512 * 1024;
@@ -256,7 +261,51 @@ export async function onboardCluster(env: Env, p: Plan, report: (lines: Line[]) 
     const r = await readPages<T>(env, path, query, { items: [], next: undefined, restarted: false }, true);
     return r.kind === "ok" ? r.data.items : (`the server's answer to a read of ${path} did not hold the list: ${r.kind}` as const);
   };
-  return (await cluster(env, p, set, fail)) && (await firstKey(env, p, set, fail)) && (await machines(env, p, set, fail)) && (await draft(env, p, set, fail, list)) && (await imports(env, p, set, fail, list));
+  const steps: [string, () => Promise<boolean>][] = [
+    ["Cluster", () => cluster(env, p, set, fail)],
+    ["First key", () => firstKey(env, p, set, fail)],
+    ["Machines", () => machines(env, p, set, fail)],
+    ["Draft", () => draft(env, p, set, fail, list)],
+    ["Imports", () => imports(env, p, set, fail, list)],
+  ];
+  p.unsent = undefined;
+  for (const [i, [, go]] of steps.entries()) {
+    if (await go()) continue;
+    p.unsent = steps.slice(i + 1).map(([name]) => name);
+    return false;
+  }
+  return true;
+}
+
+// The page's sentence after a stop. `moved`: the epoch changed after the plan's first press began, so the plan
+// is never run again, only chosen again from the file (which finds what is recorded and begins under the new
+// epoch); the steps not sent are named. `choose`: another stop that offers the file again (the first key's
+// write is released).
+export function stoppedSentence(label: string, moved: boolean, choose: boolean, unsent: readonly string[] | undefined): string {
+  if (moved) {
+    const rest = unsent !== undefined && unsent.length > 0 ? ` (not sent: ${unsent.join(", ")})` : "";
+    return `Stopped at ${label}. The installation's epoch changed after this onboarding began, so nothing more was sent under it${rest}. Choosing the file again finds what is recorded and finishes the rest under the new epoch.`;
+  }
+  return `Stopped at ${label}. Running it again finds what is recorded and finishes the rest${choose ? ": choose the file again" : ""}.`;
+}
+
+// One press of a plan: `onboardCluster` with every write sent under the plan's epoch, set by its first press
+// from `press.epoch`. A press stops before a write when `press.valid()` says the shell has invalidated the
+// reads the press began with (an epoch change does, §8.5), and a write the server refuses for the epoch
+// (412) is set aside by the write layer; either way no later write of the press goes out, and `epochChanged`
+// says the plan cannot be run again, since the ids it holds were read under the old epoch.
+export async function pressOnboarding(env: Env, p: Plan, press: { epoch: string | undefined; valid: () => boolean }, report: (lines: Line[]) => void): Promise<{ ok: boolean; epochChanged: boolean }> {
+  p.epoch ??= press.epoch;
+  let epochChanged = false;
+  const send: Env["send"] = async (spec) => {
+    const o: Outcome = press.valid()
+      ? await env.send(p.epoch === undefined ? spec : { ...spec, epoch: p.epoch })
+      : { kind: "set-aside", why: EPOCH_CHANGED_ASIDE, ambiguous: false, problem: null };
+    if (o.kind === "set-aside" && o.why === EPOCH_CHANGED_ASIDE) epochChanged = true;
+    return o;
+  };
+  const ok = await onboardCluster({ ...env, send }, p, report);
+  return { ok, epochChanged };
 }
 
 type Set = (l: Line) => void;
