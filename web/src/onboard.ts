@@ -132,7 +132,8 @@ export function isAddress(endpoint: string): boolean {
   if (endpoint.startsWith("[")) {
     const end = endpoint.indexOf("]");
     const inner = endpoint.slice(1, end < 0 ? undefined : end);
-    return V6_TEXT.test(inner);
+    // An IPv6 address has a colon; four dotted numbers in brackets are the server's to refuse.
+    return V6_TEXT.test(inner) && (inner.includes(":") || IPV4.test(inner));
   }
   const colons = endpoint.split(":").length - 1;
   if (colons > 1) return V6_TEXT.test(endpoint);

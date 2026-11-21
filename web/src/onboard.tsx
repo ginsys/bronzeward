@@ -77,6 +77,8 @@ export function OnboardCluster() {
     if (file.size > MAX_FILE) return setNote("The file is larger than 512 KiB, the most a first key may be.");
     setBusy(true);
     setNote(undefined);
+    // A preview still being read must not show its note under this read's answer.
+    latest.current++;
     const text = await file.text().catch(() => undefined);
     const r = text === undefined ? ({ ok: false, why: "The file could not be read." } as const) : await discoverCluster(env, text, { context: String(d.get("context") ?? ""), endpoint: String(d.get("endpoint") ?? "") });
     if (!alive.current) return;

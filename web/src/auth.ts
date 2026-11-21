@@ -135,6 +135,11 @@ export async function beginSignIn(config: ClientConfig, provider: Provider, retu
 // callback and every renewal redirect after it go on without `profile`.
 export const profileRefused = (f: Failure) => f.kind === "refused" && f.code === "invalid_scope";
 export const withoutProfile = (p: Provider): Provider => ({ ...p, noProfile: true });
+// Whether the sign-in this tab sent last was made without `profile`: read before the callback, which
+// deletes the entry, so the answer holds on a failed callback too and the page goes on without the scope.
+export function pendingNoProfile(storage: Storage): boolean {
+  return readPending(storage.getItem(PENDING_KEY))?.noProfile === true;
+}
 
 export interface CallbackDeps {
   storage: Storage;
@@ -144,7 +149,7 @@ export interface CallbackDeps {
 }
 
 // The callback: the pending entry is deleted first, whatever the answer (§9.3 item 1).
-export async function completeSignIn(config: ClientConfig, provider: Provider, search: string, deps: CallbackDeps): Promise<{ kind: "ok"; tokens: Tokens; returnTo: string; noProfile: boolean } | Failure> {
+export async function completeSignIn(config: ClientConfig, provider: Provider, search: string, deps: CallbackDeps): Promise<{ kind: "ok"; tokens: Tokens; returnTo: string } | Failure> {
   const raw = deps.storage.getItem(PENDING_KEY);
   deps.storage.removeItem(PENDING_KEY);
   const pending = readPending(raw);
@@ -177,7 +182,7 @@ export async function completeSignIn(config: ClientConfig, provider: Provider, s
   const now = (deps.now ?? Date.now)();
   // Item 9: the current time is before its expiry, which it must carry.
   if (typeof id["exp"] !== "number" || id["exp"] * 1000 <= now) return invalid("the ID token has expired or carries no expiry");
-  return { kind: "ok", tokens: toTokens(answer.body, { iss: provider.issuer, sub: id["sub"] }, now), returnTo: pending.returnTo, noProfile: pending.noProfile === true };
+  return { kind: "ok", tokens: toTokens(answer.body, { iss: provider.issuer, sub: id["sub"] }, now), returnTo: pending.returnTo };
 }
 
 export interface SessionOptions {

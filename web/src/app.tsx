@@ -3,7 +3,7 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, profileRefused, Session, SIGNED_OUT_PATH, type Tokens, withoutProfile } from "./auth.ts";
+import { beginSignIn, CALLBACK_PATH, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, pendingNoProfile, profileRefused, Session, SIGNED_OUT_PATH, type Tokens, withoutProfile } from "./auth.ts";
 import { type ClientConfig, loadClientConfig } from "./config.ts";
 import { PageNotices, useUnloadGuard, WritesProvider } from "./forms.tsx";
 import { navigate, PageState, renewals } from "./page.ts";
@@ -209,12 +209,14 @@ export function App() {
         if (tokens === undefined) return void signIn(config.config, found.provider, still);
         return signedIn(config.config, found.provider, tokens);
       }
-      const done = await completeSignIn(config.config, found.provider, callback, { storage: sessionStorage, origin: location.origin });
+      // A sign-in made without `profile` stays without it, on success and on a failed callback alike.
+      const provider = pendingNoProfile(sessionStorage) ? withoutProfile(found.provider) : found.provider;
+      const done = await completeSignIn(config.config, provider, callback, { storage: sessionStorage, origin: location.origin });
       if (!still()) return;
-      if (done.kind !== "ok") return offer(failure(done), config.config, profileRefused(done) ? withoutProfile(found.provider) : found.provider);
+      if (done.kind !== "ok") return offer(failure(done), config.config, profileRefused(done) ? withoutProfile(provider) : provider);
       history.replaceState(null, "", done.returnTo);
       renewer.post(done.tokens);
-      await signedIn(config.config, done.noProfile ? withoutProfile(found.provider) : found.provider, done.tokens);
+      await signedIn(config.config, provider, done.tokens);
     })();
 
     return () => {
