@@ -1613,7 +1613,7 @@ the client's rule wins wherever the two meet.
    no role, and every fill is an opaque colour so the contrast measure can read it. The filters and
    actions above a list sit in one wrapping row (the `toolbar` class), each action keeping its refusal
    note beside it, with the markup order unchanged. The web client's words for what a person meets
-   ([#1055](https://github.com/ginsys/bronzeward/issues/1055); the specification states the words and sentences once, for both clients; the command line still prints the old state words and sentences until [#1071](https://github.com/ginsys/bronzeward/issues/1071) merges):
+   ([#1055](https://github.com/ginsys/bronzeward/issues/1055); the specification states the words and sentences once, for both clients, and `bronzewardctl` prints them too, [#1071](https://github.com/ginsys/bronzeward/issues/1071)):
    "Drafts and releases" is the page that lists both, and `/drafts` and `/releases` open it; "Fragments and profiles"
    is the page the word "sources" named, and a release's count of what it is built from is headed "Built from"; the
    buttons read "Enter a cluster by hand" (it records a cluster Bronzeward did not create) and "Add machine"; a

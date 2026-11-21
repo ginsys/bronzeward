@@ -270,10 +270,6 @@ timeline:
 | observed null | "No configuration read recorded." No time is shown. |
 | frozen | adds "Frozen: no new commitment or attempt until an approver unfreezes; an attempt already recorded is not stopped, and an adoption can still be recorded." |
 
-**Gap:** the sentences above (and the `not-handed-over` line of the `step` table) are the contract for both clients
-and the web client prints them. `bronzewardctl` still prints the old words, "Drifted since", "Pending convergence:",
-"Not handed over:" and "Matches applied", until #1071 merges; remove this paragraph then.
-
 A matching release ID never by itself means healthy, fresh or converged: no health check is
 bound in the PoC (`health: none-bound`, `internal/api/observe.go:86`), and every sentence says
 "Health: not checked". A release not applied yet (the `pendingConvergence` field) and drift are different
