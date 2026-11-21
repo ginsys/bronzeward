@@ -3110,7 +3110,7 @@ components:
       type: object
       required: [name]
       properties:
-        name: {type: string, pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'}
+        name: {type: string, maxLength: 253, pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$', description: 'A hostname (persistence and API §3.5). The server also refuses a name with a dot whose last label is all digits, so that an address is no name.'}
       additionalProperties: false
     EntryBody:
       type: object
@@ -3475,7 +3475,7 @@ components:
         smbiosUuid: {type: [string, 'null'], description: A UUID in its 8-4-4-4-12 hexadecimal form.}
         talosNodeId: {type: [string, 'null'], description: The node ID `talosctl get identity` prints.}
         serial: {type: [string, 'null']}
-        name: {type: [string, 'null'], pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$', description: 'An optional name, unique within the cluster (persistence and API §3.5).'}
+        name: {type: [string, 'null'], maxLength: 253, pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$', description: 'An optional name, a hostname, unique within the cluster (persistence and API §3.5). The server also refuses a name with a dot whose last label is all digits, so that an address is no name.'}
         platform: {type: string, enum: [metal, container, cloud]}
         talosEndpoint: {type: string}
       additionalProperties: false
