@@ -24,6 +24,14 @@ export const NO_TARGET = "Not read: the address names no release and machine. Op
 export const planPath = (release: string, machine: string, operation: Operation) =>
   `/plans/new?${new URLSearchParams({ release, machine, operation })}`;
 
+// The plan this machine's state offers for this release (B18): a handover for a machine with no Applied, an
+// apply-config plan while the configuration differs. None where the text says nothing is left to send.
+export function planFor(release: string, m: Pick<components["schemas"]["MachineBody"], "desired" | "applied" | "pendingConvergence">): "adopt" | "apply-config" | undefined {
+  if (m.desired !== release) return undefined;
+  if (m.applied === null) return "adopt";
+  return m.pendingConvergence ? "apply-config" : undefined;
+}
+
 // The plans this browser just created: the plan page shows PROPOSED once for each, as the answer to the
 // creation it came from. A reload shows the plan's own state line alone.
 const fresh = new Set<string>();

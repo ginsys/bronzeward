@@ -3,7 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { type Reads, ReadsProvider, short } from "./list.tsx";
-import { EMPTY_NOTE, nextStep, NO_PROVENANCE, PROVENANCE_LIMIT, ReviewBody, ReviewItem, parts, reviewIds, reviewPath, tokenLabel } from "./review.tsx";
+import type { Load } from "./list.tsx";
+import type { Position } from "./nextstep.tsx";
+import { EMPTY_NOTE, NextStepSection, NO_PROVENANCE, positionOwns, PROVENANCE_LIMIT, releaseNote, ReviewBody, ReviewItem, parts, reviewIds, reviewPath, tokenLabel } from "./review.tsx";
 import { WITHHELD } from "./states.tsx";
 
 type Review = components["schemas"]["ReviewBody"];
@@ -112,20 +114,20 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
   test("the next step comes from the machine's Desired and Applied, and sends nothing", () => {
     const rel = "rel_BWSYNTH-h7rt2bd";
     const pc = false;
-    expect(nextStep(rel, { desired: rel, applied: null, pendingConvergence: true })).toContain("Hand it over first (an adopt plan)");
-    expect(nextStep(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward", importBase: null }, pendingConvergence: true })).toContain("An apply-config plan sends this release to it");
-    const unchanged = nextStep(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward", importBase: null }, pendingConvergence: pc });
+    expect(releaseNote(rel, { desired: rel, applied: null, pendingConvergence: true })).toContain("Hand it over first (an adopt plan)");
+    expect(releaseNote(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward", importBase: null }, pendingConvergence: true })).toContain("An apply-config plan sends this release to it");
+    const unchanged = releaseNote(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward", importBase: null }, pendingConvergence: pc });
     expect(unchanged).toContain("carries this machine's Applied configuration");
     expect(unchanged).toContain("Nothing is left to send");
     expect(unchanged).not.toContain("apply-config");
-    expect(nextStep(rel, { desired: rel, applied: { release: rel, source: "bronzeward", importBase: null }, pendingConvergence: pc })).toContain("Nothing is left to send");
-    expect(nextStep(rel, { desired: "rel_BWSYNTH-other", applied: null, pendingConvergence: pc })).toContain(`Desired is ${short("rel_BWSYNTH-other")}`);
-    expect(nextStep(rel, { desired: null, applied: null, pendingConvergence: pc })).toContain("needs no step");
+    expect(releaseNote(rel, { desired: rel, applied: { release: rel, source: "bronzeward", importBase: null }, pendingConvergence: pc })).toContain("Nothing is left to send");
+    expect(releaseNote(rel, { desired: "rel_BWSYNTH-other", applied: null, pendingConvergence: pc })).toContain(`Desired is ${short("rel_BWSYNTH-other")}`);
+    expect(releaseNote(rel, { desired: null, applied: null, pendingConvergence: pc })).toContain("needs no step");
   });
 
   test("after an adoption, Desired equal to Applied is not 'nothing left to send' while the machine has a release not applied yet", () => {
     const rel = "rel_BWSYNTH-h7rt2bd";
-    const text = nextStep(rel, { desired: rel, applied: { release: rel, source: "adoption", importBase: null }, pendingConvergence: true });
+    const text = releaseNote(rel, { desired: rel, applied: { release: rel, source: "adoption", importBase: null }, pendingConvergence: true });
     expect(text).toContain("release not applied yet");
     expect(text).toContain("An apply-config plan sends this release to it");
     expect(text).not.toContain("Nothing is left to send");
@@ -154,5 +156,88 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
     expect(reviewIds("/releases/rel_a/machines/%E0%A4%A")).toBeUndefined();
     expect(reviewIds("/releases/rel_a/machines/mch_b/extra")).toBeUndefined();
     expect(reviewIds("/releases/rel_a")).toBeUndefined();
+  });
+});
+
+// The page's next step, drawn from the machine's position (ginsys/bronzeward#1077, operator experience §2.3).
+describe("the next step of the release review page", () => {
+  const rel = "rel_BWSYNTH-h7rt2bd";
+  const pos = (step: string, over: Record<string, unknown> = {}, machine: Record<string, unknown> = {}): Load<Position> => ({
+    kind: "ok",
+    data: { machine: { id: "mch_b", cluster: "cl_a", name: null, desired: rel, applied: { release: "rel_BWSYNTH-old" }, pendingConvergence: true, frozen: false, scopeState: "normal", ...machine }, ingestion: null, draft: null, plan: null, operation: null, rolloutHeldBy: null, step, ...over } as unknown as Position,
+  });
+  const failing: Reads = { ...reads, failure: () => "The read failed." };
+  const page = (p: Load<Position>, r: Reads = failing) => renderToStaticMarkup(h(ReadsProvider, { value: r }, h(NextStepSection, { release: rel, machine: "mch_b", pos: p })));
+  const op = { id: "op_1", state: "sending" };
+
+  test("an operation open on the Desired release shows the position's words and its link, no plan button and no word about what was sent", () => {
+    const out = page(pos("operation-in-flight", { operation: op }));
+    expect(out).toContain("An operation is changing this machine (sending)");
+    expect(out).toContain('href="/operations/op_1"');
+    expect(out).not.toContain("Plan apply");
+    expect(out).not.toMatch(/nothing has been sent/i);
+    expect(out).not.toContain("An apply-config plan sends this release");
+  });
+
+  test("a plan awaiting approval or dispatch shows its link and no second plan button", () => {
+    for (const step of ["awaiting-approval", "awaiting-dispatch"]) {
+      const out = page(pos(step, { plan: { id: "pln_1", state: "approved", operation: "apply-config", release: rel, approvalCurrent: true } }));
+      expect(out).toContain('href="/plans/pln_1"');
+      expect(out).not.toContain("Plan apply");
+      expect(out).not.toContain("Plan adopt");
+    }
+    expect(page(pos("operation-unresolved", { operation: op }))).not.toContain("Plan apply");
+  });
+
+  test("an open step on a machine whose Desired is another release leaves this page's sentence and button alone", () => {
+    const other = pos("operation-in-flight", { operation: op }, { desired: "rel_BWSYNTH-other" });
+    const out = page(other);
+    expect(out).toContain("not the Desired release of this machine");
+    expect(out).not.toContain("An operation is changing");
+    expect(out).not.toContain("Plan apply");
+    if (other.kind === "ok") expect(positionOwns(other.data, rel)).toBe(false);
+  });
+
+  test("a machine with nothing open keeps the release sentence and the plan button", () => {
+    for (const step of ["needs-plan", "no-step"]) {
+      const out = page(pos(step));
+      expect(out).toContain("An apply-config plan sends this release to it.");
+      expect(out).toContain("Plan apply");
+      expect(out).not.toMatch(/nothing has been sent yet/i);
+      expect(out).not.toContain("An operation is changing");
+    }
+  });
+
+  test("the page never draws both the position's line and the release sentence", () => {
+    for (const step of ["operation-in-flight", "operation-unresolved", "awaiting-approval", "awaiting-dispatch", "needs-plan", "no-step", "drift-open", "not-handed-over"]) {
+      const out = page(pos(step, { operation: op, plan: { id: "pln_1", state: "approved", operation: "apply-config", release: rel, approvalCurrent: true } }));
+      expect(out.match(/data-testid="next-step"/g)?.length ?? 0, step).toBeLessThanOrEqual(1);
+    }
+  });
+
+  test("a failed position read shows the failure and a way to read again, and no sentence, line or plan button", () => {
+    for (const failed of [{ kind: "unavailable", status: 503, problem: null }, { kind: "transport" }] as Load<Position>[]) {
+      const out = page(failed);
+      expect(out).toContain("The read failed.");
+      expect(out).toContain(">Read again</button>");
+      expect(out).not.toContain('data-testid="next-step"');
+      expect(out).not.toContain("Plan apply");
+      expect(out).not.toContain("Plan adopt");
+      expect(out).not.toContain("An apply-config plan sends this release");
+    }
+  });
+
+  test("after a successful read again the sentence and the button return", () => {
+    const out = page(pos("needs-plan"));
+    expect(out).toContain("An apply-config plan sends this release to it.");
+    expect(out).toContain("Plan apply");
+    expect(out).not.toContain("Read again");
+  });
+
+  test("a read still loading shows no sentence and no button", () => {
+    const out = page({ kind: "loading" });
+    expect(out).toContain("Loading");
+    expect(out).not.toContain("Read again");
+    expect(out).not.toContain("Plan apply");
   });
 });
