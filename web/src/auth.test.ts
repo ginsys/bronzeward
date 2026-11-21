@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test, vi } from "vitest";
-import { beginSignIn, claims, completeSignIn, discover, type Failure, localReading, PENDING_KEY, type Provider, pendingNoProfile, profileRefused, REFRESH_WAIT_MS, renewDelay, returnPath, Session, SIGN_OUT_WAIT_MS, SIGNED_OUT_PATH, type Tokens, withoutProfile } from "./auth.ts";
+import { beginSignIn, claims, completeSignIn, discover, type Failure, localReading, PENDING_KEY, pendingNoProfile, type Provider, profileRefused, providerAfter, providerForCallback, REFRESH_WAIT_MS, renewDelay, returnPath, Session, SIGN_OUT_WAIT_MS, SIGNED_OUT_PATH, type Tokens, withoutProfile } from "./auth.ts";
 import type { ClientConfig } from "./config.ts";
 
 const ORIGIN = "http://localhost:16000";
@@ -193,6 +193,14 @@ describe("§9.3 item 1 callback", () => {
     expect(again.searchParams.get("scope")).toBe("openid offline_access urn:example:aud");
     const next = JSON.parse(second.getItem(PENDING_KEY)!) as Record<string, string>;
     expect(next["noProfile"]).toBe(true);
+    // The app's chain: the refused callback offers the provider without profile, its sign-in's callback
+    // (and a failed one) uses it, and the renewal redirect made with that provider stays without it.
+    expect(providerAfter(listed, res as Failure).noProfile).toBe(true);
+    expect(providerAfter(listed, { kind: "refused", reason: "x (access_denied)", code: "access_denied" }).noProfile).toBeUndefined();
+    expect(providerForCallback(listed, second).noProfile).toBe(true);
+    const renewal = new URL((await beginSignIn(config, providerForCallback(listed, second), "/", memory(), ORIGIN))!);
+    expect(renewal.searchParams.get("scope")).toBe("openid offline_access urn:example:aud");
+    expect(providerForCallback(listed, memory()).noProfile).toBeUndefined();
     // Read before the callback, which deletes the entry: it holds on a callback that fails as well.
     expect(pendingNoProfile(second)).toBe(true);
     const failed = await completeSignIn(config, listed, `?code=c1&state=${next["state"]}`, { storage: second, origin: ORIGIN, fetch: (() => Promise.reject(new TypeError("offline"))) as unknown as typeof fetch });

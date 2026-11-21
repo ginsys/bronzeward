@@ -77,18 +77,15 @@ export function OnboardCluster() {
     if (file.size > MAX_FILE) return setNote("The file is larger than 512 KiB, the most a first key may be.");
     setBusy(true);
     setNote(undefined);
-    // A preview still being read must not show its note under this read's answer.
-    latest.current++;
+    // The read's own answer says what is wrong; a note for the previous text, or a preview still being read,
+    // must not stand beside it.
+    unsay();
     const text = await file.text().catch(() => undefined);
     const r = text === undefined ? ({ ok: false, why: "The file could not be read." } as const) : await discoverCluster(env, text, { context: String(d.get("context") ?? ""), endpoint: String(d.get("endpoint") ?? "") });
     if (!alive.current) return;
     setBusy(false);
     // A discovery only reads, so this lead is true; its reasons are whole sentences with none of their own.
-    if (!r.ok) {
-      // A refused name is said once, in the note, not again under the field.
-      if (r.why === said) unsay();
-      return setNote(`Nothing was recorded. ${r.why}`);
-    }
+    if (!r.ok) return setNote(`Nothing was recorded. ${r.why}`);
     unsay();
     plan.current = r.plan;
     setHeld(r.plan.document !== undefined);
