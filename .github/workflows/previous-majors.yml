@@ -9,8 +9,8 @@ name: Previous majors
 # on merge_group. It runs once a day on main, on request, and on a pull request that changes one of
 # the files below, so that such a change proves itself. A failed run on main opens one issue (or
 # comments on the open one) through scripts/ci/report-browser-run.sh. A pin that falls behind the
-# browsers' releases keeps passing against an older major: until the pins are updated by a tool,
-# conformance/README.md says how to move them by hand.
+# browsers' releases keeps passing against an older major: previous-major-pins.yml checks them every
+# week and opens an issue, and conformance/README.md says how to apply the new pins.
 
 on:
   pull_request:
