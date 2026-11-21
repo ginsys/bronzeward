@@ -448,14 +448,14 @@ returns a different principal is shown as a new sign-in, never silently continue
 ```text
 $ bronzewardctl machine list --cluster cl_9fd…m3ka
 MACHINE         ENDPOINT          DESIRED        APPLIED (SOURCE)          OBSERVED             STATE
-mch_k2p…7xqa    10.5.0.2:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  =applied, 2m ago     matches applied
-mch_tqhc…35uq   10.5.0.3:50000    rel_fgqv…j6m   rel_p4nx…8wd (adoption)   =applied, 1m ago     pending convergence
-mch_w4ze…n3fa   10.5.0.4:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  no match, 5m ago     drifted, frozen
+mch_k2p…7xqa    10.5.0.2:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  =applied, 2m ago     last read matched what was applied
+mch_tqhc…35uq   10.5.0.3:50000    rel_fgqv…j6m   rel_p4nx…8wd (adoption)   =applied, 1m ago     release not applied yet
+mch_w4ze…n3fa   10.5.0.4:50000    rel_fgqv…j6m   rel_fgqv…j6m (operation)  no match, 5m ago     changed on the machine, frozen
 Health is not checked in this installation.
 ```
 
 `OBSERVED` shows how the last configuration read compares, not a health result; "no match"
-means it equals neither `Applied` nor `Desired`, and "drifted" comes from the open drift record
+means it equals neither `Applied` nor `Desired`, and "changed on the machine" comes from the open drift record
 ([§2.4](#24-desired-applied-and-observed)).
 
 `GET /machines` filters by `cluster` (`internal/api/reads.go:199-218`), so `machine list --cluster`

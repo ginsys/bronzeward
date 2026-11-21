@@ -322,7 +322,7 @@ func TestPlans(t *testing.T) {
 		r := e.ctl(e.create("adopt")...)
 		p := planID.FindString(r.out)
 		f.want(r, 0, "Plan "+p, "proposed", "adopt: records Applied from the node's own bytes and sends nothing to the machine",
-			"Baseline", "import base ibr_", "Pending convergence",
+			"Baseline", "import base ibr_", "Release not applied yet",
 			"It is not approved and nothing runs until an approver approves: bronzewardctl approve '"+p+"'")
 		f.wantMatch(r, "machine Desired: "+titled(e.rel)+" at plan creation, "+titled(e.rel)+" now")
 		f.want(e.ctl(append(h, "plan", "cancel", p)...), 2, "--reason: give a reason of 1 to 1024 bytes; nothing was sent")

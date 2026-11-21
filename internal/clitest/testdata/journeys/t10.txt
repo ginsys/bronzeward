@@ -97,10 +97,10 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
   Approval                           none                                         policy one-approver, committed operation none
 Evidence
-  Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
-  Dry run              not available: no dry run is available for this operation
-  Baseline             import base ibr_…, the node's own bytes
-  Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
+  Validation               passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
+  Dry run                  not available: no dry run is available for this operation
+  Baseline                 import base ibr_…, the node's own bytes
+  Release not applied yet  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
 It is not approved and nothing runs until an approver approves: bronzewardctl approve 'pln_…'
 This plan binds drift record <n>. drift adopt never approves: an approver runs bronzewardctl approve 'pln_…'
 Approval leads the controller to record the adoption without sending anything, even while the machine is frozen.
@@ -117,10 +117,10 @@ Plan pln_…  proposed                                         expires <local ti
   Created by                         h-all at http://127.0.0.1:<port> (publisher)  epoch ep_…, <local time>, plan revision 1, timeline revision <n>
   Approval                           none                                         policy one-approver, committed operation none
 Evidence
-  Validation           passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
-  Dry run              not available: no dry run is available for this operation
-  Baseline             import base ibr_…, the node's own bytes
-  Pending convergence  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
+  Validation               passed at publication (contract v1.14, machinery v1.14.5, Kubernetes v1.37.1, container)
+  Dry run                  not available: no dry run is available for this operation
+  Baseline                 import base ibr_…, the node's own bytes
+  Release not applied yet  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
 Self-approval  predicted: you did not create this plan or publish this release, and authored no fragment, profile or assignment revision in it.
                Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
 Type the plan ID to send it, or press Enter to stop:
