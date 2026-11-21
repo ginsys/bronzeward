@@ -1209,7 +1209,8 @@ assignment after the draft, or with none, compiling on its base alone
 **(choice §17.45)**: T3 compares against these names. For the hostname swap
 check (compilation §6.1 item 6) it also reads, for each covered machine, the name
 its `Applied` release's hostname record holds (§9.2, source `machine-name`); a
-change of `Applied` before commit is the second form of §4.2's stale input. A machine with an assignment but no import base is not
+change of `Applied` before commit is caught where §4.2's third form applies, and
+the check is otherwise as current as the snapshot. A machine with an assignment but no import base is not
 covered: a draft that changes or removes its assignment is refused
 `422 validation-failed` naming the machine, and a release covering no machine
 is refused `422` naming the cluster. Within a layer, the profiles' pins come
