@@ -62,8 +62,8 @@ describe("the sentences of a refusal", () => {
   });
 
   test("a next step that points at the explanation is left out when there is no detail", () => {
-    expect(problemSentences(problem("talos-access-unavailable", {}, 503), 503)).toBe("The server could not use or check Talos access for this machine or cluster.");
-    expect(problemSentences(problem("talos-access-unavailable", { detail: "no first key" }, 503), 503)).toBe("The server could not use or check Talos access for this machine or cluster. The server's explanation follows. The server says: no first key.");
+    expect(problemSentences(problem("talos-access-unavailable", {}, 503), 503)).toBe("The server could not work with Talos for this machine or cluster.");
+    expect(problemSentences(problem("talos-access-unavailable", { detail: "no first key" }, 503), 503)).toBe("The server could not work with Talos for this machine or cluster. The server's explanation follows. The server says: no first key.");
   });
 
   test("a refused mark names its position, and its detail, which may name a path, appears nowhere", () => {
@@ -177,6 +177,20 @@ describe("the copy control", () => {
     await act(async () => root.render(h(CopyButton, { text: "Request: req_new", byHand: "By hand." })));
     await act(async () => finish());
     expect(box.textContent).not.toContain(COPIED);
+  });
+
+  test("an older copy that fails after a newer one succeeded does not hide the newer one's line", async () => {
+    let refuse: () => void = () => {};
+    const writes = [new Promise<void>((_, reject) => (refuse = () => reject(new Error("denied")))), Promise.resolve()];
+    vi.stubGlobal("navigator", { clipboard: { writeText: () => writes.shift()! } });
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
+    await press();
+    await act(async () => root.render(h(CopyButton, { text: "Request: req_b", byHand: "By hand." })));
+    await press();
+    expect(box.textContent).toContain(COPIED);
+    await act(async () => refuse());
+    expect(box.textContent).toContain(COPIED);
+    expect(box.textContent).not.toContain("By hand.");
   });
 
   test("the reference block passes its own by-hand sentence", async () => {
