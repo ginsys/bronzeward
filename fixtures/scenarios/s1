@@ -985,7 +985,7 @@ ob_full_hostname() {
 }
 # ob_machine_name <node ip>: the name the onboarded machine at that address holds, empty for none.
 ob_machine_name() {
-  sql "SELECT coalesce(name, '') FROM machine WHERE cluster = '$cluster' AND talos_endpoint LIKE '$1%'"
+  sql "SELECT coalesce(name, '') FROM machine WHERE cluster = '$cluster' AND talos_endpoint = '$1:50000'"
 }
 onboard() {
   local ctl_file args cp_full w_short
