@@ -3,6 +3,7 @@
 // release, plan, ingestion and machine, are read by the store in bodies.ts.
 
 import type { components } from "./api/v1";
+import { short } from "./list.tsx";
 import { SAFE } from "./principals.ts";
 import { when } from "./states.tsx";
 
@@ -15,13 +16,13 @@ export const draftText = (d: Pick<S["DraftBody"], "title"> | null | undefined): 
 // A name an author typed, shown only when it is safe text (A8 rule 3), else undefined.
 export const safeText = (s: string): string | undefined => (SAFE.test(s) ? s : undefined);
 
-// A draft in a sentence: its title in quotes where the title is safe text, else `fallback` (the shortened identifier).
-export const draftCalled = (d: Pick<S["DraftBody"], "title"> | null | undefined, fallback: string): string => {
+// A draft in a sentence: its title in quotes where the title is safe text, else the shortened identifier.
+export const draftCalled = (d: Pick<S["DraftBody"], "id" | "title">): string => {
   const title = draftText(d);
-  return title === undefined ? fallback : `"${title}"`;
+  return title === undefined ? short(d.id) : `"${title}"`;
 };
 
-export const releaseTitle =(r: Pick<S["ReleaseBody"], "publishedAt">, d: Pick<S["DraftBody"], "title"> | null | undefined): string | undefined => {
+export const releaseTitle = (r: Pick<S["ReleaseBody"], "publishedAt">, d: Pick<S["DraftBody"], "title"> | null | undefined): string | undefined => {
   const text = draftText(d);
   return text === undefined ? undefined : `${text}, published ${when(r.publishedAt)}`;
 };

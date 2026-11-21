@@ -9,13 +9,13 @@ import type { components } from "./api/v1";
 import { AssignmentPane, ProfilePane } from "./composition.tsx";
 import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { LAYERS } from "./layers.ts";
-import { Detail, Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
+import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { type EmbeddedPath, references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import type { Problem } from "./request.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
-import { ClusterRef, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
+import { ClusterRef, DraftHead, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
 import { draftCalled, draftText, safeText } from "./titles.ts";
 import { NAME_NOT_SHOWN } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
@@ -106,8 +106,6 @@ const enc = encodeURIComponent;
 const isSource = (e: Draft["entries"][number]): e is Source => e.kind !== "import-base";
 const nameOf = (e: Source) => e.name ?? e.machine ?? "";
 const keyOf = (e: Source) => `${e.kind}:${nameOf(e)}`;
-// A draft in a sentence: its stored title in quotes where the title is safe text, else the shortened identifier.
-const called = (d: Pick<Draft, "id" | "title">): string => draftCalled(d, short(d.id));
 // An entry as the list names it: a fragment's or a profile's own name, and an assignment's machine as a machine is
 // named everywhere (the shortened identifier until it is read).
 function EntryName({ e }: { e: Source }) {
@@ -253,13 +251,7 @@ export function DraftItem({ id }: { id: string }) {
   };
   return (
     <>
-      <h2>{d === undefined ? `Draft ${short(id)}` : `Draft: ${draftText(d) ?? short(id)}`}</h2>
-      {d !== undefined && (
-        <>
-          <p data-testid="draft-line">{d.state}, revision {d.revision}, <ClusterRef id={d.cluster} />.</p>
-          <Detail id={d.id} />
-        </>
-      )}
+      <DraftHead id={id} d={d} lead="Draft" />
       {pending}
       {/* That read failed, also when the page keeps the data read before (no answer): reading it
           again keeps the editor, and lets Save and Remove send again. */}
@@ -315,7 +307,7 @@ function DiscardDraft({ draft, written, seeChange }: { draft: Draft; written: ()
   // A discarded draft takes no write: its ETag is forgotten as the discard settles.
   const settled = (s: Outcome) => void (s.kind === "done" && forgetETag(draft.id));
   const discard = () => {
-    if (!confirm(`Discard draft ${called(draft)}? It cannot be published afterwards.`)) return;
+    if (!confirm(`Discard draft ${draftCalled(draft)}? It cannot be published afterwards.`)) return;
     const ifMatch = keptETag(draft.id, writes?.client?.currentEpoch);
     setNote(ifMatch === undefined ? NO_ETAG : undefined);
     if (ifMatch !== undefined) send({ method: "POST", path: `/drafts/${enc(draft.id)}/discard`, body: {}, ifMatch, resource: `/drafts/${draft.id}`, settled });
@@ -324,7 +316,7 @@ function DiscardDraft({ draft, written, seeChange }: { draft: Draft; written: ()
     <>
       <p><Action label="Discard draft" needs={["author"]} onClick={discard} busy={w !== undefined && w.outcome === undefined} /></p>
       {note !== undefined && <Status>{note}</Status>}
-      <WriteResult w={w} conflict={<DiscardRefused onShow={() => (unsaved.size > 0 ? setNote(EDITOR_FIRST) : seeChange())} />} done={() => `Draft ${called(draft)} discarded.`} />
+      <WriteResult w={w} conflict={<DiscardRefused onShow={() => (unsaved.size > 0 ? setNote(EDITOR_FIRST) : seeChange())} />} done={() => `Draft ${draftCalled(draft)} discarded.`} />
     </>
   );
 }
@@ -780,7 +772,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   const editable = open && !waits;
   // Guarded also once the draft no longer takes writes (discarded by another author): the text is
   // still shown, and leaving drops it.
-  useUnsaved(`fragment ${name || "(new)"} of draft ${called(draft)}`, holdsUnsaved(held, saved, conflict?.mine));
+  useUnsaved(`fragment ${name || "(new)"} of draft ${draftCalled(draft)}`, holdsUnsaved(held, saved, conflict?.mine));
   // The draft revision the page shows now, for a revision read that answers later.
   const drafted = useRef(draft.revision);
   // The done writes now, for a revision read that answers after one finished.
@@ -977,7 +969,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       {/* A conflict a done write kept stays shown, with its Copy my text. */}
       {!(o?.kind === "refused" && o.status === 412) && conflictView()}
       <div ref={answer} tabIndex={-1} data-testid="fragment-write">
-        <WriteResult w={w} conflict={conflictView("alert") || undefined} goTo={() => void goTo()} marks={sent?.text.marks ?? ""} done={() => `Fragment ${name} ${w?.spec.method === "DELETE" ? "removed from" : "saved in"} draft ${called(draft)}.`} />
+        <WriteResult w={w} conflict={conflictView("alert") || undefined} goTo={() => void goTo()} marks={sent?.text.marks ?? ""} done={() => `Fragment ${name} ${w?.spec.method === "DELETE" ? "removed from" : "saved in"} draft ${draftCalled(draft)}.`} />
       </div>
     </section>
   );

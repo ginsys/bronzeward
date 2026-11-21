@@ -6,7 +6,7 @@
 
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import type { components } from "./api/v1";
-import { Id, Ref, short, useReads, viewOf } from "./list.tsx";
+import { Detail, Id, Ref, short, useReads, viewOf } from "./list.tsx";
 import { MachineRef, machineText } from "./machines.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
 import { draftText, importedConfiguration, operationTitle, planTitle, releaseTitle } from "./titles.ts";
@@ -45,6 +45,22 @@ export function useMachineText(id: string | null | undefined): string | undefine
 export function useClusterText(id: string | null | undefined): string | undefined {
   const c = useBody<S["ClusterBody"]>(at("clusters", id));
   return typeof c?.name === "string" && SAFE.test(c.name) ? c.name : undefined;
+}
+
+// The top of a draft's page and of its publication page: the heading "<lead>: <title>" (the shortened identifier where
+// the draft is unread or its title is not safe), then its state, revision and cluster, then the identifier with Copy.
+export function DraftHead({ id, d, lead }: { id: string; d: S["DraftBody"] | undefined; lead: string }) {
+  return (
+    <>
+      <h2>{d === undefined ? `${lead} ${short(id)}` : `${lead}: ${draftText(d) ?? short(id)}`}</h2>
+      {d !== undefined && (
+        <>
+          <p data-testid="draft-line">{d.state}, revision {d.revision}, <ClusterRef id={d.cluster} />.</p>
+          <Detail id={d.id} />
+        </>
+      )}
+    </>
+  );
 }
 
 // A cluster as a link: its name where the read gives a safe one, preceded by the word "Cluster", else "This cluster" alone.
