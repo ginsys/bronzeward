@@ -6,7 +6,7 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useReads, Ref, useSettled } from "./list.tsx";
-import { type Env, endpointNote, type Line, onboardCluster, type Plan, discoverCluster, sender } from "./onboard.ts";
+import { type Env, endpointNote, isAddress, type Line, onboardCluster, type Plan, discoverCluster, sender } from "./onboard.ts";
 import { Action } from "./shell.tsx";
 import { useUnsaved, useWrites } from "./forms.tsx";
 
@@ -150,6 +150,7 @@ export function OnboardCluster() {
         <form onSubmit={confirm} aria-label="Record the cluster">
           <p data-testid="onboard-found">
             Talos {p.found.version}, contract {p.found.contract}, {p.found.members.length} {p.found.members.length === 1 ? "member" : "members"}, read at {p.found.endpoint}.
+            {!isAddress(p.endpoint) && ` The server resolved ${p.endpoint} to that address.`}
             {!p.found.complete && " The read ended at its deadline: a member listed as not answering may be reachable."}
           </p>
           <table>
@@ -161,7 +162,7 @@ export function OnboardCluster() {
             </tbody>
           </table>
           <p><label>Name: <input name="name" required autoComplete="off" /></label> for the cluster in Bronzeward</p>
-          <p><label>Kubernetes endpoint: <input name="kube" required defaultValue={p.kube} autoComplete="off" /></label> https://host or https://host:port, proposed by the first control-plane member</p>
+          <p><label>Kubernetes endpoint: <input name="kube" required defaultValue={p.kube} autoComplete="off" /></label> https://host or https://host:port, the cluster's own where its control-plane members agree on one, else the first control-plane member's address</p>
           <p>Onboarding records the cluster and each member that answered, supplies the cluster's first key, and imports each machine into one draft.</p>
           <p><Action label="Onboard cluster" needs={["author"]} submit busy={busy} /></p>
         </form>

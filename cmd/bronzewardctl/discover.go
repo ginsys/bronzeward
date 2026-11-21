@@ -122,7 +122,7 @@ func discoverLines(res discover.Result, file, talosContext, override string) []s
 		out = append(out, sf("Dialled %s: the address that %s resolved to, once. The first reads used that address. Each member was read at its own listed address.", res.Endpoint, res.ResolvedFrom))
 	}
 	if res.KubernetesEndpoint != "" {
-		out = append(out, sf("Kubernetes endpoint %s, proposed from the first control-plane member: replace it if a VIP or a DNS name fronts the API server.", res.KubernetesEndpoint))
+		out = append(out, sf("Kubernetes endpoint %s, the cluster's own where its control-plane members agree on one, else the first control-plane member's address: replace it if a VIP or a DNS name fronts the API server.", res.KubernetesEndpoint))
 	} else {
 		out = append(out, "No control-plane member gave an API server port: give the Kubernetes endpoint yourself.")
 	}

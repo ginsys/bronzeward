@@ -11,7 +11,7 @@
 # `first-keys`: after step 1's records, the three first keys of ginsys/bronzeward#898 supplied
 # to the control plane's endpoint, the refusals, and the scan; on an up of its own.
 # `onboard`: bronzewardctl cluster onboard against the fixture's Talos and server, with no OpenBao
-# address, token or bao on its PATH (ginsys/bronzeward#900), with --no-import; on an up of its own. Each check
+# address, token or bao on its PATH (ginsys/bronzeward#900), with --no-import, and (ginsys/bronzeward#1058) POST /discoveries with the talosconfig, whose kubernetesEndpoint is the control plane configuration's cluster endpoint; on an up of its own. Each check
 # writes PASS, FAIL or SKIP, its acceptance-plan reference and what it checked to s1.tsv in the
 # evidence directory and to stdout; the directory is then scanned by bin/evidence. Exit 1 on any
 # FAIL.
@@ -938,10 +938,33 @@ ob_args() {
   printf '%s\n' cluster onboard --talosconfig "$TALOSCONFIG" --name bw-fixture --endpoint "$TALOS_CONTROLPLANE_IP:50000" \
     --kubernetes-endpoint "https://$TALOS_CONTROLPLANE_IP:6443" --no-import
 }
+# ob_cluster_endpoint: the cluster's own Kubernetes endpoint, as the control plane's machine
+# configuration names it (the endpoint of its KubeClusterConfig document), and nothing else of that file.
+ob_cluster_endpoint() {
+  awk '/^---/ {kind = ""} /^kind:/ {kind = $2} kind == "KubeClusterConfig" && /^endpoint:/ {sub(/^endpoint:[ ]*/, ""); sub(/[ ]+#.*$/, ""); gsub(/["'"'"']/, ""); print; exit}' "$STATE/controlplane.yaml"
+}
+# ob_discovery: ginsys/bronzeward#1058 through the server's own route: POST /discoveries with the
+# talosconfig as the document, so that a reader certificate signed from its CA key reads the cluster. The
+# answer's kubernetesEndpoint is the machine configuration's cluster endpoint. The two files record the
+# endpoint and the first control-plane member's address, so that the run shows whether the cluster's own
+# endpoint was told from the node's address at all (the check passes on either where they are equal).
+ob_discovery() {
+  local want doc body
+  want=$(ob_cluster_endpoint)
+  [[ "$want" =~ ^https://[A-Za-z0-9.:-]+$ ]] || { say "s1: the control plane's configuration names no https cluster endpoint of a plain shape (read: ${want:0:80})"; return 1; }
+  fresh_author
+  doc=$(jq -Rs . <"$TALOSCONFIG") || return 1
+  withheld+=("${doc:1:${#doc}-2}")
+  body=$(jq -nc --rawfile d "$TALOSCONFIG" --arg e "$TALOS_CONTROLPLANE_IP:50000" '{kind: "talosconfig", document: $d, endpoint: $e}') || return 1
+  answers_with ".kubernetesEndpoint == \"$want\" and (.members | length) == 2" 200 - POST /api/v1/discoveries "$author" "$body" || return 1
+  printf '%s\n' "$want" >"$EV/onboard-cluster-endpoint.txt"
+  jq -r '[.members[] | select(.role == "controlplane")][0].address' "$EV/last.body" >"$EV/onboard-first-controlplane.txt"
+}
 onboard() {
   local ctl_file args
   preconditions
   cli_prepare 'S1 onboard' h-author
+  check 'S1 onboard' "POST /discoveries with the talosconfig: 200, two members and the control plane's cluster endpoint as kubernetesEndpoint" ob_discovery
   mkdir -p -- "$cli_dir/nopath"
   mapfile -t args < <(ob_args)
   check 'S1 onboard' 'cluster onboard: the talosconfig is the first key; no OpenBao address, token or bao anywhere: exit 0' ob_run onboard-first "${args[@]}"

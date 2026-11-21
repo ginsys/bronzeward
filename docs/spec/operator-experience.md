@@ -471,7 +471,7 @@ the commands. The flag is required, and no default file is looked up:
 ```text
 $ bronzewardctl cluster discover --talosconfig ./talosconfig
 Talos cluster ID 7c1…, Talos v1.13.6, contract v1.13.
-Kubernetes endpoint https://10.5.0.2:6443, proposed from the first control-plane member: replace it if a VIP or a DNS name fronts the API server.
+Kubernetes endpoint https://10.5.0.2:6443, the cluster's own where its control-plane members agree on one, else the first control-plane member's address: replace it if a VIP or a DNS name fronts the API server.
 
 Members:
   9Zs…=  cp-1  controlplane  10.5.0.2  metal, SMBIOS UUID 4c4c…
@@ -1346,9 +1346,12 @@ off it: the release list is filtered in the browser (G9 of the
 **Onboard cluster** is `cluster onboard` ([§5.2](#52-inventory)) as a page, reached from the
 **Onboard cluster** button of the Machines and Clusters pages for an `author`. The operator chooses
 the cluster's talosconfig, and may name a context (else the current one) and an endpoint (else the
-context's first). The page cuts the file to that one context in memory, reads the cluster's members
+context's first), which may be an address or a DNS name: before the button the page says which
+endpoint it will use, the server resolves a name once, and the page then says what it resolved the
+name to; a name the server cannot use (it does not resolve, or its address is not one the node's
+certificate names) is a refusal that asks for a control-plane node's address. The page cuts the file to that one context in memory, reads the cluster's members
 through `POST /discoveries`, and shows the Talos version, the contract and the members, with a
-name and a Kubernetes endpoint (proposed by the first control-plane member) to confirm. It refuses an
+name and a Kubernetes endpoint (the cluster's own where its control-plane members agree on one, else the first control-plane member's address) to confirm. It refuses an
 unsupported contract and a cluster where no control-plane member answered before anything is
 recorded. Then it runs, in order, the cluster, the first key (to the first control-plane member that
 answered), each machine (by SMBIOS UUID where the node reports one, else by node ID, with the
