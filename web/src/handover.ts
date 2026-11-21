@@ -97,6 +97,16 @@ const idOf = (w: Write): string | undefined => {
   return typeof id === "string" && id !== "" ? id : undefined;
 };
 
+// The queued or running publication of this draft, if the operations list names one (its first page).
+async function running(draft: string, io: Io): Promise<string | undefined> {
+  for (const state of ["queued", "running"]) {
+    const l = await io.read<{ items: Operation[] }>(`/operations?kind=publish&state=${state}`);
+    const hit = l?.kind === "ok" ? l.data.items.find((o) => o.subject?.draft === draft) : undefined;
+    if (hit !== undefined) return hit.id;
+  }
+  return undefined;
+}
+
 // The draft: published first when it is still open; true when the machines can follow.
 async function publish(id: string, io: Io): Promise<boolean> {
   const say = (line: Line) => io.say(DRAFT, line);
@@ -105,10 +115,14 @@ async function publish(id: string, io: Io): Promise<boolean> {
   if (d.data.state === "published") return say({ state: "done", text: "Already published." }), true;
   if (d.data.state !== "open") return say({ state: "stopped", text: LINES.draftGone(d.data.state) }), false;
   say({ state: "working", text: LINES.publishing });
-  const w = await io.send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, resource: `/drafts/${id}`, ...(d.etag !== undefined && { ifMatch: d.etag }) });
-  if (!done(w)) return say({ state: "stopped", text: "", write: w }), false;
-  const op = idOf(w);
-  if (op === undefined) return say({ state: "stopped", text: LINES.noOperation }), false;
+  // A publication already queued or running for this draft (an earlier press, or another tab) is followed, not sent again.
+  let op = await running(id, io);
+  if (op === undefined) {
+    const w = await io.send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, resource: `/drafts/${id}`, ...(d.etag !== undefined && { ifMatch: d.etag }) });
+    if (!done(w)) return say({ state: "stopped", text: "", write: w }), false;
+    op = idOf(w);
+    if (op === undefined) return say({ state: "stopped", text: LINES.noOperation }), false;
+  }
   for (let i = 0; i < WAIT_POLLS && io.live(); i++) {
     const o = await io.read<Operation>(`/operations/${enc(op)}`);
     if (o?.kind === "ok" && terminal(o.data.state)) {
