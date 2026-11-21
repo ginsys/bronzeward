@@ -2249,10 +2249,14 @@ The web client's draft page offers "Start managing these machines" for a draft t
    second press, after a closed page or a failed step, therefore sends no act whose result exists. The one request that
    can meet a result is the publication: the server answers a publication already queued or running for the draft's
    revision with that operation ([persistence and API §7.3](persistence-api.md#73-natural-keys)), and the press follows
-   it. A machine whose step
+   it with the progress reader the publication page uses, ending in its words. The publication carries the draft's
+   ETag as the page showed it (the one the publication page and the discard keep), so a draft another author changed
+   is refused with 412, in the page's words, and never published unseen; with no ETag kept the press sends nothing and
+   says to read the draft again. A machine whose step
    fails stops alone with the refusal in words, and a later press retries it alone. The same act twice in one press stops
    the machine instead of looping.
-5. The roles are the routes': `publisher` for the publication and the plan, `approver` for the approval. Without either,
+5. The roles are the routes' and the draft page's: `author` for the draft page and the machines' configurations,
+   `publisher` for the publication and the plan, `approver` for the approval. Without any of the three,
    the button is off and the page names the missing role and the separate steps.
    A press while the draft editor holds unsaved text sends nothing and says to save or discard it first, because the
    publication sends only what is stored.

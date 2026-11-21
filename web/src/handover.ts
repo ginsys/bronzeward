@@ -10,22 +10,25 @@ import type { components } from "./api/v1";
 import type { Load } from "./list.tsx";
 import type { Position } from "./nextstep.tsx";
 import { planBody } from "./plan.tsx";
-import { terminal } from "./progress.ts";
 import type { Write, WriteSpec } from "./write.ts";
 
 type Draft = components["schemas"]["DraftBody"];
-type Operation = components["schemas"]["OperationBody"];
 
 export const HANDOVER_TITLE = "Start managing these machines";
 export const HANDOVER_SENTENCE =
   "This publishes the draft, then creates a handover plan for each machine and approves each plan as you, recorded as your own approval. It sends nothing to any machine. A change you apply later keeps its own plan and approval.";
 export const UNSAVED = "The draft editor holds text you have not saved, and a press publishes only what is saved. Save it or discard it, then press again. Nothing was sent.";
-export const ROLES = ["publisher", "approver"] as const;
+// The press publishes (publisher), creates each plan (publisher) and approves it (approver), and the draft
+// page's author role is what reads the draft's machines and their configurations: all three are needed.
+export const ROLES = ["author", "publisher", "approver"] as const;
 export const missingRoles = (held: readonly string[]) => ROLES.filter((r) => !held.includes(r));
 export const MISSING = (missing: readonly string[]) =>
   `Needs the ${missing.join(" and ")} role. The separate steps stay: publish this draft, then on each machine's release page plan the adopt (handover), then approve each plan.`;
+// A press publishes the draft as the page showed it: with no ETag kept for it, nothing is sent.
+export const NO_ETAG = "Not sent: this page has not read the draft under the current epoch. Read it again first.";
 
-// How long a step that waits on the controller is followed on this page, and how often it is read.
+// How long a machine that waits on the controller is followed on this page, and how often it is read. The
+// publication is followed by the progress reader (watch), which has its own pace.
 export const WAIT_MS = 2000;
 export const WAIT_POLLS = 90;
 
@@ -45,8 +48,8 @@ export const LINES = {
   repeated: "Stopped: the machine's position did not change after this step. Open the machine to see where it is.",
   unresolved: "Stopped: an operation on this machine is unresolved. The controller keeps examining it; open the machine to see it.",
   draftGone: (state: string) => `This draft is ${state}, so it cannot be published.`,
-  publishFailed: (state: string) => `The publication ${state}. Nothing was sent to any machine. Open the draft's operations to read why.`,
   noRead: "Not read: the server did not answer. Press the button again.",
+  publishUnread: "The publication's progress could not be read. Nothing was sent to any machine. Press the button again to read where it is.",
   noOperation: "The publication was accepted without naming its operation. Find it in the operations list, kind publish.",
   noPlan: "The plan was created, but the answer named no plan. Open the machine to find it.",
   notImported: "Left as it is: this machine has no stored import to hand over. Open the machine to see its next step.",
@@ -80,8 +83,14 @@ export function actFor(p: Position): Act {
   }
 }
 
+// How the publication ended, as the progress reader (watch) and publishEnd read it: a release was named, the
+// words that say why none was, the page left, or the operation could not be read.
+export type Followed = { kind: "released" } | { kind: "ended"; text: string } | { kind: "stopped" } | { kind: "unread" };
+
 export interface Io {
   read<T>(path: string): Promise<Load<T> | undefined>;
+  // Follows the publish operation to its end.
+  follow(operation: string): Promise<Followed>;
   // The write sent and settled; its `outcome` says how it ended.
   send(spec: WriteSpec): Promise<Write>;
   wait(ms: number): Promise<void>;
@@ -98,29 +107,34 @@ const idOf = (w: Write): string | undefined => {
   return typeof id === "string" && id !== "" ? id : undefined;
 };
 
-// The draft: published first when it is still open; true when the machines can follow.
-async function publish(id: string, io: Io): Promise<boolean> {
+// The draft: published first when it is still open; true when the machines can follow. `etag` is the draft's
+// ETag as the page showed it: the publication carries it, so a draft another author changed since is refused
+// (412) and never published unseen, and with none the press sends nothing.
+async function publish(id: string, io: Io, etag: string | undefined): Promise<boolean> {
   const say = (line: Line) => io.say(DRAFT, line);
   const d = await io.read<Draft>(`/drafts/${enc(id)}`);
   if (d?.kind !== "ok") return say({ state: "stopped", text: LINES.noRead }), false;
   if (d.data.state === "published") return say({ state: "done", text: "Already published." }), true;
   if (d.data.state !== "open") return say({ state: "stopped", text: LINES.draftGone(d.data.state) }), false;
+  if (etag === undefined) return say({ state: "stopped", text: NO_ETAG }), false;
   say({ state: "working", text: LINES.publishing });
   // The server answers a publication already queued or running for this draft revision with that operation
   // (persistence and API §7.3, its natural key), so a press while one runs follows it and creates no second.
-  const w = await io.send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, resource: `/drafts/${id}`, ...(d.etag !== undefined && { ifMatch: d.etag }) });
+  const w = await io.send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, resource: `/drafts/${id}`, ifMatch: etag });
   if (!done(w)) return say({ state: "stopped", text: "", write: w }), false;
   const op = idOf(w);
   if (op === undefined) return say({ state: "stopped", text: LINES.noOperation }), false;
-  for (let i = 0; i < WAIT_POLLS && io.live(); i++) {
-    const o = await io.read<Operation>(`/operations/${enc(op)}`);
-    if (o?.kind === "ok" && terminal(o.data.state)) {
-      if (o.data.state !== "succeeded") return say({ state: "stopped", text: LINES.publishFailed(o.data.state) }), false;
+  const f = await io.follow(op);
+  switch (f.kind) {
+    case "released":
       return say({ state: "done", text: LINES.published }), true;
-    }
-    await io.wait(WAIT_MS);
+    case "ended":
+      return say({ state: "stopped", text: f.text }), false;
+    case "unread":
+      return say({ state: "stopped", text: LINES.publishUnread }), false;
+    case "stopped":
+      return false;
   }
-  return say({ state: "waiting", text: "The publication is still running. Press the button again to read where it is." }), false;
 }
 
 // One machine, from where the server says it is, to managed or to the step that stopped it.
@@ -163,7 +177,7 @@ async function machine(m: string, io: Io): Promise<void> {
 }
 
 // The press: the draft first, then every machine at once (each is its own record and may fail alone).
-export async function handOver(draft: string, machines: readonly string[], io: Io): Promise<void> {
-  if (!(await publish(draft, io))) return;
+export async function handOver(draft: string, machines: readonly string[], io: Io, etag: string | undefined): Promise<void> {
+  if (!(await publish(draft, io, etag))) return;
   await Promise.all(machines.map((m) => machine(m, io)));
 }

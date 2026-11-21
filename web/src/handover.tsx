@@ -4,8 +4,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Result, unsaved, useWrites } from "./forms.tsx";
-import { DRAFT, handOver, HANDOVER_SENTENCE, HANDOVER_TITLE, type Io, type Line, MISSING, missingRoles, UNSAVED } from "./handover.ts";
-import { Ref, useSettled } from "./list.tsx";
+import { DRAFT, type Followed, handOver, HANDOVER_SENTENCE, HANDOVER_TITLE, type Io, type Line, MISSING, missingRoles, UNSAVED } from "./handover.ts";
+import { settledReads } from "./imports.tsx";
+import { Ref, useReads, useSettled } from "./list.tsx";
+import { terminal, watch } from "./progress.ts";
+import { notEstablished, publishEnd } from "./publish.tsx";
 import { useGate, useRoles } from "./shell.tsx";
 import { MachineById } from "./titles.tsx";
 import { Write } from "./write.ts";
@@ -22,19 +25,41 @@ function LineView({ k, line }: { k: string; line: Line }) {
   );
 }
 
-export function Handover({ draft, machines, written }: { draft: string; machines: readonly string[]; written: () => void }) {
+// `etag` reads the draft's ETag as this page shows it, at the moment of the press.
+export function Handover({ draft, machines, etag, written }: { draft: string; machines: readonly string[]; etag: () => string | undefined; written: () => void }) {
   const writes = useWrites()!;
   const read = useSettled();
+  const reads = useReads();
+  const now = useRef(reads);
+  now.current = reads;
   const roles = useRoles();
   const gate = useGate(["publisher"]);
   const [lines, setLines] = useState<Readonly<Record<string, Line>>>({});
   const [running, setRunning] = useState(false);
   const [held, setHeld] = useState(false);
   const live = useRef(true);
+  const leave = useRef(new AbortController());
   useEffect(() => {
     live.current = true;
-    return () => void (live.current = false);
+    leave.current = new AbortController();
+    return () => {
+      live.current = false;
+      leave.current.abort();
+    };
   }, []);
+  // The publication is followed by the progress reader the publication page uses, and its end is read by
+  // the same words (publishEnd), under the epoch it was read in.
+  const follow = async (op: string): Promise<Followed> => {
+    const client = writes.client;
+    if (client === undefined) return { kind: "unread" };
+    const reading = settledReads(client, { settle: now.current.settle, undropped: now.current.undropped }, () => live.current);
+    const r = await watch(reading, op, { show: () => {}, clear: () => {}, signal: leave.current.signal });
+    if (r.kind === "stopped") return { kind: "stopped" };
+    if (r.kind === "failed") return { kind: "unread" };
+    if (!terminal(r.operation.state) || r.epoch === undefined || r.epoch !== client.currentEpoch) return { kind: "ended", text: notEstablished(op) };
+    const e = publishEnd(r.operation);
+    return "release" in e ? { kind: "released" } : { kind: "ended", text: e.text };
+  };
   const missing = missingRoles(roles);
   const reason = missing.length > 0 ? MISSING(missing) : gate;
   const press = () => {
@@ -46,6 +71,7 @@ export function Handover({ draft, machines, written }: { draft: string; machines
     setLines({});
     const io: Io = {
       read: (path) => read(path, () => live.current),
+      follow,
       send: async (spec) => {
         const w = new Write(spec);
         await writes.submit(w);
@@ -55,7 +81,7 @@ export function Handover({ draft, machines, written }: { draft: string; machines
       say: (key, line) => live.current && setLines((was) => ({ ...was, [key]: line })),
       live: () => live.current,
     };
-    void handOver(draft, machines, io).finally(() => {
+    void handOver(draft, machines, io, etag()).finally(() => {
       if (!live.current) return;
       setRunning(false);
       written();
