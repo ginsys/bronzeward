@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { Screen, type View } from "./app.tsx";
 import { WriteNotices, WritesProvider } from "./forms.tsx";
 import type { Client } from "./request.ts";
-import { problemFields, problemText, REPEATING, REPLAYED, UNKNOWN } from "./states.tsx";
+import { problemFields, REPEATING, REPLAYED, UNKNOWN } from "./states.tsx";
 import { Write, Writes } from "./write.ts";
 
 const shown = (view: View) => renderToStaticMarkup(createElement(Screen, { view }));
@@ -15,15 +15,6 @@ const problem = (code: string, status: number, detail?: string) => ({
   status,
   instance: "req-1",
   ...(detail === undefined ? {} : { detail }),
-});
-
-test("§8.2: a problem is read in words, with the server's detail when present", () => {
-  const auth = problem("dependency-unavailable", 503, "authentication could not reach the identity provider or the database; nothing was committed");
-  expect(problemText({ kind: "unavailable", status: 503, problem: auth })).toBe(
-    "Not read. Something the server depends on is not available or not set up. Try again in a moment; if it keeps happening, ask an administrator. The server says: authentication could not reach the identity provider or the database; nothing was committed.",
-  );
-  expect(problemText({ kind: "refused", status: 401, problem: problem("other", 401) })).toBe("Not read. A dependency is unavailable.");
-  expect(problemText({ kind: "refused", status: 502, problem: null })).toBe("Not read: the server answered 502.");
 });
 
 test("§8.2: the problem shown under a 403 row's, a 401's or a revocation's own message", () => {

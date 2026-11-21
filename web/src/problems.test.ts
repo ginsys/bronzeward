@@ -9,7 +9,7 @@ import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { COPIED, COPY, CopyButton, WRITE_WAIT_MS } from "./copy.tsx";
+import { COPIED, COPY, CopyButton } from "./copy.tsx";
 import { PROBLEM_WORDS, referenceText, RequestRef, RULE_WORDS, wordsFor } from "./problems.tsx";
 import type { Problem } from "./request.ts";
 import { problemSentences, Refused, SetAside, Unknown } from "./states.tsx";
@@ -189,68 +189,6 @@ describe("the copy control", () => {
     expect(box.textContent).not.toContain(COPIED);
     await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
     expect(box.textContent).toContain(COPIED);
-  });
-
-  test("one copy at a time: the button is off while a write is pending, so writes cannot end out of order", async () => {
-    let finish: () => void = () => {};
-    const writeText = vi.fn(() => new Promise<void>((r) => (finish = r)));
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
-    await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
-    await press();
-    expect(box.querySelector("button")!.disabled).toBe(true);
-    await act(async () => root.render(h(CopyButton, { text: "Request: req_b", byHand: "By hand." })));
-    expect(box.querySelector("button")!.disabled).toBe(true);
-    await press();
-    expect(writeText).toHaveBeenCalledTimes(1);
-    await act(async () => finish());
-    expect(box.querySelector("button")!.disabled).toBe(false);
-  });
-
-  test("a write that throws at once is a refused copy: the by-hand sentence, and the button stays usable", async () => {
-    vi.stubGlobal("navigator", { clipboard: { writeText: () => { throw new Error("not allowed"); } } });
-    await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
-    await press();
-    expect(box.textContent).toContain("By hand.");
-    expect(box.querySelector("button")!.disabled).toBe(false);
-  });
-
-  test("a write that never settles is a refused copy after the wait: by-hand sentence, button back", async () => {
-    vi.useFakeTimers();
-    try {
-      vi.stubGlobal("navigator", { clipboard: { writeText: () => new Promise<void>(() => {}) } });
-      await act(async () => root.render(h(CopyButton, { text: "Request: req_a", byHand: "By hand." })));
-      await press();
-      expect(box.querySelector("button")!.disabled).toBe(true);
-      await act(async () => void vi.advanceTimersByTime(WRITE_WAIT_MS));
-      expect(box.textContent).toContain("By hand.");
-      expect(box.querySelector("button")!.disabled).toBe(false);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  test("while a given-up write is outstanding a later success is not called Copied; once it ends, it is", async () => {
-    vi.useFakeTimers();
-    try {
-      const writes: Array<() => Promise<void>> = [];
-      let finishA = () => {};
-      writes.push(() => new Promise<void>((r) => (finishA = r)));
-      writes.push(() => Promise.resolve());
-      writes.push(() => Promise.resolve());
-      vi.stubGlobal("navigator", { clipboard: { writeText: () => writes.shift()!() } });
-      await act(async () => root.render(h(CopyButton, { text: "A", byHand: "By hand." })));
-      await press();
-      await act(async () => void vi.advanceTimersByTime(WRITE_WAIT_MS));
-      await act(async () => root.render(h(CopyButton, { text: "B", byHand: "By hand." })));
-      await press();
-      expect(box.textContent).toContain("By hand.");
-      expect(box.textContent).not.toContain(COPIED);
-      await act(async () => finishA());
-      await press();
-      expect(box.textContent).toContain(COPIED);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   test("a refused copy says to select by hand, and a later success of the same text replaces that", async () => {

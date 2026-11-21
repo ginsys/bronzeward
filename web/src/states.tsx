@@ -160,13 +160,6 @@ export function Refused({ problem, status, verb, testid, replayed = false, cut =
   );
 }
 
-// §8.2: a read's problem in words, with the sentences a person needs. The authentication 503's detail is W1's text.
-export function problemText(res: ReadResult<unknown>): string {
-  const p = "problem" in res ? res.problem : null;
-  if (p === null) return `Not read: the server answered ${"status" in res ? res.status : res.kind}.`;
-  return `Not read. ${problemSentences(p, p.status)}`;
-}
-
 // The answer's problem, when it carries one.
 export function problemFields(res: ReadResult<unknown>): Problem | undefined {
   return "problem" in res && res.problem !== null ? res.problem : undefined;
