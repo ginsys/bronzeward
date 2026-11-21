@@ -17,7 +17,7 @@ import { RECOVERY_START } from "../../src/recovery.tsx";
 import { SCOPE_NO_MODE, SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { type Faults, INJECTED_SCOPE, type Step } from "../injector.ts";
-import { absent, answers, api, disposable, eventually, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, inSafari, measure, mint, mirrored, narrow, overflows, planHeading, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
+import { absent, answers, api, approvalReadsAnswered, approvalRoute, disposable, eventually, faults, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, inSafari, measure, mint, mirrored, narrow, overflows, planHeading, type Seed, seeded, storageEmpty, syntheticMachine, tabTo, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The page's answer to Approve and to Revoke approval: each control's Result, in an element that takes
@@ -261,11 +261,17 @@ describe("approval and revocation (#358)", () => {
 
     it("an approved plan: a reason is required; [Revoke approval] sends one revocation, states the limit on the control, and the server revokes the plan", async function () {
       this.timeout(120_000);
-      await open("h-all", undefined, "approved", {}, seed.plans.approved);
+      // The approval's answers are held until the page has asked for every one of them, so the wait below ends only after
+      // the reads that decide the Approve form have been answered.
+      const route = await approvalRoute(at, seed.plans.approved);
+      expect(await fixtureSignIn("h-all", {}, { upstream: at, held: route })).toMatch(SERVER);
+      await browser.url(`${FIXTURE_PAGE}/plans/${seed.plans.approved}`);
+      await approvalReadsAnswered(route, at);
+      await planHeading(seed.plans.approved, "approved");
       await expect($('[data-testid="revoke-limit"]')).toHaveText(REVOKE_LIMIT);
       // The approval is of the current epoch, so the page offers no new one. The form is drawn only once the approval's
-      // read and the identity read answer (EarlierEpoch, web/src/approval.tsx:158). The two markers show the page holds
-      // both answers; EarlierEpoch asks for them again in the same render, so only an answer later than the pause is missed.
+      // read and the identity read answer (EarlierEpoch, web/src/approval.tsx:158). The wait above returned after the page
+      // took every answer to both, three each, so the form's absence is read after the reads that could draw it.
       await $('[data-testid="approval-record"]').waitForExist({ timeout: 20_000 });
       await $('[data-testid="principal"]').waitForExist({ timeout: 20_000 });
       await absent(() => $('main form[aria-label="Approve plan"]').isExisting(), "the Approve form on a plan approved in the current epoch");

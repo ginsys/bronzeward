@@ -2,12 +2,17 @@
 // (ginsys/bronzeward#911, ginsys/bronzeward#916, ginsys/bronzeward#921, ginsys/bronzeward#926 and ginsys/bronzeward#928
 // each met it). `absent` in auth/helpers.ts reads, pauses and
 // reads again. So in an auth spec a single `expect(x).toBe(false)`, `expect(x).not.toContain(...)`,
-// `expect(x).not.toMatch(...)`, a negated wdio element matcher (`await expect(el).not.toBeExisting()`) or an empty list
-// read (`toEqual([])`, `toHaveLength(0)`) must carry a note saying why it cannot pass early: a comment
-// `once: <reason>`, trailing on its line or as the first line of the comment block directly above it. The guard
-// checks that a note exists, not that it is true. The protected specs may not call the one-read `storageEmpty` at all
+// `expect(x).not.toMatch(...)`, a negated wdio matcher (`await expect(el).not.toBeExisting()`, any matcher
+// expect-webdriverio 8.0.0 exports, network ones included), or an empty list read (`toEqual([])`, `toHaveLength(0)`, a literal
+// zero on `toBeElementsArrayOfSize`, `toHaveChildren` or `toBeRequestedTimes`) must carry a note saying why it cannot pass
+// early: a comment `once: <reason>`, trailing on its line or as the first line of the comment block directly above it. The
+// guard checks that a note exists, not that it is true. The protected specs may not call the one-read `storageEmpty` at all
 // (ginsys/bronzeward#934). Every read has a positive control: the same walk must flag a planted bare read in each
 // shape, and the real files are read byte for byte.
+// A member named by a string key (`expect(x)["toEqual"]([])`, `helpers["storageEmpty"]`, `import { "storageEmpty" as e }`)
+// is the same read as the property form. Stated limits, because the parser cannot see them: a computed key (`x[name]`), a
+// key built at run time (`"storage" + "Empty"`), a read through an alias (`const e = expect`), a count range that
+// excludes zero without naming it (`{ lt: 1 }`), and a matcher that a later expect-webdriverio adds to the list.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -19,37 +24,73 @@ const unwrap = (node: ts.Expression): ts.Expression =>
     ? unwrap(node.expression)
     : node;
 
+// `x.name` or `x["name"]`, with the key a string or a template without substitutions: the same member either way.
+// A computed key (`x[name]`) is a stated limit of this guard; so is a read through an alias (`const e = expect`).
+const member = (node: ts.Expression): { object: ts.Expression; name: string } | undefined => {
+  const n = unwrap(node);
+  if (ts.isPropertyAccessExpression(n)) return { object: n.expression, name: n.name.text };
+  if (!ts.isElementAccessExpression(n)) return undefined;
+  const key = unwrap(n.argumentExpression);
+  return ts.isStringLiteralLike(key) ? { object: n.expression, name: key.text } : undefined;
+};
+
 // `expect(x)` or `expect(promise).resolves`, which asserts the same value once the promise settles.
 const isExpect = (node: ts.Expression) => {
   let call = unwrap(node);
-  if (ts.isPropertyAccessExpression(call) && call.name.text === "resolves") call = unwrap(call.expression);
+  const resolves = member(call);
+  if (resolves?.name === "resolves") call = unwrap(resolves.object);
   if (!ts.isCallExpression(call)) return false;
   const name = unwrap(call.expression);
   return ts.isIdentifier(name) && name.text === "expect";
 };
 
-// wdio's own element matchers. Negated, each retries until the negation holds, so it passes at the first read that
-// finds the element absent, before the state it must not show has had its turn.
+// Every matcher expect-webdriverio 8.0.0 exports (element, elements, browser, network and snapshot). Negated, each
+// retries until the negation holds (the snapshot ones compare once), so it passes at the first read that finds the thing
+// absent, before the state it must not show has had its turn. A matcher from a later version is not here until the
+// list is extended.
 const ELEMENT_MATCHERS = new Set([
-  "toBeExisting", "toExist", "toBePresent", "toBeDisplayed", "toBeVisible", "toBeEnabled", "toBeClickable", "toBeFocused",
-  "toHaveText", "toHaveAttribute", "toHaveElementClass",
+  "toBeClickable", "toBeDisabled", "toBeDisplayed", "toBeDisplayedInViewport", "toBeEnabled", "toExist", "toBeExisting", "toBePresent",
+  "toBeFocused", "toBeSelected", "toBeChecked", "toBeStable", "toBeRequired", "toBeReadOnly", "toHaveAttribute", "toHaveChildren",
+  "toHaveComputedLabel", "toHaveComputedRole", "toHaveElementClass", "toHaveElementProperty", "toHaveHeight", "toHaveHref",
+  "toHaveLink", "toHaveHTML", "toHaveId", "toHaveSize", "toHaveStyle", "toHaveTagName", "toHaveText", "toHaveValue", "toHaveWidth",
+  "toBeElementsArrayOfSize",
+  "toHaveClipboardText", "toHaveCookie", "toHaveLocalStorageItem", "toHaveSessionStorageItem", "toHaveTitle", "toHaveUrl", "toHaveWindowCount",
+  "toBeRequested", "toBeRequestedTimes", "toBeRequestedWith",
+  "toMatchSnapshot", "toMatchInlineSnapshot",
 ]);
+
+// wdio's count matchers take a number or `{ eq, lte, ... }` first, then an options object: a literal zero there is an
+// empty-list read, so the options argument is allowed (unlike `toHaveLength`, which takes only the count).
+const COUNT_MATCHERS = new Set(["toBeElementsArrayOfSize", "toHaveChildren", "toBeRequestedTimes"]);
 
 const isLiteral = (node: ts.Expression | undefined, test: (n: ts.Expression) => boolean) => node !== undefined && test(unwrap(node));
 
-// `expect(...).toBe(false)`, `.toEqual([])`, `.toStrictEqual([])`, `.toHaveLength(0)`, and the negated `.not.toContain(...)`,
-// `.not.toMatch(...)` and `.not.<wdio element matcher>(...)`.
+const isZero = (n: ts.Expression) => ts.isNumericLiteral(n) && n.text === "0";
+
+// `{ eq: 0 }` or `{ lte: 0 }`; where both are written `eq` decides, as in wdio's NumberMatcher.
+const isZeroCount = (n: ts.Expression) => {
+  if (isZero(n)) return true;
+  if (!ts.isObjectLiteralExpression(n)) return false;
+  const prop = (key: string) =>
+    n.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name)) && p.name.text === key);
+  const decisive = prop("eq") ?? prop("lte");
+  return decisive !== undefined && isZero(unwrap(decisive.initializer));
+};
+
+// `expect(...).toBe(false)`, `.toEqual([])`, `.toStrictEqual([])`, `.toHaveLength(0)`, a literal zero count on a wdio count
+// matcher, and the negated `.not.toContain(...)`, `.not.toMatch(...)` and `.not.<wdio matcher>(...)`.
 const isAbsenceRead = (node: ts.CallExpression): boolean => {
-  const callee = unwrap(node.expression);
-  if (!ts.isPropertyAccessExpression(callee)) return false;
-  const matcher = callee.name.text;
+  const callee = member(node.expression);
+  if (callee === undefined) return false;
+  const matcher = callee.name;
   const [arg] = node.arguments;
-  if (matcher === "toBe") return node.arguments.length === 1 && isLiteral(arg, (n) => n.kind === ts.SyntaxKind.FalseKeyword) && isExpect(callee.expression);
-  if (matcher === "toEqual" || matcher === "toStrictEqual") return node.arguments.length === 1 && isLiteral(arg, (n) => ts.isArrayLiteralExpression(n) && n.elements.length === 0) && isExpect(callee.expression);
-  if (matcher === "toHaveLength") return node.arguments.length === 1 && isLiteral(arg, (n) => ts.isNumericLiteral(n) && n.text === "0") && isExpect(callee.expression);
+  if (matcher === "toBe") return node.arguments.length === 1 && isLiteral(arg, (n) => n.kind === ts.SyntaxKind.FalseKeyword) && isExpect(callee.object);
+  if (matcher === "toEqual" || matcher === "toStrictEqual") return node.arguments.length === 1 && isLiteral(arg, (n) => ts.isArrayLiteralExpression(n) && n.elements.length === 0) && isExpect(callee.object);
+  if (matcher === "toHaveLength") return node.arguments.length === 1 && isLiteral(arg, isZero) && isExpect(callee.object);
+  if (COUNT_MATCHERS.has(matcher) && isLiteral(arg, isZeroCount) && isExpect(callee.object)) return true;
   if (matcher !== "toContain" && matcher !== "toMatch" && !ELEMENT_MATCHERS.has(matcher)) return false;
-  const negation = unwrap(callee.expression);
-  return ts.isPropertyAccessExpression(negation) && negation.name.text === "not" && isExpect(negation.expression);
+  const negation = member(callee.object);
+  return negation?.name === "not" && isExpect(negation.object);
 };
 
 const NOTE = /^\/\/\s*once:\s*\S/;
@@ -118,11 +159,28 @@ export const protectedStorage = (source: string, fileName: string): number[] => 
   const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
   const lines: number[] = [];
   const visit = (node: ts.Node): void => {
-    if (ts.isIdentifier(node) && node.text === "storageEmpty") lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
+    if ((ts.isIdentifier(node) && node.text === "storageEmpty") || (ts.isStringLiteralLike(node) && node.text === "storageEmpty" && namesMember(node))) {
+      lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
+    }
     ts.forEachChild(node, visit);
   };
   visit(file);
   return lines;
+};
+
+// A string that names a binding or a member, as `import { "x" as y }`, `export { "x" }`, `a["x"]` and `const { "x": y } = a`,
+// is the same reference as the identifier. A string anywhere else (an argument, a value) is only text.
+const namesMember = (node: ts.StringLiteralLike): boolean => {
+  // Parentheses and type-only wrappers around an element-access key change no meaning (`a[("x" as const)]`).
+  let key: ts.Node = node;
+  while (ts.isParenthesizedExpression(key.parent) || ts.isAsExpression(key.parent) || ts.isNonNullExpression(key.parent) || ts.isSatisfiesExpression(key.parent) || ts.isTypeAssertionExpression(key.parent)) key = key.parent;
+  const p = key.parent;
+  return (
+    ts.isImportSpecifier(p) ||
+    ts.isExportSpecifier(p) ||
+    (ts.isElementAccessExpression(p) && p.argumentExpression === key) ||
+    (ts.isBindingElement(p) && p.propertyName === node)
+  );
 };
 
 // How many times the two-read check is called or handed over as a callback (`afterEach(check)`), under its own name or
@@ -165,7 +223,7 @@ test("the positive control: a bare negated wdio matcher, with or without a wait 
     'await expect($("a")).not.toHaveText(expect.stringContaining("x"), { wait: 20_000 });',
     'await expect($("a")).not.toBeDisplayed();',
     'await expect($("a")).not.toBeEnabled();',
-    'await expect($("a")).not.toBeVisible();',
+    'await expect($("a")).not.toBeDisabled();',
     'await expect($("a")).not.toBeClickable();',
     'await (expect($("a"))).not.toBeExisting();',
     'await expect($("a")).not.toBeExisting(); // once: drawn in the same render as the field',
@@ -329,6 +387,128 @@ test("the positive control: a read inside a loop, a closure and a call argument 
     'expect(await Promise.all([$("a").isExisting()])).not.toMatch(/true/);',
   ];
   expect(bare(sample.join("\n"))).toEqual([1, 2, 3]);
+});
+
+test("the positive control: a matcher, `not` or `resolves` named by a string key is the same read as a property access", () => {
+  const sample = [
+    'expect(await posts())["toEqual"]([]);',
+    'expect($("a")).not["toBeExisting"]();',
+    'expect($("a"))["not"].toHaveText("x");',
+    'expect(value)["toBe"](false);',
+    'await expect(posts())["resolves"].toEqual([]);',
+    "expect(value).not[`toContain`](CANARY);",
+    'expect(await posts())["toHaveLength"](0);',
+    'expect(value)["not"]["toMatch"](/x/);',
+    'expect(value)["toBe"](false); // once: drawn in the same render',
+  ];
+  expect(absenceReads(sample.join("\n"))).toEqual([
+    ...[1, 2, 3, 4, 5, 6, 7, 8].map((line) => ({ line, noted: false })),
+    { line: 9, noted: true },
+  ]);
+});
+
+test("the negative control: a string key that names no absence read, and a computed key (a stated limit), are not flagged", () => {
+  const sample = [
+    'expect(value)["toBe"](true);',
+    'expect(await posts())["toEqual"]([1]);',
+    'expect($("a"))["toHaveText"]("x");',
+    "expect(value)[matcher](false);",
+    "expect(value).not[matcher]();",
+    'expect(value)["not"][matcher]();',
+  ];
+  expect(absenceReads(sample.join("\n"))).toEqual([]);
+});
+
+// expect-webdriverio 8.0.0 exports these and the guard's list used to hold eleven of them.
+const ADDED_MATCHERS = [
+  "toBeDisabled", "toBeDisplayedInViewport", "toBeSelected", "toBeChecked", "toBeStable", "toBeRequired", "toBeReadOnly",
+  "toHaveChildren", "toHaveComputedLabel", "toHaveComputedRole", "toHaveElementProperty", "toHaveHeight", "toHaveHref",
+  "toHaveLink", "toHaveHTML", "toHaveId", "toHaveSize", "toHaveStyle", "toHaveTagName", "toHaveValue", "toHaveWidth",
+  "toBeElementsArrayOfSize", "toHaveClipboardText", "toHaveCookie", "toHaveLocalStorageItem", "toHaveSessionStorageItem",
+  "toHaveTitle", "toHaveUrl", "toHaveWindowCount", "toBeRequested", "toBeRequestedTimes", "toBeRequestedWith",
+];
+
+test("the positive control: every wdio matcher the list used to miss is a read of this kind when negated, noted or not", () => {
+  const sample = ADDED_MATCHERS.map((m) => `await expect(subject).not.${m}(arg);`);
+  sample.push(`await expect(subject).not.toBeDisabled(); // once: drawn with the form`);
+  expect(absenceReads(sample.join("\n"))).toEqual([
+    ...ADDED_MATCHERS.map((_, i) => ({ line: i + 1, noted: false })),
+    { line: ADDED_MATCHERS.length + 1, noted: true },
+  ]);
+});
+
+test("the negative control: the list holds no name that wdio 8.0.0 does not export, and the positive form of each is not a read", () => {
+  const sample = [
+    'await expect($("a")).not.toBeVisible();',
+    ...ADDED_MATCHERS.filter((m) => m !== "toBeElementsArrayOfSize" && m !== "toHaveChildren" && m !== "toBeRequestedTimes").map((m) => `await expect(subject).${m}(arg);`),
+  ];
+  expect(bare(sample.join("\n"))).toEqual([]);
+});
+
+test("the positive control: a literal zero is an absence read on every count matcher, with or without an options argument", () => {
+  const sample = [
+    'await expect($$("a")).toBeElementsArrayOfSize(0);',
+    'await expect($$("a")).toBeElementsArrayOfSize({ eq: 0 });',
+    'await expect($$("a")).toBeElementsArrayOfSize({ lte: 0 });',
+    'await expect($$("a")).toBeElementsArrayOfSize(0, { wait: 500 });',
+    'await expect($("ul")).toHaveChildren(0);',
+    'await expect($("ul")).toHaveChildren({ eq: 0 }, { wait: 500 });',
+    "await expect(mock).toBeRequestedTimes(0);",
+    "await expect(mock).toBeRequestedTimes({ lte: 0 });",
+    "await expect(mock).toBeRequestedTimes((0));",
+    "await expect(mock).toBeRequestedTimes({ eq: 0, lte: 1 });",
+    'await expect($$("a")).not.toBeElementsArrayOfSize(2);',
+    'await expect($$("a")).toBeElementsArrayOfSize(0); // once: the list is drawn in the same render',
+  ];
+  expect(absenceReads(sample.join("\n"))).toEqual([
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((line) => ({ line, noted: false })),
+    { line: 12, noted: true },
+  ]);
+});
+
+test("the negative control: a non-zero count, a range above zero and a computed count are not absence reads", () => {
+  const sample = [
+    'await expect($$("a")).toBeElementsArrayOfSize(1);',
+    'await expect($$("a")).toBeElementsArrayOfSize(2);',
+    'await expect($$("a")).toBeElementsArrayOfSize({ gte: 1 });',
+    'await expect($$("a")).toBeElementsArrayOfSize({ eq: 3 });',
+    'await expect($("ul")).toHaveChildren({ gte: 1 });',
+    "await expect(mock).toBeRequestedTimes(1);",
+    // wdio's NumberMatcher lets `eq` override `lte`, so these ask for one request.
+    "await expect(mock).toBeRequestedTimes({ eq: 1, lte: 0 });",
+    "await expect(mock).toBeRequestedTimes({ lte: 0, eq: 1 });",
+    "await expect(mock).toBeRequestedTimes(count);",
+    "await expect(mock).toBeRequested();",
+  ];
+  expect(absenceReads(sample.join("\n"))).toEqual([]);
+});
+
+test("the positive control: a string-named storageEmpty (import, export, element access, destructuring key) is refused in a protected spec", () => {
+  const forms = [
+    'import { "storageEmpty" as empty } from "./helpers.ts";\nafterEach(empty);',
+    'afterEach(helpers["storageEmpty"]);',
+    "afterEach(helpers[`storageEmpty`]);",
+    'const { "storageEmpty": empty } = helpers;',
+    'export { "storageEmpty" } from "./helpers.ts";',
+  ];
+  for (const form of forms) expect(protectedStorage(form, "protected.e2e.ts"), form).toEqual([1]);
+  // A type-only wrapper or parentheses around the key change no meaning.
+  for (const form of ['afterEach(helpers["storageEmpty" as const]);', 'afterEach(helpers[("storageEmpty")]);', 'afterEach(helpers["storageEmpty"!]);']) {
+    expect(protectedStorage(form, "protected.e2e.ts"), form).toEqual([1]);
+  }
+  expect(protectedStorage('import { "storageEmpty" as empty } from "./helpers.ts";', "tabs.e2e.ts")).toEqual([]);
+});
+
+test("the negative control: a string that merely contains the name, the two-read check by a string key and a built key (a stated limit) are not refused", () => {
+  const forms = [
+    'log("storageEmpty");',
+    'const s = "storageEmpty";',
+    'afterEach(helpers["storageEmptyAfterPause"]);',
+    'import { "storageEmptyAfterPause" as check } from "./helpers.ts";',
+    'afterEach(helpers["storage" + "Empty"]);',
+    "afterEach(helpers[name]);",
+  ];
+  for (const form of forms) expect(protectedStorage(form, "protected.e2e.ts"), form).toEqual([]);
 });
 
 const dir = fileURLToPath(new URL("./auth/", import.meta.url));

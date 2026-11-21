@@ -164,6 +164,29 @@ export const answered = (path: string, n: number) =>
   browser.execute((p: string) => performance.getEntriesByType("resource").filter((e) => new URL(e.name).pathname === p).length, `/api/v1${path}`)
     .then((count) => count >= n);
 
+// The route of a plan's approval, for `held` and `approvalReadsAnswered`.
+export async function approvalRoute(at: string, planId: string): Promise<string> {
+  const plan = await api(at, "h-all", "GET", `/plans/${planId}`);
+  expect(plan.status).toBe(200);
+  return `/approvals/${plan.body!["approval"] as string}`;
+}
+
+// For a page signed in with `held: route` (route = approvalRoute) that opened an approved plan: returns once every read
+// that decides the Approve form (EarlierEpoch, web/src/approval.tsx:158) has been answered, so the absence of that form
+// is read after them and not after a pause. The page asks for the approval three times (web/src/plan.tsx:199,
+// web/src/approval.tsx:160 and :204) and for /identity three times (web/src/shell.tsx:454, web/src/plan.tsx:200,
+// web/src/approval.tsx:161). While the approval's answers are held the plan's poll, which restarts only after the
+// reads at plan.tsx:199-201 settle, cannot add a read, so a count of three is exact. A fourth reader of either route
+// would not fail this wait: it would only weaken it, so a change to those reads changes the numbers here. /identity is
+// never held: the shell mounts no page until it answers (web/src/shell.tsx:121).
+export async function approvalReadsAnswered(route: string, upstream: string) {
+  await browser.waitUntil(async () => (await holding()).filter((p) => p === route).length >= 3, { timeout: 20_000, timeoutMsg: `fewer than three answers to ${route} were held` });
+  await browser.waitUntil(() => answered("/identity", 3), { timeout: 20_000, timeoutMsg: "the page did not take three answers to /identity" });
+  await faults({ upstream });
+  await release();
+  await browser.waitUntil(() => answered(route, 3), { timeout: 20_000, timeoutMsg: `the page did not take three answers to ${route}` });
+}
+
 // Signs the test provider's page in as human: the page sends the browser to the provider, which has
 // no login UI here; the case completes the authorization request through the Session API, as the
 // login UI would, and hands the callback back to the browser.
