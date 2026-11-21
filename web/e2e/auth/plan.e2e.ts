@@ -37,7 +37,7 @@ describe("the plan creation page (#357)", () => {
     await browser.url(`${FIXTURE_PAGE}/plans/new?${new URLSearchParams({ release: unknown, machine, operation: "apply-config" })}`);
     await expect($("main h2")).toHaveText("Create a plan", { wait: 20_000 });
     await $("main").$("button=Create plan").click();
-    await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Not saved: /), { wait: 60_000 });
+    await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Not saved[:.] /), { wait: 60_000 });
     // The refusal is shown with the server's own words and the button stays available for a corrected plan.
     await expect($("main").$("button=Create plan")).toBeEnabled();
     // The refusal belongs to apply-config: choosing adopt hides it.

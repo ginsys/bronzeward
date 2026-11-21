@@ -586,14 +586,21 @@ Account scope mch_k2p…7xqa (pre-restore unaccounted)
 Empty:      No drafts yet. A draft collects changes before they are published. [Create draft]
 Withheld:   Configuration not shown: it could not be redacted.
 Unread:     Observed: not read at 09:46 — node unreachable; provider access denied.
-Refused:    Not saved: validation-failed (rule unknown-reference). "registry/x" has no
+Refused:    Not saved. The server checked this and found it not valid. Change what it points
+            at; the server's explanation follows. The server says: "registry/x" has no
             declaration. [Go to field]
-            A `409 recovery-mode-active` with a `scope` member adds "Scope mch_a refuses this
-            request. This answer says nothing about the start mode."
+            ▸ Reference for a bug report   (closed; opens to the status, code, rule, scope and
+              request number, with [Copy])
+            One sentence per problem code, then its next step; the code, the rule, the scope and
+            the request number are in the reference, never in the sentence. A `409
+            recovery-mode-active` with a `scope` member adds "This applies to one part of the
+            installation only. This answer says nothing about the start mode."
 Conflict:   Someone changed this draft (revision 7). Your text is not saved. [Show their change]
-Unknown:    Unknown whether this was saved: the connection dropped. [Repeat exactly]
+Unknown:    Unknown whether this was saved: the connection dropped. Check the current state
+            before you do it again. [Repeat exactly]
             (same request, same key; offered only while this page holds the request,
-            for the same sign-in and last-seen epoch; otherwise [Show current state])
+            for the same sign-in and last-seen epoch; otherwise [Show current state]; the notice
+            never says to try again)
 Set aside:  Your sign-in or the installation's epoch changed. A change with an unknown
             outcome is pending: it may already have been committed. It was not repeated,
             and repeating it stays disabled. [Show current state]

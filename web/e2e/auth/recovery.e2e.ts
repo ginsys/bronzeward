@@ -7,7 +7,7 @@ import { Key } from "webdriverio";
 import { NORMAL_START, PRE_ENTRY } from "../../src/recovery.tsx";
 import { SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_ISSUER } from "../auth.conf.ts";
-import { absent, answers, faults, fixtureSignIn, holding, interrupt, mint, release, seen, storageEmpty } from "./helpers.ts";
+import { absent, answers, faults, fixtureSignIn, holding, interrupt, mint, references, release, seen, storageEmpty } from "./helpers.ts";
 
 const result = () => $('[data-testid="write-result"]');
 const entered = () => $('[data-testid="entered"]');
@@ -53,8 +53,8 @@ describe("the recovery entry (#364)", () => {
     // The refusal says the start is normal, so the restriction the page showed is stale: the shell
     // reads again, finds the server and leaves the state before the entry, and the header keeps why.
     await expect(entered()).toHaveText(expect.stringContaining(NORMAL_START), { wait: 20_000 });
-    // With the refusal's own problem (§8.2), kept after the form went.
-    await expect(entered()).toHaveText(expect.stringContaining("Request "));
+    // With the refusal's own problem (§8.2), kept after the form went: its request number is in the reference.
+    await browser.waitUntil(async () => (await references()).join("\n").includes("Request: "), { timeout: 20_000, timeoutMsg: "the refusal's reference was not kept" });
     await expect($("main h2")).toHaveText("Machines", { wait: 20_000 });
     await absent(async () => (await $("body").getText()).includes(PRE_ENTRY), "the pre-entry text after the shell read again");
     const sent = await entries();
@@ -82,7 +82,7 @@ describe("the recovery entry (#364)", () => {
     await absent(async () => (await $("body").getText()).includes(NORMAL_START), "the normal-start text after the move to the recovery state");
     // The form is gone with the move, so the header keeps the refusal: its reading and its problem.
     await expect(entered()).toHaveText(expect.stringContaining(`An entry is already recorded on this server, in epoch ${epoch}`));
-    await expect(entered()).toHaveText(expect.stringContaining("Request "));
+    await browser.waitUntil(async () => (await references()).join("\n").includes("Request: "), { timeout: 20_000, timeoutMsg: "the refusal's reference was not kept" });
     const sent = await entries();
     expect(sent).toHaveLength(1);
     expect(sent[0]![3]).toBe("undefined");

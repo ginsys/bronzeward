@@ -5,7 +5,7 @@ import { AddCluster, ClusterField, existing, guardsUnload, leaving, record, Resu
 import { type Failed, type Reads, ReadsProvider } from "./list.tsx";
 import { CUT, type Client, type Problem } from "./request.ts";
 import { Failure, ShellContext } from "./shell.tsx";
-import { CUT_OFF, REPEATING, REPLAYED, setAside, unknown, UNKNOWN } from "./states.tsx";
+import { CHECK_STATE, CUT_OFF, REPEATING, REPLAYED, setAside, unknown, UNKNOWN } from "./states.tsx";
 import { EARLIER_EPOCH, EPOCH_CHANGED_ASIDE, NO_EPOCH, NO_EPOCH_HEADER, type Outcome, Write, Writes } from "./write.ts";
 
 const PRINCIPAL = "https://idp.invalid SYNTH-sub-1";
@@ -30,7 +30,7 @@ describe("the notice (B11)", () => {
   test("an unknown outcome names the key, the route and the resource, offers [Repeat exactly] and Dismiss", async () => {
     const [writes, w] = await unknownWrite();
     const out = html(writes, h(WriteNotices, { go: () => {} }));
-    expect(out).toContain(`${UNKNOWN} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
+    expect(out).toContain(`${UNKNOWN} ${CHECK_STATE} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
     expect(out).toContain(">Repeat exactly</button>");
     expect(out).toContain(">Dismiss</button>");
   });
@@ -49,7 +49,7 @@ describe("the notice (B11)", () => {
     const [writes, w] = await unknownWrite();
     writes.setAside(EPOCH_CHANGED_ASIDE);
     const out = html(writes, h(WriteNotices, { go: () => {} }));
-    expect(out).toContain(`${setAside(EPOCH_CHANGED_ASIDE)} Key ${w.key}`);
+    expect(out).toContain(`${setAside(EPOCH_CHANGED_ASIDE)} ${CHECK_STATE} Key ${w.key}`);
     expect(out).toContain('<button type="button" disabled="">Repeat exactly</button><button type="button">Show current state</button>');
     writes.dismiss(w);
     expect(html(writes, h(WriteNotices, { go: () => {} }))).toBe("");
@@ -68,10 +68,11 @@ describe("the notice (B11)", () => {
     } as unknown as Client;
     const w = new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" });
     await writes.submit(w);
-    const fields = " Needs author. forbidden: not allowed. Request req-1.";
-    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(`${unknown("the server answered 403 forbidden")}${fields} Key ${w.key}`);
+    // The problem in words, with no next step: the outcome is unknown, so nothing says to try again.
+    const fields = " Your account is not allowed to do this. Needs author. The server says: not allowed.";
+    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(`${unknown("the server answered 403")} ${CHECK_STATE}${fields} Key ${w.key}`);
     writes.setAside(EPOCH_CHANGED_ASIDE);
-    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(`${setAside(EPOCH_CHANGED_ASIDE)}${fields} Key ${w.key}`);
+    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(`${setAside(EPOCH_CHANGED_ASIDE)} ${CHECK_STATE}${fields} Key ${w.key}`);
   });
 
   // A page under epoch e1 whose write answers come from `answer`, and whose waits before each
@@ -86,7 +87,7 @@ describe("the notice (B11)", () => {
     return [writes, new Write({ method: "POST", path: "/clusters", body: { name: "lab" }, resource: "/clusters" })];
   }
   const internal = { status: 500, headers: new Headers(), data: { type: "urn:bronzeward:problem:internal-error", title: "Internal error", status: 500, detail: "boom", instance: "req-5" } };
-  const fields500 = " Internal error: boom. Request req-5.";
+  const fields500 = " The server failed while handling the request. The server says: boom.";
 
   test("set aside while its repeats run after a 500, the notice shows the 500's problem at once", async () => {
     let out = "";
@@ -96,7 +97,9 @@ describe("the notice (B11)", () => {
       out = html(page, h(WriteNotices, { go: () => {} }));
     });
     await writes.submit(w);
-    expect(out).toContain(`${setAside(EPOCH_CHANGED_ASIDE)}${fields500} Key ${w.key}`);
+    expect(out).toContain(`${setAside(EPOCH_CHANGED_ASIDE)} ${CHECK_STATE}${fields500} Key ${w.key}`);
+    // The outcome is unknown, so the problem's own next step ("report it") is left out.
+    expect(out).not.toContain("Report it");
   });
 
   test("a [Repeat exactly] whose attempt drops shows that drop while it repeats, not the earlier 500", async () => {
@@ -104,10 +107,10 @@ describe("the notice (B11)", () => {
     const [writes, w] = scripted((n) => (n <= 4 ? internal : undefined), (page) => {
       if (w.repeating !== undefined && w.doubt !== undefined && out === "") out = html(page, h(WriteNotices, { go: () => {} }));
     });
-    expect(await writes.submit(w)).toMatchObject({ kind: "unknown", why: "the server answered 500 internal-error" });
+    expect(await writes.submit(w)).toMatchObject({ kind: "unknown", why: "the server answered 500" });
     await writes.submit(w);
-    expect(out).toContain(`${UNKNOWN}${REPEATING} Key ${w.key}`);
-    expect(out).not.toContain("Internal error");
+    expect(out).toContain(`${UNKNOWN} ${CHECK_STATE}${REPEATING} Key ${w.key}`);
+    expect(out).not.toContain("The server failed while handling the request.");
   });
 
   test("a refusal that settles a notice kept since it was set aside shows what the route accepts", async () => {
@@ -117,7 +120,8 @@ describe("the notice (B11)", () => {
     page = writes;
     expect(await writes.submit(w)).toMatchObject({ kind: "refused", status: 403 });
     const shown = html(writes, h(WriteNotices, { go: () => {} }));
-    expect(shown).toContain("Not saved: the server answered 403. Needs author. forbidden: not allowed. Request req-1. Key");
+    expect(shown).toContain("Not saved. Your account is not allowed to do this. Ask someone who has the right role. Needs author. The server says: not allowed. Key");
+    expect(shown).toContain("Request: req-1");
     // A retained refusal is announced as an alert, as the form's own refusal was (ginsys/bronzeward#815).
     expect(shown).toContain('<p role="alert" data-testid="write-notice">');
   });
@@ -137,7 +141,7 @@ describe("the notice (B11)", () => {
     expect(await writes.submit(w)).toMatchObject({ kind: "refused", status: 409 });
     expect(w.kept).toBe(true);
     expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(
-      `Not saved: the server answered 409. Conflict: already recorded. The cluster already recorded: cl_SYNTH1. Key ${w.key}, POST /api/v1/clusters. Read /clusters/cl_SYNTH1.`,
+      `Not saved. This is in a state that does not allow the change. Read its current state before you decide what to do. The server says: already recorded. The cluster already recorded: cl_SYNTH1. Key ${w.key}, POST /api/v1/clusters. Read /clusters/cl_SYNTH1.`,
     );
     // [Show current state] reads that record, not the list the write went to.
     expect(record(w)).toEqual({ named: " The cluster already recorded: cl_SYNTH1.", to: "/clusters/cl_SYNTH1" });
@@ -148,9 +152,11 @@ describe("the notice (B11)", () => {
     // The first answer is lost; the repeat meets the record the first attempt left in epoch e0.
     const [writes, w] = scripted((n) => (n === 1 ? undefined : { status: 409, headers: new Headers(), data: earlier }));
     await writes.submit(w);
-    const fields = " Conflict: from an earlier recovery epoch. Request req-9. The key's earlier record: request req_SYNTH0, epoch e0.";
+    const fields = " This is in a state that does not allow the change. The server says: from an earlier recovery epoch.";
     const out = html(writes, h(WriteNotices, { go: () => {} }));
-    expect(out).toContain(`${setAside(EARLIER_EPOCH)}${fields} Key ${w.key}`);
+    expect(out).toContain(`${setAside(EARLIER_EPOCH)} ${CHECK_STATE}${fields} Key ${w.key}`);
+    // The earlier record's request and epoch are in the reference, not in the sentence.
+    expect(out).toContain("Earlier record: request req_SYNTH0, epoch e0");
     expect(out).not.toContain("Not saved");
     expect(html(writes, h(Result, { w, done: () => "" }))).toContain("See the notice at the top of the page");
   });
@@ -158,14 +164,14 @@ describe("the notice (B11)", () => {
   test("set aside because the epoch read got no answer, it says so, not that the epoch changed", async () => {
     const [writes, w] = await unknownWrite();
     writes.setAside(NO_EPOCH);
-    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(`${setAside(NO_EPOCH)} Key ${w.key}`);
+    expect(html(writes, h(WriteNotices, { go: () => {} }))).toContain(`${setAside(NO_EPOCH)} ${CHECK_STATE} Key ${w.key}`);
   });
 
   test("while [Repeat exactly] runs, the notice stays with its key, route and resource, and offers no second repeat", async () => {
     const [writes, w] = await unknownWrite();
     const run = writes.submit(w);
     const out = html(writes, h(WriteNotices, { go: () => {} }));
-    expect(out).toContain(`${UNKNOWN}${REPEATING} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
+    expect(out).toContain(`${UNKNOWN} ${CHECK_STATE}${REPEATING} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
     expect(out).not.toContain("Repeat exactly");
     expect(out).not.toContain("Dismiss");
     await run;
@@ -179,7 +185,7 @@ describe("the notice (B11)", () => {
     const run = writes.submit(w);
     writes.setAside(EPOCH_CHANGED_ASIDE);
     const out = html(writes, h(WriteNotices, { go: () => {} }));
-    expect(out).toContain(`${setAside(EPOCH_CHANGED_ASIDE)} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
+    expect(out).toContain(`${setAside(EPOCH_CHANGED_ASIDE)} ${CHECK_STATE} Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
     expect(out).toContain('<button type="button" disabled="">Repeat exactly</button><button type="button">Show current state</button>');
     expect(out).not.toContain("Dismiss");
     answer({ status: 201, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: { id: "c1" } });
@@ -332,8 +338,8 @@ describe("the form's result", () => {
 
   test("not done shows the last answer's problem fields (§8.2)", () => {
     const problem = { type: "urn:bronzeward:problem:epoch-superseded", title: "Epoch superseded", status: 503, detail: "this process started before the current epoch", instance: "req-9" };
-    expect(result({ kind: "not-done", why: "every attempt was answered 503 epoch-superseded, which commits nothing", problem })).toContain(
-      ">Not saved: every attempt was answered 503 epoch-superseded, which commits nothing. Epoch superseded: this process started before the current epoch. Request req-9.</p>",
+    expect(result({ kind: "not-done", why: "every attempt was answered 503, which commits nothing", problem })).toContain(
+      ">Not saved: every attempt was answered 503, which commits nothing. This server process started before the last restore, so it may not change anything. Ask an administrator to restart the server. The server says: this process started before the current epoch.</p>",
     );
     expect(result({ kind: "not-done", why: NO_EPOCH, problem: null })).toContain(`>Not saved: ${NO_EPOCH}.</p>`);
   });
@@ -353,7 +359,8 @@ describe("the forms", () => {
     const problem: Problem = { type: "urn:bronzeward:problem:dependency-unavailable", title: "Dependency unavailable", status: 503, detail: "the store is not reachable", instance: "/requests/SYNTH-1" };
     const failed = field({ kind: "unavailable", status: 503, problem });
     expect(failed).toContain("clusters not read");
-    expect(failed).toContain("Not read: dependency-unavailable. Dependency unavailable: the store is not reachable Request /requests/SYNTH-1.");
+    expect(failed).toContain("Not read. Something the server depends on did not answer. Try again in a moment; if it keeps happening, ask an administrator. The server says: the store is not reachable.");
+    expect(failed).toContain("Request: /requests/SYNTH-1");
     const loading = field({ kind: "loading" });
     expect(loading).toContain("clusters not read");
     expect(loading).not.toContain("Not read");

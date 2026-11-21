@@ -826,7 +826,7 @@ describe("an unknown or set-aside outcome keeps the problem of the answer behind
     const { writes } = page([new TypeError("Failed to fetch"), forbidden()]);
     expect(await writes.submit(spec())).toEqual({
       kind: "unknown",
-      why: "the server answered 403 forbidden",
+      why: "the server answered 403",
       problem: { type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: 403, roles: ["author"], instance: "req-1" },
     });
   });
@@ -863,7 +863,7 @@ describe("an unknown or set-aside outcome keeps the problem of the answer behind
     const p = page([problem(500, "internal-error"), () => ((seen = w.doubt), new TypeError("Failed to fetch")), new TypeError("Failed to fetch"), new TypeError("Failed to fetch")]);
     const w = spec();
     await p.writes.submit(w);
-    expect(seen).toMatchObject({ kind: "unknown", why: "the server answered 500 internal-error", problem: { type: "urn:bronzeward:problem:internal-error" } });
+    expect(seen).toMatchObject({ kind: "unknown", why: "the server answered 500", problem: { type: "urn:bronzeward:problem:internal-error" } });
     const q = page([new TypeError("Failed to fetch"), forbidden()]);
     const v = spec();
     await q.writes.submit(v);

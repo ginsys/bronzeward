@@ -8,7 +8,7 @@ import { type ClientConfig, loadClientConfig } from "./config.ts";
 import { PageNotices, useUnloadGuard, WritesProvider } from "./forms.tsx";
 import { navigate, PageState, renewals } from "./page.ts";
 import { type Channel, Renewer } from "./renewer.ts";
-import { TRANSPORT_FAILURE } from "./request.ts";
+import { type Problem, TRANSPORT_FAILURE } from "./request.ts";
 import { Deprecations, SignedIn, type SignedInProps, VersionFooter } from "./shell.tsx";
 import { readName } from "./userinfo.ts";
 import { NOT_ACCEPTED, ProblemFields, problemFields, Status, StatusPage } from "./states.tsx";
@@ -30,8 +30,8 @@ export type View =
   // Between the sign-out button and the redirect: nothing read before stays on the page (§9.7, §10.3).
   | { kind: "signing-out" }
   // `problem`: the answer's §8.2 fields, under a message of its own.
-  | { kind: "sign-in"; message: string; reading?: string | undefined; problem?: string | undefined; signIn: () => void }
-  | { kind: "failed"; message: string; problem?: string | undefined }
+  | { kind: "sign-in"; message: string; reading?: string | undefined; problem?: Problem | undefined; signIn: () => void }
+  | { kind: "failed"; message: string; problem?: Problem | undefined }
   | { kind: "signed-in"; props: SignedInProps };
 
 const failure = (f: Failure) => (f.kind === "transport" ? TRANSPORT_FAILURE : f.reason);
@@ -104,7 +104,7 @@ export function App() {
         location.assign(u);
       });
     // The sign-in view. Its button is the operator's, so its mark is taken at the click.
-    const offer = (message: string, config: ClientConfig, provider: Provider, more: { reading?: string | undefined; problem?: string | undefined } = {}) =>
+    const offer = (message: string, config: ClientConfig, provider: Provider, more: { reading?: string | undefined; problem?: Problem | undefined } = {}) =>
       setView({ kind: "sign-in", message, ...more, signIn: () => void signIn(config, provider, page.mark()) });
 
     const signedIn = async (config: ClientConfig, provider: Provider, tokens: Tokens) => {
@@ -250,12 +250,12 @@ export function Screen({ view, notices = [] }: { view: View; notices?: readonly 
       );
     case "failed":
       // A write whose outcome is unknown keeps its notice here too (B11).
-      return <Page><p role="alert" data-testid="status">{view.message}</p><ProblemFields text={view.problem} /><Deprecations routes={notices} /><PageNotices /></Page>;
+      return <Page><p role="alert" data-testid="status">{view.message}</p><ProblemFields problem={view.problem} /><Deprecations routes={notices} /><PageNotices /></Page>;
     case "sign-in":
       return (
         <Page>
           <p role="alert" data-testid="status">{view.message}</p>
-          <ProblemFields text={view.problem} />
+          <ProblemFields problem={view.problem} />
           <Deprecations routes={notices} />
           <PageNotices />
           {view.reading !== undefined && <p data-testid="reading">This browser's own reading: {view.reading}.</p>}

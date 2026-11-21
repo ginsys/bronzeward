@@ -154,8 +154,10 @@ describe("a refused mark is named by rule and position, never a path (§11.3, PR
   test("the 422 answer to a send shows the position and no path", () => {
     const out = renderToStaticMarkup(h(Refused, { problem: problem({ position: 2, path: SENTINEL, detail: `doc[0]/${SENTINEL}`, instance: "req_1" }), status: 422, verb: "saved" }));
     expect(out).toContain("The mark at position 2 (the first is 0) is refused.");
-    expect(out).toContain("Request req_1.");
+    expect(out).toContain("Request: req_1");
     expect(out).not.toContain("BWSYNTH");
+    // The server's detail names the path, so it is in no sentence, no reference and no copy.
+    expect(out).not.toContain("doc[0]");
     expect(renderToStaticMarkup(h(Refused, { problem: problem({ status: 409, position: 2 }), status: 409, verb: "saved" }))).not.toContain("position");
   });
   test("the notices of an unknown or repeated send show the position and no path either", () => {

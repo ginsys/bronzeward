@@ -54,7 +54,7 @@ describe("the recovery banner", () => {
     expect(html(h(RecoveryRead, { res: { kind: "transport" } }))).toContain('data-testid="recovery-read"');
     expect(status(h(RecoveryRead, { res: { kind: "defect", message: "the response is not JSON" } }))).toBe("Not read: the response is not JSON.");
     const p = { ...problem("internal-error"), status: 500, title: "Internal error", instance: "req-9" };
-    expect(status(h(RecoveryRead, { res: { kind: "unavailable", status: 500, problem: p } }))).toBe("Not read: internal-error. Internal error Request req-9.");
+    expect(status(h(RecoveryRead, { res: { kind: "unavailable", status: 500, problem: p } }))).toBe("Not read. The server failed while handling the request. Report it with the reference below.");
     expect(status(h(RecoveryRead, { res: { kind: "refused", status: 502, problem: null } }))).toBe("Not read: the server answered 502.");
     expect(html(h(RecoveryRead, { res: { kind: "discarded" } }))).toBe("");
   });
@@ -63,8 +63,11 @@ describe("the recovery banner", () => {
     const refused = { kind: "refused", status: 409, problem: { type: "urn:bronzeward:problem:recovery-mode-active", title: "Recovery mode active", status: 409, detail: "only the recovery entry", instance: "req-pre" } } as const;
     expect(status(h(PreEntry, { res: refused, onRead: () => {} }))).toBe(PRE_ENTRY);
     expect(html(h(PreEntry, { res: refused, onRead: () => {} }))).toContain(">Read again</button>");
-    // §8.2: the refusal's title, detail and request ID stay shown under the restriction.
-    expect(html(h(PreEntry, { res: refused, onRead: () => {} }))).toContain('<p data-testid="problem">Not read: Recovery mode active (only the recovery entry). Request req-pre.</p>');
+    // §8.2: the refusal in words, its detail and its request number stay shown under the restriction; the page
+    // is where the entry is made, so the words carry no "wait for an administrator".
+    const shown = html(h(PreEntry, { res: refused, onRead: () => {} }));
+    expect(shown).toContain('<p data-testid="problem">Not read. The server refuses this until a recovery is finished. The server says: only the recovery entry.</p>');
+    expect(shown).toContain("Request: req-pre");
   });
 });
 
@@ -125,12 +128,12 @@ describe("the console's parts (#364)", () => {
       noteEntry({ refused: refused({}) });
       const normal = html(h(Entered));
       expect(normal).toContain(NORMAL_START.replaceAll("'", "&#x27;"));
-      expect(normal).toContain("conflict: SYNTH detail.");
-      expect(normal).toContain("Request req_synth.");
+      expect(normal).toContain("The server says: SYNTH detail.");
+      expect(normal).toContain("Request: req_synth");
       noteEntry({ refused: refused({ epoch: "ep_other" }) });
       const other = html(h(Entered));
       expect(other).toContain("An entry is already recorded on this server, in epoch ep_other, under another request.");
-      expect(other).toContain("Request req_synth.");
+      expect(other).toContain("Request: req_synth");
       expect(other).not.toContain("started normally");
     } finally {
       noteEntry(undefined);

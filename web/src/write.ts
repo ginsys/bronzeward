@@ -338,8 +338,8 @@ export class Writes {
     const headers: Record<string, string> = { "Content-Type": "application/json", "Idempotency-Key": w.key };
     if (!entry) headers["Bronzeward-Expected-Epoch"] = w.epoch!;
     if (w.spec.ifMatch !== undefined) headers["If-Match"] = w.spec.ifMatch;
-    // The last answer, as status and code, and its problem; undefined and null while the last
-    // attempt got none. A [Repeat exactly] starts from the problem of the answer it repeats.
+    // The last answer's status, and its problem (whose code the notice's reference carries); undefined and null
+    // while the last attempt got none. A [Repeat exactly] starts from the problem of the answer it repeats.
     let last: string | undefined;
     let lastProblem: Problem | null = w.repeating?.problem ?? null;
     // Set aside by a check before a send or by an answer's refusal: either way with the last
@@ -419,7 +419,7 @@ export class Writes {
       }
       const p = problemOf(a.data);
       const code = p === null ? undefined : p.type.slice(PREFIX.length);
-      last = code === undefined ? `${a.status}` : `${a.status} ${code}`;
+      last = `${a.status}`;
       lastProblem = p;
       const refused: Outcome = { kind: "refused", status: a.status, problem: p, replayed, ...(a.data === CUT ? { cut: true as const } : {}) };
       if (a.status === 401) {
