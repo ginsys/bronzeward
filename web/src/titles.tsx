@@ -44,13 +44,14 @@ export function useMachineText(id: string | null | undefined): string | undefine
 // The name of a cluster, as its read gives it; undefined while the read is pending, or when the name is not safe to show.
 export function useClusterText(id: string | null | undefined): string | undefined {
   const c = useBody<S["ClusterBody"]>(at("clusters", id));
-  return c == null || !SAFE.test(c.name) ? undefined : c.name;
+  return typeof c?.name === "string" && SAFE.test(c.name) ? c.name : undefined;
 }
 
 // A machine as a link once its body is read: its name, else its address, else "an unnamed machine", and the
 // whole identifier as the title attribute. Until the body arrives, or where the read gave none, and for an
 // identifier of another shape (no read), it is shown as any other identifier is.
 // A view that reads the machine itself passes it as `held` (its body, once read): nothing is asked.
+// The view's own read of the machine: its body, or undefined until the read answers (a failure it holds keeps the view as it is).
 export type Held = { body: S["MachineBody"] | undefined };
 export function MachineById({ id, none = "none", held }: { id: string | null | undefined; none?: string; held?: Held }): ReactNode {
   const asked = id != null && viewOf(id) === "machines";
