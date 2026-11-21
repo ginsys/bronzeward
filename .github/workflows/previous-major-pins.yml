@@ -32,7 +32,7 @@ jobs:
         with:
           sparse-checkout: |
             scripts/ci
-            web/e2e/previous-majors.json
+            web/e2e
       - id: check
         name: Compare the pins with the sources
         run: |
@@ -47,7 +47,8 @@ jobs:
           REPO: ${{ github.repository }}
           STATUS: ${{ steps.check.outputs.status }}
           KEY: ${{ github.ref == 'refs/heads/main' && 'previous-major-pins' || 'previous-major-pins-test' }}
-          TITLE_PREFIX: ${{ github.ref == 'refs/heads/main' && '' || '[test] ' }}
+          # An empty string is false in an expression, so the test value goes first: `main && '' || x` yields x.
+          TITLE_PREFIX: ${{ github.ref != 'refs/heads/main' && '[test] ' || '' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EVENT: ${{ github.event_name }}
           SHA: ${{ github.sha }}
