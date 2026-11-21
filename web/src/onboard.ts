@@ -62,7 +62,8 @@ const enc = encodeURIComponent;
 // is a valid name (persistence and API §3.5); else no name, and the reason, which the machine's line says.
 export function nameOf(hostname: string): { name: string; note?: string } | { name?: undefined; note: string } {
   if (hostname === "") return { note: "no name: the node reported no hostname" };
-  const name = hostname.toLowerCase();
+  // A to Z only, as the command does: Unicode lowercasing differs between languages (U+0130 is two code points here).
+  const name = hostname.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
   if (!MACHINE_NAME.test(name)) return { note: `no name: the hostname ${JSON.stringify(hostname.length > 64 ? `${hostname.slice(0, 64)}…` : hostname)} is not a valid name` };
   return name === hostname ? { name } : { name, note: "named by its hostname in lower case" };
 }
