@@ -40,6 +40,8 @@ run() {
   PATH="$work/bin:$PATH" WORK=$work LIST=$2 REPO=o/r STATUS=$1 DIFF=$diff_text \
     RUN_URL=https://example.test/run/1 EVENT=schedule SHA=abc1234 "$script" >/dev/null 2>&1 || rc=$?
   touch "$work/calls"
+  # The body of an issue is never edited, whatever the case.
+  [ "$(grep -c '^issue edit$' "$work/calls" || true)" -eq 0 ] || bad "gh issue edit was called"
 }
 calls() { grep -c "^$1\$" "$work/calls" || true; }
 
