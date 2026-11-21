@@ -1,0 +1,63 @@
+name: Previous-major pins
+
+# Once a week, compares web/e2e/previous-majors.json with the previous major of Chrome, Edge and
+# Firefox that the vendors publish (ginsys/bronzeward#907), through scripts/ci/previous-major-pins.py.
+# A pin that is behind opens one issue (or edits the open one) naming the new pins, Edge's .deb URL
+# and checksum with them, and the run fails; the pins match again and the issue closes. A source
+# that cannot be read fails the run and leaves the issue alone, so an outage never reads as "no
+# drift". Applying the pins is one command in a pull request, which runs previous-majors.yml.
+# A run of another branch than main reports into a separate "[test]" issue, never the real one.
+
+on:
+  schedule:
+    - cron: '13 6 * * 1'  # Mondays, 06:13 UTC; GitHub stops a schedule after 60 days without repository activity
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    # One run at a time, so two runs cannot both create the issue.
+    concurrency:
+      group: previous-major-pins
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          sparse-checkout: |
+            scripts/ci
+            web/e2e/previous-majors.json
+      - id: check
+        name: Compare the pins with the sources
+        run: |
+          status=0
+          python3 scripts/ci/previous-major-pins.py --check web/e2e/previous-majors.json >"$RUNNER_TEMP/drift.txt" || status=$?
+          cat "$RUNNER_TEMP/drift.txt"
+          echo "status=$status" >>"$GITHUB_OUTPUT"
+      # Exit 0 closes the open issue, 1 opens or edits it, 2 does nothing (scripts/ci/report-pin-drift.sh).
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          STATUS: ${{ steps.check.outputs.status }}
+          KEY: ${{ github.ref == 'refs/heads/main' && 'previous-major-pins' || 'previous-major-pins-test' }}
+          TITLE_PREFIX: ${{ github.ref == 'refs/heads/main' && '' || '[test] ' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          DIFF=$(cat "$RUNNER_TEMP/drift.txt") scripts/ci/report-pin-drift.sh
+      # A pin that is behind (1) or a source that could not be read (2) is a red run.
+      - name: Fail when the pins are behind or a source failed
+        if: ${{ steps.check.outputs.status != '0' }}
+        env:
+          STATUS: ${{ steps.check.outputs.status }}
+        run: |
+          echo "previous-major-pins: exit status $STATUS (1 = behind the sources, 2 = a source could not be read)" >&2
+          exit 1
