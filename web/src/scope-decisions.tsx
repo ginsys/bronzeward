@@ -7,6 +7,7 @@ import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { Id } from "./list.tsx";
 import type { Problem } from "./request.ts";
+import { safeWord } from "./safe.ts";
 import { Action } from "./shell.tsx";
 import { Status } from "./states.tsx";
 import { MARK_NEXT, MISSING_MEANING, MISSING_UNKNOWN, RELEASE_NOT_APPROVAL } from "./words.ts";
@@ -14,20 +15,20 @@ import { MARK_NEXT, MISSING_MEANING, MISSING_UNKNOWN, RELEASE_NOT_APPROVAL } fro
 type MarkBody = components["schemas"]["ScopeMarkBody"];
 type ReleaseBody = components["schemas"]["ScopeReleaseBody"];
 
-const marked = (data: unknown): ReactNode => {
+export const marked = (data: unknown): ReactNode => {
   const x = data as MarkBody;
   return (
     <>
-      Scope marked {x.state}, was {x.from} (act <Id id={x.act} />).{" "}
-      {x.missing.map((k) => `Missing ${k}: ${MISSING_MEANING[k] ?? MISSING_UNKNOWN}. `)}
+      Scope marked {safeWord(x.state)}, was {safeWord(x.from)} (act <Id id={x.act} />).{" "}
+      {x.missing.map((k) => `Missing ${safeWord(k)}: ${MISSING_MEANING[k] ?? MISSING_UNKNOWN}. `)}
       {MARK_NEXT[x.state] ?? MARK_NEXT["blocked"]}
     </>
   );
 };
 
-const released = (data: unknown): ReactNode => {
+export const released = (data: unknown): ReactNode => {
   const x = data as ReleaseBody;
-  return <>Scope released, was {x.from} (act <Id id={x.act} />). {RELEASE_NOT_APPROVAL}</>;
+  return <>Scope released, was {safeWord(x.from)} (act <Id id={x.act} />). {RELEASE_NOT_APPROVAL}</>;
 };
 
 // What each scope state needs next (T31), as text; the Decision column holds the controls (ginsys/bronzeward#365). The accounting of a
