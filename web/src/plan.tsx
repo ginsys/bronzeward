@@ -82,7 +82,7 @@ export function nextAfter(p: Problem | null, release: string, machine: string): 
     return <>Plan the machine's Desired release{desired !== undefined && <> <Named id={desired} /></>} instead. A published draft cannot be published again: to send this release's changes, change a new draft and publish it, then plan the release it makes.</>;
   }
   if (d.includes("has no Applied configuration")) {
-    return <>Hand the machine over first: <Ref to={planPath(release, machine, "adopt")} id={machine}>create an adopt plan</Ref> for it. Nothing has been sent.</>;
+    return <>Adopt the machine first: <Ref to={planPath(release, machine, "adopt")} id={machine}>create an adopt plan</Ref> for it. Nothing has been sent.</>;
   }
   if (d.includes("the machine has no assignment")) return <>Add an assignment for this machine to a draft (one that selects nothing is enough), publish that draft, then plan the release it makes.</>;
   if (d.includes("assignment has moved")) return <>Change a new draft and publish it, so a release is compiled from the machine's current assignment, then plan that release.</>;
@@ -127,7 +127,7 @@ function Create({ release, machine, first }: { release: string; machine: string;
         <label>Operation{" "}
           <select value={operation} onChange={(e) => (setOperation(e.target.value as Operation), setNote(undefined))} disabled={busy}>
             <option value="apply-config">apply-config (send this release, mode no-reboot)</option>
-            <option value="adopt">adopt (hand over: sends nothing to the machine)</option>
+            <option value="adopt">adopt (records what the machine runs; sends nothing to it)</option>
           </select>
         </label>
       </p>

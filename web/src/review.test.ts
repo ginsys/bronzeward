@@ -115,7 +115,7 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
   test("the next step comes from the machine's Desired and Applied, and sends nothing", () => {
     const rel = "rel_BWSYNTH-h7rt2bd";
     const pc = false;
-    expect(releaseNote(rel, { desired: rel, applied: null, pendingConvergence: true })).toContain("Hand it over first (an adopt plan)");
+    expect(releaseNote(rel, { desired: rel, applied: null, pendingConvergence: true })).toContain("Adopt it first (an adopt plan)");
     expect(releaseNote(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward", importBase: null }, pendingConvergence: true })).toContain("An apply-config plan sends this release to it");
     const unchanged = releaseNote(rel, { desired: rel, applied: { release: "rel_BWSYNTH-old", source: "bronzeward", importBase: null }, pendingConvergence: pc });
     expect(unchanged).toContain("carries this machine's Applied configuration");

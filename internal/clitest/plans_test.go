@@ -265,7 +265,7 @@ func newPlanEnvExec(t *testing.T, execution string) *planEnv {
 		f.want(e.ctl(append(h, step...)...), 0)
 	}
 	r := e.ctl(append(h, "publish", draft)...)
-	f.want(r, 0, e.s.machine+" has no Applied release: hand it over with an adopt plan:\n    "+
+	f.want(r, 0, e.s.machine+" has no Applied release: adopt it with an adopt plan:\n    "+
 		"bronzewardctl plan create --release '")
 	if e.rel = release.FindString(r.out); e.rel0 == "" || e.rel == "" {
 		t.Fatalf("the publications named releases %q and %q", e.rel0, e.rel)
@@ -294,7 +294,7 @@ func TestPlans(t *testing.T) {
 			"an apply-config plan is for the machine's Desired release",
 			"Plan the machine's Desired release instead: bronzewardctl plan create --release '"+e.rel+"' --machine "+m+" --operation 'apply-config'")
 		f.want(e.ctl(e.create("apply-config")...), 1, "has no Applied configuration",
-			"Hand the machine over with an adopt plan: bronzewardctl plan create --release '"+e.rel+"' --machine "+m+" --operation 'adopt'")
+			"Adopt the machine with an adopt plan, which records what the machine runs as its starting point and sends nothing: bronzewardctl plan create --release '"+e.rel+"' --machine "+m+" --operation 'adopt'")
 		in.set(nil, nil)
 		f.want(e.ctl(e.create("adopt", "--mode", "no-reboot")...), 2, "an adopt plan takes no --mode", "nothing was sent")
 		f.want(e.ctl(e.create("adopt", "--expires-in", "1500ms")...), 2, "whole seconds")

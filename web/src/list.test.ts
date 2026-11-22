@@ -152,7 +152,7 @@ describe("W2 badges and the observed column", () => {
     expect(badges(machine({}))).toEqual(["Last read matched what was applied"]);
     expect(badges(machine({ pendingConvergence: true, desired: "rel_next" }))).toEqual(["Release not applied yet"]);
     expect(badges(machine({ openDrift: { revision: 1, observation: "obs_k", lastObservation: "obs_m", lateLanding: null }, frozen: true }))).toEqual(["Changed on the machine", "Frozen"]);
-    expect(badges(machine({ desired: null, applied: null, observed: null }))).toEqual(["Not managed yet"]);
+    expect(badges(machine({ desired: null, applied: null, observed: null }))).toEqual(["Not adopted yet"]);
   });
 
   test("openDrift is the only authority for drift: an observation equal to Desired with drift open is no match of Applied", () => {

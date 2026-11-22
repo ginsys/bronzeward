@@ -247,7 +247,7 @@ func TestDriftRevertRefusesBeforeSending(t *testing.T) {
 		// The server refuses an apply-config plan for a machine with no Applied configuration
 		// (internal/api/plans.go), so the guidance is an adopt plan.
 		{"no Applied", `{"id":"mch_a","cluster":"cls_a","desired":"rel_b","applied":null,"openDrift":null,"frozen":false,"scopeState":"normal"}`,
-			"machine mch_a has no Applied configuration, so it has no drift to revert; nothing was sent. Hand it over with an adopt plan: bronzewardctl plan create --release 'rel_b' --machine 'mch_a' --operation 'adopt'"},
+			"machine mch_a has no Applied configuration, so it has no drift to revert; nothing was sent. Adopt it with an adopt plan: bronzewardctl plan create --release 'rel_b' --machine 'mch_a' --operation 'adopt'"},
 		{"no Applied and no Desired", `{"id":"mch_a","cluster":"cls_a","desired":null,"applied":null,"openDrift":null,"frozen":false,"scopeState":"normal"}`,
 			"machine mch_a has no Desired release to revert to; nothing was sent. Publish a release that covers it, then: bronzewardctl plan create --release <release> --machine 'mch_a' --operation 'adopt'"},
 	} {

@@ -135,7 +135,7 @@ describe("Connect a cluster (#1001)", () => {
     await storageEmptyAfterPause();
   });
 
-  it("ONBOARD-03 (ginsys/bronzeward#1066): the draft page's [Start managing these machines], pressed as the one-person identity, publishes the draft and creates and approves one adopt plan per machine, the approval marked as the person's own", async function () {
+  it("ONBOARD-03 (ginsys/bronzeward#1066): the draft page's [Adopt these machines], pressed as the one-person identity, publishes the draft and creates and approves one adopt plan per machine, the approval marked as the person's own", async function () {
     this.timeout(300_000);
     await nodes();
     await open("h-all");
@@ -148,7 +148,7 @@ describe("Connect a cluster (#1001)", () => {
     await expect($("main h2")).toHaveText(expect.stringContaining("Draft: "));
     // The sentence above the button says what the press does, and that it sends nothing to any machine.
     await expect($('[data-testid="handover-sentence"]')).toHaveText(expect.stringContaining("It sends nothing to any machine."));
-    await $("main").$("button=Start managing these machines").click();
+    await $("main").$("button=Adopt these machines").click();
     // Connect gave each machine an assignment that selects nothing, so the publication makes a release a plan can
     // bind: the whole handover runs here, in every browser, and a draft line that stops fails the case.
     const draftLine = () => $$('[data-testid="handover-line"]')[0]!;

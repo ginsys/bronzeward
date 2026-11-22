@@ -283,7 +283,7 @@ func (e *env) driftRevert(args []string) (err error) {
 		return notSent{fmt.Errorf("machine %s has no Desired release to revert to; nothing was sent. Publish a release that covers it, then: %s",
 			m, createWords("<release>", client.ShellWord(m), client.ShellWord(op)))}
 	case x.Applied == nil:
-		return notSent{fmt.Errorf("machine %s has no Applied configuration, so it has no drift to revert; nothing was sent. Hand it over with an adopt plan: %s",
+		return notSent{fmt.Errorf("machine %s has no Applied configuration, so it has no drift to revert; nothing was sent. Adopt it with an adopt plan: %s",
 			m, createLine(*x.Desired, m, "adopt"))}
 	case x.OpenDrift == nil:
 		return notSent{fmt.Errorf("machine %s has no open drift record; nothing was sent. To apply its Desired release without a revert: %s",

@@ -78,7 +78,7 @@ describe("the machines", () => {
     await shows(4);
     expect(await count()).toBe("Showing 4 of 4.");
     const row = await $(`a[title="${ids[0]}"]`).parentElement().parentElement().$$("td").map((td) => td.getText());
-    expect(row).toEqual([expect.stringMatching(/^192\.0\.2\.\d+:50000$/), expect.stringMatching(/^node synthetic-node-\d$/), "none", "none", "none", "Frozen, Not managed yet"]);
+    expect(row).toEqual([expect.stringMatching(/^192\.0\.2\.\d+:50000$/), expect.stringMatching(/^node synthetic-node-\d$/), "none", "none", "none", "Frozen, Not adopted yet"]);
     await $("label*=State").$("select").selectByAttribute("value", "frozen");
     await shows(1);
     expect(await rows()).toEqual([ids[0]]);
@@ -102,8 +102,8 @@ describe("the machines", () => {
     await $(`a[title="${id}"]`).click();
     await expect($("main h2")).toHaveText(`Machine ${ADDRESS}`);
     expect(await where()).toBe(`${FIXTURE_PAGE}/machines/${id}`);
-    // A machine just recorded has no Desired and no Applied: the page says it is not handed over and offers the import.
-    await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("Not managed yet"), { wait: 20_000 });
+    // A machine just recorded has no Desired and no Applied: the page says it is not adopted and offers the import.
+    await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("Not adopted yet"), { wait: 20_000 });
     await expect($('[data-testid="next-step"]').$("a=Import this machine")).toBeDisplayed();
     await $(`a[title="${cl.id}"]`).click();
     await expect($("main h2")).toHaveText("Cluster lab-a");
@@ -798,7 +798,7 @@ describe("the rendered review of a release's machine", () => {
     await expect($('[data-testid="provenance"]')).toHaveText(expect.stringContaining("registry/example-pass"));
     await expect($('[data-testid="provenance"]')).toHaveText(expect.stringContaining("doc[0]/machine/registries/config/registry.example.test/auth/password"));
     await expect($("main")).toHaveText(expect.stringContaining(PROVENANCE_LIMIT));
-    await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("Hand it over first (an adopt plan)"));
+    await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("Adopt it first (an adopt plan)"));
     // once: the case opens pages and clicks links only, and the page sends a write only from a submit.
     // The page reads and sends nothing: no write left the browser.
     expect(await (await fetch(`${CONTROL}/writes`)).json()).toEqual([]);

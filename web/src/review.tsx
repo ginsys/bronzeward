@@ -92,7 +92,7 @@ export function releaseNote(release: string, m: Pick<Machine, "desired" | "appli
   if (m.desired !== release) {
     return `This release is not the Desired release of this machine${m.desired === null ? "" : ` (Desired is ${short(m.desired)})`}, so it needs no step for this release.`;
   }
-  if (m.applied === null) return "This machine has no Applied configuration. Hand it over first (an adopt plan): an apply-config plan is refused until then. Nothing has been sent to it.";
+  if (m.applied === null) return "This machine has no Applied configuration. Adopt it first (an adopt plan): an apply-config plan is refused until then. Nothing has been sent to it.";
   // An open drift means the node differs from what Bronzeward recorded, whatever Desired and Applied say: the machine page
   // gives the next step (adopt the node's configuration, or revert it), so this page claims neither "nothing left to send" nor a send.
   if (m.openDrift != null) return "The node differs from what Bronzeward recorded for this machine. The machine page says what to do next.";
@@ -173,12 +173,12 @@ export function ReviewBody({ r, machine }: { r: Review; machine?: MachineLike })
   );
 }
 
-// [Plan adopt (handover)] or [Plan apply]: opens the creation page for this release and machine. It sends nothing.
+// [Plan adopt] or [Plan apply]: opens the creation page for this release and machine. It sends nothing.
 function PlanButton({ release, machine, m }: { release: string; machine: string; m: Machine }) {
   const { go } = useReads();
   const op = planFor(release, m);
   if (op === undefined) return null;
-  return <p><Action label={op === "adopt" ? "Plan adopt (handover)" : "Plan apply"} needs={["publisher"]} onClick={() => go(planPath(release, machine, op))} /></p>;
+  return <p><Action label={op === "adopt" ? "Plan adopt" : "Plan apply"} needs={["publisher"]} onClick={() => go(planPath(release, machine, op))} /></p>;
 }
 
 // The page's next step. A position that was not read draws the failure and a way to read again, and no sentence, line or

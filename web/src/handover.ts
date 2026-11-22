@@ -14,9 +14,9 @@ import type { Write, WriteSpec } from "./write.ts";
 
 type Draft = components["schemas"]["DraftBody"];
 
-export const HANDOVER_TITLE = "Start managing these machines";
+export const HANDOVER_TITLE = "Adopt these machines";
 export const HANDOVER_SENTENCE =
-  "This adds an assignment that selects nothing for each machine that has none, publishes the draft, then creates a handover plan for each machine and approves each plan as you, recorded as your own approval. It sends nothing to any machine. A change you apply later keeps its own plan and approval.";
+  "Adopting records what each machine runs as its starting point. This adds an assignment that selects nothing for each machine that has none, publishes the draft, then creates an adopt plan for each machine and approves each plan as you, recorded as your own approval. It sends nothing to any machine. A change you apply later keeps its own plan and approval.";
 export const UNSAVED = "The draft editor holds text you have not saved, and a press publishes only what is saved. Save it or discard it, then press again. Nothing was sent.";
 // A write of an earlier press that stays open (in flight, of unknown outcome, or set aside) may still commit or be
 // repeated, so a new press would send the same act under a new key: it waits for the notice's resolution.
@@ -26,7 +26,7 @@ export const UNRESOLVED = "A request of an earlier press has not finished: its o
 export const ROLES = ["author", "publisher", "approver"] as const;
 export const missingRoles = (held: readonly string[]) => ROLES.filter((r) => !held.includes(r));
 export const MISSING = (missing: readonly string[]) =>
-  `Needs the ${missing.join(" and ")} role. The separate steps stay: publish this draft, then on each machine's release page plan the adopt (handover), then approve each plan.`;
+  `Needs the ${missing.join(" and ")} role. The separate steps stay: publish this draft, then on each machine's release page plan the adopt, then approve each plan.`;
 // A press publishes the draft as the page showed it: with no ETag kept for it, nothing is sent. This is the
 // sentence of every draft write on the page (drafts.tsx re-exports it); it sits here so this file stays free of React.
 export const NO_ETAG = "Not sent: this page has not read the draft under the current epoch. Read it again first.";
@@ -46,12 +46,12 @@ export type Line = { state: "working" | "waiting" | "done" | "left" | "stopped";
 export const LINES = {
   publishing: "Publishing the draft.",
   published: "Published. Nothing was sent to any machine.",
-  planning: "Creating the handover plan.",
+  planning: "Creating the adopt plan.",
   approving: "Approving the plan as you.",
-  waiting: "The plan is approved. The controller records the handover when its gates allow; you can leave this page, it finishes without it.",
+  waiting: "The plan is approved. The controller records the adoption when its gates allow; you can leave this page, it finishes without it.",
   slow: "Still waiting for the controller. It continues without this page. Press the button again to read where it is.",
-  managed: "Managed. Bronzeward holds this machine's configuration; nothing was sent to it.",
-  already: "Already managed.",
+  managed: "Adopted. Bronzeward holds this machine's configuration; nothing was sent to it.",
+  already: "Already adopted.",
   applied: "Left as it is: this machine already has an applied configuration, so its changes keep their own steps. Open the machine to see the next one.",
   repeated: "Stopped: the machine's position did not change after this step. Open the machine to see where it is.",
   unresolved: "Stopped: an operation on this machine is unresolved. The controller keeps examining it; open the machine to see it.",
@@ -60,7 +60,7 @@ export const LINES = {
   publishUnread: "The publication's progress could not be read. Nothing was sent to any machine. Press the button again to read where it is.",
   noOperation: "The publication was accepted without naming its operation. Find it in the operations list, kind publish.",
   noPlan: "The plan was created, but the answer named no plan. Open the machine to find it.",
-  notImported: "Left as it is: this machine has no stored import to hand over. Open the machine to see its next step.",
+  notImported: "Left as it is: this machine has no stored import to adopt. Open the machine to see its next step.",
   stillOpen: "Stopped: the draft still reads open after its publication. Press the button again.",
   assigning: "Adding an assignment that selects nothing for each machine that has none, so each release holds one.",
   noAnswerETag: "Stopped: the answer to an assignment named no ETag for the draft, so the press cannot tell whether it changed since. Nothing more was sent. Read the draft again, then press the button again.",
