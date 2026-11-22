@@ -20,7 +20,7 @@ import { Action, useFocusOn } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
 import { DraftLink } from "./draft-link.tsx";
 import { ClusterLink, ClusterOption, ClusterRef, DraftHead, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
-import { draftCalled, draftName, safeText } from "./titles.ts";
+import { draftCalled, draftName, draftText, safeText } from "./titles.ts";
 import { PageNote } from "./page-note.tsx";
 import { CREATE_DRAFT_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, NAME_NOT_SHOWN } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
@@ -172,24 +172,26 @@ export function Drafts() {
   );
 }
 
+// What a created draft's answer says: the draft by name (with its short identifier beside "Untitled draft", as this line shows no other) and its cluster.
+export function CreatedDraft({ data }: { data: unknown }) {
+  const id = createdId(data);
+  if (id === undefined) return <>Draft created, but the answer names no draft. Read <Ref to="/changes" id="/changes">the {DRAFTS_AND_RELEASES} page</Ref>.</>;
+  const d = data as Draft;
+  return <>Draft <Ref to={`/drafts/${id}`} id={id}>{draftName(d)}</Ref>{draftText(d) === undefined && ` (${short(id)})`} created (<ClusterRef id={d.cluster} />).</>;
+}
+
 export function CreateDraft() {
   const [w, send] = useSend();
   const writes = useWrites();
   const [clusters] = useList<Cluster>("/clusters", "", true);
   const settled = keepOnDone((o) => createdId(o.kind === "done" ? o.data : null), () => writes?.client?.currentEpoch);
   const submit = (d: FormData) => send({ method: "POST", path: "/drafts", resource: "/changes", body: { cluster: field(d, "cluster"), title: field(d, "title") }, settled });
-  const done = (data: unknown) => {
-    const id = createdId(data);
-    if (id === undefined) return <>Draft created, but the answer names no draft. Read <Ref to="/changes" id="/changes">the {DRAFTS_AND_RELEASES} page</Ref>.</>;
-    const d = data as Draft;
-    return <>Draft <Ref to={`/drafts/${id}`} id={id}>{draftName(d)}</Ref> created (<ClusterRef id={d.cluster} />).</>;
-  };
   const options = clusters.kind === "ok" ? clusters.data.items : [];
   return (
     <>
       <h2>Create draft</h2>
       <PageNote parts={[CREATE_DRAFT_NOTE]} />
-      <Form label="Create draft" onSubmit={submit} w={w} done={done}>
+      <Form label="Create draft" onSubmit={submit} w={w} done={(data) => <CreatedDraft data={data} />}>
         <p>
           <label>Cluster:{" "}
             <select name="cluster" required defaultValue="" key={options.length}>

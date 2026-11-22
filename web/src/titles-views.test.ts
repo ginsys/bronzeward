@@ -8,7 +8,7 @@ import { act, createElement as h, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
-import { DraftItem, Drafts } from "./drafts.tsx";
+import { CreatedDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { OpenDraftsView } from "./machines.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
 import { PublishDraft } from "./publish.tsx";
@@ -831,5 +831,27 @@ describe("ginsys/bronzeward#1055: a dependency alert is a sentence, the identifi
     await settled();
     const first = [...box.querySelectorAll('[aria-label="Dependency alerts"] tbody tr')].map((r) => r.children[0]!.textContent);
     expect(first).toEqual(["Alert of kind class-change.", "A dependency is lost: the provider no longer has this version."]);
+  });
+
+  test("a kind, class or reason that is not safe text is not shown in its cell either", async () => {
+    answers["/dependency-alerts"] = ok({ items: [alert({ kind: "bad\u202Ekind", class: "bad\u202Eclass", reason: "bad\u0007reason" })], next: null });
+    await mount(h(Sources, { query: "", go: () => {} }));
+    await settled();
+    const row = box.querySelector('[aria-label="Dependency alerts"] tbody tr')!;
+    expect([...row.children].slice(0, 4).map((c) => c.textContent)).toEqual(["Alert.", "(name not shown)", "(name not shown)", "(name not shown)"]);
+    expect(box.textContent).not.toContain("bad");
+  });
+});
+
+describe("ginsys/bronzeward#1055: the Create draft confirmation names the draft, with the short identifier beside Untitled draft", () => {
+  const created = (title: string) => ({ id: DRF, cluster: "cl_a", title, state: "open", revision: 1, entries: [] });
+  test("a titled draft: the title, no identifier text; an untitled one: Untitled draft (short identifier)", async () => {
+    answers["/clusters/cl_a"] = ok({ id: "cl_a", name: "office" });
+    await mount(h(CreatedDraft, { data: created("Office labels") }));
+    await settled();
+    expect(box.textContent).toBe("Draft Office labels created (Cluster office).");
+    await mount(h(CreatedDraft, { data: created("a\nb") }), { ...reads, view: "untitled" });
+    await settled();
+    expect(box.textContent).toBe(`Draft Untitled draft (${short(DRF)}) created (Cluster office).`);
   });
 });
