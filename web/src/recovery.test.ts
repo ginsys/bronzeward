@@ -211,6 +211,10 @@ describe("the console's parts (#364)", () => {
       [[" alice", "", ""], "identity"], [["alice ", "", ""], "identity"],
       [["", " https://idp.example", "sub-1"], "issuer"], [["", "https://idp.example ", "sub-1"], "issuer"],
       [["", "https://idp.example", " alice"], "subject"], [["", "https://idp.example", "alice "], "subject"],
+      // a no-break space at either edge
+      [[" alice", "", ""], "identity"], [["alice ", "", ""], "identity"],
+      [["", "https://idp.example", " alice"], "subject"], [["", "https://idp.example", "alice "], "subject"],
+      [["", " https://idp.example", "sub-1"], "issuer"],
     ] as [[string, string, string], string][]) {
       const c = revocationConfirmation(args[0], args[1], args[2], "left");
       expect([args, c.target, c.line, c.why]).toEqual([args, undefined, undefined, `The ${field} has spaces at its start or end; enter it without them.`]);

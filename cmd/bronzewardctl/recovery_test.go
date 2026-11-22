@@ -276,6 +276,42 @@ func TestYesConfirmationOfRevoke(t *testing.T) {
 	}
 }
 
+// TestRevokeRefusesASpaceAtAnEdge: a flag value with a space at its start or end is refused before the prompt, with the
+// field named, and nothing is sent. The server would act on it as typed: a padded subject records a new human and
+// revokes that one, leaving the real subject active. A space inside a value is allowed.
+func TestRevokeRefusesASpaceAtAnEdge(t *testing.T) {
+	const route = "POST /api/v1/identity-revocations"
+	for _, c := range []struct {
+		field string
+		args  []string
+	}{
+		{"identity", []string{"--identity", " idn_BWSYNTH", "--reason", "r"}},
+		{"identity", []string{"--identity", "idn_BWSYNTH ", "--reason", "r"}},
+		{"issuer", []string{"--iss", "https://idp.BWSYNTH.example ", "--sub", "sub-BWSYNTH", "--reason", "r"}},
+		{"subject", []string{"--iss", "https://idp.BWSYNTH.example", "--sub", " sub-BWSYNTH", "--reason", "r"}},
+		{"subject", []string{"--iss", "https://idp.BWSYNTH.example", "--sub", "sub-BWSYNTH ", "--reason", "r"}},
+	} {
+		seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
+		var out, errb bytes.Buffer
+		withStdin(t, "y\n", func() {
+			if code := run(append([]string{"identity", "revoke"}, c.args...), &out, &errb); code != 2 || slices.Contains(seen(), route) {
+				t.Errorf("%q: exit %d, sent %v; want 2 and no write\n%s", c.args, code, seen(), errb.String())
+			}
+		})
+		if want := "The " + c.field + " has spaces at its start or end; enter it without them."; !strings.Contains(errb.String(), want) || strings.Contains(errb.String(), "[y/N]") {
+			t.Errorf("%q: want %q before any prompt:\n%s", c.args, want, errb.String())
+		}
+	}
+	// A space inside is allowed, and shown in the question.
+	seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
+	var out, errb bytes.Buffer
+	withStdin(t, "y\n", func() {
+		if code := run([]string{"identity", "revoke", "--iss", "https://idp.BWSYNTH.example", "--sub", "sub BWSYNTH", "--reason", "r"}, &out, &errb); code != 0 || !slices.Contains(seen(), route) {
+			t.Errorf("a space inside: exit %d, sent %v\n%s", code, seen(), errb.String())
+		}
+	})
+}
+
 // TestYesConfirmationOfEnter: recovery enter states its effects and sends only on y or yes (the one confirmation of
 // every decision: nothing is typed back); --no-input, an empty answer, n and anything else, the word enter included,
 // exit 2 and send nothing.
