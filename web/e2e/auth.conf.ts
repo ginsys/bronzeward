@@ -413,7 +413,7 @@ async function prepare() {
   let talosNode: ChildProcess | undefined;
   const ctl = control(provider, next, injector, async (recovery, keep, short, seed) => {
     if (seed !== undefined && keep) throw new Error("a seed is written once, into a fresh database: give ?seed or ?keep, not both");
-    if (seed !== undefined && seed !== "" && seed !== "noattempt") throw new Error(`a seed of ${seed}: give ?seed or ?seed=noattempt`);
+    if (seed !== undefined && seed !== "" && seed !== "noattempt" && seed !== "observations") throw new Error(`a seed of ${seed}: give ?seed, ?seed=noattempt or ?seed=observations`);
     if (disposable !== undefined) await stop(disposable.p);
     if (!keep) seeded = undefined;
     disposable = server("disposable", DISPOSABLE_API.slice(7), fixtureOidc, short ? deploymentWith("45s") : disposableDeployment, recovery ? ["-recovery-start"] : [], keep ? disposable?.db : undefined, true);
@@ -424,7 +424,7 @@ async function prepare() {
       execFileSync(binPath(root, "e2eseed.test"), ["-test.run", "^TestE2ESeed$", "-test.count=1"], {
         cwd: `${root}internal/api`,
         stdio: "inherit",
-        env: { ...process.env, BW_E2E_SEED_ATTEMPT: seed === "noattempt" ? "none" : "", BW_E2E_SEED_DSN:`postgres://bronzeward@127.0.0.1:${PG_PORT}/${disposable.db}?sslmode=disable`, BW_E2E_SEED_OUT: out },
+        env: { ...process.env, BW_E2E_SEED_ATTEMPT: seed === "noattempt" ? "none" : "", BW_E2E_SEED_OBSERVATIONS: seed === "observations" ? "1" : "", BW_E2E_SEED_DSN:`postgres://bronzeward@127.0.0.1:${PG_PORT}/${disposable.db}?sslmode=disable`, BW_E2E_SEED_OUT: out },
       });
       seeded = readFileSync(out, "utf8");
       rmSync(out);

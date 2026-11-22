@@ -38,6 +38,40 @@ type seeded struct {
 		Cancelled string `json:"cancelled"`
 		Revoked   string `json:"revoked"`
 	} `json:"plans"`
+	// Observations are the recovery observations of the accounting cases (BW_E2E_SEED_OBSERVATIONS=1), absent otherwise.
+	Observations *seededObservations `json:"observations,omitempty"`
+}
+
+// seededObservations names the recovery observations written for the accounting of a scope and of an attempt, with the shifts
+// TestRecoveryAccounting uses. The seeded attempt's transport deadline is one minute ahead, so the committed plan's machine has
+// First as the first read after it (the one start the server accepts), Later after that (a start it refuses) and End after the
+// settle floor; the other machine has no attempt, and has Start, Soon (within the settle floor of it, reading another resource
+// version) and End (a version that moved).
+type seededObservations struct {
+	Machine struct {
+		First string `json:"first"`
+		Later string `json:"later"`
+		End   string `json:"end"`
+	} `json:"machine"`
+	Machine2 struct {
+		Start string `json:"start"`
+		Soon  string `json:"soon"`
+		End   string `json:"end"`
+	} `json:"machine2"`
+}
+
+// seedObservations writes the recovery observations of seededObservations. The accounting decision reads them after a recovery
+// entry whose stop is older than they are, so a browser case enters recovery with a stop an hour back.
+func seedObservations(t *testing.T, ae *attemptEnv) *seededObservations {
+	t.Helper()
+	o := &seededObservations{}
+	o.Machine.First = ae.recoveryRead(t, ae.machine, 3*time.Minute, "rv1")
+	o.Machine.Later = ae.recoveryRead(t, ae.machine, 5*time.Minute, "rv1")
+	o.Machine.End = ae.recoveryRead(t, ae.machine, 6*time.Minute, "rv1")
+	o.Machine2.Start = ae.recoveryRead(t, ae.machine2, 5*time.Minute, "rv1")
+	o.Machine2.Soon = ae.recoveryRead(t, ae.machine2, 5*time.Minute+10*time.Second, "rv2")
+	o.Machine2.End = ae.recoveryRead(t, ae.machine2, 6*time.Minute, "rv2")
+	return o
 }
 
 // seedPlans makes ae's records into one plan per state. The committed plan goes first: its
@@ -93,7 +127,12 @@ func TestE2ESeed(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	useDatabase(t, db)
-	b, err := json.Marshal(seedPlans(t, newAttemptEnv(t, ""), os.Getenv("BW_E2E_SEED_ATTEMPT") != "none"))
+	ae := newAttemptEnv(t, "")
+	s := seedPlans(t, ae, os.Getenv("BW_E2E_SEED_ATTEMPT") != "none")
+	if os.Getenv("BW_E2E_SEED_OBSERVATIONS") == "1" {
+		s.Observations = seedObservations(t, ae)
+	}
+	b, err := json.Marshal(s)
 	if err != nil {
 		t.Fatal(err)
 	}
