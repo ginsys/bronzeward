@@ -2083,8 +2083,12 @@ one. The rule is one for both clients:
    deleted ([persistence and API §3.1](persistence-api.md#31-sources-drafts-and-heads)), so a missing
    draft is a failed read, not a fallback of its own.
 3. A draft title is remote text typed by an author, and it is shown as A7's names are: a text node
-   in the web client, with no control or format character and at most 300 code points, else the
-   identifier (§6 item 8 for the CLI, as A7 cites it).
+   in the web client, with no control or format character and at most 300 code points. In the web client a
+   draft whose title is not safe text reads "Untitled draft", with the whole identifier as the title
+   attribute and the shortened identifier beside it where the view shows no other; a release's title and a
+   publish operation's title built on it read the same words, where the draft is read, and a draft whose read
+   failed still leaves the shortened identifier (rule 2). The CLI shows the identifier (§6 item 8 for the CLI,
+   as A7 cites it).
 4. A title can name a person, so a client keeps it in memory for the web view's generation or for
    the command, and never in storage, a log or an error.
 5. `-o json` and `-o yaml` print the resource unchanged.
@@ -2102,6 +2106,13 @@ one. The rule is one for both clients:
    a view names by identifier is shown by its name (A9) in the plan, operation, import, draft, assignment,
    release, review, recovery and dependency views, read through the same store, or taken from the machine body
    or list the view already holds.
+   The drafts lists (the Drafts and releases page and a cluster's open drafts) open with the draft's name by
+   rule 3, as the link, with the identifier last under Identifier, and the first of them shows the cluster by its
+   name; the Start import choice shows a draft's name by rule 3 too, never the received text. The dependency alert list opens each row with a sentence
+   built from the alert's kind and its dependency's object and version, the dependency named once (the link of
+   the dependency's page; "This dependency" on that page), then the Kind, Class, Reason, the releases by their
+   titles and the time; the identifier is the last column, under Identifier, since an alert has no page of its
+   own.
 7. **Applied in the CLI** ([#987](https://github.com/ginsys/bronzeward/issues/987)): `plan list`, `release list` and
    `operation list` print a TITLE column beside the identifier, and `plan show`, `release show` and `operation show`
    print a `Title` line under the heading. A table prints a dash where no title could be built, and a detail no line;
