@@ -89,9 +89,11 @@ func TestFormOnlyMachineRead(t *testing.T) {
 	}
 }
 
-// The adoption of a drifted machine never reads "differs in form only", though its release is recorded form only and
-// pending: the node holds something else than the adopted configuration (ginsys/bronzeward#1098, check 4b). The plan is
-// created fresh, so the evidence is computed with the open drift and an Applied release in place.
+// An adopt plan for a machine that already has an Applied release never reads "differs in form only", though its
+// release is recorded form only and pending: only a first adoption says it, because a later one adopts again and the
+// verdict compares with the release's import base, not with what is Applied (ginsys/bronzeward#1098, check 4b). The
+// machine here also has an open drift, as the drifted adoption does; the guard reads the Applied release, so the drift
+// decides nothing in this case. The plan is created fresh, so the evidence is computed with both in place.
 func TestFormOnlyDriftedAdoption(t *testing.T) {
 	b := newBuildEnv(t)
 	b.emptyAssignment()
