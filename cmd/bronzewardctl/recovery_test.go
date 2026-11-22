@@ -286,10 +286,10 @@ func TestRevokeRefusesASpaceAtAnEdge(t *testing.T) {
 		args  []string
 	}{
 		{"identity", []string{"--identity", " idn_BWSYNTH", "--reason", "r"}},
-		{"identity", []string{"--identity", "idn_BWSYNTH ", "--reason", "r"}},
+		{"identity", []string{"--identity", "idn_BWSYNTH\u00a0", "--reason", "r"}},
 		{"issuer", []string{"--iss", "https://idp.BWSYNTH.example ", "--sub", "sub-BWSYNTH", "--reason", "r"}},
 		{"subject", []string{"--iss", "https://idp.BWSYNTH.example", "--sub", " sub-BWSYNTH", "--reason", "r"}},
-		{"subject", []string{"--iss", "https://idp.BWSYNTH.example", "--sub", "sub-BWSYNTH ", "--reason", "r"}},
+		{"subject", []string{"--iss", "https://idp.BWSYNTH.example", "--sub", "sub-BWSYNTH\u00a0", "--reason", "r"}},
 	} {
 		seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
 		var out, errb bytes.Buffer
@@ -300,6 +300,26 @@ func TestRevokeRefusesASpaceAtAnEdge(t *testing.T) {
 		})
 		if want := "The " + c.field + " has spaces at its start or end; enter it without them."; !strings.Contains(errb.String(), want) || strings.Contains(errb.String(), "[y/N]") {
 			t.Errorf("%q: want %q before any prompt:\n%s", c.args, want, errb.String())
+		}
+	}
+	// A character the question cannot show (an invisible format character, a line separator, a space that is not
+	// U+0020) is refused before the question: the raw value would be sent while the question reads as another one.
+	for _, v := range []string{"ali\u200bce", "ali\u2060ce", "alice\u2028smith", "alice\u00a0smith", "alice\u2003smith", "alice\u3000smith", "ali\ufeffce"} {
+		for _, args := range [][]string{
+			{"--identity", "idn_" + v, "--reason", "r"},
+			{"--iss", "https://idp.BWSYNTH.example", "--sub", v, "--reason", "r"},
+			{"--iss", "https://idp." + v + ".example", "--sub", "sub-BWSYNTH", "--reason", "r"},
+		} {
+			seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
+			var out, errb bytes.Buffer
+			withStdin(t, "y\n", func() {
+				if code := run(append([]string{"identity", "revoke"}, args...), &out, &errb); code != 2 || slices.Contains(seen(), route) {
+					t.Errorf("%q: exit %d, sent %v; want 2 and no write\n%s", args, code, seen(), errb.String())
+				}
+			})
+			if want := "cannot be shown, so it cannot be confirmed."; !strings.Contains(errb.String(), want) || strings.Contains(errb.String(), "[y/N]") {
+				t.Errorf("%q: want %q before any prompt:\n%s", args, want, errb.String())
+			}
 		}
 	}
 	// A space inside is allowed, and shown in the question.
