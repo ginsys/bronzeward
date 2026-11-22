@@ -194,7 +194,7 @@ describe("the timeline (ginsys/bronzeward#359, W8)", () => {
     expect(view.rows.map((r) => r.id)).toEqual(["e1:1", "e1:2"]);
   });
 
-  test("a page mounted under the epoch it showed under, or with nothing shown before, shows no notice", async () => {
+  test("a page mounted under the epoch it was last mounted under, or never mounted before, shows no notice", async () => {
     for (const was of ["e1", undefined]) {
       const { view, acts } = await mounted(was);
       expect(view.cleared).toBeUndefined();
