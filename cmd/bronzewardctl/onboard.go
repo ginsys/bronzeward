@@ -584,8 +584,14 @@ func (e *env) onboardAssignments(obj *onboarding, draft string, rerun func() str
 			return ef("GET /api/v1/drafts/%s cannot be read: %w", url.PathEscape(draft), err)
 		}
 		keep(e, c, draft, r.Header.Get("ETag"))
+		// An entry or a head that cannot be read may be the assignment of a machine, so writing past it could
+		// replace a real selection: the step stops, with nothing written, as entryRead does.
 		for _, item := range d.Entries {
-			if x, err := item.AsSourceEntry(); err == nil && x.Kind == apitypes.SourceEntryKindAssignment && x.Machine != nil {
+			x, err := item.AsSourceEntry()
+			if err != nil {
+				return ef("GET /api/v1/drafts/%s: an entry cannot be read: %w; nothing was sent", url.PathEscape(draft), err)
+			}
+			if x.Kind == apitypes.SourceEntryKindAssignment && x.Machine != nil {
 				held[*x.Machine] = true
 			}
 		}
@@ -595,9 +601,10 @@ func (e *env) onboardAssignments(obj *onboarding, draft string, rerun func() str
 		}
 		for _, raw := range items {
 			var a apitypes.AssignmentBody
-			if json.Unmarshal(raw, &a) == nil {
-				held[a.Machine] = true
+			if err := json.Unmarshal(raw, &a); err != nil {
+				return ef("GET /api/v1/assignments: an item cannot be read: %w; nothing was sent", err)
 			}
+			held[a.Machine] = true
 		}
 		return nil
 	}); err != nil {
