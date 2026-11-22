@@ -11,8 +11,8 @@ An automated check is evidence for what it measures, not conformance (§13). Ite
 come with later tickets (reflow of the diff in review) are recorded by those tickets. The import
 wizard, the protected import review and the conflict view of the draft editor are recorded in the
 section "Import wizard, protected review and conflict view", the publish screen in "Publish screen
-(T3)", and the plan page and its approval in "Plan and approval screen (T8)", all of the keyboard and
-measured checks.
+(T3)", the plan page and its approval in "Plan and approval screen (T8)", and the page of a followed
+operation in "Operation page (T9)", all of the keyboard and measured checks.
 
 ## Keyboard and measured checks
 
@@ -138,14 +138,39 @@ Not run here: the screen-reader half of T8, owed by [#447](https://github.com/gi
 (see the table below), and the keyboard path of the refusal cases (a forced submit by a user without
 `approver`, the 409 and 412 answers), which the same file checks by pointer and by the server's answer.
 
+### Operation page (T9)
+
+The page of a followed operation (W8) with its live timeline, from
+[#359](https://github.com/ginsys/bronzeward/issues/359). Automated, in `web/e2e/auth/operation.e2e.ts`
+("keyboard only (T9)", "reflow at 320 CSS pixels (T9)" and the focus and announcement case), run by
+`mise run browser-auth` with `BW_SPECS=operation` against a disposable deployment on a recovery start
+with synthetic data; the operation is unresolved, so the page shows its links and is still followed.
+Recorded on 22 November 2026 with Chrome 139, Edge 143, Firefox 160 and Firefox ESR 153 on Linux. The
+keyboard case marks each control of `main` (links, buttons, fields) and presses Tab from the page's
+title until every one has held focus; it reads a focus as "control k of m", never by its text.
+
+| Item | Screen and what is checked | chrome | edge | firefox | firefox-esr |
+| --- | --- | --- | --- | --- | --- |
+| 2.1.1 Keyboard, 2.1.2 No keyboard trap | the operation page by Tab alone: every control of `main` is reached, in the order the page lists them, and no Tab stays on one stop | pass | pass | pass | pass |
+| 2.4.7 Focus visible | every focus Tab reaches on the page shows an outline of at least 2 px | pass | pass | pass | pass |
+| 4.1.3 Status messages | the timeline is a polite live list and the page's one `role="status"` region carries the outcome; focus stays on the control it was on while the resolution's event and outcome arrive (the focus case) | pass | pass | pass | pass |
+| 1.4.3 Contrast | the page with its timeline: the lowest contrast of any shown text, measured in the page, at least 4.5:1 | pass | pass | pass | pass |
+| 2.5.8 Target size | every button, select and navigation link at least 24 by 24 px | pass | pass | pass | pass |
+| 1.4.10 Reflow | at 320 CSS pixels the page with its timeline and the resolution's row does not scroll sideways, and no control of `main` lies outside the viewport | pass | pass | pass | pass |
+
+Not run here: the screen-reader half of T9, owed by [#447](https://github.com/ginsys/bronzeward/issues/447),
+and the keyboard part of T3's handover, which goes with
+[#1068](https://github.com/ginsys/bronzeward/issues/1068). Safari runs the keyboard cases and skips the
+320 pixel case (its window stops at 336 CSS pixels, see `itNarrow`).
+
 ## Screen reader
 
-| Pass | T1 | T2 | T3 (to publication) | T4 | T5 | T6 | T7 | T8 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| VoiceOver with Safari | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed |
-| NVDA with Firefox | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed |
-| NVDA with Chrome | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed |
+| Pass | T1 | T2 | T3 (to publication) | T4 | T5 | T6 | T7 | T8 | T9 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| VoiceOver with Safari | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed |
+| NVDA with Firefox | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed |
+| NVDA with Chrome | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed |
 
-T3 to T8 are the tasks of [journeys §13](../docs/spec/operator-experience.md#13-usability-and-accessibility-acceptance). Their passes are owed by [#342](https://github.com/ginsys/bronzeward/issues/342), which closes on its automated acceptance, except T8's, which [#358](https://github.com/ginsys/bronzeward/issues/358) hands to [#447](https://github.com/ginsys/bronzeward/issues/447) below.
+T3 to T9 are the tasks of [journeys §13](../docs/spec/operator-experience.md#13-usability-and-accessibility-acceptance). Their passes are owed by [#342](https://github.com/ginsys/bronzeward/issues/342), which closes on its automated acceptance, except T8's and T9's, which [#358](https://github.com/ginsys/bronzeward/issues/358) and [#359](https://github.com/ginsys/bronzeward/issues/359) hand to [#447](https://github.com/ginsys/bronzeward/issues/447) below.
 
 [#447](https://github.com/ginsys/bronzeward/issues/447) holds these passes and closes when they run. [#334](https://github.com/ginsys/bronzeward/issues/334) closes on its automated acceptance, by the owner's decision of 1 November 2026.
