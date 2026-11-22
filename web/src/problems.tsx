@@ -4,6 +4,7 @@
 
 import { CopyButton } from "./copy.tsx";
 import type { Problem } from "./request.ts";
+import { safeSentence } from "./safe.ts";
 
 export interface Words {
   what: string;
@@ -96,7 +97,7 @@ const VALIDATION_FAILED = `${PREFIX}validation-failed`;
 export const refusedAt = (p: Problem) => (p.status === 422 && p.type === VALIDATION_FAILED && positionOf(p) !== undefined ? ` The mark at position ${positionOf(p)} (the first is 0) is refused.` : "");
 
 // The detail a person may read: none where it is absent or hidden for a refused mark.
-export const visibleDetail = (p: Problem): string | undefined => (p.detail !== undefined && refusedAt(p) === "" ? p.detail : undefined);
+export const visibleDetail = (p: Problem): string | undefined => (p.detail !== undefined && refusedAt(p) === "" ? safeSentence(p.detail) : undefined);
 
 // An earlier-epoch idempotency record's 409 (§8.2 409 row, §8.4 item 7): the request it recorded and that request's epoch.
 export const earlierOf = (p: Problem): { request: string; epoch: string } | undefined =>
@@ -106,7 +107,7 @@ export const earlierOf = (p: Problem): { request: string; epoch: string } | unde
 export function sentence(p: Problem, next = true): string {
   const detail = visibleDetail(p);
   const w = wordsFor(p);
-  if (w === undefined) return `${p.title}.`;
+  if (w === undefined) return `${safeSentence(p.title)}.`;
   return next && (w.explains !== true || detail !== undefined) ? `${w.what} ${w.next}` : w.what;
 }
 
@@ -121,7 +122,7 @@ function referenceLines(p: Problem, status: number): [string, string][] {
   const earlier = earlierOf(p);
   if (earlier !== undefined) lines.push(["Earlier record", `request ${earlier.request}, epoch ${earlier.epoch}`]);
   const detail = visibleDetail(p);
-  lines.push(["What the server said", detail === undefined ? p.title : `${p.title}: ${detail}`]);
+  lines.push(["What the server said", detail === undefined ? safeSentence(p.title) : `${safeSentence(p.title)}: ${detail}`]);
   return lines;
 }
 

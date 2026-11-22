@@ -20,6 +20,8 @@ export const THIS_CLUSTER = "This cluster";
 export const NAME_NOT_SHOWN = "(name not shown)";
 /** What stands where a server's word that is not a name (a kind, class or reason) is not safe text. */
 export const NOT_SHOWN = "(not shown)";
+/** What follows a server's sentence that is cut at its limit, so the cut is not read as the server's own text. */
+export const CUT_SENTENCE = "… (the rest is not shown)";
 /** The page that lists drafts and releases (navigation label and heading; /drafts and /releases open it too). */
 export const DRAFTS_AND_RELEASES = "Drafts and releases";
 /** The page that lists fragments and profiles, which the word "source" no longer names. */
