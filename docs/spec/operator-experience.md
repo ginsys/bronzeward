@@ -938,8 +938,10 @@ position and no other source: not applied, a plan ready, waiting behind another 
 controller applies one machine of a cluster at a time), applying, applied, or stopped, with the reason. A plan
 that somebody else prepared and that is ready is reused and never made twice, so an approver who cannot make
 plans can apply plans a publisher prepared. A plan the page made and the person did not approve is cancelled
-when the choice changes and when the page is left; one the page loses (the tab is closed) expires with the
-plan default. No route returns a change before a plan exists, so showing it means making the plan.
+when its machine is no longer chosen and when the page is left, including a plan whose creation is answered
+after that; the choice cannot change while the page works, and a plan Apply was pressed for is never
+cancelled. One the page loses (the tab is closed) expires with the plan default; a creation whose outcome is
+unknown leaves a plan the page has no ID for, which the machine's page shows with who prepared it. No route returns a change before a plan exists, so showing it means making the plan.
 A control plane may be chosen: the server does not refuse it and the acceptance tests do not cover it, so the
 page says that, and the operator limits say it too. Alternatives: one page per machine and plan (the
 repetition above); approving without showing the change (the person approves what they never read); a new

@@ -42,6 +42,11 @@ describe("what a machine's row says", () => {
     expect(say(pos("drift-open", { drift: true }))).toEqual({ state: "stopped", text: LINES.drift });
     expect(say(pos("no-step", { applied: REL }))).toEqual({ state: "applied", text: LINES.applied });
   });
+  test("a plan of this release for another operation is not an apply plan, and the row says it is decided on the machine's page", () => {
+    const adopt = (step: Position["step"]) => ({ ...pos(step, { plan: plan("p") }), plan: { ...pos(step, { plan: plan("p") }).plan!, operation: "adopt" } }) as unknown as Position;
+    expect(say(adopt("awaiting-approval"))).toEqual({ state: "stopped", text: LINES.otherPlan });
+    expect(say(adopt("awaiting-dispatch"))).toEqual({ state: "stopped", text: LINES.otherPlan });
+  });
   test("a plan of another release is not this release's plan, and a frozen machine says so", () => {
     expect(say(pos("awaiting-approval", { plan: plan("p"), planRelease: `rel_${"s".repeat(26)}` }))).toEqual({ state: "not-applied", text: LINES.notApplied });
     expect(say(pos("needs-plan", { frozen: true }))).toEqual({ state: "stopped", text: LINES.frozen });
@@ -89,23 +94,24 @@ describe("Show apply", () => {
     expect(plans.get(B)).toBe(plan("z"));
     expect(plans.get(A)).toBe(w.made[A]);
     // Only the plan this press made may be cancelled by the page: the other was prepared by somebody else.
-    expect([...made]).toEqual([w.made[A]]);
+    expect([...made.keys()]).toEqual([w.made[A]]);
+    expect(made.get(w.made[A]!)).toBe(A);
   });
-  test("a plan is in the caller's set the moment it is made, so a choice changed mid-press can cancel it", async () => {
+  test("a plan is in the caller's map the moment it is made, so a machine no longer chosen can have it cancelled", async () => {
     const w = world({ [A]: pos("needs-plan"), [B]: pos("needs-plan") });
-    const held = new Set<string>();
+    const held = new Map<string, string>();
     const seenAtB: string[] = [];
     const read = w.io.read;
     const io: ApplyIo = { ...w.io, read: (async (path: string) => {
-      if (path === `/machines/${B}/position`) seenAtB.push(...held);
+      if (path === `/machines/${B}/position`) seenAtB.push(...held.keys());
       return read(path);
     }) as ApplyIo["read"] };
     await showApply(REL, [A, B], io, held);
     expect(seenAtB).toEqual([w.made[A]]);
-    expect([...held]).toEqual([w.made[A], w.made[B]]);
+    expect([...held.keys()]).toEqual([w.made[A], w.made[B]]);
   });
-  // The page stops caring (the choice changed, or the person left) while a plan is being made: the answer of that
-  // request is the only place the plan's ID is known, so the plan is cancelled when it arrives, and no more are made.
+  // The person leaves while a plan is being made: the answer of that request is the only place the plan's ID is
+  // known, so the plan is cancelled when it arrives, and no more are made.
   test("a plan whose creation is answered after the page stopped caring is cancelled, and the rest are not made", async () => {
     const w = world({ [B]: pos("awaiting-approval", { plan: plan("z") }), [A]: pos("needs-plan"), [C]: pos("needs-plan") });
     let caring = true;
@@ -115,7 +121,7 @@ describe("Show apply", () => {
       if (spec.path === "/plans") caring = false;
       return out;
     } };
-    const held = new Set<string>();
+    const held = new Map<string, string>();
     const { plans } = await showApply(REL, [B, A, C], io, held);
     expect(w.log).toEqual(["POST /plans", `POST /plans/${w.made[A]}/cancellations`]);
     expect([...held]).toEqual([]);
@@ -123,13 +129,31 @@ describe("Show apply", () => {
     // The plan a publisher prepared is reused and never cancelled, whichever way the press ends.
     expect(w.log.join(" ")).not.toContain(plan("z"));
   });
+  // A creation whose outcome was unknown and that a later [Repeat exactly] settles reaches the page through `settled`.
+  test.each([[true, ["POST /plans"], 1], [false, ["POST /plans", "POST /plans/PLAN/cancellations"], 0]])("a repeat of an unknown creation that succeeds later, page caring %s", async (caring, log, owned) => {
+    const w = world({ [A]: pos("needs-plan") });
+    let settle: ((o: unknown) => void) | undefined;
+    const io: ApplyIo = { ...w.io, live: () => caring || settle === undefined, send: async (spec) => {
+      if (spec.path !== "/plans") return w.io.send(spec);
+      w.log.push("POST /plans");
+      settle = spec.settled as never;
+      return Object.assign(new Write(spec), { outcome: { kind: "unknown" } });
+    } };
+    const held = new Map<string, string>();
+    await showApply(REL, [A], io, held);
+    expect(w.lines[A]?.state).toBe("stopped");
+    settle!({ kind: "done", status: 201, data: { id: plan("q") }, replayed: false });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(w.log).toEqual(log.map((l) => l.replace("PLAN", plan("q"))));
+    expect(held.size).toBe(owned);
+  });
   test("one creation that fails leaves the others made and shown, and nothing to cancel", async () => {
     const w = world({ [A]: pos("needs-plan"), [B]: pos("needs-plan"), [C]: pos("needs-plan") }, { plan: [A] });
-    const held = new Set<string>();
+    const held = new Map<string, string>();
     const { plans } = await showApply(REL, [A, B, C], w.io, held);
     expect(w.log).toEqual(["POST /plans", "POST /plans", "POST /plans"]);
     expect([...plans.keys()]).toEqual([B, C]);
-    expect([...held]).toEqual([w.made[B], w.made[C]]);
+    expect([...held.keys()]).toEqual([w.made[B], w.made[C]]);
     expect(w.lines[A]?.state).toBe("stopped");
     expect(w.lines[B]?.state).toBe("ready");
     expect(w.lines[C]?.state).toBe("ready");
