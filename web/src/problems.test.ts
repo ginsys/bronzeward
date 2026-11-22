@@ -9,7 +9,8 @@ import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { COPIED, COPY, CopyButton } from "./copy.tsx";
+import { CopyButton } from "./copy.tsx";
+import { COPIED, COPY } from "./words.ts";
 import { PROBLEM_WORDS, referenceText, RequestRef, RULE_WORDS, wordsFor } from "./problems.tsx";
 import type { Problem } from "./request.ts";
 import { problemSentences, Refused, SetAside, Unknown } from "./states.tsx";
@@ -154,6 +155,14 @@ describe("the copy control", () => {
     await act(async () => root.render(h(CopyButton, { text: "Code: y", byHand: "By hand." })));
     await press();
     expect(box.textContent).toContain("By hand.");
+  });
+
+  test("a write that throws at once says to select by hand and never says Copied", async () => {
+    vi.stubGlobal("navigator", { clipboard: { writeText: () => { throw new Error("blocked by policy"); } } });
+    await act(async () => root.render(h(CopyButton, { text: "Code: z", byHand: "Select the text above to copy it." })));
+    await press();
+    expect(box.textContent).toContain("Select the text above to copy it.");
+    expect(box.textContent).not.toContain(COPIED);
   });
 
   test("a reference that changes under the page leaves no \"Copied.\" for text the clipboard does not hold", async () => {

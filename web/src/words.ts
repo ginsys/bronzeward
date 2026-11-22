@@ -8,7 +8,7 @@ export const UNNAMED_MACHINE_HEADING = "Unnamed machine";
 export const UNNAMED_MACHINE = "an unnamed machine";
 /** The word before a machine-made identifier on a page's detail line. */
 export const IDENTIFIER = "Identifier";
-/** The control that copies an identifier. */
+/** The control that copies an identifier or a reference. */
 export const COPY = "Copy";
 /** The text standing for a machine whose body has not been read yet, in a heading, and for one whose read gave no body, in a title. */
 export const THE_MACHINE = "the machine";
@@ -32,7 +32,7 @@ export const ENTER_A_CLUSTER_BY_HAND = "Enter a cluster by hand";
 export const ADD_MACHINE = "Add machine";
 /** The label, heading and page name for taking an existing cluster in; it replaces "Onboard cluster". */
 export const CONNECT_A_CLUSTER = "Connect a cluster";
-/** Said beside the Copy control once the identifier is on the clipboard. */
+/** Said beside the Copy control once the text is on the clipboard. */
 export const COPIED = "Copied";
 /** Said beside the Copy control where the browser would not copy. */
 export const COPY_BY_HAND = "Select the identifier to copy it";
