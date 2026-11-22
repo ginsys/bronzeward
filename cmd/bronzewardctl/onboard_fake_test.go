@@ -71,6 +71,8 @@ type apiFake struct {
 	failAssign   int
 	assignWrites int
 	headFirst    bool
+	// badHead adds an item to GET /assignments that cannot be read as an assignment.
+	badHead bool
 	// log is every request as "METHOD /path", in order; posts is each POST's body.
 	log, posts []string
 	// pauseFirst makes the first import of a review pause; failImportAt, when not 0, is the number of
@@ -283,6 +285,9 @@ func (f *apiFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		items := make([]string, 0, len(heads))
 		for _, m := range heads {
 			items = append(items, fmt.Sprintf(`{"id":"asg_%s","cluster":%q,"machine":%q,"headRevision":1,"revision":"asr_OB","createdAt":"2026-11-01T06:00:00Z"}`, m, f.draft.cluster, m))
+		}
+		if f.badHead {
+			items = append(items, `7`) // an item the client cannot read as an assignment
 		}
 		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(items, ","))
 	case r.Method == http.MethodPut && f.draft.id != "" && strings.HasPrefix(path, "/drafts/"+f.draft.id+"/assignments/"):

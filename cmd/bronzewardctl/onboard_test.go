@@ -999,6 +999,24 @@ func TestOnboardLeavesAMachineWithAnAssignmentHeadAlone(t *testing.T) {
 	}
 }
 
+// TestOnboardUnreadableAssignmentHeadStopsTheStep: an assignment head the client cannot read may be a
+// machine's real selection, so the step stops with nothing written, names the rerun command, and the
+// imports already released stay.
+func TestOnboardUnreadableAssignmentHeadStopsTheStep(t *testing.T) {
+	e := newOnboard(t)
+	e.api.badHead = true
+	code, out, _ := e.run()
+	if code == 0 || !strings.Contains(out, "assignment failed") || !strings.Contains(out, "bronzewardctl cluster onboard") {
+		t.Fatalf("exit %d, stdout %q; want a failed assignment step and the rerun command", code, out)
+	}
+	if got := putsOf(e.api); len(got) != 0 {
+		t.Errorf("assignment writes %q after an unreadable head; want none", got)
+	}
+	if len(e.api.ings) != 2 {
+		t.Errorf("%d imports; want both released before the step", len(e.api.ings))
+	}
+}
+
 // TestOnboardAssignmentFailureStopsAndRerunWritesTheRest: a refused assignment write ends the run with
 // the rerun command, and the rerun writes only what is missing.
 func TestOnboardAssignmentFailureStopsAndRerunWritesTheRest(t *testing.T) {
