@@ -21,8 +21,10 @@ export type Identity = components["schemas"]["IdentityBody"];
 export type Role = Identity["roles"][number];
 
 // §7 item 3: revision 2 added Bronzeward-Expected-Epoch, which every write but the recovery entry
-// sends (§8.1); revision 3 the timeline's order and tail, which W3 reads with (§8.6 item 6).
-export const MIN_API_REVISION = 3;
+// sends (§8.1); revision 3 the timeline's order and tail, which W3 reads with (§8.6 item 6); revision 6
+// GET /machines/{id}/position, which the machine page and the release review page read (operator
+// experience §2.3). A later route is called by no page yet: the next is the machine rename at revision 10.
+export const MIN_API_REVISION = 6;
 
 declare const __BW_VERSION__: string;
 export const clientVersion = () => __BW_VERSION__;

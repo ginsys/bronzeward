@@ -232,6 +232,17 @@ describe("the shell", () => {
     expect(incompatible(1)).toBe(`This server serves API revision 1; this client needs API revision ${MIN_API_REVISION} or later.`);
   });
 
+  test("ginsys/bronzeward#1080: the client's minimum is revision 6, the one that serves a machine's position", () => {
+    // The numbers are written out: a case that reads the constant passes at any value.
+    expect(MIN_API_REVISION).toBe(6);
+    const loading = { kind: "loading" } as const;
+    const served = (apiRevision: number) => ({ kind: "ok", data: { version: "v", apiRevision } }) as unknown as Parameters<typeof keepsPage>[1];
+    // keepsPage keeps a page only for a server the client accepts: one at 5 is refused, one at 6 is not.
+    expect(keepsPage(true, served(5), loading)).toBe(false);
+    expect(keepsPage(true, served(6), loading)).toBe(true);
+    expect(incompatible(5)).toBe("This server serves API revision 5; this client needs API revision 6 or later.");
+  });
+
   test("ginsys/bronzeward#517 H10: a page holding unsaved text stays shown while a new epoch's server and identity are read", () => {
     const loading = { kind: "loading" } as const;
     const server = (apiRevision: number) => ({ kind: "ok", data: { version: "v", apiRevision } }) as unknown as Parameters<typeof keepsPage>[1];
