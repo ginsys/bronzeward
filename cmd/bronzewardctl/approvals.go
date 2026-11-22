@@ -234,7 +234,7 @@ func orList(s []string) string {
 }
 
 func (e *env) approvalCmd(args []string) error {
-	v, rest, err := e.verb("approval", args, "show", "revoke")
+	v, rest, err := e.verb("approval", args, verbsOf("approval")...)
 	if err != nil {
 		return err
 	} else if v == "revoke" {

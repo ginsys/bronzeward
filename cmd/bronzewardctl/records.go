@@ -251,7 +251,7 @@ func sourceShow[H, R any](e *env, noun, revPrefix string, args []string, h func(
 }
 
 func (e *env) fragmentCmd(args []string) error {
-	if v, rest, err := e.verb("fragment", args, "show", "history", "set", "rm"); err != nil {
+	if v, rest, err := e.verb("fragment", args, verbsOf("fragment")...); err != nil {
 		return err
 	} else if v == "set" {
 		return e.fragmentSet(rest)
@@ -276,7 +276,7 @@ func (e *env) fragmentCmd(args []string) error {
 }
 
 func (e *env) profileCmd(args []string) error {
-	if v, rest, err := e.verb("profile", args, "show", "history", "set", "rm"); err != nil {
+	if v, rest, err := e.verb("profile", args, verbsOf("profile")...); err != nil {
 		return err
 	} else if v == "set" {
 		return e.profileSet(rest)
@@ -293,7 +293,7 @@ func (e *env) profileCmd(args []string) error {
 }
 
 func (e *env) assignmentCmd(args []string) error {
-	if v, rest, err := e.verb("assignment", args, "show", "history", "set", "rm"); err != nil {
+	if v, rest, err := e.verb("assignment", args, verbsOf("assignment")...); err != nil {
 		return err
 	} else if v == "set" {
 		return e.assignmentSet(rest)
@@ -316,7 +316,7 @@ func (e *env) assignmentCmd(args []string) error {
 }
 
 func (e *env) draftCmd(args []string) error {
-	if v, rest, err := e.verb("draft", args, "list", "show", "create", "discard"); err != nil {
+	if v, rest, err := e.verb("draft", args, verbsOf("draft")...); err != nil {
 		return err
 	} else if v == "create" {
 		return e.draftCreate(rest)
@@ -368,7 +368,7 @@ func (e *env) draftCmd(args []string) error {
 }
 
 func (e *env) releaseCmd(args []string) error {
-	if v, rest, err := e.verb("release", args, "list", "show", "review", "provenance"); err != nil {
+	if v, rest, err := e.verb("release", args, verbsOf("release")...); err != nil {
 		return err
 	} else if v == "review" || v == "provenance" {
 		return e.releaseReview(v, rest)
@@ -541,7 +541,7 @@ func subject(s *apitypes.OperationSubject) string {
 }
 
 func (e *env) actCmd(args []string) error {
-	v, rest, err := e.verb("act", args, "list")
+	v, rest, err := e.verb("act", args, verbsOf("act")...)
 	if err != nil {
 		return err
 	}

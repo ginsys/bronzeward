@@ -20,7 +20,7 @@ import (
 // release (#361, #362; operator-experience.md §5.9, §10). There is no retry, no "mark successful"
 // and no batch form (T37): any other verb is unknown.
 func (e *env) recoveryCmd(args []string) error {
-	v, rest, err := e.verb("recovery", args, "status", "enter", "exit", "scope-account", "account", "takeover", "resolve", "mark", "release")
+	v, rest, err := e.verb("recovery", args, verbsOf("recovery")...)
 	if err != nil {
 		return err
 	}
@@ -379,7 +379,7 @@ func (e *env) recoveryExit(args []string) error {
 
 // identityCmd is identity revoke, T36 (POST /identity-revocations, recovery-admin, human only).
 func (e *env) identityCmd(args []string) error {
-	_, rest, err := e.verb("identity", args, "revoke")
+	_, rest, err := e.verb("identity", args, verbsOf("identity")...)
 	if err != nil {
 		return err
 	}

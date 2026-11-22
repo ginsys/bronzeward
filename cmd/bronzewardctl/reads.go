@@ -141,7 +141,7 @@ func (e *env) paged(name string, args []string, n int, l *listing, extra func(*f
 }
 
 func (e *env) clusterCmd(args []string) error {
-	if v, rest, err := e.verb("cluster", args, "list", "show", "add", "discover", "first-key", "onboard"); err != nil {
+	if v, rest, err := e.verb("cluster", args, verbsOf("cluster")...); err != nil {
 		return err
 	} else if v == "add" {
 		return e.clusterAdd(rest)
@@ -177,7 +177,7 @@ func (e *env) clusterCmd(args []string) error {
 }
 
 func (e *env) machineCmd(args []string) error {
-	if v, rest, err := e.verb("machine", args, "list", "show", "timeline", "observations", "add", "set-endpoint", "rename", "freeze", "unfreeze"); err != nil {
+	if v, rest, err := e.verb("machine", args, verbsOf("machine")...); err != nil {
 		return err
 	} else if v == "rename" {
 		return e.machineRename(rest)

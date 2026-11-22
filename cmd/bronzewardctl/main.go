@@ -26,185 +26,6 @@ import (
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
 )
 
-const usage = `usage: bronzewardctl [global flags] <command> [arguments]
-
-commands:
-  context list | use <name> | remove <name>
-  context add <name> --server <url> [--certificate-authority <file>] [--automation-token-file <path>]
-  context add <name> --server <url> --issuer <url> --client-id <id> [--audience <aud>] [--scopes a,b]
-              [--oidc-certificate-authority <file>] [--oidc-token-file <path>]
-  context add <name> --from <url> [--server <url>] [--certificate-authority <file>] [--scopes a,b]
-              [--oidc-certificate-authority <file>] [--oidc-token-file <path>]
-              the issuer, audience, CLI client ID and scopes from <url>/bronzeward-client.json
-  version     this client's version, the server's and its API revision
-  whoami      the identity, roles and epoch the server sees, and this client's reading of a sign-in
-  login [--device]
-              sign in to an oidc context in this host's browser, or with --device on any device
-  logout      remove an oidc context's stored sign-in and revoke its refresh token
-  status      start mode, recovery mode, open drift and unresolved operations
-  cluster list | show <id>
-  cluster add --name <name> --endpoint <https url> --contract <v1.x> --talos-cluster-id <id>
-  cluster discover --talosconfig <file> [--talos-context <name>] [--endpoint <host|ip[:port]>]   read a cluster, print the commands that record it
-  cluster first-key --cluster <id> --kind talosconfig|machine-config|secrets-bundle --file <file>
-              --endpoint <ip[:port]> [--talos-context <name>]
-              author, a person; supplies or replaces the cluster's first key: one request, tried at the
-              endpoint before anything is stored; a Ctrl-C while it runs leaves the outcome unknown (exit 3)
-  cluster onboard --talosconfig <file> --name <name> --kubernetes-endpoint <https url>|proposed
-              [--first-key-kind machine-config|secrets-bundle --first-key-file <file> | --skip-first-key]
-              [--talos-context <name>] [--endpoint <host|ip[:port]>] [--staging encrypted|transient]
-              [--review] [--no-import]
-              author, a person; discovers the cluster, records it and its machines, supplies its first
-              key (the talosconfig unless --first-key-* names another document), then imports each
-              machine into one draft; run again after a failure: what exists is found, the first key
-              is supplied again (replacing it), and --skip-first-key skips it
-  machine list [--cluster <id>] | show <id> | timeline <id> | observations <id>
-  machine timeline <id> --follow [--limit <n>]
-              the newest entries, then each new one as the server records it, read every 5s;
-              Ctrl-C stops it with exit 130; -o json prints one entry per line, -o yaml one
-              document per entry
-  machine add --cluster <id> (--talos-node-id <id> | --smbios-uuid <uuid>) [--serial <s>]
-              --platform metal|container|cloud --talos-endpoint <ip>[:<port>] [--name <name>]
-  machine rename <id> --name <name>
-  machine set-endpoint <id> --talos-endpoint <ip>[:<port>]
-              writes, by a person signed in as author, repeat a write whose outcome was unknown
-              exactly with --idempotency-key, --expect-epoch and --expect-principal as printed
-  machine freeze | unfreeze <id> --reason <text>
-              a freeze stops new commitments and attempts, not an attempt already recorded, and
-              an adoption can still be recorded; freeze takes author, publisher, approver or
-              recovery-admin, unfreeze only an approver; a server started for recovery, or a scope
-              still pre-restore unaccounted, refuses an unfreeze
-  drift show <machine>
-              the open drift: its observations, late landing and the choices; the time shown is
-              that of the observation, the API serves no opening time; there is no ignore command
-  drift adopt <machine> --draft <draft> [--review] [--staging encrypted|transient] [--marks]
-              import as a drift-adoption (author, a person), publish (publisher), then plan create
-              --operation adopt (publisher); stops at a missing role or a pause and prints the
-              rest; never approves; its repeat flags repeat the import; -o json and yaml print
-              one object with the state of each step instead of the API resources
-  drift revert <machine>
-              publisher; plan create of Desired as apply-config, bound to the open drift record;
-              it reads the machine first and takes no repeat flag; a machine with no Applied
-              configuration is pointed at an adopt plan, and nothing is sent
-  fragment | profile | assignment show <head or revision ID> | history <head ID>
-  draft list [--cluster <id>] | show <draft>
-  draft create --cluster <id> --title <title>
-  draft discard <draft>
-  fragment set <name> --draft <draft> --layer <layer> --file <path or -> [--declarations <path>]
-              [--marks] [--ingest-wait <duration>] the document from a file, or - for standard
-              input; --marks reads one mark per line from a prompt or standard input until an
-              empty line; Linux only; a repeat waits while the first request still ingests, for
-              --ingest-wait (2m) or the server's claim lease, whichever is longer
-  profile set <name> --draft <draft> --fragments <name or frv_ ID>[,...]
-              a name pins the revision the draft proposes, else the fragment's head revision
-  assignment set <machine> --draft <draft> [--profiles <name>[,...]]
-              [--fragment <layer>=<name>[,...]]... the layer global, site, cluster, role,
-              workload or override; --none instead selects nothing, so the machine's
-              configuration is its import base alone
-  fragment | profile | assignment rm <name or machine> --draft <draft>
-              a write to a draft sends the ETag of the last draft show or write of that draft, or
-              --if-match <etag>; if the draft changed since, it saves nothing and says so
-              draft writes take author; repeat one with the outcome-unknown block's flags,
-              --if-match included
-  import start --machine <id> --draft <draft> [--file <path or ->] [--staging encrypted|transient]
-              [--review] [--marks] [--no-wait]
-              the machine's configuration, or with --file a document, into the draft, sending its
-              kept ETag or --if-match; waits until the import pauses for review or ends
-  import review <ingestion>
-              a paused import's staged document, only on a terminal, in a pager (space or f
-              forward, b back, q quit) that writes nothing else; then marks from the prompt
-  import-base document <import base revision>
-              the stored document of an import base: any author for an import read from a node,
-              and for a file import only the author who made it and continued its review; only
-              on a terminal, in the same pager; no marks prompt
-  import mark <ingestion> [--no-wait]
-              mark values as secret by their paths, one per line from the prompt or standard
-              input, never an argument; waits until the import pauses again
-  import continue | takeover <ingestion> [--no-wait]
-              continue an import paused for review, or take over one whose lease lapsed; waits
-  import abandon <ingestion>
-  import status [<ingestion>] | [--state <s>] [--machine <id>]
-              one import's state, lease and next steps, or a list: --state paused or held finds
-              imports to continue or take over
-  publish <draft> [--no-wait]
-              publisher; sends the draft's kept ETag or --if-match, waits for the publication
-              and names the release and each machine's plan create command; nothing is sent to
-              any machine
-  release list [--cluster <id>] [--draft <id>] | show <release>
-  release review | provenance <release> <machine>
-              the rendered, redacted configuration, or the secret references it was built from
-  plan create --release <id> --machine <id> --operation apply-config|adopt [--mode no-reboot]
-              [--expires-in <d>] [--max-observation-age <d>] [--check-validity <d>]
-              [--transport-deadline <d>] [--verification-deadline <d>] [--max-attempts <n>]
-              publisher; a duration in whole seconds, such as 90s or 24h; an omitted value takes
-              the server's default; an adopt plan takes no mode, deadline or attempt limit; the
-              plan is not approved and nothing runs until an approver approves
-  plan list [--state <s>] [--machine <id>] | show <plan>
-              show prints the plan's evidence, its state and what can be done next
-  plan cancel <plan> --reason <text>
-              a cancelled plan cannot be committed; a committed plan's operation ends only while
-              no attempt is recorded, and an attempt already recorded is not stopped
-  approve <plan>
-              approver, a person signed in; prints the plan and the predicted self-approval on
-              standard error, then sends only when the plan ID is typed back, on the terminal or
-              as one line of standard input; there is no --yes, and --no-input refuses; an
-              approval starts no operation, so approve does not wait
-  approval show <approval>
-  approval revoke <approval> --reason <text>
-              a revocation ends an uncommitted approval and undoes no commitment; an attempt
-              already recorded is not stopped
-  operation list [--plan <id>] [--machine <id>] [--state <s>] [--kind <k>] | show <operation>
-  operation watch <operation> [--timeout <d>]
-              one line per event until the operation ends, then its outcome; goes on past
-              unresolved; --timeout (30m) ends the watch, not the operation, with exit 5;
-              Ctrl-C stops only the watch, with exit 130
-  act list    the audit record
-  recovery status
-              the epoch, recovery mode, the entry and exit, and each scope's next step
-  recovery enter --restored family=<f>,backup=<id>,taken-at=<time> [--restored ...]
-              --stopped-at <time> --reason <text>
-              on a server started for recovery; sent only when enter is typed back; a repeat
-              of an unknown outcome takes --idempotency-key and --expect-principal, no epoch
-  recovery exit [--fact name=value]...
-              once every scope is released
-  recovery scope-account <machine> --start <observation> --end <observation> [--explanation <text>]
-              after a restore: accounts every unaccounted attempt on the machine; shows the window
-              and the risk, and is sent only when y is answered to the question that names the machine
-  recovery account <operation> <attempt> --start <observation> --end <observation> [--explanation <text>]
-              accounts one attempt whose response was lost; the same window, risk and question
-  recovery takeover <operation> --reason <text>
-              makes the serving controller the owner of a non-terminal operation; sends nothing to the node;
-              a repeat of an unknown outcome also takes --generation as printed
-  recovery resolve <operation> --reason <text>
-              ends an unresolved operation with no attempt as cancelled; records no remote outcome;
-              a repeat of an unknown outcome sends the same body without the state checks
-  recovery mark <machine> [--fact name=value]...
-              records the state the evidence supports: ready, blocked or unresolved
-  recovery release <machine> [--fact name=value]...
-              releases a ready scope; a release is not an approval
-  identity revoke (--identity <id> | --iss <iss> --sub <sub>) --reason <text>
-              permanent; sent only when the identity (or the subject) is typed back
-              these writes need a person signed in as recovery-admin; times are RFC 3339
-              lists, timeline, observations and history read one page: --limit <n>, --cursor <next>;
-              --all reads every page, which -o json and yaml print as one {"items": [...]}; the
-              draft and release filters apply to the items read
-
-global flags, before or after the command:
-  --context <name>      else BRONZEWARD_CONTEXT, else the current context
-  -o table|json|yaml    json and yaml print the API resource unchanged, but for drift adopt, which
-                        prints one object for its steps
-  --token-file <path>   the automation token, from an owner-only file; else the context's
-                        automation.tokenFile, else the path in BRONZEWARD_TOKEN_FILE
-  --token-stdin         the automation token, from standard input
-  --no-input            never prompt
-  -v                    name a proxy a request goes through
-
-exit codes: 0 success; 1 refused or failed; 2 usage error, refused repeat or approval not
-confirmed; 3 outcome unknown, or
-an import's lease lapsed while its operation runs;
-4 a waited-for operation ended failed, rejected or cancelled; 5 operation watch's --timeout
-ended with the operation not ended; 6 the output cannot be written (a full disk, say), unless
-a code above applies or the server refused the request (1); 130 a read command or operation watch stopped by Ctrl-C`
-
 type usageError struct{ error }
 
 // operationFailed is a waited-for operation that ended failed, rejected or cancelled: exit 4
@@ -241,6 +62,11 @@ type env struct {
 	// path, and titles the titles built from them, by object; both are held for this run only.
 	bodies map[string]any
 	titles map[string]string
+
+	// where is the command path parse was last called with (machine add): the help a usage error prints.
+	// helped is the flag set of that command, read for the flags its help lists.
+	where  string
+	helped *flag.FlagSet
 }
 
 func main() {
@@ -301,12 +127,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	stderr = client.GuardWriter(stderr)
 	e := &env{output: "table", err: stderr}
 	e.out = tableGuard{e, stdout, client.GuardWriter(stdout)}
-	commands := map[string]func([]string) error{"context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "login": e.loginCmd, "logout": e.logoutCmd,
-		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
-		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
-		"draft": e.draftCmd, "import": e.importCmd, "import-base": e.importBaseCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd,
-		"approve": e.approve, "approval": e.approvalCmd, "operation": e.operationCmd, "act": e.actCmd,
-		"drift": e.driftCmd, "recovery": e.recoveryCmd, "identity": e.identityCmd}
+	commands := e.handlers()
 	pos, err := e.parse("bronzewardctl", args, -1, nil)
 	if err == nil && len(pos) == 0 {
 		err = usageError{errors.New("no command")}
@@ -315,8 +136,40 @@ func run(args []string, stdout, stderr io.Writer) int {
 	} else if err == nil {
 		err = commands[pos[0]](pos[1:])
 	}
-	return report(e.afterCut(err, stderr), stdout, stderr)
+	err = e.afterCut(err, stderr)
+	// The help a request or a usage error prints is the table's entry for the command parse last read.
+	var u usageError
+	if errors.Is(err, flag.ErrHelp) {
+		err = helpRequest{e.helpText()}
+	} else if errors.As(err, &u) {
+		err = withHelp{err, e.helpText()}
+	}
+	return report(err, stdout, stderr)
 }
+
+// handlers is the function of each top-level command; its keys are the table's top-level names.
+func (e *env) handlers() map[string]func([]string) error {
+	return map[string]func([]string) error{"help": e.helpCmd, "context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "login": e.loginCmd, "logout": e.logoutCmd,
+		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
+		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
+		"draft": e.draftCmd, "import": e.importCmd, "import-base": e.importBaseCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd,
+		"approve": e.approve, "approval": e.approvalCmd, "operation": e.operationCmd, "act": e.actCmd,
+		"drift": e.driftCmd, "recovery": e.recoveryCmd, "identity": e.identityCmd}
+}
+
+// helpRequest is --help or help as the error run returns: it carries the text report prints on standard output.
+type helpRequest struct{ text string }
+
+func (helpRequest) Error() string        { return flag.ErrHelp.Error() }
+func (helpRequest) Is(target error) bool { return target == flag.ErrHelp }
+
+// withHelp is a usage error with the help of the command it was raised in, which report prints after it.
+type withHelp struct {
+	error
+	text string
+}
+
+func (w withHelp) Unwrap() error { return w.error }
 
 // afterCut makes a Ctrl-C that a read took end the command, also when a caller dropped the error of
 // that read (a best-effort lookup, say): the stop line and exit 130 win. An error the command also
@@ -358,14 +211,24 @@ func report(err error, stdout, stderr io.Writer) int {
 		endedBy = signalled.sig
 		return 128 + int(signalled.sig)
 	case errors.Is(err, flag.ErrHelp):
+		text := indexText()
+		var h helpRequest
+		if errors.As(err, &h) {
+			text = h.text
+		}
 		// Help is output like any other: when it cannot be written, code 6 takes the place of 0.
-		if _, werr := fmt.Fprintln(stdout, usage); werr != nil {
+		if _, werr := fmt.Fprintln(stdout, text); werr != nil {
 			fmt.Fprintln(stderr, "bronzewardctl:", client.Shown(werr))
 			return 6
 		}
 		return 0
 	case errors.As(err, &u):
-		fmt.Fprintf(stderr, "bronzewardctl: %s\n\n%s\n", client.Shown(err), usage)
+		text := indexText()
+		var w withHelp
+		if errors.As(err, &w) {
+			text = w.text
+		}
+		fmt.Fprintf(stderr, "bronzewardctl: %s\n\n%s\n", client.Shown(err), text)
 		return 2
 	}
 	// operation watch printed its stop line and the line to follow it again; nothing follows them.
@@ -464,6 +327,7 @@ const anyArgs = -2
 // or with anyArgs any number; with n = -1 it stops at the first one, the command, whose own flags
 // follow.
 func (e *env) parse(name string, args []string, n int, extra func(*flag.FlagSet)) ([]string, error) {
+	e.where = name
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&e.context, "context", e.context, "")
@@ -475,6 +339,7 @@ func (e *env) parse(name string, args []string, n int, extra func(*flag.FlagSet)
 	if extra != nil {
 		extra(fs)
 	}
+	e.helped = fs
 	var pos []string
 	for {
 		if err := fs.Parse(args); errors.Is(err, flag.ErrHelp) {
