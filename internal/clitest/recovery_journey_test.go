@@ -27,7 +27,7 @@ func newRecoveryJourneyEnv(t *testing.T) (*recoveryEnv, *standIn) {
 	st := f.newStandIn(t, bao.b, e.s, func(args ...string) result { return e.ctl("", args...) })
 	f.restart("-recovery-start")
 	f.store(f.humanFile(), f.mint("h-recovery", ""), "")
-	f.want(e.ctl("enter\n", "recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z",
+	f.want(e.ctl("y\n", "recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z",
 		"--stopped-at", "2026-11-01T08:31:00Z", "--reason", "BWSYNTH drill"), 0, "Recovery mode entered")
 	e.start = f.seedObservation(e.s.machine, "drift", "7", 20*time.Minute)
 	e.end = f.seedObservation(e.s.machine, "recovery", "7", 10*time.Minute)

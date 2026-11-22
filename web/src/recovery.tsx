@@ -366,11 +366,14 @@ export function ExitRecovery({ held, recoveryMode, onChanged }: { held: number; 
 // a person has: it names the target exactly as entered (the issuer and the subject both), and a target that is not
 // safe text cannot be shown, so it cannot be confirmed and the press stays off.
 export function revocationConfirmation(identity: string, iss: string, sub: string, reason: string): { line?: string; target?: { identity: string; reason: string } | { iss: string; sub: string; reason: string }; why?: string } {
-  const [i, s, u, r] = [identity.trim(), iss.trim(), sub.trim(), reason.trim()];
-  const byIdentity = i !== "" && s === "" && u === "";
-  const bySubject = i === "" && s !== "" && u !== "";
+  // The target is checked and named as entered: trimming first would let an edge control character pass and would
+  // name a different subject than the one typed. Only blankness is read trimmed.
+  const [i, s, u, r] = [identity, iss, sub, reason.trim()];
+  const blank = (v: string) => v.trim() === "";
+  const byIdentity = !blank(i) && blank(s) && blank(u);
+  const bySubject = blank(i) && !blank(s) && !blank(u);
   if (!(byIdentity || bySubject) || r === "") return { why: "Name the identity, or the issuer and subject, and give a reason." };
-  if ([i, s, u].some((v) => v !== "" && safeText(v) === undefined)) return { why: "The identity cannot be shown, so it cannot be confirmed." };
+  if ((byIdentity ? [i] : [s, u]).some((v) => safeText(v) === undefined)) return { why: "The identity cannot be shown, so it cannot be confirmed." };
   return byIdentity
     ? { line: `Revokes the identity ${i}. A revocation is permanent.`, target: { identity: i, reason: r } }
     : { line: `Revokes the subject ${u} of the issuer ${s}. A revocation is permanent.`, target: { iss: s, sub: u, reason: r } };

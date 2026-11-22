@@ -97,7 +97,7 @@ func newRecoveryEnv(t *testing.T) *recoveryEnv {
 	}
 	f.store(f.humanFile(), f.mint("h-recovery", ""), "")
 	e.in.set(nil, nil)
-	f.want(e.ctl("enter\n", "recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z",
+	f.want(e.ctl("y\n", "recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z",
 		"--stopped-at", "2026-11-01T08:31:00Z", "--reason", "BWSYNTH drill"), 0, "Recovery mode entered")
 	e.start = f.seedObservation(e.s.machine, "drift", "7", 20*time.Minute)
 	e.end = f.seedObservation(e.s.machine, "recovery", "7", 10*time.Minute)
@@ -170,7 +170,7 @@ func (e *recoveryEnv) recoveryWrites(withAttempt, withoutAttempt string) []struc
 		typed string
 		args  []string
 	}{
-		{"enter\n", []string{"recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "BWSYNTH drill"}},
+		{"y\n", []string{"recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "BWSYNTH drill"}},
 		{"", []string{"recovery", "exit"}},
 		{"y\n", e.scopeAccount()},
 		{"y\n", []string{"recovery", "account", withAttempt, "att_BWSYNTH", "--start", e.start, "--end", e.end}},
@@ -178,7 +178,7 @@ func (e *recoveryEnv) recoveryWrites(withAttempt, withoutAttempt string) []struc
 		{"", []string{"recovery", "resolve", withoutAttempt, "--reason", "BWSYNTH drill"}},
 		{"", []string{"recovery", "mark", m}},
 		{"", []string{"recovery", "release", m}},
-		{"h-recovery\n", []string{"identity", "revoke", "--iss", e.f.iss.URL, "--sub", "h-recovery", "--reason", "BWSYNTH left"}},
+		{"y\n", []string{"identity", "revoke", "--iss", e.f.iss.URL, "--sub", "h-recovery", "--reason", "BWSYNTH left"}},
 	}
 }
 
