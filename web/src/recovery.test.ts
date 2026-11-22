@@ -196,7 +196,7 @@ describe("the console's parts (#364)", () => {
       }
     });
     test("the target is checked and named as entered: an edge control or format character keeps the press off, a space is shown as typed", () => {
-    for (const v of ["﻿alice", "alice\t", "\talice", "ali​ce"]) {
+    for (const v of ["\ufeffalice", "alice\t", "\talice", "ali\u200bce"]) {
       const c = revocationConfirmation(v, "", "", "left");
       expect([v, c.target, c.line, c.why]).toEqual([v, undefined, undefined, "The identity cannot be shown, so it cannot be confirmed."]);
     }
@@ -212,9 +212,9 @@ describe("the console's parts (#364)", () => {
       [["", " https://idp.example", "sub-1"], "issuer"], [["", "https://idp.example ", "sub-1"], "issuer"],
       [["", "https://idp.example", " alice"], "subject"], [["", "https://idp.example", "alice "], "subject"],
       // a no-break space at either edge
-      [[" alice", "", ""], "identity"], [["alice ", "", ""], "identity"],
-      [["", "https://idp.example", " alice"], "subject"], [["", "https://idp.example", "alice "], "subject"],
-      [["", " https://idp.example", "sub-1"], "issuer"],
+      [["\u00a0alice", "", ""], "identity"], [["alice\u00a0", "", ""], "identity"],
+      [["", "https://idp.example", "\u00a0alice"], "subject"], [["", "https://idp.example", "alice\u00a0"], "subject"],
+      [["", "\u00a0https://idp.example", "sub-1"], "issuer"],
     ] as [[string, string, string], string][]) {
       const c = revocationConfirmation(args[0], args[1], args[2], "left");
       expect([args, c.target, c.line, c.why]).toEqual([args, undefined, undefined, `The ${field} has spaces at its start or end; enter it without them.`]);
@@ -227,6 +227,18 @@ describe("the console's parts (#364)", () => {
     expect(line("alice  smith")).toContain('class="exact"');
     expect(line("alice  smith")).not.toBe(line("alice smith"));
     expect(readFileSync(new URL("./app.css", import.meta.url), "utf8")).toMatch(/\.exact\s*\{[^}]*white-space:\s*pre-wrap/);
+  });
+
+  // A space that is not U+0020 inside a value reads as a space but is another character, so two subjects read the same
+  // and differ: the press stays off, as for an invisible format character.
+  test("a look-alike space or a line separator inside a target cannot be shown, so it cannot be confirmed", () => {
+    for (const v of ["alice\u00a0smith", "alice\u2003smith", "alice\u3000smith", "alice\u2028smith", "alice\u2029smith"]) {
+      for (const args of [[v, "", ""], ["", "https://idp.example", v], ["", v, "sub-1"]] as [string, string, string][]) {
+        const c = revocationConfirmation(args[0], args[1], args[2], "left");
+        expect([args, c.target, c.line, c.why]).toEqual([args, undefined, undefined, "The identity cannot be shown, so it cannot be confirmed."]);
+      }
+    }
+    expect(revocationConfirmation("alice smith", "", "", "left").target).toEqual({ identity: "alice smith", reason: "left" });
   });
 
   test("the press stays off while the identity, the pair or the reason is missing or both forms are filled", () => {

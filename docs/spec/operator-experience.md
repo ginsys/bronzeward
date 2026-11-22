@@ -1349,7 +1349,9 @@ stays; only a second, typed copy of it goes.
 
 *Revocation.* The console form shows the act's limits (it is permanent, and what it does not do) and one line
 naming the target exactly as entered: the identity, or the subject together with its issuer. The press stays off
-while the target is not safe text, so a revocation is never confirmed on a name a person cannot read, and while the
+while the target is not safe text, so a revocation is never confirmed on a name a person cannot read (safe text
+here also excludes a space that is not U+0020 and a line or paragraph separator, which read as a space or break the
+line while being another character; the command refuses the same values before its question), and while the
 identity, the issuer or the subject has a space at its start or end: such a space is invisible in the line, the
 server would act on it as typed (a padded subject records a new human and revokes that one, leaving the real one
 active), and the form refuses it with a reason that names the field rather than trimming it, so the value sent is

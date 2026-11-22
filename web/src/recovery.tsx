@@ -361,6 +361,8 @@ export function ExitRecovery({ held, recoveryMode, onChanged }: { held: number; 
   );
 }
 
+const LOOKALIKE = /[^\P{Zs} ]|[\p{Zl}\p{Zp}]/u; // a Zs character other than U+0020, a line separator, a paragraph separator
+
 // What the revocation form shows before its one press, and what that press sends. The identity, or the issuer and
 // subject, not both (RevocationInput), and a reason. One press confirms a permanent act, so the line is the only check
 // a person has: it names the target exactly as entered (the issuer and the subject both), and a target that is not
@@ -379,6 +381,9 @@ export function revocationConfirmation(identity: string, iss: string, sub: strin
   // human and revokes that one, leaving the real one active), so it is refused, never trimmed: the value sent stays the one shown.
   const padded = named.find(([, v]) => v !== v.trim());
   if (padded !== undefined) return { why: `The ${padded[0]} has spaces at its start or end; enter it without them.` };
+  // A space that is not U+0020 reads as one and is another character, and a line or paragraph separator breaks the line:
+  // two targets would read the same and differ, so these cannot be shown either.
+  if (named.some(([, v]) => LOOKALIKE.test(v))) return { why: "The identity cannot be shown, so it cannot be confirmed." };
   return byIdentity
     ? { line: `Revokes the identity ${i}. A revocation is permanent.`, target: { identity: i, reason: r } }
     : { line: `Revokes the subject ${u} of the issuer ${s}. A revocation is permanent.`, target: { iss: s, sub: u, reason: r } };
