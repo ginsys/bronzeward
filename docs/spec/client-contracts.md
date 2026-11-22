@@ -2119,7 +2119,7 @@ one. The rule is one for both clients:
    character, at most 300 code points), and otherwise reads "(not shown)"; one the server leaves out reads "none"
    where the cell has one, on every page that prints such a word ([#1055](https://github.com/ginsys/bronzeward/issues/1055)).
    A refusal's title and detail are sentences a person must read, so they are never replaced by "(not shown)": the
-   page shows each whole, with every control or format character (the same class) read as U+FFFD in its place, and
+   page shows each whole (except a refused mark's detail, which §8.2 leaves out), with every control or format character (the same class) read as U+FFFD in its place, and
    cuts a text over 1000 code points with the words "… (the rest is not shown)". The match that decides a next step
    reads the text as received. Other server text is not covered: a version, address, endpoint, contract, identifier, purpose, epoch, event
    type or code, approval policy, observation basis, a result or error record shown as JSON, and the identity
