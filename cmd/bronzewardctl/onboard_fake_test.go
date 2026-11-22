@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -62,6 +63,14 @@ type apiFake struct {
 		rev                       int
 	}
 	ings []obIngestion
+	// assigned is the machines the draft holds an assignment entry for, in order; heads the machines that
+	// hold an assignment head (GET /assignments).
+	assigned, heads []string
+	// failAssign, when not 0, is the number of the assignment write (from 1) answered 422 instead of stored;
+	// headFirst gives the first machine recorded an assignment head.
+	failAssign   int
+	assignWrites int
+	headFirst    bool
 	// log is every request as "METHOD /path", in order; posts is each POST's body.
 	log, posts []string
 	// pauseFirst makes the first import of a review pause; failImportAt, when not 0, is the number of
@@ -102,8 +111,12 @@ func (f *apiFake) writes() []string {
 func (f *apiFake) etag() string { return fmt.Sprintf(`"%d-OB"`, f.draft.rev) }
 
 func (f *apiFake) draftJSON() string {
-	return fmt.Sprintf(`{"id":%q,"cluster":%q,"title":%q,"state":%q,"revision":%d,"entries":[]}`,
-		f.draft.id, f.draft.cluster, f.draft.title, f.draft.state, f.draft.rev)
+	entries := make([]string, 0, len(f.assigned))
+	for _, m := range f.assigned {
+		entries = append(entries, fmt.Sprintf(`{"kind":"assignment","machine":%q,"head":null,"base":null,"revision":"asr_OB"}`, m))
+	}
+	return fmt.Sprintf(`{"id":%q,"cluster":%q,"title":%q,"state":%q,"revision":%d,"entries":[%s]}`,
+		f.draft.id, f.draft.cluster, f.draft.title, f.draft.state, f.draft.rev, strings.Join(entries, ","))
 }
 
 func (f *apiFake) machineJSON(m obMachine) string {
@@ -262,6 +275,29 @@ func (f *apiFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && f.draft.id != "" && path == "/drafts/"+f.draft.id:
 		w.Header().Set("ETag", f.etag())
 		fmt.Fprint(w, f.draftJSON())
+	case r.Method == http.MethodGet && path == "/assignments":
+		heads := f.heads
+		if f.headFirst && len(f.machines) > 0 {
+			heads = append(slices.Clone(heads), f.machines[0].id)
+		}
+		items := make([]string, 0, len(heads))
+		for _, m := range heads {
+			items = append(items, fmt.Sprintf(`{"id":"asg_%s","cluster":%q,"machine":%q,"headRevision":1,"revision":"asr_OB","createdAt":"2026-11-01T06:00:00Z"}`, m, f.draft.cluster, m))
+		}
+		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(items, ","))
+	case r.Method == http.MethodPut && f.draft.id != "" && strings.HasPrefix(path, "/drafts/"+f.draft.id+"/assignments/"):
+		if f.assignWrites++; f.assignWrites == f.failAssign {
+			f.problem(w, http.StatusUnprocessableEntity, "validation-failed", "")
+			return
+		}
+		if r.Header.Get("If-Match") != f.etag() {
+			f.problem(w, http.StatusPreconditionFailed, "precondition-failed", "")
+			return
+		}
+		f.draft.rev++
+		f.assigned = append(f.assigned, strings.TrimPrefix(path, "/drafts/"+f.draft.id+"/assignments/"))
+		w.Header().Set("ETag", f.etag())
+		fmt.Fprint(w, `{}`)
 	case r.Method == http.MethodPost && path == "/ingestions":
 		f.startImport(w, r, body)
 	case r.Method == http.MethodGet && path == "/ingestions":

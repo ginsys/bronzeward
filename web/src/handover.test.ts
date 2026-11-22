@@ -17,10 +17,14 @@ const B = `mch_${"b".repeat(26)}`;
 interface M { applied: boolean; desired: boolean; plan: "none" | "proposed" | "approved"; drift?: boolean; unresolved?: boolean; refusePlan?: boolean; holdsAfterApproval?: number }
 
 // A server for the handover: the draft, the machines and what each write does to them. `log` is every write sent.
-function world(draft: { state: string; running?: boolean; etag?: string; followed?: Followed }, machines: Record<string, M>) {
+// `entries` is what the draft holds besides the machines' imports (default: an assignment entry for every machine, so a press has
+// none to add); `heads` the machines that hold an assignment head, served on the second page of `GET /assignments`;
+// `noHeads` makes that read fail.
+function world(draft: { state: string; running?: boolean; etag?: string; followed?: Followed; entries?: { kind: string; machine: string }[]; heads?: string[]; noHeads?: boolean }, machines: Record<string, M>) {
   const log: string[] = [];
   // The If-Match each publication carried, and each operation followed to its end.
   const ifMatches: (string | undefined)[] = [];
+  const puts: { machine: string; ifMatch: string | undefined; body: unknown }[] = [];
   const follows: string[] = [];
   // A publication takes effect once: the draft is published and each machine's Desired is the release.
   const publishNow = () => {
@@ -53,7 +57,15 @@ function world(draft: { state: string; running?: boolean; etag?: string; followe
     read: <T,>(path: string) => {
       const machine = /^\/machines\/(mch_\w+)\/position$/.exec(path)?.[1];
       if (machine !== undefined) return Promise.resolve({ kind: "ok", data: position(machine) } as never);
-      if (path.startsWith("/drafts/")) return Promise.resolve({ kind: "ok", data: draft, etag: draft.etag ?? '"1"' } as never);
+      if (path.startsWith("/assignments")) {
+        if (draft.noHeads === true) return Promise.resolve(undefined as T);
+        const items = path.includes("cursor=c2") ? (draft.heads ?? []).map((machine) => ({ id: `asg_${machine}`, machine })) : [];
+        return Promise.resolve({ kind: "ok", data: path.includes("cursor=c2") ? { items } : { items, next: "c2" } } as never);
+      }
+      if (path.startsWith("/drafts/")) {
+        const entries = draft.entries ?? Object.keys(machines).map((machine) => ({ kind: "assignment", machine, revision: "asr_1" }));
+        return Promise.resolve({ kind: "ok", data: { ...draft, entries }, etag: draft.etag ?? '"1"' } as never);
+      }
       return Promise.resolve(undefined as T);
     },
     follow: (op) => {
@@ -67,6 +79,14 @@ function world(draft: { state: string; running?: boolean; etag?: string; followe
     },
     send: (spec) => {
       log.push(`${spec.method} ${spec.path}`);
+      const put = /^\/drafts\/drf_1\/assignments\/(mch_\w+)$/.exec(spec.path);
+      if (put !== null) {
+        puts.push({ machine: put[1]!, ifMatch: spec.ifMatch, body: spec.body });
+        if (spec.ifMatch !== (draft.etag ?? '"1"')) return Promise.resolve(wrote(spec, refused(412)));
+        draft.etag = `"${Number((draft.etag ?? '"1"').replaceAll('"', "")) + 1}"`;
+        draft.entries = [...(draft.entries ?? []), { kind: "assignment", machine: put[1]! }];
+        return Promise.resolve(wrote(spec, { ...done({ draft: "drf_1" }), status: 200, etag: draft.etag }));
+      }
       if (spec.path.endsWith("/publications")) {
         ifMatches.push(spec.ifMatch);
         // The server's draft is at its own ETag: a publication that does not carry it is refused (412).
@@ -100,12 +120,67 @@ function world(draft: { state: string; running?: boolean; etag?: string; followe
     say: (key, line) => void (lines[key] = line),
     live: () => true,
   };
-  return { io, log, lines, machines, plans, ifMatches, follows };
+  return { io, log, lines, machines, plans, ifMatches, follows, puts };
 }
 const fresh = (): M => ({ applied: false, desired: false, plan: "none" });
 // The draft's ETag as the page shows it.
 const SHOWN = '"1"';
 const text = (l: Line | undefined) => `${l?.state}: ${l?.text}`;
+
+describe("the press adds the empty assignment a connected machine lacks (ginsys/bronzeward#1068)", () => {
+  test("a machine with no assignment gets one that selects nothing, before the publication, each write under the ETag the one before answered", async () => {
+    const w = world({ state: "open", entries: [] }, { [A]: fresh(), [B]: fresh() });
+    await handOver("drf_1", [A, B], w.io, SHOWN);
+    expect(w.puts).toEqual([
+      { machine: A, ifMatch: '"1"', body: { profiles: [], fragments: {} } },
+      { machine: B, ifMatch: '"2"', body: { profiles: [], fragments: {} } },
+    ]);
+    expect(w.log.slice(0, 3)).toEqual([`PUT /drafts/drf_1/assignments/${A}`, `PUT /drafts/drf_1/assignments/${B}`, "POST /drafts/drf_1/publications"]);
+    expect(w.ifMatches).toEqual(['"3"']);
+    expect(text(w.lines[A])).toBe(`done: ${LINES.managed}`);
+  });
+
+  test("a machine the draft already holds an assignment for, or that holds a head on a later page of the list, is left as it is", async () => {
+    const w = world({ state: "open", entries: [{ kind: "assignment", machine: A }], heads: [B] }, { [A]: fresh(), [B]: fresh() });
+    await handOver("drf_1", [A, B], w.io, SHOWN);
+    expect(w.puts).toEqual([]);
+    expect(w.ifMatches).toEqual([SHOWN]);
+  });
+
+  test("a press with only the one machine missing writes only that one", async () => {
+    const w = world({ state: "open", entries: [{ kind: "assignment", machine: A }] }, { [A]: fresh(), [B]: fresh() });
+    await handOver("drf_1", [A, B], w.io, SHOWN);
+    expect(w.puts.map((x) => x.machine)).toEqual([B]);
+  });
+
+  test("assignments that cannot be read stop the press before any write, in words", async () => {
+    const w = world({ state: "open", entries: [], noHeads: true }, { [A]: fresh() });
+    await handOver("drf_1", [A], w.io, SHOWN);
+    expect(w.log).toEqual([]);
+    expect(text(w.lines[DRAFT])).toBe(`stopped: ${LINES.noAssignmentRead}`);
+  });
+
+  test("a draft that changed under the page refuses the first write: the press stops there, publishes nothing and plans nothing", async () => {
+    const w = world({ state: "open", entries: [], etag: '"7"' }, { [A]: fresh() });
+    await handOver("drf_1", [A], w.io, SHOWN);
+    expect(w.log).toEqual([`PUT /drafts/drf_1/assignments/${A}`]);
+    expect(w.lines[DRAFT]?.state).toBe("stopped");
+    expect(w.lines[DRAFT]?.write).toBeDefined();
+  });
+
+  test("a draft already published gets no assignment write: a second press only reads and continues", async () => {
+    const w = world({ state: "published", entries: [] }, { [A]: { ...fresh(), desired: true } });
+    await handOver("drf_1", [A], w.io, SHOWN);
+    expect(w.puts).toEqual([]);
+  });
+
+  test("a press that holds no ETag sends nothing, assignments included", async () => {
+    const w = world({ state: "open", entries: [] }, { [A]: fresh() });
+    await handOver("drf_1", [A], w.io, undefined);
+    expect(w.log).toEqual([]);
+    expect(text(w.lines[DRAFT])).toBe(`stopped: ${NO_ETAG}`);
+  });
+});
 
 describe("the handover button (ginsys/bronzeward#1066): one press, every act the existing route, once", () => {
   test("all roles, a fresh draft of two machines: one publish, one plan and one approval each, nothing else, and both end managed", async () => {

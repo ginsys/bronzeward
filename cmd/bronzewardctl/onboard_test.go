@@ -97,7 +97,7 @@ func TestOnboardFullRun(t *testing.T) {
 	if cl.Name != "lab" || cl.Endpoint != "https://10.0.0.1:6443" || cl.Contract != "v1.14" || cl.TalosClusterId != "talos-cluster-1" {
 		t.Errorf("the cluster was recorded as %+v", cl)
 	}
-	want := []string{"POST /clusters", "POST /machines", "POST /machines", "POST /clusters/" + cl.Id + "/first-keys", "POST /drafts", "POST /ingestions", "POST /ingestions"}
+	want := []string{"POST /clusters", "POST /machines", "POST /machines", "POST /clusters/" + cl.Id + "/first-keys", "POST /drafts", "POST /ingestions", "POST /ingestions", "PUT /drafts/" + a.draft.id + "/assignments/" + a.machines[0].id, "PUT /drafts/" + a.draft.id + "/assignments/" + a.machines[1].id}
 	if got := a.writes(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("writes %q; want %q", got, want)
 	}
@@ -927,5 +927,87 @@ func TestQualifyNamesTheContextOnce(t *testing.T) {
 		if got := qualify(c.ctx, c.cmd); got != c.want {
 			t.Errorf("qualify(%q, %q) = %q, want %q", c.ctx, c.cmd, got, c.want)
 		}
+	}
+}
+
+// putsOf is the assignment writes of the fake's log, as the machine each names.
+func putsOf(a *apiFake) []string {
+	var out []string
+	for _, w := range a.writes() {
+		if strings.HasPrefix(w, "PUT ") {
+			out = append(out, w[strings.LastIndex(w, "/")+1:])
+		}
+	}
+	return out
+}
+
+// TestOnboardGivesEachImportedMachineAnEmptyAssignment: a machine whose import was released gets one
+// assignment that selects nothing, sent as an empty body after the imports; the table says so, and
+// running again sends none (ginsys/bronzeward#1068).
+func TestOnboardGivesEachImportedMachineAnEmptyAssignment(t *testing.T) {
+	e := newOnboard(t)
+	code, out, errOut := e.run()
+	if code != 0 {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	a := e.api
+	if got := putsOf(a); len(got) != 2 || got[0] != a.machines[0].id || got[1] != a.machines[1].id {
+		t.Errorf("assignment writes for %q; want one for each machine, in order", got)
+	}
+	for _, p := range a.posts {
+		if strings.HasPrefix(p, "PUT ") && !strings.HasSuffix(p, " {}") {
+			t.Errorf("an assignment was sent as %q; want an empty body", p)
+		}
+	}
+	if strings.Count(out, "assignment created") != 2 {
+		t.Errorf("stdout lacks two created assignments:\n%s", out)
+	}
+	code, out, errOut = e.run()
+	if code != 0 {
+		t.Fatalf("second run: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if got := putsOf(a); len(got) != 2 {
+		t.Errorf("a second run sent more assignment writes: %q", got)
+	}
+	if strings.Count(out, "assignment existing") != 2 {
+		t.Errorf("the second run's stdout lacks two existing assignments:\n%s", out)
+	}
+}
+
+// TestOnboardLeavesAMachineWithAnAssignmentHeadAlone: a machine that already holds an assignment head is
+// not written over, and the machine without one is.
+func TestOnboardLeavesAMachineWithAnAssignmentHeadAlone(t *testing.T) {
+	e := newOnboard(t)
+	e.api.headFirst = true
+	code, out, errOut := e.run()
+	if code != 0 {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if got := putsOf(e.api); len(got) != 1 || got[0] != e.api.machines[1].id {
+		t.Errorf("assignment writes for %q; want only the second machine", got)
+	}
+	if strings.Count(out, "assignment existing") != 1 || strings.Count(out, "assignment created") != 1 {
+		t.Errorf("stdout lacks one existing and one created assignment:\n%s", out)
+	}
+}
+
+// TestOnboardAssignmentFailureStopsAndRerunWritesTheRest: a refused assignment write ends the run with
+// the rerun command, and the rerun writes only what is missing.
+func TestOnboardAssignmentFailureStopsAndRerunWritesTheRest(t *testing.T) {
+	e := newOnboard(t)
+	e.api.failAssign = 2
+	code, out, _ := e.run()
+	if code == 0 || !strings.Contains(out, "assignment failed") || !strings.Contains(out, "bronzewardctl cluster onboard") {
+		t.Fatalf("exit %d, stdout %q; want a failed assignment and the rerun command", code, out)
+	}
+	if got := putsOf(e.api); len(got) != 2 {
+		t.Fatalf("first run's assignment writes %q; want the created one and the refused one", got)
+	}
+	e.api.failAssign = 0
+	if code, out, errOut := e.run(); code != 0 {
+		t.Fatalf("rerun: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	if len(e.api.assigned) != 2 {
+		t.Errorf("the draft holds %d assignments after the rerun; want 2", len(e.api.assigned))
 	}
 }

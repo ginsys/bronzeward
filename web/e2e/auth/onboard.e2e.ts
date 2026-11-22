@@ -70,8 +70,12 @@ async function recorded(name: string) {
   const machines = id === "" ? [] : ((await api(at, "h-author", "GET", `/machines?cluster=${id}`)).body!["items"] as { id: string }[]);
   const imports: string[] = [];
   for (const m of machines) for (const i of (await api(at, "h-author", "GET", `/ingestions?machine=${m.id}`)).body!["items"] as { state: string }[]) imports.push(i.state);
-  const drafts = ((await api(at, "h-author", "GET", "/drafts")).body!["items"] as { cluster: string; title: string }[]).filter((d) => d.cluster === id && d.title === `onboard ${name}`);
-  return { clusters: clusters.length, machines: machines.length, imports, drafts: drafts.length };
+  const drafts = ((await api(at, "h-author", "GET", "/drafts")).body!["items"] as { id: string; cluster: string; title: string }[]).filter((d) => d.cluster === id && d.title === `onboard ${name}`);
+  // The machines of the cluster that the draft holds an assignment entry for or that hold an assignment head.
+  const entries = drafts[0] === undefined ? [] : ((await api(at, "h-author", "GET", `/drafts/${drafts[0].id}`)).body!["entries"] as { kind: string; machine?: string }[]);
+  const held = new Set(entries.filter((e) => e.kind === "assignment").map((e) => e.machine));
+  for (const a of (await api(at, "h-author", "GET", "/assignments")).body!["items"] as { machine: string }[]) held.add(a.machine);
+  return { clusters: clusters.length, machines: machines.length, imports, drafts: drafts.length, assigned: machines.filter((m) => held.has(m.id)).length };
 }
 
 describe("Connect a cluster (#1001)", () => {
@@ -90,9 +94,9 @@ describe("Connect a cluster (#1001)", () => {
     await $("main form").$("button=Connect a cluster").click();
     await expect(result()).toHaveText(expect.stringMatching(/^Onboarded\./), { wait: 180_000 });
     expect(await states()).toEqual([
-      `Cluster ${name}=done`, "First key=done", "Machine cp-1=done", "Machine w-1=done", "Draft onboard " + name + "=done", "Import cp-1=done", "Import w-1=done",
+      `Cluster ${name}=done`, "First key=done", "Machine cp-1=done", "Machine w-1=done", "Draft onboard " + name + "=done", "Import cp-1=done", "Import w-1=done", "Assignment cp-1=done", "Assignment w-1=done",
     ]);
-    expect(await recorded(name)).toEqual({ clusters: 1, machines: 2, imports: ["released", "released"], drafts: 1 });
+    expect(await recorded(name)).toEqual({ clusters: 1, machines: 2, imports: ["released", "released"], drafts: 1, assigned: 2 });
     // The file's key is in no part of the page, and nothing is kept in storage, IndexedDB or caches.
     // A file with no key to look for reads as shown, so the check cannot pass by finding nothing to compare.
     await absent(() => browser.execute(async (issuer: string) => {
@@ -127,7 +131,7 @@ describe("Connect a cluster (#1001)", () => {
     expect(await states()).toEqual([`Cluster ${name}=done`, "First key=done", "Machine cp-1=done", "Machine w-1=done", `Draft onboard ${name}=failed`]);
     await $("main").$("button=Run again").click();
     await expect(result()).toHaveText(expect.stringMatching(/^Onboarded\./), { wait: 180_000 });
-    expect(await recorded(name)).toEqual({ clusters: 1, machines: 2, imports: ["released", "released"], drafts: 1 });
+    expect(await recorded(name)).toEqual({ clusters: 1, machines: 2, imports: ["released", "released"], drafts: 1, assigned: 2 });
     await storageEmptyAfterPause();
   });
 
@@ -145,26 +149,18 @@ describe("Connect a cluster (#1001)", () => {
     // The sentence above the button says what the press does, and that it sends nothing to any machine.
     await expect($('[data-testid="handover-sentence"]')).toHaveText(expect.stringContaining("It sends nothing to any machine."));
     await $("main").$("button=Start managing these machines").click();
-    // The draft's line settles first: done, or stopped. The stand-in nodes' configurations are minimal (internal/api
-    // e2enode_test.go: no cluster section on the worker, no machine CA), and the case does not claim they publish: it
-    // asserts what the press did in either end, from the page and from what the deployment holds.
+    // Connect gave each machine an assignment that selects nothing, so the publication makes a release a plan can
+    // bind: the whole handover runs here, in every browser, and a draft line that stops fails the case.
     const draftLine = () => $$('[data-testid="handover-line"]')[0]!;
     await browser.waitUntil(async () => ["done", "stopped"].includes((await draftLine().getAttribute("data-state")) ?? ""), { timeout: 240_000, timeoutMsg: "the draft's handover line did not settle" });
+    // The line's own text rides in the comparison, so a stop reads in the failure.
+    expect(`${await draftLine().getAttribute("data-state")}: ${await draftLine().getText()}`).toMatch(/^done: /);
     const id = ((await api(at, "h-all", "GET", "/clusters")).body!["items"] as { id: string; name: string }[]).find((c) => c.name === name)!.id;
     const drafts = ((await api(at, "h-all", "GET", "/drafts")).body!["items"] as { cluster: string; state: string }[]).filter((d) => d.cluster === id);
     const machines = (await api(at, "h-all", "GET", `/machines?cluster=${id}`)).body!["items"] as { id: string }[];
     expect(machines).toHaveLength(2);
     const plansOf = async (m: string) => (await api(at, "h-all", "GET", `/plans?machine=${m}`)).body!["items"] as { operation: string; state: string; approval: string | null }[];
-    if ((await draftLine().getAttribute("data-state")) === "stopped") {
-      // A publication that did not succeed sends nothing to any machine and no plan is made.
-      // The line carries the publication's own end in the publication page's words (publishEnd), not the unread-watch words.
-      await expect(draftLine()).toHaveText(expect.stringMatching(/Publication operation .+\. Nothing has been sent to any machine\./));
-      expect(drafts.map((d) => d.state)).toEqual(["open"]);
-      // once: the draft's line is already stopped, and the press makes a machine's plan only after the publication succeeded
-      for (const m of machines) expect(await plansOf(m.id)).toEqual([]);
-      return;
-    }
-    // Published: one line for the draft and one for each machine, each ending done or waiting on the controller; one
+    // One line for the draft and one for each machine, each ending done or waiting on the controller; one
     // adopt plan per machine, approved, its approval marked as the person's own.
     expect(drafts.map((d) => d.state)).toEqual(["published"]);
     await browser.waitUntil(async () => {

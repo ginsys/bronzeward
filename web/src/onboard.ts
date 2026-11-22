@@ -52,6 +52,8 @@ export interface Plan {
   machines: Record<string, string>;
   draft?: string;
   imports: Record<string, string>;
+  // The machines whose assignment the step found or wrote, by node id: the draft that holds it.
+  assigned: Record<string, string>;
   lines: Line[];
   // The epoch the plan's first press began under. Every write of every press of this plan is sent under it: a
   // press that resumes from the ids the plan holds (read under that epoch) is refused once the epoch has moved.
@@ -245,7 +247,7 @@ export async function discoverCluster(env: Env, text: string, o: { context?: str
   const found = out.data as Discovery;
   if (!found.supported) return { ok: false, why: `Contract ${found.contract} is not the contract of the machinery in this server, so it would refuse the cluster.` };
   if (keyAddress(found) === undefined) return { ok: false, why: "No control-plane member answered, so no address can carry the first key. Run it again once one does." };
-  return { ok: true, plan: { found, endpoint, name: "", kube: found.kubernetesEndpoint, document: cut.document, keyed: false, machines: {}, imports: {}, lines: [] } };
+  return { ok: true, plan: { found, endpoint, name: "", kube: found.kubernetesEndpoint, document: cut.document, keyed: false, machines: {}, imports: {}, assigned: {}, lines: [] } };
 }
 
 // Runs the steps in order, each finding what exists before it writes, and reports the lines after each.
@@ -271,11 +273,13 @@ export async function onboardCluster(env: Env, p: Plan, report: (lines: Line[]) 
     ["Machines", () => machines(env, p, set, fail)],
     ["Draft", () => draft(env, p, set, fail, list)],
     ["Imports", () => imports(env, p, set, fail, list)],
+    ["Assignments", () => assignments(env, p, set, fail, list)],
   ];
   // What the stopped step has not finished, one by name where it has members, then the steps after it.
   const left: Record<string, () => string[]> = {
     Machines: () => members(p.found).filter((m) => m.answered && m.platform !== "" && p.machines[m.nodeId] === undefined).map((m) => `Machine ${labelOf(m)}`),
     Imports: () => members(p.found).filter((m) => p.machines[m.nodeId] !== undefined && p.imports[m.nodeId] === undefined).map((m) => `Import ${labelOf(m)}`),
+    Assignments: () => members(p.found).filter((m) => p.imports[m.nodeId] !== undefined && p.assigned[m.nodeId] === undefined).map((m) => `Assignment ${labelOf(m)}`),
   };
   p.unsent = undefined;
   for (const [i, [name, go]] of steps.entries()) {
@@ -438,6 +442,31 @@ async function draft(env: Env, p: Plan, set: Set, fail: Fail, list: List): Promi
   }
   p.draft = id;
   set({ key: "draft", label, state: open === undefined ? "done" : "existing", to: `/drafts/${id}` });
+  return true;
+}
+
+// Each machine whose import was released gets an assignment that selects nothing, so its release holds an
+// assignment revision and a plan can bind it (ginsys/bronzeward#1068): the machine's configuration is its import
+// base alone. A machine that already holds an assignment head, or has an assignment entry in the draft (a removal
+// is a person's choice too), is left as it is. The draft is read again before each write for its ETag and entries.
+async function assignments(env: Env, p: Plan, set: Set, fail: Fail, list: List): Promise<boolean> {
+  const heads = await list<{ machine: string }>("/assignments", "");
+  if (typeof heads === "string") return fail("assignments", "Assignments", heads);
+  for (const m of members(p.found)) {
+    const machine = p.machines[m.nodeId];
+    const key = `assignment:${m.nodeId}`;
+    const label = `Assignment ${labelOf(m)}`;
+    if (machine === undefined || p.imports[m.nodeId] === undefined || p.assigned[m.nodeId] !== undefined) continue;
+    const r = await env.read<Draft>(`/drafts/${enc(p.draft!)}`);
+    if (r.kind !== "ok" || r.etag === undefined) return fail(key, label, "the draft could not be read for its ETag: run it again");
+    const held = r.data.entries.some((e) => e.kind === "assignment" && e.machine === machine) || heads.some((h) => h.machine === machine);
+    if (!held) {
+      const o = await env.send({ method: "PUT", path: `/drafts/${enc(p.draft!)}/assignments/${enc(machine)}`, resource: `/drafts/${p.draft}`, ifMatch: r.etag, body: { profiles: [], fragments: {} } });
+      if (o.kind !== "done") return fail(key, label, o);
+    }
+    p.assigned[m.nodeId] = p.draft!;
+    set({ key, label, state: held ? "existing" : "done", to: `/drafts/${p.draft}`, detail: "selects nothing: its configuration is its import base alone" });
+  }
   return true;
 }
 

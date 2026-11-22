@@ -337,7 +337,7 @@ bronzewardctl
   cluster list | show | add
   cluster discover                    --talosconfig required; reads Talos, prints commands, writes nothing
   cluster first-key                   supply or replace the cluster's first key; the server keeps the Talos CA key
-  cluster onboard                     discover, record, supply the first key, import each machine
+  cluster onboard                     discover, record, supply the first key, import and give each machine an empty assignment
   machine list | show | add | set-endpoint | rename    (add takes an optional --name; rename sets it: served from API revision 10, G8)
   machine timeline | observations    paged; --follow polls (G9)
   machine freeze | unfreeze           --reason required
@@ -584,7 +584,11 @@ refuses the key and one that does not answer are not told apart. A talosconfig
 whose certificate is `os:reader` is refused: Bronzeward needs the `os:admin` read of a control
 plane's configuration to take the CA key from it.
 
-`cluster onboard` runs those steps in one command, and imports each machine into one draft. It needs
+`cluster onboard` runs those steps in one command, and imports each machine into one draft. It then
+writes, for each machine whose import was released into that draft and that has no assignment entry in it
+and no assignment head, an assignment that selects nothing (the machine's configuration is its import base
+alone), so that the release the draft makes holds an assignment revision a plan can bind; running it again
+writes none that exists. It needs
 an `author` signed in as a person (exit 1 otherwise, with nothing sent) and takes the flags of
 `cluster discover` and these:
 
@@ -908,9 +912,11 @@ automation token.
 **The one exception, the web client's handover button** (the owner's decision of 2026-11-21 18:22 CET, typed in
 the campaign lead's session, answering "A" to the question whether one action may take a draft's machines
 under management). On a draft that holds an import base, for a person who holds the author, publisher and
-approver roles, the web client's "Start managing these machines" publishes the draft as the page showed it
-(the publication carries the draft's ETag from that page and is refused when another author changed the draft
-since), creates an adopt plan for each machine with no `Applied` and approves each
+approver roles, the web client's "Start managing these machines" first adds, to a machine of the draft that has
+no assignment entry and no assignment head, an assignment that selects nothing (the machine's configuration is
+its import base alone), each write under the ETag the one before answered, then publishes the draft as the page
+showed it (the publication carries the ETag of the last write, or the page's when none was needed, and is
+refused when another author changed the draft since), creates an adopt plan for each machine with no `Applied` and approves each
 plan as the signed-in person, without the typed plan ID: the sentence above the button, which says what the
 press does and that it sends nothing to any machine, is the confirmation. Every act is the existing route,
 recorded one by one, and the approval records self-approval as the server computes it. A handover plan
@@ -1410,7 +1416,8 @@ unsupported contract and a cluster where no control-plane member answered before
 recorded. Then it runs, in order, the cluster, the first key (to the first control-plane member that
 answered), each machine (by SMBIOS UUID where the node reports one, else by node ID, with the
 hostname as its name where that is a valid name), the draft titled `onboard <name>` and one import
-for each machine, following each to its release, and shows one line for each step. A step that fails
+for each machine, following each to its release, then for each imported machine that has no assignment one that
+selects nothing, and shows one line for each step. A step that fails
 stops the run with its line saying why, and [Run again] finds what the server holds (a `409` naming the
 cluster or a machine, the open draft, an import already released) and finishes the rest, as a second
 `cluster onboard` does; the first key is sent again after a reload, since a reload drops the page's
@@ -1636,7 +1643,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `cluster add` | `POST /clusters` | author | yes | no |
 | `cluster discover` | none: reads Talos nodes with the operator's talosconfig | none | no | no |
 | `cluster first-key` | `POST /clusters/{id}/first-keys` | author (human) | yes | no |
-| `cluster onboard` | `POST /clusters`, `POST /machines`, `POST /clusters/{id}/first-keys`, `POST /drafts`, `POST /ingestions` | author (human) | yes | draft's |
+| `cluster onboard` | `POST /clusters`, `POST /machines`, `POST /clusters/{id}/first-keys`, `POST /drafts`, `POST /ingestions`, `PUT /drafts/{id}/assignments/{machine}` | author (human) | yes | draft's |
 | `machine add` | `POST /machines` | author | yes | no |
 | `machine set-endpoint` | `POST /machines/{id}/talos-endpoints` | author | yes | no |
 | `machine rename` (served from API revision 10, [persistence and API §3.5](persistence-api.md#35-a-machines-name)) | `POST /machines/{id}/names` | author | yes | no |

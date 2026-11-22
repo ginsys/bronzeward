@@ -16,7 +16,7 @@ type Draft = components["schemas"]["DraftBody"];
 
 export const HANDOVER_TITLE = "Start managing these machines";
 export const HANDOVER_SENTENCE =
-  "This publishes the draft, then creates a handover plan for each machine and approves each plan as you, recorded as your own approval. It sends nothing to any machine. A change you apply later keeps its own plan and approval.";
+  "This adds an assignment that selects nothing for each machine that has none, publishes the draft, then creates a handover plan for each machine and approves each plan as you, recorded as your own approval. It sends nothing to any machine. A change you apply later keeps its own plan and approval.";
 export const UNSAVED = "The draft editor holds text you have not saved, and a press publishes only what is saved. Save it or discard it, then press again. Nothing was sent.";
 // A write of an earlier press that stays open (in flight, of unknown outcome, or set aside) may still commit or be
 // repeated, so a new press would send the same act under a new key: it waits for the notice's resolution.
@@ -62,6 +62,8 @@ export const LINES = {
   noPlan: "The plan was created, but the answer named no plan. Open the machine to find it.",
   notImported: "Left as it is: this machine has no stored import to hand over. Open the machine to see its next step.",
   stillOpen: "Stopped: the draft still reads open after its publication. Press the button again.",
+  assigning: "Adding an assignment that selects nothing for each machine that has none, so each release holds one.",
+  noAssignmentRead: "Not read: the machines' assignments could not be read. Nothing was sent. Press the button again.",
 } as const;
 
 export type Act =
@@ -115,10 +117,22 @@ const idOf = (w: Write): string | undefined => {
   return typeof id === "string" && id !== "" ? id : undefined;
 };
 
+// The machines that already have an assignment: an entry of the draft, or a head on the server (every page read).
+async function assigned(d: Draft, io: Io): Promise<Set<string> | undefined> {
+  const held = new Set(d.entries.flatMap((e) => (e.kind === "assignment" && e.machine !== undefined ? [e.machine] : [])));
+  for (let cursor: string | undefined; ; ) {
+    const r = await io.read<{ items: { machine: string }[]; next?: string }>(cursor === undefined ? "/assignments" : `/assignments?cursor=${enc(cursor)}`);
+    if (r?.kind !== "ok") return undefined;
+    for (const a of r.data.items) held.add(a.machine);
+    if (r.data.next === undefined) return held;
+    cursor = r.data.next;
+  }
+}
+
 // The draft: published first when it is still open; true when the machines can follow. `etag` is the draft's
 // ETag as the page showed it: the publication carries it, so a draft another author changed since is refused
 // (412) and never published unseen, and with none the press sends nothing.
-async function publish(id: string, io: Io, etag: string | undefined): Promise<boolean> {
+async function publish(id: string, machines: readonly string[], io: Io, etag: string | undefined): Promise<boolean> {
   const say = (line: Line) => io.say(DRAFT, line);
   const d = await io.read<Draft>(`/drafts/${enc(id)}`);
   if (d?.kind !== "ok") return say({ state: "stopped", text: LINES.noRead }), false;
@@ -127,10 +141,30 @@ async function publish(id: string, io: Io, etag: string | undefined): Promise<bo
   if (etag === undefined) return say({ state: "stopped", text: NO_ETAG }), false;
   // Every write is preceded by this check: the press stops where the page left or the shell invalidated its reads.
   if (!io.live()) return false;
+  // A machine connected before this change holds an import and no assignment, and a plan binds an assignment
+  // revision: the press adds an assignment that selects nothing for each, in the draft it is about to publish.
+  const held = await assigned(d.data, io);
+  if (held === undefined) return say({ state: "stopped", text: LINES.noAssignmentRead }), false;
+  let tag: string = etag;
+  for (const m of machines.filter((m) => !held.has(m))) {
+    if (!io.live()) return false;
+    say({ state: "working", text: LINES.assigning });
+    const w = await io.send({ method: "PUT", path: `/drafts/${enc(id)}/assignments/${enc(m)}`, body: { profiles: [], fragments: {} }, resource: `/drafts/${id}`, ifMatch: tag });
+    if (!done(w)) return say({ state: "stopped", text: "", write: w }), false;
+    // The next write carries the ETag this answer gave; an answer without one is read for it again.
+    let next = w.outcome?.kind === "done" ? w.outcome.etag : undefined;
+    if (next === undefined) {
+      const again = await io.read<Draft>(`/drafts/${enc(id)}`);
+      next = again?.kind === "ok" ? again.etag : undefined;
+      if (next === undefined) return say({ state: "stopped", text: LINES.noRead }), false;
+    }
+    tag = next;
+  }
+  if (!io.live()) return false;
   say({ state: "working", text: LINES.publishing });
   // The server answers a publication already queued or running for this draft revision with that operation
   // (persistence and API §7.3, its natural key), so a press while one runs follows it and creates no second.
-  const w = await io.send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, resource: `/drafts/${id}`, ifMatch: etag });
+  const w = await io.send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, resource: `/drafts/${id}`, ifMatch: tag });
   if (!done(w)) return say({ state: "stopped", text: "", write: w }), false;
   const op = idOf(w);
   if (op === undefined) return say({ state: "stopped", text: LINES.noOperation }), false;
@@ -190,6 +224,6 @@ async function machine(m: string, io: Io): Promise<void> {
 
 // The press: the draft first, then every machine at once (each is its own record and may fail alone).
 export async function handOver(draft: string, machines: readonly string[], io: Io, etag: string | undefined): Promise<void> {
-  if (!(await publish(draft, io, etag))) return;
+  if (!(await publish(draft, machines, io, etag))) return;
   await Promise.all(machines.map((m) => machine(m, io)));
 }
