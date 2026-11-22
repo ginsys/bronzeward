@@ -61,6 +61,7 @@ const reads = (): Reads => ({
   client: {
     read: async (path: string) => {
       if (held) return new Promise(() => {});
+      if (failing) return { kind: "unavailable", status: 503, problem: null };
       const bare = path.split("?")[0]!;
       if (path in served) return { kind: "ok", data: served[path] };
       if (bare in served) return { kind: "ok", data: served[bare] };
@@ -73,7 +74,7 @@ const reads = (): Reads => ({
     return false;
   },
   undropped: () => () => true,
-  view: "v", again: 0, regained: 0, go: () => {}, failure: () => "FAILED",
+  view: "v", again, regained: 0, go: () => {}, failure: () => "FAILED",
 }) as unknown as Reads;
 
 type Roles = ("author" | "publisher" | "approver")[];
@@ -98,12 +99,21 @@ const underTheTitle = (n: Element, ...also: (Element | null | undefined)[]) => {
   const h2 = box.querySelector("h2")!;
   expect(h2.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const title = [h2, ...box.querySelectorAll('[data-testid="draft-line"]'), ...[...box.querySelectorAll("small")].map((s) => s.parentElement), ...also];
-  const all = [...box.querySelectorAll("*")];
-  const stray = all.slice(0, all.indexOf(n)).filter((e) => !e.contains(n) && !title.some((t) => t === e || t?.contains(e)));
-  expect(stray.map((e) => e.outerHTML.slice(0, 80))).toEqual([]);
+  // Every node before the note in document order, text included (a failure line can be bare text).
+  const walker = document.createTreeWalker(box, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  const stray: string[] = [];
+  for (let node = walker.nextNode(); node !== null && node !== n; node = walker.nextNode()) {
+    if (node.contains(n) || (node.nodeType === Node.TEXT_NODE && node.textContent!.trim() === "")) continue;
+    if (title.some((t) => t === node || t?.contains(node))) continue;
+    stray.push(node.nodeType === Node.TEXT_NODE ? node.textContent! : (node as Element).outerHTML.slice(0, 80));
+  }
+  expect(stray).toEqual([]);
 };
 // Reads that never answer, for the loading state.
 let held = false;
+// Reads that fail once the page shows an answer, and the shell's read counter that makes a page read again.
+let failing = false;
+let again = 0;
 const linksTo = (href: string) => [...box.querySelectorAll("a")].filter((a) => a.getAttribute("href") === href);
 const button = (label: string) => [...box.querySelectorAll("button")].find((b) => b.textContent === label);
 
@@ -113,6 +123,8 @@ beforeEach(() => {
   root = createRoot(box);
   served = {};
   held = false;
+  failing = false;
+  again = 0;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -213,6 +225,17 @@ describe("the publish page's note", () => {
     expect(box.textContent!.split(SENT_NOTHING)).toHaveLength(2);
     underTheTitle(n);
     expect(linksTo(`/drafts/${DRF}`)).toHaveLength(1);
+  });
+  test("after a failed read with the last answer kept, the note stays under the title, above the failure line, and once", async () => {
+    served[`/drafts/${DRF}`] = draft("open", [imported]);
+    const page = h(PublishDraft, { query: `draft=${DRF}` });
+    await shown(page);
+    failing = true;
+    again = 1;
+    await shown(page);
+    expect(box.textContent).toContain("FAILED");
+    expect(note().textContent).toBe(`${PUBLISH_NOTE} ${SENT_NOTHING}`);
+    underTheTitle(note());
   });
   test("a draft that is not open shows its own refusal line and no note", async () => {
     served[`/drafts/${DRF}`] = draft("published", [imported]);

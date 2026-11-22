@@ -154,14 +154,10 @@ function Publish({ id }: { id: string }) {
   return (
     <>
       <DraftHead id={id} d={d} lead="Publish draft" />
+      {d !== undefined && d.state === "open" && <PageNote parts={[PUBLISH_NOTE, SENT_NOTHING]} />}
       {pending}
       {d !== undefined && d.state !== "open" && <Status testid="not-open">{NOT_OPEN(d.state)}</Status>}
-      {d !== undefined && d.state === "open" && (
-        <>
-          <PageNote parts={[PUBLISH_NOTE, SENT_NOTHING]} />
-          <p><Action label="Publish" needs={["publisher"]} onClick={publish} busy={busy} /></p>
-        </>
-      )}
+      {d !== undefined && d.state === "open" && <p><Action label="Publish" needs={["publisher"]} onClick={publish} busy={busy} /></p>}
       {note !== undefined && <Status testid="no-etag">{note} <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
       <div ref={answer} tabIndex={-1} data-testid="publish-answer">
         <WriteResult
