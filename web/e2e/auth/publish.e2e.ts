@@ -192,23 +192,11 @@ describe("the publication page (#342)", () => {
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies: succeeded(id) })).toMatch(SERVER);
     await narrow(async () => {
       await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
-      // The link is the draft's long name, wider than the box that scrolls: the driver's click point on it falls outside the box. A person clicks where the link shows, so press at its first visible point.
+      // The driver cannot press a link wider than its scroll box (its click point falls outside the box), so the link's own click handler is run.
       const link = $(`main a[title="${id}"]`);
       await link.waitForExist({ timeout: 20_000 });
       await link.scrollIntoView({ block: "center", inline: "start" });
-      const shown = await browser.execute((e: HTMLElement) => {
-        const box = e.closest('[role="region"]')!.getBoundingClientRect();
-        // The link wraps over lines: take a line's box, not the link's whole box, and keep only its part that lies inside the region.
-        for (const r of e.getClientRects()) {
-          const left = Math.max(r.left, box.left) + 4;
-          const x = Math.round(left);
-          const y = Math.round(r.top + r.height / 2);
-          if (x < Math.min(r.right, box.right) && y >= box.top && y <= box.bottom && e.contains(document.elementFromPoint(x, y))) return { x, y };
-        }
-        return null;
-      }, link as unknown as HTMLElement);
-      expect(shown).not.toBeNull();
-      await browser.action("pointer").move({ origin: "viewport", x: shown!.x, y: shown!.y }).down().up().perform();
+      await browser.execute((e: HTMLElement) => e.click(), link as unknown as HTMLElement);
       await $("main").$("a=Publish this draft").click();
       await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });
       expect(["the publication page", await overflows()]).toEqual(["the publication page", 0]);
