@@ -1410,7 +1410,8 @@ stops the run with its line saying why, and [Run again] finds what the server ho
 cluster or a machine, the open draft, an import already released) and finishes the rest, as a second
 `cluster onboard` does; the first key is sent again after a reload, since a reload drops the page's
 memory of it. A first key that did not end well releases the file, so the page asks for it again. Every
-write of one plan, in every press of it, is sent under the epoch the plan's first press began under: once
+write of one plan, in every press of it, is sent under the epoch the plan's first press began under (a client that holds
+no epoch then sends nothing, and the page says so): once
 the installation's epoch has changed, the next write is refused and set aside in words (or not sent, where the
 page's reads were already invalidated), no later write goes out, and the page names what is not finished (each
 machine and import by name, then the later steps) and offers the file again instead of [Run again], since the ids

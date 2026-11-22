@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { describe, expect, test, vi } from "vitest";
-import { cutContext, discoverCluster, type Env, endpointNote, isAddress, type Line, nameOf, onboardCluster, type Plan, pressOnboarding, sender, stoppedSentence } from "./onboard.ts";
+import { cutContext, discoverCluster, type Env, endpointNote, isAddress, type Line, nameOf, NO_EPOCH_YET, onboardCluster, type Plan, pressOnboarding, sender, stoppedSentence } from "./onboard.ts";
 import type { Client } from "./request.ts";
 import { EPOCH_CHANGED_ASIDE, type Outcome, Writes, type WriteSpec } from "./write.ts";
 
@@ -899,14 +899,26 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     expect(new Set(writes(s).map((w) => w.epoch))).toEqual(new Set(["e2"]));
   });
 
-  test("a client that has seen no epoch sends no epoch of its own: the write layer reads one", async () => {
+  test("a client that holds no epoch sends nothing and says so, and the press after it learns one pins the plan and runs", async () => {
     const s = new Server();
     const plan = await planOf(s);
+    s.sends.length = 0;
     s.epochs.length = 0;
-    const r = await press(s, plan, undefined);
-    expect(r.ok).toBe(true);
+    let known: string | undefined;
+    const current = () => known;
+    let lines: Line[] = [];
+    const first = await pressOnboarding(s.env(), plan, { current, valid: () => true }, (l) => (lines = l));
+    expect(first).toEqual({ ok: false, epochChanged: false });
+    expect(lines).toEqual([{ key: "epoch", label: "Epoch", state: "failed", detail: NO_EPOCH_YET }]);
+    expect(writes(s)).toEqual([]);
     expect(plan.epoch).toBeUndefined();
-    expect(new Set(s.epochs)).toEqual(new Set([undefined]));
+    expect(plan.document).toBeDefined();
+    // The page reads again and the client holds an epoch: the same plan runs, every write under it.
+    known = "e1";
+    const second = await pressOnboarding(s.env(), plan, { current, valid: () => true }, () => {});
+    expect(second.ok).toBe(true);
+    expect(plan.epoch).toBe("e1");
+    expect(new Set(writes(s).map((w) => w.epoch))).toEqual(new Set(["e1"]));
   });
 
   test("a stop that only a read saw (the answer discarded under a new epoch) still says the epoch changed and retires the plan", async () => {
