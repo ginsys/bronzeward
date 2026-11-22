@@ -6,7 +6,7 @@ import type { components } from "./api/v1";
 import { short } from "./list.tsx";
 import { SAFE } from "./principals.ts";
 import { when } from "./states.tsx";
-import { UNTITLED_DRAFT } from "./words.ts";
+import { NOT_SHOWN, UNTITLED_DRAFT } from "./words.ts";
 
 type S = components["schemas"];
 
@@ -20,6 +20,12 @@ export const draftName = (d: Pick<S["DraftBody"], "title"> | null | undefined): 
 
 // A name an author typed, shown only when it is safe text (A8 rule 3), else undefined.
 export const safeText = (s: string): string | undefined => (SAFE.test(s) ? s : undefined);
+// A word the server sets (a state, kind, class or reason), shown only when it is safe text, else "(not shown)"; none stays none.
+export function safeWord(s: string): string;
+export function safeWord(s: string | null): string | undefined;
+export function safeWord(s: string | null): string | undefined {
+  return s == null ? undefined : safeText(s) ?? NOT_SHOWN;
+}
 
 // A draft in a sentence: its title in quotes where the title is safe text, else "Untitled draft" and the shortened identifier.
 export const draftCalled = (d: Pick<S["DraftBody"], "id" | "title">): string => {

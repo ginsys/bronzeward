@@ -9,7 +9,7 @@ import type { components } from "./api/v1";
 import { Detail, Id, Ref, short, useReads, viewOf } from "./list.tsx";
 import { MachineRef, machineText } from "./machines.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
-import { draftName, draftText, importedConfiguration, operationTitle, planTitle, releaseTitle } from "./titles.ts";
+import { draftName, draftText, importedConfiguration, operationTitle, planTitle, releaseTitle, safeWord } from "./titles.ts";
 import { SAFE } from "./principals.ts";
 import { THE_MACHINE, THIS_CLUSTER } from "./words.ts";
 
@@ -56,7 +56,7 @@ export function DraftHead({ id, d, lead }: { id: string; d: S["DraftBody"] | und
       <h2>{d === undefined ? `${lead} ${short(id)}` : `${lead}: ${draftName(d)}`}</h2>
       {d !== undefined && (
         <>
-          <p data-testid="draft-line">{d.state}, revision {d.revision}, <ClusterRef id={d.cluster} />.</p>
+          <p data-testid="draft-line">{safeWord(d.state)}, revision {d.revision}, <ClusterRef id={d.cluster} />.</p>
           <Detail id={d.id} />
         </>
       )}
