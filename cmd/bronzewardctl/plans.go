@@ -581,6 +581,6 @@ func (e *env) planCancel(args []string) error {
 // cancelLimits is what a cancellation of a committed plan does not do (journeys §8,
 // internal/api/attempt.go:362-366).
 // commentsLine is the plan view's line for a diff taken from a release that differs from the adopted configuration in form only.
-const commentsLine = "  Comments\tThe configuration Bronzeward adopted from the machine has comments that the release's text does not carry; they go with this apply"
+const commentsLine = "  Comments\tThe configuration Bronzeward adopted from the machine has comments that the release's text does not carry; this apply removes those comments"
 
 const cancelLimits = "A cancellation ends a committed plan's operation only while no attempt is recorded; it does not stop an attempt already recorded."

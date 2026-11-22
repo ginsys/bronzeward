@@ -331,8 +331,8 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 		}
 		appliedDigest = nil
 		pending := !bytes.Equal(artifact, baseline)
-		// Form only is said for a first adoption alone: the node holds its import base's content only
-		// where nothing has drifted from it (ginsys/bronzeward#1098).
+		// Form only is said for a first adoption alone: a machine that has an Applied release and a drift
+		// is adopting something other than its import base (ginsys/bronzeward#1098).
 		b.Evidence.Baseline = &planBaseline{ImportBaseRevision: ibr.String, PendingConvergence: pending,
 			FormOnly: pending && formOnly.Bool && !appliedRelease.Valid}
 	}
@@ -501,8 +501,8 @@ var getPlan = item(id.Plan, func(ctx context.Context, tx *sql.Tx, v string) (str
 // Applied release's artifact (pending convergence, execution-recovery.md §6.3), which has no
 // redacted form. The one exception is a machine adopted from its own bytes whose release differs from
 // them in form only (ginsys/bronzeward#1098): while no drift is open and Applied is still the import
-// base's digest, the node holds what the from-release's artifact holds in content, so the diff is
-// shown and says so.
+// base's digest, the adopted configuration holds what the from-release's artifact holds in content,
+// so the diff is shown and says so.
 func planDiffFrom(ctx context.Context, tx *sql.Tx, machine, from, to string, appliedDigest []byte, target sql.NullString, drifted bool) (*planDiff, error) {
 	d := &planDiff{From: from, To: to}
 	var applied sql.NullString

@@ -199,8 +199,8 @@ values. Publication now records, per machine, whether that holds: `pendingConver
 true, and the machine's `formOnly`, an adopt plan's `baseline.formOnly` and an apply-config
 plan's `diff.fromFormOnly` say that the release differs in form only (comments and encoding).
 The words are "Differs in form only (comments and encoding)", and the first apply still sends
-the release's text, without the comments of the adopted configuration: nothing changes in what the machine is
-configured with, and a person who approves that plan sees it say so. The verdict is true only
+the release's text, without the comments of the adopted configuration: the apply changes no document, key or value
+of what Bronzeward adopted, and a person who approves that plan sees it say so. The verdict is true only
 when every document, key and value is equal, secrets included, compared as plaintext on the
 server; whatever it cannot decide, and a machine with an identified embedded document, reads
 "differs". So does a machine whose import removed a hostname document equal to its name and
@@ -791,7 +791,7 @@ withholding cases applies (`internal/api/plans.go:470-477`).
 Had the artifact differed, that plan would show "Diff withheld": no redacted form exists of what
 the machine runs (`internal/api/plans.go:457-472`), unless the release differs in form only
 (§2.4, `fromFormOnly`): while no drift is open and Applied is still the import base's digest, the
-diff is shown and says the comments of the adopted configuration do not go with the apply. A real node reads `pendingConvergence:
+diff is shown and says the apply removes the comments of the adopted configuration. A real node reads `pendingConvergence:
 true` and `formOnly: true` here, since its text carries comments the compilation drops.
 
 ### 5.4 Editing fragments, profiles and assignments
