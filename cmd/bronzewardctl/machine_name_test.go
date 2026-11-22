@@ -152,14 +152,25 @@ func TestRenameSaysWhenTheNameReachesTheMachine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The quotations of item 6 before the sentence that names the web form, collapsed: the contract's own
+	// sentences, each a whole quotation. The implementation's three are the first, the "not yet confirmed"
+	// restart sentence and the last, in that order, each equal to a whole quotation.
 	text := strings.Join(strings.Fields(string(spec)), " ")
-	if len(renameReaches) != 3 {
-		t.Fatalf("%d sentences; want the two of the first quote as one, the restart sentence and the node name sentence", len(renameReaches))
+	_, item, ok := strings.Cut(text, "6. **A rename says when it reaches the machine**")
+	if !ok {
+		t.Fatal("client-contracts.md has no A9 item 6")
 	}
-	for _, s := range renameReaches {
-		if !strings.Contains(text, s) {
-			t.Errorf("client-contracts.md A9 item 6 does not hold %q", s)
-		}
+	item, _, _ = strings.Cut(item, "The web rename form")
+	var quoted []string
+	for _, m := range regexp.MustCompile(`"([^"]+)"`).FindAllStringSubmatch(item, -1) {
+		quoted = append(quoted, m[1])
+	}
+	if len(quoted) != 5 {
+		t.Fatalf("item 6 holds %d quotations %q; want five", len(quoted), quoted)
+	}
+	want := []string{quoted[0], quoted[3], quoted[4]}
+	if !slices.Equal(renameReaches, want) {
+		t.Errorf("renameReaches = %q; want item 6's quotations %q", renameReaches, want)
 	}
 	setServerFacts(t, 10, nil)
 	resetPosted()

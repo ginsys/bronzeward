@@ -383,7 +383,8 @@ export function RenameMachine({ machine, onChanged }: { machine: Machine; onChan
   return (
     <>
       <Form title={label} label={label} onSubmit={submit} w={w} done={done}>
-        <Text label="Name:" name="name" hint={NAME_HINT} value={current ?? ""} />
+        {/* Keyed by the machine's name: a name changed elsewhere, or by this form, replaces the field's text. */}
+        <Text key={current ?? ""} label="Name:" name="name" hint={NAME_HINT} value={current ?? ""} />
       </Form>
       {typed !== undefined && <Status testid="rename-not-sent" role="alert">{notAName(typed)}</Status>}
       {typeof holder === "string" && <Status testid="rename-holder">The machine that has this name: <MachineById id={holder} />.</Status>}
