@@ -989,7 +989,7 @@ the same documents in the same order, with every key and every value equal,
 secrets included, so that they differ in comments, key order, indentation,
 quoting or flow style only. It is computed on the plaintext inside the
 compilation and is never shown with a value. It is false for anything it
-cannot decide: an alias, an anchor, a merge key, a duplicate key, a tag
+cannot decide: an alias, an anchor, a key that is not a string, a repeated key, a tag
 outside YAML's core schema, a parse error, and an import base with an
 identified embedded document, whose string the resolver writes back in its own
 encoding (§5.4). It proves that the artifact equals the resolved base, and not

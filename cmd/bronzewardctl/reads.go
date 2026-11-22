@@ -365,7 +365,7 @@ func sentences(m apitypes.MachineBody, obs []apitypes.ObservationBody) []string 
 	case *o.Release == applied:
 		add("The configuration read at %s is attributed to %s, which is the Applied release (by %s).", at(o.At), applied, m.Applied.Source)
 		if m.Applied.Source == "adoption" {
-			add("Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's evidence says whether it does (release not applied yet); a later apply-config plan withholds its diff when it does.")
+			add("Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's evidence says whether it does (release not applied yet); a later apply-config plan withholds its diff when it does, unless it differs in form only.")
 			if deref(m.Desired) == applied {
 				add("The read may match the adopted bytes or this release's compiled configuration; the API does not say which.")
 			}

@@ -2545,10 +2545,12 @@ recovery, plan binding), which every plan body carries:
   redacted form or one that does not parse as YAML free of aliases (compilation
   writes none), or when the machine holds a configuration other than its
   `Applied` release's artifact, as an adopted machine pending convergence does
-  (execution and recovery §6.3); for an `adopt`
-  plan, `baseline`, the `importBaseRevision` the release was compiled from and
+  (execution and recovery §6.3), unless the release differs from the import base in form
+  only, which shows the diff and sets `fromFormOnly` (choice §17.48); for an `adopt`
+  plan, `baseline`, the `importBaseRevision` the release was compiled from,
   `pendingConvergence`, whether the release's artifact differs from it, which
-  leaves the machine pending convergence (execution and recovery §6.3)
+  leaves the machine pending convergence (execution and recovery §6.3), and
+  `formOnly` (choice §17.48)
   **(choice §17.38)**; for both, `validation`, the release's validation at
   publication (`result`, `at`, `contract`, `kubernetesVersion`,
   `machineryVersion`, `platformMode`), and `dryRun`, `{"available": false}`
@@ -4854,7 +4856,8 @@ design and evidence do not settle the question. Each is marked in place as
     artifact digest is not the import base's configuration digest. The
     approver learns that the adoption leaves convergence to a later
     `apply-config` plan. That plan's diff is withheld while the node holds
-    the import base's configuration, which has no redacted whole form; its
+    the import base's configuration, which has no redacted whole form, unless
+    the release differs from it in form only (choice §17.48); its
     approver relies on the release's validation and this plan's evidence.
     The same holds for the import base revision's own summary
     (`GET /import-base-revisions/{id}`, §9.2): it serves the revision's size

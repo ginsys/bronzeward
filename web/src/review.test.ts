@@ -134,6 +134,13 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
     expect(text).not.toContain("differs from what Bronzeward applied");
   });
 
+  test("a later release that differs from the import base in form only keeps the sentence, naming the Applied release", () => {
+    const rel = "rel_BWSYNTH-h7rt2bd";
+    const text = releaseNote(rel, { desired: rel, applied: { release: "rel_BWSYNTH-other0", source: "adoption", importBase: null }, pendingConvergence: true, formOnly: true });
+    expect(text).toContain("Differs in form only (comments and encoding)");
+    expect(text).toContain("whose Applied configuration is release");
+  });
+
   test("after an adoption, Desired equal to Applied is not 'nothing left to send' while the machine has a release not applied yet", () => {
     const rel = "rel_BWSYNTH-h7rt2bd";
     const text = releaseNote(rel, { desired: rel, applied: { release: rel, source: "adoption", importBase: null }, pendingConvergence: true });
