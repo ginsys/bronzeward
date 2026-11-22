@@ -712,6 +712,19 @@ describe("ginsys/bronzeward#1055: the draft and publish pages", () => {
     expect(text()).toContain(`Identifier ${DRF}`);
     expect([...box.querySelectorAll("button")].map((b) => b.textContent)).toContain("Copy");
   });
+
+  test("a draft state that is not safe text is not shown in the heading line, the not-open sentence or the drafts list", async () => {
+    answers[`/drafts/${DRF}`] = ok({ ...draft, state: "bad\u202Estate" });
+    await mount(providers(h(PublishDraft, { query: `draft=${DRF}` })));
+    await settled();
+    expect(box.querySelector('[data-testid="draft-line"]')?.textContent).toBe("(not shown), revision 3, Cluster office.");
+    expect(box.querySelector('[data-testid="not-open"]')?.textContent).toBe("This draft is (not shown), not open: it cannot be published.");
+    answers["/drafts"] = ok({ items: [{ ...draft, state: "bad\u202Estate" }], next: undefined });
+    await mount(h(Drafts, { query: "", go: () => {} }), { ...reads, view: "list" });
+    await settled();
+    expect(box.querySelector("tbody tr")?.children[2]?.textContent).toBe("(not shown)");
+    expect(box.textContent).not.toContain("bad");
+  });
 });
 
 describe("ginsys/bronzeward#1055: the import and the import base pages", () => {
@@ -859,6 +872,17 @@ describe("ginsys/bronzeward#1055: a dependency alert is a sentence, the identifi
     const fields = Object.fromEntries([...box.querySelectorAll("dt")].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent]));
     expect([fields.Provider, fields.Object, fields.Class, fields.Reason]).toEqual(["(name not shown)", "(name not shown)", "(not shown)", "(not shown)"]);
     expect(box.textContent).not.toContain("bad\u202E");
+  });
+
+  test("a release record's kind on the dependency page is safe text too", async () => {
+    answers[`/dependencies/${T}`] = ok(dependency);
+    answers[`/dependencies/${T}/releases`] = ok({ items: [{ release: REL, cluster: "cl_a", publishedAt: at, records: [{ machine: "mch_k2pq3rstuvwxyz234567abcdef", kind: "bad\u202Ekind" }] }], next: null });
+    answers[`/dependencies/${T}/alerts`] = ok({ items: [], next: null });
+    await mount(h(DependencyItem, { id: T }));
+    await settled();
+    const cell = box.querySelector('[aria-label="Dependent releases"] tbody tr')!.children[3]!.textContent;
+    expect(cell).toContain("(not shown)");
+    expect(cell).not.toContain("bad");
   });
 });
 

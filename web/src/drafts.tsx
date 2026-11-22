@@ -20,7 +20,7 @@ import { Action, useFocusOn } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
 import { DraftLink } from "./draft-link.tsx";
 import { ClusterLink, ClusterOption, ClusterRef, DraftHead, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
-import { draftCalled, draftName, draftText, safeText } from "./titles.ts";
+import { draftCalled, draftName, draftText, safeText, safeWord } from "./titles.ts";
 import { PageNote } from "./page-note.tsx";
 import { CREATE_DRAFT_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, NAME_NOT_SHOWN } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
@@ -163,7 +163,7 @@ export function Drafts() {
           <thead><tr>{["Draft", "Cluster", "State", "Revision", "Identifier"].map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
           <tbody>
             {shown.map((d) => (
-              <tr key={d.id}><th scope="row"><DraftLink d={d} /></th><td><ClusterLink id={d.cluster} /></td><td>{d.state}</td><td>{d.revision}</td><td><IdentifierText id={d.id} /></td></tr>
+              <tr key={d.id}><th scope="row"><DraftLink d={d} /></th><td><ClusterLink id={d.cluster} /></td><td>{safeWord(d.state)}</td><td>{d.revision}</td><td><IdentifierText id={d.id} /></td></tr>
             ))}
           </tbody>
         </Scroll>

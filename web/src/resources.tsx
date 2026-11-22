@@ -23,12 +23,12 @@ import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { startedBy } from "./operation-words.ts";
-import { alertSentence, assignmentName, dependencyName, importedConfigurationTitle, operationTitle, safeText, savedTitle } from "./titles.ts";
+import { alertSentence, safeWord, assignmentName, dependencyName, importedConfigurationTitle, operationTitle, safeText, savedTitle } from "./titles.ts";
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
 import {
   AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
-  NAME_NOT_SHOWN, NOT_SHOWN, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
+  NAME_NOT_SHOWN, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
 } from "./words.ts";
 
 type S = components["schemas"];
@@ -185,9 +185,8 @@ function AlertText({ a, own }: { a: S["AlertBody"]; own: boolean }) {
 }
 const ReleaseNames = ({ ids }: { ids: readonly string[] | null }) => (ids == null || ids.length === 0 ? "none" : <>{ids.map((id, i) => <Group key={id}>{i > 0 && ", "}<Named id={id} /></Group>)}</>);
 // The server's words reach the cells through the safe-text rule: a value with a control or bidirectional character is not shown.
-// A name reads "(name not shown)" and any other word "(not shown)".
+// A name reads "(name not shown)" and any other word "(not shown)" (safeWord).
 const safeName = (s: string) => safeText(s) ?? NAME_NOT_SHOWN;
-const safeWord = (s: string | null) => (s == null ? undefined : safeText(s) ?? NOT_SHOWN);
 const alertCols = (own: boolean): readonly Col<S["AlertBody"]>[] => [
   ["Alert", (a) => <AlertText a={a} own={own} />], ["Kind", (a) => safeWord(a.kind) ?? "none"], ["Class", (a) => klass({ class: safeWord(a.class) ?? null })], ["Reason", (a) => safeWord(a.reason) ?? "none"],
   ["Releases", (a) => <ReleaseNames ids={a.releases} />], ["Recorded", (a) => when(a.recordedAt)], ["Identifier", (a) => <IdentifierText id={a.id} />],
@@ -611,7 +610,7 @@ export function Audit() {
 
 const DEPENDENT: readonly Col<S["DependencyReleaseBody"]>[] = [
   ["Release", (r) => <Named id={r.release} />], CLUSTER, ["Published", (r) => when(r.publishedAt)],
-  ["Records", (r) => r.records.map((x, i) => <Group key={`${x.machine}:${x.kind}`}>{i > 0 && ", "}<MachineById id={x.machine} /> {x.kind}</Group>)],
+  ["Records", (r) => r.records.map((x, i) => <Group key={`${x.machine}:${x.kind}`}>{i > 0 && ", "}<MachineById id={x.machine} /> {safeWord(x.kind)}</Group>)],
 ];
 
 export function DependencyItem({ id }: { id: string }) {

@@ -14,6 +14,7 @@ import { PageNote } from "./page-note.tsx";
 import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
+import { safeWord } from "./titles.ts";
 import { DraftHead, Named } from "./titles.tsx";
 import { PUBLISH_NOTE } from "./words.ts";
 import type { Outcome } from "./write.ts";
@@ -156,7 +157,7 @@ function Publish({ id }: { id: string }) {
       <DraftHead id={id} d={d} lead="Publish draft" />
       {d !== undefined && d.state === "open" && <PageNote parts={[PUBLISH_NOTE, SENT_NOTHING]} />}
       {pending}
-      {d !== undefined && d.state !== "open" && <Status testid="not-open">{NOT_OPEN(d.state)}</Status>}
+      {d !== undefined && d.state !== "open" && <Status testid="not-open">{NOT_OPEN(safeWord(d.state))}</Status>}
       {d !== undefined && d.state === "open" && <p><Action label="Publish" needs={["publisher"]} onClick={publish} busy={busy} /></p>}
       {note !== undefined && <Status testid="no-etag">{note} <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
       <div ref={answer} tabIndex={-1} data-testid="publish-answer">
