@@ -12,6 +12,7 @@ import { REASON_MAX, reasonProblem } from "./plan.tsx";
 import { Who } from "./principals.tsx";
 import { Action, useFocusOn, useRoles } from "./shell.tsx";
 import { Status } from "./states.tsx";
+import { safeWord } from "./titles.ts";
 import { MachineById, OperationHeading } from "./titles.tsx";
 import { RECOVERY_OPERATION_NOTE, RECOVERY_OPERATION_ROLE_NOTE, RESOLVE_NO_OUTCOME, RESOLVE_TEXT, TAKE_OVER_TEXT } from "./words.ts";
 
@@ -52,15 +53,24 @@ const TAKEN_OVER_IN = ["committed", "sending", "verifying", "unresolved"];
 
 // Why a control is off for this operation, or undefined where it is on. The server stays authoritative: a read that is stale is
 // answered by its refusal, shown in place.
+// The server's words in these sentences (a kind, a state, a role) are shown only as safe text: any other reads "(not shown)".
 export function takeOverWhy(o: Operation): string | undefined {
-  if (o.kind !== "apply-config") return `The operation is a ${o.kind}, and only an apply-config operation is taken over.`;
-  return TAKEN_OVER_IN.includes(o.state) ? undefined : `The operation is ${o.state}: only one that is committed, sending, verifying or unresolved is taken over.`;
+  if (o.kind !== "apply-config") return `The operation is a ${safeWord(o.kind)}, and only an apply-config operation is taken over.`;
+  return TAKEN_OVER_IN.includes(o.state) ? undefined : `The operation is ${safeWord(o.state)}: only one that is committed, sending, verifying or unresolved is taken over.`;
 }
 export function resolveWhy(o: Operation): string | undefined {
-  if (o.state !== "unresolved") return `The operation is ${o.state}: only an unresolved operation is resolved.`;
+  if (o.state !== "unresolved") return `The operation is ${safeWord(o.state)}: only an unresolved operation is resolved.`;
   const n = (o.attempts ?? []).length;
   return n === 0 ? undefined : `${n === 1 ? "An attempt is" : `${n} attempts are`} recorded, and the request may have landed: an attempt is accounted for, not cancelled.`;
 }
+
+export const stateLine = (state: string) => `State: ${safeWord(state)}.`;
+export const takenOver = (r: Takeover) => (
+  <>Taken over: generation {r.generation}, state {safeWord(r.state)}, recorded by <Who id={r.requestedBy} /> ({safeWord(r.role)}), act <Id id={r.act} />. Nothing was sent to the node.</>
+);
+export const resolved = (r: Resolution) => (
+  <>Resolved: the operation is {safeWord(r.state)}, recorded by <Who id={r.resolvedBy} /> ({safeWord(r.role)}), act <Id id={r.act} />. {RESOLVE_NO_OUTCOME}</>
+);
 
 // One act with a reason: the form, the reason the control is off, and the answer, kept in one place so the operation's reread
 // does not unmount it. It sends once per press; a lost answer is repeated under its key by the write layer.
@@ -127,7 +137,7 @@ export function RecoveryOperation({ id }: { id: string }) {
         {" "}<Ref to={path} id={id}>Back to the operation</Ref>.
       </PageNote>
       <p data-testid="recovery-operation-state">
-        State: {op.state}.{" "}
+        {stateLine(op.state)}{" "}
         {machine !== undefined && <>Machine <MachineById id={machine} />. </>}
         {(op.attempts ?? []).length === 0 ? "No attempt is recorded." : `${(op.attempts ?? []).length} attempt${(op.attempts ?? []).length === 1 ? "" : "s"} recorded.`}
         {" "}Owner generation read: {generation}.
@@ -135,17 +145,11 @@ export function RecoveryOperation({ id }: { id: string }) {
       {events.kind !== "ok" && <Status testid="recovery-operation-events">{EVENTS_UNREAD}</Status>}
       {section("Take over", TAKE_OVER_TEXT, (
         <Act label="Take over" route="takeovers" op={id} off={takeOverWhy(op)} finished={reread} body={(reason) => ({ generation, reason })}
-          recorded={(d) => {
-            const r = d as Takeover;
-            return <>Taken over: generation {r.generation}, state {r.state}, recorded by <Who id={r.requestedBy} /> ({r.role}), act <Id id={r.act} />. Nothing was sent to the node.</>;
-          }} />
+          recorded={(d) => takenOver(d as Takeover)} />
       ))}
       {section("Resolve as cancelled", RESOLVE_TEXT, (
         <Act label="Resolve as cancelled" route="resolutions" op={id} off={resolveWhy(op)} finished={reread} body={(reason) => ({ to: "cancelled", reason })}
-          recorded={(d) => {
-            const r = d as Resolution;
-            return <>Resolved: the operation is {r.state}, recorded by <Who id={r.resolvedBy} /> ({r.role}), act <Id id={r.act} />. {RESOLVE_NO_OUTCOME}</>;
-          }} />
+          recorded={(d) => resolved(d as Resolution)} />
       ))}
     </>
   );
