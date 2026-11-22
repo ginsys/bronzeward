@@ -1210,9 +1210,9 @@ usage: bronzewardctl approve <plan>
 
 approve a plan.
 
-prints the plan and the predicted self-approval on standard error, then sends only when the plan ID is typed back, on the
-terminal or as one line of standard input. There is no --yes, and --no-input refuses. An approval starts no operation, so
-approve does not wait.
+prints the plan and the predicted self-approval on standard error, then asks Approve it? [y/N] and sends only on y or yes,
+on the terminal or as one line of standard input. Enter, n and the end of input send nothing. There is no --yes, and
+--no-input refuses. An approval starts no operation, so approve does not wait.
 
 Roles: approver. Needs a person signed in, not an automation token.
 

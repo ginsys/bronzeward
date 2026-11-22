@@ -20,7 +20,7 @@ import (
 // approve approves a plan (T21; POST /plans/{id}/approvals, approver, human only, normal start
 // only). The plan display, the self-approval prediction and, for a revert, the overwrite line go to
 // standard error with the confirmation prompt; standard output holds only the approval. Only the
-// plan ID typed back sends it; there is no --yes. The display and the prediction are one epoch
+// y or yes at the question sends it; there is no --yes. The display and the prediction are one epoch
 // snapshot, as plan show's: across an epoch change approve shows nothing and sends nothing, since
 // the operator would confirm a state that never existed. An approval starts no operation, so
 // approve does not wait.
@@ -31,7 +31,7 @@ func (e *env) approve(args []string) error {
 		return err
 	}
 	if e.noInput {
-		return notConfirmed{errors.New("approve asks for the plan ID typed back, which --no-input forbids; nothing was sent")}
+		return notConfirmed{errors.New("approve asks for your y, which --no-input forbids; nothing was sent")}
 	}
 	rp, err := rf.repeat(false)
 	if err != nil {
@@ -85,7 +85,7 @@ func (e *env) approve(args []string) error {
 		// The approval is sent only under the epoch the operator saw (§8.5): Send refuses a first send
 		// once its own preflight read shows another.
 		w.ReadsFrom(c)
-		return e.confirmTyped("the plan ID", p.Id)
+		return e.confirmYes("Answering y records your approval of this plan as you. Approve it?")
 	}
 	return e.writeAfter(confirm, w, func(_ *client.Client, r *client.Response) ([]string, error) {
 		var a apitypes.ApprovalBody
