@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "vitest";
 import { createBodies, TITLE_READS } from "./bodies.ts";
-import { dependencyName, draftText, operationTitle, planTitle, releaseTitle } from "./titles.ts";
+import { alertSentence, dependencyName, draftCalled, draftName, draftText, operationTitle, planTitle, releaseTitle } from "./titles.ts";
 import type { ReadResult } from "./request.ts";
 import { when } from "./states.tsx";
 
@@ -137,7 +137,7 @@ describe("ginsys/bronzeward#987: the builders", () => {
   test("a release is its draft's title and its date", () => {
     expect(releaseTitle({ publishedAt: at }, { title: "Office labels" } as never)).toBe(`Office labels, published ${when(at)}`);
     expect(releaseTitle({ publishedAt: at }, null)).toBeUndefined();
-    expect(releaseTitle({ publishedAt: at }, { title: "a\nb" } as never)).toBeUndefined();
+    expect(releaseTitle({ publishedAt: at }, { title: "a\nb" } as never)).toBe(`Untitled draft, published ${when(at)}`);
   });
 
   test("a plan is apply or adopt of its machine to its release's title", () => {
@@ -163,5 +163,49 @@ describe("a dependency's name (ginsys/bronzeward#1055)", () => {
   test("its object and version, or the shortened identifier where the object is not safe text", () => {
     expect(dependencyName({ id: "dep_k2pq3rstuvwxyz234567abcdef", object: "registry.test/app", version: 3 })).toBe("Dependency registry.test/app, version 3");
     expect(dependencyName({ id: "dep_k2pq3rstuvwxyz234567abcdef", object: "bad\u0007object", version: 3 })).toBe("Dependency dep_k2pq…cdef");
+  });
+});
+
+describe("a draft with no safe title (ginsys/bronzeward#1055, client contracts A8 rule 3)", () => {
+  test("is Untitled draft where the body is read, and nothing where it is not", () => {
+    expect(draftName({ title: "Office labels" } as never)).toBe("Office labels");
+    for (const title of ["a\nb", "a\u202Eb", "x".repeat(301), ""]) expect(draftName({ title } as never)).toBe("Untitled draft");
+    expect(draftName(null)).toBeUndefined();
+    expect(draftName(undefined)).toBeUndefined();
+  });
+
+  test("in a sentence it is Untitled draft with the shortened identifier, and a safe title is quoted", () => {
+    const id = "drf_k2pq3rstuvwxyz234567abcdef";
+    expect(draftCalled({ id, title: "a\nb" })).toBe("Untitled draft (drf_k2pq…cdef)");
+    expect(draftCalled({ id, title: "Office labels" })).toBe('"Office labels"');
+  });
+});
+
+describe("a dependency alert's sentence (ginsys/bronzeward#1055, dependency monitor section 6.2)", () => {
+  const a = (kind: string, reason: string | null = null, deletion: string | null = null) => alertSentence({ kind, reason, deletion });
+  test("each kind of the specification, and the claims no reason can falsify", () => {
+    expect(a("lost")).toEqual({ subject: true, text: "is lost: the provider no longer has this version." });
+    expect(a("blocked", "soft-deleted")).toEqual({ subject: true, text: "is blocked. The block can be undone; the Reason column says how." });
+    expect(a("persistent", "denied")).toEqual({ subject: true, text: "still cannot be confirmed." });
+    expect(a("monitor-stalled")).toEqual({ subject: false, text: "The dependency monitor has stopped making progress." });
+  });
+
+  test("a regression says the deleted-or-restored caveat only where the reason is absent", () => {
+    const caveat = "The provider may have deleted it, or been restored from a backup older than Bronzeward's database.";
+    expect(a("regression", "absent").text).toBe(`can no longer be confirmed. It was found before. ${caveat}`);
+    for (const reason of ["denied", "unavailable", "unreachable", "unreadable", "identity-mismatch", null]) {
+      expect(a("regression", reason).text).toBe("can no longer be confirmed. It was found before.");
+    }
+  });
+
+  test("a scheduled deletion names its date, or says only that it is scheduled where the date is missing or not one", () => {
+    expect(a("deletion-scheduled", "deletion-scheduled", "2026-12-01T09:00:00Z").text).toBe(`is scheduled for deletion on ${when("2026-12-01T09:00:00Z")}.`);
+    expect(a("deletion-scheduled", "deletion-scheduled", null).text).toBe("is scheduled for deletion.");
+    expect(a("deletion-scheduled", "deletion-scheduled", "not a date").text).toBe("is scheduled for deletion.");
+  });
+
+  test("a kind this client does not know is a whole sentence with the kind only where it is safe text", () => {
+    expect(a("class-change")).toEqual({ subject: false, text: "Alert of kind class-change." });
+    expect(a("bad\u202Ekind")).toEqual({ subject: false, text: "Alert." });
   });
 });

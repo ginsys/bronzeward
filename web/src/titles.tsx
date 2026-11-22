@@ -1,15 +1,15 @@
 // What shows a release, a plan, an operation, a draft, an import or a machine by a title instead of its
 // identifier (client contracts A8 and A9): the hooks that read the bodies a title names through the page's
 // own store, and the links and headings that show it. The title is the text and the whole identifier the title attribute; a
-// read that did not answer, or text that is not safe, leaves the shortened identifier, as every other is (a machine's
-// failed read in a title reads "the machine" instead, so the title survives: A8 rule 1).
+// read that did not answer leaves the shortened identifier, as every other is (a machine's failed read in a title reads
+// "the machine" instead, so the title survives: A8 rule 1), and a draft title that is not safe reads "Untitled draft".
 
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import type { components } from "./api/v1";
 import { Detail, Id, Ref, short, useReads, viewOf } from "./list.tsx";
 import { MachineRef, machineText } from "./machines.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
-import { draftText, importedConfiguration, operationTitle, planTitle, releaseTitle } from "./titles.ts";
+import { draftName, draftText, importedConfiguration, operationTitle, planTitle, releaseTitle } from "./titles.ts";
 import { SAFE } from "./principals.ts";
 import { THE_MACHINE, THIS_CLUSTER } from "./words.ts";
 
@@ -47,12 +47,13 @@ export function useClusterText(id: string | null | undefined): string | undefine
   return typeof c?.name === "string" && SAFE.test(c.name) ? c.name : undefined;
 }
 
-// The top of a draft's page and of its publication page: the heading "<lead>: <title>" (the shortened identifier where
-// the draft is unread or its title is not safe), then its state, revision and cluster, then the identifier with Copy.
+// The top of a draft's page and of its publication page: the heading "<lead>: <title>" ("Untitled draft" where its title
+// is not safe, the shortened identifier where the draft is unread), then its state, revision and cluster, then the
+// identifier with Copy.
 export function DraftHead({ id, d, lead }: { id: string; d: S["DraftBody"] | undefined; lead: string }) {
   return (
     <>
-      <h2>{d === undefined ? `${lead} ${short(id)}` : `${lead}: ${draftText(d) ?? short(id)}`}</h2>
+      <h2>{d === undefined ? `${lead} ${short(id)}` : `${lead}: ${draftName(d)}`}</h2>
       {d !== undefined && (
         <>
           <p data-testid="draft-line">{d.state}, revision {d.revision}, <ClusterRef id={d.cluster} />.</p>
@@ -125,7 +126,7 @@ export function useOperationTitle(o: S["OperationBody"] | undefined): string | u
   const machine = useMachineText(ingestion?.machine);
   const plan = usePlanTitle(o?.kind === "apply-config" || o?.kind === "adopt" ? s?.plan : undefined);
   if (o === undefined) return undefined;
-  if (o.kind !== "ingest") return operationTitle(o.kind, { draft: draftText(draft), plan });
+  if (o.kind !== "ingest") return operationTitle(o.kind, { draft: draftName(draft), plan });
   // An import's machine is on its ingestion, which the subject names: no ingestion named, no answer
   // from it or no machine on it is an import with no machine to name.
   if (s?.ingestion == null) return operationTitle("ingest", {});
@@ -140,7 +141,15 @@ const Titled = ({ id, text, what, fallback, tail = "" }: { id: string; text: str
 // the shortened identifier, and the whole identifier as the title attribute.
 const NamedLink = ({ id, text }: { id: string; text: string | undefined }) => <Ref to={`/${viewOf(id)}/${encodeURIComponent(id)}`} id={id}>{text}</Ref>;
 
-const NamedDraft = ({ id }: { id: string }) => <NamedLink id={id} text={draftText(useBody<S["DraftBody"]>(at("drafts", id)))} />;
+// An untitled draft is "Untitled draft" with its shortened identifier beside it as plain text: the link has no identifier of its own.
+function NamedDraft({ id }: { id: string }) {
+  const body = useBody<S["DraftBody"]>(at("drafts", id));
+  return <><NamedLink id={id} text={draftName(body)} />{body != null && draftText(body) === undefined && ` (${short(id)})`}</>;
+}
+// A cluster filter's option: the cluster's name where the read gives a safe one, else the shortened identifier.
+export function ClusterOption({ id }: { id: string }) {
+  return <option value={id}>{useClusterText(id) ?? short(id)}</option>;
+}
 const NamedRelease = ({ id }: { id: string }) => <NamedLink id={id} text={useReleaseTitle(id)} />;
 const NamedPlan = ({ id }: { id: string }) => <NamedLink id={id} text={usePlanTitle(id)} />;
 // An operation named by its identifier has no body in hand: it is read, then its subject's.

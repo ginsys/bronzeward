@@ -13,7 +13,7 @@ import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { OnboardCluster } from "./onboard.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
-import { Detail, EmptyList, Head, Id, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
+import { Detail, EmptyList, Head, Id, IdentifierText, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { Who } from "./principals.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
@@ -23,7 +23,7 @@ import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { startedBy } from "./operation-words.ts";
-import { assignmentName, dependencyName, importedConfigurationTitle, operationTitle, safeText, savedTitle } from "./titles.ts";
+import { alertSentence, assignmentName, dependencyName, importedConfigurationTitle, operationTitle, safeText, savedTitle } from "./titles.ts";
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
 import {
@@ -168,17 +168,28 @@ const ASSIGNMENTS: readonly Col<S["AssignmentBody"]>[] = [["Assignment", (a) => 
 export const klass = (d: { class: string | null; stale?: boolean }) => `${d.class ?? "none"}${d.stale === true ? " (stale: not observed recently)" : ""}`;
 // A dependency's first column names it as its page's heading does (`dependencyName`), and keeps the identifier as
 // the link's title.
-function DependencyName({ d }: { d: S["DependencyBody"] }) {
+function DependencyName({ d }: { d: Pick<S["DependencyBody"], "id" | "object" | "version"> }) {
   return <Ref to={`/dependencies/${encodeURIComponent(d.id)}`} id={d.id}>{dependencyName(d)}</Ref>;
 }
 const DEPENDENCIES: readonly Col<S["DependencyBody"]>[] = [
   ["Dependency", (d) => <DependencyName d={d} />], ["Provider", (d) => d.provider], ["Object", (d) => `${d.object}, version ${d.version}`],
   ["Class", klass], ["Observed from", (d) => when(d.observedFrom)],
 ];
-const ALERTS: readonly Col<S["AlertBody"]>[] = [
-  ["Alert", (a) => <Id id={a.id} />], ["Kind", (a) => a.kind], ["Dependency", (a) => <Id id={a.dependency} />], ["Class", klass],
-  ["Reason", (a) => a.reason ?? "none"], ["Releases", (a) => <Ids ids={a.releases} />], ["Recorded", (a) => when(a.recordedAt)],
+// An alert is a sentence: its dependency named once, as the dependency's own page is headed ("This dependency" on that
+// page), then what happened (alertSentence). An alert has no page of its own, so its identifier is the last column.
+function AlertText({ a, own }: { a: S["AlertBody"]; own: boolean }) {
+  const s = alertSentence(a);
+  if (!s.subject) return <>{s.text}</>;
+  const subject = a.dependency == null || a.object == null || a.version == null ? "A dependency" : own ? "This dependency" : <DependencyName d={{ id: a.dependency, object: a.object, version: a.version }} />;
+  return <>{subject} {s.text}</>;
+}
+const ReleaseNames = ({ ids }: { ids: readonly string[] | null }) => (ids == null || ids.length === 0 ? "none" : <>{ids.map((id, i) => <Group key={id}>{i > 0 && ", "}<Named id={id} /></Group>)}</>);
+const alertCols = (own: boolean): readonly Col<S["AlertBody"]>[] => [
+  ["Alert", (a) => <AlertText a={a} own={own} />], ["Kind", (a) => a.kind], ["Class", klass], ["Reason", (a) => a.reason ?? "none"],
+  ["Releases", (a) => <ReleaseNames ids={a.releases} />], ["Recorded", (a) => when(a.recordedAt)], ["Identifier", (a) => <IdentifierText id={a.id} />],
 ];
+const ALERTS = alertCols(false);
+const OWN_ALERTS = alertCols(true);
 const lastPass = (l: Listed<unknown>) => {
   const at = l.extra?.["lastPass"];
   return <p data-testid="last-pass">{typeof at === "string" ? `Last completed monitor pass: ${when(at)}.` : "No monitor pass has completed yet."}</p>;
@@ -614,7 +625,7 @@ export function DependencyItem({ id }: { id: string }) {
           <h3>Releases that depend on it</h3>
           <ListOf label="Dependent releases" path={`${path}/releases`} cols={DEPENDENT} keyOf={(r) => r.release} empty="No release depends on it." />
           <h3>Alerts</h3>
-          <ListOf label="Alerts" path={`${path}/alerts`} cols={ALERTS} empty="No alerts raised for it." />
+          <ListOf label="Alerts" path={`${path}/alerts`} cols={OWN_ALERTS} empty="No alerts raised for it." />
         </>
       )}
     </ItemOf>

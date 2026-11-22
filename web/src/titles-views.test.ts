@@ -8,7 +8,8 @@ import { act, createElement as h, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
-import { DraftItem } from "./drafts.tsx";
+import { DraftItem, Drafts } from "./drafts.tsx";
+import { OpenDraftsView } from "./machines.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
 import { PublishDraft } from "./publish.tsx";
 import { Detail, type Reads, ReadsProvider, short, useItem } from "./list.tsx";
@@ -100,11 +101,11 @@ describe("ginsys/bronzeward#987: a release", () => {
     expect(text()).toBe("rel_k2pq…cdef");
   });
 
-  test.each([["a control character", "a\nb"], ["a format character", "a‮b"], ["301 code points", "x".repeat(301)]])("keeps the identifier for a draft title with %s", async (_, title) => {
+  test.each([["a control character", "a\nb"], ["a format character", "a‮b"], ["301 code points", "x".repeat(301)]])("reads Untitled draft for a draft title with %s, never the received text", async (_, title) => {
     answers[`/drafts/${DRF}`] = ok({ id: DRF, title });
     await mount(h(ReleaseRef, { r: release() as never }));
     await settled();
-    expect(text()).toBe("rel_k2pq…cdef");
+    expect(text()).toBe(`Untitled draft, published ${when(at)}`);
   });
 
   test("shows markup in a title as text", async () => {
@@ -460,8 +461,17 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
     expect(box.querySelector("a")?.getAttribute("title")).toBe(id);
   });
 
-  test("a draft whose title is not safe is shown by its shortened identifier", async () => {
+  test("a draft whose title is not safe is Untitled draft with its shortened identifier beside it, as plain text", async () => {
     answers[`/drafts/${DRF}`] = ok({ id: DRF, title: "a\nb" });
+    await mount(h(Named, { id: DRF }));
+    await settled();
+    expect(text()).toBe("Untitled draft (drf_k2pq…cdef)");
+    expect(box.querySelector("a")?.textContent).toBe("Untitled draft");
+    expect(box.querySelector("a")?.getAttribute("title")).toBe(DRF);
+  });
+
+  test("a draft whose read failed keeps the shortened identifier", async () => {
+    answers[`/drafts/${DRF}`] = missing;
     await mount(h(Named, { id: DRF }));
     await settled();
     expect(text()).toBe("drf_k2pq…cdef");
@@ -675,11 +685,12 @@ describe("ginsys/bronzeward#1055: the draft and publish pages", () => {
     expect(entries[1]!.textContent).not.toContain("ibr_");
   });
 
-  test("a title that is not safe text leaves the shortened identifier", async () => {
+  test("a title that is not safe text reads Untitled draft", async () => {
     answers[`/drafts/${DRF}`] = ok({ ...draft, title: "Add‮evil" });
     await mount(providers(h(DraftItem, { id: DRF })));
     await settled();
-    expect(headings()[0]).toBe("Draft: drf_k2pq…cdef");
+    expect(headings()[0]).toBe("Draft: Untitled draft");
+    expect(text()).not.toContain("evil");
   });
 
   test("an entry whose name is not safe text shows no part of it, not even a short one", async () => {
@@ -751,5 +762,74 @@ describe("ginsys/bronzeward#1055: the import and the import base pages", () => {
     expect(headings()[0]).toBe(`Fragment revision ${short(FRV)}`);
     expect(text()).toContain("Clusteroffice");
     expect(text()).not.toContain("cl_a");
+  });
+});
+
+describe("ginsys/bronzeward#1055: the drafts lists open with the draft's name, the identifier last", () => {
+  const draftRow = (id: string, title: string) => ({ id, cluster: "cl_a", title, state: "open", revision: 2, entries: [] });
+  const DRF2 = "drf_k2pq3rstuvwxyz234567abcdeg";
+  const cells = (row: Element) => [...row.children].map((c) => c.textContent);
+
+  test("the Drafts and releases list: the name is the link, the cluster is named, a received title that is not safe never shows", async () => {
+    answers["/drafts"] = ok({ items: [draftRow(DRF, "Add\u202Eevil"), draftRow(DRF2, "Office labels")], next: undefined });
+    answers["/clusters/cl_a"] = ok({ id: "cl_a", name: "office" });
+    await mount(h(Drafts));
+    await settled();
+    expect([...box.querySelectorAll("thead th")].map((c) => c.textContent)).toEqual(["Draft", "Cluster", "State", "Revision", "Identifier"]);
+    const rows = [...box.querySelectorAll("tbody tr")];
+    expect(cells(rows[0]!)).toEqual(["Untitled draft", "office", "open", "2", "drf_k2pq…cdef"]);
+    expect(cells(rows[1]!)).toEqual(["Office labels", "office", "open", "2", "drf_k2pq…cdeg"]);
+    expect(rows[0]!.querySelector("a")?.getAttribute("title")).toBe(DRF);
+    expect(rows[0]!.querySelectorAll("a")).toHaveLength(2);
+    expect(text()).not.toContain("evil");
+    expect(box.querySelector("select option[value=cl_a]")?.textContent).toBe("office");
+  });
+
+  test("a cluster's open drafts: the same, with no cluster column", async () => {
+    await mount(h(OpenDraftsView, { drafts: [draftRow(DRF, "a\nb") as never, draftRow(DRF2, "Office labels") as never] }));
+    await settled();
+    expect([...box.querySelectorAll("thead th")].map((c) => c.textContent)).toEqual(["Draft", "Revision", "Identifier"]);
+    expect([...box.querySelectorAll("tbody tr")].map(cells)).toEqual([["Untitled draft", "2", "drf_k2pq…cdef"], ["Office labels", "2", "drf_k2pq…cdeg"]]);
+  });
+});
+
+describe("ginsys/bronzeward#1055: a dependency alert is a sentence, the identifier last", () => {
+  const T = "dep_k2pq3rstuvwxyz234567abcdef";
+  const alert = (extra: Record<string, unknown>) => ({
+    id: "dal_k2pq3rstuvwxyz234567abcdef", kind: "lost", dependency: T, provider: "p", object: "registry.test/app", version: 3, created: at, class: "lost", reason: "destroyed",
+    releases: [REL], deletion: null, observedFrom: at, answerDate: null, epoch: "e", recordedAt: at, ...extra,
+  });
+  const dependency = { id: T, provider: "p", object: "registry.test/app", version: 3, created: at, class: "lost", reason: "destroyed", firstRetainedAt: at, unknownSince: null, observedFrom: at, recordedAt: at, stale: false };
+
+  test("the Sources page: the dependency named once, as a link to its page; the releases by title; the identifier last", async () => {
+    answers["/dependency-alerts"] = ok({ items: [alert({}), alert({ id: "dal_k2pq3rstuvwxyz234567abcdeg", kind: "monitor-stalled", dependency: null, object: null, version: null, class: null, reason: null, releases: null })], next: null });
+    await mount(h(Sources, { query: "", go: () => {} }));
+    await settled();
+    const rows = [...box.querySelectorAll('table[aria-label="Dependency alerts"] tbody tr, [aria-label="Dependency alerts"] tbody tr')];
+    expect(rows).toHaveLength(2);
+    const cells = (row: Element) => [...row.children].map((c) => c.textContent);
+    expect(cells(rows[0]!)).toEqual(["Dependency registry.test/app, version 3 is lost: the provider no longer has this version.", "lost", "lost", "destroyed", `Add the office labels, published ${when(at)}`, when(at), "dal_k2pq…cdef"]);
+    expect(rows[0]!.querySelector("a")?.getAttribute("title")).toBe(T);
+    expect(cells(rows[1]!)).toEqual(["The dependency monitor has stopped making progress.", "monitor-stalled", "none", "none", "none", when(at), "dal_k2pq…cdeg"]);
+    expect([...box.querySelectorAll('[aria-label="Dependency alerts"] thead th')].map((c) => c.textContent)).toEqual(["Alert", "Kind", "Class", "Reason", "Releases", "Recorded", "Identifier"]);
+  });
+
+  test("the dependency's own page calls it This dependency, with no second link to itself", async () => {
+    answers[`/dependencies/${T}`] = ok(dependency);
+    answers[`/dependencies/${T}/releases`] = ok({ items: [], next: null });
+    answers[`/dependencies/${T}/alerts`] = ok({ items: [alert({})], next: null });
+    await mount(h(DependencyItem, { id: T }));
+    await settled();
+    const row = box.querySelector('[aria-label="Alerts"] tbody tr')!;
+    expect(row.children[0]!.textContent).toBe("This dependency is lost: the provider no longer has this version.");
+    expect(row.children[0]!.querySelectorAll("a")).toHaveLength(0);
+  });
+
+  test("an alert whose kind is not the specification's, or whose dependency fields are missing, still reads as a sentence", async () => {
+    answers["/dependency-alerts"] = ok({ items: [alert({ kind: "class-change" }), alert({ id: "dal_k2pq3rstuvwxyz234567abcdeg", object: null })], next: null });
+    await mount(h(Sources, { query: "", go: () => {} }));
+    await settled();
+    const first = [...box.querySelectorAll('[aria-label="Dependency alerts"] tbody tr')].map((r) => r.children[0]!.textContent);
+    expect(first).toEqual(["Alert of kind class-change.", "A dependency is lost: the provider no longer has this version."]);
   });
 });

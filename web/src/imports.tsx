@@ -20,7 +20,7 @@ import { PageNote } from "./page-note.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { ImportedConfigurationRef, MachineById, Named, useMachineText } from "./titles.tsx";
-import { operationTitle } from "./titles.ts";
+import { draftName, operationTitle } from "./titles.ts";
 import { DRIFT_ADOPTION_NOTE, IMPORT_NOTE, START_IMPORT_NOTE } from "./words.ts";
 import type { Outcome, WriteSpec } from "./write.ts";
 
@@ -703,7 +703,7 @@ export function StartImport({ query }: { query: string }) {
           <label>Draft:{" "}
             <select name="draft" required defaultValue={q.get("draft") ?? ""} key={`${machine}:${open.length}`}>
               <option value="" disabled>{m === undefined ? "choose a machine first" : open.length === 0 ? "no open draft in this machine's cluster" : "choose"}</option>
-              {open.map((d) => <option key={d.id} value={d.id}>{d.title} ({short(d.id)}, revision {d.revision})</option>)}
+              {open.map((d) => <option key={d.id} value={d.id}>{draftName(d)} ({short(d.id)}, revision {d.revision})</option>)}
             </select>
           </label>{" "}
           <Action label="Create draft" needs={["author"]} onClick={() => go("/drafts/new")} />
