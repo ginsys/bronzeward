@@ -379,7 +379,11 @@ describe("ginsys/bronzeward#1055: a cluster's name and the identifier's detail l
     expect(copied).toEqual([MCH]);
     expect(text()).toBe(`Identifier ${MCH} Copy Copied`);
   });
-  test.each([["no clipboard", undefined], ["a refused write", { writeText: () => Promise.reject(new Error("denied")) }]])("Copy with %s says to select the identifier", async (_, board) => {
+  test.each([
+    ["no clipboard", undefined],
+    ["a refused write", { writeText: () => Promise.reject(new Error("denied")) }],
+    ["a write that throws at once", { writeText: () => { throw new Error("blocked by policy"); } }],
+  ])("Copy with %s says to select the identifier", async (_, board) => {
     clipboard(board);
     await mount(h(Detail, { id: MCH }));
     await click();
