@@ -200,7 +200,21 @@ describe("the console's parts (#364)", () => {
       const c = revocationConfirmation(v, "", "", "left");
       expect([v, c.target, c.line, c.why]).toEqual([v, undefined, undefined, "The identity cannot be shown, so it cannot be confirmed."]);
     }
-    expect(revocationConfirmation(" alice ", "", "", "left")).toEqual({ line: "Revokes the identity  alice . A revocation is permanent.", target: { identity: " alice ", reason: "left" } });
+    // Spaces inside stay as typed.
+    expect(revocationConfirmation("alice  smith", "", "", "left").line).toBe("Revokes the identity alice  smith. A revocation is permanent.");
+  });
+
+  // A space at either edge of a target is invisible in the line, and the server would act on it: a padded subject records
+  // a new human row and revokes that, leaving the real one active. So the press stays off and the reason names it.
+  test("a space at the start or end of the identity, the issuer or the subject keeps the press off with a reason that names it", () => {
+    for (const [args, field] of [
+      [[" alice", "", ""], "identity"], [["alice ", "", ""], "identity"],
+      [["", " https://idp.example", "sub-1"], "issuer"], [["", "https://idp.example ", "sub-1"], "issuer"],
+      [["", "https://idp.example", " alice"], "subject"], [["", "https://idp.example", "alice "], "subject"],
+    ] as [[string, string, string], string][]) {
+      const c = revocationConfirmation(args[0], args[1], args[2], "left");
+      expect([args, c.target, c.line, c.why]).toEqual([args, undefined, undefined, `The ${field} has spaces at its start or end; enter it without them.`]);
+    }
   });
 
   test("the line keeps the spaces of the target, so two targets that differ in spaces read differently", () => {

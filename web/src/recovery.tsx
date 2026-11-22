@@ -373,7 +373,12 @@ export function revocationConfirmation(identity: string, iss: string, sub: strin
   const byIdentity = !blank(i) && blank(s) && blank(u);
   const bySubject = blank(i) && !blank(s) && !blank(u);
   if (!(byIdentity || bySubject) || r === "") return { why: "Name the identity, or the issuer and subject, and give a reason." };
-  if ((byIdentity ? [i] : [s, u]).some((v) => safeText(v) === undefined)) return { why: "The identity cannot be shown, so it cannot be confirmed." };
+  const named: [string, string][] = byIdentity ? [["identity", i]] : [["issuer", s], ["subject", u]];
+  if (named.some(([, v]) => safeText(v) === undefined)) return { why: "The identity cannot be shown, so it cannot be confirmed." };
+  // A space at an edge is invisible in the line and the server acts on it as typed (a padded subject records a new
+  // human and revokes that one, leaving the real one active), so it is refused, never trimmed: the value sent stays the one shown.
+  const padded = named.find(([, v]) => v !== v.trim());
+  if (padded !== undefined) return { why: `The ${padded[0]} has spaces at its start or end; enter it without them.` };
   return byIdentity
     ? { line: `Revokes the identity ${i}. A revocation is permanent.`, target: { identity: i, reason: r } }
     : { line: `Revokes the subject ${u} of the issuer ${s}. A revocation is permanent.`, target: { iss: s, sub: u, reason: r } };
