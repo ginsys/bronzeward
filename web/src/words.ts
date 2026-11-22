@@ -34,5 +34,5 @@ export const ADD_MACHINE = "Add machine";
 export const CONNECT_A_CLUSTER = "Connect a cluster";
 /** Said beside the Copy control once the text is on the clipboard. */
 export const COPIED = "Copied";
-/** Said beside the Copy control where the browser would not copy. */
+/** Said beside an identifier's Copy control where the browser would not copy. */
 export const COPY_BY_HAND = "Select the identifier to copy it";
