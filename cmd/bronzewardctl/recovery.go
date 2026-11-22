@@ -265,8 +265,7 @@ func (r *repeatFlags) entryRepeat() (*client.Repeat, error) {
 }
 
 // recoveryEnter is T32's entry (POST /recovery/entries, recovery-admin, human only, served by a
-// recovery start only). It states the entry's effects, then sends it only when "enter" is typed
-// back; there is no --yes.
+// recovery start only). It states the entry's effects, then sends it only on a y; there is no --yes.
 func (e *env) recoveryEnter(args []string) error {
 	var in apitypes.EntryRequest
 	var restored restoredFlag
@@ -289,7 +288,7 @@ func (e *env) recoveryEnter(args []string) error {
 	case strings.TrimSpace(in.Reason) == "":
 		return usageError{errors.New("give --reason")}
 	case e.noInput:
-		return notConfirmed{errors.New("recovery enter asks for enter typed back, which --no-input forbids; nothing was sent")}
+		return notConfirmed{errors.New("recovery enter asks for a y, which --no-input forbids; nothing was sent")}
 	}
 	rp, err := rf.entryRepeat()
 	if err != nil {
@@ -303,7 +302,7 @@ func (e *env) recoveryEnter(args []string) error {
 			"It marks every machine's scope pre-restore-unaccounted.\n"+
 			"It takes over every non-terminal apply-config operation as unresolved, and ends the running import and publish jobs.\n"+
 			"Recovery mode then lasts until recovery exit, once every scope is released.\n")
-		return e.confirmTyped("enter", "enter")
+		return e.confirmYes("Enter recovery in " + c.Context.Where() + "?")
 	}
 	return e.writeAfter(confirm, &client.Write{Method: http.MethodPost, Path: "/recovery/entries", Body: body, HumanOnly: true, Entry: true,
 		Repeat: rp, Check: "recovery status", Read: recoveryEntryRead}, func(_ *client.Client, resp *client.Response) ([]string, error) {

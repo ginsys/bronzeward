@@ -231,7 +231,7 @@ var cmdTable = []cmdEntry{
 	{path: "recovery enter", line: "enter recovery", roles: "recovery-admin", person: true, not: "expect-epoch",
 		synopsis: "recovery enter --restored family=<f>,backup=<id>,taken-at=<time> [--restored ...]\n" +
 			"               --stopped-at <time> --reason <text>",
-		notes: "on a server started for recovery; sent only when enter is typed back. A repeat of an unknown outcome takes --idempotency-key\n" +
+		notes: "on a server started for recovery; sent only after a y. A repeat of an unknown outcome takes --idempotency-key\n" +
 			"and --expect-principal, no epoch. Times are RFC 3339."},
 	{path: "recovery exit", line: "leave recovery", synopsis: "recovery exit [--fact name=value]...", roles: "recovery-admin", person: true,
 		notes: "once every scope is released."},

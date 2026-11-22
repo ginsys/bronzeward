@@ -30,16 +30,13 @@ async function open(start: "normal" | "recovery", human = "h-recovery"): Promise
   return at;
 }
 
-// Fills the form with synthetic values and types the confirmation.
+// Fills the form with synthetic values; one press then sends it, with nothing typed back.
 async function fill(reason: string) {
   const when = stamp();
   await $('input[name="database-backup"]').setValue("synthetic-backup-364");
   await $('input[name="database-taken"]').setValue(when);
   await $('input[name="stoppedAt"]').setValue(when);
   await $('input[name="reason"]').setValue(reason);
-  // once: the gate follows the typed fields synchronously (web/src/recovery.tsx:244), so the read cannot pass early.
-  expect(await $("main form").$("button=Enter recovery").isEnabled()).toBe(false);
-  await $("main form").$("label*=Type enter").$("input").setValue("enter");
   expect(await $("main form").$("button=Enter recovery").isEnabled()).toBe(true);
 }
 
@@ -129,20 +126,17 @@ describe("the recovery entry (#364)", () => {
     await absent(async () => (await $("body").getText()).includes(SET_ASIDE), "the set-aside text after the lost reply was repeated");
   });
 
-  it("an entry submitted without the typed confirmation sends nothing, the disabled button bypassed", async () => {
+  it("an entry pressed with a restored backup missing sends nothing and says what is missing", async () => {
     await open("recovery");
     const when = stamp();
-    await $('input[name="database-backup"]').setValue("synthetic-backup-364");
-    await $('input[name="database-taken"]').setValue(when);
     await $('input[name="stoppedAt"]').setValue(when);
-    await $('input[name="reason"]').setValue("unconfirmed synthetic restore");
-    // once: same gate (web/src/recovery.tsx:244): it follows the typed fields synchronously.
-    expect(await $("main form").$("button=Enter recovery").isEnabled()).toBe(false);
-    await browser.execute(() => document.querySelector<HTMLFormElement>("main form[aria-label='Enter recovery']")!.requestSubmit());
+    await $('input[name="reason"]').setValue("incomplete synthetic restore");
+    await $("main form").$("button=Enter recovery").click();
+    await expect($('[data-testid="entry-input"]')).toHaveText("Name at least one restored backup.", { wait: 5_000 });
     await browser.pause(1_000);
-    // once: read after the 1 s pause that follows the forced submit.
+    // once: read after the 1 s pause that follows the press.
     expect(await entries()).toEqual([]);
-    // once: read after the 1 s pause that follows the forced submit.
+    // once: read after the 1 s pause that follows the press.
     expect(await $("body").getText()).not.toContain("Recovery mode entered");
   });
 

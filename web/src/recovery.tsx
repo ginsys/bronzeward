@@ -178,7 +178,6 @@ const conflict = (o: Outcome | undefined): Problem | undefined =>
 export function EnterRecovery({ onRead }: { onRead?: () => void }) {
   const writes = useWrites();
   const [w, send] = useSend();
-  const [typed, type] = useState("");
   const [bad, complain] = useState<string>();
   // Before the entry no role was read, so only the offline banner gates it: the server decides.
   const off = useOffline() ? "Offline" : undefined;
@@ -186,8 +185,8 @@ export function EnterRecovery({ onRead }: { onRead?: () => void }) {
   const held = w !== undefined && writes.open.includes(w);
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    // The button is off until enter is typed, but a submit event does not need the button.
-    if (typed !== "enter" || off !== undefined || held) return;
+    // The button is off offline or while a send is open, but a submit event does not need the button.
+    if (off !== undefined || held) return;
     const d = new FormData(e.currentTarget);
     const restored = FAMILIES.flatMap((family) => {
       const backup = text(d, `${family}-backup`);
@@ -232,8 +231,7 @@ export function EnterRecovery({ onRead }: { onRead?: () => void }) {
       <ul>{ENTRY_EFFECTS.map((e) => <li key={e}>{e}</li>)}</ul>
       <Steps />
       <p>
-        <label>Type enter to record it: <input value={typed} onChange={(e) => type(e.target.value)} autoComplete="off" /></label>{" "}
-        <button type="submit" disabled={typed !== "enter" || off !== undefined || held}>Enter recovery</button>
+        <button type="submit" disabled={off !== undefined || held}>Enter recovery</button>
         {off !== undefined && ` ${off}`}
       </p>
       {bad !== undefined && <p role="alert" data-testid="entry-input">{bad}</p>}
