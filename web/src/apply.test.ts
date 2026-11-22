@@ -104,6 +104,36 @@ describe("Show apply", () => {
     expect(seenAtB).toEqual([w.made[A]]);
     expect([...held]).toEqual([w.made[A], w.made[B]]);
   });
+  // The page stops caring (the choice changed, or the person left) while a plan is being made: the answer of that
+  // request is the only place the plan's ID is known, so the plan is cancelled when it arrives, and no more are made.
+  test("a plan whose creation is answered after the page stopped caring is cancelled, and the rest are not made", async () => {
+    const w = world({ [B]: pos("awaiting-approval", { plan: plan("z") }), [A]: pos("needs-plan"), [C]: pos("needs-plan") });
+    let caring = true;
+    const send = w.io.send;
+    const io: ApplyIo = { ...w.io, live: () => caring, send: async (spec) => {
+      const out = await send(spec);
+      if (spec.path === "/plans") caring = false;
+      return out;
+    } };
+    const held = new Set<string>();
+    const { plans } = await showApply(REL, [B, A, C], io, held);
+    expect(w.log).toEqual(["POST /plans", `POST /plans/${w.made[A]}/cancellations`]);
+    expect([...held]).toEqual([]);
+    expect([...plans.keys()]).toEqual([B]);
+    // The plan a publisher prepared is reused and never cancelled, whichever way the press ends.
+    expect(w.log.join(" ")).not.toContain(plan("z"));
+  });
+  test("one creation that fails leaves the others made and shown, and nothing to cancel", async () => {
+    const w = world({ [A]: pos("needs-plan"), [B]: pos("needs-plan"), [C]: pos("needs-plan") }, { plan: [A] });
+    const held = new Set<string>();
+    const { plans } = await showApply(REL, [A, B, C], w.io, held);
+    expect(w.log).toEqual(["POST /plans", "POST /plans", "POST /plans"]);
+    expect([...plans.keys()]).toEqual([B, C]);
+    expect([...held]).toEqual([w.made[B], w.made[C]]);
+    expect(w.lines[A]?.state).toBe("stopped");
+    expect(w.lines[B]?.state).toBe("ready");
+    expect(w.lines[C]?.state).toBe("ready");
+  });
   test("leaves out a machine that cannot be planned, in words, and goes on with the others", async () => {
     const w = world({ [A]: pos("needs-plan"), [B]: pos("operation-in-flight", { plan: plan("q") }), [C]: pos("needs-plan") }, { plan: [A] });
     const { plans } = await showApply(REL, [A, B, C], w.io);

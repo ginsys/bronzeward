@@ -119,6 +119,12 @@ export async function showApply(release: string, machines: readonly string[], io
       io.say(m, { state: "stopped", text: LINES.noPlan });
       continue;
     }
+    // The page stopped caring while the request ran (the choice changed, or the person left): the plan is cancelled
+    // now, since this answer is the only place its ID is known, and no more are made.
+    if (!io.live()) {
+      await cancelPlans([id], io);
+      break;
+    }
     plans.set(m, id);
     made.add(id);
     io.say(m, { state: "ready", text: LINES.ready });

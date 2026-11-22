@@ -74,7 +74,9 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   const live = useRef(true);
   const sent = useRef<Write[]>([]);
 
-  const io = useCallback((): ApplyIo => {
+  // `choice` counts the changes of the choice: a press of Show apply that began under an earlier one no longer cares.
+  const choice = useRef(0);
+  const io = useCallback((began?: number): ApplyIo => {
     const epoch = writes.client?.currentEpoch;
     const valid = now.current.undropped();
     return {
@@ -90,7 +92,7 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
         const { [m]: _gone, ...rest } = was;
         return line.state === "done" || line.state === "ready" ? rest : { ...rest, [m]: line };
       }),
-      live: () => live.current && valid(),
+      live: () => live.current && valid() && (began === undefined || choice.current === began),
     };
   }, [writes, read]);
 
@@ -145,12 +147,14 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   const choose = (m: string, on: boolean) => {
     // The plans shown were made for the machines chosen: another choice cancels the ones this page made.
     discard();
+    choice.current += 1;
+    setLines({});
     setChosen((was) => new Set(on ? [...was, m] : [...was].filter((x) => x !== m)));
   };
   const show = async () => {
     setBusy(true);
     setLines({});
-    await showApply(release, picked, io(), made.current);
+    await showApply(release, picked, io(choice.current), made.current);
     if (live.current) (setBusy(false), setN((x) => x + 1));
   };
   const apply = async () => {

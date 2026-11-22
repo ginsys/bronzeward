@@ -76,4 +76,45 @@ describe("the apply page's refused approval", () => {
     expect(row(B).textContent).not.toContain("Nothing was approved for this machine.");
     expect(row(B).textContent).toBe(before);
   });
+
+  // The person leaves the page while a plan is being made: the request is answered after the page is gone, and the
+  // plan, which this page made and nobody saw, is cancelled by that answer. The plan a publisher prepared for B is not.
+  test("a plan whose creation is answered after the person left the page is cancelled", async () => {
+    const served: Record<string, unknown> = {
+      [`/machines/${A}`]: machine(A), [`/machines/${B}`]: machine(B),
+      [`/machines/${A}/position`]: { ...position(A, "pln_x"), step: "needs-plan", plan: null }, [`/machines/${B}/position`]: position(B, "pln_b"),
+      "/plans/pln_b": plan("pln_b", B),
+    };
+    const reads = {
+      client: { read: vi.fn(async (path: string) => (path in served ? { kind: "ok", data: served[path], etag: '"1"' } : { kind: "refused", status: 404, problem: null })) },
+      settle: (res: unknown, set: (r: unknown) => void, live: () => boolean) => (live() && set(res), true),
+      undropped: () => () => true,
+      view: "", again: 0, regained: 0, go: () => {}, failure: () => null,
+    } as unknown as Reads;
+    const writes = new Writes(() => "p");
+    const sent: string[] = [];
+    let answer: () => void = () => {};
+    const gate = new Promise<void>((r) => (answer = r));
+    vi.spyOn(writes, "submit").mockImplementation(async (w) => {
+      sent.push(w.spec.path);
+      if (w.spec.path === "/plans") await gate;
+      w.outcome = { kind: "done", status: 201, data: { id: "pln_new" }, replayed: false };
+      return w.outcome;
+    });
+    const settled = () => act(async () => void (await new Promise((r) => setTimeout(r, 40))));
+    await act(async () =>
+      root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(ApplyForm, { release: REL, r: release as never }))))),
+    );
+    await settled();
+    const row = (m: string) => box.querySelector(`[data-testid="apply-row"][data-machine="${m}"]`)!;
+    for (const m of [A, B]) await act(async () => void row(m).querySelector<HTMLInputElement>("input[type=checkbox]")!.click());
+    await settled();
+    await act(async () => void [...box.querySelectorAll("button")].find((b) => b.textContent === "Show apply")!.click());
+    await settled();
+    expect(sent).toEqual(["/plans"]);
+    await act(async () => root.unmount());
+    answer();
+    await new Promise((r) => setTimeout(r, 40));
+    expect(sent).toEqual(["/plans", "/plans/pln_new/cancellations"]);
+  });
 });
