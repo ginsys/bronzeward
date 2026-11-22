@@ -285,13 +285,13 @@ export async function onboardCluster(env: Env, p: Plan, report: (lines: Line[]) 
 
 // The page's sentence after a stop. `moved`: the epoch changed after the plan's first press began, so the plan
 // is never run again, only chosen again from the file (which finds what is recorded and begins under the new
-// epoch); the steps not sent are named. `choose`: another stop that offers the file again (the first key's
+// epoch); what is not finished is named (a write may have been answered before the stop, so never "not sent"). `choose`: another stop that offers the file again (the first key's
 // write is released).
 // `kept`: the shell keeps this page, with its actions off, while it held the file when the epoch changed, so the
 // way on is to open the page again.
 export function stoppedSentence(label: string, moved: boolean, choose: boolean, unsent: readonly string[] | undefined, kept = false): string {
   if (moved) {
-    const rest = unsent !== undefined && unsent.length > 0 ? ` (not sent: ${unsent.join(", ")})` : "";
+    const rest = unsent !== undefined && unsent.length > 0 ? ` (not finished: ${unsent.join(", ")})` : "";
     const way = kept ? "Open the machines and connect the cluster again: choosing the file" : "Choosing the file again";
     return `Stopped at ${label}. The installation's epoch changed after this onboarding began, so nothing more was sent under it${rest}. ${way} finds what is recorded and finishes the rest under the new epoch.`;
   }
@@ -302,17 +302,13 @@ export function stoppedSentence(label: string, moved: boolean, choose: boolean, 
 // from `press.current()`. A press stops quietly before a write when `press.valid()` says the shell has ended the
 // reads the press began with (an epoch change does, and so do a revocation and a sign-out: `not-done`, and
 // the plan can be run again); a write the server refuses for the epoch (412) is set aside by the write layer.
-// `epochChanged` is set only from a fact, that set-aside or the client's epoch (`press.current()`) differing
-// from the plan's, and says the plan cannot be run again, since the ids it holds were read under the old epoch.
+// `epochChanged` is set only from a fact: that set-aside, or, once the press has stopped, the client's epoch
+// (`press.current()`) differing from the plan's (one comparison, at the end, which also covers a quiet stop). It says the plan cannot be run again, since the ids it holds were read under the old epoch.
 export async function pressOnboarding(env: Env, p: Plan, press: { current: () => string | undefined; valid: () => boolean }, report: (lines: Line[]) => void): Promise<{ ok: boolean; epochChanged: boolean }> {
   p.epoch ??= press.current();
   let epochChanged = false;
   const send: Env["send"] = async (spec) => {
-    if (!press.valid()) {
-      const now = press.current();
-      epochChanged ||= p.epoch !== undefined && now !== undefined && now !== p.epoch;
-      return { kind: "not-done", why: "the page's reads ended", problem: null };
-    }
+    if (!press.valid()) return { kind: "not-done", why: "the page's reads ended", problem: null };
     const o = await env.send(p.epoch === undefined ? spec : { ...spec, epoch: p.epoch });
     if (o.kind === "set-aside" && o.why === EPOCH_CHANGED_ASIDE) epochChanged = true;
     return o;

@@ -1412,9 +1412,11 @@ cluster or a machine, the open draft, an import already released) and finishes t
 memory of it. A first key that did not end well releases the file, so the page asks for it again. Every
 write of one plan, in every press of it, is sent under the epoch the plan's first press began under: once
 the installation's epoch has changed, the next write is refused and set aside in words (or not sent, where the
-page's reads were already invalidated), no later write goes out, and the page names the steps not sent and
-offers the file again instead of [Run again], since the ids the plan holds were read under the old epoch;
-choosing the file again finds what is recorded and begins under the new epoch. The
+page's reads were already invalidated), no later write goes out, and the page names what is not finished (each
+machine and import by name, then the later steps) and offers the file again instead of [Run again], since the ids
+the plan holds were read under the old epoch; choosing the file again finds what is recorded and begins under the
+new epoch. Where the shell keeps the page (it held the file as the epoch changed, so its actions are off), the page
+offers a link to the machines instead, from where the cluster is connected again. The
 file is never stored, logged, shown or kept past the first key's write, and the page leaves the review
 of what was imported to the draft's own page. The page does not enrol, bootstrap or upgrade anything.
 

@@ -138,6 +138,7 @@ export function OnboardCluster() {
   // A first key that did not end well is released with its write, and nothing here holds the file then.
   const choose = moved || (failed?.key === "first-key" && p?.document === undefined);
   // The shell keeps this page, actions off, when it held the file as the epoch changed: only another page opens it afresh.
+  // The gate's reason is the only sign of it here ("Offline" wins over it: an offline kept page still shows the button).
   const keptPage = useGate(["author"]) === KEPT_PAGE;
   return (
     <>
