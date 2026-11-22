@@ -137,7 +137,7 @@ func TestDriftFreeze(t *testing.T) {
 
 	// The adoption gives the machine its Applied release (the T21 adopt plan of TestApprovals).
 	p := planID.FindString(e.ctl(e.create("adopt")...).out)
-	f.want(e.approveTyped("human", p), 0, "Applied becomes "+e.rel+" (adoption) once it does.")
+	f.want(e.approveYes("human", p), 0, "Applied becomes "+e.rel+" (adoption) once it does.")
 	e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, p)
 	var op string
 	if err := f.db.QueryRow(`SELECT operation FROM plan_state WHERE plan = $1`, p).Scan(&op); err != nil || f.ended(op) != "completed" {
@@ -263,7 +263,7 @@ func TestDrift(t *testing.T) {
 
 	// The adoption that gives the machine its Applied release (the T21 adopt plan of TestApprovals).
 	p := planID.FindString(e.ctl(e.create("adopt")...).out)
-	f.want(e.approveTyped("human", p), 0, "Applied becomes "+e.rel+" (adoption) once it does.")
+	f.want(e.approveYes("human", p), 0, "Applied becomes "+e.rel+" (adoption) once it does.")
 	e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, p)
 
 	// With no open drift record there is nothing to revert: nothing is sent, and the refusal names plan create.
@@ -300,7 +300,7 @@ func TestDrift(t *testing.T) {
 		t.Errorf("the revert plan binds drift record %d with operation %q, %v; want %d and apply-config", bound, operation, err, opened)
 	}
 	f.want(step("", with(approver, "machine", "unfreeze", m, "--reason", "BWSYNTH: decided to revert")...), 0, "Unfrozen.")
-	f.want(step(revert+"\n", with(approver, "approve", revert)...), 0, "which no reviewer has seen")
+	f.want(step("y\n", with(approver, "approve", revert)...), 0, "which no reviewer has seen")
 	e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, revert)
 	if got := e.closedAs(t, opened); got != "reverted" {
 		t.Errorf("the revert closed drift record %d as %q, want reverted", opened, got)
@@ -331,7 +331,7 @@ func TestDrift(t *testing.T) {
 	if state, approval := e.planState(t, adopt); state != "proposed" || approval != "" {
 		t.Errorf("the adopt plan is %s with approval %q after drift adopt, want proposed with none", state, approval)
 	}
-	f.want(step(adopt+"\n", with(approver, "approve", adopt)...), 0)
+	f.want(step("y\n", with(approver, "approve", adopt)...), 0)
 	e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, adopt)
 	if got := e.closedAs(t, opened); got != "adopted" {
 		t.Errorf("the adoption closed drift record %d as %q, want adopted", opened, got)

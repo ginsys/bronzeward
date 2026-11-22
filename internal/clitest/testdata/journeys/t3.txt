@@ -101,7 +101,7 @@ Evidence
   Release not applied yet  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
 Self-approval  predicted: you created this plan and published this release, and authored a fragment, profile or assignment revision its draft introduced.
                Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
-Type the plan ID to send it, or press Enter to stop:
+Answering y records your approval of this plan as you. Approve it? [y/N]:
 [exit 0]
 
 $ bronzewardctl --context human plan show {plan}

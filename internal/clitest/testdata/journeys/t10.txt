@@ -61,7 +61,7 @@ Self-approval  predicted: you did not create this plan or publish this release, 
                Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
 Overwrites     the drifted configuration of drift record <n>, which no reviewer has seen.
                Approving records that you approve overwriting it.
-Type the plan ID to send it, or press Enter to stop:
+Answering y records your approval of this plan as you. Approve it? [y/N]:
 Approved (apr_…). Recorded self-approval reasons: none.
 It overwrites the drifted configuration, which no reviewer has seen: this approval records that you approve overwriting it.
 The controller re-checks the plan at use time; it applies it only if every check passes.
@@ -123,7 +123,7 @@ Evidence
   Release not applied yet  yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff
 Self-approval  predicted: you did not create this plan or publish this release, and authored no fragment, profile or assignment revision in it.
                Import-base authorship and automation you own are not predicted. The approval records the actual reasons; self-approval is marked and allowed.
-Type the plan ID to send it, or press Enter to stop:
+Answering y records your approval of this plan as you. Approve it? [y/N]:
 Approved (apr_…). Recorded self-approval reasons: none.
 The controller records the adoption without sending anything; Applied becomes rel_… (adoption) once it does.
 [exit 0]
