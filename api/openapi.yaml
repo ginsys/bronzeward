@@ -3708,8 +3708,8 @@ components:
         to: {type: string}
         withheld: {type: boolean}
         unified: {type: string}
-        fromFormOnly: {type: boolean, description: 'True when the diff is shown although the machine holds its import base and not the from release''s
-            artifact, because the two differ in comments and encoding only (API revision 13).'}
+        fromFormOnly: {type: boolean, description: 'True when the diff is shown although the machine''s Applied digest is its import base''s and not the from
+            release''s artifact, because the two differ in comments and encoding only (API revision 13).'}
       additionalProperties: false
     PlanDryRun:
       type: object
