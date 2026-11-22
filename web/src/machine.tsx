@@ -5,7 +5,7 @@
 
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { ChangeEndpoint } from "./forms.tsx";
+import { ChangeEndpoint, RenameMachine } from "./forms.tsx";
 import { Detail, type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, machineHeading, machineName, node, release } from "./machines.tsx";
 import { ClusterRef } from "./titles.tsx";
@@ -442,6 +442,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
       {m.kind !== "ok" && pm}
       {obs.kind !== "ok" && po}
       <p><ClusterRef id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
+      {changed !== undefined && <RenameMachine machine={d} onChanged={changed} />}
       {changed !== undefined && <ChangeEndpoint machine={d} onChanged={changed} />}
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list).map((s) => <li key={s}>{s}</li>)}</ul>
       <NextStep position={position} recovery={recovery} />

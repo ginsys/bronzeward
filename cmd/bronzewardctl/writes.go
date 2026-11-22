@@ -330,9 +330,19 @@ func needNameRevision(c *client.Client) error {
 	return nil
 }
 
+// renameReaches says when a rename reaches the machine, word for word as client contracts A9 item 6 has it:
+// the first two sentences, the restart sentence in its "not yet confirmed" form (until ginsys/bronzeward#1040's
+// measurement picks one) and the Kubernetes node name sentence. The web rename form says the same.
+var renameReaches = []string{
+	"If this machine's hostname comes from its name, the new name reaches the machine only after the next release is published and a plan for it is approved. Until then the machine keeps its current hostname.",
+	"Whether the machine needs a restart to take the new name is not yet confirmed.",
+	"On the node, the Kubernetes node name normally follows the hostname.",
+}
+
 // machineRename replaces a machine's name (client contracts A9, operator-experience.md §10:
 // POST /machines/{id}/names, author, human only). A name another machine of the cluster holds, and the
-// machine's own current name, are refused by the server and shown as every refusal is.
+// machine's own current name, are refused by the server and shown as every refusal is. The text output
+// ends with renameReaches; -o json and -o yaml print the answer unchanged.
 func (e *env) machineRename(args []string) error {
 	var in apitypes.NameInput
 	var rf repeatFlags
@@ -362,7 +372,7 @@ func (e *env) machineRename(args []string) error {
 		}}, func(_ *client.Client, r *client.Response) ([]string, error) {
 		var x apitypes.NameChangeBody
 		err := json.Unmarshal(r.Body, &x)
-		return []string{sf("Machine %s: name %s, was %s (timeline revision %d).", x.Machine, x.Name, deref(x.PreviousName), x.Revision)}, err
+		return append([]string{sf("Machine %s: name %s, was %s (timeline revision %d).", x.Machine, x.Name, deref(x.PreviousName), x.Revision)}, renameReaches...), err
 	})
 }
 

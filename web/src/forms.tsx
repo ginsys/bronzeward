@@ -11,10 +11,14 @@ import { Action, useOffline } from "./shell.tsx";
 import type { Problem } from "./request.ts";
 import { CHECK_STATE, CUT_OFF, problemSentences, Refused, Repeated, REPLAYED, SetAside, Status, unknown, Unknown } from "./states.tsx";
 import { PageNote } from "./page-note.tsx";
-import { ADD_MACHINE, ADD_MACHINE_NOTE, BY_HAND_NOTE, ENTER_A_CLUSTER_BY_HAND } from "./words.ts";
+import { MACHINE_NAME } from "./machine-name.ts";
+import { machineName } from "./machines.tsx";
+import { MachineById } from "./titles.tsx";
+import { ADD_MACHINE, ADD_MACHINE_NOTE, BY_HAND_NOTE, ENTER_A_CLUSTER_BY_HAND, NAME_HINT, NAME_THIS_MACHINE, notAName, RENAME_MACHINE, RENAME_REACHES } from "./words.ts";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 type EndpointChange = components["schemas"]["EndpointChangeBody"];
+type NameChange = components["schemas"]["NameChangeBody"];
 
 const Context = createContext<Writes | undefined>(undefined);
 export const WritesProvider = Context.Provider;
@@ -348,6 +352,43 @@ export function ChangeEndpoint({ machine, onChanged }: { machine: Machine; onCha
     <Form title="Change endpoint" label="Change endpoint" onSubmit={submit} w={w} done={done}>
       <Text label="Talos endpoint:" name="talosEndpoint" value={machine.talosEndpoint} />
     </Form>
+  );
+}
+
+// On the machine's page: name an unnamed machine, or rename a named one (client contracts A9 item 6). The grammar is
+// the one MACHINE_NAME the views already read, tested before anything is sent; the server's refusals show as it words
+// them, and `name-in-use` shows the machine that holds the name. `onChanged` reads the machine again.
+export function RenameMachine({ machine, onChanged }: { machine: Machine; onChanged: () => void }) {
+  const [w, send] = useSend();
+  const [typed, notSent] = useState<string>();
+  const current = machineName(machine.name);
+  const label = current === undefined ? NAME_THIS_MACHINE : RENAME_MACHINE;
+  const path = `/machines/${encodeURIComponent(machine.id)}`;
+  const submit = (d: FormData) => {
+    const name = field(d, "name").trim();
+    if (!MACHINE_NAME.test(name)) return notSent(name);
+    notSent(undefined);
+    send({ method: "POST", path: `${path}/names`, resource: path, body: { name } });
+  };
+  const outcome = w?.outcome;
+  const changed = outcome?.kind === "done";
+  useEffect(() => {
+    if (changed) onChanged();
+  }, [changed, onChanged]);
+  const done = (data: unknown) => {
+    const c = data as NameChange;
+    return <>{c.previousName == null ? `Machine named ${c.name}` : `Machine renamed from ${c.previousName} to ${c.name}`} (revision {c.revision}).</>;
+  };
+  const holder = outcome?.kind === "refused" && outcome.problem?.type === "urn:bronzeward:problem:name-in-use" ? outcome.problem["machine"] : undefined;
+  return (
+    <>
+      <Form title={label} label={label} onSubmit={submit} w={w} done={done}>
+        <Text label="Name:" name="name" hint={NAME_HINT} value={current ?? ""} />
+      </Form>
+      {typed !== undefined && <Status testid="rename-not-sent" role="alert">{notAName(typed)}</Status>}
+      {typeof holder === "string" && <Status testid="rename-holder">The machine that has this name: <MachineById id={holder} />.</Status>}
+      <p data-testid="rename-reaches">{RENAME_REACHES.join(" ")}</p>
+    </>
   );
 }
 

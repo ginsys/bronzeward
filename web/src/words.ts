@@ -70,6 +70,17 @@ export const RELEASE_NOT_APPLIED_YET = "Release not applied yet";
 /** The buttons and headings that record a cluster by hand and add a machine. */
 export const ENTER_A_CLUSTER_BY_HAND = "Enter a cluster by hand";
 export const ADD_MACHINE = "Add machine";
+export const NAME_THIS_MACHINE = "Name this machine";
+export const RENAME_MACHINE = "Rename machine";
+export const NAME_HINT = "a hostname: lowercase letters, digits and hyphens, with dots between labels";
+export const notAName = (typed: string) => `Not sent: "${typed}" is not a name the server takes; use ${NAME_HINT}.`;
+// When a rename reaches the machine (client contracts A9 item 6), word for word; the command line prints the same
+// sentences. The restart sentence is the "not yet confirmed" form until ginsys/bronzeward#1040's measurement picks one.
+export const RENAME_REACHES = [
+  "If this machine's hostname comes from its name, the new name reaches the machine only after the next release is published and a plan for it is approved. Until then the machine keeps its current hostname.",
+  "Whether the machine needs a restart to take the new name is not yet confirmed.",
+  "On the node, the Kubernetes node name normally follows the hostname.",
+] as const;
 /** The label, heading and page name for taking an existing cluster in; it replaces "Onboard cluster". */
 export const CONNECT_A_CLUSTER = "Connect a cluster";
 /** Said beside the Copy control once the text is on the clipboard. */

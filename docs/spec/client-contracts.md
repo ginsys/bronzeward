@@ -2195,7 +2195,10 @@ not part of this rule.
    carries the one the measurement picks. A restart: "The machine takes the new name when it next restarts." or
    "The machine takes the new name when the plan is applied." Until measured: "Whether the machine needs a restart
    to take the new name is not yet confirmed." The Kubernetes node name: "On the node, the Kubernetes node name
-   normally follows the hostname."
+   normally follows the hostname." The web rename form is on the machine's page, beside Change endpoint: "Name this
+   machine" for a machine with no name, "Rename machine" for one with a name. It tests the typed name, trimmed,
+   against the grammar of item 1 and sends nothing that fails it; for `name-in-use` it shows the machine that holds
+   the name as a link.
 7. **A release says where each machine's hostname came from** (persistence and API §9.2, the `hostname` member).
    A release review shows, per machine, one of these sentences by `source`, naming the machine by its name where
    it has one: `machine-name`, "Hostname: node-a, taken from the machine's name."; `configuration`, "Hostname:
