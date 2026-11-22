@@ -137,7 +137,8 @@ function host(listen: string, clientConfig: object, issuer: string, api: string)
 // /release lets its held answers go and answers once they are sent, GET /writes lists the writes
 // it received, GET /redirected counts the requests that followed its redirects, GET /streams lists
 // the event streams it opened with their Last-Event-ID and GET /cuts counts the ones its `cut` fault
-// closed, and POST /epoch commits a new epoch where they go; the next sign-in clears all. POST /disposable answers the URL of B's
+// closed, POST /epoch commits a new epoch where they go, and POST /scope?machine=&state= sets a machine's scope
+// (blocked, unresolved or ready, with the mark a release reads) there; the next sign-in clears all. POST /disposable answers the URL of B's
 // deployment just started on a fresh database, replacing any earlier one: ?start=recovery with
 // -recovery-start, its entry not yet made, and with &keep on the earlier one's database. POST
 // /bao/hold?ms= holds each KV write of that deployment's provider this long (AMB-02), and POST
@@ -199,6 +200,14 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
     if (url.pathname === "/drift" && req.method === "POST") {
       try {
         injector.drift(url.searchParams.get("machine") ?? "");
+      } catch (e) {
+        return res.writeHead(500).end(String(e));
+      }
+      return res.end();
+    }
+    if (url.pathname === "/scope" && req.method === "POST") {
+      try {
+        injector.scope(url.searchParams.get("machine") ?? "", url.searchParams.get("state") ?? "");
       } catch (e) {
         return res.writeHead(500).end(String(e));
       }
@@ -483,6 +492,19 @@ async function prepare() {
       stdio: "inherit",
       env: { ...process.env, BW_E2E_DRIFT_MACHINE: machine, BW_E2E_DRIFT_DSN: `postgres://bronzeward@127.0.0.1:${PG_PORT}/${db}?sslmode=disable` },
     });
+  };
+  // A machine's scope in the state a recovery decision acts on, as the server leaves it after a mark: the state, and for ready the
+  // scope-state entry a release reads (cause restoration-mark, the Desired release the mark checked). Written by SQL, like the
+  // epoch, so that a case starts from a state without depending on what a mark's reads of a stand-in node give.
+  injector.scope = (machine, state) => {
+    const db = owned("a scope state is set");
+    if (!/^mch_[a-z2-7]+$/.test(machine)) throw new Error(`a machine of ${machine}: give a machine identifier`);
+    if (!["blocked", "unresolved", "ready"].includes(state)) throw new Error(`a scope of ${state}: give blocked, unresolved or ready`);
+    const entry = state !== "ready" ? [] : ["-c", `WITH m AS (UPDATE machine SET revision_counter = revision_counter + 1 WHERE id = '${machine}' RETURNING id, revision_counter)
+      INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
+      SELECT m.id, m.revision_counter, (SELECT epoch FROM installation_state), 'scope-state', jsonb_build_object('from', 'blocked', 'to', 'ready',
+        'cause', 'restoration-mark', 'release', (SELECT desired FROM machine_state WHERE machine = m.id), 'missing', '[]'::jsonb), clock_timestamp() FROM m`];
+    execFileSync("psql", [...PG, "-v", "ON_ERROR_STOP=1", "-q", "-d", db, "-c", `UPDATE machine SET scope_state = '${state}' WHERE id = '${machine}'`, ...entry]);
   };
   // This run's digest key only (bao.ts), and only while the writes go to the disposable deployment.
   injector.retire = async () => {

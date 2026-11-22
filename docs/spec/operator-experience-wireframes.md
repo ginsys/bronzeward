@@ -582,15 +582,22 @@ Restored: database backup taken 10:20; stopped at 10:31
 Server started for recovery (as GET /server reports; G14): plan creation, approval and
 unfreeze wait for its normal restart; publications it accepts complete only after that
 restart. Imports complete on it.
-+----------------+--------------------------+----------------------------------------------+
-| Machine        | Scope state              | Next action                                  |
-+----------------+--------------------------+----------------------------------------------+
-| mch_k2p…7xqa   | pre-restore-unaccounted  | [Account scope]                              |
-| mch_tqhc…35uq  | ready                    | [Release scope]  (not an approval)           |
-| mch_w4ze…n3fa  | ready                    | [Release scope]  (not an approval)           |
-| mch_b3c…aa2q   | unresolved               | op_q8r… held: classified after the normal    |
-|                |                          | restart, then re-mark                        |
-+----------------+--------------------------+----------------------------------------------+
++------------+--------------------------+--------------------------------------+------------------+
+| Machine    | Scope state              | Next step                            | Decision         |
++------------+--------------------------+--------------------------------------+------------------+
+| worker-1   | pre-restore-unaccounted  | Account the scope.                   | [Account scope]  |
+| worker-2   | ready                    | Release the scope. A release is not  | [Mark] [Release] |
+|            |                          | an approval.                         |                  |
+| worker-3   | ready                    | Release the scope. A release is not  | [Mark] [Release] |
+|            |                          | an approval.                         |                  |
+| worker-4   | unresolved               | An operation holds it: classified    | [Mark]           |
+|            |                          | after the normal restart, then mark  |                  |
++------------+--------------------------+--------------------------------------+------------------+
+Mark and Release are one press for one machine, with no control for all scopes. The answer stays in
+the row: "Scope marked blocked, was blocked (act …). Missing identity: the identity the node showed is
+not the one the machine record binds, or a later observation showed another. Next: fix what is
+missing, then mark the scope again." or "Scope released, was ready (act …). A release is not an
+approval: it approves no plan and sends nothing, and a plan still needs its own approval."
 | [Exit recovery]~ 4 scopes not released (ready is not released)                            |
 | Drafts, imports and publication remain available: a scope blocked by a lost key leaves    |
 | that state through a newly published release that leaves unreleased scopes' assignments   |

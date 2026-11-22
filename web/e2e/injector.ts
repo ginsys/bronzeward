@@ -79,6 +79,9 @@ export interface Injector {
   // Opens a drift record on a machine of the deployment the writes go to, as a drift observation's recording
   // transaction does (internal/api TestE2EDrift), so a case reads a record the server itself binds (auth.conf.ts).
   drift: (machine: string) => void;
+  // Puts a machine's scope in a state a recovery decision acts on: blocked, unresolved, or ready with the mark entry a release
+  // rests on (auth.conf.ts). A release case starts from it, so it does not depend on a mark's reads of a node.
+  scope: (machine: string, state: string) => void;
   // The requests that reached REDIRECTED: a redirect the page followed.
   redirected: number;
   // Retires the versions of the digest key of the deployment the writes go to (AMB-06).
@@ -104,7 +107,7 @@ export function startInjector(upstream: string, port: number): Promise<Injector>
   // Each held answer: its release, and its having been sent.
   const waiting: { go: () => void; sent: Promise<void> }[] = [];
   const inj: Injector = {
-    faults: {}, seen: [], answered: [], holding: [], writes: [], redirected: 0, streams: [], cuts: 0, server: undefined as never, epoch: () => {}, drift: () => {}, retire: async () => {},
+    faults: {}, seen: [], answered: [], holding: [], writes: [], redirected: 0, streams: [], cuts: 0, server: undefined as never, epoch: () => {}, drift: () => {}, scope: () => {}, retire: async () => {},
     release: async () => {
       inj.holding = [];
       const now = waiting.splice(0);

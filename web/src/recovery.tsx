@@ -13,6 +13,7 @@ import { ENTER_RECOVERY_NOTE, RECOVERY_NOTE, RECOVERY_ROLE_NOTE } from "./words.
 import { RequestRef } from "./problems.tsx";
 import { clock, Disconnected, ProblemFields, problemFields, problemSentences, Refused, Status, when } from "./states.tsx";
 import { PageNote } from "./page-note.tsx";
+import { ScopeDecision } from "./scope-decisions.tsx";
 import { MachineById } from "./titles.tsx";
 import type { components } from "./api/v1";
 
@@ -110,7 +111,8 @@ export const REVOCATION_LIMITS = [
   "First add the subject to auth.deniedSubjects, a human by iss and sub, a service identity by its identity and name, and leave it there. After a restore, record this revocation again.",
 ];
 
-// What each scope state needs next (T31), as text; the controls are the recovery decisions' (#365).
+// What each scope state needs next (T31), as text; the Decision column holds the controls (ginsys/bronzeward#365). The accounting of a
+// pre-restore-unaccounted scope has none there yet.
 export function nextStep(state: string): string {
   switch (state) {
     case "pre-restore-unaccounted":
@@ -334,13 +336,14 @@ function Scopes({ scopes }: { scopes: readonly Scope[] }) {
   if (scopes.length === 0) return <Status testid="scopes">No scope is in recovery.</Status>;
   return (
     <Scroll label="Scopes in recovery" testid="scopes">
-      <Head cols={["Machine", "Scope state", "Next step"]} />
+      <Head cols={["Machine", "Scope state", "Next step", "Decision"]} />
       <tbody>
         {scopes.map((s) => (
-          <tr key={s.machine}>
+          <tr key={s.machine} data-testid={`scope-${s.machine}`}>
             <td><MachineById id={s.machine} /></td>
-            <td>{s.state}</td>
+            <td data-testid="scope-state">{s.state}</td>
             <td>{nextStep(s.state)}</td>
+            <td><ScopeDecision machine={s.machine} state={s.state} /></td>
           </tr>
         ))}
       </tbody>
