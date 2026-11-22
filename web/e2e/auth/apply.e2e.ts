@@ -108,6 +108,9 @@ describe("the apply page (#1096)", () => {
     await browser.waitUntil(async () => (await rows().length) === 2, { timeout: 20_000 });
     await choose(B).click();
     await expect($('[data-testid="apply-plan"]')).toBeExisting({ wait: 20_000 });
+    // A plan another person prepared says who prepared it and when, and the plan shown is the plan Apply approves.
+    await browser.waitUntil(async () => ((await $('[data-testid="apply-plan-by"]').getProperty("textContent")) as string).startsWith("Prepared by"), { timeout: 20_000, timeoutMsg: "the plan did not say who prepared it" });
+    expect(await $('[data-testid="apply-plan"]').getAttribute("data-plan")).toBe(PB);
     await expect($('[data-testid="apply-sentence"]')).toHaveText(expect.stringContaining("Pressing Apply records your approval of each plan shown above."));
     await $("button=Apply").click();
     await browser.waitUntil(async () => (await posts()).length > 0, { timeout: 20_000, timeoutMsg: "no approval was sent" });
