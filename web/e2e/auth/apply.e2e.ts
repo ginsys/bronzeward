@@ -94,6 +94,8 @@ describe("the apply page (#1096)", () => {
     await choose(B).click();
     await $("button=Show apply").click();
     await browser.waitUntil(async () => (await $$('[data-testid="apply-plan"]').length) === 2, { timeout: 20_000, timeoutMsg: "the second plan did not appear" });
+    // Each plan's change is inside a closed details, whose text a browser does not return: open each one first.
+    for (const s of await $$('[data-testid="apply-plan"] summary')) await s.click();
     const diffs = await $$('[data-testid="diff"]').map((d) => d.getText());
     expect(diffs.sort()).toEqual(["@@ machine.install @@\n+  disk: /dev/sdb", "@@ machine.network @@\n+  hostname: alpha"]);
     // once: Show apply was pressed twice and has already answered; a plan it made would have been sent before the second list
