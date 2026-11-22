@@ -383,7 +383,7 @@ describe("a change made by someone else", () => {
     expect(text("unfreeze-answer")).toBe("");
   });
 
-  test("while the freeze this page sent is recorded and the machine is not yet read again, the form stays disabled", async () => {
+  test("a pin, not a repair: a recorded write whose machine read still shows the old value keeps its form disabled", async () => {
     answers = [recorded(true)];
     await shown();
     await submit("Freeze", "r");
