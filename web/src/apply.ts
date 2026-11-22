@@ -41,6 +41,8 @@ export const LINES = {
   frozen: "Stopped: the machine is frozen. An approver can unfreeze it on the machine's page.",
   otherPlan: "Stopped: the plan waiting for this machine is not an apply plan. Open the machine to decide on it.",
   unreadPlan: "The change of a plan could not be read, so Apply stays off until it can be: reload the page.",
+  withheld: "cannot be shown: either the configuration could not be redacted, or the machine holds a configuration other than the one Bronzeward last applied, so the two cannot be compared. Apply stays off while this plan is listed. Open the plan to read what it records and approve it there, or untick this machine.",
+  held: "A write of this page has an unknown outcome, so nothing new is sent. Repeat it or dismiss its notice at the top of the page first.",
   planning: "Creating the plan.",
   approving: "Approving the plan as you.",
   approvedNow: "Approved. The controller sends it when its gates allow; you can leave this page, it continues without it.",

@@ -2,14 +2,15 @@
 // none chosen; "Show apply" makes one plan for each machine chosen and shows what each changes; "Apply" records the
 // approval of those plans. The logic is apply.ts; every step is decided from the machine's position.
 
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { type ApplyIo, applyPlans, cancelPlans, type Line, LINES, rowOf, showApply } from "./apply.ts";
 import { Change } from "./change.tsx";
-import { Result, useWrites } from "./forms.tsx";
+import { Result, startsNew, useWrites } from "./forms.tsx";
 import { Ref, useItem, useReads, useSettled } from "./list.tsx";
 import type { Position } from "./nextstep.tsx";
 import { PageNote } from "./page-note.tsx";
+import { poll } from "./plan.tsx";
 import { safeWord } from "./safe.ts";
 import { Who } from "./principals.tsx";
 import { when } from "./states.tsx";
@@ -26,9 +27,9 @@ const POLL_FOR_MS = 10 * 60 * 1000;
 
 interface Seen { position: Position | undefined; role: string | null | undefined }
 
-function Row({ release, machine, chosen, choose, locked, line, n, profiles, seen }: { release: string; machine: string; chosen: boolean; choose: (on: boolean) => void; locked: boolean; line: Line | undefined; n: number; profiles: readonly string[] | undefined; seen: (m: string, s: Seen) => void }) {
-  const m = useItem<S["MachineBody"]>(`/machines/${enc(machine)}`, undefined, n);
-  const p = useItem<Position>(`/machines/${enc(machine)}/position`, undefined, n);
+function Row({ release, machine, chosen, choose, locked, line, n, profiles, seen, settled }: { release: string; machine: string; chosen: boolean; choose: (on: boolean) => void; locked: boolean; line: Line | undefined; n: number; profiles: readonly string[] | undefined; seen: (m: string, s: Seen) => void; settled: () => void }) {
+  const m = useItem<S["MachineBody"]>(`/machines/${enc(machine)}`, undefined, n, settled);
+  const p = useItem<Position>(`/machines/${enc(machine)}/position`, undefined, n, settled);
   const role = m.kind === "ok" ? m.data.role : undefined;
   const position = p.kind === "ok" ? p.data : undefined;
   useEffect(() => seen(machine, { position, role }), [seen, machine, position, role]);
@@ -44,17 +45,24 @@ function Row({ release, machine, chosen, choose, locked, line, n, profiles, seen
   );
 }
 
+// What the page knows of a plan's change: shown (Apply may approve it), withheld by the server (it cannot be shown, so
+// Apply is off) or unread (the read has not answered).
+type Seeing = "shown" | "withheld" | "unread";
+
 // The plan of one machine, whose change is the one Apply approves. A plan another person prepared says who and when.
-function PlanChange({ id, machine, mine, onRead }: { id: string; machine: string; mine: boolean; onRead: (id: string, ok: boolean) => void }) {
+function PlanChange({ id, machine, mine, onRead }: { id: string; machine: string; mine: boolean; onRead: (id: string, s: Seeing) => void }) {
   const p = useItem<S["PlanBody"]>(`/plans/${enc(id)}`);
-  const ok = p.kind === "ok";
-  useEffect(() => onRead(id, ok), [onRead, id, ok]);
+  const seeing: Seeing = p.kind !== "ok" ? "unread" : p.data.evidence.diff?.withheld === true ? "withheld" : "shown";
+  useEffect(() => onRead(id, seeing), [onRead, id, seeing]);
   return (
-    <details data-testid="apply-plan" data-plan={id}>
-      <summary>What the plan for <MachineById id={machine} /> changes</summary>
-      {p.kind === "ok" && <p data-testid="apply-plan-by">{mine ? LINES.madeHere : <>{LINES.preparedBy} <Who id={p.data.createdBy?.principal} /> on {when(p.data.createdAt)}.</>} It expires {when(p.data.expiresAt)}.</p>}
-      {p.kind === "ok" ? <Change p={p.data} /> : <p>Not read yet.</p>}
-    </details>
+    <>
+      <details data-testid="apply-plan" data-plan={id}>
+        <summary>What the plan for <MachineById id={machine} /> changes</summary>
+        {p.kind === "ok" && <p data-testid="apply-plan-by">{mine ? LINES.madeHere : <>{LINES.preparedBy} <Who id={p.data.createdBy?.principal} /> on {when(p.data.createdAt)}.</>} It expires {when(p.data.expiresAt)}.</p>}
+        {p.kind === "ok" ? <Change p={p.data} /> : <p>Not read yet.</p>}
+      </details>
+      {seeing === "withheld" && <p data-testid="apply-withheld"><MachineById id={machine} />: the change of its plan {LINES.withheld} <Ref to={`/plans/${enc(id)}`} id={id}>Open the plan</Ref></p>}
+    </>
   );
 }
 
@@ -74,7 +82,7 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   // The plans this page made, each with its machine, and those Apply was pressed for, which the page never cancels.
   const made = useRef(new Map<string, string>());
   const pressed = useRef(new Set<string>());
-  const [readable, setReadable] = useState<Readonly<Record<string, boolean>>>({});
+  const [readable, setReadable] = useState<Readonly<Record<string, Seeing>>>({});
   const live = useRef(true);
   const sent = useRef<Write[]>([]);
 
@@ -105,13 +113,17 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
     for (const id of ids) made.current.delete(id);
     if (ids.length > 0) void cancelPlans(ids, io()).then(() => live.current && setN((x) => x + 1));
   }, [io]);
+  // Only leaving the page cancels what it made: the effect runs on mount and unmount, never when `io` is rebuilt, and
+  // calls the latest `discard` through a ref.
+  const discarding = useRef(discard);
+  discarding.current = discard;
   useEffect(() => {
     live.current = true;
     return () => {
       live.current = false;
-      discard();
+      discarding.current();
     };
-  }, [discard]);
+  }, []);
 
   // Profiles are in the release's assignment revisions: one read each, never one per row.
   useEffect(() => {
@@ -128,13 +140,27 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
     return () => void (on = false);
   }, [r.sources, read]);
 
-  // While machines wait or apply, the rows are read again, for ten minutes after the press.
+  // While machines wait or apply, the rows are read again, for ten minutes after the press: five seconds after the last
+  // read settled, never on a clock, so a slow read is not dropped by the next one (list.tsx drops a read whose effect re-ran).
+  // Each row reads its machine and its position, so a round is over when 2 x the machines' reads have answered.
+  const watch = useRef(false);
+  watch.current = watching;
+  const nNow = useRef(n);
+  nNow.current = n;
+  const round = useRef({ n, answered: 0, reads: 0 });
+  round.current.reads = 2 * r.machines.length;
+  const timer = useMemo(() => poll(() => setN((x) => x + 1), POLL_MS), []);
+  const rowSettled = useCallback(() => {
+    if (round.current.n !== nNow.current) round.current = { ...round.current, n: nNow.current, answered: 0 };
+    round.current.answered++;
+    if (watch.current && round.current.answered >= round.current.reads) timer.settled();
+  }, [timer]);
+  useEffect(() => timer.stop, [timer]);
   useEffect(() => {
     if (!watching) return;
-    const tick = setInterval(() => setN((x) => x + 1), POLL_MS);
-    const stop = setTimeout(() => setWatching(false), POLL_FOR_MS);
-    return () => (clearInterval(tick), clearTimeout(stop));
-  }, [watching]);
+    const stop = setTimeout(() => (setWatching(false), timer.stop()), POLL_FOR_MS);
+    return () => clearTimeout(stop);
+  }, [watching, timer]);
 
   const see = useCallback((m: string, s: Seen) => setSeen((was) => (was[m]?.position === s.position && was[m]?.role === s.role ? was : { ...was, [m]: s })), []);
   const machines = r.machines.map((x) => x.machine);
@@ -149,8 +175,13 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
     else if (p === undefined && own !== undefined) plans.set(m, own);
   }
   const roles = Object.values(seen).map((s) => s.role);
-  // Apply needs every plan's change read: a person never approves a change they could not see.
-  const unread = [...plans.values()].some((id) => readable[id] !== true);
+  // Apply needs every plan's change shown: a person never approves a change they could not see. A plan whose change the
+  // server withholds says so, and where to go, in its own line.
+  const unread = [...plans.values()].some((id) => readable[id] !== "shown");
+  const unreadOnly = [...plans.values()].some((id) => readable[id] !== "shown" && readable[id] !== "withheld");
+  // A write of this page that is still open (in flight, unknown or set aside after an attempt) is the logical write of
+  // its press: nothing new is sent until it ended or its notice was dismissed (forms.tsx startsNew).
+  const held = sent.current.some((w) => !startsNew(writes, w));
 
   const choose = (m: string, on: boolean) => {
     // The plans shown were made for the machines chosen: a machine no longer chosen has its plan cancelled.
@@ -171,28 +202,29 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
     await applyPlans(plans, io());
     if (live.current) (setBusy(false), setN((x) => x + 1), setWatching(true));
   };
-  const markRead = useCallback((id: string, ok: boolean) => setReadable((was) => (was[id] === ok ? was : { ...was, [id]: ok })), []);
+  const markRead = useCallback((id: string, s: Seeing) => setReadable((was) => (was[id] === s ? was : { ...was, [id]: s })), []);
 
   return (
     <>
       <PageNote parts={[APPLY_NOTE]} />
       <p><Ref to={`/releases/${enc(release)}`} id={release}>Back to the release</Ref></p>
       <ul aria-label="Machines of this release">
-        {machines.map((m) => <Row key={m} release={release} machine={m} chosen={chosen.has(m)} choose={(on) => choose(m, on)} locked={busy} line={lines[m]} n={n} profiles={profiles[m]} seen={see} />)}
+        {machines.map((m) => <Row key={m} release={release} machine={m} chosen={chosen.has(m)} choose={(on) => choose(m, on)} locked={busy} line={lines[m]} n={n} profiles={profiles[m]} seen={see} settled={rowSettled} />)}
       </ul>
       {picked.some((m) => seen[m]?.role === "controlplane") && <p data-testid="apply-control-plane">{CONTROL_PLANE_NOTE}</p>}
       {roles.some((x) => x === null) && <p data-testid="apply-no-role">{NO_ROLE_NOTE}</p>}
       <p>
-        <Action label="Show apply" needs={["publisher"]} onClick={() => void show()} busy={busy || picked.length === 0} />
+        <Action label="Show apply" needs={["publisher"]} onClick={() => void show()} busy={busy || held || picked.length === 0} />
         {picked.length === 0 && <span data-testid="apply-none"> Choose at least one machine.</span>}
       </p>
+      {held && <p data-testid="apply-held">{LINES.held}</p>}
       {picked.length > 0 && plans.size < picked.length && <p data-testid="apply-needs-publisher">{APPLY_NEEDS_PUBLISHER}</p>}
       {plans.size > 0 && (
         <section aria-label="Plans to approve">
           {[...plans].map(([m, id]) => <PlanChange key={id} id={id} machine={m} mine={made.current.has(id)} onRead={markRead} />)}
           <p data-testid="apply-sentence">{APPLY_SENTENCE}</p>
-          {unread && <p data-testid="apply-unread">{LINES.unreadPlan}</p>}
-          <p><Action label="Apply" needs={["approver"]} onClick={() => void apply()} busy={busy || unread} /></p>
+          {unreadOnly && <p data-testid="apply-unread">{LINES.unreadPlan}</p>}
+          <p><Action label="Apply" needs={["approver"]} onClick={() => void apply()} busy={busy || held || unread} /></p>
         </section>
       )}
     </>
