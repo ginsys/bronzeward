@@ -920,7 +920,7 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     expect(plan.document).toBeUndefined();
   });
 
-  test("a stop inside the imports names each import not sent, not only the steps after it", async () => {
+  test("a stop inside the imports names each import not finished, not only the steps after it", async () => {
     const s = new Server();
     const plan = await planOf(s);
     s.committed = (route) => {
@@ -931,17 +931,29 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     expect(plan.unsent).toEqual(["Import cp-1", "Import W_2"]);
   });
 
+  test("an import whose write was answered before the epoch moved is not described as unsent: the page says not finished", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    const base = s.env();
+    const env: Env = { ...base, read: async (path: string) => (/^\/ingestions\/ing_/.test(path) ? ((s.epoch = "e2"), { kind: "discarded" } as never) : base.read(path)) };
+    const r = await pressOnboarding(env, plan, { current: () => s.epoch, valid: () => true }, () => {});
+    expect(r.epochChanged).toBe(true);
+    expect(posts(s).filter((x) => x === "POST /ingestions")).toHaveLength(1);
+    expect(stoppedSentence("Import cp-1", true, true, plan.unsent)).toContain("not finished: Import cp-1, Import W_2");
+    expect(stoppedSentence("Import cp-1", true, true, plan.unsent)).not.toContain("not sent");
+  });
+
   test("the shell keeps the page while it held the file: the sentence sends the person to the machines, never to a disabled button", () => {
     expect(stoppedSentence("Cluster lab", true, true, ["First key"], true)).toBe(
-      "Stopped at Cluster lab. The installation's epoch changed after this onboarding began, so nothing more was sent under it (not sent: First key). Open the machines and connect the cluster again: choosing the file finds what is recorded and finishes the rest under the new epoch.",
+      "Stopped at Cluster lab. The installation's epoch changed after this onboarding began, so nothing more was sent under it (not finished: First key). Open the machines and connect the cluster again: choosing the file finds what is recorded and finishes the rest under the new epoch.",
     );
   });
 
-  test("the page's sentence after an epoch stop says what was not sent and offers the file, never the run again", () => {
+  test("the page's sentence after an epoch stop says what is not finished and offers the file, never the run again", () => {
     expect(stoppedSentence("Machine cp-1", true, true, ["Draft", "Imports"])).toBe(
-      "Stopped at Machine cp-1. The installation's epoch changed after this onboarding began, so nothing more was sent under it (not sent: Draft, Imports). Choosing the file again finds what is recorded and finishes the rest under the new epoch.",
+      "Stopped at Machine cp-1. The installation's epoch changed after this onboarding began, so nothing more was sent under it (not finished: Draft, Imports). Choosing the file again finds what is recorded and finishes the rest under the new epoch.",
     );
-    expect(stoppedSentence("Imports", true, true, [])).not.toContain("not sent");
+    expect(stoppedSentence("Imports", true, true, [])).not.toContain("not finished");
     expect(stoppedSentence("Draft", false, false, ["Imports"])).toBe("Stopped at Draft. Running it again finds what is recorded and finishes the rest.");
     expect(stoppedSentence("First key", false, true, undefined)).toBe("Stopped at First key. Running it again finds what is recorded and finishes the rest: choose the file again.");
   });

@@ -2430,8 +2430,11 @@ Limits:
   It sends every write of a plan, in every press of it, under the epoch the plan's first press began under
   ([§8.4](#84-idempotency-and-ambiguous-responses) item 3): once the installation's epoch has changed, the
   next write is refused by the server (or not sent, where the shell has already invalidated the page's reads) and set
-  aside in the page's words, no later write goes out, and the page names the steps not sent and offers the file
-  again, which finds what is recorded and begins under the new epoch, never a second run of the same plan.
+  aside in the page's words, no later write goes out, and the page names what is not finished (each machine and
+  import by name, then the later steps) and offers the file again, which finds what is recorded and begins under
+  the new epoch, never a second run of the same plan. Where the shell keeps the page (it held the file as the epoch
+  changed, so its actions are off), the page offers a link to the machines instead, from where the cluster is
+  connected again.
   The browser case ONBOARD-01 runs the flow against two stand-in nodes, so what a real node answers
   to the deployment's address policy
   ([ginsys/bronzeward#1009](https://github.com/ginsys/bronzeward/issues/1009)) is not proven by it.
