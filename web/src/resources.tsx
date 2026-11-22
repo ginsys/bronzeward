@@ -461,7 +461,7 @@ export function ReleaseItem({ id }: { id: string }) {
 
 const PLANS: readonly Col<S["PlanBody"]>[] = [
   ["Plan", (p) => <PlanRef p={p} />], ["State", (p) => safeWord(p.state)], ["Machine", (p) => <MachineById id={p.machine} />],
-  ["Operation", (p) => (p.mode === null ? p.operation : `${p.operation}, mode ${safeWord(p.mode)}`)], ["Release", (p) => <Named id={p.release} />],
+  ["Operation", (p) => (p.mode === null ? safeWord(p.operation) : `${safeWord(p.operation)}, mode ${safeWord(p.mode)}`)], ["Release", (p) => <Named id={p.release} />],
   CREATED, ["Expires", (p) => when(p.expiresAt)],
 ];
 
@@ -515,7 +515,7 @@ export function PlanItem({ id }: { id: string }) {
             <Fields rows={[
               ["State", `${safeWord(p.state)}; expires ${when(p.expiresAt)}`],
               ["Target", <>machine <MachineById id={p.machine} {...(held(p) !== undefined && { held: held(p)! })} />, cluster <Id id={p.cluster} />, route {safeWord(p.route)}</>],
-              ["Operation", p.mode === null ? p.operation : `${p.operation}, mode ${safeWord(p.mode)}`],
+              ["Operation", p.mode === null ? safeWord(p.operation) : `${safeWord(p.operation)}, mode ${safeWord(p.mode)}`],
               ["Release", <><Named id={p.release} /> (the machine's Desired when planned: <Named id={p.desiredRelease} />)</>],
               ["Bound to", <>assignment revision <Id id={p.assignmentRevision} />, baseline revision {p.baselineRevision ?? "none"}, drift record {p.driftRecord ?? "none"}, epoch {p.epoch}</>],
               ["Limits", `transport ${seconds(p.transportDeadlineSeconds)}, verification ${seconds(p.verificationDeadlineSeconds)}, observation age ${seconds(p.maxObservationAgeSeconds)}, check validity ${seconds(p.checkValiditySeconds)}, attempts ${p.maxAttempts ?? "none"}, rollout limit ${p.rolloutLimit}`],

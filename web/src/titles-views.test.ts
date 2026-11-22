@@ -12,9 +12,9 @@ import { WritesProvider } from "./forms.tsx";
 import { CreatedDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { OpenDraftsView } from "./machines.tsx";
 import { allowed, IngestionItem, StartImport } from "./imports.tsx";
-import { MachineShown, sentences } from "./machine.tsx";
+import { MachineShown, sentences, TimelineRows } from "./machine.tsx";
 import { RecoveryConsole } from "./recovery.tsx";
-import { RevokedBy } from "./approval.tsx";
+import { predict, recordedReasons, RevokedBy } from "./approval.tsx";
 import { ReviewBody } from "./review.tsx";
 import { nextStep } from "./nextstep.tsx";
 import { PublishDraft } from "./publish.tsx";
@@ -22,7 +22,7 @@ import { Detail, type Reads, ReadsProvider, short, useItem } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
 import { Writes } from "./write.ts";
 import type { ReadResult } from "./request.ts";
-import { Status, StatusPage, when } from "./states.tsx";
+import { needs, Status, StatusPage, when } from "./states.tsx";
 import { Outcome } from "./operation.tsx";
 import { PlanState } from "./plan.tsx";
 import { ACTS, Change, DependencyItem, ImportBaseItem, Imports, OperationItem, Operations, PlanItem, Plans, ReleaseItem, RevisionItem, Sources } from "./resources.tsx";
@@ -1063,5 +1063,28 @@ describe("ginsys/bronzeward#1055: a server word on a plan, operation, import, re
     expect(field("Validated in mode")).toBe(NOT_SHOWN);
     const step = nextStep({ step: "operation-in-flight", machine: { id: MCH }, operation: { id: OP, state: BAD }, plan: null, draft: null, ingestion: null, rolloutHeldBy: null } as never);
     expect(step?.text).toBe(`An operation is changing this machine (${NOT_SHOWN}). Next: wait for it to end.`);
+  });
+
+  test("a timeline entry's role, reason and cause, and the plan's operation, are safe text", async () => {
+    const entry = { epoch: "e0", revision: 1, at, kind: "freeze", entry: { role: BAD, reason: BAD, cause: BAD } };
+    await mount(h(TimelineRows, { tl: { items: [entry], older: undefined, tail: undefined, read: true, restarted: false }, older: undefined, busy: false } as never));
+    expect(box.querySelector("tbody td:nth-child(3)")?.textContent).toBe(`${NOT_SHOWN} "${NOT_SHOWN}" ${NOT_SHOWN}`);
+    answers[`/plans/${PLN}`] = ok({ ...planBody("proposed"), operation: BAD });
+    await mount(h(PlanItem, { id: PLN }), { ...reads, view: "operation" });
+    await settled();
+    expect(field("Operation")).toBe(`${NOT_SHOWN}, mode proposed`);
+  });
+
+  test("what holds an approved plan names the machine's scope state as safe text", () => {
+    const position = { step: "awaiting-dispatch", machine: { id: MCH, scopeState: BAD, frozen: false }, plan: { operation: "adopt", approvalCurrent: true }, draft: null, ingestion: null, operation: null, rolloutHeldBy: null };
+    expect(nextStep(position as never)?.text).toContain(`Held now: the machine's scope state is ${NOT_SHOWN}.`);
+  });
+
+  test("the recorded self-approval reasons, the release source kinds of the prediction and the roles a refusal names are safe text", () => {
+    expect(recordedReasons({ selfApproval: { reasons: [BAD, "created-plan"] } } as never)).toBe(`Recorded self-approval reasons: ${NOT_SHOWN}, created-plan.`);
+    const prediction = predict({ id: PLN, release: REL, operation: "adopt", createdBy: { principal: "idn_other" } } as never, { kind: "ok", data: { principal } }, { kind: "loading" }, undefined, [{ kind: BAD, revision: "frr_a", load: { kind: "loading" } }]);
+    expect(prediction.join(" ")).toContain(`${NOT_SHOWN} revision`);
+    expect(prediction.join(" ")).not.toContain("bad");
+    expect(needs(403, { roles: [BAD, "approver"] } as never)).toBe(` Needs ${NOT_SHOWN} or approver.`);
   });
 });

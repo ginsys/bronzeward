@@ -2119,7 +2119,8 @@ one. The rule is one for both clients:
    where the cell has one. This holds on every page that prints such a word: the plan, operation, import, recovery,
    machine, review, onboarding, audit, draft, alert and dependency pages ([#1055](https://github.com/ginsys/bronzeward/issues/1055)).
    Other server text is not covered: a version, address, endpoint, contract, identifier, purpose, epoch, event
-   type or code, approval policy, observation basis, and the identity provider's refusal text. The CLI escapes every
+   type or code, approval policy, observation basis, a result or error record shown as JSON, and the identity
+   provider's refusal text. The CLI escapes every
    string it prints instead (§6 item 8).
 7. **Applied in the CLI** ([#987](https://github.com/ginsys/bronzeward/issues/987)): `plan list`, `release list` and
    `operation list` print a TITLE column beside the identifier, and `plan show`, `release show` and `operation show`

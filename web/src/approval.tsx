@@ -34,7 +34,7 @@ export const afterApproval = (p: Plan) => p.operation === "adopt"
 export const overwrites = (p: Plan) => p.operation === "apply-config" && p.driftRecord !== null
   ? `Overwrites the drifted configuration of drift record ${p.driftRecord}, which no reviewer has seen. Approving records that you approve overwriting it.`
   : undefined;
-export const recordedReasons = (a: Approval) => `Recorded self-approval reasons: ${a.selfApproval.reasons.length > 0 ? a.selfApproval.reasons.join(", ") : "none"}.`;
+export const recordedReasons = (a: Approval) => `Recorded self-approval reasons: ${a.selfApproval.reasons.length > 0 ? a.selfApproval.reasons.map(safeWord).join(", ") : "none"}.`;
 
 // A revision a release contains, with what its read answered.
 export type Source = { kind: string; revision: string; load: Load<{ author: string }> };
@@ -51,7 +51,7 @@ export function predict(p: Plan, me: Load<{ principal: string | null }>, release
   note(me, "your identity");
   note(release, `release ${short(p.release)}`);
   if (release.kind === "ok" && draft !== undefined) note(draft, `the release's draft ${short(release.data.draft)}`);
-  for (const s of sources) note(s.load, `${s.kind} revision ${short(s.revision)}`);
+  for (const s of sources) note(s.load, `${safeWord(s.kind)} revision ${short(s.revision)}`);
   const clauses: string[] = [];
   const who = me.kind === "ok" ? me.data.principal : null;
   if (who !== null) {
@@ -63,7 +63,7 @@ export function predict(p: Plan, me: Load<{ principal: string | null }>, release
         ? published ? "you created this plan and published this release" : "you created this plan but did not publish this release"
         : published ? "you did not create this plan but published this release" : "you did not create this plan or publish this release");
       const mine = sources.filter((s) => s.load.kind === "ok" && s.load.data.author === who);
-      const named = (l: readonly Source[]) => l.map((s) => `${s.kind} revision ${short(s.revision)}`).join(", ");
+      const named = (l: readonly Source[]) => l.map((s) => `${safeWord(s.kind)} revision ${short(s.revision)}`).join(", ");
       if (mine.length > 0 && draft?.kind === "ok") {
         const introduced = new Set(draft.data.entries.map((e) => e.revision));
         const change = mine.filter((s) => introduced.has(s.revision)), reused = mine.filter((s) => !introduced.has(s.revision));

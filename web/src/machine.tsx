@@ -264,7 +264,7 @@ export function details(e: Entry): ReactNode {
   const r = (e.entry ?? {}) as Record<string, unknown>;
   const names = e.kind === "name-change" ? [r["previous"], r["new"]].map(machineName).filter((n): n is string => n !== undefined) : [];
   return [...names.map((n, i) => ({ k: `name${i}`, v: n })), ...SHOWN.filter((k) => typeof r[k] === "string" && r[k] !== "").map((k) => ({ k, v: r[k] as string }))].map(({ k, v }, i) => (
-    <Fragment key={k}>{i > 0 && " "}{k === "reason" ? `"${v}"` : k === "principal" && principalId(v) ? <Who id={v} /> : /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Id id={v} /> : v}</Fragment>
+    <Fragment key={k}>{i > 0 && " "}{k === "reason" ? `"${safeWord(v)}"` : k === "principal" && principalId(v) ? <Who id={v} /> : /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Id id={v} /> : safeWord(v)}</Fragment>
   ));
 }
 
