@@ -135,6 +135,18 @@ describe("what is sent", () => {
     expect(text("write-result")).toBe("Machine renamed from cp-1 to cp-2 (revision 7).");
   });
 
+  test("a returned name outside the grammar is never shown, whichever of the two it is (A9 item 1)", async () => {
+    const bad = "evil\u202Ename";
+    answers.push(changed("cp-1", bad));
+    await mount(named);
+    await send("cp-2");
+    expect(text("write-result")).toBe("Machine renamed from cp-1 to the new name (revision 7).");
+    answers.push(changed(bad, "cp-3"));
+    await send("cp-3");
+    expect(text("write-result")).toBe("Machine renamed to cp-3 (revision 7).");
+    expect(box.textContent).not.toContain("\u202E");
+  });
+
   test("a name outside the grammar is not sent, and the form says so", async () => {
     await mount(unnamed);
     for (const typed of ["CP-1", "cp_1", "-cp", "cp-", "a..b", "10.0.0.1", "x".repeat(64)]) {

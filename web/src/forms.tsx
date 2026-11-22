@@ -377,7 +377,11 @@ export function RenameMachine({ machine, onChanged }: { machine: Machine; onChan
   }, [changed, onChanged]);
   const done = (data: unknown) => {
     const c = data as NameChange;
-    return <>{c.previousName == null ? `Machine named ${c.name}` : `Machine renamed from ${c.previousName} to ${c.name}`} (revision {c.revision}).</>;
+    // Received names are remote text (A9 item 1): each is shown only when it matches the grammar.
+    const to = machineName(c.name) ?? "the new name";
+    const from = machineName(c.previousName);
+    const said = c.previousName == null ? `Machine named ${to}` : from === undefined ? `Machine renamed to ${to}` : `Machine renamed from ${from} to ${to}`;
+    return <>{said} (revision {c.revision}).</>;
   };
   const holder = outcome?.kind === "refused" && outcome.problem?.type === "urn:bronzeward:problem:name-in-use" ? outcome.problem["machine"] : undefined;
   return (
