@@ -191,7 +191,7 @@ func (e *env) nextSteps(c *client.Client, release string) ([]string, error) {
 			replaced++
 			lines = append(lines, fmt.Sprintf("  %s has Desired release %s, not this one: plan nothing for it from this release.", pr(m.Machine), pr(*x.Desired)))
 		case x.Applied == nil:
-			lines = append(lines, fmt.Sprintf("  %s has no Applied release: hand it over with an adopt plan:", pr(m.Machine)),
+			lines = append(lines, fmt.Sprintf("  %s has no Applied release: adopt it with an adopt plan:", pr(m.Machine)),
 				"    "+createLine(rel.Id, m.Machine, "adopt"))
 		default:
 			lines = append(lines, fmt.Sprintf("  %s has Applied release %s: plan an apply-config:", pr(m.Machine), pr(x.Applied.Release)),

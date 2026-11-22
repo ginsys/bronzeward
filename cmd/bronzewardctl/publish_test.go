@@ -186,7 +186,7 @@ func TestPublication(t *testing.T) {
 		"Publication succeeded: release rel_BWSYNTH is now Desired for 2 machines. Nothing has been sent to any machine.\n"+
 		"  mch_a has Applied release rel_BWSYNTH-old: plan an apply-config:\n"+
 		"    bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_a' --operation 'apply-config'\n"+
-		"  mch_b has no Applied release: hand it over with an adopt plan:\n"+
+		"  mch_b has no Applied release: adopt it with an adopt plan:\n"+
 		"    bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_b' --operation 'adopt'\n", "  queued\n  succeeded\n")
 	if w := f.took(); len(w) != 1 || w[0] != `POST /drafts/drf_BWSYNTH/publications if-match="1-BWSYNTH"` {
 		t.Errorf("sent %q; want one publication with the kept ETag", w)
@@ -230,7 +230,7 @@ func TestPublication(t *testing.T) {
 	step("a release no longer Desired, for another release or for none, gets no plan", pub, 0,
 		"Publication succeeded: release rel_BWSYNTH was published for 2 machines, but it is no longer Desired for 2 of them. Nothing has been sent to any machine.\n"+
 			"  mch_a has Desired release rel_BWSYNTH-new, not this one: plan nothing for it from this release.\n"+
-			"  mch_b has no Desired release: plan nothing for it from this release.\n", "", "is now Desired for", "another release", "plan an", "hand it over")
+			"  mch_b has no Desired release: plan nothing for it from this release.\n", "", "is now Desired for", "another release", "plan an", "adopt it")
 
 	step("review: line by line, the token kept and the tab escaped", []string{"release", "review", "rel_BWSYNTH", "mch_a"}, 0,
 		"Release rel_BWSYNTH, machine mch_a, validated: metal\n"+strings.ReplaceAll(rendered, "\t", `\x09`), "", "\t")
@@ -256,7 +256,7 @@ func TestPublication(t *testing.T) {
 		"Publication succeeded: release rel_BWSYNTH was published for 2 machines. Nothing has been sent to any machine.\n"+
 			"  The epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' while the machines were read, so no next step is shown. Read them again with: release show 'rel_BWSYNTH'\n"+
 			"Review a machine's rendered configuration: bronzewardctl release review rel_BWSYNTH <machine>\n",
-		"", "plan an", "hand it over", "is now Desired", "no Desired")
+		"", "plan an", "adopt it", "is now Desired", "no Desired")
 
 	// The change shows first in the failed read of the release's last machine: the advice built for
 	// the machine before it is of the earlier snapshot too.
@@ -267,7 +267,7 @@ func TestPublication(t *testing.T) {
 	step("an epoch change shown by a failed machine read shows no next step", pub, 0,
 		"Publication succeeded: release rel_BWSYNTH was published for 2 machines. Nothing has been sent to any machine.\n"+
 			"  The epoch changed from 'ep_BWSYNTH-1' to 'ep_BWSYNTH-2' while the machines were read, so no next step is shown. Read them again with: release show 'rel_BWSYNTH'\n",
-		"", "plan an", "hand it over", "is now Desired", "cannot be read")
+		"", "plan an", "adopt it", "is now Desired", "cannot be read")
 
 	// The failed read shows the new epoch and the refresh after it answers the first one again: the
 	// client's last epoch equals the release's, and only the moves count shows the change.
@@ -278,7 +278,7 @@ func TestPublication(t *testing.T) {
 	step("an epoch set back after a failed machine read shows no next step", pub, 0,
 		"Publication succeeded: release rel_BWSYNTH was published for 2 machines. Nothing has been sent to any machine.\n"+
 			"  The epoch changed and changed back from 'ep_BWSYNTH-1' while the machines were read, so no next step is shown. Read them again with: release show 'rel_BWSYNTH'\n",
-		"", "plan an", "hand it over", "is now Desired", "cannot be read")
+		"", "plan an", "adopt it", "is now Desired", "cannot be read")
 }
 
 // TestPublicationNamesTheReleaseByItsTitle: the result line of publish and the header of release review

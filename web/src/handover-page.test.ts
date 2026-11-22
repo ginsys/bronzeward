@@ -118,7 +118,7 @@ describe("the handover button with unsaved text in the draft editor", () => {
     );
     await settled();
     expect(keptETag(DRF, "e0")).toBe('"1"');
-    await click("Start managing these machines");
+    await click("Adopt these machines");
     await settled();
     expect(box.querySelector('[data-testid="handover-line"]')!.textContent).toContain(NOT_PUBLISHED);
     expect(sent).toEqual(['"1"']);
@@ -136,7 +136,7 @@ describe("the handover button with unsaved text in the draft editor", () => {
     await click("Show their change");
     await settled();
     expect(keptETag(DRF, "e0")).toBe('"2"');
-    await click("Start managing these machines");
+    await click("Adopt these machines");
     await settled();
     expect(sent).toEqual(['"1"', '"2"']);
     expect(epochs).toEqual(["e0", "e0"]);

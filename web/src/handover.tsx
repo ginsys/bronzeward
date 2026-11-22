@@ -131,7 +131,7 @@ export function Handover({ draft, machines, etag, seeChange, written }: { draft:
         {reason !== undefined && <span data-testid="handover-reason"> {reason}</span>}
       </p>
       {held && <p role="alert" data-testid="handover-unsaved">{UNSAVED}</p>}
-      {shown.length > 0 && <ul aria-label="Handover progress" aria-live="polite">{shown.map(([k, l]) => <LineView key={k} k={k} line={l} show={() => setNote(seeChange())} />)}</ul>}
+      {shown.length > 0 && <ul aria-label="Adoption progress" aria-live="polite">{shown.map(([k, l]) => <LineView key={k} k={k} line={l} show={() => setNote(seeChange())} />)}</ul>}
       {note !== undefined && <Status testid="handover-note">{note}</Status>}
     </section>
   );

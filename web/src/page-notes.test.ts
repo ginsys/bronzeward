@@ -187,7 +187,7 @@ describe("the machine page through its own reads", () => {
 
 describe("the draft page's note, a part only where its control shows", () => {
   const parts = (...p: string[]) => p.join(" ");
-  test("an open draft with a machine's import: all three parts, and the Start managing section they point at", async () => {
+  test("an open draft with a machine's import: all three parts, and the Adopt these machines section they point at", async () => {
     served[`/drafts/${DRF}`] = draft("open", [imported]);
     await shown(h(DraftItem, { id: DRF }));
     const n = note();
@@ -208,7 +208,7 @@ describe("the draft page's note, a part only where its control shows", () => {
     expect(note().textContent).toBe(parts(DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START));
     underTheTitle(note());
   });
-  test("an open draft with no import: no Start part, and no Start managing section", async () => {
+  test("an open draft with no import: no Start part, and no Adopt these machines section", async () => {
     served[`/drafts/${DRF}`] = draft("open", []);
     await shown(h(DraftItem, { id: DRF }));
     expect(note().textContent).toBe(parts(DRAFT_NOTE, DRAFT_NOTE_OPEN));

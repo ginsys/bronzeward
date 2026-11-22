@@ -37,7 +37,7 @@ describe("a cluster's machines by state", () => {
   test("counts each badge, how many show none, and how many machines there are", () => {
     expect(machineStates([drifted, matches, plain])).toEqual({
       total: 3,
-      counts: [["Changed on the machine", 1], ["Frozen", 1], ["Last read matched what was applied", 1], ["Not managed yet", 1]],
+      counts: [["Changed on the machine", 1], ["Frozen", 1], ["Last read matched what was applied", 1], ["Not adopted yet", 1]],
       none: 1,
     });
     expect(machineStates([])).toEqual({ total: 0, counts: [], none: 0 });
@@ -50,7 +50,7 @@ describe("a cluster's machines by state", () => {
     expect(out).toContain("1 with no state shown");
     expect(out).toContain("A machine can carry several states");
     expect(out).toContain('href="/machines/mch_a"');
-    expect(out).toContain("Changed on the machine, Frozen, Not managed yet");
+    expect(out).toContain("Changed on the machine, Frozen, Not adopted yet");
     expect(html(h(MachineSummary, { machines: [] }))).toContain("No machines recorded in this cluster.");
   });
 });

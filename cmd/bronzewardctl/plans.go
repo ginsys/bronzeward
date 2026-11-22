@@ -288,7 +288,7 @@ func createRefusalNext(err error, release, machine string) string {
 		}
 		return "The machine has no Desired release: publish a release that covers it first."
 	case strings.Contains(detail, "has no Applied configuration"):
-		return "Hand the machine over with an adopt plan: " + createLine(release, machine, "adopt")
+		return "Adopt the machine with an adopt plan, which records what the machine runs as its starting point and sends nothing: " + createLine(release, machine, "adopt")
 	case strings.Contains(detail, "the machine has no assignment"):
 		return "Add an assignment for the machine to a draft, one that selects nothing is enough: bronzewardctl assignment set " +
 			client.ShellWord(machine) + " --draft <draft> --none. Publish that draft, then plan the release it makes."

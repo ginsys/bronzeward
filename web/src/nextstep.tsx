@@ -61,7 +61,7 @@ export function nextStep(p: Position, recovery = false): Step | undefined {
       };
     case "needs-plan":
       return {
-        text: "A release is selected and not yet applied. Next: create a plan. With no Applied configuration the plan is an adopt (it accepts the configuration the node already runs, the handover); with an Applied configuration and no open drift it is an apply-config (it sends the release). The server refuses the other kind in each case.",
+        text: "A release is selected and not yet applied. Next: create a plan. With no Applied configuration the plan is an adopt (it accepts the configuration the node already runs); with an Applied configuration and no open drift it is an apply-config (it sends the release). The server refuses the other kind in each case.",
         links: needsPlanLinks(p),
       };
     case "awaiting-approval":
