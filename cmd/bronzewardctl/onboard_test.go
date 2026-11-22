@@ -665,6 +665,10 @@ func TestOnboardReviewPause(t *testing.T) {
 	if code != 0 || len(e.api.ings) != 1 || e.api.ings[0].state != "paused" {
 		t.Fatalf("exit %d, %d imports, stdout %q, stderr %q; want 0 and one paused import", code, len(e.api.ings), out, errOut)
 	}
+	// A machine whose import is paused has none released, so the run stops at it and sends no assignment.
+	if got := putsOf(e.api); len(got) != 0 {
+		t.Errorf("a run that stopped at a paused import wrote assignments for %q; want none", got)
+	}
 	paused := e.api.ings[0].id
 	for _, want := range []string{"import review " + paused, "import continue " + paused, "cluster onboard", "paused"} {
 		if !strings.Contains(strings.ReplaceAll(out, "'", ""), want) {
@@ -683,6 +687,10 @@ func TestOnboardReviewPause(t *testing.T) {
 	e.api.mu.Unlock()
 	if code, out, errOut := e.runArgs(skip...); code != 0 || len(e.api.ings) != 2 || e.api.ings[1].machine != e.api.machines[1].id {
 		t.Errorf("rerun after the continue: exit %d, %d imports, stdout %q, stderr %q; want the second machine imported only", code, len(e.api.ings), out, errOut)
+	}
+	// Both imports are released now, so each machine gets its assignment, and only now.
+	if got := putsOf(e.api); len(got) != 2 {
+		t.Errorf("after both imports were released the assignment writes were %q; want one for each machine", got)
 	}
 }
 
