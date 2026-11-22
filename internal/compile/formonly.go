@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"math/big"
-	"reflect"
 	"regexp"
 
 	"go.yaml.in/yaml/v3"
@@ -20,8 +19,8 @@ import (
 //
 // Both texts must parse as multi-document YAML without an alias, an anchor, a key that is not a string, a repeated key or a tag
 // outside YAML's core schema. They must hold the same documents in the same order, with
-// sequences equal element by element and scalars equal by their resolved tag and value (so "1" and 1,
-// and true and "true", differ; the spellings of one null are equal).
+// sequences equal element by element and scalars of one tag and equal text, or numbers of equal decimal value (so "1" and 1, and
+// true and "true", differ; the spellings of one null are equal; a bool or a timestamp spelled two ways differs).
 func formOnly(a, b []byte) bool {
 	da, err := parseDocuments(a)
 	if err != nil {
@@ -133,8 +132,8 @@ func keyed(m *yaml.Node) (map[mapKey]*yaml.Node, bool) {
 // plainDecimal is a decimal number with no leading zero before another digit.
 var plainDecimal = regexp.MustCompile(`^[+-]?(0|[1-9][0-9]*)?(\.[0-9]*)?([eE][+-]?[0-9]+)?$`)
 
-// sameScalar compares the resolved value of two scalars: a string by its text, every other core type by
-// the Go value YAML resolves it to, a null by its tag alone.
+// sameScalar compares two scalars: a string by its text, a null by its tag alone, a number by its exact
+// decimal value, any other type by its text.
 func sameScalar(a, b *yaml.Node) bool {
 	ta, tb := a.ShortTag(), b.ShortTag()
 	if ta != tb || !coreTags[ta] {
@@ -149,25 +148,16 @@ func sameScalar(a, b *yaml.Node) bool {
 	if a.Value == b.Value {
 		return true
 	}
-	switch ta {
-	case "!!timestamp":
-		return false // decoding keeps nanoseconds only, so differing text is never proved equal
-	case "!!float":
-		// Compared as exact decimals, of plain decimal syntax only: a float64 would read two long spellings of
-		// different numbers as equal, and a leading zero (an octal in some decoders) is not decimal ten.
-		if !plainDecimal.MatchString(a.Value) || !plainDecimal.MatchString(b.Value) {
-			return false
-		}
-		x, okx := new(big.Rat).SetString(a.Value)
-		y, oky := new(big.Rat).SetString(b.Value)
-		return okx && oky && x.Cmp(y) == 0
-	}
-	var va, vb any
-	if a.Decode(&va) != nil || b.Decode(&vb) != nil {
+	// Different text is proved equal for numbers only, as exact decimals of plain decimal syntax: a float64 would
+	// read two long spellings of different numbers as equal, and a leading zero, a hex or an underscore reads
+	// differently in different decoders. A bool, a timestamp or a binary with different text reads different.
+	if ta != "!!int" && ta != "!!float" {
 		return false
 	}
-	if _, wide := va.(float64); wide { // an integer too large for any integer type
+	if !plainDecimal.MatchString(a.Value) || !plainDecimal.MatchString(b.Value) {
 		return false
 	}
-	return reflect.DeepEqual(va, vb)
+	x, okx := new(big.Rat).SetString(a.Value)
+	y, oky := new(big.Rat).SetString(b.Value)
+	return okx && oky && x.Cmp(y) == 0
 }
