@@ -762,7 +762,7 @@ func TestTitlesReuseWhatTheCommandRead(t *testing.T) {
 		}
 	})
 	f.got("/releases/rel_BWSYNTH")
-	setStdin(t, "pln_BWSYNTH\n")
+	setStdin(t, "y\n")
 	if code, _, errOut := runCtl(t, "approve", "pln_BWSYNTH"); code != 0 {
 		t.Fatalf("approve: exit %d, %s", code, errOut)
 	}

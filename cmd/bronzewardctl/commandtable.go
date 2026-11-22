@@ -208,6 +208,13 @@ var cmdTable = []cmdEntry{
 	{path: "plan cancel", line: "cancel a plan", synopsis: "plan cancel <plan> --reason <text>", roles: "publisher (its own plan), approver or recovery-admin",
 		notes: "a cancelled plan cannot be committed; a committed plan's operation ends only while no attempt is recorded, and an attempt\n" +
 			"already recorded is not stopped."},
+	{path: "apply", line: "apply a release to the machines you choose", synopsis: "apply <release> (--machine <a,b> | --all) [--diff]", roles: "publisher, then approver", person: true,
+		notes: "makes one apply-config plan for each machine chosen, by name or ID, or --all of the release's machines, prints each machine with\n" +
+			"its role and profiles, and with --diff each plan's change, on standard error, then asks Approve them? [y/N] and approves every\n" +
+			"plan listed only on y or yes. Enter, n and the end of input send no approval and cancel the plans this command made; a plan\n" +
+			"somebody else prepared is approved as it stands and never cancelled here. A Ctrl-C at the question leaves the plans to expire\n" +
+			"24 hours after they were made. A machine already applied, frozen, in drift or in an operation is left out with its reason.\n" +
+			"There is no --yes, --no-input refuses, and -o json and -o yaml are not offered. It does not wait for the operations."},
 	{path: "approve", line: "approve a plan", synopsis: "approve <plan>", roles: "approver", person: true,
 		notes: "prints the plan and the predicted self-approval on standard error, then asks Approve it? [y/N] and sends only on y or yes,\n" +
 			"on the terminal or as one line of standard input. Enter, n and the end of input send nothing. There is no --yes, and\n" +
