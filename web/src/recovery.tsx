@@ -15,7 +15,7 @@ import { clock, Disconnected, ProblemFields, problemFields, problemSentences, Re
 import { PageNote } from "./page-note.tsx";
 import { nextStep, ScopeDecision } from "./scope-decisions.tsx";
 import { MachineById } from "./titles.tsx";
-import { safeWord } from "./safe.ts";
+import { safeText, safeWord } from "./safe.ts";
 import type { components } from "./api/v1";
 
 export type Recovery = components["schemas"]["RecoveryBody"];
@@ -363,31 +363,39 @@ export function ExitRecovery({ held, recoveryMode, onChanged }: { held: number; 
   );
 }
 
-// B35: the identity, or the issuer and subject, and a reason; sent only when the identity is typed back.
+// What the revocation form shows before its one press, and what that press sends. The identity, or the issuer and
+// subject, not both (RevocationInput), and a reason. One press confirms a permanent act, so the line is the only check
+// a person has: it names the target exactly as entered (the issuer and the subject both), and a target that is not
+// safe text cannot be shown, so it cannot be confirmed and the press stays off.
+export function revocationConfirmation(identity: string, iss: string, sub: string, reason: string): { line?: string; target?: { identity: string; reason: string } | { iss: string; sub: string; reason: string }; why?: string } {
+  const [i, s, u, r] = [identity.trim(), iss.trim(), sub.trim(), reason.trim()];
+  const byIdentity = i !== "" && s === "" && u === "";
+  const bySubject = i === "" && s !== "" && u !== "";
+  if (!(byIdentity || bySubject) || r === "") return { why: "Name the identity, or the issuer and subject, and give a reason." };
+  if ([i, s, u].some((v) => v !== "" && safeText(v) === undefined)) return { why: "The identity cannot be shown, so it cannot be confirmed." };
+  return byIdentity
+    ? { line: `Revokes the identity ${i}. A revocation is permanent.`, target: { identity: i, reason: r } }
+    : { line: `Revokes the subject ${u} of the issuer ${s}. A revocation is permanent.`, target: { iss: s, sub: u, reason: r } };
+}
+
+// B35: the identity, or the issuer and subject, and a reason; one press sends it after the line that names the target.
 export function Revocation() {
   const [w, send] = useSend();
   const [identity, setIdentity] = useState("");
   const [iss, setIss] = useState("");
   const [sub, setSub] = useState("");
   const [reason, setReason] = useState("");
-  const [typed, type] = useState("");
   const gate = useGate(["recovery-admin"]);
   const writes = useWrites();
   const busy = w !== undefined && writes?.open.includes(w) === true;
-  // The identity, or the issuer and subject, not both (RevocationInput). The identity typed back is
-  // the identity, or the subject (as the CLI asks).
-  const byIdentity = identity.trim() !== "" && iss.trim() === "" && sub.trim() === "";
-  const bySubject = identity.trim() === "" && iss.trim() !== "" && sub.trim() !== "";
-  const target = byIdentity ? identity.trim() : bySubject ? sub.trim() : "";
-  const ready = target !== "" && reason.trim() !== "" && typed === target;
-  const why = gate ?? (ready ? undefined : "Name the identity, or the issuer and subject, give a reason, and type the identity back");
+  const confirmation = revocationConfirmation(identity, iss, sub, reason);
+  const why = gate ?? confirmation.why;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     // A submit event does not need the button: the guards that disable it also stop the send, so a
-    // permanent revocation goes out neither without the role, nor unconfirmed, nor twice.
-    if (why !== undefined || busy) return;
-    const body = byIdentity ? { identity: target, reason: reason.trim() } : { iss: iss.trim(), sub: target, reason: reason.trim() };
-    send({ method: "POST", path: "/identity-revocations", resource: "/recovery", body });
+    // permanent revocation goes out neither without the role, nor without a target a person can read, nor twice.
+    if (why !== undefined || busy || confirmation.target === undefined) return;
+    send({ method: "POST", path: "/identity-revocations", resource: "/recovery", body: confirmation.target });
   };
   return (
     <form aria-label="Revoke identity" onSubmit={submit}>
@@ -396,7 +404,7 @@ export function Revocation() {
       <p><label>Identity: <input value={identity} onChange={(e) => setIdentity(e.target.value)} autoComplete="off" /></label></p>
       <p>or <label>Issuer: <input value={iss} onChange={(e) => setIss(e.target.value)} autoComplete="off" /></label> <label>Subject: <input value={sub} onChange={(e) => setSub(e.target.value)} autoComplete="off" /></label></p>
       <p><label>Reason: <input value={reason} onChange={(e) => setReason(e.target.value)} autoComplete="off" /></label></p>
-      <p><label>Type the identity to record it{target !== "" ? ` (${target})` : ""}: <input value={typed} onChange={(e) => type(e.target.value)} autoComplete="off" /></label></p>
+      {confirmation.line !== undefined && <p data-testid="revocation-line">{confirmation.line}</p>}
       <p>
         <button type="submit" disabled={why !== undefined || busy}>Revoke identity</button>
         {why !== undefined && ` ${why}`}

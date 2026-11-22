@@ -1338,9 +1338,25 @@ A typed machine name: a name is easier to type than an ID and proves no more. Fo
 "press Enter to record": a held key would record a judgment of risk; and a `--yes` flag: a script
 would record the judgment unseen.
 
-*Unchanged.* The word `enter` typed at recovery entry, and the identity typed back at revocation: the
-decision covers the two accountings only. The approval's own confirmation (§5.6) is decided with the
-apply page and is not changed here.
+*The rule, for every decision.* The owner decided the same kind of question the same way three times on
+2026-11-22: the typed plan ID at approval went (typed 07:49 to 08:01 CET), the two accountings are confirmed by
+one press (12:10 CET, above), and the revocation is "a confirmation and one press" (his answer "B", typed
+21:28 CET, to what the revocation form asks for). He then typed at 21:29 CET, as the project lead relayed the words: "you keep asking the same kind of
+question, make the UX consistent". So one rule holds for every decision a person confirms: **it is confirmed by
+reading what it records and one press in the console, or one `y` in the command. Nothing is typed back as a
+confirmation.** A value a person types because it is the input (the identity to revoke, a reason, an address)
+stays; only a second, typed copy of it goes.
+
+*Revocation.* The console form shows the act's limits (it is permanent, and what it does not do) and one line
+naming the target exactly as entered: the identity, or the subject together with its issuer. The press stays off
+while the target is not safe text, so a revocation is never confirmed on a name a person cannot read. The command
+prints the same limits, then asks `Revoke <the identity, or the subject of the issuer> in <context>? A revocation
+is permanent [y/N]`; only `y` or `yes` sends, and `--no-input` refuses, with no `--yes`. The reasons of the
+accounting decision above hold unchanged: a typed copy proves a person copied a value, and the evidence on the
+screen at the press is what guards the act.
+
+*Unchanged.* The word `enter` typed at recovery entry, until the next change below applies the rule to it. The
+approval's own confirmation (§5.6) is decided with the apply page and is not changed here.
 
 Client rules for the two accountings, where the answer or the read lacks what this section asks for:
 

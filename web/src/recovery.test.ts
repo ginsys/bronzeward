@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
 import {
-  ENTRY_EFFECTS, EnterRecovery, Entered, ExitRecovery, nextStep, NORMAL_START, noteEntry, PRE_ENTRY, PreEntry, RECOVERY_START, RecoveryBanner, RecoveryRead, REVOCATION_LIMITS, Revocation, scopeSummary,
+  ENTRY_EFFECTS, EnterRecovery, Entered, ExitRecovery, nextStep, NORMAL_START, noteEntry, PRE_ENTRY, PreEntry, RECOVERY_START, RecoveryBanner, RecoveryRead, REVOCATION_LIMITS, Revocation, revocationConfirmation, scopeSummary,
   stamp, startModeOf, startRefusal, UNKNOWN_START, unreleased,
 } from "./recovery.tsx";
 import { type Problem, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
@@ -158,13 +158,45 @@ describe("the console's parts (#364)", () => {
     }
   });
 
-  test("the revocation states its limits, and stays off without recovery-admin or a typed identity", () => {
+  test("the revocation states its limits, and stays off without recovery-admin or a named identity", () => {
     for (const roles of [["author"], ["recovery-admin"]] as Role[][]) {
       const form = shell(roles, h(Revocation));
       for (const limit of REVOCATION_LIMITS) expect(form).toContain(limit);
       expect(form).toMatch(/<button type="submit" disabled="">Revoke identity<\/button>/);
     }
     expect(shell(["author"], h(Revocation))).toContain("Needs recovery-admin");
-    expect(shell(["recovery-admin"], h(Revocation))).toContain("type the identity back");
+    expect(shell(["recovery-admin"], h(Revocation))).toContain("Name the identity, or the issuer and subject, and give a reason");
+    expect(shell(["recovery-admin"], h(Revocation))).not.toContain("type the identity back");
+  });
+
+  // One press confirms a permanent act, so the line that names its target is the only check: it names the identity as
+  // entered, or the issuer and the subject both, and a target that cannot be shown cannot be confirmed.
+  describe("the revocation's confirmation line", () => {
+    const BIDI = "‮";
+    test("an identity is named exactly as entered, with the act's permanence", () => {
+      expect(revocationConfirmation("  idn_BWSYNTH ", "", "", "left")).toEqual({
+        line: "Revokes the identity idn_BWSYNTH. A revocation is permanent.", target: { identity: "idn_BWSYNTH", reason: "left" },
+      });
+    });
+    test("an issuer and a subject are both named, each as entered", () => {
+      const c = revocationConfirmation("", " https://idp.example ", " sub-1 ", " left ");
+      expect(c.line).toBe("Revokes the subject sub-1 of the issuer https://idp.example. A revocation is permanent.");
+      expect(c.target).toEqual({ iss: "https://idp.example", sub: "sub-1", reason: "left" });
+    });
+    test("a target that is not safe text leaves the press off with its reason, in both forms", () => {
+      for (const [identity, iss, sub] of [[`idn${BIDI}x`, "", ""], ["", `https://i${BIDI}.example`, "sub-1"], ["", "https://idp.example", `s${BIDI}ub`], ["x".repeat(301), "", ""]] as [string, string, string][]) {
+        const c = revocationConfirmation(identity, iss, sub, "left");
+        expect(c.why, identity + iss + sub).toBe("The identity cannot be shown, so it cannot be confirmed.");
+        expect(c.target).toBeUndefined();
+        expect(c.line).toBeUndefined();
+      }
+    });
+    test("the press stays off while the identity, the pair or the reason is missing or both forms are filled", () => {
+      for (const args of [["", "", "", "left"], ["idn_a", "", "", "  "], ["idn_a", "https://i", "", "left"], ["", "https://i", "", "left"], ["idn_a", "", "s", "left"]] as [string, string, string, string][]) {
+        const c = revocationConfirmation(args[0], args[1], args[2], args[3]);
+        expect(c.why, args.join("|")).toBe("Name the identity, or the issuer and subject, and give a reason.");
+        expect(c.target).toBeUndefined();
+      }
+    });
   });
 });

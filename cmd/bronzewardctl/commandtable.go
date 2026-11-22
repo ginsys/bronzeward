@@ -256,7 +256,7 @@ var cmdTable = []cmdEntry{
 	{path: "identity", line: "identities of people and services"},
 	{path: "identity revoke", line: "revoke an identity", roles: "recovery-admin", person: true,
 		synopsis: "identity revoke (--identity <id> | --iss <iss> --sub <sub>) --reason <text>",
-		notes:    "permanent; sent only when the identity (or the subject) is typed back."},
+		notes:    "permanent; names the identity (or the subject and its issuer), then sends only after a y."},
 }
 
 // draftWrite is the note of every leaf that writes to a draft.
