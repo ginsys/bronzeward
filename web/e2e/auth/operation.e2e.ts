@@ -59,8 +59,8 @@ const cuts = async () => (await (await fetch(`${CONTROL}/cuts`)).json()) as numb
 const eventsOf = (s: Started) => `/operations/${s.op}/events`;
 // On a new epoch the shell reads the server and the identity again and mounts the page anew (web/src/shell.tsx onEpochChange),
 // whichever answer it learned the epoch from, so the reader's own clear (RESTORED, RESTORED_WHILE_READ) runs on a page that is
-// gone. The page shows its restored notice itself at the mount, from the epoch it showed under before (web/src/operation.tsx
-// shownUnder): the cases read that notice, the shell's notice (§8.5 item 3) and the rows of the new epoch. The reader's two clear
+// gone. The page shows its restored notice itself at the mount, from the epoch it was last mounted under (web/src/operation.tsx
+// seenUnder): the cases read that notice, the shell's notice (§8.5 item 3) and the rows of the new epoch. The reader's two clear
 // calls are read in web/src/progress.test.ts, which kills the mutants of them that this browser cannot reach.
 const RESTORED = "The installation was restored or entered recovery mode, so the operation's events are shown again from the start.";
 const rowIds = () => browser.execute(() => [...document.querySelectorAll('[data-testid="events"] li')].map((li) => li.getAttribute("data-event-id") ?? ""));
