@@ -216,6 +216,8 @@ const words = (p: Problem | null, next: boolean) => (p === null ? "" : ` ${probl
 const stateOf = (o: Outcome): LineState => (o.kind === "unknown" || (o.kind === "set-aside" && o.ambiguous) ? "unknown" : "failed");
 
 const members = (f: Discovery) => f.members;
+// How a member is named in a step's line and in the list of what a stopped press left: its hostname, else its node id.
+const labelOf = (m: Discovery["members"][number]) => (m.hostname === "" ? m.nodeId : m.hostname);
 // An IPv6 address is bracketed where the server takes an endpoint, as the CLI's endpointArg does.
 const endpointOf = (address: string) => (address.includes(":") && !address.startsWith("[") ? `[${address}]` : address);
 // The address that carries the first key: the first control-plane member that answered.
@@ -269,10 +271,9 @@ export async function onboardCluster(env: Env, p: Plan, report: (lines: Line[]) 
     ["Imports", () => imports(env, p, set, fail, list)],
   ];
   // What the stopped step still had to send, one by name where it has members, then the steps after it.
-  const nameOf = (m: Discovery["members"][number]) => (m.hostname === "" ? m.nodeId : m.hostname);
   const left: Record<string, () => string[]> = {
-    Machines: () => members(p.found).filter((m) => m.answered && m.platform !== "" && p.machines[m.nodeId] === undefined).map((m) => `Machine ${nameOf(m)}`),
-    Imports: () => members(p.found).filter((m) => p.machines[m.nodeId] !== undefined && p.imports[m.nodeId] === undefined).map((m) => `Import ${nameOf(m)}`),
+    Machines: () => members(p.found).filter((m) => m.answered && m.platform !== "" && p.machines[m.nodeId] === undefined).map((m) => `Machine ${labelOf(m)}`),
+    Imports: () => members(p.found).filter((m) => p.machines[m.nodeId] !== undefined && p.imports[m.nodeId] === undefined).map((m) => `Import ${labelOf(m)}`),
   };
   p.unsent = undefined;
   for (const [i, [name, go]] of steps.entries()) {
@@ -378,7 +379,7 @@ function nameRefusal(o: Outcome, name: string): { note: string; holder?: string 
 async function machines(env: Env, p: Plan, set: Set, fail: Fail): Promise<boolean> {
   for (const m of members(p.found)) {
     const key = `machine:${m.nodeId}`;
-    const label = `Machine ${m.hostname === "" ? m.nodeId : m.hostname}`;
+    const label = `Machine ${labelOf(m)}`;
     if (p.machines[m.nodeId] !== undefined) continue;
     if (!m.answered || m.platform === "") {
       set({ key, label, state: "skipped", detail: m.answered ? "answered, reported no platform" : "did not answer" });
@@ -441,7 +442,7 @@ async function imports(env: Env, p: Plan, set: Set, fail: Fail, list: List): Pro
   for (const m of members(p.found)) {
     const machine = p.machines[m.nodeId];
     const key = `import:${m.nodeId}`;
-    const label = `Import ${m.hostname === "" ? m.nodeId : m.hostname}`;
+    const label = `Import ${labelOf(m)}`;
     if (machine === undefined || p.imports[m.nodeId] !== undefined) continue;
     const had = await list<Ingestion>("/ingestions", new URLSearchParams({ machine }).toString());
     if (typeof had === "string") return fail(key, label, had);
