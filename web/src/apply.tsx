@@ -150,8 +150,7 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   const show = async () => {
     setBusy(true);
     setLines({});
-    const shown = await showApply(release, picked, io());
-    for (const id of shown.made) made.current.add(id);
+    await showApply(release, picked, io(), made.current);
     if (live.current) (setBusy(false), setN((x) => x + 1));
   };
   const apply = async () => {

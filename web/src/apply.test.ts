@@ -91,6 +91,19 @@ describe("Show apply", () => {
     // Only the plan this press made may be cancelled by the page: the other was prepared by somebody else.
     expect([...made]).toEqual([w.made[A]]);
   });
+  test("a plan is in the caller's set the moment it is made, so a choice changed mid-press can cancel it", async () => {
+    const w = world({ [A]: pos("needs-plan"), [B]: pos("needs-plan") });
+    const held = new Set<string>();
+    const seenAtB: string[] = [];
+    const read = w.io.read;
+    const io: ApplyIo = { ...w.io, read: (async (path: string) => {
+      if (path === `/machines/${B}/position`) seenAtB.push(...held);
+      return read(path);
+    }) as ApplyIo["read"] };
+    await showApply(REL, [A, B], io, held);
+    expect(seenAtB).toEqual([w.made[A]]);
+    expect([...held]).toEqual([w.made[A], w.made[B]]);
+  });
   test("leaves out a machine that cannot be planned, in words, and goes on with the others", async () => {
     const w = world({ [A]: pos("needs-plan"), [B]: pos("operation-in-flight", { plan: plan("q") }), [C]: pos("needs-plan") }, { plan: [A] });
     const { plans } = await showApply(REL, [A, B, C], w.io);

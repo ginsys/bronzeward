@@ -80,10 +80,11 @@ const idOf = (w: Write): string | undefined => {
 
 // "Show apply": the plan of each chosen machine, read from where it stands now. A plan that is ready (somebody
 // prepared it) is reused and never made twice; a machine that cannot be planned is left out with its reason, and the
-// others go on. `made` holds only the plans this press created: the page may cancel those and no others.
-export async function showApply(release: string, machines: readonly string[], io: ApplyIo): Promise<{ plans: Map<string, string>; made: Set<string> }> {
+// others go on. `made` holds only the plans this press created: the page may cancel those and no others. The caller
+// passes its own set, which gains each plan the moment it is made, so a choice changed while the press still runs
+// cancels it.
+export async function showApply(release: string, machines: readonly string[], io: ApplyIo, made = new Set<string>()): Promise<{ plans: Map<string, string>; made: Set<string> }> {
   const plans = new Map<string, string>();
-  const made = new Set<string>();
   for (const m of machines) {
     if (!io.live()) break;
     const p = await io.read<Position>(`/machines/${enc(m)}/position`);
