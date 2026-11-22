@@ -343,7 +343,7 @@ export const ImportBaseRows = ({ r }: { r: S["ImportBaseSummary"] }) => (
       ["Machine", <MachineById id={r.machine} />], ["Author", <Who id={r.author} />], ["Imported", when(r.createdAt)],
       ["Document size", `${r.documentBytes} bytes`], ["References", r.references], ["Embedded documents", r.embedded],
     ]} />
-    <p>The digests and reference names are not shown. The document text is read on request, and only the author who imported it and reviewed it may read it.</p>
+    <p>The digests and reference names are not shown. The text is read on request. Any author may read an import read from a machine; an import of a file only the author who imported it and reviewed it may read.</p>
   </>
 );
 
@@ -357,7 +357,7 @@ function ImportBaseHeading({ id, r }: { id: string; r: S["ImportBaseSummary"] | 
 export const ImportBaseItem = ({ id }: { id: string }) => (
   <ItemOf<S["ImportBaseSummary"]> path={`/import-base-revisions/${encodeURIComponent(id)}`} what="the imported configuration"
     title={(r) => <ImportBaseHeading id={id} r={r} />}>
-    {(r) => <><ImportBaseRows r={r} /><BaseDocument id={r.id} /></>}
+    {(r) => <><ImportBaseRows r={r} /><BaseDocument id={r.id} machine={r.machine} /></>}
   </ItemOf>
 );
 

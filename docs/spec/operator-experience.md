@@ -1630,7 +1630,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `import start` | `POST /ingestions` | author | yes | draft's |
 | `import review` | `GET /ingestions/{id}/review` | author | yes | no |
 | `import base` (web: the import base summary) | `GET /import-base-revisions/{id}` | author | yes | no |
-| `import-base document` (web: Show document on the summary) | `GET /import-base-revisions/{id}/document` | author | yes | no |
+| `import-base document` (web: Show imported configuration on the summary and on each import entry of the draft page) | `GET /import-base-revisions/{id}/document` | author | yes | no |
 | `import mark` / `continue` / `takeover` / `abandon` | `POST /ingestions/{id}/marks` / `continuations` / `takeovers` / `abandonments` | author | yes | no |
 | `import status` | `GET /ingestions/{id}` | any | no | no |
 | `draft create` | `POST /drafts` | author | no | no |

@@ -18,12 +18,12 @@ export const HANDOVER_TITLE = "Start managing these machines";
 export const HANDOVER_SENTENCE =
   "This publishes the draft, then creates a handover plan for each machine and approves each plan as you, recorded as your own approval. It sends nothing to any machine. A change you apply later keeps its own plan and approval.";
 export const UNSAVED = "The draft editor holds text you have not saved, and a press publishes only what is saved. Save it or discard it, then press again. Nothing was sent.";
+// A write of an earlier press that stays open (in flight, of unknown outcome, or set aside) may still commit or be
+// repeated, so a new press would send the same act under a new key: it waits for the notice's resolution.
+export const UNRESOLVED = "A request of an earlier press has not finished: its outcome is unknown or it is still being sent. Repeat it from its notice or dismiss the notice, then press again, so no step is sent twice. Nothing was sent.";
 // The press publishes (publisher), creates each plan (publisher) and approves it (approver), and the draft
 // page's author role is what reads the draft's machines and their configurations: all three are needed.
-// A write of an earlier press that stays open (unknown outcome, its notice not dismissed) may still commit or be
-// repeated, so a new press would send the same act under a new key: it waits for the notice's resolution.
-export const UNRESOLVED = "A request of the last press has an unknown outcome and its notice is still open. Repeat it exactly or dismiss the notice, then press again, so no step is sent twice. Nothing was sent.";
-export const ROLES =["author", "publisher", "approver"] as const;
+export const ROLES = ["author", "publisher", "approver"] as const;
 export const missingRoles = (held: readonly string[]) => ROLES.filter((r) => !held.includes(r));
 export const MISSING = (missing: readonly string[]) =>
   `Needs the ${missing.join(" and ")} role. The separate steps stay: publish this draft, then on each machine's release page plan the adopt (handover), then approve each plan.`;
