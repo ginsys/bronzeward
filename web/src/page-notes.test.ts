@@ -3,6 +3,7 @@
 // and the test asserts the exact text, that it sits under the title before the page's content, that a part is shown only
 // where its control is, and that a link in a note is the only one of its text and target.
 
+import { readFileSync } from "node:fs";
 import { act, createElement as h, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -583,6 +584,33 @@ describe("the notes of the other pages", () => {
         await shown(page());
         expect(notes()).toHaveLength(0);
       }
+    }
+  });
+
+  // The Connect page's phases (file, confirm, run) are reached only by reading a talosconfig and sending to the server, which a
+  // page mount here cannot do. The note is one JSX line directly under the heading and ahead of every phase's part, so the
+  // source is read for that order: a note drawn inside a phase, or below one, fails.
+  test("the Connect page draws its note once, directly under the heading and before every phase", () => {
+    const src = readFileSync(`${import.meta.dirname}/onboard.tsx`, "utf8");
+    const heading = src.indexOf("<h2>{CONNECT_A_CLUSTER}</h2>");
+    const noteAt = src.indexOf("<PageNote parts={[CONNECT_NOTE]} />");
+    const firstPhase = src.indexOf("{phase ===");
+    expect(src.split("<PageNote parts={[CONNECT_NOTE]} />")).toHaveLength(2);
+    expect(heading).toBeGreaterThan(-1);
+    expect(src.slice(heading + "<h2>{CONNECT_A_CLUSTER}</h2>".length, noteAt).trim()).toBe("");
+    expect(noteAt).toBeLessThan(firstPhase);
+  });
+
+  test("an import with an operation shows the note under the title and the progress it describes, in every claim state", async () => {
+    for (const state of ["held", "paused", "resumed", "released", "abandoned"]) {
+      served["/ingestions/ing_o"] = { id: "ing_o", kind: "import", mode: "encrypted", state, machine: MCH, draft: DRF, operation: OP, review: null, ownerGeneration: 1, leaseUntil: "2026-11-22T14:02:00Z", expiresAt: "2026-11-22T14:02:00Z", createdAt: "2026-11-21T14:02:00Z" };
+      await act(async () => root.unmount());
+      root = createRoot(box);
+      await pageNote(h(IngestionItem, { id: "ing_o" }), IMPORT_NOTE);
+      const progress = box.querySelector('section[aria-label="Progress"]');
+      expect(progress, state).not.toBeNull();
+      // The note comes before the progress it describes.
+      expect(note().compareDocumentPosition(progress!) & Node.DOCUMENT_POSITION_FOLLOWING, state).toBeTruthy();
     }
   });
 
