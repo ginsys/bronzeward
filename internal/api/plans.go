@@ -331,8 +331,9 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 		}
 		appliedDigest = nil
 		pending := !bytes.Equal(artifact, baseline)
-		// Form only is said for a first adoption alone: a machine that has an Applied release and a drift
-		// is adopting something other than its import base (ginsys/bronzeward#1098).
+		// Form only is said for a first adoption alone. A machine that has an Applied release is adopting
+		// again, and what the verdict compares with is the release's import base, not the configuration that
+		// is Applied or the one the drift holds (ginsys/bronzeward#1098).
 		b.Evidence.Baseline = &planBaseline{ImportBaseRevision: ibr.String, PendingConvergence: pending,
 			FormOnly: pending && formOnly.Bool && !appliedRelease.Valid}
 	}
@@ -499,10 +500,11 @@ var getPlan = item(id.Plan, func(ctx context.Context, tx *sql.Tx, v string) (str
 // planDiffFrom is the unified diff from Applied's redacted configuration to the target's, or a
 // withheld diff when either has none, or when the machine holds a configuration other than its
 // Applied release's artifact (pending convergence, execution-recovery.md §6.3), which has no
-// redacted form. The one exception is a machine adopted from its own bytes whose release differs from
-// them in form only (ginsys/bronzeward#1098): while no drift is open and Applied is still the import
-// base's digest, the adopted configuration holds what the from-release's artifact holds in content,
-// so the diff is shown and says so.
+// redacted form. The one exception is a machine whose Applied is its release's import base (a first
+// adoption) and whose release differs from that import base in form only (ginsys/bronzeward#1098): while
+// no drift is open and Applied is still the import base's digest, the adopted configuration holds what the
+// from-release's artifact holds in content (the compiler's verdict, which trusts the provider's pinned
+// secret versions), so the diff is shown and says so.
 func planDiffFrom(ctx context.Context, tx *sql.Tx, machine, from, to string, appliedDigest []byte, target sql.NullString, drifted bool) (*planDiff, error) {
 	d := &planDiff{From: from, To: to}
 	var applied sql.NullString
