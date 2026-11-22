@@ -2094,8 +2094,8 @@ one. The rule is one for both clients:
 5. `-o json` and `-o yaml` print the resource unchanged.
 6. **Applied in the web client** ([#987](https://github.com/ginsys/bronzeward/issues/987)): a release's, plan's and operation's
    list link and item heading show the title (the heading keeps the plan's state and the
-   operation's kind and state), the identifier is the title attribute, and a failed read other than a machine's (rule 1), an unsafe draft title or a
-   `subject` lacking what its kind needs leaves the shortened identifier. A view reads at most four title bodies
+   operation's kind and state), the identifier is the title attribute, and a failed read other than a machine's (rule 1) or a
+   `subject` lacking what its kind needs leaves the shortened identifier, and an unsafe draft title reads "Untitled draft" (rule 3). A view reads at most four title bodies
    at a time, each distinct one once. A view that names a release, plan, operation, draft or import by its
    identifier shows the same title, the identifier as the title attribute and the shortened identifier where the read
    does not answer ([#996](https://github.com/ginsys/bronzeward/issues/996)): a plan's release, committed operation and

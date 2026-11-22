@@ -28,7 +28,7 @@ import { ClusterLink, type Held, MachineById, Named, OperationHeading, Operation
 import { PageNote } from "./page-note.tsx";
 import {
   AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
-  NAME_NOT_SHOWN, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
+  NAME_NOT_SHOWN, NOT_SHOWN, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
 } from "./words.ts";
 
 type S = components["schemas"];
@@ -172,8 +172,8 @@ function DependencyName({ d }: { d: Pick<S["DependencyBody"], "id" | "object" | 
   return <Ref to={`/dependencies/${encodeURIComponent(d.id)}`} id={d.id}>{dependencyName(d)}</Ref>;
 }
 const DEPENDENCIES: readonly Col<S["DependencyBody"]>[] = [
-  ["Dependency", (d) => <DependencyName d={d} />], ["Provider", (d) => d.provider], ["Object", (d) => `${d.object}, version ${d.version}`],
-  ["Class", klass], ["Observed from", (d) => when(d.observedFrom)],
+  ["Dependency", (d) => <DependencyName d={d} />], ["Provider", (d) => safeName(d.provider)], ["Object", (d) => `${safeName(d.object)}, version ${d.version}`],
+  ["Class", (d) => klass({ ...d, class: safeWord(d.class) ?? null })], ["Observed from", (d) => when(d.observedFrom)],
 ];
 // An alert is a sentence: its dependency named once, as the dependency's own page is headed ("This dependency" on that
 // page), then what happened (alertSentence). An alert has no page of its own, so its identifier is the last column.
@@ -185,9 +185,11 @@ function AlertText({ a, own }: { a: S["AlertBody"]; own: boolean }) {
 }
 const ReleaseNames = ({ ids }: { ids: readonly string[] | null }) => (ids == null || ids.length === 0 ? "none" : <>{ids.map((id, i) => <Group key={id}>{i > 0 && ", "}<Named id={id} /></Group>)}</>);
 // The server's words reach the cells through the safe-text rule: a value with a control or bidirectional character is not shown.
-const safeCell = (s: string | null) => (s == null ? undefined : safeText(s) ?? NAME_NOT_SHOWN);
+// A name reads "(name not shown)" and any other word "(not shown)".
+const safeName = (s: string) => safeText(s) ?? NAME_NOT_SHOWN;
+const safeWord = (s: string | null) => (s == null ? undefined : safeText(s) ?? NOT_SHOWN);
 const alertCols = (own: boolean): readonly Col<S["AlertBody"]>[] => [
-  ["Alert", (a) => <AlertText a={a} own={own} />], ["Kind", (a) => safeCell(a.kind) ?? "none"], ["Class", (a) => klass({ class: safeCell(a.class) ?? null })], ["Reason", (a) => safeCell(a.reason) ?? "none"],
+  ["Alert", (a) => <AlertText a={a} own={own} />], ["Kind", (a) => safeWord(a.kind) ?? "none"], ["Class", (a) => klass({ class: safeWord(a.class) ?? null })], ["Reason", (a) => safeWord(a.reason) ?? "none"],
   ["Releases", (a) => <ReleaseNames ids={a.releases} />], ["Recorded", (a) => when(a.recordedAt)], ["Identifier", (a) => <IdentifierText id={a.id} />],
 ];
 const ALERTS = alertCols(false);
@@ -620,8 +622,8 @@ export function DependencyItem({ id }: { id: string }) {
         <>
           <PageNote parts={[DEPENDENCY_NOTE]} />
           <Fields rows={[
-            ["Identifier", d.id], ["Provider", d.provider], ["Object", d.object], ["Version", d.version], ["Created", d.created],
-            ["Class", klass(d)], ["Reason", d.reason ?? "none"], ["First retained", when(d.firstRetainedAt)], ["Unknown since", when(d.unknownSince)],
+            ["Identifier", d.id], ["Provider", safeName(d.provider)], ["Object", safeName(d.object)], ["Version", d.version], ["Created", d.created],
+            ["Class", klass({ ...d, class: safeWord(d.class) ?? null })], ["Reason", safeWord(d.reason) ?? "none"], ["First retained", when(d.firstRetainedAt)], ["Unknown since", when(d.unknownSince)],
             ["Observed from", when(d.observedFrom)], ["Recorded", when(d.recordedAt)],
           ]} />
           <h3>Releases that depend on it</h3>

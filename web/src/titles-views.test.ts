@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // The titles and machine names in the views (client contracts A8 and A9, ginsys/bronzeward#987): each
 // object shows its title as the text and its whole identifier as the title attribute, falls back to the
-// shortened identifier when a read fails or the text is not safe, and a view reads each distinct draft,
+// shortened identifier when a read fails (a draft whose title is not safe reads "Untitled draft"; other
+// text that is not safe is not shown), and a view reads each distinct draft,
 // release, plan, ingestion and machine once. The client answers by path and records every path asked.
 
 import { act, createElement as h, type ReactElement } from "react";
@@ -838,8 +839,26 @@ describe("ginsys/bronzeward#1055: a dependency alert is a sentence, the identifi
     await mount(h(Sources, { query: "", go: () => {} }));
     await settled();
     const row = box.querySelector('[aria-label="Dependency alerts"] tbody tr')!;
-    expect([...row.children].slice(0, 4).map((c) => c.textContent)).toEqual(["Alert.", "(name not shown)", "(name not shown)", "(name not shown)"]);
+    expect([...row.children].slice(0, 4).map((c) => c.textContent)).toEqual(["Alert.", "(not shown)", "(not shown)", "(not shown)"]);
     expect(box.textContent).not.toContain("bad");
+  });
+
+  test("the dependency list shows its provider, object and class, and the dependency page its provider, object, class and reason, as safe text", async () => {
+    const bad = { provider: "bad\u202Eprovider", object: "bad\u0007object", class: "bad\u202Eclass", reason: "bad\u0007reason" };
+    answers["/dependencies"] = ok({ items: [{ ...dependency, ...bad }], next: null, lastPass: null });
+    await mount(h(Sources, { query: "", go: () => {} }));
+    await settled();
+    const row = box.querySelector('[aria-label="Dependencies"] tbody tr')!;
+    expect([...row.children].slice(1, 4).map((c) => c.textContent)).toEqual(["(name not shown)", "(name not shown), version 3", "(not shown)"]);
+    expect(box.querySelector('[aria-label="Dependencies"]')!.textContent).not.toContain("bad");
+    answers[`/dependencies/${T}`] = ok({ ...dependency, ...bad });
+    answers[`/dependencies/${T}/releases`] = ok({ items: [], next: null });
+    answers[`/dependencies/${T}/alerts`] = ok({ items: [], next: null });
+    await mount(h(DependencyItem, { id: T }), { ...reads, view: "page" });
+    await settled();
+    const fields = Object.fromEntries([...box.querySelectorAll("dt")].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent]));
+    expect([fields.Provider, fields.Object, fields.Class, fields.Reason]).toEqual(["(name not shown)", "(name not shown)", "(not shown)", "(not shown)"]);
+    expect(box.textContent).not.toContain("bad\u202E");
   });
 });
 
