@@ -173,7 +173,7 @@ The timeline opens on its newest page and polls on from its tail, as
 new entries reads the machine and its observations again, one such read at a time. "Load older"
 reads the page before the oldest entry shown and is gone once the machine's first entry is shown.
 
-The machine page has no freeze, unfreeze or revert control. It has one link to the drift page
+The machine page has no freeze, unfreeze or revert control. It has one standing link to the drift page
 ([W9](#w9-drift-decision)), shown for every machine, and its words follow the machine's state: "Decide on the
 change made on the machine" where an open drift is recorded, "Unfreeze the machine or decide on the change" where
 it is recorded and the machine is frozen, "Unfreeze the machine" where the machine is frozen with no open drift, and
@@ -572,7 +572,7 @@ frozen machine says that the freeze holds the plan and links back here for the u
 With no open drift the page says so and why (only a read that differs from Applied opens one) and draws no adoption or
 revert choice, since there is nothing to adopt or revert. It still offers [Freeze] to a machine that is not frozen, and
 [Unfreeze] to a frozen machine, with the sentence that the machine is frozen: a machine frozen while its drift closed,
-or frozen by hand, reaches its unfreeze from the machine page's one link.
+or frozen by hand, reaches its unfreeze from the machine page's standing link.
 
 ## W10. Recovery console
 

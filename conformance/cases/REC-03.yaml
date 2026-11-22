@@ -14,6 +14,6 @@ expect:
   absent: [token in the harness log, retained artifacts or browser storage]
 runs:
   web:
-    check: web/e2e/auth/approval.e2e.ts and, for an unfreeze, web/e2e/auth/drift.e2e.ts, mise run browser-auth; the start mode from a write's refusal in web/src/write.test.ts, and the freeze and unfreeze refusals' wording in web/src/drift.test.ts, mise run web
+    check: web/e2e/auth/approval.e2e.ts and, for an unfreeze, web/e2e/auth/drift.e2e.ts, mise run browser-auth; the start mode from a write's refusal in web/src/write.test.ts, and the unfreeze's refusals' wording (scope and process) in web/src/drift.test.ts, mise run web
     browsers: [chrome, edge, firefox, firefox-esr, safari]
     covers: the first case on a real recovery start; the second case injected, since no setup step of a disposable deployment leaves a machine's scope pre-restore unaccounted, and its real round trip is ginsys/bronzeward#261's; the drift page's unfreeze (ginsys/bronzeward#363) is the same second case on another write, injected the same way, and a freeze is never refused for a scope, so only the process's refusal reaches it

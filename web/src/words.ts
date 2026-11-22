@@ -78,13 +78,13 @@ export const COPIED = "Copied";
 export const COPY_BY_HAND = "Select the identifier to copy it";
 /** The drift page (wireframe W9): its note, the sentences it says of the change, and the three choices. */
 export const DRIFT_NOTE = "This page shows the change made on this machine, where one is open, and is where you freeze or unfreeze the machine. Nothing on this page is sent to the machine.";
-export const DRIFT_NOTE_OPEN = "To decide the change, choose one of the three ways below: freeze the machine, adopt the change or revert the machine. Each step says who may take it. A plan sends nothing until it is approved.";
+export const DRIFT_NOTE_OPEN = "To decide the change, adopt it or revert the machine; the machine can be frozen while you decide. Each step says who may take it. A plan sends nothing until it is approved.";
 export const DRIFT_NOT_SHOWN = "What changed is not shown: Bronzeward can show it only by importing the machine's configuration for adoption.";
 export const DRIFT_NONE = "No change made on the machine is open. Only a configuration read that differs from what Bronzeward last verified opens one; a read that matches it, or one that could not be read, opens none. There is nothing to adopt or revert.";
 export const DRIFT_FREEZE = "Freeze the machine while you decide. It gets no new commitment or attempt until an approver unfreezes it. An attempt already recorded is not stopped, and an adoption can still be recorded. Freezing needs an author, publisher, approver or recovery-admin; unfreezing needs an approver.";
 export const DRIFT_ADOPT = "Adopt the change: import the machine's own configuration for adoption (an author), review it, publish it as a release (a publisher), then make and approve an adopt plan (a publisher makes it, an approver approves it). Its compiled configuration may differ from the node's bytes. Starting the import sends nothing to the machine, and this page stops at its review.";
 export const DRIFT_REVERT = "Revert the machine to its Desired release: make an apply-config plan (a publisher), approve it (an approver), and unfreeze the machine first if it is frozen (an approver). Approving overwrites a change nobody has reviewed. The plan records which change it was made on.";
-/** The machine page's one link to the drift page: its words follow the machine's state. */
+/** The machine page's standing link to the drift page: its words follow the machine's state. */
 export const DECIDE_ON_THE_CHANGE = "Decide on the change made on the machine";
 export const UNFREEZE_OR_DECIDE = "Unfreeze the machine or decide on the change";
 export const UNFREEZE_THE_MACHINE = "Unfreeze the machine";
