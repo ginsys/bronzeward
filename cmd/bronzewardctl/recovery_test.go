@@ -877,38 +877,51 @@ func TestRefusedExitRepeatNamesTheScope(t *testing.T) {
 	}
 }
 
-// TestIdentityPromptIsEscaped: the identity the operator is asked about is shown escaped, a
-// line feed included, so a hostile --identity cannot forge a prompt line (client-contracts.md section 6 item 8).
-func TestIdentityPromptIsEscaped(t *testing.T) {
-	recoveryServer(t, map[string]string{}, "")
-	var out, errb bytes.Buffer
-	withStdin(t, "\n", func() {
-		run([]string{"identity", "revoke", "--identity", "svc_x\nFORGED: type yes", "--reason", "r"}, &out, &errb)
-	})
-	if strings.Contains(errb.String(), "\nFORGED") {
-		t.Errorf("the prompt shows the identity raw:\n%q", errb.String())
-	}
-	if !strings.Contains(errb.String(), `Revoke the identity 'svc_x\x0aFORGED: type yes' in`) {
-		t.Errorf("the prompt lacks the escaped identity:\n%q", errb.String())
+// TestRevokeRefusesAControlCharacter: a control character in the identity, the issuer or the subject is refused before
+// the question, so a hostile value cannot forge a line of the prompt and no escape is ever written for a value that
+// can be confirmed (client-contracts.md section 6 item 8).
+func TestRevokeRefusesAControlCharacter(t *testing.T) {
+	const route = "POST /api/v1/identity-revocations"
+	for _, v := range []string{"svc_x\nFORGED: type yes", "svc_x\ty", "svc_x\x1b[2J", "svc_x\x7f", "svc_x\u0085y", "svc_x\xffy"} {
+		for _, args := range [][]string{
+			{"--identity", v, "--reason", "r"},
+			{"--iss", "https://idp.BWSYNTH.example", "--sub", v, "--reason", "r"},
+		} {
+			seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
+			var out, errb bytes.Buffer
+			withStdin(t, "y\n", func() {
+				if code := run(append([]string{"identity", "revoke"}, args...), &out, &errb); code != 2 || slices.Contains(seen(), route) {
+					t.Errorf("%q: exit %d, sent %v; want 2 and no write\n%s", args, code, seen(), errb.String())
+				}
+			})
+			if !strings.Contains(errb.String(), "cannot be shown, so it cannot be confirmed.") || strings.Contains(errb.String(), "[y/N]") || strings.Contains(errb.String(), "\nFORGED") {
+				t.Errorf("%q: want the refusal before any prompt, with no raw control character:\n%q", args, errb.String())
+			}
+		}
 	}
 }
 
-// TestIdentityConfirmationSendsTheRawValue: for an identity with a tab, the prompt shows \x09, a y sends the raw
-// value, and typing the shown spelling back sends nothing.
-func TestIdentityConfirmationSendsTheRawValue(t *testing.T) {
-	args := []string{"identity", "revoke", "--identity", "svc_x\ty", "--reason", "r"}
-	for _, c := range []struct {
-		typed string
-		sent  bool
-	}{{"y\n", true}, {`svc_x\x09y` + "\n", false}} {
-		seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
-		var out, errb bytes.Buffer
-		withStdin(t, c.typed, func() { run(args, &out, &errb) })
-		if got := slices.Contains(seen(), "POST /api/v1/identity-revocations"); got != c.sent {
-			t.Errorf("typed %q: sent %t, want %t\n%s", c.typed, got, c.sent, errb.String())
-		}
-		if !strings.Contains(errb.String(), `Revoke the identity 'svc_x\x09y' in`) {
-			t.Errorf("typed %q: the prompt lacks the escaped tab:\n%q", c.typed, errb.String())
+// TestRevokeQuestionPrintsTheValueItSends: for every value the guards let through, the text printed between the
+// quotes of the question is the value that a y sends, so no escape is written for a value that can be confirmed and
+// two targets cannot read alike. The backslash and x09 typed as text stays a backslash and x09.
+func TestRevokeQuestionPrintsTheValueItSends(t *testing.T) {
+	const route = "POST /api/v1/identity-revocations"
+	for _, v := range []string{"svc_x", "svc x", "svc'x", `svc\x09y`, "svc\\y", "caf\u00e9", "\u0414\u0430"} {
+		for _, args := range [][]string{
+			{"--identity", v, "--reason", "r"},
+			{"--iss", "https://idp.BWSYNTH.example", "--sub", v, "--reason", "r"},
+		} {
+			seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
+			var out, errb bytes.Buffer
+			withStdin(t, "y\n", func() {
+				if code := run(append([]string{"identity", "revoke"}, args...), &out, &errb); code != 0 || !slices.Contains(seen(), route) {
+					t.Errorf("%q: exit %d, sent %v\n%s", args, code, seen(), errb.String())
+				}
+			})
+			quoted := "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
+			if !strings.Contains(errb.String(), "Revoke the ") || !strings.Contains(errb.String(), quoted) {
+				t.Errorf("%q: the question does not print %s as it is:\n%q", args, quoted, errb.String())
+			}
 		}
 	}
 }
