@@ -220,7 +220,7 @@ call POST /recovery/entries "$recovery" "$(jq -nc --arg s "$stopped_at" '{
 ```
 
 With `bronzewardctl`, a person signed in as `recovery-admin` records the entry on the recovery
-instance. The command states what the entry does, then sends it only when you type `enter`. There
+instance. The command states what the entry does, then asks `Enter recovery in <context>? [y/N]` and sends it only when you answer `y` or `yes`. There
 is no `--yes`, and `--no-input` sends nothing. It reads the process as started for recovery or
 normally from the answer.
 
