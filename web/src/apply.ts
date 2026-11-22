@@ -44,6 +44,9 @@ export const LINES = {
   approvedNow: "Approved. The controller sends it when its gates allow; you can leave this page, it continues without it.",
   noRead: "Not read: the server did not answer. Press the button again.",
   noPlan: "The plan was created, but the answer named no plan. Open the machine to find it.",
+  preparedBy: "Prepared by",
+  madeHere: "Made by this page just now.",
+  afterRefusal: "Nothing was approved for this machine. Press Show apply to read where it stands now: a plan that changed or expired is made again.",
   cancelReason: "Not approved: the apply page was left or its selection changed.",
 } as const;
 

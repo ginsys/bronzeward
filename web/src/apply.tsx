@@ -4,12 +4,14 @@
 
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { type ApplyIo, applyPlans, cancelPlans, type Line, rowOf, showApply } from "./apply.ts";
+import { type ApplyIo, applyPlans, cancelPlans, type Line, LINES, rowOf, showApply } from "./apply.ts";
 import { Change } from "./change.tsx";
 import { Result, useWrites } from "./forms.tsx";
 import { Ref, useItem, useReads, useSettled } from "./list.tsx";
 import type { Position } from "./nextstep.tsx";
 import { PageNote } from "./page-note.tsx";
+import { Who } from "./principals.tsx";
+import { when } from "./states.tsx";
 import { Action } from "./shell.tsx";
 import { MachineById } from "./titles.tsx";
 import { Write } from "./write.ts";
@@ -35,17 +37,19 @@ function Row({ release, machine, chosen, choose, line, n, profiles, seen }: { re
       <label><input type="checkbox" checked={chosen} onChange={(e) => choose(e.target.checked)} /> <MachineById id={machine} /></label>
       {role != null && <> <span data-testid="apply-role">{roleWords(role)}</span></>}
       {profiles?.map((x) => <span key={x} className="label" data-testid="apply-profile"> {x}</span>)}
-      {shown !== undefined && <>: {STATES[shown.state]}. {shown.write === undefined ? shown.text : <Result w={shown.write} done={() => null} />}</>}
+      {shown !== undefined && <>: {STATES[shown.state]}. {shown.write === undefined ? shown.text : <><Result w={shown.write} done={() => null} /> {LINES.afterRefusal}</>}</>}
       {" "}<Ref to={`/machines/${enc(machine)}`} id={machine}>Open the machine</Ref>
     </li>
   );
 }
 
-function PlanChange({ id, machine }: { id: string; machine: string }) {
+// The plan of one machine, whose change is the one Apply approves. A plan another person prepared says who and when.
+function PlanChange({ id, machine, mine }: { id: string; machine: string; mine: boolean }) {
   const p = useItem<S["PlanBody"]>(`/plans/${enc(id)}`);
   return (
     <details data-testid="apply-plan" data-plan={id}>
       <summary>What the plan for <MachineById id={machine} /> changes</summary>
+      {p.kind === "ok" && <p data-testid="apply-plan-by">{mine ? LINES.madeHere : <>{LINES.preparedBy} <Who id={p.data.createdBy?.principal} /> on {when(p.data.createdAt)}.</>}</p>}
       {p.kind === "ok" ? <Change p={p.data} /> : <p>Not read yet.</p>}
     </details>
   );
@@ -172,7 +176,7 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
       {picked.length > 0 && plans.size < picked.length && <p data-testid="apply-needs-publisher">{APPLY_NEEDS_PUBLISHER}</p>}
       {plans.size > 0 && (
         <section aria-label="Plans to approve">
-          {[...plans].map(([m, id]) => <PlanChange key={id} id={id} machine={m} />)}
+          {[...plans].map(([m, id]) => <PlanChange key={id} id={id} machine={m} mine={made.current.has(id)} />)}
           <p data-testid="apply-sentence">{APPLY_SENTENCE}</p>
           <p><Action label="Apply" needs={["approver"]} onClick={() => void apply()} busy={busy} /></p>
         </section>
