@@ -903,15 +903,25 @@ and `owned-automation` cannot be predicted: no read serves an import-base revisi
 a release, or a service principal's responsible human. The prediction therefore never presents
 an approver as clear of self-approval; the returned approval owns the reasons.
 
-**Proposed:** `approve` always prints the plan before asking, the confirmation is the plan ID
-typed back (not `y`), and approval has no `--yes`. These are guards against approving by habit
-without the evidence on screen; they do not prove that a person typed it, and a script can type
-a plan ID. Human-only approval is enforced by the server from the authenticated principal's
+**Proposed:** in the console the plan page is the confirmation: it shows the plan, the
+prediction and, above one "Approve" button, a sentence saying that pressing it records the
+person's approval and what the controller does after it. No field asks for the plan ID
+([#1096](https://github.com/ginsys/bronzeward/issues/1096); the owner removed the typed plan ID
+from approval on 2026-11-22, as recorded at the accounting decision in §5.9). Alternatives
+rejected: a plan ID typed per machine, which a person does by copying and so shows nothing
+more than the press; a machine's name typed, which asks a person to read the name and prove it
+by typing, for the one act that records an approval the person can already see on the page; one
+press with no sentence, which leaves a person to infer what the press records. `approve` in
+the command still prints the plan before asking, and until its own confirmation replaces it
+the confirmation is the plan ID typed back (not `y`), and approval has no `--yes`. These
+are guards against approving by habit without the evidence on screen; they do not prove that a
+person typed it, and a script can type a plan ID. Human-only approval is enforced by the server from the authenticated principal's
 class: an automation credential gets `403` with `humanOnly: true`
 (`internal/api/api.go:380-392`), and the CLI says so before sending when the context holds an
 automation token.
 
-**The one exception, the web client's adopt button** (the owner's decision of 2026-11-21 18:22 CET, typed in
+**The web client's adopt button approves the plans it creates in the same press, from no plan page**
+(the owner's decision of 2026-11-21 18:22 CET, typed in
 the campaign lead's session, answering "A" to the question whether one action may take a draft's machines
 under management). On a draft that holds an import base, for a person who holds the author, publisher and
 approver roles, the web client's "Adopt these machines" first adds, to a machine of the draft that has
@@ -919,11 +929,13 @@ no assignment entry and no assignment head, an assignment that selects nothing (
 its import base alone), each write under the ETag the one before answered, then publishes the draft as the page
 showed it (the publication carries the ETag of the last write, or the page's when none was needed, and is
 refused when another author changed the draft since), creates an adopt plan for each machine with no `Applied` and approves each
-plan as the signed-in person, without the typed plan ID: the sentence above the button, which says what the
-press does and that it sends nothing to any machine, is the confirmation. Every act is the existing route,
+plan as the signed-in person: the sentence above the button, which says what the press does and that it
+sends nothing to any machine, is the confirmation, as the sentence above Approve is on the plan page
+(above). The plan page is what differs: the button shows no plan before it approves it, which is why it is
+limited to an adoption of a draft's machines with no `Applied`. Every act is the existing route,
 recorded one by one, and the approval records self-approval as the server computes it. A first adopt plan
-binds no drift record, and a machine with an `Applied` keeps the separate steps. The CLI keeps the typed
-plan ID, and so does every approval of a change applied later
+binds no drift record, and a machine with an `Applied` keeps the separate steps on the plan page. The
+command still asks for the plan ID typed back, until its confirmation changes
 ([client contracts A11](client-contracts.md#14-proposed-api-gap-issues-and-downstream-refinement)).
 
 A revert approval adds one line, from `unseenOverwrite` (`internal/api/approvals.go:49-51`):
@@ -1517,7 +1529,7 @@ the plan leaves its hands. Automation may publish and plan (`internal/api/routes
 
 **Approver.** Open a proposed plan; read target machine, route, operation, mode, release,
 assignment revision, baseline, drift record, deadlines, expiry, epoch, evidence, self-approval
-reasons and `unseenOverwrite`; approve by typing the plan ID (the adopt button of [§5.6](#56-plan-and-approval) is the one exception); watch the operation; revoke an
+reasons and `unseenOverwrite`; approve by one press under the plan on its page in the console, or by typing the plan ID in the command ([§5.6](#56-plan-and-approval)); watch the operation; revoke an
 approval or cancel a plan; unfreeze. Human only for approval. Sees: that revoking after the
 controller committed does not stop an attempt already recorded
 ([design §13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy)).

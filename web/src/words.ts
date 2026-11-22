@@ -38,7 +38,7 @@ export const OPEN_A_MACHINE = "open a machine";
 export const PLANS_NOTE_END = "and follow its next step.";
 export const CREATE_PLAN_NOTE = "Choose what to do with this machine and release: apply-config sends the release to the machine; adopt records what the machine runs and sends nothing to it. Nothing runs until the plan is approved.";
 export const PLAN_NOTE = "This plan proposes one action on one machine, with one release. What it does, the evidence for it and its state are below.";
-export const PLAN_NOTE_APPROVE = "To approve it, type the plan ID, as the form shows it, into its field, then press Approve. You can approve a plan you made yourself; Bronzeward records that you did. Approving does not run the plan: Bronzeward commits it later, after its own checks, and can refuse.";
+export const PLAN_NOTE_APPROVE = "To approve it, read the plan on this page, then press Approve. You can approve a plan you made yourself; Bronzeward records that you did. Approving does not run the plan: Bronzeward commits it later, after its own checks, and can refuse.";
 export const OPERATIONS_NOTE = "An operation is one run of work: publishing a draft, importing a machine's configuration, applying a release to a machine, or adopting a machine. This lists operations with their state; open one to follow its progress.";
 export const OPERATION_NOTE = "This is one run of work: what it is doing, its state, its timeline and each attempt it made.";
 /** The sentences of the pages off the path from a draft to an operation (ginsys/bronzeward#1055, pull request B). */

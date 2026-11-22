@@ -500,7 +500,8 @@ Plan pln_f645…cawy   (•) Proposed — not approved, nothing will run   expir
 |     authored no fragment, profile or assignment revision in it. Import-base authorship    |
 |     and automation you own are not predicted. The approval records the actual reasons.    |
 |     Allowed and marked.                                                                   |
-| To approve, type the plan ID: [______________]   [Approve]  (approver, human)             |
+| Pressing Approve records your approval of this plan. The controller re-checks the plan    |
+| at use time; it applies it only if every check passes.   [Approve]  (approver, human)     |
 | [Cancel plan] (creator publisher, approver, recovery-admin)                               |
 +-------------------------------------------------------------------------------------------+
 ```

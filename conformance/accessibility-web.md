@@ -126,6 +126,10 @@ with Chrome 157, Edge 157, Firefox 160 and Firefox ESR 153 on Linux, from the `b
 (Chrome 139, local): Approve and Revoke approval are disabled once the write is accepted, so focus fell
 to the page body; the page's answer now takes it.
 
+Since 22 November 2026 ([ginsys/bronzeward#1096](https://github.com/ginsys/bronzeward/issues/1096)) the plan page has no typed
+plan ID field: Approve is one press under its confirmation sentence, and the cases tab to Approve directly. The rows below keep the
+wording and the results of the recorded run; they are re-recorded when the browsers run the changed cases.
+
 | Item | Screen and what is checked | chrome | edge | firefox | firefox-esr |
 | --- | --- | --- | --- | --- | --- |
 | 2.1.1 Keyboard, 2.1.2 No keyboard trap | the plan page by Tab alone: the change, then the typed plan ID field, then Approve by Enter; on an approved plan the reason field and Revoke approval by Enter; Tab reaches each of them and never stays on one stop on the way | pass | pass | pass | pass |
