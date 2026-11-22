@@ -201,12 +201,12 @@ fixes what the line says and links to. A client treats a `step` value it does no
 
 | `step` | The line says | Link | Who acts |
 | --- | --- | --- | --- |
-| `not-handed-over` | Not managed yet: no Desired and no Applied configuration is recorded. Next: import its configuration. An import reads the node and writes nothing to it. | start the import for this machine | `author` |
+| `not-handed-over` | Not adopted yet: no Desired and no Applied configuration is recorded. Next: import its configuration. An import reads the node and writes nothing to it. | start the import for this machine | `author` |
 | `import-stalled` | An import's runner has stopped: its lease lapsed and its staging is encrypted. Next: take it over to resume it, or abandon it ([§5.3](#53-protected-import-with-review)). | the ingestion | `author` |
 | `import-running` | An import of this machine is running. | the ingestion | nobody yet |
 | `import-paused` | An import waits for review of the staged change. | the protected review ([§5.3](#53-protected-import-with-review)) | `author` |
 | `draft-to-publish` | The import is stored in an open draft. Next: publish it; that makes its release this machine's Desired release. Publishing sends nothing to the machine. | the draft | `publisher` |
-| `needs-plan` | A release is selected and not yet applied. Next: create a plan. With no Applied configuration the plan is an `adopt` (it accepts the configuration the node already runs, the handover); with an Applied configuration and no open drift it is an `apply-config` (it sends the release). The server refuses the other kind in each case. | create a plan for the machine | `publisher` |
+| `needs-plan` | A release is selected and not yet applied. Next: create a plan. With no Applied configuration the plan is an `adopt` (it accepts the configuration the node already runs); with an Applied configuration and no open drift it is an `apply-config` (it sends the release). The server refuses the other kind in each case. | create a plan for the machine | `publisher` |
 | `awaiting-approval` | A plan waits for approval. When its approval is from an earlier epoch, it says so: the plan must be approved again. | the plan | `approver`, a human |
 | `awaiting-dispatch` | A plan is approved and its approval is current. The controller runs it when its gates allow, and the line names what holds it by the plan's kind. An `apply-config` plan waits for a frozen machine, a `machine.scopeState` that the scope-state rule refuses, and `rolloutHeldBy` (the operation of another machine that holds the cluster's rollout scope). An `adopt` plan waits only for the machine scope and the scope-state rule: a freeze and another machine's rollout holder do not stop it. The scope-state rule: outside recovery mode, `normal` and `released` admit a plan; in recovery mode (the answer's `Bronzeward-Recovery-Mode` header) only `released` does, so a `normal` scope holds the plan there, and the line says so. A plan the machine's drift or its bound values make uncommittable is not drawn here: the server picks no such plan, so the page shows the line the machine's own fields give, `drift-open` for an open drift record. | the plan | the controller |
 | `operation-in-flight` | An operation is changing this machine (its state is named). Next: wait for it to end. | the operation | the controller |
@@ -731,7 +731,7 @@ Take it over to resume, or abandon it:
 ```
 
 A machine recorded from an existing cluster has no `Applied` yet, and an `apply-config` plan
-for it is refused until it is handed over (`internal/api/plans.go`). The handover
+for it is refused until it is adopted (`internal/api/plans.go`). Adopting
 gives the machine an assignment in the import draft, publishes it and adopts
 the machine with an adopt plan that binds no drift record. An assignment may select nothing
 (`bronzewardctl assignment set <machine> --draft <draft> --none`): the machine's configuration is
@@ -740,9 +740,9 @@ assignment revision a plan binds ([persistence and API choice §17.47](persisten
 published with no assignment has no assignment revision in the release, and any plan for it is
 refused in words that name the next step: add an assignment for the machine to a draft, one that
 selects nothing is enough, publish that draft, then plan the release it makes
-(`internal/api/plans.go`; `docs/operator/walkthrough.md`, "S3 handover")
-([execution and recovery §6.3](execution-recovery.md#63-adopt), existing-cluster handover;
-[acceptance plan S3](acceptance-plan.md#s3-approval), handover part):
+(`internal/api/plans.go`; `docs/operator/walkthrough.md`, "S3 adoption")
+([execution and recovery §6.3](execution-recovery.md#63-adopt), existing-cluster adoption;
+[acceptance plan S3](acceptance-plan.md#s3-approval), adoption part):
 
 ```text
 $ bronzewardctl assignment set mch_b3c…aa2q --draft drf_2rmp…457a --fragment cluster=cluster-base
@@ -751,9 +751,9 @@ $ bronzewardctl publish drf_2rmp…457a                          # role: publish
 Publishing draft drf_2rmp…457a revision 3 (operation op_t6j…w2na) ... succeeded.
 Release rel_9vbn…c1ta is now Desired for 4 machines: every machine of cluster cl_9fd…m3ka with
 an import base. Nothing has been sent to any machine.
-mch_b3c…aa2q has no Applied: hand it over with an adopt plan.
+mch_b3c…aa2q has no Applied: adopt it with an adopt plan.
 $ bronzewardctl plan create --release rel_9vbn…c1ta --machine mch_b3c…aa2q --operation adopt
-Plan pln_h2d…r8qa proposed: adopt, handover (no drift record, no baseline revision).
+Plan pln_h2d…r8qa proposed: adopt (no drift record, no baseline revision).
 It sends nothing to the machine. It is not approved.
 $ bronzewardctl approve pln_h2d…r8qa                           # role: approver, human
 ...
@@ -831,7 +831,7 @@ $ bronzewardctl publish drf_8kdq…z6pa          # role: publisher
 Publishing draft drf_8kdq…z6pa revision 6 (operation op_m2a…z7ka) ... succeeded.
 Release rel_h7rt…2bd is now Desired for 4 machines: every machine of cluster cl_9fd…m3ka with
 an import base. Nothing has been sent to any machine.
-Next (mch_b3c…aa2q has an Applied, so apply-config; a machine with none is handed over first, §5.3):
+Next (mch_b3c…aa2q has an Applied, so apply-config; a machine with none is adopted first, §5.3):
   bronzewardctl plan create --release rel_h7rt…2bd --machine mch_b3c…aa2q --operation apply-config
 $ bronzewardctl release show rel_h7rt…2bd
 Release rel_h7rt…2bd  cluster cl_9fd… (lab-a)  published by ops-ben (publisher) 10:02
@@ -911,17 +911,17 @@ class: an automation credential gets `403` with `humanOnly: true`
 (`internal/api/api.go:380-392`), and the CLI says so before sending when the context holds an
 automation token.
 
-**The one exception, the web client's handover button** (the owner's decision of 2026-11-21 18:22 CET, typed in
+**The one exception, the web client's adopt button** (the owner's decision of 2026-11-21 18:22 CET, typed in
 the campaign lead's session, answering "A" to the question whether one action may take a draft's machines
 under management). On a draft that holds an import base, for a person who holds the author, publisher and
-approver roles, the web client's "Start managing these machines" first adds, to a machine of the draft that has
+approver roles, the web client's "Adopt these machines" first adds, to a machine of the draft that has
 no assignment entry and no assignment head, an assignment that selects nothing (the machine's configuration is
 its import base alone), each write under the ETag the one before answered, then publishes the draft as the page
 showed it (the publication carries the ETag of the last write, or the page's when none was needed, and is
 refused when another author changed the draft since), creates an adopt plan for each machine with no `Applied` and approves each
 plan as the signed-in person, without the typed plan ID: the sentence above the button, which says what the
 press does and that it sends nothing to any machine, is the confirmation. Every act is the existing route,
-recorded one by one, and the approval records self-approval as the server computes it. A handover plan
+recorded one by one, and the approval records self-approval as the server computes it. A first adopt plan
 binds no drift record, and a machine with an `Applied` keeps the separate steps. The CLI keeps the typed
 plan ID, and so does every approval of a change applied later
 ([client contracts A11](client-contracts.md#14-proposed-api-gap-issues-and-downstream-refinement)).
@@ -1489,7 +1489,7 @@ the plan leaves its hands. Automation may publish and plan (`internal/api/routes
 
 **Approver.** Open a proposed plan; read target machine, route, operation, mode, release,
 assignment revision, baseline, drift record, deadlines, expiry, epoch, evidence, self-approval
-reasons and `unseenOverwrite`; approve by typing the plan ID (the handover button of [§5.6](#56-plan-and-approval) is the one exception); watch the operation; revoke an
+reasons and `unseenOverwrite`; approve by typing the plan ID (the adopt button of [§5.6](#56-plan-and-approval) is the one exception); watch the operation; revoke an
 approval or cancel a plan; unfreeze. Human only for approval. Sees: that revoking after the
 controller committed does not stop an attempt already recorded
 ([design §13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy)).
@@ -1745,7 +1745,7 @@ the CLI and in the web interface. A walkthrough by an agent does not count as a 
 | --- | --- | --- | --- |
 | T1 Sign in, pick a context, say which roles you hold | any | correct context and roles stated | — |
 | T2 Find the drifted machine and state its desired, applied and observed release and observation time | viewer | all four correct | "Is it healthy?" Expected: not established |
-| T3 Import a machine with review, mark one unmarked secret, continue, then hand it over: assign it, publish the import draft, plan and approve the adopt | author, publisher, approver | import released; mark recorded; `Applied` set by the adoption | "Is the secret in the draft?" Expected: a reference only |
+| T3 Import a machine with review, mark one unmarked secret, continue, then adopt it: assign it, publish the import draft, plan and approve the adopt | author, publisher, approver | import released; mark recorded; `Applied` set by the adoption | "Is the secret in the draft?" Expected: a reference only |
 | T4 Change a node label for the workers and save it | author | draft entry saved | "Has any machine changed?" Expected: no |
 | T5 Recover from a concurrent edit | author | other change read, own change re-applied | — |
 | T6 Publish and find one machine's rendered configuration | publisher | review opened for that machine | "Are the sources the configuration?" Expected: no |

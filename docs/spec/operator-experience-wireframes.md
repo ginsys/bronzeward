@@ -102,13 +102,13 @@ Machines                          Cluster: all ▾   State: all ▾   [Add machi
 | mch_k2p…7x | 10.5.0.2:50000 | rel_fgqv…   | rel_fgqv… (operation)    | = applied, 2 min ago     | (•) Last read matched what was applied |
 | mch_tqhc…35| 10.5.0.3:50000 | rel_fgqv…   | rel_p4nx… (adoption)     | = applied, 1 min ago     | (•) Release not applied yet            |
 | mch_w4ze…n3| 10.5.0.4:50000 | rel_fgqv…   | rel_fgqv… (operation)    | no match, 5 min ago      | (•) Changed on the machine (•) Frozen  |
-| mch_b3c…aa | 10.5.0.5:50000 | none        | none                     | —                        | (•) Not managed yet                    |
+| mch_b3c…aa | 10.5.0.5:50000 | none        | none                     | —                        | (•) Not adopted yet                    |
 +------------+----------------+-------------+--------------------------+--------------------------+----------------------------------------+
 The server filters by cluster; the browser filters by state over all pages (gap G9). Showing 4 of 4. Health is not checked.
 ```
 
 All four rows are at one moment: just after `mch_b3c…aa2q` was recorded
-([§5.2](operator-experience.md#52-inventory)), before its import and handover
+([§5.2](operator-experience.md#52-inventory)), before its import and adoption
 ([§5.3](operator-experience.md#53-protected-import-with-review)), so it has no `Desired` and no
 `Applied` yet.
 
@@ -470,8 +470,8 @@ Withheld variant: the rendered panel reads only "Configuration not shown: it cou
 redacted." with no document area. It is never an empty editor.
 
 For a machine with no `Applied`, such as one just imported from an existing cluster, the row
-offers [Plan adopt (handover)] instead of [Plan apply]: an `apply-config` plan is refused until
-the machine is handed over
+offers [Plan adopt] instead of [Plan apply]: an `apply-config` plan is refused until
+the machine is adopted
 ([§5.3](operator-experience.md#53-protected-import-with-review)).
 
 ## W7. Plan and approval
