@@ -173,10 +173,11 @@ describe("the console's parts (#364)", () => {
     expect(shell(["recovery-admin"], h(Revocation))).not.toContain("type the identity back");
   });
 
-  // One press confirms a permanent act, so the line that names its target is the only check: it names the identity as
-  // entered, or the issuer and the subject both, and a target that cannot be shown cannot be confirmed.
+  // One press confirms a permanent act, so the line that names its target is the only check. A target is confirmed only
+  // when every character of it is printable ASCII and neither edge is a space (an allow list, so an invisible or
+  // non-ASCII character cannot reach a confirmation by construction), and the line names it exactly as entered.
   describe("the revocation's confirmation line", () => {
-    const BIDI = "‮";
+    const reason = (field: string) => `The ${field} holds a character that cannot be confirmed here. Only plain letters, digits and signs are accepted, with no space at the start or end.`;
     test("an identity is named exactly as entered, with the act's permanence", () => {
       expect(revocationConfirmation("idn_BWSYNTH", "", "", " left ")).toEqual({
         line: "Revokes the identity idn_BWSYNTH. A revocation is permanent.", target: { identity: "idn_BWSYNTH", reason: "left" },
@@ -187,61 +188,33 @@ describe("the console's parts (#364)", () => {
       expect(c.line).toBe("Revokes the subject sub-1 of the issuer https://idp.example. A revocation is permanent.");
       expect(c.target).toEqual({ iss: "https://idp.example", sub: "sub-1", reason: "left" });
     });
-    test("a target that is not safe text leaves the press off with its reason, in both forms", () => {
-      for (const [identity, iss, sub] of [[`idn${BIDI}x`, "", ""], ["", `https://i${BIDI}.example`, "sub-1"], ["", "https://idp.example", `s${BIDI}ub`], ["x".repeat(301), "", ""]] as [string, string, string][]) {
-        const c = revocationConfirmation(identity, iss, sub, "left");
-        expect(c.why, identity + iss + sub).toBe("The identity cannot be shown, so it cannot be confirmed.");
-        expect(c.target).toBeUndefined();
-        expect(c.line).toBeUndefined();
+    test("the accepted shapes: plain, a space inside, a single quote, a backslash and x09 as text", () => {
+      for (const v of ["alice", "alice smith", "alice  smith", "o'brien", "a\\x09b", "a~!#%^&*()+={}[]|;:,.<>?/\\\"-_@$`"]) {
+        expect(revocationConfirmation(v, "", "", "left").target, v).toEqual({ identity: v, reason: "left" });
+        expect(revocationConfirmation("", "https://idp.example", v, "left").target, v).toEqual({ iss: "https://idp.example", sub: v, reason: "left" });
       }
     });
-    test("the target is checked and named as entered: an edge control or format character keeps the press off, a space is shown as typed", () => {
-    for (const v of ["\ufeffalice", "alice\t", "\talice", "ali\u200bce"]) {
-      const c = revocationConfirmation(v, "", "", "left");
-      expect([v, c.target, c.line, c.why]).toEqual([v, undefined, undefined, "The identity cannot be shown, so it cannot be confirmed."]);
-    }
-    // Spaces inside stay as typed.
-    expect(revocationConfirmation("alice  smith", "", "", "left").line).toBe("Revokes the identity alice  smith. A revocation is permanent.");
-  });
-
-  // A space at either edge of a target is invisible in the line, and the server would act on it: a padded subject records
-  // a new human row and revokes that, leaving the real one active. So the press stays off and the reason names it.
-  test("a space at the start or end of the identity, the issuer or the subject keeps the press off with a reason that names it", () => {
-    for (const [args, field] of [
-      [[" alice", "", ""], "identity"], [["alice ", "", ""], "identity"],
-      [["", " https://idp.example", "sub-1"], "issuer"], [["", "https://idp.example ", "sub-1"], "issuer"],
-      [["", "https://idp.example", " alice"], "subject"], [["", "https://idp.example", "alice "], "subject"],
-      // a no-break space at either edge
-      [["\u00a0alice", "", ""], "identity"], [["alice\u00a0", "", ""], "identity"],
-      [["", "https://idp.example", "\u00a0alice"], "subject"], [["", "https://idp.example", "alice\u00a0"], "subject"],
-      [["", "\u00a0https://idp.example", "sub-1"], "issuer"],
-    ] as [[string, string, string], string][]) {
-      const c = revocationConfirmation(args[0], args[1], args[2], "left");
-      expect([args, c.target, c.line, c.why]).toEqual([args, undefined, undefined, `The ${field} has spaces at its start or end; enter it without them.`]);
-    }
-  });
-
-  test("the line keeps the spaces of the target, so two targets that differ in spaces read differently", () => {
-    const line = (v: string) => renderToStaticMarkup(h(ConfirmationLine, { line: revocationConfirmation(v, "", "", "left").line! }));
-    expect(line("alice  smith")).toContain("alice  smith");
-    expect(line("alice  smith")).toContain('class="exact"');
-    expect(line("alice  smith")).not.toBe(line("alice smith"));
-    expect(readFileSync(new URL("./app.css", import.meta.url), "utf8")).toMatch(/\.exact\s*\{[^}]*white-space:\s*pre-wrap/);
-  });
-
-  // A space that is not U+0020 inside a value reads as a space but is another character, so two subjects read the same
-  // and differ: the press stays off, as for an invisible format character.
-  test("a look-alike space or a line separator inside a target cannot be shown, so it cannot be confirmed", () => {
-    for (const v of ["alice\u00a0smith", "alice\u2003smith", "alice\u3000smith", "alice\u2028smith", "alice\u2029smith"]) {
-      for (const args of [[v, "", ""], ["", "https://idp.example", v], ["", v, "sub-1"]] as [string, string, string][]) {
-        const c = revocationConfirmation(args[0], args[1], args[2], "left");
-        expect([args, c.target, c.line, c.why]).toEqual([args, undefined, undefined, "The identity cannot be shown, so it cannot be confirmed."]);
+    test("anything but printable ASCII with no space at either edge keeps the press off with a reason that names the field", () => {
+      const refused = [
+        "ali\u034fce", "ali\u115fce", "ali\u3164ce", "ali\ufe0fce", "ali\u180bce", "ali\u{e0041}ce", "ali\u2800ce", // invisible, beyond Cf
+        "ali\u00a0ce", "ali\tce", "ali\u200bce", "\u0430lice", "ali\u202ece", "ali\u2028ce", "ali\u00e9ce", "ali\nce", "ali\x7fce", // look-alike, control, non-ASCII
+        " alice", "alice ", "\u00a0alice", "alice\u00a0", "\talice", "alice\t", "\ufeffalice", "alice\u200b", // an edge
+      ];
+      for (const v of refused) {
+        for (const [args, field] of [[[v, "", ""], "identity"], [["", "https://idp.example", v], "subject"], [["", v, "sub-1"], "issuer"]] as [[string, string, string], string][]) {
+          const c = revocationConfirmation(args[0], args[1], args[2], "left");
+          expect([JSON.stringify(args), c.target, c.line, c.why]).toEqual([JSON.stringify(args), undefined, undefined, reason(field)]);
+        }
       }
-    }
-    expect(revocationConfirmation("alice smith", "", "", "left").target).toEqual({ identity: "alice smith", reason: "left" });
-  });
-
-  test("the press stays off while the identity, the pair or the reason is missing or both forms are filled", () => {
+    });
+    test("the line keeps the spaces of the target, so two targets that differ in spaces read differently", () => {
+      const line = (v: string) => renderToStaticMarkup(h(ConfirmationLine, { line: revocationConfirmation(v, "", "", "left").line! }));
+      expect(line("alice  smith")).toContain("alice  smith");
+      expect(line("alice  smith")).toContain('class="exact"');
+      expect(line("alice  smith")).not.toBe(line("alice smith"));
+      expect(readFileSync(new URL("./app.css", import.meta.url), "utf8")).toMatch(/\.exact\s*\{[^}]*white-space:\s*pre-wrap/);
+    });
+    test("the press stays off while the identity, the pair or the reason is missing or both forms are filled", () => {
       for (const args of [["", "", "", "left"], ["idn_a", "", "", "  "], ["idn_a", "https://i", "", "left"], ["", "https://i", "", "left"], ["idn_a", "", "s", "left"]] as [string, string, string, string][]) {
         const c = revocationConfirmation(args[0], args[1], args[2], args[3]);
         expect(c.why, args.join("|")).toBe("Name the identity, or the issuer and subject, and give a reason.");

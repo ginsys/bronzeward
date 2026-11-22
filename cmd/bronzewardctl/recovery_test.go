@@ -276,62 +276,6 @@ func TestYesConfirmationOfRevoke(t *testing.T) {
 	}
 }
 
-// TestRevokeRefusesASpaceAtAnEdge: a flag value with a space at its start or end is refused before the prompt, with the
-// field named, and nothing is sent. The server would act on it as typed: a padded subject records a new human and
-// revokes that one, leaving the real subject active. A space inside a value is allowed.
-func TestRevokeRefusesASpaceAtAnEdge(t *testing.T) {
-	const route = "POST /api/v1/identity-revocations"
-	for _, c := range []struct {
-		field string
-		args  []string
-	}{
-		{"identity", []string{"--identity", " idn_BWSYNTH", "--reason", "r"}},
-		{"identity", []string{"--identity", "idn_BWSYNTH\u00a0", "--reason", "r"}},
-		{"issuer", []string{"--iss", "https://idp.BWSYNTH.example ", "--sub", "sub-BWSYNTH", "--reason", "r"}},
-		{"subject", []string{"--iss", "https://idp.BWSYNTH.example", "--sub", " sub-BWSYNTH", "--reason", "r"}},
-		{"subject", []string{"--iss", "https://idp.BWSYNTH.example", "--sub", "sub-BWSYNTH\u00a0", "--reason", "r"}},
-	} {
-		seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
-		var out, errb bytes.Buffer
-		withStdin(t, "y\n", func() {
-			if code := run(append([]string{"identity", "revoke"}, c.args...), &out, &errb); code != 2 || slices.Contains(seen(), route) {
-				t.Errorf("%q: exit %d, sent %v; want 2 and no write\n%s", c.args, code, seen(), errb.String())
-			}
-		})
-		if want := "The " + c.field + " has spaces at its start or end; enter it without them."; !strings.Contains(errb.String(), want) || strings.Contains(errb.String(), "[y/N]") {
-			t.Errorf("%q: want %q before any prompt:\n%s", c.args, want, errb.String())
-		}
-	}
-	// A character the question cannot show (an invisible format character, a line separator, a space that is not
-	// U+0020) is refused before the question: the raw value would be sent while the question reads as another one.
-	for _, v := range []string{"ali\u200bce", "ali\u2060ce", "alice\u2028smith", "alice\u00a0smith", "alice\u2003smith", "alice\u3000smith", "ali\ufeffce"} {
-		for _, args := range [][]string{
-			{"--identity", "idn_" + v, "--reason", "r"},
-			{"--iss", "https://idp.BWSYNTH.example", "--sub", v, "--reason", "r"},
-			{"--iss", "https://idp." + v + ".example", "--sub", "sub-BWSYNTH", "--reason", "r"},
-		} {
-			seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
-			var out, errb bytes.Buffer
-			withStdin(t, "y\n", func() {
-				if code := run(append([]string{"identity", "revoke"}, args...), &out, &errb); code != 2 || slices.Contains(seen(), route) {
-					t.Errorf("%q: exit %d, sent %v; want 2 and no write\n%s", args, code, seen(), errb.String())
-				}
-			})
-			if want := "cannot be shown, so it cannot be confirmed."; !strings.Contains(errb.String(), want) || strings.Contains(errb.String(), "[y/N]") {
-				t.Errorf("%q: want %q before any prompt:\n%s", args, want, errb.String())
-			}
-		}
-	}
-	// A space inside is allowed, and shown in the question.
-	seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
-	var out, errb bytes.Buffer
-	withStdin(t, "y\n", func() {
-		if code := run([]string{"identity", "revoke", "--iss", "https://idp.BWSYNTH.example", "--sub", "sub BWSYNTH", "--reason", "r"}, &out, &errb); code != 0 || !slices.Contains(seen(), route) {
-			t.Errorf("a space inside: exit %d, sent %v\n%s", code, seen(), errb.String())
-		}
-	})
-}
-
 // TestYesConfirmationOfEnter: recovery enter states its effects and sends only on y or yes (the one confirmation of
 // every decision: nothing is typed back); --no-input, an empty answer, n and anything else, the word enter included,
 // exit 2 and send nothing.
@@ -877,36 +821,48 @@ func TestRefusedExitRepeatNamesTheScope(t *testing.T) {
 	}
 }
 
-// TestRevokeRefusesAControlCharacter: a control character in the identity, the issuer or the subject is refused before
-// the question, so a hostile value cannot forge a line of the prompt and no escape is ever written for a value that
-// can be confirmed (client-contracts.md section 6 item 8).
-func TestRevokeRefusesAControlCharacter(t *testing.T) {
+// TestRevokeConfirmsOnlyPrintableASCII: the identity, the issuer and the subject are confirmed only when every
+// character is printable ASCII and neither edge is a space (an allow list: an invisible, look-alike or non-ASCII
+// character cannot reach the question by construction). Anything else is refused before the question, exit 2, with
+// one reason that names the field, and nothing is sent. The server acts on a value as typed: a padded subject records
+// a new human and revokes that one, leaving the real subject active.
+func TestRevokeConfirmsOnlyPrintableASCII(t *testing.T) {
 	const route = "POST /api/v1/identity-revocations"
-	for _, v := range []string{"svc_x\nFORGED: type yes", "svc_x\ty", "svc_x\x1b[2J", "svc_x\x7f", "svc_x\u0085y", "svc_x\xffy"} {
-		for _, args := range [][]string{
-			{"--identity", v, "--reason", "r"},
-			{"--iss", "https://idp.BWSYNTH.example", "--sub", v, "--reason", "r"},
+	refused := []string{
+		"ali\u034fce", "ali\u115fce", "ali\u3164ce", "ali\ufe0fce", "ali\u180bce", "ali\U000e0041ce", "ali\u2800ce", // invisible, beyond Cf
+		"ali\u00a0ce", "ali\tce", "ali\u200bce", "\u0430lice", "ali\u202ece", "ali\u2028ce", "ali\u00e9ce", "ali\nce", "ali\x7fce", "ali\x1b[2Jce", "ali\u0085ce", "ali\xffce", // look-alike, control, non-ASCII, a bad byte
+		" alice", "alice ", "\u00a0alice", "alice\u00a0", "\talice", "alice\t", "\ufeffalice", "alice\u200b", // an edge
+	}
+	for _, v := range refused {
+		for _, c := range []struct {
+			field string
+			args  []string
+		}{
+			{"identity", []string{"--identity", v, "--reason", "r"}},
+			{"issuer", []string{"--iss", v, "--sub", "sub-BWSYNTH", "--reason", "r"}},
+			{"subject", []string{"--iss", "https://idp.BWSYNTH.example", "--sub", v, "--reason", "r"}},
 		} {
 			seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
 			var out, errb bytes.Buffer
 			withStdin(t, "y\n", func() {
-				if code := run(append([]string{"identity", "revoke"}, args...), &out, &errb); code != 2 || slices.Contains(seen(), route) {
-					t.Errorf("%q: exit %d, sent %v; want 2 and no write\n%s", args, code, seen(), errb.String())
+				if code := run(append([]string{"identity", "revoke"}, c.args...), &out, &errb); code != 2 || slices.Contains(seen(), route) {
+					t.Errorf("%q: exit %d, sent %v; want 2 and no write\n%s", c.args, code, seen(), errb.String())
 				}
 			})
-			if !strings.Contains(errb.String(), "cannot be shown, so it cannot be confirmed.") || strings.Contains(errb.String(), "[y/N]") || strings.Contains(errb.String(), "\nFORGED") {
-				t.Errorf("%q: want the refusal before any prompt, with no raw control character:\n%q", args, errb.String())
+			want := "The " + c.field + " holds a character that cannot be confirmed here. Only plain letters, digits and signs are accepted, with no space at the start or end."
+			if !strings.Contains(errb.String(), want) || strings.Contains(errb.String(), "[y/N]") || strings.Contains(errb.String(), "\nFORGED") {
+				t.Errorf("%q: want %q before any prompt:\n%q", c.args, want, errb.String())
 			}
 		}
 	}
 }
 
-// TestRevokeQuestionPrintsTheValueItSends: for every value the guards let through, the text printed between the
+// TestRevokeQuestionPrintsTheValueItSends: for every value the guard lets through, the text printed between the
 // quotes of the question is the value that a y sends, so no escape is written for a value that can be confirmed and
 // two targets cannot read alike. The backslash and x09 typed as text stays a backslash and x09.
 func TestRevokeQuestionPrintsTheValueItSends(t *testing.T) {
 	const route = "POST /api/v1/identity-revocations"
-	for _, v := range []string{"svc_x", "svc x", "svc'x", `svc\x09y`, "svc\\y", "caf\u00e9", "\u0414\u0430"} {
+	for _, v := range []string{"svc_x", "svc x", "svc  x", "svc'x", `svc\x09y`, `svc\y`, "~!#%^&*()+={}[]|;:,.<>?/\"-_@$`"} {
 		for _, args := range [][]string{
 			{"--identity", v, "--reason", "r"},
 			{"--iss", "https://idp.BWSYNTH.example", "--sub", v, "--reason", "r"},

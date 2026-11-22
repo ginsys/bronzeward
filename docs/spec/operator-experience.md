@@ -1348,18 +1348,24 @@ confirmation.** A value a person types because it is the input (the identity to 
 stays; only a second, typed copy of it goes.
 
 *Revocation.* The console form shows the act's limits (it is permanent, and what it does not do) and one line
-naming the target exactly as entered: the identity, or the subject together with its issuer. The press stays off
-while the target is not safe text, so a revocation is never confirmed on a name a person cannot read (safe text
-here also excludes a space that is not U+0020 and a line or paragraph separator, which read as a space or break the
-line while being another character; the command refuses the same values before its question), and while the
-identity, the issuer or the subject has a space at its start or end: such a space is invisible in the line, the
-server would act on it as typed (a padded subject records a new human and revokes that one, leaving the real one
-active), and the form refuses it with a reason that names the field rather than trimming it, so the value sent is
-always the value shown. The command refuses the same values before the question, with exit 2 and the same reason. The command
-prints the same limits, then asks `Revoke <the identity, or the subject of the issuer> in <context>? A revocation
-is permanent [y/N]`; only `y` or `yes` sends, and `--no-input` refuses, with no `--yes`. The reasons of the
-accounting decision above hold unchanged: a typed copy proves a person copied a value, and the evidence on the
-screen at the press is what guards the act.
+naming the target exactly as entered: the identity, or the subject together with its issuer. A target is confirmed
+only when every character of the identity, the issuer and the subject is printable ASCII (U+0020 to U+007E) and
+neither edge is a space; anything else keeps the press off with one reason that names the field ("The subject holds
+a character that cannot be confirmed here. Only plain letters, digits and signs are accepted, with no space at the
+start or end."). This is an allow list and not a list of what to refuse: Unicode has no closed list of characters that
+draw as nothing or as another character (a combining joiner, a Hangul filler, a variation selector, a braille blank,
+a Cyrillic letter for a Latin one), and a revocation is permanent, so no such character can reach a confirmation by
+construction. A space at an edge is refused too, never trimmed: the line cannot show it and the server acts on a value
+as typed (a padded subject records a new human and revokes that one, leaving the real one active), so the value sent
+is always the value shown. No valid target falls outside the rule: an OpenID Connect subject is ASCII by definition
+(OIDC Core, ID Token; recalled, not read), the identity is the server's own `idn_` identifier and the issuer must be
+the configured one. The command refuses the same values before its question, with exit 2 and the same reason, so for
+every value it asks about, the text between the quotes is the value a `y` sends and no escape is ever written. The
+command prints the same limits, then asks `Revoke <the identity, or the subject of the issuer> in <context>? A
+revocation is permanent [y/N]`; only `y` or `yes` sends, and `--no-input` refuses, with no `--yes`. The reasons of
+the accounting decision above hold unchanged: a typed copy proves a person copied a value, and the evidence on the
+screen at the press is what guards the act. Not covered: two ASCII characters that look alike (`l` and `1`, `O` and
+`0`) read alike to a person, and the server still accepts any non-empty subject from another client.
 
 *Recovery entry.* The word `enter` typed at recovery entry goes too, and this is the project lead's reading of the
 rule, not a separate answer from the owner, so the owner can reverse it. The console form lists what entering does
