@@ -268,6 +268,24 @@ func TestObserveDrift(t *testing.T) {
 	}
 }
 
+// A comment-only edit of the node's configuration is still a drift: the observation records the digest of the
+// bytes the node holds, which the form-only verdict never touches (ginsys/bronzeward#1098, check 6). The drift
+// loop's record for such an edit is TestDrifterOpensAndReturns; this one names the digest it compares.
+func TestObserveDriftCommentOnlyEdit(t *testing.T) {
+	t.Parallel()
+	oe := newObsEnv(t)
+	edited := standInConfig + "# edited by hand\n"
+	oe.node.SetMachineConfig(t, []byte(edited))
+	got, err := observer(t, oe.env, oe.x, options{}).observe(t.Context(), oe.machine, observeFor{purpose: "drift"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	was, now := talos.ConfigurationDigest([]byte(standInConfig)), talos.ConfigurationDigest([]byte(edited))
+	if got.Digest == nil || *got.Digest == was || *got.Digest != now {
+		t.Fatalf("observed digest %v; want the edited text's %x, not the original's %x", got.Digest, now, was)
+	}
+}
+
 // PA §7.3: a node of Talos before v1.14 prints its cluster ID in the URL-safe alphabet. The
 // observation reads it, records it in the standard spelling and names no value unread, so the
 // recorded ID is the one the cluster was registered under, whichever Talos version answered.

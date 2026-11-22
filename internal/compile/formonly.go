@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"math/big"
 	"reflect"
 
 	"go.yaml.in/yaml/v3"
@@ -16,8 +17,8 @@ import (
 // part of the content, so the texts are the resolved, plaintext ones and the answer is never shown
 // with a value.
 //
-// Both texts must parse as multi-document YAML without an alias, an anchor, a merge key, a tag outside
-// YAML's core schema or a duplicate key. They must hold the same documents in the same order, with
+// Both texts must parse as multi-document YAML without an alias, an anchor, a key that is not a string, a repeated key or a tag
+// outside YAML's core schema. They must hold the same documents in the same order, with
 // sequences equal element by element and scalars equal by their resolved tag and value (so "1" and 1,
 // and true and "true", differ; the spellings of one null are equal).
 func formOnly(a, b []byte) bool {
@@ -86,8 +87,8 @@ func allSame(a, b []*yaml.Node) bool {
 	return true
 }
 
-// sameMapping compares two mappings as sets of keys. A key that is not a scalar, a merge key and a
-// repeated key make the answer false.
+// sameMapping compares two mappings as sets of keys. A key that is not a string and a repeated key
+// make the answer false.
 func sameMapping(a, b *yaml.Node) bool {
 	if a.ShortTag() != "!!map" || b.ShortTag() != "!!map" || len(a.Content) != len(b.Content) {
 		return false
@@ -115,7 +116,8 @@ func keyed(m *yaml.Node) (map[mapKey]*yaml.Node, bool) {
 	out := make(map[mapKey]*yaml.Node, len(m.Content)/2)
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		k := m.Content[i]
-		if k.Kind != yaml.ScalarNode || k.Anchor != "" || k.ShortTag() == "!!merge" || !coreTags[k.ShortTag()] {
+		// Only a string key: two spellings of one number (16 and 0x10) would otherwise be two keys.
+		if k.Kind != yaml.ScalarNode || k.Anchor != "" || k.ShortTag() != "!!str" {
 			return nil, false
 		}
 		mk := mapKey{k.ShortTag(), k.Value}
@@ -140,8 +142,20 @@ func sameScalar(a, b *yaml.Node) bool {
 	case "!!str":
 		return a.Value == b.Value
 	}
+	if a.Value == b.Value {
+		return true
+	}
+	if ta == "!!float" {
+		// Compared as exact decimals: a float64 would read two long spellings of different numbers as equal.
+		x, okx := new(big.Rat).SetString(a.Value)
+		y, oky := new(big.Rat).SetString(b.Value)
+		return okx && oky && x.Cmp(y) == 0
+	}
 	var va, vb any
 	if a.Decode(&va) != nil || b.Decode(&vb) != nil {
+		return false
+	}
+	if _, wide := va.(float64); wide { // an integer too large for any integer type
 		return false
 	}
 	return reflect.DeepEqual(va, vb)

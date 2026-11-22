@@ -99,7 +99,7 @@ export function releaseNote(release: string, m: Pick<Machine, "desired" | "appli
   // The server's pendingConvergence says whether the node's configuration differs from this release's (operator-experience §2.4).
   // After an adoption Applied can equal Desired while it does; after a publication Applied can name another release while it does not.
   const same = m.applied.release === release;
-  if (m.formOnly === true && same) return `${DIFFERS_IN_FORM_ONLY}: this release is Desired and Applied on this machine. ${FORM_ONLY_NOTE} An apply-config plan sends this release to it.`;
+  if (m.formOnly === true) return `${DIFFERS_IN_FORM_ONLY}: ${same ? "this release is Desired and Applied on this machine" : `this release is Desired on this machine, whose Applied configuration is release ${short(m.applied.release)}`}. ${FORM_ONLY_NOTE} An apply-config plan sends this release to it.`;
   if (m.pendingConvergence) {
     return `${same ? `This release is Desired and Applied on this machine, but its configuration differs from what Bronzeward applied.` : `This machine has an Applied configuration (release ${short(m.applied.release)}) that differs from this release.`} An apply-config plan sends this release to it.`;
   }

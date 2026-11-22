@@ -22,7 +22,7 @@ export type Observation = components["schemas"]["ObservationBody"];
 export type Entry = components["schemas"]["TimelineEntry"];
 
 export const ADOPTED =
-  "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's evidence says whether it does (release not applied yet); a later apply-config plan withholds its diff when it does.";
+  "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's evidence says whether it does (release not applied yet); a later apply-config plan withholds its diff when it does, unless it differs in form only.";
 export const EITHER = "The read may match the adopted bytes or this release's compiled configuration; the API does not say which.";
 export const FROZEN =
   "Frozen: no new commitment or attempt until an approver unfreezes; an attempt already recorded is not stopped, and an adoption can still be recorded.";
