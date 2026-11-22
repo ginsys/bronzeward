@@ -3,7 +3,7 @@
 // redaction token as a badge whose kind is spelled out, a withheld review as its own state, the
 // provenance records exactly as served, and what the machine needs next (B18). It sends no write.
 
-import { Fragment as Group, type ReactNode } from "react";
+import { Fragment as Group, type ReactNode, useState } from "react";
 import type { components } from "./api/v1";
 import { Head, Id, type Load, Ref, Scroll, short, useItem, usePending, useReads, viewOf } from "./list.tsx";
 import { NO_KEEP, positionShown } from "./machine.tsx";
@@ -179,12 +179,10 @@ function PlanButton({ release, machine, m }: { release: string; machine: string;
 // The page's next step. A position that was not read draws the failure and a way to read again, and no sentence, line or
 // plan button: the button depends on the answer, so the page does not guess (the machine page removes its line instead,
 // operator experience §2.3).
-export function NextStepSection({ release, machine, pos }: { release: string; machine: string; pos: Load<Position> }) {
-  const { go } = useReads();
+export function NextStepSection({ release, machine, pos, readAgain }: { release: string; machine: string; pos: Load<Position>; readAgain: () => void }) {
   const pending = usePending(pos, "the machine's position");
   if (pos.kind !== "ok") {
-    const again = reviewPath(release, machine);
-    return <>{pending}{pos.kind !== "loading" && pos.kind !== "discarded" && again !== undefined && <p><button type="button" onClick={() => go(again)}>Read again</button></p>}</>;
+    return <>{pending}{pos.kind !== "loading" && pos.kind !== "discarded" && <p><button type="button" onClick={readAgain}>Read again</button></p>}</>;
   }
   const { position, recovery } = positionShown(pos);
   if (position !== undefined && positionOwns(position, release)) return <NextStep position={position} recovery={recovery} />;
@@ -200,7 +198,8 @@ export function ReviewItem({ release, machine }: { release: string; machine: str
   const review = useItem<Review>(`/releases/${enc(release)}/machines/${enc(machine)}/review`);
   const pending = usePending(review, "the rendered review");
   // The position holds the machine record, so the page's name and address cost no further read.
-  const pos = useItem<Position>(`/machines/${enc(machine)}/position`, NO_KEEP);
+  const [n, readAgain] = useState(0);
+  const pos = useItem<Position>(`/machines/${enc(machine)}/position`, NO_KEEP, n);
   const held = pos.kind === "ok" ? pos.data.machine : undefined;
   return (
     <>
@@ -208,7 +207,7 @@ export function ReviewItem({ release, machine }: { release: string; machine: str
       <p><Ref to={`/releases/${enc(release)}`} id={release}>Back to the release</Ref></p>
       {review.kind === "ok" ? <ReviewBody r={review.data} {...(held !== undefined && { machine: held })} /> : pending}
       <h3>Next step</h3>
-      <NextStepSection release={release} machine={machine} pos={pos} />
+      <NextStepSection release={release} machine={machine} pos={pos} readAgain={() => readAgain((x) => x + 1)} />
     </>
   );
 }

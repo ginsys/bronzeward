@@ -167,7 +167,7 @@ describe("the next step of the release review page", () => {
     data: { machine: { id: "mch_b", cluster: "cl_a", name: null, desired: rel, applied: { release: "rel_BWSYNTH-old" }, pendingConvergence: true, frozen: false, scopeState: "normal", ...machine }, ingestion: null, draft: null, plan: null, operation: null, rolloutHeldBy: null, step, ...over } as unknown as Position,
   });
   const failing: Reads = { ...reads, failure: () => "The read failed." };
-  const page = (p: Load<Position>, r: Reads = failing) => renderToStaticMarkup(h(ReadsProvider, { value: r }, h(NextStepSection, { release: rel, machine: "mch_b", pos: p })));
+  const page = (p: Load<Position>, r: Reads = failing) => renderToStaticMarkup(h(ReadsProvider, { value: r }, h(NextStepSection, { release: rel, machine: "mch_b", pos: p, readAgain: () => {} })));
   const op = { id: "op_1", state: "sending" };
 
   test("an operation open on the Desired release shows the position's words and its link, no plan button and no word about what was sent", () => {
