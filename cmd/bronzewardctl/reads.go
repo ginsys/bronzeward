@@ -229,6 +229,15 @@ func (e *env) machineCmd(args []string) error {
 	})
 }
 
+// roleWords is a machine's role in a person's words: the API's "controlplane" is two words, and a value
+// this client does not know is shown as the server sent it (the text is remote and escaped when printed).
+func roleWords(r apitypes.MachineBodyRole) string {
+	if r == apitypes.MachineBodyRoleControlplane {
+		return "control plane"
+	}
+	return string(r)
+}
+
 // machineLabel is a machine as every command names it: its identifier, with its name beside it when it
 // has one, as a cluster's is (client contracts A9). A machine with no name, and one a server older than
 // API revision 10 serves with no member, is the identifier alone. The text is remote: it is escaped when
@@ -321,6 +330,9 @@ func (e *env) machineShow(c *client.Client, id string) error {
 	return e.emit(r.Body, func(w *tabwriter.Writer) {
 		tf(w, "Machine\t%s\tcluster %s\n", machineLabel(m.Id, m.Name), m.Cluster)
 		tf(w, "Endpoint\t%s\tplatform %s\n", m.TalosEndpoint, m.Platform)
+		if m.Role != nil { // a machine imported before the role was stored shows none (choice §17.49)
+			tf(w, "Role\t%s\n", roleWords(*m.Role))
+		}
 		tf(w, "Hardware\tnode ID %s\tSMBIOS UUID %s\n", deref(m.Hardware.TalosNodeId), deref(m.Hardware.SmbiosUuid))
 		tf(w, "Scope\t%s\n", m.ScopeState)
 		for _, s := range sentences(m, obs) {

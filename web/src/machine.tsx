@@ -11,7 +11,7 @@ import { type Machine, machineHeading, machineName, node, release } from "./mach
 import { ClusterRef } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
 import { PageNote } from "./page-note.tsx";
-import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
+import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, roleWords, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
 import { NextStep, type Position } from "./nextstep.tsx";
 import { driftPath } from "./plan.tsx";
 import { principalId } from "./principals.ts";
@@ -455,7 +455,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
       <PageNote parts={[MACHINE_NOTE]}> <Ref to="/drafts/new" id="drafts">{CREATE_A_DRAFT}</Ref>.</PageNote>
       {m.kind !== "ok" && pm}
       {obs.kind !== "ok" && po}
-      <p><ClusterRef id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {safeWord(d.platform)}.</p>
+      <p><ClusterRef id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {safeWord(d.platform)}{d.role !== null && d.role !== undefined && <>, {safeWord(roleWords(d.role))}</>}.</p>
       {changed !== undefined && <RenameMachine machine={d} onChanged={changed} />}
       {changed !== undefined && <ChangeEndpoint machine={d} onChanged={changed} />}
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list).map((s) => <li key={s}>{s}</li>)}</ul>

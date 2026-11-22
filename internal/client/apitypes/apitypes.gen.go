@@ -239,6 +239,24 @@ func (e IngestionInputStaging) Valid() bool {
 	}
 }
 
+// Defines values for MachineBodyRole.
+const (
+	MachineBodyRoleControlplane MachineBodyRole = "controlplane"
+	MachineBodyRoleWorker       MachineBodyRole = "worker"
+)
+
+// Valid indicates whether the value is a known member of the MachineBodyRole enum.
+func (e MachineBodyRole) Valid() bool {
+	switch e {
+	case MachineBodyRoleControlplane:
+		return true
+	case MachineBodyRoleWorker:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MachineInputPlatform.
 const (
 	MachineInputPlatformCloud     MachineInputPlatform = "cloud"
@@ -1631,9 +1649,15 @@ type MachineBody struct {
 	// PendingConvergence Whether the Desired release's artifact differs from the Applied one; true for a machine with a Desired release and no Applied state (persistence and API §9.3).
 	PendingConvergence bool   `json:"pendingConvergence"`
 	Platform           string `json:"platform"`
-	ScopeState         string `json:"scopeState"`
-	TalosEndpoint      string `json:"talosEndpoint"`
+
+	// Role The machine's Talos type as its latest import base's document names it; null when the machine has no import base, was imported before the role was stored, or its document names neither type (persistence and API §3.2, choice §17.48, API revision 14).
+	Role          *MachineBodyRole `json:"role"`
+	ScopeState    string           `json:"scopeState"`
+	TalosEndpoint string           `json:"talosEndpoint"`
 }
+
+// MachineBodyRole The machine's Talos type as its latest import base's document names it; null when the machine has no import base, was imported before the role was stored, or its document names neither type (persistence and API §3.2, choice §17.48, API revision 14).
+type MachineBodyRole string
 
 // MachineInput Exactly one of smbiosUuid and talosNodeId.
 type MachineInput struct {

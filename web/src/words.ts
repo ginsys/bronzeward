@@ -123,3 +123,5 @@ export const DECIDE_ON_THE_CHANGE = "Decide on the change made on the machine";
 export const UNFREEZE_OR_DECIDE = "Unfreeze the machine or decide on the change";
 export const UNFREEZE_THE_MACHINE = "Unfreeze the machine";
 export const FREEZE_THIS_MACHINE = "Freeze this machine";
+/** A machine's role in a person's words (ginsys/bronzeward#1096): the API's "controlplane" is two words; a value this client does not know is shown as sent. */
+export const roleWords = (role: string): string => (role === "controlplane" ? "control plane" : role);

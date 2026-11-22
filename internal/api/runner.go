@@ -408,11 +408,13 @@ func (a *API) commitImport(ctx context.Context, j job, imp imported) (*refusal, 
 			return err
 		}
 		// The ingestion's creator authors the revision (execution and recovery §2's self-approval).
+		docs := imp.sanitized.Documents()
+		role := ingest.MachineRole(docs)
 		res, err := tx.ExecContext(ctx, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext,
-			baseline_digest, baseline_digest_key, configuration_digest, created_at, author)
-			SELECT $1, $2, $3, $4, $5, $6, $7, $8, now(), created_by FROM operation WHERE id = $9`,
-			ibr, j.claim.Machine, string(imp.sanitized.Documents()), emb, []byte(b.Ciphertext), b.Digest[:], b.DigestKey,
-			b.Configuration[:], j.op)
+			baseline_digest, baseline_digest_key, configuration_digest, machine_role, created_at, author)
+			SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, now(), created_by FROM operation WHERE id = $10`,
+			ibr, j.claim.Machine, string(docs), emb, []byte(b.Ciphertext), b.Digest[:], b.DigestKey,
+			b.Configuration[:], sql.NullString{String: role, Valid: role != ""}, j.op)
 		if err != nil {
 			return err
 		}
