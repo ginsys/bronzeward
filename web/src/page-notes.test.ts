@@ -6,7 +6,7 @@
 import { act, createElement as h, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { DraftItem } from "./drafts.tsx";
+import { DraftItem, settledFragment } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { HANDOVER_TITLE } from "./handover.ts";
 import { type Reads, ReadsProvider } from "./list.tsx";
@@ -160,6 +160,16 @@ describe("the draft page's note, a part only where its control shows", () => {
     expect(button(HANDOVER_TITLE)).toBeDefined();
     expect(button("Add fragment")).toBeDefined();
     expect(linksTo(`/publications/new?draft=${DRF}`)).toHaveLength(1);
+  });
+  test("after a write the page reads again with the last answer kept: the note stays under the title, above the read-again control", async () => {
+    served[`/drafts/${DRF}`] = draft("open", [imported]);
+    await shown(h(DraftItem, { id: DRF }));
+    held = true;
+    await act(async () => settledFragment(DRF, () => undefined)({ kind: "done", status: 200, data: {}, replayed: false } as never, {} as never));
+    await settled();
+    expect(button("Read the draft again")).toBeDefined();
+    expect(note().textContent).toBe(parts(DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START));
+    underTheTitle(note());
   });
   test("an open draft with no import: no Start part, and no Start managing section", async () => {
     served[`/drafts/${DRF}`] = draft("open", []);
