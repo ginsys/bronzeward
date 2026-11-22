@@ -1813,7 +1813,7 @@ type PlanCreator struct {
 type PlanDiff struct {
 	From string `json:"from"`
 
-	// FromFormOnly True when the diff is shown although the machine holds its import base and not the from release's artifact, because the two differ in comments and encoding only (API revision 13).
+	// FromFormOnly True when the diff is shown although the machine's Applied digest is its import base's and not the from release's artifact, because the two differ in comments and encoding only (API revision 13).
 	FromFormOnly bool   `json:"fromFormOnly"`
 	To           string `json:"to"`
 	Unified      string `json:"unified"`

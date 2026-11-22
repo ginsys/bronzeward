@@ -142,8 +142,8 @@ type planDiff struct {
 	To       string `json:"to"`
 	Withheld bool   `json:"withheld"`
 	Unified  string `json:"unified"`
-	// FromFormOnly is true when the diff was shown although the machine holds its import base and not
-	// the from-release's artifact, because the two differ in form only.
+	// FromFormOnly is true when the diff was shown although the machine's Applied digest is its import
+	// base's and not the from-release's artifact's, because the two differ in form only.
 	FromFormOnly bool `json:"fromFormOnly"`
 }
 
@@ -500,8 +500,8 @@ var getPlan = item(id.Plan, func(ctx context.Context, tx *sql.Tx, v string) (str
 // planDiffFrom is the unified diff from Applied's redacted configuration to the target's, or a
 // withheld diff when either has none, or when the machine holds a configuration other than its
 // Applied release's artifact (pending convergence, execution-recovery.md §6.3), which has no
-// redacted form. The one exception is a machine whose Applied is its release's import base (a first
-// adoption) and whose release differs from that import base in form only (ginsys/bronzeward#1098): while
+// redacted form. The one exception is a machine whose Applied digest is its release's import base's
+// and whose release differs from that import base in form only (ginsys/bronzeward#1098): while
 // no drift is open and Applied is still the import base's digest, the adopted configuration holds what the
 // from-release's artifact holds in content (the compiler's verdict, which trusts the provider's pinned
 // secret versions), so the diff is shown and says so.
