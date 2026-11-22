@@ -196,7 +196,7 @@ describe("the publication page (#342)", () => {
       const link = $(`main a[title="${id}"]`);
       await link.waitForExist({ timeout: 20_000 });
       await link.scrollIntoView({ block: "center", inline: "start" });
-      await browser.execute((e: HTMLElement) => e.click(), link as unknown as HTMLElement);
+      await browser.execute((e: HTMLElement) => e.click(), (await link) as unknown as HTMLElement);
       await $("main").$("a=Publish this draft").click();
       await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });
       expect(["the publication page", await overflows()]).toEqual(["the publication page", 0]);
