@@ -10,7 +10,7 @@ import { DraftItem } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { HANDOVER_TITLE } from "./handover.ts";
 import { type Reads, ReadsProvider } from "./list.tsx";
-import { MachineShown } from "./machine.tsx";
+import { MachineItem, MachineShown } from "./machine.tsx";
 import { PlanNew } from "./plan.tsx";
 import { PublishDraft, SENT_NOTHING } from "./publish.tsx";
 import { OperationItem, Operations, PlanItem, Plans, ReleaseItem } from "./resources.tsx";
@@ -44,7 +44,7 @@ const plan = (state: string) => ({
   id: PLN, state, expiresAt: "2026-11-22T14:02:00Z", machine: MCH, cluster: "cl_a", route: "talos", operation: "apply-config", mode: "no-reboot", release: REL,
   desiredRelease: REL, assignmentRevision: "asr_a", baselineRevision: null, driftRecord: null, epoch: "e0", transportDeadlineSeconds: 60, verificationDeadlineSeconds: 60,
   maxObservationAgeSeconds: 60, checkValiditySeconds: 60, maxAttempts: null, rolloutLimit: 1, approvalPolicy: "one", approval: null, committedOperation: null,
-  createdAt: "2026-11-21T14:02:00Z", createdBy: null,
+  createdAt: "2026-11-21T14:02:00Z", createdBy: { principal: "p0", role: "publisher" },
   evidence: { validation: { result: "ok", at: "t", contract: "v1.14", machineryVersion: "1", kubernetesVersion: "1.34", platformMode: "metal" }, dryRun: { available: false, reason: "none" }, baseline: null, diff: null },
 });
 const operation = {
@@ -60,10 +60,11 @@ let served: Record<string, unknown>;
 const reads = (): Reads => ({
   client: {
     read: async (path: string) => {
+      if (held) return new Promise(() => {});
       const bare = path.split("?")[0]!;
       if (path in served) return { kind: "ok", data: served[path] };
       if (bare in served) return { kind: "ok", data: served[bare] };
-      if (["/plans", "/operations", "/drafts", "/releases"].includes(bare) || bare.endsWith("/events")) return { kind: "ok", data: { items: [], next: undefined } };
+      if (["/plans", "/operations", "/drafts", "/releases"].includes(bare) || bare.endsWith("/events") || bare.endsWith("/observations") || bare.endsWith("/timeline")) return { kind: "ok", data: { items: [], next: undefined } };
       return { kind: "refused", status: 404, problem: null };
     },
   },
@@ -90,14 +91,19 @@ const note = () => {
   expect(notes()).toHaveLength(1);
   return notes()[0]!;
 };
-const CONTENT = new Set(["H3", "TABLE", "DL", "UL", "PRE", "FORM", "SECTION"]);
-// The note follows the page's heading, and no page content (a section, list, table or form) comes before it.
-const underTheTitle = (n: Element) => {
+// The note follows the page's heading, and nothing but the title's own lines comes before it: the heading, a draft's state
+// line, the identifier line and any line the caller names. Any other element before the note (a paragraph, a label, an
+// input, a button, a section, a form) fails the check.
+const underTheTitle = (n: Element, ...also: (Element | null | undefined)[]) => {
   const h2 = box.querySelector("h2")!;
   expect(h2.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  const before = [...box.querySelectorAll("*")].slice(0, [...box.querySelectorAll("*")].indexOf(n));
-  expect(before.filter((e) => CONTENT.has(e.tagName) && !e.contains(n))).toEqual([]);
+  const title = [h2, ...box.querySelectorAll('[data-testid="draft-line"]'), ...[...box.querySelectorAll("small")].map((s) => s.parentElement), ...also];
+  const all = [...box.querySelectorAll("*")];
+  const stray = all.slice(0, all.indexOf(n)).filter((e) => !e.contains(n) && !title.some((t) => t === e || t?.contains(e)));
+  expect(stray.map((e) => e.outerHTML.slice(0, 80))).toEqual([]);
 };
+// Reads that never answer, for the loading state.
+let held = false;
 const linksTo = (href: string) => [...box.querySelectorAll("a")].filter((a) => a.getAttribute("href") === href);
 const button = (label: string) => [...box.querySelectorAll("button")].find((b) => b.textContent === label);
 
@@ -106,6 +112,7 @@ beforeEach(() => {
   document.body.append(box);
   root = createRoot(box);
   served = {};
+  held = false;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -123,6 +130,21 @@ describe("the machine page's note", () => {
     underTheTitle(n);
     expect(linksTo("/drafts/new")).toHaveLength(1);
     expect(n.querySelector("a")!.getAttribute("href")).toBe("/drafts/new");
+  });
+});
+
+describe("the machine page through its own reads", () => {
+  test("draws no note while the machine read is pending, and the note under the title once it answers", async () => {
+    served[`/machines/${MCH}`] = machine;
+    served[`/machines/${MCH}/position`] = { machine, ingestion: null, draft: null, plan: null, operation: null, rolloutHeldBy: null, step: "needs-plan" };
+    held = true;
+    await shown(h(MachineItem, { id: MCH }));
+    expect(notes()).toHaveLength(0);
+    held = false;
+    await shown(h(MachineItem, { id: MCH, key: "answered" }));
+    const n = note();
+    expect(n.textContent).toBe(`${MACHINE_NOTE} ${CREATE_A_DRAFT}.`);
+    underTheTitle(n);
   });
 });
 
@@ -160,9 +182,15 @@ describe("the draft page's note, a part only where its control shows", () => {
     expect(note().textContent).toBe(DRAFT_NOTE);
     expect(button(HANDOVER_TITLE)).toBeUndefined();
   });
-  test("before the read answers there is no note, since no entry is below yet", async () => {
+  test("while the read is pending there is no note, since no entry is below yet; the note appears with the entries once it answers", async () => {
+    served[`/drafts/${DRF}`] = draft("open", [imported]);
+    held = true;
     await shown(h(DraftItem, { id: DRF }));
+    expect(box.querySelector("h2")).not.toBeNull();
     expect(notes()).toHaveLength(0);
+    held = false;
+    await shown(h(DraftItem, { id: DRF, key: "answered" }));
+    underTheTitle(note());
   });
 });
 
@@ -192,9 +220,18 @@ describe("the release page's note", () => {
     expect(n.textContent).toBe(RELEASE_NOTE);
     underTheTitle(n);
   });
-  test("is not drawn while the read has not answered", async () => {
+  test("names the Rendered configuration link of each covered machine, which the page draws, and is not drawn while the read is pending", async () => {
+    served[`/releases/${REL}`] = { ...release, machines: [{ machine: MCH, mode: "no-reboot", publicationObservation: null }] };
+    held = true;
     await shown(h(ReleaseItem, { id: REL }));
     expect(notes()).toHaveLength(0);
+    held = false;
+    await shown(h(ReleaseItem, { id: REL, key: "answered" }));
+    expect(RELEASE_NOTE).toContain("Rendered configuration");
+    const links = [...box.querySelectorAll("a")].filter((a) => a.textContent!.startsWith("Rendered configuration of"));
+    expect(links).toHaveLength(1);
+    expect(links[0]!.getAttribute("href")).toBe(`/releases/${REL}/machines/${MCH}`);
+    underTheTitle(note());
   });
 });
 
@@ -206,7 +243,7 @@ describe("the rendered configuration page's note", () => {
     await shown(h(ReviewItem, { release: REL, machine: MCH }));
     const n = note();
     expect(n.textContent).toBe(REVIEW_NOTE);
-    underTheTitle(n);
+    underTheTitle(n, [...box.querySelectorAll("a")].find((a) => a.textContent === "Back to the release")?.parentElement);
     expect(box.querySelector('[data-testid="document"]')).not.toBeNull();
     expect([...box.querySelectorAll("a")].filter((a) => a.textContent === "Back to the release")).toHaveLength(1);
     expect(n.querySelector("a")).toBeNull();
@@ -267,6 +304,38 @@ describe("the plan page's note", () => {
     expect(box.textContent).toContain("To approve, type the plan ID (");
     expect(linksTo(`/operations?plan=${PLN}`)).toHaveLength(1);
   });
+  describe("an approved plan, whose form shows only for an approval from an earlier recovery entry", () => {
+    const approved = { ...plan("approved"), approval: "apr_a" };
+    const approval = (epoch: string) => ({ id: "apr_a", plan: PLN, approver: { principal: "p", role: "approver" }, epoch, selfApproval: { marked: false, reasons: [] }, unseenOverwrite: false });
+    const formShown = () => box.querySelector('section[aria-label="Approval"]') !== null;
+    test("an approval from an earlier epoch: the form and the approval part appear together", async () => {
+      served[`/plans/${PLN}`] = approved;
+      served["/approvals/apr_a"] = approval("ep_before");
+      served["/identity"] = { principal: "p", epoch: "ep_now" };
+      await shown(h(PlanItem, { id: PLN }));
+      expect(formShown()).toBe(true);
+      expect(notes().map((n) => n.textContent)).toEqual([PLAN_NOTE, PLAN_NOTE_APPROVE]);
+    });
+    test("an approval from the current epoch: no form and no approval part", async () => {
+      served[`/plans/${PLN}`] = approved;
+      served["/approvals/apr_a"] = approval("ep_now");
+      served["/identity"] = { principal: "p", epoch: "ep_now" };
+      await shown(h(PlanItem, { id: PLN }));
+      expect(formShown()).toBe(false);
+      expect(notes().map((n) => n.textContent)).toEqual([PLAN_NOTE]);
+    });
+    test("an approval or identity read that did not answer: no form and no approval part, until both answer", async () => {
+      served[`/plans/${PLN}`] = approved;
+      served["/identity"] = { principal: "p", epoch: "ep_now" };
+      await shown(h(PlanItem, { id: PLN }));
+      expect(formShown()).toBe(false);
+      expect(notes().map((n) => n.textContent)).toEqual([PLAN_NOTE]);
+      served["/approvals/apr_a"] = approval("ep_before");
+      await shown(h(PlanItem, { id: PLN, key: "answered" }));
+      expect(formShown()).toBe(true);
+      expect(notes().map((n) => n.textContent)).toEqual([PLAN_NOTE, PLAN_NOTE_APPROVE]);
+    });
+  });
   test("a cancelled plan shows no approval form and so only the always part", async () => {
     served[`/plans/${PLN}`] = plan("cancelled");
     await shown(h(PlanItem, { id: PLN }));
@@ -291,8 +360,10 @@ describe("the operations pages' notes", () => {
     expect(n.textContent).toBe(OPERATION_NOTE);
     underTheTitle(n);
   });
-  test("an operation's page draws none before its read answers", async () => {
+  test("an operation's page draws none while its read is pending", async () => {
+    held = true;
     await shown(h(OperationItem, { id: OP }));
+    expect(box.querySelector("h2")).not.toBeNull();
     expect(notes()).toHaveLength(0);
   });
 });
