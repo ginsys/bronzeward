@@ -818,7 +818,7 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     expect(done).toEqual(["Cluster lab", "First key"]);
     const stopped = r.lines.find((l) => l.state === "failed")!;
     expect(stopped.detail).toBe(`not saved: ${EPOCH_CHANGED_ASIDE}.`);
-    expect(plan.unsent).toEqual(["Draft", "Imports"]);
+    expect(plan.unsent).toEqual(["Machine cp-1", "Machine W_2", "Draft", "Imports"]);
   });
 
   test("an epoch stop before the first key drops the page's copy of the talosconfig, which nothing will send now", async () => {
@@ -907,6 +907,34 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     expect(r.ok).toBe(true);
     expect(plan.epoch).toBeUndefined();
     expect(new Set(s.epochs)).toEqual(new Set([undefined]));
+  });
+
+  test("a stop that only a read saw (the answer discarded under a new epoch) still says the epoch changed and retires the plan", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.clusters.set("cl_9", { id: "cl_9", name: "lab", talosClusterId: ID });
+    const env: Env = { ...s.env(), read: async () => ((s.epoch = "e2"), { kind: "discarded" } as never) };
+    const r = await pressOnboarding(env, plan, { current: () => s.epoch, valid: () => true }, () => {});
+    expect(r.ok).toBe(false);
+    expect(r.epochChanged).toBe(true);
+    expect(plan.document).toBeUndefined();
+  });
+
+  test("a stop inside the imports names each import not sent, not only the steps after it", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.committed = (route) => {
+      if (route === "POST /drafts") s.epoch = "e2";
+    };
+    const r = await press(s, plan, "e1");
+    expect(r.epochChanged).toBe(true);
+    expect(plan.unsent).toEqual(["Import cp-1", "Import W_2"]);
+  });
+
+  test("the shell keeps the page while it held the file: the sentence sends the person to the machines, never to a disabled button", () => {
+    expect(stoppedSentence("Cluster lab", true, true, ["First key"], true)).toBe(
+      "Stopped at Cluster lab. The installation's epoch changed after this onboarding began, so nothing more was sent under it (not sent: First key). Open the machines and connect the cluster again: choosing the file finds what is recorded and finishes the rest under the new epoch.",
+    );
   });
 
   test("the page's sentence after an epoch stop says what was not sent and offers the file, never the run again", () => {

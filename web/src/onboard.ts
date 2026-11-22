@@ -268,10 +268,16 @@ export async function onboardCluster(env: Env, p: Plan, report: (lines: Line[]) 
     ["Draft", () => draft(env, p, set, fail, list)],
     ["Imports", () => imports(env, p, set, fail, list)],
   ];
+  // What the stopped step still had to send, one by name where it has members, then the steps after it.
+  const nameOf = (m: Discovery["members"][number]) => (m.hostname === "" ? m.nodeId : m.hostname);
+  const left: Record<string, () => string[]> = {
+    Machines: () => members(p.found).filter((m) => m.answered && m.platform !== "" && p.machines[m.nodeId] === undefined).map((m) => `Machine ${nameOf(m)}`),
+    Imports: () => members(p.found).filter((m) => p.machines[m.nodeId] !== undefined && p.imports[m.nodeId] === undefined).map((m) => `Import ${nameOf(m)}`),
+  };
   p.unsent = undefined;
-  for (const [i, [, go]] of steps.entries()) {
+  for (const [i, [name, go]] of steps.entries()) {
     if (await go()) continue;
-    p.unsent = steps.slice(i + 1).map(([name]) => name);
+    p.unsent = [...(left[name]?.() ?? []), ...steps.slice(i + 1).map(([later]) => later)];
     return false;
   }
   return true;
@@ -281,10 +287,13 @@ export async function onboardCluster(env: Env, p: Plan, report: (lines: Line[]) 
 // is never run again, only chosen again from the file (which finds what is recorded and begins under the new
 // epoch); the steps not sent are named. `choose`: another stop that offers the file again (the first key's
 // write is released).
-export function stoppedSentence(label: string, moved: boolean, choose: boolean, unsent: readonly string[] | undefined): string {
+// `kept`: the shell keeps this page, with its actions off, while it held the file when the epoch changed, so the
+// way on is to open the page again.
+export function stoppedSentence(label: string, moved: boolean, choose: boolean, unsent: readonly string[] | undefined, kept = false): string {
   if (moved) {
     const rest = unsent !== undefined && unsent.length > 0 ? ` (not sent: ${unsent.join(", ")})` : "";
-    return `Stopped at ${label}. The installation's epoch changed after this onboarding began, so nothing more was sent under it${rest}. Choosing the file again finds what is recorded and finishes the rest under the new epoch.`;
+    const way = kept ? "Open the machines and connect the cluster again: choosing the file" : "Choosing the file again";
+    return `Stopped at ${label}. The installation's epoch changed after this onboarding began, so nothing more was sent under it${rest}. ${way} finds what is recorded and finishes the rest under the new epoch.`;
   }
   return `Stopped at ${label}. Running it again finds what is recorded and finishes the rest${choose ? ": choose the file again" : ""}.`;
 }
@@ -309,6 +318,9 @@ export async function pressOnboarding(env: Env, p: Plan, press: { current: () =>
     return o;
   };
   const ok = await onboardCluster({ ...env, send }, p, report);
+  // A stop that only reads saw (an answer discarded under a new epoch) leaves no later write to notice it.
+  const now = press.current();
+  if (!ok && p.epoch !== undefined && now !== undefined && now !== p.epoch) epochChanged = true;
   // Nothing sends this plan again: its copy of the talosconfig goes now, not at the next read.
   if (epochChanged) p.document = undefined;
   return { ok, epochChanged };

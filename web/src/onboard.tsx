@@ -8,7 +8,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useReads, Ref, useSettled } from "./list.tsx";
 import { type Env, endpointNote, isAddress, type Line, pressOnboarding, type Plan, discoverCluster, type Reference, sender, stoppedSentence } from "./onboard.ts";
 import { RequestRef } from "./problems.tsx";
-import { Action } from "./shell.tsx";
+import { Action, KEPT_PAGE, useGate } from "./shell.tsx";
 import { MachineById } from "./titles.tsx";
 import { useUnsaved, useWrites } from "./forms.tsx";
 import { CONNECT_A_CLUSTER } from "./words.ts";
@@ -137,6 +137,8 @@ export function OnboardCluster() {
   const failed = lines.find((l) => l.state === "failed" || l.state === "unknown" || l.state === "stopped");
   // A first key that did not end well is released with its write, and nothing here holds the file then.
   const choose = moved || (failed?.key === "first-key" && p?.document === undefined);
+  // The shell keeps this page, actions off, when it held the file as the epoch changed: only another page opens it afresh.
+  const keptPage = useGate(["author"]) === KEPT_PAGE;
   return (
     <>
       <h2>{CONNECT_A_CLUSTER}</h2>
@@ -195,12 +197,14 @@ export function OnboardCluster() {
           )}
           {ended === false && (
             <p role="alert" data-testid="onboard-result">
-              {stoppedSentence(failed?.label ?? "a step", moved, choose, p?.unsent)}
+              {stoppedSentence(failed?.label ?? "a step", moved, choose, p?.unsent, keptPage)}
             </p>
           )}
           {ended === false && (
             <p>
-              {choose
+              {moved && keptPage
+                ? <a href="/machines" onClick={(e) => { e.preventDefault(); go("/machines"); }}>Open the machines</a>
+                : choose
                 ? <Action label="Choose the file again" needs={["author"]} onClick={() => { setPhase("file"); setNote(undefined); unsay(); }} />
                 : <Action label="Run again" needs={["author"]} onClick={() => void run()} busy={busy} />}
             </p>
