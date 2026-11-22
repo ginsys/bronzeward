@@ -1437,8 +1437,9 @@ states the floor and the point it counts from (`internal/api/settle.go:148-150`)
 maximum transport deadline as values before any decision, on a recovery start once its entry has
 committed, so the client shows both before the first one (G17). After a successful accounting its timeline entries carry `facts.settleFloor` and `facts.anchor`
 (`internal/api/settle.go:160-161`, `internal/api/recovery_accountings.go:209-211`,
-`internal/api/recovery_accountings.go:230-231`). **Proposed:** the end-observation choice offers only observations
-with purpose `recovery`, and an observation without a `resourceVersion` is shown unusable at
+`internal/api/recovery_accountings.go:230-231`). **Decided in the console:** the end-observation choice lists every observation of the machine and
+turns off, with its reason, one whose purpose is not `recovery`, one that is the start, and one that
+began before the start was recorded; an observation without a `resourceVersion` is shown unusable at
 either end (`internal/api/observations.go:23`, `internal/api/observations.go:37`). The per-attempt
 accounting also refuses an attempt already accounted and an executor not stopped or taken over
 (`internal/api/settle.go:50-67`;

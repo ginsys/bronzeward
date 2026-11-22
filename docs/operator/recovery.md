@@ -154,6 +154,18 @@ shows the window, the settle floor and the risk. It then asks `Record accounting
 typed back. Each named refusal of the server gets one next step. The answer shows the settle floor
 and the anchor that the server recorded, read from the timeline.
 
+In the web interface the recovery page of the operation, `/recovery/operations/<operation>`, has
+an "Account for an attempt" section for each attempt with no accounting. It shows the machine by
+name, the settle floor and the maximum transport deadline, and the machine's observations twice:
+once to choose the start, once to choose the end. An observation that cannot be the start or the
+end is off, with the reason. "Read the observations again" reads them again without losing what
+you chose or typed: use it when the settle floor asks you to wait for a later observation. The
+sentence above the button says what the decision records: your
+judgment that no copy of the request can still land, and that nothing shows whether it did. One
+press on "Record accounting" sends it. Nothing is typed back. The form sends nothing in the same
+four cases as the command, and a moved version needs an explanation. A named refusal of the server
+shows in place with its next step.
+
 ### Cancel it
 
 When the outcome cannot be read and no attempt was made, cancel the operation:
@@ -293,6 +305,12 @@ Each machine goes `pre-restore-unaccounted`, then `unresolved` or `blocked`, the
    release. The command then asks `Record accounting for machine <name> (cluster <cluster>)? [y/N]`
    and sends the decision only when you answer `y` or `yes`. Run it again for each further machine.
 
+   In the web interface the console's row of a `pre-restore-unaccounted` scope holds the same
+   form as the attempt's: the machine by name, the floor and the deadline, the two choices of
+   observations with the reason an observation is off, the explanation where the version moved,
+   the sentence that says what the decision records, and one "Record accounting" press. Nothing is
+   typed back. The answer names the state the scope is now in and the next step.
+
    A scope a restored operation still holds is `unresolved`; otherwise `blocked` until marked. A
    restored operation with no attempt is then cancelled by the server, sending nothing. One with an
    attempt is classified by the normal instance's executor from an observation after the
@@ -399,5 +417,4 @@ These actions are on the web:
   entry and it issues no token again.
 
 These steps stay outside the browser: the restores, the `auth.deniedSubjects` edit, the restarts and
-the token rotation. The page links to them. The accounting controls are not on the page yet. Use
-`bronzewardctl` for them.
+the token rotation. The page links to them.
