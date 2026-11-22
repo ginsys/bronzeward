@@ -210,10 +210,11 @@ var cmdTable = []cmdEntry{
 			"already recorded is not stopped."},
 	{path: "apply", line: "apply a release to the machines you choose", synopsis: "apply <release> (--machine <a,b> | --all) [--diff]", roles: "publisher, then approver", person: true,
 		notes: "makes one apply-config plan for each machine chosen, by name or ID, or --all of the release's machines, prints each machine with\n" +
-			"its role and profiles, and with --diff each plan's change, on standard error, then asks Approve them? [y/N] and approves every\n" +
-			"plan listed only on y or yes. Enter, n and the end of input send no approval and cancel the plans this command made; a plan\n" +
-			"somebody else prepared is approved as it stands and never cancelled here. A Ctrl-C at the question leaves the plans to expire\n" +
-			"24 hours after they were made. A machine already applied, frozen, in drift or in an operation is left out with its reason.\n" +
+			"its role, profiles and plan expiry, and with --diff each plan's change, on standard error, then asks Approve them? [y/N] and approves\n" +
+			"every plan listed only on y or yes. A plan whose change cannot be read is left out. Enter, n and the end of input send no approval\n" +
+			"and cancel the plans this command made; a plan somebody else prepared is approved as it stands and never cancelled here. A Ctrl-C at\n" +
+			"the question leaves the plans to expire at the time each shows. A machine already applied, frozen, in drift, in an operation or with\n" +
+			"another operation's plan waiting is left out with its reason.\n" +
 			"There is no --yes, --no-input refuses, and -o json and -o yaml are not offered. It does not wait for the operations."},
 	{path: "approve", line: "approve a plan", synopsis: "approve <plan>", roles: "approver", person: true,
 		notes: "prints the plan and the predicted self-approval on standard error, then asks Approve it? [y/N] and sends only on y or yes,\n" +

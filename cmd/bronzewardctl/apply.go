@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/ginsys/bronzeward/internal/client"
@@ -19,8 +20,9 @@ import (
 // question, Approve N plans? [y/N], decides all of them: only y or yes approves, and Enter, n and the
 // end of input send no approval and cancel the plans this command made. A plan somebody else prepared
 // is read from the machine's position and approved as it stands; it is never cancelled here. A Ctrl-C
-// at the question leaves the plans made to expire (24 hours). Standard output holds one line for each
-// machine. The structured outputs are not offered: the command asks a person a question.
+// at the question leaves the plans made to expire at the time each one shows. A plan whose change cannot
+// be read is left out. The approvals are bound to the epoch the list was shown at. Standard output holds
+// one line for each machine. The structured outputs are not offered: the command asks a person a question.
 func (e *env) apply(args []string) error {
 	var machines string
 	var all, diff bool
@@ -55,30 +57,49 @@ func (e *env) apply(args []string) error {
 		return err
 	}
 	var made []string
+	var failed []error
 	for _, r := range rows {
 		if r.plan == "" && r.line == "" {
 			if r.plan, err = e.applyPlan(c, release, r); err != nil {
+				failed = append(failed, fmt.Errorf("%s: %w", r.label(), err))
 				r.line = sf("not planned: %v", err)
+				var u *client.Unknown
+				if errors.As(err, &u) {
+					r.line = "not planned: whether its plan was made is unknown (the error above); plan list --machine shows it"
+				}
 			} else {
 				made = append(made, r.plan)
+				r.madeID = r.plan
 			}
 		}
 	}
+	// Every plan is read before the list is shown, so that none is approved unseen: a plan whose change
+	// cannot be read is left out, and one this command made is cancelled.
+	e.applyRead(c, rows)
+	var unread []string
 	planned := 0
 	for _, r := range rows {
-		if r.plan != "" {
+		switch {
+		case r.plan != "":
 			planned++
+		case r.made:
+			unread = append(unread, r.madeID)
 		}
 	}
-	e.applyShow(c, rows, diff)
+	e.applyCancel(c, unread)
+	made = slices.DeleteFunc(made, func(id string) bool { return slices.Contains(unread, id) })
+	e.applyShow(rows, diff)
 	if planned == 0 {
-		return notConfirmed{errors.New("no plan to approve; nothing was approved")}
+		return errors.Join(append(failed, notConfirmed{errors.New("no plan to approve; nothing was approved")})...)
 	}
+	// Every approval is bound to the reads the list was shown from: an epoch that moved since makes the
+	// rest refuse, never approve under the new one.
+	epoch, moves := c.Context.LastEpoch, c.EpochMoves()
 	if err := e.confirmYes(sf("Answering y records your approval of the %d plans listed as you. Approve them?", planned)); err != nil {
 		e.applyCancel(c, made)
-		return err
+		return errors.Join(append(failed, err)...)
 	}
-	return e.applyApprove(c, rows)
+	return errors.Join(append(failed, e.applyApprove(c, rows, epoch, moves))...)
 }
 
 // applyRow is a machine of the release as the command reads it. plan is the one to approve ("" for
@@ -88,7 +109,9 @@ type applyRow struct {
 	profiles       []string
 	plan, line     string
 	made           bool
+	madeID         string // the plan this command made, kept when the plan is left out of the approval
 	machine        apitypes.MachineBody
+	body           apitypes.PlanBody // the plan as read, the change and the expiry the list shows
 }
 
 func (r *applyRow) label() string {
@@ -150,12 +173,16 @@ func (e *env) applyRows(c *client.Client, rel *apitypes.ReleaseBody, chosen stri
 // (somebody prepared it), the reason there is nothing to do, or neither, which means a plan is to be made.
 func applyStanding(p *apitypes.PositionBody, release string) (plan, line string) {
 	m := p.Machine
-	mine := p.Plan != nil && p.Plan.Release == release
+	ofRelease := p.Plan != nil && p.Plan.Release == release
+	mine := ofRelease && p.Plan.Operation == apitypes.PositionPlanOperationApplyConfig
+	waiting := p.Step == apitypes.PositionBodyStepAwaitingApproval || p.Step == apitypes.PositionBodyStepAwaitingDispatch
 	switch {
 	case p.Step == apitypes.PositionBodyStepOperationUnresolved:
 		return "", "stopped: an operation on this machine is unresolved; open it with operation list"
 	case p.Step == apitypes.PositionBodyStepOperationInFlight:
 		return "", "applying: its operation is in progress"
+	case ofRelease && !mine && waiting:
+		return "", "stopped: the plan waiting for this machine is not an apply plan; open it with plan show " + client.ShellWord(p.Plan.Id)
 	case p.Step == apitypes.PositionBodyStepAwaitingDispatch && mine:
 		return "", "approved already: the controller sends it when its gates allow"
 	case m.OpenDrift != nil:
@@ -196,9 +223,23 @@ func (e *env) applyPlan(c *client.Client, release string, r *applyRow) (string, 
 	return id, err
 }
 
+// applyRead reads each row's plan. One that cannot be read is left out of the approval, with the reason,
+// so that no plan is approved unseen; r.madeID keeps the ID of one this command made, to be cancelled.
+func (e *env) applyRead(c *client.Client, rows []*applyRow) {
+	for _, r := range rows {
+		if r.plan == "" {
+			continue
+		}
+		if err := getJSON(c, "/plans/"+url.PathEscape(r.plan), &r.body); err != nil {
+			r.plan, r.line = "", sf("stopped: the change of its plan could not be read (%v), so it is left out", err)
+		}
+	}
+}
+
 // applyShow prints the list on standard error: each machine with its role and profiles and its plan
-// or the reason it has none, the diff of each plan with --diff, then the notes the lead ruled on.
-func (e *env) applyShow(c *client.Client, rows []*applyRow, diff bool) {
+// (with its own expiry) or the reason it has none, the diff of each plan with --diff, then the notes
+// the lead ruled on.
+func (e *env) applyShow(rows []*applyRow, diff bool) {
 	controlPlane, noRole := false, false
 	for _, r := range rows {
 		role := "no role"
@@ -216,15 +257,17 @@ func (e *env) applyShow(c *client.Client, rows []*applyRow, diff bool) {
 			} else {
 				what += " (prepared by somebody else)"
 			}
+			what += ", expires " + r.body.ExpiresAt.UTC().Format("2006-01-02 15:04:05 MST")
 		}
 		tf(e.err, "%s  %s  %s  %s\n", r.label(), role, strings.Join(r.profiles, ","), what)
-		if diff && r.plan != "" {
-			var p apitypes.PlanBody
-			if err := getJSON(c, "/plans/"+url.PathEscape(r.plan), &p); err != nil {
-				tf(e.err, "  the plan's change could not be read: %v\n", err)
-			} else if d := p.Evidence.Diff; d == nil || d.Withheld {
+		if r.plan != "" {
+			d := r.body.Evidence.Diff
+			switch {
+			case d == nil || d.Withheld:
 				tf(e.err, "  the plan's change is withheld\n")
-			} else {
+			case !diff:
+				tf(e.err, "  the plan's change is %d lines; --diff shows it\n", strings.Count(d.Unified, "\n"))
+			default:
 				if d.Unified == "" {
 					tf(e.err, "  no differences in the redacted configurations\n")
 				}
@@ -245,11 +288,13 @@ func (e *env) applyShow(c *client.Client, rows []*applyRow, diff bool) {
 	if noRole {
 		tf(e.err, "A machine imported before its role was stored shows no role until it is imported again.\n")
 	}
-	tf(e.err, "The controller re-checks each plan when it sends it and applies it only if every check passes, one machine of a cluster at a time, in the order the plans were approved, which is the order listed. A plan that is not applied expires 24 hours after it was made.\n")
+	tf(e.err, "The controller re-checks each plan when it sends it and applies it only if every check passes, one machine of a cluster at a time, in an order the controller does not promise. A plan that is not applied expires at the time shown for it.\n")
 }
 
-// applyApprove approves each listed plan and carries on past a refusal; the error is every refusal.
-func (e *env) applyApprove(c *client.Client, rows []*applyRow) error {
+// applyApprove approves each listed plan, bound to the epoch and move count the list was shown from, and
+// carries on past a refusal; the error is every refusal. Only a refused write is said to have approved
+// nothing: an unknown outcome may have been committed, and its error says so.
+func (e *env) applyApprove(c *client.Client, rows []*applyRow, epoch string, moves int) error {
 	var errs []error
 	for _, r := range rows {
 		if r.plan == "" {
@@ -263,7 +308,7 @@ func (e *env) applyApprove(c *client.Client, rows []*applyRow) error {
 				err := getJSON(c, "/plans/"+url.PathEscape(r.plan), &now)
 				return sf("GET /api/v1/plans/%s shows state %s, approval %s", r.plan, now.State, or(now.Approval, "none")), err
 			}}
-		w.ReadsFrom(c)
+		w.ReadsAt(epoch, moves)
 		approved := ""
 		err := e.writeWith(c, nil, w, func(_ *client.Client, resp *client.Response) ([]string, error) {
 			var a apitypes.ApprovalBody
@@ -274,7 +319,12 @@ func (e *env) applyApprove(c *client.Client, rows []*applyRow) error {
 			return nil, nil
 		})
 		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w; nothing was approved for this machine", r.label(), err))
+			var u *client.Unknown
+			if errors.As(err, &u) {
+				errs = append(errs, fmt.Errorf("%s: %w", r.label(), err))
+			} else {
+				errs = append(errs, fmt.Errorf("%s: %w; nothing was approved for this machine", r.label(), err))
+			}
 			continue
 		}
 		tf(e.out, "%s\n", approved)
@@ -291,7 +341,7 @@ func (e *env) applyCancel(c *client.Client, made []string) {
 			Check: "plan show " + client.ShellWord(id)}
 		w.ReadsFrom(c)
 		if err := e.writeWith(c, nil, w, func(*client.Client, *client.Response) ([]string, error) { return nil, nil }); err != nil {
-			tf(e.err, "plan %s was not cancelled (%v); it expires 24 hours after it was made\n", id, err)
+			tf(e.err, "plan %s was not cancelled (%v); it stays until it expires\n", id, err)
 			continue
 		}
 		cancelled = append(cancelled, id)
