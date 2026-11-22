@@ -396,7 +396,7 @@ func sentences(m apitypes.MachineBody, obs []apitypes.ObservationBody) []string 
 	case m.OpenDrift != nil:
 		// Drift is the sentence above; a release not applied yet and drift are different (§2.4).
 	case m.FormOnly:
-		add("Release not applied yet: the selected release %s for this machine differs in form only (comments and encoding) from what Bronzeward adopted: the same documents, keys and values. The first apply sends the release's text, without the comments of the adopted configuration.", *m.Desired)
+		add("Differs in form only (comments and encoding): the selected release %s for this machine. The release has the same documents, keys and values as the configuration Bronzeward adopted from the machine. The first apply sends the release's text, without the comments of the adopted configuration.", *m.Desired)
 	case m.PendingConvergence:
 		add("Release not applied yet: the configuration of the selected release %s for this machine differs from what Bronzeward applied.", *m.Desired)
 	case m.Applied != nil && *m.Desired != m.Applied.Release:

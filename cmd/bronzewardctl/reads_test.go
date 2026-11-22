@@ -35,6 +35,11 @@ func TestSentences(t *testing.T) {
 			[]string{"Adopted from the node's own bytes", "the API does not say which."}, nil},
 		{"pending, applied", apitypes.MachineBody{Applied: applied, Desired: rel("rel_b"), PendingConvergence: true}, nil,
 			[]string{"Release not applied yet: the configuration of the selected release rel_b for this machine differs from what Bronzeward applied."}, nil},
+		// The specification's formOnly row (operator-experience.md, the status sentences), word for word, in place of
+		// the "differs from what Bronzeward applied" sentence; the web client's machine page shows the same text.
+		{"pending, form only", apitypes.MachineBody{Applied: &apitypes.Applied{Release: "rel_a", Source: "adoption"}, Desired: rel("rel_b"), PendingConvergence: true, FormOnly: true}, nil,
+			[]string{"Differs in form only (comments and encoding): the selected release rel_b for this machine. The release has the same documents, keys and values as the configuration Bronzeward adopted from the machine. The first apply sends the release's text, without the comments of the adopted configuration."},
+			[]string{"Release not applied yet", "differs from what Bronzeward applied"}},
 		{"pending, never applied", apitypes.MachineBody{Desired: rel("rel_b"), PendingConvergence: true}, nil,
 			[]string{"Release not applied yet: the selected release rel_b has not been applied to this machine.", "Not applied or adopted"}, nil},
 		{"new release, same configuration", apitypes.MachineBody{Applied: applied, Desired: rel("rel_b")}, nil,
