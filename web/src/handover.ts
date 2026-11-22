@@ -119,12 +119,23 @@ const idOf = (w: Write): string | undefined => {
 };
 
 // The machines that already have an assignment: an entry of the draft, or a head on the server (every page read).
+// An entry or a head the press cannot read may be a machine's real assignment, so it gives no answer at all
+// (undefined) and the press writes nothing: skipping it could replace that selection with an empty one.
 async function assigned(d: Draft, io: Io): Promise<Set<string> | undefined> {
-  const held = new Set(d.entries.flatMap((e) => (e.kind === "assignment" && e.machine !== undefined ? [e.machine] : [])));
+  const held = new Set<string>();
+  for (const e of d.entries as { kind?: unknown; machine?: unknown }[]) {
+    if (typeof e?.kind !== "string") return undefined;
+    if (e.kind !== "assignment") continue;
+    if (typeof e.machine !== "string") return undefined;
+    held.add(e.machine);
+  }
   for (let cursor: string | undefined; ; ) {
-    const r = await io.read<{ items: { machine: string }[]; next?: string }>(cursor === undefined ? "/assignments" : `/assignments?cursor=${enc(cursor)}`);
+    const r = await io.read<{ items: { machine?: unknown }[]; next?: string }>(cursor === undefined ? "/assignments" : `/assignments?cursor=${enc(cursor)}`);
     if (r?.kind !== "ok") return undefined;
-    for (const a of r.data.items) held.add(a.machine);
+    for (const a of r.data.items) {
+      if (typeof a?.machine !== "string") return undefined;
+      held.add(a.machine);
+    }
     if (r.data.next === undefined) return held;
     cursor = r.data.next;
   }
