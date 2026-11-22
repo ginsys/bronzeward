@@ -384,9 +384,9 @@ describe("reading the composition, one read at a time", () => {
 describe("the assignment entry (W4)", () => {
   const reads: Reads = { client: { read: () => new Promise(() => {}) }, settle: () => true, undropped: () => () => true, view: "", again: 0, regained: 0, go: () => {}, failure: () => null };
   const draft = { id: "drf_1", cluster: "cl_1", title: "t", state: "open", revision: 6, entries: [] };
-  const pane = (state = "open") =>
+  const pane = (state = "open", entry?: unknown) =>
     renderToStaticMarkup(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles: ["author"], offline: false } },
-      h(ReadsProvider, { value: reads }, h(AssignmentPane, { draft: { ...draft, state }, entry: undefined, seeChange: () => {} })))));
+      h(ReadsProvider, { value: reads }, h(AssignmentPane, { draft: { ...draft, state }, entry: entry as never, seeChange: () => {} })))));
 
   test("a new assignment chooses a machine, shows the six layers in order and offers Save", () => {
     const out = pane();
@@ -400,6 +400,11 @@ describe("the assignment entry (W4)", () => {
   test("an empty list says what it means in an open draft, and nothing otherwise", () => {
     expect(pane()).toContain(EMPTY_ASSIGNMENT.replace("'", "&#x27;"));
     expect(pane("discarded")).not.toContain("import base alone");
+  });
+  test("the empty-list sentence waits for the entry's text, and is left out for an entry the draft removes", () => {
+    const entry = (revision: string | null) => ({ kind: "assignment", machine: "mch_1", head: "asg_1", base: 1, revision });
+    expect(pane("open", entry("asr_1"))).not.toContain("import base alone"); // the text is not read yet: the lists are empty
+    expect(pane("open", entry(null))).not.toContain("import base alone");
   });
   test("a draft that is not open takes no write", () => {
     const out = pane("discarded");
