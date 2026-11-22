@@ -23,7 +23,7 @@ var recoveryScopeCases = map[string]func(*testing.T, *recoveryEnv){
 			epoch.Store(e.f.newEpoch())
 		}), nil)
 		before := e.f.actCount()
-		r := e.ctl(e.s.machine+"\n", e.scopeAccount()...)
+		r := e.ctl("y\n", e.scopeAccount()...)
 		e.f.want(r, 3, "set aside, not repeated: the epoch is now "+fmt.Sprint(epoch.Load())+", not the reference epoch",
 			"the newest timeline entry of machine "+e.s.machine, "--idempotency-key ")
 		s.one(t, 1)
@@ -42,7 +42,7 @@ var recoveryScopeCases = map[string]func(*testing.T, *recoveryEnv){
 			e.in.proxy.ServeHTTP(w, r)
 		}), nil)
 		before := e.f.actCount()
-		r := e.ctl(e.s.machine+"\n", e.scopeAccount()...)
+		r := e.ctl("y\n", e.scopeAccount()...)
 		e.f.want(r, 3, "repeat 1 of 3", "set aside, not repeated: the key's record is from an earlier epoch", "the newest timeline entry of machine "+e.s.machine)
 		s.one(t, 2)
 		if n := e.f.actCount(); r.out != "" || n != before+1 {
@@ -61,7 +61,7 @@ var recoveryScopeCases = map[string]func(*testing.T, *recoveryEnv){
 			e.in.proxy.ServeHTTP(w, r)
 		}), nil)
 		before := e.f.actCount()
-		r := e.ctl(e.s.machine+"\n", e.scopeAccount()...)
+		r := e.ctl("y\n", e.scopeAccount()...)
 		e.f.want(r, 3, "set aside, not repeated: the epoch is now "+fmt.Sprint(epoch.Load())+", and this send committed nothing",
 			"the newest timeline entry of machine "+e.s.machine)
 		s.one(t, 2)
@@ -172,8 +172,8 @@ func (e *recoveryEnv) recoveryWrites(withAttempt, withoutAttempt string) []struc
 	}{
 		{"enter\n", []string{"recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "BWSYNTH drill"}},
 		{"", []string{"recovery", "exit"}},
-		{m + "\n", e.scopeAccount()},
-		{m + "\n", []string{"recovery", "account", withAttempt, "att_BWSYNTH", "--start", e.start, "--end", e.end}},
+		{"y\n", e.scopeAccount()},
+		{"y\n", []string{"recovery", "account", withAttempt, "att_BWSYNTH", "--start", e.start, "--end", e.end}},
 		{"", []string{"recovery", "takeover", withAttempt, "--reason", "BWSYNTH drill"}},
 		{"", []string{"recovery", "resolve", withoutAttempt, "--reason", "BWSYNTH drill"}},
 		{"", []string{"recovery", "mark", m}},

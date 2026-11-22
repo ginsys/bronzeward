@@ -9,7 +9,7 @@
 # Data is synthetic. A second recovery entry needs a configured provider, so the cases that need a new
 # epoch commit it in the database as the entry does: a recovery_epoch row and installation_state.epoch.
 # The server reads the epoch from the database on every request. Human tokens stay valid across it.
-# Each sends recovery scope-account <machine> --start <start> --end <end>, with the machine ID typed back.
+# Each sends recovery scope-account <machine> --start <start> --end <end>, with y answered to the question that names the machine.
 
 - id: AMB-05
   setup: serve started with -recovery-start, entry committed, two observations seeded

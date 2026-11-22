@@ -168,9 +168,9 @@ commands:
               once every scope is released
   recovery scope-account <machine> --start <observation> --end <observation> [--explanation <text>]
               after a restore: accounts every unaccounted attempt on the machine; shows the window
-              and the risk, and is sent only when the machine ID is typed back
+              and the risk, and is sent only when y is answered to the question that names the machine
   recovery account <operation> <attempt> --start <observation> --end <observation> [--explanation <text>]
-              accounts one attempt whose response was lost; the same window, risk and typed ID
+              accounts one attempt whose response was lost; the same window, risk and question
   recovery takeover <operation> --reason <text>
               makes the serving controller the owner of a non-terminal operation; sends nothing to the node;
               a repeat of an unknown outcome also takes --generation as printed

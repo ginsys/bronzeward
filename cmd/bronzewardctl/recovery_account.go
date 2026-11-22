@@ -19,7 +19,7 @@ import (
 // one attempt whose response was lost. Both are the operator's judgment, made over two
 // observations of the machine; the server checks the settle (internal/api/settle.go) and the
 // client shows the window and the risk first, refuses what it can read for itself, and sends only
-// when the machine ID is typed back.
+// on y or yes to one question that names the machine and its cluster. Nothing is typed back.
 
 // maxExplanation is the longest value of a facts member (checkFacts in the server).
 const maxExplanation = 1024
@@ -81,16 +81,36 @@ func shortDuration(d time.Duration) string {
 func servedSeconds(s float32) time.Duration { return time.Duration(float64(s) * float64(time.Second)) }
 
 // settleFlags checks the flags both accountings take before anything is read or sent.
-func settleFlags(start, end, explanation string, noInput bool, typed string) error {
+func settleFlags(start, end, explanation string, noInput bool) error {
 	switch {
 	case start == "" || end == "":
 		return usageError{errors.New("give --start and --end, the observation IDs the settle runs between; nothing was sent")}
 	case len(explanation) > maxExplanation:
 		return usageError{fmt.Errorf("--explanation: give at most %d bytes; nothing was sent", maxExplanation)}
 	case noInput:
-		return notConfirmed{fmt.Errorf("this asks for %s typed back, which --no-input forbids; nothing was sent", typed)}
+		return notConfirmed{errors.New("this asks for a confirmation, which --no-input forbids; nothing was sent")}
 	}
 	return nil
+}
+
+// accountQuestion is the question an accounting asks before it sends: the machine by its name and its
+// cluster by its name, as the machine and cluster bodies serve them (a role is served by nothing, so none
+// is named). A machine with no name, a cluster that could not be read or a machine that could not be read
+// is named by its identifier, and none of that stops the accounting. It reads before epochHeld, so both
+// bodies sit inside the epoch window.
+func (e *env) accountQuestion(c *client.Client, machine string) string {
+	m := titleBody[apitypes.MachineBody](e, c, titlePath("machines", machine))
+	if m == nil {
+		return "Record accounting for machine " + machine + "?"
+	}
+	name, cluster := machine, m.Cluster
+	if m.Name != nil && *m.Name != "" {
+		name = *m.Name
+	}
+	if cl := titleBody[apitypes.ClusterBody](e, c, titlePath("clusters", m.Cluster)); cl != nil && cl.Name != "" {
+		cluster = cl.Name
+	}
+	return "Record accounting for machine " + name + " (cluster " + cluster + ")?"
 }
 
 // machineObservations reads every observation of machine, by ID.
@@ -235,7 +255,7 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		return err
 	}
 	machine := pos[0]
-	if err := settleFlags(start, end, explanation, e.noInput, "the machine ID"); err != nil {
+	if err := settleFlags(start, end, explanation, e.noInput); err != nil {
 		return err
 	}
 	rp, err := rf.repeat(false)
@@ -269,6 +289,7 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		if err != nil {
 			return err
 		}
+		question := e.accountQuestion(c, machine)
 		if err := epochHeld(c, first, moves); err != nil {
 			return err
 		}
@@ -290,7 +311,7 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		// a first send once its own preflight read shows another.
 		w.Body = body
 		w.ReadsFrom(c)
-		return e.confirmTyped("the machine ID", machine)
+		return e.confirmYes(question)
 	}
 	err = e.writeAfter(prep, w, func(c *client.Client, resp *client.Response) ([]string, error) {
 		var x apitypes.ScopeAccountingBody
@@ -330,7 +351,7 @@ func (e *env) recoveryAccount(args []string) error {
 		return err
 	}
 	operation, attempt := pos[0], pos[1]
-	if err := settleFlags(start, end, explanation, e.noInput, "the machine ID"); err != nil {
+	if err := settleFlags(start, end, explanation, e.noInput); err != nil {
 		return err
 	}
 	rp, err := rf.repeat(false)
@@ -377,6 +398,7 @@ func (e *env) recoveryAccount(args []string) error {
 		if err != nil {
 			return err
 		}
+		question := e.accountQuestion(c, machine)
 		if err := epochHeld(c, first, moves); err != nil {
 			return err
 		}
@@ -397,7 +419,7 @@ func (e *env) recoveryAccount(args []string) error {
 		w.Body = body
 		w.ReadsFrom(c)
 		w.Read = newestEntry(machine)
-		return e.confirmTyped("the machine ID", machine)
+		return e.confirmYes(question)
 	}
 	err = e.writeAfter(prep, w, func(c *client.Client, resp *client.Response) ([]string, error) {
 		var x apitypes.AccountingBody

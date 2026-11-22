@@ -321,11 +321,11 @@ both_settled() {
 # in mode cli (ginsys/bronzeward#362). The CLI's contexts name B, which serves them from step 2 on:
 # first B-recovery, then B again. cli_ready adds them at the first command, when B answers.
 # cli_account_scope <name> <machine> <start> <end> <state text>: h-recovery accounts one scope with the
-# machine ID typed back, and the output says the scope is now in that state.
+# y answered to the question that names the machine, and the output says the scope is now in that state.
 cli_account_scope() {
   cli_ready "$mutation_ref" h-recovery
   ctl "$1" h-recovery recovery scope-account "$2" --start "$3" --end "$4" \
-    --explanation "$mutation_ref: the scope's settle reads" <<<"$2" &&
+    --explanation "$mutation_ref: the scope's settle reads" <<<y &&
     cli_kept "$1" "^Recorded\. Scope $2 is now $5\."
 }
 # takeover_held: h-recovery takes held over through B-recovery from generation 2: unresolved at 3. The

@@ -1275,16 +1275,44 @@ landed; nothing here shows whether it did. The settle floor is a minimum wait, n
 bound: a request landing after this can overwrite work admitted once the scope is released,
 and would be seen only as drift at a later observation.
 Explanation (required if the resource version moved): <empty>
-Type the machine ID to record this accounting: mch_k2p…7xqa
+Record accounting for machine worker-1 (cluster prod)? [y/N]: y
 Recorded. Scope mch_k2p…7xqa is now blocked until it is marked.
 ```
+
+**Decision: the two accountings are confirmed by one press in the console and one `y` in the command,
+and no machine ID is typed.** The owner chose it on 2026-11-22 (typed 12:10 CET, answering the question of what the accounting
+form asks for, option "a confirmation and one press"), after he removed the typed plan ID from
+approval the same day. The console form shows the machine by name with its cluster, both
+observations, the judgment and the residual-risk text, and one press of "Record accounting" records
+it. The command has no button, so its form of the same answer is the project lead's reading of it,
+not the owner's own words, and the owner may reverse it: it prints the same window, then asks `Record accounting for machine <name> (cluster
+<cluster>)? [y/N]`. Only `y` or `yes` in any case sends; Enter, no answer, end of input and anything
+else stop with nothing sent and exit 2. There is no `--yes`, and `--no-input` still refuses, because the
+question needs an answer. A machine with no name, or one that could not be read, is named by its
+identifier. No role is named: nothing serves a machine's role. Everything the client checks before
+sending stays.
+
+*Why.* The typed machine ID was a guard against recording the judgment by habit. What guards that is
+the evidence on the screen at the moment of the press: the machine's name, the two readings, and the
+judgment and residual-risk text. A typed identifier proves a person copied an identifier, not that
+they read the page, and the ID is the one thing in the form a person does not recognise (the owner's
+standing direction of 2026-11-21: names, not identifiers).
+
+*Alternatives, rejected.* A typed machine ID: it is what this section had; the owner removed it.
+A typed machine name: a name is easier to type than an ID and proves no more. For the command, a bare
+"press Enter to record": a held key would record a judgment of risk; and a `--yes` flag: a script
+would record the judgment unseen.
+
+*Unchanged.* The word `enter` typed at recovery entry, and the identity typed back at revocation: the
+decision covers the two accountings only. The approval's own confirmation (§5.6) is decided with the
+apply page and is not changed here.
 
 Client rules for the two accountings, where the answer or the read lacks what this section asks for:
 
 - The answer carries neither `facts.settleFloor` nor `facts.anchor`. The client reads the timeline entry at the answered revision, newest first, and prints both. Without API revision 3 it names the timeline instead.
 - The refusal of a start that is not the first read names no observation and no anchor. The client points at `machine observations`.
-- The window shows purpose, start time, recorded time and resource version for both observations at the typed answer. The observation table keeps its columns.
-- `recovery account` takes an operation and an attempt. The client reads the machine from the operation's subject and asks for that machine ID.
+- The window shows purpose, start time, recorded time and resource version for both observations at the question. The observation table keeps its columns.
+- `recovery account` takes an operation and an attempt. The client reads the machine from the operation's subject and names that machine in the question. It reads the machine and its cluster before the epoch check, so both sit inside the epoch window; a read that fails names the identifier and never stops the accounting.
 - The client refuses before sending, with exit 2, an end that is not a `recovery` observation, an observation without a resource version and a moved version without an explanation.
 
 Client rules for the four acts that follow (`recovery takeover`, `resolve`, `mark` and `release`),

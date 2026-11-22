@@ -23,7 +23,7 @@ Scope accounting of machine mch_… in human (https://127.0.0.1:<port>)
   Explanation: none
 This records your judgment that no request sent before the restore, from any attempt the restored journal shows or one it lost, can still land on this machine. It may already have landed; nothing here shows whether it did.
 The settle floor is a minimum wait, not a proven bound: a request landing after this can overwrite work admitted once the scope is released, and would be seen only as drift at a later observation.
-Type the machine ID to send it, or press Enter to stop:
+Record accounting for machine mch_… (cluster lab-a)? [y/N]:
 Recorded. Scope mch_… is now blocked until it is marked.
 Attempts accounted: none.
 Settle floor 30s, counted from <time>.
