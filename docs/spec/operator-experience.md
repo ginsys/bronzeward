@@ -942,6 +942,14 @@ when its machine is no longer chosen and when the page is left, including a plan
 after that; the choice cannot change while the page works, and a plan Apply was pressed for is never
 cancelled. One the page loses (the tab is closed) expires with the plan default; a creation whose outcome is
 unknown leaves a plan the page has no ID for, which the machine's page shows with who prepared it. No route returns a change before a plan exists, so showing it means making the plan.
+**Apply** stays off while any plan's change is unread or withheld by the server (a configuration that could not be
+redacted, or a machine holding a configuration other than the one Bronzeward applied, so the two cannot be
+compared): the page names that plan and links to its plan page, where the person can read what it records and
+approve it one plan at a time, a choice the plan page leaves to the person and the batch does not. Show apply and
+Apply send nothing new while a write of the page is open, with an unknown outcome, until the person repeats it or
+dismisses its notice (the rule of every form of the console, `startsNew`). While machines wait or apply, the rows
+are read again five seconds after the last read answered, so a slow read is never dropped by the next one, for ten
+minutes after the press.
 A control plane may be chosen: the server does not refuse it and the acceptance tests do not cover it, so the
 page says that, and the operator limits say it too. Alternatives: one page per machine and plan (the
 repetition above); approving without showing the change (the person approves what they never read); a new
