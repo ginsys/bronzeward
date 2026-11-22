@@ -105,6 +105,8 @@ const note = () => {
 const underTheTitle = (n: Element, ...also: (Element | null | undefined)[]) => {
   const h2 = box.querySelector("h2")!;
   expect(h2.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // A note inside the heading follows it in document order too, so containment is refused on its own.
+  expect(h2.contains(n)).toBe(false);
   const title = [h2, ...box.querySelectorAll('[data-testid="draft-line"]'), ...[...box.querySelectorAll("small")].map((s) => s.parentElement), ...also];
   // Every node before the note in document order, text included (a failure line can be bare text).
   const walker = document.createTreeWalker(box, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
@@ -500,12 +502,30 @@ describe("the notes of the other pages", () => {
     served["/machines"] = { items: [machine], next: undefined };
     served["/clusters"] = { items: [cluster], next: undefined };
     served["/drafts"] = { items: [draft("open", [])], next: undefined };
-    for (const [, page, text] of lists.filter(([n]) => ["the machines list", "the clusters list", "Drafts and releases"].includes(n))) {
+    served["/ingestions"] = { items: [{ id: "ing_a", kind: "import", mode: "encrypted", state: "held", machine: MCH, draft: DRF, operation: null, review: null, ownerGeneration: 1, leaseUntil: "2026-11-22T14:02:00Z", expiresAt: "2026-11-22T14:02:00Z", createdAt: "2026-11-21T14:02:00Z" }], next: undefined };
+    served["/fragments"] = { items: [{ id: "frg_a", name: "base", cluster: "cl_a", scope: "cluster", layer: "base", revision: null, headRevision: 0, createdAt: "2026-11-21T14:02:00Z" }], next: undefined };
+    served["/profiles"] = { items: [{ id: "prf_a", name: "workers", cluster: "cl_a", scope: "cluster", layer: "base", revision: null, headRevision: 0, createdAt: "2026-11-21T14:02:00Z" }], next: undefined };
+    served["/assignments"] = { items: [{ id: "asg_a", cluster: "cl_a", machine: MCH, revision: null, headRevision: 0, createdAt: "2026-11-21T14:02:00Z" }], next: undefined };
+    served["/acts"] = { items: [{ id: "act_a", at: "2026-11-21T14:02:00Z", principal: "p0", principalKind: "human", via: "api", role: null, action: "draft.create", subjects: [], requestId: null }], next: undefined };
+    const populated = ["the machines list", "the clusters list", "Drafts and releases", "Imports", "Fragments and profiles", "Audit"];
+    for (const [, page, text] of lists.filter(([n]) => populated.includes(n))) {
       await act(async () => root.unmount());
       root = createRoot(box);
       await pageNote(page(), text);
       expect(box.querySelector("table, ul, ol")).not.toBeNull();
     }
+  });
+
+  test("the placement check refuses a note drawn inside the heading, and one drawn below a control", async () => {
+    await act(async () => root.unmount());
+    box.innerHTML = '<h2>Title<p data-testid="page-note">x</p></h2>';
+    expect(() => underTheTitle(note())).toThrow();
+    box.innerHTML = '<h2>Title</h2><button>Add</button><p data-testid="page-note">x</p>';
+    expect(() => underTheTitle(note())).toThrow();
+    box.innerHTML = '<h2>Title</h2><p data-testid="page-note">x</p><button>Add</button>';
+    expect(() => underTheTitle(note())).not.toThrow();
+    box.innerHTML = "";
+    root = createRoot(box);
   });
 
   test("the fragment, profile and assignment pages and their revision pages show the note named by their kind, once read", async () => {
