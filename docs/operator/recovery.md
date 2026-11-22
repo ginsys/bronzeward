@@ -389,7 +389,7 @@ These actions are on the web:
 
 - **Enter recovery** is on the page the web interface shows when the server was started for
   recovery and has no entry yet. It takes one to three restored backups, the time the restore
-  stopped writes, and a reason. It sends only after you type `enter`. If the answer is lost, the
+  stopped writes, and a reason. It lists what entering does, then sends on one press. If the answer is lost, the
   page repeats the entry with the same key. After a reload the page cannot repeat it. Read
   `GET /recovery` to see if the entry was recorded.
 - **Exit recovery** stays off until every scope is released. The state `ready` is not released.

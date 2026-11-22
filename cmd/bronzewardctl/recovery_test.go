@@ -276,37 +276,34 @@ func TestYesConfirmationOfRevoke(t *testing.T) {
 	}
 }
 
-// TestTypedConfirmations: recovery enter sends only when the confirmation is typed back; --no-input, an empty
-// answer and a wrong one exit 2 and send nothing.
-func TestTypedConfirmations(t *testing.T) {
-	enter := []string{"recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z",
+// TestYesConfirmationOfEnter: recovery enter states its effects and sends only on y or yes (the one confirmation of
+// every decision: nothing is typed back); --no-input, an empty answer, n and anything else, the word enter included,
+// exit 2 and send nothing.
+func TestYesConfirmationOfEnter(t *testing.T) {
+	const route = "POST /api/v1/recovery/entries"
+	args := []string{"recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z",
 		"--stopped-at", "2026-11-01T08:31:00Z", "--reason", "BWSYNTH drill"}
-	for _, c := range []struct {
-		args          []string
-		typed, effect string
-		route         string
-	}{
-		{enter, "enter", "It marks every machine's scope pre-restore-unaccounted.", "POST /api/v1/recovery/entries"},
-	} {
-		seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
-		var out, errb bytes.Buffer
-		if code := run(append(slices.Clone(c.args), "--no-input"), &out, &errb); code != 2 || len(seen()) != 0 {
-			t.Errorf("%s --no-input: exit %d, sent %v; want 2 and nothing\n%s", c.args[0], code, seen(), errb.String())
-		}
-		for _, typed := range []string{"", "\n", "BWSYNTH-wrong\n", c.typed + "x\n"} {
-			errb.Reset()
-			withStdin(t, typed, func() {
-				if code := run(c.args, &out, &errb); code != 2 || slices.Contains(seen(), c.route) || out.Len() != 0 {
-					t.Errorf("%s typed %q: exit %d, sent %v; want 2 and no write\n%s", c.args[0], typed, code, seen(), errb.String())
-				}
-			})
-		}
-		if !strings.Contains(errb.String(), c.effect) || !strings.Contains(errb.String(), "nothing was sent") {
-			t.Errorf("%s: the effects or the refusal were not shown:\n%s", c.args[0], errb.String())
-		}
-		withStdin(t, c.typed+"\n", func() {
-			if code := run(c.args, &out, &errb); code != 0 || !slices.Contains(seen(), c.route) {
-				t.Errorf("%s typed back: exit %d, sent %v\n%s", c.args[0], code, seen(), errb.String())
+	seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
+	var out, errb bytes.Buffer
+	if code := run(append(slices.Clone(args), "--no-input"), &out, &errb); code != 2 || len(seen()) != 0 || !strings.Contains(errb.String(), "asks for a y") {
+		t.Errorf("--no-input: exit %d, sent %v; want 2, nothing and the reason\n%s", code, seen(), errb.String())
+	}
+	for _, answer := range []string{"", "\n", "n\n", "no\n", "enter\n", "yy\n"} {
+		errb.Reset()
+		withStdin(t, answer, func() {
+			if code := run(args, &out, &errb); code != 2 || slices.Contains(seen(), route) || out.Len() != 0 {
+				t.Errorf("answered %q: exit %d, sent %v; want 2 and no write\n%s", answer, code, seen(), errb.String())
+			}
+		})
+	}
+	if !strings.Contains(errb.String(), "It marks every machine's scope pre-restore-unaccounted.") || !strings.Contains(errb.String(), "Enter recovery in ") || !strings.Contains(errb.String(), "nothing was sent") {
+		t.Errorf("the effects, the question or the refusal were not shown:\n%s", errb.String())
+	}
+	for _, answer := range []string{"y\n", "YES\n"} {
+		seen = recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
+		withStdin(t, answer, func() {
+			if code := run(args, &out, &errb); code != 0 || !slices.Contains(seen(), route) {
+				t.Errorf("answered %q: exit %d, sent %v\n%s", answer, code, seen(), errb.String())
 			}
 		})
 	}
@@ -703,7 +700,7 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 		marks []string
 	}{
 		{[]string{"recovery", "status"}, "", "Epoch", []string{"EPOCH", "BY", "WHY", "FAMILY", "BACKUP", "MACH", "STATE"}},
-		{[]string{"recovery", "enter", "--restored", "family=database,backup=pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "r"}, "enter\n", "Recovery mode entered", []string{"ACT", "NEWEPOCH", "PREV", "OP"}},
+		{[]string{"recovery", "enter", "--restored", "family=database,backup=pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "r"}, "y\n", "Recovery mode entered", []string{"ACT", "NEWEPOCH", "PREV", "OP"}},
 		{[]string{"recovery", "exit"}, "", "Recovery mode left", []string{"ACT", "NEWEPOCH", "SCOPE"}},
 		{[]string{"identity", "revoke", "--identity", "svc_x", "--reason", "r"}, "y\n", "Revoked", []string{"IDENT", "ACT", "NOTE"}},
 	} {
@@ -793,7 +790,7 @@ func TestEntryUnknownOutcomePrintsNoEpoch(t *testing.T) {
 	var out, errb bytes.Buffer
 	args := []string{"recovery", "enter", "--restored", "family=database,backup=pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "r"}
 	var rc int
-	withStdin(t, "enter\n", func() { rc = run(args, &out, &errb) })
+	withStdin(t, "y\n", func() { rc = run(args, &out, &errb) })
 	if rc != 3 || !strings.Contains(errb.String(), "GET /api/v1/recovery shows recovery mode true") {
 		t.Fatalf("rc %d, want 3 with the read shown:\n%s", rc, errb.String())
 	}

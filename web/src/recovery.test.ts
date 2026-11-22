@@ -89,13 +89,16 @@ describe("the console's parts (#364)", () => {
     expect(unreleased(scopes("normal", "released", "ready", "blocked")).map((s) => s.state)).toEqual(["ready", "blocked"]);
   });
 
-  test("the entry form states the effects before its control, which stays off until enter is typed", () => {
+  test("the entry form states the effects before its one control, which asks for nothing typed back", () => {
     const form = shell([], h(EnterRecovery));
     const escaped = ENTRY_EFFECTS.map((e) => e.replaceAll("'", "&#x27;"));
     for (const effect of escaped) expect(form).toContain(effect);
     for (const family of ["database", "provider", "credential-store"]) expect(form).toContain(`name="${family}-backup"`);
     expect(form.indexOf(escaped[0]!)).toBeLessThan(form.indexOf(">Enter recovery</button>"));
-    expect(form).toMatch(/<button type="submit" disabled="">Enter recovery<\/button>/);
+    expect(form).toMatch(/<button type="submit">Enter recovery<\/button>/);
+    expect(form).not.toContain("Type enter");
+    // Offline, the one press is off with its reason.
+    expect(shell([], h(EnterRecovery), true)).toMatch(/<button type="submit" disabled="">Enter recovery<\/button> Offline/);
     // No role was read before the entry, so no role text is shown; offline is.
     expect(form).not.toContain("Needs");
     expect(shell([], h(EnterRecovery), true)).toContain("Offline");

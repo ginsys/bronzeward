@@ -1355,8 +1355,11 @@ is permanent [y/N]`; only `y` or `yes` sends, and `--no-input` refuses, with no 
 accounting decision above hold unchanged: a typed copy proves a person copied a value, and the evidence on the
 screen at the press is what guards the act.
 
-*Unchanged.* The word `enter` typed at recovery entry, until the next change below applies the rule to it. The
-approval's own confirmation (§5.6) is decided with the apply page and is not changed here.
+*Recovery entry.* The word `enter` typed at recovery entry goes too, and this is the project lead's reading of the
+rule, not a separate answer from the owner, so the owner can reverse it. The console form lists what entering does
+and sends on one press; `recovery enter` prints the same list and asks `Enter recovery in <context>? [y/N]`.
+
+*Not changed here.* The approval's own confirmation (§5.6) is decided with the apply page.
 
 Client rules for the two accountings, where the answer or the read lacks what this section asks for:
 

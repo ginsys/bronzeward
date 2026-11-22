@@ -2495,8 +2495,8 @@ Limits:
   ([ginsys/bronzeward#1009](https://github.com/ginsys/bronzeward/issues/1009)) is not proven by it.
 - For a person signed in as recovery-admin
   ([#361](https://github.com/ginsys/bronzeward/issues/361)), bronzewardctl reads recovery status
-  and sends recovery enter, recovery exit and identity revoke; enter is sent only when the word is typed back
-  and revoke only after a `y`. Its tests run REC-02 and REC-04 (a) and (b) against a served
+  and sends recovery enter, recovery exit and identity revoke; enter and revoke are sent only after a `y`,
+  with nothing typed back. Its tests run REC-02 and REC-04 (a) and (b) against a served
   bronzeward; (b) runs the fixture's interrupt build, whose server-side COMMIT fault hook
   [#366](https://github.com/ginsys/bronzeward/issues/366) added. With
   [#362](https://github.com/ginsys/bronzeward/issues/362) it also sends recovery scope-account,

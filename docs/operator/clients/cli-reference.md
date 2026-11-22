@@ -1385,7 +1385,7 @@ usage: bronzewardctl recovery enter --restored family=<f>,backup=<id>,taken-at=<
 
 enter recovery.
 
-on a server started for recovery; sent only when enter is typed back. A repeat of an unknown outcome takes --idempotency-key
+on a server started for recovery; sent only after a y. A repeat of an unknown outcome takes --idempotency-key
 and --expect-principal, no epoch. Times are RFC 3339.
 
 Roles: recovery-admin. Needs a person signed in, not an automation token.
