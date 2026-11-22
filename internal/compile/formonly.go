@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/big"
 	"reflect"
+	"regexp"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -129,6 +130,9 @@ func keyed(m *yaml.Node) (map[mapKey]*yaml.Node, bool) {
 	return out, true
 }
 
+// plainDecimal is a decimal number with no leading zero before another digit.
+var plainDecimal = regexp.MustCompile(`^[+-]?(0|[1-9][0-9]*)?(\.[0-9]*)?([eE][+-]?[0-9]+)?$`)
+
 // sameScalar compares the resolved value of two scalars: a string by its text, every other core type by
 // the Go value YAML resolves it to, a null by its tag alone.
 func sameScalar(a, b *yaml.Node) bool {
@@ -145,8 +149,15 @@ func sameScalar(a, b *yaml.Node) bool {
 	if a.Value == b.Value {
 		return true
 	}
-	if ta == "!!float" {
-		// Compared as exact decimals: a float64 would read two long spellings of different numbers as equal.
+	switch ta {
+	case "!!timestamp":
+		return false // decoding keeps nanoseconds only, so differing text is never proved equal
+	case "!!float":
+		// Compared as exact decimals, of plain decimal syntax only: a float64 would read two long spellings of
+		// different numbers as equal, and a leading zero (an octal in some decoders) is not decimal ten.
+		if !plainDecimal.MatchString(a.Value) || !plainDecimal.MatchString(b.Value) {
+			return false
+		}
 		x, okx := new(big.Rat).SetString(a.Value)
 		y, oky := new(big.Rat).SetString(b.Value)
 		return okx && oky && x.Cmp(y) == 0

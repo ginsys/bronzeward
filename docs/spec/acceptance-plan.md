@@ -376,8 +376,10 @@ has no plan but the adoption's completed `adopt` plan.
    deadlines, maximum attempts, expiry and maximum observation age; `h-viewer` reads its
    evidence. The worker holds the import base's configuration, which has no redacted whole form,
    so the diff is served from `Applied`'s release to the plan's release with `withheld: true` and
-   no text (PA choice §17.38); what the approver relies on is the release's validation and the
-   plan's bound values.
+   no text (PA choice §17.38), unless the handover's release differs from the import base in form
+   only, with no drift open: then the diff is served from that release, with `fromFormOnly` set
+   (PA choice §17.48), and the run records which of the two it saw. What the approver relies on is the
+   release's validation and the plan's bound values.
 3. `h-approver` approves it.
 4. From one restore of snapshots taken before step 2 (`bin/inject db-snapshot s3-step4`,
    `bao-snapshot s3-step4`; restored with `db-restore s3-step4`, `bao-restore s3-step4`),
