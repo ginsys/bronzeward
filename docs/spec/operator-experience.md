@@ -979,27 +979,35 @@ automation token.
 several machines with one question (ginsys/bronzeward#1096; the campaign lead's ruling of 2026-11-22, 12:23 CET,
 that the question is `y/N`, with no `--yes`, and that the end of input sends nothing). It makes one
 apply-config plan for each machine chosen, by name or ID, so that every change exists to read, and
-reuses a plan somebody prepared that is ready. It prints each machine with its role and profiles, and
-with `--diff` each plan's change, on standard error, then asks once. `y` approves every plan
-listed, each by its own approval and each answered on its own line; a refusal for one machine leaves the
-others approved and exits non-zero. Enter, `n` and the end of input approve nothing and cancel the plans this command
-made, never one it read. A Ctrl-C at the question leaves the plans to expire (24 hours). A machine already
-applied, frozen, in drift or in an operation is left out with its reason. A control plane machine may be
-chosen: the command says that applying to one was not covered by the acceptance tests and that machines
-are applied one at a time, in the order the plans were approved, which is the order listed.
+reuses a plan somebody prepared for this operation that is ready. It reads every plan before it shows
+anything and prints each machine with its role and profiles, each plan's own expiry, and the size of its
+change (the change itself with `--diff`), on standard error, then asks once. A plan whose change cannot be
+read is left out, and one this command made is cancelled, so that nothing is approved unseen. `y` approves
+every plan listed, each by its own approval, bound to the epoch the list was shown at (an epoch that moved
+since refuses the rest), and each answered on its own line; a refusal for one machine leaves the others
+approved and exits non-zero, and so does a plan that could not be made. An approval whose outcome is unknown
+is reported as unknown, never as unapproved. Enter, `n` and the end of input approve nothing and cancel the
+plans this command made, never one it read. A Ctrl-C at the question leaves the plans to expire at the time
+each shows. A machine already applied, frozen, in drift or in an operation is left out with its reason, and
+so is one whose waiting plan is for another operation (an adopt plan is decided on the machine's page). A
+control plane machine may be chosen: the command says that applying to one was not covered by the acceptance
+tests, that machines are applied one at a time and that the order is not promised.
 The structured outputs are not offered, since the command asks a person a question. The console's apply
 page does the same through the same routes.
 
 ```text
 $ bronzewardctl apply rel_h7rt…2bd --machine alpha,beta --diff     # ops-ben; roles: publisher, approver
-alpha  controlplane  cp-base  plan pln_8m2k…xq4c (made by this command)
+alpha  controlplane  cp-base  plan pln_8m2k…xq4c (made by this command), expires 2026-11-23 14:02:11 UTC
     @@ KubeNodeConfig labels @@
     +  team: storage
-beta  worker  worker-base,storage  plan pln_f645…cawy (prepared by somebody else)
+beta  worker  worker-base,storage  plan pln_f645…cawy (prepared by somebody else), expires 2026-11-23 09:40:00 UTC
     @@ KubeNodeConfig labels @@
     +  team: storage
 A control plane machine is chosen. Applying to a control plane machine was not covered by this version's
 acceptance tests. The server does not refuse it, machines are applied one at a time, and you decide.
+The controller re-checks each plan when it sends it and applies it only if every check passes, one machine of
+a cluster at a time, in an order the controller does not promise. A plan that is not applied expires at the
+time shown for it.
 Answering y records your approval of the 2 plans listed as you. Approve them? [y/N]: y
 alpha: approved (apr_2ztr…47vy). Recorded self-approval reasons: created-plan, published.
 beta: approved (apr_6kqd…m3xe). Recorded self-approval reasons: none.

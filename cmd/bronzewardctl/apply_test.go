@@ -18,6 +18,13 @@ type applyFake struct {
 	posts   []string
 	refuse  string // a plan whose approval answers 409
 	applied bool   // beta is already applied
+	// Faults, each off by default: alpha's waiting plan is an adopt plan; the made plan cannot be read;
+	// the approval of the plan named answers 500 (an unknown outcome); making a plan answers 500; the
+	// the epoch moves after the last plan is read (moves; moved is that state).
+	adoptPlan, unreadMade bool
+	unknown               string
+	createFails, moves    bool
+	moved                 bool
 }
 
 func (f *applyFake) took() []string {
@@ -36,7 +43,11 @@ func (f *applyFake) position(machine string) string {
 	role, name, step, plan, applied := "worker", "beta", "needs-plan", "null", "null"
 	if machine == "mch_alpha" {
 		role, name, step = "controlplane", "alpha", "awaiting-approval"
-		plan = `{"id":"pln_prepared","state":"proposed","operation":"apply-config","release":"rel_BWSYNTH","approvalCurrent":null,"createdAt":"2026-11-22T08:00:00Z","expiresAt":"2026-11-23T08:00:00Z"}`
+		op := "apply-config"
+		if f.adoptPlan {
+			op = "adopt"
+		}
+		plan = `{"id":"pln_prepared","state":"proposed","operation":"` + op + `","release":"rel_BWSYNTH","approvalCurrent":null,"createdAt":"2026-11-22T08:00:00Z","expiresAt":"2026-11-23T08:00:00Z"}`
 	}
 	pending := "true"
 	if machine == "mch_beta" && f.applied {
@@ -48,7 +59,16 @@ func (f *applyFake) position(machine string) string {
 
 func (f *applyFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
-	w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2")
+	f.mu.Lock()
+	epoch := "ep_BWSYNTH-2"
+	if f.moved {
+		epoch = "ep_BWSYNTH-3"
+	}
+	if f.moves && path == "/plans/pln_made" {
+		f.moved = true // the epoch moves once the last plan is read, so the approvals' own reads see the new one
+	}
+	f.mu.Unlock()
+	w.Header().Set("Bronzeward-Epoch", epoch)
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodPost {
 		b, _ := io.ReadAll(r.Body)
@@ -56,6 +76,10 @@ func (f *applyFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.posts = append(f.posts, path+" "+string(b))
 		f.mu.Unlock()
 		switch {
+		case path == "/plans" && f.createFails, strings.HasSuffix(path, "/approvals") && f.unknown != "" && strings.Contains(path, f.unknown):
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:internal-error","title":"Internal Server Error","status":500,"detail":"BWSYNTH"}`)
 		case path == "/plans":
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, f.plan("pln_made", "mch_beta"))
@@ -95,6 +119,12 @@ func (f *applyFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/plans/pln_prepared":
 		fmt.Fprint(w, f.plan("pln_prepared", "mch_alpha"))
 	case "/plans/pln_made":
+		if f.unreadMade {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:internal-error","title":"Internal Server Error","status":500,"detail":"BWSYNTH"}`)
+			return
+		}
 		fmt.Fprint(w, f.plan("pln_made", "mch_beta"))
 	default:
 		w.Header().Set("Content-Type", "application/problem+json")
@@ -142,8 +172,8 @@ func TestApply(t *testing.T) {
 		"beta  worker  worker-base,storage  plan pln_made (made by this command)",
 		"    @@ -1 +1 @@\n    -team: a\n    +team: b\n",
 		"A control plane machine is chosen. Applying to a control plane machine was not covered by this version's acceptance tests.",
-		"one machine of a cluster at a time, in the order the plans were approved",
-		"expires 24 hours after it was made",
+		"one machine of a cluster at a time, in an order the controller does not promise. A plan that is not applied expires at the time shown for it.",
+		"(prepared by somebody else), expires ",
 		"Answering y records your approval of the 2 plans listed as you. Approve them? [y/N]: ",
 	} {
 		if !strings.Contains(errOut, w) {
@@ -202,6 +232,50 @@ func TestApplyStops(t *testing.T) {
 	if code == 0 || !strings.Contains(out, "beta: approved") || strings.Contains(out, "alpha: approved") ||
 		!strings.Contains(errOut, "alpha: ") || !strings.Contains(errOut, "nothing was approved for this machine") {
 		t.Errorf("one refusal: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+}
+
+// TestApplyFaults checks what #1096's command does not approve or does not claim: another operation's plan
+// is not reused, a plan whose change cannot be read is left out (and cancelled when the command made it),
+// an approval of unknown outcome is not said to be unapproved, a failed plan fails the command although
+// another machine was approved, and an epoch that moved after the list was shown refuses the later approvals.
+func TestApplyFaults(t *testing.T) {
+	run := func(set func(*applyFake)) (*applyFake, int, string, string) {
+		f := applyServer(t)
+		set(f)
+		setStdin(t, "y\n")
+		code, out, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--all")
+		return f, code, out, errOut
+	}
+	sent := func(f *applyFake) string { return strings.Join(f.took(), "\n") }
+
+	f, code, out, errOut := run(func(f *applyFake) { f.adoptPlan = true })
+	if code != 0 || !strings.Contains(errOut, "alpha  controlplane  cp-base  stopped: the plan waiting for this machine is not an apply plan; open it with plan show 'pln_prepared'") ||
+		!strings.Contains(out, "beta: approved") || strings.Contains(sent(f), "pln_prepared") {
+		t.Errorf("adopt plan: exit %d, stdout %q, stderr %q, sent %q", code, out, errOut, f.took())
+	}
+
+	f, code, out, errOut = run(func(f *applyFake) { f.unreadMade = true })
+	if code != 0 || !strings.Contains(errOut, "the change of its plan could not be read") ||
+		!strings.Contains(errOut, "Cancelled the plans this command made: pln_made.") || !strings.Contains(out, "alpha: approved") || strings.Contains(out, "beta: approved") ||
+		strings.Contains(sent(f), "pln_made/approvals") || !strings.Contains(sent(f), "pln_made/cancellations") {
+		t.Errorf("unread plan: exit %d, stdout %q, stderr %q, sent %q", code, out, errOut, f.took())
+	}
+
+	f, code, out, errOut = run(func(f *applyFake) { f.unknown = "pln_prepared" })
+	if code != 3 || !strings.Contains(errOut, "outcome unknown") || strings.Contains(errOut, "nothing was approved for this machine") || !strings.Contains(out, "beta: approved") {
+		t.Errorf("unknown approval: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+
+	f, code, out, errOut = run(func(f *applyFake) { f.createFails = true })
+	if code == 0 || !strings.Contains(errOut, "beta: ") || !strings.Contains(out, "alpha: approved") || strings.Contains(sent(f), "pln_made") {
+		t.Errorf("a plan not made: exit %d, stdout %q, stderr %q, sent %q", code, out, errOut, f.took())
+	}
+
+	f, code, out, errOut = run(func(f *applyFake) { f.moves = true })
+	if code == 0 || strings.Contains(out, "approved (") || strings.Contains(sent(f), "/approvals") ||
+		strings.Count(errOut, "nothing was approved for this machine") != 2 {
+		t.Errorf("epoch moved: exit %d, stdout %q, stderr %q, sent %q", code, out, errOut, f.took())
 	}
 }
 
