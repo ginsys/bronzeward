@@ -7,6 +7,9 @@
 
 import { safeWord } from "./safe.ts";
 
+// The recovery page of an operation (ginsys/bronzeward#365): where an unresolved operation is taken over or resolved.
+export const recoveryOperationPath = (id: string) => `/recovery/operations/${encodeURIComponent(id)}`;
+
 const KNOWN: Record<string, Record<string, [now: string, next: string | undefined]>> = {
   publish: {
     queued: ["Accepted; no worker has taken it yet.", "Wait; nothing to do."],

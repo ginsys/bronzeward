@@ -77,6 +77,12 @@ export const MARK_NEXT: Readonly<Record<string, string>> = {
   blocked: "Next: fix what is missing, then mark the scope again.",
 };
 export const RELEASE_NOT_APPROVAL = "A release is not an approval: it approves no plan and sends nothing, and a plan still needs its own approval.";
+// The recovery page of one operation (ginsys/bronzeward#365): take over, and resolve as cancelled.
+export const RECOVERY_OPERATION_NOTE = "This page decides an operation whose outcome is not known. Take over moves it to the server you are talking to and sends nothing to the node. Resolve as cancelled ends an operation that has no attempt. Both need the recovery-admin role and a reason, which is the record.";
+export const RECOVERY_OPERATION_ROLE_NOTE = "You do not have the recovery-admin role, so both controls are off.";
+export const TAKE_OVER_TEXT = "Move the operation to this server instance, from the owner generation read from its events and attempts. The server refuses a generation that is not current, and then nothing changed.";
+export const RESOLVE_TEXT = "Cancel an operation that has no attempt. It records no remote outcome: nothing was sent to the node, and nothing shows whether anything landed.";
+export const RESOLVE_NO_OUTCOME = "This records no remote outcome.";
 export const NOT_FOUND_NOTE = "Start from Machines or Clusters.";
 export const CONNECT_NOTE = "Connecting records the cluster and each machine that answers with a platform, and starts an import of each of those machines into one draft. A machine that does not answer, or reports no platform, is skipped. First you choose the talosconfig, then you confirm what the page found.";
 /** The column of a release that counts what it is built from. */

@@ -9,6 +9,7 @@ import { ApprovalRecord, ApproveControl, RevocationReason, RevokeControl } from 
 import { BaseDocument } from "./claim.tsx";
 import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { DriftItem, driftId } from "./drift.tsx";
+import { RecoveryOperation, recoveryOperationId } from "./recovery-operation.tsx";
 import { CancelPlan, FrozenLine, PlanNew, PlanState, PROPOSED, takeFresh } from "./plan.tsx";
 import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
@@ -646,6 +647,8 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   if (review !== undefined) return <ReviewItem key={path} release={review[0]} machine={review[1]} />;
   const drift = driftId(path);
   if (drift !== undefined) return <DriftItem key={path} id={drift} />;
+  const recovering = recoveryOperationId(path);
+  if (recovering !== undefined) return <RecoveryOperation key={path} id={recovering} />;
   const [, kind, id] = /^\/([a-z-]+)(?:\/([^/]+))?$/.exec(path === "/" ? "/machines" : path) ?? [];
   const source = /^(fragment|profile|assignment)s$/.exec(kind ?? "")?.[1] as Kind | undefined;
   const revision = /^(fragment|profile|assignment)-revisions$/.exec(kind ?? "")?.[1] as Kind | undefined;

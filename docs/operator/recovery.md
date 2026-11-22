@@ -376,6 +376,13 @@ These actions are on the web:
   that a release is not an approval. A scope that is not `ready`, or whose Desired release moved
   after the mark, is refused with the server's reason and the next step. No control acts on more
   than one machine.
+- **Take over** and **Resolve as cancelled** are on the operation's own recovery page,
+  `/recovery/operations/<operation>`. The operation's page links to it with **Open in Recovery**
+  while the operation is `unresolved`. Each takes a reason, which is the record, and one press.
+  Take over sends the highest generation the operation's events and attempts show, as the command
+  does, and the server refuses a generation that is not current. Resolve as cancelled is off with
+  its reason where an attempt is recorded, and says that it records no remote outcome. Neither
+  sends anything to the node.
 
 - **Enter recovery** is on the page the web interface shows when the server was started for
   recovery and has no entry yet. It takes one to three restored backups, the time the restore
