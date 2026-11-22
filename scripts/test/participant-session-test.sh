@@ -1014,12 +1014,19 @@ if [ "$rc" != 0 ] && [ $((SECONDS - s0)) -lt 6 ]; then
 else bad "idp_reached with a docker client that ignores TERM: rc $rc after $((SECONDS - s0)) s"; fi
 
 # web_stop ends the web driver by its own pid (web.pid) as well as the wrapper that started it: a driver that
-# the wrapper's kill does not reach is the leak it exists for.
+# the wrapper's kill does not reach is the leak it exists for. web_stop only signals the driver and waits for
+# the wrapper, so the case waits up to 5 s for each pid to end, reading /proc as running() does (kill -0 finds a
+# zombie), and reaps it with wait; a pid still running after that is alive.
 mkdir "$t/web"
 # shellcheck disable=SC2016 # the inner shell's own text
 out=$(bash -c '. "$0"; sleep 300 & echo $! >"$1/web.pid"; sleep 300 & t9_web=$!; t9_web_dir=$1
   drv=$(<"$1/web.pid"); wrap=$t9_web; web_stop
-  for p in $drv $wrap; do ! kill -0 "$p" 2>/dev/null || { echo "alive $p"; kill "$p"; }; done
+  up() { local s; s=$(cat "/proc/$1/stat" 2>/dev/null) || return 1; s=${s##*) }; [ "${s%% *}" != Z ]; }
+  for p in $drv $wrap; do
+    for _ in $(seq 50); do up "$p" || break; sleep 0.1; done
+    ! up "$p" || { echo "alive $p"; kill "$p"; }
+    wait "$p" 2>/dev/null
+  done
   [ -z "$t9_web" ] && echo cleared' "$t/clean.sh" "$t/web" 2>&1)
 if [ "$out" = cleared ]; then ok "web_stop ends the driver by its pid and the wrapper, and clears the handle"
 else bad "web_stop: $out"; fi
