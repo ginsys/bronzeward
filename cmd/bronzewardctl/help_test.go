@@ -29,7 +29,7 @@ var leavesOfTheSpecification = []string{
 	"publish",
 	"release list", "release show", "release review", "release provenance",
 	"plan list", "plan show", "plan create", "plan cancel",
-	"approve", "approval show", "approval revoke",
+	"apply", "approve", "approval show", "approval revoke",
 	"operation list", "operation show", "operation watch",
 	"act list",
 	"recovery status", "recovery enter", "recovery exit", "recovery scope-account", "recovery account", "recovery takeover",
@@ -174,8 +174,8 @@ func TestIndexShape(t *testing.T) {
 	if lines[0] != "usage: bronzewardctl [global flags] <command> [arguments]" {
 		t.Errorf("the first line is %q", lines[0])
 	}
-	if len(lines) > 30 {
-		t.Errorf("the index is %d lines, over one screen of 30", len(lines))
+	if len(lines) > 31 {
+		t.Errorf("the index is %d lines, over one screen of 31", len(lines))
 	}
 	for _, name := range topLevel() {
 		n := 0

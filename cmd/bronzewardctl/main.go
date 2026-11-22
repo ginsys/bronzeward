@@ -153,7 +153,7 @@ func (e *env) handlers() map[string]func([]string) error {
 		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
 		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
 		"draft": e.draftCmd, "import": e.importCmd, "import-base": e.importBaseCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd,
-		"approve": e.approve, "approval": e.approvalCmd, "operation": e.operationCmd, "act": e.actCmd,
+		"apply": e.apply, "approve": e.approve, "approval": e.approvalCmd, "operation": e.operationCmd, "act": e.actCmd,
 		"drift": e.driftCmd, "recovery": e.recoveryCmd, "identity": e.identityCmd}
 }
 

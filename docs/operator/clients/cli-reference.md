@@ -30,6 +30,7 @@ commands:
   publish      publish a draft as a release
   release      list, show, review, provenance
   plan         list, show, create, cancel
+  apply        apply a release to the machines you choose
   approve      approve a plan
   approval     show, revoke
   operation    list, show, watch
@@ -1199,6 +1200,27 @@ already recorded is not stopped.
 Roles: publisher (its own plan), approver or recovery-admin.
 
 Flags: --expect-epoch, --expect-principal, --idempotency-key, --reason
+
+Global flags and exit codes: bronzewardctl help global.
+```
+
+## apply
+
+```text
+usage: bronzewardctl apply <release> (--machine <a,b> | --all) [--diff]
+
+apply a release to the machines you choose.
+
+makes one apply-config plan for each machine chosen, by name or ID, or --all of the release's machines, prints each machine with
+its role and profiles, and with --diff each plan's change, on standard error, then asks Approve them? [y/N] and approves every
+plan listed only on y or yes. Enter, n and the end of input send no approval and cancel the plans this command made; a plan
+somebody else prepared is approved as it stands and never cancelled here. A Ctrl-C at the question leaves the plans to expire
+24 hours after they were made. A machine already applied, frozen, in drift or in an operation is left out with its reason.
+There is no --yes, --no-input refuses, and -o json and -o yaml are not offered. It does not wait for the operations.
+
+Roles: publisher, then approver. Needs a person signed in, not an automation token.
+
+Flags: --all, --diff, --machine
 
 Global flags and exit codes: bronzewardctl help global.
 ```
