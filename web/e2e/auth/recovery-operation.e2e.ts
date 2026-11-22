@@ -48,6 +48,8 @@ describe("the recovery page of one operation (#365)", () => {
     await expect($('[data-testid="takeovers-answer"]')).toHaveText(expect.stringContaining(`Taken over: generation ${before + 1}`), { wait: 30_000 });
     expect(await posts("takeovers")).toHaveLength(1);
     expect(await generation()).toBe(before + 1);
+    // The events are not read again, so the page's own generation is the answer's: a second press would send it, never the old one.
+    await expect($('[data-testid="recovery-operation-state"]')).toHaveText(expect.stringContaining(`Owner generation read: ${before + 1}`), { wait: 30_000 });
   });
 
   it("resolve as cancelled ends an operation with no attempt, says it records no remote outcome, and leaves both controls off", async function () {

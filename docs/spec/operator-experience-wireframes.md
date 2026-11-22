@@ -636,8 +636,9 @@ Take over
   and attempts. The server refuses a generation that is not current, and then nothing changed.
   Reason (at most 1024 bytes) [______________]   [Take over]
 Resolve as cancelled
-  Cancel an operation that has no attempt. It records no remote outcome: nothing was sent to
-  the node, and nothing shows whether anything landed.
+  Cancel an operation that has no attempt. This action sends nothing to the node and records no
+  remote outcome. No recorded attempt does not prove that nothing was ever sent: after a restore
+  the journal can lack an attempt, and nothing shows whether anything landed.
   Reason (at most 1024 bytes) [______________]   [Resolve as cancelled]
   With an attempt recorded: "1 attempt is recorded, and the request may have landed: an attempt
   is accounted for, not cancelled." The control is off.

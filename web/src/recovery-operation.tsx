@@ -12,11 +12,15 @@ import { REASON_MAX, reasonProblem } from "./plan.tsx";
 import { Who } from "./principals.tsx";
 import { Action, useFocusOn, useRoles } from "./shell.tsx";
 import { Status } from "./states.tsx";
-import { safeWord } from "./titles.ts";
 import { MachineById, OperationHeading } from "./titles.tsx";
-import { RECOVERY_OPERATION_NOTE, RECOVERY_OPERATION_ROLE_NOTE, RESOLVE_NO_OUTCOME, RESOLVE_TEXT, TAKE_OVER_TEXT } from "./words.ts";
+import { NOT_SHOWN, RECOVERY_OPERATION_NOTE, RECOVERY_OPERATION_ROLE_NOTE, RESOLVE_NO_OUTCOME, RESOLVE_TEXT, TAKE_OVER_TEXT } from "./words.ts";
 
 const enc = encodeURIComponent;
+// A word the server sets, shown only as safe text: any other reads "(not shown)" (client contracts A8 rule 6). Same character classes
+// as `safeWord` of the safe-text module, which the base this change is on does not have; temporary: the next change on this page
+// (the accounting forms) imports it from there and drops this.
+const SAFE_WORD = /^[^\p{Cc}\p{Cf}]{1,300}$/u;
+const safeWord = (s: string): string => (SAFE_WORD.test(s) ? s : NOT_SHOWN);
 type Operation = components["schemas"]["OperationBody"];
 type EventBody = components["schemas"]["EventBody"];
 type Takeover = components["schemas"]["TakeoverBody"];
@@ -46,18 +50,32 @@ export function ownerGeneration(events: readonly Pick<EventBody, "data">[], atte
   return seen.length === 0 ? 1 : Math.max(...seen);
 }
 
+// The generation a takeover's answer names, or 0 where it names none.
+export function answeredGeneration(answer: unknown): number {
+  const g = typeof answer === "object" && answer !== null ? (answer as { generation?: unknown }).generation : undefined;
+  return typeof g === "number" && Number.isInteger(g) && g > 0 ? g : 0;
+}
+
 // Said where the events could not be read: the generation is then read from the attempts alone.
 const EVENTS_UNREAD = "The operation's events were not read, so the owner generation is read from its attempts alone.";
+// Said while they are still being read, as the reason Take over is off.
+export const EVENTS_LOADING = "The operation's events are still being read: the owner generation comes from them.";
+// The note on the page about the events read: only once the read has failed, never while it is loading or after it answered.
+export const eventsNote = (kind: string): string | undefined => (kind === "ok" || kind === "loading" ? undefined : EVENTS_UNREAD);
 // The states a takeover is accepted in, and the one kind it acts on (internal/api/outcome.go takeOverTx, operationMachine).
 const TAKEN_OVER_IN = ["committed", "sending", "verifying", "unresolved"];
 
 // Why a control is off for this operation, or undefined where it is on. The server stays authoritative: a read that is stale is
 // answered by its refusal, shown in place.
 // The server's words in these sentences (a kind, a state, a role) are shown only as safe text: any other reads "(not shown)".
-export function takeOverWhy(o: Operation): string | undefined {
+// Take over sends the owner generation read from the events, so it waits while they are still being read; a read that failed
+// does not hold it (the generation then comes from the attempts alone, which the note says).
+export function takeOverWhy(o: Operation, eventsLoading = false): string | undefined {
   if (o.kind !== "apply-config") return `The operation is a ${safeWord(o.kind)}, and only an apply-config operation is taken over.`;
-  return TAKEN_OVER_IN.includes(o.state) ? undefined : `The operation is ${safeWord(o.state)}: only one that is committed, sending, verifying or unresolved is taken over.`;
+  if (!TAKEN_OVER_IN.includes(o.state)) return `The operation is ${safeWord(o.state)}: only one that is committed, sending, verifying or unresolved is taken over.`;
+  return eventsLoading ? EVENTS_LOADING : undefined;
 }
+// Resolve reads only the operation's own state and attempts, which are read before the page shows, so it never waits for the events.
 export function resolveWhy(o: Operation): string | undefined {
   if (o.state !== "unresolved") return `The operation is ${safeWord(o.state)}: only an unresolved operation is resolved.`;
   const n = (o.attempts ?? []).length;
@@ -75,7 +93,7 @@ export const resolved = (r: Resolution) => (
 // One act with a reason: the form, the reason the control is off, and the answer, kept in one place so the operation's reread
 // does not unmount it. It sends once per press; a lost answer is repeated under its key by the write layer.
 function Act({ label, route, op, off, finished, body, recorded }: {
-  label: string; route: "takeovers" | "resolutions"; op: string; off: string | undefined; finished: () => void;
+  label: string; route: "takeovers" | "resolutions"; op: string; off: string | undefined; finished: (answer: unknown) => void;
   body: (reason: string) => Record<string, unknown>; recorded: (data: unknown) => ReactNode;
 }) {
   const writes = useWrites()!;
@@ -94,9 +112,10 @@ function Act({ label, route, op, off, finished, body, recorded }: {
       send({ method: "POST", path: `/operations/${enc(op)}/${route}`, body: body(reason), resource: `/operations/${enc(op)}` });
     }
   };
+  const answered = w?.outcome?.kind === "done" ? w.outcome.data : undefined;
   useEffect(() => {
-    if (done) finished();
-  }, [done, finished]);
+    if (done) finished(answered);
+  }, [done, finished, answered]);
   return (
     <>
       <form onSubmit={submit} aria-label={label}>
@@ -114,13 +133,19 @@ export function RecoveryOperation({ id }: { id: string }) {
   const path = `/operations/${enc(id)}`;
   const [n, setN] = useState(0);
   const reread = useCallback(() => setN((x) => x + 1), []);
+  // The generation a takeover that finished on this page answered: the events are not read again, so it is the newest the page knows.
+  const [taken, setTaken] = useState(0);
+  const tookOver = useCallback((answer: unknown) => {
+    setTaken((g) => Math.max(g, answeredGeneration(answer)));
+    reread();
+  }, [reread]);
   const o = useItem<Operation>(path, undefined, n);
-  const [events] = useList<EventBody>(`${path}/events`, "", true);
+  const [events, , rereading] = useList<EventBody>(`${path}/events`, "", true);
   const roles = useRoles();
   const po = usePending(o, "the operation");
   if (o.kind !== "ok") return <><h2>Recovery of the operation {short(id)}</h2>{po}</>;
   const op = o.data;
-  const generation = ownerGeneration(events.kind === "ok" ? events.data.items : [], op.attempts ?? []);
+  const generation = Math.max(ownerGeneration(events.kind === "ok" ? events.data.items : [], op.attempts ?? []), taken);
   const machine = op.subject?.machine;
   const section = (title: string, text: string, body: ReactNode) => (
     <section aria-label={title}>
@@ -142,9 +167,9 @@ export function RecoveryOperation({ id }: { id: string }) {
         {(op.attempts ?? []).length === 0 ? "No attempt is recorded." : `${(op.attempts ?? []).length} attempt${(op.attempts ?? []).length === 1 ? "" : "s"} recorded.`}
         {" "}Owner generation read: {generation}.
       </p>
-      {events.kind !== "ok" && <Status testid="recovery-operation-events">{EVENTS_UNREAD}</Status>}
+      {eventsNote(events.kind) !== undefined && <Status testid="recovery-operation-events">{eventsNote(events.kind)}</Status>}
       {section("Take over", TAKE_OVER_TEXT, (
-        <Act label="Take over" route="takeovers" op={id} off={takeOverWhy(op)} finished={reread} body={(reason) => ({ generation, reason })}
+        <Act label="Take over" route="takeovers" op={id} off={takeOverWhy(op, events.kind === "loading" || rereading)} finished={tookOver} body={(reason) => ({ generation, reason })}
           recorded={(d) => takenOver(d as Takeover)} />
       ))}
       {section("Resolve as cancelled", RESOLVE_TEXT, (

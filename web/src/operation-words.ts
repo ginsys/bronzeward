@@ -7,9 +7,6 @@
 
 import { safeWord } from "./safe.ts";
 
-// The recovery page of an operation (ginsys/bronzeward#365): where an unresolved operation is taken over or resolved.
-export const recoveryOperationPath = (id: string) => `/recovery/operations/${encodeURIComponent(id)}`;
-
 const KNOWN: Record<string, Record<string, [now: string, next: string | undefined]>> = {
   publish: {
     queued: ["Accepted; no worker has taken it yet.", "Wait; nothing to do."],
@@ -79,3 +76,6 @@ export function startedBy(kind: string, createdBy: Principal | null, plan: { pla
   if (plan === undefined) return { controller: "the controller" };
   return plan.creator === undefined ? { controller, plan: plan.plan } : { controller, plan: plan.plan, creator: plan.creator };
 }
+
+// The recovery page of an operation (ginsys/bronzeward#365): where an unresolved operation is taken over or resolved.
+export const recoveryOperationPath = (id: string) => `/recovery/operations/${encodeURIComponent(id)}`;
