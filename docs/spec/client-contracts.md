@@ -775,7 +775,7 @@ contract's, and this specification does not close it.
    every write it sends has a `principal` to compare. Every write, its first send and each
    repeat, carries the reference epoch in `Bronzeward-Expected-Epoch`: the last epoch the client saw before the
    first send, or the epoch the caller names for the write where one that acts on its reads over time does (the
-   handover button's press names the epoch it began under, and the Onboard cluster page names the epoch its plan's first press began under for every press of that plan, [A11](#14-proposed-api-gap-issues-and-downstream-refinement) item 4). An empty or repeated header is `400 invalid-request`, never taken as absent
+   handover button's press names the epoch it began under, and the Connect a cluster page names the epoch its plan's first press began under for every press of that plan, [A11](#14-proposed-api-gap-issues-and-downstream-refinement) item 4). An empty or repeated header is `400 invalid-request`, never taken as absent
    (`internal/api/api.go:426-433`). The header needs API revision 2
    ([persistence and API §9.1](persistence-api.md#91-conventions)): an earlier server ignores it
    without error, so a client that relies on it declares revision 2 as its minimum
