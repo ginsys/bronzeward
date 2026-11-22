@@ -76,33 +76,20 @@ export interface ApplyIo {
 }
 
 const done = (w: Write) => w.outcome?.kind === "done";
-const idOfOutcome = (o: Write["outcome"]): string | undefined => {
-  const d = o?.kind === "done" ? o.data : undefined;
+const idOf = (w: Write): string | undefined => {
+  const d = w.outcome?.kind === "done" ? w.outcome.data : undefined;
   const id = typeof d === "object" && d !== null ? (d as { id?: unknown }).id : undefined;
   return typeof id === "string" && id !== "" ? id : undefined;
 };
-const idOf = (w: Write) => idOfOutcome(w.outcome);
 
 // "Show apply": the plan of each chosen machine, read from where it stands now. A plan that is ready (somebody
 // prepared it) is reused and never made twice; a machine that cannot be planned is left out with its reason, and the
 // others go on. `made` maps each plan this press created to its machine: the page may cancel those and no others. The
 // caller passes its own map, which gains each plan the moment it is made. A plan whose creation is answered after the
 // page stopped caring (the person left) is cancelled by that answer, since it is the only place the plan's ID is
-// known; that includes the answer of a repeat of an unknown creation, which arrives through `settled`.
+// known. A creation whose outcome is unknown has no ID here: the machine's page shows any plan it made.
 export async function showApply(release: string, machines: readonly string[], io: ApplyIo, made = new Map<string, string>()): Promise<{ plans: Map<string, string>; made: Map<string, string> }> {
   const plans = new Map<string, string>();
-  const cancelled = new Set<string>();
-  const own = async (m: string, id: string): Promise<boolean> => {
-    if (made.has(id)) return true;
-    if (cancelled.has(id)) return false;
-    if (!io.live()) {
-      cancelled.add(id);
-      await cancelPlans([id], io);
-      return false;
-    }
-    made.set(id, m);
-    return true;
-  };
   for (const m of machines) {
     if (!io.live()) break;
     const p = await io.read<Position>(`/machines/${enc(m)}/position`);
@@ -127,10 +114,7 @@ export async function showApply(release: string, machines: readonly string[], io
     }
     if (!io.live()) break;
     io.say(m, { state: "working", text: LINES.planning });
-    const w = await io.send({ method: "POST", path: "/plans", body: body.body, resource: "/plans", settled: (o) => {
-      const late = idOfOutcome(o);
-      if (late !== undefined) void own(m, late);
-    } });
+    const w = await io.send({ method: "POST", path: "/plans", body: body.body, resource: "/plans" });
     if (!done(w)) {
       io.say(m, { state: "stopped", text: "", write: w });
       continue;
@@ -140,7 +124,11 @@ export async function showApply(release: string, machines: readonly string[], io
       io.say(m, { state: "stopped", text: LINES.noPlan });
       continue;
     }
-    if (!(await own(m, id))) break;
+    if (!io.live()) {
+      await cancelPlans([id], io);
+      break;
+    }
+    made.set(id, m);
     plans.set(m, id);
     io.say(m, { state: "ready", text: LINES.ready });
   }

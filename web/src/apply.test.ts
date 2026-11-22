@@ -129,23 +129,18 @@ describe("Show apply", () => {
     // The plan a publisher prepared is reused and never cancelled, whichever way the press ends.
     expect(w.log.join(" ")).not.toContain(plan("z"));
   });
-  // A creation whose outcome was unknown and that a later [Repeat exactly] settles reaches the page through `settled`.
-  test.each([[true, ["POST /plans"], 1], [false, ["POST /plans", "POST /plans/PLAN/cancellations"], 0]])("a repeat of an unknown creation that succeeds later, page caring %s", async (caring, log, owned) => {
+  // A creation whose outcome is unknown has no plan ID for the page: the row says so, and the page cancels nothing.
+  test("a creation whose outcome is unknown stops that machine's row and cancels nothing", async () => {
     const w = world({ [A]: pos("needs-plan") });
-    let settle: ((o: unknown) => void) | undefined;
-    const io: ApplyIo = { ...w.io, live: () => caring || settle === undefined, send: async (spec) => {
-      if (spec.path !== "/plans") return w.io.send(spec);
-      w.log.push("POST /plans");
-      settle = spec.settled as never;
-      return Object.assign(new Write(spec), { outcome: { kind: "unknown" } });
+    const io: ApplyIo = { ...w.io, send: async (spec) => {
+      w.log.push(`${spec.method} ${spec.path}`);
+      return Object.assign(new Write(spec), { outcome: { kind: "unknown", why: "lost", problem: null } });
     } };
     const held = new Map<string, string>();
     await showApply(REL, [A], io, held);
     expect(w.lines[A]?.state).toBe("stopped");
-    settle!({ kind: "done", status: 201, data: { id: plan("q") }, replayed: false });
-    await new Promise((r) => setTimeout(r, 0));
-    expect(w.log).toEqual(log.map((l) => l.replace("PLAN", plan("q"))));
-    expect(held.size).toBe(owned);
+    expect(w.log).toEqual(["POST /plans"]);
+    expect(held.size).toBe(0);
   });
   test("one creation that fails leaves the others made and shown, and nothing to cancel", async () => {
     const w = world({ [A]: pos("needs-plan"), [B]: pos("needs-plan"), [C]: pos("needs-plan") }, { plan: [A] });
