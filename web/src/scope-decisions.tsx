@@ -2,7 +2,8 @@
 // One machine per press and no batch control. The row's own write layer instances keep the answers, so the console's reread, which
 // moves the scope, does not drop them, as the drift page's controls do.
 
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
+import { AccountingForm, SCOPE_WHAT, accountedScope } from "./accounting.tsx";
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { Id } from "./list.tsx";
@@ -31,8 +32,8 @@ export const released = (data: unknown): ReactNode => {
   return <>Scope released, was {safeWord(x.from)} (act <Id id={x.act} />). {RELEASE_NOT_APPROVAL}</>;
 };
 
-// What each scope state needs next (T31), as text; the Decision column holds the controls (ginsys/bronzeward#365). The accounting of a
-// pre-restore-unaccounted scope has none there yet.
+// What each scope state needs next (T31), as text; the Decision column holds the controls (ginsys/bronzeward#365), the accounting of a
+// pre-restore-unaccounted scope included.
 export function nextStep(state: string): string {
   switch (state) {
     case "pre-restore-unaccounted":
@@ -72,6 +73,9 @@ export function ScopeDecision({ machine, state }: { machine: string; state: stri
   const busy = (w: W) => w !== undefined && !startsNew(writes, w);
   const next = (w: W) => (w?.outcome?.kind === "refused" ? scopeNext(w.outcome.problem) : undefined);
   const markable = state === "blocked" || state === "unresolved" || state === "ready";
+  // The accounting form stays drawn once pressed, for its answer: the console's reread then shows the scope as accounted.
+  const due = state === "pre-restore-unaccounted";
+  const [started, setStarted] = useState(false);
   return (
     <>
       {markable && <p><Action label="Mark" needs={["recovery-admin"]} onClick={send("marks")} busy={busy(mark)} /></p>}
@@ -80,6 +84,9 @@ export function ScopeDecision({ machine, state }: { machine: string; state: stri
       {state === "ready" && <p><Action label="Release" needs={["recovery-admin"]} onClick={send("releases")} busy={busy(release)} /></p>}
       <Result w={release} done={released} />
       {next(release) !== undefined && <Status testid="write-next">{next(release)}</Status>}
+      {(due || started) && (
+        <AccountingForm machine={machine} path="/recovery/accountings" resource="/recovery" what={SCOPE_WHAT} done={accountedScope} due={due} onStart={() => setStarted(true)} />
+      )}
     </>
   );
 }

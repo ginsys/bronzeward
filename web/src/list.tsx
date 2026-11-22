@@ -122,8 +122,8 @@ export function settleKept<T>(settle: Reads["settle"], lost: (lost: boolean) => 
 // same list under a new view is still the same data. `more` reads on. One read at a time: while a
 // start's read or a `more` is in flight, `more` waits. A read that a newer start superseded reads no
 // further page and settles as not live: the shell still takes its refusal of the credentials, and
-// ignores the rest.
-export function useList<T>(path: string, query: string, all: boolean, keep?: Keep): [Load<Listed<T>> | Dropped, (() => void) | undefined, boolean] {
+// ignores the rest. A change of `n` reads the list again from its start and keeps what it shows.
+export function useList<T>(path: string, query: string, all: boolean, keep?: Keep, n = 0): [Load<Listed<T>> | Dropped, (() => void) | undefined, boolean] {
   const { client, settle, undropped, again, view } = useReads();
   const [list, put, own] = useHeld<Listed<T>, Dropped>();
   const [held, lost] = useKeep(keep, own);
@@ -155,7 +155,7 @@ export function useList<T>(path: string, query: string, all: boolean, keep?: Kee
     }
     read({ items: [], next: undefined, restarted: false }, all);
     return () => void start.current++;
-  }, [read, put, view, path, query, all, again]);
+  }, [read, put, view, path, query, all, again, n]);
   const more = useCallback(() => {
     if (list.kind === "ok" && reading.current !== start.current) read(list.data, false);
   }, [read, list]);
