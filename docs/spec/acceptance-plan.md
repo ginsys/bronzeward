@@ -82,7 +82,7 @@ Bronzeward logs, temporary and staging paths and every backup taken, with its po
 found.
 
 **Execution.** One integrated run executes the pass paths of S0 to S5, S7 (its nominal run) and S8
-in order, S3's handover part between S1 and S2, from a fresh `bin/up`, as [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) requires.
+in order, S3's adoption part between S1 and S2, from a fresh `bin/up`, as [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) requires.
 S6 is an interruption matrix: it kills and partitions instances, so it runs outside the integrated
 run, and #31 takes its results from those runs. Negative controls and interruption matrices run
 separately, each from a fresh `bin/up` or a
@@ -122,7 +122,7 @@ closing paragraph.
 
 Every other row of that table is exercised in the scenario whose issue builds its route, since its
 outcome needs that route's handler, state S0 does not create, or both: the adopted-baseline approval
-in S3's handover part; the automation identity's publication in S2; the automation identity's plan, a human
+in S3's adoption part; the automation identity's publication in S2; the automation identity's plan, a human
 approver's approval, the self-approval cases, cancellation by each role that may cancel and a
 `publisher`'s refused cancellation of another identity's plan, revocation before commitment by each
 role that may revoke and unapproved dispatch in S3; the revoked-identity approval, the controller's
@@ -186,8 +186,8 @@ one synthetic secret outside the Talos schema's secret fields, in `machine.files
 4. Each ingestion's draft transaction commits and releases its claim.
 5. `bin/evidence` records the post-state and scans.
 
-The handover that follows the import, publishing the import draft and adopting each machine so that
-`Applied` holds its baseline, is S3's handover part
+The adoption that follows the import, publishing the import draft and adopting each machine so that
+`Applied` holds its baseline, is S3's adoption part
 ([ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25)).
 
 **Clauses exercised.** C [§2.3](compilation.md#23-pipeline), [§3.1](compilation.md#31-two-modes),
@@ -247,7 +247,7 @@ success, refusal and interruption point; claim rows and the orphan report.
 [ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23),
 [ginsys/bronzeward#24](https://github.com/ginsys/bronzeward/issues/24). Design §18.2 items 2 and 3.
 
-**Preconditions.** S1 passed, and S3's handover part
+**Preconditions.** S1 passed, and S3's adoption part
 ([ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25)) has run: the worker has
 `Applied` from its adoption. The SR and SP matrices
 re-run with composition through the compiler's own machinery path reach the same verdicts, with
@@ -259,7 +259,7 @@ scenario runs.
 
 **Steps.**
 
-1. `h-author` opens a draft (`POST /drafts`), since the handover published S1's import draft, and keeps its
+1. `h-author` opens a draft (`POST /drafts`), since the adoption published S1's import draft, and keeps its
    ETag. In it, `h-author` writes a worker fragment with one node-label change, the safe
    `no-reboot` change S4 applies, and a `!bwref` reference to a value extracted in S1. Each
    mutation sends the draft's current ETag in `If-Match` and keeps the ETag it returns.
@@ -298,7 +298,7 @@ running contract minor. The review data shows the label change and redacts every
 every value whose provenance is sensitive. The release records the profile and assignment revisions
 of step 2, and the label's provenance names the fragment revision the profile selected. The release
 is `Desired` for the worker, with no plan and no operation but `publish` created since the
-handover's completed `adopt` operations, and no change of the worker's resource version. Immutable rows refuse
+adoption's completed `adopt` operations, and no change of the worker's resource version. Immutable rows refuse
 `UPDATE` and `DELETE`. Every dependency classifies `retained`
 ([design §7.8](../design/Talos_Configuration_and_Machine_Management_Design.md#78-poc-retention-and-recovery-policy)).
 Step 7's release is published, its edits recorded under `author` and its publication under
@@ -345,13 +345,13 @@ after.
 [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25). Design §18.2 item 4,
 [§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy).
 
-S3 has two parts. The handover part hands the imported cluster over to Bronzeward: it follows S1
+S3 has two parts. The adoption part adopts the imported cluster: it follows S1
 and precedes S2, in the integrated run as in any other. The approval part, steps 1 to 4, follows S2.
 
-**Preconditions.** For the handover part, S1 passed. For the approval part, S2 passed; the worker
-has no plan but the handover's completed `adopt` plan.
+**Preconditions.** For the adoption part, S1 passed. For the approval part, S2 passed; the worker
+has no plan but the adoption's completed `adopt` plan.
 
-**Handover steps.**
+**Adoption steps.**
 
 1. `h-publisher` publishes S1's import draft, as in S2 steps 3 and 5. The draft first holds an
    assignment for each machine, which a plan binds; one that selects nothing is enough
@@ -367,7 +367,7 @@ has no plan but the handover's completed `adopt` plan.
 
 1. After the adoption controller has observed the worker at least three times following S2 (its
    heartbeat is the fixture's 5 s), confirm that no plan and no operation but `publish` exists
-   for it besides the handover's completed `adopt` plan and operation: publication alone
+   for it besides the adoption's completed `adopt` plan and operation: publication alone
    dispatches nothing. The fixture's drift interval is longer than any run, so no `drift`
    observation joins this check before S5
    ([ginsys/bronzeward#27](https://github.com/ginsys/bronzeward/issues/27)) sets the interval it
@@ -406,14 +406,14 @@ has no plan but the handover's completed `adopt` plan.
 
 **Clauses exercised.** ER [§2](execution-recovery.md#2-immutable-plan-and-approval-binding)
 (the plan states before commitment, approval and its refusals, revocation and cancellation) and, in
-the handover part, [§6.3](execution-recovery.md#63-adopt) (existing-cluster handover); PA
+the adoption part, [§6.3](execution-recovery.md#63-adopt) (existing-cluster adoption); PA
 [§8.1](persistence-api.md#81-plans-and-their-operations), [§10.4](persistence-api.md#104-revocation),
 [§10.5](persistence-api.md#105-recording-every-act). The controls that need the commitment or
 attempt transaction (ER [§3.2](execution-recovery.md#32-the-commitment-transaction) comparison 2,
 [§8.1](execution-recovery.md#81-revocation-racing-commitment),
 [§8.5](execution-recovery.md#85-identity-revocation)) are S4's, below.
 
-**Pass criteria.** In the handover part, each adopt operation is `completed`, and `Applied` holds
+**Pass criteria.** In the adoption part, each adopt operation is `completed`, and `Applied` holds
 the baseline's digest, marked adopted by observation; neither node's digest nor resource version
 changed from S1's pre-state, no Talos mutation request appears in any log, and the scan finds no
 synthetic secret outside OpenBao. In the approval part, the plan binds every value ER §2 lists, its
@@ -427,14 +427,14 @@ exists before commitment.
 
 **Negative controls.** Every control of the approval part acts before commitment, and none can
 commit while the worker's links are cut (step 4); S4 owns the controls that need the commitment or
-attempt transaction (S4's negative controls). In the handover part, from a separate `bin/up`
+attempt transaction (S4's negative controls). In the adoption part, from a separate `bin/up`
 (§2): an adoption whose evidence observation is older than the plan's bound age is no evidence, so
 nothing is refused and no refusal entry is written; the controller observes again after its lease
 and the adoption relies on that later observation, `Applied` staying unset until it commits. An
 adoption whose latest observation shows another digest than the baseline's: refused once, by
 comparison 4.4, and `Applied` stays unset. Automation, `h-recovery` and `h-viewer` approving:
 `403`; a second approval, by `h-approver` and by `h-all`: `409`. A plan from the import release the
-handover published, which S2 superseded as the worker's `Desired`: `409 conflict` naming the S2
+adoption published, which S2 superseded as the worker's `Desired`: `409 conflict` naming the S2
 release, no plan created. A plan past its expiry: `expired`, an approval of it `409`, no
 operation. A plan cancelled before commitment, once each by its creator `h-publisher`, by its
 creator the automation identity, by `h-approver` and by `h-recovery`: `cancelled`, no operation,
@@ -444,7 +444,7 @@ before commitment, once by `h-approver` and once by `h-recovery`: `revoked`, not
 recorded under its role. Every dependency `retained` and the plan unapproved, across several
 heartbeats of the controller: nothing dispatched.
 
-**Retained evidence.** The handover's post-state digests, resource versions and scan bundle, and
+**Retained evidence.** The adoption's post-state digests, resource versions and scan bundle, and
 its adopt plans, approvals and adoption records; plan and approval records, the diff as served, and
 each case's timeline entries.
 
@@ -572,7 +572,7 @@ ends: S1 to S4 run with none observing.
    base then holds that label as a reference, which S2's label fragment would override (refused,
    C choice §16.20), so `h-author` takes the fragment out of the `workers` profile in the same
    draft, or, where it is the only fragment the profile lists (a profile lists at least one),
-   points the worker's assignment back at S3's handover cluster fragment. After the ingestion succeeds, `h-publisher` reads the draft's new ETag, publishes it with that ETag and creates an
+   points the worker's assignment back at S3's adoption cluster fragment. After the ingestion succeeds, `h-publisher` reads the draft's new ETag, publishes it with that ETag and creates an
    `adopt` plan binding the drift record; `h-approver` approves; after an `evidence` observation begun after the approval, the adoption
    record commits under the freeze.
 5. Measure whether an artifact compiled from the unchanged import base reproduces the baseline
@@ -912,7 +912,7 @@ support them, and the reviewer's record.
 
 | Design §18.2 | Scenario | Issue |
 | --- | --- | --- |
-| Item 1: import without mutation, extraction before persistence, exact encrypted baseline | S1; S3's handover part (the baseline published and adopted) | [ginsys/bronzeward#22](https://github.com/ginsys/bronzeward/issues/22), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25) |
+| Item 1: import without mutation, extraction before persistence, exact encrypted baseline | S1; S3's adoption part (the baseline published and adopted) | [ginsys/bronzeward#22](https://github.com/ginsys/bronzeward/issues/22), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25) |
 | Item 2: native fragments, references, revisions, provenance, validation stages | S2 | [ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23) |
 | Item 3: immutable encrypted artifacts, exact dependencies, redacted review data, no apply | S2, S3 step 1 | [ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23), [ginsys/bronzeward#24](https://github.com/ginsys/bronzeward/issues/24) |
 | Item 4: authenticated API; plan and approval of one safe worker change | S0, S3 | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25) |
@@ -921,7 +921,7 @@ support them, and the reviewer's record.
 | Item 7: interrupted execution | S6 | [ginsys/bronzeward#28](https://github.com/ginsys/bronzeward/issues/28) |
 | Item 7: external restoration through explicit recovery mode | S7 | [ginsys/bronzeward#29](https://github.com/ginsys/bronzeward/issues/29) |
 | Closing paragraph: selected database/provider behaviour (§7.7) | S0 to S8 on the §2 fixture | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30) |
-| Closing paragraph: scoped authorization (§13.7) | S0 steps 4 and 5 (every denial by role alone, the human-only refusals and the absent routes), and each other scenario-table row in the scenario S0 names for it: S2 step 7, S3 (its handover part included), S4, S5 steps 3 and 7, S6.1 step 7, S7 | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25), [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#27](https://github.com/ginsys/bronzeward/issues/27), [ginsys/bronzeward#28](https://github.com/ginsys/bronzeward/issues/28), [ginsys/bronzeward#29](https://github.com/ginsys/bronzeward/issues/29) |
+| Closing paragraph: scoped authorization (§13.7) | S0 steps 4 and 5 (every denial by role alone, the human-only refusals and the absent routes), and each other scenario-table row in the scenario S0 names for it: S2 step 7, S3 (its adoption part included), S4, S5 steps 3 and 7, S6.1 step 7, S7 | [ginsys/bronzeward#21](https://github.com/ginsys/bronzeward/issues/21), [ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23), [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25), [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#27](https://github.com/ginsys/bronzeward/issues/27), [ginsys/bronzeward#28](https://github.com/ginsys/bronzeward/issues/28), [ginsys/bronzeward#29](https://github.com/ginsys/bronzeward/issues/29) |
 | Closing paragraph: usable operation timeline | S8 | [ginsys/bronzeward#26](https://github.com/ginsys/bronzeward/issues/26), [ginsys/bronzeward#30](https://github.com/ginsys/bronzeward/issues/30), [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
 | §18.1 E6: the existing-cluster vertical slice | the integrated run (S0 to S5, S7's nominal run, S8) and S6's interruption runs (§2) | [ginsys/bronzeward#31](https://github.com/ginsys/bronzeward/issues/31) |
 
@@ -964,7 +964,7 @@ it has no retained result, and ginsys/bronzeward#31 confirms the table row by ro
 | PA §16: claim eligibility re-check (row 020): the takeover's conditional `UPDATE` refusing a claim whose absolute expiry passed after it was locked, with the control that decides on the earlier read, is `TestTakeOverRechecksEligibility` | *check* | #22 |
 | PA §16: the orphan report's identity, its policy read back and compared exactly, with the extra-stanza control; listing and reading generation metadata, refused every value read (the Talos access path included), metadata read outside the generation path, Transit request and change under the generation path (update, patch, latest-version `DELETE` and undelete included), each refusal with a control granting that request's capability on its path; a provider or database failure mid-run exiting nonzero with no path printed, with the print-as-listed control; the token file's mode, a FIFO and a symlink refused before any provider request; no route serving the report, with the registered-route control; a token file replaced within the run after configuration load read at use, with the read-once control; `--cluster` limited to its subtree, with the walk-everything control; its selection of unreferenced generations of claims that are not live (abandoned, released, or absent from the database), with the claim-state-only control; generations referenced through each kind of reference row, with the one-kind-only control; a release committed during the report, with the split-read control; a release committed after the claim's expiry, with the read-time-abandonment control; expired encrypted claims recorded `held` and `resumed` and a lease-lapsed transient claim with no controller running, listed apart, with the omit-every-live control; a lease-lapsed encrypted claim before its expiry neither reported nor listed, with the lapsed-lease-abandons control; a cluster a restore removed, found without `--cluster`, with the database-clusters-only control; a custom-metadata sentinel on no report surface, with the print-the-response control; nothing changed by a run (a full data dump compared), with the audit-row control | S1 negative controls plus *check* | #22 |
 | PA §16: migration advisory lock (row 026); immutability triggers; startup refusal on each schema mismatch; authentication refusals; role checks that role alone decides, and the human-only refusals | S0, S2 pass criteria, plus *check* for startup | #21, #23 |
-| PA §16: role checks whose outcome needs the route's handler or state, against the design §13.7 scenarios | S2 step 7, S3 (its handover part included), S4, S5 steps 3 and 7, S6.1 step 7, S7 | #23, #25, #26, #27, #28, #29 |
+| PA §16: role checks whose outcome needs the route's handler or state, against the design §13.7 scenarios | S2 step 7, S3 (its adoption part included), S4, S5 steps 3 and 7, S6.1 step 7, S7 | #23, #25, #26, #27, #28, #29 |
 | PA §16: the epoch term and process-epoch checks; the recovery-start process in the new epoch; per-scope refusals and the recovery-start refusal | S7 | #29 |
 | PA §16: one idempotency key in flight twice, with the key-lock control | *check* | #21 |
 | DM §10.1 items 2 and 3: each provider object state (KV soft-deleted, undeleted, destroyed, pruned and its metadata deleted; a Transit version below the decryption floor and trimmed, the key deleted) classified through the metadata client under the fixture's policy, with exactly its alerts, and item 3's unseeded control: `TestLiveProviderStates`, run against the fixture's OpenBao | S2 negative controls | #24 |
