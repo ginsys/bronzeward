@@ -52,6 +52,7 @@ func (e *env) apply(args []string) error {
 	if err := getJSON(c, "/releases/"+url.PathEscape(release), &rel); err != nil {
 		return err
 	}
+	startMoves := c.EpochMoves()
 	rows, err := e.applyRows(c, &rel, machines, all)
 	if err != nil {
 		return err
@@ -76,6 +77,13 @@ func (e *env) apply(args []string) error {
 	// Every plan is read before the list is shown, so that none is approved unseen: a plan whose change
 	// cannot be read is left out, and one this command made is cancelled.
 	e.applyRead(c, rows)
+	// The approvals are bound to the epoch and move count of these reads, taken before any cleanup read
+	// can show another one. An epoch that moved while the list was read is not shown as a list at all.
+	epoch, moves := c.Context.LastEpoch, c.EpochMoves()
+	if moves != startMoves {
+		failed = append(failed, e.applyCancel(c, made))
+		return errors.Join(append(failed, notConfirmed{errors.New("the epoch changed while the plans were read, so nothing was approved; run apply again")})...)
+	}
 	var unread []string
 	planned := 0
 	for _, r := range rows {
@@ -86,17 +94,14 @@ func (e *env) apply(args []string) error {
 			unread = append(unread, r.madeID)
 		}
 	}
-	e.applyCancel(c, unread)
+	failed = append(failed, e.applyCancel(c, unread))
 	made = slices.DeleteFunc(made, func(id string) bool { return slices.Contains(unread, id) })
 	e.applyShow(rows, diff)
 	if planned == 0 {
 		return errors.Join(append(failed, notConfirmed{errors.New("no plan to approve; nothing was approved")})...)
 	}
-	// Every approval is bound to the reads the list was shown from: an epoch that moved since makes the
-	// rest refuse, never approve under the new one.
-	epoch, moves := c.Context.LastEpoch, c.EpochMoves()
 	if err := e.confirmYes(sf("Answering y records your approval of the %d plans listed as you. Approve them?", planned)); err != nil {
-		e.applyCancel(c, made)
+		failed = append(failed, e.applyCancel(c, made))
 		return errors.Join(append(failed, err)...)
 	}
 	return errors.Join(append(failed, e.applyApprove(c, rows, epoch, moves))...)
@@ -332,15 +337,24 @@ func (e *env) applyApprove(c *client.Client, rows []*applyRow, epoch string, mov
 	return errors.Join(errs...)
 }
 
-// applyCancel cancels the plans this command made and no others, and says what it left.
-func (e *env) applyCancel(c *client.Client, made []string) {
+// applyCancel cancels the plans this command made and no others, and says what it left. A cancellation
+// of unknown outcome is said to be unknown, never as done or as not done, and its error is returned so
+// that the command exits 3.
+func (e *env) applyCancel(c *client.Client, made []string) error {
 	var cancelled []string
+	var unknown []error
 	for _, id := range made {
-		body, _ := json.Marshal(apitypes.ReasonInput{Reason: "Not approved: apply was stopped at its question."})
+		body, _ := json.Marshal(apitypes.ReasonInput{Reason: "Not approved: apply stopped before approving this plan."})
 		w := &client.Write{Method: http.MethodPost, Path: "/plans/" + url.PathEscape(id) + "/cancellations", Body: body,
 			Check: "plan show " + client.ShellWord(id)}
 		w.ReadsFrom(c)
 		if err := e.writeWith(c, nil, w, func(*client.Client, *client.Response) ([]string, error) { return nil, nil }); err != nil {
+			var u *client.Unknown
+			if errors.As(err, &u) {
+				tf(e.err, "whether plan %s was cancelled is unknown (the error above); plan show %s reads it\n", id, client.ShellWord(id))
+				unknown = append(unknown, fmt.Errorf("plan %s: %w", id, err))
+				continue
+			}
 			tf(e.err, "plan %s was not cancelled (%v); it stays until it expires\n", id, err)
 			continue
 		}
@@ -349,4 +363,5 @@ func (e *env) applyCancel(c *client.Client, made []string) {
 	if len(cancelled) > 0 {
 		tf(e.err, "Cancelled the plans this command made: %s. Plans prepared by somebody else were left as they were.\n", strings.Join(cancelled, ", "))
 	}
+	return errors.Join(unknown...)
 }

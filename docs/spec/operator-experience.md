@@ -983,10 +983,11 @@ reuses a plan somebody prepared for this operation that is ready. It reads every
 anything and prints each machine with its role and profiles, each plan's own expiry, and the size of its
 change (the change itself with `--diff`), on standard error, then asks once. A plan whose change cannot be
 read is left out, and one this command made is cancelled, so that nothing is approved unseen. `y` approves
-every plan listed, each by its own approval, bound to the epoch the list was shown at (an epoch that moved
-since refuses the rest), and each answered on its own line; a refusal for one machine leaves the others
-approved and exits non-zero, and so does a plan that could not be made. An approval whose outcome is unknown
-is reported as unknown, never as unapproved. Enter, `n` and the end of input approve nothing and cancel the
+every plan listed, each by its own approval, bound to the epoch the plans were read at (an epoch that moved
+since refuses the rest, and one that moves while they are read stops the command before the list), and each
+answered on its own line; a refusal for one machine leaves the others approved and exits non-zero, and so
+does a plan that could not be made. An approval or a cancellation whose outcome is unknown is reported as
+unknown, never as unapproved or as not cancelled, and exits 3. Enter, `n` and the end of input approve nothing and cancel the
 plans this command made, never one it read. A Ctrl-C at the question leaves the plans to expire at the time
 each shows. A machine already applied, frozen, in drift or in an operation is left out with its reason, and
 so is one whose waiting plan is for another operation (an adopt plan is decided on the machine's page). A
