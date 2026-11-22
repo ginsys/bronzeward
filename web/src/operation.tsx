@@ -9,7 +9,7 @@ import type { components } from "./api/v1";
 import { useWrites } from "./forms.tsx";
 import { settledReads } from "./imports.tsx";
 import { type Failed, Id, readPages, Ref, useReads } from "./list.tsx";
-import { operationNext, operationNow } from "./operation-words.ts";
+import { operationNext, operationNow, recoveryOperationPath } from "./operation-words.ts";
 import { Named } from "./titles.tsx";
 import { safeText, safeWord } from "./safe.ts";
 import { eventLine, RESTORED, watch } from "./progress.ts";
@@ -110,7 +110,7 @@ export function Outcome({ o, cause: why }: { o: Operation; cause?: string | unde
       return (
         <Status testid="outcome">
           Outcome unknown{why === undefined ? "" : ` (${why})`}. A recovery administrator must account for {attempts.length === 0 ? "this operation: no attempt is recorded" : `attempt ${attempts[attempts.length - 1]!.number}`}. No conflicting work on this machine proceeds until then.
-          {" "}<Ref to="/recovery" id="recovery">Open in Recovery</Ref> (recovery-admin). This page keeps following the operation.
+          {" "}<Ref to={recoveryOperationPath(o.id)} id={o.id}>Open in Recovery</Ref> (recovery-admin). This page keeps following the operation.
         </Status>
       );
     default: return <Status testid="outcome">In progress: {safeWord(o.state)}.</Status>;

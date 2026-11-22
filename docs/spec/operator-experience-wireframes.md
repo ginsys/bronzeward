@@ -625,6 +625,22 @@ Account scope mch_k2p…7xqa (pre-restore unaccounted)
   landing can overwrite work admitted after release, and would be seen only as drift at a
   later observation.
   Machine worker-1, cluster prod.                                [Record accounting]
+
+Recovery of the operation: apply-config on worker-1 (unresolved)      /recovery/operations/op_…
+Decides an operation whose outcome is not known. Take over moves it to this server and sends
+nothing to the node. Resolve as cancelled ends an operation with no attempt. Both need the
+recovery-admin role and a reason, which is the record.   [Back to the operation]
+State: unresolved. Machine worker-1. No attempt is recorded. Owner generation read: 3.
+Take over
+  Move the operation to this server instance, from the owner generation read from its events
+  and attempts. The server refuses a generation that is not current, and then nothing changed.
+  Reason (at most 1024 bytes) [______________]   [Take over]
+Resolve as cancelled
+  Cancel an operation that has no attempt. It records no remote outcome: nothing was sent to
+  the node, and nothing shows whether anything landed.
+  Reason (at most 1024 bytes) [______________]   [Resolve as cancelled]
+  With an attempt recorded: "1 attempt is recorded, and the request may have landed: an attempt
+  is accounted for, not cancelled." The control is off.
 ```
 
 ## W11. Empty, withheld, error and offline states
