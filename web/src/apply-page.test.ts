@@ -118,3 +118,98 @@ describe("the apply page's refused approval", () => {
     expect(sent).toEqual(["/plans", "/plans/pln_new/cancellations"]);
   });
 });
+
+// The page mounted over a served world: `served` answers reads, `answer` decides each write's outcome, `sent` lists the writes.
+function mount(served: Record<string, unknown>, answer: (path: string) => unknown) {
+  const box = document.createElement("div");
+  document.body.append(box);
+  const root = createRoot(box);
+  const reads = {
+    client: { read: vi.fn(async (path: string) => (path in served ? { kind: "ok", data: served[path], etag: '"1"' } : { kind: "refused", status: 404, problem: null })) },
+    settle: (res: unknown, set: (r: unknown) => void, live: () => boolean) => (live() && set(res), true),
+    undropped: () => () => true,
+    view: "", again: 0, regained: 0, go: () => {}, failure: () => null,
+  } as unknown as Reads;
+  const writes = new Writes(() => "p");
+  const sent: string[] = [];
+  vi.spyOn(writes, "submit").mockImplementation(async (w) => {
+    sent.push(w.spec.path);
+    w.outcome = answer(w.spec.path) as never;
+    return w.outcome;
+  });
+  const settled = () => act(async () => void (await new Promise((r) => setTimeout(r, 40))));
+  const row = (m: string) => box.querySelector(`[data-testid="apply-row"][data-machine="${m}"]`)!;
+  const button = (label: string) => [...box.querySelectorAll("button")].find((b) => b.textContent === label)!;
+  const start = async () => {
+    await act(async () =>
+      root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(ApplyForm, { release: REL, r: release as never }))))),
+    );
+    await settled();
+  };
+  const choose = async (m: string) => {
+    await act(async () => void row(m).querySelector<HTMLInputElement>("input[type=checkbox]")!.click());
+    await settled();
+  };
+  const press = async (label: string) => {
+    await act(async () => void button(label).click());
+    await settled();
+  };
+  const stop = async () => {
+    await act(async () => root.unmount());
+    box.remove();
+  };
+  return { sent, row, button, start, choose, press, stop, settled, box };
+}
+const done = (data: unknown) => ({ kind: "done", status: 201, data, replayed: false });
+const served2 = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  [`/machines/${A}`]: machine(A), [`/machines/${B}`]: machine(B),
+  [`/machines/${A}/position`]: position(A, "pln_a"), [`/machines/${B}/position`]: position(B, "pln_b"),
+  "/plans/pln_a": plan("pln_a", A), "/plans/pln_b": plan("pln_b", B),
+  ...over,
+});
+
+describe("the apply page's plans and approvals", () => {
+  test("Apply stays off while a plan's change could not be read", async () => {
+    const served = served2();
+    delete served["/plans/pln_a"];
+    const p = mount(served, () => done({ id: "apr_1" }));
+    await p.start();
+    await p.choose(A);
+    expect(p.box.querySelector('[data-testid="apply-unread"]')).not.toBeNull();
+    expect(p.button("Apply").hasAttribute("disabled") || p.button("Apply").getAttribute("aria-disabled") === "true").toBe(true);
+    await p.stop();
+  });
+
+  test("a machine no longer chosen has its plan cancelled, and the plan of a machine still chosen is kept", async () => {
+    const none = (m: string) => ({ ...position(m, "x"), step: "needs-plan", plan: null });
+    const p = mount(served2({ [`/machines/${A}/position`]: none(A), [`/machines/${B}/position`]: none(B) }), (path) => (path === "/plans" ? done({ id: "pln_made" }) : done({})));
+    await p.start();
+    await p.choose(A);
+    await p.choose(B);
+    await p.press("Show apply");
+    expect(p.sent).toEqual(["/plans", "/plans"]);
+    await p.choose(A);
+    expect(p.sent).toEqual(["/plans", "/plans", "/plans/pln_made/cancellations"]);
+    await p.stop();
+  });
+
+  test("a plan Apply was pressed for is never cancelled, when the choice changes or the person leaves", async () => {
+    const p = mount(served2(), (path) => done(path.endsWith("/approvals") ? { id: "apr_1" } : {}));
+    await p.start();
+    await p.choose(A);
+    await p.choose(B);
+    await p.press("Apply");
+    expect(p.sent).toEqual(["/plans/pln_a/approvals", "/plans/pln_b/approvals"]);
+    await p.stop();
+    expect(p.sent.filter((s) => s.endsWith("/cancellations"))).toEqual([]);
+  });
+
+  test("an approval whose outcome is unknown is not said to be unapproved", async () => {
+    const p = mount(served2(), (path) => (path === "/plans/pln_a/approvals" ? { kind: "unknown", why: "the connection was lost", problem: null } : done({ id: "apr_1" })));
+    await p.start();
+    await p.choose(A);
+    await p.press("Apply");
+    expect(p.row(A).textContent).not.toContain("Nothing was approved for this machine.");
+    await p.stop();
+  });
+});

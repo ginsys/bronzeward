@@ -89,10 +89,14 @@ describe("the apply page (#1096)", () => {
     await browser.waitUntil(async () => (await rows().length) === 2, { timeout: 20_000 });
     await choose(A).click();
     await $("button=Show apply").click();
+    // The press disables the button until it has finished, so an enabled button after the click means the press is done.
+    await expect($("button=Show apply")).toBeEnabled({ wait: 20_000 });
     await expect($('[data-testid="apply-plan"]')).toBeExisting({ wait: 20_000 });
+    // once: only A is chosen and the press is done, so one plan is listed; a second would have needed B chosen.
     expect(await $$('[data-testid="apply-plan"]').length).toBe(1);
     await choose(B).click();
     await $("button=Show apply").click();
+    await expect($("button=Show apply")).toBeEnabled({ wait: 20_000 });
     await browser.waitUntil(async () => (await $$('[data-testid="apply-plan"]').length) === 2, { timeout: 20_000, timeoutMsg: "the second plan did not appear" });
     // Each plan's change is inside a closed details, whose text a browser does not return: open each one first.
     for (const s of await $$('[data-testid="apply-plan"] summary')) await s.click();
@@ -116,6 +120,9 @@ describe("the apply page (#1096)", () => {
     await expect($('[data-testid="apply-sentence"]')).toHaveText(expect.stringContaining("Pressing Apply records your approval of each plan shown above."));
     await $("button=Apply").click();
     await browser.waitUntil(async () => (await posts()).length > 0, { timeout: 20_000, timeoutMsg: "no approval was sent" });
+    // The press disables Apply until every approval has been sent: an enabled button means the press is done.
+    await expect($("button=Apply")).toBeEnabled({ wait: 20_000 });
+    // once: only B is chosen, and the press is done, so the approval of A, which was never chosen, was not sent.
     expect(await posts()).toEqual([`POST /plans/${PB}/approvals`]);
   });
 
@@ -127,8 +134,11 @@ describe("the apply page (#1096)", () => {
     await choose(A).click();
     await $("button=Show apply").click();
     await browser.waitUntil(async () => (await posts()).includes("POST /plans"), { timeout: 20_000, timeoutMsg: "no plan was made" });
+    // The choice is locked while the press runs, so the machine is unchosen once the press is done.
+    await expect($("button=Show apply")).toBeEnabled({ wait: 20_000 });
     await choose(A).click();
     await browser.waitUntil(async () => (await posts()).includes(`POST /plans/${PA}/cancellations`), { timeout: 20_000, timeoutMsg: "the plan the page made was not cancelled" });
+    // once: the plan was made once and cancelled once, and the case sends nothing else.
     expect(await posts()).toEqual(["POST /plans", `POST /plans/${PA}/cancellations`]);
   });
 

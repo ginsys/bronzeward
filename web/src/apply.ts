@@ -39,6 +39,8 @@ export const LINES = {
   unresolved: "Stopped: an operation on this machine is unresolved. The controller keeps examining it; open the machine to see it.",
   drift: "Stopped: the machine changed since Bronzeward last verified it. Open the machine to decide on the change first.",
   frozen: "Stopped: the machine is frozen. An approver can unfreeze it on the machine's page.",
+  otherPlan: "Stopped: the plan waiting for this machine is not an apply plan. Open the machine to decide on it.",
+  unreadPlan: "The change of a plan could not be read, so Apply stays off until it can be: reload the page.",
   planning: "Creating the plan.",
   approving: "Approving the plan as you.",
   approvedNow: "Approved. The controller sends it when its gates allow; you can leave this page, it continues without it.",
@@ -53,7 +55,9 @@ export const LINES = {
 // Where a machine stands for this release, in words. A plan that is another release's is not this release's plan.
 export function rowOf(p: Position, release: string): Row {
   const m = p.machine;
-  const mine = p.plan !== null && p.plan.release === release;
+  const mine = p.plan !== null && p.plan.release === release && p.plan.operation === "apply-config";
+  // A plan of this release that is another operation's (an adoption, say) is decided on the machine's page: this page applies.
+  if (p.plan !== null && p.plan.release === release && !mine && (p.step === "awaiting-approval" || p.step === "awaiting-dispatch")) return { state: "stopped", text: LINES.otherPlan };
   if (p.step === "operation-unresolved") return { state: "stopped", text: LINES.unresolved };
   if (p.step === "operation-in-flight") return { state: "running", text: LINES.running };
   if (p.step === "awaiting-dispatch" && mine) return p.rolloutHeldBy === null ? { state: "waiting", text: LINES.approved } : { state: "waiting", text: LINES.behind };
@@ -72,19 +76,33 @@ export interface ApplyIo {
 }
 
 const done = (w: Write) => w.outcome?.kind === "done";
-const idOf = (w: Write): string | undefined => {
-  const d = w.outcome?.kind === "done" ? w.outcome.data : undefined;
+const idOfOutcome = (o: Write["outcome"]): string | undefined => {
+  const d = o?.kind === "done" ? o.data : undefined;
   const id = typeof d === "object" && d !== null ? (d as { id?: unknown }).id : undefined;
   return typeof id === "string" && id !== "" ? id : undefined;
 };
+const idOf = (w: Write) => idOfOutcome(w.outcome);
 
 // "Show apply": the plan of each chosen machine, read from where it stands now. A plan that is ready (somebody
 // prepared it) is reused and never made twice; a machine that cannot be planned is left out with its reason, and the
-// others go on. `made` holds only the plans this press created: the page may cancel those and no others. The caller
-// passes its own set, which gains each plan the moment it is made, so a choice changed while the press still runs
-// cancels it.
-export async function showApply(release: string, machines: readonly string[], io: ApplyIo, made = new Set<string>()): Promise<{ plans: Map<string, string>; made: Set<string> }> {
+// others go on. `made` maps each plan this press created to its machine: the page may cancel those and no others. The
+// caller passes its own map, which gains each plan the moment it is made. A plan whose creation is answered after the
+// page stopped caring (the person left) is cancelled by that answer, since it is the only place the plan's ID is
+// known; that includes the answer of a repeat of an unknown creation, which arrives through `settled`.
+export async function showApply(release: string, machines: readonly string[], io: ApplyIo, made = new Map<string, string>()): Promise<{ plans: Map<string, string>; made: Map<string, string> }> {
   const plans = new Map<string, string>();
+  const cancelled = new Set<string>();
+  const own = async (m: string, id: string): Promise<boolean> => {
+    if (made.has(id)) return true;
+    if (cancelled.has(id)) return false;
+    if (!io.live()) {
+      cancelled.add(id);
+      await cancelPlans([id], io);
+      return false;
+    }
+    made.set(id, m);
+    return true;
+  };
   for (const m of machines) {
     if (!io.live()) break;
     const p = await io.read<Position>(`/machines/${enc(m)}/position`);
@@ -109,7 +127,10 @@ export async function showApply(release: string, machines: readonly string[], io
     }
     if (!io.live()) break;
     io.say(m, { state: "working", text: LINES.planning });
-    const w = await io.send({ method: "POST", path: "/plans", body: body.body, resource: "/plans" });
+    const w = await io.send({ method: "POST", path: "/plans", body: body.body, resource: "/plans", settled: (o) => {
+      const late = idOfOutcome(o);
+      if (late !== undefined) void own(m, late);
+    } });
     if (!done(w)) {
       io.say(m, { state: "stopped", text: "", write: w });
       continue;
@@ -119,14 +140,8 @@ export async function showApply(release: string, machines: readonly string[], io
       io.say(m, { state: "stopped", text: LINES.noPlan });
       continue;
     }
-    // The page stopped caring while the request ran (the choice changed, or the person left): the plan is cancelled
-    // now, since this answer is the only place its ID is known, and no more are made.
-    if (!io.live()) {
-      await cancelPlans([id], io);
-      break;
-    }
+    if (!(await own(m, id))) break;
     plans.set(m, id);
-    made.add(id);
     io.say(m, { state: "ready", text: LINES.ready });
   }
   return { plans, made };

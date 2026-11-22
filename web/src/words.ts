@@ -130,7 +130,7 @@ export const roleWords = (role: string): string => (role === "controlplane" ? "c
 
 /** The apply page (ginsys/bronzeward#1096): /releases/<id>/apply. */
 export const APPLY_NOTE = "Choose the machines of this release to change, then press Show apply: it makes one plan for each machine and shows what each plan changes. Apply then records your approval of those plans. A machine you leave out stays as it is and can be applied later from this page.";
-export const APPLY_SENTENCE = "Pressing Apply records your approval of each plan shown above. The controller re-checks each plan when it sends it and applies it only if every check passes, one machine of a cluster at a time, in the order the plans were approved, which is the order of the list. A plan that is not applied expires 24 hours after Show apply made it. Approval is for a human sign-in only.";
+export const APPLY_SENTENCE = "Pressing Apply records your approval of each plan shown above. The controller re-checks each plan when it sends it and applies it only if every check passes, one machine of a cluster at a time, in an order the controller does not promise. A plan that is not applied expires at the time shown for it. Approval is for a human sign-in only.";
 export const CONTROL_PLANE_NOTE = "A control plane machine is chosen. Applying to a control plane machine was not covered by this version's acceptance tests. The server does not refuse it, machines are applied one at a time, and you decide.";
 export const NO_ROLE_NOTE = "A machine imported before its role was stored shows none until it is imported again.";
 export const APPLY_NEEDS_PUBLISHER = "Show apply makes the plans, which needs the publisher role. A publisher can prepare them and an approver can then apply them from this page.";
