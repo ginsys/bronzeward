@@ -9,6 +9,7 @@ import { ChangeEndpoint, RenameMachine } from "./forms.tsx";
 import { Detail, type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, machineHeading, machineName, node, release } from "./machines.tsx";
 import { ClusterRef } from "./titles.tsx";
+import { safeWord } from "./titles.ts";
 import { PageNote } from "./page-note.tsx";
 import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
 import { NextStep, type Position } from "./nextstep.tsx";
@@ -36,7 +37,7 @@ export function at(s: string): string {
   return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${clock(d)}`;
 }
 // What a read could not read, field by field: the API gives several fields the same cause.
-export const causes = (o: Observation) => Object.entries(o.unread).map(([field, u]) => `${field} (${u.cause})`);
+export const causes = (o: Observation) => Object.entries(o.unread).map(([field, u]) => `${field} (${safeWord(u.cause)})`);
 
 // The newest read, when it has a higher basis than the one observed names and could not read
 // something. The machine read selects observed by highest basis among reads of the digest. The
@@ -70,7 +71,7 @@ export function sentences(m: Machine, obs: Observation[]): string[] {
   } else if (o === null) {
     out.push("No configuration read recorded.");
   } else if (a !== null && o.release === a.release) {
-    out.push(`The configuration read at ${at(o.at)} is attributed to ${short(o.release)}, which is the Applied release (by ${a.source}).`);
+    out.push(`The configuration read at ${at(o.at)} is attributed to ${short(o.release)}, which is the Applied release (by ${safeWord(a.source)}).`);
     if (a.source === "adoption") out.push(ADOPTED);
     if (a.source === "adoption" && d === a.release) out.push(EITHER);
   } else if (o.release === null) {
@@ -454,7 +455,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
       <PageNote parts={[MACHINE_NOTE]}> <Ref to="/drafts/new" id="drafts">{CREATE_A_DRAFT}</Ref>.</PageNote>
       {m.kind !== "ok" && pm}
       {obs.kind !== "ok" && po}
-      <p><ClusterRef id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
+      <p><ClusterRef id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {safeWord(d.platform)}.</p>
       {changed !== undefined && <RenameMachine machine={d} onChanged={changed} />}
       {changed !== undefined && <ChangeEndpoint machine={d} onChanged={changed} />}
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list).map((s) => <li key={s}>{s}</li>)}</ul>
@@ -462,10 +463,10 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
       <NextStep position={position} recovery={recovery} />
       <dl>
         <dt>Desired</dt><dd>{release(d.desired)}</dd>
-        <dt>Applied</dt><dd>{d.applied === null ? "none" : <>{release(d.applied.release)} by {d.applied.source}</>}</dd>
+        <dt>Applied</dt><dd>{d.applied === null ? "none" : <>{release(d.applied.release)} by {safeWord(d.applied.source)}</>}</dd>
         <dt>Import base</dt><dd data-testid="import-base"><Id id={d.applied?.importBase} none="none" /></dd>
         <dt>Observed</dt><dd data-testid="observed">{d.observed === null ? "none" : <>read at {at(d.observed.at)} (<span title={d.observed.observation}>{short(d.observed.observation)}</span>): {attribution(d.observed.release)}</>}</dd>
-        <dt>Scope</dt><dd>{d.scopeState}</dd>
+        <dt>Scope</dt><dd>{safeWord(d.scopeState)}</dd>
       </dl>
       <p>
         <Ref to={`/plans?machine=${d.id}`} id={d.id}>Plans for this machine</Ref>{" · "}
@@ -522,7 +523,7 @@ export function TimelineRows({ tl, older, busy }: { tl: Timeline<Entry>; older: 
               {tl.items.map((e) => (
                 <tr key={`${e.epoch}:${e.revision}`}>
                   <td>{at(e.at)}</td>
-                  <td>{e.kind}</td>
+                  <td>{safeWord(e.kind)}</td>
                   <td>{details(e)}</td>
                 </tr>
               ))}

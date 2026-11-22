@@ -39,7 +39,7 @@ export function publishEnd(o: Operation): Ended {
     return { release: r.release };
   }
   const code = refusalOf({ problem: o.error }).code;
-  return { text: `Publication operation ${short(o.id)} ${o.state}${code === undefined ? "" : `: ${code}`}. ${SENT_NOTHING}` };
+  return { text: `Publication operation ${short(o.id)} ${safeWord(o.state)}${code === undefined ? "" : `: ${code}`}. ${SENT_NOTHING}` };
 }
 
 // What the accepted answer says: the draft's revision and the operation, each only when the answer names it.

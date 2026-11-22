@@ -5,6 +5,8 @@
 // cause, its attempts, the applied release) stay with `Outcome`, so a sentence here adds what the state
 // means for the machine and never repeats them.
 
+import { safeWord } from "./titles.ts";
+
 const KNOWN: Record<string, Record<string, [now: string, next: string | undefined]>> = {
   publish: {
     queued: ["Accepted; no worker has taken it yet.", "Wait; nothing to do."],
@@ -50,8 +52,8 @@ const article = (kind: string) => (/^[aeiou]/.test(kind) ? "An" : "A");
 export function operationNow(kind: string, state: string): string {
   const row = known(kind, state);
   if (row !== undefined) return row[0];
-  const what = Object.hasOwn(KNOWN, kind) ? `${article(kind)} ${kind} operation` : `An operation of kind ${kind}`;
-  return `${what} in state ${state}; this page has no description of it.`;
+  const what = Object.hasOwn(KNOWN, kind) ? `${article(kind)} ${kind} operation` : `An operation of kind ${safeWord(kind)}`;
+  return `${what} in state ${safeWord(state)}; this page has no description of it.`;
 }
 
 export function operationNext(kind: string, state: string): string | undefined {

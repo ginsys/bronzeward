@@ -10,6 +10,7 @@ import { type Env, endpointNote, isAddress, type Line, pressOnboarding, type Pla
 import { RequestRef } from "./problems.tsx";
 import { Action, KEPT_PAGE, useGate } from "./shell.tsx";
 import { MachineById } from "./titles.tsx";
+import { safeWord } from "./titles.ts";
 import { useUnsaved, useWrites } from "./forms.tsx";
 import { PageNote } from "./page-note.tsx";
 import { CONNECT_A_CLUSTER, CONNECT_NOTE } from "./words.ts";
@@ -172,7 +173,7 @@ export function OnboardCluster() {
             <thead><tr><th>Hostname</th><th>Role</th><th>Address</th><th>Platform</th><th>Answered</th></tr></thead>
             <tbody>
               {p.found.members.map((m) => (
-                <tr key={m.nodeId}><td>{m.hostname}</td><td>{m.role}</td><td>{m.address}</td><td>{m.platform}</td><td>{m.answered ? "yes" : "no"}</td></tr>
+                <tr key={m.nodeId}><td>{safeWord(m.hostname)}</td><td>{m.role}</td><td>{m.address}</td><td>{safeWord(m.platform)}</td><td>{m.answered ? "yes" : "no"}</td></tr>
               ))}
             </tbody>
           </table>

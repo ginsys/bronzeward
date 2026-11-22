@@ -11,7 +11,12 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
 import { CreatedDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { OpenDraftsView } from "./machines.tsx";
-import { IngestionItem, StartImport } from "./imports.tsx";
+import { allowed, IngestionItem, StartImport } from "./imports.tsx";
+import { MachineShown, sentences } from "./machine.tsx";
+import { RecoveryConsole } from "./recovery.tsx";
+import { RevokedBy } from "./approval.tsx";
+import { ReviewBody } from "./review.tsx";
+import { nextStep } from "./nextstep.tsx";
 import { PublishDraft } from "./publish.tsx";
 import { Detail, type Reads, ReadsProvider, short, useItem } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
@@ -900,5 +905,163 @@ describe("ginsys/bronzeward#1055: the Create draft confirmation names the draft,
     await mount(h(CreatedDraft, { data: created("a\nb") }), { ...reads, view: "untitled" });
     await settled();
     expect(box.textContent).toBe(`Draft Untitled draft (${short(DRF)}) created (Cluster office).`);
+  });
+});
+
+// ginsys/bronzeward#1055 part 6: a word the server sets (a state, kind, class, reason, mode, source, role,
+// route, action, cause, platform or hostname) is printed only when it is safe text (client contracts A8
+// rule 6), on every page, not on the draft and dependency pages alone.
+describe("ginsys/bronzeward#1055: a server word on a plan, operation, import, recovery, machine or audit page is safe text", () => {
+  const BAD = "bad‮word";
+  const UNKNOWN = "newstate";
+  const NOT_SHOWN = "(not shown)";
+  const principal = "idn_k2pq3rstuvwxyz234567abcdef";
+  const planBody = (word: string) => ({
+    ...plan("apply-config"), state: word, mode: word, route: word, expiresAt: at, createdAt: at, createdBy: { principal, role: word },
+    evidence: { diff: null, validation: { platformMode: word }, dryRun: { available: false, reason: word } },
+  });
+  const opBody = (word: string) => ({
+    ...operation("apply-config", { plan: PLN, machine: MCH }), kind: word, state: word, createdBy: { principal, role: word },
+    attempts: [{ id: "att_a", number: 1, at, route: word, controller: "c", generation: 1, transportDeadline: at, verificationDeadline: at, response: { class: word, code: "c", at }, accounting: null }],
+  });
+  const ingestion = (word: string) => ({ id: ING, machine: MCH, draft: DRF, operation: OP, state: word, kind: word, mode: word, review: null, ownerGeneration: 1, leaseUntil: at, expiresAt: at, createdAt: at });
+  const shown = (e: Element | null | undefined) => e?.textContent ?? "";
+  const field = (name: string) => [...box.querySelectorAll("dt")].find((dt) => dt.textContent === name)?.nextElementSibling?.textContent;
+  const clean = () => {
+    expect(text()).not.toContain("bad");
+    expect(text()).toContain(NOT_SHOWN);
+  };
+
+  test("the plan page: its heading, state, route, mode, validation mode, dry-run reason and creator's role", async () => {
+    answers[`/plans/${PLN}`] = ok(planBody(BAD));
+    await mount(h(PlanItem, { id: PLN }));
+    await settled();
+    expect(headings()[0]).toContain(`(${NOT_SHOWN})`);
+    expect(field("State")).toBe(`${NOT_SHOWN}; expires ${when(at)}`);
+    expect(field("Target")).toContain(`route ${NOT_SHOWN}`);
+    expect(field("Operation")).toBe(`apply-config, mode ${NOT_SHOWN}`);
+    expect(field("Created")).toContain(`(${NOT_SHOWN})`);
+    expect(field("Validation")).toContain(`, ${NOT_SHOWN})`);
+    expect(field("Dry run")).toBe(`not available (${NOT_SHOWN})`);
+    clean();
+  });
+
+  test("the plans list shows its state as safe text", async () => {
+    answers["/plans"] = ok({ items: [planBody(BAD)], next: null });
+    await mount(h(Plans, { query: "", go: () => {} }));
+    await settled();
+    expect(box.querySelector("tbody")?.textContent).toContain(NOT_SHOWN);
+    expect(text()).not.toContain("bad");
+  });
+
+  test("the operation page: its heading, kind, state, outcome line, description, creator's role and attempts", async () => {
+    answers[`/operations/${OP}`] = ok(opBody(BAD));
+    await mount(h(OperationItem, { id: OP }));
+    await settled();
+    expect(headings()[0]).toBe(`Operation op_k2pq…defg: ${NOT_SHOWN}, ${NOT_SHOWN}`);
+    expect(field("Kind")).toBe(NOT_SHOWN);
+    expect(field("State")).toBe(NOT_SHOWN);
+    expect(box.querySelector("[data-testid=outcome]")?.textContent).toBe(`In progress: ${NOT_SHOWN}.`);
+    expect(box.querySelector("[data-testid=now]")?.textContent).toBe(`An operation of kind ${NOT_SHOWN} in state ${NOT_SHOWN}; this page has no description of it.`);
+    expect(field("Created")).toContain(`(${NOT_SHOWN})`);
+    expect(shown(box.querySelector('[aria-label="Attempts"] tbody tr'))).toContain(`${NOT_SHOWN} ${"c"}`);
+    clean();
+  });
+
+  test("the operations list shows its kind and state as safe text", async () => {
+    answers["/operations"] = ok({ items: [opBody(BAD)], next: null });
+    await mount(h(Operations, { query: "", go: () => {} }));
+    await settled();
+    const row = box.querySelector("tbody tr")!;
+    expect([...row.children].filter((c) => c.textContent === NOT_SHOWN)).toHaveLength(2);
+    expect(text()).not.toContain("bad");
+  });
+
+  test("a word that is safe text but unknown to the page is shown as it is", async () => {
+    answers[`/operations/${OP}`] = ok(opBody(UNKNOWN));
+    await mount(h(OperationItem, { id: OP }));
+    await settled();
+    expect(box.querySelector("[data-testid=outcome]")?.textContent).toBe(`In progress: ${UNKNOWN}.`);
+    expect(field("Kind")).toBe(UNKNOWN);
+    answers[`/plans/${PLN}`] = ok(planBody(UNKNOWN));
+    await mount(h(PlanItem, { id: PLN }), { ...reads, view: "plan" });
+    await settled();
+    expect(field("State")).toBe(`${UNKNOWN}; expires ${when(at)}`);
+  });
+
+  test("the import page and the imports list: heading, state, kind, mode, and the sentences of an ended or lapsed claim", async () => {
+    answers[`/ingestions/${ING}`] = ok(ingestion(BAD));
+    await mount(providers(h(IngestionItem, { id: ING })));
+    await settled();
+    expect(headings()[0]).toBe(`Import of worker-1: ${NOT_SHOWN}`);
+    expect(field("State")).toBe(`${NOT_SHOWN}, ${NOT_SHOWN}, ${NOT_SHOWN} staging`);
+    clean();
+    answers["/ingestions"] = ok({ items: [ingestion(BAD)], next: null });
+    await mount(h(Imports, { query: "", go: () => {} }), { ...reads, view: "list" });
+    await settled();
+    expect(box.querySelector("tbody")?.textContent).toContain(NOT_SHOWN);
+    expect(text()).not.toContain("bad");
+  });
+
+  test("what an import's state allows reads Ended with the state as safe text", async () => {
+    await mount(h("div", {}, allowed(ingestion(BAD) as never, Date.now())));
+    expect(text()).toContain(`Ended: ${NOT_SHOWN}.`);
+    expect(text()).not.toContain("bad");
+  });
+
+  test("the recovery page: the entry's reason and every scope's state", async () => {
+    answers["/recovery"] = ok({ epoch: "e0", recoveryMode: true, entry: { enteredAt: at, enteredBy: principal, reason: BAD, stoppedAt: at, restored: [] }, exit: null, scopes: [{ machine: MCH, state: BAD }] });
+    await mount(providers(h(RecoveryConsole, {})), { ...reads, settle: (res, set, live) => (live() && set(res), false), view: "recovery" });
+    await settled();
+    expect(box.querySelector("[data-testid=recovery-entry]")?.textContent).toContain(`${NOT_SHOWN}. Restore stopped`);
+    expect(box.querySelector('[data-testid=scopes] tbody td:nth-child(2)')?.textContent).toBe(NOT_SHOWN);
+    expect(text()).not.toContain("bad");
+  });
+
+  test("the audit page: the principal's kind, role and action", async () => {
+    const [kind, role, action] = ["Principal", "Role", "Action"].map((n) => ACTS.find(([name]) => name === n)![1]);
+    const a = { at, principal, principalKind: BAD, via: "web", role: BAD, action: BAD, subjects: [], requestId: null, id: "act_a" } as never;
+    await mount(h("div", {}, [kind!(a), role!(a), action!(a)].map((c, i) => h("p", { key: i }, c))));
+    await settled();
+    expect([...box.querySelectorAll("p")].map((p) => p.textContent)).toEqual([expect.stringContaining(`(${NOT_SHOWN})`), NOT_SHOWN, NOT_SHOWN]);
+    await mount(h("div", {}, ACTS.find(([name]) => name === "Role")![1]({ ...(a as object), role: null } as never)), { ...reads, view: "none" });
+    expect(text()).toBe("none");
+  });
+
+  test("the machine page: platform, applied source, scope state, timeline kind, an observation's unread cause", async () => {
+    const machine = {
+      id: MCH, name: "worker-1", cluster: "cl_a", talosEndpoint: "https://10.0.0.1:50000", hardware: { talosNodeId: "n1" }, platform: BAD, scopeState: BAD, desired: REL,
+      applied: { release: REL, source: BAD, importBase: null }, observed: null, openDrift: null, frozen: false,
+    };
+    const observation = { id: "obs_aaaaaaaaaaaaaaaaaaaaaaaaaa", basis: "b", at, purpose: "p", release: null, unread: { field: { cause: BAD } } };
+    const entry = { epoch: "e0", revision: 1, at, kind: BAD };
+    await mount(h(MachineShown, {
+      id: MCH, m: { kind: "ok", data: machine }, obs: { kind: "ok", data: { items: [observation], next: undefined, restarted: false } }, km: { view: "v", data: machine, restarted: false },
+      ko: { view: "v", data: undefined, restarted: false }, tl: { kind: "ok", data: { items: [entry], older: undefined, tail: undefined, read: true, restarted: false } },
+      kt: { view: "v", data: undefined, restarted: false }, older: undefined, busy: false,
+    } as never));
+    await settled();
+    expect([...box.querySelectorAll("p")].find((p) => p.textContent?.includes("10.0.0.1"))?.textContent).toContain(`, ${NOT_SHOWN}.`);
+    expect(field("Applied")).toContain(`by ${NOT_SHOWN}`);
+    expect(field("Scope")).toBe(NOT_SHOWN);
+    expect(box.querySelector('[data-testid=timeline] tbody td:nth-child(2)')?.textContent).toBe(NOT_SHOWN);
+    expect(box.querySelector('[data-testid=observations] tbody td:nth-child(5)')?.textContent).toBe(`field (${NOT_SHOWN})`);
+    expect(text()).not.toContain("bad");
+  });
+
+  test("the sentences of a machine whose Applied source is adoption still read as they did", () => {
+    const m = { desired: REL, applied: { release: REL, source: "adoption" }, observed: { at, release: REL, observation: "obs_a" }, openDrift: null } as never;
+    expect(sentences(m, []).some((s) => s.includes("(by adoption)"))).toBe(true);
+    expect(sentences({ ...(m as object), applied: { release: REL, source: BAD } } as never, []).join(" ")).toContain(`(by ${NOT_SHOWN})`);
+  });
+
+  test("a role in the revocation and the freeze sentences, a revocation's reason, a review's mode and an operation's state in the next step", async () => {
+    await mount(h(RevokedBy, { principal, reason: BAD }));
+    expect(text()).toContain(`: ${NOT_SHOWN}`);
+    await mount(h(ReviewBody, { r: { release: REL, machine: MCH, mode: BAD, configuration: null, provenance: [] } as never }), { ...reads, view: "review" });
+    await settled();
+    expect(field("Validated in mode")).toBe(NOT_SHOWN);
+    const step = nextStep({ step: "operation-in-flight", machine: { id: MCH }, operation: { id: OP, state: BAD }, plan: null, draft: null, ingestion: null, rolloutHeldBy: null } as never);
+    expect(step?.text).toBe(`An operation is changing this machine (${NOT_SHOWN}). Next: wait for it to end.`);
   });
 });

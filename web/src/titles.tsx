@@ -184,6 +184,6 @@ export const OperationRef = ({ o }: { o: S["OperationBody"] }) => <Ref to={at("o
 export const ReleaseHeading = ({ id, r }: { id: string; r: S["ReleaseBody"] }) =>
   <Titled id={id} what="Release" text={useReleaseTitle(id, r)} fallback={`Release ${short(id)}`} />;
 export const PlanHeading = ({ id, p, machine }: { id: string; p: S["PlanBody"]; machine?: Held }) =>
-  <Titled id={id} what="Plan" text={usePlanTitle(id, p, machine)} tail={` (${p.state})`} fallback={`Plan ${short(id)}: ${p.state}`} />;
+  <Titled id={id} what="Plan" text={usePlanTitle(id, p, machine)} tail={` (${safeWord(p.state)})`} fallback={`Plan ${short(id)}: ${safeWord(p.state)}`} />;
 export const OperationHeading = ({ id, o }: { id: string; o: S["OperationBody"] }) =>
-  <Titled id={id} what="Operation" text={useOperationTitle(o)} tail={` (${o.kind}, ${o.state})`} fallback={`Operation ${short(id)}: ${o.kind}, ${o.state}`} />;
+  <Titled id={id} what="Operation" text={useOperationTitle(o)} tail={` (${safeWord(o.kind)}, ${safeWord(o.state)})`} fallback={`Operation ${short(id)}: ${safeWord(o.kind)}, ${safeWord(o.state)}`} />;
