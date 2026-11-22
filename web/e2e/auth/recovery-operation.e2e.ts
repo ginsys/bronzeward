@@ -157,8 +157,8 @@ describe("the recovery page of one operation (#365)", () => {
     await $("a=Open in Recovery").click();
     await browser.waitUntil(async () => (await browser.getUrl()) === `${FIXTURE_PAGE}/recovery/operations/${op}`, { timeout: 20_000, timeoutMsg: "the link did not open the recovery page" });
     await expect($('[data-testid="recovery-operation-state"]')).toBeExisting({ wait: 30_000 });
-    // once: read after the page's operation read rendered, which is what puts the operation's name in the heading
-    expect(await $("main h2").getText()).not.toContain(op);
+    // The titled form is "Operation: <title> (<kind>, <state>)", and the fallback while the title's reads run is "Operation <short id>: <kind>, <state>".
+    await expect($("main h2")).toHaveText(expect.stringMatching(/^Recovery of the operation: Operation: .+ \(apply-config, unresolved\)$/), { wait: 30_000 });
     await storageEmpty();
   });
 });
