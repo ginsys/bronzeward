@@ -1375,7 +1375,8 @@ where the contract names no step:
 - On the console, take over and resolve are controls of the operation's own recovery page,
   `/recovery/operations/<operation>`, which the operation's page links to while it is `unresolved`.
   Each takes a reason and one press, no typed identifier. Resolve is off with its reason where an
-  attempt is recorded, and take over where the operation is finished; a refusal shows the server's
+  attempt is recorded, and take over where the server would refuse it (an operation that is not an apply-config, or is in
+  a state other than committed, sending, verifying or unresolved); a refusal shows the server's
   reason in place.
 - A resolution says it records no remote outcome. The client refuses it before sending when the
   operation is not `unresolved` or has an attempt. A repeat skips these checks. A resolution that
