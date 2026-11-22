@@ -10,6 +10,7 @@ import { Result, useWrites } from "./forms.tsx";
 import { Ref, useItem, useReads, useSettled } from "./list.tsx";
 import type { Position } from "./nextstep.tsx";
 import { PageNote } from "./page-note.tsx";
+import { safeWord } from "./safe.ts";
 import { Who } from "./principals.tsx";
 import { when } from "./states.tsx";
 import { Action } from "./shell.tsx";
@@ -35,8 +36,8 @@ function Row({ release, machine, chosen, choose, line, n, profiles, seen }: { re
   return (
     <li data-testid="apply-row" data-machine={machine} data-state={shown?.state}>
       <label><input type="checkbox" checked={chosen} onChange={(e) => choose(e.target.checked)} /> <MachineById id={machine} /></label>
-      {role != null && <> <span data-testid="apply-role">{roleWords(role)}</span></>}
-      {profiles?.map((x) => <span key={x} className="label" data-testid="apply-profile"> {x}</span>)}
+      {role != null && <> <span data-testid="apply-role">{safeWord(roleWords(role))}</span></>}
+      {profiles?.map((x) => <span key={x} className="label" data-testid="apply-profile"> {safeWord(x)}</span>)}
       {shown !== undefined && <>: {STATES[shown.state]}. {shown.write === undefined ? shown.text : <><Result w={shown.write} done={() => null} /> {LINES.afterRefusal}</>}</>}
       {" "}<Ref to={`/machines/${enc(machine)}`} id={machine}>Open the machine</Ref>
     </li>
