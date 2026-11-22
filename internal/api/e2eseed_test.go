@@ -170,10 +170,15 @@ func seedSurvives(t *testing.T, attempt bool) {
 		a.wakeExecutor()
 		waitIdle(t, idle, 1)
 	}
-	time.Sleep(200 * time.Millisecond) // the drift loop's passes
+	// The drift loop's passes: two, because one begun before driftFrom was read ends after it and may have
+	// read nothing of the seed (as the executor's first signal above). A wait for the counter, bounded, not
+	// a sleep: a loaded runner can starve the loop's ticker for longer than any fixed time.
+	for deadline := time.Now().Add(10 * time.Second); driftPasses.Load()-driftFrom < 2 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
 	execRan, driftRan := execPasses.Load()-execFrom, driftPasses.Load()-driftFrom
 	t.Logf("passes after the seed: executor %d, drift %d", execRan, driftRan)
-	if execRan < 30 || driftRan < 1 {
+	if execRan < 30 || driftRan < 2 {
 		t.Fatalf("only %d executor and %d drift passes ran after the seed: the proof below would say nothing", execRan, driftRan)
 	}
 	if after := shown(t, db); after != before {
