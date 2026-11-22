@@ -203,3 +203,21 @@ func seedSurvives(t *testing.T, attempt bool) {
 		t.Errorf("the operation has %d attempts, want %d", n, want)
 	}
 }
+
+// TestE2EDrift is the e2e harness's drift step (ginsys/bronzeward#363): with BW_E2E_DRIFT_DSN naming the
+// disposable deployment's database and BW_E2E_DRIFT_MACHINE a machine in it, it opens a drift record on that
+// machine as a drift observation's recording transaction does (openDriftOn). The deployment's detector runs
+// every 5 minutes and the stand-in nodes' configuration is fixed, so no read of one ever differs from Applied:
+// a case that needs a record the server itself binds to a plan opens it here. It skips otherwise.
+func TestE2EDrift(t *testing.T) {
+	dsn, machine := os.Getenv("BW_E2E_DRIFT_DSN"), os.Getenv("BW_E2E_DRIFT_MACHINE")
+	if dsn == "" || machine == "" {
+		t.Skip("BW_E2E_DRIFT_DSN and BW_E2E_DRIFT_MACHINE unset: this is the browser harness's step")
+	}
+	db, err := database.Open(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	openDriftOn(t, db, machine)
+}

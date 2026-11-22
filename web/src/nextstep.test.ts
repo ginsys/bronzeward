@@ -84,10 +84,10 @@ describe("each step", () => {
     expect(nextStep(position("operation-unresolved", { operation: op }))?.text).toContain("no retry action");
   });
 
-  test("drift-open says the node differs and links nowhere", () => {
+  test("drift-open says the node differs and links to the machine's drift page", () => {
     const s = nextStep(position("drift-open"));
     expect(s?.text).toContain("differs");
-    expect(s?.links).toEqual([]);
+    expect(s?.links).toEqual([{ to: "/machines/mch_x/drift", label: "Decide on the change made on the machine", id: "mch_x" }]);
   });
 });
 

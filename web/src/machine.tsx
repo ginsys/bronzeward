@@ -10,8 +10,9 @@ import { Detail, type Dropped, Head, Id, type Keep, type Listed, type Load, type
 import { type Machine, machineHeading, machineName, node, release } from "./machines.tsx";
 import { ClusterRef } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
-import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET } from "./words.ts";
+import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
 import { NextStep, type Position } from "./nextstep.tsx";
+import { driftPath } from "./plan.tsx";
 import { principalId } from "./principals.ts";
 import { Who } from "./principals.tsx";
 import type { ReadResult } from "./request.ts";
@@ -35,7 +36,7 @@ export function at(s: string): string {
   return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${clock(d)}`;
 }
 // What a read could not read, field by field: the API gives several fields the same cause.
-const causes = (o: Observation) => Object.entries(o.unread).map(([field, u]) => `${field} (${u.cause})`);
+export const causes = (o: Observation) => Object.entries(o.unread).map(([field, u]) => `${field} (${u.cause})`);
 
 // The newest read, when it has a higher basis than the one observed names and could not read
 // something. The machine read selects observed by highest basis among reads of the digest. The
@@ -47,12 +48,23 @@ export function latestUnread(m: Machine, obs: Observation[]): Observation | unde
   return latest !== undefined && basis !== undefined && latest.basis > basis && causes(latest).length > 0 ? latest : undefined;
 }
 
+// The reads an open drift names, from the observations a page holds: the one that opened it and the one that last
+// saw it. Either is undefined when the page does not hold it (the API serves no opening time, so its time is that
+// of the observation that opened it). The drift page words them from the same lookup.
+export function driftReads(drift: NonNullable<Machine["openDrift"]>, obs: Observation[]): { opened: Observation | undefined; last: Observation | undefined } {
+  return { opened: obs.find((x) => x.id === drift.observation), last: obs.find((x) => x.id === drift.lastObservation) };
+}
+
+// The words of the machine page's one link to the drift page, which follow the machine's state.
+export const driftLinkText = (m: Pick<Machine, "openDrift" | "frozen">): string =>
+  m.frozen ? (m.openDrift === null ? UNFREEZE_THE_MACHINE : UNFREEZE_OR_DECIDE) : m.openDrift === null ? FREEZE_THIS_MACHINE : DECIDE_ON_THE_CHANGE;
+
 // Journeys §2.4's sentences. openDrift alone says "drifted"; a matching release never says healthy.
 export function sentences(m: Machine, obs: Observation[]): string[] {
   const { desired: d, applied: a, observed: o, openDrift: drift } = m;
   const out: string[] = [];
   if (drift !== null) {
-    const opened = obs.find((x) => x.id === drift.observation);
+    const { opened } = driftReads(drift, obs);
     out.push(`${CHANGED_ON_THE_MACHINE} since ${opened === undefined ? `the read ${short(drift.observation)}` : at(opened.at)}: a read differed from what Bronzeward last verified (${a === null ? "none" : short(a.release)}).`);
     if (o?.release != null && o.release === d) out.push("It equals the selected release; that does not close the drift.");
   } else if (o === null) {
@@ -444,6 +456,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
       <p><ClusterRef id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>
       {changed !== undefined && <ChangeEndpoint machine={d} onChanged={changed} />}
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list).map((s) => <li key={s}>{s}</li>)}</ul>
+      <p data-testid="drift-link"><Ref to={driftPath(d.id)} id={d.id}>{driftLinkText(d)}</Ref></p>
       <NextStep position={position} recovery={recovery} />
       <dl>
         <dt>Desired</dt><dd>{release(d.desired)}</dd>

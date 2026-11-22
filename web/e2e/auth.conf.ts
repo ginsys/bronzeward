@@ -196,6 +196,14 @@ function control(provider: Provider, next: { grant: Grant }, injector: Injector,
       }
       return res.end();
     }
+    if (url.pathname === "/drift" && req.method === "POST") {
+      try {
+        injector.drift(url.searchParams.get("machine") ?? "");
+      } catch (e) {
+        return res.writeHead(500).end(String(e));
+      }
+      return res.end();
+    }
     if (url.pathname === "/bao/hold" && req.method === "POST") {
       try {
         kv(Number(url.searchParams.get("ms") ?? 0));
@@ -463,6 +471,18 @@ async function prepare() {
       SELECT m.id, m.revision_counter, '${ep}', 'ownership-transition', jsonb_build_object('operation', '${op}', 'from', old.owner, 'to', old.owner,
         'generation', old.owner_gen + 1, 'fromGeneration', old.owner_gen, 'fromEpoch', old.owner_epoch, 'epoch', '${ep}', 'reason', 'recovery-entry'), clock_timestamp() FROM m, old`];
     execFileSync("psql", [...PG, "-v", "ON_ERROR_STOP=1", "-q", "-d", db, "-c", `INSERT INTO recovery_epoch (epoch, entered_at) VALUES ('${ep}', now())`, "-c", `UPDATE installation_state SET epoch = '${ep}'`, ...event]);
+  };
+  // A drift record opened on a machine of the disposable deployment, written as a drift observation's recording
+  // transaction writes it (TestE2EDrift reuses the API tests' helper), because the deployment's detector runs every
+  // 5 minutes and the stand-in nodes' configuration is fixed, so no read of one differs from Applied.
+  injector.drift = (machine) => {
+    const db = owned("a drift record is opened");
+    if (!/^mch_[a-z2-7]+$/.test(machine)) throw new Error(`a machine of ${machine}: give a machine identifier`);
+    execFileSync(binPath(root, "e2eseed.test"), ["-test.run", "^TestE2EDrift$", "-test.count=1"], {
+      cwd: `${root}internal/api`,
+      stdio: "inherit",
+      env: { ...process.env, BW_E2E_DRIFT_MACHINE: machine, BW_E2E_DRIFT_DSN: `postgres://bronzeward@127.0.0.1:${PG_PORT}/${db}?sslmode=disable` },
+    });
   };
   // This run's digest key only (bao.ts), and only while the writes go to the disposable deployment.
   injector.retire = async () => {
