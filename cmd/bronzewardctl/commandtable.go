@@ -34,6 +34,10 @@ var cmdTable = []cmdEntry{
 		notes: "help with no argument prints the index; help global prints the global flags and the exit codes;\n" +
 			"help <group> lists the group's commands; help <group> <command> is the same text as\n" +
 			"bronzewardctl <group> <command> --help."},
+	{path: "completion", line: "print the shell completion script for bash, zsh or fish", synopsis: "completion bash|zsh|fish", roles: "any",
+		notes: "reads no server and no context. bash: source <(bronzewardctl completion bash). zsh: bronzewardctl completion zsh >\n" +
+			"\"${fpath[1]}/_bronzewardctl\". fish: bronzewardctl completion fish | source. The script lists the commands, each group's\n" +
+			"commands and each command's flags, as help shows them."},
 	{path: "context", line: "the API servers this client knows and the sign-in each uses"},
 	{path: "context list", line: "list the contexts", synopsis: "context list", roles: "any", notes: "reads the client's own configuration; no server is asked."},
 	{path: "context use", line: "make a context the current one", synopsis: "context use <name>", roles: "any"},
@@ -328,7 +332,7 @@ func indexText() string {
 		}
 		b.WriteString("  " + pad(name, 13) + what + "\n")
 	}
-	b.WriteString("\n" + helpFooter)
+	b.WriteString(helpFooter)
 	return b.String()
 }
 
@@ -383,16 +387,25 @@ func leafText(x *cmdEntry, fs *flag.FlagSet) string {
 // globalFlags are the flags parse adds to every flag set.
 var globalFlags = []string{"context", "o", "token-file", "token-stdin", "no-input", "v"}
 
-// leafFlags are the flags a flag set holds besides the global ones, as they are written.
-func leafFlags(x *cmdEntry, fs *flag.FlagSet) []string {
+// visibleFlags are the flags a flag set holds that the leaf takes: not a global one, not one the entry hides.
+func visibleFlags(x *cmdEntry, fs *flag.FlagSet) []*flag.Flag {
 	if fs == nil {
 		return nil
 	}
-	var names []string
+	var shown []*flag.Flag
 	fs.VisitAll(func(f *flag.Flag) {
 		if !slices.Contains(globalFlags, f.Name) && !slices.Contains(strings.Fields(x.not), f.Name) && (f.Name != "if-match" || x.ifMatch) {
-			names = append(names, "--"+f.Name)
+			shown = append(shown, f)
 		}
 	})
+	return shown
+}
+
+// leafFlags are those flags, as they are written in help.
+func leafFlags(x *cmdEntry, fs *flag.FlagSet) []string {
+	var names []string
+	for _, f := range visibleFlags(x, fs) {
+		names = append(names, "--"+f.Name)
+	}
 	return names
 }

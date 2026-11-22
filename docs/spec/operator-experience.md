@@ -333,6 +333,8 @@ bronzewardctl
   context list | use | add | remove   API endpoint, TLS trust and identity per installation
   whoami                              identity, roles, epoch, recovery mode (GET /identity)
   status                              installation epoch, recovery mode, open drift, unresolved ops
+  help [<command>]                    the index, a group's leaves, or one command's flags, notes, roles and whether a person is needed
+  completion bash | zsh | fish        the shell completion script, made from the same table and flag sets as help
 
   cluster list | show | add
   cluster discover                    --talosconfig required; reads Talos, prints commands, writes nothing
