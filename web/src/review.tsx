@@ -88,11 +88,14 @@ export const positionOwns = (p: Position, release: string): boolean => p.machine
 
 // What this release is to the machine (B18), from its Desired, Applied and pendingConvergence. It says nothing of
 // what was sent: the machine record cannot show that, and a plan or an operation open on it is the position's line.
-export function releaseNote(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence">): string {
+export function releaseNote(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence"> & Partial<Pick<Machine, "openDrift">>): string {
   if (m.desired !== release) {
     return `This release is not the Desired release of this machine${m.desired === null ? "" : ` (Desired is ${short(m.desired)})`}, so it needs no step for this release.`;
   }
   if (m.applied === null) return "This machine has no Applied configuration. Hand it over first (an adopt plan): an apply-config plan is refused until then. Nothing has been sent to it.";
+  // An open drift means the node differs from what Bronzeward recorded, whatever Desired and Applied say: the machine page
+  // gives the next step (adopt the node's configuration, or revert it), so this page claims neither "nothing left to send" nor a send.
+  if (m.openDrift != null) return "The node differs from what Bronzeward recorded for this machine. The machine page says what to do next.";
   // The server's pendingConvergence says whether the node's configuration differs from this release's (operator-experience §2.4).
   // After an adoption Applied can equal Desired while it does; after a publication Applied can name another release while it does not.
   const same = m.applied.release === release;
