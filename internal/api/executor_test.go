@@ -495,10 +495,13 @@ func TestExecutorAccessErrorTextControl(t *testing.T) {
 	}
 }
 
-// ER §3.3: an attempt whose transaction failed was never recorded, so nothing is sent for it; the
-// operation stays committed under its owner and the next pass records it and sends once. A wake
-// left pending by the approval or by until starts that next pass at once, so the commit holding an
-// attempt waits, before it commits, until the state between the two passes has been checked.
+// ER §3.3: an attempt whose transaction failed was never recorded, so nothing is sent for it, and the
+// operation stays committed under its owner until the next pass. That pass makes the attempt again with
+// a new certificate, which comparison 3 always refuses, so the operation is then observed and
+// classified again and the one request goes on new evidence (ER §3.2, comparison 3; the renewal test
+// below pins the refusal). A wake left pending by the approval or by until starts that next pass
+// at once, so every commit after the failure is held, whatever it commits, until the state between the
+// two passes has been checked: the next pass stops at its first commit, before it moves any state.
 func TestExecutorAttemptNotRecordedSendsNothing(t *testing.T) {
 	t.Parallel()
 	xe := newExecEnv(t)
@@ -508,16 +511,17 @@ func TestExecutorAttemptNotRecordedSendsNothing(t *testing.T) {
 	life, stop := context.WithCancel(t.Context())
 	idle := make(chan struct{})
 	a := xe.executor(t, life, idle, options{commit: func(tx *sql.Tx) error {
-		var n int
-		if err := tx.QueryRow(`SELECT count(*) FROM attempt`).Scan(&n); err == nil && n > 0 {
-			if armed.CompareAndSwap(true, false) {
-				_ = tx.Rollback()
-				return errors.New("the attempt's commit failed")
-			}
+		if !armed.Load() { // after the failure
 			select {
 			case <-checked:
 			case <-life.Done():
 			}
+			return tx.Commit()
+		}
+		var n int
+		if err := tx.QueryRow(`SELECT count(*) FROM attempt`).Scan(&n); err == nil && n > 0 && armed.CompareAndSwap(true, false) {
+			_ = tx.Rollback()
+			return errors.New("the attempt's commit failed")
 		}
 		return tx.Commit()
 	}})
