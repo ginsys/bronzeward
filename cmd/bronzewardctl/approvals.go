@@ -57,7 +57,7 @@ func (e *env) approve(args []string) error {
 			return err
 		}
 		if p = v[0]; p.Id != plan {
-			// The ID typed back must be the one the approval is sent to; an empty one would match no input.
+			// The plan read must be the one the approval is sent to.
 			return fmt.Errorf("GET /api/v1%s answered plan %s; nothing is shown and nothing was sent", path, client.ShellWord(p.Id))
 		}
 		var view, prediction []string

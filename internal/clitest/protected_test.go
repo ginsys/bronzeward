@@ -543,7 +543,7 @@ var expiresAt = regexp.MustCompile(`expires \d{4}-\d\d-\d\d \d\d:\d\d:\d\d \S+?\
 // journey runs the journey task T3 (operator-experience.md §13) as a script through the CLI: a
 // draft, an import with review, the review on a terminal marking the unmarked secret, the
 // continuation, the machine's assignment and the publication, then the handover (#354): the adopt
-// plan, its approval by the plan ID typed back, the adoption's operation followed to its end, and
+// plan, its approval answered y, the adoption's operation followed to its end, and
 // the machine read, whose Applied is the release, set by the adoption. The import leaves nothing to
 // assign (the draft holds the import base only), so a fragment is saved for the assignment to name.
 // Its probe "Is the secret in the draft?" is answered by the release's provenance, which names the
@@ -584,7 +584,7 @@ func (e *importEnv) journey(t *testing.T) {
 		}
 		var r result
 		if step[0] == "approve" {
-			r = e.ctl(nil, plan+"\n", append([]string{"--context", "human"}, args...)...)
+			r = e.ctl(nil, "y\n", append([]string{"--context", "human"}, args...)...)
 		} else {
 			r = e.run(args...)
 		}

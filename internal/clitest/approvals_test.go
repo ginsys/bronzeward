@@ -15,9 +15,9 @@ import (
 // aprID is an approval ID in the CLI's output.
 var aprID = regexp.MustCompile(`\bapr_[a-z2-7]{26}\b`)
 
-// approveTyped is approve of plan on context ctx, the plan ID typed as standard input's one line.
-func (e *planEnv) approveTyped(ctx, plan string) result {
-	return e.ctlIn(plan+"\n", "--context", ctx, "approve", plan)
+// approveYes is approve of plan on context ctx, with y as standard input's one line.
+func (e *planEnv) approveYes(ctx, plan string) result {
+	return e.ctlIn("y\n", "--context", ctx, "approve", plan)
 }
 
 // planState is plan's state and approval, read in the database.
@@ -46,8 +46,8 @@ var approvalCases = map[string]func(*testing.T, *planEnv){
 		e.in.set(nil, nil)
 		p := planID.FindString(e.ctl(e.create("adopt")...).out)
 		before := e.f.actCount()
-		r := e.approveTyped("auto", p)
-		e.f.want(r, 1, "Type the plan ID to send it", "POST /api/v1/plans/"+p+"/approvals is for a person signed in, not an automation token: the server refuses it.",
+		r := e.approveYes("auto", p)
+		e.f.want(r, 1, "Approve it? [y/N]", "POST /api/v1/plans/"+p+"/approvals is for a person signed in, not an automation token: the server refuses it.",
 			"answered 403", "(forbidden): this route is for humans only", "This needs a person signed in, not an automation token.")
 		if warned, sent := strings.Index(r.err, "is for a person signed in"), strings.Index(r.err, "answered 403"); warned > sent || r.out != "" {
 			t.Errorf("the warning is not before the 403, or standard output is %q:\n%s", r.out, r.err)
@@ -73,7 +73,7 @@ var approvalCases = map[string]func(*testing.T, *planEnv){
 			epoch.Store(e.f.newEpoch())
 		}), nil)
 		before := e.f.actCount()
-		r := e.approveTyped("human", p)
+		r := e.approveYes("human", p)
 		e.f.want(r, 3, "set aside, not repeated: the epoch is now "+fmt.Sprint(epoch.Load())+", not the reference epoch",
 			"GET /api/v1/plans/"+p+" shows state approved, approval apr_", "read it again with: bronzewardctl --context 'human' plan show '"+p+"'", "--idempotency-key ")
 		s.one(t, 1)
@@ -95,7 +95,7 @@ var approvalCases = map[string]func(*testing.T, *planEnv){
 			e.in.proxy.ServeHTTP(w, r)
 		}), nil)
 		before := e.f.actCount()
-		r := e.approveTyped("human", p)
+		r := e.approveYes("human", p)
 		e.f.want(r, 3, "repeat 1 of 3", "set aside, not repeated: the key's record is from an earlier epoch", "GET /api/v1/plans/"+p+" shows state approved, approval apr_")
 		s.one(t, 2)
 		if n := e.f.actCount(); r.out != "" || n != before+1 {
@@ -121,7 +121,7 @@ var approvalCases = map[string]func(*testing.T, *planEnv){
 		config := filepath.Join(f.home, "bronzeward", "config.yaml")
 		process := "Recovery mode: the server was started for recovery: it refuses plan creation, approval and unfreeze"
 		f.want(e.ctl(e.create("apply-config")...), 1, "409", "(recovery-mode-active)", process)
-		f.want(e.approveTyped("human", last), 1, "409", "(recovery-mode-active)", process)
+		f.want(e.approveYes("human", last), 1, "409", "(recovery-mode-active)", process)
 		if cfg, _ := os.ReadFile(config); !strings.Contains(string(cfg), "startMode: recovery") || f.actCount() != before {
 			t.Errorf("after the refusals on a recovery start, %d acts and the contexts file:\n%s", f.actCount()-before, cfg)
 		}
@@ -157,13 +157,14 @@ func TestApprovals(t *testing.T) {
 		p := planID.FindString(e.ctl(e.create("adopt")...).out)
 		in.set(nil, nil) // clears the request log, so it holds only the unconfirmed approvals' requests
 		for _, c := range []struct{ stdin, want string }{
-			{"pln_aaaaaaaaaaaaaaaaaaaaaaaaaa\n", "the typed text is not the plan ID; nothing was sent"},
+			{"n\n", "stopped: the answer is not y or yes; nothing was sent"},
+			{"pln_aaaaaaaaaaaaaaaaaaaaaaaaaa\n", "stopped: the answer is not y or yes; nothing was sent"},
 			{"\n", "stopped: nothing was typed; nothing was sent"},
 			{"", "stopped: nothing was typed; nothing was sent"},
 		} {
-			f.want(e.ctlIn(c.stdin, append(h, "approve", p)...), 2, "Plan "+p, "Self-approval  predicted: ", "Type the plan ID to send it", c.want)
+			f.want(e.ctlIn(c.stdin, append(h, "approve", p)...), 2, "Plan "+p, "Self-approval  predicted: ", "Approve it? [y/N]", c.want)
 		}
-		f.want(e.ctlIn(p+"\n", append(h, "approve", p, "--no-input")...), 2, "which --no-input forbids; nothing was sent")
+		f.want(e.ctlIn("y\n", append(h, "approve", p, "--no-input")...), 2, "which --no-input forbids; nothing was sent")
 		for _, q := range in.requests() {
 			if !strings.HasPrefix(q, "GET ") {
 				t.Errorf("an unconfirmed approval sent %s", q)
@@ -186,7 +187,7 @@ func TestApprovals(t *testing.T) {
 	t.Run("T22 revocation before commitment", func(t *testing.T) {
 		e.cancelAll(t)
 		p := planID.FindString(e.ctl(e.create("adopt")...).out)
-		r := e.approveTyped("human", p)
+		r := e.approveYes("human", p)
 		reasons := "created-plan, published, authored-change"
 		f.want(r, 0, "Self-approval  predicted: you created this plan and published this release, "+
 			"and authored a fragment, profile or assignment revision its draft introduced.", "Import-base authorship and automation you own are not predicted.",
@@ -209,7 +210,7 @@ func TestApprovals(t *testing.T) {
 	t.Run("T21 adopt plan", func(t *testing.T) {
 		in.set(nil, nil)
 		p := planID.FindString(e.ctl(e.create("adopt")...).out)
-		f.want(e.approveTyped("human", p), 0, "Applied becomes "+e.rel+" (adoption) once it does.")
+		f.want(e.approveYes("human", p), 0, "Applied becomes "+e.rel+" (adoption) once it does.")
 		e.until(t, "committed", `SELECT state FROM plan_state WHERE plan = $1`, p)
 		if err := f.db.QueryRow(`SELECT operation FROM plan_state WHERE plan = $1`, p).Scan(&op); err != nil || f.ended(op) != "completed" {
 			t.Fatalf("the adoption %s ended %s, %v: %s", op, f.ended(op), err, f.events(op))
@@ -224,7 +225,7 @@ func TestApprovals(t *testing.T) {
 		arrived, release := e.st.node.HoldApply(t)
 		defer release()
 		p := planID.FindString(e.ctl(e.create("apply-config", "--transport-deadline", "1m", "--verification-deadline", "1m", "--max-attempts", "1")...).out)
-		r := e.approveTyped("human", p)
+		r := e.approveYes("human", p)
 		f.want(r, 0, "The controller re-checks the plan at use time; it applies it only if every check passes.")
 		a := aprID.FindString(r.out)
 		select {
@@ -286,7 +287,7 @@ func (e *planEnv) t8(t *testing.T) {
 	r := step("", "--context", "publisher", "plan", "create", "--release", rel, "--machine", e.s.machine, "--operation", "apply-config")
 	p := planID.FindString(r.out)
 	f.want(r, 0, "Changes shown below", "node.example.test/tier: b")
-	r = step(p+"\n", "--context", "approver", "approve", p)
+	r = step("y\n", "--context", "approver", "approve", p)
 	f.want(r, 0, "Self-approval  predicted: you did not create this plan or publish this release, "+
 		"and authored no fragment, profile or assignment revision in it.", "Recorded self-approval reasons: none.")
 	// The prompt ends in a space, which the repository's whitespace check refuses in a kept file.
