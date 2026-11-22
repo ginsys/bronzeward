@@ -13,6 +13,7 @@ import { CreatedDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { OpenDraftsView } from "./machines.tsx";
 import { allowed, IngestionItem, StartImport } from "./imports.tsx";
 import { MachineShown, sentences, TimelineRows } from "./machine.tsx";
+import { nameOf } from "./onboard.ts";
 import { RecoveryConsole } from "./recovery.tsx";
 import { predict, recordedReasons, RevokedBy } from "./approval.tsx";
 import { ReviewBody } from "./review.tsx";
@@ -1073,6 +1074,11 @@ describe("ginsys/bronzeward#1055: a server word on a plan, operation, import, re
     await mount(h(PlanItem, { id: PLN }), { ...reads, view: "operation" });
     await settled();
     expect(field("Operation")).toBe(`${NOT_SHOWN}, mode proposed`);
+  });
+
+  test("the note on a hostname that is not a valid name shows it only when it is safe text", () => {
+    expect(nameOf(`bad${"‮"}host`).note).toBe(`no name: the hostname ${NOT_SHOWN} is not a valid name`);
+    expect(nameOf("bad host").note).toBe('no name: the hostname "bad host" is not a valid name');
   });
 
   test("what holds an approved plan names the machine's scope state as safe text", () => {
