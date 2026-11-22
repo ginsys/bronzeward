@@ -258,13 +258,13 @@ export function DraftItem({ id }: { id: string }) {
   return (
     <>
       <DraftHead id={id} d={d} lead="Draft" />
+      {d !== undefined && <PageNote parts={[DRAFT_NOTE, d.state === "open" && DRAFT_NOTE_OPEN, handedOver.length > 0 && d.state !== "discarded" && DRAFT_NOTE_START]} />}
       {pending}
       {/* That read failed, also when the page keeps the data read before (no answer): reading it
           again keeps the editor, and lets Save and Remove send again. */}
       {unshown && item.kind !== "loading" && <p><button type="button" onClick={() => reread((x) => x + 1)}>{READ_DRAFT_AGAIN}</button></p>}
       {d !== undefined && (
         <>
-          <PageNote parts={[DRAFT_NOTE, d.state === "open" && DRAFT_NOTE_OPEN, handedOver.length > 0 && d.state !== "discarded" && DRAFT_NOTE_START]} />
           <h3>Entries</h3>
           <ul aria-label="Entries">
             {d.entries.map((e) => isSource(e) ? (
