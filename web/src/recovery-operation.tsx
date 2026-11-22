@@ -10,17 +10,13 @@ import { recoveryOperationPath } from "./operation-words.ts";
 import { PageNote } from "./page-note.tsx";
 import { REASON_MAX, reasonProblem } from "./plan.tsx";
 import { Who } from "./principals.tsx";
+import { safeWord } from "./safe.ts";
 import { Action, useFocusOn, useRoles } from "./shell.tsx";
 import { Status } from "./states.tsx";
 import { MachineById, OperationHeading } from "./titles.tsx";
-import { NOT_SHOWN, RECOVERY_OPERATION_NOTE, RECOVERY_OPERATION_ROLE_NOTE, RESOLVE_NO_OUTCOME, RESOLVE_TEXT, TAKE_OVER_TEXT } from "./words.ts";
+import { RECOVERY_OPERATION_NOTE, RECOVERY_OPERATION_ROLE_NOTE, RESOLVE_NO_OUTCOME, RESOLVE_TEXT, TAKE_OVER_TEXT } from "./words.ts";
 
 const enc = encodeURIComponent;
-// A word the server sets, shown only as safe text: any other reads "(not shown)" (client contracts A8 rule 6). Same character classes
-// as `safeWord` of the safe-text module, which the base this change is on does not have; temporary: the next change on this page
-// (the accounting forms) imports it from there and drops this.
-const SAFE_WORD = /^[^\p{Cc}\p{Cf}]{1,300}$/u;
-const safeWord = (s: string): string => (SAFE_WORD.test(s) ? s : NOT_SHOWN);
 type Operation = components["schemas"]["OperationBody"];
 type EventBody = components["schemas"]["EventBody"];
 type Takeover = components["schemas"]["TakeoverBody"];
