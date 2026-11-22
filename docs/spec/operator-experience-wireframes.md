@@ -130,7 +130,7 @@ Machine mch_w4ze…n3fa   cluster cl_9fd… (lab-a)   10.5.0.4:50000   node 9Zs�
 +-------------------------------------------------------------------------------------------+
 | (•) Changed on the machine since 09:41: a read differed from what Bronzeward last         |
 |     verified (rel_fgqv…).                                                                 |
-|     Opened by obs_k3d…, last seen 09:46. Late landing: no.         [Decide] -> W9         |
+|     Opened by obs_k3d…, last seen 09:46. Late landing: no.                                 |
 | (•) Frozen: no new commitment or attempt until an approver unfreezes. An attempt already  |
 |     recorded is not stopped; an adoption can still be recorded.                           |
 +-------------------------------------------------------------------------------------------+
@@ -141,7 +141,7 @@ Machine mch_w4ze…n3fa   cluster cl_9fd… (lab-a)   10.5.0.4:50000   node 9Zs�
 |            Health: not checked (none bound in the PoC)                                    |
 | Scope      normal                                                                         |
 +-------------------------------------------------------------------------------------------+
-| [Freeze]~ already frozen    [Unfreeze] (approver)         [Plan revert]  (publisher)      |
+| [Unfreeze the machine or decide on the change] -> W9                                      |
 +-------------------------------------------------------------------------------------------+
 | Timeline (newest first)                                            [Load older]           |
 |  09:51  observation   drift    obs_p8w…   configuration not read: node unreachable        |
@@ -172,6 +172,17 @@ The timeline opens on its newest page and polls on from its tail, as
 [client contracts §8.6](client-contracts.md#86-event-resumption) item 6 has it, and a poll with
 new entries reads the machine and its observations again, one such read at a time. "Load older"
 reads the page before the oldest entry shown and is gone once the machine's first entry is shown.
+
+The machine page has no freeze, unfreeze or revert control. It has one link to the drift page
+([W9](#w9-drift-decision)), shown for every machine, and its words follow the machine's state: "Decide on the
+change made on the machine" where an open drift is recorded, "Unfreeze the machine or decide on the change" where
+it is recorded and the machine is frozen, "Unfreeze the machine" where the machine is frozen with no open drift, and
+"Freeze this machine" where it is neither. The drift sentence and the frozen sentence stay plain text beside it, and the
+next-step line links to the same page where its step is `drift-open`. Decided 2026-11-22 (ginsys/bronzeward#363): the
+controls live on the drift page only, so that one place holds them and each is drawn with its steps and the role each
+needs. Rejected: a second row of buttons on the machine page, which would put the same controls in two places, with
+two sets of role reasons and refusal lines to keep alike, and would offer a revert with none of the steps W9 draws
+beside it.
 
 ## W4. Draft editor
 
@@ -523,7 +534,8 @@ installation was restored; events replayed from the start".
 ## W9. Drift decision
 
 ```text
-Drift on mch_w4ze…n3fa   opened 09:41   (•) Frozen
+Change on the machine: Machine lab-a-cp1                                          (•) Frozen
+Opened by the read at 2026-11-01 09:41, last seen in the read at 2026-11-01 09:46. Late landing: no.
 What changed is not shown: Bronzeward can show it only by importing it (gap G7).
 +-----------------------------+-------------------------------+-----------------------------+
 | Freeze                      | Adopt                         | Revert                      |
@@ -540,6 +552,27 @@ What changed is not shown: Bronzeward can show it only by importing it (gap G7).
 | [Unfreeze] (approver)       | [Start adoption]              | [Plan revert]               |
 +-----------------------------+-------------------------------+-----------------------------+
 ```
+
+The page is `/machines/{id}/drift`, reached from the machine page ([W3](#w3-machine-detail)), and it says where to go
+next: a note under the title and a link back to the machine. Its first lines are the record in words. The API serves no
+drift opening time, so each time is that of the observation that opened the record and of the one that last saw it, read
+from the machine's observations, with its date; an observation the page does not hold has no time, and the line says
+so. A late landing names the operation it may be the late result of. A newer read that could not read is told with its
+causes, as the machine page tells it. No identifier is link text or a first column: the machine's identifier is the
+detail line's. The page draws each choice with its steps and the role each step needs; a control without its role is
+disabled with the reason ("Needs approver"), and a send forced past it shows the server's 403 and what the route
+accepts. [Freeze] and [Unfreeze] take a reason of 1 to 1024 bytes. [Start adoption] opens the import wizard as a drift
+adoption of this machine, and the page goes no further than the wizard's review. [Plan revert] opens the create-plan
+page with the machine's Desired release and apply-config, and the server binds the open drift record to the plan. A
+refusal is shown where it happened, in the words the other pages use for it: a scope's refusal names the scope and says
+nothing about the start mode, and a server started for recovery refuses the process-wide way (a freeze before the
+recovery entry, an unfreeze until the server is restarted normally), without a scope. The plan page of a revert on a
+frozen machine says that the freeze holds the plan and links back here for the unfreeze.
+
+With no open drift the page says so and why (only a read that differs from Applied opens one) and draws no adoption or
+revert choice, since there is nothing to adopt or revert. It still offers [Freeze] to a machine that is not frozen, and
+[Unfreeze] to a frozen machine, with the sentence that the machine is frozen: a machine frozen while its drift closed,
+or frozen by hand, reaches its unfreeze from the machine page's one link.
 
 ## W10. Recovery console
 

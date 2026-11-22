@@ -165,12 +165,12 @@ and the keyboard part of T3's handover, which goes with
 
 ## Screen reader
 
-| Pass | T1 | T2 | T3 (to publication) | T4 | T5 | T6 | T7 | T8 | T9 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| VoiceOver with Safari | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed |
-| NVDA with Firefox | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed |
-| NVDA with Chrome | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed |
+| Pass | T1 | T2 | T3 (to publication) | T4 | T5 | T6 | T7 | T8 | T9 | T10 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| VoiceOver with Safari | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed | owed |
+| NVDA with Firefox | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed | owed |
+| NVDA with Chrome | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed | owed |
 
-T3 to T9 are the tasks of [journeys §13](../docs/spec/operator-experience.md#13-usability-and-accessibility-acceptance). Their passes are owed by [#342](https://github.com/ginsys/bronzeward/issues/342), which closes on its automated acceptance, except T8's and T9's, which [#358](https://github.com/ginsys/bronzeward/issues/358) and [#359](https://github.com/ginsys/bronzeward/issues/359) hand to [#447](https://github.com/ginsys/bronzeward/issues/447) below.
+T3 to T10 are the tasks of [journeys §13](../docs/spec/operator-experience.md#13-usability-and-accessibility-acceptance). Their passes are owed by [#342](https://github.com/ginsys/bronzeward/issues/342), which closes on its automated acceptance, except T8's, T9's and T10's, which [#358](https://github.com/ginsys/bronzeward/issues/358), [#359](https://github.com/ginsys/bronzeward/issues/359) and [#363](https://github.com/ginsys/bronzeward/issues/363) hand to [#447](https://github.com/ginsys/bronzeward/issues/447) below.
 
 [#447](https://github.com/ginsys/bronzeward/issues/447) holds these passes and closes when they run. [#334](https://github.com/ginsys/bronzeward/issues/334) closes on its automated acceptance, by the owner's decision of 1 November 2026.

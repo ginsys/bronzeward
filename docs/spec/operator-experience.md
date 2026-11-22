@@ -233,7 +233,7 @@ beside the machine and its observations, under the page's own reads. The line is
 operation can move from one state to the next between two of them and leave every list empty, and a plan's
 `committed` state is terminal and says nothing of its operation (an adopt plan stays `committed` with its operation
 `completed`). Where the server is older than revision 6 the read fails and the page shows no line; the release review page then shows the failure and no plan button, so it needs revision 6 too, though the client accepts a server from revision 3. The drift view
-that the `drift-open` row names is not a page of the web client yet, so that line links to none.
+that the `drift-open` row names is the web client's drift page (`/machines/{id}/drift`, [W9](operator-experience-wireframes.md#w9-drift-decision)), and that line links to it.
 
 ### 2.4 Desired, applied and observed
 
