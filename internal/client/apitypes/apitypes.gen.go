@@ -1650,13 +1650,13 @@ type MachineBody struct {
 	PendingConvergence bool   `json:"pendingConvergence"`
 	Platform           string `json:"platform"`
 
-	// Role The machine's Talos type as its latest import base's document names it; null when the machine has no import base, was imported before the role was stored, or its document names neither type (persistence and API §3.2, choice §17.48, API revision 14).
+	// Role The machine's Talos type as its latest import base's document names it; null when the machine has no import base, was imported before the role was stored, or its document names neither type or names two different types (persistence and API §3.2, choice §17.48, API revision 14).
 	Role          *MachineBodyRole `json:"role"`
 	ScopeState    string           `json:"scopeState"`
 	TalosEndpoint string           `json:"talosEndpoint"`
 }
 
-// MachineBodyRole The machine's Talos type as its latest import base's document names it; null when the machine has no import base, was imported before the role was stored, or its document names neither type (persistence and API §3.2, choice §17.48, API revision 14).
+// MachineBodyRole The machine's Talos type as its latest import base's document names it; null when the machine has no import base, was imported before the role was stored, or its document names neither type or names two different types (persistence and API §3.2, choice §17.48, API revision 14).
 type MachineBodyRole string
 
 // MachineInput Exactly one of smbiosUuid and talosNodeId.
