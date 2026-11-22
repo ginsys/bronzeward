@@ -283,7 +283,7 @@ describe("the machine detail (W3)", () => {
     const p = obs("p", 5, "2026-10-26T08:51:00Z", { configDigest: { code: "unreachable", cause: "node unreachable" } });
     const machine: Machine = {
       id: id!, cluster: cl.id, name: null, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
-      desired: rel("b"), applied: { release: rel("a"), source: "operation", importBase: null }, pendingConvergence: true,
+      desired: rel("b"), applied: { release: rel("a"), source: "operation", importBase: null }, pendingConvergence: true, formOnly: false,
       observed: { observation: m1.id, at: m1.at, release: rel("b") }, frozen: true, scopeState: "normal",
       openDrift: { revision: 3, observation: k.id, lastObservation: m1.id, lateLanding: null },
     };
@@ -450,7 +450,7 @@ describe("the machine detail (W3)", () => {
     const [m1, m2] = [obs("m", 2, "2026-10-26T08:46:00Z"), obs("n", 3, "2026-10-26T08:51:00Z")];
     const machine = (o: Observation, frozen: boolean): Machine => ({
       id: id!, cluster: cl.id, name: null, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
-      desired: null, applied: null, pendingConvergence: false, observed: { observation: o.id, at: o.at, release: null }, frozen, scopeState: "normal", openDrift: null,
+      desired: null, applied: null, pendingConvergence: false, formOnly: false, observed: { observation: o.id, at: o.at, release: null }, frozen, scopeState: "normal", openDrift: null,
     });
     const bodies = (o: Observation[], frozen: boolean) => ({ [`/machines/${id}`]: machine(o[0]!, frozen), [`/machines/${id}/observations`]: { items: o } });
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: bodies([m1], false) })).toMatch(SERVER);
@@ -561,7 +561,7 @@ function synthetic(cl: string, machine: string) {
     maxObservationAgeSeconds: 300, checkValiditySeconds: 120, transportDeadlineSeconds: 60, verificationDeadlineSeconds: 600, maxAttempts: 3, rolloutLimit: 1,
     approvalPolicy: "one-approver", createdBy: { principal: author, role: "publisher" }, epoch: "ep_synthetic", timelineRevision: 7, createdAt: T0, expiresAt: "2026-10-27T08:30:00Z",
     evidence: {
-      diff: { from: sid("rel", "g"), to: rel.id, withheld: false, unified: "--- applied\n+++ release\n machine:\n   nodeLabels:\n+    team: storage\n" },
+      diff: { from: sid("rel", "g"), to: rel.id, withheld: false, unified: "--- applied\n+++ release\n machine:\n   nodeLabels:\n+    team: storage\n", fromFormOnly: false },
       validation: { result: "passed", at: "publication", contract: "v1.13", kubernetesVersion: "v1.34.1", machineryVersion: "v1.13.6", platformMode: "metal" },
       dryRun: { available: false, reason: "the PoC has none" },
     },
@@ -771,7 +771,7 @@ describe("the rendered review of a release's machine", () => {
     };
     const machine: Machine = {
       id: m!, cluster: cl.id, name: null, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
-      desired: s.rel.id, applied, pendingConvergence: true, observed: null, frozen: false, scopeState: "normal", openDrift: null,
+      desired: s.rel.id, applied, pendingConvergence: true, formOnly: false, observed: null, frozen: false, scopeState: "normal", openDrift: null,
     };
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: { ...s.bodies, [path]: review, [`/machines/${m}`]: machine, [`/machines/${m}/position`]: { machine, ingestion: null, draft: null, plan: null, operation: null, rolloutHeldBy: null, step: "needs-plan" } } })).toMatch(SERVER);
     return { s, m: m! };
