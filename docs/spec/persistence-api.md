@@ -5163,9 +5163,13 @@ design and evidence do not settle the question. Each is marked in place as
     drift is open and Applied's digest is the import base's; an adopt plan's
     `baseline.formOnly`, true for a first adoption whose release is pending,
     since Applied is not yet recorded; and a plan's `diff.fromFormOnly`, which
-    shows an apply-config plan's diff from the Applied release under the machine
-    read's condition (a diff that is otherwise withheld because the node holds
-    its import base and not the release's artifact). The first apply still sends
+    shows an apply-config plan's diff from the Applied release when that release
+    differs from its own import base in form only, no drift is open and Applied's
+    digest is that import base's (a diff that is otherwise withheld because
+    Applied's digest is the import base's and not the release's artifact's). The
+    machine's `formOnly` judges the Desired release and the diff the Applied
+    one, so after a content-changing Desired release is published the machine's
+    `formOnly` can be false while `diff.fromFormOnly` is true. The first apply still sends
     the release's text, comments omitted: the words say so, and no rule changes.
     The verdict trusts the provider's version of each secret the import pinned
     (generations are created create-only at import, and publication refuses a
