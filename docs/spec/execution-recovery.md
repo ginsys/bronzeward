@@ -1115,7 +1115,7 @@ state is being accepted (design §12.1).
    allows, with the self-approval rule. The adopt plan binds the machine and
    its identity (§2), its assignment revision, its baseline revision (none
    for a machine with no `Applied`), the machine's `Desired` release at plan creation (or none), the
-   open drift record (none for an adoption), the adopted release, the baseline's
+   open drift record (none for a first adoption), the adopted release, the baseline's
    configuration digest, a maximum observation age, its expiry, the approval
    policy, and its creator **(choice §10.38)**. It has the plan states of
    §2, and any change to a bound value needs a new plan.
@@ -1129,7 +1129,7 @@ state is being accepted (design §12.1).
       current recovery epoch;
    3. the machine's assignment revision, baseline revision and `Desired`
       release equal the bound ones, and the bound drift record is still open
-      (for an adoption, the machine still has no `Applied`);
+      (for a first adoption, the machine still has no `Applied`);
    4. the machine's recorded observation with the highest basis (§4.1), of any
       purpose, began its read after the approval, is no older than the age the
       plan binds, and shows the machine identity the plan binds, the
