@@ -11,7 +11,7 @@ import { RenameMachine, WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { Client } from "./request.ts";
 import { ShellContext } from "./shell.tsx";
-import { NAME_THIS_MACHINE, RENAME_MACHINE, RENAME_REACHES } from "./words.ts";
+import { NAME_HINT, NAME_THIS_MACHINE, RENAME_MACHINE, RENAME_REACHES } from "./words.ts";
 import { Writes } from "./write.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -33,21 +33,28 @@ let box: HTMLElement;
 let sent: { method: string; path: string; body: unknown }[];
 let answers: Response[];
 let onChanged: Mock<() => void>;
+let writes: Writes | undefined;
 
-const reads = { client: { read: async () => ({ kind: "refused", status: 404, problem: null }) }, settle: () => false, undropped: () => () => true, view: "v", again: 0, regained: 0, go: () => {}, failure: () => "FAILED" } as unknown as Reads;
+// The machine bodies the page's own reads answer, by path; any other path is not found.
+let served: Record<string, unknown>;
+const reads = { client: { read: async (path: string) => (path in served ? { kind: "ok", data: served[path] } : { kind: "refused", status: 404, problem: null }) }, settle: () => false, undropped: () => () => true, view: "v", again: 0, regained: 0, go: () => {}, failure: () => "FAILED" } as unknown as Reads;
 
 const mount = async (machine: never) => {
+  if (writes === undefined) writes = made();
+  await act(async () => {
+    root.render(h(WritesProvider, { value: writes! }, h(ShellContext, { value: { roles: ["author"], offline: false } }, h(ReadsProvider, { value: reads }, h(RenameMachine, { machine, onChanged })))));
+  });
+};
+const made = () => {
   const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const path = String(url).replace("/api/v1", "");
     if (path === "/recovery") return recovery();
     sent.push({ method: init?.method ?? "GET", path, body: init?.body === undefined ? undefined : JSON.parse(String(init.body)) });
     return answers.shift()!;
   });
-  const writes = new Writes(() => "p", async () => {});
-  writes.client = new Client({ token: () => "SYNTH-token", fetch: fetchMock as unknown as typeof fetch });
-  await act(async () => {
-    root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author"], offline: false } }, h(ReadsProvider, { value: reads }, h(RenameMachine, { machine, onChanged })))));
-  });
+  const w = new Writes(() => "p", async () => {});
+  w.client = new Client({ token: () => "SYNTH-token", fetch: fetchMock as unknown as typeof fetch });
+  return w;
 };
 const input = () => box.querySelector<HTMLInputElement>('input[name="name"]')!;
 const send = async (typed: string) => {
@@ -66,6 +73,8 @@ beforeEach(() => {
   root = createRoot(box);
   sent = [];
   answers = [];
+  served = {};
+  writes = undefined;
   onChanged = vi.fn<() => void>();
 });
 afterEach(async () => {
@@ -85,6 +94,27 @@ describe("the offer", () => {
     await mount(named);
     expect(box.querySelector("button")!.textContent).toBe(RENAME_MACHINE);
     expect(input().value).toBe("cp-1");
+  });
+});
+
+describe("the field follows the machine", () => {
+  test("a name changed elsewhere replaces the field's text, so the old name is not sent back", async () => {
+    answers.push(changed("cp-2", "cp-1"));
+    await mount(named);
+    expect(input().value).toBe("cp-1");
+    await mount({ ...(named as object), name: "cp-2" } as never);
+    expect(input().value).toBe("cp-2");
+    await send("cp-1");
+    expect(sent).toEqual([{ method: "POST", path: `/machines/${MCH}/names`, body: { name: "cp-1" } }]);
+  });
+
+  test("the name this form set shows in the field once the page reads the machine again", async () => {
+    answers.push(changed(null, "cp-2"));
+    await mount(unnamed);
+    await send("cp-2");
+    await mount({ ...(unnamed as object), name: "cp-2" } as never);
+    expect(input().value).toBe("cp-2");
+    expect(box.querySelector("button")!.textContent).toBe(RENAME_MACHINE);
   });
 });
 
@@ -109,7 +139,7 @@ describe("what is sent", () => {
     await mount(unnamed);
     for (const typed of ["CP-1", "cp_1", "-cp", "cp-", "a..b", "10.0.0.1", "x".repeat(64)]) {
       await send(typed);
-      expect(text("rename-not-sent")).toContain(`Not sent: "${typed}" is not a name the server takes`);
+      expect(text("rename-not-sent")).toBe(`Not sent: "${typed}" is not a name the server takes; use ${NAME_HINT}.`);
     }
     expect(sent).toEqual([]);
     expect(onChanged).not.toHaveBeenCalled();
@@ -126,14 +156,17 @@ describe("what is sent", () => {
 });
 
 describe("what a refusal says", () => {
-  test("name-in-use says another machine has the name, and names that machine as a link rather than an identifier", async () => {
+  test("name-in-use says another machine has the name, and names that machine by its name in a link rather than by its identifier", async () => {
+    served[`/machines/${HOLDER}`] = { ...base, id: HOLDER, name: "cp-9" };
     answers.push(refusal(409, "name-in-use", { machine: HOLDER }));
     await mount(unnamed);
     await send("cp-2");
     expect(text("write-result")).toContain("Another machine in this cluster already has this name.");
     expect(text("write-result")).toContain("Choose a different name.");
-    expect(text("rename-holder")).toContain("The machine that has this name:");
-    expect(box.querySelector('[data-testid="rename-holder"] a')!.getAttribute("href")).toBe(`/machines/${HOLDER}`);
+    expect(text("rename-holder")).toBe("The machine that has this name: cp-9.");
+    const link = box.querySelector('[data-testid="rename-holder"] a')!;
+    expect(link.getAttribute("href")).toBe(`/machines/${HOLDER}`);
+    expect(link.textContent).toBe("cp-9");
     expect(onChanged).not.toHaveBeenCalled();
   });
 
@@ -164,7 +197,13 @@ describe("what a refusal says", () => {
 });
 
 describe("when the name reaches the machine (client contracts A9 item 6)", () => {
-  const spec = readFileSync(`${import.meta.dirname}/../../docs/spec/client-contracts.md`, "utf8").replace(/\s+/g, " ");
+  // The quotations of item 6 before the sentence that names the web form: the contract's own sentences, each whole. The
+  // form's three are the first, the "not yet confirmed" restart sentence and the last, each equal to a whole quotation.
+  const quotations = () => {
+    const spec = readFileSync(`${import.meta.dirname}/../../docs/spec/client-contracts.md`, "utf8").replace(/\s+/g, " ");
+    const item = spec.slice(spec.indexOf("6. **A rename says when it reaches the machine**"));
+    return [...item.slice(0, item.indexOf("The web rename form")).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  };
 
   test("the three sentences are on the form for an unnamed and a named machine, word for word", async () => {
     for (const machine of [unnamed, named]) {
@@ -173,7 +212,9 @@ describe("when the name reaches the machine (client contracts A9 item 6)", () =>
     }
   });
 
-  test("each sentence is the contract's own text", () => {
-    for (const s of RENAME_REACHES) expect(spec).toContain(s);
+  test("each is a whole quotation of the contract's item 6, in its order", () => {
+    const q = quotations();
+    expect(q).toHaveLength(5);
+    expect([...RENAME_REACHES]).toEqual([q[0], q[3], q[4]]);
   });
 });
