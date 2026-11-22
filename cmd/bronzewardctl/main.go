@@ -149,7 +149,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // handlers is the function of each top-level command; its keys are the table's top-level names.
 func (e *env) handlers() map[string]func([]string) error {
-	return map[string]func([]string) error{"help": e.helpCmd, "context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "login": e.loginCmd, "logout": e.logoutCmd,
+	return map[string]func([]string) error{"help": e.helpCmd, "completion": e.completionCmd, "context": e.contextCmd, "version": e.versionCmd, "whoami": e.whoamiCmd, "login": e.loginCmd, "logout": e.logoutCmd,
 		"status": e.statusCmd, "cluster": e.clusterCmd, "machine": e.machineCmd,
 		"fragment": e.fragmentCmd, "profile": e.profileCmd, "assignment": e.assignmentCmd,
 		"draft": e.draftCmd, "import": e.importCmd, "import-base": e.importBaseCmd, "publish": e.publish, "release": e.releaseCmd, "plan": e.planCmd,

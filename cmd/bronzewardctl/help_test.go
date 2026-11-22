@@ -13,7 +13,7 @@ import (
 // leavesOfTheSpecification are the leaves of operator-experience.md §4 (docs/spec), with help itself. The
 // table must hold exactly these: a leaf missing from it, or an extra one, fails here.
 var leavesOfTheSpecification = []string{
-	"help",
+	"help", "completion",
 	"context list", "context use", "context add", "context remove",
 	"version", "whoami", "login", "logout", "status",
 	"cluster list", "cluster show", "cluster add", "cluster discover", "cluster first-key", "cluster onboard",

@@ -45,17 +45,27 @@ func (e *env) helpCmd(args []string) error {
 	case x.synopsis == "":
 		text = groupText(x.path)
 	default:
-		// The leaf runs with --help only: its flag set is read before it reads or sends anything.
-		probe := &env{output: "table", err: io.Discard, out: io.Discard}
-		handler := probe.handlers()[words[0]]
-		if handler == nil {
-			return fmt.Errorf("help %s: no command answers it", client.Quoted(path))
+		fs, perr := probeFlags(path)
+		if perr != nil {
+			return fmt.Errorf("help %s: %v", client.Quoted(path), perr)
 		}
-		if herr := handler(append(slices.Clone(words[1:]), "--help")); !errors.Is(herr, flag.ErrHelp) {
-			return fmt.Errorf("help %s: the command did not answer --help: %v", client.Quoted(path), herr)
-		}
-		text = leafText(x, probe.helped)
+		text = leafText(x, fs)
 	}
 	_, err = fmt.Fprintln(e.out, text)
 	return err
+}
+
+// probeFlags is the flag set a leaf builds, read by running the leaf with --help only: it is read before the
+// leaf reads or sends anything.
+func probeFlags(path string) (*flag.FlagSet, error) {
+	words := strings.Fields(path)
+	probe := &env{output: "table", err: io.Discard, out: io.Discard}
+	handler := probe.handlers()[words[0]]
+	if handler == nil {
+		return nil, errors.New("no command answers it")
+	}
+	if err := handler(append(slices.Clone(words[1:]), "--help")); !errors.Is(err, flag.ErrHelp) {
+		return nil, fmt.Errorf("the command did not answer --help: %v", err)
+	}
+	return probe.helped, nil
 }
