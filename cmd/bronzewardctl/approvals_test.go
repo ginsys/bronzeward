@@ -25,13 +25,14 @@ func TestApprove(t *testing.T) {
 		}
 	})
 	approve := []string{"approve", "pln_BWSYNTH"}
-	// typed runs approve with the plan ID as standard input's one line.
+	// typed runs approve with y as standard input's one line.
 	typed := func(extra ...string) (int, string, string) {
-		setStdin(t, "pln_BWSYNTH\n")
+		setStdin(t, "y\n")
 		return runCtl(t, append(approve, extra...)...)
 	}
 	for _, c := range []struct{ name, stdin, want string }{
-		{"a wrong ID", "pln_OTHER\n", "the typed text is not the plan ID; nothing was sent"},
+		{"an n", "n\n", "stopped: the answer is not y or yes; nothing was sent"},
+		{"the plan's ID instead of y", "pln_BWSYNTH\n", "stopped: the answer is not y or yes; nothing was sent"},
 		{"an empty line", "\n", "stopped: nothing was typed; nothing was sent"},
 		{"no input at all", "", "stopped: nothing was typed; nothing was sent"},
 	} {
@@ -41,7 +42,7 @@ func TestApprove(t *testing.T) {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q; want 2 and %q", c.name, code, out, errOut, c.want)
 		}
 	}
-	if code, _, errOut := typed("--no-input"); code != 2 || !strings.Contains(errOut, "which --no-input forbids; nothing was sent") {
+	if code, _, errOut := typed("--no-input"); code != 2 || !strings.Contains(errOut, "approve asks for your y, which --no-input forbids; nothing was sent") {
 		t.Errorf("--no-input: exit %d, %s", code, errOut)
 	}
 	if code, _, errOut := typed("--yes"); code != 2 || !strings.Contains(errOut, "flag provided but not defined: -yes") {
@@ -55,8 +56,8 @@ func TestApprove(t *testing.T) {
 	for _, id := range []string{"", "pln_OTHER"} {
 		body := strings.Replace(f.plan(), `"id":"pln_BWSYNTH"`, `"id":"`+id+`"`, 1)
 		f.set(func(f *planFake) { f.raw = map[string]string{"/plans/pln_BWSYNTH": body} })
-		setStdin(t, id)
-		if code, out, errOut := runCtl(t, approve...); code == 0 || out != "" || strings.Contains(errOut, "Type the plan ID") ||
+		setStdin(t, "y\n")
+		if code, out, errOut := runCtl(t, approve...); code == 0 || out != "" || strings.Contains(errOut, "Approve it? [y/N]") ||
 			!strings.Contains(errOut, "GET /api/v1/plans/pln_BWSYNTH answered plan '"+id+"'; nothing is shown and nothing was sent") {
 			t.Errorf("an answer with ID %q: exit %d, stdout %q, stderr %q", id, code, out, errOut)
 		}
@@ -65,7 +66,7 @@ func TestApprove(t *testing.T) {
 	// A display that fails to reach the operator sends nothing, though the prompt shows and the right
 	// ID is typed: the plan view's write, then the prediction's.
 	for _, part := range []string{"Changes shown below", "Self-approval"} {
-		setStdin(t, "pln_BWSYNTH\n")
+		setStdin(t, "y\n")
 		var errb failOn
 		errb.part = part
 		if code := run(approve, io.Discard, &errb); code == 0 || !strings.Contains(errb.String(), "showing the plan: ") {
@@ -77,7 +78,7 @@ func TestApprove(t *testing.T) {
 	}
 
 	code, out, errOut := typed()
-	prompt := strings.Index(errOut, "Type the plan ID to send it, or press Enter to stop: ")
+	prompt := strings.Index(errOut, "Answering y records your approval of this plan as you. Approve it? [y/N]: ")
 	for _, w := range []string{
 		"Plan pln_BWSYNTH  proposed",
 		"Changes shown below",
@@ -102,7 +103,7 @@ func TestApprove(t *testing.T) {
 	f.set(func(f *planFake) { f.drift = "12" })
 	code, out, errOut = typed()
 	if i := strings.Index(errOut, "Overwrites     the drifted configuration of drift record 12, which no reviewer has seen.\n"+
-		"               Approving records that you approve overwriting it.\n"); code != 0 || i < 0 || i > strings.Index(errOut, "Type the plan ID") ||
+		"               Approving records that you approve overwriting it.\n"); code != 0 || i < 0 || i > strings.Index(errOut, "Approve it? [y/N]") ||
 		!strings.Contains(out, "\nIt overwrites the drifted configuration, which no reviewer has seen: this approval records that you approve overwriting it.\n") {
 		t.Errorf("a revert: exit %d, stdout %q, stderr %q", code, out, errOut)
 	}
@@ -143,7 +144,7 @@ func TestConfirmEmpty(t *testing.T) {
 			t.Errorf("input %q against an empty want: %v; want it not confirmed", in, err)
 		}
 	}
-	setStdin(t, "pln_BWSYNTH\n")
+	setStdin(t, "y\n")
 	if err := (&env{err: &shortWriter{}}).confirmTyped("the plan ID", "pln_BWSYNTH"); err == nil || !strings.Contains(err.Error(), "showing the prompt") {
 		t.Errorf("a prompt that cannot be shown: %v", err)
 	}
@@ -261,10 +262,10 @@ func TestApprovalEpochs(t *testing.T) {
 				return "ep_BWSYNTH-2"
 			}
 		})
-		setStdin(t, "pln_BWSYNTH\n")
+		setStdin(t, "y\n")
 		code, out, errOut := runCtl(t, "approve", "pln_BWSYNTH")
 		if code == 0 || out != "" || !strings.Contains(errOut, c.want+" while the plan was read; nothing is shown and nothing was sent. "+
-			"Approve it again with: approve 'pln_BWSYNTH'") || strings.Contains(errOut, "Self-approval") || strings.Contains(errOut, "Type the plan ID") {
+			"Approve it again with: approve 'pln_BWSYNTH'") || strings.Contains(errOut, "Self-approval") || strings.Contains(errOut, "Approve it? [y/N]") {
 			t.Errorf("approve, %s: exit %d, stdout %q, stderr %q", c.name, code, out, errOut)
 		}
 		if b := f.took(); len(b) != 0 {
@@ -282,9 +283,9 @@ func TestApprovalEpochs(t *testing.T) {
 			return map[bool]string{false: "ep_BWSYNTH-2", true: "ep_BWSYNTH-3"}[moved]
 		}
 	})
-	setStdin(t, "pln_BWSYNTH\n")
+	setStdin(t, "y\n")
 	code, out, errOut := runCtl(t, "approve", "pln_BWSYNTH")
-	if code == 0 || out != "" || !strings.Contains(errOut, "Type the plan ID") ||
+	if code == 0 || out != "" || !strings.Contains(errOut, "Approve it? [y/N]") ||
 		!strings.Contains(errOut, "not sent: the epoch changed from 'ep_BWSYNTH-2' to 'ep_BWSYNTH-3' after the request was built from reads of the earlier one") {
 		t.Errorf("approve, moved after the confirmation: exit %d, stdout %q, stderr %q", code, out, errOut)
 	}
@@ -371,7 +372,7 @@ func TestApprovalEscapes(t *testing.T) {
 			}
 		}
 	}
-	setStdin(t, "pln_BWSYNTH\n")
+	setStdin(t, "y\n")
 	code, out, errOut := runCtl(t, "approve", "pln_BWSYNTH")
 	check("approve", code, out, errOut, "the profile revision prv_b: ", "Approved ("+esc+"). Recorded self-approval reasons: "+esc+".")
 	f.took()

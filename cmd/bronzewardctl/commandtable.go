@@ -209,9 +209,9 @@ var cmdTable = []cmdEntry{
 		notes: "a cancelled plan cannot be committed; a committed plan's operation ends only while no attempt is recorded, and an attempt\n" +
 			"already recorded is not stopped."},
 	{path: "approve", line: "approve a plan", synopsis: "approve <plan>", roles: "approver", person: true,
-		notes: "prints the plan and the predicted self-approval on standard error, then sends only when the plan ID is typed back, on the\n" +
-			"terminal or as one line of standard input. There is no --yes, and --no-input refuses. An approval starts no operation, so\n" +
-			"approve does not wait."},
+		notes: "prints the plan and the predicted self-approval on standard error, then asks Approve it? [y/N] and sends only on y or yes,\n" +
+			"on the terminal or as one line of standard input. Enter, n and the end of input send nothing. There is no --yes, and\n" +
+			"--no-input refuses. An approval starts no operation, so approve does not wait."},
 	{path: "approval", line: "approvals of plans"},
 	{path: "approval show", line: "show an approval", synopsis: "approval show <approval>", roles: "any"},
 	{path: "approval revoke", line: "revoke an approval", synopsis: "approval revoke <approval> --reason <text>", roles: "approver or recovery-admin",

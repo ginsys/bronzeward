@@ -373,7 +373,7 @@ bronzewardctl
   publish <draft>                     waits for the publish operation unless --no-wait
   release list | show | review | provenance
   plan create | list | show | cancel
-  approve <plan>                      shows the plan evidence and asks for the plan ID
+  approve <plan>                      shows the plan evidence and asks Approve it? [y/N]
   approval show | revoke
 
   operation list | show | watch       watch follows events and resumes after a disconnect
@@ -904,7 +904,7 @@ Self-approval   predicted: you created this plan and published this release, and
                 fragment, profile or assignment revision in it. Import-base authorship and
                 automation you own are not predicted. The approval records the actual
                 reasons; self-approval is marked and allowed.
-Type the plan ID to send it, or press Enter to stop: pln_f645…cawy
+Answering y records your approval of this plan as you. Approve it? [y/N]: y
 Approved (apr_2ztr…47vy). Recorded self-approval reasons: created-plan, published.
 The controller re-checks the plan at use time; it applies it only if every check passes.
 ```
@@ -967,10 +967,10 @@ rejected: a plan ID typed per machine, which a person does by copying and so sho
 more than the press; a machine's name typed, which asks a person to read the name and prove it
 by typing, for the one act that records an approval the person can already see on the page; one
 press with no sentence, which leaves a person to infer what the press records. `approve` in
-the command still prints the plan before asking, and until its own confirmation replaces it
-the confirmation is the plan ID typed back (not `y`), and approval has no `--yes`. These
-are guards against approving by habit without the evidence on screen; they do not prove that a
-person typed it, and a script can type a plan ID. Human-only approval is enforced by the server from the authenticated principal's
+the command still prints the plan before asking, and its confirmation is the question
+`Approve it? [y/N]`: only `y` or `yes` sends, and Enter, `n` and the end of input send nothing. Approval has no `--yes`.
+These are guards against approving by habit without the evidence on screen; they do not prove that a
+person typed it, and a script can type `y`. Human-only approval is enforced by the server from the authenticated principal's
 class: an automation credential gets `403` with `humanOnly: true`
 (`internal/api/api.go:380-392`), and the CLI says so before sending when the context holds an
 automation token.
@@ -990,7 +990,7 @@ sends nothing to any machine, is the confirmation, as the sentence above Approve
 limited to an adoption of a draft's machines with no `Applied`. Every act is the existing route,
 recorded one by one, and the approval records self-approval as the server computes it. A first adopt plan
 binds no drift record, and a machine with an `Applied` keeps the separate steps on the plan page. The
-command still asks for the plan ID typed back, until its confirmation changes
+command's `approve` asks `Approve it? [y/N]`
 ([client contracts A11](client-contracts.md#14-proposed-api-gap-issues-and-downstream-refinement)).
 
 A revert approval adds one line, from `unseenOverwrite` (`internal/api/approvals.go:49-51`):
@@ -1627,7 +1627,7 @@ the plan leaves its hands. Automation may publish and plan (`internal/api/routes
 
 **Approver.** Open a proposed plan; read target machine, route, operation, mode, release,
 assignment revision, baseline, drift record, deadlines, expiry, epoch, evidence, self-approval
-reasons and `unseenOverwrite`; approve by one press under the plan on its page in the console, or by typing the plan ID in the command ([§5.6](#56-plan-and-approval)); watch the operation; revoke an
+reasons and `unseenOverwrite`; approve by one press under the plan on its page in the console, or by answering `y` in the command ([§5.6](#56-plan-and-approval)); watch the operation; revoke an
 approval or cancel a plan; unfreeze. Human only for approval. Sees: that revoking after the
 controller committed does not stop an attempt already recorded
 ([design §13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy)).
