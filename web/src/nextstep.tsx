@@ -1,4 +1,5 @@
-// The machine page's "where you are, what next" line (ginsys/bronzeward#860), worded from
+// The "where you are, what next" line of the machine page (ginsys/bronzeward#860) and of the release review page
+// (ginsys/bronzeward#1077), worded from
 // docs/spec/operator-experience.md §2.3. It is drawn from one answer and from nothing else: the `step` of
 // `GET /machines/{id}/position` (ginsys/bronzeward#879), which the server decides from facts read in one
 // snapshot. A step this client does not know reads as `no-step`, and `no-step` draws no line: it claims neither

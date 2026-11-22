@@ -27,6 +27,7 @@ let box: HTMLElement;
 // What the position's path answers now, and how many times it was read.
 let answer: ReadResult<unknown>;
 let reads = 0;
+let reviewReads = 0;
 
 const client: Reads["client"] = {
   read: async <T,>(path: string) => {
@@ -34,6 +35,7 @@ const client: Reads["client"] = {
       reads += 1;
       return answer as ReadResult<T>;
     }
+    reviewReads += 1;
     return { kind: "ok", data: { release: rel, machine: "mch_b", mode: "metal", configuration: "a: b", provenance: [] } } as ReadResult<T>;
   },
 };
@@ -56,6 +58,7 @@ beforeEach(() => {
   document.body.append(box);
   root = createRoot(box);
   reads = 0;
+  reviewReads = 0;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -72,10 +75,12 @@ describe("the release review page's position read", () => {
     expect(box.querySelector('[data-testid="next-step"]')).toBeNull();
     expect(button("Plan apply")).toBeUndefined();
 
+    const before = reviewReads;
     answer = { kind: "ok", data: position("needs-plan") };
     await act(async () => button("Read again")!.click());
     await settled();
     expect(reads).toBe(2);
+    expect(reviewReads).toBeGreaterThan(before);
     expect(box.querySelector('[data-testid="next-step"]')?.textContent).toContain("An apply-config plan sends this release to it.");
     expect(button("Plan apply")).toBeDefined();
     expect(button("Read again")).toBeUndefined();

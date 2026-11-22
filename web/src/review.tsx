@@ -195,10 +195,11 @@ export function NextStepSection({ release, machine, pos, readAgain }: { release:
 }
 
 export function ReviewItem({ release, machine }: { release: string; machine: string }) {
-  const review = useItem<Review>(`/releases/${enc(release)}/machines/${enc(machine)}/review`);
+  // [Read again] reads the whole page again: the review and the position share one counter.
+  const [n, readAgain] = useState(0);
+  const review = useItem<Review>(`/releases/${enc(release)}/machines/${enc(machine)}/review`, undefined, n);
   const pending = usePending(review, "the rendered review");
   // The position holds the machine record, so the page's name and address cost no further read.
-  const [n, readAgain] = useState(0);
   const pos = useItem<Position>(`/machines/${enc(machine)}/position`, NO_KEEP, n);
   const held = pos.kind === "ok" ? pos.data.machine : undefined;
   return (
