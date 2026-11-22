@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
@@ -390,8 +391,11 @@ func paddedField(identity, iss, sub string) string {
 // unshownIn is whether any value holds a character the question would not show as itself or as an escape.
 func unshownIn(values ...string) bool {
 	for _, v := range values {
+		if !utf8.ValidString(v) {
+			return true
+		}
 		for _, r := range v {
-			if unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) || unicode.Is(unicode.Zs, r) && r != ' ' {
+			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) || unicode.Is(unicode.Zs, r) && r != ' ' {
 				return true
 			}
 		}
@@ -429,9 +433,10 @@ func (e *env) identityCmd(args []string) error {
 		// real one active. Refused, never trimmed, so the value sent stays the one named in the question.
 		return usageError{errors.New("The " + paddedField(identity, iss, sub) + " has spaces at its start or end; enter it without them.")}
 	case unshownIn(identity, iss, sub):
-		// printable escapes a control character and a bidirectional control, and leaves these as they are: an invisible
-		// format character, a space that is not U+0020, a line or paragraph separator. The question would read as
-		// another target than the raw value that is sent.
+		// printable writes a control character, a bidirectional control and a byte that is not UTF-8 as an escape, which
+		// reads like the same text typed, and leaves an invisible format character, a space that is not U+0020 and a
+		// line or paragraph separator as they are. Either way the question would read as another target than the raw
+		// value that is sent, so none is confirmable: no escape is ever written for a value that can be confirmed.
 		return usageError{errors.New("The identity cannot be shown, so it cannot be confirmed.")}
 	case e.noInput:
 		return notConfirmed{errors.New("identity revoke asks for a y, which --no-input forbids; nothing was sent")}
