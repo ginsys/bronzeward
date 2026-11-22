@@ -133,6 +133,34 @@ func TestResolveAlias(t *testing.T) {
 	}
 }
 
+// Resolved says whether an identified embedded document was written back, so the form-only verdict
+// (ginsys/bronzeward#1098) can refuse a base whose string the resolver re-encoded.
+func TestResolvedEmbedded(t *testing.T) {
+	values := map[string]provider.Value{"app/pass": value(t, provider.KindString, resolveSecret)}
+	refs := map[string]Reference{"app/pass": str(provider.KindString)}
+	for _, c := range []struct {
+		name, text string
+		embedded   []Embedded
+		want       bool
+	}{
+		{"identified", manifestStream("kind: Secret\nstringData:\n    password: !bwref app/pass\n"),
+			[]Embedded{{Path: manifestPath, Format: "yaml"}}, true},
+		{"none", "machine:\n  type: worker\n", nil, false},
+	} {
+		decl := Declarations{}
+		if c.embedded != nil {
+			decl = Declarations{References: refs, Embedded: c.embedded}
+		}
+		r, err := Resolve(sanitizedOf(t, c.text, decl), values)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if r.Embedded() != c.want {
+			t.Errorf("%s: Embedded() = %t, want %t", c.name, r.Embedded(), c.want)
+		}
+	}
+}
+
 // An identified embedded document is resolved and written back whole: YAML with two-space
 // indentation, JSON compact with sorted keys and a final newline (compilation.md §5.4, SR's
 // prototype rules).

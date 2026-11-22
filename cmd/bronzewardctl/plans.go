@@ -383,7 +383,10 @@ func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
 	}
 	if b := ev.Baseline; b != nil {
 		pending := "no: the release's compiled configuration is byte-identical to the node's"
-		if b.PendingConvergence {
+		switch {
+		case b.FormOnly:
+			pending = "yes, in form only (comments and encoding): the release's compiled configuration has the same documents, keys and values as the node's. The first apply sends the release's text, without the node's comments"
+		case b.PendingConvergence:
 			pending = "yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff"
 		}
 		lines = append(lines, "  Baseline\timport base "+pr(b.ImportBaseRevision)+", the node's own bytes", "  Release not applied yet\t"+pending)
@@ -394,8 +397,14 @@ func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
 		lines = append(lines, sf("  Diff\tDiff withheld: the change cannot be shown (%s -> %s)", e.ref("release", d.From), e.ref("release", d.To)))
 	case d.Unified == "":
 		lines = append(lines, sf("  Diff\tNo differences in the redacted configurations (%s -> %s)", e.ref("release", d.From), e.ref("release", d.To)))
+		if d.FromFormOnly {
+			lines = append(lines, "  Comments\tThe node's own text has comments that the release's text does not carry; they go with this apply")
+		}
 	default:
 		lines = append(lines, sf("  Diff\tChanges shown below: the whole redacted configuration, %s -> %s", e.ref("release", d.From), e.ref("release", d.To)))
+		if d.FromFormOnly {
+			lines = append(lines, "  Comments\tThe node's own text has comments that the release's text does not carry; they go with this apply")
+		}
 		for _, l := range strings.Split(strings.TrimSuffix(d.Unified, "\n"), "\n") {
 			lines = append(lines, "    "+client.Printable(l))
 		}

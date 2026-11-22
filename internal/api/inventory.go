@@ -271,7 +271,8 @@ type observedBody struct {
 
 // machineBody is §9.3's machine resource; openDrift is the machine's open drift record, or null.
 // PendingConvergence states whether the Desired artifact differs from the Applied one; it names
-// no digest (choice §17.38).
+// no digest (choice §17.38). FormOnly states that the Desired release's compiled configuration is
+// pending and differs from the machine's adopted configuration in comments and encoding only.
 type machineBody struct {
 	ID                 string         `json:"id"`
 	Cluster            string         `json:"cluster"`
@@ -282,6 +283,7 @@ type machineBody struct {
 	Desired            *string        `json:"desired"`
 	Applied            *applied       `json:"applied"`
 	PendingConvergence bool           `json:"pendingConvergence"`
+	FormOnly           bool           `json:"formOnly"`
 	Observed           *observedBody  `json:"observed"`
 	Frozen             bool           `json:"frozen"`
 	ScopeState         string         `json:"scopeState"`

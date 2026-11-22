@@ -3439,6 +3439,7 @@ components:
       - desired
       - applied
       - pendingConvergence
+      - formOnly
       - observed
       - frozen
       - scopeState
@@ -3457,6 +3458,9 @@ components:
           - {type: 'null'}
         pendingConvergence: {type: boolean, description: 'Whether the Desired release''s artifact differs from the Applied one;
             true for a machine with a Desired release and no Applied state (persistence and API §9.3).'}
+        formOnly: {type: boolean, description: 'True only while pendingConvergence is true, no drift is open and the Desired release''s compiled
+            configuration holds the same documents, keys and values as the machine''s adopted configuration, differing in comments and
+            encoding only (persistence and API §9.3, API revision 13).'}
         observed:
           oneOf:
           - {$ref: '#/components/schemas/ObservedBody'}
@@ -3621,10 +3625,12 @@ components:
       additionalProperties: false
     PlanBaseline:
       type: object
-      required: [importBaseRevision, pendingConvergence]
+      required: [importBaseRevision, pendingConvergence, formOnly]
       properties:
         importBaseRevision: {type: string}
         pendingConvergence: {type: boolean}
+        formOnly: {type: boolean, description: 'True when the release''s compiled configuration holds the same documents, keys and values as the
+            baseline and differs in comments and encoding only; never true for the adoption of a drifted machine (API revision 13).'}
       additionalProperties: false
     PlanBody:
       type: object
@@ -3696,12 +3702,14 @@ components:
       additionalProperties: false
     PlanDiff:
       type: object
-      required: [from, to, withheld, unified]
+      required: [from, to, withheld, unified, fromFormOnly]
       properties:
         from: {type: string}
         to: {type: string}
         withheld: {type: boolean}
         unified: {type: string}
+        fromFormOnly: {type: boolean, description: 'True when the diff is shown although the machine holds its import base and not the from release''s
+            artifact, because the two differ in comments and encoding only (API revision 13).'}
       additionalProperties: false
     PlanDryRun:
       type: object

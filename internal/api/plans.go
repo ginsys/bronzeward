@@ -142,6 +142,9 @@ type planDiff struct {
 	To       string `json:"to"`
 	Withheld bool   `json:"withheld"`
 	Unified  string `json:"unified"`
+	// FromFormOnly is true when the diff was shown although the machine holds its import base and not
+	// the from-release's artifact, because the two differ in form only.
+	FromFormOnly bool `json:"fromFormOnly"`
 }
 
 // planBaseline is an adopt plan's evidence (execution-recovery.md §6.3): the import base revision
@@ -150,6 +153,9 @@ type planDiff struct {
 type planBaseline struct {
 	ImportBaseRevision string `json:"importBaseRevision"`
 	PendingConvergence bool   `json:"pendingConvergence"`
+	// FormOnly is true when the release's compiled configuration differs from the baseline in
+	// comments and encoding only: the same documents, keys and values.
+	FormOnly bool `json:"formOnly"`
 }
 
 // planValidation is the release's validation the plan relies on: it passed at publication.
@@ -241,15 +247,17 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 		covered                  bool
 		ibr, asr, mode, redacted sql.NullString
 		artifact, baseline       []byte
+		formOnly                 sql.NullBool
 	)
 	err = tx.QueryRowContext(ctx, `SELECT r.contract, r.kubernetes_version, r.machinery_version, m.machine IS NOT NULL,
-			m.import_base_revision, m.assignment_revision, m.mode, m.redacted, m.configuration_digest, i.configuration_digest
+			m.import_base_revision, m.assignment_revision, m.mode, m.redacted, m.configuration_digest, i.configuration_digest,
+			m.form_only
 		FROM release r
 		LEFT JOIN release_machine m ON m.release = r.id AND m.machine = $2
 		LEFT JOIN import_base_revision i ON i.id = m.import_base_revision
 		WHERE r.id = $1 AND r.cluster = $3`, in.ReleaseID, in.Machine, b.Cluster).Scan(
 		&b.Evidence.Validation.Contract, &b.Evidence.Validation.KubernetesVersion, &b.Evidence.Validation.MachineryVersion,
-		&covered, &ibr, &asr, &mode, &redacted, &artifact, &baseline)
+		&covered, &ibr, &asr, &mode, &redacted, &artifact, &baseline, &formOnly)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return result{}, refuse(http.StatusNotFound, "not-found", "no such release in the machine's cluster").with("release", in.ReleaseID)
@@ -295,7 +303,7 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 			return result{}, err
 		}
 		b.BaselineRevision = &baselineRev.Int64
-		d, err := planDiffFrom(ctx, tx, in.Machine, appliedRelease.String, in.ReleaseID, appliedDigest, redacted)
+		d, err := planDiffFrom(ctx, tx, in.Machine, appliedRelease.String, in.ReleaseID, appliedDigest, redacted, b.DriftRecord != nil)
 		if err != nil {
 			return result{}, err
 		}
@@ -305,7 +313,8 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 		}
 	case "adopt":
 		// A machine with an Applied is adopted only while drifted: the plan binds its open drift record
-		// and its baseline revision (execution-recovery.md §6.3 step 3); a handover binds neither.
+		// and its baseline revision (execution-recovery.md §6.3 step 3); the first adoption of a
+		// machine binds neither.
 		if appliedRelease.Valid {
 			var opened int64
 			err := tx.QueryRowContext(ctx, `SELECT opened FROM drift_record WHERE machine = $1 AND closed IS NULL`,
@@ -321,7 +330,11 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 			b.DriftRecord, b.BaselineRevision = &opened, &baselineRev.Int64
 		}
 		appliedDigest = nil
-		b.Evidence.Baseline = &planBaseline{ImportBaseRevision: ibr.String, PendingConvergence: !bytes.Equal(artifact, baseline)}
+		pending := !bytes.Equal(artifact, baseline)
+		// Form only is said for a first adoption alone: the node holds its import base's content only
+		// where nothing has drifted from it (ginsys/bronzeward#1098).
+		b.Evidence.Baseline = &planBaseline{ImportBaseRevision: ibr.String, PendingConvergence: pending,
+			FormOnly: pending && formOnly.Bool && !appliedRelease.Valid}
 	}
 
 	// The release was compiled from the machine's assignment at one revision; a plan on a moved
@@ -486,22 +499,28 @@ var getPlan = item(id.Plan, func(ctx context.Context, tx *sql.Tx, v string) (str
 // planDiffFrom is the unified diff from Applied's redacted configuration to the target's, or a
 // withheld diff when either has none, or when the machine holds a configuration other than its
 // Applied release's artifact (pending convergence, execution-recovery.md §6.3), which has no
-// redacted form.
-func planDiffFrom(ctx context.Context, tx *sql.Tx, machine, from, to string, appliedDigest []byte, target sql.NullString) (*planDiff, error) {
+// redacted form. The one exception is a machine adopted from its own bytes whose release differs from
+// them in form only (ginsys/bronzeward#1098): while no drift is open and Applied is still the import
+// base's digest, the node holds what the from-release's artifact holds in content, so the diff is
+// shown and says so.
+func planDiffFrom(ctx context.Context, tx *sql.Tx, machine, from, to string, appliedDigest []byte, target sql.NullString, drifted bool) (*planDiff, error) {
 	d := &planDiff{From: from, To: to}
 	var applied sql.NullString
-	var artifact []byte
-	if err := tx.QueryRowContext(ctx, `SELECT redacted, configuration_digest FROM release_machine WHERE release = $1 AND machine = $2`,
-		from, machine).Scan(&applied, &artifact); err != nil {
+	var artifact, baseline []byte
+	var form bool
+	if err := tx.QueryRowContext(ctx, `SELECT m.redacted, m.configuration_digest, m.form_only, i.configuration_digest
+		FROM release_machine m JOIN import_base_revision i ON i.id = m.import_base_revision
+		WHERE m.release = $1 AND m.machine = $2`, from, machine).Scan(&applied, &artifact, &form, &baseline); err != nil {
 		return nil, err
 	}
-	if !applied.Valid || !target.Valid || !bytes.Equal(artifact, appliedDigest) {
-		d.Withheld = true
+	d.FromFormOnly = !bytes.Equal(artifact, appliedDigest) && form && !drifted && bytes.Equal(baseline, appliedDigest)
+	if !applied.Valid || !target.Valid || (!bytes.Equal(artifact, appliedDigest) && !d.FromFormOnly) {
+		d.Withheld, d.FromFormOnly = true, false
 		return d, nil
 	}
 	base, shown, err := pairRedacted(applied.String, target.String)
 	if err != nil {
-		d.Withheld = true
+		d.Withheld, d.FromFormOnly = true, false
 		return d, nil
 	}
 	d.Unified = textdiff.Unified(base, shown)

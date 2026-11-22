@@ -821,7 +821,7 @@ there.
 ### 3.5 A machine's name
 
 A machine may carry a name, an operator's label for finding it **(choice §17.43)**. It is stored
-in the database and is not part of any fragment or plan; since API revision 13 a release compiles it
+in the database and is not part of any fragment or plan; since API revision 14 a release compiles it
 as the machine's hostname where nothing sets one and records the name used (the last bullet below). It is served from API
 revision 10 (§9.1), which adds `name` on a machine and on `POST /machines`, the route
 `POST /machines/{id}/names`, the `name-change` timeline entry and the `name-in-use` problem code.
@@ -2220,8 +2220,9 @@ API revisions:
 | 10 | `name` on a machine and on `POST /machines`, `POST /machines/{id}/names`, the `name-change` timeline entry and the `name-in-use` problem code (§3.5, choice §17.43) |
 | 11 | `POST /discoveries`, a `POST` that only reads (§9.2) |
 | 12 | `GET /clusters/{id}/talos-access` (§9.2, §3.3 "Presence") |
+| 13 | `formOnly` on a machine and on an adopt plan's `baseline` evidence, `fromFormOnly` on a plan's `diff` (§9.3, choice §17.48) |
 
-Revision 13 is specified and not yet served. It adds `hostname` (`source`, and
+Revision 14 is specified and not yet served. It adds `hostname` (`source`, and
 `name` for `machine-name`) on each machine of a release and its review, and the
 `hostname` rule of `422 validation-failed` (§9.2, §3.5, choice §17.44), and the
 name form of `409 stale-input` (§4.2, choice §17.45): the publication check and
@@ -3043,11 +3044,11 @@ hostname, and either the machine has no name, with or without the legacy
 stable-hostname feature, or its configuration says `auto: off`) or `legacy-stable` (the
 configuration sets the legacy stable-hostname feature and no explicit hostname,
 on a machine that has a name, so no name is used; a feature held in a secret
-reference counts as set whatever its value, so the source never tells it) or `unrecorded` (a release made before revision 13,
+reference counts as set whatever its value, so the source never tells it) or `unrecorded` (a release made before revision 14,
 whose hostname source was never recorded: it is no confirmed absence, and
 the migration gives every such release that value by a column default, never
 an `UPDATE`, since `release_machine` is immutable), and,
-for `machine-name`, `name`, the name used **(choice §17.44, API revision 13)**. The stored value
+for `machine-name`, `name`, the name used **(choice §17.44, API revision 14)**. The stored value
 outside that enumeration is `500 internal-error`, as a provenance record is. It
 is a fact about the release and never read again from the machine, whose name
 may have changed since. `GET /releases` lists releases in identifier order, each as the
@@ -5069,7 +5070,7 @@ design and evidence do not settle the question. Each is marked in place as
     source column added `NOT NULL DEFAULT 'unrecorded'` with the default then
     dropped, so that a new release must state it and every older row reads
     `unrecorded` with no `UPDATE` (the table is immutable), and a nullable name
-    column, served on the release read and its review, as API revision 13; a
+    column, served on the release read and its review, as API revision 14; a
     rename changes no release; "unless the configuration already sets one"
     means three cases that leave the name unused: an explicit hostname, an
     `auto: off` document with no hostname, and the legacy stable feature
@@ -5135,6 +5136,44 @@ design and evidence do not settle the question. Each is marked in place as
     leaves a connected cluster one undocumented step short of its first plan
     and, as the first walk with real nodes showed, a person looking at a
     published release with nothing to plan.
+48. **A release records whether it differs from the machine's imported
+    configuration in form only** (§3.1, §9.3, API revision 13). A node's text
+    carries comments, and every compilation re-encodes without them (compilation
+    §6 step 7), so a machine adopted from its own bytes and published with
+    nothing selected read "differs" although it holds the same documents,
+    keys and values. Applied and drift keep meaning the bytes on the node, and
+    adoption, commitment and the digest function do not change. Publication,
+    which holds both plaintexts, records per machine (`release_machine.form_only`)
+    that the compiled configuration and the resolved import base hold the same
+    documents in the same order, every key and every value equal, secrets
+    included, differing in comments, key order, indentation, quoting or flow
+    style; anything the comparison cannot decide (an alias, an anchor, a merge
+    key, a duplicate key, a tag outside YAML's core schema, a parse error)
+    reads "differs". A machine whose import base declares an identified
+    embedded document reads "differs" as well: the resolver writes that string
+    back in its own encoding, so its value is not the node's. So does a machine
+    whose import removed a hostname document equal to its name and whose release
+    writes one back (compilation §2.3 step 2a and §6 step 5a, ginsys/bronzeward#1040),
+    although nothing changes on the node: that limit is the fill's change to
+    decide. The verdict is read in three places, each with its own condition:
+    the machine's `formOnly`, true while its Desired release is pending, no
+    drift is open and Applied's digest is the import base's; an adopt plan's
+    `baseline.formOnly`, true for a first adoption whose release is pending,
+    since Applied is not yet recorded; and a plan's `diff.fromFormOnly`, which
+    shows an apply-config plan's diff from the Applied release under the machine
+    read's condition (a diff that is otherwise withheld because the node holds
+    its import base and not the release's artifact). The first apply still sends
+    the release's text, comments omitted: the words say so, and no rule changes.
+    The verdict trusts the provider's version of each secret the import pinned
+    (generations are created create-only at import, and publication refuses a
+    version whose recorded identity changed), and it does not prove that value is
+    the node's; the baseline cannot be decrypted by any identity (compilation
+    §2.3), so no comparison with it is offered. Releases published before the
+    column read false. Alternatives: a compilation that reproduces the node's
+    text when nothing is added, which one later fragment defeats and which drops
+    a normalisation the compilation states on purpose; a normalised form in every
+    comparison, which makes Applied and drift stop meaning the bytes on the node,
+    the largest contract change for the same gain.
 
 ## 18. Traceability
 

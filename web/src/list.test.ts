@@ -143,7 +143,7 @@ const NOW = Date.parse("2026-10-28T09:46:30Z");
 // Synthetic machine reads, as the generated types describe them.
 const machine = (over: Partial<Machine>): Machine => ({
   id: "mch_a", cluster: "cl_a", name: null, hardware: { smbiosUuid: null, talosNodeId: "node-a", serial: null }, platform: "metal", talosEndpoint: "10.5.0.2:50000",
-  desired: "rel_new", applied: { release: "rel_new", source: "operation", importBase: null }, pendingConvergence: false,
+  desired: "rel_new", applied: { release: "rel_new", source: "operation", importBase: null }, pendingConvergence: false, formOnly: false,
   observed: { observation: "obs_a", at: "2026-10-26T09:46:00Z", release: "rel_new" }, frozen: false, scopeState: "normal", openDrift: null, ...over,
 });
 
@@ -151,6 +151,7 @@ describe("W2 badges and the observed column", () => {
   test("each state from the list's fields", () => {
     expect(badges(machine({}))).toEqual(["Last read matched what was applied"]);
     expect(badges(machine({ pendingConvergence: true, desired: "rel_next" }))).toEqual(["Release not applied yet"]);
+    expect(badges(machine({ pendingConvergence: true, formOnly: true, desired: "rel_next" }))).toEqual(["Release not applied yet", "Differs in form only (comments and encoding)"]);
     expect(badges(machine({ openDrift: { revision: 1, observation: "obs_k", lastObservation: "obs_m", lateLanding: null }, frozen: true }))).toEqual(["Changed on the machine", "Frozen"]);
     expect(badges(machine({ desired: null, applied: null, observed: null }))).toEqual(["Not adopted yet"]);
   });
