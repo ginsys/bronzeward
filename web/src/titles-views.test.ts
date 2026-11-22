@@ -1079,6 +1079,9 @@ describe("ginsys/bronzeward#1055: a server word on a plan, operation, import, re
   test("the note on a hostname that is not a valid name shows it only when it is safe text", () => {
     expect(nameOf(`bad${"‮"}host`).note).toBe(`no name: the hostname ${NOT_SHOWN} is not a valid name`);
     expect(nameOf("bad host").note).toBe('no name: the hostname "bad host" is not a valid name');
+    // The whole hostname is checked, then cut: a bidirectional character past the cut, or 301 characters, is not shown either.
+    for (const long of [`${"a".repeat(64)}${"‮"}host`, "a".repeat(301)]) expect(nameOf(long).note).toBe(`no name: the hostname ${NOT_SHOWN} is not a valid name`);
+    expect(nameOf("a_".repeat(40)).note).toBe(`no name: the hostname ${JSON.stringify(`${"a_".repeat(32)}…`)} is not a valid name`);
   });
 
   test("what holds an approved plan names the machine's scope state as safe text", () => {
