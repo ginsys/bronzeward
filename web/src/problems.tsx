@@ -51,8 +51,8 @@ export const PROBLEM_WORDS: Readonly<Record<string, Words>> = {
 export const RULE_WORDS: Readonly<Record<string, Words>> = {
   // A client cannot tell from GET /server whether the server shows an import read from a machine (the API revision is the same
   // before and after that change), so both sentences stay true for a server that still refuses one.
-  "conflict/import-not-reviewed": { what: "The server did not show you this import's text. It shows a file import only to the person who continued it after its review, and an import read from a machine only if it has been updated to.", next: "Nothing needs doing: the import itself is not affected. If this import was read from a machine, ask whoever runs the server whether it is up to date." },
-  "forbidden/not-the-importer": { what: "The server did not show you this import's text. It shows a file import only to the person who imported it, and an import read from a machine only if it has been updated to.", next: "Ask that person. If this import was read from a machine, ask whoever runs the server whether it is up to date." },
+  "conflict/import-not-reviewed": { what: "The server did not show you this import's text. It shows a file import only to the person who continued it after its review, and an import read from a machine only if the server is new enough to show it.", next: "Nothing needs doing: the import itself is not affected. If this import was read from a machine, ask whoever runs the server whether it is up to date." },
+  "forbidden/not-the-importer": { what: "The server did not show you this import's text. It shows a file import only to the person who imported it, and an import read from a machine only if the server is new enough to show it.", next: "Ask that person. If this import was read from a machine, ask whoever runs the server whether it is up to date." },
 };
 
 // The plan cancellation's creator check carries a `plan` member, and its detail is the explanation (§8.2 403

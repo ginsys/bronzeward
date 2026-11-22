@@ -41,7 +41,7 @@ describe("the words table", () => {
   test("the import that was not reviewed has one sentence true for both causes, and says nothing needs doing", () => {
     const w = wordsFor(problem("conflict", { rule: "import-not-reviewed" }, 409));
     expect(w).toEqual(RULE_WORDS["conflict/import-not-reviewed"]);
-    expect(w?.what).toBe("The server did not show you this import's text. It shows a file import only to the person who continued it after its review, and an import read from a machine only if it has been updated to.");
+    expect(w?.what).toBe("The server did not show you this import's text. It shows a file import only to the person who continued it after its review, and an import read from a machine only if the server is new enough to show it.");
     expect(w?.next).toBe("Nothing needs doing: the import itself is not affected. If this import was read from a machine, ask whoever runs the server whether it is up to date.");
     expect(wordsFor(problem("forbidden", { rule: "not-the-importer" }, 403))?.next).toBe("Ask that person. If this import was read from a machine, ask whoever runs the server whether it is up to date.");
     expect(wordsFor(problem("conflict", { rule: "some-other-rule" }, 409))).toEqual(PROBLEM_WORDS["conflict"]);
