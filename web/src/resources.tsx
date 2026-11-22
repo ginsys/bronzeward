@@ -621,7 +621,7 @@ export function DependencyItem({ id }: { id: string }) {
         <>
           <PageNote parts={[DEPENDENCY_NOTE]} />
           <Fields rows={[
-            ["Identifier", d.id], ["Provider", safeName(d.provider)], ["Object", safeName(d.object)], ["Version", d.version], ["Created", d.created],
+            ["Identifier", d.id], ["Provider", safeName(d.provider)], ["Object", safeName(d.object)], ["Version", d.version], ["Created", when(d.created)],
             ["Class", klass({ ...d, class: safeWord(d.class) ?? null })], ["Reason", safeWord(d.reason) ?? "none"], ["First retained", when(d.firstRetainedAt)], ["Unknown since", when(d.unknownSince)],
             ["Observed from", when(d.observedFrom)], ["Recorded", when(d.recordedAt)],
           ]} />
