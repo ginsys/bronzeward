@@ -385,7 +385,7 @@ func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
 		pending := "no: the release's compiled configuration is byte-identical to the node's"
 		switch {
 		case b.FormOnly:
-			pending = "yes, in form only (comments and encoding): the release's compiled configuration has the same documents, keys and values as the node's. The first apply sends the release's text, without the node's comments"
+			pending = "yes, in form only (comments and encoding): the release's compiled configuration has the same documents, keys and values as the configuration Bronzeward adopted from the machine. The first apply sends the release's text, without the comments of the adopted configuration"
 		case b.PendingConvergence:
 			pending = "yes: the release's compiled configuration differs from the node's, which the adoption records; a later apply-config plan withholds its diff"
 		}
@@ -398,12 +398,12 @@ func (e *env) planView(c *client.Client, p *apitypes.PlanBody) []string {
 	case d.Unified == "":
 		lines = append(lines, sf("  Diff\tNo differences in the redacted configurations (%s -> %s)", e.ref("release", d.From), e.ref("release", d.To)))
 		if d.FromFormOnly {
-			lines = append(lines, "  Comments\tThe node's own text has comments that the release's text does not carry; they go with this apply")
+			lines = append(lines, commentsLine)
 		}
 	default:
 		lines = append(lines, sf("  Diff\tChanges shown below: the whole redacted configuration, %s -> %s", e.ref("release", d.From), e.ref("release", d.To)))
 		if d.FromFormOnly {
-			lines = append(lines, "  Comments\tThe node's own text has comments that the release's text does not carry; they go with this apply")
+			lines = append(lines, commentsLine)
 		}
 		for _, l := range strings.Split(strings.TrimSuffix(d.Unified, "\n"), "\n") {
 			lines = append(lines, "    "+client.Printable(l))
@@ -580,4 +580,7 @@ func (e *env) planCancel(args []string) error {
 
 // cancelLimits is what a cancellation of a committed plan does not do (journeys §8,
 // internal/api/attempt.go:362-366).
+// commentsLine is the plan view's line for a diff taken from a release that differs from the adopted configuration in form only.
+const commentsLine = "  Comments\tThe configuration Bronzeward adopted from the machine has comments that the release's text does not carry; they go with this apply"
+
 const cancelLimits = "A cancellation ends a committed plan's operation only while no attempt is recorded; it does not stop an attempt already recorded."
