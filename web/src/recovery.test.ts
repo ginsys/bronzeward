@@ -1,9 +1,10 @@
+import { readFileSync } from "node:fs";
 import { createElement as h, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
 import {
-  ENTRY_EFFECTS, EnterRecovery, Entered, ExitRecovery, nextStep, NORMAL_START, noteEntry, PRE_ENTRY, PreEntry, RECOVERY_START, RecoveryBanner, RecoveryRead, REVOCATION_LIMITS, Revocation, revocationConfirmation, scopeSummary,
+  ConfirmationLine, ENTRY_EFFECTS, EnterRecovery, Entered, ExitRecovery, nextStep, NORMAL_START, noteEntry, PRE_ENTRY, PreEntry, RECOVERY_START, RecoveryBanner, RecoveryRead, REVOCATION_LIMITS, Revocation, revocationConfirmation, scopeSummary,
   stamp, startModeOf, startRefusal, UNKNOWN_START, unreleased,
 } from "./recovery.tsx";
 import { type Problem, type ReadResult, TRANSPORT_FAILURE } from "./request.ts";
@@ -200,6 +201,14 @@ describe("the console's parts (#364)", () => {
       expect([v, c.target, c.line, c.why]).toEqual([v, undefined, undefined, "The identity cannot be shown, so it cannot be confirmed."]);
     }
     expect(revocationConfirmation(" alice ", "", "", "left")).toEqual({ line: "Revokes the identity  alice . A revocation is permanent.", target: { identity: " alice ", reason: "left" } });
+  });
+
+  test("the line keeps the spaces of the target, so two targets that differ in spaces read differently", () => {
+    const line = (v: string) => renderToStaticMarkup(h(ConfirmationLine, { line: revocationConfirmation(v, "", "", "left").line! }));
+    expect(line("alice  smith")).toContain("alice  smith");
+    expect(line("alice  smith")).toContain('class="exact"');
+    expect(line("alice  smith")).not.toBe(line("alice smith"));
+    expect(readFileSync(new URL("./app.css", import.meta.url), "utf8")).toMatch(/\.exact\s*\{[^}]*white-space:\s*pre-wrap/);
   });
 
   test("the press stays off while the identity, the pair or the reason is missing or both forms are filled", () => {

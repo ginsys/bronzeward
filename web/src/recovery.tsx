@@ -379,6 +379,11 @@ export function revocationConfirmation(identity: string, iss: string, sub: strin
     : { line: `Revokes the subject ${u} of the issuer ${s}. A revocation is permanent.`, target: { iss: s, sub: u, reason: r } };
 }
 
+// The line that names the target keeps its spaces (class exact): two subjects that differ only in spaces must read differently.
+export function ConfirmationLine({ line }: { line: string }) {
+  return <p className="exact" data-testid="revocation-line">{line}</p>;
+}
+
 // B35: the identity, or the issuer and subject, and a reason; one press sends it after the line that names the target.
 export function Revocation() {
   const [w, send] = useSend();
@@ -405,7 +410,7 @@ export function Revocation() {
       <p><label>Identity: <input value={identity} onChange={(e) => setIdentity(e.target.value)} autoComplete="off" /></label></p>
       <p>or <label>Issuer: <input value={iss} onChange={(e) => setIss(e.target.value)} autoComplete="off" /></label> <label>Subject: <input value={sub} onChange={(e) => setSub(e.target.value)} autoComplete="off" /></label></p>
       <p><label>Reason: <input value={reason} onChange={(e) => setReason(e.target.value)} autoComplete="off" /></label></p>
-      {confirmation.line !== undefined && <p data-testid="revocation-line">{confirmation.line}</p>}
+      {confirmation.line !== undefined && <ConfirmationLine line={confirmation.line} />}
       <p>
         <button type="submit" disabled={why !== undefined || busy}>Revoke identity</button>
         {why !== undefined && ` ${why}`}
