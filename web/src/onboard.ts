@@ -29,6 +29,8 @@ export interface Env {
 // What a step ended in: `existing` for a record the server already held, `skipped` for a member that
 // cannot be recorded, `stopped` for an import that waits on a person.
 export type LineState = "done" | "existing" | "skipped" | "stopped" | "failed" | "unknown";
+// The line of a press whose client holds no epoch to send under: nothing was sent, and the page's [Run again] is the way on.
+export const NO_EPOCH_YET = "not sent: this page has not read the installation's epoch yet. Run it again; if this repeats, open the page again.";
 // The problem a failure carries, which the page shows as the reference for a bug report (the words point to it).
 export interface Reference { problem: Problem; status: number }
 // `holder` is the identifier of the machine that holds the name a machine was refused: the page links to it.
@@ -270,7 +272,7 @@ export async function onboardCluster(env: Env, p: Plan, report: (lines: Line[]) 
     ["Draft", () => draft(env, p, set, fail, list)],
     ["Imports", () => imports(env, p, set, fail, list)],
   ];
-  // What the stopped step still had to send, one by name where it has members, then the steps after it.
+  // What the stopped step has not finished, one by name where it has members, then the steps after it.
   const left: Record<string, () => string[]> = {
     Machines: () => members(p.found).filter((m) => m.answered && m.platform !== "" && p.machines[m.nodeId] === undefined).map((m) => `Machine ${labelOf(m)}`),
     Imports: () => members(p.found).filter((m) => p.machines[m.nodeId] !== undefined && p.imports[m.nodeId] === undefined).map((m) => `Import ${labelOf(m)}`),
@@ -300,24 +302,30 @@ export function stoppedSentence(label: string, moved: boolean, choose: boolean, 
 }
 
 // One press of a plan: `onboardCluster` with every write sent under the plan's epoch, set by its first press
-// from `press.current()`. A press stops quietly before a write when `press.valid()` says the shell has ended the
+// from `press.current()`; a client that holds none sends nothing (`NO_EPOCH_YET`). A press stops quietly before a write when `press.valid()` says the shell has ended the
 // reads the press began with (an epoch change does, and so do a revocation and a sign-out: `not-done`, and
 // the plan can be run again); a write the server refuses for the epoch (412) is set aside by the write layer.
 // `epochChanged` is set only from a fact: that set-aside, or, once the press has stopped, the client's epoch
 // (`press.current()`) differing from the plan's (one comparison, at the end, which also covers a quiet stop). It says the plan cannot be run again, since the ids it holds were read under the old epoch.
 export async function pressOnboarding(env: Env, p: Plan, press: { current: () => string | undefined; valid: () => boolean }, report: (lines: Line[]) => void): Promise<{ ok: boolean; epochChanged: boolean }> {
   p.epoch ??= press.current();
+  const epoch = p.epoch;
+  // A client that holds no epoch has nothing to pin the plan to, and the write layer would pick one of its own for each write.
+  if (epoch === undefined) {
+    report([{ key: "epoch", label: "Epoch", state: "failed", detail: NO_EPOCH_YET }]);
+    return { ok: false, epochChanged: false };
+  }
   let epochChanged = false;
   const send: Env["send"] = async (spec) => {
     if (!press.valid()) return { kind: "not-done", why: "the page's reads ended", problem: null };
-    const o = await env.send(p.epoch === undefined ? spec : { ...spec, epoch: p.epoch });
+    const o = await env.send({ ...spec, epoch });
     if (o.kind === "set-aside" && o.why === EPOCH_CHANGED_ASIDE) epochChanged = true;
     return o;
   };
   const ok = await onboardCluster({ ...env, send }, p, report);
   // A stop that only reads saw (an answer discarded under a new epoch) leaves no later write to notice it.
   const now = press.current();
-  if (!ok && p.epoch !== undefined && now !== undefined && now !== p.epoch) epochChanged = true;
+  if (!ok && now !== undefined && now !== epoch) epochChanged = true;
   // Nothing sends this plan again: its copy of the talosconfig goes now, not at the next read.
   if (epochChanged) p.document = undefined;
   return { ok, epochChanged };
