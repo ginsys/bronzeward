@@ -1627,7 +1627,7 @@ the client's rule wins wherever the two meet.
    is the page the word "sources" named, and a release's count of what it is built from is headed "Built from"; the
    buttons read "Enter a cluster by hand" (it records a cluster Bronzeward did not create) and "Add machine"; a
    machine's state badges read "Changed on the machine", "Release not applied yet", "Last read matched what was
-   applied" (the specification says a match never by itself means healthy, fresh or converged) and "Not managed
+   applied" (the specification says a match never by itself means healthy, fresh or converged) and "Not adopted
    yet", with "Frozen" as before. An assignments row and an imports row are headed by what they are, "Assignment of
    cp1" and "Import of cp1", and a dependency by "Dependency <object>, version <n>", with the identifier as the link's title.
    Every titled page of the console shows one note under its title that says what the page is, what to do on it and where to
