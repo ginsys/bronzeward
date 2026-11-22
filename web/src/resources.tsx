@@ -184,9 +184,9 @@ function AlertText({ a, own }: { a: S["AlertBody"]; own: boolean }) {
   return <>{subject} {s.text}</>;
 }
 const ReleaseNames = ({ ids }: { ids: readonly string[] | null }) => (ids == null || ids.length === 0 ? "none" : <>{ids.map((id, i) => <Group key={id}>{i > 0 && ", "}<Named id={id} /></Group>)}</>);
-// The server's words reach the cells through the safe-text rule: a value with a control or bidirectional character is not shown.
 // A name reads "(name not shown)" and any other word "(not shown)" (safeWord).
 const safeName = (s: string) => safeText(s) ?? NAME_NOT_SHOWN;
+// The server's words reach the cells through the safe-text rule: a value with a control or bidirectional character is not shown.
 const alertCols = (own: boolean): readonly Col<S["AlertBody"]>[] => [
   ["Alert", (a) => <AlertText a={a} own={own} />], ["Kind", (a) => safeWord(a.kind) ?? "none"], ["Class", (a) => klass({ class: safeWord(a.class) ?? null })], ["Reason", (a) => safeWord(a.reason) ?? "none"],
   ["Releases", (a) => <ReleaseNames ids={a.releases} />], ["Recorded", (a) => when(a.recordedAt)], ["Identifier", (a) => <IdentifierText id={a.id} />],
@@ -621,7 +621,7 @@ export function DependencyItem({ id }: { id: string }) {
         <>
           <PageNote parts={[DEPENDENCY_NOTE]} />
           <Fields rows={[
-            ["Identifier", d.id], ["Provider", safeName(d.provider)], ["Object", safeName(d.object)], ["Version", d.version], ["Created", when(d.created)],
+            ["Identifier", d.id], ["Provider", safeName(d.provider)], ["Object", safeName(d.object)], ["Version", d.version], ["Created", <span title={safeWord(d.created)}>{when(d.created)}</span>],
             ["Class", klass({ ...d, class: safeWord(d.class) ?? null })], ["Reason", safeWord(d.reason) ?? "none"], ["First retained", when(d.firstRetainedAt)], ["Unknown since", when(d.unknownSince)],
             ["Observed from", when(d.observedFrom)], ["Recorded", when(d.recordedAt)],
           ]} />
