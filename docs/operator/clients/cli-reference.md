@@ -1528,7 +1528,7 @@ usage: bronzewardctl identity revoke (--identity <id> | --iss <iss> --sub <sub>)
 
 revoke an identity.
 
-permanent; sent only when the identity (or the subject) is typed back.
+permanent; names the identity (or the subject and its issuer), then sends only after a y.
 
 Roles: recovery-admin. Needs a person signed in, not an automation token.
 

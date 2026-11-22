@@ -250,7 +250,7 @@ Then, through the recovery instance:
 
 - Re-record every revocation the restore erased (`POST /identity-revocations`, or `bronzewardctl
   identity revoke`, which states that a revocation is permanent, adds no `auth.deniedSubjects`
-  entry and reissues no token, and sends only when you type the identity back). Keep every subject
+  entry and reissues no token, and sends only after you answer `y`). Keep every subject
   in `auth.deniedSubjects`, including the ones you just added: the list survives a later restore,
   which could erase the revocation again.
 - Reissue every automation token with `bronzeward token rotate`. A token issued before the entry
@@ -384,7 +384,8 @@ These actions are on the web:
   `GET /recovery` to see if the entry was recorded.
 - **Exit recovery** stays off until every scope is released. The state `ready` is not released.
 - **Revoke identity** takes the identity, or the issuer and subject, and a reason. It sends only
-  after you type the identity back. A revocation is permanent. It adds no `auth.deniedSubjects`
+  after one press, under a line that names the identity, or the subject and its issuer, as you entered them. A
+  revocation is permanent. It adds no `auth.deniedSubjects`
   entry and it issues no token again.
 
 These steps stay outside the browser: the restores, the `auth.deniedSubjects` edit, the restarts and

@@ -395,18 +395,20 @@ func (e *env) identityCmd(args []string) error {
 	}); err != nil {
 		return err
 	}
-	target := identity
+	// What the question names: the identity, or the subject and its issuer, each as given.
+	named := "the identity " + client.ShellWord(identity)
 	switch {
 	case identity != "" && (iss != "" || sub != ""), identity == "" && (iss == "" || sub == ""):
 		return usageError{errors.New("name the identity with --identity, or with --iss and --sub, not both")}
 	case strings.TrimSpace(in.Reason) == "":
 		return usageError{errors.New("give --reason")}
 	case e.noInput:
-		return notConfirmed{errors.New("identity revoke asks for the identity typed back, which --no-input forbids; nothing was sent")}
+		return notConfirmed{errors.New("identity revoke asks for a y, which --no-input forbids; nothing was sent")}
 	case identity != "":
 		in.Identity = &identity
 	default:
-		in.Iss, in.Sub, target = &iss, &sub, sub
+		in.Iss, in.Sub = &iss, &sub
+		named = "the subject " + client.ShellWord(sub) + " of the issuer " + client.ShellWord(iss)
 	}
 	rp, err := rf.repeat(false)
 	if err != nil {
@@ -414,12 +416,12 @@ func (e *env) identityCmd(args []string) error {
 	}
 	body, _ := json.Marshal(in)
 	confirm := func(c *client.Client) error {
-		fmt.Fprintf(e.err, "Revoking %s in %s. Reason: %s\n", client.ShellWord(target), c.Context.Where(), client.Printable(in.Reason))
+		fmt.Fprintf(e.err, "Revoking %s in %s. Reason: %s\n", named, c.Context.Where(), client.Printable(in.Reason))
 		fmt.Fprint(e.err, "A revocation is permanent: no command undoes it.\n"+
 			"It adds no auth.deniedSubjects entry and reissues no token, and a restore of the database can erase it.\n"+
 			"Administrator steps (operator guide, recovery): first add the subject to auth.deniedSubjects, a human by iss and sub,\n"+
 			"  a service identity by its identity and name, and leave it there; after a restore, record this revocation again.\n")
-		return e.confirmTyped("the identity "+target, target)
+		return e.confirmYes("Revoke " + named + " in " + c.Context.Where() + "? A revocation is permanent")
 	}
 	w := &client.Write{Method: http.MethodPost, Path: "/identity-revocations", Body: body, HumanOnly: true, Repeat: rp, Check: "act list"}
 	if identity != "" {

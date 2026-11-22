@@ -237,19 +237,56 @@ func withStdin(t *testing.T, s string, do func()) {
 	do()
 }
 
-// TestTypedConfirmations: recovery enter and identity revoke send only when the confirmation is
-// typed back; --no-input, an empty answer and a wrong one exit 2 and send nothing.
+// TestYesConfirmationOfRevoke: identity revoke names its target, as given, and sends only on y or yes (the one
+// confirmation of every decision: nothing is typed back); --no-input, an empty answer, n and anything else exit 2
+// and send nothing, for the identity and for the issuer and subject alike.
+func TestYesConfirmationOfRevoke(t *testing.T) {
+	const route = "POST /api/v1/identity-revocations"
+	for _, c := range []struct {
+		name, named string
+		args        []string
+	}{
+		{"identity", "Revoke the identity 'idn_BWSYNTH' in", []string{"identity", "revoke", "--identity", "idn_BWSYNTH", "--reason", "BWSYNTH left"}},
+		{"subject", "Revoke the subject 'sub-BWSYNTH' of the issuer 'https://idp.BWSYNTH.example' in", []string{"identity", "revoke", "--iss", "https://idp.BWSYNTH.example", "--sub", "sub-BWSYNTH", "--reason", "BWSYNTH left"}},
+	} {
+		seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
+		var out, errb bytes.Buffer
+		if code := run(append(slices.Clone(c.args), "--no-input"), &out, &errb); code != 2 || len(seen()) != 0 || !strings.Contains(errb.String(), "asks for a y") {
+			t.Errorf("%s --no-input: exit %d, sent %v; want 2, nothing and the reason\n%s", c.name, code, seen(), errb.String())
+		}
+		for _, answer := range []string{"", "\n", "n\n", "no\n", "idn_BWSYNTH\n", "yy\n"} {
+			errb.Reset()
+			withStdin(t, answer, func() {
+				if code := run(c.args, &out, &errb); code != 2 || slices.Contains(seen(), route) || out.Len() != 0 {
+					t.Errorf("%s answered %q: exit %d, sent %v; want 2 and no write\n%s", c.name, answer, code, seen(), errb.String())
+				}
+			})
+		}
+		if !strings.Contains(errb.String(), c.named) || !strings.Contains(errb.String(), "A revocation is permanent") || !strings.Contains(errb.String(), "nothing was sent") {
+			t.Errorf("%s: the target, the permanence or the refusal were not shown:\n%s", c.name, errb.String())
+		}
+		for _, answer := range []string{"y\n", "YES\n"} {
+			seen = recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
+			withStdin(t, answer, func() {
+				if code := run(c.args, &out, &errb); code != 0 || !slices.Contains(seen(), route) {
+					t.Errorf("%s answered %q: exit %d, sent %v\n%s", c.name, answer, code, seen(), errb.String())
+				}
+			})
+		}
+	}
+}
+
+// TestTypedConfirmations: recovery enter sends only when the confirmation is typed back; --no-input, an empty
+// answer and a wrong one exit 2 and send nothing.
 func TestTypedConfirmations(t *testing.T) {
 	enter := []string{"recovery", "enter", "--restored", "family=database,backup=BWSYNTH-pg,taken-at=2026-11-01T08:30:00Z",
 		"--stopped-at", "2026-11-01T08:31:00Z", "--reason", "BWSYNTH drill"}
-	revoke := []string{"identity", "revoke", "--identity", "idn_BWSYNTH", "--reason", "BWSYNTH left"}
 	for _, c := range []struct {
 		args          []string
 		typed, effect string
 		route         string
 	}{
 		{enter, "enter", "It marks every machine's scope pre-restore-unaccounted.", "POST /api/v1/recovery/entries"},
-		{revoke, "idn_BWSYNTH", "It adds no auth.deniedSubjects entry and reissues no token", "POST /api/v1/identity-revocations"},
 	} {
 		seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
 		var out, errb bytes.Buffer
@@ -668,7 +705,7 @@ func TestRecoveryTextIsEscaped(t *testing.T) {
 		{[]string{"recovery", "status"}, "", "Epoch", []string{"EPOCH", "BY", "WHY", "FAMILY", "BACKUP", "MACH", "STATE"}},
 		{[]string{"recovery", "enter", "--restored", "family=database,backup=pg,taken-at=2026-11-01T08:30:00Z", "--stopped-at", "2026-11-01T08:31:00Z", "--reason", "r"}, "enter\n", "Recovery mode entered", []string{"ACT", "NEWEPOCH", "PREV", "OP"}},
 		{[]string{"recovery", "exit"}, "", "Recovery mode left", []string{"ACT", "NEWEPOCH", "SCOPE"}},
-		{[]string{"identity", "revoke", "--identity", "svc_x", "--reason", "r"}, "svc_x\n", "Revoked", []string{"IDENT", "ACT", "NOTE"}},
+		{[]string{"identity", "revoke", "--identity", "svc_x", "--reason", "r"}, "y\n", "Revoked", []string{"IDENT", "ACT", "NOTE"}},
 	} {
 		args := c.args
 		var out, errb bytes.Buffer
@@ -787,9 +824,8 @@ func TestRefusedExitRepeatNamesTheScope(t *testing.T) {
 	}
 }
 
-// TestIdentityPromptIsEscaped: the identity the operator is asked to type back is shown escaped, a
-// line feed included, so a hostile --identity cannot forge a prompt line; the comparison still
-// uses the raw value (client-contracts.md section 6 item 8).
+// TestIdentityPromptIsEscaped: the identity the operator is asked about is shown escaped, a
+// line feed included, so a hostile --identity cannot forge a prompt line (client-contracts.md section 6 item 8).
 func TestIdentityPromptIsEscaped(t *testing.T) {
 	recoveryServer(t, map[string]string{}, "")
 	var out, errb bytes.Buffer
@@ -799,26 +835,26 @@ func TestIdentityPromptIsEscaped(t *testing.T) {
 	if strings.Contains(errb.String(), "\nFORGED") {
 		t.Errorf("the prompt shows the identity raw:\n%q", errb.String())
 	}
-	if !strings.Contains(errb.String(), `Type the identity svc_x\x0aFORGED: type yes to send it`) {
+	if !strings.Contains(errb.String(), `Revoke the identity 'svc_x\x0aFORGED: type yes' in`) {
 		t.Errorf("the prompt lacks the escaped identity:\n%q", errb.String())
 	}
 }
 
-// TestIdentityConfirmationComparesTheRawValue: for an identity with a tab, the prompt shows \x09,
-// but only the raw spelling confirms; the shown spelling sends nothing.
-func TestIdentityConfirmationComparesTheRawValue(t *testing.T) {
+// TestIdentityConfirmationSendsTheRawValue: for an identity with a tab, the prompt shows \x09, a y sends the raw
+// value, and typing the shown spelling back sends nothing.
+func TestIdentityConfirmationSendsTheRawValue(t *testing.T) {
 	args := []string{"identity", "revoke", "--identity", "svc_x\ty", "--reason", "r"}
 	for _, c := range []struct {
 		typed string
 		sent  bool
-	}{{"svc_x\ty\n", true}, {`svc_x\x09y` + "\n", false}} {
+	}{{"y\n", true}, {`svc_x\x09y` + "\n", false}} {
 		seen := recoveryServer(t, nil, `{"act":"act_BWSYNTH","identity":"idn_BWSYNTH","deniedSubjectsListed":true}`)
 		var out, errb bytes.Buffer
 		withStdin(t, c.typed, func() { run(args, &out, &errb) })
 		if got := slices.Contains(seen(), "POST /api/v1/identity-revocations"); got != c.sent {
 			t.Errorf("typed %q: sent %t, want %t\n%s", c.typed, got, c.sent, errb.String())
 		}
-		if !strings.Contains(errb.String(), `Type the identity svc_x\x09y to send it`) {
+		if !strings.Contains(errb.String(), `Revoke the identity 'svc_x\x09y' in`) {
 			t.Errorf("typed %q: the prompt lacks the escaped tab:\n%q", c.typed, errb.String())
 		}
 	}

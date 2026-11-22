@@ -203,8 +203,8 @@ describe("the recovery entry (#364)", () => {
     // once: no step has clicked or submitted yet, and the page sends a write only from a submit.
     // Nothing was sent by the page.
     expect((await writes()).filter(([, route]) => route !== "/recovery/entries")).toEqual([]);
-    // The role gate also stops a submit that skips the disabled button, the confirmation typed.
-    await fillRevocation({ iss: FIXTURE_ISSUER, sub: "h-viewer-revokee", reason: "viewer synthetic revocation" }, "h-viewer-revokee");
+    // The role gate also stops a submit that skips the disabled button, the form filled.
+    await fillRevocation({ iss: FIXTURE_ISSUER, sub: "h-viewer-revokee", reason: "viewer synthetic revocation" });
     await browser.execute(() => document.querySelector<HTMLFormElement>("main form[aria-label='Revoke identity']")!.requestSubmit());
     await browser.pause(1_000);
     // once: read after the 1 s pause that follows the forced submit.
@@ -213,10 +213,10 @@ describe("the recovery entry (#364)", () => {
     expect(await revoke.$('[data-testid="write-result"]').isExisting()).toBe(false);
   });
 
-  it("a revocation submitted without the typed confirmation sends nothing, the disabled button bypassed", async () => {
+  it("a revocation submitted without a reason sends nothing, the disabled button bypassed", async () => {
     await openRevocation("revocation-unconfirmed");
-    await fillRevocation({ iss: FIXTURE_ISSUER, sub: "h-revokee-unconfirmed", reason: "unconfirmed synthetic revocation" }, "");
-    // once: the gate follows the typed fields synchronously (web/src/recovery.tsx:356,399), so the read cannot pass early.
+    await fillRevocation({ iss: FIXTURE_ISSUER, sub: "h-revokee-unconfirmed", reason: "" });
+    // once: the gate follows the typed fields synchronously (revocationConfirmation in web/src/recovery.tsx), so the read cannot pass early.
     expect(await $("main form[aria-label='Revoke identity']").$("button=Revoke identity").isEnabled()).toBe(false);
     await browser.execute(() => document.querySelector<HTMLFormElement>("main form[aria-label='Revoke identity']")!.requestSubmit());
     await browser.pause(1_000);
@@ -230,8 +230,10 @@ describe("the recovery entry (#364)", () => {
     this.timeout(60_000);
     const at = await openRevocation("revocation-targets");
     const sub = "h-publisher";
-    await fillRevocation({ iss: FIXTURE_ISSUER, sub, reason: "synthetic revocation by subject" }, sub);
+    await fillRevocation({ iss: FIXTURE_ISSUER, sub, reason: "synthetic revocation by subject" });
     const form = $("main form[aria-label='Revoke identity']");
+    // One press sends it, so the line before it names the subject and the issuer as entered, and says it is permanent.
+    await expect(form.$('[data-testid="revocation-line"]')).toHaveText(`Revokes the subject ${sub} of the issuer ${FIXTURE_ISSUER}. A revocation is permanent.`);
     await form.$("button=Revoke identity").click();
     await expect(form.$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("Revoked idn"), { wait: 20_000 });
     await expect(form.$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("auth.deniedSubjects lists it: no"));
@@ -247,9 +249,9 @@ describe("the recovery entry (#364)", () => {
     await form.$("label*=Identity:").$("input").setValue(named!);
     await clearRevocation(["Issuer", "Subject"]);
     await form.$("label*=Reason").$("input").setValue("synthetic revocation by identity");
-    await form.$("label*=Type the identity").$("input").setValue(named!);
     // The form reads the identity alone: the cleared issuer and subject are gone from its state too.
     await browser.waitUntil(async () => form.$("button=Revoke identity").isEnabled(), { timeout: 5_000, timeoutMsg: "the revocation by identity stayed off" });
+    await expect(form.$('[data-testid="revocation-line"]')).toHaveText(`Revokes the identity ${named!}. A revocation is permanent.`);
     await form.$("button=Revoke identity").click();
     await browser.waitUntil(async () => (await answers()).filter((a) => a.startsWith("/identity-revocations ")).length === 2, { timeout: 20_000, timeoutMsg: "the revocation by identity was not answered" });
     expect((await answers()).filter((a) => a.startsWith("/identity-revocations "))).toEqual(["/identity-revocations 201", "/identity-revocations 409"]);
@@ -276,13 +278,12 @@ async function openRevocation(tag: string): Promise<string> {
   return at;
 }
 
-// Fills the revocation form by issuer and subject, and types `typed` back as the confirmation.
-async function fillRevocation(v: { iss: string; sub: string; reason: string }, typed: string) {
+// Fills the revocation form by issuer and subject; a field given empty is left alone.
+async function fillRevocation(v: { iss: string; sub: string; reason: string }) {
   const form = $("main form[aria-label='Revoke identity']");
-  await form.$("label*=Issuer").$("input").setValue(v.iss);
-  await form.$("label*=Subject").$("input").setValue(v.sub);
-  await form.$("label*=Reason").$("input").setValue(v.reason);
-  if (typed !== "") await form.$("label*=Type the identity").$("input").setValue(typed);
+  if (v.iss !== "") await form.$("label*=Issuer").$("input").setValue(v.iss);
+  if (v.sub !== "") await form.$("label*=Subject").$("input").setValue(v.sub);
+  if (v.reason !== "") await form.$("label*=Reason").$("input").setValue(v.reason);
 }
 
 // Empties the inputs with the keys a person uses: the driver's own clear sends no input event in
