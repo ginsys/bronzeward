@@ -24,7 +24,8 @@ import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { startedBy } from "./operation-words.ts";
-import { alertSentence, safeWord, assignmentName, dependencyName, importedConfigurationTitle, operationTitle, safeText, savedTitle } from "./titles.ts";
+import { safeText, safeWord } from "./safe.ts";
+import { alertSentence, assignmentName, dependencyName, importedConfigurationTitle, operationTitle, savedTitle } from "./titles.ts";
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
 import {
@@ -525,7 +526,7 @@ export function PlanItem({ id }: { id: string }) {
             ]} />
             <h3>Evidence</h3>
             <Fields rows={[
-              ["Validation", `${v.result} at ${v.at} (contract ${v.contract}, machinery ${v.machineryVersion}, Kubernetes ${v.kubernetesVersion}, ${safeWord(v.platformMode)})`],
+              ["Validation", `${safeWord(v.result)} at ${v.at} (contract ${v.contract}, machinery ${v.machineryVersion}, Kubernetes ${v.kubernetesVersion}, ${safeWord(v.platformMode)})`],
               ["Dry run", dryRun.available ? "available" : `not available (${safeWord(dryRun.reason)})`],
               ...(baseline == null ? [] : [["Baseline", <>import base <Id id={baseline.importBaseRevision} />{baseline.pendingConvergence && ", release not applied yet"}{baseline.formOnly && `, ${DIFFERS_IN_FORM_ONLY.toLowerCase()}`}</>] as const]),
               ["Change", <Change p={p} />],
@@ -601,7 +602,7 @@ export function OperationItem({ id }: { id: string }) {
 }
 
 export const ACTS: readonly Col<S["ActItem"]>[] = [
-  ["At", (a) => when(a.at)], ["Principal", (a) => <><Who id={a.principal} /> ({safeWord(a.principalKind)})</>], ["Via", (a) => a.via],
+  ["At", (a) => when(a.at)], ["Principal", (a) => <><Who id={a.principal} /> ({safeWord(a.principalKind)})</>], ["Via", (a) => safeWord(a.via) ?? "none"],
   ["Role", (a) => safeWord(a.role) ?? "none"], ["Action", (a) => safeWord(a.action)], ["Subjects", (a) => <Ids ids={a.subjects} />],
   ["Request", (a) => a.requestId ?? "none"], ["Act", (a) => <Id id={a.id} />],
 ];

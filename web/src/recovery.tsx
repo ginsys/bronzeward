@@ -15,7 +15,7 @@ import { clock, Disconnected, ProblemFields, problemFields, problemSentences, Re
 import { PageNote } from "./page-note.tsx";
 import { nextStep, ScopeDecision } from "./scope-decisions.tsx";
 import { MachineById } from "./titles.tsx";
-import { safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
 import type { components } from "./api/v1";
 
 export type Recovery = components["schemas"]["RecoveryBody"];

@@ -18,7 +18,6 @@ export const draftText = (d: Pick<S["DraftBody"], "title"> | null | undefined): 
 export const draftName = (d: Pick<S["DraftBody"], "title"> | null | undefined): string | undefined =>
   d == null ? undefined : draftText(d) ?? UNTITLED_DRAFT;
 
-export { safeText, safeWord };
 
 // A draft in a sentence: its title in quotes where the title is safe text, else "Untitled draft" and the shortened identifier.
 export const draftCalled = (d: Pick<S["DraftBody"], "id" | "title">): string => {

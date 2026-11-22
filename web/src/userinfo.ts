@@ -5,7 +5,7 @@
 // stored, never used for a decision. Any failure leaves the sentence that says only "a person".
 
 import type { Provider } from "./auth.ts";
-import { SAFE } from "./principals.ts";
+import { SAFE } from "./safe.ts";
 
 // How long the page waits for the provider before it shows "a person" and stops asking.
 export const NAME_WAIT_MS = 5_000;

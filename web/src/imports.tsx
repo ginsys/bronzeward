@@ -20,7 +20,8 @@ import { PageNote } from "./page-note.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { ImportedConfigurationRef, MachineById, Named, useMachineText } from "./titles.tsx";
-import { draftName, operationTitle, safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
+import { draftName, operationTitle } from "./titles.ts";
 import { DRIFT_ADOPTION_NOTE, IMPORT_NOTE, START_IMPORT_NOTE } from "./words.ts";
 import type { Outcome, WriteSpec } from "./write.ts";
 

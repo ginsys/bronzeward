@@ -9,7 +9,7 @@ import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { type Load, Id, type Reads, settledRead, short, useItem, useReads } from "./list.tsx";
 import { PageNote } from "./page-note.tsx";
 import { Who } from "./principals.tsx";
-import { safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
 import { REASON_MAX, reasonProblem } from "./plan.tsx";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";

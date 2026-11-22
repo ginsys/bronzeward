@@ -2114,10 +2114,10 @@ one. The rule is one for both clients:
    the dependency's page; "This dependency" on that page), then the Kind, Class, Reason, the releases by their
    titles and the time; the identifier is the last column, under Identifier, since an alert has no page of its
    own. A word the server sets and a page prints as a state, kind, class, reason, mode, source, role, action,
-   route, cause, operation, platform or hostname is shown only when it is safe text (item 1, A8 rule 3: no control or format
+   route, cause, operation, platform, hostname, validation result, the way an act came in (Via) or the name of an
+   unread field is shown only when it is safe text (item 1, A8 rule 3: no control or format
    character, at most 300 code points), and otherwise reads "(not shown)"; one the server leaves out reads "none"
-   where the cell has one. This holds on every page that prints such a word: the plan, operation, import, recovery,
-   machine, review, onboarding, audit, draft, alert and dependency pages ([#1055](https://github.com/ginsys/bronzeward/issues/1055)).
+   where the cell has one, on every page that prints such a word ([#1055](https://github.com/ginsys/bronzeward/issues/1055)).
    Other server text is not covered: a version, address, endpoint, contract, identifier, purpose, epoch, event
    type or code, approval policy, observation basis, a result or error record shown as JSON, and the identity
    provider's refusal text. The CLI escapes every
