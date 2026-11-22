@@ -177,12 +177,12 @@ describe("the console's parts (#364)", () => {
   describe("the revocation's confirmation line", () => {
     const BIDI = "‮";
     test("an identity is named exactly as entered, with the act's permanence", () => {
-      expect(revocationConfirmation("  idn_BWSYNTH ", "", "", "left")).toEqual({
+      expect(revocationConfirmation("idn_BWSYNTH", "", "", " left ")).toEqual({
         line: "Revokes the identity idn_BWSYNTH. A revocation is permanent.", target: { identity: "idn_BWSYNTH", reason: "left" },
       });
     });
     test("an issuer and a subject are both named, each as entered", () => {
-      const c = revocationConfirmation("", " https://idp.example ", " sub-1 ", " left ");
+      const c = revocationConfirmation("", "https://idp.example", "sub-1", " left ");
       expect(c.line).toBe("Revokes the subject sub-1 of the issuer https://idp.example. A revocation is permanent.");
       expect(c.target).toEqual({ iss: "https://idp.example", sub: "sub-1", reason: "left" });
     });
@@ -194,7 +194,15 @@ describe("the console's parts (#364)", () => {
         expect(c.line).toBeUndefined();
       }
     });
-    test("the press stays off while the identity, the pair or the reason is missing or both forms are filled", () => {
+    test("the target is checked and named as entered: an edge control or format character keeps the press off, a space is shown as typed", () => {
+    for (const v of ["﻿alice", "alice\t", "\talice", "ali​ce"]) {
+      const c = revocationConfirmation(v, "", "", "left");
+      expect([v, c.target, c.line, c.why]).toEqual([v, undefined, undefined, "The identity cannot be shown, so it cannot be confirmed."]);
+    }
+    expect(revocationConfirmation(" alice ", "", "", "left")).toEqual({ line: "Revokes the identity  alice . A revocation is permanent.", target: { identity: " alice ", reason: "left" } });
+  });
+
+  test("the press stays off while the identity, the pair or the reason is missing or both forms are filled", () => {
       for (const args of [["", "", "", "left"], ["idn_a", "", "", "  "], ["idn_a", "https://i", "", "left"], ["", "https://i", "", "left"], ["idn_a", "", "s", "left"]] as [string, string, string, string][]) {
         const c = revocationConfirmation(args[0], args[1], args[2], args[3]);
         expect(c.why, args.join("|")).toBe("Name the identity, or the issuer and subject, and give a reason.");

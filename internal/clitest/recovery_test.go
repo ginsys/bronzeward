@@ -90,23 +90,24 @@ func TestRecovery(t *testing.T) {
 	f.store(f.humanFile(), f.mint("h-recovery", ""), "")
 	revoke := []string{"identity", "revoke", "--iss", f.iss.URL, "--sub", "h-viewer", "--reason", "BWSYNTH left"}
 	in.set(nil, nil)
-	f.want(ctl("BWSYNTH-wrong\n", revoke...), 2, "A revocation is permanent", "nothing was sent")
+	// The identity typed back was the old confirmation; it is refused now, like any answer that is not y.
+	f.want(ctl("h-viewer\n", revoke...), 2, "A revocation is permanent", "nothing was sent")
 	if slices.Contains(in.requests(), "POST /api/v1/identity-revocations") {
 		t.Errorf("a wrong confirmation sent the revocation: %v", in.requests())
 	}
-	f.want(ctl("h-viewer\n", revoke...), 0, "Revoked idn_", "auth.deniedSubjects lists it: no: add it now")
+	f.want(ctl("y\n", revoke...), 0, "Revoked idn_", "auth.deniedSubjects lists it: no: add it now")
 
 	// REC-02, first: the entry sent to a normal start.
 	before := f.actCount()
 	in.set(nil, nil)
-	f.want(ctl("enter\n", enter...), 1, "409", "(conflict)", "This server was started normally; only a server started for recovery serves the entry.")
+	f.want(ctl("y\n", enter...), 1, "409", "(conflict)", "This server was started normally; only a server started for recovery serves the entry.")
 	if c := contexts(); !strings.Contains(c, `"startMode":"normal"`) {
 		t.Errorf("REC-02 normal start: the context does not read a normal start:\n%s", c)
 	}
 
-	// The typed confirmation on the recovery start: nothing is sent unless enter is typed back.
+	// The confirmation on the recovery start: nothing is sent unless the answer is y; the word enter, once typed back, is refused.
 	f.restart("-recovery-start")
-	for _, typed := range []string{"", "\n", "BWSYNTH-wrong\n", "enterx\n"} {
+	for _, typed := range []string{"", "\n", "BWSYNTH-wrong\n", "enter\n"} {
 		in.set(nil, nil)
 		f.want(ctl(typed, enter...), 2, "It marks every machine's scope pre-restore-unaccounted.", "nothing was sent")
 		if seen := in.requests(); len(seen) != 0 {
@@ -163,7 +164,7 @@ func TestRecovery(t *testing.T) {
 		in.proxy.ServeHTTP(w, r)
 	}), nil)
 	previous := epoch()
-	r := ctl("enter\n", enter...)
+	r := ctl("y\n", enter...)
 	minted := epoch()
 	f.want(r, 0, "repeat 1 of 3 with the same key", "already done earlier; showing that result",
 		"Recovery mode entered (act act_", "Epoch "+minted+", was "+previous+".", "Scopes marked pre-restore-unaccounted: 1 machines.")
@@ -180,7 +181,7 @@ func TestRecovery(t *testing.T) {
 
 	// REC-02, second: another entry to the recovery start whose entry committed under REC-04's key.
 	in.set(nil, nil)
-	f.want(ctl("enter\n", enter...), 1, "409", "(conflict)", "Another recovery entry committed first (epoch "+minted+"); this one recorded nothing.")
+	f.want(ctl("y\n", enter...), 1, "409", "(conflict)", "Another recovery entry committed first (epoch "+minted+"); this one recorded nothing.")
 	if c := contexts(); strings.Contains(c, `"startMode":"normal"`) || !strings.Contains(c, `"startMode":"recovery"`) {
 		t.Errorf("REC-02 recovery start: the context reads a normal start:\n%s", c)
 	}
@@ -207,7 +208,7 @@ func TestRecovery(t *testing.T) {
 		t.Errorf("the refused mark and release recorded %d acts, want none", n-beforeScopeActs)
 	}
 	// A token without recovery-admin: the three commands that send a recovery write show the 403
-	// and the role they need (client-contracts.md §9.6). Typed confirmations are given, so the
+	// and the role they need (client-contracts.md §9.6). The y answers are given, so the
 	// refusal is the server's. The accountings read observations first; a seeded machine has none,
 	// so they stop at the client and their 403 is not run here. h-viewer is revoked above, and a
 	// revoked subject answers 403 identity-revoked (§9.6), so another viewer signs in.
@@ -217,9 +218,9 @@ func TestRecovery(t *testing.T) {
 		typed string
 		args  []string
 	}{
-		{"enter\n", enter},
+		{"y\n", enter},
 		{"", []string{"recovery", "exit"}},
-		{"h-recovery\n", []string{"identity", "revoke", "--iss", f.iss.URL, "--sub", "h-recovery", "--reason", "BWSYNTH left"}},
+		{"y\n", []string{"identity", "revoke", "--iss", f.iss.URL, "--sub", "h-recovery", "--reason", "BWSYNTH left"}},
 	} {
 		f.want(ctl(c.typed, c.args...), 1, "403", "Needs one of the roles", "recovery-admin")
 	}
@@ -288,7 +289,7 @@ func TestRecoveryLostReply(t *testing.T) {
 	}
 	before, previous := acts(), epoch()
 	in.set(nil, nil)
-	r := ctl("enter\n", enter...)
+	r := ctl("y\n", enter...)
 	minted := epoch()
 	f.want(r, 0, "repeat 1 of 3 with the same key", "already done earlier; showing that result",
 		"Recovery mode entered (act act_", "Epoch "+minted+", was "+previous+".")
