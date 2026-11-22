@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -113,9 +114,9 @@ func TestMachineRename(t *testing.T) {
 		out, err     string
 	}{
 		{"renamed", `{"machine":"mch_a","revision":7,"previousName":"web-1","name":"web-2","changedBy":"idn_BWSYNTH","role":"author","act":"act_BWSYNTH","epoch":"ep_BWSYNTH-1","at":"2026-11-20T09:00:00Z"}`,
-			0, "Machine mch_a: name web-2, was web-1 (timeline revision 7).\n", ""},
+			0, "Machine mch_a: name web-2, was web-1 (timeline revision 7).\n" + strings.Join(renameReaches, "\n") + "\n", ""},
 		{"named for the first time", `{"machine":"mch_a","revision":2,"previousName":null,"name":"web-2","changedBy":"idn_BWSYNTH","role":"author","act":"act_BWSYNTH","epoch":"ep_BWSYNTH-1","at":"2026-11-20T09:00:00Z"}`,
-			0, "Machine mch_a: name web-2, was none (timeline revision 2).\n", ""},
+			0, "Machine mch_a: name web-2, was none (timeline revision 2).\n" + strings.Join(renameReaches, "\n") + "\n", ""},
 		{"a name another machine holds names it", `409 ` + sprintfProblem("name-in-use", 409, `,"detail":"another machine of the cluster holds this name","machine":"mch_b"`),
 			1, "", "The name is held by machine mch_b."},
 		{"its own name", `409 ` + sprintfProblem("conflict", 409, `,"detail":"the machine already has this name","machine":"mch_a"`),
@@ -141,6 +142,40 @@ func TestMachineRename(t *testing.T) {
 				t.Errorf("sent %v with body %q; want %s with {\"name\":\"web-2\"}", seen(), posted(), route)
 			}
 		})
+	}
+}
+
+// TestRenameSaysWhenTheNameReachesTheMachine: the sentences are client contracts A9 item 6's, word for word (the spec
+// wraps its lines, so whitespace is collapsed on both sides), and -o json prints the answer with none of them.
+func TestRenameSaysWhenTheNameReachesTheMachine(t *testing.T) {
+	spec, err := os.ReadFile("../../docs/spec/client-contracts.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(strings.Fields(string(spec)), " ")
+	if len(renameReaches) != 3 {
+		t.Fatalf("%d sentences; want the two of the first quote as one, the restart sentence and the node name sentence", len(renameReaches))
+	}
+	for _, s := range renameReaches {
+		if !strings.Contains(text, s) {
+			t.Errorf("client-contracts.md A9 item 6 does not hold %q", s)
+		}
+	}
+	setServerFacts(t, 10, nil)
+	resetPosted()
+	answer := `{"machine":"mch_a","revision":7,"previousName":"web-1","name":"web-2","changedBy":"idn_BWSYNTH","role":"author","act":"act_BWSYNTH","epoch":"ep_BWSYNTH-1","at":"2026-11-20T09:00:00Z"}`
+	recoveryServer(t, map[string]string{}, answer)
+	var out, errb bytes.Buffer
+	if code := run([]string{"-o", "json", "machine", "rename", "mch_a", "--name", "web-2"}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	for _, s := range renameReaches {
+		if strings.Contains(out.String(), s) {
+			t.Errorf("-o json holds %q; it prints the answer unchanged", s)
+		}
+	}
+	if !strings.Contains(out.String(), `"previousName": "web-1"`) && !strings.Contains(out.String(), `"previousName":"web-1"`) {
+		t.Errorf("-o json = %q; want the answer", out.String())
 	}
 }
 

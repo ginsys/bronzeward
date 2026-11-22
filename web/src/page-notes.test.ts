@@ -168,6 +168,21 @@ describe("the machine page through its own reads", () => {
     expect(n.textContent).toBe(`${MACHINE_NOTE} ${CREATE_A_DRAFT}.`);
     underTheTitle(n);
   });
+
+  test("offers Name this machine below the note for an unnamed machine and Rename machine for a named one", async () => {
+    for (const [name, offer] of [[null, "Name this machine"], ["cp-1", "Rename machine"]] as const) {
+      served[`/machines/${MCH}`] = { ...machine, name };
+      served[`/machines/${MCH}/position`] = { machine: { ...machine, name }, ingestion: null, draft: null, plan: null, operation: null, rolloutHeldBy: null, step: "needs-plan" };
+      await shown(h(MachineItem, { id: MCH, key: String(name) }));
+      const n = note();
+      expect(n.textContent).toBe(`${MACHINE_NOTE} ${CREATE_A_DRAFT}.`);
+      underTheTitle(n);
+      const form = box.querySelector(`form[aria-label="${offer}"]`)!;
+      expect(form).not.toBeNull();
+      expect(n.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(box.querySelectorAll('form[aria-label="Name this machine"], form[aria-label="Rename machine"]')).toHaveLength(1);
+    }
+  });
 });
 
 describe("the draft page's note, a part only where its control shows", () => {
