@@ -11,7 +11,7 @@ import type { ReadResult } from "./request.ts";
 
 // Synthetic machine and observation reads, as the generated types describe them.
 const machine = (over: Partial<Machine>): Machine => ({
-  id: "mch_a", cluster: "cl_a", name: null, hardware: { smbiosUuid: null, talosNodeId: "node-a", serial: null }, platform: "metal", talosEndpoint: "10.5.0.2:50000",
+  id: "mch_a", cluster: "cl_a", name: null, role: null, hardware: { smbiosUuid: null, talosNodeId: "node-a", serial: null }, platform: "metal", talosEndpoint: "10.5.0.2:50000",
   desired: "rel_new", applied: { release: "rel_new", source: "operation", importBase: null }, pendingConvergence: false, formOnly: false,
   observed: { observation: "obs_a", at: "2026-10-26T09:46:00Z", release: "rel_new" }, frozen: false, scopeState: "normal", openDrift: null, ...over,
 });
@@ -883,5 +883,20 @@ describe("the machine heading (client contracts A9)", () => {
     expect(page).toContain('<p><small>Identifier <code>mch_a</code> <button type="button">Copy</button></small></p>');
     // No word stands before the fallback link: "Cluster This cluster" would read as a name.
     expect(page).toContain('<p><a href="/clusters/cl_a" title="cl_a">This cluster</a>, 10.5.0.2:50000, node node-a, metal.</p>');
+  });
+  // A machine's role stands beside its platform in a person's words, and no word stands there for a machine
+  // that has none: one imported before the role was stored shows nothing, not a sentence about it (ginsys/bronzeward#1096).
+  test.each([
+    ["controlplane", "metal, control plane."],
+    ["worker", "metal, worker."],
+    [null, "metal."],
+  ] as const)("a machine whose role is %s reads %s", (role, tail) => {
+    const m = machine({ role });
+    const page = renderToStaticMarkup(createElement(ReadsProvider, { value: { go: () => {}, failure: () => "FAILED", client: {}, view: "v", again: 0 } as unknown as Reads }, createElement(MachineShown, {
+      id: "mch_a", m: { kind: "ok", data: m }, obs: { kind: "ok", data: { items: [], next: undefined, restarted: false } },
+      km: { view: "v", data: m, restarted: false }, ko: { view: "v", data: undefined, restarted: false },
+      tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
+    })));
+    expect(page).toContain(`node node-a, ${tail}</p>`);
   });
 });

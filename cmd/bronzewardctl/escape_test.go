@@ -109,7 +109,7 @@ const notShown = "AccessVersionBody.Created AccessVersionBody.NotAfter AccessVer
 var markersShown = map[string][3]int{
 	"status": {5, 7, 4}, "version": {1, 1, 1}, "whoami": {5, 5, 5}, "context list": {3, 3, 3},
 	"cluster list": {6, 6, 6}, "cluster show c1": {5, 5, 5},
-	"machine list": {8, 8, 8}, "machine show m1": {12, 12, 12}, "machine timeline m1": {3, 3, 3}, "machine observations m1": {6, 6, 6},
+	"machine list": {8, 8, 8}, "machine show m1": {13, 13, 13}, "machine timeline m1": {3, 3, 3}, "machine observations m1": {6, 6, 6},
 	"fragment show f1": {6, 6, 6}, "fragment show frv_1": {8, 8, 8}, "fragment history f1": {5, 5, 5},
 	"profile show p1": {5, 5, 5}, "profile show prv_1": {5, 5, 5}, "profile history p1": {5, 5, 5},
 	"assignment show a1": {4, 4, 4}, "assignment show asr_1": {6, 6, 6}, "assignment history a1": {6, 6, 6},

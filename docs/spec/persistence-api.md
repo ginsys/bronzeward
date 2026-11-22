@@ -371,6 +371,13 @@ afterwards (execution and recovery, comparison 2). A publication compiled on
 the old base but committing after the record is refused `409 stale-input`
 (§4.2).
 
+An import base also records the machine's role **(choice §17.49)**: ingestion
+reads `machine.type` from the document and stores `controlplane` or `worker`
+beside it, or nothing where the document names neither (§3.2's document is
+plaintext; no secret is read). A machine's `role` is the latest import base's
+value, and null for a machine with no import base or one imported before the
+value was stored. Nothing backfills it, and a later import fills it.
+
 ### 3.3 Talos access
 
 Design: [§7.1](../design/Talos_Configuration_and_Machine_Management_Design.md#71-responsibility-split-and-secret-ingress),
@@ -2221,8 +2228,9 @@ API revisions:
 | 11 | `POST /discoveries`, a `POST` that only reads (§9.2) |
 | 12 | `GET /clusters/{id}/talos-access` (§9.2, §3.3 "Presence") |
 | 13 | `formOnly` on a machine and on an adopt plan's `baseline` evidence, `fromFormOnly` on a plan's `diff` (§9.3, choice §17.48) |
+| 14 | `role` on a machine (§3.2, §9.2, choice §17.49) |
 
-Revision 14 is specified and not yet served. It adds `hostname` (`source`, and
+Revision 15 is specified and not yet served. It adds `hostname` (`source`, and
 `name` for `machine-name`) on each machine of a release and its review, and the
 `hostname` rule of `422 validation-failed` (§9.2, §3.5, choice §17.44), and the
 name form of `409 stale-input` (§4.2, choice §17.45): the publication check and
@@ -5181,6 +5189,27 @@ design and evidence do not settle the question. Each is marked in place as
     a normalisation the compilation states on purpose; a normalised form in every
     comparison, which makes Applied and drift stop meaning the bytes on the node,
     the largest contract change for the same gain.
+
+49. **A machine's role is read from its import base at import and served as
+    `role`** (§3.2, §9.2, API revision 14; ginsys/bronzeward#1096). The page
+    that applies a change to selected machines shows whether each is a control
+    plane or a worker, and no read served it: connect discovery knows it and
+    stores nothing. The import base's document carries `machine.type`, so
+    ingestion reads it once, stores it beside the document as a nullable
+    `machine_role` of `controlplane` or `worker`, and a machine's read serves
+    its latest import base's value. A document that names no type, a type
+    other than those two, text that does not parse, or documents that name
+    different types give null, and an import is never refused for it: the role
+    is a label, and no machine is unusable for lacking one. Rows that exist when
+    the column arrives keep null (the table refuses an update, §4.4), and a
+    machine added by hand has no import base; neither is backfilled, and a later
+    import fills it. The field changes no plan, approval, authorization or dispatch
+    contract. Alternatives: a field set by the person, which the document
+    contradicts the day the node is re-imaged; reading the type from the rendered
+    configuration at each request, which parses a document per machine per read
+    and cannot see an older import; a field on the machine row, which a second
+    import of a machine whose type changed would have to update, and the import base
+    already keeps one value per import.
 
 ## 18. Traceability
 

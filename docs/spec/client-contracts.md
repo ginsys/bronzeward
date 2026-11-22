@@ -2164,6 +2164,9 @@ stays as the title attribute of its link, and on a machine's own page on a detai
 says "Copied", or "Select the identifier to copy it" where the browser would not copy.
 A cluster's link on that page shows its name where the read gives a safe one, preceded by the word "Cluster",
 else "This cluster" alone.
+The machine's page names its role after the platform on that line, "control plane" or "worker" in a person's words, and
+`machine show` prints a `Role` line; a machine whose read gives no role shows neither, with no sentence about it
+([#1096](https://github.com/ginsys/bronzeward/issues/1096), persistence and API choice §17.49).
 
 The draft, import and import-base pages follow the same rule ([#1055](https://github.com/ginsys/bronzeward/issues/1055)).
 A draft page's heading is "Draft: `<title>`" (the shortened identifier where the draft has no safe title), with a line

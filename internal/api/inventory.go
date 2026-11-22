@@ -274,9 +274,13 @@ type observedBody struct {
 // no digest (choice §17.38). FormOnly states that the Desired release's compiled configuration is
 // pending and differs from the machine's adopted configuration in comments and encoding only.
 type machineBody struct {
-	ID                 string         `json:"id"`
-	Cluster            string         `json:"cluster"`
-	Name               *string        `json:"name"`
+	ID      string  `json:"id"`
+	Cluster string  `json:"cluster"`
+	Name    *string `json:"name"`
+	// Role is the machine's Talos type, "controlplane" or "worker", as its latest import base's
+	// document names it; null for a machine with no import base or one imported before the role was
+	// stored (API revision 14).
+	Role               *string        `json:"role"`
 	Hardware           hardware       `json:"hardware"`
 	Platform           string         `json:"platform"`
 	TalosEndpoint      string         `json:"talosEndpoint"`

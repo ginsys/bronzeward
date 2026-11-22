@@ -269,6 +269,8 @@ CREATE TABLE import_base_revision (
   baseline_digest      bytea NOT NULL CHECK (length(baseline_digest) = 32),
   baseline_digest_key  text NOT NULL CHECK (btrim(baseline_digest_key) <> '' AND octet_length(baseline_digest_key) <= 256),
   configuration_digest bytea NOT NULL CHECK (length(configuration_digest) = 32),
+  -- the machine's Talos type read from the document at import (ginsys/bronzeward#1096); null when the document names none
+  machine_role         text CHECK (machine_role IN ('controlplane', 'worker')),
   created_at           timestamptz NOT NULL,
   writer               xid8 NOT NULL,
   author               text NOT NULL REFERENCES principal (id),

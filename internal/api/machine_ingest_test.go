@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -202,6 +203,11 @@ func TestMachineIngestion(t *testing.T) {
 	}
 	if strings.Contains(doc, runToken) || !strings.Contains(doc, "!bwref") {
 		t.Fatalf("import base document %q", doc)
+	}
+	// The role is read from the document at import (ginsys/bronzeward#1096): the stand-in is a worker.
+	var role sql.NullString
+	if err := me.db.QueryRow(`SELECT machine_role FROM import_base_revision WHERE machine = $1`, me.machine).Scan(&role); err != nil || role.String != "worker" {
+		t.Fatalf("stored role %+v, %v; want worker", role, err)
 	}
 	if reads := me.keys.kv.readVersions(); !slices.Equal(reads, []int{me.keyAct.Version}) {
 		t.Fatalf("CA key reads %v; want one, of the version the act names", reads)
