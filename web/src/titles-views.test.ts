@@ -26,7 +26,8 @@ import type { ReadResult } from "./request.ts";
 import { needs, Status, StatusPage, when } from "./states.tsx";
 import { Outcome } from "./operation.tsx";
 import { PlanState } from "./plan.tsx";
-import { ACTS, Change, DependencyItem, ImportBaseItem, Imports, OperationItem, Operations, PlanItem, Plans, ReleaseItem, RevisionItem, Sources } from "./resources.tsx";
+import { Change } from "./change.tsx";
+import { ACTS, DependencyItem, ImportBaseItem, Imports, OperationItem, Operations, PlanItem, Plans, ReleaseItem, RevisionItem, Sources } from "./resources.tsx";
 import { MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useClusterText } from "./titles.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
