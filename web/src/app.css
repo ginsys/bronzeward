@@ -60,8 +60,6 @@ h2 { margin: 0 0 var(--s4); }
 h3 { margin: var(--s5) 0 var(--s3); }
 nav a, button, select { min-height: 24px; min-width: 24px; }
 p, dd, li, h2, h3 { overflow-wrap: anywhere; }
-/* A list's name column is its row's link: a long name wraps, so the link stays inside the box that scrolls. */
-th[scope="row"] { overflow-wrap: anywhere; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 dt { font-weight: bold; color: var(--muted-foreground); }
 dd { margin: 0; }
