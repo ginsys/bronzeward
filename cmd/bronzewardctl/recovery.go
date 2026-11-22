@@ -376,6 +376,16 @@ func (e *env) recoveryExit(args []string) error {
 	return err
 }
 
+// paddedField names the first of the identity, the issuer and the subject that has a space at its start or end, or "".
+func paddedField(identity, iss, sub string) string {
+	for _, f := range []struct{ name, v string }{{"identity", identity}, {"issuer", iss}, {"subject", sub}} {
+		if f.v != strings.TrimSpace(f.v) {
+			return f.name
+		}
+	}
+	return ""
+}
+
 // identityCmd is identity revoke, T36 (POST /identity-revocations, recovery-admin, human only).
 func (e *env) identityCmd(args []string) error {
 	_, rest, err := e.verb("identity", args, verbsOf("identity")...)
@@ -401,6 +411,10 @@ func (e *env) identityCmd(args []string) error {
 		return usageError{errors.New("name the identity with --identity, or with --iss and --sub, not both")}
 	case strings.TrimSpace(in.Reason) == "":
 		return usageError{errors.New("give --reason")}
+	case paddedField(identity, iss, sub) != "":
+		// The server acts on a value as typed: a padded subject records a new human and revokes that one, leaving the
+		// real one active. Refused, never trimmed, so the value sent stays the one named in the question.
+		return usageError{errors.New("The " + paddedField(identity, iss, sub) + " has spaces at its start or end; enter it without them.")}
 	case e.noInput:
 		return notConfirmed{errors.New("identity revoke asks for a y, which --no-input forbids; nothing was sent")}
 	case identity != "":
