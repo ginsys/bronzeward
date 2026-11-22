@@ -128,7 +128,7 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
   test("after an adoption, Desired equal to Applied is not 'nothing left to send' while the machine has a release not applied yet", () => {
     const rel = "rel_BWSYNTH-h7rt2bd";
     const text = releaseNote(rel, { desired: rel, applied: { release: rel, source: "adoption", importBase: null }, pendingConvergence: true });
-    expect(text).toContain("release not applied yet");
+    expect(text).toContain('The machine page shows this as "Release not applied yet".');
     expect(text).toContain("An apply-config plan sends this release to it");
     expect(text).not.toContain("Nothing is left to send");
   });

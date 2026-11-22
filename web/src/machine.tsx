@@ -9,7 +9,8 @@ import { ChangeEndpoint } from "./forms.tsx";
 import { Detail, type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, machineHeading, machineName, node, release } from "./machines.tsx";
 import { ClusterRef } from "./titles.tsx";
-import { CHANGED_ON_THE_MACHINE, RELEASE_NOT_APPLIED_YET } from "./words.ts";
+import { PageNote } from "./page-note.tsx";
+import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET } from "./words.ts";
 import { NextStep, type Position } from "./nextstep.tsx";
 import { principalId } from "./principals.ts";
 import { Who } from "./principals.tsx";
@@ -20,7 +21,7 @@ export type Observation = components["schemas"]["ObservationBody"];
 export type Entry = components["schemas"]["TimelineEntry"];
 
 export const ADOPTED =
-  "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's pendingConvergence evidence shows whether it does; a later apply-config plan withholds its diff when it does.";
+  "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's evidence says whether it does (release not applied yet); a later apply-config plan withholds its diff when it does.";
 export const EITHER = "The read may match the adopted bytes or this release's compiled configuration; the API does not say which.";
 export const FROZEN =
   "Frozen: no new commitment or attempt until an approver unfreezes; an attempt already recorded is not stopped, and an adoption can still be recorded.";
@@ -437,6 +438,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
     <>
       <h2>{machineHeading(d)}</h2>
       <Detail id={d.id} />
+      <PageNote parts={[MACHINE_NOTE]}> <Ref to="/drafts/new" id="drafts">{CREATE_A_DRAFT}</Ref>.</PageNote>
       {m.kind !== "ok" && pm}
       {obs.kind !== "ok" && po}
       <p><ClusterRef id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {d.platform}.</p>

@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { ReadsProvider, type Reads } from "./list.tsx";
-import { NextStep, NextStepLine, nextStep, NOT_HANDED_OVER, type Position } from "./nextstep.tsx";
+import { NextStep, NextStepLine, nextStep, NOT_MANAGED_YET_STEP, type Position } from "./nextstep.tsx";
 
 type Machine = components["schemas"]["MachineBody"];
 
@@ -28,7 +28,7 @@ const position = (step: string, over: Partial<Position> = {}): Position =>
 describe("each step", () => {
   test("not-handed-over keeps its wording and links to the import", () => {
     const s = nextStep(position("not-handed-over"));
-    expect(s?.text).toBe(NOT_HANDED_OVER);
+    expect(s?.text).toBe(NOT_MANAGED_YET_STEP);
     expect(s?.text).toContain("writes nothing to it");
     expect(s?.links).toEqual([{ to: "/ingestions/new?machine=mch_x", label: "Import this machine", id: "mch_x" }]);
   });

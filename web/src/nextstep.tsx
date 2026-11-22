@@ -14,7 +14,7 @@ export type Position = components["schemas"]["PositionBody"];
 
 export interface Step { text: string; links: { to: string; label: string; id: string }[] }
 
-export const NOT_HANDED_OVER =
+export const NOT_MANAGED_YET_STEP =
   `${NOT_MANAGED_YET}: no Desired and no Applied configuration is recorded for this machine. Next: import its configuration. An import reads the node and writes nothing to it.`;
 
 // What holds an approved plan, by the plan's kind (§2.3): an apply-config plan waits for a frozen machine, a scope
@@ -47,7 +47,7 @@ export function nextStep(p: Position, recovery = false): Step | undefined {
   const plan = p.plan === null ? [] : [{ to: `/plans/${p.plan.id}`, label: "The plan", id: p.plan.id }];
   switch (p.step) {
     case "not-handed-over":
-      return { text: NOT_HANDED_OVER, links: [{ to: `/ingestions/new?machine=${m}`, label: "Import this machine", id: m }] };
+      return { text: NOT_MANAGED_YET_STEP, links: [{ to: `/ingestions/new?machine=${m}`, label: "Import this machine", id: m }] };
     case "import-stalled":
       return { text: "An import's runner has stopped: its lease lapsed and its staging is encrypted. Next: take it over to resume it, or abandon it.", links: ing };
     case "import-running":

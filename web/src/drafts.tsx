@@ -20,7 +20,8 @@ import { Action, useFocusOn } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
 import { ClusterRef, DraftHead, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
 import { draftCalled, draftText, safeText } from "./titles.ts";
-import { DRAFTS_AND_RELEASES, NAME_NOT_SHOWN } from "./words.ts";
+import { PageNote } from "./page-note.tsx";
+import { DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, NAME_NOT_SHOWN } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
 
 type S = components["schemas"];
@@ -263,6 +264,7 @@ export function DraftItem({ id }: { id: string }) {
       {unshown && item.kind !== "loading" && <p><button type="button" onClick={() => reread((x) => x + 1)}>{READ_DRAFT_AGAIN}</button></p>}
       {d !== undefined && (
         <>
+          <PageNote parts={[DRAFT_NOTE, d.state === "open" && DRAFT_NOTE_OPEN, handedOver.length > 0 && d.state !== "discarded" && DRAFT_NOTE_START]} />
           <h3>Entries</h3>
           <ul aria-label="Entries">
             {d.entries.map((e) => isSource(e) ? (
