@@ -9,7 +9,7 @@ import { ChangeEndpoint, RenameMachine } from "./forms.tsx";
 import { Detail, type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, machineHeading, machineName, node, release } from "./machines.tsx";
 import { ClusterRef } from "./titles.tsx";
-import { safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
 import { PageNote } from "./page-note.tsx";
 import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
 import { NextStep, type Position } from "./nextstep.tsx";
@@ -37,7 +37,7 @@ export function at(s: string): string {
   return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${clock(d)}`;
 }
 // What a read could not read, field by field: the API gives several fields the same cause.
-export const causes = (o: Observation) => Object.entries(o.unread).map(([field, u]) => `${field} (${safeWord(u.cause)})`);
+export const causes = (o: Observation) => Object.entries(o.unread).map(([field, u]) => `${safeWord(field)} (${safeWord(u.cause)})`);
 
 // The newest read, when it has a higher basis than the one observed names and could not read
 // something. The machine read selects observed by highest basis among reads of the digest. The

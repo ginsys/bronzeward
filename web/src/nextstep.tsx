@@ -8,7 +8,7 @@
 import type { components } from "./api/v1";
 import { Ref } from "./list.tsx";
 import { driftPath, planFor, planPath } from "./plan.tsx";
-import { safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
 import { DECIDE_ON_THE_CHANGE, NOT_MANAGED_YET } from "./words.ts";
 
 export type Position = components["schemas"]["PositionBody"];

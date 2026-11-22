@@ -15,7 +15,6 @@ export const PRINCIPAL_READS = 100;
 // zero bits, so the last is one of a, e, i, m, q, u, y and 4 (internal/id Parse refuses any other).
 export const principalId = (id: string) => /^idn_[a-z2-7]{25}[aeimquy4]$/.test(id);
 
-export { SAFE };
 
 // A human's display name, else its subject at its issuer; a service's name. Nothing (the caller shows
 // the shortened identifier) for an identifier no row holds, a read that did not answer, a record that

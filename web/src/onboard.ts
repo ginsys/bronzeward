@@ -10,7 +10,7 @@ import { parse, stringify } from "yaml";
 import type { components } from "./api/v1";
 import { existing } from "./forms.tsx";
 import { startBody } from "./imports.tsx";
-import { safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
 import { type Listed, readPages } from "./list.tsx";
 import { MACHINE_NAME } from "./machine-name.ts";
 import type { Problem, ReadResult } from "./request.ts";

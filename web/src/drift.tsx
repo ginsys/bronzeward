@@ -13,7 +13,7 @@ import { type Machine, machineHeading } from "./machines.tsx";
 import { PageNote } from "./page-note.tsx";
 import { driftPath, REASON_MAX, planPath, reasonProblem } from "./plan.tsx";
 import { Who } from "./principals.tsx";
-import { safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
 import { Action, useFocusOn, useGate } from "./shell.tsx";
 import { Status } from "./states.tsx";
 import { CHANGED_ON_THE_MACHINE, DRIFT_ADOPT, DRIFT_FREEZE, DRIFT_NONE, DRIFT_NOT_SHOWN, DRIFT_NOTE, DRIFT_NOTE_OPEN, DRIFT_REVERT } from "./words.ts";

@@ -14,7 +14,7 @@ import { PageNote } from "./page-note.tsx";
 import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
-import { safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
 import { DraftHead, Named } from "./titles.tsx";
 import { PUBLISH_NOTE } from "./words.ts";
 import type { Outcome } from "./write.ts";

@@ -10,7 +10,7 @@ import { type Env, endpointNote, isAddress, type Line, pressOnboarding, type Pla
 import { RequestRef } from "./problems.tsx";
 import { Action, KEPT_PAGE, useGate } from "./shell.tsx";
 import { MachineById } from "./titles.tsx";
-import { safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
 import { useUnsaved, useWrites } from "./forms.tsx";
 import { PageNote } from "./page-note.tsx";
 import { CONNECT_A_CLUSTER, CONNECT_NOTE } from "./words.ts";

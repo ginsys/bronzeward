@@ -919,7 +919,7 @@ describe("ginsys/bronzeward#1055: a server word on a plan, operation, import, re
   const principal = "idn_k2pq3rstuvwxyz234567abcdef";
   const planBody = (word: string) => ({
     ...plan("apply-config"), state: word, mode: word, route: word, expiresAt: at, createdAt: at, createdBy: { principal, role: word },
-    evidence: { diff: null, validation: { platformMode: word }, dryRun: { available: false, reason: word } },
+    evidence: { diff: null, validation: { result: word, platformMode: word }, dryRun: { available: false, reason: word } },
   });
   const opBody = (word: string) => ({
     ...operation("apply-config", { plan: PLN, machine: MCH }), kind: word, state: word, createdBy: { principal, role: word },
@@ -943,6 +943,7 @@ describe("ginsys/bronzeward#1055: a server word on a plan, operation, import, re
     expect(field("Operation")).toBe(`apply-config, mode ${NOT_SHOWN}`);
     expect(field("Created")).toContain(`(${NOT_SHOWN})`);
     expect(field("Validation")).toContain(`, ${NOT_SHOWN})`);
+    expect(field("Validation")?.startsWith(`${NOT_SHOWN} at `)).toBe(true);
     expect(field("Dry run")).toBe(`not available (${NOT_SHOWN})`);
     clean();
   });
@@ -1019,12 +1020,12 @@ describe("ginsys/bronzeward#1055: a server word on a plan, operation, import, re
     expect(text()).not.toContain("bad");
   });
 
-  test("the audit page: the principal's kind, role and action", async () => {
-    const [kind, role, action] = ["Principal", "Role", "Action"].map((n) => ACTS.find(([name]) => name === n)![1]);
-    const a = { at, principal, principalKind: BAD, via: "web", role: BAD, action: BAD, subjects: [], requestId: null, id: "act_a" } as never;
-    await mount(h("div", {}, [kind!(a), role!(a), action!(a)].map((c, i) => h("p", { key: i }, c))));
+  test("the audit page: the principal's kind, role, action and the way the act came in", async () => {
+    const [kind, role, action, via] = ["Principal", "Role", "Action", "Via"].map((n) => ACTS.find(([name]) => name === n)![1]);
+    const a = { at, principal, principalKind: BAD, via: BAD, role: BAD, action: BAD, subjects: [], requestId: null, id: "act_a" } as never;
+    await mount(h("div", {}, [kind!(a), role!(a), action!(a), via!(a)].map((c, i) => h("p", { key: i }, c))));
     await settled();
-    expect([...box.querySelectorAll("p")].map((p) => p.textContent)).toEqual([expect.stringContaining(`(${NOT_SHOWN})`), NOT_SHOWN, NOT_SHOWN]);
+    expect([...box.querySelectorAll("p")].map((p) => p.textContent)).toEqual([expect.stringContaining(`(${NOT_SHOWN})`), NOT_SHOWN, NOT_SHOWN, NOT_SHOWN]);
     await mount(h("div", {}, ACTS.find(([name]) => name === "Role")![1]({ ...(a as object), role: null } as never)), { ...reads, view: "none" });
     expect(text()).toBe("none");
   });
@@ -1034,7 +1035,7 @@ describe("ginsys/bronzeward#1055: a server word on a plan, operation, import, re
       id: MCH, name: "worker-1", cluster: "cl_a", talosEndpoint: "https://10.0.0.1:50000", hardware: { talosNodeId: "n1" }, platform: BAD, scopeState: BAD, desired: REL,
       applied: { release: REL, source: BAD, importBase: null }, observed: null, openDrift: null, frozen: false,
     };
-    const observation = { id: "obs_aaaaaaaaaaaaaaaaaaaaaaaaaa", basis: "b", at, purpose: "p", release: null, unread: { field: { cause: BAD } } };
+    const observation = { id: "obs_aaaaaaaaaaaaaaaaaaaaaaaaaa", basis: "b", at, purpose: "p", release: null, unread: { field: { cause: BAD }, [BAD]: { cause: "gone" } } };
     const entry = { epoch: "e0", revision: 1, at, kind: BAD };
     await mount(h(MachineShown, {
       id: MCH, m: { kind: "ok", data: machine }, obs: { kind: "ok", data: { items: [observation], next: undefined, restarted: false } }, km: { view: "v", data: machine, restarted: false },
@@ -1046,7 +1047,7 @@ describe("ginsys/bronzeward#1055: a server word on a plan, operation, import, re
     expect(field("Applied")).toContain(`by ${NOT_SHOWN}`);
     expect(field("Scope")).toBe(NOT_SHOWN);
     expect(box.querySelector('[data-testid=timeline] tbody td:nth-child(2)')?.textContent).toBe(NOT_SHOWN);
-    expect(box.querySelector('[data-testid=observations] tbody td:nth-child(5)')?.textContent).toBe(`field (${NOT_SHOWN})`);
+    expect(box.querySelector('[data-testid=observations] tbody td:nth-child(5)')?.textContent).toBe(`field (${NOT_SHOWN}); ${NOT_SHOWN} (gone)`);
     expect(text()).not.toContain("bad");
   });
 

@@ -10,7 +10,7 @@ import type { components } from "./api/v1";
 import type { Load } from "./list.tsx";
 import type { Position } from "./nextstep.tsx";
 import { planBody } from "./plan.tsx";
-import { safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
 import type { Write, WriteSpec } from "./write.ts";
 
 type Draft = components["schemas"]["DraftBody"];

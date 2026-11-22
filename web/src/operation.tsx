@@ -11,7 +11,7 @@ import { settledReads } from "./imports.tsx";
 import { type Failed, Id, readPages, Ref, useReads } from "./list.tsx";
 import { operationNext, operationNow } from "./operation-words.ts";
 import { Named } from "./titles.tsx";
-import { safeText, safeWord } from "./titles.ts";
+import { safeText, safeWord } from "./safe.ts";
 import { eventLine, RESTORED, watch } from "./progress.ts";
 import { Status } from "./states.tsx";
 

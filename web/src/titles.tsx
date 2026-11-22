@@ -9,8 +9,8 @@ import type { components } from "./api/v1";
 import { Detail, Id, Ref, short, useReads, viewOf } from "./list.tsx";
 import { MachineRef, machineText } from "./machines.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
-import { draftName, draftText, importedConfiguration, operationTitle, planTitle, releaseTitle, safeWord } from "./titles.ts";
-import { SAFE } from "./principals.ts";
+import { SAFE, safeWord } from "./safe.ts";
+import { draftName, draftText, importedConfiguration, operationTitle, planTitle, releaseTitle } from "./titles.ts";
 import { THE_MACHINE, THIS_CLUSTER } from "./words.ts";
 
 type S = components["schemas"];

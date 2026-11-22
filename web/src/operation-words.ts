@@ -5,7 +5,7 @@
 // cause, its attempts, the applied release) stay with `Outcome`, so a sentence here adds what the state
 // means for the machine and never repeats them.
 
-import { safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
 
 const KNOWN: Record<string, Record<string, [now: string, next: string | undefined]>> = {
   publish: {

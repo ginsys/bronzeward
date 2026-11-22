@@ -13,7 +13,7 @@ import { Action } from "./shell.tsx";
 import { MachineRef, type MachineLike, machineText } from "./machines.tsx";
 import { Withheld } from "./states.tsx";
 import { Named } from "./titles.tsx";
-import { safeWord } from "./titles.ts";
+import { safeWord } from "./safe.ts";
 import { PageNote } from "./page-note.tsx";
 import { DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, REVIEW_NOTE, THE_MACHINE } from "./words.ts";
 
