@@ -159,10 +159,10 @@ function mount(served: Record<string, unknown>, answer: (path: string) => unknow
   const row = (m: string) => box.querySelector(`[data-testid="apply-row"][data-machine="${m}"]`)!;
   const button = (label: string) => [...box.querySelectorAll("button")].find((b) => b.textContent === label)!;
   const off = (label: string) => button(label).hasAttribute("disabled") || button(label).getAttribute("aria-disabled") === "true";
-  const render = async (w: Writes) => {
+  const render = async (w: Writes, again = 0) => {
     if (w !== writes) wire(w);
     await act(async () =>
-      root.render(h(WritesProvider, { value: w }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(ApplyForm, { release: REL, r: release as never }))))),
+      root.render(h(WritesProvider, { value: w }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: { ...reads, again } }, h(ApplyForm, { release: REL, r: release as never }))))),
     );
     await settled();
   };
@@ -179,7 +179,7 @@ function mount(served: Record<string, unknown>, answer: (path: string) => unknow
     box.remove();
   };
   const start = () => render(writes);
-  return { sent, row, button, off, start, render, choose, press, stop, settled, elapse, slow, calls, dismiss, box };
+  return { sent, row, button, off, start, render, writes, choose, press, stop, settled, elapse, slow, calls, dismiss, box };
 }
 const done = (data: unknown) => ({ kind: "done", status: 201, data, replayed: false });
 const served2 = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -307,6 +307,55 @@ describe("the apply page's plans and approvals", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // A refresh by the shell starts a new round of reads that drops a slow one in flight: the count of answered reads
+  // starts again, so the first fast answer of the round does not schedule the next round before the slow one answers.
+  test("a refresh of the shell's reads restarts the count of a round and the pending wait", async () => {
+    vi.useFakeTimers();
+    try {
+      const p = mount(served2(), () => done({ id: "apr_1" }), true);
+      await p.start();
+      await p.choose(A);
+      await p.press("Apply");
+      p.slow.ms = 7000;
+      const path = `/machines/${A}/position`;
+      await p.elapse(1000);
+      await p.render(p.writes, 1);
+      const refreshed = p.calls[path]!;
+      await p.elapse(6000);
+      // 6 s after the refresh the slow read has not answered, and no replacement started.
+      expect(p.calls[path]).toBe(refreshed);
+      await p.elapse(3000);
+      expect(p.calls[path]).toBe(refreshed);
+      await p.elapse(5000);
+      expect(p.calls[path]).toBe(refreshed + 1);
+      await p.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The link to a withheld plan hands it to the person: the page that made it must not cancel it on the way out.
+  test("a plan this page made is not cancelled when the person opens it from its withheld line", async () => {
+    const none = (m: string) => ({ ...position(m, "x"), step: "needs-plan", plan: null });
+    const withheld = { ...plan("pln_new", A), evidence: { diff: { withheld: true, from: "rel_x", to: REL, unified: "", fromFormOnly: false }, validation: null, dryRun: null, baseline: null } };
+    const served = served2({ [`/machines/${A}/position`]: none(A), "/plans/pln_new": withheld });
+    // Once the plan exists, the machine's position names it, as the server's does.
+    const p = mount(served, (path) => {
+      if (path !== "/plans") return done({});
+      served[`/machines/${A}/position`] = position(A, "pln_new");
+      return done({ id: "pln_new" });
+    });
+    await p.start();
+    await p.choose(A);
+    await p.press("Show apply");
+    await p.settled();
+    const link = [...p.box.querySelectorAll('[data-testid="apply-withheld"] a')].find((a) => a.textContent === "Open the plan") as HTMLAnchorElement;
+    expect(link).toBeDefined();
+    await act(async () => void link.click());
+    await p.stop();
+    expect(p.sent).toEqual(["/plans"]);
   });
 
   test("the plans a page made are cancelled when the person leaves, and not when its writes object is replaced", async () => {

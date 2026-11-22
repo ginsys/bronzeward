@@ -50,7 +50,7 @@ function Row({ release, machine, chosen, choose, locked, line, n, profiles, seen
 type Seeing = "shown" | "withheld" | "unread";
 
 // The plan of one machine, whose change is the one Apply approves. A plan another person prepared says who and when.
-function PlanChange({ id, machine, mine, onRead }: { id: string; machine: string; mine: boolean; onRead: (id: string, s: Seeing) => void }) {
+function PlanChange({ id, machine, mine, onRead, onOpen }: { id: string; machine: string; mine: boolean; onRead: (id: string, s: Seeing) => void; onOpen: (id: string) => void }) {
   const p = useItem<S["PlanBody"]>(`/plans/${enc(id)}`);
   const seeing: Seeing = p.kind !== "ok" ? "unread" : p.data.evidence.diff?.withheld === true ? "withheld" : "shown";
   useEffect(() => onRead(id, seeing), [onRead, id, seeing]);
@@ -61,7 +61,7 @@ function PlanChange({ id, machine, mine, onRead }: { id: string; machine: string
         {p.kind === "ok" && <p data-testid="apply-plan-by">{mine ? LINES.madeHere : <>{LINES.preparedBy} <Who id={p.data.createdBy?.principal} /> on {when(p.data.createdAt)}.</>} It expires {when(p.data.expiresAt)}.</p>}
         {p.kind === "ok" ? <Change p={p.data} /> : <p>Not read yet.</p>}
       </details>
-      {seeing === "withheld" && <p data-testid="apply-withheld"><MachineById id={machine} />: the change of its plan {LINES.withheld} <Ref to={`/plans/${enc(id)}`} id={id}>Open the plan</Ref></p>}
+      {seeing === "withheld" && <p data-testid="apply-withheld"><MachineById id={machine} />: the change of its plan {LINES.withheld} <span onClickCapture={() => onOpen(id)}><Ref to={`/plans/${enc(id)}`} id={id}>Open the plan</Ref></span></p>}
     </>
   );
 }
@@ -145,16 +145,19 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   // Each row reads its machine and its position, so a round is over when 2 x the machines' reads have answered.
   const watch = useRef(false);
   watch.current = watching;
-  const nNow = useRef(n);
-  nNow.current = n;
-  const round = useRef({ n, answered: 0, reads: 0 });
+  const round = useRef({ answered: 0, reads: 0 });
   round.current.reads = 2 * r.machines.length;
   const timer = useMemo(() => poll(() => setN((x) => x + 1), POLL_MS), []);
   const rowSettled = useCallback(() => {
-    if (round.current.n !== nNow.current) round.current = { ...round.current, n: nNow.current, answered: 0 };
     round.current.answered++;
     if (watch.current && round.current.answered >= round.current.reads) timer.settled();
   }, [timer]);
+  // A new round of reads (the page's own, or the shell's refresh or view change) starts the count again and drops a
+  // pending wait: the rows' effects run before this one, and their answers come after it.
+  useEffect(() => {
+    round.current.answered = 0;
+    timer.stop();
+  }, [timer, n, reads.again, reads.view]);
   useEffect(() => timer.stop, [timer]);
   useEffect(() => {
     if (!watching) return;
@@ -202,6 +205,8 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
     await applyPlans(plans, io());
     if (live.current) (setBusy(false), setN((x) => x + 1), setWatching(true));
   };
+  // A plan the person opens from here is theirs to decide on its own page: leaving this page does not cancel it.
+  const handOff = useCallback((id: string) => void pressed.current.add(id), []);
   const markRead = useCallback((id: string, s: Seeing) => setReadable((was) => (was[id] === s ? was : { ...was, [id]: s })), []);
 
   return (
@@ -221,7 +226,7 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
       {picked.length > 0 && plans.size < picked.length && <p data-testid="apply-needs-publisher">{APPLY_NEEDS_PUBLISHER}</p>}
       {plans.size > 0 && (
         <section aria-label="Plans to approve">
-          {[...plans].map(([m, id]) => <PlanChange key={id} id={id} machine={m} mine={made.current.has(id)} onRead={markRead} />)}
+          {[...plans].map(([m, id]) => <PlanChange key={id} id={id} machine={m} mine={made.current.has(id)} onRead={markRead} onOpen={handOff} />)}
           <p data-testid="apply-sentence">{APPLY_SENTENCE}</p>
           {unreadOnly && <p data-testid="apply-unread">{LINES.unreadPlan}</p>}
           <p><Action label="Apply" needs={["approver"]} onClick={() => void apply()} busy={busy || held || unread} /></p>
