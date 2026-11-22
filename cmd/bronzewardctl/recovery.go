@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
@@ -378,29 +377,21 @@ func (e *env) recoveryExit(args []string) error {
 	return err
 }
 
-// paddedField names the first of the identity, the issuer and the subject that has a space at its start or end, or "".
-func paddedField(identity, iss, sub string) string {
+// confirmable is what identity revoke confirms: printable ASCII with no space at either edge. An allow list, so an
+// invisible, look-alike or non-ASCII character, a control character, a byte that is not UTF-8 and a space the question
+// cannot show cannot reach a confirmation by construction: for every value that passes, the text printed between the
+// quotes of the question is the value a y sends. An OpenID Connect subject is ASCII by definition (OIDC Core, ID Token;
+// recalled, not read), the identity is our own idn_ identifier and the issuer must be the configured one.
+var confirmable = regexp.MustCompile(`^[\x21-\x7e]([\x20-\x7e]*[\x21-\x7e])?$`)
+
+// unconfirmable names the first of the identity, the issuer and the subject that is given and is not confirmable, or "".
+func unconfirmable(identity, iss, sub string) string {
 	for _, f := range []struct{ name, v string }{{"identity", identity}, {"issuer", iss}, {"subject", sub}} {
-		if f.v != strings.TrimSpace(f.v) {
+		if f.v != "" && !confirmable.MatchString(f.v) {
 			return f.name
 		}
 	}
 	return ""
-}
-
-// unshownIn is whether any value holds a character the question would not show as itself or as an escape.
-func unshownIn(values ...string) bool {
-	for _, v := range values {
-		if !utf8.ValidString(v) {
-			return true
-		}
-		for _, r := range v {
-			if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) || unicode.Is(unicode.Zs, r) && r != ' ' {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // identityCmd is identity revoke, T36 (POST /identity-revocations, recovery-admin, human only).
@@ -428,16 +419,10 @@ func (e *env) identityCmd(args []string) error {
 		return usageError{errors.New("name the identity with --identity, or with --iss and --sub, not both")}
 	case strings.TrimSpace(in.Reason) == "":
 		return usageError{errors.New("give --reason")}
-	case paddedField(identity, iss, sub) != "":
-		// The server acts on a value as typed: a padded subject records a new human and revokes that one, leaving the
-		// real one active. Refused, never trimmed, so the value sent stays the one named in the question.
-		return usageError{errors.New("The " + paddedField(identity, iss, sub) + " has spaces at its start or end; enter it without them.")}
-	case unshownIn(identity, iss, sub):
-		// printable writes a control character, a bidirectional control and a byte that is not UTF-8 as an escape, which
-		// reads like the same text typed, and leaves an invisible format character, a space that is not U+0020 and a
-		// line or paragraph separator as they are. Either way the question would read as another target than the raw
-		// value that is sent, so none is confirmable: no escape is ever written for a value that can be confirmed.
-		return usageError{errors.New("The identity cannot be shown, so it cannot be confirmed.")}
+	case unconfirmable(identity, iss, sub) != "":
+		// Refused, never trimmed or escaped, so the value sent stays the one named in the question; the server acts on a
+		// value as typed (a padded subject records a new human and revokes that one, leaving the real one active).
+		return usageError{errors.New("The " + unconfirmable(identity, iss, sub) + " holds a character that cannot be confirmed here. Only plain letters, digits and signs are accepted, with no space at the start or end.")}
 	case e.noInput:
 		return notConfirmed{errors.New("identity revoke asks for a y, which --no-input forbids; nothing was sent")}
 	case identity != "":

@@ -15,7 +15,7 @@ import { clock, Disconnected, ProblemFields, problemFields, problemSentences, Re
 import { PageNote } from "./page-note.tsx";
 import { nextStep, ScopeDecision } from "./scope-decisions.tsx";
 import { MachineById } from "./titles.tsx";
-import { safeText, safeWord } from "./safe.ts";
+import { safeWord } from "./safe.ts";
 import type { components } from "./api/v1";
 
 export type Recovery = components["schemas"]["RecoveryBody"];
@@ -361,29 +361,27 @@ export function ExitRecovery({ held, recoveryMode, onChanged }: { held: number; 
   );
 }
 
-const LOOKALIKE = /[^\P{Zs} ]|[\p{Zl}\p{Zp}]/u; // a Zs character other than U+0020, a line separator, a paragraph separator
+// A target is confirmed only when every character of it is printable ASCII (U+0020 to U+007E) and neither edge is a
+// space: an allow list, so an invisible, look-alike or non-ASCII character cannot reach a confirmation by construction,
+// and a space at an edge, which the line cannot show and the server would act on as typed, cannot either. An OpenID
+// Connect subject is ASCII by definition (OIDC Core, ID Token; recalled, not read), the identity is our own idn_
+// identifier and the issuer must be the configured one, so no valid target falls outside it.
+const CONFIRMABLE = /^[\x21-\x7e]([\x20-\x7e]*[\x21-\x7e])?$/;
+const NOT_CONFIRMABLE = (field: string) => `The ${field} holds a character that cannot be confirmed here. Only plain letters, digits and signs are accepted, with no space at the start or end.`;
 
 // What the revocation form shows before its one press, and what that press sends. The identity, or the issuer and
 // subject, not both (RevocationInput), and a reason. One press confirms a permanent act, so the line is the only check
 // a person has: it names the target exactly as entered (the issuer and the subject both), and a target that is not
-// safe text cannot be shown, so it cannot be confirmed and the press stays off.
+// confirmable keeps the press off, never trimmed, so the value sent is the value shown.
 export function revocationConfirmation(identity: string, iss: string, sub: string, reason: string): { line?: string; target?: { identity: string; reason: string } | { iss: string; sub: string; reason: string }; why?: string } {
-  // The target is checked and named as entered: trimming first would let an edge control character pass and would
-  // name a different subject than the one typed. Only blankness is read trimmed.
   const [i, s, u, r] = [identity, iss, sub, reason.trim()];
   const blank = (v: string) => v.trim() === "";
   const byIdentity = !blank(i) && blank(s) && blank(u);
   const bySubject = blank(i) && !blank(s) && !blank(u);
   if (!(byIdentity || bySubject) || r === "") return { why: "Name the identity, or the issuer and subject, and give a reason." };
   const named: [string, string][] = byIdentity ? [["identity", i]] : [["issuer", s], ["subject", u]];
-  if (named.some(([, v]) => safeText(v) === undefined)) return { why: "The identity cannot be shown, so it cannot be confirmed." };
-  // A space at an edge is invisible in the line and the server acts on it as typed (a padded subject records a new
-  // human and revokes that one, leaving the real one active), so it is refused, never trimmed: the value sent stays the one shown.
-  const padded = named.find(([, v]) => v !== v.trim());
-  if (padded !== undefined) return { why: `The ${padded[0]} has spaces at its start or end; enter it without them.` };
-  // A space that is not U+0020 reads as one and is another character, and a line or paragraph separator breaks the line:
-  // two targets would read the same and differ, so these cannot be shown either.
-  if (named.some(([, v]) => LOOKALIKE.test(v))) return { why: "The identity cannot be shown, so it cannot be confirmed." };
+  const bad = named.find(([, v]) => !CONFIRMABLE.test(v));
+  if (bad !== undefined) return { why: NOT_CONFIRMABLE(bad[0]) };
   return byIdentity
     ? { line: `Revokes the identity ${i}. A revocation is permanent.`, target: { identity: i, reason: r } }
     : { line: `Revokes the subject ${u} of the issuer ${s}. A revocation is permanent.`, target: { iss: s, sub: u, reason: r } };
