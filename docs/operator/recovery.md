@@ -382,7 +382,8 @@ These actions are on the web:
   Take over sends the highest generation the operation's events and attempts show, as the command
   does, and the server refuses a generation that is not current. Take over is off, with its reason,
   for an operation the server would refuse (not an apply-config, or not committed, sending,
-  verifying or unresolved). Resolve as cancelled is off with
+  verifying or unresolved), and while the events are still being read. If the events cannot be
+  read, Take over stays on, uses the attempts alone and says so. Resolve as cancelled is off with
   its reason where an attempt is recorded, and says that it records no remote outcome. Neither
   sends anything to the node.
 
