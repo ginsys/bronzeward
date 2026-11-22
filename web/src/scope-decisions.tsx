@@ -30,16 +30,34 @@ const released = (data: unknown): ReactNode => {
   return <>Scope released, was {x.from} (act <Id id={x.act} />). {RELEASE_NOT_APPROVAL}</>;
 };
 
-// The next step of a refused mark or release. The server's 409 conflict on these routes has no shared next step (the command adds
-// its own, cmd/bronzewardctl/recovery_scope.go), so this adds it by the refusal's detail.
+// What each scope state needs next (T31), as text; the Decision column holds the controls (ginsys/bronzeward#365). The accounting of a
+// pre-restore-unaccounted scope has none there yet.
+export function nextStep(state: string): string {
+  switch (state) {
+    case "pre-restore-unaccounted":
+      return "Account the scope: record that no request sent before the restore can still land.";
+    case "ready":
+      return "Release the scope. A release is not an approval.";
+    case "released":
+      return "None.";
+    case "unresolved":
+      return "Read the machine's operations. If one has not ended, it is classified after the normal restart: restart, then mark the scope again. If none holds the scope, mark it again now.";
+    case "blocked":
+      return "Mark the scope, then read its recorded cause: a scope stays blocked until it is marked. If the cause names a missing key or observation, repair that, or publish a new release for a lost key version.";
+    default:
+      return "None.";
+  }
+}
+
+// The next step of a refused mark or release. Both refusals carry the scope's state as a field, so the step is that state's own
+// (`nextStep`). A `ready` scope is refused a release only when no mark is recorded for it, so its step is to mark. The one refusal with
+// no field, a Desired release that moved, is told by its text (recovery_marks.go, recovery_releases.go).
 export function scopeNext(p: Problem | null): string | undefined {
   if (p === null) return undefined;
-  const detail = typeof p.detail === "string" ? p.detail : "";
-  if (p["scope"] === "pre-restore-unaccounted") return "Account the scope first: it leaves that state only by the accounting.";
-  if (detail.includes("only a ready scope is released")) return `Mark the scope until it is ready, then release it. ${RELEASE_NOT_APPROVAL}`;
-  if (detail.includes("Desired release changed")) return "Mark the scope again.";
-  if (detail.includes("is not marked")) return "Read the scope's state and its next step on this page.";
-  return undefined;
+  if (typeof p.detail === "string" && p.detail.includes("Desired release changed")) return "Mark the scope again.";
+  const state = p["scope"];
+  if (typeof state !== "string") return undefined;
+  return state === "ready" ? `Mark the scope, then release it. ${RELEASE_NOT_APPROVAL}` : nextStep(state);
 }
 
 export function ScopeDecision({ machine, state }: { machine: string; state: string }) {

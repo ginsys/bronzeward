@@ -13,7 +13,7 @@ import { ENTER_RECOVERY_NOTE, RECOVERY_NOTE, RECOVERY_ROLE_NOTE } from "./words.
 import { RequestRef } from "./problems.tsx";
 import { clock, Disconnected, ProblemFields, problemFields, problemSentences, Refused, Status, when } from "./states.tsx";
 import { PageNote } from "./page-note.tsx";
-import { ScopeDecision } from "./scope-decisions.tsx";
+import { nextStep, ScopeDecision } from "./scope-decisions.tsx";
 import { MachineById } from "./titles.tsx";
 import type { components } from "./api/v1";
 
@@ -111,24 +111,7 @@ export const REVOCATION_LIMITS = [
   "First add the subject to auth.deniedSubjects, a human by iss and sub, a service identity by its identity and name, and leave it there. After a restore, record this revocation again.",
 ];
 
-// What each scope state needs next (T31), as text; the Decision column holds the controls (ginsys/bronzeward#365). The accounting of a
-// pre-restore-unaccounted scope has none there yet.
-export function nextStep(state: string): string {
-  switch (state) {
-    case "pre-restore-unaccounted":
-      return "Account the scope: record that no request sent before the restore can still land.";
-    case "ready":
-      return "Release the scope. A release is not an approval.";
-    case "released":
-      return "None.";
-    case "unresolved":
-      return "Read the machine's operations. If one has not ended, it is classified after the normal restart: restart, then mark the scope again. If none holds the scope, mark it again now.";
-    case "blocked":
-      return "Mark the scope, then read its recorded cause: a scope stays blocked until it is marked. If the cause names a missing key or observation, repair that, or publish a new release for a lost key version.";
-    default:
-      return "None.";
-  }
-}
+export { nextStep };
 
 // The scopes in recovery: a scope in `normal` state is outside it.
 const inRecovery = (scopes: readonly Scope[]) => scopes.filter((s) => s.state !== "normal");

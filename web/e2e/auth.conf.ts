@@ -495,7 +495,8 @@ async function prepare() {
   };
   // A machine's scope in the state a recovery decision acts on, as the server leaves it after a mark: the state, and for ready the
   // scope-state entry a release reads (cause restoration-mark, the Desired release the mark checked). Written by SQL, like the
-  // epoch, so that a case starts from a state without depending on what a mark's reads of a stand-in node give.
+  // epoch, so that a case starts from a state without depending on what a mark's reads of a stand-in node give. The entry copies the
+  // shape the server writes in internal/api/recovery_marks.go (kind scope-state, cause restoration-mark): a change there finds this.
   injector.scope = (machine, state) => {
     const db = owned("a scope state is set");
     if (!/^mch_[a-z2-7]+$/.test(machine)) throw new Error(`a machine of ${machine}: give a machine identifier`);

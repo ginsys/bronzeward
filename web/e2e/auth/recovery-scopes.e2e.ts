@@ -98,7 +98,7 @@ describe("the scope decisions of the recovery console (#365)", () => {
     await row(m).$("button=Release").click();
     const result = row(m).$('[data-testid="write-result"]');
     await expect(result).toHaveText(expect.stringContaining("only a ready scope is released"), { wait: 30_000 });
-    await expect(row(m).$('[data-testid="write-next"]')).toHaveText(expect.stringContaining("Mark the scope until it is ready"));
+    await expect(row(m).$('[data-testid="write-next"]')).toHaveText(expect.stringContaining("Mark the scope, then read its recorded cause"));
     expect((await answers()).filter((a) => a.startsWith(`/recovery/scopes/${m}/releases `))).toEqual([`/recovery/scopes/${m}/releases 409`]);
     // once: read after the server's 409 was answered and shown, so the refused write is settled and the act list cannot still grow from it
     expect(await acts(m, "release")).toBe(0);

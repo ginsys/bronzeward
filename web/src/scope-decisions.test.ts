@@ -3,29 +3,33 @@
 
 import { describe, expect, test } from "vitest";
 import type { Problem } from "./request.ts";
-import { scopeNext } from "./scope-decisions.tsx";
+import { nextStep, scopeNext } from "./scope-decisions.tsx";
 import { MARK_NEXT, MISSING_MEANING, RELEASE_NOT_APPROVAL } from "./words.ts";
 
 const refused = (detail: string, over: Record<string, unknown> = {}): Problem => ({ type: "about:blank", title: "Conflict", status: 409, detail, ...over });
 
 describe("scopeNext", () => {
-  test("a release of a scope that is not ready says to mark it until it is, and that a release is no approval", () => {
-    const s = scopeNext(refused("the scope is blocked; only a ready scope is released"));
-    expect(s).toContain("Mark the scope until it is ready");
+  test("a refusal that carries the scope's state gets that state's own next step, whatever its text says", () => {
+    for (const state of ["pre-restore-unaccounted", "blocked", "unresolved", "released"]) {
+      expect(scopeNext(refused("worded some other way", { scope: state })), state).toBe(nextStep(state));
+    }
+  });
+  test("a release of a blocked scope says to mark it", () => {
+    expect(scopeNext(refused("the scope is blocked; only a ready scope is released", { scope: "blocked" }))).toMatch(/^Mark the scope, then read its recorded cause/);
+  });
+  test("a release of a ready scope that has no mark says to mark it, then release, and that a release is no approval", () => {
+    const s = scopeNext(refused("the scope is ready; only a ready scope is released", { scope: "ready" }));
+    expect(s).toMatch(/^Mark the scope, then release it\./);
     expect(s).toContain(RELEASE_NOT_APPROVAL);
   });
-  test("a changed Desired release says to mark again", () => {
+  test("a changed Desired release, which carries no scope, says to mark again", () => {
     expect(scopeNext(refused("the Desired release changed since the scope was marked; mark it again"))).toBe("Mark the scope again.");
+    expect(scopeNext(refused("the Desired release changed while the scope was checked; nothing was marked"))).toBe("Mark the scope again.");
   });
-  test("a scope that is not marked points to the page's own read of it", () => {
-    expect(scopeNext(refused("the scope is ready and is not marked"))).toContain("Read the scope's state");
-  });
-  test("a scope still pre-restore-unaccounted says to account it first, whatever the detail", () => {
-    expect(scopeNext(refused("anything", { scope: "pre-restore-unaccounted" }))).toContain("Account the scope first");
-  });
-  test("no problem, or a refusal with no known detail, adds nothing", () => {
+  test("no problem, or a refusal with neither a scope nor a known text, adds nothing", () => {
     expect(scopeNext(null)).toBeUndefined();
     expect(scopeNext(refused("something else"))).toBeUndefined();
+    expect(scopeNext(refused("something else", { scope: 3 }))).toBeUndefined();
   });
 });
 
