@@ -25,10 +25,11 @@ export type Role = Identity["roles"][number];
 // §7 item 3: revision 2 added Bronzeward-Expected-Epoch, which every write but the recovery entry
 // sends (§8.1); revision 3 the timeline's order and tail, which W3 reads with (§8.6 item 6); revision 6
 // GET /machines/{id}/position, which the machine page and the release review page read (operator
-// experience §2.3). Three pages call a later route and show a refused read on the page, so the minimum
-// stays 6: the imported base document at revision 7, the Connect page's POST /discoveries at 11 and
-// the cluster's Talos access at 12.
-export const MIN_API_REVISION = 6;
+// experience §2.3); revision 7 GET /import-base-revisions/{id}/document, which the imported-configuration
+// page reads; revision 11 POST /discoveries, which the Connect page sends; revision 12 GET
+// /clusters/{id}/talos-access, which the cluster page reads. The minimum is the highest revision of any
+// route the client calls, raised in the same pull request that adds such a call.
+export const MIN_API_REVISION = 12;
 
 declare const __BW_VERSION__: string;
 export const clientVersion = () => __BW_VERSION__;
@@ -553,8 +554,10 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   );
 }
 
-// The root is the machine list, the hub of the journeys (§6); /drafts and /releases open the page that lists both.
-export const current = (path: string) => (path === "/" ? "/machines" : path === "/drafts" || path === "/releases" ? "/changes" : path);
+// The root is the machine list, the hub of the journeys (§6); /drafts and /releases open the page that lists both, and
+// /fragments, /profiles and /assignments the page that lists the sources.
+export const current = (path: string) =>
+  path === "/" ? "/machines" : path === "/drafts" || path === "/releases" ? "/changes" : ["/fragments", "/profiles", "/assignments"].includes(path) ? "/sources" : path;
 
 export function Page({ path, query, go }: { path: string; query: string; go: (to: string) => void }) {
   return view(path, query, go) ?? <><h2>Not found</h2><Status>No page at {path}.</Status><PageNote parts={[NOT_FOUND_NOTE]} /></>;

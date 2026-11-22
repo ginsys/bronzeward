@@ -232,15 +232,17 @@ describe("the shell", () => {
     expect(incompatible(1)).toBe(`This server serves API revision 1; this client needs API revision ${MIN_API_REVISION} or later.`);
   });
 
-  test("ginsys/bronzeward#1080: the client's minimum is revision 6, the one that serves a machine's position", () => {
-    // The numbers are written out: a case that reads the constant passes at any value.
-    expect(MIN_API_REVISION).toBe(6);
+  test("ginsys/bronzeward#1080: the client's minimum is revision 12, the highest revision of a route it calls", () => {
+    // The numbers are written out: a case that reads the constant passes at any value. The routes the client calls, and the
+    // revision each is served from: position 6 (machine and release review pages), base document 7 (imported-configuration
+    // page), discoveries 11 (Connect page), Talos access 12 (cluster page).
+    expect(MIN_API_REVISION).toBe(12);
     const loading = { kind: "loading" } as const;
     const served = (apiRevision: number) => ({ kind: "ok", data: { version: "v", apiRevision } }) as unknown as Parameters<typeof keepsPage>[1];
-    // keepsPage keeps a page only for a server the client accepts: one at 5 is refused, one at 6 is not.
-    expect(keepsPage(true, served(5), loading)).toBe(false);
-    expect(keepsPage(true, served(6), loading)).toBe(true);
-    expect(incompatible(5)).toBe("This server serves API revision 5; this client needs API revision 6 or later.");
+    // keepsPage keeps a page only for a server the client accepts: one at 11 is refused, one at 12 is not.
+    expect(keepsPage(true, served(11), loading)).toBe(false);
+    expect(keepsPage(true, served(12), loading)).toBe(true);
+    expect(incompatible(11)).toBe("This server serves API revision 11; this client needs API revision 12 or later.");
   });
 
   test("ginsys/bronzeward#517 H10: a page holding unsaved text stays shown while a new epoch's server and identity are read", () => {
@@ -539,11 +541,15 @@ describe("focus after an action", () => {
 });
 
 describe("the navigation's current page", () => {
-  test("the root is the machine list, and /drafts and /releases are the page that lists both", () => {
+  test("the root is the machine list, /drafts and /releases are the page that lists both, and the bare source addresses are Sources", () => {
     expect(current("/")).toBe("/machines");
     expect(current("/drafts")).toBe("/changes");
     expect(current("/releases")).toBe("/changes");
     expect(current("/changes")).toBe("/changes");
+    expect(current("/fragments")).toBe("/sources");
+    expect(current("/profiles")).toBe("/sources");
+    expect(current("/assignments")).toBe("/sources");
+    expect(current("/sources")).toBe("/sources");
     expect(current("/plans")).toBe("/plans");
   });
 });
