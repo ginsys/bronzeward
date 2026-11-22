@@ -90,6 +90,15 @@ func TestDriftedAdoptPlan(t *testing.T) {
 		AND expected_digest IS NULL`, ae.pid, ae.drift); n != 1 {
 		t.Fatalf("%d stored", n)
 	}
+	// The adoption of a drifted machine never reads "differs in form only", even for a release the publication
+	// recorded as form only: the node's bytes are not the import base's (ginsys/bronzeward#1098, check 4b).
+	mustExec(t, ae.db, `UPDATE release_machine rm SET form_only = true FROM plan p
+		WHERE p.id = $1 AND rm.release = p.release AND rm.machine = p.machine`, ae.pid)
+	got := decode[planBody](t, ae.do(ae.api, call{method: "GET", path: prefix + "/plans/" + ae.pid, token: ae.human("h-viewer")}),
+		http.StatusOK)
+	if got.Evidence.Baseline == nil || got.Evidence.Baseline.FormOnly {
+		t.Fatalf("drifted adoption evidence %+v with form_only set", got.Evidence.Baseline)
+	}
 }
 
 // Execution and recovery §6.3 step 4 and its effects: the adoption record of a drifted machine sets

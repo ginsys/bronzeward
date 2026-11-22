@@ -199,7 +199,7 @@ values. Publication now records, per machine, whether that holds: `pendingConver
 true, and the machine's `formOnly`, an adopt plan's `baseline.formOnly` and an apply-config
 plan's `diff.fromFormOnly` say that the release differs in form only (comments and encoding).
 The words are "Differs in form only (comments and encoding)", and the first apply still sends
-the release's text, without the node's comments: nothing changes in what the machine is
+the release's text, without the comments of the adopted configuration: nothing changes in what the machine is
 configured with, and a person who approves that plan sees it say so. The verdict is true only
 when every document, key and value is equal, secrets included, compared as plaintext on the
 server; whatever it cannot decide, and a machine with an identified embedded document, reads
@@ -282,7 +282,7 @@ timeline:
 | no open drift, observed.release = applied.release | "The configuration read at `<observed.at>` is attributed to `<observed.release>`, which is the `Applied` release (by `<applied.source>`)." |
 | as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's evidence says whether it does (release not applied yet); a later `apply-config` plan withholds its diff when it does, unless it differs in form only." If desired = applied.release, also adds "The read may match the adopted bytes or this release's compiled configuration; the API does not say which." (`internal/api/reads.go:163-164`) |
 | pendingConvergence, applied not null, no open drift | adds "Release not applied yet: the configuration of the selected release `<desired>` for this machine differs from what Bronzeward applied." |
-| formOnly | adds "Differs in form only (comments and encoding): the selected release `<desired>` for this machine. The release has the same documents, keys and values as the configuration Bronzeward adopted from the machine. The first apply sends the release's text, without the node's comments." in place of the previous row's sentence |
+| formOnly | adds "Differs in form only (comments and encoding): the selected release `<desired>` for this machine. The release has the same documents, keys and values as the configuration Bronzeward adopted from the machine. The first apply sends the release's text, without the comments of the adopted configuration." in place of the previous row's sentence |
 | pendingConvergence, applied null | adds "Release not applied yet: the selected release `<desired>` has not been applied to this machine." |
 | desired not null, desired ≠ applied.release, not pendingConvergence, no open drift | adds "The selected release `<desired>` carries this machine's applied configuration unchanged." |
 | openDrift not null | "Changed on the machine since `<at of the openDrift.observation observation>`: a read differed from what Bronzeward last verified (`<applied.release>`)." If observed.release = desired, adds "It equals the selected release; that does not close the drift." |
@@ -791,7 +791,7 @@ withholding cases applies (`internal/api/plans.go:470-477`).
 Had the artifact differed, that plan would show "Diff withheld": no redacted form exists of what
 the machine runs (`internal/api/plans.go:457-472`), unless the release differs in form only
 (§2.4, `fromFormOnly`): while no drift is open and Applied is still the import base's digest, the
-diff is shown and says the comments of the node's text also go. A real node reads `pendingConvergence:
+diff is shown and says the comments of the adopted configuration do not go with the apply. A real node reads `pendingConvergence:
 true` and `formOnly: true` here, since its text carries comments the compilation drops.
 
 ### 5.4 Editing fragments, profiles and assignments

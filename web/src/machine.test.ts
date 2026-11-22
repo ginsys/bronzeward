@@ -50,7 +50,7 @@ describe("journeys §2.4 status sentences, field by field", () => {
   test("formOnly says the release differs in form only and what the first apply does", () => {
     const adopted = { release: "rel_new", source: "adoption", importBase: null };
     const out = sentences(machine({ applied: adopted, pendingConvergence: true, formOnly: true }), [obsA]);
-    expect(out).toContain("Differs in form only (comments and encoding): the selected release rel_new for this machine. The release has the same documents, keys and values as the configuration Bronzeward adopted from the machine. The first apply sends the release's text, without the node's comments.");
+    expect(out).toContain("Differs in form only (comments and encoding): the selected release rel_new for this machine. The release has the same documents, keys and values as the configuration Bronzeward adopted from the machine. The first apply sends the release's text, without the comments of the adopted configuration.");
     expect(out.join(" ")).not.toContain("differs from what Bronzeward applied");
   });
 

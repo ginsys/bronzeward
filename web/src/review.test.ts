@@ -130,7 +130,7 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
     const rel = "rel_BWSYNTH-h7rt2bd";
     const text = releaseNote(rel, { desired: rel, applied: { release: rel, source: "adoption", importBase: null }, pendingConvergence: true, formOnly: true });
     expect(text).toContain("Differs in form only (comments and encoding)");
-    expect(text).toContain("The first apply sends the release's text, without the node's comments.");
+    expect(text).toContain("The first apply sends the release's text, without the comments of the adopted configuration.");
     expect(text).not.toContain("differs from what Bronzeward applied");
   });
 
