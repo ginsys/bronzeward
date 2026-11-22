@@ -380,7 +380,9 @@ These actions are on the web:
   `/recovery/operations/<operation>`. The operation's page links to it with **Open in Recovery**
   while the operation is `unresolved`. Each takes a reason, which is the record, and one press.
   Take over sends the highest generation the operation's events and attempts show, as the command
-  does, and the server refuses a generation that is not current. Resolve as cancelled is off with
+  does, and the server refuses a generation that is not current. Take over is off, with its reason,
+  for an operation the server would refuse (not an apply-config, or not committed, sending,
+  verifying or unresolved). Resolve as cancelled is off with
   its reason where an attempt is recorded, and says that it records no remote outcome. Neither
   sends anything to the node.
 

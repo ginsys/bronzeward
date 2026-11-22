@@ -47,12 +47,14 @@ export function ownerGeneration(events: readonly Pick<EventBody, "data">[], atte
 
 // Said where the events could not be read: the generation is then read from the attempts alone.
 const EVENTS_UNREAD = "The operation's events were not read, so the owner generation is read from its attempts alone.";
-const TERMINAL = ["completed", "failed", "rejected", "cancelled", "succeeded"];
+// The states a takeover is accepted in, and the one kind it acts on (internal/api/outcome.go takeOverTx, operationMachine).
+const TAKEN_OVER_IN = ["committed", "sending", "verifying", "unresolved"];
 
 // Why a control is off for this operation, or undefined where it is on. The server stays authoritative: a read that is stale is
 // answered by its refusal, shown in place.
 export function takeOverWhy(o: Operation): string | undefined {
-  return TERMINAL.includes(o.state) ? `The operation is ${o.state}: there is nothing to take over.` : undefined;
+  if (o.kind !== "apply-config") return `The operation is a ${o.kind}, and only an apply-config operation is taken over.`;
+  return TAKEN_OVER_IN.includes(o.state) ? undefined : `The operation is ${o.state}: only one that is committed, sending, verifying or unresolved is taken over.`;
 }
 export function resolveWhy(o: Operation): string | undefined {
   if (o.state !== "unresolved") return `The operation is ${o.state}: only an unresolved operation is resolved.`;

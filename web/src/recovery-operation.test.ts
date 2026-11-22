@@ -35,9 +35,12 @@ describe("ownerGeneration", () => {
 });
 
 describe("when a control is off", () => {
-  test("take over is off for a finished operation and on for the others", () => {
-    for (const s of ["completed", "failed", "rejected", "cancelled", "succeeded"]) expect(takeOverWhy(op(s)), s).toContain(`is ${s}`);
-    for (const s of ["unresolved", "running", "verifying"]) expect(takeOverWhy(op(s)), s).toBeUndefined();
+  test("take over is on in the four states the server accepts and off in the others", () => {
+    for (const s of ["completed", "failed", "rejected", "cancelled", "succeeded", "running"]) expect(takeOverWhy(op(s)), s).toContain(`is ${s}`);
+    for (const s of ["committed", "sending", "verifying", "unresolved"]) expect(takeOverWhy(op(s)), s).toBeUndefined();
+  });
+  test("take over is off for an operation that is not an apply-config", () => {
+    expect(takeOverWhy({ ...op("unresolved"), kind: "publish" })).toContain("only an apply-config operation");
   });
   test("resolve is on for an unresolved operation with no attempt only", () => {
     expect(resolveWhy(op("unresolved"))).toBeUndefined();

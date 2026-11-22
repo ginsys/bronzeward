@@ -4,7 +4,7 @@
 // The first press of each case goes to the real routes. Every value is synthetic.
 import { $, browser, expect } from "@wdio/globals";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { absent, answers, api, disposable, faults, fixtureSignIn, holding, mint, storageEmpty, type Seed } from "./helpers.ts";
+import { absent, answers, api, disposable, faults, fixtureSignIn, mint, storageEmpty, type Seed } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -89,21 +89,42 @@ describe("the recovery page of one operation (#365)", () => {
     expect(await generation()).toBe(before + 1);
     await browser.refresh();
     await expect($('[data-testid="recovery-operation-state"]')).toBeExisting({ wait: 30_000 });
-    expect(await posts("takeovers")).toHaveLength(2);
+    await absent(async () => (await posts("takeovers")).length > 2, "a take over sent again after the reload");
+  });
+
+  it("a resolution whose answer is dropped after the commit is repeated under its key and is one act, and a reload sends nothing", async function () {
+    this.timeout(120_000);
+    await start("seed=noattempt");
+    const before = (await events()).filter((e) => e.type === "operation-state").length;
+    await open();
+    await faults({ upstream: at, steps: { path: `/operations/${op}/resolutions`, take: ["commit-drop"] } });
+    await reason("Resolve as cancelled", "never sent");
+    await $('form[aria-label="Resolve as cancelled"] button').click();
+    // The repeat is sent with the operation already cancelled: the client's own checks would refuse it, so it is the key that carries it.
+    await expect($('[data-testid="resolutions-answer"]')).toHaveText(expect.stringContaining("This records no remote outcome"), { wait: 60_000 });
+    const sent = await posts("resolutions");
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.split(" ")[2]).toBe(sent[0]!.split(" ")[2]);
+    expect((await api(at, "h-viewer", "GET", `/operations/${op}`)).body!["state"]).toBe("cancelled");
+    expect((await events()).filter((e) => e.type === "operation-state").length).toBe(before + 1);
+    await browser.refresh();
+    await expect($('[data-testid="recovery-operation-state"]')).toBeExisting({ wait: 30_000 });
+    await absent(async () => (await posts("resolutions")).length > 2, "a resolution sent again after the reload");
   });
 
   it("an operation another operator resolved shows the server's refusal of a second resolution, and records no second act", async function () {
     this.timeout(120_000);
     await start("seed=noattempt");
     await open();
-    await faults({ upstream: at, held: `/operations/${op}` });
-    await browser.waitUntil(async () => (await holding()).includes(`/operations/${op}`), { timeout: 15_000, timeoutMsg: "the page's read was not held" });
+    // The page reads the operation once and again only after its own act, so it still shows the operation unresolved here.
     expect((await api(at, "h-recovery", "POST", `/operations/${op}/resolutions`, { to: "cancelled", reason: "the other operator" })).status).toBe(201);
+    const before = (await events()).filter((e) => e.type === "operation-state").length;
     await reason("Resolve as cancelled", "never sent");
     await $('form[aria-label="Resolve as cancelled"] button').click();
-    await expect($('[data-testid="resolutions-answer"]')).toHaveText(expect.stringContaining("Not saved"), { wait: 30_000 });
+    await expect($('[data-testid="resolutions-answer"]')).toHaveText(expect.stringContaining("the operation is cancelled"), { wait: 30_000 });
     expect((await answers()).filter((a) => a.startsWith(`/operations/${op}/resolutions `))).toEqual([`/operations/${op}/resolutions 409`]);
-    expect((await events()).filter((e) => e.type === "operation-state").length).toBeGreaterThan(0);
+    // once: read after the server's 409 was answered and shown, so the refused write is settled and the event list cannot still grow from it
+    expect((await events()).filter((e) => e.type === "operation-state").length).toBe(before);
   });
 
   it("a reason is required, and a blank one sends nothing", async function () {
