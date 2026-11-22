@@ -632,12 +632,14 @@ export function view(path: string, query: string, go: (to: string) => void): Rea
   if (id === "new" && kind === "publications") return <PublishDraft query={query} />;
   if (id === "new" && kind === "plans") return <PlanNew query={query} />;
   if (id === undefined) {
+    // /fragments, /profiles and /assignments open the page that lists all three (ginsys/bronzeward#1087); a filter there moves to /sources.
+    const sources = () => <Sources query={query} go={go} />;
     const pages: Record<string, () => ReactNode> = {
       machines: () => <Machines query={query} go={go} />, clusters: () => <Clusters />,
       // /drafts and /releases open the page that lists both.
       changes: () => <Changes />, drafts: () => <Changes />, releases: () => <Changes />,
       plans: () => <Plans query={query} go={go} />, operations: () => <Operations query={query} go={go} />,
-      sources: () => <Sources query={query} go={go} />, audit: () => <Audit />, recovery: () => <RecoveryConsole />,
+      sources, fragments: sources, profiles: sources, assignments: sources, audit: () => <Audit />, recovery: () => <RecoveryConsole />,
       ingestions: () => <Imports query={query} go={go} />,
     };
     return kind !== undefined && Object.hasOwn(pages, kind) ? pages[kind]!() : undefined;
