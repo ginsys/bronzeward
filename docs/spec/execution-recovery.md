@@ -1095,7 +1095,7 @@ state is being accepted (design §12.1).
    §17.22) **(choice §10.14)**. Ingestion records the baseline's
    configuration digest (§1) over the same input it encrypts (compilation
    contract §2.3 step 8). An existing-cluster import records it the same way, so
-   the handover below compares against the same digest. Where the machine has
+   the adoption below compares against the same digest. Where the machine has
    a name and the drifted configuration holds a `HostnameConfig` whose hostname
    equals it, ingestion removes that document from the sanitized document, as an
    import does (compilation contract §2.3 step 2a, §6.1): the hostname is then
@@ -1115,7 +1115,7 @@ state is being accepted (design §12.1).
    allows, with the self-approval rule. The adopt plan binds the machine and
    its identity (§2), its assignment revision, its baseline revision (none
    for a machine with no `Applied`), the machine's `Desired` release at plan creation (or none), the
-   open drift record (none for a handover), the adopted release, the baseline's
+   open drift record (none for an adoption), the adopted release, the baseline's
    configuration digest, a maximum observation age, its expiry, the approval
    policy, and its creator **(choice §10.38)**. It has the plan states of
    §2, and any change to a bound value needs a new plan.
@@ -1129,7 +1129,7 @@ state is being accepted (design §12.1).
       current recovery epoch;
    3. the machine's assignment revision, baseline revision and `Desired`
       release equal the bound ones, and the bound drift record is still open
-      (for a handover, the machine still has no `Applied`);
+      (for an adoption, the machine still has no `Applied`);
    4. the machine's recorded observation with the highest basis (§4.1), of any
       purpose, began its read after the approval, is no older than the age the
       plan binds, and shows the machine identity the plan binds, the
@@ -1200,10 +1200,10 @@ machine is then pending convergence (§1), not drifted. Converging it is an
 ordinary approved plan whose redacted whole-configuration diff shows what the
 re-encoding changes (§2).
 
-**Existing-cluster handover.** The same transaction establishes the first
+**Existing-cluster adoption.** The same transaction establishes the first
 `Applied` for a machine that has none, which is how existing-cluster adoption
-(design §9.1) hands a machine over. Such a machine is not drifted, since there
-is no `Applied` to differ from; the adopt plan is the handover authorization,
+(design §9.1) adopts a machine. Such a machine is not drifted, since there
+is no `Applied` to differ from; the adopt plan is the adoption authorization,
 binds no drift record and no baseline revision, and compares the baseline
 digest recorded by import (step 1); requirements 4.1 to 4.5 apply otherwise
 unchanged. The adopt plan binds the machine's assignment revision like any
@@ -1211,7 +1211,7 @@ plan, so the machine's release holds one: an assignment that selects nothing is
 enough, and a release that holds none for a machine with no assignment is
 refused a plan in words that name that next step
 ([persistence and API](persistence-api.md) choice §17.47). The rest of
-that handover, from publishing the import draft to recording the adoption,
+that adoption, from publishing the import draft to recording the adoption,
 belongs to the [approval work](https://github.com/ginsys/bronzeward/issues/25);
 the import that precedes it belongs to the
 [adoption work](https://github.com/ginsys/bronzeward/issues/22).

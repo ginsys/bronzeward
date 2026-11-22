@@ -148,7 +148,7 @@ machine. The review, continue, takeover and abandon controls are on a later page
 *On your deployment:* `platform` and the endpoints are your machines'; supply your own talosconfig
 as the first key with `bronzewardctl cluster first-key` (or let `cluster onboard` do it).
 
-## S3 handover: adopt both machines
+## S3 adoption: both machines
 
 Adoption makes the imported configuration the machine's `Applied` state without sending anything to
 the node. It needs a published release covering the machine and an assignment for the machine, which
@@ -227,7 +227,7 @@ call PUT /drafts/$draft/profiles/workers "$author" "$(jq -nc --arg f "$frv" '{fr
 call PUT /drafts/$draft/assignments/$machine_w "$author" '{"profiles": ["workers"], "fragments": {}}' walkthrough-assignment-s2 "$etag"; etag=$(etag)
 ```
 
-**3. Publish**, as in the handover. The release becomes the worker's `desired`; `applied` stays the
+**3. Publish**, as in the adoption. The release becomes the worker's `desired`; `applied` stays the
 adopted release until a plan runs.
 
 ```sh
@@ -330,7 +330,7 @@ call POST /ingestions "$author" "$(jq -nc --arg m "$machine_w" --arg d "$draft" 
 Wait for it as in S1 and refresh `etag`. The adopted base now holds S2's label as a reference, and
 a fragment overriding it would refuse publication, so the worker must stop selecting `s2-labels`.
 Here the `workers` profile lists nothing else, and a profile lists at least one fragment, so point
-the worker's assignment back at the handover's cluster fragment. Then publish, plan an adoption
+the worker's assignment back at the adoption's cluster fragment. Then publish, plan an adoption
 and approve it:
 
 ```sh
@@ -346,7 +346,7 @@ call POST /plans/$plan/approvals "$approver" '{}' walkthrough-approval-adopt-dri
 
 The plan binds the open drift record (`driftRecord`). The adoption commits even while frozen, since
 it sends nothing. The record closes `adopted` and `applied.source` reads `adoption`. As in the
-handover, the approval answers first: wait for the adoption before changing the node again, or a
+adoption, the approval answers first: wait for the adoption before changing the node again, or a
 later digest gets it refused.
 
 ```sh

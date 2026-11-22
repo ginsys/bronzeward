@@ -776,7 +776,7 @@ contract's, and this specification does not close it.
    every write it sends has a `principal` to compare. Every write, its first send and each
    repeat, carries the reference epoch in `Bronzeward-Expected-Epoch`: the last epoch the client saw before the
    first send, or the epoch the caller names for the write where one that acts on its reads over time does (the
-   handover button's press names the epoch it began under, and the Connect a cluster page names the epoch its plan's first press began under for every press of that plan (a client that holds no epoch then sends nothing and the page says so), [A11](#14-proposed-api-gap-issues-and-downstream-refinement) item 4). An empty or repeated header is `400 invalid-request`, never taken as absent
+   adopt button's press names the epoch it began under, and the Connect a cluster page names the epoch its plan's first press began under for every press of that plan (a client that holds no epoch then sends nothing and the page says so), [A11](#14-proposed-api-gap-issues-and-downstream-refinement) item 4). An empty or repeated header is `400 invalid-request`, never taken as absent
    (`internal/api/api.go:426-433`). The header needs API revision 2
    ([persistence and API §9.1](persistence-api.md#91-conventions)): an earlier server ignores it
    without error, so a client that relies on it declares revision 2 as its minimum
@@ -1622,7 +1622,7 @@ the client's rule wins wherever the two meet.
    no role, and every fill is an opaque colour so the contrast measure can read it. The filters and
    actions above a list sit in one wrapping row (the `toolbar` class), each action keeping its refusal
    note beside it, with the markup order unchanged. The web client's words for what a person meets
-   ([#1055](https://github.com/ginsys/bronzeward/issues/1055); the specification states the words and sentences once, for both clients, and `bronzewardctl` prints the three machine state words and the sentences of operator experience §2.4, [#1071](https://github.com/ginsys/bronzeward/issues/1071); "Not managed yet" is the console's word for a machine with no Desired and no Applied, which the command prints as `-` when no other state applies):
+   ([#1055](https://github.com/ginsys/bronzeward/issues/1055); the specification states the words and sentences once, for both clients, and `bronzewardctl` prints the three machine state words and the sentences of operator experience §2.4, [#1071](https://github.com/ginsys/bronzeward/issues/1071); "Not adopted yet" is the console's word for a machine with no Desired and no Applied, which the command prints as `-` when no other state applies):
    "Drafts and releases" is the page that lists both, and `/drafts` and `/releases` open it; "Fragments and profiles"
    is the page the word "sources" named, and a release's count of what it is built from is headed "Built from"; the
    buttons read "Enter a cluster by hand" (it records a cluster Bronzeward did not create) and "Add machine"; a
@@ -1633,7 +1633,7 @@ the client's rule wins wherever the two meet.
    Every titled page of the console shows one note under its title that says what the page is, what to do on it and where to
    go next (the plan page's approval part is drawn inside its Approval section; the signed-out page already says so in
    its own line, and the not-found page's note follows its own line), and a note says only what the page shows in its
-   state: a part about Add, Publish, Discard or Start managing is shown only where that control is, the release's
+   state: a part about Add, Publish, Discard or Adopt is shown only where that control is, the release's
    rendered configuration page shows its note only where the configuration is drawn, and a page that shows a record
    shows its note once the record is read. A note holds no identifier and no role word, uses the word its own page's
    control shows, and adds a link only where the page has none to that place. The one exception is the recovery page,
@@ -2276,8 +2276,8 @@ outcome line, and under it the next step an operator can take, from the steps of
    import) it gives the table's text and never a line that sends the reader back to `operation show`; (b) an unknown
    pair says "this command has no description of it". `operation watch` prints the same outcome lines.
 
-**A11. One button takes a draft's machines under management (client rule, no API change).**
-The web client's draft page offers "Start managing these machines" for a draft that holds an import base
+**A11. One button adopts a draft's machines (client rule, no API change).**
+The web client's draft page offers "Adopt these machines" for a draft that holds an import base
 ([#1066](https://github.com/ginsys/bronzeward/issues/1066)).
 
 1. It has no route of its own. For each machine of the draft with no assignment entry in it and no assignment head it
@@ -2313,7 +2313,7 @@ The web client's draft page offers "Start managing these machines" for a draft t
    publication sends only what is stored.
 6. After the approval the controller records the adoption unasked
    ([execution and recovery §6.3](execution-recovery.md#63-adopt)). The page follows each machine for a bounded time and
-   says that the person may leave: the handover finishes without the page.
+   says that the person may leave: the adoption finishes without the page.
 
 **C1. Contract correction.** Add the `reset` event to the stream contract of
 [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) (G15). A

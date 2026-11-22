@@ -159,7 +159,7 @@ title until every one has held focus; it reads a focus as "control k of m", neve
 | 1.4.10 Reflow | at 320 CSS pixels the page with its timeline and the resolution's row does not scroll sideways, and no control of `main` lies outside the viewport | pass | pass | pass | pass |
 
 Not run here: the screen-reader half of T9, owed by [#447](https://github.com/ginsys/bronzeward/issues/447),
-and the keyboard part of T3's handover, which goes with
+and the keyboard part of T3's adoption, which goes with
 [#1068](https://github.com/ginsys/bronzeward/issues/1068). Safari runs the keyboard cases and skips the
 320 pixel case (its window stops at 336 CSS pixels, see `itNarrow`).
 

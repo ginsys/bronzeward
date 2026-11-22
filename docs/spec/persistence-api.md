@@ -73,7 +73,7 @@ Out of scope, owned elsewhere:
   duties 1–6; [§14.2](../design/Talos_Configuration_and_Machine_Management_Design.md#142-operator-owned-database-and-vault-services));
 - the adoption workflow ([ginsys/bronzeward#22](https://github.com/ginsys/bronzeward/issues/22)
   for the import, [ginsys/bronzeward#25](https://github.com/ginsys/bronzeward/issues/25) for the
-  handover) and the edit and publication user flow
+  adoption) and the edit and publication user flow
   ([ginsys/bronzeward#23](https://github.com/ginsys/bronzeward/issues/23)).
 
 Bronzeward owns the schema, migrations and connection and transaction behavior
@@ -2909,7 +2909,7 @@ change:
   machine reads by its own fields (`needs-plan` for a machine with a `Desired`
   release and no `Applied`), and the operator makes the new plan that execution
   and recovery §6.3 requires.
-- A handover: a machine with no `Desired` and no `Applied`, and an `approved`
+- An adoption: a machine with no `Desired` and no `Applied`, and an `approved`
   adopt plan that bound no `Desired`, with a current approval: `plan` is picked
   (its bound values equal the machine's), so the step is `awaiting-dispatch`,
   never `not-handed-over`; an adopt plan whose adopted `release` differs from the
