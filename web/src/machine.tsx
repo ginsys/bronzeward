@@ -55,7 +55,7 @@ export function driftReads(drift: NonNullable<Machine["openDrift"]>, obs: Observ
   return { opened: obs.find((x) => x.id === drift.observation), last: obs.find((x) => x.id === drift.lastObservation) };
 }
 
-// The words of the machine page's one link to the drift page, which follow the machine's state.
+// The words of the machine page's standing link to the drift page, which follow the machine's state.
 export const driftLinkText = (m: Pick<Machine, "openDrift" | "frozen">): string =>
   m.frozen ? (m.openDrift === null ? UNFREEZE_THE_MACHINE : UNFREEZE_OR_DECIDE) : m.openDrift === null ? FREEZE_THIS_MACHINE : DECIDE_ON_THE_CHANGE;
 

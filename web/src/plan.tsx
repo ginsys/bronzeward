@@ -11,7 +11,7 @@ import { PageNote } from "./page-note.tsx";
 import type { Problem } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
-import { MachineById, Named } from "./titles.tsx";
+import { MachineById, Named, useBody } from "./titles.tsx";
 import { CREATE_PLAN_NOTE, UNFREEZE_THE_MACHINE } from "./words.ts";
 
 type PlanInput = components["schemas"]["PlanInput"];
@@ -266,8 +266,9 @@ function FrozenSaid({ p, machine }: { p: Plan; machine: Machine | null | undefin
   return <Status testid="plan-frozen">{PLAN_FROZEN} <Ref to={driftPath(p.machine)} id={p.machine}>{UNFREEZE_THE_MACHINE}</Ref>.</Status>;
 }
 function ProposedFrozen({ p }: { p: Plan }) {
-  const m = useItem<Machine>(`/machines/${enc(p.machine)}`);
-  return <FrozenSaid p={p} machine={m.kind === "ok" ? m.data : undefined} />;
+  // The titles' store: the plan's heading and target ask for the same path, so the machine is read once.
+  const m = useBody<Machine>(`/machines/${enc(p.machine)}`);
+  return <FrozenSaid p={p} machine={m} />;
 }
 export function FrozenLine({ p, machine }: { p: Plan; machine: Machine | null | undefined }) {
   if (p.operation !== "apply-config") return null;

@@ -51,10 +51,13 @@ let served: Record<string, unknown>;
 // What the next writes answer, in order, and what was sent.
 let answers: Response[];
 let sent: { method: string; path: string; body: unknown }[];
+// Every path the page asked the client to read.
+let readLog: string[];
 
 const reads = (): Reads => ({
   client: {
     read: async (path: string) => {
+      readLog.push(path);
       const bare = path.split("?")[0]!;
       if (path in served) return { kind: "ok", data: served[path] };
       if (bare in served) return { kind: "ok", data: served[bare] };
@@ -121,6 +124,7 @@ beforeEach(() => {
   served = { [`/machines/${MCH}`]: machine(), [`/machines/${MCH}/observations`]: { items: [obsM, obsK], next: undefined } };
   answers = [];
   sent = [];
+  readLog = [];
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -408,6 +412,10 @@ describe("the plan page says a frozen machine holds an apply-config plan", () =>
   test("an approved plan says it too, from the machine read it already makes", async () => {
     await planPage("approved", true);
     expect(text("plan-frozen")).toContain(PLAN_FROZEN);
+  });
+  test.each(["proposed", "approved"])("a %s plan page reads its machine once", async (state) => {
+    await planPage(state, true);
+    expect(readLog.filter((p) => p === `/machines/${MCH}`)).toHaveLength(1);
   });
   test("an unfrozen machine, an adopt plan and a finished plan say nothing of it", async () => {
     await planPage("proposed", false);
