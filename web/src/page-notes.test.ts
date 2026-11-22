@@ -472,10 +472,58 @@ describe("the notes of the other pages", () => {
     await pageNote(h(IngestionItem, { id: "ing_a", key: "read" }), IMPORT_NOTE);
   });
 
-  test("the not-found page says where to start, after its own line", async () => {
+  test("the not-found page says where to start, after its heading and its own line", async () => {
     await shown(h(Page, { path: "/nowhere", query: "", go: () => {} }));
+    const status = box.querySelector('[data-testid="status"]')!;
+    expect(status.textContent).toContain("No page at /nowhere.");
     expect(note().textContent).toBe(NOT_FOUND_NOTE);
     expect(box.querySelector("h2")!.textContent).toBe("Not found");
+    expect(status.compareDocumentPosition(note()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    underTheTitle(note(), status.closest(".alert") ?? status);
+  });
+
+  test("a list or form page keeps its note under the title when its reads fail", async () => {
+    failing = true;
+    for (const [, page, text] of lists) {
+      await act(async () => root.unmount());
+      root = createRoot(box);
+      await pageNote(page(), text);
+    }
+  });
+
+  test("a profile page shows the profile note, once read", async () => {
+    served["/profiles/prf_a"] = { id: "prf_a", name: "workers", cluster: "cl_a", scope: "cluster", layer: "base", revision: null, headRevision: 0, createdAt: "2026-11-21T14:02:00Z" };
+    await pageNote(h(SourceItem, { kind: "profile", id: "prf_a" }), sourceNote("profile"));
+  });
+
+  test("the item pages show no note while their read is pending or has failed", async () => {
+    served["/assignment-revisions/asr_a"] = { id: "asr_a", cluster: "cl_a", machine: MCH, profiles: [], fragments: {}, author: "p0", createdAt: "2026-11-21T14:02:00Z" };
+    served["/dependencies/dep_a"] = { id: "dep_a", provider: "github", object: "owner/repo", version: 1, created: "2026-11-21", class: "release", reason: null, firstRetainedAt: null, unknownSince: null, observedFrom: "2026-11-21T14:02:00Z", recordedAt: "2026-11-21T14:02:00Z", stale: false };
+    served["/import-base-revisions/ibr_a"] = { id: "ibr_a", machine: MCH, author: "p0", createdAt: "2026-11-21T14:02:00Z", documentBytes: 10, references: 0, embedded: 0 };
+    served["/recovery"] = { epoch: "e0", recoveryMode: false, entry: null, exit: null, scopes: [] };
+    const items = [
+      () => h(RevisionItem, { kind: "assignment", id: "asr_a" }),
+      () => h(DependencyItem, { id: "dep_a" }),
+      () => h(ImportBaseItem, { id: "ibr_a" }),
+      () => h(RecoveryConsole, {}),
+    ];
+    for (const state of ["held", "failing"] as const) {
+      held = state === "held";
+      failing = state === "failing";
+      for (const page of items) {
+        await act(async () => root.unmount());
+        root = createRoot(box);
+        await shown(page());
+        expect(notes()).toHaveLength(0);
+      }
+    }
+  });
+
+  test("an import with no machine, a draft update, shows the import note and its progress part draws nothing", async () => {
+    served["/ingestions/ing_u"] = { id: "ing_u", kind: "draft-update", mode: "encrypted", state: "held", machine: null, draft: DRF, operation: null, review: null, ownerGeneration: 1, leaseUntil: "2026-11-22T14:02:00Z", expiresAt: "2026-11-22T14:02:00Z", createdAt: "2026-11-21T14:02:00Z" };
+    await pageNote(h(IngestionItem, { id: "ing_u" }), IMPORT_NOTE);
+    expect(IMPORT_NOTE).toContain("draft update");
+    expect(IMPORTS_NOTE).toContain("draft updates");
   });
 
   test("the recovery page adds its role sentence only for a person without the recovery role", async () => {
