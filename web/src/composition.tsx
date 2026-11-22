@@ -344,10 +344,12 @@ export const assignmentBody = (l: Lists) => ({
   fragments: Object.fromEntries(LAYERS.filter((x) => l[x].length > 0).map((x) => [x, l[x]])),
 });
 
-// Why Save sends nothing for this list, if it does not (api: updateAssignment).
+// What an empty list means, shown where it is empty: an assignment that selects nothing is valid.
+export const EMPTY_ASSIGNMENT = "Nothing is selected: the machine's configuration is its import base alone. If the machine already has selections, Save removes them from its next release.";
+
+// Why Save sends nothing for this list, if it does not (api: updateAssignment). An empty list is sent.
 export function assignmentRefusal(l: Lists): string | undefined {
   const n = total(l);
-  if (n === 0) return "Not sent: an assignment selects at least one profile or fragment. Remove the entry to drop the assignment.";
   if (n > ASSIGNMENT_MAX) return `Not sent: an assignment selects at most ${ASSIGNMENT_MAX} profiles and fragments in all.`;
   const twice = (names: string[]) => names.find((x, i) => names.indexOf(x) !== i);
   const p = twice(l.profile);
@@ -741,6 +743,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
       </h3>
       <p>{entry === undefined ? "new" : change(entry)}{unsavedList && " -> unsaved"}</p>
       <p>{ASSIGNMENT_STATEMENT}</p>
+      {open && total(lists) === 0 && <p>{EMPTY_ASSIGNMENT}</p>}
       {entry?.revision === null && <Status>Removed in this draft.</Status>}
       {waits && (failed
         ? <p><button type="button" onClick={() => retry((x) => x + 1)}>Read the entry again</button></p>

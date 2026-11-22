@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import {
-  ASSIGNMENT_STATEMENT, AssignmentPane, assignmentBody, assignmentRefusal, choices, compose, fragmentOffers, fromRevision, isCurrent, listsOf, machineOffers, move, noLists, PINS_MAX, PINS_STATEMENT,
+  ASSIGNMENT_STATEMENT, AssignmentPane, EMPTY_ASSIGNMENT, assignmentBody, assignmentRefusal, choices, compose, fragmentOffers, fromRevision, isCurrent, listsOf, machineOffers, move, noLists, PINS_MAX, PINS_STATEMENT,
   type Composition, pinned, pinRefusal, pinsOf, ProfilePane, profileBody, profileOffers, readComposition, referenceLines, referenceStates, showable, shownResult, sourceKey, stillOffered, unknownPins, withLists, withoutPin, withPin,
 } from "./composition.tsx";
 import { editor, EMPTY, FRESH, holdsUnsaved, where } from "./drafts.tsx";
@@ -205,8 +205,9 @@ describe("an assignment's lists, as the editor's text (W4)", () => {
 });
 
 describe("what Save refuses before it sends (api: updateAssignment)", () => {
-  test("nothing selected", () => {
-    expect(assignmentRefusal(noLists())).toMatch(/at least one/);
+  test("nothing selected is sent, and the body is empty", () => {
+    expect(assignmentRefusal(noLists())).toBeUndefined();
+    expect(assignmentBody(noLists())).toEqual({ profiles: [], fragments: {} });
   });
   test("more than 256 in all, profiles and fragments together", () => {
     const many = (n: number, p: string) => Array.from({ length: n }, (_, i) => `${p}${i}`);
@@ -395,6 +396,10 @@ describe("the assignment entry (W4)", () => {
     const at = ["Profiles", "Layer global", "Layer site", "Layer cluster", "Layer role", "Layer workload", "Layer override"].map((t) => out.indexOf(`${t}, in order`));
     expect(at.every((x, i) => x > 0 && (i === 0 || x > at[i - 1]!))).toBe(true);
     expect(out).toContain("Show composition and references");
+  });
+  test("an empty list says what it means in an open draft, and nothing otherwise", () => {
+    expect(pane()).toContain(EMPTY_ASSIGNMENT.replace("'", "&#x27;"));
+    expect(pane("discarded")).not.toContain("import base alone");
   });
   test("a draft that is not open takes no write", () => {
     const out = pane("discarded");
