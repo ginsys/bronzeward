@@ -1332,6 +1332,10 @@ where the contract names no step:
 - A release of a scope that is not `ready`, or whose Desired release moved after the mark, is refused
   with code `conflict`. The shared text has no case for it, so the client adds the next step per
   command. A release says it is not an approval.
+- On the console, mark and release are controls of the scope's own row, one machine per press, with
+  no control for all scopes and no typed answer. Mark is on a scope in `blocked`, `unresolved` or
+  `ready`, and release on a `ready` one. The row keeps the answer when the next read moves the scope,
+  and a refusal shows the server's reason with the same next step as the command.
 - A resolution says it records no remote outcome. The client refuses it before sending when the
   operation is not `unresolved` or has an attempt. A repeat skips these checks. A resolution that
   committed leaves the operation `cancelled`, so the checks would stop the repeat before the key

@@ -60,8 +60,23 @@ export const DEPENDENCY_NOTE = "A dependency is an outside thing of which Bronze
 export const AUDIT_NOTE = "Each row is an act Bronzeward recorded: who did what, through which route, and to what. Nothing on this page changes them.";
 export const DRIFT_ADOPTION_NOTE = "Drift adoption reads the machine's own configuration into a draft, so that you can review what changed on it. Choose the machine and the draft that should receive the configuration. Reading it writes nothing to the machine.";
 export const ENTER_RECOVERY_NOTE = "Enter recovery after a restore, to record which backups were restored. Name each restored backup, when it was taken, and when the restore stopped writes. Times are RFC 3339 with a zone.";
-export const RECOVERY_NOTE = "Recovery mode is for restoring Bronzeward from a backup. This page shows whether it is on and which scopes are still in recovery, and lets you leave recovery mode or revoke an identity.";
-export const RECOVERY_ROLE_NOTE = "Leaving recovery mode and revoking an identity need the recovery-admin role, which you do not have.";
+export const RECOVERY_NOTE = "Recovery mode is for restoring Bronzeward from a backup. This page shows whether it is on and which scopes are still in recovery. On a machine's row, Mark reads the machine and records what it supports, and Release lets a ready scope act again, one machine at a time. You can also leave recovery mode or revoke an identity.";
+export const RECOVERY_ROLE_NOTE = "Marking and releasing a scope, leaving recovery mode and revoking an identity need the recovery-admin role, which you do not have.";
+// What each item of a mark's `missing` list says (the command's table, cmd/bronzewardctl/recovery_scope.go).
+export const MISSING_MEANING: Readonly<Record<string, string>> = {
+  observation: "the restoration observation does not support the scope: it read no identity, does not follow the accounting, an operation changed after it, or it used another access version",
+  identity: "the identity the node showed is not the one the machine record binds, or a later observation showed another",
+  access: "the cluster's Talos access failed the dependency check",
+  artifact: "the Desired release's artifact could not be decrypted for the machine; a lost key version leaves through a newly published release",
+};
+export const MISSING_UNKNOWN = "the server named it and this page has no text for it";
+// The step after a mark, by the state it set.
+export const MARK_NEXT: Readonly<Record<string, string>> = {
+  ready: "Next: release the scope.",
+  unresolved: "A restored operation still holds the scope. It is classified after the normal restart; then mark the scope again.",
+  blocked: "Next: fix what is missing, then mark the scope again.",
+};
+export const RELEASE_NOT_APPROVAL = "A release is not an approval: it approves no plan and sends nothing, and a plan still needs its own approval.";
 export const NOT_FOUND_NOTE = "Start from Machines or Clusters.";
 export const CONNECT_NOTE = "Connecting records the cluster and each machine that answers with a platform, and starts an import of each of those machines into one draft. A machine that does not answer, or reports no platform, is skipped. First you choose the talosconfig, then you confirm what the page found.";
 /** The column of a release that counts what it is built from. */

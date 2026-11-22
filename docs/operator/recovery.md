@@ -365,9 +365,17 @@ sees it in the navigation. Every other role sees it while recovery mode is on, a
 off with the reason `Needs recovery-admin`.
 
 The page shows the epoch, the mode, the entry, the exit and the start mode. It lists each scope with
-its state and next step, and it reads the state again every 5 seconds.
+its state, its next step and its decision controls, and it reads the state again every 5 seconds.
 
-Three actions are on the web:
+These actions are on the web:
+
+- **Mark** is on the row of a scope in `blocked`, `unresolved` or `ready`. One press reads the
+  machine and records what the evidence supports, as `recovery mark` does. The answer stays in the
+  row: the state it set, each item of `missing` with its meaning, and the next step.
+- **Release** is on the row of a `ready` scope. One press releases that scope only. The answer says
+  that a release is not an approval. A scope that is not `ready`, or whose Desired release moved
+  after the mark, is refused with the server's reason and the next step. No control acts on more
+  than one machine.
 
 - **Enter recovery** is on the page the web interface shows when the server was started for
   recovery and has no entry yet. It takes one to three restored backups, the time the restore
@@ -380,5 +388,5 @@ Three actions are on the web:
   entry and it issues no token again.
 
 These steps stay outside the browser: the restores, the `auth.deniedSubjects` edit, the restarts and
-the token rotation. The page links to them. The accounting, mark and release controls are not on the
-page yet. Use `bronzewardctl` for them.
+the token rotation. The page links to them. The accounting controls are not on the page yet. Use
+`bronzewardctl` for them.
