@@ -8,7 +8,7 @@ import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } 
 import type { components } from "./api/v1";
 import { BaseDocument } from "./claim.tsx";
 import { AssignmentPane, ProfilePane } from "./composition.tsx";
-import { Form, field, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
+import { Form, field, NO_ASSIST, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { NO_ETAG } from "./handover.ts";
 import { Handover } from "./handover.tsx";
 import { LAYERS } from "./layers.ts";
@@ -983,9 +983,6 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
     </section>
   );
 }
-
-// §11.4 item 2: browser spelling and fill services get nothing of a document or marks.
-export const NO_ASSIST = { autoComplete: "off", spellCheck: false, autoCorrect: "off", autoCapitalize: "off" } as const;
 
 function ReferenceRow({ name, declared, used, set, open }: { name: string; declared: Declared[string] | undefined; used: boolean; set: (r: Declared[string] | undefined) => void; open: boolean }) {
   const kind = declared?.kind ?? "string";

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { components } from "./api/v1";
 import { forgetETag, keepETag, keptETag } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
+import { importPath } from "./router.ts";
 import { ABANDONED_SETTLE, abandonedSince, againPath, allowed, catchUpLoss, caughtUp, documentRefusal, ended, fileReader, followRun, forgetRefused, importHeading, type Ingestion, keepTyped, lapsedRead, MAX_DOCUMENT, onEvent, REFRESH_FAILED, type ReadStamp, refreshDelay, refreshRetry, refreshWait, REVIEW_FIRST, reviewFirst, sendStart, StartImport, type StartInput, startBody, startETag, startParams, settledReads, stampRead, startRun, started, stopsWatch, typedDocument, unsent, watchDeps, watchView } from "./imports.tsx";
 import { type Load, type Reads, ReadsProvider, short } from "./list.tsx";
 import { eventLine, watch } from "./progress.ts";
@@ -67,6 +68,10 @@ describe("what an import's state allows (B15, as the CLI's import status)", () =
     expect(text(allowed(ing({ state: "released" }), NOW))).toBe("Released into draft drf_2rmp457a. Nothing is left to do.");
     expect(text(allowed(ing({ state: "abandoned" }), NOW))).toBe("Ended: abandoned. Import again");
     expect(againPath(ing())).toBe("/ingestions/new?machine=mch_b3caa2q&draft=drf_2rmp457a");
+    // One builder serves this page and the read page of an import: a machine alone, a draft alone, neither.
+    expect(importPath({ machine: "mch_a" })).toBe("/ingestions/new?machine=mch_a");
+    expect(importPath({ machine: null, draft: "drf_x" })).toBe("/ingestions/new?draft=drf_x");
+    expect(importPath({})).toBe("/ingestions/new");
   });
 });
 

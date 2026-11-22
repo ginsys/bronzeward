@@ -7,8 +7,7 @@
 
 import { useState } from "react";
 import { isAlias, isMap, isScalar, isSeq, parseAllDocuments } from "yaml";
-import { NO_ASSIST } from "./drafts.tsx";
-import { useUnsaved } from "./forms.tsx";
+import { NO_ASSIST, useUnsaved } from "./forms.tsx";
 import { short } from "./list.tsx";
 import { Action } from "./shell.tsx";
 import type { WriteSpec } from "./write.ts";

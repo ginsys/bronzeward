@@ -579,7 +579,7 @@ table (`web/src/problems.tsx`), and never a code, a rule, a scope identifier or 
 in a sentence. A rule can narrow a code where the general sentence would misstate the cause: a
 `409 conflict` with rule `import-not-reviewed` reads "The server did not show you this import's
 text. It shows a file import only to the person who continued it after its review, and an import
-read from a machine only if it has been updated to. Nothing needs doing: the import itself is not
+read from a machine only if the server is new enough to show it. Nothing needs doing: the import itself is not
 affected. If this import was read from a machine, ask whoever runs the server whether it is up to
 date.", true for every cause the server's `detail` names and for a server that still refuses an
 import read from a machine (a client cannot tell from `GET /server`: the API revision is the same

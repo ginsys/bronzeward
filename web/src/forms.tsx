@@ -84,6 +84,9 @@ export function WriteNotices({ go }: { go: (to: string) => void }) {
   });
 }
 
+// §11.4 item 2: browser spelling and fill services get nothing of a document or marks.
+export const NO_ASSIST = { autoComplete: "off", spellCheck: false, autoCorrect: "off", autoCapitalize: "off" } as const;
+
 // The editors holding text not saved, each by what it edits (#339): never stored, only guarded.
 export const unsaved = new Set<string>();
 export function useUnsaved(what: string, dirty: boolean): void {

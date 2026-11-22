@@ -7,13 +7,14 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { Claim } from "./claim.tsx";
-import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
-import { Form, field, useSend, useUnsaved, useWrites } from "./forms.tsx";
+import { keepETag, keptETag } from "./drafts.tsx";
+import { Form, field, NO_ASSIST, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { Detail, Id, type Load, type Reads, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
 import { markLines } from "./marks.tsx";
 import { eventLine, type Refusal, refusalOf, terminal, type Watch, type Watched, watch } from "./progress.ts";
 import { refusalWords } from "./problems.tsx";
 import type { Client, ReadResult } from "./request.ts";
+import { importPath } from "./router.ts";
 import { machineOptions, sharedAddresses } from "./machines.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
@@ -39,8 +40,7 @@ export const LEASE_MARGIN = 10_000;
 // import of an earlier epoch is not matched by the draft's revision alone. In this page's memory only.
 export const started = new Map<string, { draft: string; epoch: string | undefined }>();
 
-export const againPath = (b: Pick<Ingestion, "machine" | "draft">) =>
-  `/ingestions/new?${new URLSearchParams({ ...(b.machine === null ? {} : { machine: b.machine }), draft: b.draft })}`;
+export const againPath = (b: Pick<Ingestion, "machine" | "draft">) => importPath(b);
 const ImportAgain = ({ b }: { b: Pick<Ingestion, "machine" | "draft"> }) => <Ref to={againPath(b)} id={b.draft}>Import again</Ref>;
 
 const running = (b: Ingestion) => b.state === "held" || b.state === "resumed";

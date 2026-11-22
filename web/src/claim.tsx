@@ -4,10 +4,10 @@
 
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { NO_ASSIST } from "./drafts.tsx";
-import { startsNew, useSend, useWrites, Result } from "./forms.tsx";
+import { NO_ASSIST, startsNew, useSend, useWrites, Result } from "./forms.tsx";
 import { type Load, Ref, short, useReads, useSettled } from "./list.tsx";
 import { markSent, MarksPanel, markSpec } from "./marks.tsx";
+import { importPath } from "./router.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import type { Outcome, Write, WriteSpec } from "./write.ts";
@@ -207,9 +207,6 @@ type BaseDocumentBody = components["schemas"]["ImportBaseDocument"];
 export const readBaseDocument = (read: <T>(path: string, live?: () => boolean) => Promise<Load<T> | undefined>, id: string, live: () => boolean) =>
   read<BaseDocumentBody>(`/import-base-revisions/${enc(id)}/document`, live);
 
-// The page where a person imports a machine again, which is where a value is marked: the machine's, when known.
-const importAgain = (machine: string | null | undefined) => (machine == null ? "/ingestions/new" : `/ingestions/new?machine=${enc(machine)}`);
-
 export function BaseDocument({ id, machine }: { id: string; machine?: string | null }) {
   const read = useSettled();
   const { failure } = useReads();
@@ -240,7 +237,7 @@ export function BaseDocument({ id, machine }: { id: string; machine?: string | n
   const { section, close } = useCloser(drop);
   return (
     <section ref={section} tabIndex={-1} aria-label="Protected document">
-      {text === undefined ? <Action label="Show imported configuration" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={id} text={text} close={close} kind="document" again={importAgain(machine)} />}
+      {text === undefined ? <Action label="Show imported configuration" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={id} text={text} close={close} kind="document" again={importPath({ machine })} />}
       {why}
     </section>
   );

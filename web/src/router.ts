@@ -25,6 +25,12 @@ export const GROUPS = [
   ["Governance", ["/audit", "/recovery"]],
 ] as const;
 
+// The page where a machine is imported (again): its machine and the draft its result goes to, where known.
+export const importPath = (q: { machine?: string | null | undefined; draft?: string | undefined }) => {
+  const params = new URLSearchParams({ ...(q.machine == null ? {} : { machine: q.machine }), ...(q.draft === undefined ? {} : { draft: q.draft }) }).toString();
+  return params === "" ? "/ingestions/new" : `/ingestions/new?${params}`;
+};
+
 type Entries = Pick<History, "state" | "go" | "pushState" | "replaceState">;
 type Ask = (to: string, from: string) => boolean;
 const position = (state: unknown): number | undefined => {
