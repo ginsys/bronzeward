@@ -13,7 +13,7 @@ import (
 
 // importBaseCmd is the import-base noun: the one verb, document.
 func (e *env) importBaseCmd(args []string) error {
-	_, rest, err := e.verb("import-base", args, "document")
+	_, rest, err := e.verb("import-base", args, verbsOf("import-base")...)
 	if err != nil {
 		return err
 	}

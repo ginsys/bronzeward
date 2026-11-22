@@ -26,7 +26,7 @@ const (
 // driftCmd is the drift noun (operator-experience.md §5.8): drift show reads one machine's open
 // drift, adopt and revert end it. It offers no ignore, retry or mark-successful verb.
 func (e *env) driftCmd(args []string) error {
-	v, rest, err := e.verb("drift", args, "show", "adopt", "revert")
+	v, rest, err := e.verb("drift", args, verbsOf("drift")...)
 	if err != nil {
 		return err
 	}

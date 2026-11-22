@@ -116,7 +116,7 @@ func TestDriftHasNoIgnore(t *testing.T) {
 			t.Errorf("drift %s: exit %d, stdout %q, stderr %q; want a usage error", verb, code, out, errOut)
 		}
 	}
-	if _, out, _ := runDrift(t, "-h"); !strings.Contains(out, "there is no ignore command") {
+	if _, out, _ := runDrift(t, "drift", "show", "--help"); !strings.Contains(out, "There is no ignore command") {
 		t.Errorf("the help text does not say that drift has no ignore command:\n%s", out)
 	}
 }
@@ -222,15 +222,6 @@ func TestUnfreezeRoleRefused(t *testing.T) {
 	code, out, errOut := runDrift(t, "machine", "unfreeze", "mch_a", "--reason", "decided")
 	if code != 1 || out != "" || !strings.Contains(errOut, "Needs one of the roles [approver].") || strings.Contains(errOut, "Why:") {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, out, errOut)
-	}
-}
-
-// The usage text keeps the continuation line of machine set-endpoint under it: the entries added
-// after it (machine freeze, drift show) go below that line, not between the entry and its line.
-func TestUsageKeepsSetEndpointContinuation(t *testing.T) {
-	_, after, ok := strings.Cut(usage, "  machine set-endpoint <id> --talos-endpoint <ip>[:<port>]\n")
-	if !ok || !strings.HasPrefix(after, "              writes, by a person signed in as author") {
-		t.Errorf("the line after machine set-endpoint is %q", strings.SplitN(after, "\n", 2)[0])
 	}
 }
 

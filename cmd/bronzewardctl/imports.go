@@ -73,7 +73,7 @@ type settlement struct {
 // importCmd runs import start, status, review, mark, continue, takeover and abandon
 // (operator-experience.md §4, §5.3; decisions T11, T14 and T15 of #256).
 func (e *env) importCmd(args []string) error {
-	v, rest, err := e.verb("import", args, "start", "status", "review", "mark", "continue", "takeover", "abandon")
+	v, rest, err := e.verb("import", args, verbsOf("import")...)
 	if err != nil {
 		return err
 	}

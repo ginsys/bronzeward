@@ -21,7 +21,7 @@ import (
 // display that plan create, plan show and approve print (T20), and plan cancel (T22).
 
 func (e *env) planCmd(args []string) error {
-	if v, rest, err := e.verb("plan", args, "list", "show", "create", "cancel"); err != nil {
+	if v, rest, err := e.verb("plan", args, verbsOf("plan")...); err != nil {
 		return err
 	} else if v == "create" {
 		return e.planCreate(rest)
