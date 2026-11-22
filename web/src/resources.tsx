@@ -25,7 +25,8 @@ import { Status, when } from "./states.tsx";
 import { startedBy } from "./operation-words.ts";
 import { dependencyName, importedConfigurationTitle, operationTitle, safeText, savedTitle } from "./titles.ts";
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
-import { BUILT_FROM, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES } from "./words.ts";
+import { PageNote } from "./page-note.tsx";
+import { BUILT_FROM, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE } from "./words.ts";
 
 type S = components["schemas"];
 type Col<T> = readonly [string, (t: T) => ReactNode];
@@ -421,6 +422,7 @@ export function ReleaseItem({ id }: { id: string }) {
     <ItemOf<S["ReleaseBody"]> path={`/releases/${encodeURIComponent(id)}`} what="the release" title={(r) => (r === undefined ? `Release ${short(id)}` : <ReleaseHeading id={id} r={r} />)}>
       {(r) => (
         <>
+          <PageNote parts={[RELEASE_NOTE]} />
           <Fields rows={[
             ["Identifier", r.id], ["Cluster", <Id id={r.cluster} />], ["Published", <>{when(r.publishedAt)} by {by(r.publishedBy)}</>],
             ["Renderer", `contract ${r.renderer.contract} · machinery ${r.renderer.machineryVersion} · Kubernetes ${r.renderer.kubernetesVersion}`],
@@ -447,6 +449,7 @@ export function Plans({ query, go }: { query: string; go: (to: string) => void }
   return (
     <>
       <h2>Plans</h2>
+      <PageNote parts={[PLANS_NOTE]}> <Ref to="/machines" id="machines">{OPEN_A_MACHINE}</Ref> {PLANS_NOTE_END}</PageNote>
       <Pinned label="Machine" id={q.get("machine")} clear={() => set("machine", "")} />
       <Filter label="State:" value={q.get("state") ?? ""} options={choices(PLAN_STATES)} onChange={(v) => set("state", v)} />
       <ListOf label="Plans" path="/plans" query={sent(["state", "machine"])} cols={PLANS} empty={q.size === 0 ? "No plans created yet." : "No plan matches this filter."} />
@@ -483,6 +486,7 @@ export function PlanItem({ id }: { id: string }) {
         const { validation: v, dryRun, baseline } = p.evidence;
         return (
           <>
+            <PageNote parts={[PLAN_NOTE]} />
             {proposed && p.state === "proposed" && <Status testid="plan-proposed">{PROPOSED}</Status>}
             <PlanState p={p} reread={reread} answers={answers} onMachine={onMachine} />
             <Fields rows={[
@@ -529,6 +533,7 @@ export function Operations({ query, go }: { query: string; go: (to: string) => v
   return (
     <>
       <h2>Operations</h2>
+      <PageNote parts={[OPERATIONS_NOTE]} />
       <Pinned label="Machine" id={q.get("machine")} clear={() => set("machine", "")} />
       <Pinned label="Plan" id={q.get("plan")} clear={() => set("plan", "")} />
       <Filter label="Kind:" value={q.get("kind") ?? ""} options={choices(OPERATION_KINDS)} onChange={(v) => set("kind", v)} />
@@ -557,6 +562,7 @@ export function OperationItem({ id }: { id: string }) {
       title={(o) => (o === undefined ? `Operation ${short(id)}` : <OperationHeading id={id} o={o} />)}>
       {(o) => (
         <>
+          <PageNote parts={[OPERATION_NOTE]} />
           <OperationTimeline id={id} o={o} reread={reread} />
           <Fields rows={[
             ["Kind", o.kind], ["State", o.state], ["Subject", <Subject s={o.subject} />], ["Created", <>{when(o.createdAt)} by <StartedBy o={o} /></>],

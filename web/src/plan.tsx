@@ -7,10 +7,12 @@ import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "re
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { type Load, Id, Ref, short, usePending, useReads, useSettled } from "./list.tsx";
+import { PageNote } from "./page-note.tsx";
 import type { Problem } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { MachineById, Named } from "./titles.tsx";
+import { CREATE_PLAN_NOTE } from "./words.ts";
 
 type PlanInput = components["schemas"]["PlanInput"];
 type Operation = PlanInput["operation"];
@@ -147,6 +149,7 @@ export function PlanNew({ query }: { query: string }) {
   return (
     <>
       <h2>Create a plan</h2>
+      <PageNote parts={[CREATE_PLAN_NOTE]} />
       <Create key={`${release}/${machine}/${first}`} release={release} machine={machine} first={first} />
     </>
   );

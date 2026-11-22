@@ -136,7 +136,7 @@ Endpoint  127.0.0.1:<port>                 platform container
 Hardware  node ID none                    SMBIOS UUID 0b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b
 Scope     normal
 The configuration read at <local time> is attributed to rel_…, which is the Applied release (by adoption).
-Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's pendingConvergence evidence shows whether it does; a later apply-config plan withholds its diff when it does.
+Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's evidence says whether it does (release not applied yet); a later apply-config plan withholds its diff when it does.
 The read may match the adopted bytes or this release's compiled configuration; the API does not say which.
 Release not applied yet: the configuration of the selected release rel_… for this machine differs from what Bronzeward applied.
 Health: not checked.

@@ -10,10 +10,12 @@ import { forgetETag, keepETag, keptETag, lastGood, NO_ETAG, WriteResult } from "
 import { startsNew, useSend, useWrites } from "./forms.tsx";
 import { settledReads, watchView } from "./imports.tsx";
 import { Ref, short, useItem, usePending, useReads } from "./list.tsx";
+import { PageNote } from "./page-note.tsx";
 import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
 import { DraftHead, Named } from "./titles.tsx";
+import { PUBLISH_NOTE } from "./words.ts";
 import type { Outcome } from "./write.ts";
 
 type S = components["schemas"];
@@ -156,7 +158,7 @@ function Publish({ id }: { id: string }) {
       {d !== undefined && d.state !== "open" && <Status testid="not-open">{NOT_OPEN(d.state)}</Status>}
       {d !== undefined && d.state === "open" && (
         <>
-          <p>Publishing renders the configuration of every machine of the cluster that has an import base, from this draft's revision, and makes the release Desired for those machines. {SENT_NOTHING}</p>
+          <PageNote parts={[PUBLISH_NOTE, SENT_NOTHING]} />
           <p><Action label="Publish" needs={["publisher"]} onClick={publish} busy={busy} /></p>
         </>
       )}

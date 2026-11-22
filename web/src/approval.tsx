@@ -7,10 +7,12 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "rea
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { type Load, Id, type Reads, settledRead, short, useItem, useReads } from "./list.tsx";
+import { PageNote } from "./page-note.tsx";
 import { Who } from "./principals.tsx";
 import { REASON_MAX, reasonProblem } from "./plan.tsx";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
+import { PLAN_NOTE_APPROVE } from "./words.ts";
 
 type S = components["schemas"];
 type Plan = S["PlanBody"];
@@ -138,6 +140,7 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
   const busy = (w !== undefined && !startsNew(writes, w)) || done;
   const form = (
     <section aria-label="Approval">
+      <PageNote parts={[PLAN_NOTE_APPROVE]} />
       <Prediction p={p} />
       {over !== undefined && <Status testid="unseen-overwrite">{over}</Status>}
       <form onSubmit={submit} aria-label="Approve plan">

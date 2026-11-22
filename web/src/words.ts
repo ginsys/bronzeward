@@ -20,6 +20,23 @@ export const NAME_NOT_SHOWN = "(name not shown)";
 export const DRAFTS_AND_RELEASES = "Drafts and releases";
 /** The page that lists fragments and profiles, which the word "source" no longer names. */
 export const FRAGMENTS_AND_PROFILES = "Fragments and profiles";
+/** The sentences a page shows under its title: what the page is, what to do here, where to go next. A part is shown only where its control is. */
+export const DRAFT_NOTE = "A draft collects changes to one cluster; its entries are below. Click a fragment, profile or assignment entry to open it.";
+export const DRAFT_NOTE_OPEN = "While the draft is open you can add a fragment, a profile or an assignment, publish it, or discard it. Publishing builds a release and sends nothing to any machine.";
+export const DRAFT_NOTE_START = "To bring the machines imported into this draft under management, use Start managing these machines below.";
+export const PUBLISH_NOTE = "Publishing builds a release from this draft: it renders the configuration of every machine of the cluster that has an imported configuration, and makes the release the Desired release of those machines.";
+export const MACHINE_NOTE = "This page shows where this machine stands: its status, the next step where there is one, what Bronzeward has Desired and Applied for it, what was Observed on it, and its timeline. To change its configuration,";
+export const CREATE_A_DRAFT = "create a draft";
+export const RELEASE_NOTE = "A release is the finished configuration of every machine of the cluster that has an imported configuration, built from one draft. Open a machine below to read the configuration it would receive.";
+export const REVIEW_NOTE = "This is the configuration this machine would receive from this release. Secrets are shown as badges, never as values.";
+export const PLANS_NOTE = "A plan is one proposed action on one machine: apply a release to it, or adopt it as it is. This lists plans with their state. To make one,";
+export const OPEN_A_MACHINE = "open a machine";
+export const PLANS_NOTE_END = "and follow its next step.";
+export const CREATE_PLAN_NOTE = "Choose what to do with this machine and release: apply-config sends the release to the machine; adopt hands the machine over and sends nothing to it. Nothing runs until the plan is approved.";
+export const PLAN_NOTE = "This plan proposes one action on one machine, with one release. What it does, the evidence for it and its state are below.";
+export const PLAN_NOTE_APPROVE = "To approve it, type the plan ID, as the form shows it, into its field, then press Approve. You can approve a plan you made yourself; Bronzeward records that you did. Approving does not run the plan: Bronzeward commits it later, after its own checks, and can refuse.";
+export const OPERATIONS_NOTE = "An operation is one run of work: publishing a draft, importing a machine's configuration, applying a release to a machine, or adopting a machine. This lists operations with their state; open one to follow its progress.";
+export const OPERATION_NOTE = "This is one run of work: what it is doing, its state, its timeline and each attempt it made.";
 /** The column of a release that counts what it is built from. */
 export const BUILT_FROM = "Built from";
 /** The state words of a machine. */

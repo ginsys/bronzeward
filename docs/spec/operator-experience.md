@@ -264,7 +264,7 @@ timeline:
 | Fields | Sentence |
 | --- | --- |
 | no open drift, observed.release = applied.release | "The configuration read at `<observed.at>` is attributed to `<observed.release>`, which is the `Applied` release (by `<applied.source>`)." |
-| as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's `pendingConvergence` evidence shows whether it does; a later `apply-config` plan withholds its diff when it does." If desired = applied.release, also adds "The read may match the adopted bytes or this release's compiled configuration; the API does not say which." (`internal/api/reads.go:163-164`) |
+| as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's evidence says whether it does (release not applied yet); a later `apply-config` plan withholds its diff when it does." If desired = applied.release, also adds "The read may match the adopted bytes or this release's compiled configuration; the API does not say which." (`internal/api/reads.go:163-164`) |
 | pendingConvergence, applied not null, no open drift | adds "Release not applied yet: the configuration of the selected release `<desired>` for this machine differs from what Bronzeward applied." |
 | pendingConvergence, applied null | adds "Release not applied yet: the selected release `<desired>` has not been applied to this machine." |
 | desired not null, desired ≠ applied.release, not pendingConvergence, no open drift | adds "The selected release `<desired>` carries this machine's applied configuration unchanged." |
