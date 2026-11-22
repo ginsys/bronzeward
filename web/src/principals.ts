@@ -5,6 +5,7 @@
 
 import type { components } from "./api/v1";
 import type { Client, ReadResult } from "./request.ts";
+import { SAFE } from "./safe.ts";
 
 export type Principal = components["schemas"]["PrincipalBody"];
 
@@ -14,9 +15,7 @@ export const PRINCIPAL_READS = 100;
 // zero bits, so the last is one of a, e, i, m, q, u, y and 4 (internal/id Parse refuses any other).
 export const principalId = (id: string) => /^idn_[a-z2-7]{25}[aeimquy4]$/.test(id);
 
-// Remote text that is shown as it is: the rule of an operation's cause (`operation.tsx`), which keeps
-// a control or format character (a line feed, a bidirectional control) and a long text out of the page.
-export const SAFE = /^[^\p{Cc}\p{Cf}]{1,300}$/u;
+export { SAFE };
 
 // A human's display name, else its subject at its issuer; a service's name. Nothing (the caller shows
 // the shortened identifier) for an identifier no row holds, a read that did not answer, a record that

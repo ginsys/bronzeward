@@ -4,6 +4,7 @@
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import { Icon } from "./icons.tsx";
+import { safeWord } from "./safe.ts";
 import { codeOf, refusedAt, RequestRef, sentence, visibleDetail } from "./problems.tsx";
 import { type Problem, type ReadResult, TRANSPORT_FAILURE, WRITE_TRANSPORT_FAILURE } from "./request.ts";
 
@@ -116,7 +117,7 @@ export function needs(status: number, problem: Problem): string {
   if (status !== 403 || problem["plan"] !== undefined) return "";
   if (problem["humanOnly"] === true) return ` ${HUMAN_ONLY}`;
   const roles = problem["roles"];
-  return Array.isArray(roles) && roles.length > 0 && roles.every((r) => typeof r === "string") ? ` Needs ${roles.join(" or ")}.` : "";
+  return Array.isArray(roles) && roles.length > 0 && roles.every((r) => typeof r === "string") ? ` Needs ${roles.map(safeWord).join(" or ")}.` : "";
 }
 
 // A `409 recovery-mode-active` with a `scope` member is that scope's refusal, about one part of the

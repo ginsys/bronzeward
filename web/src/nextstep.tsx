@@ -25,7 +25,7 @@ function holds(p: Position, recovery: boolean): string[] {
   const out: string[] = [];
   const scope = p.machine.scopeState;
   if (p.plan?.operation === "apply-config" && p.machine.frozen) out.push("the machine is frozen");
-  if (scope !== "normal" && scope !== "released") out.push(`the machine's scope state is ${scope}`);
+  if (scope !== "normal" && scope !== "released") out.push(`the machine's scope state is ${safeWord(scope)}`);
   else if (recovery && scope !== "released") out.push("the server is in recovery mode and the machine's scope is not released");
   if (p.plan?.operation === "apply-config" && p.rolloutHeldBy !== null) out.push(`another machine's operation holds the cluster's rollout scope (${p.rolloutHeldBy.id})`);
   return out;
