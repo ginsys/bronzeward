@@ -35,6 +35,9 @@ func TestE2ENode(t *testing.T) {
 		{NodeID: "e2e-n1", Hostname: "cp-1", Addresses: []string{"127.0.0.2"}, ControlPlanePort: 6443},
 		{NodeID: "e2e-n2", Hostname: "w-1", Addresses: []string{"127.0.0.3"}},
 	}
+	// Both configurations validate in the node's mode (a cluster section on each, the machine CA on the worker), so a
+	// draft that imports both publishes: the handover journey (ONBOARD-03) runs the whole press (ginsys/bronzeward#1068).
+	cluster := "cluster:\n  controlPlane:\n    endpoint: https://cp.example.test:6443\n"
 	for i, m := range members {
 		n := talostest.ServeOn(t, pki, m.Addresses[0]+":50000")
 		n.SetNodeID(t, m.NodeID)
@@ -43,9 +46,9 @@ func TestE2ENode(t *testing.T) {
 		n.SetSMBIOSUUID(t, []string{"11111111-2222-3333-4444-555555555555", "66666666-7777-8888-9999-aaaaaaaaaaaa"}[i], true)
 		n.SetPlatform(t, "metal")
 		if i == 0 {
-			n.SetMachineConfig(t, []byte(controlPlaneConfig(ca)))
+			n.SetMachineConfig(t, []byte(controlPlaneConfig(ca)+cluster))
 		} else {
-			n.SetMachineConfig(t, []byte(standInConfig))
+			n.SetMachineConfig(t, []byte("version: v1alpha1\nmachine:\n  type: worker\n  token: "+runToken+"\n  ca:\n    crt: "+b64(ca.Crt)+"\n"+cluster))
 		}
 	}
 	other := "    endpoints: [192.0.2.9]\n    ca: " + strings.Repeat("A", 8) + "\n"
