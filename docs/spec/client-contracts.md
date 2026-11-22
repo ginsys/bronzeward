@@ -1629,8 +1629,9 @@ the client's rule wins wherever the two meet.
    applied" (the specification says a match never by itself means healthy, fresh or converged) and "Not managed
    yet", with "Frozen" as before. An assignments row and an imports row are headed by what they are, "Assignment of
    cp1" and "Import of cp1", and a dependency by "Dependency <object>, version <n>", with the identifier as the link's title.
-   A page on the path from connecting a cluster to following an operation shows one note under its title that says
-   what the page is, what to do on it and where to go next, and a note says only what the page shows in its state: a
+   A page on the path from a draft to an operation shows one note under its title that says what the page is, what to
+   do on it and where to go next (the Connect page follows, and the plan page's approval part is drawn inside its
+   approval form), and a note says only what the page shows in its state: a
    part about Add, Publish, Discard or Start managing is shown only where that control is, and the release's rendered
    configuration page shows its note only where the configuration is drawn. A note holds no identifier and no role
    word, uses the word its own page's control shows, and adds a link only where the page has none to that place.
