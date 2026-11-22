@@ -6,20 +6,25 @@ import type { components } from "./api/v1";
 import { short } from "./list.tsx";
 import { SAFE } from "./principals.ts";
 import { when } from "./states.tsx";
+import { UNTITLED_DRAFT } from "./words.ts";
 
 type S = components["schemas"];
 
-// A draft's title is an author's text: shown only when safe (A8 rule 3), else the identifier.
+// A draft's title is an author's text: shown only when safe (A8 rule 3), else undefined.
 export const draftText = (d: Pick<S["DraftBody"], "title"> | null | undefined): string | undefined =>
   d != null && SAFE.test(d.title) ? d.title : undefined;
+
+// A draft's name: its title where safe, else "Untitled draft" (A8 rule 3); undefined where the draft is not read.
+export const draftName = (d: Pick<S["DraftBody"], "title"> | null | undefined): string | undefined =>
+  d == null ? undefined : draftText(d) ?? UNTITLED_DRAFT;
 
 // A name an author typed, shown only when it is safe text (A8 rule 3), else undefined.
 export const safeText = (s: string): string | undefined => (SAFE.test(s) ? s : undefined);
 
-// A draft in a sentence: its title in quotes where the title is safe text, else the shortened identifier.
+// A draft in a sentence: its title in quotes where the title is safe text, else "Untitled draft" and the shortened identifier.
 export const draftCalled = (d: Pick<S["DraftBody"], "id" | "title">): string => {
   const title = draftText(d);
-  return title === undefined ? short(d.id) : `"${title}"`;
+  return title === undefined ? `${UNTITLED_DRAFT} (${short(d.id)})` : `"${title}"`;
 };
 
 // An assignment has no name: it is named by the machine it covers (a list row and a revision's heading both use this).
@@ -33,7 +38,7 @@ export const dependencyName = (d: Pick<S["DependencyBody"], "id" | "object" | "v
 };
 
 export const releaseTitle = (r: Pick<S["ReleaseBody"], "publishedAt">, d: Pick<S["DraftBody"], "title"> | null | undefined): string | undefined => {
-  const text = draftText(d);
+  const text = draftName(d);
   return text === undefined ? undefined : `${text}, published ${when(r.publishedAt)}`;
 };
 
@@ -56,5 +61,22 @@ export function operationTitle(kind: string, parts: { draft?: string | undefined
     case "apply-config":
     case "adopt": return parts.plan;
     default: return undefined;
+  }
+}
+
+// A dependency alert's sentence after its subject (the dependency, named once by the row), from its kind and reason
+// (dependency monitor section 6.2). `unknown` covers every reason, so `regression` and `persistent` claim only that
+// the version cannot be confirmed, and the deleted-or-restored caveat is the specification's own for an absent version.
+// A kind of no dependency, or one this client does not know, is a whole sentence: `subject` is false for it.
+export function alertSentence(a: Pick<S["AlertBody"], "kind" | "reason" | "deletion">): { subject: boolean; text: string } {
+  switch (a.kind) {
+    case "lost": return { subject: true, text: "is lost: the provider no longer has this version." };
+    case "blocked": return { subject: true, text: "is blocked. The block can be undone; the Reason column says how." };
+    case "regression":
+      return { subject: true, text: `can no longer be confirmed. It was found before.${a.reason === "absent" ? " The provider may have deleted it, or been restored from a backup older than Bronzeward's database." : ""}` };
+    case "persistent": return { subject: true, text: "still cannot be confirmed." };
+    case "deletion-scheduled": return { subject: true, text: a.deletion == null || Number.isNaN(Date.parse(a.deletion)) ? "is scheduled for deletion." : `is scheduled for deletion on ${when(a.deletion)}.` };
+    case "monitor-stalled": return { subject: false, text: "The dependency monitor has stopped making progress." };
+    default: return { subject: false, text: safeText(a.kind) === undefined ? "Alert." : `Alert of kind ${a.kind}.` };
   }
 }

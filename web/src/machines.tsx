@@ -7,7 +7,8 @@ import type { components } from "./api/v1";
 import { AddClusterAction, RecordMachineAction } from "./forms.tsx";
 import { MACHINE_NAME } from "./machine-name.ts";
 import { OnboardClusterAction } from "./onboard.tsx";
-import { Detail, EmptyList, Head, Id, type Listed, More, Ref, RESTARTED, Scroll, short, useItem, useList, usePending } from "./list.tsx";
+import { DraftLink } from "./draft-link.tsx";
+import { Detail, EmptyList, Head, Id, IdentifierText, type Listed, More, Ref, RESTARTED, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { SAFE } from "./principals.ts";
 import { Status } from "./states.tsx";
 import { TalosAccessSign } from "./talosaccess.tsx";
@@ -334,10 +335,10 @@ export function OpenDraftsView({ drafts }: { drafts: readonly Draft[] }) {
   if (drafts.length === 0) return <Status>No open draft in this cluster.</Status>;
   return (
     <Scroll label="Open drafts of this cluster">
-      <Head cols={["Draft", "Title", "Revision"]} />
+      <Head cols={["Draft", "Revision", "Identifier"]} />
       <tbody>
         {drafts.map((d) => (
-          <tr key={d.id}><th scope="row"><Ref to={`/drafts/${d.id}`} id={d.id} /></th><td>{d.title}</td><td>{d.revision}</td></tr>
+          <tr key={d.id}><th scope="row"><DraftLink d={d} /></th><td>{d.revision}</td><td><IdentifierText id={d.id} /></td></tr>
         ))}
       </tbody>
     </Scroll>

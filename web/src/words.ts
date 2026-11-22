@@ -2,6 +2,8 @@
 // from here and never writes it again, so a word Serge answers differently is one edit. Each pull request of that
 // work adds only the words it renders; the operation sentences stay in operation-words.ts (client contracts A10).
 
+/** What a draft whose title is not safe text is called; its shortened identifier stands beside it where the view shows no other. */
+export const UNTITLED_DRAFT = "Untitled draft";
 /** The heading of a machine with no name and no address to show. */
 export const UNNAMED_MACHINE_HEADING = "Unnamed machine";
 /** The text standing for a machine with no name and no address, where a title or a link names it. */
@@ -56,7 +58,7 @@ export const DEPENDENCY_NOTE = "A dependency is an outside thing of which Bronze
 export const AUDIT_NOTE = "Each row is an act Bronzeward recorded: who did what, through which route, and to what. Nothing on this page changes them.";
 export const DRIFT_ADOPTION_NOTE = "Drift adoption reads the machine's own configuration into a draft, so that you can review what changed on it. Choose the machine and the draft that should receive the configuration. Reading it writes nothing to the machine.";
 export const ENTER_RECOVERY_NOTE = "Enter recovery after a restore, to record which backups were restored. Name each restored backup, when it was taken, and when the restore stopped writes. Times are RFC 3339 with a zone.";
-export const RECOVERY_NOTE ="Recovery mode is for restoring Bronzeward from a backup. This page shows whether it is on and which scopes are still in recovery, and lets you leave recovery mode or revoke an identity.";
+export const RECOVERY_NOTE = "Recovery mode is for restoring Bronzeward from a backup. This page shows whether it is on and which scopes are still in recovery, and lets you leave recovery mode or revoke an identity.";
 export const RECOVERY_ROLE_NOTE = "Leaving recovery mode and revoking an identity need the recovery-admin role, which you do not have.";
 export const NOT_FOUND_NOTE = "Start from Machines or Clusters.";
 export const CONNECT_NOTE = "Connecting records the cluster and each machine that answers with a platform, and starts an import of each of those machines into one draft. A machine that does not answer, or reports no platform, is skipped. First you choose the talosconfig, then you confirm what the page found.";

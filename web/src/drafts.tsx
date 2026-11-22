@@ -12,14 +12,15 @@ import { Form, field, NO_ASSIST, Result, startsNew, Text, unsaved, useSend, useU
 import { NO_ETAG } from "./handover.ts";
 import { Handover } from "./handover.tsx";
 import { LAYERS } from "./layers.ts";
-import { Id, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
+import { IdentifierText, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { type EmbeddedPath, references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
 import type { Problem } from "./request.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
-import { ClusterRef, DraftHead, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
-import { draftCalled, draftText, safeText } from "./titles.ts";
+import { DraftLink } from "./draft-link.tsx";
+import { ClusterLink, ClusterOption, ClusterRef, DraftHead, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
+import { draftCalled, draftName, safeText } from "./titles.ts";
 import { PageNote } from "./page-note.tsx";
 import { CREATE_DRAFT_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, NAME_NOT_SHOWN } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
@@ -152,17 +153,17 @@ export function Drafts() {
         <label>Cluster:{" "}
           <select value={cluster} onChange={(e) => setCluster(e.target.value)}>
             <option value="">all</option>
-            {clusters.map((c) => <option key={c} value={c}>{short(c)}</option>)}
+            {clusters.map((c) => <ClusterOption key={c} id={c} />)}
           </select>
         </label>{" "}
         <Action label="Create draft" needs={["author"]} onClick={() => go("/drafts/new")} />
       </p>
       {pending ?? (shown.length === 0 ? <Status>No drafts{cluster === "" ? "" : " in this cluster"}.</Status> : (
         <Scroll label="Drafts">
-          <thead><tr>{["Draft", "Title", "Cluster", "State", "Revision"].map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
+          <thead><tr>{["Draft", "Cluster", "State", "Revision", "Identifier"].map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
           <tbody>
             {shown.map((d) => (
-              <tr key={d.id}><th scope="row"><Id id={d.id} /></th><td>{d.title}</td><td><Id id={d.cluster} /></td><td>{d.state}</td><td>{d.revision}</td></tr>
+              <tr key={d.id}><th scope="row"><DraftLink d={d} /></th><td><ClusterLink id={d.cluster} /></td><td>{d.state}</td><td>{d.revision}</td><td><IdentifierText id={d.id} /></td></tr>
             ))}
           </tbody>
         </Scroll>
@@ -181,7 +182,7 @@ export function CreateDraft() {
     const id = createdId(data);
     if (id === undefined) return <>Draft created, but the answer names no draft. Read <Ref to="/changes" id="/changes">the {DRAFTS_AND_RELEASES} page</Ref>.</>;
     const d = data as Draft;
-    return <>Draft <Ref to={`/drafts/${id}`} id={id}>{draftText(d) ?? short(id)}</Ref> created (<ClusterRef id={d.cluster} />).</>;
+    return <>Draft <Ref to={`/drafts/${id}`} id={id}>{draftName(d)}</Ref> created (<ClusterRef id={d.cluster} />).</>;
   };
   const options = clusters.kind === "ok" ? clusters.data.items : [];
   return (

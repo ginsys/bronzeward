@@ -213,6 +213,10 @@ export const short = (id: string) => {
   return id.length - i > 10 ? `${id.slice(0, i + 4)}…${id.slice(-4)}` : id;
 };
 
+// An identifier as plain text, the whole one as the title attribute: the last column of a row whose name is the link,
+// and the identifier of a row that has no page.
+export const IdentifierText = ({ id }: { id: string }) => <span title={id}>{short(id)}</span>;
+
 // A resource's own path, opened in the page or, with the browser's own handling, in a new tab.
 export function Ref({ to, id, children }: { to: string; id: string; children?: ReactNode }) {
   const { go } = useReads();
