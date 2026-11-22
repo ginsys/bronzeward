@@ -63,7 +63,8 @@ export const LINES = {
   notImported: "Left as it is: this machine has no stored import to hand over. Open the machine to see its next step.",
   stillOpen: "Stopped: the draft still reads open after its publication. Press the button again.",
   assigning: "Adding an assignment that selects nothing for each machine that has none, so each release holds one.",
-  noAssignmentRead: "Not read: the machines' assignments could not be read. Nothing was sent. Press the button again.",
+  noAnswerETag: "Stopped: the answer to an assignment named no ETag for the draft, so the press cannot tell whether it changed since. Nothing more was sent. Read the draft again, then press the button again.",
+  noAssignmentRead:"Not read: the machines' assignments could not be read. Nothing was sent. Press the button again.",
 } as const;
 
 export type Act =
@@ -151,13 +152,10 @@ async function publish(id: string, machines: readonly string[], io: Io, etag: st
     say({ state: "working", text: LINES.assigning });
     const w = await io.send({ method: "PUT", path: `/drafts/${enc(id)}/assignments/${enc(m)}`, body: { profiles: [], fragments: {} }, resource: `/drafts/${id}`, ifMatch: tag });
     if (!done(w)) return say({ state: "stopped", text: "", write: w }), false;
-    // The next write carries the ETag this answer gave; an answer without one is read for it again.
-    let next = w.outcome?.kind === "done" ? w.outcome.etag : undefined;
-    if (next === undefined) {
-      const again = await io.read<Draft>(`/drafts/${enc(id)}`);
-      next = again?.kind === "ok" ? again.etag : undefined;
-      if (next === undefined) return say({ state: "stopped", text: LINES.noRead }), false;
-    }
+    // The next write carries the ETag this answer gave. An answer without one stops the press: a draft read in its
+    // place could hold another author's change that the remaining writes and the publication would then pass over.
+    const next = w.outcome?.kind === "done" ? w.outcome.etag : undefined;
+    if (next === undefined) return say({ state: "stopped", text: LINES.noAnswerETag }), false;
     tag = next;
   }
   if (!io.live()) return false;

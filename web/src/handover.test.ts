@@ -19,8 +19,8 @@ interface M { applied: boolean; desired: boolean; plan: "none" | "proposed" | "a
 // A server for the handover: the draft, the machines and what each write does to them. `log` is every write sent.
 // `entries` is what the draft holds besides the machines' imports (default: an assignment entry for every machine, so a press has
 // none to add); `heads` the machines that hold an assignment head, served on the second page of `GET /assignments`;
-// `noHeads` makes that read fail.
-function world(draft: { state: string; running?: boolean; etag?: string; followed?: Followed; entries?: { kind: string; machine: string }[]; heads?: string[]; noHeads?: boolean }, machines: Record<string, M>) {
+// `noHeads` makes that read fail; `noAnswerETag` leaves the ETag out of an assignment's answer.
+function world(draft: { state: string; running?: boolean; etag?: string; followed?: Followed; entries?: { kind: string; machine: string }[]; heads?: string[]; noHeads?: boolean; noAnswerETag?: boolean }, machines: Record<string, M>) {
   const log: string[] = [];
   // The If-Match each publication carried, and each operation followed to its end.
   const ifMatches: (string | undefined)[] = [];
@@ -85,7 +85,7 @@ function world(draft: { state: string; running?: boolean; etag?: string; followe
         if (spec.ifMatch !== (draft.etag ?? '"1"')) return Promise.resolve(wrote(spec, refused(412)));
         draft.etag = `"${Number((draft.etag ?? '"1"').replaceAll('"', "")) + 1}"`;
         draft.entries = [...(draft.entries ?? []), { kind: "assignment", machine: put[1]! }];
-        return Promise.resolve(wrote(spec, { ...done({ draft: "drf_1" }), status: 200, etag: draft.etag }));
+        return Promise.resolve(wrote(spec, { ...done({ draft: "drf_1" }), status: 200, ...(draft.noAnswerETag !== true && { etag: draft.etag }) }));
       }
       if (spec.path.endsWith("/publications")) {
         ifMatches.push(spec.ifMatch);
@@ -166,6 +166,13 @@ describe("the press adds the empty assignment a connected machine lacks (ginsys/
     expect(w.log).toEqual([`PUT /drafts/drf_1/assignments/${A}`]);
     expect(w.lines[DRAFT]?.state).toBe("stopped");
     expect(w.lines[DRAFT]?.write).toBeDefined();
+  });
+
+  test("an assignment's answer with no ETag stops the press: nothing more is written, nothing is published, and the line says to read the draft again", async () => {
+    const w = world({ state: "open", entries: [], noAnswerETag: true }, { [A]: fresh(), [B]: fresh() });
+    await handOver("drf_1", [A, B], w.io, SHOWN);
+    expect(w.log).toEqual([`PUT /drafts/drf_1/assignments/${A}`]);
+    expect(text(w.lines[DRAFT])).toBe(`stopped: ${LINES.noAnswerETag}`);
   });
 
   test("a draft already published gets no assignment write: a second press only reads and continues", async () => {
