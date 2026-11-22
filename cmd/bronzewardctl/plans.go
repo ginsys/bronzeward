@@ -273,8 +273,8 @@ func (e *env) planCreateOn(c *client.Client, req *planRequest, opts planOpts) er
 }
 
 // createRefusalNext is the next step T19 names for plan creation's conflicts (internal/api/plans.go):
-// a release that is not the machine's Desired, a machine with no Applied, and an assignment moved
-// since publication. It is "" for any other answer.
+// a release that is not the machine's Desired, a machine with no Applied, a machine with no assignment
+// at all, and an assignment moved since publication. It is "" for any other answer.
 func createRefusalNext(err error, release, machine string) string {
 	var p *client.Problem
 	if !errors.As(err, &p) || p.Code() != "conflict" {
@@ -289,6 +289,9 @@ func createRefusalNext(err error, release, machine string) string {
 		return "The machine has no Desired release: publish a release that covers it first."
 	case strings.Contains(detail, "has no Applied configuration"):
 		return "Hand the machine over with an adopt plan: " + createLine(release, machine, "adopt")
+	case strings.Contains(detail, "the machine has no assignment"):
+		return "Add an assignment for the machine to a draft, one that selects nothing is enough: bronzewardctl assignment set " +
+			client.ShellWord(machine) + " --draft <draft> --none. Publish that draft, then plan the release it makes."
 	case strings.Contains(detail, "assignment has moved since the release was compiled"):
 		return "Publish a release from the machine's current assignment, then plan that release. The assignment's history: " +
 			"bronzewardctl machine timeline " + client.ShellWord(machine)

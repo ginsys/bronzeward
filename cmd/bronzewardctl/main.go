@@ -98,7 +98,8 @@ commands:
               a name pins the revision the draft proposes, else the fragment's head revision
   assignment set <machine> --draft <draft> [--profiles <name>[,...]]
               [--fragment <layer>=<name>[,...]]... the layer global, site, cluster, role,
-              workload or override
+              workload or override; --none instead selects nothing, so the machine's
+              configuration is its import base alone
   fragment | profile | assignment rm <name or machine> --draft <draft>
               a write to a draft sends the ETag of the last draft show or write of that draft, or
               --if-match <etag>; if the draft changed since, it saves nothing and says so

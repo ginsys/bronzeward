@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -460,13 +461,40 @@ func TestAssignmentUpdate(t *testing.T) {
 	}
 }
 
-// The assignment body: at least one selection; known layers; valid names, none repeated.
+// An assignment may select nothing (0 to 256 names in all): the machine's configuration is then its
+// import base alone. The revision is stored with no selection rows, and a second such write replaces the
+// first as any update does.
+func TestAssignmentSelectingNothing(t *testing.T) {
+	d := newDraftEnv(t)
+	part := "/assignments/" + d.machine
+	for _, body := range []string{`{}`, `{"profiles":[],"fragments":{}}`} {
+		e := d.ok(d.put(part, body, d.etag, d.key()))
+		if e.Kind != "assignment" || e.Machine != d.machine || e.Revision == nil {
+			t.Fatalf("%s: entry %+v", body, e)
+		}
+		if n := count(t, d.db, `SELECT count(*) FROM assignment_revision WHERE id = '`+*e.Revision+`'`); n != 1 {
+			t.Fatalf("%s: %d revisions stored", body, n)
+		}
+		if n := count(t, d.db, `SELECT count(*) FROM assignment_revision_profile WHERE revision = '`+*e.Revision+`'`) +
+			count(t, d.db, `SELECT count(*) FROM assignment_revision_fragment WHERE revision = '`+*e.Revision+`'`); n != 0 {
+			t.Fatalf("%s: %d selection rows", body, n)
+		}
+	}
+	if n := count(t, d.db, `SELECT count(*) FROM draft_source_entry WHERE kind = 'assignment'`); n != 1 {
+		t.Fatalf("%d assignment entries", n)
+	}
+}
+
+// The assignment body: at most 256 selections; known layers; valid names, none repeated.
 func TestAssignmentUpdateRefusals(t *testing.T) {
 	d := newDraftEnv(t)
 	part := "/assignments/" + d.machine
+	many := make([]string, 257)
+	for i := range many {
+		many[i] = fmt.Sprintf("%q", fmt.Sprintf("p%03d", i))
+	}
 	for name, body := range map[string]string{
-		"nothing selected":            `{}`,
-		"empty lists":                 `{"profiles":[],"fragments":{}}`,
+		"257 selections":              `{"profiles":[` + strings.Join(many, ",") + `]}`,
 		"empty layer":                 `{"profiles":["workers"],"fragments":{"site":[]}}`,
 		"unknown layer":               `{"fragments":{"machine-intrinsic":["registries"]}}`,
 		"repeated profile":            `{"profiles":["workers","workers"]}`,

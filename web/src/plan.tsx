@@ -68,9 +68,10 @@ export function planBody(release: string, machine: string, operation: Operation,
   return { body: body as unknown as PlanInput };
 }
 
-// What the operator does next after one of the server's three refusals of a plan (internal/api/plans.go: the
-// release is not the machine's Desired, the machine has no Applied, the assignment moved since the release was
-// compiled), and the two adopt refusals. The page acts on none of them. Another refusal has no next step here.
+// What the operator does next after one of the server's refusals of a plan (internal/api/plans.go: the
+// release is not the machine's Desired, the machine has no Applied, the machine has no assignment at all, the
+// assignment moved since the release was compiled), and the two adopt refusals. The page acts on none of them.
+// Another refusal has no next step here.
 export function nextAfter(p: Problem | null, release: string, machine: string): ReactNode {
   const d = p?.detail ?? "";
   if (d.includes("is for the machine's Desired release")) {
@@ -80,6 +81,7 @@ export function nextAfter(p: Problem | null, release: string, machine: string): 
   if (d.includes("has no Applied configuration")) {
     return <>Hand the machine over first: <Ref to={planPath(release, machine, "adopt")} id={machine}>create an adopt plan</Ref> for it. Nothing has been sent.</>;
   }
+  if (d.includes("the machine has no assignment")) return <>Add an assignment for this machine to a draft (one that selects nothing is enough), publish that draft, then plan the release it makes.</>;
   if (d.includes("assignment has moved")) return <>Change a new draft and publish it, so a release is compiled from the machine's current assignment, then plan that release.</>;
   if (d.includes("adopt only a drifted machine")) return <>There is nothing to adopt. To send this release, create an apply-config plan for it.</>;
   return null;

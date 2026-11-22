@@ -151,7 +151,9 @@ as the first key with `bronzewardctl cluster first-key` (or let `cluster onboard
 ## S3 handover: adopt both machines
 
 Adoption makes the imported configuration the machine's `Applied` state without sending anything to
-the node. It needs a published release covering the machine and an assignment selecting something.
+the node. It needs a published release covering the machine and an assignment for the machine, which
+the plan binds. An assignment may select nothing, and then the machine's configuration is its import
+base alone. This walk selects one fragment, so the release carries something beyond the import.
 
 **1. In the import draft**, as `h-author`, add a cluster fragment and assign it to both machines:
 

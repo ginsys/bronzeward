@@ -303,7 +303,11 @@ must be proposed by this draft or, with no entry for it, have a head with a
 revision; a name this draft removes can be neither pinned nor selected; and a
 fragment selected under a layer must carry that layer. Otherwise the update is
 refused `422 validation-failed`, naming the body path (compilation §7, stage
-1). Publication checks the same again. A removal of a name the draft
+1). Publication checks the same again. An assignment may select nothing (0 to
+256 names in all): its revision then has no selection rows, the machine's
+configuration is its import base alone, the same configuration as with no
+assignment, and the release holds the revision so a plan can bind it **(choice
+§17.47)**. A removal of a name the draft
 introduces, with no head, leaves an entry whose base is absent and whose
 publication creates nothing; a removal of a name with neither a head (one a
 publication removed counts) nor an entry is `404`. The PoC accepts cluster scope only: a fragment or
@@ -4066,7 +4070,7 @@ or Desired change; it does not erase earlier evidence.
 | Publish | New request for a draft already published | `409 conflict` naming the release | nothing |
 | Plan | Second approval of a plan in one epoch | `409 conflict` | nothing |
 | Plan | An `apply-config` plan for a release that is not the machine's `Desired` | `409 conflict` naming the `Desired` release | nothing |
-| Plan | An `apply-config` plan for a machine with no `Applied`; an `adopt` plan for a machine with one and no open drift record; the machine's assignment head moved past the revision the release was compiled from | `409 conflict` | nothing |
+| Plan | An `apply-config` plan for a machine with no `Applied`; an `adopt` plan for a machine with one and no open drift record; the machine's assignment head moved past the revision the release was compiled from; a release that holds no assignment revision for a machine that has no assignment at all (choice §17.47) | `409 conflict` | nothing |
 | Plan | A release that does not cover the machine | `422 validation-failed` naming both | nothing |
 | Plan | A duration or attempt limit out of range, or a transport deadline above the maximum or the verification deadline, or a certificate lifetime above the signer's maximum (§9.3) | `400 invalid-request` | nothing |
 | Plan | Approval or identity revocation racing a commitment | the revoker waits for the commitment or precedes it (§1.2 item 3) | the revocation, after or before the commitment |
@@ -5106,6 +5110,31 @@ design and evidence do not settle the question. Each is marked in place as
     certificate names (`machine.certSANs`), and a name that is not there
     answers `503 talos-access-unavailable` where `talosctl` would also fail;
     a typed address keeps today's check.
+47. **An assignment may select nothing; a machine is under management when a
+    release holds an assignment revision for it** (§3.1, §9.2). A plan binds
+    the machine's assignment revision and the plan's commitment compares it
+    (execution and recovery §3.2 item 2), so a machine whose release holds none
+    can never be planned: a cluster taken under management by connecting it
+    (ginsys/bronzeward#1068) had imported configurations and no way to a plan.
+    The update therefore accepts a body that selects nothing. Compilation reads
+    the selections only, so the machine's configuration digest is the same
+    with such an assignment as with none (a machine never assigned compiles on
+    its base alone, §6.1), and the release digest differs, since it includes the
+    revision. The API revision does not change: the widening adds no field,
+    route or problem code (§9.1, the same reading as the name grammar widened
+    in §3.5, choice §17.43). A plan for a release that holds no assignment revision for a
+    machine with no assignment at all is refused `409 conflict` in words that
+    say so and name the next step (a draft that adds an assignment for the
+    machine, one that selects nothing is enough), where a machine whose
+    assignment has a head since the release keeps the moved-head words. A
+    client that sends a selecting-nothing body to an older server gets that
+    server's `400`, with no revision to tell it apart. Alternatives: a plan
+    that binds no assignment revision, which changes a bound value every later
+    comparison reads and the NOT NULL column of the plan, for a machine that
+    nothing else distinguishes; leaving the assignments to the person, which
+    leaves a connected cluster one undocumented step short of its first plan
+    and, as the first walk with real nodes showed, a person looking at a
+    published release with nothing to plan.
 
 ## 18. Traceability
 
@@ -5113,7 +5142,7 @@ design and evidence do not settle the question. Each is marked in place as
 | --- | --- | --- |
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
-| §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31, §17.32 |
+| §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31, §17.32, §17.47 |
 | §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.14.5, the same result as on v1.13.6); signing from a control plane configuration or a secrets bundle, a key read through an `os:admin` talosconfig, and a node accepting the signed certificate: [signing locally](../design/research/20261118-local-talos-signing.md) and [the extraction](../design/research/20261118-local-talos-signing-extract.md), Talos v1.14.5 only; revocation, CA rotation and a held connection across a CA replacement not measured; the provider grants on `secret/data/access/talos-ca/*` not measured (choice §17.29); the presence read's answers for a never-written path and a path whose metadata was deleted (HTTP 404, no tombstone) and for a soft-deleted and a destroyed latest version are [RC §4.1](../design/research/20260924-retention-metadata-classification.md#41-openbao) rows 010, 024, 021 and 022 on OpenBao 2.6.1; the access-presence identity's policy (exactly `read` on the metadata path), its refusal of a data read, a list, a delete, a generation read and the Transit calls beside the same request with the grant added, and the classification of its read for a stored, a soft-deleted, an undeleted and a destroyed latest version are measured by `TestLivePresencePolicyExact` and `TestLivePresenceIdentity` against the fixture's OpenBao (choice §17.42); §16 names what they leave unmeasured |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7; bodies and bindings: choice §17.35 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011; none for the name check: choice §17.45 |

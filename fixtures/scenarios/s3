@@ -98,8 +98,9 @@ publish_import() {
   etag=$(etag_of_last)
   [ -n "$etag" ] || return 1
   # An adopt plan binds the machine's assignment head as the release compiled it, so each machine
-  # has an assignment, and an assignment must select something: one cluster-layer fragment, a
-  # single node label, which the release then carries beyond the import (pending convergence).
+  # has an assignment. This one selects a cluster-layer fragment, a single node label, so the
+  # release carries something beyond the import (pending convergence); an assignment that selects
+  # nothing would also do.
   local m body
   body=$(jq -nc '{layer: "cluster", document: "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  bw-s3-handover: \"yes\"\n", marks: []}') || return 1
   answers 200 - PUT "/api/v1/drafts/$import_draft/fragments/s3-handover" "$author" "$body" "$(key fragment-s3-handover)" "$etag" || return 1

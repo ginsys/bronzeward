@@ -725,11 +725,16 @@ Take it over to resume, or abandon it:
 ```
 
 A machine recorded from an existing cluster has no `Applied` yet, and an `apply-config` plan
-for it is refused until it is handed over (`internal/api/plans.go:272-275`). The handover
-gives the machine an assignment selecting something in the import draft, publishes it and adopts
-the machine with an adopt plan that binds no drift record. A machine published with no assignment
-has no assignment revision in the release, and its adopt plan is refused
-(`internal/api/publish.go:713`, `internal/api/plans.go:325-328`; `docs/operator/walkthrough.md:128-141`)
+for it is refused until it is handed over (`internal/api/plans.go`). The handover
+gives the machine an assignment in the import draft, publishes it and adopts
+the machine with an adopt plan that binds no drift record. An assignment may select nothing
+(`bronzewardctl assignment set <machine> --draft <draft> --none`): the machine's configuration is
+then its import base alone, the same configuration as with no assignment, and the release holds the
+assignment revision a plan binds ([persistence and API choice §17.47](persistence-api.md)). A machine
+published with no assignment has no assignment revision in the release, and any plan for it is
+refused in words that name the next step: add an assignment for the machine to a draft, one that
+selects nothing is enough, publish that draft, then plan the release it makes
+(`internal/api/plans.go`; `docs/operator/walkthrough.md`, "S3 handover")
 ([execution and recovery §6.3](execution-recovery.md#63-adopt), existing-cluster handover;
 [acceptance plan S3](acceptance-plan.md#s3-approval), handover part):
 

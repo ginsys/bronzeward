@@ -221,22 +221,26 @@ func (l layerFragments) Set(v string) error {
 }
 
 // assignmentSet puts a machine's assignment in a draft (PUT /drafts/{id}/assignments/{machine}):
-// profiles and per-layer fragments, by name.
+// profiles and per-layer fragments, by name, or with --none an assignment that selects nothing, so the
+// machine's configuration is its import base alone.
 func (e *env) assignmentSet(args []string) error {
 	var draft, profiles string
+	var none bool
 	fragments := layerFragments{}
 	var rf repeatFlags
 	pos, err := e.parse("assignment set", args, 1, func(fs *flag.FlagSet) {
 		fs.StringVar(&draft, "draft", "", "")
 		fs.StringVar(&profiles, "profiles", "", "")
 		fs.Var(fragments, "fragment", "")
+		fs.BoolVar(&none, "none", false, "")
 		rf.flags(fs)
 	})
 	if err != nil {
 		return err
 	}
-	if draft == "" || profiles == "" && len(fragments) == 0 {
-		return usageError{errors.New("assignment set needs --draft and --profiles or --fragment")}
+	selects := profiles != "" || len(fragments) > 0
+	if draft == "" || selects == none {
+		return usageError{errors.New("assignment set needs --draft and one of --profiles or --fragment, or --none to select nothing (the machine's configuration is then its import base alone)")}
 	}
 	rp, err := rf.repeat(true)
 	if err != nil {

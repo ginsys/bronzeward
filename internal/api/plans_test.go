@@ -486,6 +486,35 @@ func TestPlanCreationAdopt(t *testing.T) {
 	}
 }
 
+// A release that holds no assignment revision for the machine is refused in the words of that fact when the
+// machine has no assignment at all, and in the words of a move when the machine has a head since (a newer
+// release holds it): the advice of the first, to add an assignment, is wrong for the second.
+func TestPlanCreationNoAssignmentRevision(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name, want string
+		head       bool
+	}{
+		{"no assignment at all", "the machine has no assignment", false},
+		{"an assignment since the release", "the machine's assignment has moved since the release was compiled", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newDraftEnv(t)
+			if c.head {
+				d.assignment(d.machine)
+			}
+			seed := d.release(d.draft, 1, releaseProvenance) // d.assigned is false: no revision in the release
+			doc := wantProblem(t, d.plan(d.robot, "k-noasr-0123456789", adoptBody(seed.rel, d.machine, "")), http.StatusConflict, "conflict")
+			if detail, _ := doc["detail"].(string); !strings.Contains(detail, c.want) {
+				t.Fatalf("detail %q; want it to say %q", doc["detail"], c.want)
+			}
+			if n := count(t, d.db, `SELECT count(*) FROM plan`); n != 0 {
+				t.Fatalf("%d plans", n)
+			}
+		})
+	}
+}
+
 // T4's refusals (persistence-api.md §5, §14; execution-recovery.md §2): each writes nothing.
 func TestPlanCreationRefusals(t *testing.T) {
 	t.Parallel()
