@@ -18,7 +18,9 @@ func TestFormOnly(t *testing.T) {
 		{"flow style", "a: [1, 2]\nb: {c: d}\n", "a:\n- 1\n- 2\nb:\n  c: d\n", true},
 		{"literal and quoted string", "a: |\n  one\n  two\n", "a: \"one\\ntwo\\n\"\n", true},
 		{"null spellings", "a: ~\nb: null\nc:\n", "a:\nb: ~\nc: null\n", true},
-		{"integer spelling", "a: 16\n", "a: 0x10\n", true},
+		{"integer spelling", "a: 16\n", "a: +16\n", true},
+		{"hex integer spelling is not decided", "a: 16\n", "a: 0x10\n", false},
+		{"bool spelling is not decided", "a: true\n", "a: True\n", false},
 		{"float spelling", "a: 1.5\nb: 100.0\n", "a: 1.50\nb: 1e2\n", true},
 		{"two documents", "a: 1\n---\nb: 2\n", "# c\na: 1\n---\n# d\nb: 2\n", true},
 
