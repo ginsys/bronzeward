@@ -259,10 +259,14 @@ func observedCell(m apitypes.MachineBody) string {
 
 func stateCell(m apitypes.MachineBody) string {
 	var s []string
+	pending := "release not applied yet"
+	if m.FormOnly {
+		pending = "release not applied yet (differs in form only)"
+	}
 	for _, x := range []struct {
 		on   bool
 		text string
-	}{{m.OpenDrift != nil, "changed on the machine"}, {m.PendingConvergence, "release not applied yet"}, {m.Frozen, "frozen"}, {m.ScopeState != "normal", "scope " + m.ScopeState}} {
+	}{{m.OpenDrift != nil, "changed on the machine"}, {m.PendingConvergence, pending}, {m.Frozen, "frozen"}, {m.ScopeState != "normal", "scope " + m.ScopeState}} {
 		if x.on {
 			s = append(s, x.text)
 		}
@@ -379,6 +383,8 @@ func sentences(m apitypes.MachineBody, obs []apitypes.ObservationBody) []string 
 		add("Release not applied yet: the selected release %s has not been applied to this machine.", *m.Desired)
 	case m.OpenDrift != nil:
 		// Drift is the sentence above; a release not applied yet and drift are different (§2.4).
+	case m.FormOnly:
+		add("Release not applied yet: the selected release %s for this machine differs in form only (comments and encoding) from what Bronzeward adopted: the same documents, keys and values. The first apply sends the release's text, without the node's comments.", *m.Desired)
 	case m.PendingConvergence:
 		add("Release not applied yet: the configuration of the selected release %s for this machine differs from what Bronzeward applied.", *m.Desired)
 	case m.Applied != nil && *m.Desired != m.Applied.Release:

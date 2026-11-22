@@ -175,6 +175,9 @@ describe("Connect a cluster (#1001)", () => {
       expect(plans[0]!.state).not.toBe("proposed");
       const approval = (await api(at, "h-all", "GET", `/approvals/${plans[0]!.approval}`)).body!["selfApproval"] as { marked: boolean };
       expect(approval.marked).toBe(true);
+      // The stand-in nodes' texts carry comments, so each release differs from its node in form only (ginsys/bronzeward#1098).
+      const plan = (await api(at, "h-all", "GET", `/plans?machine=${m.id}`)).body!["items"] as { evidence: { baseline: { pendingConvergence: boolean; formOnly: boolean } } }[];
+      expect(plan[0]!.evidence.baseline).toMatchObject({ pendingConvergence: true, formOnly: true });
     }
   });
 });

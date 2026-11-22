@@ -13,7 +13,7 @@ import { SAFE } from "./principals.ts";
 import { Status } from "./states.tsx";
 import { TalosAccessSign } from "./talosaccess.tsx";
 import { PageNote } from "./page-note.tsx";
-import { CHANGED_ON_THE_MACHINE, CLUSTER_NOTE, CLUSTERS_NOTE, LAST_READ_MATCHED, MACHINES_NOTE, NOT_MANAGED_YET, RELEASE_NOT_APPLIED_YET, UNNAMED_MACHINE, UNNAMED_MACHINE_HEADING } from "./words.ts";
+import { CHANGED_ON_THE_MACHINE, CLUSTER_NOTE, DIFFERS_IN_FORM_ONLY, CLUSTERS_NOTE, LAST_READ_MATCHED, MACHINES_NOTE, NOT_MANAGED_YET, RELEASE_NOT_APPLIED_YET, UNNAMED_MACHINE, UNNAMED_MACHINE_HEADING } from "./words.ts";
 
 export type Machine = components["schemas"]["MachineBody"];
 export type Cluster = components["schemas"]["ClusterBody"];
@@ -35,6 +35,7 @@ export function badges(m: Machine): string[] {
   if (m.openDrift !== null) out.push(CHANGED_ON_THE_MACHINE);
   if (m.frozen) out.push("Frozen");
   if (m.pendingConvergence) out.push(RELEASE_NOT_APPLIED_YET);
+  if (m.formOnly) out.push(DIFFERS_IN_FORM_ONLY);
   if (m.desired === null && m.applied === null) out.push(NOT_MANAGED_YET);
   else if (m.openDrift === null && !m.pendingConvergence && m.applied !== null && m.observed?.release === m.applied.release) out.push(LAST_READ_MATCHED);
   return out;

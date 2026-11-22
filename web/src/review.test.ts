@@ -126,6 +126,14 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
     expect(releaseNote(rel, { desired: null, applied: null, pendingConvergence: pc })).toContain("needs no step");
   });
 
+  test("after an adoption whose release differs in form only, the note says so and what the first apply does", () => {
+    const rel = "rel_BWSYNTH-h7rt2bd";
+    const text = releaseNote(rel, { desired: rel, applied: { release: rel, source: "adoption", importBase: null }, pendingConvergence: true, formOnly: true });
+    expect(text).toContain("Differs in form only (comments and encoding)");
+    expect(text).toContain("The first apply sends the release's text, without the node's comments.");
+    expect(text).not.toContain("differs from what Bronzeward applied");
+  });
+
   test("after an adoption, Desired equal to Applied is not 'nothing left to send' while the machine has a release not applied yet", () => {
     const rel = "rel_BWSYNTH-h7rt2bd";
     const text = releaseNote(rel, { desired: rel, applied: { release: rel, source: "adoption", importBase: null }, pendingConvergence: true });

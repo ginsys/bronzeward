@@ -983,6 +983,24 @@ For each machine:
    the local checks and is not strict. A warning of the machinery, such as a
    deprecation the node still accepts, does not refuse a publication.
 
+**The form-only verdict (choice §16.39).** For each machine, publication
+records whether the composed configuration and the resolved import base hold
+the same documents in the same order, with every key and every value equal,
+secrets included, so that they differ in comments, key order, indentation,
+quoting or flow style only. It is computed on the plaintext inside the
+compilation and is never shown with a value. It is false for anything it
+cannot decide: an alias, an anchor, a merge key, a duplicate key, a tag
+outside YAML's core schema, a parse error, and an import base with an
+identified embedded document, whose string the resolver writes back in its own
+encoding (§5.4). It proves that the artifact equals the resolved base, and not
+that the node runs it: the pinned secret values are the provider's version, and
+the baseline cannot be decrypted by any identity (§2.3), so no comparison with
+the node's own bytes is offered. A machine whose import removed a hostname
+document equal to its name (§2.3 step 2a) and whose release writes one back
+(step 5a) reads false although nothing changes on the node; that limit is the
+fill's change to decide (ginsys/bronzeward#1040). The compilation's own
+transformations, the digest and the artifact are unchanged.
+
 The compiler's only transformations of native YAML are step 4's replacement of
 tagged nodes and re-serialization of identified embedded documents, and the
 one hostname patch of step 5a. Everything
@@ -2316,6 +2334,12 @@ in place as
     explicitly** (§6.1 item 6). Alternative: a review warning only. The failure
     lands on a live cluster and is not cheap to undo, so a refusal is chosen
     over a warning that leaves it to whoever approves the plan.
+39. **Publication records whether a machine's configuration differs from its
+    import base in form only** (§6 step 8; persistence and API choice §17.48).
+    Alternatives: a compilation that reproduces the node's text when nothing is
+    added, which one later fragment defeats and which drops a normalisation the
+    compilation states on purpose; a normalised form in every comparison, which
+    makes Applied and drift stop meaning the bytes on the node.
 
 ## 17. Traceability
 

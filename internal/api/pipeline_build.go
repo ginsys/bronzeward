@@ -138,7 +138,8 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 // configuration (nil when it cannot be redacted) and the §8.2 and §9 records, each dependency
 // object the generation its source declares and each identity the one step 3 classified.
 func machineRecords(m snapshotMachine, c compile.Compiled, s snapshot, pins pinned) (unitMachine, error) {
-	um := unitMachine{machine: m.machine, importBase: m.importBase, assignment: m.assignment, mode: m.mode, provenance: c.Provenance()}
+	um := unitMachine{machine: m.machine, importBase: m.importBase, assignment: m.assignment, mode: m.mode, provenance: c.Provenance(),
+		formOnly: c.FormOnly()}
 	var err error
 	if um.configuration, err = c.Materialized().Digest(); err != nil {
 		return unitMachine{}, err

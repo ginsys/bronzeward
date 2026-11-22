@@ -1047,6 +1047,10 @@ CREATE TABLE release_machine (
   redacted             text CHECK (redacted <> ''),
   provenance           jsonb NOT NULL CHECK (jsonb_typeof(provenance) = 'array'),
   key_name             text NOT NULL,
+  -- Whether the compiled configuration and the import base hold the same documents, keys and
+  -- values and differ in form only (compilation.md §6), decided at publication on the plaintext.
+  -- A release published before this column existed reads false: it differs.
+  form_only            boolean NOT NULL DEFAULT false,
   PRIMARY KEY (release, machine),
   UNIQUE (release, machine, import_base_revision),
   UNIQUE (release, machine, key_name, key_version),

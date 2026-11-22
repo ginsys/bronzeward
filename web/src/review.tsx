@@ -14,7 +14,7 @@ import { MachineRef, type MachineLike, machineText } from "./machines.tsx";
 import { Withheld } from "./states.tsx";
 import { Named } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
-import { REVIEW_NOTE, THE_MACHINE } from "./words.ts";
+import { DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, REVIEW_NOTE, THE_MACHINE } from "./words.ts";
 
 type S = components["schemas"];
 type Review = S["ReviewBody"];
@@ -88,7 +88,7 @@ export const positionOwns = (p: Position, release: string): boolean => p.machine
 
 // What this release is to the machine (B18), from its Desired, Applied and pendingConvergence. It says nothing of
 // what was sent: the machine record cannot show that, and a plan or an operation open on it is the position's line.
-export function releaseNote(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence"> & Partial<Pick<Machine, "openDrift">>): string {
+export function releaseNote(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence"> & Partial<Pick<Machine, "openDrift" | "formOnly">>): string {
   if (m.desired !== release) {
     return `This release is not the Desired release of this machine${m.desired === null ? "" : ` (Desired is ${short(m.desired)})`}, so it needs no step for this release.`;
   }
@@ -99,6 +99,7 @@ export function releaseNote(release: string, m: Pick<Machine, "desired" | "appli
   // The server's pendingConvergence says whether the node's configuration differs from this release's (operator-experience §2.4).
   // After an adoption Applied can equal Desired while it does; after a publication Applied can name another release while it does not.
   const same = m.applied.release === release;
+  if (m.formOnly === true && same) return `${DIFFERS_IN_FORM_ONLY}: this release is Desired and Applied on this machine. ${FORM_ONLY_NOTE} An apply-config plan sends this release to it.`;
   if (m.pendingConvergence) {
     return `${same ? `This release is Desired and Applied on this machine, but its configuration differs from what Bronzeward applied.` : `This machine has an Applied configuration (release ${short(m.applied.release)}) that differs from this release.`} An apply-config plan sends this release to it.`;
   }

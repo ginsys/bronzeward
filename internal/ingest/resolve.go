@@ -34,7 +34,15 @@ var ErrPatchLoad = errors.New("ingest: the machinery cannot load the resolved fr
 // Unresolved, every fmt verb prints a placeholder, the marshallers fail and the text sits behind
 // a pointer to a string. It leaves this package only as the machinery's own composition input or
 // patch.
-type Resolved struct{ s *string }
+type Resolved struct {
+	s        *string
+	embedded bool
+}
+
+// Embedded reports whether an identified embedded document was written back: its string is the
+// resolver's own encoding of the document, so the resolved text differs from the stored one in that
+// value, not only in form.
+func (r Resolved) Embedded() bool { return r.embedded }
 
 // Input is the resolved stream as the first composition input, the import base.
 func (r Resolved) Input() configpatcher.Input {
@@ -87,6 +95,7 @@ func resolveWith(s Sanitized, value func(name string, r Reference, p Path, site 
 		return Resolved{}, err
 	}
 	var place visit
+	wroteEmbedded := false
 	place = func(n *yaml.Node, p Path, key bool, _ *yaml.Node) error {
 		if n.Kind == yaml.AliasNode {
 			if aliased != nil && !key {
@@ -127,6 +136,7 @@ func resolveWith(s Sanitized, value func(name string, r Reference, p Path, site 
 			return refuse(RuleEmbedded, p.String())
 		}
 		n.Tag, n.Value, n.Style = "!!str", text, yaml.LiteralStyle
+		wroteEmbedded = true
 		if hosted != nil {
 			hosted(format, text)
 		}
@@ -140,7 +150,7 @@ func resolveWith(s Sanitized, value func(name string, r Reference, p Path, site 
 		return Resolved{}, err
 	}
 	text := string(out)
-	return Resolved{s: &text}, nil
+	return Resolved{s: &text, embedded: wroteEmbedded}, nil
 }
 
 // placed is the node a declared name resolves to, or the rule that refuses it.

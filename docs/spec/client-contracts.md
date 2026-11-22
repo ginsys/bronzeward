@@ -141,7 +141,7 @@ no role included (`internal/api/api.go:339`).
 | Client action | Route | Paged | ETag served | Notes |
 | --- | --- | --- | --- | --- |
 | cluster list / show | `GET /clusters`, `/clusters/{id}` | list | no | |
-| machine list / show | `GET /machines`, `/machines/{id}` | list | no | filter `cluster`; `pendingConvergence` (G24) (`internal/api/reads.go:199-218`) |
+| machine list / show | `GET /machines`, `/machines/{id}` | list | no | filter `cluster`; `pendingConvergence` (G24) and `formOnly` (API revision 13, persistence and API choice §17.48) (`internal/api/reads.go:199-218`) |
 | machine position | `GET /machines/{id}/position` | no | no | one snapshot (G25, [persistence and API §9.3](persistence-api.md#93-examples)) |
 | machine observations | `GET /machines/{id}/observations` | yes | no | |
 | machine timeline | `GET /machines/{id}/timeline` | yes, by revision, oldest or newest first | no | JSON only, no stream (G9); `order`, and `tail`, the forward cursor from the newest entry, API revision 3 ([persistence and API §9.2](persistence-api.md#92-resources-and-routes)) |
@@ -1626,9 +1626,10 @@ the client's rule wins wherever the two meet.
    "Drafts and releases" is the page that lists both, and `/drafts` and `/releases` open it; "Fragments and profiles"
    is the page the word "sources" named, and a release's count of what it is built from is headed "Built from"; the
    buttons read "Enter a cluster by hand" (it records a cluster Bronzeward did not create) and "Add machine"; a
-   machine's state badges read "Changed on the machine", "Release not applied yet", "Last read matched what was
-   applied" (the specification says a match never by itself means healthy, fresh or converged) and "Not adopted
-   yet", with "Frozen" as before. An assignments row and an imports row are headed by what they are, "Assignment of
+   machine's state badges read "Changed on the machine", "Release not applied yet" (with "Differs in form only
+   (comments and encoding)" beside it when the server says the release has the same documents, keys and values), "Last
+   read matched what was applied" (the specification says a match never by itself means healthy, fresh or converged)
+   and "Not adopted yet", with "Frozen" as before. An assignments row and an imports row are headed by what they are, "Assignment of
    cp1" and "Import of cp1", and a dependency by "Dependency <object>, version <n>", with the identifier as the link's title.
    Every titled page of the console shows one note under its title that says what the page is, what to do on it and where to
    go next (the plan page's approval part is drawn inside its Approval section; the signed-out page already says so in

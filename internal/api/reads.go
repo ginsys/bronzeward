@@ -212,9 +212,12 @@ const selectMachine = `SELECT m.id, m.cluster, m.name, m.smbios_uuid::text, m.ta
 		CASE WHEN ob.configuration_digest = s.applied_digest THEN s.applied_release
 			WHEN ob.configuration_digest = rd.configuration_digest THEN s.desired END,
 		d.opened, d.observation, d.last_observation, d.late_landing,
-		s.desired IS NOT NULL AND rd.configuration_digest IS DISTINCT FROM s.applied_digest
+		s.desired IS NOT NULL AND rd.configuration_digest IS DISTINCT FROM s.applied_digest,
+		COALESCE(s.desired IS NOT NULL AND rd.configuration_digest IS DISTINCT FROM s.applied_digest AND rd.form_only
+			AND rdi.configuration_digest = s.applied_digest AND d.opened IS NULL, false)
 	FROM machine m JOIN machine_state s ON s.machine = m.id
 	LEFT JOIN release_machine rd ON rd.release = s.desired AND rd.machine = m.id
+	LEFT JOIN import_base_revision rdi ON rdi.id = rd.import_base_revision
 	LEFT JOIN release_machine ra ON ra.release = s.applied_release AND ra.machine = m.id
 	LEFT JOIN drift_record d ON d.machine = m.id AND d.closed IS NULL
 	LEFT JOIN LATERAL (SELECT o.id, o.at, o.configuration_digest FROM observation o
@@ -226,7 +229,7 @@ func scanMachine(r interface{ Scan(...any) error }) (machineBody, error) {
 	var observedAt sql.NullTime
 	var opened sql.NullInt64
 	err := r.Scan(&b.ID, &b.Cluster, &b.Name, &b.Hardware.SMBIOSUUID, &b.Hardware.TalosNodeID, &b.Hardware.Serial, &b.Platform, &b.TalosEndpoint, &b.Frozen, &b.ScopeState, &b.Desired, &rel, &source, &base,
-		&obs, &observedAt, &observedRelease, &opened, &driftObs, &driftLast, &late, &b.PendingConvergence)
+		&obs, &observedAt, &observedRelease, &opened, &driftObs, &driftLast, &late, &b.PendingConvergence, &b.FormOnly)
 	if opened.Valid {
 		b.OpenDrift = &openDriftBody{Revision: opened.Int64, Observation: driftObs.String, LastObservation: driftLast.String}
 		if late.Valid {

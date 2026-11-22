@@ -28,7 +28,7 @@ import { alertSentence, safeWord, assignmentName, dependencyName, importedConfig
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
 import {
-  AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
+  AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DIFFERS_IN_FORM_ONLY, DRAFTS_AND_RELEASES, FORM_ONLY_DIFF_NOTE, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
   NAME_NOT_SHOWN, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
 } from "./words.ts";
 
@@ -483,8 +483,9 @@ export function Change({ p }: { p: S["PlanBody"] }) {
   if (p.operation === "adopt") return <p>Sends nothing. Records the machine's current configuration as applied.</p>;
   if (d == null) return <p>No change recorded.</p>;
   if (d.withheld) return <p>The change cannot be shown.</p>;
-  if (d.unified === "") return <p>No differences in the redacted configurations (applied <Named id={d.from} />, release <Named id={d.to} />).</p>;
-  return <><p>Change shown below: the whole redacted configuration, applied <Named id={d.from} /> → <Named id={d.to} />.</p><pre className="diff" data-testid="diff" tabIndex={0} aria-label="Change">{d.unified}</pre></>;
+  const note = d.fromFormOnly ? <p>{FORM_ONLY_DIFF_NOTE}</p> : null;
+  if (d.unified === "") return <><p>No differences in the redacted configurations (applied <Named id={d.from} />, release <Named id={d.to} />).</p>{note}</>;
+  return <><p>Change shown below: the whole redacted configuration, applied <Named id={d.from} /> → <Named id={d.to} />.</p>{note}<pre className="diff" data-testid="diff" tabIndex={0} aria-label="Change">{d.unified}</pre></>;
 }
 
 export function PlanItem({ id }: { id: string }) {
@@ -526,7 +527,7 @@ export function PlanItem({ id }: { id: string }) {
             <Fields rows={[
               ["Validation", `${v.result} at ${v.at} (contract ${v.contract}, machinery ${v.machineryVersion}, Kubernetes ${v.kubernetesVersion}, ${v.platformMode})`],
               ["Dry run", dryRun.available ? "available" : `not available (${dryRun.reason})`],
-              ...(baseline == null ? [] : [["Baseline", <>import base <Id id={baseline.importBaseRevision} />{baseline.pendingConvergence && ", release not applied yet"}</>] as const]),
+              ...(baseline == null ? [] : [["Baseline", <>import base <Id id={baseline.importBaseRevision} />{baseline.pendingConvergence && ", release not applied yet"}{baseline.formOnly && `, ${DIFFERS_IN_FORM_ONLY.toLowerCase()}`}</>] as const]),
               ["Change", <Change p={p} />],
             ]} />
             <p><Ref to={`/operations?plan=${p.id}`} id={p.id}>Operations of this plan</Ref></p>

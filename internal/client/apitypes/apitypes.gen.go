@@ -1613,9 +1613,12 @@ type LayerFragments = []SourceName
 
 // MachineBody defines model for MachineBody.
 type MachineBody struct {
-	Applied  *Applied `json:"applied"`
-	Cluster  string   `json:"cluster"`
-	Desired  *string  `json:"desired"`
+	Applied *Applied `json:"applied"`
+	Cluster string   `json:"cluster"`
+	Desired *string  `json:"desired"`
+
+	// FormOnly True only while pendingConvergence is true, no drift is open and the Desired release's compiled configuration holds the same documents, keys and values as the machine's adopted configuration, differing in comments and encoding only (persistence and API §9.3, API revision 13).
+	FormOnly bool     `json:"formOnly"`
 	Frozen   bool     `json:"frozen"`
 	Hardware Hardware `json:"hardware"`
 	Id       string   `json:"id"`
@@ -1762,6 +1765,8 @@ type OperationSubject struct {
 
 // PlanBaseline defines model for PlanBaseline.
 type PlanBaseline struct {
+	// FormOnly True when the release's compiled configuration holds the same documents, keys and values as the baseline and differs in comments and encoding only; never true for the adoption of a drifted machine (API revision 13).
+	FormOnly           bool   `json:"formOnly"`
 	ImportBaseRevision string `json:"importBaseRevision"`
 	PendingConvergence bool   `json:"pendingConvergence"`
 }
@@ -1806,10 +1811,13 @@ type PlanCreator struct {
 
 // PlanDiff defines model for PlanDiff.
 type PlanDiff struct {
-	From     string `json:"from"`
-	To       string `json:"to"`
-	Unified  string `json:"unified"`
-	Withheld bool   `json:"withheld"`
+	From string `json:"from"`
+
+	// FromFormOnly True when the diff is shown although the machine holds its import base and not the from release's artifact, because the two differ in comments and encoding only (API revision 13).
+	FromFormOnly bool   `json:"fromFormOnly"`
+	To           string `json:"to"`
+	Unified      string `json:"unified"`
+	Withheld     bool   `json:"withheld"`
 }
 
 // PlanDryRun defines model for PlanDryRun.

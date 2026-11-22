@@ -10,7 +10,7 @@ import { Detail, type Dropped, Head, Id, type Keep, type Listed, type Load, type
 import { type Machine, machineHeading, machineName, node, release } from "./machines.tsx";
 import { ClusterRef } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
-import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
+import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
 import { NextStep, type Position } from "./nextstep.tsx";
 import { driftPath } from "./plan.tsx";
 import { principalId } from "./principals.ts";
@@ -84,6 +84,7 @@ export function sentences(m: Machine, obs: Observation[]): string[] {
   if (a === null) out.push("Not applied or adopted by Bronzeward.");
   if (d === null) out.push("No release selected.");
   else if (m.pendingConvergence && a === null) out.push(`${RELEASE_NOT_APPLIED_YET}: the selected release ${short(d)} has not been applied to this machine.`);
+  else if (m.formOnly) out.push(`${DIFFERS_IN_FORM_ONLY}: the selected release ${short(d)} for this machine. ${FORM_ONLY_NOTE}`);
   else if (m.pendingConvergence && drift === null) out.push(`${RELEASE_NOT_APPLIED_YET}: the configuration of the selected release ${short(d)} for this machine differs from what Bronzeward applied.`);
   else if (!m.pendingConvergence && drift === null && a !== null && d !== a.release) out.push(`The selected release ${short(d)} carries this machine's applied configuration unchanged.`);
   if (m.frozen) out.push(FROZEN);

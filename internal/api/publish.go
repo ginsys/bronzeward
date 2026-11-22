@@ -63,6 +63,7 @@ type unitMachine struct {
 	provenance                            []compile.Record
 	effective, reproduction               []unitDependency
 	encryption                            unitDependency
+	formOnly                              bool // the compiled configuration differs from the import base in form only
 }
 
 // unitDependency is one dependency record: a KV generation path or the Transit key name, its
@@ -712,10 +713,11 @@ func insertReleaseMachine(ctx context.Context, tx *sql.Tx, rel, cluster string, 
 		redacted = sql.NullString{String: *m.redacted, Valid: true}
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision,
-		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`, rel, cluster, m.machine, m.importBase,
+		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation,
+		form_only)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`, rel, cluster, m.machine, m.importBase,
 		sql.NullString{String: m.assignment, Valid: m.assignment != ""}, m.mode, string(m.ciphertext), cipherDigest[:],
-		m.configuration[:], redacted, string(provenance), m.encryption.object, m.observation)
+		m.configuration[:], redacted, string(provenance), m.encryption.object, m.observation, m.formOnly)
 	return err
 }
 

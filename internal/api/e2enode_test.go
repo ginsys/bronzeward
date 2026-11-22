@@ -37,7 +37,9 @@ func TestE2ENode(t *testing.T) {
 	}
 	// Both configurations validate in the node's mode (a cluster section on each, the machine CA on the worker), so a
 	// draft that imports both publishes: the handover journey (ONBOARD-03) runs the whole press (ginsys/bronzeward#1068).
-	cluster := "cluster:\n  controlPlane:\n    endpoint: https://cp.example.test:6443\n"
+	// Each carries comments as a talosctl-written configuration does, so the journey shows an adoption whose release
+	// differs from the node's text in form only (ginsys/bronzeward#1098).
+	cluster := "# Provides cluster specific configuration options.\ncluster:\n  controlPlane:\n    endpoint: https://cp.example.test:6443 # the control plane\n"
 	for i, m := range members {
 		n := talostest.ServeOn(t, pki, m.Addresses[0]+":50000")
 		n.SetNodeID(t, m.NodeID)
@@ -46,9 +48,9 @@ func TestE2ENode(t *testing.T) {
 		n.SetSMBIOSUUID(t, []string{"11111111-2222-3333-4444-555555555555", "66666666-7777-8888-9999-aaaaaaaaaaaa"}[i], true)
 		n.SetPlatform(t, "metal")
 		if i == 0 {
-			n.SetMachineConfig(t, []byte(controlPlaneConfig(ca)+cluster))
+			n.SetMachineConfig(t, []byte("# Stand-in control plane.\n"+controlPlaneConfig(ca)+cluster))
 		} else {
-			n.SetMachineConfig(t, []byte("version: v1alpha1\nmachine:\n  type: worker\n  token: "+runToken+"\n  ca:\n    crt: "+b64(ca.Crt)+"\n"+cluster))
+			n.SetMachineConfig(t, []byte("# Stand-in worker.\nversion: v1alpha1\nmachine:\n  type: worker\n  token: "+runToken+"\n  ca:\n    crt: "+b64(ca.Crt)+"\n"+cluster))
 		}
 	}
 	other := "    endpoints: [192.0.2.9]\n    ca: " + strings.Repeat("A", 8) + "\n"

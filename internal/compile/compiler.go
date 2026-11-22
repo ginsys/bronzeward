@@ -45,6 +45,21 @@ type Compiled struct {
 	// saying why it could not be redacted; it holds no value.
 	redacted  *string
 	redactErr error
+	formOnly  bool
+}
+
+// FormOnly reports whether the composed configuration holds the same documents, keys and values as
+// the import base and differs from it in form only: comments and encoding. It is false for anything
+// the comparison cannot decide, and for a base with an identified embedded document, whose string
+// the resolver writes back in its own encoding.
+func (c Compiled) FormOnly() bool { return c.formOnly }
+
+func sameInForm(base ingest.Resolved, m Materialized) bool {
+	if base.Embedded() {
+		return false
+	}
+	text, err := base.Input().Bytes()
+	return err == nil && formOnly(text, m.bytes())
 }
 
 // outcome is where one tracer's value ended up: the output paths holding it, or the fragment
@@ -197,7 +212,7 @@ func compile(in Input, sources []Source) (Compiled, error) {
 	// The kept outcomes hold redacted paths only: fmt reaches an unexported field by reflection,
 	// past Compiled's own placeholder.
 	red := newRedactor(sources)
-	c := Compiled{m: m, origins: origins(sources)}
+	c := Compiled{m: m, origins: origins(sources), formOnly: sameInForm(real[0], m)}
 	if text, err := redactedText(m.bytes(), hosts, outcomes, red); err != nil {
 		c.redactErr = err
 	} else {

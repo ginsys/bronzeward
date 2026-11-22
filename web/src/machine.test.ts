@@ -12,7 +12,7 @@ import type { ReadResult } from "./request.ts";
 // Synthetic machine and observation reads, as the generated types describe them.
 const machine = (over: Partial<Machine>): Machine => ({
   id: "mch_a", cluster: "cl_a", name: null, hardware: { smbiosUuid: null, talosNodeId: "node-a", serial: null }, platform: "metal", talosEndpoint: "10.5.0.2:50000",
-  desired: "rel_new", applied: { release: "rel_new", source: "operation", importBase: null }, pendingConvergence: false,
+  desired: "rel_new", applied: { release: "rel_new", source: "operation", importBase: null }, pendingConvergence: false, formOnly: false,
   observed: { observation: "obs_a", at: "2026-10-26T09:46:00Z", release: "rel_new" }, frozen: false, scopeState: "normal", openDrift: null, ...over,
 });
 const observation = (id: string, basis: number, at: string, unread: Observation["unread"] = {}): Observation => ({
@@ -45,6 +45,13 @@ describe("journeys §2.4 status sentences, field by field", () => {
     expect(sentences(machine({ applied: null, pendingConvergence: true, observed: null }), [])).toEqual([
       "No configuration read recorded.", "Not applied or adopted by Bronzeward.", "Release not applied yet: the selected release rel_new has not been applied to this machine.", HEALTH,
     ]);
+  });
+
+  test("formOnly says the release differs in form only and what the first apply does", () => {
+    const adopted = { release: "rel_new", source: "adoption", importBase: null };
+    const out = sentences(machine({ applied: adopted, pendingConvergence: true, formOnly: true }), [obsA]);
+    expect(out).toContain("Differs in form only (comments and encoding): the selected release rel_new for this machine. The release has the same documents, keys and values as the configuration Bronzeward adopted from the machine. The first apply sends the release's text, without the node's comments.");
+    expect(out.join(" ")).not.toContain("differs from what Bronzeward applied");
   });
 
   test("openDrift is the only authority for drift, even when the read equals the selected release", () => {
