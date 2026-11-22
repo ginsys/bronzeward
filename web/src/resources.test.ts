@@ -54,6 +54,17 @@ describe("paths (B3)", () => {
     expect(html(h(Sources, { query: "", go }))).not.toContain("Sources");
   });
 
+  test("ginsys/bronzeward#1087: /fragments, /profiles and /assignments open the page of fragments and profiles, which lists all three", () => {
+    for (const path of ["/fragments", "/profiles", "/assignments"]) {
+      expect(at(path)?.type, path).toBe(Sources);
+      const shown = html(at(path) as ReactElement);
+      expect(shown, path).toContain("<h2>Fragments and profiles</h2>");
+      for (const section of ["Fragments", "Profiles", "Assignments"]) expect(shown, `${path} ${section}`).toContain(`<h3>${section}</h3>`);
+    }
+    // An address that names no page stays one that does not: a bare kind with a trailing path, a revision list, a plural that is no kind.
+    for (const path of ["/fragments/frg_a/extra", "/fragment-revisions", "/profile-revisions", "/assignment-revisions", "/fragment", "/sourcess"]) expect(at(path), path).toBeUndefined();
+  });
+
   test("ginsys/bronzeward#517 H2: each draft's page is its own, so a move to another draft keeps none of its reads or editor", () => {
     expect(at("/drafts/drf_a")?.key).toBe("drf_a");
     expect(at("/drafts/drf_b")?.key).toBe("drf_b");
