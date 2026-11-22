@@ -857,7 +857,7 @@ describe("ginsys/bronzeward#1055: a dependency alert is a sentence, the identifi
   });
 
   test("the dependency list shows its provider, object and class, and the dependency page its provider, object, class and reason, as safe text", async () => {
-    const bad = { provider: "bad\u202Eprovider", object: "bad\u0007object", class: "bad\u202Eclass", reason: "bad\u0007reason" };
+    const bad = { created: "bad\u202Ecreated", provider: "bad\u202Eprovider", object: "bad\u0007object", class: "bad\u202Eclass", reason: "bad\u0007reason" };
     answers["/dependencies"] = ok({ items: [{ ...dependency, ...bad }], next: null, lastPass: null });
     await mount(h(Sources, { query: "", go: () => {} }));
     await settled();
@@ -871,6 +871,7 @@ describe("ginsys/bronzeward#1055: a dependency alert is a sentence, the identifi
     await settled();
     const fields = Object.fromEntries([...box.querySelectorAll("dt")].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent]));
     expect([fields.Provider, fields.Object, fields.Class, fields.Reason]).toEqual(["(name not shown)", "(name not shown)", "(not shown)", "(not shown)"]);
+    expect(fields.Created).not.toContain("bad");
     expect(box.textContent).not.toContain("bad\u202E");
   });
 
