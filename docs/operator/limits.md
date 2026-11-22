@@ -30,9 +30,11 @@ Results hold for that topology only. Results recorded before the move to v1.14.5
   E3 compatibility evidence is not complete E3
   ([specification review §8](../design/research/20260927-poc-specification-review.md)).
 - Remote transports, and recovery of a managed cluster's etcd.
-- Applying to a control plane: only workers are dispatched to. The console's apply page labels each
-  machine as a control plane or a worker and lets you choose a control plane; it says this limit when
-  you do, and the server does not refuse it.
+- Applying to a control plane: only workers are dispatched to, and applying to a control plane machine
+  was not covered by this version's acceptance tests. The console's apply page and `bronzewardctl apply`
+  label each machine as a control plane or a worker and let you choose a control plane; they say this
+  limit when you do, and the server does not refuse it. Machines are applied one at a time, in the order
+  their plans were approved, and a plan not applied expires 24 hours after it was made.
 - Any apply mode but `no-reboot`, and a rollout of more than one machine at a time.
 - A bounded `Ignore` drift policy.
 - SQLite, MySQL and MariaDB; replicated or pooled PostgreSQL or OpenBao; physical backups and
