@@ -50,6 +50,8 @@ export const useRecoveryState = () => {
 };
 // The roles GET /identity served, for a view that shows something to a role only.
 export const useRoles = () => useContext(Shell).roles;
+// The header's role list: each role a word the server sets, so shown only when it is safe text.
+export const rolesLine = (roles: readonly string[]) => `Roles: ${roles.length > 0 ? roles.map(safeWord).join(", ") : "none"}`;
 // The offline banner shows: no action sends anything (journeys §8 Offline row).
 export const useOffline = () => useContext(Shell).offline;
 
@@ -523,7 +525,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
         {id !== undefined && (
           <p>
             <span data-testid="principal">{signedInAs(id.kind, id.service, name)}</span>.{" "}
-            <span data-testid="roles">Roles: {id.roles.length > 0 ? id.roles.join(", ") : "none"}</span>.
+            <span data-testid="roles">{rolesLine(id.roles)}</span>.
           </p>
         )}
         <button type="button" onClick={() => signingOut() && reads.signOut(signOut)}><Icon name="signOut" />Sign out</button>

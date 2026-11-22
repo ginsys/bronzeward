@@ -6,7 +6,7 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useReads, Ref, useSettled } from "./list.tsx";
-import { type Env, endpointNote, isAddress, type Line, pressOnboarding, type Plan, discoverCluster, type Reference, sender, stoppedSentence } from "./onboard.ts";
+import { type Discovery, type Env, endpointNote, isAddress, type Line, pressOnboarding, type Plan, discoverCluster, type Reference, sender, stoppedSentence } from "./onboard.ts";
 import { RequestRef } from "./problems.tsx";
 import { Action, KEPT_PAGE, useGate } from "./shell.tsx";
 import { MachineById } from "./titles.tsx";
@@ -23,6 +23,11 @@ export const OnboardClusterAction = () => {
   const { go } = useReads();
   return <Action label={CONNECT_A_CLUSTER} needs={["author"]} onClick={() => go("/clusters/onboard")} />;
 };
+
+// One member of the discovered cluster. The address is not a server-set word (A8 rule 6 names it as not covered).
+export const MemberRow = ({ m }: { m: Discovery["members"][number] }) => (
+  <tr><td>{safeWord(m.hostname)}</td><td>{safeWord(m.role)}</td><td>{m.address}</td><td>{safeWord(m.platform)}</td><td>{m.answered ? "yes" : "no"}</td></tr>
+);
 
 export function OnboardCluster() {
   const writes = useWrites()!;
@@ -172,9 +177,7 @@ export function OnboardCluster() {
           <table>
             <thead><tr><th>Hostname</th><th>Role</th><th>Address</th><th>Platform</th><th>Answered</th></tr></thead>
             <tbody>
-              {p.found.members.map((m) => (
-                <tr key={m.nodeId}><td>{safeWord(m.hostname)}</td><td>{m.role}</td><td>{m.address}</td><td>{safeWord(m.platform)}</td><td>{m.answered ? "yes" : "no"}</td></tr>
-              ))}
+              {p.found.members.map((m) => <MemberRow key={m.nodeId} m={m} />)}
             </tbody>
           </table>
           <p><label>Name: <input name="name" required autoComplete="off" /></label> for the cluster in Bronzeward</p>
