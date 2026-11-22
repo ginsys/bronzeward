@@ -6,10 +6,10 @@
 // under a new epoch, with its events), reads the operation's state and events first, then opens the
 // operation page as h-viewer. The injector's `cut` fault closes the stream (injector.ts) and the
 // resolution (cancelled, by h-recovery) is the event that follows. Every value is synthetic.
-import { $, browser, expect } from "@wdio/globals";
+import { $, $$, browser, expect } from "@wdio/globals";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import type { Faults } from "../injector.ts";
-import { absent, answers, api, counts, disposable, faults, fixtureSignIn, mint, type Seed, storageEmpty } from "./helpers.ts";
+import { absent, answers, api, counts, disposable, faults, fixtureSignIn, fromTitle, itNarrow, measure, mint, narrow, overflows, type Seed, storageEmpty, tab } from "./helpers.ts";
 
 const LIVE = "Live: connected (resumes after a drop)";
 const ENDED = "Live: ended.";
@@ -58,9 +58,20 @@ const streams = async () => (await (await fetch(`${CONTROL}/streams`)).json()) a
 const cuts = async () => (await (await fetch(`${CONTROL}/cuts`)).json()) as number;
 const eventsOf = (s: Started) => `/operations/${s.op}/events`;
 // On a new epoch the shell reads the server and the identity again and mounts the page anew (web/src/shell.tsx onEpochChange),
-// whichever answer it learned the epoch from, so the reader's own notice of the clear (RESTORED, RESTORED_WHILE_READ) never
-// reaches the page in these cases: the cases read the display's result and the shell's notice (§8.5 item 3). The reader's rule
-// itself is read in web/src/progress.test.ts.
+// whichever answer it learned the epoch from, so the reader's own clear (RESTORED, RESTORED_WHILE_READ) runs on a page that is
+// gone. The page shows its restored notice itself at the mount, from the epoch it showed under before (web/src/operation.tsx
+// shownUnder): the cases read that notice, the shell's notice (§8.5 item 3) and the rows of the new epoch. The reader's two clear
+// calls are read in web/src/progress.test.ts, which kills the mutants of them that this browser cannot reach.
+const RESTORED = "The installation was restored or entered recovery mode, so the operation's events are shown again from the start.";
+const rowIds = () => browser.execute(() => [...document.querySelectorAll('[data-testid="events"] li')].map((li) => li.getAttribute("data-event-id") ?? ""));
+// The restored notice shows once, in its own words, and the rows are the ones the server lists under the new epoch.
+async function restoredOnce(s: Started) {
+  await expect($('[data-testid="cleared"]')).toHaveText(RESTORED, { wait: 30_000 });
+  expect((await $$('[data-testid="cleared"]')).length).toBe(1);
+  const now = ((await api(s.at, "h-viewer", "GET", eventsOf(s))).body!["items"] as Event[]).map((e) => e.id);
+  await browser.waitUntil(async () => JSON.stringify(await rowIds()) === JSON.stringify(now), { timeout: 30_000, timeoutMsg: "the rows are not the server's list under the new epoch" });
+  expect(await rowIds()).not.toEqual(s.ids);
+}
 // The resolution that cancels the unresolved operation: one more event, the last.
 const resolve = async (s: Started) => expect((await api(s.at, "h-recovery", "POST", `/operations/${s.op}/resolutions`, { to: "cancelled", reason: "synthetic resolution" })).status).toBe(201);
 const epochOf = (id: string) => id.split(":", 1)[0]!;
@@ -166,6 +177,7 @@ describe("the operation page's stream (#359)", () => {
     await browser.waitUntil(async () => (await streams()).length >= 3, { timeout: 30_000, timeoutMsg: "the page did not open the stream again from the start" });
     await reach(n);
     await absent(async () => (await rows()).length !== n, "a repeated or missing event after the replay");
+    await restoredOnce(s);
     const opened = await streams();
     expect(opened.slice(0, 2)).toEqual([`${eventsOf(s)} -`, `${eventsOf(s)} ${s.ids[n - 1]}`]);
     expect(opened.slice(2).every((o) => o === `${eventsOf(s)} -`)).toBe(true);
@@ -191,6 +203,7 @@ describe("the operation page's stream (#359)", () => {
     await reach(n + 1);
     await absent(async () => (await rows()).length !== n + 1, "a repeated or missing event after the replay");
     expect(await timeline()).toContain(LIVE);
+    await restoredOnce(s);
     await storageEmpty();
   });
 
@@ -256,6 +269,57 @@ describe("the operation page's stream (#359)", () => {
     );
     expect(await live()).toBe("polite");
     expect(await active()).toBe(focused);
+    await storageEmpty();
+  });
+
+  // T9 (journeys §13), WCAG 2.2 AA on the page of a followed operation with its timeline: every control of the page by Tab alone,
+  // in reading order, each focus visible (2.1.1, 2.1.2, 2.4.7), the contrast and target size the other views measure (1.4.3, 2.5.8).
+  // Announcement without moving focus is the case above; the screen-reader pass is owed by ginsys/bronzeward#447.
+  const CONTROLS = 'main a[href], main button, main input, main select, main textarea, main [tabindex="0"]';
+  it("keyboard only (T9): Tab reaches every control of the operation page, and the page measures", async function () {
+    this.timeout(120_000);
+    const s = await start();
+    await open(s);
+    await reach(s.ids.length);
+    // Each control of the page gets a mark, so that a focus is read as "control k of m", never by its text.
+    const total = await browser.execute((sel: string) => {
+      const all = [...document.querySelectorAll(sel)];
+      all.forEach((e, i) => e.setAttribute("data-t9", String(i)));
+      return all.length;
+    }, CONTROLS);
+    expect(total).toBeGreaterThan(0);
+    await fromTitle();
+    const reached: number[] = [];
+    for (let i = 0; i < 80 && reached.length < total; i++) {
+      const f = await tab();
+      if (f.same) throw new Error(`Tab did not leave ${f.tag} "${f.text}" on the way through the page`);
+      const k = await browser.execute(() => document.activeElement?.closest("[data-t9]")?.getAttribute("data-t9") ?? null);
+      if (k !== null && !reached.includes(Number(k))) reached.push(Number(k));
+    }
+    // Every control was reached, and in the order the page lists them.
+    expect(reached).toEqual([...reached].sort((a, b) => a - b));
+    expect(reached.length).toBe(total);
+    const seen = await measure();
+    expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(seen.small).toBe(0);
+    await storageEmpty();
+  });
+
+  itNarrow("reflow at 320 CSS pixels (T9): the operation page with its timeline does not scroll sideways, and no control is clipped", async function () {
+    this.timeout(120_000);
+    const s = await start();
+    await open(s);
+    await reach(s.ids.length);
+    await resolve(s);
+    await reach(s.ids.length + 1);
+    await narrow(async () => {
+      expect(["the operation page with its timeline", await overflows()]).toEqual(["the operation page with its timeline", 0]);
+      const clipped = await browser.execute((sel: string) => [...document.querySelectorAll(sel)].filter((e) => {
+        const r = e.getBoundingClientRect();
+        return r.left < -0.5 || r.right > innerWidth + 0.5;
+      }).length, CONTROLS);
+      expect(clipped).toBe(0);
+    });
     await storageEmpty();
   });
 });

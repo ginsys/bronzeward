@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { ReadsProvider, type Reads } from "./list.tsx";
-import { causeOf, CLOSING, ENDED, follow, LIVE, OperationTimeline, Outcome, type Row, rowOf, SERVER_TIMES_UNREAD, TimelineRows, type TimelineView, timelineView } from "./operation.tsx";
+import { causeOf, CLOSING, ENDED, follow, LIVE, OperationTimeline, Outcome, type Row, rowOf, seenUnder, SERVER_TIMES_UNREAD, TimelineRows, type TimelineView, timelineView } from "./operation.tsx";
 import { RESTORED } from "./progress.ts";
 import { API_BASE, Client } from "./request.ts";
 
@@ -168,6 +168,58 @@ describe("the timeline (ginsys/bronzeward#359, W8)", () => {
     expect(view.cleared).toBe(RESTORED);
     expect(view.rows.map((r) => r.id)).toEqual(["e1:1", "e1:2"]);
     expect(view.rows.every((r) => r.server)).toBe(true);
+  });
+
+  // The shell mounts the page anew on an epoch change, so the notice is made at the mount: `was` is the epoch
+  // the page was last mounted under, and the client's epoch is e1.
+  async function mounted(was: string | undefined) {
+    let view: TimelineView = { rows: [], done: false };
+    const acts: string[] = [];
+    const client = server("completed", 3);
+    await follow(client, OP, {
+      dispatch: (a) => {
+        acts.push(a.type);
+        view = timelineView(view, a);
+      },
+      soon: () => {}, again: () => {}, failure: () => "not read", signal: new AbortController().signal, epoch: () => "e1", was, received: () => "2026-11-19T10:00:00Z",
+    });
+    return { view, acts };
+  }
+
+  test("a page mounted under another epoch than it was last mounted under shows the restored notice once, then the rows of the new epoch", async () => {
+    const { view, acts } = await mounted("e0");
+    expect(view.cleared).toBe(RESTORED);
+    expect(acts.filter((a) => a === "clear")).toEqual(["clear"]);
+    expect(acts.slice(0, 2)).toEqual(["start", "clear"]);
+    expect(view.rows.map((r) => r.id)).toEqual(["e1:1", "e1:2"]);
+  });
+
+  test("a page mounted under the epoch it showed under, or with nothing shown before, shows no notice", async () => {
+    for (const was of ["e1", undefined]) {
+      const { view, acts } = await mounted(was);
+      expect(view.cleared).toBeUndefined();
+      expect(acts).not.toContain("clear");
+      expect(view.rows.length).toBe(2);
+    }
+  });
+
+  // One rule, recorded once at each mount and by nothing a row carries, so a replay reaching a page that is being
+  // replaced changes nothing: the page that opens the operation it opened last, under another epoch, owes the notice once.
+  test("the page's memory: the operation opened last, per client; leaving and coming back reads it, another operation in between forgets it", () => {
+    const client = {};
+    expect(seenUnder(client, "op_1", "e1")).toBeUndefined();
+    // Coming back under the same epoch owes nothing; the epoch changing owes the notice, once.
+    expect(seenUnder(client, "op_1", "e1")).toBe("e1");
+    expect(seenUnder(client, "op_1", "e2")).toBe("e1");
+    expect(seenUnder(client, "op_1", "e2")).toBe("e2");
+    expect(seenUnder({}, "op_1", "e2")).toBeUndefined();
+    seenUnder(client, "op_2", "e2");
+    expect(seenUnder(client, "op_1", "e2")).toBeUndefined();
+    // A client that knows no epoch yet records nothing and forgets nothing.
+    const fresh = {};
+    seenUnder(fresh, "op_1", "e1");
+    expect(seenUnder(fresh, "op_1", undefined)).toBe("e1");
+    expect(seenUnder(fresh, "op_1", "e1")).toBe("e1");
   });
 
   test("a state change row names the state it reached and its cause, a token or a sentence the server wrote", () => {

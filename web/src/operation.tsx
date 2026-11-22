@@ -129,6 +129,9 @@ export interface Follow {
   // The client's epoch now: a final read made when it differs from the epoch the watch ended on, whether
   // the client discarded the read or answered it, is a restore's (§8.5).
   epoch: () => string | undefined;
+  // The epoch this operation's page was last mounted under: the shell mounts the page anew on an epoch
+  // change (§8.5), so the notice of what the reader cleared is made at the mount (`seenUnder`).
+  was?: string | undefined;
   received?: () => string;
 }
 
@@ -145,6 +148,9 @@ export async function follow(reading: Reader, id: string, f: Follow): Promise<vo
   const received = f.received ?? (() => new Date().toISOString());
   for (let round = 0; ; round++) {
     f.dispatch(round === 0 ? { type: "start" } : { type: "clear", why: RESTORED });
+    // A page mounted under another epoch than the one it was last mounted under shows the notice once.
+    const at = f.epoch();
+    if (round === 0 && f.was !== undefined && at !== undefined && f.was !== at) f.dispatch({ type: "clear", why: RESTORED });
     const r = await watch(reading, id, {
       show: (e) => {
         f.dispatch({ type: "show", row: rowOf(e, received(), false) });
@@ -183,6 +189,18 @@ export const Next = ({ o }: { o: Operation }) => {
   return next === undefined ? null : <p data-testid="next">Next: {next}</p>;
 };
 
+// The epoch the operation page was last mounted under, with its operation, per client (which outlives the
+// page and ends with the sign-in), recorded once at each mount and by nothing a row carries. One rule: a
+// page that opens the operation it opened last, under another epoch than that, shows the restored notice
+// once. Leaving and coming back after an epoch change reads it too; opening another operation in between
+// forgets this one. A client that knows no epoch yet records nothing.
+const mountedUnder = new WeakMap<object, { op: string; epoch: string }>();
+export function seenUnder(client: object, op: string, now: string | undefined): string | undefined {
+  const before = mountedUnder.get(client);
+  if (now !== undefined) mountedUnder.set(client, { op, epoch: now });
+  return before?.op === op ? before.epoch : undefined;
+}
+
 // The page's outcome and timeline: `o` is the operation as last read, and `reread` is called soon after
 // events arrive so that read follows the state. The outcome names the cause of the state it shows when
 // a state change row gave one.
@@ -203,7 +221,7 @@ export function OperationTimeline({ id, o, reread }: { id: string; o: Operation;
       timer = setTimeout(() => again.current(), 300);
     };
     const reading = settledReads(client, { settle: now.current.settle, undropped: now.current.undropped }, () => !abort.signal.aborted);
-    void follow(reading, id, { dispatch, soon, again: () => again.current(), failure: (res) => now.current.failure(res), signal: abort.signal, epoch: () => client.currentEpoch });
+    void follow(reading, id, { dispatch, soon, again: () => again.current(), failure: (res) => now.current.failure(res), signal: abort.signal, epoch: () => client.currentEpoch, was: seenUnder(client, id, client.currentEpoch) });
     return () => {
       clearTimeout(timer);
       abort.abort();
