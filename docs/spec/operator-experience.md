@@ -1324,7 +1324,7 @@ not the owner's own words, and the owner may reverse it: it prints the same wind
 <cluster>)? [y/N]`. Only `y` or `yes` in any case sends; Enter, no answer, end of input and anything
 else stop with nothing sent and exit 2. There is no `--yes`, and `--no-input` still refuses, because the
 question needs an answer. A machine with no name, or one that could not be read, is named by its
-identifier. No role is named: nothing serves a machine's role. Everything the client checks before
+identifier. No role is named: machine reads serve a role since API revision 14, and this question does not use it. Everything the client checks before
 sending stays.
 
 *Why.* The typed machine ID was a guard against recording the judgment by habit. What guards that is
