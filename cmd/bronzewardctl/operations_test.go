@@ -281,6 +281,12 @@ func TestOperationWatch(t *testing.T) {
 		{"apply-config", "failed", "null", `{"title":"Ingestion abandoned","status":409,"detail":"the staging claim passed its lease; ingest the input again\u001b[31m","instance":"op_BWSYNTH"}`,
 			"Failed at 2026-11-01 06:00:03 UTC (server): Ingestion abandoned: the staging claim passed its lease; ingest the input again\\x1b[31m (instance op_BWSYNTH).\n" +
 				"Nothing more is sent for this plan. Read what the machine runs before a new plan: bronzewardctl machine show 'mch_a'"},
+		// A failed ingest names the identity field that differed first (the server's cause member of a
+		// machine-identity-mismatch, ginsys/bronzeward#813), so the operator knows which flag of machine add to change.
+		{"ingest", "failed", "null", `{"type":"urn:bronzeward:problem:machine-identity-mismatch","title":"The node read is not the recorded machine","status":409,` +
+			`"detail":"the node read is not the recorded machine; the claim is abandoned and nothing read is kept","machine":"mch_a","cause":"smbios-uuid","instance":"op_BWSYNTH"}`,
+			"Failed at 2026-11-01 06:00:03 UTC (server): smbios-uuid: The node read is not the recorded machine: " +
+				"the node read is not the recorded machine; the claim is abandoned and nothing read is kept (instance op_BWSYNTH)."},
 		// A cancelled operation records neither result nor error: its cause is its last event's.
 		{"apply-config", "cancelled", "null", "null",
 			"Cancelled at 2026-11-01 06:00:03 UTC (server): resolution.\n" +

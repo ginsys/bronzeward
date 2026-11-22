@@ -105,12 +105,16 @@ scripts/ci/commit-lint.sh "$base" HEAD
 oapi_codegen = "go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.1 -config internal/client/apitypes/oapi-codegen.yaml"
 
 [tasks.generate]
-description = "Regenerate internal/client/apitypes/apitypes.gen.go from api/openapi.yaml with the pinned oapi-codegen"
-run = "{{vars.oapi_codegen}} -o internal/client/apitypes/apitypes.gen.go api/openapi.yaml"
+description = "Regenerate internal/client/apitypes/apitypes.gen.go from api/openapi.yaml with the pinned oapi-codegen, and docs/operator/clients/cli-reference.md from the command table"
+run = """
+{{vars.oapi_codegen}} -o internal/client/apitypes/apitypes.gen.go api/openapi.yaml
+BRONZEWARD_WRITE_REFERENCE=1 go test ./cmd/bronzewardctl -run '^TestCLIReference$' -count=1
+"""
 
 [tasks."generate:check"]
-description = "Fail when internal/client/apitypes/apitypes.gen.go differs from what mise run generate writes"
+description = "Fail when internal/client/apitypes/apitypes.gen.go or docs/operator/clients/cli-reference.md differs from what mise run generate writes"
 run = """
+go test ./cmd/bronzewardctl -run '^TestCLIReference$' -count=1 || exit 1
 out=$(mktemp)
 trap 'rm -f "$out"' EXIT
 {{vars.oapi_codegen}} -o "$out" api/openapi.yaml
