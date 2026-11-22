@@ -3449,7 +3449,7 @@ components:
         id: {type: string}
         cluster: {type: string}
         name: {type: [string, 'null'], description: 'The machine''s name, unique within its cluster; null when it has none (persistence and API §3.5, API revision 10).'}
-        role: {type: [string, 'null'], enum: [controlplane, worker, null], description: 'The machine''s Talos type as its latest import base''s document names it; null when the machine has no import base, was imported before the role was stored, or its document names neither type (persistence and API §3.2, choice §17.48, API revision 14).'}
+        role: {type: [string, 'null'], enum: [controlplane, worker, null], description: 'The machine''s Talos type as its latest import base''s document names it; null when the machine has no import base, was imported before the role was stored, or its document names neither type or names two different types (persistence and API §3.2, choice §17.48, API revision 14).'}
         hardware: {$ref: '#/components/schemas/Hardware'}
         platform: {type: string}
         talosEndpoint: {type: string}

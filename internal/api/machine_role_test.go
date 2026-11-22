@@ -33,7 +33,7 @@ func TestMachineRoleRead(t *testing.T) {
 	revise(machines[1], "worker")
 	revise(machines[2], "worker") // a re-import of a node whose type changed: the latest revision answers
 	revise(machines[2], "controlplane")
-	revise(machines[3], "controlplane") // an import before the role was stored sits under a later one without
+	revise(machines[3], "controlplane") // an earlier import that stored a role, then a later one that stored none: null answers
 	revise(machines[3], nil)
 	for i, want := range []*string{nil, ptr("worker"), ptr("controlplane"), nil} {
 		got := decode[machineBody](t, e.do(e.api, call{method: "GET", path: prefix + "/machines/" + machines[i], token: viewer}), http.StatusOK).Role

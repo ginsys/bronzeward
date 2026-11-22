@@ -279,7 +279,7 @@ type machineBody struct {
 	Name    *string `json:"name"`
 	// Role is the machine's Talos type, "controlplane" or "worker", as its latest import base's
 	// document names it; null for a machine with no import base or one imported before the role was
-	// stored (API revision 14).
+	// stored, or whose document names neither type or names two different types (API revision 14).
 	Role               *string        `json:"role"`
 	Hardware           hardware       `json:"hardware"`
 	Platform           string         `json:"platform"`
