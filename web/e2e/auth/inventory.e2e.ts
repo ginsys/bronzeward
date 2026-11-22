@@ -773,7 +773,7 @@ describe("the rendered review of a release's machine", () => {
       id: m!, cluster: cl.id, name: null, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
       desired: s.rel.id, applied, pendingConvergence: true, observed: null, frozen: false, scopeState: "normal", openDrift: null,
     };
-    expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: { ...s.bodies, [path]: review, [`/machines/${m}`]: machine } })).toMatch(SERVER);
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: { ...s.bodies, [path]: review, [`/machines/${m}`]: machine, [`/machines/${m}/position`]: { machine, ingestion: null, draft: null, plan: null, operation: null, rolloutHeldBy: null, step: "needs-plan" } } })).toMatch(SERVER);
     return { s, m: m! };
   }
   const reviewOf = (rel: string, machine: string) => `/releases/${rel}/machines/${machine}/review`;
