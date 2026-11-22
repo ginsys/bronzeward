@@ -12,7 +12,7 @@ come with later tickets (reflow of the diff in review) are recorded by those tic
 wizard, the protected import review and the conflict view of the draft editor are recorded in the
 section "Import wizard, protected review and conflict view", the publish screen in "Publish screen
 (T3)", the plan page and its approval in "Plan and approval screen (T8)", and the page of a followed
-operation in "Operation page (T9)", all of the keyboard and measured checks.
+operation in "Operation page (T9)", and the page of a machine's change in "Drift page (T10)", all of the keyboard and measured checks.
 
 ## Keyboard and measured checks
 
@@ -162,6 +162,28 @@ Not run here: the screen-reader half of T9, owed by [#447](https://github.com/gi
 and the keyboard part of T3's handover, which goes with
 [#1068](https://github.com/ginsys/bronzeward/issues/1068). Safari runs the keyboard cases and skips the
 320 pixel case (its window stops at 336 CSS pixels, see `itNarrow`).
+
+### Drift page (T10)
+
+The page of a machine's change (W9) with its freeze and unfreeze controls and its links to the adoption and the
+revert, from [#363](https://github.com/ginsys/bronzeward/issues/363). Automated, in
+`web/e2e/auth/drift.e2e.ts` ("keyboard only (T10)" and "reflow at 320 CSS pixels (T10)"), run by
+`mise run browser-auth` with `BW_SPECS=drift` against a disposable deployment with synthetic data, on a machine
+with an open change. Recorded on 22 November 2026 by the `browser-auth` jobs of the pull request, on Chrome,
+Edge, Firefox and Firefox ESR on Linux. The keyboard case marks each control of `main` (links, buttons, fields)
+and presses Tab from the page's title until every one has held focus; it reads a focus as "control k of m",
+never by its text.
+
+| Item | Screen and what is checked | chrome | edge | firefox | firefox-esr |
+| --- | --- | --- | --- | --- | --- |
+| 2.1.1 Keyboard, 2.1.2 No keyboard trap | the drift page by Tab alone: every control of `main` is reached, in the order the page lists them, and no Tab stays on one stop | pass | pass | pass | pass |
+| 2.4.7 Focus visible | every focus Tab reaches on the page shows an outline of at least 2 px | pass | pass | pass | pass |
+| 1.4.3 Contrast | the page with its record and controls: the lowest contrast of any shown text, measured in the page, at least 4.5:1 | pass | pass | pass | pass |
+| 2.5.8 Target size | every button, select and navigation link at least 24 by 24 px | pass | pass | pass | pass |
+| 1.4.10 Reflow | at 320 CSS pixels the page does not scroll sideways, and no control of `main` lies outside the viewport | pass | pass | pass | pass |
+
+Not run here: the screen-reader half of T10, owed by [#447](https://github.com/ginsys/bronzeward/issues/447).
+Safari runs the keyboard case and skips the 320 pixel case (its window stops at 336 CSS pixels, see `itNarrow`).
 
 ## Screen reader
 

@@ -53,6 +53,8 @@ let answers: Response[];
 let sent: { method: string; path: string; body: unknown }[];
 // Every path the page asked the client to read.
 let readLog: string[];
+// The page's own "read again" counter, which a test bumps to make the page read the machine once more.
+let again: number;
 
 const reads = (): Reads => ({
   client: {
@@ -70,7 +72,7 @@ const reads = (): Reads => ({
     return false;
   },
   undropped: () => () => true,
-  view: "v", again: 0, regained: 0, go: () => {}, failure: () => "FAILED",
+  view: "v", again, regained: 0, go: () => {}, failure: () => "FAILED",
 }) as unknown as Reads;
 
 const EPOCH = "e1";
@@ -125,6 +127,7 @@ beforeEach(() => {
   answers = [];
   sent = [];
   readLog = [];
+  again = 0;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -341,6 +344,50 @@ describe("freeze and unfreeze", () => {
     expect(text("freeze-answer")).toMatch(/^Frozen\./);
     expect(text("freeze-answer")).toContain("ccc");
     expect(text("unfreeze-answer")).toBe("");
+  });
+});
+
+describe("a change made by someone else", () => {
+  const recorded = (frozen: boolean) => created({ machine: MCH, revision: 41, frozen, principal: "https://idp.invalid SYNTH-sub-1", role: "approver", reason: "r", act: "act_p2dk2pq3rstuvwxyz234567aaa", epoch: EPOCH, at: LAST });
+  const input = (form: string) => box.querySelector(`form[aria-label="${form}"] input`) as HTMLInputElement | null;
+
+  test("an unfreeze by someone else after this page froze the machine draws a Freeze form that works", async () => {
+    answers = [recorded(true), recorded(true)];
+    await shown();
+    served[`/machines/${MCH}`] = machine({ frozen: true });
+    await submit("Freeze", "r");
+    await settled();
+    expect(input("Unfreeze")!.disabled).toBe(false);
+    served[`/machines/${MCH}`] = machine({ frozen: false });
+    again = 1;
+    await shown();
+    expect(input("Freeze")!.disabled).toBe(false);
+    expect(text("freeze-answer")).toBe("");
+    served[`/machines/${MCH}`] = machine({ frozen: true });
+    await submit("Freeze", "again");
+    expect(sent.filter((x) => x.method === "POST").map((x) => x.path)).toEqual([`/machines/${MCH}/freezes`, `/machines/${MCH}/freezes`]);
+  });
+
+  test("a freeze by someone else after this page unfroze the machine draws an Unfreeze form that works", async () => {
+    served[`/machines/${MCH}`] = machine({ frozen: true });
+    answers = [recorded(false), recorded(false)];
+    await shown();
+    served[`/machines/${MCH}`] = machine({ frozen: false });
+    await submit("Unfreeze", "r");
+    await settled();
+    expect(input("Freeze")!.disabled).toBe(false);
+    served[`/machines/${MCH}`] = machine({ frozen: true });
+    again = 1;
+    await shown();
+    expect(input("Unfreeze")!.disabled).toBe(false);
+    expect(text("unfreeze-answer")).toBe("");
+  });
+
+  test("while the freeze this page sent is recorded and the machine is not yet read again, the form stays disabled", async () => {
+    answers = [recorded(true)];
+    await shown();
+    await submit("Freeze", "r");
+    expect(input("Freeze")!.disabled).toBe(true);
   });
 });
 

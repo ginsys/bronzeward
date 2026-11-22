@@ -45,7 +45,8 @@ function LinkAction({ label, to, id, needs }: { label: string; to: string; id: s
 // [Freeze] or [Unfreeze]: a reason of 1 to REASON_MAX bytes, the control disabled without its role (a form's submit still
 // reaches the server, whose refusal is shown in place), and the answer kept in one place so the machine's reread, which
 // swaps one control for the other, does not unmount it. Each instance sends once; the page draws a fresh one (a new key)
-// when the other kind has been recorded, so a freeze after an unfreeze works and shows only its own answer.
+// when a read shows the machine moved the other way, so a freeze after an unfreeze works, whoever unfroze, and shows only
+// its own answer.
 function Reasoned({ id, kind, show, finished }: { id: string; kind: "freeze" | "unfreeze"; show: boolean; finished: () => void }) {
   const writes = useWrites()!;
   const [note, setNote] = useState<string | undefined>();
@@ -110,11 +111,15 @@ function Record({ m, obs }: { m: Machine; obs: Observation[] }) {
 export function DriftItem({ id }: { id: string }) {
   const path = `/machines/${enc(id)}`;
   const [n, setN] = useState(0);
-  // How many times each kind was recorded in this visit: an instance's key is the count of the other kind.
-  const [recorded, setRecorded] = useState({ freeze: 0, unfreeze: 0 });
-  const froze = useCallback(() => { setN((x) => x + 1); setRecorded((r) => ({ ...r, freeze: r.freeze + 1 })); }, []);
-  const unfroze = useCallback(() => { setN((x) => x + 1); setRecorded((r) => ({ ...r, unfreeze: r.unfreeze + 1 })); }, []);
+  const reread = useCallback(() => setN((x) => x + 1), []);
   const m = useItem<Machine>(path, undefined, n);
+  // How many times a read showed the machine freeze and unfreeze in this visit, by this page or by anyone else: an
+  // instance's key is the count of the other kind, so a fresh control is drawn when the machine moved the other way.
+  const [seen, setSeen] = useState<{ frozen?: boolean; froze: number; unfroze: number }>({ froze: 0, unfroze: 0 });
+  if (m.kind === "ok" && m.data.frozen !== seen.frozen) {
+    const moved = seen.frozen !== undefined;
+    setSeen({ frozen: m.data.frozen, froze: seen.froze + (moved && m.data.frozen ? 1 : 0), unfroze: seen.unfroze + (moved && !m.data.frozen ? 1 : 0) });
+  }
   const [obs] = useList<Observation>(`${path}/observations`, "", true);
   const pm = usePending(m, "the machine");
   const po = usePending(obs, "the observations");
@@ -139,8 +144,8 @@ export function DriftItem({ id }: { id: string }) {
       {d.frozen && <Status testid="drift-frozen">{FROZEN}</Status>}
       {choice("Freeze", DRIFT_FREEZE, (
         <>
-          <Reasoned key={`freeze-${recorded.unfreeze}`} id={d.id} kind="freeze" show={!d.frozen} finished={froze} />
-          <Reasoned key={`unfreeze-${recorded.freeze}`} id={d.id} kind="unfreeze" show={d.frozen} finished={unfroze} />
+          <Reasoned key={`freeze-${seen.unfroze}`} id={d.id} kind="freeze" show={!d.frozen} finished={reread} />
+          <Reasoned key={`unfreeze-${seen.froze}`} id={d.id} kind="unfreeze" show={d.frozen} finished={reread} />
         </>
       ))}
       {open && choice("Adopt", DRIFT_ADOPT, <p><LinkAction label="Start adoption" to={`/ingestions/new?${new URLSearchParams({ machine: d.id, kind: "drift-adoption", source: "machine" })}`} id={d.id} needs={["author"]} /></p>)}
