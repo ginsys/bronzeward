@@ -183,13 +183,12 @@ function AlertText({ a, own }: { a: S["AlertBody"]; own: boolean }) {
   const subject = a.dependency == null || a.object == null || a.version == null ? "A dependency" : own ? "This dependency" : <DependencyName d={{ id: a.dependency, object: a.object, version: a.version }} />;
   return <>{subject} {s.text}</>;
 }
-const ReleaseNames = ({ ids }: { ids: readonly string[] | null }) => (ids == null || ids.length === 0 ? "none" : <>{ids.map((id, i) => <Group key={id}>{i > 0 && ", "}<Named id={id} /></Group>)}</>);
 // A name reads "(name not shown)" and any other word "(not shown)" (safeWord).
 const safeName = (s: string) => safeText(s) ?? NAME_NOT_SHOWN;
 // The server's words reach the cells through the safe-text rule: a value with a control or bidirectional character is not shown.
 const alertCols = (own: boolean): readonly Col<S["AlertBody"]>[] => [
   ["Alert", (a) => <AlertText a={a} own={own} />], ["Kind", (a) => safeWord(a.kind) ?? "none"], ["Class", (a) => klass({ class: safeWord(a.class) ?? null })], ["Reason", (a) => safeWord(a.reason) ?? "none"],
-  ["Releases", (a) => <ReleaseNames ids={a.releases} />], ["Recorded", (a) => when(a.recordedAt)], ["Identifier", (a) => <IdentifierText id={a.id} />],
+  ["Releases", (a) => <Ids ids={a.releases} />], ["Recorded", (a) => when(a.recordedAt)], ["Identifier", (a) => <IdentifierText id={a.id} />],
 ];
 const ALERTS = alertCols(false);
 const OWN_ALERTS = alertCols(true);
