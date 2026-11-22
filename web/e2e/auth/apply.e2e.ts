@@ -7,7 +7,9 @@ import { FIXTURE_PAGE } from "../auth.conf.ts";
 import { disposable, fixtureSignIn, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
-const id = (p: string, c: string) => `${p}_${c.repeat(26)}`;
+// A well-formed identifier (128-bit lower-case base32, so the last character is one whose low two bits are zero): the server
+// parses the identifiers in a request before it looks anything up, and answers the unknown ones from the injector's bodies.
+const id = (p: string, c: string) => `${p}_${c.repeat(25)}a`;
 const REL = id("rel", "r");
 const CL = id("cl", "c");
 const A = id("mch", "a");
