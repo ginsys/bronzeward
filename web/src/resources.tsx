@@ -28,7 +28,7 @@ import { ClusterLink, type Held, MachineById, Named, OperationHeading, Operation
 import { PageNote } from "./page-note.tsx";
 import {
   AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
-  PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
+  NAME_NOT_SHOWN, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
 } from "./words.ts";
 
 type S = components["schemas"];
@@ -184,8 +184,10 @@ function AlertText({ a, own }: { a: S["AlertBody"]; own: boolean }) {
   return <>{subject} {s.text}</>;
 }
 const ReleaseNames = ({ ids }: { ids: readonly string[] | null }) => (ids == null || ids.length === 0 ? "none" : <>{ids.map((id, i) => <Group key={id}>{i > 0 && ", "}<Named id={id} /></Group>)}</>);
+// The server's words reach the cells through the safe-text rule: a value with a control or bidirectional character is not shown.
+const safeCell = (s: string | null) => (s == null ? undefined : safeText(s) ?? NAME_NOT_SHOWN);
 const alertCols = (own: boolean): readonly Col<S["AlertBody"]>[] => [
-  ["Alert", (a) => <AlertText a={a} own={own} />], ["Kind", (a) => a.kind], ["Class", klass], ["Reason", (a) => a.reason ?? "none"],
+  ["Alert", (a) => <AlertText a={a} own={own} />], ["Kind", (a) => safeCell(a.kind) ?? "none"], ["Class", (a) => klass({ class: safeCell(a.class) ?? null })], ["Reason", (a) => safeCell(a.reason) ?? "none"],
   ["Releases", (a) => <ReleaseNames ids={a.releases} />], ["Recorded", (a) => when(a.recordedAt)], ["Identifier", (a) => <IdentifierText id={a.id} />],
 ];
 const ALERTS = alertCols(false);
