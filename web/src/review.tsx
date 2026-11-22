@@ -14,7 +14,7 @@ import { MachineRef, type MachineLike, machineText } from "./machines.tsx";
 import { Withheld } from "./states.tsx";
 import { Named } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
-import { RELEASE_NOT_APPLIED_YET, REVIEW_NOTE, THE_MACHINE } from "./words.ts";
+import { REVIEW_NOTE, THE_MACHINE } from "./words.ts";
 
 type S = components["schemas"];
 type Review = S["ReviewBody"];
@@ -97,7 +97,7 @@ export function releaseNote(release: string, m: Pick<Machine, "desired" | "appli
   // After an adoption Applied can equal Desired while it does; after a publication Applied can name another release while it does not.
   const same = m.applied.release === release;
   if (m.pendingConvergence) {
-    return `${same ? `This release is Desired and Applied on this machine, but its configuration differs from what Bronzeward applied. The machine page shows this as "${RELEASE_NOT_APPLIED_YET}".` : `This machine has an Applied configuration (release ${short(m.applied.release)}) that differs from this release.`} An apply-config plan sends this release to it.`;
+    return `${same ? `This release is Desired and Applied on this machine, but its configuration differs from what Bronzeward applied.` : `This machine has an Applied configuration (release ${short(m.applied.release)}) that differs from this release.`} An apply-config plan sends this release to it.`;
   }
   return same
     ? "This release is the one Applied on this machine. Nothing is left to send."
