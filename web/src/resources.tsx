@@ -1,14 +1,15 @@
 // The read-only lists and items besides the machines (#334): sources and their revisions,
 // releases, plans, operations, acts and dependencies with their releases and alerts. Every
-// resource has its path (B3) and every identifier links to its view where it has one. The release
-// review, plan and drift actions come with their own tickets; an operation's timeline is operation.tsx.
+// resource has its path (B3) and every identifier links to its view where it has one. An operation's
+// timeline is operation.tsx, a machine's drift page is drift.tsx.
 
 import { Fragment as Group, type ReactNode, useCallback, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { ApprovalRecord, ApproveControl, RevocationReason, RevokeControl } from "./approval.tsx";
 import { BaseDocument } from "./claim.tsx";
 import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
-import { CancelPlan, PlanNew, PlanState, PROPOSED, takeFresh } from "./plan.tsx";
+import { DriftItem, driftId } from "./drift.tsx";
+import { CancelPlan, FrozenLine, PlanNew, PlanState, PROPOSED, takeFresh } from "./plan.tsx";
 import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { OnboardCluster } from "./onboard.tsx";
@@ -509,6 +510,7 @@ export function PlanItem({ id }: { id: string }) {
             <PageNote parts={[PLAN_NOTE]} />
             {proposed && p.state === "proposed" && <Status testid="plan-proposed">{PROPOSED}</Status>}
             <PlanState p={p} reread={reread} answers={answers} onMachine={onMachine} />
+            <FrozenLine p={p} machine={held(p)?.body} />
             <Fields rows={[
               ["State", `${p.state}; expires ${when(p.expiresAt)}`],
               ["Target", <>machine <MachineById id={p.machine} {...(held(p) !== undefined && { held: held(p)! })} />, cluster <Id id={p.cluster} />, route {p.route}</>],
@@ -640,6 +642,8 @@ export function DependencyItem({ id }: { id: string }) {
 export function view(path: string, query: string, go: (to: string) => void): ReactNode | undefined {
   const review = reviewIds(path);
   if (review !== undefined) return <ReviewItem key={path} release={review[0]} machine={review[1]} />;
+  const drift = driftId(path);
+  if (drift !== undefined) return <DriftItem key={path} id={drift} />;
   const [, kind, id] = /^\/([a-z-]+)(?:\/([^/]+))?$/.exec(path === "/" ? "/machines" : path) ?? [];
   const source = /^(fragment|profile|assignment)s$/.exec(kind ?? "")?.[1] as Kind | undefined;
   const revision = /^(fragment|profile|assignment)-revisions$/.exec(kind ?? "")?.[1] as Kind | undefined;

@@ -6,13 +6,13 @@
 import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
-import { type Load, Id, Ref, short, usePending, useReads, useSettled } from "./list.tsx";
+import { type Load, Id, Ref, short, useItem, usePending, useReads, useSettled } from "./list.tsx";
 import { PageNote } from "./page-note.tsx";
 import type { Problem } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { MachineById, Named } from "./titles.tsx";
-import { CREATE_PLAN_NOTE } from "./words.ts";
+import { CREATE_PLAN_NOTE, UNFREEZE_THE_MACHINE } from "./words.ts";
 
 type PlanInput = components["schemas"]["PlanInput"];
 type Operation = PlanInput["operation"];
@@ -25,6 +25,9 @@ export const NO_TARGET = "Not read: the address names no release and machine. Op
 
 export const planPath = (release: string, machine: string, operation: Operation) =>
   `/plans/new?${new URLSearchParams({ release, machine, operation })}`;
+
+// The drift page of a machine (wireframe W9): where a change made on the machine is decided and a machine is frozen.
+export const driftPath = (machine: string) => `/machines/${enc(machine)}/drift`;
 
 // The plan this machine's state offers for this release (B18): a handover for a machine with no Applied, an
 // apply-config plan while the configuration differs. None where the text says nothing is left to send.
@@ -252,6 +255,24 @@ export function PlanState({ p, reread, answers = 0, onMachine }: { p: Plan; rere
       {p.state === "committed" && p.committedOperation !== null && <Status testid="plan-committed">Committed: operation <Named id={p.committedOperation} />.</Status>}
     </>
   );
+}
+
+// A freeze holds every apply-config plan at commitment, a revert included. The line is the plan page's, for a plan that is
+// still waiting: it says so and names the step that releases it. An approved plan reads its machine already (`machine`,
+// the body its `Approved` reads), and a proposed one reads it here, so each plan state reads the machine once.
+export const PLAN_FROZEN = "The machine is frozen: this plan cannot commit until an approver unfreezes the machine.";
+function FrozenSaid({ p, machine }: { p: Plan; machine: Machine | null | undefined }) {
+  if (machine?.id !== p.machine || !machine.frozen) return null;
+  return <Status testid="plan-frozen">{PLAN_FROZEN} <Ref to={driftPath(p.machine)} id={p.machine}>{UNFREEZE_THE_MACHINE}</Ref>.</Status>;
+}
+function ProposedFrozen({ p }: { p: Plan }) {
+  const m = useItem<Machine>(`/machines/${enc(p.machine)}`);
+  return <FrozenSaid p={p} machine={m.kind === "ok" ? m.data : undefined} />;
+}
+export function FrozenLine({ p, machine }: { p: Plan; machine: Machine | null | undefined }) {
+  if (p.operation !== "apply-config") return null;
+  if (p.state === "approved") return <FrozenSaid p={p} machine={machine} />;
+  return p.state === "proposed" ? <ProposedFrozen p={p} /> : null;
 }
 
 export const reasonProblem = (text: string): string | undefined =>

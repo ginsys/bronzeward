@@ -7,8 +7,8 @@
 
 import type { components } from "./api/v1";
 import { Ref } from "./list.tsx";
-import { planFor, planPath } from "./plan.tsx";
-import { NOT_MANAGED_YET } from "./words.ts";
+import { driftPath, planFor, planPath } from "./plan.tsx";
+import { DECIDE_ON_THE_CHANGE, NOT_MANAGED_YET } from "./words.ts";
 
 export type Position = components["schemas"]["PositionBody"];
 
@@ -84,8 +84,7 @@ export function nextStep(p: Position, recovery = false): Step | undefined {
         links: op,
       };
     case "drift-open":
-      // The drift view of operator experience §5.8 is not a page of this client yet, so the line links to none.
-      return { text: "The node differs from what Bronzeward recorded. Next: adopt the node's configuration, or revert it.", links: [] };
+      return { text: "The node differs from what Bronzeward recorded. Next: adopt the node's configuration, or revert it.", links: [{ to: driftPath(m), label: DECIDE_ON_THE_CHANGE, id: m }] };
     default:
       return undefined; // no-step, or a step a later API revision added
   }
