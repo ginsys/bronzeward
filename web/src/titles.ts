@@ -22,6 +22,9 @@ export const draftCalled = (d: Pick<S["DraftBody"], "id" | "title">): string => 
   return title === undefined ? short(d.id) : `"${title}"`;
 };
 
+// An assignment has no name: it is named by the machine it covers (a list row and a revision's heading both use this).
+export const assignmentName = (machine: string): string => `Assignment of ${machine}`;
+
 // A dependency by its object and version, in its page's heading and in its list row; an object that is not safe
 // text (A8 rule 3) leaves the shortened identifier.
 export const dependencyName = (d: Pick<S["DependencyBody"], "id" | "object" | "version">): string => {

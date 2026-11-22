@@ -23,10 +23,13 @@ import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { startedBy } from "./operation-words.ts";
-import { dependencyName, importedConfigurationTitle, operationTitle, safeText, savedTitle } from "./titles.ts";
+import { assignmentName, dependencyName, importedConfigurationTitle, operationTitle, safeText, savedTitle } from "./titles.ts";
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
-import { BUILT_FROM, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE } from "./words.ts";
+import {
+  AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
+  PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
+} from "./words.ts";
 
 type S = components["schemas"];
 type Col<T> = readonly [string, (t: T) => ReactNode];
@@ -153,7 +156,7 @@ const PROFILES: readonly Col<S["ProfileBody"]>[] = [named("profile"), CLUSTER, [
 // shortened identifier stands in until the machine is read.
 function AssignmentName({ a }: { a: S["AssignmentBody"] }) {
   const machine = useMachineText(a.machine);
-  return <Ref to={`/assignments/${encodeURIComponent(a.id)}`} id={a.id}>{machine === undefined ? `Assignment ${short(a.id)}` : `Assignment of ${machine}`}</Ref>;
+  return <Ref to={`/assignments/${encodeURIComponent(a.id)}`} id={a.id}>{machine === undefined ? `Assignment ${short(a.id)}` : assignmentName(machine)}</Ref>;
 }
 function ImportName({ b }: { b: S["IngestionBody"] }) {
   const machine = useMachineText(b.machine);
@@ -187,7 +190,7 @@ export function Sources({ query, go }: { query: string; go: (to: string) => void
   return (
     <>
       <h2>{FRAGMENTS_AND_PROFILES}</h2>
-      <p>What releases are built from. These are not configuration: a machine's configuration is a release's.</p>
+      <PageNote parts={[SOURCES_NOTE]} />
       <h3>Fragments</h3>
       <ListOf label="Fragments" path="/fragments" cols={FRAGMENTS} empty="No fragments recorded yet." />
       <h3>Profiles</h3>
@@ -215,6 +218,7 @@ export function SourceItem({ kind, id }: { kind: Kind; id: string }) {
     <ItemOf<Source> path={path} what={`the ${kind}`} title={(s) => `${cap(kind)} ${s !== undefined && "name" in s ? s.name : short(id)}`}>
       {(s) => (
         <>
+          <PageNote parts={[sourceNote(kind)]} />
           <Fields rows={[
             ["Identifier", s.id], ["Cluster", <Id id={s.cluster} />],
             ...("scope" in s ? [["Scope", s.scope] as const] : []), ...("layer" in s ? [["Layer", s.layer] as const] : []),
@@ -292,7 +296,7 @@ const REFERENCES: readonly Col<[string, S["Reference"]]>[] = [
 function RevisionHeading({ kind, id, r }: { kind: Kind; id: string; r: AnyRevision | undefined }) {
   const machine = useMachineText(r !== undefined && "machine" in r ? r.machine : undefined);
   const name = r !== undefined && "name" in r ? safeText(r.name) : undefined;
-  const what = r === undefined ? undefined : "name" in r ? name === undefined ? undefined : `${cap(kind)} ${name}` : machine === undefined ? undefined : `${cap(kind)} of ${machine}`;
+  const what = r === undefined ? undefined : "name" in r ? name === undefined ? undefined : `${cap(kind)} ${name}` : machine === undefined ? undefined : assignmentName(machine);
   return <>{r === undefined || what === undefined ? `${cap(kind)} revision ${short(id)}` : savedTitle(what, r.createdAt)}</>;
 }
 
@@ -302,6 +306,7 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
       title={(r) => <RevisionHeading kind={kind} id={id} r={r} />}>
       {(r) => (
         <>
+          <PageNote parts={[revisionNote(kind)]} />
           <Detail id={r.id} />
           <Fields rows={[
             ["Cluster", <ClusterLink id={r.cluster} />], ...("layer" in r ? [["Layer", r.layer] as const] : []),
@@ -358,7 +363,7 @@ function ImportBaseHeading({ id, r }: { id: string; r: S["ImportBaseSummary"] | 
 export const ImportBaseItem = ({ id }: { id: string }) => (
   <ItemOf<S["ImportBaseSummary"]> path={`/import-base-revisions/${encodeURIComponent(id)}`} what="the imported configuration"
     title={(r) => <ImportBaseHeading id={id} r={r} />}>
-    {(r) => <><ImportBaseRows r={r} /><BaseDocument id={r.id} machine={r.machine} /></>}
+    {(r) => <><PageNote parts={[IMPORTED_NOTE]} /><ImportBaseRows r={r} /><BaseDocument id={r.id} machine={r.machine} /></>}
   </ItemOf>
 );
 
@@ -380,6 +385,7 @@ export function Imports({ query, go }: { query: string; go: (to: string) => void
   return (
     <>
       <h2>Imports</h2>
+      <PageNote parts={[IMPORTS_NOTE]} />
       <p><Action label="Start import" needs={["author"]} onClick={() => go(q.has("machine") ? `/ingestions/new?machine=${q.get("machine")}` : "/ingestions/new")} /></p>
       <Pinned label="Machine" id={q.get("machine")} clear={() => set("machine", "")} />
       <Filter label="State:" value={q.get("state") ?? ""} options={choices(INGESTION_STATES)} onChange={(v) => set("state", v)} />
@@ -394,6 +400,7 @@ export function Changes() {
   return (
     <>
       <h2>{DRAFTS_AND_RELEASES}</h2>
+      <PageNote parts={[CHANGES_NOTE]} />
       <h3>Drafts</h3>
       <Drafts />
       <p><Ref to="/ingestions" id="ingestions">Imports</Ref>, of every machine.</p>
@@ -584,7 +591,7 @@ export const ACTS: readonly Col<S["ActItem"]>[] = [
 ];
 
 export function Audit() {
-  return <><h2>Audit</h2><ListOf label="Acts" path="/acts" cols={ACTS} empty="No acts recorded yet." /></>;
+  return <><h2>Audit</h2><PageNote parts={[AUDIT_NOTE]} /><ListOf label="Acts" path="/acts" cols={ACTS} empty="No acts recorded yet." /></>;
 }
 
 const DEPENDENT: readonly Col<S["DependencyReleaseBody"]>[] = [
@@ -598,6 +605,7 @@ export function DependencyItem({ id }: { id: string }) {
     <ItemOf<S["DependencyBody"]> path={path} what="the dependency" title={(d) => (d === undefined ? `Dependency ${short(id)}` : dependencyName(d))}>
       {(d) => (
         <>
+          <PageNote parts={[DEPENDENCY_NOTE]} />
           <Fields rows={[
             ["Identifier", d.id], ["Provider", d.provider], ["Object", d.object], ["Version", d.version], ["Created", d.created],
             ["Class", klass(d)], ["Reason", d.reason ?? "none"], ["First retained", when(d.firstRetainedAt)], ["Unknown since", when(d.unknownSince)],

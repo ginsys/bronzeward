@@ -12,7 +12,9 @@ import { view } from "./resources.tsx";
 import { type IconName, Icon } from "./icons.tsx";
 import { follow, GROUPS, PAGES, usePath } from "./router.ts";
 import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status, StatusPage } from "./states.tsx";
+import { PageNote } from "./page-note.tsx";
 import { signedInAs } from "./userinfo.ts";
+import { NOT_FOUND_NOTE } from "./words.ts";
 import { type Ending, EPOCH_CHANGED_ASIDE, type Writes } from "./write.ts";
 import type { components } from "./api/v1";
 
@@ -552,6 +554,6 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
 // The root is the machine list, the hub of the journeys (§6); /drafts and /releases open the page that lists both.
 export const current = (path: string) => (path === "/" ? "/machines" : path === "/drafts" || path === "/releases" ? "/changes" : path);
 
-function Page({ path, query, go }: { path: string; query: string; go: (to: string) => void }) {
-  return view(path, query, go) ?? <><h2>Not found</h2><Status>No page at {path}.</Status></>;
+export function Page({ path, query, go }: { path: string; query: string; go: (to: string) => void }) {
+  return view(path, query, go) ?? <><h2>Not found</h2><Status>No page at {path}.</Status><PageNote parts={[NOT_FOUND_NOTE]} /></>;
 }

@@ -21,7 +21,7 @@ import { Conflict, Refused, Status } from "./states.tsx";
 import { ClusterRef, DraftHead, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
 import { draftCalled, draftText, safeText } from "./titles.ts";
 import { PageNote } from "./page-note.tsx";
-import { DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, NAME_NOT_SHOWN } from "./words.ts";
+import { CREATE_DRAFT_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, NAME_NOT_SHOWN } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
 
 type S = components["schemas"];
@@ -187,6 +187,7 @@ export function CreateDraft() {
   return (
     <>
       <h2>Create draft</h2>
+      <PageNote parts={[CREATE_DRAFT_NOTE]} />
       <Form label="Create draft" onSubmit={submit} w={w} done={done}>
         <p>
           <label>Cluster:{" "}
