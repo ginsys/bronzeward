@@ -153,6 +153,25 @@ describe("the press adds the empty assignment a connected machine lacks (ginsys/
     expect(w.puts.map((x) => x.machine)).toEqual([B]);
   });
 
+  test("an entry or a head the press cannot read stops it before any write, in words", async () => {
+    for (const bad of [{ entries: [{ machine: A }] }, { entries: [{ kind: "assignment" }] }, { entries: [{ kind: "import-base", machine: A }, { kind: "assignment" }] }]) {
+      const w = world({ state: "open", ...bad } as never, { [A]: fresh(), [B]: fresh() });
+      await handOver("drf_1", [A, B], w.io, SHOWN);
+      expect(w.log, JSON.stringify(bad)).toEqual([]);
+      expect(text(w.lines[DRAFT]), JSON.stringify(bad)).toBe(`stopped: ${LINES.noAssignmentRead}`);
+    }
+    const w = world({ state: "open", entries: [], heads: [undefined as never] }, { [A]: fresh() });
+    await handOver("drf_1", [A], w.io, SHOWN);
+    expect(w.log).toEqual([]);
+    expect(text(w.lines[DRAFT])).toBe(`stopped: ${LINES.noAssignmentRead}`);
+  });
+
+  test("an import entry of the draft is no reason to stop: the press still writes the assignment it lacks", async () => {
+    const w = world({ state: "open", entries: [{ kind: "import-base", machine: A }] }, { [A]: fresh() });
+    await handOver("drf_1", [A], w.io, SHOWN);
+    expect(w.log.filter((l) => l.startsWith("PUT")).length).toBe(1);
+  });
+
   test("assignments that cannot be read stop the press before any write, in words", async () => {
     const w = world({ state: "open", entries: [], noHeads: true }, { [A]: fresh() });
     await handOver("drf_1", [A], w.io, SHOWN);
