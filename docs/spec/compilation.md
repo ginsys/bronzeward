@@ -998,8 +998,12 @@ the baseline cannot be decrypted by any identity (§2.3), so no comparison with
 the node's own bytes is offered. A machine whose import removed a hostname
 document equal to its name (§2.3 step 2a) and whose release writes one back
 (step 5a) reads false although nothing changes on the node; that limit is the
-fill's change to decide (ginsys/bronzeward#1040). The compilation's own
-transformations, the digest and the artifact are unchanged.
+fill's change to decide (ginsys/bronzeward#1040). So does a base that omits a
+key the composition writes with an empty value (a configuration not written by
+`talosctl` can be in that case): the release then holds a key the base lacks,
+reads false, and the first apply's diff is withheld. The comparison does not treat an empty
+default as absent; that would change what the verdict means. The compilation's
+own transformations, the digest and the artifact are unchanged.
 
 The compiler's only transformations of native YAML are step 4's replacement of
 tagged nodes and re-serialization of identified embedded documents, and the

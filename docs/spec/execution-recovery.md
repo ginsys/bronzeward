@@ -1197,8 +1197,10 @@ release does not by itself resolve drift.
 
 If the adopted release's artifact digest differs from the baseline's, the
 machine is then pending convergence (§1), not drifted. Converging it is an
-ordinary approved plan whose redacted whole-configuration diff shows what the
-re-encoding changes (§2).
+ordinary approved plan. Its redacted whole-configuration diff is shown only
+when the release differs from the adopted configuration in form only; for any
+difference in content it is withheld
+([persistence and API](persistence-api.md) choice §17.48; [compilation](compilation.md) §6).
 
 **Existing-cluster adoption.** The same transaction establishes the first
 `Applied` for a machine that has none, which is how existing-cluster adoption
