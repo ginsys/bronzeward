@@ -197,11 +197,18 @@ describe("the publication page (#342)", () => {
       await link.waitForExist({ timeout: 20_000 });
       await link.scrollIntoView({ block: "center", inline: "start" });
       const shown = await browser.execute((e: HTMLElement) => {
-        const r = e.getBoundingClientRect();
         const box = e.closest('[role="region"]')!.getBoundingClientRect();
-        return { x: Math.round(Math.max(r.left, box.left) + 4), y: Math.round(r.top + r.height / 2) };
+        // The link wraps over lines: take a line's box, not the link's whole box, and keep only its part that lies inside the region.
+        for (const r of e.getClientRects()) {
+          const left = Math.max(r.left, box.left) + 4;
+          const x = Math.round(left);
+          const y = Math.round(r.top + r.height / 2);
+          if (x < Math.min(r.right, box.right) && y >= box.top && y <= box.bottom && e.contains(document.elementFromPoint(x, y))) return { x, y };
+        }
+        return null;
       }, link as unknown as HTMLElement);
-      await browser.action("pointer").move({ origin: "viewport", x: shown.x, y: shown.y }).down().up().perform();
+      expect(shown).not.toBeNull();
+      await browser.action("pointer").move({ origin: "viewport", x: shown!.x, y: shown!.y }).down().up().perform();
       await $("main").$("a=Publish this draft").click();
       await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });
       expect(["the publication page", await overflows()]).toEqual(["the publication page", 0]);
