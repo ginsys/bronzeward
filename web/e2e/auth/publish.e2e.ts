@@ -192,7 +192,11 @@ describe("the publication page (#342)", () => {
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at, bodies: succeeded(id) })).toMatch(SERVER);
     await narrow(async () => {
       await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
-      await $(`main a[title="${id}"]`).click();
+      // The link is the draft's long name, wider than the box that scrolls: its centre is out of view, so scroll to its start and click there, where a person would.
+      const link = $(`main a[title="${id}"]`);
+      await link.waitForExist({ timeout: 20_000 });
+      await link.scrollIntoView({ block: "center", inline: "start" });
+      await link.click({ x: 4 - Math.floor((await link.getSize("width")) / 2), y: 0 });
       await $("main").$("a=Publish this draft").click();
       await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });
       expect(["the publication page", await overflows()]).toEqual(["the publication page", 0]);
