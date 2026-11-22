@@ -182,14 +182,16 @@ describe("the apply page's plans and approvals", () => {
 
   test("a machine no longer chosen has its plan cancelled, and the plan of a machine still chosen is kept", async () => {
     const none = (m: string) => ({ ...position(m, "x"), step: "needs-plan", plan: null });
-    const p = mount(served2({ [`/machines/${A}/position`]: none(A), [`/machines/${B}/position`]: none(B) }), (path) => (path === "/plans" ? done({ id: "pln_made" }) : done({})));
+    let n = 0;
+    const p = mount(served2({ [`/machines/${A}/position`]: none(A), [`/machines/${B}/position`]: none(B) }), (path) => (path === "/plans" ? done({ id: `pln_made${++n}` }) : done({})));
     await p.start();
     await p.choose(A);
     await p.choose(B);
     await p.press("Show apply");
     expect(p.sent).toEqual(["/plans", "/plans"]);
     await p.choose(A);
-    expect(p.sent).toEqual(["/plans", "/plans", "/plans/pln_made/cancellations"]);
+    // The plan made for A (the first) is cancelled and the one made for B stays.
+    expect(p.sent).toEqual(["/plans", "/plans", "/plans/pln_made1/cancellations"]);
     await p.stop();
   });
 
