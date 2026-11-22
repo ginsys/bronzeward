@@ -9,6 +9,7 @@ import { EMPTY_NOTE, NextStepSection, NO_PROVENANCE, positionOwns, PROVENANCE_LI
 import { WITHHELD } from "./states.tsx";
 
 type Review = components["schemas"]["ReviewBody"];
+type Machine = components["schemas"]["MachineBody"];
 
 const go = () => {};
 const reads: Reads = { client: { read: () => new Promise(() => {}) }, settle: () => false, undropped: () => () => true, view: "", again: 0, regained: 0, go, failure: () => null };
@@ -136,6 +137,19 @@ describe("the rendered review page (ginsys/bronzeward#342, journeys §5.5, W6)",
     expect(text).not.toContain("Nothing is left to send");
   });
 
+  test("with a drift open the note neither says nothing is left to send nor offers a send, whatever Desired and Applied say", () => {
+    const rel = "rel_BWSYNTH-h7rt2bd";
+    const drift = { id: "drf_1" } as unknown as Machine["openDrift"];
+    for (const pc of [true, false]) {
+      for (const applied of [rel, "rel_BWSYNTH-old"]) {
+        const text = releaseNote(rel, { desired: rel, applied: { release: applied, source: "adoption", importBase: null }, pendingConvergence: pc, openDrift: drift });
+        expect(text).toContain("The node differs from what Bronzeward recorded");
+        expect(text).not.toContain("Nothing is left to send");
+        expect(text).not.toContain("apply-config plan sends");
+      }
+    }
+  });
+
   test("the page reads before it shows anything, and the release page links to it by both identifiers", () => {
     const page = html(h(ReviewItem, { release: "rel_a", machine: "mch_b" }));
     expect(page).toContain("Rendered configuration of the machine in release rel_a");
@@ -209,6 +223,13 @@ describe("the next step of the release review page", () => {
       expect(out).not.toMatch(/nothing has been sent yet/i);
       expect(out).not.toContain("An operation is changing");
     }
+  });
+
+  test("a machine with an open drift, Desired equal to Applied and nothing pending, is not told nothing is left to send", () => {
+    const out = page(pos("drift-open", {}, { applied: { release: rel }, pendingConvergence: false, openDrift: { id: "drf_1" } }));
+    expect(out).toContain("The node differs from what Bronzeward recorded");
+    expect(out).not.toContain("Nothing is left to send");
+    expect(out).not.toContain("An apply-config plan sends this release");
   });
 
   test("the page never draws both the position's line and the release sentence", () => {
