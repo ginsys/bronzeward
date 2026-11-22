@@ -75,8 +75,9 @@ export function nameOf(hostname: string): { name: string; note?: string } | { na
   // A to Z only, as the command does: Unicode lowercasing differs between languages (U+0130 is two code points here).
   const name = hostname.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
   if (!MACHINE_NAME.test(name)) {
-    const shown = hostname.length > 64 ? `${hostname.slice(0, 64)}…` : hostname;
-    return { note: `no name: the hostname ${safeWord(shown) === shown ? JSON.stringify(shown) : safeWord(shown)} is not a valid name` };
+    const word = safeWord(hostname);
+    const said = word === hostname ? JSON.stringify(hostname.length > 64 ? `${hostname.slice(0, 64)}…` : hostname) : word;
+    return { note: `no name: the hostname ${said} is not a valid name` };
   }
   return name === hostname ? { name } : { name, note: "named by its hostname in lower case" };
 }
