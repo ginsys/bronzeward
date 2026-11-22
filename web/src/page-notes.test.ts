@@ -326,7 +326,7 @@ describe("the create-a-plan page's note", () => {
 });
 
 describe("the plan page's note", () => {
-  test("a proposed plan: the always part under the title, and the approval part inside the approval form, once", async () => {
+  test("a proposed plan: the always part under the title, and the approval part inside the Approval section, once", async () => {
     served[`/plans/${PLN}`] = plan("proposed");
     await shown(h(PlanItem, { id: PLN }));
     const all = notes().map((n) => n.textContent);
