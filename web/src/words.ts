@@ -54,7 +54,9 @@ export const sourceNote = (kind: string) => `This is one ${kind}, with its revis
 export const revisionNote = (kind: string) => `A revision is one saved state of a ${kind}. This shows it as it was saved.`;
 export const DEPENDENCY_NOTE = "A dependency is an outside thing of which Bronzeward records a version, by provider and object. Below: the releases that depend on it and the alerts raised for it.";
 export const AUDIT_NOTE = "Each row is an act Bronzeward recorded: who did what, through which route, and to what. Nothing on this page changes them.";
-export const RECOVERY_NOTE = "Recovery mode is for restoring Bronzeward from a backup. This page shows whether it is on and which scopes are still in recovery, and lets you leave recovery mode or revoke an identity.";
+export const DRIFT_ADOPTION_NOTE = "Drift adoption reads the machine's own configuration into a draft, so that you can review what changed on it. Choose the machine and the draft that should receive the configuration. Reading it writes nothing to the machine.";
+export const ENTER_RECOVERY_NOTE = "Enter recovery after a restore, to record which backups were restored. Name each restored backup, when it was taken, and when the restore stopped writes. Times are RFC 3339 with a zone.";
+export const RECOVERY_NOTE ="Recovery mode is for restoring Bronzeward from a backup. This page shows whether it is on and which scopes are still in recovery, and lets you leave recovery mode or revoke an identity.";
 export const RECOVERY_ROLE_NOTE = "Leaving recovery mode and revoking an identity need the recovery-admin role, which you do not have.";
 export const NOT_FOUND_NOTE = "Start from Machines or Clusters.";
 export const CONNECT_NOTE = "Connecting records the cluster and each machine that answers with a platform, and starts an import of each of those machines into one draft. A machine that does not answer, or reports no platform, is skipped. First you choose the talosconfig, then you confirm what the page found.";
