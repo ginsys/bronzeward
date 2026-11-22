@@ -828,7 +828,7 @@ there.
 ### 3.5 A machine's name
 
 A machine may carry a name, an operator's label for finding it **(choice §17.43)**. It is stored
-in the database and is not part of any fragment or plan; since API revision 14 a release compiles it
+in the database and is not part of any fragment or plan; since API revision 15 a release compiles it
 as the machine's hostname where nothing sets one and records the name used (the last bullet below). It is served from API
 revision 10 (§9.1), which adds `name` on a machine and on `POST /machines`, the route
 `POST /machines/{id}/names`, the `name-change` timeline entry and the `name-in-use` problem code.
@@ -3054,11 +3054,11 @@ hostname, and either the machine has no name, with or without the legacy
 stable-hostname feature, or its configuration says `auto: off`) or `legacy-stable` (the
 configuration sets the legacy stable-hostname feature and no explicit hostname,
 on a machine that has a name, so no name is used; a feature held in a secret
-reference counts as set whatever its value, so the source never tells it) or `unrecorded` (a release made before revision 14,
+reference counts as set whatever its value, so the source never tells it) or `unrecorded` (a release made before revision 15,
 whose hostname source was never recorded: it is no confirmed absence, and
 the migration gives every such release that value by a column default, never
 an `UPDATE`, since `release_machine` is immutable), and,
-for `machine-name`, `name`, the name used **(choice §17.44, API revision 14)**. The stored value
+for `machine-name`, `name`, the name used **(choice §17.44, API revision 15)**. The stored value
 outside that enumeration is `500 internal-error`, as a provenance record is. It
 is a fact about the release and never read again from the machine, whose name
 may have changed since. `GET /releases` lists releases in identifier order, each as the
@@ -5081,7 +5081,7 @@ design and evidence do not settle the question. Each is marked in place as
     source column added `NOT NULL DEFAULT 'unrecorded'` with the default then
     dropped, so that a new release must state it and every older row reads
     `unrecorded` with no `UPDATE` (the table is immutable), and a nullable name
-    column, served on the release read and its review, as API revision 14; a
+    column, served on the release read and its review, as API revision 15; a
     rename changes no release; "unless the configuration already sets one"
     means three cases that leave the name unused: an explicit hostname, an
     `auto: off` document with no hostname, and the legacy stable feature
