@@ -5,7 +5,11 @@
 
 import { Fragment as Group, type ReactNode, useCallback, useRef, useState } from "react";
 import type { components } from "./api/v1";
+import { applyId, applyPath } from "./apply.ts";
+import { ApplyForm } from "./apply.tsx";
 import { ApprovalRecord, ApproveControl, RevocationReason, RevokeControl } from "./approval.tsx";
+import { Change } from "./change.tsx";
+export { Change };
 import { BaseDocument } from "./claim.tsx";
 import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { DriftItem, driftId } from "./drift.tsx";
@@ -29,7 +33,7 @@ import { alertSentence, assignmentName, dependencyName, importedConfigurationTit
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
 import {
-  AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DIFFERS_IN_FORM_ONLY, DRAFTS_AND_RELEASES, FORM_ONLY_DIFF_NOTE, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
+  AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DIFFERS_IN_FORM_ONLY, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
   NAME_NOT_SHOWN, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
 } from "./words.ts";
 
@@ -439,12 +443,21 @@ const covered = (release: string): readonly Col<S["ReleaseMachineBody"]>[] => [
   }],
 ];
 
+function ApplyItem({ id }: { id: string }) {
+  return (
+    <ItemOf<S["ReleaseBody"]> path={`/releases/${encodeURIComponent(id)}`} what="the release" title={() => <>Apply release <Named id={id} /></>}>
+      {(r) => <ApplyForm release={id} r={r} />}
+    </ItemOf>
+  );
+}
+
 export function ReleaseItem({ id }: { id: string }) {
   return (
     <ItemOf<S["ReleaseBody"]> path={`/releases/${encodeURIComponent(id)}`} what="the release" title={(r) => (r === undefined ? `Release ${short(id)}` : <ReleaseHeading id={id} r={r} />)}>
       {(r) => (
         <>
           <PageNote parts={[RELEASE_NOTE]} />
+          <p><Ref to={applyPath(r.id)} id={r.id}>Apply this release to machines</Ref></p>
           <Fields rows={[
             ["Identifier", r.id], ["Cluster", <Id id={r.cluster} />], ["Published", <>{when(r.publishedAt)} by {by(r.publishedBy)}</>],
             ["Renderer", `contract ${r.renderer.contract} · machinery ${r.renderer.machineryVersion} · Kubernetes ${r.renderer.kubernetesVersion}`],
@@ -477,16 +490,6 @@ export function Plans({ query, go }: { query: string; go: (to: string) => void }
       <ListOf label="Plans" path="/plans" query={sent(["state", "machine"])} cols={PLANS} empty={q.size === 0 ? "No plans created yet." : "No plan matches this filter."} />
     </>
   );
-}
-
-export function Change({ p }: { p: S["PlanBody"] }) {
-  const d = p.evidence.diff;
-  if (p.operation === "adopt") return <p>Sends nothing. Records the machine's current configuration as applied.</p>;
-  if (d == null) return <p>No change recorded.</p>;
-  if (d.withheld) return <p>The change cannot be shown.</p>;
-  const note = d.fromFormOnly ? <p>{FORM_ONLY_DIFF_NOTE}</p> : null;
-  if (d.unified === "") return <><p>No differences in the redacted configurations (applied <Named id={d.from} />, release <Named id={d.to} />).</p>{note}</>;
-  return <><p>Change shown below: the whole redacted configuration, applied <Named id={d.from} /> → <Named id={d.to} />.</p>{note}<pre className="diff" data-testid="diff" tabIndex={0} aria-label="Change">{d.unified}</pre></>;
 }
 
 export function PlanItem({ id }: { id: string }) {
@@ -644,6 +647,8 @@ export function DependencyItem({ id }: { id: string }) {
 export function view(path: string, query: string, go: (to: string) => void): ReactNode | undefined {
   const review = reviewIds(path);
   if (review !== undefined) return <ReviewItem key={path} release={review[0]} machine={review[1]} />;
+  const apply = applyId(path);
+  if (apply !== undefined) return <ApplyItem key={path} id={apply} />;
   const drift = driftId(path);
   if (drift !== undefined) return <DriftItem key={path} id={drift} />;
   const [, kind, id] = /^\/([a-z-]+)(?:\/([^/]+))?$/.exec(path === "/" ? "/machines" : path) ?? [];

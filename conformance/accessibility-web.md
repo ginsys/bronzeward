@@ -142,6 +142,15 @@ Not run here: the screen-reader half of T8, owed by [#447](https://github.com/gi
 (see the table below), and the keyboard path of the refusal cases (a forced submit by a user without
 `approver`, the 409 and 412 answers), which the same file checks by pointer and by the server's answer.
 
+### Apply page (ginsys/bronzeward#1096)
+
+`/releases/<id>/apply` has no row in the tables above yet: its keyboard order, contrast, reflow and focus after
+the two presses are **not run**, and its screen-reader pass is owed by
+[#447](https://github.com/ginsys/bronzeward/issues/447). What exists is `web/e2e/auth/apply.e2e.ts`, which checks
+the page's content and what it sends (no keyboard or measured check). A control carries its reason beside it as
+text (`Action`), and each machine row is a labelled checkbox with its state in words, so the page's keyboard order
+is the document's own; that is a design statement and not a recorded run.
+
 ### Operation page (T9)
 
 The page of a followed operation (W8) with its live timeline, from

@@ -30,7 +30,9 @@ Results hold for that topology only. Results recorded before the move to v1.14.5
   E3 compatibility evidence is not complete E3
   ([specification review §8](../design/research/20260927-poc-specification-review.md)).
 - Remote transports, and recovery of a managed cluster's etcd.
-- Applying to a control plane: only workers are dispatched to.
+- Applying to a control plane: only workers are dispatched to. The console's apply page labels each
+  machine as a control plane or a worker and lets you choose a control plane; it says this limit when
+  you do, and the server does not refuse it.
 - Any apply mode but `no-reboot`, and a rollout of more than one machine at a time.
 - A bounded `Ignore` drift policy.
 - SQLite, MySQL and MariaDB; replicated or pooled PostgreSQL or OpenBao; physical backups and
