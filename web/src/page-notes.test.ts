@@ -491,9 +491,40 @@ describe("the notes of the other pages", () => {
     }
   });
 
-  test("a profile page shows the profile note, once read", async () => {
-    served["/profiles/prf_a"] = { id: "prf_a", name: "workers", cluster: "cl_a", scope: "cluster", layer: "base", revision: null, headRevision: 0, createdAt: "2026-11-21T14:02:00Z" };
-    await pageNote(h(SourceItem, { kind: "profile", id: "prf_a" }), sourceNote("profile"));
+  test("a list or form page keeps its note under the title when its reads succeed, empty or populated", async () => {
+    for (const [, page, text] of lists) {
+      await act(async () => root.unmount());
+      root = createRoot(box);
+      await pageNote(page(), text);
+    }
+    served["/machines"] = { items: [machine], next: undefined };
+    served["/clusters"] = { items: [cluster], next: undefined };
+    served["/drafts"] = { items: [draft("open", [])], next: undefined };
+    for (const [, page, text] of lists.filter(([n]) => ["the machines list", "the clusters list", "Drafts and releases"].includes(n))) {
+      await act(async () => root.unmount());
+      root = createRoot(box);
+      await pageNote(page(), text);
+      expect(box.querySelector("table, ul, ol")).not.toBeNull();
+    }
+  });
+
+  test("the fragment, profile and assignment pages and their revision pages show the note named by their kind, once read", async () => {
+    const at = "2026-11-21T14:02:00Z";
+    served["/profiles/prf_a"] = { id: "prf_a", name: "workers", cluster: "cl_a", scope: "cluster", layer: "base", revision: null, headRevision: 0, createdAt: at };
+    served["/assignments/asg_a"] = { id: "asg_a", cluster: "cl_a", machine: MCH, revision: null, headRevision: 0, createdAt: at };
+    served["/fragment-revisions/frr_a"] = { id: "frr_a", cluster: "cl_a", name: "base", layer: "base", document: "{}", declarations: { references: {}, embedded: [] }, author: "p0", createdAt: at };
+    served["/profile-revisions/prr_a"] = { id: "prr_a", cluster: "cl_a", name: "workers", fragments: [], author: "p0", createdAt: at };
+    const pages = [
+      [() => h(SourceItem, { kind: "profile", id: "prf_a" }), sourceNote("profile")],
+      [() => h(SourceItem, { kind: "assignment", id: "asg_a" }), sourceNote("assignment")],
+      [() => h(RevisionItem, { kind: "fragment", id: "frr_a" }), revisionNote("fragment")],
+      [() => h(RevisionItem, { kind: "profile", id: "prr_a" }), revisionNote("profile")],
+    ] as const;
+    for (const [page, text] of pages) {
+      await act(async () => root.unmount());
+      root = createRoot(box);
+      await pageNote(page(), text);
+    }
   });
 
   test("the item pages show no note while their read is pending or has failed", async () => {
@@ -501,7 +532,21 @@ describe("the notes of the other pages", () => {
     served["/dependencies/dep_a"] = { id: "dep_a", provider: "github", object: "owner/repo", version: 1, created: "2026-11-21", class: "release", reason: null, firstRetainedAt: null, unknownSince: null, observedFrom: "2026-11-21T14:02:00Z", recordedAt: "2026-11-21T14:02:00Z", stale: false };
     served["/import-base-revisions/ibr_a"] = { id: "ibr_a", machine: MCH, author: "p0", createdAt: "2026-11-21T14:02:00Z", documentBytes: 10, references: 0, embedded: 0 };
     served["/recovery"] = { epoch: "e0", recoveryMode: false, entry: null, exit: null, scopes: [] };
+    served["/clusters/cl_a"] = cluster;
+    served["/ingestions/ing_a"] = { id: "ing_a", kind: "import", mode: "encrypted", state: "held", machine: MCH, draft: DRF, operation: null, review: null, ownerGeneration: 1, leaseUntil: "2026-11-22T14:02:00Z", expiresAt: "2026-11-22T14:02:00Z", createdAt: "2026-11-21T14:02:00Z" };
+    served["/fragments/frg_a"] = { id: "frg_a", name: "base", cluster: "cl_a", scope: "cluster", layer: "base", revision: null, headRevision: 0, createdAt: "2026-11-21T14:02:00Z" };
+    served["/profiles/prf_a"] = { id: "prf_a", name: "workers", cluster: "cl_a", scope: "cluster", layer: "base", revision: null, headRevision: 0, createdAt: "2026-11-21T14:02:00Z" };
+    served["/assignments/asg_a"] = { id: "asg_a", cluster: "cl_a", machine: MCH, revision: null, headRevision: 0, createdAt: "2026-11-21T14:02:00Z" };
+    served["/fragment-revisions/frr_a"] = { id: "frr_a", cluster: "cl_a", name: "base", layer: "base", document: "{}", declarations: { references: {}, embedded: [] }, author: "p0", createdAt: "2026-11-21T14:02:00Z" };
+    served["/profile-revisions/prr_a"] = { id: "prr_a", cluster: "cl_a", name: "workers", fragments: [], author: "p0", createdAt: "2026-11-21T14:02:00Z" };
     const items = [
+      () => h(ClusterItem, { id: "cl_a" }),
+      () => h(IngestionItem, { id: "ing_a" }),
+      () => h(SourceItem, { kind: "fragment", id: "frg_a" }),
+      () => h(SourceItem, { kind: "profile", id: "prf_a" }),
+      () => h(SourceItem, { kind: "assignment", id: "asg_a" }),
+      () => h(RevisionItem, { kind: "fragment", id: "frr_a" }),
+      () => h(RevisionItem, { kind: "profile", id: "prr_a" }),
       () => h(RevisionItem, { kind: "assignment", id: "asr_a" }),
       () => h(DependencyItem, { id: "dep_a" }),
       () => h(ImportBaseItem, { id: "ibr_a" }),
@@ -520,8 +565,9 @@ describe("the notes of the other pages", () => {
   });
 
   test("an import with no machine, a draft update, shows the import note and its progress part draws nothing", async () => {
-    served["/ingestions/ing_u"] = { id: "ing_u", kind: "draft-update", mode: "encrypted", state: "held", machine: null, draft: DRF, operation: null, review: null, ownerGeneration: 1, leaseUntil: "2026-11-22T14:02:00Z", expiresAt: "2026-11-22T14:02:00Z", createdAt: "2026-11-21T14:02:00Z" };
+    served["/ingestions/ing_u"] = { id: "ing_u", kind: "draft-update", mode: "transient", state: "held", machine: null, draft: DRF, operation: null, review: null, ownerGeneration: 1, leaseUntil: "2026-11-22T14:02:00Z", expiresAt: "2026-11-22T14:02:00Z", createdAt: "2026-11-21T14:02:00Z" };
     await pageNote(h(IngestionItem, { id: "ing_u" }), IMPORT_NOTE);
+    expect(box.querySelector('section[aria-label="Progress"]')).toBeNull();
     expect(IMPORT_NOTE).toContain("draft update");
     expect(IMPORTS_NOTE).toContain("draft updates");
   });
