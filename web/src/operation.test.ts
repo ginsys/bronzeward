@@ -362,8 +362,8 @@ describe("the outcome lines", () => {
     }
   });
 
-  test("an unresolved outcome links to Recovery, and an applied one to the machine's page", () => {
-    expect(html(h(Outcome, { o: op({ state: "unresolved" }) }))).toContain('href="/recovery"');
+  test("an unresolved outcome links to the operation's recovery page, and an applied one to the machine's page", () => {
+    expect(html(h(Outcome, { o: op({ state: "unresolved" }) }))).toContain('href="/recovery/operations/op_1"');
     expect(html(h(Outcome, { o: op({ state: "completed", result: { appliedRelease: "rel_a", observation: "obs_a" } }) }))).toContain('href="/machines/mch_a"');
   });
 });
