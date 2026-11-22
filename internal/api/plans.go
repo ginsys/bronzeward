@@ -335,7 +335,7 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 	}
 	if !asr.Valid && !head.Valid {
 		return result{}, refuse(http.StatusConflict, "conflict",
-			"the machine has no assignment: the release was published with the machine's imported configuration alone. "+
+			"the machine has no assignment: the release was published with the machine's import base alone. "+
 				"Add an assignment for the machine to a draft (one that selects nothing is enough), publish that draft, then plan the new release.").
 			with("release", in.ReleaseID).with("machine", in.Machine)
 	}

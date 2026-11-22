@@ -743,7 +743,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
       </h3>
       <p>{entry === undefined ? "new" : change(entry)}{unsavedList && " -> unsaved"}</p>
       <p>{ASSIGNMENT_STATEMENT}</p>
-      {open && total(lists) === 0 && <p>{EMPTY_ASSIGNMENT}</p>}
+      {editable && entry?.revision !== null && total(lists) === 0 && <p>{EMPTY_ASSIGNMENT}</p>}
       {entry?.revision === null && <Status>Removed in this draft.</Status>}
       {waits && (failed
         ? <p><button type="button" onClick={() => retry((x) => x + 1)}>Read the entry again</button></p>
