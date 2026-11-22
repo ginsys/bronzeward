@@ -3,6 +3,7 @@
 // the reason is the record. The controls are on this page only: the operation's page links here for an unresolved operation.
 
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { ATTEMPT_WHAT, AccountingForm, accountedAttempt } from "./accounting.tsx";
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { Detail, Id, Ref, short, useItem, useList, usePending, viewOf } from "./list.tsx";
@@ -14,7 +15,7 @@ import { safeWord } from "./safe.ts";
 import { Action, useFocusOn, useRoles } from "./shell.tsx";
 import { Status } from "./states.tsx";
 import { MachineById, OperationHeading } from "./titles.tsx";
-import { RECOVERY_OPERATION_NOTE, RECOVERY_OPERATION_ROLE_NOTE, RESOLVE_NO_OUTCOME, RESOLVE_TEXT, TAKE_OVER_TEXT } from "./words.ts";
+import { ACCOUNT_TEXT, RECOVERY_OPERATION_NOTE, RECOVERY_OPERATION_ROLE_NOTE, RESOLVE_NO_OUTCOME, RESOLVE_TEXT, TAKE_OVER_TEXT } from "./words.ts";
 
 const enc = encodeURIComponent;
 type Operation = components["schemas"]["OperationBody"];
@@ -125,6 +126,29 @@ function Act({ label, route, op, off, finished, body, recorded }: {
   );
 }
 
+// The accounting of each attempt that has none: the form of a lost response, one per attempt.
+// An attempt whose form was pressed stays here, off, so the answer of its own accounting is not dropped by the operation's reread;
+// one accounted elsewhere, which this page never pressed, leaves as soon as a read shows it.
+function Accounts({ op, machine, attempts }: { op: string; machine: string; attempts: readonly { id: string; number: number; accounting?: unknown }[] }) {
+  const [started, setStarted] = useState<readonly string[]>([]);
+  const due = (a: { id: string; accounting?: unknown }) => a.accounting == null;
+  const shown = attempts.filter((a) => due(a) || started.includes(a.id));
+  if (shown.length === 0) return null;
+  return (
+    <section aria-label="Account for an attempt">
+      <h3>Account for an attempt</h3>
+      <p>{ACCOUNT_TEXT}</p>
+      {shown.map((a) => (
+        <div key={a.id}>
+          <h4>Attempt {a.number}</h4>
+          <AccountingForm machine={machine} path={`/operations/${enc(op)}/attempts/${enc(a.id)}/accountings`} resource={`/operations/${enc(op)}`}
+            what={ATTEMPT_WHAT} done={accountedAttempt} due={due(a)} onStart={() => setStarted((s) => (s.includes(a.id) ? s : [...s, a.id]))} />
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function RecoveryOperation({ id }: { id: string }) {
   const path = `/operations/${enc(id)}`;
   const [n, setN] = useState(0);
@@ -172,6 +196,9 @@ export function RecoveryOperation({ id }: { id: string }) {
         <Act label="Resolve as cancelled" route="resolutions" op={id} off={resolveWhy(op)} finished={reread} body={(reason) => ({ to: "cancelled", reason })}
           recorded={(d) => resolved(d as Resolution)} />
       ))}
+      {machine !== undefined && op.state === "unresolved" && (
+        <Accounts op={id} machine={machine} attempts={op.attempts ?? []} />
+      )}
     </>
   );
 }

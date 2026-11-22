@@ -85,6 +85,7 @@ export const RECOVERY_OPERATION_ROLE_NOTE = "You do not have the recovery-admin 
 export const TAKE_OVER_TEXT = "Move the operation to this server instance, from the owner generation read from its events and attempts. The server refuses a generation that is not current, and then nothing changed.";
 export const RESOLVE_TEXT = "Cancel an operation that has no attempt. This action sends nothing to the node and records no remote outcome. No recorded attempt does not prove that nothing was ever sent: after a restore the journal can lack an attempt, and nothing shows whether anything landed.";
 export const RESOLVE_NO_OUTCOME = "This records no remote outcome.";
+export const ACCOUNT_TEXT = "Account for an attempt whose response was lost, once its executor is stopped or the operation is taken over. It sends nothing to the node and changes no state: it records that the attempt is accounted for, so the controller or an operator can go on. Choose the two observations the settle runs between.";
 export const NOT_FOUND_NOTE = "Start from Machines or Clusters.";
 export const CONNECT_NOTE = "Connecting records the cluster and each machine that answers with a platform, and starts an import of each of those machines into one draft. A machine that does not answer, or reports no platform, is skipped. First you choose the talosconfig, then you confirm what the page found.";
 /** The column of a release that counts what it is built from. */
