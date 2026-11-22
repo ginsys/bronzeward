@@ -38,7 +38,7 @@ func TestE2ENode(t *testing.T) {
 	// Both configurations validate in the node's mode (a cluster section on each, the machine CA on the worker), so a
 	// draft that imports both publishes: the handover journey (ONBOARD-03) runs the whole press (ginsys/bronzeward#1068).
 	// Each carries comments as a talosctl-written configuration does, so the journey shows an adoption whose release
-	// differs from the node's text in form only (ginsys/bronzeward#1098).
+	// differs from the adopted configuration in form only (ginsys/bronzeward#1098).
 	cluster := "# Provides cluster specific configuration options.\ncluster:\n  controlPlane:\n    endpoint: https://cp.example.test:6443 # the control plane\n"
 	for i, m := range members {
 		n := talostest.ServeOn(t, pki, m.Addresses[0]+":50000")

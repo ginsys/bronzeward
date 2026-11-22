@@ -89,6 +89,21 @@ func TestFormOnlyMachineRead(t *testing.T) {
 	}
 }
 
+// The adoption of a drifted machine never reads "differs in form only", though its release is recorded form only and
+// pending: the node holds something else than the adopted configuration (ginsys/bronzeward#1098, check 4b). The plan is
+// created fresh, so the evidence is computed with the open drift and an Applied release in place.
+func TestFormOnlyDriftedAdoption(t *testing.T) {
+	b := newBuildEnv(t)
+	b.emptyAssignment()
+	rel, base := b.published()
+	b.adopted(rel, base)
+	openDriftOn(t, b.db, b.machine)
+	got := decode[formOnlyEvidence](t, b.plan(b.robot, "k-formonly-drifted-0123", adoptBody(rel, b.machine, `,"maxObservationAgeSeconds":60`)), http.StatusCreated)
+	if bl := got.Evidence.Baseline; bl == nil || !bl.PendingConvergence || bl.FormOnly {
+		t.Fatalf("the drifted adoption's baseline evidence %+v", bl)
+	}
+}
+
 // A release that changes content is not form only, though it is pending too.
 func TestFormOnlyContentDiffers(t *testing.T) {
 	b := newBuildEnv(t) // the fragment adds an environment variable
@@ -155,7 +170,7 @@ func TestFormOnlyDiff(t *testing.T) {
 }
 
 // A machine imported with the comments talosctl writes and published with nothing selected is
-// configured with the same content as the node: its adopt plan says the release is not applied yet
+// configured with the same content as the adopted configuration: its adopt plan says the release is not applied yet
 // and that it differs in form only (ginsys/bronzeward#1098).
 func TestFormOnlyAdoption(t *testing.T) {
 	b := newBuildEnv(t)

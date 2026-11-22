@@ -74,7 +74,7 @@ export const RELEASE_NOT_APPLIED_YET = "Release not applied yet";
 /** The server's formOnly verdict (ginsys/bronzeward#1098): the same documents, keys and values, other comments and encoding. */
 export const DIFFERS_IN_FORM_ONLY = "Differs in form only (comments and encoding)";
 export const FORM_ONLY_NOTE = "The release has the same documents, keys and values as the configuration Bronzeward adopted from the machine. The first apply sends the release's text, without the comments of the adopted configuration.";
-export const FORM_ONLY_DIFF_NOTE = "The comments of the configuration Bronzeward adopted do not go with this apply: the release's text carries none.";
+export const FORM_ONLY_DIFF_NOTE = "This apply removes the comments of the configuration Bronzeward adopted: the release's text carries none.";
 /** The buttons and headings that record a cluster by hand and add a machine. */
 export const ENTER_A_CLUSTER_BY_HAND = "Enter a cluster by hand";
 export const ADD_MACHINE = "Add machine";

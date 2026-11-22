@@ -115,7 +115,7 @@ describe("the read-only views", () => {
       ({ operation: "apply-config", evidence: { diff, validation: {}, dryRun: { available: false, reason: "none" } }, ...over }) as components["schemas"]["PlanBody"];
     const diff = { from: "rel_a", to: "rel_b", withheld: false, unified: "-team: a\n+team: <b>storage</b>", fromFormOnly: false };
     expect(html(h(Change, { p: plan({}, diff) }))).toContain('<pre class="diff" data-testid="diff" tabindex="0" aria-label="Change">-team: a\n+team: &lt;b&gt;storage&lt;/b&gt;</pre>');
-    expect(html(h(Change, { p: plan({}, { ...diff, fromFormOnly: true }) }))).toContain("<p>The comments of the configuration Bronzeward adopted do not go with this apply: the release&#x27;s text carries none.</p>");
+    expect(html(h(Change, { p: plan({}, { ...diff, fromFormOnly: true }) }))).toContain("<p>This apply removes the comments of the configuration Bronzeward adopted: the release&#x27;s text carries none.</p>");
     expect(html(h(Change, { p: plan({}, { ...diff, unified: "", fromFormOnly: true }) }))).toContain("No differences in the redacted configurations");
     expect(html(h(Change, { p: plan({}, { ...diff, withheld: true }) }))).toBe("<p>The change cannot be shown.</p>");
     expect(html(h(Change, { p: plan({}, null) }))).toBe("<p>No change recorded.</p>");
