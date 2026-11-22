@@ -837,6 +837,9 @@ describe("ginsys/bronzeward#1055: a dependency alert is a sentence, the identifi
     const row = box.querySelector('[aria-label="Alerts"] tbody tr')!;
     expect(row.children[0]!.textContent).toBe("This dependency is lost: the provider no longer has this version.");
     expect(row.children[0]!.querySelectorAll("a")).toHaveLength(0);
+    // The creation time is part of the version's identity: the date for the eye, the exact value as the title attribute.
+    const created = [...box.querySelectorAll("dt")].find((dt) => dt.textContent === "Created")?.nextElementSibling?.querySelector("span");
+    expect([created?.textContent, created?.getAttribute("title")]).toEqual([when(at), at]);
   });
 
   test("an alert whose kind is not the specification's, or whose dependency fields are missing, still reads as a sentence", async () => {
@@ -871,7 +874,7 @@ describe("ginsys/bronzeward#1055: a dependency alert is a sentence, the identifi
     await settled();
     const fields = Object.fromEntries([...box.querySelectorAll("dt")].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent]));
     expect([fields.Provider, fields.Object, fields.Class, fields.Reason]).toEqual(["(name not shown)", "(name not shown)", "(not shown)", "(not shown)"]);
-    expect(fields.Created).not.toContain("bad");
+    expect([...box.querySelectorAll("dt")].find((dt) => dt.textContent === "Created")?.nextElementSibling?.querySelector("span")?.getAttribute("title")).toBe("(not shown)");
     expect(box.textContent).not.toContain("bad\u202E");
   });
 
