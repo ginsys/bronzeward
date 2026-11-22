@@ -28,7 +28,9 @@ class Server {
   released: string[] = [];
   clusters = new Map<string, { id: string; name: string; talosClusterId: string }>();
   machines = new Map<string, { id: string; cluster: string; key: string; name?: unknown }>();
-  drafts = new Map<string, { id: string; cluster: string; title: string; state: string; rev: number }>();
+  drafts = new Map<string, { id: string; cluster: string; title: string; state: string; rev: number; entries: { kind: string; machine: string; revision: string | null }[] }>();
+  // The machines that hold an assignment head (`GET /assignments`).
+  heads: string[] = [];
   ingestions = new Map<string, { id: string; machine: string; draft: string; state: string; polls: number }>();
   keys = 0;
   discovery: typeof DISCOVERY = DISCOVERY;
@@ -76,7 +78,7 @@ class Server {
 
   private write(spec: WriteSpec): Outcome {
     const b = spec.body as Record<string, string>;
-    switch (`${spec.method} ${spec.path.replace(/\/(cl|mch|drf)_[0-9]+/, "/{id}")}`) {
+    switch (`${spec.method} ${spec.path.replace(/\/(cl|mch|drf)_[0-9]+/g, "/{id}")}`) {
       case "POST /discoveries":
         return done(this.discovery, 200);
       case "POST /clusters": {
@@ -101,9 +103,17 @@ class Server {
         return done({ ...m, name: b["name"] ?? null });
       }
       case "POST /drafts": {
-        const d = { id: this.id("drf"), cluster: b["cluster"]!, title: b["title"]!, state: "open", rev: 1 };
+        const d = { id: this.id("drf"), cluster: b["cluster"]!, title: b["title"]!, state: "open", rev: 1, entries: [] };
         this.drafts.set(d.id, d);
         return done(d, 201, `"${d.rev}"`);
+      }
+      case "PUT /drafts/{id}/assignments/{id}": {
+        const [, , draft, , machine] = spec.path.split("/");
+        const d = this.drafts.get(draft!)!;
+        if (spec.ifMatch !== `"${d.rev}"`) return refused(412, "precondition-failed", { draft: d.id });
+        d.rev++;
+        d.entries = [...d.entries.filter((e) => !(e.kind === "assignment" && e.machine === machine)), { kind: "assignment", machine: machine!, revision: `asr_${d.rev}` }];
+        return done({ draft: d.id, entry: d.entries.at(-1) }, 200, `"${d.rev}"`);
       }
       case "POST /ingestions": {
         const d = this.drafts.get(b["draft"]!)!;
@@ -122,6 +132,7 @@ class Server {
     const [p, q = ""] = path.split("?");
     const query = new URLSearchParams(q);
     if (p === "/drafts") return { data: { items: [...this.drafts.values()] } };
+    if (p === "/assignments") return { data: { items: this.heads.map((machine) => ({ id: `asg_${machine}`, machine })) } };
     if (p === "/ingestions") return { data: { items: [...this.ingestions.values()].filter((i) => i.machine === query.get("machine")) } };
     const m = /^\/(machines|drafts|ingestions)\/(.+)$/.exec(p!);
     if (/^\/clusters\/cl_[0-9]+$/.test(p!)) return { data: this.clusters.get(p!.slice("/clusters/".length)) };
@@ -370,7 +381,7 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
       { cluster: "cl_1", talosNodeId: "n2", platform: "metal", talosEndpoint: "10.0.0.2" },
     ]);
     expect([...s.ingestions.values()].map((i) => i.state)).toEqual(["released", "released"]);
-    expect(lines.map((l) => l.key)).toEqual(["cluster", "first-key", "machine:n1", "machine:n2", "machine:n3", "draft", "import:n1", "import:n2"]);
+    expect(lines.map((l) => l.key)).toEqual(["cluster", "first-key", "machine:n1", "machine:n2", "machine:n3", "draft", "import:n1", "import:n2", "assignment:n1", "assignment:n2"]);
   });
 
   // One failure per step: the run stops there, says which step, and a run again finishes the rest
@@ -486,7 +497,7 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
     const before = { c: s.clusters.size, m: s.machines.size, d: s.drafts.size, i: s.ingestions.size };
     const again = await run(s, await planOf(s));
     expect(again.ok).toBe(true);
-    expect(again.lines.map((l) => l.state)).toEqual(["existing", "done", "existing", "existing", "skipped", "existing", "existing", "existing"]);
+    expect(again.lines.map((l) => l.state)).toEqual(["existing", "done", "existing", "existing", "skipped", "existing", "existing", "existing", "existing", "existing"]);
     expect({ c: s.clusters.size, m: s.machines.size, d: s.drafts.size, i: s.ingestions.size }).toEqual(before);
     expect(s.keys).toBe(2);
   });
@@ -794,7 +805,7 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     s.sends.length = 0;
     const r = await press(s, plan, "e1");
     expect(r.ok).toBe(true);
-    expect(writes(s).map((w) => w.route.replace(/cl_[0-9]+/, "{cl}"))).toEqual(["POST /clusters", "POST /clusters/{cl}/first-keys", "POST /machines", "POST /machines", "POST /drafts", "POST /ingestions", "POST /ingestions"]);
+    expect(writes(s).map((w) => w.route.replace(/cl_[0-9]+/, "{cl}"))).toEqual(["POST /clusters", "POST /clusters/{cl}/first-keys", "POST /machines", "POST /machines", "POST /drafts", "POST /ingestions", "POST /ingestions", "PUT /drafts/drf_4/assignments/mch_2", "PUT /drafts/drf_4/assignments/mch_3"]);
     expect(new Set(writes(s).map((w) => w.epoch))).toEqual(new Set(["e1"]));
   });
 
@@ -818,7 +829,7 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     expect(done).toEqual(["Cluster lab", "First key"]);
     const stopped = r.lines.find((l) => l.state === "failed")!;
     expect(stopped.detail).toBe(`not saved: ${EPOCH_CHANGED_ASIDE}.`);
-    expect(plan.unsent).toEqual(["Machine cp-1", "Machine W_2", "Draft", "Imports"]);
+    expect(plan.unsent).toEqual(["Machine cp-1", "Machine W_2", "Draft", "Imports", "Assignments"]);
   });
 
   test("an epoch stop before the first key drops the page's copy of the talosconfig, which nothing will send now", async () => {
@@ -832,7 +843,7 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     expect(r.epochChanged).toBe(true);
     expect(plan.keyed).toBe(false);
     expect(plan.document).toBeUndefined();
-    expect(plan.unsent).toEqual(["Machines", "Draft", "Imports"]);
+    expect(plan.unsent).toEqual(["Machines", "Draft", "Imports", "Assignments"]);
   });
 
   test("the shell ends the reads of the press with the epoch moved: nothing more is sent, not even a write that would be refused, and the plan is retired", async () => {
@@ -940,7 +951,7 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     };
     const r = await press(s, plan, "e1");
     expect(r.epochChanged).toBe(true);
-    expect(plan.unsent).toEqual(["Import cp-1", "Import W_2"]);
+    expect(plan.unsent).toEqual(["Import cp-1", "Import W_2", "Assignments"]);
   });
 
   test("an import whose write was answered before the epoch moved is not described as unsent: the page says not finished", async () => {
@@ -968,5 +979,65 @@ describe("every write of an onboarding is sent under the epoch its plan's first 
     expect(stoppedSentence("Imports", true, true, [])).not.toContain("not finished");
     expect(stoppedSentence("Draft", false, false, ["Imports"])).toBe("Stopped at Draft. Running it again finds what is recorded and finishes the rest.");
     expect(stoppedSentence("First key", false, true, undefined)).toBe("Stopped at First key. Running it again finds what is recorded and finishes the rest: choose the file again.");
+  });
+});
+
+describe("Connect gives each imported machine an assignment that selects nothing (ginsys/bronzeward#1068)", () => {
+  const empty = (s: Server) => s.sends.filter((x) => x.route.startsWith("PUT /drafts/") && x.route.includes("/assignments/"));
+
+  test("one empty assignment per machine whose import was released, under the draft's current ETag each time", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    const { ok, lines } = await run(s, plan);
+    expect(ok).toBe(true);
+    // n3 did not answer: no machine, no import, no assignment.
+    expect(empty(s)).toHaveLength(2);
+    for (const w of empty(s)) expect(w.body).toEqual({ profiles: [], fragments: {} });
+    expect(lines.filter((l) => l.key.startsWith("assignment:")).map((l) => [l.key, l.state])).toEqual([["assignment:n1", "done"], ["assignment:n2", "done"]]);
+    expect(s.epochs.every((e) => e === undefined)).toBe(true);
+  });
+
+  test("a run again, from the same file, sends none: the draft holds each machine's entry, and the lines say they exist", async () => {
+    const s = new Server();
+    await run(s, await planOf(s));
+    const before = empty(s).length;
+    const again = await run(s, await planOf(s));
+    expect(again.ok).toBe(true);
+    expect(empty(s)).toHaveLength(before);
+    expect(again.lines.filter((l) => l.key.startsWith("assignment:")).map((l) => l.state)).toEqual(["existing", "existing"]);
+  });
+
+  test("a machine that already holds an assignment head is never written over", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.heads = ["mch_2"]; // the fake numbers: cl_1, mch_2 (cp-1), mch_3 (W_2), drf_4
+    const { ok, lines } = await run(s, plan);
+    expect(ok).toBe(true);
+    const written = empty(s).map((w) => w.route.split("/").at(-1));
+    expect(written).toHaveLength(1);
+    expect(written).not.toContain(s.heads[0]);
+    expect(lines.filter((l) => l.key.startsWith("assignment:")).map((l) => l.state).sort()).toEqual(["done", "existing"]);
+  });
+
+  test("a machine whose import has not been released gets none: the Imports step stops first and the step is named as not finished", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.fail.set("POST /ingestions", refused(500, "internal-error"));
+    const { ok } = await run(s, plan);
+    expect(ok).toBe(false);
+    expect(empty(s)).toHaveLength(0);
+    expect(plan.unsent).toContain("Assignments");
+  });
+
+  test("a failed write stops the step with its line, and running again writes only what is missing", async () => {
+    const s = new Server();
+    const plan = await planOf(s);
+    s.fail.set("PUT /drafts/drf_4/assignments/mch_3", refused(500, "internal-error")); // the fake numbers: cl_1, mch_2, mch_3, drf_4
+    const first = await run(s, plan);
+    expect(first.ok).toBe(false);
+    expect(first.lines.find((l) => l.state === "failed")?.key).toMatch(/^assignment:/);
+    const second = await run(s, plan);
+    expect(second.ok).toBe(true);
+    expect(s.drafts.values().next().value!.entries.filter((e) => e.kind === "assignment")).toHaveLength(2);
   });
 });

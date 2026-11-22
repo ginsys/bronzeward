@@ -67,6 +67,10 @@ type onboardMachine struct {
 	NameHeldBy string      `json:"nameHeldBy,omitempty"`
 	Add        onboardPart `json:"add"`
 	Import     onboardPart `json:"import"`
+	// Assignment is the assignment that selects nothing, which the run gives a machine whose import was
+	// released into the draft and that has no assignment (ginsys/bronzeward#1068). Nil where the step
+	// did not reach the machine.
+	Assignment *onboardPart `json:"assignment,omitempty"`
 }
 
 // onboarding is the object cluster onboard prints for -o json and yaml, once, when its last step has
@@ -552,6 +556,75 @@ func (e *env) onboardImports(a *onboardArgs, obj *onboarding, rerun func() strin
 			return err
 		}
 	}
+	return e.onboardAssignments(obj, draft.Id, rerun)
+}
+
+// onboardAssignments gives each machine whose import was released into the draft an assignment that
+// selects nothing, so the release the draft makes holds an assignment revision and a plan can bind it
+// (ginsys/bronzeward#1068). A machine that has an assignment entry in the draft or an assignment head is
+// left as it is: a rerun writes only what is missing. The draft is read first for its ETag and entries.
+func (e *env) onboardAssignments(obj *onboarding, draft string, rerun func() string) error {
+	var need []*onboardMachine
+	for i := range obj.Machines {
+		if m := &obj.Machines[i]; m.Machine != "" && m.Import.State == obReleased {
+			need = append(need, m)
+		}
+	}
+	if len(need) == 0 {
+		return nil
+	}
+	held := map[string]bool{}
+	if err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+		r, err := c.Get("/drafts/" + url.PathEscape(draft))
+		if err != nil {
+			return err
+		}
+		var d apitypes.DraftBody
+		if err := json.Unmarshal(r.Body, &d); err != nil {
+			return ef("GET /api/v1/drafts/%s cannot be read: %w", url.PathEscape(draft), err)
+		}
+		keep(e, c, draft, r.Header.Get("ETag"))
+		for _, item := range d.Entries {
+			if x, err := item.AsSourceEntry(); err == nil && x.Kind == apitypes.SourceEntryKindAssignment && x.Machine != nil {
+				held[*x.Machine] = true
+			}
+		}
+		items, err := c.List("/assignments")
+		if err != nil {
+			return err
+		}
+		for _, raw := range items {
+			var a apitypes.AssignmentBody
+			if json.Unmarshal(raw, &a) == nil {
+				held[a.Machine] = true
+			}
+		}
+		return nil
+	}); err != nil {
+		need[0].Assignment = &onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}
+		return err
+	}
+	for _, m := range need {
+		if held[m.Machine] {
+			m.Assignment = &onboardPart{State: obExisting}
+			continue
+		}
+		err := e.quietly(func() error {
+			return e.write(&client.Write{Method: http.MethodPut, Path: "/drafts/" + url.PathEscape(draft) + "/assignments/" + url.PathEscape(m.Machine),
+				Body: []byte(`{}`), Draft: draft, Check: "draft show " + client.ShellWord(draft),
+				Read: entryRead(draft, apitypes.SourceEntryKindAssignment, m.Machine)}, func(*client.Client, *client.Response) ([]string, error) { return nil, nil })
+		})
+		var lost saveFailed
+		if err != nil && !errors.As(err, &lost) {
+			m.Assignment = &onboardPart{State: classify(err, false).s(), Command: rerun(), Error: client.Shown(err)}
+			return err
+		}
+		m.Assignment = &onboardPart{State: obCreated}
+		if err != nil {
+			m.Assignment.Command, m.Assignment.Error = rerun(), client.Shown(err)
+			return err
+		}
+	}
 	return nil
 }
 
@@ -702,11 +775,17 @@ func onboardLines(obj *onboarding) []string {
 			continue
 		}
 		line := sf("  %s  %s  %s  add %s, import %s", m.Node, m.Host, cmp.Or(m.Machine, "-"), m.Add.State, m.Import.State)
+		if m.Assignment != nil {
+			line += sf(", assignment %s", m.Assignment.State)
+		}
 		if m.NameNote != "" {
 			line += sf(" (%s)", m.NameNote)
 		}
 		out = append(out, line)
 		add(m.Add.Command, m.Import.Command)
+		if m.Assignment != nil {
+			add(m.Assignment.Command)
+		}
 		if m.Import.State == statePaused.s() {
 			paused = true
 			add("bronzewardctl import review "+client.ShellWord(m.Import.ID), "bronzewardctl import continue "+client.ShellWord(m.Import.ID), obj.again)

@@ -82,10 +82,11 @@ describe("the handover button with unsaved text in the draft editor", () => {
     forgetETag(DRF);
     let served = '"1"';
     let draftReads = 0;
-    const draft = { id: DRF, title: "Add the office labels", state: "open", revision: 3, cluster: "cl_a", entries: [{ kind: "import-base", machine: "mch_a", revision: "ibr_a" }] };
+    const draft = { id: DRF, title: "Add the office labels", state: "open", revision: 3, cluster: "cl_a", entries: [{ kind: "import-base", machine: "mch_a", revision: "ibr_a" }, { kind: "assignment", machine: "mch_a", revision: "asr_a" }] };
     const reads = {
       client: {
         read: vi.fn(async (path: string) => {
+          if (path === "/assignments") return { kind: "ok", data: { items: [] } };
           if (path !== `/drafts/${DRF}`) return { kind: "refused", status: 404, problem: null };
           draftReads++;
           return { kind: "ok", data: draft, etag: served };
@@ -147,7 +148,11 @@ describe("the handover button with unsaved text in the draft editor", () => {
     // dismissed the press goes on.
     let draftReads = 0;
     const reads = {
-      client: { read: vi.fn(async () => (draftReads++, { kind: "ok", data: { state: "open" }, etag: '"1"' })) },
+      client: {
+        read: vi.fn(async (path: string) =>
+          path === "/assignments" ? { kind: "ok", data: { items: [] } } : (draftReads++, { kind: "ok", data: { state: "open", entries: [{ kind: "assignment", machine: "mch_a" }] }, etag: '"1"' }),
+        ),
+      },
       settle: (res: unknown, set: (r: unknown) => void, live: () => boolean) => (live() && set(res), true),
       undropped: () => () => true,
       view: "", again: 0, regained: 0, go: () => {}, failure: () => null,

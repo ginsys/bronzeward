@@ -98,8 +98,8 @@ supplies the cluster's first key, and the signer identity stores it (persistence
 bronzewardctl cluster onboard --talosconfig ./talosconfig --name <name> --kubernetes-endpoint <https url>
 ```
 
-`cluster onboard` records the cluster and its machines, supplies the first key and imports each
-machine. `cluster first-key` supplies or replaces the key alone, and the cluster's id is the `cl_...`
+`cluster onboard` records the cluster and its machines, supplies the first key, imports each
+machine and gives each an assignment that selects nothing. `cluster first-key` supplies or replaces the key alone, and the cluster's id is the `cl_...`
 identifier Bronzeward returns when the cluster is recorded (walkthrough, S1).
 
 ## Migrate, then serve

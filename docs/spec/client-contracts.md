@@ -244,7 +244,7 @@ write that takes the Ctrl-C ([§8.2](#82-errors)): the request can stall at the 
 | `login`, `logout` | identity-provider and client concerns; the server keeps no session | [§9](#9-authentication) |
 | `context` | client configuration | [§5](#5-endpoint-discovery-and-context-selection) |
 | `cluster discover` | reads a cluster's nodes with the operator's own talosconfig and calls no Bronzeward route; prints the `cluster add`, `machine add` and `cluster first-key` commands that record it and runs none of them | `--talosconfig <file>` is required and nothing else is searched (not `$TALOSCONFIG`, not Talos's default file, not the current directory); table output only; the file is read with a size limit and never copied, logged or printed; errors give the node's gRPC code and never its text |
-| `cluster onboard` | has no route of its own: it does the discover read, then runs the routes of [§3.2](#32-writes) for those steps, the first key included, and the imports itself ([operator experience §5.2](operator-experience.md#52-inventory)); it holds no OpenBao address or token | the same `--talosconfig` and read rules; `-o json` and `-o yaml` print one object at the end; the first key is sent once and never logged or printed; errors give the node's gRPC code and never its text |
+| `cluster onboard` | has no route of its own: it does the discover read, then runs the routes of [§3.2](#32-writes) for those steps, the first key included, the imports itself, and for each imported machine without an assignment one that selects nothing ([operator experience §5.2](operator-experience.md#52-inventory)); it holds no OpenBao address or token | the same `--talosconfig` and read rules; `-o json` and `-o yaml` print one object at the end; the first key is sent once and never logged or printed; errors give the node's gRPC code and never its text |
 | automation token issue, rotate, list | server-side command only | not offered by either client |
 | dispatch, apply | the controller dispatches approved plans ([design §12.7](../design/Talos_Configuration_and_Machine_Management_Design.md#127-application-approval-and-dispatch-boundary); [§13.7](../design/Talos_Configuration_and_Machine_Management_Design.md#137-poc-identity-and-approval-policy) item 2) | not offered |
 
@@ -2263,8 +2263,11 @@ outcome line, and under it the next step an operator can take, from the steps of
 The web client's draft page offers "Start managing these machines" for a draft that holds an import base
 ([#1066](https://github.com/ginsys/bronzeward/issues/1066)).
 
-1. It has no route of its own. It sends the draft's publication, then for each machine an adopt plan and that plan's
-   approval, each through its existing route and each recorded as a typed act is. It never creates an apply-config plan.
+1. It has no route of its own. For each machine of the draft with no assignment entry in it and no assignment head it
+   first writes an assignment that selects nothing (a plan binds the release's assignment revision, and Connect gives
+   each machine one: a draft connected before that holds none), each write under the ETag the one before answered and
+   the first under the page's. It then sends the draft's publication, then for each machine an adopt plan and that
+   plan's approval, each through its existing route and each recorded as a typed act is. It never creates an apply-config plan.
    The approval's self-approval reasons are the server's, computed when it is recorded.
 2. The sentence above the button is the confirmation, in place of the plan ID typed back
    ([operator experience §5.6](operator-experience.md#56-plan-and-approval)). The typed plan ID stays for every other web
