@@ -25,6 +25,7 @@ type applyFake struct {
 	createFails           int    // the status making a plan answers with, 0 for none
 	moveAt                string // the epoch moves after this path is served
 	cancelFails, moved    bool
+	cancelRefused         bool // a cancellation answers 409, as for a plan somebody cancelled meanwhile
 }
 
 func (f *applyFake) took() []string {
@@ -76,7 +77,7 @@ func (f *applyFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.posts = append(f.posts, path+" "+string(b))
 		f.mu.Unlock()
 		switch {
-		case path == "/plans" && f.createFails == http.StatusConflict:
+		case path == "/plans" && f.createFails == http.StatusConflict, strings.HasSuffix(path, "/cancellations") && f.cancelRefused:
 			w.Header().Set("Content-Type", "application/problem+json")
 			w.WriteHeader(http.StatusConflict)
 			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:conflict","title":"Conflict","status":409,"detail":"BWSYNTH the machine changed"}`)
@@ -298,6 +299,12 @@ func TestApplyFaults(t *testing.T) {
 		if code == 0 || strings.Contains(out, "approved (") || strings.Contains(sent(f), "/approvals") || !strings.Contains(errOut, c.want) {
 			t.Errorf("epoch moved %s: exit %d, stdout %q, stderr %q, sent %q", c.name, code, out, errOut, f.took())
 		}
+	}
+
+	f, code, out, errOut = run(func(f *applyFake) { f.unreadMade, f.cancelRefused = true, true })
+	if !strings.Contains(errOut, "the request to cancel plan pln_made was refused (") || !strings.Contains(errOut, "plan show 'pln_made' reads its state") ||
+		strings.Contains(errOut, "stays until it expires") || strings.Contains(errOut, "was not cancelled") || strings.Contains(errOut, "Cancellation recorded") || !strings.Contains(out, "alpha: approved") {
+		t.Errorf("a cancellation refused: exit %d, stdout %q, stderr %q", code, out, errOut)
 	}
 
 	f, code, out, errOut = run(func(f *applyFake) { f.unreadMade, f.cancelFails = true, true })
