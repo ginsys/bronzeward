@@ -11,7 +11,8 @@ import { Detail, EmptyList, Head, Id, type Listed, More, Ref, RESTARTED, Scroll,
 import { SAFE } from "./principals.ts";
 import { Status } from "./states.tsx";
 import { TalosAccessSign } from "./talosaccess.tsx";
-import { CHANGED_ON_THE_MACHINE, LAST_READ_MATCHED, NOT_MANAGED_YET, RELEASE_NOT_APPLIED_YET, UNNAMED_MACHINE, UNNAMED_MACHINE_HEADING } from "./words.ts";
+import { PageNote } from "./page-note.tsx";
+import { CHANGED_ON_THE_MACHINE, CLUSTER_NOTE, CLUSTERS_NOTE, LAST_READ_MATCHED, MACHINES_NOTE, NOT_MANAGED_YET, RELEASE_NOT_APPLIED_YET, UNNAMED_MACHINE, UNNAMED_MACHINE_HEADING } from "./words.ts";
 
 export type Machine = components["schemas"]["MachineBody"];
 export type Cluster = components["schemas"]["ClusterBody"];
@@ -224,6 +225,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
   return (
     <>
       <h2>Machines</h2>
+      <PageNote parts={[MACHINES_NOTE]} />
       <div className="toolbar">
         <Filter label="Cluster:" value={cluster} options={options} onChange={(v) => filter("cluster", v)} />
         {clusters.kind !== "loading" && unread}
@@ -261,7 +263,7 @@ export function Clusters() {
       </>
     );
   }
-  return <><h2>Clusters</h2><div className="toolbar"><AddClusterAction /><OnboardClusterAction /></div>{body}</>;
+  return <><h2>Clusters</h2><PageNote parts={[CLUSTERS_NOTE]} /><div className="toolbar"><AddClusterAction /><OnboardClusterAction /></div>{body}</>;
 }
 
 export function ClusterItem({ id }: { id: string }) {
@@ -272,6 +274,7 @@ export function ClusterItem({ id }: { id: string }) {
   return (
     <>
       <h2>Cluster {d.name}</h2>
+      <PageNote parts={[CLUSTER_NOTE]} />
       <Detail id={d.id} />
       <p>Kubernetes endpoint {d.endpoint}, contract {d.contract}, Talos cluster ID {d.talosClusterId}.</p>
       <p><Ref to={`/machines?cluster=${d.id}`} id={d.id}>Machines in this cluster</Ref></p>

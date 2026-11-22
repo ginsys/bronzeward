@@ -6,19 +6,26 @@
 import { act, createElement as h, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { DraftItem, settledFragment } from "./drafts.tsx";
+import { CreateDraft, DraftItem, settledFragment } from "./drafts.tsx";
 import { WritesProvider } from "./forms.tsx";
 import { HANDOVER_TITLE } from "./handover.ts";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { MachineItem, MachineShown } from "./machine.tsx";
 import { PlanNew } from "./plan.tsx";
 import { PublishDraft, SENT_NOTHING } from "./publish.tsx";
-import { OperationItem, Operations, PlanItem, Plans, ReleaseItem } from "./resources.tsx";
+import { Audit, Changes, DependencyItem, ImportBaseItem, Imports, OperationItem, Operations, PlanItem, Plans, ReleaseItem, RevisionItem, SourceItem, Sources } from "./resources.tsx";
 import { ReviewItem } from "./review.tsx";
-import { ShellContext } from "./shell.tsx";
+import { Page, type Role, ShellContext } from "./shell.tsx";
+import { AddCluster, RecordMachine } from "./forms.tsx";
+import { IngestionItem, StartImport } from "./imports.tsx";
+import { ClusterItem, Clusters, Machines } from "./machines.tsx";
+import { OnboardCluster } from "./onboard.tsx";
+import { RecoveryConsole } from "./recovery.tsx";
 import {
   CREATE_A_DRAFT, CREATE_PLAN_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, MACHINE_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
   PLAN_NOTE_APPROVE, PLANS_NOTE, PLANS_NOTE_END, PUBLISH_NOTE, RELEASE_NOTE, REVIEW_NOTE,
+  ADD_MACHINE_NOTE, AUDIT_NOTE, BY_HAND_NOTE, CHANGES_NOTE, CLUSTER_NOTE, CLUSTERS_NOTE, CONNECT_NOTE, CREATE_DRAFT_NOTE, DEPENDENCY_NOTE, IMPORT_NOTE, IMPORTED_NOTE, IMPORTS_NOTE,
+  MACHINES_NOTE, NOT_FOUND_NOTE, RECOVERY_NOTE, RECOVERY_ROLE_NOTE, revisionNote, SOURCES_NOTE, sourceNote, START_IMPORT_NOTE,
 } from "./words.ts";
 import { Writes } from "./write.ts";
 
@@ -65,7 +72,7 @@ const reads = (): Reads => ({
       const bare = path.split("?")[0]!;
       if (path in served) return { kind: "ok", data: served[path] };
       if (bare in served) return { kind: "ok", data: served[bare] };
-      if (["/plans", "/operations", "/drafts", "/releases"].includes(bare) || bare.endsWith("/events") || bare.endsWith("/observations") || bare.endsWith("/timeline")) return { kind: "ok", data: { items: [], next: undefined } };
+      if (["/plans", "/operations", "/drafts", "/releases", "/machines", "/clusters", "/ingestions", "/acts", "/fragments", "/profiles", "/assignments", "/dependencies", "/dependency-alerts"].includes(bare) || bare.endsWith("/events") || bare.endsWith("/observations") || bare.endsWith("/timeline")) return { kind: "ok", data: { items: [], next: undefined } };
       return { kind: "refused", status: 404, problem: null };
     },
   },
@@ -77,7 +84,7 @@ const reads = (): Reads => ({
   view: "v", again, regained: 0, go: () => {}, failure: () => "FAILED",
 }) as unknown as Reads;
 
-type Roles = ("author" | "publisher" | "approver")[];
+type Roles = Role[];
 const mount = (page: ReactNode, roles: Roles = ["author", "publisher", "approver"]) =>
   act(async () => {
     root.render(h(WritesProvider, { value: new Writes(() => "p") }, h(ShellContext, { value: { roles, offline: false } }, h(ReadsProvider, { value: reads() }, page))));
@@ -401,9 +408,88 @@ describe("the operations pages' notes", () => {
   });
 });
 
+// The pages off the path (ginsys/bronzeward#1055, pull request B): each shows one note directly under its title.
+describe("the notes of the other pages", () => {
+  const cluster = { id: "cl_a", name: "office", endpoint: "https://10.5.0.1:6443", contract: "v1.14", talosClusterId: "tcid" };
+  const pageNote = async (page: ReactNode, text: string, roles?: Roles) => {
+    await shown(page, roles);
+    const n = note();
+    expect(n.textContent).toBe(text);
+    underTheTitle(n);
+  };
+  const lists = [
+    ["the machines list", () => h(Machines, { query: "", go: () => {} }), MACHINES_NOTE],
+    ["the clusters list", () => h(Clusters, {}), CLUSTERS_NOTE],
+    ["Add machine", () => h(RecordMachine, { query: "" }), ADD_MACHINE_NOTE],
+    ["Enter a cluster by hand", () => h(AddCluster, {}), BY_HAND_NOTE],
+    ["Create draft", () => h(CreateDraft, {}), CREATE_DRAFT_NOTE],
+    ["Drafts and releases", () => h(Changes, {}), CHANGES_NOTE],
+    ["Imports", () => h(Imports, { query: "", go: () => {} }), IMPORTS_NOTE],
+    ["Start import", () => h(StartImport, { query: "" }), START_IMPORT_NOTE],
+    ["Fragments and profiles", () => h(Sources, { query: "", go: () => {} }), SOURCES_NOTE],
+    ["Audit", () => h(Audit, {}), AUDIT_NOTE],
+    ["Connect a cluster", () => h(OnboardCluster, {}), CONNECT_NOTE],
+  ] as const;
+  for (const [name, page, text] of lists) {
+    test(`${name}: its note is the one sentence block under the title, also while its reads are pending`, async () => {
+      held = true;
+      await pageNote(page(), text);
+    });
+  }
+
+  test("a fragment, profile or assignment, and its revision, show their note only once read, named by the kind", async () => {
+    const source = { id: "frg_a", name: "base", cluster: "cl_a", scope: "cluster", layer: "base", revision: null, headRevision: 0, createdAt: "2026-11-21T14:02:00Z" };
+    served["/fragments/frg_a"] = source;
+    held = true;
+    await shown(h(SourceItem, { kind: "fragment", id: "frg_a" }));
+    expect(notes()).toHaveLength(0);
+    held = false;
+    await pageNote(h(SourceItem, { kind: "fragment", id: "frg_a", key: "read" }), sourceNote("fragment"));
+    expect(sourceNote("profile")).toContain("profile");
+    served["/assignment-revisions/asr_a"] = { id: "asr_a", cluster: "cl_a", machine: MCH, profiles: [], fragments: {}, author: "p0", createdAt: "2026-11-21T14:02:00Z" };
+    await pageNote(h(RevisionItem, { kind: "assignment", id: "asr_a" }), revisionNote("assignment"));
+  });
+
+  test("the cluster page shows its note once the cluster is read, and the dependency and imported-configuration pages likewise", async () => {
+    served["/clusters/cl_a"] = cluster;
+    held = true;
+    await shown(h(ClusterItem, { id: "cl_a" }));
+    expect(notes()).toHaveLength(0);
+    held = false;
+    await pageNote(h(ClusterItem, { id: "cl_a", key: "read" }), CLUSTER_NOTE);
+    served["/dependencies/dep_a"] = { id: "dep_a", provider: "github", object: "owner/repo", version: 1, created: "2026-11-21", class: "release", reason: null, firstRetainedAt: null, unknownSince: null, observedFrom: "2026-11-21T14:02:00Z", recordedAt: "2026-11-21T14:02:00Z", stale: false };
+    await pageNote(h(DependencyItem, { id: "dep_a" }), DEPENDENCY_NOTE);
+    served["/import-base-revisions/ibr_a"] = { id: "ibr_a", machine: MCH, author: "p0", createdAt: "2026-11-21T14:02:00Z", documentBytes: 10, references: 0, embedded: 0 };
+    await pageNote(h(ImportBaseItem, { id: "ibr_a" }), IMPORTED_NOTE);
+  });
+
+  test("the import page shows its note once the import is read", async () => {
+    served["/ingestions/ing_a"] = { id: "ing_a", kind: "import", mode: "encrypted", state: "held", machine: MCH, draft: DRF, operation: null, review: null, ownerGeneration: 1, leaseUntil: "2026-11-22T14:02:00Z", expiresAt: "2026-11-22T14:02:00Z", createdAt: "2026-11-21T14:02:00Z" };
+    held = true;
+    await shown(h(IngestionItem, { id: "ing_a" }));
+    expect(notes()).toHaveLength(0);
+    held = false;
+    await pageNote(h(IngestionItem, { id: "ing_a", key: "read" }), IMPORT_NOTE);
+  });
+
+  test("the not-found page says where to start, after its own line", async () => {
+    await shown(h(Page, { path: "/nowhere", query: "", go: () => {} }));
+    expect(note().textContent).toBe(NOT_FOUND_NOTE);
+    expect(box.querySelector("h2")!.textContent).toBe("Not found");
+  });
+
+  test("the recovery page adds its role sentence only for a person without the recovery role", async () => {
+    served["/recovery"] = { epoch: "e0", recoveryMode: false, entry: null, exit: null, scopes: [] };
+    await pageNote(h(RecoveryConsole, {}), `${RECOVERY_NOTE} ${RECOVERY_ROLE_NOTE}`, ["author"]);
+    await act(async () => root.unmount());
+    root = createRoot(box);
+    await pageNote(h(RecoveryConsole, {}), RECOVERY_NOTE, ["author", "recovery-admin"]);
+  });
+});
+
 describe("no note carries an identifier or a table reference", () => {
   test("the sentences hold no identifier string, no role word and no table cite", () => {
-    const all = [DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, PUBLISH_NOTE, SENT_NOTHING, MACHINE_NOTE, RELEASE_NOTE, REVIEW_NOTE, PLANS_NOTE, PLANS_NOTE_END, CREATE_PLAN_NOTE, PLAN_NOTE, PLAN_NOTE_APPROVE, OPERATIONS_NOTE, OPERATION_NOTE];
+    const all = [ADD_MACHINE_NOTE, AUDIT_NOTE, BY_HAND_NOTE, CHANGES_NOTE, CLUSTER_NOTE, CLUSTERS_NOTE, CONNECT_NOTE, CREATE_DRAFT_NOTE, DEPENDENCY_NOTE, IMPORT_NOTE, IMPORTED_NOTE, IMPORTS_NOTE, MACHINES_NOTE, NOT_FOUND_NOTE, RECOVERY_NOTE, SOURCES_NOTE, sourceNote("fragment"), revisionNote("fragment"), START_IMPORT_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, PUBLISH_NOTE, SENT_NOTHING, MACHINE_NOTE, RELEASE_NOTE, REVIEW_NOTE, PLANS_NOTE, PLANS_NOTE_END, CREATE_PLAN_NOTE, PLAN_NOTE, PLAN_NOTE_APPROVE, OPERATIONS_NOTE, OPERATION_NOTE];
     for (const s of all) {
       expect(s).not.toMatch(/\b(mch|drf|pln|rel|op|cl)_|\bD11\b/);
       expect(s).not.toMatch(/\b(author|publisher|approver)\b/);

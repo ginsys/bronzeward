@@ -37,6 +37,27 @@ export const PLAN_NOTE = "This plan proposes one action on one machine, with one
 export const PLAN_NOTE_APPROVE = "To approve it, type the plan ID, as the form shows it, into its field, then press Approve. You can approve a plan you made yourself; Bronzeward records that you did. Approving does not run the plan: Bronzeward commits it later, after its own checks, and can refuse.";
 export const OPERATIONS_NOTE = "An operation is one run of work: publishing a draft, importing a machine's configuration, applying a release to a machine, or adopting a machine. This lists operations with their state; open one to follow its progress.";
 export const OPERATION_NOTE = "This is one run of work: what it is doing, its state, its timeline and each attempt it made.";
+/** The sentences of the pages off the path from a draft to an operation (ginsys/bronzeward#1055, pull request B). */
+export const MACHINES_NOTE = "A machine is one node of a cluster. Open a machine to read its state. To bring in a whole cluster, use Connect a cluster; to add one machine, use Add machine.";
+export const ADD_MACHINE_NOTE = "Use this to add one machine to a cluster Bronzeward has recorded. It asks for the cluster, the machine's Talos node ID, its platform and its Talos endpoint, an IP address. To bring in a whole cluster with all its machines at once, use Connect a cluster.";
+export const CLUSTERS_NOTE = "A cluster is a Talos cluster Bronzeward records. Open one to see its machines and its open drafts. To bring one in by reading its talosconfig, use Connect a cluster; to record one yourself, use Enter a cluster by hand.";
+export const BY_HAND_NOTE = "Use this only when you cannot read a talosconfig. It records an existing cluster by its name, its Kubernetes endpoint, its Talos contract and its Talos cluster ID.";
+export const CLUSTER_NOTE = "This shows the machines of this cluster and the drafts open for it. A draft is a set of changes to this cluster that is not published yet; open one to see its entries.";
+export const CHANGES_NOTE = "Drafts are changes to one cluster that are not published yet; releases are what publishing a draft built. Create a draft here, and open one to see its entries. Imports of every machine are on their own page, linked between the two lists.";
+export const CREATE_DRAFT_NOTE = "A draft collects changes to one cluster. Choose the cluster and give the draft a title you will recognise.";
+export const IMPORTS_NOTE = "An import brings one machine's configuration into a draft, read from the machine or taken from a document. This lists imports with their state; the filters narrow it. Start one with Start import.";
+export const START_IMPORT_NOTE = "Choose the machine and the draft that should receive its configuration, and whether to read it from the machine or from a document you paste or choose. Reading from the machine writes nothing to it.";
+export const IMPORT_NOTE = "An import reads one machine's configuration into a draft. This shows its state, the machine, the draft it fills and its progress.";
+export const IMPORTED_NOTE = "This is the configuration imported from one machine, with its size and counts. Its text is read on request, as the lines below say. The configuration a machine would receive is read on its release, under Rendered configuration.";
+export const SOURCES_NOTE = "The fragments, profiles and assignments that releases are built from, and the dependencies Bronzeward monitors. None of them is a machine's configuration: that is the release's. A fragment is added with Add fragment on a draft's page, and is listed here once that draft is published.";
+export const sourceNote = (kind: string) => `This is one ${kind}, with its revisions below. Open a revision to read that saved state of it.`;
+export const revisionNote = (kind: string) => `A revision is one saved state of a ${kind}. This shows it as it was saved.`;
+export const DEPENDENCY_NOTE = "A dependency is an outside thing of which Bronzeward records a version, by provider and object. Below: the releases that depend on it and the alerts raised for it.";
+export const AUDIT_NOTE = "Each row is an act Bronzeward recorded: who did what, through which route, and to what. Nothing on this page changes them.";
+export const RECOVERY_NOTE = "Recovery mode is for restoring Bronzeward from a backup. This page shows whether it is on and which scopes are still in recovery, and lets you leave recovery mode or revoke an identity.";
+export const RECOVERY_ROLE_NOTE = "Leaving recovery mode and revoking an identity need the recovery-admin role, which you do not have.";
+export const NOT_FOUND_NOTE = "Start from Machines or Clusters.";
+export const CONNECT_NOTE = "Connecting records the cluster and each machine that answers, and starts an import of each machine into one draft. First you choose the talosconfig, then you confirm what the page found.";
 /** The column of a release that counts what it is built from. */
 export const BUILT_FROM = "Built from";
 /** The state words of a machine. */

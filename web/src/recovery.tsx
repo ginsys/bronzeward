@@ -8,9 +8,11 @@ import { Head, Id, type Load, Scroll, useReads, useSettled } from "./list.tsx";
 import { Who } from "./principals.tsx";
 import type { Problem, ReadResult } from "./request.ts";
 import type { Outcome } from "./write.ts";
-import { useGate, useOffline, useRecoveryState } from "./shell.tsx";
+import { useGate, useOffline, useRecoveryState, useRoles } from "./shell.tsx";
+import { RECOVERY_NOTE, RECOVERY_ROLE_NOTE } from "./words.ts";
 import { RequestRef } from "./problems.tsx";
 import { clock, Disconnected, ProblemFields, problemFields, problemSentences, Refused, Status, when } from "./states.tsx";
+import { PageNote } from "./page-note.tsx";
 import { MachineById } from "./titles.tsx";
 import type { components } from "./api/v1";
 
@@ -306,6 +308,7 @@ export function RecoveryConsole() {
     };
   }, [settled, n, shellAgain, view]);
   const { mode } = useRecoveryState();
+  const roles = useRoles();
   if (read.kind === "loading") return <><h2>Recovery</h2><Status>Loading the recovery state</Status></>;
   if (read.kind === "discarded") return null;
   if (read.kind !== "ok") return <><h2>Recovery</h2><RecoveryRead res={read} /></>;
@@ -314,6 +317,7 @@ export function RecoveryConsole() {
   return (
     <>
       <h2>Recovery</h2>
+      <PageNote parts={[RECOVERY_NOTE, !roles.includes("recovery-admin") && RECOVERY_ROLE_NOTE]} />
       <Status testid="recovery-state">
         Recovery mode {r.recoveryMode ? "on" : "off"}, epoch {r.epoch}. {mode === "recovery" ? RECOVERY_START : mode === "normal" ? "Server started normally." : UNKNOWN_START}
       </Status>

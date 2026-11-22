@@ -10,7 +10,8 @@ import { RequestRef } from "./problems.tsx";
 import { Action, useOffline } from "./shell.tsx";
 import type { Problem } from "./request.ts";
 import { CHECK_STATE, CUT_OFF, problemSentences, Refused, Repeated, REPLAYED, SetAside, Status, unknown, Unknown } from "./states.tsx";
-import { ADD_MACHINE, ENTER_A_CLUSTER_BY_HAND } from "./words.ts";
+import { PageNote } from "./page-note.tsx";
+import { ADD_MACHINE, ADD_MACHINE_NOTE, BY_HAND_NOTE, ENTER_A_CLUSTER_BY_HAND } from "./words.ts";
 import { type Outcome, Write, type Writes, type WriteSpec } from "./write.ts";
 
 type EndpointChange = components["schemas"]["EndpointChangeBody"];
@@ -257,6 +258,7 @@ export function AddCluster() {
   return (
     <>
       <h2>{ENTER_A_CLUSTER_BY_HAND}</h2>
+      <PageNote parts={[BY_HAND_NOTE]} />
       <Form label={ENTER_A_CLUSTER_BY_HAND} onSubmit={submit} w={w} done={done}>
         <Text label="Name:" name="name" />
         <Text label="Kubernetes endpoint:" name="endpoint" hint="https://host or https://host:port" />
@@ -311,6 +313,7 @@ export function RecordMachine({ query }: { query: string }) {
   return (
     <>
       <h2>{ADD_MACHINE}</h2>
+      <PageNote parts={[ADD_MACHINE_NOTE]} />
       <Form label={ADD_MACHINE} onSubmit={submit} w={w} done={done}>
         <ClusterField clusters={clusters} chosen={chosen} choose={choose} />
         <Text label="Talos node ID:" name="talosNodeId" hint="as talosctl get identity prints it" />

@@ -11,7 +11,8 @@ import { RequestRef } from "./problems.tsx";
 import { Action, KEPT_PAGE, useGate } from "./shell.tsx";
 import { MachineById } from "./titles.tsx";
 import { useUnsaved, useWrites } from "./forms.tsx";
-import { CONNECT_A_CLUSTER } from "./words.ts";
+import { PageNote } from "./page-note.tsx";
+import { CONNECT_A_CLUSTER, CONNECT_NOTE } from "./words.ts";
 
 // The most a first key may be (the API's bound), so a larger file is refused before it is read.
 const MAX_FILE = 512 * 1024;
@@ -143,6 +144,7 @@ export function OnboardCluster() {
   return (
     <>
       <h2>{CONNECT_A_CLUSTER}</h2>
+      <PageNote parts={[CONNECT_NOTE]} />
       {note !== undefined && <p role="alert" data-testid="onboard-note">{note.text}</p>}
       {note?.reference !== undefined && <RequestRef problem={note.reference.problem} status={note.reference.status} />}
       {phase === "file" && (
