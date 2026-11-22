@@ -361,7 +361,7 @@ func (e *env) applyCancel(c *client.Client, made []string) error {
 		cancelled = append(cancelled, id)
 	}
 	if len(cancelled) > 0 {
-		tf(e.err, "Cancelled the plans this command made: %s. Plans prepared by somebody else were left as they were.\n", strings.Join(cancelled, ", "))
+		tf(e.err, "Cancellation recorded for the plans this command made: %s. %s Plans prepared by somebody else were left as they were.\n", strings.Join(cancelled, ", "), cancelLimits)
 	}
 	return errors.Join(unknown...)
 }

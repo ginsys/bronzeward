@@ -209,7 +209,7 @@ func TestApplyStops(t *testing.T) {
 		code, out, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--machine", "alpha,mch_beta")
 		got := f.took()
 		if code != 2 || out != "" || !strings.Contains(errOut, "nothing was sent") ||
-			!strings.Contains(errOut, "Cancelled the plans this command made: pln_made. Plans prepared by somebody else were left as they were.") {
+			!strings.Contains(errOut, "Cancellation recorded for the plans this command made: pln_made. "+cancelLimits+" Plans prepared by somebody else were left as they were.") {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q", c.name, code, out, errOut)
 		}
 		if len(got) != 2 || !strings.HasPrefix(got[0], "/plans {") || !strings.HasPrefix(got[1], "/plans/pln_made/cancellations {") {
@@ -222,7 +222,7 @@ func TestApplyStops(t *testing.T) {
 	f.posts = nil
 	f.mu.Unlock()
 	setStdin(t, "n\n")
-	if code, _, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--machine", "alpha"); code != 2 || strings.Contains(errOut, "Cancelled") {
+	if code, _, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--machine", "alpha"); code != 2 || strings.Contains(errOut, "Cancellation recorded") {
 		t.Errorf("prepared plan, n: exit %d, stderr %q", code, errOut)
 	}
 	if b := f.took(); len(b) != 0 {
@@ -263,7 +263,7 @@ func TestApplyFaults(t *testing.T) {
 
 	f, code, out, errOut = run(func(f *applyFake) { f.unreadMade = true })
 	if code != 0 || !strings.Contains(errOut, "the change of its plan could not be read") ||
-		!strings.Contains(errOut, "Cancelled the plans this command made: pln_made.") || !strings.Contains(out, "alpha: approved") || strings.Contains(out, "beta: approved") ||
+		!strings.Contains(errOut, "Cancellation recorded for the plans this command made: pln_made. "+cancelLimits) || !strings.Contains(out, "alpha: approved") || strings.Contains(out, "beta: approved") ||
 		strings.Contains(sent(f), "pln_made/approvals") || !strings.Contains(sent(f), "pln_made/cancellations") {
 		t.Errorf("unread plan: exit %d, stdout %q, stderr %q, sent %q", code, out, errOut, f.took())
 	}
