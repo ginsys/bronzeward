@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Result, startsNew, unsaved, useWrites } from "./forms.tsx";
 import { DRAFT, type Followed, handOver, HANDOVER_SENTENCE, HANDOVER_TITLE, type Io, type Line, MISSING, missingRoles, NOT_PUBLISHED, UNRESOLVED, UNSAVED } from "./handover.ts";
+import { keepOnDone } from "./drafts.tsx";
 import { settledReads } from "./imports.tsx";
 import { Ref, useReads, useSettled } from "./list.tsx";
 import { watch } from "./progress.ts";
@@ -102,7 +103,10 @@ export function Handover({ draft, machines, etag, seeChange, written }: { draft:
       read: (path) => read(path, current),
       follow,
       send: async (spec) => {
-        const w = new Write({ ...spec, ...(epoch !== undefined && { epoch }) });
+        // A done assignment write keeps its answer's ETag for the page, so a press after one that stopped midway
+        // sends the next write under the draft as it now is, never the ETag from before the first.
+        const keeps = spec.method === "PUT" ? { settled: keepOnDone(draft, () => writes.client?.currentEpoch) } : {};
+        const w = new Write({ ...spec, ...keeps, ...(epoch !== undefined && { epoch }) });
         sent.push(w);
         await writes.submit(w);
         return w;

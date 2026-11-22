@@ -182,6 +182,39 @@ describe("the handover button with unsaved text in the draft editor", () => {
     expect(box.querySelector('[data-testid="handover-note"]')).toBeNull();
   });
 
+  test("an assignment the press wrote keeps its answer's ETag for the page, so a press after one that stopped midway does not send the old one", async () => {
+    const DRF = "drf_m3pq3rstuvwxyz234567abcdef";
+    forgetETag(DRF);
+    const reads = {
+      client: {
+        read: vi.fn(async (path: string) =>
+          path === "/assignments" ? { kind: "ok", data: { items: [] } } : { kind: "ok", data: { id: DRF, state: "open", entries: [{ kind: "import-base", machine: "mch_a" }] }, etag: '"1"' },
+        ),
+      },
+      settle: (res: unknown, set: (r: unknown) => void, live: () => boolean) => (live() && set(res), true),
+      undropped: () => () => true,
+      view: "", again: 0, regained: 0, go: () => {}, failure: () => null,
+    } as unknown as Reads;
+    const writes = new Writes(() => "p");
+    writes.client = { currentEpoch: "e0" } as unknown as Writes["client"];
+    const sent: { method: string; ifMatch: string | undefined }[] = [];
+    vi.spyOn(writes, "submit").mockImplementation(async (w) => {
+      sent.push({ method: w.spec.method, ifMatch: w.spec.ifMatch });
+      // The assignment is answered with a new ETag, and the publication then stops the press.
+      w.outcome = w.spec.method === "PUT" ? { kind: "done", status: 200, data: {}, replayed: false, etag: '"2"' } : { kind: "refused", status: 500, problem: null, replayed: false };
+      w.epoch = w.spec.epoch; // what the real submit records from the spec before it sends
+      w.spec.settled?.(w.outcome, w);
+      return w.outcome;
+    });
+    await act(async () =>
+      root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(Handover, { draft: DRF, machines: ["mch_a"], etag: () => keptETag(DRF, "e0") ?? '"1"', seeChange: () => undefined, written: () => {} }))))),
+    );
+    await press();
+    await act(async () => void (await new Promise((r) => setTimeout(r, 40))));
+    expect(sent).toEqual([{ method: "PUT", ifMatch: '"1"' }, { method: "POST", ifMatch: '"2"' }]);
+    expect(keptETag(DRF, "e0")).toBe('"2"');
+  });
+
   test("with nothing unsaved the press starts: no unsaved notice, and the draft is read", async () => {
     await mount();
     await press();

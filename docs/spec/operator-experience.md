@@ -1443,7 +1443,7 @@ where there is one.
 | Sign-in and context | [W1](operator-experience-wireframes.md#w1-sign-in-and-context) | (#253) |
 | Machines | [W2](operator-experience-wireframes.md#w2-machines) | `GET /machines`, `GET /clusters` |
 | Clusters and a cluster's page | none (see the note under W2) | `GET /clusters[/{id}]`, `GET /machines?cluster=`, `GET /drafts` |
-| Connect a cluster | none (a form and a list of steps) | `POST /discoveries`, `POST /clusters`, `POST /clusters/{id}/first-keys`, `POST /machines`, `POST /drafts`, `POST /ingestions` |
+| Connect a cluster | none (a form and a list of steps) | `POST /discoveries`, `POST /clusters`, `POST /clusters/{id}/first-keys`, `POST /machines`, `POST /drafts`, `POST /ingestions`, `GET /assignments`, `PUT /drafts/{id}/assignments/{machine}` |
 | Machine detail | [W3](operator-experience-wireframes.md#w3-machine-detail) | `GET /machines/{id}`, `/observations`, `/timeline`, `/position` (G18) |
 | Draft editor | [W4](operator-experience-wireframes.md#w4-draft-editor) | `GET /drafts/{id}`, draft `PUT`/`DELETE`, discard |
 | Protected review | [W5](operator-experience-wireframes.md#w5-protected-import-review) | `GET /ingestions/{id}/review`, marks, continuations |

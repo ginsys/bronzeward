@@ -465,7 +465,7 @@ async function assignments(env: Env, p: Plan, set: Set, fail: Fail, list: List):
       if (o.kind !== "done") return fail(key, label, o);
     }
     p.assigned[m.nodeId] = p.draft!;
-    set({ key, label, state: held ? "existing" : "done", to: `/drafts/${p.draft}`, detail: "selects nothing: its configuration is its import base alone" });
+    set({ key, label, state: held ? "existing" : "done", to: `/drafts/${p.draft}`, detail: held ? "an assignment exists: left as it is" : "selects nothing: its configuration is its import base alone" });
   }
   return true;
 }

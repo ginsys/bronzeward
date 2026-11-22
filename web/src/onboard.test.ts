@@ -1017,6 +1017,11 @@ describe("Connect gives each imported machine an assignment that selects nothing
     expect(written).toHaveLength(1);
     expect(written).not.toContain(s.heads[0]);
     expect(lines.filter((l) => l.key.startsWith("assignment:")).map((l) => l.state).sort()).toEqual(["done", "existing"]);
+    // Only what the run wrote is said to select nothing: a machine that already had one is left as it is.
+    const said = Object.fromEntries(lines.filter((l) => l.key.startsWith("assignment:")).map((l) => [l.state, l.detail]));
+    expect(said["done"]).toContain("selects nothing");
+    expect(said["existing"]).toContain("left as it is");
+    expect(said["existing"]).not.toContain("selects nothing");
   });
 
   test("a machine whose import has not been released gets none: the Imports step stops first and the step is named as not finished", async () => {
