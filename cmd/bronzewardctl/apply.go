@@ -355,7 +355,7 @@ func (e *env) applyCancel(c *client.Client, made []string) error {
 				unknown = append(unknown, fmt.Errorf("plan %s: %w", id, err))
 				continue
 			}
-			tf(e.err, "plan %s was not cancelled (%v); it stays until it expires\n", id, err)
+			tf(e.err, "the request to cancel plan %s was refused (%v); plan show %s reads its state\n", id, err, client.ShellWord(id))
 			continue
 		}
 		cancelled = append(cancelled, id)
