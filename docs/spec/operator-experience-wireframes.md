@@ -614,7 +614,7 @@ Account scope mch_k2p…7xqa (pre-restore unaccounted)
   here shows whether it did. The settle floor is a minimum wait, not a proven bound: a later
   landing can overwrite work admitted after release, and would be seen only as drift at a
   later observation.
-  Type the machine ID to record: [________]   [Record accounting]
+  Machine worker-1, cluster prod.                                [Record accounting]
 ```
 
 ## W11. Empty, withheld, error and offline states

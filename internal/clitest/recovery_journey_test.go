@@ -52,7 +52,7 @@ func TestRecoveryJourney(t *testing.T) {
 	}
 	before := f.actCount()
 	f.want(step("", "recovery", "status"), 0, m, "pre-restore-unaccounted", "recovery scope-account '"+m+"'")
-	f.want(step(m+"\n", e.scopeAccount()...), 0, "Recorded. Scope "+m+" is now blocked until it is marked.", "Next: recovery mark '"+m+"'.")
+	f.want(step("y\n", e.scopeAccount()...), 0, "Recorded. Scope "+m+" is now blocked until it is marked.", "Next: recovery mark '"+m+"'.")
 	f.want(step("", "recovery", "mark", m, "--fact", "evidence=BWSYNTH restore drill read"), 0,
 		"Scope "+m+" marked ready, was blocked", "Next: recovery release '"+m+"'.")
 	f.want(step("", "recovery", "release", m, "--fact", "evidence=BWSYNTH restore drill read"), 0,

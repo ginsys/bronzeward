@@ -18,8 +18,8 @@
 # in the evidence directory and to stdout. Exit 1 on any FAIL.
 # Mode cli (ginsys/bronzeward#362): the same run with the recovery-admin's three acts made through
 # bronzewardctl as h-recovery and h-approver, built from this checkout and run on the host against
-# B: the accounting of point 020 and of the lost response (recovery account, the machine ID typed
-# back), h-approver's refused accounting, and the step 7 resolution (recovery resolve). The takeover
+# B: the accounting of point 020 and of the lost response (recovery account, y answered to the
+# question that names the machine), h-approver's refused accounting, and the step 7 resolution (recovery resolve). The takeover
 # stays the server's, made at B's start (ER 3.4). The kept output is cli-<name>.txt in the evidence
 # directory s6-cli-<utc>, which s8 does not read. The DS rows are S4's and are not read in this mode:
 # each is a SKIP naming that.
@@ -113,13 +113,14 @@ resolve() {
     "$EV/last.body" >/dev/null
 }
 # The recovery-admin's acts, by the API in mode run and through bronzewardctl in mode cli. The CLI
-# accounts for op's first attempt on start and end with the machine ID typed back on standard input.
+# accounts for op's first attempt on start and end with y answered on standard input to the question
+# that names the machine.
 cli_account() {
   local attempt
   cli_ready "$mutation_ref" h-recovery h-approver
   attempt=$(sql "SELECT id FROM attempt WHERE operation = '$op' AND number = 1") && [ -n "$attempt" ] || return 1
   ctl "$1" "$2" recovery account "$op" "$attempt" --start "$start" --end "$end" \
-    --explanation "$mutation_ref: the node was cut off" <<<"$machine_w"
+    --explanation "$mutation_ref: the node was cut off" <<<y
 }
 # account_ok <name>: h-recovery's accounting of op's first attempt is recorded.
 account_ok() {

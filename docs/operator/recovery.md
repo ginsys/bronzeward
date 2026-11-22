@@ -149,8 +149,9 @@ With `bronzewardctl`, a person signed in as `recovery-admin` records the same de
 reads the operation, the observations of its machine, and the settle floor from `GET /server`. It
 exits 2 and sends nothing in four cases: the end is not a `recovery` observation, the start has no
 resource version, the end has none, or the version moved and `--explanation` is missing. Then it
-shows the window, the settle floor and the risk. It sends the decision only after you type the
-machine ID. Each named refusal of the server gets one next step. The answer shows the settle floor
+shows the window, the settle floor and the risk. It then asks `Record accounting for machine <name>
+(cluster <cluster>)? [y/N]` and sends the decision only when you answer `y` or `yes`; nothing is
+typed back. Each named refusal of the server gets one next step. The answer shows the settle floor
 and the anchor that the server recorded, read from the timeline.
 
 ### Cancel it
@@ -289,8 +290,8 @@ Each machine goes `pre-restore-unaccounted`, then `unresolved` or `blocked`, the
    records the decision for one machine. It shows the time the restore stopped, the settle floor and
    the maximum transport deadline. It also shows the risk: the decision is your judgment, a request
    sent before the restore can already have landed, and a late request can overwrite work after the
-   release. The command sends the decision only after you type the machine ID. Run it again for each
-   further machine.
+   release. The command then asks `Record accounting for machine <name> (cluster <cluster>)? [y/N]`
+   and sends the decision only when you answer `y` or `yes`. Run it again for each further machine.
 
    A scope a restored operation still holds is `unresolved`; otherwise `blocked` until marked. A
    restored operation with no attempt is then cancelled by the server, sending nothing. One with an

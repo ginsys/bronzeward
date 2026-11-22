@@ -29,6 +29,8 @@ func accAnswers(post string) map[string]string {
 			`{"id":"obs_m","purpose":"recovery","resourceVersion":"8","startedAt":"2026-11-01T09:01:00Z","at":"2026-11-01T09:01:02Z"},` +
 			`{"id":"obs_n","purpose":"routine","resourceVersion":"7","startedAt":"2026-11-01T09:01:00Z","at":"2026-11-01T09:01:02Z"},` +
 			`{"id":"obs_v","purpose":"recovery","startedAt":"2026-11-01T09:01:00Z","at":"2026-11-01T09:01:02Z"}]}`,
+		"GET /api/v1/machines/mch_a": `{"id":"mch_a","name":"worker-1","cluster":"cls_a"}`,
+		"GET /api/v1/clusters/cls_a": `{"id":"cls_a","name":"prod"}`,
 		"GET /api/v1/operations/op_1": `{"id":"op_1","kind":"apply-config","state":"unresolved","subject":{"machine":"mch_a"},` +
 			`"attempts":[{"id":"att_1","number":1,"generation":2,"transportDeadline":"2026-11-01T08:50:00Z"}]}`,
 		"GET /api/v1/machines/mch_a/timeline?order=newest": `{"items":[{"kind":"scope-state","revision":9,"epoch":"ep_BWSYNTH-1","entry":{"to":"blocked",` +
@@ -51,7 +53,7 @@ func conflict(detail string) string {
 	return `409 {"type":"urn:bronzeward:problem:conflict","title":"conflict","status":409,"detail":"` + detail + `","instance":"req_BWSYNTH"}`
 }
 
-// account runs args with typed on standard input and returns the exit code and both streams.
+// account runs args with the answer to the question on standard input and returns the exit code and both streams.
 func account(t *testing.T, typed string, args ...string) (int, string, string) {
 	t.Helper()
 	var out, errb bytes.Buffer
@@ -84,7 +86,7 @@ func TestAccountRefusals(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			resetPosted()
 			seen := recoveryServer(t, accAnswers(accScopeAnswer), accScopeAnswer)
-			code, out, errb := account(t, "mch_a\n", c.args...)
+			code, out, errb := account(t, "y\n", c.args...)
 			if code != 2 || out != "" || !strings.Contains(errb, c.want) || !strings.Contains(errb, "nothing was sent") {
 				t.Errorf("exit %d, stdout %q, stderr:\n%s\nwant exit 2, nothing on stdout, %q and \"nothing was sent\"", code, out, errb, c.want)
 			}
@@ -95,9 +97,10 @@ func TestAccountRefusals(t *testing.T) {
 	}
 }
 
-// TestAccountTyped: the machine ID typed back is the only way to send; --no-input, an empty answer
-// and a wrong one exit 2 and send nothing. The window, the settle floor and the risk come first.
-func TestAccountTyped(t *testing.T) {
+// TestAccountConfirm: only y or yes sends, at the question that names the machine and its cluster;
+// --no-input, no answer, Enter, no, the machine ID typed back and anything else exit 2 and send
+// nothing. The window, the settle floor and the risk come first. Nothing is typed back.
+func TestAccountConfirm(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		args  []string
@@ -111,20 +114,58 @@ func TestAccountTyped(t *testing.T) {
 			if code != 2 || slices.Contains(seen(), c.route) {
 				t.Errorf("--no-input: exit %d, sent %v; want 2 and no POST\n%s", code, seen(), errb)
 			}
-			for _, typed := range []string{"", "\n", "mch_wrong\n", "mch_ax\n"} {
-				if code, out, errb := account(t, typed, c.args...); code != 2 || out != "" || slices.Contains(seen(), c.route) {
-					t.Errorf("typed %q: exit %d, sent %v; want 2 and no POST\n%s", typed, code, seen(), errb)
+			for _, answer := range []string{"", "\n", "n\n", "no\n", "mch_a\n", "yes please\n", "yy\n"} {
+				if code, out, errb := account(t, answer, c.args...); code != 2 || out != "" || slices.Contains(seen(), c.route) || !strings.Contains(errb, "nothing was sent") {
+					t.Errorf("answer %q: exit %d, sent %v; want 2 and no POST\n%s", answer, code, seen(), errb)
 				}
 			}
-			code, _, errb = account(t, "mch_a\n", c.args...)
-			if code != 0 || !slices.Contains(seen(), c.route) {
-				t.Errorf("typed back: exit %d, sent %v\n%s", code, seen(), errb)
+			for _, answer := range []string{"y\n", "Y\n", "yes\n", "YES\r\n", "y"} {
+				resetPosted()
+				code, _, errb = account(t, answer, c.args...)
+				if code != 0 || !slices.Contains(seen(), c.route) {
+					t.Errorf("answer %q: exit %d, sent %v\n%s", answer, code, seen(), errb)
+				}
 			}
-			// The window is shown to the run that asks for the typed ID; --no-input refuses before it.
+			// The window is shown to the run that asks the question; --no-input refuses before it. The question
+			// names the machine and its cluster by name, and no typed ID is asked for.
+			if !strings.Contains(errb, "Record accounting for machine worker-1 (cluster prod)? [y/N]: ") || strings.Contains(errb, "Type the machine ID") {
+				t.Errorf("the question is not the one that names the machine and its cluster:\n%s", errb)
+			}
 			for _, want := range []string{"obs_s, purpose routine", "obs_e, purpose recovery", "resource version 7", "Settle floor 30s", "judgment that no ", "not a proven bound"} {
 				if !strings.Contains(errb, want) {
 					t.Errorf("the window lacks %q:\n%s", want, errb)
 				}
+			}
+		})
+	}
+}
+
+// TestAccountQuestionFallsBack: a machine that has no name, or whose read failed, is named by its
+// identifier in the question, a cluster that could not be read by its identifier, and none of it stops
+// the accounting.
+func TestAccountQuestionFallsBack(t *testing.T) {
+	for _, c := range []struct {
+		name, machine, cluster, want string
+	}{
+		{"no name", `{"id":"mch_a","name":null,"cluster":"cls_a"}`, `{"id":"cls_a","name":"prod"}`, "for machine mch_a (cluster prod)? [y/N]: "},
+		{"cluster not read", `{"id":"mch_a","name":"worker-1","cluster":"cls_a"}`, "", "for machine worker-1 (cluster cls_a)? [y/N]: "},
+		{"machine not read", "", "", "for machine mch_a? [y/N]: "},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			resetPosted()
+			a := accAnswers(accScopeAnswer)
+			delete(a, "GET /api/v1/machines/mch_a")
+			delete(a, "GET /api/v1/clusters/cls_a")
+			if c.machine != "" {
+				a["GET /api/v1/machines/mch_a"] = c.machine
+			}
+			if c.cluster != "" {
+				a["GET /api/v1/clusters/cls_a"] = c.cluster
+			}
+			seen := recoveryServer(t, a, accScopeAnswer)
+			code, _, errb := account(t, "y\n", scopeArgs...)
+			if code != 0 || !slices.Contains(seen(), accScope) || !strings.Contains(errb, c.want) {
+				t.Errorf("exit %d, sent %v; want 0, the POST and %q\n%s", code, seen(), c.want, errb)
 			}
 		})
 	}
@@ -151,7 +192,7 @@ func TestAccountRequestAndAnswer(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			resetPosted()
 			recoveryServer(t, accAnswers(c.post), c.post)
-			code, out, errb := account(t, "mch_a\n", c.args...)
+			code, out, errb := account(t, "y\n", c.args...)
 			if code != 0 || len(posted()) != 1 {
 				t.Fatalf("exit %d, %d POSTs\n%s", code, len(posted()), errb)
 			}
@@ -191,7 +232,7 @@ func TestAccountSettleCauses(t *testing.T) {
 			}
 			resetPosted()
 			recoveryServer(t, accAnswers(conflict(c.detail)), "")
-			code, out, errb := account(t, "mch_a\n", args...)
+			code, out, errb := account(t, "y\n", args...)
 			if code != 1 || out != "" || !strings.Contains(errb, c.detail) || !strings.Contains(errb, c.next) {
 				t.Errorf("%s: exit %d, stdout %q; want 1 with the cause and %q\n%s", args[1], code, out, c.next, errb)
 			}
@@ -199,7 +240,7 @@ func TestAccountSettleCauses(t *testing.T) {
 	}
 	// A scope that is not pre-restore unaccounted gets the status step, on the scope command only.
 	recoveryServer(t, accAnswers(conflict("the scope of machine mch_a is not pre-restore unaccounted")), "")
-	if code, _, errb := account(t, "mch_a\n", scopeArgs...); code != 1 || !strings.Contains(errb, "recovery status names the state") {
+	if code, _, errb := account(t, "y\n", scopeArgs...); code != 1 || !strings.Contains(errb, "recovery status names the state") {
 		t.Errorf("exit %d\n%s", code, errb)
 	}
 }
@@ -221,6 +262,12 @@ func TestAccountEpochChange(t *testing.T) {
 		{"account after the reads", accAttempt, accAttemptAnswer, "/api/v1/identity", "", "after the request was built", attemptArgs},
 		{"scope-account during the reads", accScope, accScopeAnswer, "/api/v1/machines/mch_a/observations", "", "while the window was read", scopeArgs},
 		{"account during the reads", accAttempt, accAttemptAnswer, "/api/v1/machines/mch_a/observations", "", "while the window was read", attemptArgs},
+		// The two reads the question makes, the machine and then its cluster, are inside the window: an answer
+		// of another epoch at either one refuses the accounting, so the name shown belongs to the reads shown.
+		{"scope-account, the machine read", accScope, accScopeAnswer, "/api/v1/machines/mch_a", "", "while the window was read", scopeArgs},
+		{"account, the machine read", accAttempt, accAttemptAnswer, "/api/v1/machines/mch_a", "", "while the window was read", attemptArgs},
+		{"scope-account, the cluster read", accScope, accScopeAnswer, "/api/v1/clusters/cls_a", "", "while the window was read", scopeArgs},
+		{"account, the cluster read", accAttempt, accAttemptAnswer, "/api/v1/clusters/cls_a", "", "while the window was read", attemptArgs},
 		// The observations answer shows ep_BWSYNTH-2 and the GET /server it calls for shows ep_BWSYNTH-1
 		// again: the last epoch equals the first, and the count of moves is what shows the change.
 		{"scope-account and back", accScope, accScopeAnswer, "/api/v1/machines/mch_a/observations", "ep_BWSYNTH-1", "though the last read shows 'ep_BWSYNTH-1' as at the first", scopeArgs},
@@ -231,7 +278,7 @@ func TestAccountEpochChange(t *testing.T) {
 			setServerFacts(t, 3, map[string]string{c.moves: "ep_BWSYNTH-2"})
 			recoveryRefreshEpoch = c.refresh
 			seen := recoveryServer(t, accAnswers(c.post), c.post)
-			code, out, errb := account(t, "mch_a\n", c.args...)
+			code, out, errb := account(t, "y\n", c.args...)
 			if code == 0 || out != "" || len(posted()) != 0 || slices.Contains(seen(), c.route) {
 				t.Errorf("exit %d, stdout %q, %d POSTs; want a refusal and no POST\n%s", code, out, len(posted()), errb)
 			}
@@ -262,7 +309,7 @@ func TestAccountPreflightEpochBack(t *testing.T) {
 			setServerFacts(t, 3, map[string]string{"/api/v1/identity": "ep_BWSYNTH-2"})
 			recoveryRefreshEpoch = "ep_BWSYNTH-1"
 			seen := recoveryServer(t, accAnswers(c.post), c.post)
-			code, out, errb := account(t, "mch_a\n", c.args...)
+			code, out, errb := account(t, "y\n", c.args...)
 			if code == 0 || out != "" || len(posted()) != 0 || slices.Contains(seen(), c.route) {
 				t.Errorf("exit %d, stdout %q, %d POSTs; want a refusal and no POST\n%s", code, out, len(posted()), errb)
 			}
@@ -286,7 +333,7 @@ func TestAccountSettleFactsEpoch(t *testing.T) {
 			a := accAnswers(c.post)
 			a["GET /api/v1/machines/mch_a/timeline?order=newest"] = strings.ReplaceAll(a["GET /api/v1/machines/mch_a/timeline?order=newest"], `"epoch":"ep_BWSYNTH-1"`, `"epoch":"ep_BWSYNTH-0"`)
 			recoveryServer(t, a, c.post)
-			code, out, errb := account(t, "mch_a\n", c.args...)
+			code, out, errb := account(t, "y\n", c.args...)
 			flat := strings.Join(strings.Fields(out), " ")
 			if code != 0 || strings.Contains(flat, "Settle floor 30s, counted from") || !strings.Contains(flat, "The settle floor and its anchor are on the machine's timeline: machine timeline 'mch_a'.") {
 				t.Errorf("exit %d; want the timeline named and no facts of another epoch\n%s\n%s", code, out, errb)
