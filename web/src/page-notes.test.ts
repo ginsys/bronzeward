@@ -20,11 +20,11 @@ import { AddCluster, RecordMachine } from "./forms.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
 import { ClusterItem, Clusters, Machines } from "./machines.tsx";
 import { OnboardCluster } from "./onboard.tsx";
-import { RecoveryConsole } from "./recovery.tsx";
+import { EnterRecovery, RecoveryConsole } from "./recovery.tsx";
 import {
   CREATE_A_DRAFT, CREATE_PLAN_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, MACHINE_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
   PLAN_NOTE_APPROVE, PLANS_NOTE, PLANS_NOTE_END, PUBLISH_NOTE, RELEASE_NOTE, REVIEW_NOTE,
-  ADD_MACHINE_NOTE, AUDIT_NOTE, BY_HAND_NOTE, CHANGES_NOTE, CLUSTER_NOTE, CLUSTERS_NOTE, CONNECT_NOTE, CREATE_DRAFT_NOTE, DEPENDENCY_NOTE, IMPORT_NOTE, IMPORTED_NOTE, IMPORTS_NOTE,
+  ADD_MACHINE_NOTE, AUDIT_NOTE, BY_HAND_NOTE, CHANGES_NOTE, CLUSTER_NOTE, CLUSTERS_NOTE, CONNECT_NOTE, CREATE_DRAFT_NOTE, DEPENDENCY_NOTE, DRIFT_ADOPTION_NOTE, ENTER_RECOVERY_NOTE, IMPORT_NOTE, IMPORTED_NOTE, IMPORTS_NOTE,
   MACHINES_NOTE, NOT_FOUND_NOTE, RECOVERY_NOTE, RECOVERY_ROLE_NOTE, revisionNote, SOURCES_NOTE, sourceNote, START_IMPORT_NOTE,
 } from "./words.ts";
 import { Writes } from "./write.ts";
@@ -428,6 +428,8 @@ describe("the notes of the other pages", () => {
     ["Drafts and releases", () => h(Changes, {}), CHANGES_NOTE],
     ["Imports", () => h(Imports, { query: "", go: () => {} }), IMPORTS_NOTE],
     ["Start import", () => h(StartImport, { query: "" }), START_IMPORT_NOTE],
+    ["Start drift adoption", () => h(StartImport, { query: "kind=drift-adoption&source=machine" }), DRIFT_ADOPTION_NOTE],
+    ["Enter recovery", () => h(EnterRecovery, {}), ENTER_RECOVERY_NOTE],
     ["Fragments and profiles", () => h(Sources, { query: "", go: () => {} }), SOURCES_NOTE],
     ["Audit", () => h(Audit, {}), AUDIT_NOTE],
     ["Connect a cluster", () => h(OnboardCluster, {}), CONNECT_NOTE],
@@ -603,7 +605,7 @@ describe("the notes of the other pages", () => {
 
 describe("no note carries an identifier or a table reference", () => {
   test("the sentences hold no identifier string, no role word and no table cite", () => {
-    const all = [ADD_MACHINE_NOTE, AUDIT_NOTE, BY_HAND_NOTE, CHANGES_NOTE, CLUSTER_NOTE, CLUSTERS_NOTE, CONNECT_NOTE, CREATE_DRAFT_NOTE, DEPENDENCY_NOTE, IMPORT_NOTE, IMPORTED_NOTE, IMPORTS_NOTE, MACHINES_NOTE, NOT_FOUND_NOTE, RECOVERY_NOTE, SOURCES_NOTE, sourceNote("fragment"), revisionNote("fragment"), START_IMPORT_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, PUBLISH_NOTE, SENT_NOTHING, MACHINE_NOTE, RELEASE_NOTE, REVIEW_NOTE, PLANS_NOTE, PLANS_NOTE_END, CREATE_PLAN_NOTE, PLAN_NOTE, PLAN_NOTE_APPROVE, OPERATIONS_NOTE, OPERATION_NOTE];
+    const all = [ADD_MACHINE_NOTE, DRIFT_ADOPTION_NOTE, ENTER_RECOVERY_NOTE, AUDIT_NOTE, BY_HAND_NOTE, CHANGES_NOTE, CLUSTER_NOTE, CLUSTERS_NOTE, CONNECT_NOTE, CREATE_DRAFT_NOTE, DEPENDENCY_NOTE, IMPORT_NOTE, IMPORTED_NOTE, IMPORTS_NOTE, MACHINES_NOTE, NOT_FOUND_NOTE, RECOVERY_NOTE, SOURCES_NOTE, sourceNote("fragment"), revisionNote("fragment"), START_IMPORT_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, PUBLISH_NOTE, SENT_NOTHING, MACHINE_NOTE, RELEASE_NOTE, REVIEW_NOTE, PLANS_NOTE, PLANS_NOTE_END, CREATE_PLAN_NOTE, PLAN_NOTE, PLAN_NOTE_APPROVE, OPERATIONS_NOTE, OPERATION_NOTE];
     for (const s of all) {
       expect(s).not.toMatch(/\b(mch|drf|pln|rel|op|cl)_|\bD11\b/);
       expect(s).not.toMatch(/\b(author|publisher|approver)\b/);

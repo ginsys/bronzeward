@@ -9,7 +9,7 @@ import { Who } from "./principals.tsx";
 import type { Problem, ReadResult } from "./request.ts";
 import type { Outcome } from "./write.ts";
 import { useGate, useOffline, useRecoveryState, useRoles } from "./shell.tsx";
-import { RECOVERY_NOTE, RECOVERY_ROLE_NOTE } from "./words.ts";
+import { ENTER_RECOVERY_NOTE, RECOVERY_NOTE, RECOVERY_ROLE_NOTE } from "./words.ts";
 import { RequestRef } from "./problems.tsx";
 import { clock, Disconnected, ProblemFields, problemFields, problemSentences, Refused, Status, when } from "./states.tsx";
 import { PageNote } from "./page-note.tsx";
@@ -234,7 +234,7 @@ export function EnterRecovery({ onRead }: { onRead?: () => void }) {
   return (
     <form onSubmit={submit} aria-label="Enter recovery">
       <h2>Enter recovery</h2>
-      <p>Name each restored backup, when it was taken, and when the restore stopped writes. Times are RFC 3339 with a zone.</p>
+      <PageNote parts={[ENTER_RECOVERY_NOTE]} />
       {FAMILIES.map((f) => (
         <p key={f}>
           <label>Restored {f} backup: <input name={`${f}-backup`} autoComplete="off" /></label>{" "}

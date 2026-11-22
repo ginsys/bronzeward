@@ -544,7 +544,8 @@ is.
    allows only the entry, whose request it already
    knows from revision 1, and reads the revision once the entry has committed. The revision
    describes the process that answered; another instance behind the same endpoint may differ, so
-   a refusal names the revision that answer served.
+   a refusal names the revision that answer served. The web client's minimum is the highest
+   revision of any route it calls, raised in the pull request that adds such a call; it is 12.
 4. A `Deprecation` header on any response is shown once per command or page load, naming the
    route.
 5. Each client prints its own version and the server's, with its API revision, in

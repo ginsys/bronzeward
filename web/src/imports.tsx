@@ -21,7 +21,7 @@ import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { ImportedConfigurationRef, MachineById, Named, useMachineText } from "./titles.tsx";
 import { operationTitle } from "./titles.ts";
-import { IMPORT_NOTE, START_IMPORT_NOTE } from "./words.ts";
+import { DRIFT_ADOPTION_NOTE, IMPORT_NOTE, START_IMPORT_NOTE } from "./words.ts";
 import type { Outcome, WriteSpec } from "./write.ts";
 
 type S = components["schemas"];
@@ -688,7 +688,7 @@ export function StartImport({ query }: { query: string }) {
   return (
     <>
       <h2>{label}</h2>
-      {params.kind !== "drift-adoption" && <PageNote parts={[START_IMPORT_NOTE]} />}
+      <PageNote parts={[params.kind === "drift-adoption" ? DRIFT_ADOPTION_NOTE : START_IMPORT_NOTE]} />
       {params.refusal !== undefined && <Status testid="start-refused">{params.refusal}</Status>}
       <Form label={label} onSubmit={(d) => void submit(d)} w={w} done={(data) => <><Named id={(data as { ingestion: string }).ingestion} /> started.</>}>
         <p>
