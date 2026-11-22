@@ -2287,9 +2287,11 @@ The web client's draft page offers "Adopt these machines" for a draft that holds
    the first under the page's. It then sends the draft's publication, then for each machine an adopt plan and that
    plan's approval, each through its existing route and each recorded as a typed act is. It never creates an apply-config plan.
    The approval's self-approval reasons are the server's, computed when it is recorded.
-2. The sentence above the button is the confirmation, in place of the plan ID typed back
-   ([operator experience §5.6](operator-experience.md#56-plan-and-approval)). The typed plan ID stays for every other web
-   approval and for every CLI approval.
+2. The sentence above the button is the confirmation, as the sentence above Approve is on the plan page
+   ([operator experience §5.6](operator-experience.md#56-plan-and-approval)); no web approval types the plan ID
+   ([ginsys/bronzeward#1096](https://github.com/ginsys/bronzeward/issues/1096)). What differs from the plan page is that the
+   button approves a plan the person has not been shown, which is why item 3 limits it to a first adoption. The typed plan
+   ID stays for every CLI approval until the command's own confirmation replaces it.
 3. It acts only on a machine with no `Applied`. A machine with an `Applied`, a drift record included, keeps its separate steps.
 4. Each act is chosen from the draft's state and the `step` of `GET /machines/{id}/position`, read at that moment. A
    second press, after a closed page or a failed step, therefore sends no act whose result exists. The one request that

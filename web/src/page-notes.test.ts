@@ -358,8 +358,13 @@ describe("the plan page's note", () => {
     expect(all).toEqual([PLAN_NOTE, PLAN_NOTE_APPROVE]);
     underTheTitle(notes()[0]!);
     expect(box.querySelector('section[aria-label="Approval"]')!.contains(notes()[1]!)).toBe(true);
-    expect(PLAN_NOTE_APPROVE).toContain("plan ID");
-    expect(box.textContent).toContain("To approve, type the plan ID (");
+    // The page is the confirmation: no field asks for the plan ID, and the form says what pressing Approve does (ginsys/bronzeward#1096).
+    expect(PLAN_NOTE_APPROVE).not.toMatch(/plan ID|type/i);
+    expect(box.querySelector('input[name="plan"]')).toBeNull();
+    expect(box.textContent).not.toMatch(/type the plan ID/i);
+    const form = box.querySelector('form[aria-label="Approve plan"]')!;
+    expect(form.textContent).toContain("Pressing Approve records your approval of this plan.");
+    expect(form.querySelector("button")!.hasAttribute("disabled")).toBe(false);
     expect(linksTo(`/operations?plan=${PLN}`)).toHaveLength(1);
   });
   describe("an approved plan, whose form shows only for an approval from an earlier recovery entry", () => {

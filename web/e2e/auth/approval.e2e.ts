@@ -10,7 +10,7 @@
 // plan creation page, still open, sends its write. The refusal carries the entry's epoch, whose
 // re-read remounts the page (client contracts section 8.5 item 1); the refusal must still be shown.
 // Every value is synthetic.
-import { $, browser, expect } from "@wdio/globals";
+import { $, $$, browser, expect } from "@wdio/globals";
 import { REVOKE_LIMIT, UNPREDICTED } from "../../src/approval.tsx";
 import { short } from "../../src/list.tsx";
 import { RECOVERY_START } from "../../src/recovery.tsx";
@@ -68,22 +68,19 @@ describe("approval and revocation (#358)", () => {
     await planHeading(id, state);
   }
   const approve = () => $('main form[aria-label="Approve plan"]').$("button=Approve");
-  const typed = () => $('main form[aria-label="Approve plan"] input[name="plan"]');
   const posts = async () => (await writes()).filter((w) => w.startsWith("POST "));
 
-  it("a proposed plan shows its prediction; [Approve] waits for the typed plan ID, and a second click sends nothing new", async function () {
+  it("a proposed plan shows its prediction and what Approve records, with no field to fill; one press approves, and a second submit sends nothing new", async function () {
     this.timeout(120_000);
     await open("h-all", { "/identity": await identity("h-all"), [`/plans/${PLAN}`]: plan("proposed"), [`/releases/${REL}`]: release, [`/drafts/${DRAFT}`]: draft, [approvals]: approval(["created-plan"]) });
     await expect($('[data-testid="self-approval"]')).toHaveText(
       `Self-approval, predicted: you did not create this plan or publish this release, and you authored no fragment, profile or assignment revision in it. ${UNPREDICTED}`,
       { wait: 20_000 },
     );
-    // once: the gate is `busy || typed !== p.id` (web/src/approval.tsx:143), false from the first render until the full ID is typed.
-    expect(await approve().isEnabled()).toBe(false);
-    await typed().setValue(PLAN.slice(0, -1));
-    // once: same gate: a short ID differs from the plan ID, and typing is synchronous.
-    expect(await approve().isEnabled()).toBe(false);
-    await typed().setValue(PLAN);
+    // The page is the confirmation (ginsys/bronzeward#1096): no field asks for the plan ID, the form says what the press
+    // records, and the button is enabled from the first render.
+    await expect($('main form[aria-label="Approve plan"]')).toHaveText(expect.stringContaining("Pressing Approve records your approval of this plan."));
+    expect(await $$('main form[aria-label="Approve plan"] input').length).toBe(0);
     expect(await approve().isEnabled()).toBe(true);
     await approve().click();
     await browser.execute(() => document.querySelector<HTMLFormElement>('main form[aria-label="Approve plan"]')?.requestSubmit());
@@ -114,20 +111,20 @@ describe("approval and revocation (#358)", () => {
     await expect($('[data-testid="unseen-overwrite"]')).toHaveText(expect.stringContaining("Overwrites the drifted configuration of drift record 4, which no reviewer has seen."), { wait: 20_000 });
   });
 
-  // T8 (journeys section 13), the order: an approver reaches the change before the approval's typed ID field (2.4.3),
+  // T8 (journeys section 13), the order: an approver reaches the change before the Approve button (2.4.3),
   // every focus Tab reaches shows an outline (2.4.7), and the page measures as the other views do. The unified text is
   // synthetic; a long line makes the change scroll inside its own focusable region at 320 CSS pixels (1.4.10).
-  it("keyboard only (T8): the change is reached before the typed plan ID, and the page measures", async function () {
+  it("keyboard only (T8): the change is reached before Approve, and the page measures", async function () {
     this.timeout(120_000);
     const unified = `@@ machine.nodeLabels @@\n+  team: storage\n+  note: ${"x".repeat(240)}`;
     const evidence = { ...plan("proposed").evidence, diff: { from: `rel_${"j".repeat(26)}`, to: REL, withheld: false, unified } };
     await open("h-all", { "/identity": await identity("h-all"), [`/plans/${PLAN}`]: plan("proposed", { operation: "apply-config", mode: "no-reboot", transportDeadlineSeconds: 60, verificationDeadlineSeconds: 120, maxAttempts: 3, evidence }), [`/releases/${REL}`]: release, [`/drafts/${DRAFT}`]: draft });
     await expect($('[data-testid="diff"]')).toBeExisting({ wait: 20_000 });
     await fromTitle();
-    const before = await tabTo((f) => f.name === "plan", "the typed plan ID field");
+    const before = await tabTo((f) => f.tag === "BUTTON" && f.text === "Approve", "Approve");
     expect(before.some((t) => t.startsWith("@@ machine.nodeLabels @@"))).toBe(true);
-    // once: nothing typed yet, so the gate `busy || typed !== p.id` (web/src/approval.tsx:143) holds from the first render.
-    expect(await approve().isEnabled()).toBe(false);
+    // once: nothing is typed, so the button is enabled from the first render (web/src/approval.tsx).
+    expect(await approve().isEnabled()).toBe(true);
     const seen = await measure();
     expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
     expect(seen.small).toBe(0);
@@ -175,7 +172,7 @@ describe("approval and revocation (#358)", () => {
     });
 
     // A new proposed plan of the seeded release, made by the publisher, so that a human sign-in other
-    // than its creator may approve it; opened as h-all (the deployment denies h-approver, AUTH-10) with its ID typed and [Approve] clicked,
+    // than its creator may approve it; opened as h-all (the deployment denies h-approver, AUTH-10) with [Approve] clicked,
     // the first send of the approval taking `take`. Returns the plan and its approval route.
     async function approving(take: Step[]) {
       const made = await api(at, "h-publisher", "POST", "/plans", { releaseId: seed.release, machine: seed.machine2, operation: "apply-config", mode: "no-reboot" });
@@ -183,7 +180,6 @@ describe("approval and revocation (#358)", () => {
       const id = made.body!["id"] as string;
       const route = `/plans/${id}/approvals`;
       await open("h-all", undefined, "proposed", { steps: { path: route, take } }, id);
-      await typed().setValue(id);
       await approve().click();
       return { id, route };
     }
@@ -198,7 +194,6 @@ describe("approval and revocation (#358)", () => {
         this.timeout(60_000);
         const route = `/plans/${seed.plans.proposed}/approvals`;
         await open(human, undefined, "proposed", {}, seed.plans.proposed);
-        await typed().setValue(seed.plans.proposed);
         // once: the button is disabled with its reason in one element, and the reason is read at the next line, so an early read cannot pass here.
         expect(await approve().isEnabled()).toBe(false);
         await expect($('main form[aria-label="Approve plan"]')).toHaveText(expect.stringContaining("Needs approver"));
@@ -209,20 +204,15 @@ describe("approval and revocation (#358)", () => {
       });
     }
 
-    // T8, the operation: the approver types the plan ID and approves by keyboard. The approval makes the page read the
-    // plan again, and the control that had focus is gone with its form; focus must be in the answer once the page reads
-    // "approved", not only before it (2.4.3).
-    it("keyboard only (T8): typing the plan ID and Approve by keyboard, focus is in the answer once the plan reads approved", async function () {
+    // T8, the operation: the approver reaches Approve and presses it by keyboard, with no field to fill. The approval makes
+    // the page read the plan again, and the control that had focus is gone with its form; focus must be in the answer once
+    // the page reads "approved", not only before it (2.4.3).
+    it("keyboard only (T8): Approve by keyboard, focus is in the answer once the plan reads approved", async function () {
       this.timeout(120_000);
       const id = seed.plans.proposed;
       await open("h-all", undefined, "proposed", {}, id);
       await fromTitle();
-      await tabTo((f) => f.name === "plan", "the typed plan ID field");
-      await browser.keys(id);
-      // The typed ID is read back before Tab: Approve stays disabled, and Tab skips it, until the field holds
-      // the whole ID (ginsys/bronzeward#927 item 4). Only counts and an index leave the page.
-      const read = await browser.execute((e: HTMLInputElement, want: string) => ({ typed: e.value.length, of: want.length, firstDifference: [...want].findIndex((c, i) => e.value[i] !== c) }), (await typed()) as unknown as HTMLInputElement, id);
-      expect({ ...read, approveEnabled: await approve().isEnabled() }).toEqual({ typed: id.length, of: id.length, firstDifference: -1, approveEnabled: true });
+      expect(await approve().isEnabled()).toBe(true);
       await tabTo((f) => f.tag === "BUTTON" && f.text === "Approve", "Approve");
       await browser.keys("Enter");
       await planHeading(id, "approved");

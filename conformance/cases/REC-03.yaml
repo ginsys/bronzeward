@@ -1,6 +1,6 @@
 id: REC-03
 setup: 'first: as AUTH-02, the injector passing every request to the disposable deployment, a normal start with one synthetic machine; signed in as h-publisher with the plan creation page open, the deployment is restarted with -recovery-start on the same database and its entry made as h-recovery outside the page (one synthetic database backup). Second: the normal start, signed in as h-all on a plan the injector serves as proposed, the injector answering the approval with a scope refusal'
-action: 'first: send Create plan for an adopt plan; second: send Approve with the plan ID typed'
+action: 'first: send Create plan for an adopt plan; second: press Approve under the confirmation sentence'
 exchange:
   - request: POST /api/v1/plans
     headers: ["Authorization: Bearer <token>", "Content-Type: application/json", "Idempotency-Key: <key>", "Bronzeward-Expected-Epoch: <epoch>"]

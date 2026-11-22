@@ -87,7 +87,6 @@ describe("the drift page (#363)", () => {
     await expect($('[data-testid="unseen-overwrite"]')).toHaveText(expect.stringContaining("which no reviewer has seen"), { wait: 20_000 });
     await expect($('[data-testid="plan-frozen"]')).toHaveText(expect.stringContaining(PLAN_FROZEN), { wait: 20_000 });
     // Approval records that the approver overwrote a configuration nobody reviewed.
-    await $('main form[aria-label="Approve plan"] input[name="plan"]').setValue(plan);
     await $("main").$("button=Approve").click();
     await expect($("main h2")).toHaveText(expect.stringMatching(/\(approved\)$/), { wait: 30_000 });
     const approved = await read(`/plans/${plan}`);

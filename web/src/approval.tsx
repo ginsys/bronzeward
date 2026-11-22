@@ -1,7 +1,7 @@
 // Approval and its revocation on the plan page (ginsys/bronzeward#358; decisions B21, B22 and B26 of
 // ginsys/bronzeward#259; journeys §5.6 and the approver role; W7). Before approval the page predicts the
 // self-approval reasons its reads can show, in W7's words; the returned approval owns the actual
-// reasons. Approval is confirmed by typing the plan ID back.
+// reasons. Approval is one press under the sentence that says what it records.
 
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
@@ -114,14 +114,13 @@ function Prediction({ p }: { p: Plan }) {
   return <Status testid="self-approval">{lines.map((l, i) => <span key={i}>{i > 0 && " "}{l}</span>)}</Status>;
 }
 
-// [Approve] (B21): the prediction, then the plan ID typed back. The button waits for the ID; the
-// submit checks only the ID, so a role the page disables still reaches the server, whose refusal is
-// authoritative. Once the plan is no longer proposed, only the result of the approval that ended it
-// stays shown. `reread` reads the plan again.
+// [Approve] (B21): the prediction, a sentence on what pressing Approve records, then one press; the
+// page is the confirmation. The submit checks nothing, so a role the page disables still reaches the
+// server, whose refusal is authoritative. Once the plan is no longer proposed, only the result of the
+// approval that ended it stays shown. `reread` reads the plan again.
 export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
   const writes = useWrites()!;
   const [w, send] = useSend();
-  const [typed, setTyped] = useState("");
   const answer = useRef<HTMLDivElement>(null);
   useFocusOn(w?.outcome, answer);
   const done = w?.outcome?.kind === "done";
@@ -134,7 +133,7 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
   };
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!done && typed.trim() === p.id) send({ method: "POST", path: `/plans/${enc(p.id)}/approvals`, body: {}, resource: `/plans/${enc(p.id)}` });
+    if (!done) send({ method: "POST", path: `/plans/${enc(p.id)}/approvals`, body: {}, resource: `/plans/${enc(p.id)}` });
   };
   const over = overwrites(p);
   const busy = (w !== undefined && !startsNew(writes, w)) || done;
@@ -144,8 +143,8 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
       <Prediction p={p} />
       {over !== undefined && <Status testid="unseen-overwrite">{over}</Status>}
       <form onSubmit={submit} aria-label="Approve plan">
-        <p><label>To approve, type the plan ID ({p.id}): <input name="plan" autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} disabled={busy} /></label> Approval is for a human sign-in only.</p>
-        <p><Action label="Approve" needs={["approver"]} submit busy={busy || typed.trim() !== p.id} /></p>
+        <p>Pressing Approve records your approval of this plan. {afterApproval(p)} Approval is for a human sign-in only.</p>
+        <p><Action label="Approve" needs={["approver"]} submit busy={busy} /></p>
       </form>
     </section>
   );
