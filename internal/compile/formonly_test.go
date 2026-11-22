@@ -27,6 +27,8 @@ func TestFormOnly(t *testing.T) {
 		{"integers beyond any integer type", "a: 100000000000000000000\n", "a: 100000000000000000001\n", false},
 		{"two spellings of one integer key", "16: first\n0x10: second\n", "16: first\n0x10: second\n", false},
 		{"a non-string key", "1: a\n", "1: a\n", false},
+		{"a tagged octal-looking float", "a: !!float 010\n", "a: 10.0\n", false},
+		{"timestamps beyond nanoseconds", "a: 2026-11-22T00:00:00.1234567891Z\n", "a: 2026-11-22T00:00:00.1234567892Z\n", false},
 		{"a changed secret behind an unchanged shape", "machine:\n  token: s3cret\n", "machine:\n  token: s3cres\n", false},
 		{"a dropped key", "a: 1\nb: 2\n", "a: 1\n", false},
 		{"an added key", "a: 1\n", "a: 1\nb: 2\n", false},
