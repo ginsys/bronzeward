@@ -146,15 +146,15 @@ describe("ETAG-02: after a released import the draft's ETag is adopted only at t
 describe("a watch's end", () => {
   test("a continuation the draft overtook says the import was not applied and offers Import again", async () => {
     const out = text(await ended(reading({ kind: "transport" }).client, ing(), op({ state: "failed", error: { type: "urn:bronzeward:problem:precondition-failed", title: "precondition failed", status: 412, instance: "req_1" } }), "failed", NOW, "e1"));
-    expect(out).toBe("Import ing_6fdq2la (operation op_zcfw5mcm) failed: precondition-failed. The draft changed after this import started, so the import was not applied and its claim is abandoned. Import again");
+    expect(out).toBe("Import ing_6fdq2la (operation op_zcfw5mcm) failed. The draft changed after this import started, so the import was not applied and its claim is abandoned. Import again");
   });
   test("a machine-identity-mismatch names the differing field, and shows no other cause text", async () => {
     const c = reading({ kind: "transport" }).client;
     const failed = (cause: string) => op({ state: "failed", error: { type: "urn:bronzeward:problem:machine-identity-mismatch", title: "mismatch", status: 409, instance: "req_1", machine: "mch_1", cause } });
     for (const field of ["smbios-uuid", "node-id", "cluster-id"]) {
-      expect(text(await ended(c, ing(), failed(field), "failed", NOW, "e1"))).toBe(`Import ing_6fdq2la (operation op_zcfw5mcm) failed: machine-identity-mismatch. The node's ${field} is not the recorded one. Import again`);
+      expect(text(await ended(c, ing(), failed(field), "failed", NOW, "e1"))).toBe(`Import ing_6fdq2la (operation op_zcfw5mcm) failed. The machine at that address could not be confirmed as the one on record. The node's ${field} is not the recorded one. Import again`);
     }
-    expect(text(await ended(c, ing(), failed("provider said: secret-value"), "failed", NOW, "e1"))).toBe("Import ing_6fdq2la (operation op_zcfw5mcm) failed: machine-identity-mismatch. Import again");
+    expect(text(await ended(c, ing(), failed("provider said: secret-value"), "failed", NOW, "e1"))).toBe("Import ing_6fdq2la (operation op_zcfw5mcm) failed. The machine at that address could not be confirmed as the one on record. Import again");
   });
   test("a pause, a resume-failed and a lapsed lease end the watch on a running operation, the last of unknown outcome", async () => {
     const c = reading({ kind: "transport" }).client;
@@ -682,7 +682,7 @@ describe("a lapsed lease decides only after the operation's newest event was sho
     expect(lines).toEqual(["started", "paused (generation 1)", "continued (generation 2)", "resume-failed: decrypt-failed"]);
     expect(f.settled()).toBe("resume-failed");
     if (r.kind !== "ended") throw new Error(`the watch did not end: ${r.kind}`);
-    expect(text(await ended(client, b, r.operation, f.settled() ?? "", at("07:05:20"), r.epoch))).toContain("could not be decrypted (resume-failed)");
+    expect(text(await ended(client, b, r.operation, f.settled() ?? "", at("07:05:20"), r.epoch))).toContain("could not be decrypted.");
   });
   test("the check reads the claim again: a lease renewed since the page's read keeps the watch, and a claim still lapsed stops it in the ask that started the check (ginsys/bronzeward#814)", async () => {
     const b = ing({ ownerGeneration: 2 });

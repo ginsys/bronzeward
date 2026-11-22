@@ -208,9 +208,9 @@ describe("the import base document view (ginsys/bronzeward#858)", () => {
     expect(seen.live).toBe(live);
   });
 
-  test("the text is read on request only: the page offers Show document and holds no text before it", () => {
+  test("the text is read on request only: the page offers Show imported configuration and holds no text before it", () => {
     const out = shell(asAuthor, h(BaseDocument, { id: ibr }));
-    expect(out).toContain("Show document");
+    expect(out).toContain("Show imported configuration");
     expect(out).not.toContain("<textarea");
   });
 
@@ -219,9 +219,9 @@ describe("the import base document view (ginsys/bronzeward#858)", () => {
       const out = shell(value, h(Shown, { id: ibr, text: "machine:\n  token: BWSYNTH-base", close: () => {}, kind: "document" }));
       expect(out).toContain("PROTECTED DOCUMENT.");
       expect(out).not.toContain("PROTECTED REVIEW");
-      expect(out).toContain("Document of import base ibr_2xxa…qa4m");
-      expect(out).toContain("Close document");
-      expect(out).not.toMatch(/<button[^>]*disabled[^>]*>Close document/);
+      expect(out).toContain("Imported configuration ibr_2xxa…qa4m");
+      expect(out).toContain("Close imported configuration");
+      expect(out).not.toMatch(/<button[^>]*disabled[^>]*>Close imported configuration/);
       expect(out).toContain("readOnly");
       for (const control of ["Copy", "Download", "Print", "Save", "Export"]) expect(out).not.toContain(control);
     }

@@ -577,9 +577,16 @@ command-line client always shows `title`, `detail` when present, and `instance`,
 `internal/api/problem.go` it shows one sentence for what happened and one for what to do, from one
 table (`web/src/problems.tsx`), and never a code, a rule, a scope identifier or a request number
 in a sentence. A rule can narrow a code where the general sentence would misstate the cause: a
-`409 conflict` with rule `import-not-reviewed` reads "Only a file import that you continued yourself
-after its review can be shown here, and this import is not one. Nothing needs doing: the import
-itself is not affected.", true for both causes the server's `detail` names. The server's `detail` is
+`409 conflict` with rule `import-not-reviewed` reads "The server did not show you this import's
+text. It shows a file import only to the person who continued it after its review, and an import
+read from a machine only if it has been updated to. Nothing needs doing: the import itself is not
+affected. If this import was read from a machine, ask whoever runs the server whether it is up to
+date.", true for every cause the server's `detail` names and for a server that still refuses an
+import read from a machine (a client cannot tell from `GET /server`: the API revision is the same
+before and after the change). The sentences of the import page (a refused mark, a resume that failed,
+an operation that failed) come from the same two tables by code and rule, show a refused mark by its
+position only, and where the table has no words for a code say so and point to the event list on the
+same page, which keeps the code for a bug report. The server's `detail` is
 shown after the sentences as "The server says: …", except where the table above says a path may be
 in it (a refused mark: the position only), where it is shown nowhere, copy included. A code with no
 entry shows the server's `title`. The status, `code`, `rule`, `scope` (when text), `instance` and
@@ -1810,10 +1817,14 @@ file import only the author who made it from a file they provided and continued 
 
 **Proposed.**
 
-1. The review, and an import base's text (Show document on the import base page), is fetched with
+1. The review, and an import base's text (Show imported configuration on the import base page and
+   on each import entry of the draft page), is fetched with
    `cache: 'no-store'`, rendered as text in a read-only element with no copy, download or print
-   action, and discarded on leaving the page, on `pagehide` and on sign-out. The import base page
-   offers the action to any `author` and shows the server's refusal as it comes.
+   action, and discarded on leaving the page, on `pagehide` and on sign-out. Those pages
+   offer the action to any `author` and show the server's refusal in words, as the table of §8.2 says it.
+   Beside the opened text the page says that a value found there that should be hidden cannot be
+   marked on this import, links the page where the machine is imported again (where Marks is
+   filled in), and says the copy read stays stored as it is.
 2. Document and marks fields set `autocomplete="off"`, `spellcheck="false"`, `autocorrect="off"` and
    `autocapitalize="off"`, so browser spelling services do not receive their text (assumption S5).
 3. No draft of a document or of marks is kept between page loads.
@@ -2257,9 +2268,9 @@ The web client's draft page offers "Start managing these machines" for a draft t
    the editor holds unsaved text), and the next press sends that ETag. With no ETag kept the press sends nothing and
    says to read the draft again. Every write of one press carries the epoch the press began under as its reference
    epoch, so one made after the installation's epoch changed is refused by the server and set aside in the page's
-   words; the press also stops, quietly, before such a write. A write of an earlier press whose outcome stayed unknown
-   holds the next press back, with a note, until its notice is repeated exactly or dismissed: a new press would send the
-   same act under a new key. A machine whose step
+   words; the press also stops, quietly, before such a write. A write of an earlier press that is not finished (in
+   flight, of unknown outcome, or set aside) holds the next press back, with a note, until it is repeated exactly from
+   its notice or the notice is dismissed: a new press would send the same act under a new key. A machine whose step
    fails stops alone with the refusal in words, and a later press retries it alone. The same act twice in one press stops
    the machine instead of looping.
 5. The roles are the routes' and the draft page's: `author` for the draft page and the machines' configurations,

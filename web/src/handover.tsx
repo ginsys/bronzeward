@@ -3,7 +3,7 @@
 // failed. A press is read-then-act (handover.ts), so pressing again continues and repeats nothing.
 
 import { useEffect, useRef, useState } from "react";
-import { Result, unsaved, useWrites } from "./forms.tsx";
+import { Result, startsNew, unsaved, useWrites } from "./forms.tsx";
 import { DRAFT, type Followed, handOver, HANDOVER_SENTENCE, HANDOVER_TITLE, type Io, type Line, MISSING, missingRoles, NOT_PUBLISHED, UNRESOLVED, UNSAVED } from "./handover.ts";
 import { settledReads } from "./imports.tsx";
 import { Ref, useReads, useSettled } from "./list.tsx";
@@ -64,9 +64,9 @@ export function Handover({ draft, machines, etag, seeChange, written }: { draft:
     // The press publishes what is stored, so text the editor holds unsaved would be left out of the release.
     if (unsaved.size > 0) return setHeld(true);
     setHeld(false);
-    // An earlier press's write still open (unknown outcome) may commit or be repeated from its notice: a new key
-    // for the same act would send it twice, as useSend's form is held back until its write is settled.
-    const pending = sent.filter((w) => writes.open.includes(w));
+    // An earlier press's write still open (in flight, unknown outcome or set aside) may commit or be repeated from its
+    // notice: a new key for the same act would send it twice, as useSend's form is held back until its write is settled.
+    const pending = sent.filter((w) => !startsNew(writes, w));
     sent.splice(0, sent.length, ...pending);
     if (pending.length > 0) return setNote(UNRESOLVED);
     setNote(undefined);

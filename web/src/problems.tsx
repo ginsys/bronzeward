@@ -49,20 +49,40 @@ export const PROBLEM_WORDS: Readonly<Record<string, Words>> = {
 
 // A rule narrows a code: the same code with a different cause that the general sentence would misstate.
 export const RULE_WORDS: Readonly<Record<string, Words>> = {
-  "conflict/import-not-reviewed": { what: "Only a file import that you continued yourself after its review can be shown here, and this import is not one.", next: "Nothing needs doing: the import itself is not affected." },
-  "forbidden/not-the-importer": { what: "Only the person who imported this can read it, and you are signed in as someone else.", next: "Ask that person." },
+  // A client cannot tell from GET /server whether the server shows an import read from a machine (the API revision is the same
+  // before and after that change), so both sentences stay true for a server that still refuses one.
+  "conflict/import-not-reviewed": { what: "The server did not show you this import's text. It shows a file import only to the person who continued it after its review, and an import read from a machine only if it has been updated to.", next: "Nothing needs doing: the import itself is not affected. If this import was read from a machine, ask whoever runs the server whether it is up to date." },
+  "forbidden/not-the-importer": { what: "The server did not show you this import's text. It shows a file import only to the person who imported it, and an import read from a machine only if it has been updated to.", next: "Ask that person. If this import was read from a machine, ask whoever runs the server whether it is up to date." },
 };
 
 // The plan cancellation's creator check carries a `plan` member, and its detail is the explanation (§8.2 403
 // row): the caller holds the route's roles, so "ask someone with the right role" would mislead.
 const PLAN_FORBIDDEN: Words = { what: "You may not do this to this plan.", next: "The server's explanation follows.", explains: true };
 
+// The words for a code, narrowed by its rule where the table has one. An operation's error and a refused mark
+// carry a code and a rule but are no `Problem`, so they read the same two tables through this.
+export function wordsOfCode(code: string, rule?: string): Words | undefined {
+  const narrowed = rule !== undefined && Object.hasOwn(RULE_WORDS, `${code}/${rule}`) ? RULE_WORDS[`${code}/${rule}`] : undefined;
+  return narrowed ?? (Object.hasOwn(PROBLEM_WORDS, code) ? PROBLEM_WORDS[code] : undefined);
+}
+
 export function wordsFor(p: Problem): Words | undefined {
   const code = codeOf(p);
   if (code === "forbidden" && p["plan"] !== undefined) return PLAN_FORBIDDEN;
   const rule = p["rule"];
-  const narrowed = typeof rule === "string" && Object.hasOwn(RULE_WORDS, `${code}/${rule}`) ? RULE_WORDS[`${code}/${rule}`] : undefined;
-  return narrowed ?? (Object.hasOwn(PROBLEM_WORDS, code) ? PROBLEM_WORDS[code] : undefined);
+  return wordsOfCode(code, typeof rule === "string" ? rule : undefined);
+}
+
+// What the import page says where the table has no words for a code. The code is not lost: the events listed on
+// the same page name it, for a bug report.
+export const NO_WORDS = "The server gave a reason this page has no words for. The events listed on this page name it.";
+
+// A refusal or an error in words for the import page's sentences: never the code or the rule, and a refused mark
+// by its position only, never its path (§8.2 422 row).
+export function refusalWords(r: { code?: string | undefined; rule?: string | undefined; position?: number | undefined }): string {
+  const w = r.code === undefined ? undefined : wordsOfCode(r.code, r.rule);
+  const at = r.position === undefined ? "" : ` The mark at position ${r.position} (the first is 0) is refused.`;
+  return `${w === undefined ? NO_WORDS : w.what}${at}`;
 }
 
 // A problem's `position` member when it is a whole number (a mark refused by its index).

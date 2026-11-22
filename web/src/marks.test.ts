@@ -8,6 +8,7 @@ import { ended, type Ingestion, onEvent, startBody, startRun } from "./imports.t
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { candidates, markLines, markRefusal, markSent, MarksPanel, markSpec, MAX_CANDIDATES, MAX_MARKS, withMark } from "./marks.tsx";
 import { eventLine, refusalOf, refusalText } from "./progress.ts";
+import { NO_WORDS, PROBLEM_WORDS, RULE_WORDS } from "./problems.tsx";
 import { ShellContext } from "./shell.tsx";
 import { problemSentences, Refused, Unknown } from "./states.tsx";
 import { Writes } from "./write.ts";
@@ -128,6 +129,40 @@ describe("the marks panel inside the open review (the seam with the review view)
   });
 });
 
+describe("the import page's sentences say the refusal in words (ginsys/bronzeward#1070)", () => {
+  const flat = (n: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: noReads }, n)).replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'");
+  const failed = (code: string) => op({ state: "failed", error: { type: `urn:bronzeward:problem:${code}`, title: "x", status: 500 } as never });
+  const done = op({ state: "succeeded", result: { draft: "drf_2rmp457a", draftRevision: 5, importBaseRevision: "rev_1" } });
+  test("no sentence carries a problem code, a rule name, resume-failed or `no code`", async () => {
+    const codes = [...Object.keys(PROBLEM_WORDS), "ingestion-abandoned", "not-in-the-table"];
+    const rules = Object.keys(RULE_WORDS).map((k) => k.split("/")[1]!).concat("mark-kind");
+    const said: string[] = [];
+    for (const code of codes) {
+      said.push(flat(await ended(unused, ing(), failed(code), "failed", NOW, "e1")));
+      said.push(flat(await ended(unused, ing(), op(), "paused", NOW, "e1", { marked: true, refused: { code, rule: rules[0]!, position: 0 } })));
+      said.push(flat(await ended(unused, ing({ state: "released" }), done, "", NOW, "e1", { marked: true, refused: { code, rule: "mark-kind", position: 1 } })));
+    }
+    said.push(flat(await ended(unused, ing(), op(), "resume-failed", NOW, "e1")), flat(await ended(unused, ing({ state: "released" }), done, "resume-failed", NOW, "e1", { marked: true })));
+    expect(said.length).toBeGreaterThan(60);
+    // Tokens, so a word like "forbidden" in a sentence is not mistaken for the code `forbidden` where it is plain English.
+    const named = [...Object.keys(PROBLEM_WORDS).filter((k) => k.includes("-")), ...rules, "resume-failed", "no code"];
+    for (const s of said) for (const n of named) expect(s, `${n} in: ${s}`).not.toContain(n);
+  });
+  test("a failed operation's error is read with its rule, so a narrowed code gets the narrowed words", async () => {
+    const withRule = op({ state: "failed", error: { type: "urn:bronzeward:problem:conflict", title: "x", status: 409, rule: "import-not-reviewed" } as never });
+    const s = flat(await ended(unused, ing(), withRule, "failed", NOW, "e1"));
+    expect(s).toContain("The server did not show you this import's text.");
+    expect(s).not.toContain("This is in a state that does not allow the change.");
+    const plain = flat(await ended(unused, ing(), failed("conflict"), "failed", NOW, "e1"));
+    expect(plain).toContain("This is in a state that does not allow the change.");
+  });
+  test("a code the table has no words for says so and points to the events listed on the page", async () => {
+    const s = flat(await ended(unused, ing(), failed("not-in-the-table"), "failed", NOW, "e1"));
+    expect(s).toContain(NO_WORDS);
+    expect(await ended(unused, ing(), op(), "paused", NOW, "e1", { marked: true, refused: {} })).toContain(`it was refused. ${NO_WORDS}`);
+  });
+});
+
 describe("a refused mark is named by rule and position, never a path (§11.3, PROT-03)", () => {
   test("the rule and position are kept, a path is not", () => {
     const r = refusalOf({ generation: 2, problem: problem({ rule: "mark-kind", position: 1, path: `doc[0]/${SENTINEL}`, detail: SENTINEL }) });
@@ -216,16 +251,16 @@ describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () =>
       const s = events(2, [["marked", { generation: 2 }], ["mark-refused", refusal], ["paused", { generation: 2 }], ["continued", { generation: 3 }]]);
       const done = op({ state: "succeeded", result: { draft: "drf_2rmp457a", draftRevision: 5, importBaseRevision: "rev_1" } });
       const out = renderToStaticMarkup(h(ReadsProvider, { value: noReads }, await ended(unused, ing({ state: "released" }), done, "", NOW, "e1", s))).replace(/<[^>]+>/g, "");
-      expect(out).toMatch(/^The mark was not applied: it was refused \(validation-failed, rule mark-kind/);
+      expect(out).toMatch(/^The mark was not applied: it was refused, and operation \S+ then released the import without it\. The server checked this and found it not valid\. The mark at position/);
     });
   });
   test("the page says applied, refused by position and rule, or not applied by code, and never names a path", async () => {
     const applied = await ended(unused, ing(), op(), "paused", NOW, "e1", { marked: true });
     expect(applied).toMatch(/^The marks were applied: re-staged and paused again \(expires /);
     const refused = await ended(unused, ing(), op(), "paused", NOW, "e1", { marked: true, refused: { code: "validation-failed", rule: "mark-kind", position: 0 } });
-    expect(refused).toMatch(/^The mark was not applied: it was refused \(validation-failed, rule mark-kind, the mark at position 0 \(the first is 0\)\)\. The import is paused again/);
+    expect(refused).toMatch(/^The mark was not applied: it was refused\. The server checked this and found it not valid\. The mark at position 0 \(the first is 0\) is refused\. The import is paused again/);
     const noPosition = await ended(unused, ing(), op(), "paused", NOW, "e1", { marked: true, refused: { code: "dependency-unavailable" } });
-    expect(noPosition).toContain("it was refused (dependency-unavailable)");
+    expect(noPosition).toContain("it was refused. Something the server depends on is not available or not set up. The import is paused again");
     expect(await ended(unused, ing(), op(), "paused", NOW, "e1")).toMatch(/^Paused for review/);
   });
   describe("a takeover after a mark that nothing ended fences it off (§11.3: the takeover resumes without it)", () => {
@@ -266,9 +301,9 @@ describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () =>
     });
     test("a refusal or a resume-failed before the release is named, and the mark is not applied", async () => {
       expect(await text({ marked: true, refused: { code: "validation-failed", rule: "mark-kind", position: 0 } })).toMatch(
-        /^The mark was not applied: it was refused \(validation-failed, rule mark-kind, the mark at position 0 \(the first is 0\)\), and operation op_zcfw5mcm then released the import without it\./);
+        /^The mark was not applied: it was refused, and operation op_zcfw5mcm then released the import without it\. The server checked this and found it not valid\. The mark at position 0 \(the first is 0\) is refused\./);
       expect(await text({ marked: true }, "resume-failed")).toMatch(
-        /^The mark was not applied: its staged input could not be decrypted \(resume-failed\), and operation op_zcfw5mcm then released the import without it\./);
+        /^The mark was not applied: its staged input could not be decrypted, and operation op_zcfw5mcm then released the import without it\./);
     });
     test("a mark applied at its pause, then continued, and an import with no mark, add no such line", async () => {
       expect(await text({ marked: true })).not.toContain("not applied");

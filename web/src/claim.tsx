@@ -6,7 +6,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import type { components } from "./api/v1";
 import { NO_ASSIST } from "./drafts.tsx";
 import { startsNew, useSend, useWrites, Result } from "./forms.tsx";
-import { type Load, short, useReads, useSettled } from "./list.tsx";
+import { type Load, Ref, short, useReads, useSettled } from "./list.tsx";
 import { markSent, MarksPanel, markSpec } from "./marks.tsx";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
@@ -198,15 +198,19 @@ function Review({ b, marking }: { b: Ingestion; marking: { send: (marks: string[
   );
 }
 
-// The import base's document, read on request by the author who imported and reviewed it
-// (persistence and API choice §17.41, client contracts §11.3): the same view as the review, with no
-// marks. Held in this page's memory only: dropped on leaving the page, on pagehide and on sign-out,
-// and a read in flight goes with it. A refusal of the server is shown as it came and keeps nothing.
+// The import base's document, read on request (persistence and API choice §17.41, client contracts §11.3):
+// by any author for an import read from a node, and for a file import only by the author who imported and
+// reviewed it. The same view as the review, with no marks. Held in this page's memory only: dropped on
+// leaving the page, on pagehide and on sign-out, and a read in flight goes with it. A server that still
+// refuses a node import (the same API revision answers either way) is shown in the console's words and keeps nothing.
 type BaseDocumentBody = components["schemas"]["ImportBaseDocument"];
 export const readBaseDocument = (read: <T>(path: string, live?: () => boolean) => Promise<Load<T> | undefined>, id: string, live: () => boolean) =>
   read<BaseDocumentBody>(`/import-base-revisions/${enc(id)}/document`, live);
 
-export function BaseDocument({ id }: { id: string }) {
+// The page where a person imports a machine again, which is where a value is marked: the machine's, when known.
+const importAgain = (machine: string | null | undefined) => (machine == null ? "/ingestions/new" : `/ingestions/new?machine=${enc(machine)}`);
+
+export function BaseDocument({ id, machine }: { id: string; machine?: string | null }) {
   const read = useSettled();
   const { failure } = useReads();
   const [text, setText] = useState<string>();
@@ -236,7 +240,7 @@ export function BaseDocument({ id }: { id: string }) {
   const { section, close } = useCloser(drop);
   return (
     <section ref={section} tabIndex={-1} aria-label="Protected document">
-      {text === undefined ? <Action label="Show document" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={id} text={text} close={close} kind="document" />}
+      {text === undefined ? <Action label="Show imported configuration" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={id} text={text} close={close} kind="document" again={importAgain(machine)} />}
       {why}
     </section>
   );
@@ -245,7 +249,7 @@ export function BaseDocument({ id }: { id: string }) {
 // The open review or document: the notice, the read-only text and the close button. Closing is a plain
 // button, not a gated action: it only drops what the page holds, so no role, connection or epoch state
 // may disable it.
-export function Shown({ id, text, close, marking, kind = "review" }: { id: string; text: string; close: () => void; marking?: { send: (marks: string[]) => void; busy: boolean }; kind?: "review" | "document" }) {
+export function Shown({ id, text, close, marking, kind = "review", again }: { id: string; text: string; close: () => void; marking?: { send: (marks: string[]) => void; busy: boolean }; kind?: "review" | "document"; again?: string }) {
   const doc = kind === "document";
   // The button that opened it is gone: focus is on the text, with the marks and Close after it.
   const area = useRef<HTMLTextAreaElement>(null);
@@ -253,9 +257,10 @@ export function Shown({ id, text, close, marking, kind = "review" }: { id: strin
   return (
     <>
       <Status testid="review-notice">{doc ? "PROTECTED DOCUMENT" : "PROTECTED REVIEW"}. This may contain secrets nothing has recognised yet. This page stores none of it. Screen capture and copying by hand are outside its control, and browser extensions can read this page.</Status>
-      <p><label>{doc ? "Document of import base" : "Review of import"} {short(id)}<br /><textarea ref={area} readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
+      <p><label>{doc ? "Imported configuration" : "Review of import"} {short(id)}<br /><textarea ref={area} readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
       {marking && <MarksPanel text={text} send={marking.send} busy={marking.busy} />}
-      <p><button type="button" onClick={close}>{doc ? "Close document" : "Close review"}</button></p>
+      {again !== undefined && <p data-testid="hide-note">A value found here that should be hidden cannot be marked on this import. <Ref to={again} id={again}>Import this machine again</Ref>, and put the value's path in Marks. This copy stays stored and readable as it is.</p>}
+      <p><button type="button" onClick={close}>{doc ? "Close imported configuration" : "Close review"}</button></p>
     </>
   );
 }

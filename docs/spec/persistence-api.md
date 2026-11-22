@@ -4926,7 +4926,10 @@ design and evidence do not settle the question. Each is marked in place as
     wider: the review shows the staged text of a claim that asked for a
     review, while it is paused, and this read shows the stored text of every
     import read from a node, reviewed or not, for as long as the revision
-    exists. The change takes no API revision (§9.1): the table's
+    exists, which the owner accepted as built by decision
+    BW-node-config-stored-versions-1 (21 November 2026, 23:32 CET, answer A:
+    "Every stored copy, at any time"), beside BW-node-config-readers-1. The
+    change takes no API revision (§9.1): the table's
     "Adds" column names a route, a field, a header or a problem code, and this
     adds none, only who the existing route answers; the narrowing of the same
     route by ginsys/bronzeward#902 took none either. Servers of the same

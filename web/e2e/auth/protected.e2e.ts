@@ -271,7 +271,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // The importer, who continued the review of this import in PROT-01.
     expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
     await browser.url(base);
-    await shows().$("button=Show document").click();
+    await shows().$("button=Show imported configuration").click();
     await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
     await expect($('[data-testid="review-notice"]')).toHaveText(holds("PROTECTED DOCUMENT"));
     // Only a boolean crosses WebDriver: the text in the field is as long, in bytes, as the size the summary
@@ -292,11 +292,11 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
       return false;
     }, "a copy, download, print, save or export control");
     // Leaving the page drops the text: the same page again holds none, until it is shown on request.
-    await $("button=Close document").click();
+    await $("button=Close imported configuration").click();
     // The closed state's own control shows exactly when the text is gone (claim.tsx), so it marks the state.
-    await shows().$("button=Show document").waitForExist({ timeout: 20_000, timeoutMsg: "the document was not closed" });
-    await absent(reviewShown, "the document text after Close document");
-    await shows().$("button=Show document").click();
+    await shows().$("button=Show imported configuration").waitForExist({ timeout: 20_000, timeoutMsg: "the document was not closed" });
+    await absent(reviewShown, "the document text after Close imported configuration");
+    await shows().$("button=Show imported configuration").click();
     await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
     // A page load starts a sign-in again, whose state storage holds until it ends, so the page is read
     // only once it settled signed in (the check below measures storage, not a sign-in in flight).
@@ -308,8 +308,8 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // Another author, who did not import it, is refused by the server's rule and the page holds no text.
     expect(await fixtureSignIn("h-all", {}, { upstream: at })).toMatch(SERVER);
     await browser.url(base);
-    await shows().$("button=Show document").click();
-    await expect(shows()).toHaveText(holds("Only the person who imported this can read it, and you are signed in as someone else."), { wait: 20_000 });
+    await shows().$("button=Show imported configuration").click();
+    await expect(shows()).toHaveText(holds("The server did not show you this import's text. It shows a file import only to the person who imported it"), { wait: 20_000 });
     await absent(reviewShown, "the document text of a refused author");
     await storageEmptyAfterPause();
     await absent(() => cacheHolds(documentPath), "the document in the HTTP cache after a refused author");
@@ -336,14 +336,14 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await typeMarks(["doc[0]/machine"]);
     await sendMarks();
     await claimShows("The marks were accepted in operation", 30_000);
-    await expect(ended()).toHaveText(holds("The mark was not applied: it was refused ("), { wait: 60_000 });
-    await expect(ended()).toHaveText(holds("the mark at position 0 (the first is 0)"));
+    await expect(ended()).toHaveText(holds("The mark was not applied: it was refused."), { wait: 60_000 });
+    await expect(ended()).toHaveText(holds("The mark at position 0 (the first is 0) is refused."));
     await expect(ended()).toHaveText(holds("The import is paused again"));
     await absent(() => pageShows("doc[0]/machine"), "the refused path");
     await abandon();
   });
 
-  it("PROT-03, a compilation that fails on a dependency: refused with 503, shown by its code as not applied", async function () {
+  it("PROT-03, a compilation that fails on a dependency: refused with 503, shown in words as not applied", async function () {
     this.timeout(120_000);
     await pausedImport();
     await openReview();
@@ -351,7 +351,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await post("/bao/fault?mode=kv");
     await sendMarks();
     await claimShows("The marks were accepted in operation", 30_000);
-    await expect(ended()).toHaveText(holds("The mark was not applied: it was refused (dependency-unavailable"), { wait: 60_000 });
+    await expect(ended()).toHaveText(holds("The mark was not applied: it was refused. Something the server depends on is not available or not set up."), { wait: 60_000 });
     await expect(ended()).toHaveText(holds("The import is paused again"));
     await absent(() => pageShows(TIER), "the path of a mark refused on a dependency");
     await post("/bao/fault?mode=none");
@@ -388,7 +388,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await claimShows("The marks were accepted in operation", 30_000);
     await expect(events()).toHaveText(holds("resume-failed: dependency-unavailable"), { wait: 60_000 });
     // The mark is reported as not applied and the claim stays held (client contracts, row PROT-05).
-    await expect(ended()).toHaveText(holds("was not applied: its staged input could not be decrypted (resume-failed)"), { wait: 20_000 });
+    await expect(ended()).toHaveText(holds("was not applied: its staged input could not be decrypted."), { wait: 20_000 });
     await expect(ended()).toHaveText(holds("The claim stays held until its lease lapses at"));
     expect(await $("button=Abandon import").isExisting()).toBe(true);
     await post("/bao/fault?mode=none");

@@ -101,6 +101,18 @@ describe("Connect a cluster (#1001)", () => {
       return key === undefined || key.length < 20 ? true : document.documentElement.outerHTML.includes(key);
     }, FIXTURE_ISSUER), "the file's key in the page");
     await storageEmptyAfterPause();
+    // The draft page offers each machine's imported configuration on request (ginsys/bronzeward#1070). Only a boolean
+    // crosses WebDriver: the text is there, and the page says a value found in it cannot be marked on this import.
+    await result().$('a[href^="/drafts/"]').click();
+    await expect($("main h2")).toHaveText(expect.stringContaining("Draft: "));
+    const entries = $$('section[aria-label="Protected document"]');
+    await expect(entries).toBeElementsArrayOfSize(2);
+    await entries[0]!.$("button=Show imported configuration").click();
+    await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
+    expect(await browser.execute(() => (document.querySelector<HTMLTextAreaElement>('[data-testid="review-text"]')?.value ?? "").length > 0)).toBe(true);
+    await expect($('[data-testid="hide-note"]')).toHaveText(expect.stringContaining("cannot be marked on this import"));
+    await $("button=Close imported configuration").click();
+    await storageEmptyAfterPause();
   });
 
   it("ONBOARD-02: a refused draft stops the run after the cluster, the first key and the machines, and [Run again] finishes it with nothing recorded twice", async function () {

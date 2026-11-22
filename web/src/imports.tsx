@@ -11,7 +11,8 @@ import { keepETag, keptETag, NO_ASSIST } from "./drafts.tsx";
 import { Form, field, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { Detail, Id, type Load, type Reads, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
 import { markLines } from "./marks.tsx";
-import { eventLine, type Refusal, refusalOf, refusalText, terminal, type Watch, type Watched, watch } from "./progress.ts";
+import { eventLine, type Refusal, refusalOf, terminal, type Watch, type Watched, watch } from "./progress.ts";
+import { refusalWords } from "./problems.tsx";
 import type { Client, ReadResult } from "./request.ts";
 import { machineOptions, sharedAddresses } from "./machines.tsx";
 import { Action } from "./shell.tsx";
@@ -73,6 +74,11 @@ const code = (error: unknown) => {
   const t = typeof error === "object" && error !== null && "type" in error ? String(error.type) : "";
   return t.replace(/^urn:bronzeward:problem:/, "");
 };
+// The rule that narrows the error's code, where it names one: its words are the table's for code and rule together.
+const ruleOf = (error: unknown): string | undefined => {
+  const r = typeof error === "object" && error !== null && "rule" in error ? error.rule : undefined;
+  return typeof r === "string" ? r : undefined;
+};
 
 // The identity field a machine-identity-mismatch names in its `cause` member. Only the three field names of
 // the persistence and API §9.4 contract are shown, so no other text of the answer reaches the page.
@@ -86,8 +92,8 @@ const differing = (error: unknown) => {
 // not decryptable, or no pause at its generation at all.
 const notApplied = (last: string, run: Pick<RunState, "refused" | "replacedBy">, o: Operation) =>
   run.replacedBy !== undefined ? `a takeover at generation ${run.replacedBy} resumed the import without it, and operation ${short(o.id)} then released it.`
-  : run.refused !== undefined ? `it was refused (${refusalText(run.refused)}), and operation ${short(o.id)} then released the import without it.`
-  : last === "resume-failed" ? `its staged input could not be decrypted (resume-failed), and operation ${short(o.id)} then released the import without it.`
+  : run.refused !== undefined ? `it was refused, and operation ${short(o.id)} then released the import without it. ${refusalWords(run.refused)}`
+  : last === "resume-failed" ? `its staged input could not be decrypted, and operation ${short(o.id)} then released the import without it.`
   : `operation ${short(o.id)} succeeded without pausing at the mark's generation.`;
 
 // What a watch's end says. A success of an import this page started adopts the draft's ETag only at
@@ -120,20 +126,20 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
       "precondition-failed": " The draft changed after this import started, so the import was not applied and its claim is abandoned.",
       "ingestion-abandoned": " The ingestion was abandoned, so nothing of it reached the draft.",
     };
-    const why = (reasons[code(o.error)] ?? "") + differing(o.error);
-    return <>Import {short(b.id)} (operation {short(o.id)}) {o.state}: {code(o.error) || "no code"}.{why} <ImportAgain b={b} /></>;
+    const why = (reasons[code(o.error)] ?? ` ${refusalWords({ code: code(o.error), rule: ruleOf(o.error) })}`) + differing(o.error);
+    return <>Import {short(b.id)} (operation {short(o.id)}) {o.state}.{why} <ImportAgain b={b} /></>;
   }
   // An abandoned claim whose operation has no recorded end: the pause the events replay is not current.
   if (b.state === "abandoned") return `Import ${short(b.id)} is abandoned, but operation ${short(o.id)} has no recorded end yet: its outcome is unknown. Read it again later.`;
   if (last === "paused" && run?.refused !== undefined) {
-    return `The mark was not applied: it was refused (${refusalText(run.refused)}). The import is paused again (expires ${when(b.expiresAt)}). Review it again and mark again, continue it, or abandon it.`;
+    return `The mark was not applied: it was refused. ${refusalWords(run.refused)} The import is paused again (expires ${when(b.expiresAt)}). Review it again and mark again, continue it, or abandon it.`;
   }
   if (last === "paused" && run?.replacedBy !== undefined) {
     return `The earlier mark was not applied: a takeover at generation ${run.replacedBy} resumed the import without it. The import is paused again (expires ${when(b.expiresAt)}). Review it again and mark again, continue it, or abandon it.`;
   }
   if (last === "paused" && run?.marked) return `The marks were applied: re-staged and paused again (expires ${when(b.expiresAt)}). Review again, continue or abandon it.`;
   if (last === "paused") return `Paused for review (expires ${when(b.expiresAt)}).`;
-  if (last === "resume-failed") return `Import ${short(b.id)} was not applied: its staged input could not be decrypted (resume-failed). The claim stays held until its lease lapses at ${when(b.leaseUntil)}; then take it over, or abandon it now.`;
+  if (last === "resume-failed") return `Import ${short(b.id)} was not applied: its staged input could not be decrypted. The claim stays held until its lease lapses at ${when(b.leaseUntil)}; then take it over, or abandon it now.`;
   if (lapsed(b, now)) {
     const next = b.mode === "transient" ? "or abandon it (transient staging cannot be taken over)" : "take it over, or abandon it";
     // A takeover discarded the mark whatever the takeover's own run does next, so that part is known.
