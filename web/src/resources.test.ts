@@ -9,8 +9,9 @@ import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Machines } from "./machines.tsx";
 import { PublishDraft } from "./publish.tsx";
 import { RecoveryConsole } from "./recovery.tsx";
+import { Change } from "./change.tsx";
 import {
-  Audit, Change, Changes, DEPENDENCY_CLASSES, DependencyItem, klass, OPERATION_KINDS, OPERATION_STATES, OperationItem, Operations, PLAN_STATES,
+  Audit, Changes, DEPENDENCY_CLASSES, DependencyItem, klass, OPERATION_KINDS, OPERATION_STATES, OperationItem, Operations, PLAN_STATES,
   ImportBaseItem, ImportBaseRows, PlanItem, Plans, ReleaseItem, RevisionItem, seconds, SourceItem, Sources, view,
 } from "./resources.tsx";
 

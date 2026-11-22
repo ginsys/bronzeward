@@ -9,7 +9,6 @@ import { applyId, applyPath } from "./apply.ts";
 import { ApplyForm } from "./apply.tsx";
 import { ApprovalRecord, ApproveControl, RevocationReason, RevokeControl } from "./approval.tsx";
 import { Change } from "./change.tsx";
-export { Change };
 import { BaseDocument } from "./claim.tsx";
 import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { DriftItem, driftId } from "./drift.tsx";

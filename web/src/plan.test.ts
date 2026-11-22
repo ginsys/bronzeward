@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { CANCEL_NOTE, nextAfter, NO_TARGET, PlanNew, PlanState, planBody, planFor, planPath, poll, reasonProblem, REASON_MAX, staleReasons, STALE_AFTER_RECOVERY, takeFresh } from "./plan.tsx";
-import { Change } from "./resources.tsx";
+import { Change } from "./change.tsx";
 
 const go = () => {};
 // A client that never answers: the objects a plan names by identifier are read for their titles, and a
