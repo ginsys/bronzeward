@@ -14,7 +14,7 @@ import { follow, GROUPS, PAGES, usePath } from "./router.ts";
 import { Disconnected, HumanOnly, Loading, Offline, ProblemFields, problemFields, Refused, Status, StatusPage } from "./states.tsx";
 import { PageNote } from "./page-note.tsx";
 import { signedInAs } from "./userinfo.ts";
-import { safeWord } from "./safe.ts";
+import { safeSentence, safeWord } from "./safe.ts";
 import { NOT_FOUND_NOTE } from "./words.ts";
 import { type Ending, EPOCH_CHANGED_ASIDE, type Writes } from "./write.ts";
 import type { components } from "./api/v1";
@@ -98,7 +98,7 @@ export function Failure({ res, sub }: { res: Exclude<ReadResult<unknown>, { kind
     const p = res.problem;
     const row = (text: ReactNode) => <>{text}<ProblemFields problem={problemFields(res)} role="alert" /></>;
     if (p?.["humanOnly"] === true) return row(<HumanOnly />);
-    if (p?.["plan"] !== undefined && typeof p.detail === "string") return row(<Status role="alert">{p.detail}; you are signed in as {sub}</Status>);
+    if (p?.["plan"] !== undefined && typeof p.detail === "string") return row(<Status role="alert">{safeSentence(p.detail)}; you are signed in as {sub}</Status>);
     const roles = p?.["roles"];
     if (Array.isArray(roles) && roles.every((r) => typeof r === "string")) return row(<Status role="alert">Needs {roles.map(safeWord).join(" or ")}; you are signed in as {sub}</Status>);
   }
