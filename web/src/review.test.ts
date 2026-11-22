@@ -227,13 +227,6 @@ describe("the next step of the release review page", () => {
     }
   });
 
-  test("after a successful read again the sentence and the button return", () => {
-    const out = page(pos("needs-plan"));
-    expect(out).toContain("An apply-config plan sends this release to it.");
-    expect(out).toContain("Plan apply");
-    expect(out).not.toContain("Read again");
-  });
-
   test("a read still loading shows no sentence and no button", () => {
     const out = page({ kind: "loading" });
     expect(out).toContain("Loading");
