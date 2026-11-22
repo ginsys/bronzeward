@@ -2113,7 +2113,14 @@ one. The rule is one for both clients:
    built from the alert's kind and its dependency's object and version, the dependency named once (the link of
    the dependency's page; "This dependency" on that page), then the Kind, Class, Reason, the releases by their
    titles and the time; the identifier is the last column, under Identifier, since an alert has no page of its
-   own.
+   own. A word the server sets and a page prints as a state, kind, class, reason, mode, source, role, action,
+   route, cause, platform or hostname is shown only when it is safe text (item 1, A8 rule 3: no control or format
+   character, at most 300 code points), and otherwise reads "(not shown)"; one the server leaves out reads "none"
+   where the cell has one. This holds on every page that prints such a word: the plan, operation, import, recovery,
+   machine, review, onboarding, audit, draft, alert and dependency pages ([#1055](https://github.com/ginsys/bronzeward/issues/1055)).
+   Other server text is not covered: a version, address, endpoint, contract, identifier, purpose, epoch, event
+   type or code, approval policy, observation basis, and the identity provider's refusal text. The CLI escapes every
+   string it prints instead (§6 item 8).
 7. **Applied in the CLI** ([#987](https://github.com/ginsys/bronzeward/issues/987)): `plan list`, `release list` and
    `operation list` print a TITLE column beside the identifier, and `plan show`, `release show` and `operation show`
    print a `Title` line under the heading. A table prints a dash where no title could be built, and a detail no line;

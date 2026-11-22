@@ -11,6 +11,7 @@ import { settledReads } from "./imports.tsx";
 import { type Failed, Id, readPages, Ref, useReads } from "./list.tsx";
 import { operationNext, operationNow } from "./operation-words.ts";
 import { Named } from "./titles.tsx";
+import { safeText, safeWord } from "./titles.ts";
 import { eventLine, RESTORED, watch } from "./progress.ts";
 import { Status } from "./states.tsx";
 
@@ -31,10 +32,9 @@ export interface Row { id: string; line: string; at: string; server: boolean; to
 const TOKEN = /^[A-Za-z0-9_-]{1,64}$/;
 const token = (v: unknown): string | undefined => (typeof v === "string" && TOKEN.test(v) ? v : undefined);
 // A cause is a token or a sentence the server wrote (`internal/api/settle.go`: "a completion observation
-// contradicts the postconditions"). It is shown as text, so it needs no escaping; one with a control or
-// format character (a line feed, a bidirectional control) or over 300 characters is not shown.
-const CAUSE = /^[^\p{Cc}\p{Cf}]{1,300}$/u;
-const causeText = (v: unknown): string | undefined => (typeof v === "string" && CAUSE.test(v.trim()) ? v.trim() : undefined);
+// contradicts the postconditions"): safe text (client contracts A8 rule 6), so it is not shown with a control
+// or format character (a line feed, a bidirectional control) or over 300 characters.
+const causeText = (v: unknown): string | undefined => (typeof v === "string" ? safeText(v.trim()) : undefined);
 
 // An event as a row: the shared reader's line, except that a state change names the state it reached
 // and why (`internal/api/recovery_acts.go` and the other writers of `operation-state` set `from`, `to`
@@ -113,7 +113,7 @@ export function Outcome({ o, cause: why }: { o: Operation; cause?: string | unde
           {" "}<Ref to="/recovery" id="recovery">Open in Recovery</Ref> (recovery-admin). This page keeps following the operation.
         </Status>
       );
-    default: return <Status testid="outcome">In progress: {o.state}.</Status>;
+    default: return <Status testid="outcome">In progress: {safeWord(o.state)}.</Status>;
   }
 }
 

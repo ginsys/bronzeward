@@ -13,6 +13,7 @@ import { Action } from "./shell.tsx";
 import { MachineRef, type MachineLike, machineText } from "./machines.tsx";
 import { Withheld } from "./states.tsx";
 import { Named } from "./titles.tsx";
+import { safeWord } from "./titles.ts";
 import { PageNote } from "./page-note.tsx";
 import { DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, REVIEW_NOTE, THE_MACHINE } from "./words.ts";
 
@@ -166,7 +167,7 @@ export function ReviewBody({ r, machine }: { r: Review; machine?: MachineLike })
       <dl>
         <dt>Release</dt><dd><Named id={r.release} /></dd>
         <dt>Machine</dt><dd>{machine === undefined ? <Id id={r.machine} /> : <MachineRef machine={machine} />}</dd>
-        <dt>Validated in mode</dt><dd>{r.mode}</dd>
+        <dt>Validated in mode</dt><dd>{safeWord(r.mode)}</dd>
       </dl>
       {r.configuration === null ? <Withheld /> : <><Document configuration={r.configuration} /><p>{EMPTY_NOTE}</p></>}
       <Provenance records={r.provenance} />

@@ -20,7 +20,7 @@ import { PageNote } from "./page-note.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { ImportedConfigurationRef, MachineById, Named, useMachineText } from "./titles.tsx";
-import { draftName, operationTitle } from "./titles.ts";
+import { draftName, operationTitle, safeWord } from "./titles.ts";
 import { DRIFT_ADOPTION_NOTE, IMPORT_NOTE, START_IMPORT_NOTE } from "./words.ts";
 import type { Outcome, WriteSpec } from "./write.ts";
 
@@ -69,7 +69,7 @@ export function allowed(b: Ingestion, now: number): ReactNode {
     case "released":
       return <>Released into draft <Named id={b.draft} />. Nothing is left to do.</>;
   }
-  return <>Ended: {b.state}. <ImportAgain b={b} /></>;
+  return <>Ended: {safeWord(b.state)}. <ImportAgain b={b} /></>;
 }
 
 const code = (error: unknown) => {
@@ -129,7 +129,7 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
       "ingestion-abandoned": " The ingestion was abandoned, so nothing of it reached the draft.",
     };
     const why = (reasons[code(o.error)] ?? ` ${refusalWords({ code: code(o.error), rule: ruleOf(o.error) })}`) + differing(o.error);
-    return <>Import {short(b.id)} (operation {short(o.id)}) {o.state}.{why} <ImportAgain b={b} /></>;
+    return <>Import {short(b.id)} (operation {short(o.id)}) {safeWord(o.state)}.{why} <ImportAgain b={b} /></>;
   }
   // An abandoned claim whose operation has no recorded end: the pause the events replay is not current.
   if (b.state === "abandoned") return `Import ${short(b.id)} is abandoned, but operation ${short(o.id)} has no recorded end yet: its outcome is unknown. Read it again later.`;
@@ -146,7 +146,7 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
     const next = b.mode === "transient" ? "or abandon it (transient staging cannot be taken over)" : "take it over, or abandon it";
     // A takeover discarded the mark whatever the takeover's own run does next, so that part is known.
     const lost = run?.replacedBy !== undefined ? `The earlier mark was not applied: a takeover at generation ${run.replacedBy} resumed the import without it. ` : "";
-    return `${lost}Its claim is ${b.state} and its lease lapsed at ${when(b.leaseUntil)}, while operation ${short(o.id)} still runs: the outcome is unknown. Read it again later, ${next}.`;
+    return `${lost}Its claim is ${safeWord(b.state)} and its lease lapsed at ${when(b.leaseUntil)}, while operation ${short(o.id)} still runs: the outcome is unknown. Read it again later, ${next}.`;
   }
   return undefined;
 }
@@ -155,8 +155,8 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
 // identifier stands in, as it does in every other title.
 export function importHeading(id: string, b: Pick<Ingestion, "machine" | "state"> | undefined, machine: string | undefined): string {
   if (b === undefined) return `Import ${short(id)}`;
-  if (b.machine != null && machine === undefined) return `Import ${short(id)}: ${b.state}`;
-  return `${operationTitle("ingest", { machine }) ?? "Import"}: ${b.state}`;
+  if (b.machine != null && machine === undefined) return `Import ${short(id)}: ${safeWord(b.state)}`;
+  return `${operationTitle("ingest", { machine }) ?? "Import"}: ${safeWord(b.state)}`;
 }
 
 // The import page (/ingestions/{id}): a reload reads the ingestion and shows what its state allows.
@@ -186,7 +186,7 @@ export function IngestionItem({ id }: { id: string }) {
           <PageNote parts={[IMPORT_NOTE]} />
           <Detail id={b.id} />
           <dl>
-            <dt>State</dt><dd>{b.state}, {b.kind}, {b.mode} staging</dd>
+            <dt>State</dt><dd>{safeWord(b.state)}, {safeWord(b.kind)}, {safeWord(b.mode)} staging</dd>
             <dt>Machine</dt><dd><MachineById id={b.machine} /></dd>
             <dt>Draft</dt><dd><Named id={b.draft} /></dd>
             <dt>Operation</dt><dd><Named id={b.operation} /></dd>

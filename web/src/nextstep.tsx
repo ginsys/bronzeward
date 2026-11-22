@@ -8,6 +8,7 @@
 import type { components } from "./api/v1";
 import { Ref } from "./list.tsx";
 import { driftPath, planFor, planPath } from "./plan.tsx";
+import { safeWord } from "./titles.ts";
 import { DECIDE_ON_THE_CHANGE, NOT_MANAGED_YET } from "./words.ts";
 
 export type Position = components["schemas"]["PositionBody"];
@@ -77,7 +78,7 @@ export function nextStep(p: Position, recovery = false): Step | undefined {
       };
     }
     case "operation-in-flight":
-      return { text: `An operation is changing this machine (${p.operation?.state ?? "in flight"}). Next: wait for it to end.`, links: op };
+      return { text: `An operation is changing this machine (${p.operation == null ? "in flight" : safeWord(p.operation.state)}). Next: wait for it to end.`, links: op };
     case "operation-unresolved":
       return {
         text: "An operation on this machine is unresolved: its outcome is not yet established. The controller keeps examining it and may settle it or classify it safe to retry on its own. This page offers no retry action; a recovery admin decides only an operation that stays unresolved.",

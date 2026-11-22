@@ -10,6 +10,7 @@ import { OnboardClusterAction } from "./onboard.tsx";
 import { DraftLink } from "./draft-link.tsx";
 import { Detail, EmptyList, Head, Id, IdentifierText, type Listed, More, Ref, RESTARTED, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { SAFE } from "./principals.ts";
+import { safeWord } from "./titles.ts";
 import { Status } from "./states.tsx";
 import { TalosAccessSign } from "./talosaccess.tsx";
 import { PageNote } from "./page-note.tsx";
@@ -213,7 +214,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
                   <td>{m.talosEndpoint}</td>
                   <td>{node(m)}</td>
                   <td>{release(m.desired)}</td>
-                  <td>{m.applied === null ? "none" : <>{release(m.applied.release)} ({m.applied.source})</>}</td>
+                  <td>{m.applied === null ? "none" : <>{release(m.applied.release)} ({safeWord(m.applied.source)})</>}</td>
                   <td title={m.observed?.at}>{observed(m, now)}</td>
                   <td>{badges(m).join(", ")}</td>
                 </tr>

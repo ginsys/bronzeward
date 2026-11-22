@@ -15,6 +15,7 @@ import { clock, Disconnected, ProblemFields, problemFields, problemSentences, Re
 import { PageNote } from "./page-note.tsx";
 import { nextStep, ScopeDecision } from "./scope-decisions.tsx";
 import { MachineById } from "./titles.tsx";
+import { safeWord } from "./titles.ts";
 import type { components } from "./api/v1";
 
 export type Recovery = components["schemas"]["RecoveryBody"];
@@ -251,7 +252,7 @@ export const RecoveryFacts = ({ r }: { r: Recovery }) => (
   <>
     {r.entry != null && (
       <p data-testid="recovery-entry">
-        Entered {when(r.entry.enteredAt)} by <Who id={r.entry.enteredBy} />: {r.entry.reason}. Restore stopped {when(r.entry.stoppedAt)}. Restored:{" "}
+        Entered {when(r.entry.enteredAt)} by <Who id={r.entry.enteredBy} />: {safeWord(r.entry.reason)}. Restore stopped {when(r.entry.stoppedAt)}. Restored:{" "}
         {r.entry.restored.map((b) => `${b.family} ${b.backup} (taken ${when(b.takenAt)})`).join("; ")}.
       </p>
     )}
@@ -324,7 +325,7 @@ function Scopes({ scopes }: { scopes: readonly Scope[] }) {
         {scopes.map((s) => (
           <tr key={s.machine} data-testid={`scope-${s.machine}`}>
             <td><MachineById id={s.machine} /></td>
-            <td data-testid="scope-state">{s.state}</td>
+            <td data-testid="scope-state">{safeWord(s.state)}</td>
             <td>{nextStep(s.state)}</td>
             <td><ScopeDecision machine={s.machine} state={s.state} /></td>
           </tr>

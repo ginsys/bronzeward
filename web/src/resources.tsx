@@ -89,7 +89,7 @@ const Fields = ({ rows }: { rows: readonly Row[] }) => <dl>{rows.map(([k, v]) =>
 // Each object is shown by its title (A8 rule 6).
 const Ids = ({ ids }: { ids: readonly string[] | null }) =>
   ids === null || ids.length === 0 ? "none" : ids.map((id, i) => <Group key={id}>{i > 0 && ", "}<Named id={id} /></Group>);
-export const by = (c: { principal: string; role: string } | null) => (c === null ? "none" : <><Who id={c.principal} /> ({c.role})</>);
+export const by = (c: { principal: string; role: string } | null) => (c === null ? "none" : <><Who id={c.principal} /> ({safeWord(c.role)})</>);
 // Who started an operation (client contracts A10): the principal that made the request, or for an apply or an
 // adoption, which the controller creates itself, the controller, the plan it committed and who created that plan.
 export function StartedBy({ o }: { o: S["OperationBody"] }) {
@@ -166,7 +166,7 @@ function ImportName({ b }: { b: S["IngestionBody"] }) {
 const ASSIGNMENTS: readonly Col<S["AssignmentBody"]>[] = [["Assignment", (a) => <AssignmentName a={a} />], CLUSTER, ["Machine", (a) => <MachineById id={a.machine} />], CURRENT, CREATED];
 
 // Never a colour alone: the class and its staleness are words.
-export const klass = (d: { class: string | null; stale?: boolean }) => `${d.class ?? "none"}${d.stale === true ? " (stale: not observed recently)" : ""}`;
+export const klass = (d: { class: string | null; stale?: boolean }) => `${safeWord(d.class) ?? "none"}${d.stale === true ? " (stale: not observed recently)" : ""}`;
 // A dependency's first column names it as its page's heading does (`dependencyName`), and keeps the identifier as
 // the link's title.
 function DependencyName({ d }: { d: Pick<S["DependencyBody"], "id" | "object" | "version"> }) {
@@ -174,7 +174,7 @@ function DependencyName({ d }: { d: Pick<S["DependencyBody"], "id" | "object" | 
 }
 const DEPENDENCIES: readonly Col<S["DependencyBody"]>[] = [
   ["Dependency", (d) => <DependencyName d={d} />], ["Provider", (d) => safeName(d.provider)], ["Object", (d) => `${safeName(d.object)}, version ${d.version}`],
-  ["Class", (d) => klass({ ...d, class: safeWord(d.class) ?? null })], ["Observed from", (d) => when(d.observedFrom)],
+  ["Class", klass], ["Observed from", (d) => when(d.observedFrom)],
 ];
 // An alert is a sentence: its dependency named once, as the dependency's own page is headed ("This dependency" on that
 // page), then what happened (alertSentence). An alert has no page of its own, so its identifier is the last column.
@@ -188,7 +188,7 @@ function AlertText({ a, own }: { a: S["AlertBody"]; own: boolean }) {
 const safeName = (s: string) => safeText(s) ?? NAME_NOT_SHOWN;
 // The server's words reach the cells through the safe-text rule: a value with a control or bidirectional character is not shown.
 const alertCols = (own: boolean): readonly Col<S["AlertBody"]>[] => [
-  ["Alert", (a) => <AlertText a={a} own={own} />], ["Kind", (a) => safeWord(a.kind) ?? "none"], ["Class", (a) => klass({ class: safeWord(a.class) ?? null })], ["Reason", (a) => safeWord(a.reason) ?? "none"],
+  ["Alert", (a) => <AlertText a={a} own={own} />], ["Kind", (a) => safeWord(a.kind) ?? "none"], ["Class", klass], ["Reason", (a) => safeWord(a.reason) ?? "none"],
   ["Releases", (a) => <Ids ids={a.releases} />], ["Recorded", (a) => when(a.recordedAt)], ["Identifier", (a) => <IdentifierText id={a.id} />],
 ];
 const ALERTS = alertCols(false);
@@ -389,8 +389,8 @@ const RELEASES: readonly Col<S["ReleaseBody"]>[] = [
 // The imports (#340): GET /ingestions filtered by state finds paused and lapsed imports (G10), and
 // by machine, as a machine's page links them.
 const INGESTIONS: readonly Col<S["IngestionBody"]>[] = [
-  ["Import", (b) => <ImportName b={b} />], ["State", (b) => b.state], ["Machine", (b) => <MachineById id={b.machine} />], ["Draft", (b) => <Named id={b.draft} />],
-  ["Staging", (b) => b.mode], ["Lease until", (b) => (b.state === "held" || b.state === "resumed" ? when(b.leaseUntil) : "none")],
+  ["Import", (b) => <ImportName b={b} />], ["State", (b) => safeWord(b.state)], ["Machine", (b) => <MachineById id={b.machine} />], ["Draft", (b) => <Named id={b.draft} />],
+  ["Staging", (b) => safeWord(b.mode)], ["Lease until", (b) => (b.state === "held" || b.state === "resumed" ? when(b.leaseUntil) : "none")],
   ["Expires", (b) => when(b.expiresAt)], CREATED,
 ];
 
@@ -425,13 +425,13 @@ export function Changes() {
 }
 
 const BUILT: readonly Col<S["ReleaseSourceBody"]>[] = [
-  ["Kind", (s) => s.kind], ["Source", (s) => <Id id={s.head} />], ["Revision", (s) => <Id id={s.revision} none="removed" />],
+  ["Kind", (s) => safeWord(s.kind)], ["Source", (s) => <Id id={s.head} />], ["Revision", (s) => <Id id={s.revision} none="removed" />],
 ];
 const RenderedLink = ({ to, machine }: { to: string; machine: string }) => (
   <Ref to={to} id={machine}>Rendered configuration of {useMachineText(machine) ?? short(machine)}</Ref>
 );
 const covered = (release: string): readonly Col<S["ReleaseMachineBody"]>[] => [
-  ["Machine", (m) => <MachineById id={m.machine} />], ["Mode", (m) => m.mode], ["Publication observation", (m) => <Id id={m.publicationObservation} />],
+  ["Machine", (m) => <MachineById id={m.machine} />], ["Mode", (m) => safeWord(m.mode)], ["Publication observation", (m) => <Id id={m.publicationObservation} />],
   ["Rendered configuration", (m) => {
     const to = reviewPath(release, m.machine);
     return to === undefined ? "none" : <RenderedLink to={to} machine={m.machine} />;
@@ -460,8 +460,8 @@ export function ReleaseItem({ id }: { id: string }) {
 }
 
 const PLANS: readonly Col<S["PlanBody"]>[] = [
-  ["Plan", (p) => <PlanRef p={p} />], ["State", (p) => p.state], ["Machine", (p) => <MachineById id={p.machine} />],
-  ["Operation", (p) => (p.mode === null ? p.operation : `${p.operation}, mode ${p.mode}`)], ["Release", (p) => <Named id={p.release} />],
+  ["Plan", (p) => <PlanRef p={p} />], ["State", (p) => safeWord(p.state)], ["Machine", (p) => <MachineById id={p.machine} />],
+  ["Operation", (p) => (p.mode === null ? p.operation : `${p.operation}, mode ${safeWord(p.mode)}`)], ["Release", (p) => <Named id={p.release} />],
   CREATED, ["Expires", (p) => when(p.expiresAt)],
 ];
 
@@ -513,9 +513,9 @@ export function PlanItem({ id }: { id: string }) {
             <PlanState p={p} reread={reread} answers={answers} onMachine={onMachine} />
             <FrozenLine p={p} machine={held(p)?.body} />
             <Fields rows={[
-              ["State", `${p.state}; expires ${when(p.expiresAt)}`],
-              ["Target", <>machine <MachineById id={p.machine} {...(held(p) !== undefined && { held: held(p)! })} />, cluster <Id id={p.cluster} />, route {p.route}</>],
-              ["Operation", p.mode === null ? p.operation : `${p.operation}, mode ${p.mode}`],
+              ["State", `${safeWord(p.state)}; expires ${when(p.expiresAt)}`],
+              ["Target", <>machine <MachineById id={p.machine} {...(held(p) !== undefined && { held: held(p)! })} />, cluster <Id id={p.cluster} />, route {safeWord(p.route)}</>],
+              ["Operation", p.mode === null ? p.operation : `${p.operation}, mode ${safeWord(p.mode)}`],
               ["Release", <><Named id={p.release} /> (the machine's Desired when planned: <Named id={p.desiredRelease} />)</>],
               ["Bound to", <>assignment revision <Id id={p.assignmentRevision} />, baseline revision {p.baselineRevision ?? "none"}, drift record {p.driftRecord ?? "none"}, epoch {p.epoch}</>],
               ["Limits", `transport ${seconds(p.transportDeadlineSeconds)}, verification ${seconds(p.verificationDeadlineSeconds)}, observation age ${seconds(p.maxObservationAgeSeconds)}, check validity ${seconds(p.checkValiditySeconds)}, attempts ${p.maxAttempts ?? "none"}, rollout limit ${p.rolloutLimit}`],
@@ -525,8 +525,8 @@ export function PlanItem({ id }: { id: string }) {
             ]} />
             <h3>Evidence</h3>
             <Fields rows={[
-              ["Validation", `${v.result} at ${v.at} (contract ${v.contract}, machinery ${v.machineryVersion}, Kubernetes ${v.kubernetesVersion}, ${v.platformMode})`],
-              ["Dry run", dryRun.available ? "available" : `not available (${dryRun.reason})`],
+              ["Validation", `${v.result} at ${v.at} (contract ${v.contract}, machinery ${v.machineryVersion}, Kubernetes ${v.kubernetesVersion}, ${safeWord(v.platformMode)})`],
+              ["Dry run", dryRun.available ? "available" : `not available (${safeWord(dryRun.reason)})`],
               ...(baseline == null ? [] : [["Baseline", <>import base <Id id={baseline.importBaseRevision} />{baseline.pendingConvergence && ", release not applied yet"}{baseline.formOnly && `, ${DIFFERS_IN_FORM_ONLY.toLowerCase()}`}</>] as const]),
               ["Change", <Change p={p} />],
             ]} />
@@ -547,7 +547,7 @@ export function PlanItem({ id }: { id: string }) {
 const Subject = ({ s }: { s: S["OperationSubject"] | null }) =>
   <Ids ids={s === null ? null : [s.machine, s.plan, s.draft, s.ingestion].filter((x) => x !== undefined)} />;
 const OPERATIONS: readonly Col<S["OperationBody"]>[] = [
-  ["Operation", (o) => <OperationRef o={o} />], ["Kind", (o) => o.kind], ["State", (o) => o.state], ["Subject", (o) => <Subject s={o.subject} />],
+  ["Operation", (o) => <OperationRef o={o} />], ["Kind", (o) => safeWord(o.kind)], ["State", (o) => safeWord(o.state)], ["Subject", (o) => <Subject s={o.subject} />],
   ["Started by", (o) => <StartedBy o={o} />], CREATED,
 ];
 
@@ -568,9 +568,9 @@ export function Operations({ query, go }: { query: string; go: (to: string) => v
 }
 
 const ATTEMPTS: readonly Col<S["AttemptBody"]>[] = [
-  ["Attempt", (a) => a.number], ["At", (a) => when(a.at)], ["Route", (a) => a.route], ["Controller", (a) => `${a.controller}, generation ${a.generation}`],
+  ["Attempt", (a) => a.number], ["At", (a) => when(a.at)], ["Route", (a) => safeWord(a.route)], ["Controller", (a) => `${a.controller}, generation ${a.generation}`],
   ["Deadlines", (a) => `transport ${when(a.transportDeadline)}, verification ${when(a.verificationDeadline)}`],
-  ["Response", (a) => (a.response === null ? "none" : `${a.response.class} ${a.response.code} at ${when(a.response.at)}`)],
+  ["Response", (a) => (a.response === null ? "none" : `${safeWord(a.response.class)} ${a.response.code} at ${when(a.response.at)}`)],
   ["Accounted", (a) => (a.accounting === null ? "no" : `${a.accounting.basis} at ${when(a.accounting.at)}`)],
 ];
 // A result or error record as the server wrote it, as text.
@@ -588,7 +588,7 @@ export function OperationItem({ id }: { id: string }) {
           <PageNote parts={[OPERATION_NOTE]} />
           <OperationTimeline id={id} o={o} reread={reread} />
           <Fields rows={[
-            ["Kind", o.kind], ["State", o.state], ["Subject", <Subject s={o.subject} />], ["Created", <>{when(o.createdAt)} by <StartedBy o={o} /></>],
+            ["Kind", safeWord(o.kind)], ["State", safeWord(o.state)], ["Subject", <Subject s={o.subject} />], ["Created", <>{when(o.createdAt)} by <StartedBy o={o} /></>],
             ["Epoch", o.epoch], ["Last event", o.lastEvent], ["Result", <Record v={o.result} />], ["Error", <Record v={o.error} />],
           ]} />
           <h3>Attempts</h3>
@@ -601,8 +601,8 @@ export function OperationItem({ id }: { id: string }) {
 }
 
 export const ACTS: readonly Col<S["ActItem"]>[] = [
-  ["At", (a) => when(a.at)], ["Principal", (a) => <><Who id={a.principal} /> ({a.principalKind})</>], ["Via", (a) => a.via],
-  ["Role", (a) => a.role ?? "none"], ["Action", (a) => a.action], ["Subjects", (a) => <Ids ids={a.subjects} />],
+  ["At", (a) => when(a.at)], ["Principal", (a) => <><Who id={a.principal} /> ({safeWord(a.principalKind)})</>], ["Via", (a) => a.via],
+  ["Role", (a) => safeWord(a.role) ?? "none"], ["Action", (a) => safeWord(a.action)], ["Subjects", (a) => <Ids ids={a.subjects} />],
   ["Request", (a) => a.requestId ?? "none"], ["Act", (a) => <Id id={a.id} />],
 ];
 
@@ -624,7 +624,7 @@ export function DependencyItem({ id }: { id: string }) {
           <PageNote parts={[DEPENDENCY_NOTE]} />
           <Fields rows={[
             ["Identifier", d.id], ["Provider", safeName(d.provider)], ["Object", safeName(d.object)], ["Version", d.version], ["Created", <span title={safeWord(d.created)}>{when(d.created)}</span>],
-            ["Class", klass({ ...d, class: safeWord(d.class) ?? null })], ["Reason", safeWord(d.reason) ?? "none"], ["First retained", when(d.firstRetainedAt)], ["Unknown since", when(d.unknownSince)],
+            ["Class", klass(d)], ["Reason", safeWord(d.reason) ?? "none"], ["First retained", when(d.firstRetainedAt)], ["Unknown since", when(d.unknownSince)],
             ["Observed from", when(d.observedFrom)], ["Recorded", when(d.recordedAt)],
           ]} />
           <h3>Releases that depend on it</h3>

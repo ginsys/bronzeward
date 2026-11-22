@@ -10,6 +10,7 @@ import { parse, stringify } from "yaml";
 import type { components } from "./api/v1";
 import { existing } from "./forms.tsx";
 import { startBody } from "./imports.tsx";
+import { safeWord } from "./titles.ts";
 import { type Listed, readPages } from "./list.tsx";
 import { MACHINE_NAME } from "./machine-name.ts";
 import type { Problem, ReadResult } from "./request.ts";
@@ -221,7 +222,7 @@ const stateOf = (o: Outcome): LineState => (o.kind === "unknown" || (o.kind === 
 
 const members = (f: Discovery) => f.members;
 // How a member is named in a step's line and in the list of what a stopped press left: its hostname, else its node id.
-const labelOf = (m: Discovery["members"][number]) => (m.hostname === "" ? m.nodeId : m.hostname);
+const labelOf = (m: Discovery["members"][number]) => (m.hostname === "" ? m.nodeId : safeWord(m.hostname));
 // An IPv6 address is bracketed where the server takes an endpoint, as the CLI's endpointArg does.
 const endpointOf = (address: string) => (address.includes(":") && !address.startsWith("[") ? `[${address}]` : address);
 // The address that carries the first key: the first control-plane member that answered.
@@ -508,7 +509,7 @@ async function imports(env: Env, p: Plan, set: Set, fail: Fail, list: List): Pro
       set({ key, label, state, to });
       continue;
     }
-    set({ key, label, state: ing.state === "paused" || ing.state === "held" || ing.state === "resumed" ? "stopped" : "failed", detail: `the import is ${ing.state}: read it`, to });
+    set({ key, label, state: ing.state === "paused" || ing.state === "held" || ing.state === "resumed" ? "stopped" : "failed", detail: `the import is ${safeWord(ing.state)}: read it`, to });
     return false;
   }
   return true;

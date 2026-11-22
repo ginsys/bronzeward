@@ -10,6 +10,7 @@ import type { components } from "./api/v1";
 import type { Load } from "./list.tsx";
 import type { Position } from "./nextstep.tsx";
 import { planBody } from "./plan.tsx";
+import { safeWord } from "./titles.ts";
 import type { Write, WriteSpec } from "./write.ts";
 
 type Draft = components["schemas"]["DraftBody"];
@@ -149,7 +150,7 @@ async function publish(id: string, machines: readonly string[], io: Io, etag: st
   const d = await io.read<Draft>(`/drafts/${enc(id)}`);
   if (d?.kind !== "ok") return say({ state: "stopped", text: LINES.noRead }), false;
   if (d.data.state === "published") return say({ state: "done", text: "Already published." }), true;
-  if (d.data.state !== "open") return say({ state: "stopped", text: LINES.draftGone(d.data.state) }), false;
+  if (d.data.state !== "open") return say({ state: "stopped", text: LINES.draftGone(safeWord(d.data.state)) }), false;
   if (etag === undefined) return say({ state: "stopped", text: NO_ETAG }), false;
   // Every write is preceded by this check: the press stops where the page left or the shell invalidated its reads.
   if (!io.live()) return false;

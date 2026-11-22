@@ -13,6 +13,7 @@ import { type Machine, machineHeading } from "./machines.tsx";
 import { PageNote } from "./page-note.tsx";
 import { driftPath, REASON_MAX, planPath, reasonProblem } from "./plan.tsx";
 import { Who } from "./principals.tsx";
+import { safeWord } from "./titles.ts";
 import { Action, useFocusOn, useGate } from "./shell.tsx";
 import { Status } from "./states.tsx";
 import { CHANGED_ON_THE_MACHINE, DRIFT_ADOPT, DRIFT_FREEZE, DRIFT_NONE, DRIFT_NOT_SHOWN, DRIFT_NOTE, DRIFT_NOTE_OPEN, DRIFT_REVERT } from "./words.ts";
@@ -60,7 +61,7 @@ function Reasoned({ id, kind, show, finished }: { id: string; kind: "freeze" | "
   const label = kind === "freeze" ? "Freeze" : "Unfreeze";
   const recorded = (data: unknown) => {
     const r = data as FreezeBody;
-    return <>{r.frozen ? "Frozen" : "Unfrozen"}. Recorded by <Who id={r.principal} /> ({r.role}), act <Id id={r.act} />.</>;
+    return <>{r.frozen ? "Frozen" : "Unfrozen"}. Recorded by <Who id={r.principal} /> ({safeWord(r.role)}), act <Id id={r.act} />.</>;
   };
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
