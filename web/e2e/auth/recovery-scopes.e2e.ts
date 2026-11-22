@@ -64,7 +64,10 @@ describe("the scope decisions of the recovery console (#365)", () => {
     const result = row(m).$('[data-testid="write-result"]');
     await expect(result).toHaveText(expect.stringMatching(/^Scope marked (blocked|ready|unresolved), was blocked \(act \S+\)\./), { wait: 60_000 });
     const text = await result.getText();
-    for (const item of text.matchAll(/missing (observation|identity|access|artifact): (\S.*)/g)) expect(item[2]!.length).toBeGreaterThan(20);
+    // A scope that is not ready is missing something, and each missing item is named with its meaning; a ready one names none.
+    const items = [...text.matchAll(/Missing (observation|identity|access|artifact): (\S.*)/g)];
+    expect(items.length > 0).toBe(!/^Scope marked ready/.test(text));
+    for (const item of items) expect(item[2]!.length).toBeGreaterThan(20);
     expect(await posts("marks")).toHaveLength(1);
     expect(await acts(m, "restoration-mark")).toBe(1);
   });
@@ -97,6 +100,7 @@ describe("the scope decisions of the recovery console (#365)", () => {
     await expect(result).toHaveText(expect.stringContaining("only a ready scope is released"), { wait: 30_000 });
     await expect(row(m).$('[data-testid="write-next"]')).toHaveText(expect.stringContaining("Mark the scope until it is ready"));
     expect((await answers()).filter((a) => a.startsWith(`/recovery/scopes/${m}/releases `))).toEqual([`/recovery/scopes/${m}/releases 409`]);
+    // once: read after the server's 409 was answered and shown, so the refused write is settled and the act list cannot still grow from it
     expect(await acts(m, "release")).toBe(0);
   });
 
@@ -115,7 +119,7 @@ describe("the scope decisions of the recovery console (#365)", () => {
     await browser.refresh();
     await expect($('[data-testid="scopes"]')).toBeExisting({ wait: 20_000 });
     await expect(row(m).$('[data-testid="scope-state"]')).toHaveText("released", { wait: 20_000 });
-    expect(await posts("releases")).toHaveLength(2);
+    await absent(async () => (await posts("releases")).length > 2, "a release sent again after the reload");
   });
 
   it("a scope another operator released shows the refusal of a second release, and no control sends for more than one machine", async function () {
@@ -133,6 +137,7 @@ describe("the scope decisions of the recovery console (#365)", () => {
     // once: read after the rows and the refusal's answer rendered, and the list names every button of the page
     expect(labels.filter((l) => /all/i.test(l))).toEqual([]);
     expect(labels.filter((l) => l === "Release")).toHaveLength(2);
+    // once: the other machine's release was never pressed, and the page was read after the first machine's refusal settled
     expect(await acts(seed.machine, "release")).toBe(0);
   });
 

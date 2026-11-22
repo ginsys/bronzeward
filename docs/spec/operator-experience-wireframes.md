@@ -593,6 +593,8 @@ restart. Imports complete on it.
 | worker-4   | unresolved               | An operation holds it: classified    | [Mark]           |
 |            |                          | after the normal restart, then mark  |                  |
 +------------+--------------------------+--------------------------------------+------------------+
+[Account scope] and its form below arrive with the accounting change: until then a pre-restore-unaccounted
+row carries no control, and the accounting is the command's (`recovery scope-account`).
 Mark and Release are one press for one machine, with no control for all scopes. The answer stays in
 the row: "Scope marked blocked, was blocked (act …). Missing identity: the identity the node showed is
 not the one the machine record binds, or a later observation showed another. Next: fix what is
