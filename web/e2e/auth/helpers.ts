@@ -113,6 +113,8 @@ export async function disposable(query: string): Promise<string> {
 export type Seed = {
   cluster: string; release: string; machine: string; machine2: string; operation: string;
   plans: { proposed: string; approved: string; committed: string; expired: string; cancelled: string; revoked: string };
+  // Only for ?seed=observations: the recovery observations of the accounting cases (internal/api/e2eseed_test.go).
+  observations?: { machine: { first: string; later: string; end: string }; machine2: { start: string; soon: string; end: string } };
 };
 
 // Starts a disposable deployment with the seeded records and returns its URL and their identifiers.
