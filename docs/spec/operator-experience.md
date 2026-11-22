@@ -650,7 +650,9 @@ request, like a file name that cannot be printed back in a command.
 
 The text output lists the cluster, the first key, the draft and one row per member, then the next
 commands. `-o json` and `-o yaml` print one object once, at the end:
-`{cluster, firstKey, draft, machines[]}`, each member with `{node, machine, add, import}` and, only for a
+`{cluster, firstKey, draft, machines[]}`, each member with `{node, machine, add, import}` and, only once the run reached the assignment step for
+a machine whose import was released, `assignment` (its `state` is `created` for one this run wrote and
+`existing` for one it found and left as it was), and, only for a
 machine this run recorded, `name` (the name it was given, absent when it has none) and `nameNote` (how it was
 named, or why it was not) and, when the name was refused as held, `nameHeldBy` (the holder's identifier), each step
 with a `state` and, when it did not finish, the `command` that carries on and the `error` line. The

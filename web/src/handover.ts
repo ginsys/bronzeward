@@ -64,7 +64,7 @@ export const LINES = {
   stillOpen: "Stopped: the draft still reads open after its publication. Press the button again.",
   assigning: "Adding an assignment that selects nothing for each machine that has none, so each release holds one.",
   noAnswerETag: "Stopped: the answer to an assignment named no ETag for the draft, so the press cannot tell whether it changed since. Nothing more was sent. Read the draft again, then press the button again.",
-  noAssignmentRead:"Not read: the machines' assignments could not be read. Nothing was sent. Press the button again.",
+  noAssignmentRead: "Not read: the machines' assignments could not be read. Nothing was sent. Press the button again.",
 } as const;
 
 export type Act =
