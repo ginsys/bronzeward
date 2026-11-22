@@ -926,6 +926,26 @@ and `owned-automation` cannot be predicted: no read serves an import-base revisi
 a release, or a service principal's responsible human. The prediction therefore never presents
 an approver as clear of self-approval; the returned approval owns the reasons.
 
+**Proposed: the web client's apply page** (`/releases/<id>/apply`, ginsys/bronzeward#1096). A release's
+changes reach several machines at once, and one plan page per machine asks the same question again each
+time. The page lists the release's machines, each with its name, its role (`role`, control plane or worker,
+shown only where the read has one) and the profiles of its assignment revision as small labels, none chosen.
+**Show apply** makes one apply-config plan for each machine chosen (a publisher) and lists each plan's own
+stored change on request, the change a person reads being the change of the plan approved. **Apply** records
+one approval for each plan shown (an approver), carries on past a machine the server refuses, and says so in
+that machine's line. Each line says where the machine stands for this release, read from the machine's
+position and no other source: not applied, a plan ready, waiting behind another machine's apply (the
+controller applies one machine of a cluster at a time), applying, applied, or stopped, with the reason. A plan
+that somebody else prepared and that is ready is reused and never made twice, so an approver who cannot make
+plans can apply plans a publisher prepared. A plan the page made and the person did not approve is cancelled
+when the choice changes and when the page is left; one the page loses (the tab is closed) expires with the
+plan default. No route returns a change before a plan exists, so showing it means making the plan.
+A control plane may be chosen: the server does not refuse it and the acceptance tests do not cover it, so the
+page says that, and the operator limits say it too. Alternatives: one page per machine and plan (the
+repetition above); approving without showing the change (the person approves what they never read); a new
+read that computes the changes without a plan (a second source of the diff the plan stores, which could
+disagree with it).
+
 **Proposed:** in the console the plan page is the confirmation: it shows the plan, the
 prediction and, above one "Approve" button, a sentence saying that pressing it records the
 person's approval and what the controller does after it. No field asks for the plan ID

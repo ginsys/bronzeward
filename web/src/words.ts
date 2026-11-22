@@ -133,3 +133,10 @@ export const UNFREEZE_THE_MACHINE = "Unfreeze the machine";
 export const FREEZE_THIS_MACHINE = "Freeze this machine";
 /** A machine's role in a person's words (ginsys/bronzeward#1096): the API's "controlplane" is two words; a value this client does not know is shown as sent. */
 export const roleWords = (role: string): string => (role === "controlplane" ? "control plane" : role);
+
+/** The apply page (ginsys/bronzeward#1096): /releases/<id>/apply. */
+export const APPLY_NOTE = "Choose the machines of this release to change, then press Show apply: it makes one plan for each machine and shows what each plan changes. Apply then records your approval of those plans. A machine you leave out stays as it is and can be applied later from this page.";
+export const APPLY_SENTENCE = "Pressing Apply records your approval of each plan shown above. The controller re-checks each plan when it sends it and applies it only if every check passes, one machine of a cluster at a time. Approval is for a human sign-in only.";
+export const CONTROL_PLANE_NOTE = "A control plane machine is chosen. Sending a configuration to a control plane is not covered by Bronzeward's acceptance tests yet. The server does not refuse it, and you decide.";
+export const NO_ROLE_NOTE = "A machine imported before its role was stored shows none until it is imported again.";
+export const APPLY_NEEDS_PUBLISHER = "Show apply makes the plans, which needs the publisher role. A publisher can prepare them and an approver can then apply them from this page.";
