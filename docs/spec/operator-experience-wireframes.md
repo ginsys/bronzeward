@@ -215,7 +215,8 @@ six layers in order, from global to override. Each list has the same [Move up], 
 the machines of the draft's cluster that the draft holds no assignment for, each as its short ID
 and Talos endpoint. [Add to profiles] adds a profile that the draft holds or that the cluster
 has a head revision for. The picker of a layer offers only the fragments of that layer. An
-assignment selects 1 to 256 names in all, each profile once and each fragment once. A name that is
+assignment selects 0 to 256 names in all, each profile once and each fragment once. An assignment
+that selects nothing is valid: the machine's configuration is its import base alone. A name that is
 no longer available shows "not available in this draft", and a Save that sends it gets a `422`
 that names its path. [Show composition and references] reads on demand, one read at a time, and
 counts the reads. It lists the composition order and the state of each reference of each

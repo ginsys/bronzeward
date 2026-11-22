@@ -428,6 +428,54 @@ func TestBuildReleaseMachines(t *testing.T) {
 	}
 }
 
+// An assignment that selects nothing compiles to the configuration of the same machine with no
+// assignment (ginsys/bronzeward#1068): the release holds its revision, and the configuration digest, which
+// is of the compiled content alone, is the same. The ciphertext is not compared: each is encrypted on its own.
+func TestBuildReleaseEmptyAssignment(t *testing.T) {
+	b := newBuildEnv(t)
+	empty := id.New(id.AssignmentRevision)
+	tx, err := b.db.Begin() // a revision's rows are written in its own transaction (refuse_late_revision_row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	mustExec(t, tx, `INSERT INTO assignment_revision (id, cluster, machine, author, created_at) VALUES ($1, $2, $3, $4, now())`,
+		empty, b.cluster, b.machine, b.seed)
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, b.db, `UPDATE draft_source_entry SET assignment_revision = $2 WHERE draft = $1 AND kind = 'assignment'`, b.draft, empty)
+	with, ref := b.build()
+	if ref != nil {
+		t.Fatalf("buildRelease refused an empty assignment: %v %v", ref, ref.extra)
+	}
+	if got := with.machines[0].assignment; got != empty {
+		t.Fatalf("the unit's assignment revision %q; want %q", got, empty)
+	}
+	mustExec(t, b.db, `DELETE FROM draft_source_entry WHERE draft = $1 AND kind = 'assignment'`, b.draft)
+	without, ref := b.build()
+	if ref != nil {
+		t.Fatalf("buildRelease refused no assignment: %v %v", ref, ref.extra)
+	}
+	if got := without.machines[0].assignment; got != "" {
+		t.Fatalf("the unit's assignment revision %q with no assignment; want none", got)
+	}
+	if with.machines[0].configuration != without.machines[0].configuration {
+		t.Fatalf("configuration digest %x with an empty assignment, %x with none", with.machines[0].configuration, without.machines[0].configuration)
+	}
+	// The release of the empty assignment commits and holds its revision.
+	mustExec(t, b.db, `INSERT INTO draft_source_entry (draft, cluster, kind, machine, assignment_revision, base)
+		VALUES ($1, $2, 'assignment', $3, $4, NULL)`, b.draft, b.cluster, b.machine, empty)
+	b.unit = with
+	rel, ref := b.commit()
+	if ref != nil {
+		t.Fatalf("commit refused an empty assignment: %v %v", ref, ref.extra)
+	}
+	if n := count(t, b.db, `SELECT count(*) FROM release_machine WHERE release = '`+rel+`' AND assignment_revision = '`+empty+`'`); n != 1 {
+		t.Fatalf("%d release machines hold the empty assignment revision", n)
+	}
+}
+
 // Ruling R33 for the artifact key: an encryption under a key version the first metadata read did
 // not show refuses 422 naming the key and the version the ciphertext names, in the detail too.
 func TestBuildReleaseEncryptionRefused(t *testing.T) {

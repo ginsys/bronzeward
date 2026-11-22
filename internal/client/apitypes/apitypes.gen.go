@@ -1087,7 +1087,7 @@ type AssignmentBody struct {
 	Revision     *string   `json:"revision"`
 }
 
-// AssignmentInput Profiles, then fragments per layer by name; 1 to 256 selected in all, each profile once and each fragment once across all layers. A fragments member is a layer and lists at least one fragment.
+// AssignmentInput Profiles, then fragments per layer by name; 0 to 256 selected in all, each profile once and each fragment once across all layers. A body that selects nothing is accepted - the machine's configuration is then its import base alone. A fragments member is a layer and lists at least one fragment.
 type AssignmentInput struct {
 	Fragments *struct {
 		// Cluster The fragments one layer selects, by name.

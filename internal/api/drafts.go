@@ -480,8 +480,8 @@ func (in *assignmentInput) check(*API) error {
 		}
 		n += len(list)
 	}
-	if n == 0 || n > 256 {
-		return errors.New("an assignment must select 1 to 256 profiles and fragments")
+	if n > 256 {
+		return errors.New("an assignment must select at most 256 profiles and fragments")
 	}
 	return nil
 }

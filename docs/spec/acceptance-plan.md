@@ -353,7 +353,9 @@ has no plan but the handover's completed `adopt` plan.
 
 **Handover steps.**
 
-1. `h-publisher` publishes S1's import draft, as in S2 steps 3 and 5.
+1. `h-publisher` publishes S1's import draft, as in S2 steps 3 and 5. The draft first holds an
+   assignment for each machine, which a plan binds; one that selects nothing is enough
+   ([persistence and API](persistence-api.md) choice §17.47), and a machine published with none has no plan.
 2. `h-publisher` creates an `adopt` plan per machine, binding no drift record and no baseline
    revision; `h-approver` approves each.
 3. The controller takes an `evidence` observation of each machine, begun after its approval, then

@@ -1206,7 +1206,11 @@ re-encoding changes (§2).
 is no `Applied` to differ from; the adopt plan is the handover authorization,
 binds no drift record and no baseline revision, and compares the baseline
 digest recorded by import (step 1); requirements 4.1 to 4.5 apply otherwise
-unchanged. The rest of
+unchanged. The adopt plan binds the machine's assignment revision like any
+plan, so the machine's release holds one: an assignment that selects nothing is
+enough, and a release that holds none for a machine with no assignment is
+refused a plan in words that name that next step
+([persistence and API](persistence-api.md) choice §17.47). The rest of
 that handover, from publishing the import draft to recording the adoption,
 belongs to the [approval work](https://github.com/ginsys/bronzeward/issues/25);
 the import that precedes it belongs to the

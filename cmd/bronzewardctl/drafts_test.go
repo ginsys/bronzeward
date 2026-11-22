@@ -354,6 +354,11 @@ func TestDraftEditing(t *testing.T) {
 			` body={"fragments":{"cluster":["cluster-base"],"role":["a","b","c"]},"profiles":["workers"]}`)
 	step("assignment set: an unknown layer", []string{"assignment", "set", "mch_BWSYNTH", "--draft", "drf_BWSYNTH", "--fragment", "rack=a"}, 2, "",
 		"the layer one of global, site, cluster, role, workload and override")
+	// An assignment names what it selects or says it selects nothing: neither, and both, are usage errors.
+	step("assignment set: nothing named", []string{"assignment", "set", "mch_BWSYNTH", "--draft", "drf_BWSYNTH"}, 2, "",
+		"or --none to select nothing")
+	step("assignment set: --none with a selection", []string{"assignment", "set", "mch_BWSYNTH", "--draft", "drf_BWSYNTH", "--none", "--profiles", "workers"}, 2, "",
+		"or --none to select nothing")
 	step("profile rm: a DELETE with no body", []string{"profile", "rm", "workers", "--draft", "drf_BWSYNTH"}, 0,
 		"Profile workers removed from draft drf_BWSYNTH (draft revision 4).", "",
 		`DELETE /drafts/drf_BWSYNTH/profiles/workers if-match="3-BWSYNTH" type= body=`)
@@ -371,6 +376,10 @@ func TestDraftEditing(t *testing.T) {
 	step("--if-match gives the ETag", []string{"assignment", "rm", "mch_BWSYNTH", "--draft", "drf_BWSYNTH", `--if-match="9-BWSYNTH"`}, 0,
 		"Assignment mch_BWSYNTH removed from draft drf_BWSYNTH (draft revision 10).", "",
 		`DELETE /drafts/drf_BWSYNTH/assignments/mch_BWSYNTH if-match="9-BWSYNTH" type= body=`)
+	// --none sends an assignment that selects nothing: the machine's configuration is its import base alone.
+	step("assignment set --none", []string{"assignment", "set", "mch_BWSYNTH", "--draft", "drf_BWSYNTH", "--none"}, 0,
+		"Assignment saved (draft revision 11).", "",
+		`PUT /drafts/drf_BWSYNTH/assignments/mch_BWSYNTH if-match="10-BWSYNTH" type=`+ctype+` body={}`)
 	// The draft is read at a new epoch, and the GET /server that calls for shows a newer one still:
 	// the ETag belongs to the older epoch, so none is kept (§8.5 item 1).
 	f.mu.Lock()
