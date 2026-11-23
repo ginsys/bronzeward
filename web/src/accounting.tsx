@@ -10,7 +10,9 @@ import { Id, Ref, useItem, useList, usePending } from "./list.tsx";
 import { Who } from "./principals.tsx";
 import { safeWord } from "./safe.ts";
 import { Action, useFocusOn } from "./shell.tsx";
+import { useScopeDeadline } from "./scope-deadline.ts";
 import { settleNext } from "./settle-causes.ts";
+import { type Deadline, startMarks } from "./start-mark.ts";
 import { Status, when } from "./states.tsx";
 import { ClusterLink, MachineById } from "./titles.tsx";
 
@@ -85,23 +87,28 @@ function MachineLine({ machine }: { machine: string }) {
   return <p data-testid="settle-machine">Machine <MachineById id={machine} />{cluster !== undefined && <>, cluster <ClusterLink id={cluster} /></>}.</p>;
 }
 
-function Choice({ name, o, off, checked, onChoose }: { name: string; o: Observation; off: string | undefined; checked: boolean; onChoose: () => void }) {
+function Choice({ name, o, off, checked, onChoose, marked }: { name: string; o: Observation; off: string | undefined; checked: boolean; onChoose: () => void; marked?: boolean }) {
   return (
     <li>
       <label>
         <input type="radio" name={name} value={o.id} checked={checked} disabled={off !== undefined} onChange={onChoose} /> <Id id={o.id} />: {observationLine(o)}
+        {marked && " (the first read after the deadline)"}
         {off !== undefined && <> (off: {off})</>}
       </label>
     </li>
   );
 }
 
+// `deadline` is the instant the settle counts from where the page can name it (an attempt's own; a scope's is read from `stoppedAt`):
+// with it the Start choice marks the one observation the server accepts and gives every other its reason; without it the choice is
+// the person's and the server's, as the server judges it.
 // `path` is the route the decision is sent to, `resource` the page it names, `what` the requests it covers; `done` shows the answer.
 // `due` is whether the latest read still shows the accounting owed: a form that was pressed stays mounted after the read says
 // otherwise, to keep its answer, but is off; one never pressed is not drawn. `onStart` tells the parent a press was made, so the
 // parent keeps this form mounted when the reread that follows the answer stops showing the accounting as owed.
-export function AccountingForm({ machine, path, resource, what, label = "Record accounting", done, due, onStart }: {
+export function AccountingForm({ machine, path, resource, what, label = "Record accounting", done, due, onStart, deadline: given, stoppedAt }: {
   machine: string; path: string; resource: string; what: string; label?: string; done: (data: unknown) => ReactNode; due: boolean; onStart?: () => void;
+  deadline?: Deadline; stoppedAt?: string | undefined;
 }) {
   const writes = useWrites()!;
   const server = useItem<Server>("/server");
@@ -117,6 +124,9 @@ export function AccountingForm({ machine, path, resource, what, label = "Record 
   useFocusOn(w?.outcome, answer);
   const pending = usePending(list, "the machine's observations");
   const sdone = usePending(server, "the server's settings");
+  // A scope's deadline needs the machine's operations, so the form reads them (`stoppedAt` is the entry's); an attempt's is given.
+  const scoped = useScopeDeadline(machine, stoppedAt, server.kind === "ok" ? server.data.maxTransportDeadlineSeconds : undefined, again);
+  const deadline = given ?? scoped;
   const recorded = w?.outcome?.kind === "done";
   const pressed = w !== undefined;
   useEffect(() => { if (pressed) onStart?.(); }, [pressed]);
@@ -128,10 +138,12 @@ export function AccountingForm({ machine, path, resource, what, label = "Record 
   const start = observations.find((o) => o.id === startId);
   const end = observations.find((o) => o.id === endId);
   const needed = moved(start, end);
+  const marks = deadline !== undefined && "at" in deadline ? startMarks(observations, deadline.at) : undefined;
+  const startReason = (o: Observation) => marks?.why(o) ?? startWhy(o);
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const bad = start === undefined ? "Choose the start observation." : end === undefined ? "Choose the end observation." :
-      startWhy(start) ?? endWhy(end, start) ?? explanationProblem(explanation, needed);
+      startReason(start) ?? endWhy(end, start) ?? explanationProblem(explanation, needed);
     setNote(bad);
     if (bad === undefined && !busy) {
       send({ method: "POST", path, body: { ...(path.startsWith("/recovery/") ? { scopes: [{ machine, start: startId, end: endId }] } : { start: startId, end: endId }), ...(explanation.trim() === "" ? {} : { facts: { explanation } }) }, resource });
@@ -149,7 +161,9 @@ export function AccountingForm({ machine, path, resource, what, label = "Record 
         <>
           <fieldset disabled={busy}>
             <legend>Start: the first successful read of the machine after the transport deadline</legend>
-            <ul>{observations.map((x) => <Choice key={x.id} name="start" o={x} off={startWhy(x)} checked={x.id === startId} onChoose={() => setStart(x.id)} />)}</ul>
+            {deadline !== undefined && "unknown" in deadline && <Status testid="settle-start-unknown">The page cannot name the valid start: {deadline.unknown} The server decides.</Status>}
+            {marks !== undefined && marks.mark === undefined && <Status testid="settle-start-none">No observation of this machine began after the transport deadline and read something, so the page finds no start yet. Read the observations again once one has.</Status>}
+            <ul>{observations.map((x) => <Choice key={x.id} name="start" o={x} off={startReason(x)} marked={x.id === marks?.mark} checked={x.id === startId} onChoose={() => setStart(x.id)} />)}</ul>
           </fieldset>
           <fieldset disabled={busy}>
             <legend>End: a recovery observation that began at least the settle floor after that</legend>
