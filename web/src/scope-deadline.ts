@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import type { components } from "./api/v1";
 import { useReads } from "./list.tsx";
-import type { Deadline } from "./start-mark.ts";
+import { type Deadline, instant } from "./start-mark.ts";
 
 type Operation = components["schemas"]["OperationBody"];
 
@@ -42,7 +42,7 @@ export function useScopeDeadline(machine: string, stoppedAt: string | undefined,
         const full = await get<Operation>(`/operations/${enc(op.id)}`);
         if (!current()) return;
         if (full === undefined) return unknown("an operation of the machine could not be read.");
-        for (const a of full.attempts ?? []) if (a.accounting === null) at = Math.max(at, Date.parse(a.transportDeadline));
+        for (const a of full.attempts ?? []) if (a.accounting === null) at = Math.max(at, instant(a.transportDeadline));
       }
       if (current()) setDeadline({ at });
     })();

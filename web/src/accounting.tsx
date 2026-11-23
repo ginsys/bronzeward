@@ -12,7 +12,7 @@ import { safeWord } from "./safe.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { useScopeDeadline } from "./scope-deadline.ts";
 import { settleNext } from "./settle-causes.ts";
-import { type Deadline, startMarks } from "./start-mark.ts";
+import { type Deadline, instant, startMarks } from "./start-mark.ts";
 import { Status, when } from "./states.tsx";
 import { ClusterLink, MachineById } from "./titles.tsx";
 
@@ -41,8 +41,7 @@ export function endWhy(o: Observation, start: Observation | undefined): string |
   if (o.resourceVersion == null) return "it read no machine-configuration resource version";
   if (start === undefined) return undefined;
   if (o.id === start.id) return "it is the start";
-  // The server compares the two times to the nanosecond; this is to the millisecond, so an end that began in the same millisecond, after the start, is off here.
-  if (Date.parse(o.startedAt) <= Date.parse(start.at)) return "it began before the start observation was recorded";
+  if (instant(o.startedAt) <= instant(start.at)) return "it began before the start observation was recorded";
   return undefined;
 }
 // Whether the two chosen observations read a different resource version, which needs an explanation.
