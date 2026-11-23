@@ -1342,3 +1342,34 @@ describe("release of the body of a write that can no longer be repeated (#653)",
     expect(i.released).toHaveBeenCalledTimes(1);
   });
 });
+
+// A write sent once: a discovery try from a list reads and records nothing, so a repeat protects nothing and the next
+// entry of the list is the better one.
+describe("a write sent once (spec.once)", () => {
+  const once = () => new Write({ method: "POST", path: "/discoveries", body: { kind: "talosconfig" }, resource: "/clusters", once: true });
+
+  test("a 503 talos-access-unavailable is sent once, with no wait, and ends not-done with its problem", async () => {
+    const { writes, waits, writesSent } = page([problem(503, "talos-access-unavailable", { detail: "no answer" })]);
+    const o = await writes.submit(once());
+    expect(o.kind).toBe("not-done");
+    if (o.kind === "not-done") expect(o.problem?.type).toBe("urn:bronzeward:problem:talos-access-unavailable");
+    expect(writesSent()).toHaveLength(1);
+    expect(waits).toEqual([]);
+  });
+
+  test("a failed send is one attempt and ends unknown, as after the last attempt of an ordinary write", async () => {
+    const { writes, waits, writesSent } = page([new TypeError("Failed to fetch")]);
+    const o = await writes.submit(once());
+    expect(o.kind).toBe("unknown");
+    expect(writesSent()).toHaveLength(1);
+    expect(waits).toEqual([]);
+  });
+
+  test("an ordinary write answered the same 503 is sent four times, after 1, 2 and 4 s", async () => {
+    const { writes, waits, writesSent } = page(BACKOFF.concat(0).map(() => problem(503, "talos-access-unavailable")));
+    const o = await writes.submit(spec());
+    expect(o.kind).toBe("not-done");
+    expect(writesSent()).toHaveLength(4);
+    expect(waits).toEqual(BACKOFF);
+  });
+});
