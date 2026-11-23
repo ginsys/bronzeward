@@ -123,5 +123,5 @@ func (st Staged) Remarked(s Sanitized, created map[string]string) Staged {
 		gens = map[string]string{}
 	}
 	maps.Copy(gens, created)
-	return Staged{Sanitized: s, Generations: gens, Baseline: st.Baseline}
+	return Staged{Sanitized: s, Generations: gens, Baseline: st.Baseline, Filled: st.Filled}
 }
