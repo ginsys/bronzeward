@@ -1451,7 +1451,8 @@ INSERT INTO release_machine ...;     -- per machine: ciphertext and its digest,
                                      -- hostname record (source, the name used
                                      -- where it was filled, and the derived
                                      -- node name, null where it depends on a
-                                     -- secret or a redacted value or nothing
+                                     -- secret, a redacted value or a withheld
+                                     -- review, or nothing
                                      -- sets it, and whether it was
                                      -- recorded; §9.3); its
                                      -- assignment revision its assignment

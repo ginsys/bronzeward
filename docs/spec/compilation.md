@@ -1220,8 +1220,8 @@ unmeasured.
    second machine the first's old name, publish and apply. Then give the first
    machine its final name, publish and apply. The check is no guarantee. It reads the recorded `nodeName` of each
    machine's applied release (persistence and API §9.3), so it does not cover a
-   hostname that depends on a secret reference (`nodeName` `null`, not
-   compared), a machine whose configuration sets no hostname (`null` as well:
+   hostname that depends on a secret reference or a value the review redacts or
+   withholds (`nodeName` `null`, not compared), a machine whose configuration sets no hostname (`null` as well:
    the node chooses its own), a release with an explicit hostname made before the
    record existed (absent, not recorded), or an adopted baseline whose record names a
    hostname the node does not run (execution and recovery §9.3). An apply that

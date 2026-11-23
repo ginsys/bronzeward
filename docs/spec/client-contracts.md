@@ -2270,13 +2270,15 @@ not part of this rule.
    release applied to machine node-a still sets the Kubernetes node name node-a, and this release gives the same
    name to machine node-b. Nothing has been changed on either machine. Apply the release for machine node-a first,
    or give machine node-b another hostname." The name is the `nodeName` of the plan's release for the machine,
-   which is never a secret; each machine is named by its name where it has one and by its identifier where it has
-   none (A8 rule 1). The sentence says "waits", never "refused" or "failed": the plan stays approved and nothing was
+   which is never a secret; each machine is named as A8 rule 1 names it: by its name where it has one, else in the web
+   client by its address or "an unnamed machine", in the CLI by its whole identifier. The sentence says "waits", never "refused" or "failed": the plan stays approved and nothing was
    sent. Where a commitment was refused on this ground, the timeline's refusal entry is shown as: "The plan could
    not start yet: machine node-a still has the Kubernetes node name node-a." with no hostname value beyond that name.
-   For a machine whose release records no `nodeName` because its hostname depends on a secret, the release review
-   adds: "Not checked: this machine's hostname depends on a secret, so a clash with another machine's hostname cannot
-   be checked." (`nodeName` `null`, not compared). For a release whose `nodeName` is absent, not recorded because
+   For a machine whose release records `nodeName` `null` (not compared) for any cause of persistence and API §9.3
+   that the review hides (an input to the hostname is a secret reference or a value the review redacts, or the review
+   of the release is withheld in whole, a literal hostname included), the release review adds: "Not checked: the
+   review hides this machine's hostname, so a clash with another machine's hostname cannot be checked." It names no
+   cause and no value. For a release whose `nodeName` is absent, not recorded because
    the release was made before it was recorded, the review says: "Not checked: this release was made before
    hostname clashes were recorded, so a clash with another machine's hostname cannot be checked." and names no
    secret; a release with an `unrecorded` source is one of these, and its item 7 sentence ("not recorded for this
