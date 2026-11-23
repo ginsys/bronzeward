@@ -63,9 +63,11 @@ Steps:
 3. Edit the document in the fragment editor. Press **Save** (needs `author`). **Revert to base**
    restores the base text of the entry, and **Remove** removes the entry from the draft.
 4. For a profile, build its list: **Add to profile** adds a fragment, and each row has buttons to
-   move it up or down or remove it. The same buttons work from the keyboard.
+   move it up or down or remove it. The same buttons work from the keyboard. The list is not saved
+   until you press **Save** (needs `author`).
 5. For an assignment, the list of profile names and each layer's list of fragment names work the
-   same way. The machine is the entry's name.
+   same way, and also need **Save** before you switch entries or go on. The machine is the entry's
+   name.
 6. Press **Show composition and references** to read the order in which the lists compose and, for
    each fragment, each reference with its declared kind and version and whether it is declared, carried
    and not declared, or declared and not in the document. It shows no document and no secret value.
