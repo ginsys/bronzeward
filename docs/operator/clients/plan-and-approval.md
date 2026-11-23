@@ -11,6 +11,9 @@ but cannot approve one: an approval is for a human sign-in only. The release com
 [publication](publication.md). What happens after the approval is in
 [operation tracking](operation-tracking.md).
 
+The `text` blocks on this page show the shape of the output, read from the source. This page does
+not claim that a run printed them.
+
 **Nothing here sends a configuration to a machine.** Creating a plan sends nothing. Approving a
 plan starts no operation. After an approval, the controller checks the plan again when it is time
 to send it and applies it only if every check passes.
@@ -194,5 +197,5 @@ The import journey that leads to it is in [import and adopt](protected-import.md
   approves overwriting a configuration nobody reviewed. That belongs to the drift journey and is
   not written here yet.
 
-Next: [follow the operation the approved plan starts](operation-tracking.md). A release you still
+Next: [follow the operation the controller makes from the approved plan](operation-tracking.md). A release you still
 need to make is in [publication](publication.md).
