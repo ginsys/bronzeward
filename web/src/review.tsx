@@ -12,7 +12,7 @@ import { planFor, planPath } from "./plan.tsx";
 import { Action } from "./shell.tsx";
 import { MachineRef, type MachineLike, machineText } from "./machines.tsx";
 import { Withheld } from "./states.tsx";
-import { Named } from "./titles.tsx";
+import { Named, useReleaseNames, useReleaseTitle } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
 import { PageNote } from "./page-note.tsx";
 import { DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, REVIEW_NOTE, THE_MACHINE } from "./words.ts";
@@ -89,9 +89,9 @@ export const positionOwns = (p: Position, release: string): boolean => p.machine
 
 // What this release is to the machine (B18), from its Desired, Applied and pendingConvergence. It says nothing of
 // what was sent: the machine record cannot show that, and a plan or an operation open on it is the position's line.
-export function releaseNote(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence"> & Partial<Pick<Machine, "openDrift" | "formOnly">>): string {
+export function releaseNote(release: string, m: Pick<Machine, "desired" | "applied" | "pendingConvergence"> & Partial<Pick<Machine, "openDrift" | "formOnly">>, name: (release: string) => string = short): string {
   if (m.desired !== release) {
-    return `This release is not the Desired release of this machine${m.desired === null ? "" : ` (Desired is ${short(m.desired)})`}, so it needs no step for this release.`;
+    return `This release is not the Desired release of this machine${m.desired === null ? "" : ` (Desired is ${name(m.desired)})`}, so it needs no step for this release.`;
   }
   if (m.applied === null) return "This machine has no Applied configuration. Adopt it first (an adopt plan): an apply-config plan is refused until then. Nothing has been sent to it.";
   // An open drift means the node differs from what Bronzeward recorded, whatever Desired and Applied say: the machine page
@@ -100,13 +100,13 @@ export function releaseNote(release: string, m: Pick<Machine, "desired" | "appli
   // The server's pendingConvergence says whether the node's configuration differs from this release's (operator-experience §2.4).
   // After an adoption Applied can equal Desired while it does; after a publication Applied can name another release while it does not.
   const same = m.applied.release === release;
-  if (m.formOnly === true) return `${DIFFERS_IN_FORM_ONLY}: ${same ? "this release is Desired and Applied on this machine" : `this release is Desired on this machine, whose Applied configuration is release ${short(m.applied.release)}`}. ${FORM_ONLY_NOTE} An apply-config plan sends this release to it.`;
+  if (m.formOnly === true) return `${DIFFERS_IN_FORM_ONLY}: ${same ? "this release is Desired and Applied on this machine" : `this release is Desired on this machine, whose Applied configuration is release ${name(m.applied.release)}`}. ${FORM_ONLY_NOTE} An apply-config plan sends this release to it.`;
   if (m.pendingConvergence) {
-    return `${same ? `This release is Desired and Applied on this machine, but its configuration differs from what Bronzeward applied.` : `This machine has an Applied configuration (release ${short(m.applied.release)}) that differs from this release.`} An apply-config plan sends this release to it.`;
+    return `${same ? `This release is Desired and Applied on this machine, but its configuration differs from what Bronzeward applied.` : `This machine has an Applied configuration (release ${name(m.applied.release)}) that differs from this release.`} An apply-config plan sends this release to it.`;
   }
   return same
     ? "This release is the one Applied on this machine. Nothing is left to send."
-    : `This release carries this machine's Applied configuration (release ${short(m.applied.release)}) unchanged. Nothing is left to send.`;
+    : `This release carries this machine's Applied configuration (release ${name(m.applied.release)}) unchanged. Nothing is left to send.`;
 }
 
 export const EMPTY_NOTE = "A field that shows as empty is empty in the rendered review. A redacted field shows as a badge, so an empty one was not redacted.";
@@ -188,6 +188,8 @@ function PlanButton({ release, machine, m }: { release: string; machine: string;
 // operator experience §2.3).
 export function NextStepSection({ release, machine, pos, readAgain }: { release: string; machine: string; pos: Load<Position>; readAgain: () => void }) {
   const pending = usePending(pos, "the machine's position");
+  const m = pos.kind === "ok" ? pos.data.machine : undefined;
+  const name = useReleaseNames(m?.desired, m?.applied?.release);
   if (pos.kind !== "ok") {
     return <>{pending}{pos.kind !== "loading" && pos.kind !== "discarded" && <p><button type="button" onClick={readAgain}>Read again</button></p>}</>;
   }
@@ -195,7 +197,7 @@ export function NextStepSection({ release, machine, pos, readAgain }: { release:
   if (position !== undefined && positionOwns(position, release)) return <NextStep position={position} recovery={recovery} />;
   return (
     <>
-      <p data-testid="next-step">{releaseNote(release, pos.data.machine)}</p>
+      <p data-testid="next-step">{releaseNote(release, pos.data.machine, name)}</p>
       <PlanButton release={release} machine={machine} m={pos.data.machine} />
     </>
   );
@@ -211,7 +213,7 @@ export function ReviewItem({ release, machine }: { release: string; machine: str
   const held = pos.kind === "ok" ? pos.data.machine : undefined;
   return (
     <>
-      <h2>Rendered configuration of {held === undefined ? THE_MACHINE : machineText(held)} in release {short(release)}</h2>
+      <h2>Rendered configuration of {held === undefined ? THE_MACHINE : machineText(held)} in release {useReleaseTitle(release) ?? short(release)}</h2>
       <p><Ref to={`/releases/${enc(release)}`} id={release}>Back to the release</Ref></p>
       {review.kind === "ok" ? <ReviewBody r={review.data} {...(held !== undefined && { machine: held })} /> : pending}
       <h3>Next step</h3>

@@ -11,7 +11,7 @@ import { PageNote } from "./page-note.tsx";
 import type { Problem } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
-import { MachineById, Named, useBody } from "./titles.tsx";
+import { MachineById, Named, useBody, useReleaseNames } from "./titles.tsx";
 import { CREATE_PLAN_NOTE, UNFREEZE_THE_MACHINE } from "./words.ts";
 
 type PlanInput = components["schemas"]["PlanInput"];
@@ -174,9 +174,9 @@ const TERMINAL: Record<string, (p: Plan) => ReactNode> = {
 };
 
 // What differs between the plan and the machine now: the Desired release and the drift record the plan was made on.
-export function staleReasons(p: Pick<Plan, "desiredRelease" | "driftRecord">, m: Pick<components["schemas"]["MachineBody"], "desired" | "openDrift">): string[] {
+export function staleReasons(p: Pick<Plan, "desiredRelease" | "driftRecord">, m: Pick<components["schemas"]["MachineBody"], "desired" | "openDrift">, releaseName: (release: string) => string = short): string[] {
   const out: string[] = [];
-  const name = (id: string | null) => (id === null ? "none" : short(id));
+  const name = (id: string | null) => (id === null ? "none" : releaseName(id));
   if (m.desired !== p.desiredRelease) out.push(`the machine's Desired release is now ${name(m.desired)}, and it was ${name(p.desiredRelease)}`);
   const drift = m.openDrift?.revision ?? null;
   if (drift !== p.driftRecord) out.push(`the machine's drift record is now ${drift ?? "none"}, and it was ${p.driftRecord ?? "none"}`);
@@ -227,7 +227,8 @@ function Approved({ p, reread, answers, onMachine }: { p: Plan; reread: () => vo
   }, [p, answers, settled, timer, onMachine]);
   const { approval, now, machine } = seen;
   const pending = [usePending(approval, "the approval"), usePending(machine, "the machine")];
-  const reasons = machine.kind === "ok" ? staleReasons(p, machine.data) : [];
+  const releaseName = useReleaseNames(machine.kind === "ok" ? machine.data.desired : undefined, p.desiredRelease);
+  const reasons = machine.kind === "ok" ? staleReasons(p, machine.data, releaseName) : [];
   const old = approval.kind === "ok" && now.kind === "ok" && approval.data.epoch !== now.data.epoch;
   return (
     <>
