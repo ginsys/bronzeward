@@ -24,6 +24,8 @@ const out = `${web}e2e/out`;
 const children: ChildProcess[] = [];
 const servers: Server[] = [];
 let signature = "";
+// The directory of the client configuration the web host reads (issuer, audience and synthetic client ids, no token), removed at the end.
+let clientDir = "";
 
 // The files under dir that hold sig, the token's last 24 characters.
 function holding(dir: string, sig: string): string[] {
@@ -42,9 +44,10 @@ async function prepare() {
   signature = token.slice(-24);
   const missing = missingBinaries(root, ["webhost"]);
   if (missing.length > 0) throw new SevereServiceError(`missing ${missing.join(", ")} under ${root}bin: go build -o bin/webhost ./fixtures/webhost`);
-  const provider = await startProvider({ issuer: FIXTURE_ISSUER, pageOrigin: FIXTURE_PAGE, clientId: "synthetic-web-client", next: () => ({ access: token, sub: process.env["BW_FIXTURE_HUMAN"] ?? "h-recovery", bare: true }) });
+  const provider = await startProvider({ issuer: FIXTURE_ISSUER, pageOrigin: FIXTURE_PAGE, clientId: "synthetic-web-client", next: () => ({ access: token, sub: "h-recovery", bare: true }) });
   servers.push(provider.server);
-  const clientConfig = mkdtempSync(`${tmpdir()}/bw-fixture-client-`) + "/client.json";
+  clientDir = mkdtempSync(`${tmpdir()}/bw-fixture-client-`);
+  const clientConfig = `${clientDir}/client.json`;
   writeFileSync(clientConfig, JSON.stringify({ issuer: FIXTURE_ISSUER, audience: "bronzeward", cliClientId: "synthetic-cli-client", webClientId: "synthetic-web-client" }));
   const host = spawnChild(binPath(root, "webhost"), ["-listen", FIXTURE_LISTEN, "-dist", `${web}dist`, "-headers", `${web}headers.json`, "-client-config", clientConfig, "-issuer", FIXTURE_ISSUER, "-api", api], { stdio: "inherit" });
   children.push(host);
@@ -62,6 +65,7 @@ async function cleanup() {
   for (const p of children.splice(0)) p.kill();
   await Promise.all(servers.splice(0).map((s) => new Promise((r) => (s.closeAllConnections(), s.close(r)))));
   removeProfiles();
+  if (clientDir !== "") rmSync(clientDir, { recursive: true, force: true });
   if (signature === "") return;
   // The scan with its control: a file that holds the signature must be found, and the output must hold none.
   const control = mkdtempSync(`${tmpdir()}/bw-fixture-control-`);

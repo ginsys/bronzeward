@@ -141,7 +141,8 @@ web_ready() {
   web_ok=1
 }
 # The canary below is the prefix wdio.conf.ts demands, written in two parts: the prefix itself is the leak scan's pattern, and a literal
-# in this file would be found in the fixtures diff that bin/evidence bundles.
+# in this file would be found in the fixtures diff that bin/evidence bundles. The driver's browser cache goes under TMPDIR, which is on disk
+# unless the caller set BW_WDIO_CACHE (the mise browser tasks set the same default).
 web_act() {
   local name=$1 tok rc=0
   web_ready
