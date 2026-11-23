@@ -175,7 +175,7 @@ describe("Connect a cluster (#1001)", () => {
       expect(plans[0]!.state).not.toBe("proposed");
       const approval = (await api(at, "h-all", "GET", `/approvals/${plans[0]!.approval}`)).body!["selfApproval"] as { marked: boolean };
       expect(approval.marked).toBe(true);
-      // Each machine is named from its node's hostname and the stand-in node's text sets none, so its release writes a HostnameConfig document the adopted configuration lacks (compilation.md §6 step 5a): the release differs in content, not in form only (the comments of ginsys/bronzeward#1098 differ too).
+      // Each machine is named from its node's hostname and the stand-in node's text sets none, so its release writes a HostnameConfig document the adopted configuration lacks (compilation.md §6 step 5a): the release differs in content, not in form only (the comments of ginsys/bronzeward#1098 differ too). Import's equality rule (compilation.md §2.3 step 2a) removes nothing here, since there is no HostnameConfig to remove, so this stays false after it; a node that does set its hostname equal to its name reads form only (the Go tests of the compile and API packages hold that case).
       const plan = (await api(at, "h-all", "GET", `/plans?machine=${m.id}`)).body!["items"] as { evidence: { baseline: { pendingConvergence: boolean; formOnly: boolean } } }[];
       expect(plan[0]!.evidence.baseline).toMatchObject({ pendingConvergence: true, formOnly: false });
     }
