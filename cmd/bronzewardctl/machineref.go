@@ -1,7 +1,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/ginsys/bronzeward/internal/client"
@@ -20,6 +22,46 @@ const machineByNameNote = "<machine> is a machine's name or its ID (mch_...). A 
 
 // isMachineID reports whether ref is an identifier. A name that begins with mch_ is read as one.
 func isMachineID(ref string) bool { return strings.HasPrefix(ref, "mch_") }
+
+// givenLabel is how a line names the machine an act landed on, in the client's one form for a machine (machineLabel):
+// the identifier with the name beside it for a machine the person gave by name, so they read which machine it was, and
+// the identifier alone for one given by identifier.
+func givenLabel(ref, id string) string {
+	if ref == id {
+		return id
+	}
+	return machineLabel(id, &ref)
+}
+
+// machinePath is "/machines/<identifier><suffix>" of the machine ref names, resolved on the session's own client.
+func machinePath(ref, cluster, suffix string) func(*client.Client) (string, error) {
+	return func(c *client.Client) (string, error) {
+		id, _, err := machineByName(c, ref, cluster)
+		return "/machines/" + url.PathEscape(id) + suffix, err
+	}
+}
+
+// withCluster adds the --cluster flag, which narrows a machine given by name and is no filter of the list, to flags.
+func withCluster(cluster *string, flags func(*flag.FlagSet)) func(*flag.FlagSet) {
+	return func(fs *flag.FlagSet) {
+		flags(fs)
+		fs.StringVar(cluster, "cluster", "", "")
+	}
+}
+
+// machineFilter is a list's path and query with the machine filter ref (when given) resolved to its identifier.
+func machineFilter(ref, cluster, path string, q url.Values) func(*client.Client) (string, url.Values, error) {
+	return func(c *client.Client) (string, url.Values, error) {
+		if ref != "" {
+			id, _, err := machineByName(c, ref, cluster)
+			if err != nil {
+				return "", nil, err
+			}
+			q.Set("machine", id)
+		}
+		return path, q, nil
+	}
+}
 
 // writeNamed resolves ref and sends the write build makes of its identifier, both on one client (a token read from
 // standard input is read once). A write built from a name is bound to the epoch of the lookup, and its repeat

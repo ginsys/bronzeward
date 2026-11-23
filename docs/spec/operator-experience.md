@@ -416,9 +416,14 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
 - A command that starts an operation prints its ID and waits by default, showing events;
   `--no-wait` returns at once.
 - Names are accepted where the API keys by name (fragments, profiles and the draft path) and
-  identifiers everywhere else. A cluster is addressed by its ID and displayed with its recorded
+  identifiers everywhere else, except a machine, which every command that takes a `<machine>` accepts by its name
+  as well: the command reads the machine list once, matches the name across the clusters the credential reads
+  (`--cluster`, a cluster's name or ID, narrows it), refuses a name no machine holds and a name that machines of
+  two clusters hold, sends the identifier and shows the machine with its name beside it; an identifier is sent as
+  it is and reads no list (client contracts A9; the web client is unchanged: it links by identifier). A cluster is
+  addressed by its ID and displayed with its recorded
   `name` beside it (`cl_9fd… (lab-a)`), and a machine the same way when it has a name
-  (`mch_… (node-a)`, client contracts A9); the client resolves no names, except fragment names for a profile's pins, read from the draft's entries, the cluster's fragments or the pinned revision ([§5.4](#54-editing-fragments-profiles-and-assignments)). A machine without a name, and a server that serves none
+  (`mch_… (node-a)`, client contracts A9); the client resolves no other names than a machine's, above, and fragment names for a profile's pins, read from the draft's entries, the cluster's fragments or the pinned revision ([§5.4](#54-editing-fragments-profiles-and-assignments)). A machine without a name, and a server that serves none
   ([§11](#11-api-gap-audit), G8), show the Talos endpoint beside the identifier in tables, and
   the machine detail adds the node ID.
 - No command applies configuration. Dispatch is the controller's; the clients plan, approve,

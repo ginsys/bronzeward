@@ -243,18 +243,18 @@ func factsOf(explanation string) *map[string]string {
 // human only, one scope): it accounts every unaccounted attempt on the machine at once, and is
 // refused on a scope that is not pre-restore unaccounted.
 func (e *env) recoveryScopeAccount(args []string) error {
-	var start, end, explanation string
+	var start, end, explanation, cluster string
 	var rf repeatFlags
 	pos, err := e.parse("recovery scope-account", args, 1, func(fs *flag.FlagSet) {
 		fs.StringVar(&start, "start", "", "")
 		fs.StringVar(&end, "end", "", "")
 		fs.StringVar(&explanation, "explanation", "", "")
+		fs.StringVar(&cluster, "cluster", "", "")
 		rf.flags(fs)
 	})
 	if err != nil {
 		return err
 	}
-	machine := pos[0]
 	if err := settleFlags(start, end, explanation, e.noInput); err != nil {
 		return err
 	}
@@ -262,9 +262,14 @@ func (e *env) recoveryScopeAccount(args []string) error {
 	if err != nil {
 		return err
 	}
-	w := &client.Write{Method: http.MethodPost, Path: "/recovery/accountings", HumanOnly: true, Repeat: rp,
-		Check: "machine timeline " + client.ShellWord(machine), Read: newestEntry(machine)}
+	// machine is the identifier and label what a line calls the machine, both set once the name is resolved.
+	var machine, label string
+	var w *client.Write
 	prep := func(c *client.Client) error {
+		// The read of the name's lookup, which writeNamed bound the write to before this ran: the reads below hold it
+		// too, so a move after the lookup, the first of these reads included, refuses the write, and the final bind
+		// of these reads does not replace it.
+		lookupEpoch, lookupMoves := w.Reads, w.BoundMoves()
 		r, err := c.Get("/server")
 		if err != nil {
 			return err
@@ -293,11 +298,16 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		if err := epochHeld(c, first, moves); err != nil {
 			return err
 		}
+		if machine != pos[0] {
+			if err := epochHeld(c, lookupEpoch, lookupMoves); err != nil {
+				return err
+			}
+		}
 		if err := checkSettle(machine, by, start, end, explanation); err != nil {
 			return err
 		}
 		srv := srvs[0]
-		tf(e.err, "Scope accounting of machine %s in %s\n  restore stopped: %s\n", machine, c.Context.Where(), when(recs[0].Entry.StoppedAt))
+		tf(e.err, "Scope accounting of machine %s in %s\n  restore stopped: %s\n", label, c.Context.Where(), when(recs[0].Entry.StoppedAt))
 		tf(e.err, "  Start must be the first successful read after the latest of that stop plus the maximum transport deadline and any restored unaccounted attempt's deadline.\n")
 		tf(e.err, "  End must be a recovery observation begun at least the settle floor after the latest of that point and the start.\n")
 		tf(e.err, "  Settle floor %s, maximum transport deadline %s, as GET /server serves them.\n", shortDuration(servedSeconds(srv.SettleFloorSeconds)),
@@ -313,7 +323,12 @@ func (e *env) recoveryScopeAccount(args []string) error {
 		w.ReadsFrom(c)
 		return e.confirmYes(question)
 	}
-	err = e.writeAfter(prep, w, func(c *client.Client, resp *client.Response) ([]string, error) {
+	err = e.writeNamed(pos[0], cluster, prep, func(id string) *client.Write {
+		machine, label = id, givenLabel(pos[0], id)
+		w = &client.Write{Method: http.MethodPost, Path: "/recovery/accountings", HumanOnly: true, Repeat: rp,
+			Check: "machine timeline " + client.ShellWord(id), Read: newestEntry(id)}
+		return w
+	}, func(c *client.Client, resp *client.Response) ([]string, error) {
 		var x apitypes.ScopeAccountingBody
 		if err := json.Unmarshal(resp.Body, &x); err != nil || len(x.Scopes) != 1 {
 			return nil, errors.Join(err, errors.New("the answer names no single scope"))

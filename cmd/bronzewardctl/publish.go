@@ -212,11 +212,20 @@ func (e *env) nextSteps(c *client.Client, release string) ([]string, error) {
 // lists exactly the records served, which cover secret references only (G6). -o json and yaml print
 // the review unchanged: it is not protected (client-contracts.md §11.1).
 func (e *env) releaseReview(verb string, args []string) error {
-	pos, err := e.parse("release "+verb, args, 2, nil)
+	var cluster string
+	pos, err := e.parse("release "+verb, args, 2, func(fs *flag.FlagSet) { fs.StringVar(&cluster, "cluster", "", "") })
 	if err != nil {
 		return err
 	}
-	return showThen(e, "/releases/"+url.PathEscape(pos[0])+"/machines/"+url.PathEscape(pos[1])+"/review", func(c *client.Client, _ *client.Response, r *apitypes.ReviewBody) error {
+	at := machinePath(pos[1], cluster, "/review")
+	return showThenAt(e, func(c *client.Client) (string, error) {
+		path, err := at(c)
+		if err != nil {
+			return "", err
+		}
+		// at gives /machines/<id>/review; the review route is under the release.
+		return "/releases/" + url.PathEscape(pos[0]) + path, nil
+	}, func(c *client.Client, _ *client.Response, r *apitypes.ReviewBody) error {
 		if verb != "provenance" {
 			e.titleRef(c, "release", r.Release)
 		}

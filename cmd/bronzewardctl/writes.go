@@ -360,8 +360,10 @@ func (e *env) machineRename(args []string) error {
 		return err
 	}
 	body, _ := json.Marshal(in)
+	var label string
 	return e.writeNamed(pos[0], cluster, needNameRevision, func(id string) *client.Write {
 		m := url.PathEscape(id)
+		label = givenLabel(pos[0], id)
 		return &client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/names", Body: body, HumanOnly: true,
 			Repeat: rp, Check: "machine timeline " + client.ShellWord(id),
 			Read: func(c *client.Client) (string, error) {
@@ -376,7 +378,10 @@ func (e *env) machineRename(args []string) error {
 	}, func(_ *client.Client, r *client.Response) ([]string, error) {
 		var x apitypes.NameChangeBody
 		err := json.Unmarshal(r.Body, &x)
-		return append([]string{sf("Machine %s: name %s, was %s (timeline revision %d).", x.Machine, x.Name, deref(x.PreviousName), x.Revision)}, renameReaches...), err
+		if label == pos[0] {
+			label = x.Machine // given by identifier: the line shows the machine the server answers for
+		}
+		return append([]string{sf("Machine %s: name %s, was %s (timeline revision %d).", label, x.Name, deref(x.PreviousName), x.Revision)}, renameReaches...), err
 	})
 }
 
@@ -385,8 +390,10 @@ func (e *env) machineRename(args []string) error {
 func (e *env) machineSetEndpoint(args []string) error {
 	var in apitypes.EndpointInput
 	var rf repeatFlags
+	var cluster string
 	pos, err := e.parse("machine set-endpoint", args, 1, func(fs *flag.FlagSet) {
 		fs.StringVar(&in.TalosEndpoint, "talos-endpoint", "", "")
+		fs.StringVar(&cluster, "cluster", "", "")
 		rf.flags(fs)
 	})
 	if err != nil {
@@ -397,21 +404,28 @@ func (e *env) machineSetEndpoint(args []string) error {
 		return err
 	}
 	body, _ := json.Marshal(in)
-	m := url.PathEscape(pos[0])
-	return e.write(&client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/talos-endpoints", Body: body, HumanOnly: true,
-		Repeat: rp, Check: "machine timeline " + client.ShellWord(pos[0]),
-		Read: func(c *client.Client) (string, error) {
-			r, err := c.Get("/machines/" + m)
-			if err != nil {
-				return "", err
-			}
-			var x apitypes.MachineBody
-			err = json.Unmarshal(r.Body, &x)
-			return "GET /api/v1/machines/" + m + " shows the Talos endpoint " + x.TalosEndpoint, err
-		}}, func(_ *client.Client, r *client.Response) ([]string, error) {
+	var label string
+	return e.writeNamed(pos[0], cluster, nil, func(id string) *client.Write {
+		m := url.PathEscape(id)
+		label = givenLabel(pos[0], id)
+		return &client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/talos-endpoints", Body: body, HumanOnly: true,
+			Repeat: rp, Check: "machine timeline " + client.ShellWord(id),
+			Read: func(c *client.Client) (string, error) {
+				r, err := c.Get("/machines/" + m)
+				if err != nil {
+					return "", err
+				}
+				var x apitypes.MachineBody
+				err = json.Unmarshal(r.Body, &x)
+				return "GET /api/v1/machines/" + m + " shows the Talos endpoint " + x.TalosEndpoint, err
+			}}
+	}, func(_ *client.Client, r *client.Response) ([]string, error) {
 		var x apitypes.EndpointChangeBody
 		err := json.Unmarshal(r.Body, &x)
+		if label == pos[0] {
+			label = x.Machine // given by identifier: the line shows the machine the server answers for
+		}
 		return []string{sf("Machine %s: Talos endpoint %s, was %s (timeline revision %d).",
-			x.Machine, x.TalosEndpoint, x.PreviousEndpoint, x.Revision)}, err
+			label, x.TalosEndpoint, x.PreviousEndpoint, x.Revision)}, err
 	})
 }

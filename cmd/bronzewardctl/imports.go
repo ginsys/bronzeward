@@ -120,12 +120,13 @@ func checkStaging(staging string, review bool) error {
 func (e *env) ingest(name, kind string, args []string) (*client.Client, accepted, error) {
 	var c *client.Client
 	var a accepted
-	var machine, draft, file string
+	var machine, draft, file, cluster string
 	staging := "encrypted"
 	var review, marks, noWait bool
 	var rf repeatFlags
 	if _, err := e.parse(name, args, 0, func(fs *flag.FlagSet) {
 		fs.StringVar(&machine, "machine", "", "")
+		fs.StringVar(&cluster, "cluster", "", "")
 		fs.StringVar(&draft, "draft", "", "")
 		fs.Func("file", "", func(s string) error {
 			if s == "" {
@@ -165,10 +166,15 @@ func (e *env) ingest(name, kind string, args []string) (*client.Client, accepted
 	if review {
 		in.Review = &review
 	}
-	w := &client.Write{Method: http.MethodPost, Path: "/ingestions", Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, HumanOnly: true,
-		Check: "import status --machine " + client.ShellWord(machine), Read: ingestionsRead(machine, draft)}
+	var w *client.Write
+	build := func(id string) *client.Write {
+		in.Machine = id
+		w = &client.Write{Method: http.MethodPost, Path: "/ingestions", Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, HumanOnly: true,
+			Check: "import status --machine " + client.ShellWord(id), Read: ingestionsRead(id, draft)}
+		return w
+	}
 	err = e.held(func() error {
-		err := e.writeAfter(func(cl *client.Client) error {
+		err := e.writeNamed(machine, cluster, func(cl *client.Client) error {
 			c = cl
 			if file != "" {
 				doc, err := readDocument(file)
@@ -189,7 +195,7 @@ func (e *env) ingest(name, kind string, args []string) (*client.Client, accepted
 				err = fmt.Errorf("the request body is %d bytes, %s; nothing was sent", len(w.Body), overBodyLimit)
 			}
 			return err
-		}, w, func(cl *client.Client, r *client.Response) ([]string, error) {
+		}, build, func(cl *client.Client, r *client.Response) ([]string, error) {
 			err := json.Unmarshal(r.Body, &a)
 			if a.Ingestion != "" {
 				started(e, cl, a.Ingestion, true)
@@ -302,14 +308,14 @@ func (e *env) importAbandon(args []string) error {
 // held finding the paused and lapsed ones (GET /ingestions).
 func (e *env) importStatus(args []string) error {
 	var l listing
-	var state, machine string
+	var state, machine, cluster string
 	f := map[string]*string{"state": &state, "machine": &machine}
-	pos, err := e.paged("import status", args, anyArgs, &l, filters(f))
+	pos, err := e.paged("import status", args, anyArgs, &l, withCluster(&cluster, filters(f)))
 	if err != nil {
 		return err
 	}
 	if len(pos) == 0 {
-		return listWith(e, l, "/ingestions", values(f), nil, nil, func(c *client.Client, bs []apitypes.IngestionBody) {
+		return listResolved(e, l, machineFilter(machine, cluster, "/ingestions", values(f)), nil, nil, func(c *client.Client, bs []apitypes.IngestionBody) {
 			for i := range bs {
 				e.titleIngestion(c, &bs[i])
 			}

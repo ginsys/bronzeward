@@ -224,11 +224,12 @@ func (l layerFragments) Set(v string) error {
 // profiles and per-layer fragments, by name, or with --none an assignment that selects nothing, so the
 // machine's configuration is its import base alone.
 func (e *env) assignmentSet(args []string) error {
-	var draft, profiles string
+	var draft, profiles, cluster string
 	var none bool
 	fragments := layerFragments{}
 	var rf repeatFlags
 	pos, err := e.parse("assignment set", args, 1, func(fs *flag.FlagSet) {
+		fs.StringVar(&cluster, "cluster", "", "")
 		fs.StringVar(&draft, "draft", "", "")
 		fs.StringVar(&profiles, "profiles", "", "")
 		fs.Var(fragments, "fragment", "")
@@ -254,19 +255,24 @@ func (e *env) assignmentSet(args []string) error {
 		in["fragments"] = fragments
 	}
 	body, _ := json.Marshal(in)
-	return e.write(&client.Write{Method: http.MethodPut, Path: "/drafts/" + url.PathEscape(draft) + "/assignments/" + url.PathEscape(pos[0]),
-		Body: body, Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, Check: "draft show " + client.ShellWord(draft),
-		Read: entryRead(draft, apitypes.SourceEntryKindAssignment, pos[0])}, func(_ *client.Client, r *client.Response) ([]string, error) {
+	return e.writeNamed(pos[0], cluster, nil, func(id string) *client.Write {
+		return &client.Write{Method: http.MethodPut, Path: "/drafts/" + url.PathEscape(draft) + "/assignments/" + url.PathEscape(id),
+			Body: body, Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, Check: "draft show " + client.ShellWord(draft),
+			Read: entryRead(draft, apitypes.SourceEntryKindAssignment, id)}
+	}, func(_ *client.Client, r *client.Response) ([]string, error) {
 		return []string{fmt.Sprintf("Assignment saved (draft revision %s).", client.DraftRevision(r.Header.Get("ETag")))}, nil
 	})
 }
 
 // sourceRm removes a profile or an assignment from a draft (DELETE /drafts/{id}/<kind>s/<name>).
 func (e *env) sourceRm(kind apitypes.SourceEntryKind, args []string) error {
-	var draft string
+	var draft, cluster string
 	var rf repeatFlags
 	pos, err := e.parse(string(kind)+" rm", args, 1, func(fs *flag.FlagSet) {
 		fs.StringVar(&draft, "draft", "", "")
+		if kind == apitypes.SourceEntryKindAssignment { // an assignment is a machine's; a profile is named
+			fs.StringVar(&cluster, "cluster", "", "")
+		}
 		rf.flags(fs)
 	})
 	if err != nil {
@@ -279,12 +285,23 @@ func (e *env) sourceRm(kind apitypes.SourceEntryKind, args []string) error {
 	if err != nil {
 		return err
 	}
-	return e.write(&client.Write{Method: http.MethodDelete, Path: "/drafts/" + url.PathEscape(draft) + "/" + string(kind) + "s/" + url.PathEscape(pos[0]),
-		Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, Check: "draft show " + client.ShellWord(draft),
-		Read: entryRead(draft, kind, pos[0])}, func(_ *client.Client, r *client.Response) ([]string, error) {
-		return []string{sf("%s %s removed from draft %s (draft revision %s).", strings.ToUpper(string(kind[:1]))+string(kind[1:]), pos[0], draft,
+	removal := func(id string) *client.Write {
+		return &client.Write{Method: http.MethodDelete, Path: "/drafts/" + url.PathEscape(draft) + "/" + string(kind) + "s/" + url.PathEscape(id),
+			Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, Check: "draft show " + client.ShellWord(draft),
+			Read: entryRead(draft, kind, id)}
+	}
+	label := pos[0]
+	say := func(_ *client.Client, r *client.Response) ([]string, error) {
+		return []string{sf("%s %s removed from draft %s (draft revision %s).", strings.ToUpper(string(kind[:1]))+string(kind[1:]), label, draft,
 			client.DraftRevision(r.Header.Get("ETag")))}, nil
-	})
+	}
+	if kind != apitypes.SourceEntryKindAssignment { // a profile is named in the draft, never resolved
+		return e.write(removal(pos[0]), say)
+	}
+	return e.writeNamed(pos[0], cluster, nil, func(id string) *client.Write {
+		label = givenLabel(pos[0], id)
+		return removal(id)
+	}, say)
 }
 
 // entryRead reads the draft after an unknown outcome and says what it shows of the entry kind and

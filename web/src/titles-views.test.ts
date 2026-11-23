@@ -1135,6 +1135,18 @@ describe("ginsys/bronzeward#1055: a server word on a plan, operation, import, re
     expect(text()).toBe("none");
   });
 
+  test("the audit page: the request an act came in with is shown only when it is safe text", async () => {
+    const request = ACTS.find(([name]) => name === "Request")![1];
+    const a = { at, principal, principalKind: "human", via: "api", role: "author", action: "x", subjects: [], requestId: BAD, id: "act_a" } as never;
+    await mount(h("div", {}, request(a)));
+    await settled();
+    expect(text()).toBe(NOT_SHOWN);
+    await mount(h("div", {}, request({ ...(a as object), requestId: "req_a" } as never)), { ...reads, view: "safe" });
+    expect(text()).toBe("req_a");
+    await mount(h("div", {}, request({ ...(a as object), requestId: null } as never)), { ...reads, view: "none" });
+    expect(text()).toBe("none");
+  });
+
   test("the machine page: platform, applied source, scope state, timeline kind, an observation's unread cause", async () => {
     const machine = {
       id: MCH, name: "worker-1", cluster: "cl_a", talosEndpoint: "https://10.0.0.1:50000", hardware: { talosNodeId: "n1" }, platform: BAD, scopeState: BAD, desired: REL,

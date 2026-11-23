@@ -26,7 +26,16 @@ func show[T any](e *env, path string, table func(*tabwriter.Writer, *T)) error {
 // showThen is show, running then (when not nil) on the decoded answer before it prints it; an
 // error from then prints nothing.
 func showThen[T any](e *env, path string, then func(*client.Client, *client.Response, *T) error, table func(*tabwriter.Writer, *T)) error {
+	return showThenAt(e, func(*client.Client) (string, error) { return path, nil }, then, table)
+}
+
+// showThenAt is showThen for a path that holds a machine given by name: at runs on the session's client.
+func showThenAt[T any](e *env, at func(*client.Client) (string, error), then func(*client.Client, *client.Response, *T) error, table func(*tabwriter.Writer, *T)) error {
 	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+		path, err := at(c)
+		if err != nil {
+			return err
+		}
 		r, err := c.Get(path)
 		if err != nil {
 			return err
@@ -62,7 +71,17 @@ func listWho[T any](e *env, l listing, path string, q url.Values, keep func(*T) 
 // listWith is listWho that also runs pre on the items kept, with the client, before the first row: the
 // reads a table's titles take (titles.go).
 func listWith[T any](e *env, l listing, path string, q url.Values, keep func(*T) bool, who func(*T) []string, pre func(*client.Client, []T), header, foot string, row func(*tabwriter.Writer, *T)) error {
+	return listResolved(e, l, func(*client.Client) (string, url.Values, error) { return path, q, nil }, keep, who, pre, header, foot, row)
+}
+
+// listResolved is listWith for a list whose path or filter holds a machine given by name: at runs on the session's
+// client, which also reads the machine list for the name (machineAt, machineFilter).
+func listResolved[T any](e *env, l listing, at func(*client.Client) (string, url.Values, error), keep func(*T) bool, who func(*T) []string, pre func(*client.Client, []T), header, foot string, row func(*tabwriter.Writer, *T)) error {
 	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+		path, q, err := at(c)
+		if err != nil {
+			return err
+		}
 		raw, items, next, err := l.read(c, path, q, nil)
 		if err != nil {
 			return err
@@ -191,11 +210,16 @@ func compact(v any) string {
 // machineObservations reads a machine's observations.
 func (e *env) machineObservations(args []string) error {
 	var l listing
-	pos, err := e.paged("machine observations", args, 1, &l, nil)
+	var cluster string
+	pos, err := e.paged("machine observations", args, 1, &l, func(fs *flag.FlagSet) { fs.StringVar(&cluster, "cluster", "", "") })
 	if err != nil {
 		return err
 	}
-	return list(e, l, "/machines/"+url.PathEscape(pos[0])+"/observations", url.Values{}, nil, "OBSERVATION\tAT\tPURPOSE\tBASIS\tENDPOINT\tUNREAD", "Health is not checked in this installation.",
+	at := machinePath(pos[0], cluster, "/observations")
+	return listResolved(e, l, func(c *client.Client) (string, url.Values, error) {
+		path, err := at(c)
+		return path, url.Values{}, err
+	}, nil, nil, nil, "OBSERVATION\tAT\tPURPOSE\tBASIS\tENDPOINT\tUNREAD", "Health is not checked in this installation.",
 		func(w *tabwriter.Writer, o *apitypes.ObservationBody) {
 			var unread []string
 			for k, u := range o.Unread {
@@ -423,14 +447,14 @@ func (e *env) operationCmd(args []string) error {
 		return e.operationWatch(a[1:])
 	}
 	var l listing
-	var plan, machine, state, kind string
+	var plan, machine, state, kind, cluster string
 	f := map[string]*string{"plan": &plan, "machine": &machine, "state": &state, "kind": &kind}
-	v, pos, err := e.noun("operation", args, &l, filters(f))
+	v, pos, err := e.noun("operation", args, &l, withCluster(&cluster, filters(f)))
 	if err != nil {
 		return err
 	}
 	if v == "list" {
-		return listWith(e, l, "/operations", values(f), nil,
+		return listResolved(e, l, machineFilter(machine, cluster, "/operations", values(f)), nil,
 			func(o *apitypes.OperationBody) []string {
 				if o.CreatedBy == nil {
 					return nil

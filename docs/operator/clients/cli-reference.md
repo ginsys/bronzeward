@@ -403,16 +403,17 @@ Global flags and exit codes: bronzewardctl help global.
 ### machine timeline
 
 ```text
-usage: bronzewardctl machine timeline <machine> [--follow] [--limit <n>]
+usage: bronzewardctl machine timeline <machine> [--cluster <cluster>] [--follow] [--limit <n>]
 
 a machine's history.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 with --follow: the newest entries, then each new one as the server records it, read every 5s; Ctrl-C stops it with
 exit 130; -o json prints one entry per line, -o yaml one document per entry.
 
 Roles: any.
 
-Flags: --all, --cursor, --follow, --limit
+Flags: --all, --cluster, --cursor, --follow, --limit
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -420,13 +421,15 @@ Global flags and exit codes: bronzewardctl help global.
 ### machine observations
 
 ```text
-usage: bronzewardctl machine observations <machine>
+usage: bronzewardctl machine observations <machine> [--cluster <cluster>]
 
 what Bronzeward last read from a machine.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
+
 Roles: any.
 
-Flags: --all, --cursor, --limit
+Flags: --all, --cluster, --cursor, --limit
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -457,15 +460,16 @@ Global flags and exit codes: bronzewardctl help global.
 ### machine set-endpoint
 
 ```text
-usage: bronzewardctl machine set-endpoint <machine> --talos-endpoint <ip>[:<port>]
+usage: bronzewardctl machine set-endpoint <machine> --talos-endpoint <ip>[:<port>] [--cluster <cluster>]
 
 change a machine's Talos endpoint.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 repeat a write whose outcome was unknown exactly with --idempotency-key, --expect-epoch and --expect-principal as printed.
 
 Roles: author. Needs a person signed in, not an automation token.
 
-Flags: --expect-epoch, --expect-principal, --idempotency-key, --talos-endpoint
+Flags: --cluster, --expect-epoch, --expect-principal, --idempotency-key, --talos-endpoint
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -538,14 +542,17 @@ Run bronzewardctl help drift <command> for a command's flags, notes and roles.
 ### drift show
 
 ```text
-usage: bronzewardctl drift show <machine>
+usage: bronzewardctl drift show <machine> [--cluster <cluster>]
 
 the open drift of a machine.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 shows its observations, late landing and the choices; the time shown is that of the observation, the API serves no
 opening time. There is no ignore command.
 
 Roles: any.
+
+Flags: --cluster
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -553,17 +560,18 @@ Global flags and exit codes: bronzewardctl help global.
 ### drift adopt
 
 ```text
-usage: bronzewardctl drift adopt <machine> --draft <draft> [--review] [--staging encrypted|transient] [--marks]
+usage: bronzewardctl drift adopt <machine> --draft <draft> [--cluster <cluster>] [--review] [--staging encrypted|transient] [--marks]
 
 adopt the drift into a release.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 imports the machine's configuration as a drift adoption (author, a person), publishes it (publisher), then creates an
 adopt plan (publisher). It stops at a missing role or a pause and prints the rest; it never approves. Its repeat flags
 repeat the import; -o json and yaml print one object with the state of each step instead of the API resources.
 
 Roles: author, then publisher, then approver. Needs a person signed in, not an automation token.
 
-Flags: --draft, --expect-epoch, --expect-principal, --idempotency-key, --if-match, --marks, --review, --staging
+Flags: --cluster, --draft, --expect-epoch, --expect-principal, --idempotency-key, --if-match, --marks, --review, --staging
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -571,14 +579,17 @@ Global flags and exit codes: bronzewardctl help global.
 ### drift revert
 
 ```text
-usage: bronzewardctl drift revert <machine>
+usage: bronzewardctl drift revert <machine> [--cluster <cluster>]
 
 revert a machine to Desired.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 creates an apply-config plan of Desired, bound to the open drift record. It reads the machine first and takes no repeat
 flag; a machine with no Applied configuration is pointed at an adopt plan, and nothing is sent.
 
 Roles: publisher.
+
+Flags: --cluster
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -786,11 +797,12 @@ Global flags and exit codes: bronzewardctl help global.
 ### assignment set
 
 ```text
-usage: bronzewardctl assignment set <machine> --draft <draft> [--profiles <name>[,...]]
+usage: bronzewardctl assignment set <machine> --draft <draft> [--cluster <cluster>] [--profiles <name>[,...]]
                      [--fragment <layer>=<name>[,...]]...
 
 assign configuration to a machine in a draft.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 the layer is global, site, cluster, role, workload or override. --none instead selects nothing, so the machine's
 configuration is its import base alone.
 A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
@@ -799,7 +811,7 @@ changed since, it saves nothing and says so. Draft writes take author; repeat on
 
 Roles: author.
 
-Flags: --draft, --expect-epoch, --expect-principal, --fragment, --idempotency-key, --if-match, --none, --profiles
+Flags: --cluster, --draft, --expect-epoch, --expect-principal, --fragment, --idempotency-key, --if-match, --none, --profiles
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -807,17 +819,18 @@ Global flags and exit codes: bronzewardctl help global.
 ### assignment rm
 
 ```text
-usage: bronzewardctl assignment rm <machine> --draft <draft>
+usage: bronzewardctl assignment rm <machine> --draft <draft> [--cluster <cluster>]
 
 remove a machine's assignment from a draft.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
 changed since, it saves nothing and says so. Draft writes take author; repeat one with the outcome-unknown block's flags,
 --if-match included.
 
 Roles: author.
 
-Flags: --draft, --expect-epoch, --expect-principal, --idempotency-key, --if-match
+Flags: --cluster, --draft, --expect-epoch, --expect-principal, --idempotency-key, --if-match
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -916,17 +929,18 @@ Run bronzewardctl help import <command> for a command's flags, notes and roles.
 ### import start
 
 ```text
-usage: bronzewardctl import start --machine <machine> --draft <draft> [--file <path or ->] [--staging encrypted|transient]
+usage: bronzewardctl import start --machine <machine> --draft <draft> [--cluster <cluster>] [--file <path or ->] [--staging encrypted|transient]
                      [--review] [--marks] [--no-wait]
 
 import a machine's configuration into a draft.
 
+--machine is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 imports the machine's configuration, or with --file a document, into the draft, sending its kept ETag or --if-match. It
 waits until the import pauses for review or ends.
 
 Roles: author. Needs a person signed in, not an automation token.
 
-Flags: --draft, --expect-epoch, --expect-principal, --file, --idempotency-key, --if-match, --machine, --marks, --no-wait, --review, --staging
+Flags: --cluster, --draft, --expect-epoch, --expect-principal, --file, --idempotency-key, --if-match, --machine, --marks, --no-wait, --review, --staging
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -935,15 +949,16 @@ Global flags and exit codes: bronzewardctl help global.
 
 ```text
 usage: bronzewardctl import status [<ingestion>]
-       bronzewardctl import status [--state <s>] [--machine <id>]
+       bronzewardctl import status [--state <s>] [--machine <machine>] [--cluster <cluster>]
 
 one import's state, or a list.
 
+--machine is a machine's name or its ID (mch_...); --cluster narrows a name two clusters hold.
 one import's state, lease and next steps, or a list: --state paused or held finds imports to continue or take over.
 
 Roles: any.
 
-Flags: --all, --cursor, --limit, --machine, --state
+Flags: --all, --cluster, --cursor, --limit, --machine, --state
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -1113,11 +1128,15 @@ Global flags and exit codes: bronzewardctl help global.
 ### release review
 
 ```text
-usage: bronzewardctl release review <release> <machine>
+usage: bronzewardctl release review <release> <machine> [--cluster <cluster>]
 
 a machine's rendered, redacted configuration in a release.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
+
 Roles: any.
+
+Flags: --cluster
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -1125,11 +1144,15 @@ Global flags and exit codes: bronzewardctl help global.
 ### release provenance
 
 ```text
-usage: bronzewardctl release provenance <release> <machine>
+usage: bronzewardctl release provenance <release> <machine> [--cluster <cluster>]
 
 the secret references a machine's configuration was built from.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
+
 Roles: any.
+
+Flags: --cluster
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -1152,13 +1175,15 @@ Run bronzewardctl help plan <command> for a command's flags, notes and roles.
 ### plan list
 
 ```text
-usage: bronzewardctl plan list [--state <s>] [--machine <id>]
+usage: bronzewardctl plan list [--state <s>] [--machine <machine>] [--cluster <cluster>]
 
 list the plans.
 
+--machine is a machine's name or its ID (mch_...); --cluster narrows a name two clusters hold.
+
 Roles: any.
 
-Flags: --all, --cursor, --limit, --machine, --state
+Flags: --all, --cluster, --cursor, --limit, --machine, --state
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -1310,13 +1335,15 @@ Run bronzewardctl help operation <command> for a command's flags, notes and role
 ### operation list
 
 ```text
-usage: bronzewardctl operation list [--plan <id>] [--machine <id>] [--state <s>] [--kind <k>]
+usage: bronzewardctl operation list [--plan <id>] [--machine <machine>] [--cluster <cluster>] [--state <s>] [--kind <k>]
 
 list the operations.
 
+--machine is a machine's name or its ID (mch_...); --cluster narrows a name two clusters hold.
+
 Roles: any.
 
-Flags: --all, --cursor, --kind, --limit, --machine, --plan, --state
+Flags: --all, --cluster, --cursor, --kind, --limit, --machine, --plan, --state
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -1445,15 +1472,16 @@ Global flags and exit codes: bronzewardctl help global.
 ### recovery scope-account
 
 ```text
-usage: bronzewardctl recovery scope-account <machine> --start <observation> --end <observation> [--explanation <text>]
+usage: bronzewardctl recovery scope-account <machine> --start <observation> --end <observation> [--explanation <text>] [--cluster <cluster>]
 
 account every unaccounted attempt of a machine after a restore.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 shows the window and the risk, and is sent only when y is answered to the question that names the machine.
 
 Roles: recovery-admin. Needs a person signed in, not an automation token.
 
-Flags: --end, --expect-epoch, --expect-principal, --explanation, --idempotency-key, --start
+Flags: --cluster, --end, --expect-epoch, --expect-principal, --explanation, --idempotency-key, --start
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -1511,15 +1539,16 @@ Global flags and exit codes: bronzewardctl help global.
 ### recovery mark
 
 ```text
-usage: bronzewardctl recovery mark <machine> [--fact name=value]...
+usage: bronzewardctl recovery mark <machine> [--fact name=value]... [--cluster <cluster>]
 
 record what the evidence supports for a machine.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 records the state the evidence supports: ready, blocked or unresolved.
 
 Roles: recovery-admin. Needs a person signed in, not an automation token.
 
-Flags: --expect-epoch, --expect-principal, --fact, --idempotency-key
+Flags: --cluster, --expect-epoch, --expect-principal, --fact, --idempotency-key
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -1527,15 +1556,16 @@ Global flags and exit codes: bronzewardctl help global.
 ### recovery release
 
 ```text
-usage: bronzewardctl recovery release <machine> [--fact name=value]...
+usage: bronzewardctl recovery release <machine> [--fact name=value]... [--cluster <cluster>]
 
 release a ready scope.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 a release is not an approval.
 
 Roles: recovery-admin. Needs a person signed in, not an automation token.
 
-Flags: --expect-epoch, --expect-principal, --fact, --idempotency-key
+Flags: --cluster, --expect-epoch, --expect-principal, --fact, --idempotency-key
 
 Global flags and exit codes: bronzewardctl help global.
 ```

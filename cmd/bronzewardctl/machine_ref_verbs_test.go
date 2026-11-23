@@ -24,9 +24,9 @@ var namedVerbs = []struct {
 	{"drift revert", []string{"drift", "revert", "{m}"}, "GET /api/v1/machines/mch_b", "", ""},
 	{"drift adopt", []string{"drift", "adopt", "{m}", "--draft", "drf_a"}, "GET /api/v1/identity", "", ""},
 	{"machine set-endpoint", []string{"machine", "set-endpoint", "{m}", "--talos-endpoint", "10.0.0.9:50000"}, "POST /api/v1/machines/mch_b/talos-endpoints", "", `{}`},
-	{"assignment set", []string{"assignment", "set", "{m}", "--draft", "drf_a", "--profiles", "p1"}, "PUT /api/v1/drafts/drf_a/assignments/mch_b", "", ""},
-	{"assignment rm", []string{"assignment", "rm", "{m}", "--draft", "drf_a"}, "DELETE /api/v1/drafts/drf_a/assignments/mch_b", "", ""},
-	{"import start", []string{"import", "start", "--machine", "{m}", "--draft", "drf_a", "--no-wait"}, "POST /api/v1/ingestions", "", `{"ingestion":"ing_1","operation":"op_1"}`},
+	{"assignment set", []string{"assignment", "set", "{m}", "--draft", "drf_a", "--profiles", "p1", "--if-match", `"r1"`}, "PUT /api/v1/drafts/drf_a/assignments/mch_b", "", ""},
+	{"assignment rm", []string{"assignment", "rm", "{m}", "--draft", "drf_a", "--if-match", `"r1"`}, "DELETE /api/v1/drafts/drf_a/assignments/mch_b", "", ""},
+	{"import start", []string{"import", "start", "--machine", "{m}", "--draft", "drf_a", "--no-wait", "--if-match", `"r1"`}, "POST /api/v1/ingestions", "", `{"ingestion":"ing_1","operation":"op_1"}`},
 	{"import status --machine", []string{"import", "status", "--machine", "{m}"}, "", "GET /api/v1/ingestions?machine=mch_b", ""},
 	{"plan list --machine", []string{"plan", "list", "--machine", "{m}"}, "", "GET /api/v1/plans?machine=mch_b", ""},
 	{"operation list --machine", []string{"operation", "list", "--machine", "{m}"}, "", "GET /api/v1/operations?machine=mch_b", ""},
@@ -144,6 +144,20 @@ func TestDriftRevertRefusalNamesTheMachine(t *testing.T) {
 	code, _, errOut := runDrift(t, "drift", "revert", "db-1")
 	if code == 0 || !strings.Contains(errOut, "machine mch_b (db-1) has no Desired release to revert to") {
 		t.Errorf("drift revert db-1: exit %d, stderr %q; want the refusal to name mch_b (db-1)", code, errOut)
+	}
+}
+
+// The epoch moving between the name's lookup and the first read of the accounting refuses it: the reads the window is
+// built from are not the reads the name was resolved at.
+func TestScopeAccountByNameRefusesAMoveAfterTheLookup(t *testing.T) {
+	answers := accAnswers(accScopeAnswer)
+	answers["GET /api/v1/machines"] = `{"items":[` + refMachine("mch_a", "worker-1", "cls_a") + `]}`
+	setServerFacts(t, 10, map[string]string{"/api/v1/server": "ep_BWSYNTH-2"})
+	resetPosted()
+	seen := recoveryServer(t, answers, accScopeAnswer)
+	code, _, errb := account(t, "y\n", "recovery", "scope-account", "worker-1", "--start", "obs_s", "--end", "obs_e")
+	if code == 0 || !strings.Contains(errb, "the epoch changed") || sentCount(seen(), accScope) != 0 {
+		t.Errorf("scope-account by name, epoch moved after the lookup: exit %d, sent %v; want refused before the POST\n%s", code, seen(), errb)
 	}
 }
 
