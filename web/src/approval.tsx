@@ -10,7 +10,8 @@ import { type Load, Id, type Reads, settledRead, short, useItem, useReads } from
 import { useReleaseNames } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
 import { Who } from "./principals.tsx";
-import { safeWord } from "./safe.ts";
+import { safeText, safeWord } from "./safe.ts";
+import { savedTitle } from "./titles.ts";
 import { REASON_MAX, reasonProblem } from "./plan.tsx";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
@@ -38,7 +39,12 @@ export const overwrites = (p: Plan) => p.operation === "apply-config" && p.drift
 export const recordedReasons = (a: Approval) => `Recorded self-approval reasons: ${a.selfApproval.reasons.length > 0 ? a.selfApproval.reasons.map(safeWord).join(", ") : "none"}.`;
 
 // A revision a release contains, with what its read answered.
-export type Source = { kind: string; revision: string; load: Load<{ author: string }> };
+export type Source = { kind: string; revision: string; load: Load<{ author: string; createdAt?: string; name?: string }> };
+// A revision has no number a person can read: "fragment network-base, saved 21 Nov, 14:02". Before it is read, its kind only.
+const revisionName = (s: Source) => {
+  const what = s.load.kind === "ok" && s.load.data.name !== undefined ? `${safeWord(s.kind)} ${safeText(s.load.data.name) ?? ""}`.trim() : `${safeWord(s.kind)} revision`;
+  return s.load.kind === "ok" && s.load.data.createdAt !== undefined ? savedTitle(what, s.load.data.createdAt) : what;
+};
 
 // The prediction by these reads: one clause per reason, in W7's wording, and a line for each read in
 // flight or failed. A reason whose read has not answered is not claimed either way, so the approver
@@ -50,9 +56,9 @@ export function predict(p: Plan, me: Load<{ principal: string | null }>, release
     else if (l.kind !== "ok") failed.push(what);
   };
   note(me, "your identity");
-  note(release, `release ${short(p.release)}`);
-  if (release.kind === "ok" && draft !== undefined) note(draft, `the release's draft ${short(release.data.draft)}`);
-  for (const s of sources) note(s.load, `${safeWord(s.kind)} revision ${short(s.revision)}`);
+  note(release, "the release");
+  if (release.kind === "ok" && draft !== undefined) note(draft, "the release's draft");
+  for (const s of sources) note(s.load, revisionName(s));
   const clauses: string[] = [];
   const who = me.kind === "ok" ? me.data.principal : null;
   if (who !== null) {
@@ -64,7 +70,7 @@ export function predict(p: Plan, me: Load<{ principal: string | null }>, release
         ? published ? "you created this plan and published this release" : "you created this plan but did not publish this release"
         : published ? "you did not create this plan but published this release" : "you did not create this plan or publish this release");
       const mine = sources.filter((s) => s.load.kind === "ok" && s.load.data.author === who);
-      const named = (l: readonly Source[]) => l.map((s) => `${safeWord(s.kind)} revision ${short(s.revision)}`).join(", ");
+      const named = (l: readonly Source[]) => l.map(revisionName).join(", ");
       if (mine.length > 0 && draft?.kind === "ok") {
         const introduced = new Set(draft.data.entries.map((e) => e.revision));
         const change = mine.filter((s) => introduced.has(s.revision)), reused = mine.filter((s) => !introduced.has(s.revision));
@@ -111,7 +117,7 @@ function Prediction({ p }: { p: Plan }) {
   const path = (r: { kind: string; revision: string }) => `/${r.kind}-revisions/${enc(r.revision)}`;
   const draftPath = rel === undefined ? undefined : `/drafts/${enc(rel.draft)}`;
   const all = useAll<unknown>([...(draftPath === undefined ? [] : [draftPath]), ...revs.map(path)]);
-  const sources = revs.map((r) => ({ ...r, load: all.get(path(r)) as Load<{ author: string }> }));
+  const sources = revs.map((r) => ({ ...r, load: all.get(path(r)) as Source["load"] }));
   const lines = predict(p, me, release, draftPath === undefined ? undefined : (all.get(draftPath) as Load<Draft>), sources);
   return <Status testid="self-approval">{lines.map((l, i) => <span key={i}>{i > 0 && " "}{l}</span>)}</Status>;
 }

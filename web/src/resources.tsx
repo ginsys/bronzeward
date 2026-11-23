@@ -438,8 +438,17 @@ function SourceName({ kind, head }: { kind: string; head: string }) {
   const text = kind === "assignment" ? (machine === undefined ? undefined : assignmentName(machine)) : body?.name === undefined ? undefined : safeText(body.name);
   return text === undefined || viewOf(head) === undefined ? <Id id={head} /> : <Ref to={`/${viewOf(head)}/${encodeURIComponent(head)}`} id={head}>{text}</Ref>;
 }
+// The revision a release was built from, by when it was saved; its identifier is the title. "removed" and a revision not read
+// yet or not readable keep the shortened identifier.
+function SourceRevision({ kind, revision }: { kind: string; revision: string | null }) {
+  const known = kind === "assignment" || kind === "fragment" || kind === "profile";
+  const body = useBody<{ createdAt?: string }>(known && revision !== null ? `/${kind}-revisions/${encodeURIComponent(revision)}` : undefined);
+  const view = revision === null ? undefined : viewOf(revision);
+  if (body?.createdAt === undefined || revision === null || view === undefined) return <Id id={revision} none="removed" />;
+  return <Ref to={`/${view}/${encodeURIComponent(revision)}`} id={revision}>Saved {when(body.createdAt)}</Ref>;
+}
 const BUILT: readonly Col<S["ReleaseSourceBody"]>[] = [
-  ["Kind", (s) => safeWord(s.kind)], ["Source", (s) => <SourceName kind={s.kind} head={s.head} />], ["Revision", (s) => <Id id={s.revision} none="removed" />],
+  ["Kind", (s) => safeWord(s.kind)], ["Source", (s) => <SourceName kind={s.kind} head={s.head} />], ["Revision", (s) => <SourceRevision kind={s.kind} revision={s.revision} />],
 ];
 const RenderedLink = ({ to, machine }: { to: string; machine: string }) => (
   <Ref to={to} id={machine}>Rendered configuration of {useMachineText(machine) ?? short(machine)}</Ref>
