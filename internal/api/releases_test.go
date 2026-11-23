@@ -100,11 +100,17 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 		if d.assigned {
 			asr = heads[i][1]
 		}
+		host := d.hostnames[i]
+		if host.source == "" {
+			host.source = "none"
+		}
 		mustExec(t, tx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision, assignment_revision, mode,
-				ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation)
-			VALUES ($1, $2, $3, $4, $9, 'container', $5, $6, $10, $7, $8::jsonb, 'bw-artifact', $11)`,
+				ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation,
+				hostname_source, hostname_name)
+			VALUES ($1, $2, $3, $4, $9, 'container', $5, $6, $10, $7, $8::jsonb, 'bw-artifact', $11, $12, $13)`,
 			s.rel, d.cluster, m.machine, m.ibr, releaseCipher, make([]byte, 32), m.redacted,
-			strings.NewReplacer("{ibr}", m.ibr, "{ibr2}", ibr2, "{frv}", s.frv).Replace(provenance), asr, artifact, dbtest.PublicationObservation(t, tx, m.machine, s.op))
+			strings.NewReplacer("{ibr}", m.ibr, "{ibr2}", ibr2, "{frv}", s.frv).Replace(provenance), asr, artifact, dbtest.PublicationObservation(t, tx, m.machine, s.op),
+			host.source, host.name)
 		if d.assigned {
 			mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, assignment, machine, assignment_revision, head_revision)
 				VALUES ($1, $2, 'assignment', $3, $4, $5, 1)`, s.rel, d.cluster, heads[i][0], m.machine, heads[i][1])
@@ -183,7 +189,8 @@ func TestReleaseReads(t *testing.T) {
 		t.Fatalf("machines %+v", r.Machines)
 	}
 	for i, m := range machines {
-		want := releaseMachineBody{Machine: m, Mode: "container", Review: prefix + "/releases/" + s.rel + "/machines/" + m + "/review"}
+		want := releaseMachineBody{Machine: m, Mode: "container", Review: prefix + "/releases/" + s.rel + "/machines/" + m + "/review",
+			Hostname: hostnameBody{Source: "none"}}
 		if err := d.db.QueryRow(`SELECT publication_observation FROM release_machine WHERE release = $1 AND machine = $2`, s.rel, m).Scan(&want.PublicationObservation); err != nil {
 			t.Fatal(err)
 		}

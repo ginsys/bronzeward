@@ -36,10 +36,19 @@ type releaseSourceBody struct {
 // releaseMachineBody is one machine a release covers, with the mode it was validated in and the
 // route of its review data.
 type releaseMachineBody struct {
-	Machine                string `json:"machine"`
-	Mode                   string `json:"mode"`
-	Review                 string `json:"review"`
-	PublicationObservation string `json:"publicationObservation"`
+	Machine                string       `json:"machine"`
+	Mode                   string       `json:"mode"`
+	Review                 string       `json:"review"`
+	PublicationObservation string       `json:"publicationObservation"`
+	Hostname               hostnameBody `json:"hostname"`
+}
+
+// hostnameBody is where a release machine's hostname came from (compilation.md §6.1 item 2) and,
+// for machine-name only, the name used. It is a fact about the release, never read again from the
+// machine, whose name may have changed since.
+type hostnameBody struct {
+	Source string `json:"source"`
+	Name   string `json:"name,omitempty"`
 }
 
 // releaseBody is PA §9.2's release resource, as its read example answers it. It holds no
@@ -66,6 +75,7 @@ type reviewBody struct {
 	Mode          string             `json:"mode"`
 	Configuration *string            `json:"configuration"`
 	Notice        string             `json:"notice,omitempty"`
+	Hostname      hostnameBody       `json:"hostname"`
 	Provenance    []provenanceRecord `json:"provenance"`
 }
 

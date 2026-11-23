@@ -63,7 +63,9 @@ type unitMachine struct {
 	provenance                            []compile.Record
 	effective, reproduction               []unitDependency
 	encryption                            unitDependency
-	formOnly                              bool // the compiled configuration differs from the import base in form only
+	formOnly                              bool             // the compiled configuration differs from the import base in form only
+	name                                  string           // the machine's name at the snapshot, "" for none (§3.5)
+	hostname                              compile.Hostname // where its hostname came from (compilation §6.1)
 }
 
 // unitDependency is one dependency record: a KV generation path or the Transit key name, its
