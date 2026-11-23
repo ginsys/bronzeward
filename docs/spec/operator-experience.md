@@ -996,7 +996,7 @@ unknown outcome while the epoch holds, and says on that line only that the plans
 each plan's own line says what happened to it, never a count: each approval is its own plan under
 the same read epoch, the one `y` confirmed them all, and the command has no open write to hold or repeat. Enter, `n` and the end of input approve nothing and cancel the
 plans this command made, never one it read. A Ctrl-C at the question leaves the plans to expire at the time
-each shows. A machine already applied, frozen, in drift or in an operation is left out with its reason, and
+each shows. A machine already applied (or one whose Desired release this is, with nothing pending: the release leaves its Applied configuration unchanged, as the page decides), frozen, in drift or in an operation is left out with its reason, and
 so is one whose waiting plan is for another operation (an adopt plan is decided on the machine's page). A
 control plane machine may be chosen: the command says that applying to one was not covered by the acceptance
 tests, that machines are applied one at a time and that the order is not promised.
