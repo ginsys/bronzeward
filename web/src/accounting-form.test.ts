@@ -67,7 +67,8 @@ const writes = () => {
       const path = String(url).replace("/api/v1", "");
       if (path === "/recovery") return new Response(JSON.stringify({ mode: "normal" }), { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH } });
       sent.push({ method: init?.method ?? "GET", path, body: init?.body === undefined ? undefined : JSON.parse(String(init.body)) });
-      return new Response(JSON.stringify(answerBody), { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH } });
+      const body = path.endsWith("/marks") ? { state: "blocked", from: "blocked", act: "act_markmarkmarkmarkmark", missing: [] } : answerBody;
+      return new Response(JSON.stringify(body), { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH } });
     }) as typeof fetch,
   });
   return w;
@@ -168,6 +169,24 @@ describe("a scope's accounting form on the console's row", () => {
     await settled();
     expect(text("settle-answer")).toMatch(/^Recorded\./);
     expect(box.querySelector('form[aria-label="Record accounting"] button[type="submit"]')?.hasAttribute("disabled")).toBe(true);
+  });
+
+  test("the accounting's answer leaves the row when the person marks the scope, since what it says the scope is now is stale", async () => {
+    await mount(row("pre-restore-unaccounted"));
+    await settled();
+    await choose("start", START);
+    await choose("end", END);
+    await explain("the operator re-applied the restored configuration");
+    await press();
+    await mount(row("blocked"));
+    await settled();
+    expect(text("settle-answer")).toMatch(/^Recorded\./);
+    await act(async () => {
+      (Array.from(box.querySelectorAll("button")).find((b) => b.textContent === "Mark") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(text("write-result")).toMatch(/^Scope marked blocked, was blocked/);
+    expect(text("settle-answer")).toBeUndefined();
   });
 
   test("a person who waits for a later observation reads the machine's observations again and keeps what was typed", async () => {

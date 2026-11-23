@@ -84,7 +84,8 @@ export function ScopeDecision({ machine, state, stoppedAt }: { machine: string; 
       {state === "ready" && <p><Action label="Release" needs={["recovery-admin"]} onClick={send("releases")} busy={busy(release)} /></p>}
       <Result w={release} done={released} />
       {next(release) !== undefined && <Status testid="write-next">{next(release)}</Status>}
-      {(due || started) && (
+      {/* The accounting's answer says what the scope "is now"; once the person marks or releases, that sentence is stale, so the form leaves with the next act. */}
+      {(due || started) && mark === undefined && release === undefined && (
         <AccountingForm machine={machine} path="/recovery/accountings" resource="/recovery" what={SCOPE_WHAT} done={accountedScope} due={due} stoppedAt={stoppedAt} onStart={() => setStarted(true)} />
       )}
     </>

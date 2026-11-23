@@ -291,6 +291,8 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await tabTo("Mark");
     await browser.keys("Enter");
     await browser.waitUntil(async () => (await results()).some((t) => /^Scope marked (blocked|ready|unresolved), was blocked/.test(t)), { timeout: 60_000, timeoutMsg: "no result of the row says the scope was marked" });
+    // The accounting's answer ("is now blocked until it is marked") is stale once the mark is made, so the row no longer shows it.
+    await absent(() => scopeForm(m).$('[data-testid="settle-answer"]').isExisting(), "the accounting's answer after the mark");
     // Release: a ready scope offers Release; Enter on it releases the scope with the sentence that it is not an approval.
     const ready = await fetch(`${CONTROL}/scope?machine=${m}&state=ready`, { method: "POST" });
     expect([ready.status, await ready.text()]).toEqual([200, ""]);
