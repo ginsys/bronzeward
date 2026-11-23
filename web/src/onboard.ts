@@ -128,8 +128,12 @@ export function sender(writes: Pick<Writes, "submit" | "repeatable" | "dismiss" 
       // The page may have been left while an earlier request was answered.
       if (!alive()) return { sent: Promise.resolve(left) };
       let w = s.held.find((x) => same(x) && (x.running !== undefined || writes.repeatable(x)));
-      if (w !== undefined) w.spec.released = hook;
-      else {
+      if (w !== undefined) {
+        w.spec.released = hook;
+        // The repeat has the retry policy of this send, not of the first: a list try and a typed endpoint differ in it.
+        if (spec.once === true) w.spec.once = true;
+        else delete w.spec.once;
+      } else {
         for (const old of s.held) {
           await old.running?.catch(() => undefined);
           if (writes.open.includes(old)) writes.dismiss(old);
