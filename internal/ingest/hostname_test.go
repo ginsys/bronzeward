@@ -135,18 +135,35 @@ func TestShiftEmbedded(t *testing.T) {
 	list := []Embedded{
 		{Path: "doc[0]/a", Format: "yaml"}, {Path: "doc[1]/b", Format: "json"}, {Path: "doc[3]/c", Format: "yaml"},
 	}
-	got := shiftEmbedded(list, 1)
+	got, set := shiftEmbedded(list, 1)
 	want := []Embedded{{Path: "doc[0]/a", Format: "yaml"}, {Path: "doc[2]/c", Format: "yaml"}}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("shifted %+v, want %+v", got, want)
 	}
+	if len(set) != 2 || set["doc[0]/a"] != "yaml" || set["doc[2]/c"] != "yaml" {
+		t.Errorf("set %v", set)
+	}
+	if toInput("doc[2]/c", 1) != "doc[3]/c" || toInput("doc[0]/a", 1) != "doc[0]/a" || toInput("doc[1]/b", 1) != "doc[2]/b" {
+		t.Error("toInput does not undo the renumbering")
+	}
 }
 
-// A refusal of the stream names the input's positions and the mark it arises from, with the filled
-// document removed or not: the guard and the validation run before the document leaves the stored stream.
+// The guard reads the stored stream: a value the removed document holds, or a comment on it, refuses
+// nothing, as it would not had the document never been there.
+func TestFilledHostnameIsNotGuarded(t *testing.T) {
+	text := "# node-a\n" + hostDocFill + "---\nmachine:\n  nodeLabels:\n    safe: node-a\n"
+	req := request(t, text, "doc[1]/machine/nodeLabels/safe")
+	req.Name = "node-a"
+	if _, err := Extract(req); err != nil {
+		t.Errorf("a label equal to the filled hostname: %v", err)
+	}
+}
+
+// A refusal of the stored stream is given the input's positions and the mark it arises from: the same
+// refusal, with the paths and the position of the input numbering, with the filled document or without.
 func TestFilledHostnameRefusalKeepsInputPositions(t *testing.T) {
 	body := "machine:\n  nodeLabels:\n    safe: harmless-5839\n---\n" + manifestStream("password: sensitive-9284\n")
-	holder := "doc[1]/cluster/inlineManifests/0/contents"
+	holder := "doc[2]/cluster/inlineManifests/0/contents"
 	refuse := func(text, label, embedded string, name string) *Refusal {
 		t.Helper()
 		req := request(t, text, label, embedded)
@@ -159,10 +176,13 @@ func TestFilledHostnameRefusalKeepsInputPositions(t *testing.T) {
 		}
 		return ref
 	}
-	without := refuse(body, "doc[0]/machine/nodeLabels/safe", "doc[0]/cluster/inlineManifests/0/contents", "")
+	without := refuse(body, "doc[0]/machine/nodeLabels/safe", "doc[1]/cluster/inlineManifests/0/contents", "")
 	with := refuse(hostDocFill+"---\n"+body, "doc[1]/machine/nodeLabels/safe", holder, "node-a")
 	if with.Rule != without.Rule || with.Position != without.Position {
 		t.Errorf("with the filled document: rule %s position %d, without it: rule %s position %d",
 			with.Rule, with.Position, without.Rule, without.Position)
+	}
+	if len(with.Paths) != 1 || with.Paths[0] != holder {
+		t.Errorf("with the filled document the refusal names %v, want the input's %s", with.Paths, holder)
 	}
 }
