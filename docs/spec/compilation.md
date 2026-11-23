@@ -1349,24 +1349,33 @@ group (a limit, below).
 Both are compositions, never a base alone, so a machine whose release already
 selects fragments is not refused before any refactoring. The check does not
 compare with the node's own bytes: the baseline cannot be decrypted by any
-identity (§2.3). Where the machine is not pending convergence (next
-paragraph), the old side is what the node already holds. Its secrets are the
+identity (§2.3). Where the machine holds what its `Applied` release composed
+(next paragraph), the old side is what the node already holds. Its secrets are the
 provider's versions the release pinned, as in the form-only verdict (§6), and the
 check does not prove those values are the node's.
 
-**It runs only where the machine is not pending convergence (choice §16.41).**
-A machine is not pending when it has no `Desired` release or when its `Desired`
-digest equals its `Applied` digest ([persistence and API
-§9.3](persistence-api.md#93-examples), the machine's `pendingConvergence`). For a pending machine the check refuses `cannot-decide`
-with the words "a release is pending for this machine: apply it, then publish
-the refactoring". The reason: the plan that applies the thinner release would
-also carry the pending change to the node, so a pass shown as "equivalent" with
-no diff would describe a plan that does change the node. An adopted machine
-whose release differs from its import base bytes (comments, a filled hostname
-that differs, a moved document) is pending, so its refactoring waits until that
-release is applied. The alternative, comparing with the pending `Desired`
-release and saying so in the evidence, is rejected: it needs a second diff
-rule and still leaves the approver without a diff for the change from `Applied`.
+**It runs only where the machine holds what its `Applied` release composed
+(choice §16.41).** Two conditions hold, both read from the machine's records
+and neither served. The machine is not pending convergence: it has no
+`Desired` release, or its `Desired` digest equals its `Applied` digest
+([persistence and API §9.3](persistence-api.md#93-examples), the machine's
+`pendingConvergence`). And its `Applied` digest equals the configuration
+digest of its `Applied` release's own artifact. The second condition is not
+implied by the first: after an adoption the `Applied` digest is the import
+base's (§9.3), so an adopted machine whose release `R0` composed other bytes
+holds the base, not `R0`, and a later release that renders the base's bytes
+clears `pendingConvergence` while the `Applied` release is still `R0`. Where
+either condition fails the check refuses `cannot-decide` with the words "the
+machine does not yet hold its Applied release: apply a release, then publish
+the refactoring". The reason: the old side is the composition of the `Applied`
+release, so it describes the node only when the node holds that release's
+bytes, and with a release pending the plan that applies the thinner release
+would also carry the pending change to the node. An adopted machine whose
+release differs from its import base bytes (comments, a filled hostname that
+differs, a moved document) therefore waits until a release is applied. The
+alternative, comparing with the pending `Desired` release and saying so in the
+evidence, is rejected: it leaves the approver without a statement about the
+change from what the node holds.
 
 **What counts as equal (choice §16.40).** The documents of each side, loaded
 as typed documents of the pinned renderer and matched by kind and name (level
@@ -1380,8 +1389,9 @@ field written with its default and the same field omitted read as different
 omitted). Embedded text is one leaf: equal or not equal, never partly (§5.4).
 
 **The result.** Per machine, the check records `equal`, true or false, and
-`byteIdentical`, whether the two renders are the same bytes, which is the
-digest of the render reported beside the result and never the gate. With a
+`byteIdentical`, whether the two renders are the same bytes: the boolean
+outcome of a byte comparison, reported beside the result and never the gate.
+No digest of either render is recorded or served with it. With a
 false `equal` it also records the paths that differ and, for each, whether it
 stands on one side only or holds a different value, never the value. A path is
 written by the path means of §8.3. The result is recorded with the release
@@ -1397,7 +1407,7 @@ naming the machine, and it commits no release.
 | Reason | When | Reports |
 | --- | --- | --- |
 | `not-equal` | The sides differ | The paths, and the sentence "the typed equivalence check can refuse a change that is equivalent in behaviour; it compares typed values and applies no defaults" |
-| `cannot-decide` | The machine is pending convergence, or the comparison cannot decide a case | The reason in words; no paths |
+| `cannot-decide` | The machine does not hold its `Applied` release's bytes (pending convergence, or an adopted baseline not yet replaced), or the comparison cannot decide a case | The reason in words; no paths |
 
 The check fails closed: it never reads "equal" for a case it could not decide.
 A refusal of the composition itself (a dependency, a validation, the contract)
@@ -2116,7 +2126,7 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Compilation | A hostname filled from a machine's name that another machine of the cluster holds explicitly, or a node name that another machine's applied release holds (§6.1 item 6) | Publication refused, rule `hostname`, naming both machines | Nothing |
 | Ingestion | The machine's name changed between the removal of a filled hostname (§2.3 step 2a) and the draft transaction | The draft transaction is refused `409 stale-input`; re-ingest | Claim row, no payload |
 | Compilation | A machine whose draft entry carries a thinner import base: the typed equivalence check finds the two compositions different (§6.2) | Publication refused, rule `equivalence`, reason `not-equal`, naming the machine and the paths | Nothing |
-| Compilation | The same machine is pending convergence, or the check cannot decide a case (§6.2) | Publication refused, rule `equivalence`, reason `cannot-decide` | Nothing |
+| Compilation | The same machine does not hold its `Applied` release's bytes (pending, or an adopted baseline not yet replaced), or the check cannot decide a case (§6.2) | Publication refused, rule `equivalence`, reason `cannot-decide` | Nothing |
 | Compilation | Trace or flip fragment missing, shape differs, or passes disagree | Publication refused (§8.1) | Nothing |
 | Compilation | Reserved text or an unattributed exact copy in the output | Publication refused, naming paths | Nothing |
 | Compilation | Encryption fails, or persistence rejects a stale input | Publication refused | Nothing of the release |
@@ -2631,13 +2641,15 @@ in place as
     typed form's normalisation to the reader; a comparison of redacted forms,
     which cannot see a changed secret behind a reference (N4). The cost is a
     check that can refuse an equivalent change and applies no typed defaults.
-41. **The check runs only where the machine is not pending convergence, and
-    refuses otherwise** (§6.2). Alternative: compare with the pending `Desired`
-    release and say so in the evidence. The refusal is chosen because the plan
-    that applies the thinner release then carries the pending change to the node
-    too, and an approver would read "equivalent" beside a diff the form-only
-    rule withholds. The cost is that a machine with a pending release waits to
-    be refactored until that release is applied.
+41. **The check runs only where the machine holds what its `Applied` release
+    composed, and refuses otherwise** (§6.2): not pending convergence, and an
+    `Applied` digest equal to its release's own artifact digest. Alternative:
+    compare with the pending `Desired` release and say so in the evidence. The
+    refusal is chosen because the plan that applies the thinner release then
+    carries the pending change to the node too, and "equivalent" would then
+    describe a comparison with something the node does not hold. The cost is
+    that a machine with a pending release, or an adopted baseline not yet
+    replaced, waits to be refactored until a release is applied.
 
 ## 17. Traceability
 
