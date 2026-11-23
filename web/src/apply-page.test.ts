@@ -179,7 +179,7 @@ function mount(served: Record<string, unknown>, answer: (path: string) => unknow
     box.remove();
   };
   const start = () => render(writes);
-  return { sent, row, button, off, start, render, writes, choose, press, stop, settled, elapse, slow, calls, dismiss, box };
+  return { sent, row, button, off, start, render, writes, choose, press, stop, settled, elapse, slow, calls, dismiss, box, all };
 }
 const done = (data: unknown) => ({ kind: "done", status: 201, data, replayed: false });
 const served2 = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -279,6 +279,20 @@ describe("the apply page's plans and approvals", () => {
     expect(p.off("Show apply")).toBe(true);
     await p.press("Apply");
     expect(p.sent).toEqual(["/plans/pln_a/approvals"]);
+    await p.stop();
+  });
+
+  // The row keeps the stop line of a write only while the write has not succeeded: once the person repeats the approval
+  // and it is done, the machine's own position speaks again.
+  test("a row stops saying Stopped once the approval it stopped at has been repeated successfully", async () => {
+    const p = mount(served2(), (path) => (path === "/plans/pln_a/approvals" ? { kind: "unknown", why: "the connection was lost", problem: null } : done({ id: "apr_1" })));
+    await p.start();
+    await p.choose(A);
+    await p.press("Apply");
+    expect(p.row(A).getAttribute("data-state")).toBe("stopped");
+    p.all[0]!.outcome = done({ id: "apr_1" }) as never;
+    await p.render(p.writes);
+    expect(p.row(A).getAttribute("data-state")).not.toBe("stopped");
     await p.stop();
   });
 

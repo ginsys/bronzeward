@@ -33,7 +33,9 @@ function Row({ release, machine, chosen, choose, locked, line, n, profiles, seen
   const role = m.kind === "ok" ? m.data.role : undefined;
   const position = p.kind === "ok" ? p.data : undefined;
   useEffect(() => seen(machine, { position, role }), [seen, machine, position, role]);
-  const shown = line ?? (position === undefined ? undefined : { ...rowOf(position, release), write: undefined });
+  // A stop line whose write has since succeeded (the person repeated it) is stale: the machine's own position speaks.
+  const settledLine = line?.write?.outcome?.kind === "done" ? undefined : line;
+  const shown = settledLine ?? (position === undefined ? undefined : { ...rowOf(position, release), write: undefined });
   return (
     <li data-testid="apply-row" data-machine={machine} data-state={shown?.state}>
       <label><input type="checkbox" checked={chosen} disabled={locked} onChange={(e) => choose(e.target.checked)} /> <MachineById id={machine} /></label>
@@ -113,6 +115,7 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
       }),
       live: () => live.current && valid(),
       canSend: () => live.current && valid() && !openWrite(),
+      handedOver: (id) => pressed.current.has(id),
     };
   }, [writes, read, openWrite]);
 
