@@ -411,6 +411,19 @@ func TestDriftAdoptNeedsAnAuthorAndADraft(t *testing.T) {
 	}
 }
 
+// TestDriftAdoptByNameEscapesTheResolvedIdentifier: a machine given by name is announced with the identifier the server
+// listed, which is remote text, so a control character in it is shown escaped and never starts a line of its own.
+func TestDriftAdoptByNameEscapesTheResolvedIdentifier(t *testing.T) {
+	f := adoptChainServer(t)
+	f.imp.refuseStart = problemHead + `conflict","title":"Conflict","status":409,"detail":"the machine has no open drift record"` + problemTail
+	f.machines = `{"items":[` + refMachine(`mch_BW\nFORGED\u001b[31m`, "db-1", "cl_1") + `]}`
+	_, out, _ := runDrift(t, "drift", "adopt", "db-1", "--draft", "drf_BWSYNTH")
+	noRawControl(t, "the announcement", out)
+	if !strings.Contains(out, "Step 1/3  import (drift-adoption) of machine mch_BW") || strings.Contains(out, "\nFORGED") {
+		t.Errorf("stdout %q; want the step 1 line with the identifier escaped, on one line", out)
+	}
+}
+
 // TestDriftAdoptNoOpenDriftRefused: drift adopt on a machine with no open drift record (#360 row 2: "a
 // machine with no open drift is refused"). The server answers the import start with 409 conflict
 // naming the machine (internal/api/ingestions.go), and the CLI has no check of its own, so the
