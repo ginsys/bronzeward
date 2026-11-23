@@ -198,14 +198,38 @@ never by its text.
 Not run here: the screen-reader half of T10, owed by [#447](https://github.com/ginsys/bronzeward/issues/447).
 Safari runs the keyboard case and skips the 320 pixel case (its window stops at 336 CSS pixels, see `itNarrow`).
 
+### Recovery decisions (T11)
+
+A scope's row on the recovery console: its accounting form, its Mark button and its Release button, from
+[#365](https://github.com/ginsys/bronzeward/issues/365). Automated, in `web/e2e/auth/recovery-accounting.e2e.ts`
+("keyboard only (T11)"), run by `mise run browser-auth` with `BW_SPECS=recovery-accounting` against a disposable
+deployment with synthetic data. The keys used are Tab, Shift+Tab, the arrow keys inside a group of choices, Space and
+Enter. The case marks each control of the row (a group of choices counts as one) and presses Tab from the page's title
+until every one has held focus, in the order the row lists them. It then makes the decision with the keyboard alone:
+Space chooses the start observation, Tab skips the disabled one in the end group and an arrow key moves within it,
+the explanation is typed, and Enter on "Record accounting", on "Mark" and on "Release" sends each. It reads a focus as
+"control k of m", never by its text, and checks the answer each press gives, that exactly one accounting was sent, and
+that the release answer says a release is not an approval.
+
+| Item | Screen and what is checked |
+| --- | --- |
+| 2.1.1 Keyboard, 2.1.2 No keyboard trap | a scope's row by Tab alone: every control is reached, and no Tab stays on one stop |
+| 2.4.7 Focus visible | every focus Tab reaches on the row shows an outline of at least 2 px |
+| 1.4.3 Contrast | the console with its row open: the lowest contrast of any shown text, at least 4.5:1 |
+| 2.5.8 Target size | every button and choice at least 24 by 24 px |
+
+A pass is the case passing in the `browser-auth` jobs of the pull request, on Chrome, Edge, Firefox and Firefox ESR on
+Linux, which must pass to merge; this file holds no per-browser cell that the jobs did not write. Not run here: the
+screen-reader half of T11, owed by [#447](https://github.com/ginsys/bronzeward/issues/447).
+
 ## Screen reader
 
-| Pass | T1 | T2 | T3 (to publication) | T4 | T5 | T6 | T7 | T8 | T9 | T10 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| VoiceOver with Safari | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed | owed |
-| NVDA with Firefox | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed | owed |
-| NVDA with Chrome | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed | owed |
+| Pass | T1 | T2 | T3 (to publication) | T4 | T5 | T6 | T7 | T8 | T9 | T10 | T11 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| VoiceOver with Safari | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed | owed | owed |
+| NVDA with Firefox | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed | owed | owed |
+| NVDA with Chrome | pending: owner or designated tester | pending: owner or designated tester | owed | owed | owed | owed | owed | owed | owed | owed | owed |
 
-T3 to T10 are the tasks of [journeys §13](../docs/spec/operator-experience.md#13-usability-and-accessibility-acceptance). Their passes are owed by [#342](https://github.com/ginsys/bronzeward/issues/342), which closes on its automated acceptance, except T8's, T9's and T10's, which [#358](https://github.com/ginsys/bronzeward/issues/358), [#359](https://github.com/ginsys/bronzeward/issues/359) and [#363](https://github.com/ginsys/bronzeward/issues/363) hand to [#447](https://github.com/ginsys/bronzeward/issues/447) below.
+T3 to T11 are the tasks of [journeys §13](../docs/spec/operator-experience.md#13-usability-and-accessibility-acceptance). Their passes are owed by [#342](https://github.com/ginsys/bronzeward/issues/342), which closes on its automated acceptance, except T8's, T9's, T10's and T11's, which [#358](https://github.com/ginsys/bronzeward/issues/358), [#359](https://github.com/ginsys/bronzeward/issues/359), [#363](https://github.com/ginsys/bronzeward/issues/363) and [#365](https://github.com/ginsys/bronzeward/issues/365) hand to [#447](https://github.com/ginsys/bronzeward/issues/447) below.
 
 [#447](https://github.com/ginsys/bronzeward/issues/447) holds these passes and closes when they run. [#334](https://github.com/ginsys/bronzeward/issues/334) closes on its automated acceptance, by the owner's decision of 1 November 2026.
