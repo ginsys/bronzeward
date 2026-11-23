@@ -12,6 +12,10 @@ const talosconfig = (extra = "") => `# ${CANARY}\ncontext: a\ncontexts:\n  a:\n 
 const problem = (status: number, code: string, extra: Record<string, unknown> = {}) => ({ type: `urn:bronzeward:problem:${code}`, title: code, status, ...extra });
 const done = (data: unknown, status = 201, etag?: string): Outcome => ({ kind: "done", status, data, replayed: false, ...(etag !== undefined && { etag }) });
 const refused = (status: number, code: string, extra: Record<string, unknown> = {}): Outcome => ({ kind: "refused", status, problem: problem(status, code, extra), replayed: false });
+// What the write layer ends a send as when every attempt was answered 503 talos-access-unavailable: it repeats that 503
+// (REPEATED_503) and ends `not-done` with the problem, never `refused`. A mock of this answer as `refused` is an outcome
+// the write layer cannot return.
+const unavailable = (extra: Record<string, unknown> = {}): Outcome => ({ kind: "not-done", why: "every attempt was answered 503, which commits nothing", problem: problem(503, "talos-access-unavailable", extra) });
 
 const MEMBERS = [
   { nodeId: "n1", hostname: "cp-1", address: "10.0.0.1", role: "controlplane", smbiosUuid: "11111111-2222-3333-4444-555555555555", platform: "metal", answered: true },
@@ -546,7 +550,7 @@ describe("onboarding a cluster from a talosconfig (ONBOARD-01's steps, over an i
   test("a refused discovery says why, quotes no text of the file and makes no plan", async () => {
     const s = new Server();
     const env = s.env();
-    s.fail.set("POST /discoveries", refused(503, "talos-access-unavailable", { detail: "synthetic: the endpoint did not answer" }));
+    s.fail.set("POST /discoveries", unavailable({ detail: "synthetic: the endpoint did not answer" }));
     const r = await discoverCluster(env, talosconfig(), {});
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -657,7 +661,7 @@ describe("a name is sent as it stands, and discovery's failures are whole senten
   test("a refused read of a name says to type a control-plane node's address; one of an address does not", async () => {
     for (const [typed, hint] of [["lb.example.test", true], ["10.0.0.1", false]] as const) {
       const s = new Server();
-      s.fail.set("POST /discoveries", refused(503, "talos-access-unavailable", { title: "Talos is unavailable", detail: "the endpoint did not resolve", instance: "req_x" }));
+      s.fail.set("POST /discoveries", unavailable({ title: "Talos is unavailable", detail: "the endpoint did not resolve", instance: "req_x" }));
       const r = await discoverCluster(s.env(), talosconfig(), { endpoint: typed });
       expect(r.ok).toBe(false);
       if (r.ok) continue;
@@ -1050,7 +1054,7 @@ describe("Connect gives each imported machine an assignment that selects nothing
 describe("a context that lists several endpoints is tried in order, and a typed endpoint alone", () => {
   const LIST = ["10.0.0.1", "10.0.0.2", "10.0.0.3"];
   const several = named(LIST.join(", "));
-  const unreachable = (endpoint: string): Outcome => refused(503, "talos-access-unavailable", { title: "Talos is unavailable", detail: `the endpoint ${endpoint} did not answer` });
+  const unreachable = (endpoint: string): Outcome => unavailable({ title: "Talos is unavailable", detail: `the endpoint ${endpoint} did not answer` });
   // A server whose endpoints in `dead` answer as an unreachable one does, and which records each endpoint a discovery was sent to.
   const tryList = (dead: string[], answer?: (endpoint: string) => Outcome | undefined) => {
     const s = new Server();
@@ -1131,7 +1135,7 @@ describe("a context that lists several endpoints is tried in order, and a typed 
 
   test.each([
     ["an endpoint that is no control plane", refused(422, "validation-failed", { rule: "first-key-endpoint-no-control-plane" })],
-    ["an endpoint that does not answer", refused(503, "talos-access-unavailable")],
+    ["an endpoint that does not answer", unavailable()],
   ])("%s moves on to the next endpoint", async (_what, o) => {
     const { env, asked } = tryList([], (e) => (e === "10.0.0.1" ? o : undefined));
     const r = await discoverCluster(env, several, {});
@@ -1187,5 +1191,64 @@ describe("a context that lists several endpoints is tried in order, and a typed 
     expect(asked).toEqual(["10.0.0.1"]);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.why.startsWith("Stopped before trying the other endpoints.")).toBe(true);
+  });
+});
+
+// The list through the real write layer, which repeats a 503 talos-access-unavailable and ends it `not-done`, never `refused`.
+describe("a list of endpoints through the real write layer", () => {
+  const LIST = ["10.0.0.1", "10.0.0.2", "10.0.0.3"];
+  const NAME = "lb.example.test";
+  // A client whose discovery of each endpoint in `dead` is answered 503 talos-access-unavailable at every attempt, and which
+  // answers the others with the cluster; `attempts` counts what was sent to each endpoint.
+  const layer = (dead: string[]) => {
+    const writes = new Writes(() => "p", async () => {});
+    const attempts: Record<string, number> = {};
+    writes.client = {
+      currentEpoch: "e1",
+      attempt: async (m: string, _path: string, _h: unknown, body: string) => {
+        const headers = new Headers({ "Bronzeward-Epoch": "e1" });
+        // The read a repeat makes to confirm the epoch.
+        if (m === "GET") return { status: 200, headers, data: {} };
+        const endpoint = (JSON.parse(body) as { endpoint: string }).endpoint;
+        attempts[endpoint] = (attempts[endpoint] ?? 0) + 1;
+        if (dead.includes(endpoint)) return { status: 503, headers, data: problem(503, "talos-access-unavailable", { title: "Talos is unavailable", detail: `the endpoint ${endpoint} did not answer` }) };
+        return { status: 201, headers, data: DISCOVERY };
+      },
+    } as unknown as Client;
+    return { env: { send: sender(writes, () => true) } as unknown as Env, attempts };
+  };
+
+  test("the first endpoint dead and the second live: the second is tried, and the dead one is sent once", async () => {
+    const { env, attempts } = layer([LIST[0]!]);
+    const r = await discoverCluster(env, named(LIST.join(", ")), {});
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.plan.endpoint).toBe(LIST[1]);
+    expect(attempts).toEqual({ [LIST[0]!]: 1, [LIST[1]!]: 1 });
+  });
+
+  test("every endpoint of the list dead: each is sent once and named with its own answer", async () => {
+    const { env, attempts } = layer(LIST);
+    const r = await discoverCluster(env, named(LIST.join(", ")), {});
+    expect(r.ok).toBe(false);
+    expect(attempts).toEqual({ [LIST[0]!]: 1, [LIST[1]!]: 1, [LIST[2]!]: 1 });
+    if (!r.ok) {
+      for (const e of LIST) expect(r.why).toContain(`the endpoint ${e} did not answer`);
+      expect(r.why).toContain("the same answer as for an endpoint that does not answer");
+      expect(r.why).not.toContain("every attempt");
+    }
+  });
+
+  test("a typed endpoint, or a list of one, keeps the write layer's four attempts, and a name gets its hint", async () => {
+    for (const run of [(env: Env) => discoverCluster(env, named(LIST.join(", ")), { endpoint: NAME }), (env: Env) => discoverCluster(env, named(NAME), {})]) {
+      const { env, attempts } = layer([NAME]);
+      const r = await run(env);
+      expect(r.ok).toBe(false);
+      expect(attempts).toEqual({ [NAME]: 4 });
+      if (!r.ok) {
+        expect(r.why.startsWith("The server could not work with Talos for this machine or cluster.")).toBe(true);
+        expect(r.why).toContain(` The endpoint ${NAME} is a name: the nodes' certificates may not list it.`);
+        expect(r.why).not.toContain("every attempt");
+      }
+    }
   });
 });
