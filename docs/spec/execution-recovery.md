@@ -424,7 +424,7 @@ machine rows (see comparison 6a below), never before the others.
    known. Another machine with no `Applied` holds no name, and an adopt plan
    sends nothing, so the gate does not apply to it. The refusal leaves the plan
    `approved`: it commits once the other machine's `Applied` no longer holds the
-   name, as a lifted freeze or a freed rollout slot lets it (choice §10.27), so
+   name, as a lifted freeze or a freed rollout slot lets it (choice §10.28), so
    the plan waits for the other machine's plan and nothing is applied in the
    meantime **(choice §10.39)**.
 
@@ -435,8 +435,8 @@ UPDATE` at its own place in that order, every other row `FOR SHARE`. Taking its
 own row first and the others after would lock a lower-id machine out of order,
 and could deadlock with an identity revocation or recovery-mode entry, which
 take every machine row in id order (persistence and API T5c and T9). At the PoC
-limit of one no other machine's operation holds the rollout slot when a
-commitment commits (comparison 5), so the gate reads another machine's
+limit of one no other machine's operation holds the rollout slot when an
+`apply-config` commitment commits (comparison 5), so the gate reads another machine's
 `Applied` after the apply that would have raced it has ended, and sees what
 that apply recorded: a completed apply replaced `Applied`, and one that ended
 `failed` left the old record, a case the gate does not close (§9.3). It also
@@ -2043,7 +2043,9 @@ operation released the rollout slot and the machine's `Applied` still names the
 earlier node name, so a commitment that gives the new name to another machine
 passes comparison 5 and comparison 6a while the first machine runs it. An
 `unresolved` outcome is not this case: it keeps the cluster's one rollout slot
-(comparison 5), so no other commitment passes until it is settled.
+(comparison 5), so no other `apply-config` commitment passes until it is
+settled; an adoption does not wait for the slot (§6.3) and can still advance
+another machine's `Applied`, which is the adopted-baseline case above.
 Three further cases are not compared at all: a hostname that depends on a secret
 reference or a value the review redacts or withholds (`nodeName` `null`), whose clash an
 equality test would make a test on the secret; a configuration that sets none, where the node chooses its own
@@ -2494,7 +2496,7 @@ conservative option; those that do not say so. Each is marked in place as
     machine's `Applied` release); the commitment is the one place that reads
     every machine's `Applied` under locks and after the rollout slot, so it
     refuses what changed after publication, and the plan stays `approved` and
-    waits, never ends (choice §10.27). It compares the derived node name, which
+    waits, never ends (choice §10.28). It compares the derived node name, which
     the release records for every machine (persistence and API §9.3), and never
     a hostname: a name that depends on a secret reference or a value the review
     redacts or withholds, or that nothing sets, records `null` (not compared), and a release
