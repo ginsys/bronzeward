@@ -424,6 +424,18 @@ func TestDriftAdoptByNameEscapesTheResolvedIdentifier(t *testing.T) {
 	}
 }
 
+// TestDriftAdoptByNameTellsARepeatTheIdentifier: when the import start's outcome is unknown, the repeat instruction
+// names the identifier the name resolved to, since the name may find another machine or none by then.
+func TestDriftAdoptByNameTellsARepeatTheIdentifier(t *testing.T) {
+	f := adoptChainServer(t)
+	f.imp.startUnknown = true
+	f.machines = `{"items":[` + refMachine("mch_BWSYNTH", "db-1", "cl_1") + `]}`
+	code, _, errOut := runDrift(t, "drift", "adopt", "db-1", "--draft", "drf_BWSYNTH")
+	if code != 3 || !strings.Contains(errOut, "the same input, with machine 'mch_BWSYNTH' in place of 'db-1',") {
+		t.Errorf("exit %d, stderr %q; want the repeat to name machine 'mch_BWSYNTH' in place of 'db-1'", code, errOut)
+	}
+}
+
 // TestDriftAdoptNoOpenDriftRefused: drift adopt on a machine with no open drift record (#360 row 2: "a
 // machine with no open drift is refused"). The server answers the import start with 409 conflict
 // naming the machine (internal/api/ingestions.go), and the CLI has no check of its own, so the
