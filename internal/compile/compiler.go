@@ -205,9 +205,7 @@ func compile(in Input, sources []Source, decide bool) (Compiled, error) {
 	}
 	var hostname Hostname
 	if decide {
-		if hostname, err = decideHostname(in.Name, m, tm, flips); err != nil {
-			return Compiled{}, fidelity()
-		}
+		hostname = decideHostname(in.Name, m, tm, flips)
 		if hostname.Source == HostnameMachineName {
 			// The fill comes before the output check (steps 5a and 7): the second compile, over the
 			// patch, checks and validates everything, and a copy of the literal it replaces is none.
