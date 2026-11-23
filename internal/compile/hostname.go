@@ -1,7 +1,11 @@
 package compile
 
 import (
+	"bytes"
 	"errors"
+	"io"
+	"maps"
+	"strings"
 
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 	"github.com/siderolabs/talos/pkg/machinery/config/types/network"
@@ -37,6 +41,135 @@ type Hostname struct {
 
 // Hostname is the decision taken for this compilation (compilation.md §6 step 5a).
 func (c Compiled) Hostname() Hostname { return c.hostname }
+
+// NodeName is the Kubernetes node name the composed configuration gives its node, and whether it may
+// be compared with another machine's (compilation.md §6.1 item 6). It is not compared, and no error
+// returns, where the composition holds no hostname, where the hostname or the effective
+// registerWithFQDN value depends on a secret reference (the redacted configuration reads another
+// value there: comparing it would make a refusal an equality test on a secret), and where the derived
+// name is empty, so two empty names never clash. It holds no configured value beyond the derived name.
+func (c Compiled) NodeName() (string, bool, error) {
+	host, fqdn, ok := nodeInputs(c.m.bytes())
+	if !ok || host == "" {
+		return "", false, nil
+	}
+	shown, err := c.Redacted()
+	if err != nil {
+		return "", false, nil
+	}
+	// The redacted text is no loadable configuration (its tokens sit in typed fields), so the two leaves
+	// are read from both texts as plain YAML: a leaf redaction changed depends on a secret.
+	real, okReal := nodeLeaves(c.m.bytes())
+	seen, okSeen := nodeLeaves([]byte(shown))
+	if !okReal || !okSeen || !maps.Equal(real, seen) {
+		return "", false, nil
+	}
+	node := nodeName(host, fqdn)
+	return node, node != "", nil
+}
+
+// nodeLeaves are the scalar values, as written, of the four leaves the node name is derived from: the
+// hostname of a HostnameConfig document or of machine.network, and registerWithFQDN of a
+// KubeNodeConfig document or of machine.kubelet. ok is false for text that is no YAML stream.
+func nodeLeaves(b []byte) (map[string]string, bool) {
+	out := map[string]string{}
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	for {
+		var n yaml.Node
+		err := dec.Decode(&n)
+		if errors.Is(err, io.EOF) {
+			return out, true
+		}
+		if err != nil {
+			return nil, false
+		}
+		if len(n.Content) == 0 {
+			continue
+		}
+		doc := n.Content[0]
+		kind := nodeMember(doc, "kind")
+		var paths map[string][]string
+		switch {
+		case kind == nil:
+			paths = map[string][]string{"hostname": {"machine", "network", "hostname"},
+				"registerWithFQDN": {"machine", "kubelet", "registerWithFQDN"}}
+		case kind.Value == "HostnameConfig":
+			paths = map[string][]string{"hostname": {"hostname"}}
+		case kind.Value == "KubeNodeConfig":
+			paths = map[string][]string{"registerWithFQDN": {"registerWithFQDN"}}
+		}
+		for name, path := range paths {
+			at := doc
+			for _, key := range path {
+				if at = nodeMember(at, key); at == nil {
+					break
+				}
+			}
+			if at != nil {
+				out[name+":"+kindOf(kind)] = at.Value
+			}
+		}
+	}
+}
+
+func kindOf(k *yaml.Node) string {
+	if k == nil {
+		return "v1alpha1"
+	}
+	return k.Value
+}
+
+// nodeMember is the value of key in a mapping node, or nil.
+func nodeMember(n *yaml.Node, key string) *yaml.Node {
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// nodeInputs are the two values Talos derives the node name from: the hostname the accessor returns and
+// the effective registerWithFQDN (the KubeNodeConfig document's field, else the machine.kubelet one).
+// ok is false for text the loader refuses: a real composition it refuses took no decision either.
+func nodeInputs(b []byte) (host string, fqdn, ok bool) {
+	cfg, err := configloader.NewFromBytes(b)
+	if err != nil {
+		return "", false, false
+	}
+	if h := cfg.NetworkHostnameConfig(); h != nil {
+		host = h.Hostname()
+	}
+	if k := cfg.K8sNodeConfig(); k != nil {
+		fqdn = k.RegisterWithFQDN()
+	}
+	return host, fqdn, true
+}
+
+// nodeName is Talos's node name for a hostname (nodename.go FromHostname, v1.14, copied because the
+// package is internal): the first label unless registerWithFQDN is true, `A` to `Z` lower-cased, an
+// underscore turned into a hyphen, every rune but `a` to `z`, `0` to `9`, the hyphen and the dot
+// dropped, and hyphens and dots trimmed from both ends. It is empty where nothing is left.
+func nodeName(host string, fqdn bool) string {
+	if !fqdn {
+		host, _, _ = strings.Cut(host, ".")
+	}
+	n := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '.':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r - 'A' + 'a'
+		case r == '_':
+			return '-'
+		}
+		return -1
+	}, host)
+	return strings.Trim(n, "-.")
+}
 
 // hostState is what the machinery's accessor says about one composition.
 type hostState struct {
