@@ -37,7 +37,16 @@
 # not do stay the API's: the patches, the refused adoption, the label fragment, the observations
 # and every database assertion. The CLI's writes are checked in the database too: each freeze's
 # entry, each plan's act and each approval's act.
-# Usage: scenarios/s5 run|pass|cli|roles|drift   (run, pass, cli or drift after scenarios/s4 run on
+# `web` (Refs ginsys/bronzeward#261): `pass` with the operator's steps 3 and 6 and step 4's plan made in a browser
+# on the fixture, each as the human the plan names (the page signs in as that human, one token minted per act): the
+# freeze (h-author), the adopt plan (h-publisher) and its approval (h-approver), step 6's revert plan from the drift
+# page's Plan revert link (h-publisher) and its approval (h-approver, the unseen-overwrite sentence read first), the
+# page's Unfreeze control read off for h-publisher with what it needs, and the unfreeze (h-approver). The page's
+# acts are checked in the database as `cli`'s are: each freeze's entry, each plan's act and each approval's act. What
+# stays the API's: the patches, the refused adoption, the drift adoption's import and its publish (the wizard, its
+# own journey), the label fragment, the observations and every database assertion. The server's 403 of an unfreeze
+# by h-publisher is `cli`'s row (run `cli` in the same chain); the page row here shows the control off and sends nothing.
+# Usage: scenarios/s5 run|pass|cli|web|roles|drift   (run, pass, cli, web or drift after scenarios/s4 run on
 # the same up; roles after run)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -46,12 +55,13 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s5_mode=${1:-}
-pass_only='' via_cli=''
+pass_only='' via_cli='' via_web=''
 case $s5_mode in
   run | roles | drift) ;;
   pass) pass_only=1 ;;
   cli) pass_only=1 via_cli=1 ;;
-  *) die "usage: scenarios/s5 run|pass|cli|roles|drift" ;;
+  web) pass_only=1 via_web=1 ;;
+  *) die "usage: scenarios/s5 run|pass|cli|web|roles|drift" ;;
 esac
 need docker curl jq timeout id sleep date awk wc od head tr
 [ -z "$via_cli" ] || need go grep sed
@@ -302,6 +312,10 @@ set_freeze() {
   if [ -n "$via_cli" ]; then
     # The CLI's machine freeze | unfreeze, whose verb is the entry's kind; the database below checks the rest.
     ctl_rm "$kind-$2" "$2" machine "$kind" "$machine_w" --reason "$reason" || return 1
+  elif [ -n "$via_web" ]; then
+    # The drift page's Freeze or Unfreeze form, as that human; the page's own answer names who and the act.
+    web_act "$kind-$2" "$kind" BW_FIXTURE_HUMAN="$2" BW_FIXTURE_MACHINE="$machine_w" BW_FIXTURE_TEXT="$reason" &&
+      web_done "$kind-$2" "ACT $kind: answer: $([ "$frozen" = true ] && echo Frozen || echo Unfrozen)\. Recorded by " || return 1
   else
     fresh "$2"
     answers_with ".machine == \"$machine_w\" and .frozen == $frozen and .role == \"$role\"" \
@@ -742,22 +756,64 @@ cli_plan() {
   plan_id=''
   ctl_rm "plan-$name" h-publisher "$@" || return 1
   plan_id=$(grep --only-matching --extended-regexp -- 'pln_[a-z2-7]{26}' "$EV/cli-plan-$name.txt" | head -n 1) || plan_id=
+  plan_recorded
+}
+# plan_recorded: the plan in plan_id has one plan.create act naming it and the worker, recorded under the publisher role.
+plan_recorded() {
   [ -n "$plan_id" ] &&
     [ "$(sql "SELECT count(*) FROM act WHERE action = 'plan.create' AND role = 'publisher' AND subjects = ARRAY['$plan_id', '$machine_w']")" = 1 ]
+}
+# approval_recorded <plan>: one approval of the plan, recorded with one plan.approve act.
+approval_recorded() {
+  [ "$(sql "SELECT (SELECT count(*) FROM approval WHERE plan = '$1') || ' ' ||
+      (SELECT count(*) FROM act WHERE action = 'plan.approve' AND '$1' = ANY (subjects))")" = '1 1' ]
+}
+# unseen_recorded <plan>: the plan's approval entry on the timeline records an unseen overwrite.
+unseen_recorded() {
+  [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval'
+    AND entry->>'plan' = '$1' AND (entry->>'unseenOverwrite')::boolean")" = 1 ]
 }
 # cli_approve <plan> <name>: h-approver's approve, y answered on standard input to the question that names the plan: one
 # approval of the plan, recorded with one plan.approve act.
 cli_approve() {
   ctl_rm "approve-$2" h-approver approve "$1" <<<y || return 1
-  [ "$(sql "SELECT (SELECT count(*) FROM approval WHERE plan = '$1') || ' ' ||
-      (SELECT count(*) FROM act WHERE action = 'plan.approve' AND '$1' = ANY (subjects))")" = '1 1' ]
+  approval_recorded "$1"
 }
 # cli_unseen <plan> <name>: the approval's output says it approves an unseen overwrite, and the plan's
 # approval entry on the timeline records it as one.
 cli_unseen() {
   cli_kept "approve-$2" '^[[:space:]]*It[[:space:]]+overwrites[[:space:]]+the[[:space:]]+drifted[[:space:]]+configuration,[[:space:]]+which[[:space:]]+no[[:space:]]+reviewer[[:space:]]+has[[:space:]]+seen:[[:space:]]+this[[:space:]]+approval[[:space:]]+records[[:space:]]+that[[:space:]]+you[[:space:]]+approve[[:space:]]+overwriting[[:space:]]+it\.[[:space:]]*$' &&
-    [ "$(sql "SELECT count(*) FROM machine_event WHERE machine = '$machine_w' AND kind = 'approval'
-      AND entry->>'plan' = '$1' AND (entry->>'unseenOverwrite')::boolean")" = 1 ]
+    unseen_recorded "$1"
+}
+# web_plan <name> <adopt|revert> [release]: h-publisher makes the plan on the create-plan page (an adopt of the release, or a revert from
+# the drift page's link); the plan's id in plan_id, read from the page's own line and checked in the database as cli_plan's is.
+web_plan() {
+  local name=$1 operation=$2 offered=apply-config
+  [ "$operation" != adopt ] || offered=adopt
+  plan_id=''
+  web_act "plan-$name" plan BW_FIXTURE_HUMAN=h-publisher BW_FIXTURE_MACHINE="$machine_w" BW_FIXTURE_OPERATION="$operation" BW_FIXTURE_RELEASE="${3:-}" &&
+    web_done "plan-$name" "ACT plan: the operation offered: $offered" || return 1
+  plan_id=$(grep --only-matching --extended-regexp -- 'ACT plan: plan pln_[a-z2-7]{26}' "$EV/web-plan-$name.txt" | grep --only-matching --extended-regexp -- 'pln_[a-z2-7]{26}' | head -n 1) || plan_id=
+  plan_recorded
+}
+# web_approve <plan> <name>: h-approver approves the plan on its page: one approval, one plan.approve act.
+web_approve() {
+  web_act "approve-$2" approve BW_FIXTURE_HUMAN=h-approver BW_FIXTURE_MACHINE="$machine_w" BW_FIXTURE_PLAN="$1" &&
+    web_done "approve-$2" 'ACT approve: approved: ' || return 1
+  approval_recorded "$1"
+}
+# web_unseen <plan> <name>: the plan page, before the approval, said it overwrites a configuration no reviewer has seen, and the
+# plan's approval entry on the timeline records it as one.
+web_unseen() {
+  web_kept "approve-$2" 'ACT approve: unseen overwrite: .*which no reviewer has seen' && unseen_recorded "$1"
+}
+# unfreeze_off_web <who>: that human's drift page shows the Unfreeze control off with what it needs, and the scope is still frozen:
+# the page's row, where `cli`'s is the server's refusal of the same unfreeze.
+unfreeze_off_web() {
+  web_act "unfreeze-off-$1" unfreeze-off BW_FIXTURE_HUMAN="$1" BW_FIXTURE_MACHINE="$machine_w" &&
+    web_done "unfreeze-off-$1" 'ACT unfreeze-off: the Unfreeze control is off' &&
+    web_kept "unfreeze-off-$1" 'ACT unfreeze-off: the Unfreeze form: .*Needs approver' &&
+    [ "$(sql "SELECT frozen FROM machine WHERE id = '$machine_w'")" = t ]
 }
 # unfreeze_refused_cli <who>: an unfreeze by that identity, holding no approver role, is refused naming the
 # approver role, and the scope is still frozen.
@@ -819,6 +875,12 @@ adopt() {
     [ -n "$plan" ] || die "s5: no adopt plan; nothing after it can run"
     check "$ref" 'the plan binds the open record' same "$(sql "SELECT drift_record FROM plan WHERE id = '$plan'")" "$opened"
     check "$ref" 'h-approver approves it with approve, y answered: one approval, one plan.approve act' cli_approve "$plan" adopt
+  elif [ -n "$via_web" ]; then
+    check "$ref" 'h-publisher creates an adopt plan of the release on the create-plan page: one plan.create act' web_plan adopt adopt "$new_release"
+    plan=$plan_id
+    [ -n "$plan" ] || die "s5: no adopt plan; nothing after it can run"
+    check "$ref" 'the plan binds the open record' same "$(sql "SELECT drift_record FROM plan WHERE id = '$plan'")" "$opened"
+    check "$ref" 'h-approver approves it on the plan page: one approval, one plan.approve act' web_approve "$plan" adopt
   else
     plan_body_json=$(jq -nc --arg r "$new_release" --arg m "$machine_w" '{releaseId: $r, machine: $m, operation: "adopt"}')
     fresh h-publisher
@@ -931,6 +993,8 @@ revert_step() {
     check "$ref" "h-viewer's drift show on the worker names the new record's choices, the scope still frozen" \
       cli_drift_show redrift 'Drift opened by observation ' 'Choose: freeze while you decide' 'Frozen: no new commitment or attempt until an approver unfreezes; '
     check "$ref" 'h-publisher runs drift revert on the worker: a revert plan of its Desired, one plan.create act' cli_plan revert drift revert "$machine_w"
+  elif [ -n "$via_web" ]; then
+    check "$ref" "h-publisher makes a revert plan from the drift page's Plan revert link: one plan.create act" web_plan revert revert
   else
     check "$ref" 'a plan for the drifted worker as h-publisher, a revert binding the new record: 201' plan_by h-publisher revert
   fi
@@ -941,6 +1005,10 @@ revert_step() {
     check "$ref" 'h-approver approves it with approve, y answered: one approval, one plan.approve act' cli_approve "$rplan" revert
     check "$ref" 'the approval prints that it approves an unseen overwrite, and is recorded as doing so on the timeline' cli_unseen "$rplan" revert
     check 'S5 negative controls' 'unfreezing as h-publisher, not an approver: refused naming the approver role, the scope still frozen' unfreeze_refused_cli h-publisher
+  elif [ -n "$via_web" ]; then
+    check "$ref" 'h-approver approves it on the plan page: one approval, one plan.approve act' web_approve "$rplan" revert
+    check "$ref" 'the plan page said it approves an unseen overwrite before the approval, and the approval is recorded as doing so on the timeline' web_unseen "$rplan" revert
+    check 'S5 negative controls' "h-publisher's drift page shows the Unfreeze control off, naming the role it needs, the scope still frozen (the server's 403 of the same unfreeze is s5 cli's row)" unfreeze_off_web h-publisher
   else
     check "$ref" 'approved as h-approver: 201' approve_by h-approver "$rplan" revert
     check "$ref" 'the approval is recorded as approving an unseen overwrite, as answered and on the timeline' approved_unseen "$rplan"

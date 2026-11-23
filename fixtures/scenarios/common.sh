@@ -778,9 +778,11 @@ ctl() {
 # cli_kept <name> <ERE>: the kept output of cli-<name>.txt has a line matching the ERE (kept, above,
 # reads a kept array instead).
 cli_kept() { grep --quiet --extended-regexp -- "$2" "$EV/cli-$1.txt"; }
-# Mode web: web_act <name> <act> [VAR=value]... runs fixture/acts.e2e.ts through wdio, which signs the page in as h-recovery and makes
-# the act named by BW_FIXTURE_ACT (the driver's own header lists the acts and the variables each reads). The token is minted now and
-# reaches the driver's environment only, never a command line; the VAR=value pairs carry no secret. The driver talks to the instance on
+# Mode web: web_act <name> <act> [VAR=value]... runs fixture/acts.e2e.ts through wdio, which signs the page in as h-recovery, or as the
+# human a BW_FIXTURE_HUMAN=<fixture human> pair names, and makes the act named by BW_FIXTURE_ACT (the driver's own header lists the acts
+# and the variables each reads). One mint per act, as that human; the token is minted now and reaches the driver's environment only,
+# never a command line, and is registered with keep_secret so the output scan finds it; the VAR=value pairs carry no secret (the
+# human is a synthetic fixture name). The driver talks to the instance on
 # call_port where a scenario sets it, and to B otherwise. The driver's output is kept as web-<name>.txt. web_kept <name> <ERE> reads it.
 web_ready() {
   local repo=$here/../..
@@ -794,18 +796,25 @@ web_ready() {
 # in this file would be found in the fixtures diff that bin/evidence bundles. The driver needs a browser-driver cache directory that
 # outlives the run: BW_WDIO_CACHE if the caller set it, TMPDIR otherwise (the mise browser tasks use the same default).
 web_act() {
-  local name=$1 act=$2 tok kv rc=0
+  local name=$1 act=$2 tok kv rc=0 human=h-recovery
   shift 2
   web_ready
-  tok=$(mint h-recovery) || return 1
+  # The one place of the human's default: the act is made as h-recovery unless a BW_FIXTURE_HUMAN=<fixture human> pair names another,
+  # and the same value is the token's human and the page's sign-in (fixture.conf.ts reads it with no default of its own).
+  for kv in "$@"; do
+    case $kv in BW_FIXTURE_HUMAN=*) human=${kv#BW_FIXTURE_HUMAN=} ;; esac
+  done
+  tok=$(mint "$human") || return 1
   keep_secret "$tok"
   (
     cd -- "$here/../../web" &&
       for kv in "$@"; do declare -x "$kv"; done &&
-      BW_FIXTURE_TOKEN=$tok BW_FIXTURE_API=http://127.0.0.1:${call_port:-$SERVER_B_PORT} BW_FIXTURE_ACT=$act \
+      BW_FIXTURE_HUMAN=$human BW_FIXTURE_TOKEN=$tok BW_FIXTURE_API=http://127.0.0.1:${call_port:-$SERVER_B_PORT} BW_FIXTURE_ACT=$act \
         BW_BROWSERS=chrome BW_WEB_CANARY=BWSYNTH""-fixture-web BW_WDIO_CACHE=${BW_WDIO_CACHE:-${TMPDIR:-/tmp}} \
         timeout 600 npx wdio run e2e/fixture.conf.ts
   ) >"$EV/web-$name.txt" 2>&1 || rc=$?
   return "$rc"
 }
 web_kept() { grep --quiet --extended-regexp -- "$2" "$EV/web-$1.txt"; }
+# web_done <name> <ERE>: the browser act's output holds the answer the ERE names and the one passing case.
+web_done() { web_kept "$1" "$2" && web_kept "$1" '1 passing'; }

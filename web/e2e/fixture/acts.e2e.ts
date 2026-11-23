@@ -12,6 +12,12 @@
 //   scope-account: the scope's accounting on its row, with BW_FIXTURE_START, BW_FIXTURE_END and BW_FIXTURE_TEXT as above.
 //   mark, release: the row's one press, its answer printed.
 //   exit:     the exit form (no machine).
+// On the drift and plan pages (S5; BW_FIXTURE_MACHINE names the machine; the page signs in as the human the scenario named):
+//   freeze, unfreeze: the drift page's form of that name, on the reason in BW_FIXTURE_TEXT.
+//   unfreeze-off: reads that the drift page's Unfreeze control is off and says what it needs; sends nothing.
+//   plan:     a plan made on the create-plan page, BW_FIXTURE_OPERATION adopt (from the release in BW_FIXTURE_RELEASE) or revert (from
+//             the drift page's Plan revert link); the plan's id is printed.
+//   approve:  the plan in BW_FIXTURE_PLAN approved on its page; the page's unseen-overwrite sentence is printed first.
 import { $, browser, expect } from "@wdio/globals";
 import { FIXTURE_PAGE } from "../ports.ts";
 import { button, choice, control, field, region, shown } from "./control.ts";
@@ -25,6 +31,7 @@ const need = (name: string) => {
 const act = need("BW_FIXTURE_ACT");
 const say = (line: string) => console.log(`ACT ${act}: ${line.replace(/\s+/g, " ")}`);
 const OPERATION = ["account", "resolve", "takeover"];
+const DRIFT = ["freeze", "unfreeze", "unfreeze-off", "plan", "approve"];
 
 // Signs the page in through the provider, then opens the act's page: the operation's recovery page, the console, or (the entry, whose
 // form the shell shows on any page of a recovery start before its entry) the page the sign-in returns to.
@@ -56,7 +63,7 @@ async function open() {
     return;
   }
   say(`${await $('[data-testid="principal"]').getText()}; ${await $('[data-testid="roles"]').getText()}`);
-  if (act === "enter") return;
+  if (act === "enter" || DRIFT.includes(act)) return;
   if (OPERATION.includes(act)) {
     await browser.url(`${FIXTURE_PAGE}/recovery/operations/${need("BW_FIXTURE_OP")}`);
     const state = await $('[data-testid="recovery-operation-state"]');
@@ -132,6 +139,24 @@ async function pick(form: WebdriverIO.Element, group: string, value: string): Pr
   return radio;
 }
 
+// A page of the signed-in session, opened by its path.
+const go = (path: string) => browser.url(`${FIXTURE_PAGE}${path}`);
+// A form of the machine's drift page, once the page has drawn it.
+async function driftForm(label: string) {
+  await go(`/machines/${need("BW_FIXTURE_MACHINE")}/drift`);
+  await expect($(`main form[aria-label="${label}"]`)).toBeExisting({ wait: 30_000 });
+  return control($("main"), `form[aria-label="${label}"]`, `the ${label} form`);
+}
+// A drift page's decision on a reason: the answer is the page's own line for it.
+async function driftDecision(label: "Freeze" | "Unfreeze", answered: string) {
+  const form = await driftForm(label);
+  await (await field(form, "reason")).setValue(need("BW_FIXTURE_TEXT"));
+  await press(form, label);
+  const answer = $(`[data-testid="${label.toLowerCase()}-answer"]`);
+  await expect(answer).toHaveText(expect.stringContaining(answered), { wait: 60_000 });
+  say(`answer: ${await answer.getText()}`);
+}
+
 describe(`fixture act ${act}`, () => {
   before(open);
 
@@ -188,7 +213,53 @@ describe(`fixture act ${act}`, () => {
       await expect(answer).toHaveText(expect.stringContaining("Recovery mode left"), { wait: 60_000 });
       say(`answer: ${await answer.getText()}`);
     });
+  } else if (act === "freeze" || act === "unfreeze") {
+    it(`${act}s the machine on a reason`, async function () {
+      this.timeout(120_000);
+      await driftDecision(act === "freeze" ? "Freeze" : "Unfreeze", act === "freeze" ? "Frozen." : "Unfrozen.");
+    });
+  } else if (act === "unfreeze-off") {
+    it("reads that the Unfreeze control is off for this human, with what it needs, and sends nothing", async function () {
+      this.timeout(120_000);
+      const form = await driftForm("Unfreeze");
+      const unfreeze = await button(form, "Unfreeze");
+      await expect(form).toHaveText(expect.stringContaining("Needs approver"), { wait: 30_000 });
+      say(`the Unfreeze form: ${await form.getText()}`);
+      say(`the Unfreeze control is ${(await unfreeze.isEnabled()) ? "on" : "off"}`);
+      expect(await unfreeze.isEnabled()).toBe(false);
+    });
+  } else if (act === "plan") {
+    it("makes a plan on the create-plan page", async function () {
+      this.timeout(120_000);
+      const machine = need("BW_FIXTURE_MACHINE");
+      const operation = need("BW_FIXTURE_OPERATION");
+      if (operation === "revert") {
+        await driftForm("Unfreeze");
+        await (await control($("main"), "a=Plan revert", "the Plan revert link")).click();
+      } else {
+        await go(`/plans/new?${new URLSearchParams({ release: need("BW_FIXTURE_RELEASE"), machine, operation })}`);
+      }
+      await expect($("main h2")).toHaveText("Create a plan", { wait: 30_000 });
+      const form = await control($("main"), 'form[aria-label="Create plan"]', "the create-plan form");
+      say(`the operation offered: ${await (await control(form, "select", "the operation choice")).getValue()}`);
+      await press(form, "Create plan");
+      await browser.waitUntil(async () => /\/plans\/pln_[a-z2-7]+$/.test(await browser.getUrl()), { timeout: 60_000, timeoutMsg: "the plan page did not open within 60 s" });
+      const plan = (await browser.getUrl()).split("/").at(-1)!;
+      await expect($("main h2")).toHaveText(expect.stringMatching(/\(proposed\)$/), { wait: 30_000 });
+      say(`plan ${plan}: ${await $("main h2").getText()}`);
+    });
+  } else if (act === "approve") {
+    it("approves the plan on its page", async function () {
+      this.timeout(120_000);
+      await go(`/plans/${need("BW_FIXTURE_PLAN")}`);
+      await expect($("main h2")).toHaveText(expect.stringMatching(/\(proposed\)$/), { wait: 30_000 });
+      const unseen = $('[data-testid="unseen-overwrite"]');
+      say(`unseen overwrite: ${(await unseen.isExisting()) ? await unseen.getText() : "none"}`);
+      await (await control($("main"), "button=Approve", "the Approve button")).click();
+      await expect($("main h2")).toHaveText(expect.stringMatching(/\(approved\)$/), { wait: 60_000 });
+      say(`approved: ${await $("main h2").getText()}`);
+    });
   } else {
-    throw new Error(`BW_FIXTURE_ACT must be one of account, resolve, takeover, enter, scope-account, mark, release, exit, not ${act}`);
+    throw new Error(`BW_FIXTURE_ACT must be one of account, resolve, takeover, enter, scope-account, mark, release, exit, freeze, unfreeze, unfreeze-off, plan, approve, not ${act}`);
   }
 });

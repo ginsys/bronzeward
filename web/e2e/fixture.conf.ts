@@ -41,10 +41,14 @@ async function prepare() {
   if (token === undefined || token === "" || api === undefined || api === "") throw new SevereServiceError("BW_FIXTURE_TOKEN and BW_FIXTURE_API must be set by the scenario");
   // The worker processes start after this and must not inherit the token.
   delete process.env["BW_FIXTURE_TOKEN"];
+  // The human the page signs in as: one value, named by the scenario beside the token it minted for that human (a synthetic fixture
+  // name, never a credential), so the page's sign-in and the token cannot name two.
+  const human = process.env["BW_FIXTURE_HUMAN"];
+  if (human === undefined || human === "") throw new SevereServiceError("BW_FIXTURE_HUMAN must be set by the scenario");
   signature = token.slice(-24);
   const missing = missingBinaries(root, ["webhost"]);
   if (missing.length > 0) throw new SevereServiceError(`missing ${missing.join(", ")} under ${root}bin: go build -o bin/webhost ./fixtures/webhost`);
-  const provider = await startProvider({ issuer: FIXTURE_ISSUER, pageOrigin: FIXTURE_PAGE, clientId: "synthetic-web-client", next: () => ({ access: token, sub: "h-recovery", bare: true }) });
+  const provider = await startProvider({ issuer: FIXTURE_ISSUER, pageOrigin: FIXTURE_PAGE, clientId: "synthetic-web-client", next: () => ({ access: token, sub: human, bare: true }) });
   servers.push(provider.server);
   clientDir = mkdtempSync(`${tmpdir()}/bw-fixture-client-`);
   const clientConfig = `${clientDir}/client.json`;
