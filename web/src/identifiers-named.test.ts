@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { MachineShown, sentences, TimelineRows } from "./machine.tsx";
 import { NextStepSection } from "./review.tsx";
 import { NodeCell } from "./machines.tsx";
+import { Named } from "./titles.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { DraftItem } from "./drafts.tsx";
 import { PlanItem, ReleaseItem } from "./resources.tsx";
@@ -294,5 +295,14 @@ describe("the open-drift sentence names the release Bronzeward last verified", (
     const out = sentences(drifted, [], (id) => (id === REL ? "Add the office labels, published 21 Nov" : id)).join(" ");
     expect(out).toContain("(Add the office labels, published 21 Nov)");
     expect(out).not.toContain("rel_k2pq");
+  });
+});
+
+describe("a cluster named by its identifier in an act's subjects", () => {
+  test("shows the cluster's name through Named, with the identifier as title", async () => {
+    await mount(h(Named, { id: CL }));
+    await settled();
+    expect(text()).toBe("office");
+    expect(titles()).toEqual([CL]);
   });
 });
