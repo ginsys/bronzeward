@@ -13,6 +13,7 @@ import { SAFE, safeWord } from "./safe.ts";
 import { Status } from "./states.tsx";
 import { TalosAccessSign } from "./talosaccess.tsx";
 import { PageNote } from "./page-note.tsx";
+import { Named } from "./titles.tsx";
 import { CHANGED_ON_THE_MACHINE, CLUSTER_NOTE, DIFFERS_IN_FORM_ONLY, CLUSTERS_NOTE, LAST_READ_MATCHED, MACHINES_NOTE, NOT_MANAGED_YET, RELEASE_NOT_APPLIED_YET, UNNAMED_MACHINE, UNNAMED_MACHINE_HEADING } from "./words.ts";
 
 export type Machine = components["schemas"]["MachineBody"];
@@ -65,7 +66,8 @@ export function observed(m: Machine, now: number): string {
 
 // G8: the node ID when the machine was recorded by it, else its SMBIOS UUID.
 export const node = (m: Machine) => (m.hardware.talosNodeId != null ? `node ${m.hardware.talosNodeId}` : `UUID ${m.hardware.smbiosUuid ?? "unknown"}`);
-export const release = (id: string | null) => <Id id={id} />;
+// A release as its title (the identifier is the title attribute): `Named` reads it through the page's store.
+export const release = (id: string | null) => <Named id={id} />;
 
 // A9: a name is remote text, shown only when the received value matches the grammar (machine-name.ts),
 // else the machine is shown by its address. It replaces A7's control and format character test.

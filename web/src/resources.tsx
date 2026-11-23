@@ -148,7 +148,7 @@ function nextControl(from: HTMLElement | null): HTMLElement | null {
 }
 
 const CREATED: Col<{ createdAt: string }> = ["Created", (t) => when(t.createdAt)];
-const CLUSTER: Col<{ cluster: string }> = ["Cluster", (t) => <Id id={t.cluster} />];
+const CLUSTER: Col<{ cluster: string }> = ["Cluster", (t) => <ClusterLink id={t.cluster} />];
 // A head's current revision, null once the head is removed.
 const CURRENT: Col<{ revision: string | null }> = ["Current revision", (t) => <Id id={t.revision} none="removed" />];
 const named = (kind: string): Col<{ id: string; name: string }> => [cap(kind), (t) => <Ref to={`/${kind}s/${t.id}`} id={t.id}>{t.name}</Ref>];
@@ -236,7 +236,7 @@ export function SourceItem({ kind, id }: { kind: Kind; id: string }) {
         <>
           <PageNote parts={[sourceNote(kind)]} />
           <Fields rows={[
-            ["Identifier", s.id], ["Cluster", <Id id={s.cluster} />],
+            ["Identifier", s.id], ["Cluster", <ClusterLink id={s.cluster} />],
             ...("scope" in s ? [["Scope", s.scope] as const] : []), ...("layer" in s ? [["Layer", s.layer] as const] : []),
             ...("machine" in s ? [["Machine", <MachineById id={s.machine} />] as const] : []),
             ["Current revision", <Id id={s.revision} none="removed" />], ["Head revision", s.headRevision], ["Created", when(s.createdAt)],
@@ -447,7 +447,7 @@ export function ReleaseItem({ id }: { id: string }) {
         <>
           <PageNote parts={[RELEASE_NOTE]} />
           <Fields rows={[
-            ["Identifier", r.id], ["Cluster", <Id id={r.cluster} />], ["Published", <>{when(r.publishedAt)} by {by(r.publishedBy)}</>],
+            ["Identifier", r.id], ["Cluster", <ClusterLink id={r.cluster} />], ["Published", <>{when(r.publishedAt)} by {by(r.publishedBy)}</>],
             ["Renderer", `contract ${r.renderer.contract} · machinery ${r.renderer.machineryVersion} · Kubernetes ${r.renderer.kubernetesVersion}`],
             ["Draft", <><Named id={r.draft} />, revision {r.draftRevision}</>], ["Publication", <Named id={r.operation} />],
           ]} />
@@ -516,7 +516,7 @@ export function PlanItem({ id }: { id: string }) {
             <FrozenLine p={p} machine={held(p)?.body} />
             <Fields rows={[
               ["State", `${safeWord(p.state)}; expires ${when(p.expiresAt)}`],
-              ["Target", <>machine <MachineById id={p.machine} {...(held(p) !== undefined && { held: held(p)! })} />, cluster <Id id={p.cluster} />, route {safeWord(p.route)}</>],
+              ["Target", <>machine <MachineById id={p.machine} {...(held(p) !== undefined && { held: held(p)! })} />, cluster <ClusterLink id={p.cluster} />, route {safeWord(p.route)}</>],
               ["Operation", p.mode === null ? safeWord(p.operation) : `${safeWord(p.operation)}, mode ${safeWord(p.mode)}`],
               ["Release", <><Named id={p.release} /> (the machine's Desired when planned: <Named id={p.desiredRelease} />)</>],
               ["Bound to", <>assignment revision <Id id={p.assignmentRevision} />, baseline revision {p.baselineRevision ?? "none"}, drift record {p.driftRecord ?? "none"}, epoch {p.epoch}</>],

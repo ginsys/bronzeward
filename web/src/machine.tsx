@@ -8,7 +8,7 @@ import type { components } from "./api/v1";
 import { ChangeEndpoint, RenameMachine } from "./forms.tsx";
 import { Detail, type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, machineHeading, machineName, node, release } from "./machines.tsx";
-import { ClusterRef } from "./titles.tsx";
+import { ClusterRef, Named } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
 import { PageNote } from "./page-note.tsx";
 import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, roleWords, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
@@ -264,7 +264,7 @@ export function details(e: Entry): ReactNode {
   const r = (e.entry ?? {}) as Record<string, unknown>;
   const names = e.kind === "name-change" ? [r["previous"], r["new"]].map(machineName).filter((n): n is string => n !== undefined) : [];
   return [...names.map((n, i) => ({ k: `name${i}`, v: n })), ...SHOWN.filter((k) => typeof r[k] === "string" && r[k] !== "").map((k) => ({ k, v: r[k] as string }))].map(({ k, v }, i) => (
-    <Fragment key={k}>{i > 0 && " "}{k === "reason" ? `"${safeWord(v)}"` : k === "principal" && principalId(v) ? <Who id={v} /> : /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Id id={v} /> : safeWord(v)}</Fragment>
+    <Fragment key={k}>{i > 0 && " "}{k === "reason" ? `"${safeWord(v)}"` : k === "principal" && principalId(v) ? <Who id={v} /> : (k === "plan" || k === "operation") && /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Named id={v} /> : /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Id id={v} /> : safeWord(v)}</Fragment>
   ));
 }
 

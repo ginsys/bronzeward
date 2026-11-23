@@ -101,8 +101,8 @@ describe("journeys §2.4 status sentences, field by field", () => {
 
   test("#423 C5: the observed read's attribution, apart from the drift sentences", () => {
     expect(renderToStaticMarkup(attribution(null))).toBe("matches neither Applied nor Desired");
-    // A release links to its view.
-    const reads = { go: () => {} } as unknown as Reads;
+    // A release links to its view, by its title once read (static markup reads nothing, so the identifier stands in).
+    const reads = { go: () => {}, client: { read: async () => ({ kind: "refused", status: 404, problem: null }) }, settle: () => false, undropped: () => () => true, view: "v", again: 0 } as unknown as Reads;
     expect(renderToStaticMarkup(createElement(ReadsProvider, { value: reads }, attribution("rel_new")))).toBe('attributed to <a href="/releases/rel_new" title="rel_new">rel_new</a>');
   });
 

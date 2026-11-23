@@ -42,7 +42,7 @@ export const deprecated = (route: string) => `The server marks ${route} as depre
 // What an action needs to know: the roles GET /identity served, whether the page is offline, and
 // whether it is a page kept across an epoch change (keepsPage), and the recovery console's: the
 // start mode the last answer showed and whether recovery mode is on.
-const Shell = createContext<{ roles: readonly Role[]; offline: boolean; kept?: boolean; mode?: StartMode; recoveryMode?: boolean }>({ roles: [], offline: false });
+const Shell = createContext<{ roles: readonly Role[]; offline: boolean; principal?: string | null; kept?: boolean; mode?: StartMode; recoveryMode?: boolean }>({ roles: [], offline: false });
 export const ShellContext = Shell.Provider;
 export const useRecoveryState = () => {
   const { mode = "unknown", recoveryMode = false } = useContext(Shell);
@@ -50,6 +50,8 @@ export const useRecoveryState = () => {
 };
 // The roles GET /identity served, for a view that shows something to a role only.
 export const useRoles = () => useContext(Shell).roles;
+// The signed-in principal's identifier (GET /identity): null for a human with no row yet, and until it is read.
+export const usePrincipal = () => useContext(Shell).principal ?? null;
 // The header's role list: each role a word the server sets, so shown only when it is safe text.
 export const rolesLine = (roles: readonly string[]) => `Roles: ${roles.length > 0 ? roles.map(safeWord).join(", ") : "none"}`;
 // The offline banner shows: no action sends anything (journeys §8 Offline row).
@@ -516,7 +518,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
 
   const id = identity.load.kind === "ok" ? identity.load.data : undefined;
   return (
-    <ShellContext value={{ roles: id?.roles ?? [], offline: offline !== undefined, kept, mode, recoveryMode }}>
+    <ShellContext value={{ roles: id?.roles ?? [], offline: offline !== undefined, principal: id?.principal ?? null, kept, mode, recoveryMode }}>
       <StatusPage>
       <a className="skip" href="#main">Skip to the page</a>
       <div className={id !== undefined ? "shell with-nav" : "shell"}>
