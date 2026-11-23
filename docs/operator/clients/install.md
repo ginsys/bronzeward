@@ -85,7 +85,8 @@ shows no command for them that you could copy and run today.
    instead of copying a value from a page you cannot check, and compare them with the workflow
    file in the repository at the release's tag.
 3. Check the archive against `SHA256SUMS`. You downloaded one archive, so check only its line:
-   `grep -F -- " <archive>" SHA256SUMS | sha256sum --check --strict -`. (Checking the whole
+   `grep -E "^[0-9a-f]{64} [ *]<archive>$" SHA256SUMS | sha256sum --check --strict -`. The
+   `[ *]` accepts both markers the file may use before the name. (Checking the whole
    file, as in the build above, reports every archive you did not download as missing.)
 4. Check the build attestation of the archive with `gh attestation verify <archive> --repo
    ginsys/bronzeward`.
