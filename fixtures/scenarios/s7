@@ -50,8 +50,8 @@
 #                                task T11, fixtures/participants)
 #        scenarios/s7 cli       (as run, after scenarios/s4 cli on the same up; the recovery-admin's acts
 #                                of steps 3 and 6 to 11 made through bronzewardctl as h-recovery, built
-#                                from this checkout and run on the host against B: step 3's entry (the word
-#                                enter typed back), step 6's takeover of held, step 7's two scope
+#                                from this checkout and run on the host against B: step 3's entry (y
+#                                answered to its question), step 6's takeover of held, step 7's two scope
 #                                accountings (one decision per scope, not one for both), the three marks,
 #                                step 8's and step 10's two releases and step 11's exit, each with the
 #                                output kept as cli-<name>.txt in the evidence directory. Steps 1, 2, 4
@@ -183,8 +183,8 @@ entry_body() {
     '{restored: [{family: "database", backup: $db, takenAt: $dt}, {family: "provider", backup: $pb, takenAt: $pt}],
       stoppedAt: $s, reason: $r}'
 }
-# enter_cli: the entry of mode cli (ginsys/bronzeward#362), through recovery enter with the word enter typed
-# back. The CLI's answer names the new epoch and the one it fences, the number of machines and the
+# enter_cli: the entry of mode cli (ginsys/bronzeward#362), through recovery enter with y answered to its
+# question. The CLI's answer names the new epoch and the one it fences, the number of machines and the
 # operations taken over; the entry's actor is read from the database. The request names each backup
 # by its identity and the time it was taken, as the API's entry does: the CLI sends no more than that.
 enter_cli() {
@@ -192,7 +192,7 @@ enter_cli() {
   cli_ready "$mutation_ref" h-recovery
   ctl enter h-recovery recovery enter --restored "family=database,backup=$db_backup,taken-at=$t_at" \
     --restored "family=provider,backup=$bao_backup,taken-at=$bao_at" --stopped-at "$stopped_at" \
-    --reason "$entry_reason" <<<enter || return 1
+    --reason "$entry_reason" <<<y || return 1
   n=$(sql "SELECT count(*) FROM machine") && [ -n "$n" ] || return 1
   cli_kept enter "^Recovery mode entered \(act [a-z]+_[a-z2-7]+\)\. Epoch ep_[a-z2-7]{26}, was $restored_epoch\.$" &&
     cli_kept enter "^Scopes marked pre-restore-unaccounted: $n machines\. Apply-config operations taken over: " || return 1
