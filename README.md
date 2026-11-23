@@ -17,4 +17,4 @@ Use the milestones for priorities and completion criteria, and native GitHub dep
 
 The [design's configuration-control scope](docs/design/Talos_Configuration_and_Machine_Management_Design.md#182-phase-1---configuration-control-on-an-existing-cluster) defines PoC acceptance and exclusions. See the [specification index](docs/spec/README.md) for contract locations and [delivery terminology](CONTRIBUTING.md#delivery-terminology) for the mapping between design phases and GitHub milestones.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for ownership, evidence and review rules and [AGENTS.md](AGENTS.md) for agent instructions. Tracking creation does not complete any tracked work.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for how the code is laid out, [CONTRIBUTING.md](CONTRIBUTING.md) for ownership, evidence and review rules and [AGENTS.md](AGENTS.md) for agent instructions. Tracking creation does not complete any tracked work.

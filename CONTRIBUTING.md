@@ -11,6 +11,7 @@ Work from a GitHub issue with an explicit objective, scope, exclusions, delivera
 | Delivery grouping and completion criteria | GitHub milestone |
 | Architecture and product constraints | [Current main design](https://github.com/ginsys/bronzeward/blob/main/docs/design/Talos_Configuration_and_Machine_Management_Design.md) |
 | Detailed PoC contracts | [Specification index and reserved contract locations](docs/spec/README.md), produced during [milestone 02](https://github.com/ginsys/bronzeward/milestone/2) |
+| Code layout and package boundaries on `main` | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Reproducible experimental evidence | Repository research documents and prototypes |
 | Historical discussion | [Historical report](docs/design/research/20260906-design-discussion-and-peer-review.md) |
 
@@ -53,7 +54,7 @@ The [PoC compatibility investigation](https://github.com/ginsys/bronzeward/issue
 
 1. Prepare a scoped change on a feature branch; preserve unrelated work and keep the default branch unchanged.
 2. Run the [documentation checks](#documentation-checks) and any checks required by the issue, then review the actual diff against the current design/specification. Record exact checks and limitations.
-3. Open a draft PR stating the problem, scope, linked issues, validation evidence and outstanding limitations. Include related documentation in the same PR.
+3. Open a draft PR stating the problem, scope, linked issues, validation evidence and outstanding limitations. Include related documentation in the same PR; a PR that changes what the map, flows, rules or boundaries in [ARCHITECTURE.md](ARCHITECTURE.md) say updates that file in the same PR.
 4. Have the owner or designated reviewer assess correctness, scope, safety, evidence and documentation. Record findings and resolve them or explicitly record an accepted disposition.
 5. Complete required evidence before seeking readiness or merge authorization. The owner may merge their own PR after review. Agents require explicit authorization to change PR readiness, merge or change branch protection.
 

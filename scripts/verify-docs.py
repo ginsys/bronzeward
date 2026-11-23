@@ -272,7 +272,7 @@ def scan(root=ROOT):
 def main(root=ROOT):
     # The scan runs first: the link checks below quote what they refuse.
     scanned = scan(root)
-    documents = [root / name for name in ('README.md', 'CONTRIBUTING.md', 'AGENTS.md', 'CLAUDE.md', 'docs/spec/README.md')]
+    documents = [root / name for name in ('README.md', 'CONTRIBUTING.md', 'AGENTS.md', 'CLAUDE.md', 'ARCHITECTURE.md', 'docs/spec/README.md')]
     documents = sorted(set(documents) | set((root / 'docs/spec').rglob('*.md')) | set((root / 'docs/operator').rglob('*.md')))
     for document in documents:
         check_markdown(document, root)
