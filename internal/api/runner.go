@@ -43,6 +43,7 @@ type imported struct {
 	sanitized ingest.Sanitized
 	gens      map[string]string
 	baseline  ingest.Baseline
+	filled    ingest.Filled // what step 2a removed, with the name it compared
 }
 
 // errStop ends a run without an outcome: the claim is no longer this run's, or the outcome of
@@ -141,7 +142,7 @@ func (a *API) heartbeat(ctx context.Context, stop context.CancelFunc, j job) {
 // event. A claim whose review is pending pauses in the same transaction (compilation §3.6) and the
 // run ends with errPaused. A refusal is the operation's outcome; an error stops the run.
 func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
-	c, err := ingest.Extract(ingest.Request{Input: j.input, Marks: j.marks, Declarations: j.decl})
+	c, err := ingest.Extract(ingest.Request{Input: j.input, Marks: j.marks, Declarations: j.decl, Name: j.name})
 	if err != nil {
 		return imported{}, a.failure(j, "extraction", err), nil
 	}
@@ -157,11 +158,11 @@ func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
 		return imported{}, a.failure(j, "baseline", err), nil
 	}
 	seam.At("baseline")
-	imp := imported{sanitized: s, gens: gens, baseline: b}
+	imp := imported{sanitized: s, gens: gens, baseline: b, filled: c.Filled()}
 	if j.claim.Mode != "encrypted" {
 		return imp, nil, nil
 	}
-	plain, sum, err := ingest.Staged{Sanitized: s, Generations: gens, Baseline: b}.Seal()
+	plain, sum, err := ingest.Staged{Sanitized: s, Generations: gens, Baseline: b, Filled: imp.filled}.Seal()
 	if err != nil {
 		return imported{}, a.failure(j, "envelope", err), nil
 	}
@@ -251,7 +252,7 @@ func (a *API) resume(ctx context.Context, j job) (imported, *refusal, error) {
 		}
 		return imported{}, nil, errPaused
 	}
-	return imported{sanitized: st.Sanitized, gens: st.Generations, baseline: st.Baseline}, nil, nil
+	return imported{sanitized: st.Sanitized, gens: st.Generations, baseline: st.Baseline, filled: st.Filled}, nil, nil
 }
 
 // remark is a mark's run once its envelope is opened (compilation §3.6 items 3-4): the staged
@@ -410,11 +411,30 @@ func (a *API) commitImport(ctx context.Context, j job, imp imported) (*refusal, 
 		// The ingestion's creator authors the revision (execution and recovery §2's self-approval).
 		docs := imp.sanitized.Documents()
 		role := ingest.MachineRole(docs)
+		// Step 2a compared the name read at the request. A rename since then makes the removal wrong, so
+		// the claim is abandoned and the import is started again (persistence-api §4.2).
+		if imp.filled.Name != "" {
+			var now sql.NullString
+			if err := tx.QueryRowContext(ctx, `SELECT name FROM machine WHERE id = $1 FOR SHARE`, j.claim.Machine).Scan(&now); err != nil {
+				return err
+			}
+			if now.String != imp.filled.Name {
+				actual := any(nil)
+				if now.Valid {
+					actual = now.String
+				}
+				ref = refuse(http.StatusConflict, "stale-input", "Import refused: the machine's name changed while the import ran; the claim is abandoned.").
+					with("conflicts", []map[string]any{{"machine": j.claim.Machine, "expected": imp.filled.Name, "actual": actual}})
+				return errRefused
+			}
+		}
+		filledName := sql.NullString{String: imp.filled.Name, Valid: imp.filled.Name != ""}
+		filledEqual := sql.NullBool{Bool: imp.filled.Equal, Valid: imp.filled.Name != ""}
 		res, err := tx.ExecContext(ctx, `INSERT INTO import_base_revision (id, machine, document, embedded, baseline_ciphertext,
-			baseline_digest, baseline_digest_key, configuration_digest, machine_role, created_at, author)
-			SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, now(), created_by FROM operation WHERE id = $10`,
+			baseline_digest, baseline_digest_key, configuration_digest, machine_role, filled_hostname, filled_hostname_equal, created_at, author)
+			SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), created_by FROM operation WHERE id = $12`,
 			ibr, j.claim.Machine, string(docs), emb, []byte(b.Ciphertext), b.Digest[:], b.DigestKey,
-			b.Configuration[:], sql.NullString{String: role, Valid: role != ""}, j.op)
+			b.Configuration[:], sql.NullString{String: role, Valid: role != ""}, filledName, filledEqual, j.op)
 		if err != nil {
 			return err
 		}

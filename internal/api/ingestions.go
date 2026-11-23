@@ -97,6 +97,7 @@ type job struct {
 	marks    []ingest.Path
 	decl     ingest.Declarations
 	input    ingest.Unresolved
+	name     string // the machine's stored name when the request read it, or empty
 	node     *node
 	resume   *staged
 }
@@ -130,10 +131,10 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	// identity as read here (§3.3).
 	var machineCluster string
 	var nd node
-	var uuid, nodeID sql.NullString
-	switch err := tx.QueryRowContext(ctx, `SELECT m.cluster, m.talos_endpoint, m.smbios_uuid, m.talos_node_id, c.talos_cluster_id
+	var uuid, nodeID, machineName sql.NullString
+	switch err := tx.QueryRowContext(ctx, `SELECT m.cluster, m.talos_endpoint, m.smbios_uuid, m.talos_node_id, c.talos_cluster_id, m.name
 		FROM machine m JOIN cluster c ON c.id = m.cluster WHERE m.id = $1`, in.Machine).
-		Scan(&machineCluster, &nd.endpoint, &uuid, &nodeID, &nd.clusterID); {
+		Scan(&machineCluster, &nd.endpoint, &uuid, &nodeID, &nd.clusterID, &machineName); {
 	case errors.Is(err, sql.ErrNoRows):
 		return result{}, refuse(http.StatusNotFound, "not-found", "no such machine").with("machine", in.Machine)
 	case err != nil:
@@ -210,7 +211,9 @@ func startIngestion(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 		VALUES ($1, 1, $2, 'ingest', '{"type": "started"}', now())`, op, q.epoch); err != nil {
 		return result{}, err
 	}
-	j := job{claim: c, op: op, draft: in.Draft, draftRev: rev, marks: in.marks, decl: in.Declarations, input: in.Document}
+	// The name step 2a compares is the one read here, for this request (compilation.md §2.3 step 2a).
+	j := job{claim: c, op: op, draft: in.Draft, draftRev: rev, marks: in.marks, decl: in.Declarations, input: in.Document,
+		name: machineName.String}
 	if in.Source == "machine" {
 		j.node = &nd
 	}
