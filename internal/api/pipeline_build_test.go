@@ -351,31 +351,65 @@ func TestBuildReleaseRefusalNamesFragment(t *testing.T) {
 	}
 	b.noSecretIn(fmt.Sprint(ref.extra) + ref.detail)
 
+	t.Run("a cluster-level refusal", func(t *testing.T) {
+		b := newBuildEnv(t)
+		mustExec(b.t, b.db, `UPDATE cluster SET contract = 'v1.12' WHERE id = $1`, b.cluster)
+		_, ref := b.build()
+		if ref == nil {
+			t.Fatal("buildRelease: no refusal")
+		}
+		if _, ok := ref.extra["input"]; ok {
+			t.Fatalf("refusal %v names an input; the case is meant to name none", ref.extra)
+		}
+		for _, k := range []string{"fragment", "layer"} {
+			if _, ok := ref.extra[k]; ok {
+				t.Fatalf("refusal %v names %s though it names no fragment", ref.extra, k)
+			}
+		}
+	})
+}
+
+// namingFragment names a fragment only for an input that is one of the machine's fragments, with a name.
+func TestNamingFragment(t *testing.T) {
+	m := snapshotMachine{importBase: "ibr_a", fragments: []string{"frv_a", "frv_b"}}
+	s := snapshot{sources: map[string]storedSource{
+		"ibr_a": {}, // an import base has no name and no layer
+		"frv_a": {name: "global-net", layer: "global"},
+		"frv_b": {name: "network", layer: "site"},
+		"frv_c": {name: "elsewhere", layer: "node"}, // not one of m's fragments
+	}}
 	for _, c := range []struct {
-		name    string
-		prepare func(b *buildEnv)
+		input, fragment, layer string
 	}{
-		{"the base", func(b *buildEnv) { b.fragment("network", "site", buildFragment("  type: bogus\n")) }},
-		{"a cluster-level refusal", func(b *buildEnv) {
-			mustExec(b.t, b.db, `UPDATE cluster SET contract = 'v1.12' WHERE id = $1`, b.cluster)
-		}},
+		{"fragment[0]", "global-net", "global"},
+		{"fragment[1]", "network", "site"},
+		{"base", "", ""},
+		{"", "", ""},
+		{"fragment[2]", "", ""},
+		{"fragment[-1]", "", ""},
+		{"fragment[x]", "", ""},
 	} {
-		t.Run(c.name, func(t *testing.T) {
-			b := newBuildEnv(t)
-			c.prepare(b)
-			_, ref := b.build()
-			if ref == nil {
-				t.Fatal("buildRelease: no refusal")
+		t.Run("input "+c.input, func(t *testing.T) {
+			ref := refuse(http.StatusUnprocessableEntity, "validation-failed", "refused")
+			if c.input != "" {
+				ref = ref.with("input", c.input)
 			}
-			if in, _ := ref.extra["input"].(string); strings.HasPrefix(in, "fragment[") {
-				return // the case names a fragment: the check above covers it
-			}
-			for _, k := range []string{"fragment", "layer"} {
-				if _, ok := ref.extra[k]; ok {
-					t.Fatalf("refusal %v names %s though it names no fragment", ref.extra, k)
+			got := namingFragment(ref, m, s)
+			fragment, hasFragment := got.extra["fragment"]
+			layer, hasLayer := got.extra["layer"]
+			if c.fragment == "" {
+				if hasFragment || hasLayer {
+					t.Fatalf("refusal %v names a fragment for input %q", got.extra, c.input)
 				}
+				return
+			}
+			if fragment != c.fragment || layer != c.layer {
+				t.Fatalf("refusal names fragment %v in layer %v; want %s in %s", fragment, layer, c.fragment, c.layer)
 			}
 		})
+	}
+	if namingFragment(nil, m, s) != nil {
+		t.Fatal("namingFragment(nil) is not nil")
 	}
 }
 
