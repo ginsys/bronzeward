@@ -76,6 +76,11 @@ export function ScopeDecision({ machine, state, stoppedAt }: { machine: string; 
   // The accounting form stays drawn once pressed, for its answer: the console's reread then shows the scope as accounted.
   const due = state === "pre-restore-unaccounted";
   const [started, setStarted] = useState(false);
+  // The scope state the accounting's answer reported ("blocked until it is marked" or "unresolved"), once the answer is in.
+  const [reported, setReported] = useState<string | undefined>();
+  // The answer says what the scope is now, so it stays only while a read shows the scope in that state; until the answer is in, only
+  // that the scope can still be marked.
+  const keep = started && (reported === undefined ? markable : state === reported);
   return (
     <>
       {markable && <p><Action label="Mark" needs={["recovery-admin"]} onClick={send("marks")} busy={busy(mark)} /></p>}
@@ -84,9 +89,9 @@ export function ScopeDecision({ machine, state, stoppedAt }: { machine: string; 
       {state === "ready" && <p><Action label="Release" needs={["recovery-admin"]} onClick={send("releases")} busy={busy(release)} /></p>}
       <Result w={release} done={released} />
       {next(release) !== undefined && <Status testid="write-next">{next(release)}</Status>}
-      {/* The accounting's answer says what the scope "is now"; once a mark or a release has been made that sentence is stale, so the form leaves then. A refused one leaves it while the scope is still as it said, and the form leaves when a read shows the scope is no longer one that can be marked (another administrator released it). A mark whose outcome is `unknown` (the answer never came) keeps the form, and so keeps the sentence "is now blocked", which may then be stale: that is accepted, because the next reread of the scopes replaces it. */}
-      {(due || (started && markable)) && mark?.outcome?.kind !== "done" && release?.outcome?.kind !== "done" && (
-        <AccountingForm machine={machine} path="/recovery/accountings" resource="/recovery" what={SCOPE_WHAT} done={accountedScope} due={due} stoppedAt={stoppedAt} onStart={() => setStarted(true)} />
+      {/* The accounting's answer says what the scope "is now"; once a mark or a release has been made that sentence is stale, so the form leaves then. A refused one leaves it while the scope is still as it said, and the form leaves when a read shows the scope in another state than the answer reported (another administrator marked or released it). A mark whose outcome is `unknown` (the answer never came) keeps the form, and so keeps the sentence "is now blocked", which may then be stale: that is accepted, because the next reread of the scopes replaces it. */}
+      {(due || keep) &&mark?.outcome?.kind !== "done" && release?.outcome?.kind !== "done" && (
+        <AccountingForm machine={machine} path="/recovery/accountings" resource="/recovery" what={SCOPE_WHAT} done={accountedScope} due={due} stoppedAt={stoppedAt} onStart={() => setStarted(true)} onAnswered={(d) => setReported((d as { scopes: { state: string }[] }).scopes[0]?.state)} />
       )}
     </>
   );
