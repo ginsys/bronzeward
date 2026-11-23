@@ -1288,3 +1288,46 @@ describe("the page's send keeps the retry policy of each send of a held discover
     expect(counted.posts).toBe(4 + 1);
   });
 });
+
+// A 401 on a list try renews the sign-in, and the same endpoint is sent once more; the list then goes on as after a first send.
+describe("a list try answered 401 through the real write layer", () => {
+  const LIST = ["10.0.0.1", "10.0.0.2"];
+  // A client whose discovery of the first endpoint is answered by `first` in turn (a number is a status), the second always with the cluster.
+  const layer = (first: (200 | 401)[]) => {
+    const waits: number[] = [];
+    const writes = new Writes(() => "p", async (ms) => void waits.push(ms));
+    const attempts: Record<string, number> = {};
+    let renewals = 0;
+    writes.client = {
+      currentEpoch: "e1",
+      renew: async () => (renewals++, true),
+      endWrites: () => {},
+      attempt: async (m: string, _path: string, _h: unknown, body: string) => {
+        const headers = new Headers({ "Bronzeward-Epoch": "e1" });
+        if (m === "GET") return { status: 200, headers, data: {} };
+        const endpoint = (JSON.parse(body) as { endpoint: string }).endpoint;
+        attempts[endpoint] = (attempts[endpoint] ?? 0) + 1;
+        if (endpoint === LIST[0] && first.shift() === 401) return { status: 401, headers: new Headers(), data: problem(401, "unauthenticated") };
+        return { status: 201, headers, data: { ...DISCOVERY, endpoint } };
+      },
+    } as unknown as Client;
+    return { env: { send: sender(writes, () => true) } as unknown as Env, attempts, waits, renewals: () => renewals };
+  };
+
+  test("the first endpoint answered 401 once is sent twice, gives the cluster, and the second is not sent; the 1 s wait is the only wait", async () => {
+    const { env, attempts, waits, renewals } = layer([401, 200]);
+    const r = await discoverCluster(env, named(LIST.join(", ")), {});
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.plan.endpoint).toBe(LIST[0]);
+    expect(attempts).toEqual({ [LIST[0]!]: 2 });
+    expect(renewals()).toBe(1);
+    expect(waits).toEqual([1000]);
+  });
+
+  test("the first endpoint answered 401 again after the renewal ends the list as a lost sign-in, and the second is not sent", async () => {
+    const { env, attempts } = layer([401, 401]);
+    const r = await discoverCluster(env, named(LIST.join(", ")), {});
+    expect(r.ok).toBe(false);
+    expect(attempts).toEqual({ [LIST[0]!]: 2 });
+  });
+});
