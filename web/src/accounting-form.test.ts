@@ -289,6 +289,19 @@ describe("the Start choice of a scope reads the machine's unaccounted attempts",
     expect(startInput(START).disabled).toBe(false);
   });
 
+  test("the shell's re-read reads the operations again, so the deadline follows the observations' re-read", async () => {
+    served["/operations"] = { items: [{ id: "op_a" }], next: undefined };
+    served["/operations/op_a"] = operation("op_a", "2026-11-01T09:02:00Z", false);
+    await mount(scopeRow());
+    await settled();
+    expect(startInput(START).disabled).toBe(true);
+    served["/operations/op_a"] = operation("op_a", "2026-11-01T09:02:00Z", true);
+    await mount(scopeRow(), ["recovery-admin"], 1);
+    await settled();
+    expect(startInput(START).disabled).toBe(false);
+    expect(startInput(START).closest("li")!.textContent).toContain("(the first read after the deadline)");
+  });
+
   test("an operation that cannot be read gives no mark, whatever the others say", async () => {
     served["/operations"] = { items: [{ id: "op_a" }, { id: "op_b" }], next: undefined };
     served["/operations/op_a"] = operation("op_a", "2026-11-01T07:00:00Z", true);
