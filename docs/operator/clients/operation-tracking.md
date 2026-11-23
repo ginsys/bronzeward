@@ -4,8 +4,12 @@
 configuration, whether the machine accepted it, and what the machine's applied configuration is
 now. You also want the history of one machine, including plans that never ran.
 
-**You need** no role. Every command and page on this page reads. Plans and approvals are in
-[plans and approval](plan-and-approval.md).
+**You need** at least one role (viewer, author, publisher, approver or recovery-admin). Every
+command and page on this page reads. Plans and approvals are in [plans and
+approval](plan-and-approval.md).
+
+The `text` block on this page shows the shape of the output, read from the source. This page does
+not claim that a run printed it.
 
 An **operation** is one run of something: a publication, an import, an apply or an adoption. An
 approved apply or adopt plan becomes an operation when the controller commits it, so a plan page

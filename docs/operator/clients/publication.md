@@ -7,8 +7,12 @@ read what was built, machine by machine, before anybody plans to send it. Words 
 epoch are in [the word list](terms.md).
 
 **You need** the `publisher` role to publish. Reading a release, a rendered configuration and its
-provenance needs no role. A draft you have just finished is in [editing](editing.md); sending a
-release to a machine is in [plans and approval](plan-and-approval.md).
+provenance needs at least one role (viewer, author, publisher, approver or recovery-admin). A draft
+you have just finished is in [editing](editing.md); sending a release to a machine is in [plans and
+approval](plan-and-approval.md).
+
+The `text` blocks on this page show the shape of the output, read from the source. This page does
+not claim that a run printed them.
 
 **Publishing sends nothing to any machine.** It renders, validates and records. The release
 becomes the machine's Desired release, and a machine changes only after a plan is approved and
@@ -42,10 +46,11 @@ A machine with no Applied release is **adopted** first; a machine with one gets 
 **apply-config** plan. A machine whose Desired release is another release gets no plan from this
 one.
 
-Read the result with `release show`, `release review` and `release provenance`. They need no role.
+Read the result with `release list`, `release show`, `release review` and `release provenance`.
+Each needs any one role.
 
 ```bash
-bronzewardctl release list --cluster <cluster>
+bronzewardctl release list
 bronzewardctl release show <release>
 bronzewardctl release review <release> <machine>
 bronzewardctl release provenance <release> <machine>
