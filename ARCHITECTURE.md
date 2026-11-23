@@ -46,14 +46,14 @@ A file named without a directory is in `internal/api`.
 2. It records the cluster and each machine (`POST /clusters`, `POST /machines`).
 3. It sends the cluster's first key (`firstkeys.go`): a control-plane machine configuration, a secrets bundle or, by default, an admin talosconfig, from which `internal/talos/signer` reads a control plane's configuration. The signer extracts the CA key and tries it at a node, and `internal/provider` stores it.
 4. It opens a draft and starts one import per machine (`ingestions.go`): the server takes a staging claim and hands the job to the runner after the commit.
-5. The runner (`runner.go`) reads the node, `internal/ingest` replaces secrets by references, `internal/provider` stores each value, and one transaction records the machine's import base (the imported configuration the draft starts from) in the draft and ends the import.
+5. The runner (`runner.go`) reads the node, `internal/ingest` replaces secrets by references, `internal/provider` stores each value, and one transaction records the machine's import base (the imported configuration the draft starts from) in the draft and ends the import. `internal/ingest` also removes a `HostnameConfig` whose hostname equals the machine's name, which the compiler fills again, and the draft transaction refuses `409 stale-input` if the machine was renamed while the import ran.
 
 **Edit and publish a release.**
 
 1. Fragments, profiles and assignments are changed in a draft (`drafts.go`, `fragments.go`).
 2. `POST /drafts/{id}/publications` queues a publish operation.
 3. The publish worker (`worker.go`) claims it under the server's owner generation.
-4. `buildRelease` (`pipeline_build.go`) compiles each machine with `internal/compile` and encrypts the artifacts.
+4. `buildRelease` (`pipeline_build.go`) compiles each machine with `internal/compile` and encrypts the artifacts. It also refuses a release in which two machines would get one Kubernetes node name (`hostname_clash.go`), and `publishCommit` refuses a machine that would take the name another machine's last applied release still records (`hostname_swap.go`).
 5. `publishCommit` (`publish.go`) writes the release and moves each machine's desired configuration in one transaction; a worker that lost its claim writes nothing.
 
 **A plan to an applied configuration.**
