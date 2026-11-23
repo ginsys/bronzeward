@@ -79,7 +79,7 @@ The blocks:
 |---|---|
 | `listen` | The address to serve on. Plain HTTP: terminate TLS in front of it. Port `0` takes a free port, which `serve` reports when it starts (see [Migrate, then serve](#migrate-then-serve)). |
 | `database.dsn` | Your PostgreSQL DSN, with credentials. |
-| `auth.oidc` | Your identity provider's issuer, the audience, the groups claim, the longest token lifetime accepted (default 15 minutes). |
+| `auth.oidc` | Your identity provider's issuer, the audience, the groups claim, the claim a person's display name is read from (default `name`, else `preferred_username`), the longest token lifetime accepted (default 15 minutes). |
 | `auth.roles` | Which groups grant `viewer`, `author`, `publisher`, `approver` and `recovery-admin`. |
 | `auth.deniedSubjects` | Subjects refused from configuration, which survives a database restore; list a subject here before revoking it: a human as `{iss: ..., sub: ...}`, a service identity as `{identity: idn_..., name: ...}`, both in one entry (persistence API §10.4). |
 | `execution` | `maxTransportDeadline` (required), and the defaults a plan binds when its request leaves a value out. |
