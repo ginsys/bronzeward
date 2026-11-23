@@ -213,8 +213,6 @@ enter_cli() {
   who=$(who_id h-recovery) && [ -n "$who" ] || return 1
   same "$(sql "SELECT entered_by FROM recovery_epoch WHERE epoch = '$epoch'")" "$who"
 }
-# web_done <name> <ERE>: the browser act's output holds the answer the ERE names and the one passing case.
-web_done() { web_kept "$1" "$2" && web_kept "$1" '1 passing'; }
 # enter_web: the entry of mode web, through the entry form of the recovery start. The page's answer names the act; the new epoch
 # and the entry's actor are read from the database, as the CLI's are, and held taken over is checked by held_taken_over.
 enter_web() {
