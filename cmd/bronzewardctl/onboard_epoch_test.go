@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
+	"github.com/ginsys/bronzeward/internal/talos/discover"
 )
 
 // TestOnboardEpochChangeStopsTheRun: every write of one run is sent under the epoch the run's first read showed
@@ -53,6 +55,27 @@ func TestOnboardEpochChangeStopsTheRun(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestOnboardEpochChangeDuringTheDiscoveryStopsBeforeTheFirstWrite: the discovery sits between the run's first
+// read (which pins the epoch) and its first write, and with several endpoints to try it can take a minute. An
+// epoch that changes inside it sends nothing: the first write is refused before it goes.
+func TestOnboardEpochChangeDuringTheDiscoveryStopsBeforeTheFirstWrite(t *testing.T) {
+	e := newOnboard(t)
+	inner := discoverCluster
+	discoverCluster = func(ctx context.Context, tc []byte, contextName, endpoint string) (discover.Result, string, error) {
+		e.api.mu.Lock()
+		e.api.switchAfter, e.api.writesDone = 1, 1 // the epoch is ep_OB-2 from here on
+		e.api.mu.Unlock()
+		return inner(ctx, tc, contextName, endpoint)
+	}
+	code, out, errOut := e.run()
+	if code == 0 || len(e.api.writes()) != 0 {
+		t.Errorf("exit %d, writes %q; want a failure and no write sent", code, e.api.writes())
+	}
+	if !strings.Contains(out+errOut, "the epoch changed from 'ep_OB-1' to 'ep_OB-2'") {
+		t.Errorf("the run does not say the epoch changed:\nstdout %q\nstderr %q", out, errOut)
 	}
 }
 
