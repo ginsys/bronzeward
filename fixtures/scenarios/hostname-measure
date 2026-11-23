@@ -101,6 +101,24 @@ row() {
     "$(awk '/^## nodename/ {f=1} f && /nodename:/ {print $2; exit}' "$EV/node-$1-after.txt")" | tee -a "$EV/table.tsv"
 }
 
+# Step 0: the equivalence measurements of docs/design/research/20261118-import-analysis-and-equivalence.md
+# rerun with the fixture's own pinned talosctl (the manifest pins the version the note names). Before
+# `up` is used, so a failure costs nothing; its wall time is the record's, since the note holds none. gen.sh
+# finds its talosctl beside itself, so it runs from a copy in $STATE with a link to the verified binary; the
+# synthetic cluster it makes is under $STATE too and holds no credential of a real host.
+equivalence() {
+  local ev=$here/../../docs/design/research/evidence/20261118-import-equivalence w=$STATE/hostname-equivalence start=$SECONDS
+  rm -rf -- "$w" && mkdir -p -- "$w/gen/bin" "$STATE/gocache" "$STATE/gotmp" || return 1
+  tool_verify talosctl "$TALOSCTL_SHA256"
+  ln -s -- "$CACHE/talosctl" "$w/gen/bin/talosctl" && cp -- "$ev/gen.sh" "$w/gen/" || return 1
+  bash "$w/gen/gen.sh" "$w/work" >"$EV/equivalence-gen.txt" 2>&1 || return 1
+  GOCACHE=$STATE/gocache GOTMPDIR=$STATE/gotmp bash "$ev/runall.sh" "$here/../.." "$w/work" "$EV/equivalence-output.txt" \
+    >"$EV/equivalence-run.txt" 2>&1 || return 1
+  printf 'step 0: %s s\n' "$((SECONDS - start))" | tee -a "$EV/table.tsv"
+  rm -rf -- "$w"
+}
+check "$ref step 0" 'the equivalence measurements run with the pinned talosctl and exit 0' equivalence
+
 machines
 check "$ref" 'the worker is named: onboarding named it from its node (s1 onboard)' \
   test -n "$(sql "SELECT name FROM machine WHERE id = '$machine_w'")"
