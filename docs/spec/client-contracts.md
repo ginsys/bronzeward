@@ -2270,8 +2270,10 @@ outcome line, and under it the next step an operator can take, from the steps of
    adoption record, and the Recovery route of an `unresolved` operation, which is its next step too. A failed `publish` or
    `ingest` carries a problem document, so its outcome line, and the publish page's end line, also give its `rule`, its
    `input` ("the base" or the fragment's position), its `paths`, its `message` and its `machine` by name, each as safe
-   text (item 1, A8 rule 3); the web client shows up to 20 paths and says how many it leaves out. The server redacts the
-   paths and the message (compilation §8.3), so none holds a value. The sentence says what
+   text (item 1, A8 rule 3); the web client shows up to 20 paths and says how many it leaves out. The client shows what the
+   server serves. The server redacts a resolved secret value of six bytes or more from the paths and the message
+   (compilation §8.3), a message may quote an authored literal from a fragment, and a shorter copy of a secret is not
+   detected (compilation §8.4). The sentence says what
    the state means and the outcome line says what happened in it, so neither repeats the other.
 3. A kind or state the table does not know, and a pair the server cannot produce, show both values as the server wrote them
    in a sentence that says the page has no description of it, and no next step. Never a blank. A test runs every pair of the
