@@ -22,24 +22,28 @@ export function useScopeDeadline(machine: string, stoppedAt: string | undefined,
     if (stoppedAt === undefined || maxSeconds === undefined) return;
     let live = true;
     const unchanged = undropped();
+    // A read the effect or the shell has superseded changes nothing and starts no further read.
+    const current = () => live && unchanged();
     const get = async <T,>(path: string): Promise<T | undefined> => {
       const res = await client.read<T>(path);
-      settle(res, () => {}, () => live && unchanged(), () => false);
+      settle(res, () => {}, current, () => false);
       return res.kind === "ok" ? res.data : undefined;
     };
     void (async () => {
       const enc = encodeURIComponent;
-      const unknown = (why: string) => live && setDeadline({ unknown: why });
+      const unknown = (why: string) => current() && setDeadline({ unknown: why });
       const list = await get<{ items: Operation[]; next?: string }>(`/operations?machine=${enc(machine)}&kind=apply-config&limit=${MAX_OPERATIONS + 1}`);
+      if (!current()) return;
       if (list === undefined) return unknown("the machine's operations could not be read.");
       if (list.items.length > MAX_OPERATIONS || list.next !== undefined) return unknown(`the machine has more than ${MAX_OPERATIONS} apply operations, too many to read here.`);
       let at = Date.parse(stoppedAt) + maxSeconds * 1000;
       for (const op of list.items) {
         const full = await get<Operation>(`/operations/${enc(op.id)}`);
+        if (!current()) return;
         if (full === undefined) return unknown("an operation of the machine could not be read.");
         for (const a of full.attempts ?? []) if (a.accounting === null) at = Math.max(at, Date.parse(a.transportDeadline));
       }
-      if (live && unchanged()) setDeadline({ at });
+      if (current()) setDeadline({ at });
     })();
     return () => { live = false; };
   }, [machine, stoppedAt, maxSeconds, again]);

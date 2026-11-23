@@ -36,11 +36,17 @@ let root: Root;
 let box: HTMLElement;
 let served: Record<string, unknown>;
 let sent: { method: string; path: string; body: unknown }[];
+// The reads the fake client was asked for, a path whose answer is held until released, and whether the shell has invalidated every read in flight.
+let requested: string[];
+let hold: { path: string; release: () => void; gate: Promise<void> } | undefined;
+let dropped: boolean;
 
 const reads = (again = 0): Reads => ({
   client: {
     read: async (path: string) => {
       const bare = path.split("?")[0]!;
+      requested.push(bare);
+      if (hold?.path === bare) await hold.gate;
       if (bare in served) return { kind: "ok", data: served[bare] };
       return { kind: "refused", status: 404, problem: null };
     },
@@ -49,7 +55,7 @@ const reads = (again = 0): Reads => ({
     if (live()) set(res);
     return false;
   },
-  undropped: () => () => true,
+  undropped: () => () => !dropped,
   view: "v", again, regained: 0, go: () => {}, failure: () => "FAILED",
 }) as unknown as Reads;
 
@@ -113,6 +119,9 @@ beforeEach(() => {
     },
   };
   sent = [];
+  requested = [];
+  hold = undefined;
+  dropped = false;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -273,5 +282,40 @@ describe("the Start choice of a scope reads the machine's unaccounted attempts",
     await settled();
     expect(text("settle-start-unknown")).toBe("The page cannot name the valid start: an operation of the machine could not be read. The server decides.");
     expect(startInput(START).disabled).toBe(false);
+  });
+});
+
+// A read the effect or the shell has superseded changes nothing and starts no further read.
+describe("a superseded read of a scope's operations", () => {
+  const STOPPED = "2026-11-01T08:00:00Z";
+  const scopeRow = () => h(ScopeDecision, { machine: MCH, state: "pre-restore-unaccounted", stoppedAt: STOPPED });
+  const holding = (path: string) => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    hold = { path, release, gate };
+  };
+  const later = () => act(async () => { hold!.release(); await new Promise((r) => setTimeout(r, 30)); });
+
+  test("a read the shell invalidated, failing late, leaves no \"cannot name\" text and starts no further read", async () => {
+    served["/operations"] = { items: [{ id: "op_a" }, { id: "op_b" }], next: undefined };
+    holding("/operations/op_a");
+    await mount(scopeRow());
+    await settled();
+    dropped = true;
+    await later();
+    expect(text("settle-start-unknown")).toBeUndefined();
+    expect(requested).not.toContain("/operations/op_b");
+  });
+
+  test("an unmount during an operation's read starts no further read", async () => {
+    served["/operations"] = { items: [{ id: "op_a" }, { id: "op_b" }], next: undefined };
+    served["/operations/op_a"] = { id: "op_a", attempts: [] };
+    holding("/operations/op_a");
+    await mount(scopeRow());
+    await settled();
+    await act(async () => root.unmount());
+    root = createRoot(box);
+    await later();
+    expect(requested).not.toContain("/operations/op_b");
   });
 });
