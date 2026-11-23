@@ -15,6 +15,7 @@
 import { $, browser, expect } from "@wdio/globals";
 import { FIXTURE_PAGE } from "../ports.ts";
 import { button, choice, control, field, region, shown } from "./control.ts";
+import { openState } from "./open-state.ts";
 
 const need = (name: string) => {
   const v = process.env[name];
@@ -31,20 +32,29 @@ async function open() {
   await browser.url(`${FIXTURE_PAGE}/`);
   // Before the entry the server refuses every read but the entry, so the shell shows the entry form and no identity: there is no
   // principal to wait for, and the sign-in has already returned to the page (the provider signs the fixture's person in at once).
-  const entryForm = () => $('form[aria-label="Enter recovery"]').isExisting();
-  try {
-    await browser.waitUntil(async () => (await $('[data-testid="principal"]').isExisting()) || (await $("button*=Sign in").isExisting()) || (act === "enter" && (await entryForm())), { timeout: 30_000 });
-  } catch {
-    // The page's own words are the diagnosis: the text is public page text, never a token.
-    throw new Error(`the page showed neither a signed-in principal, a Sign in button nor (for the entry) the entry form; it said: ${(await $("body").getText()).replace(/\s+/g, " ").slice(0, 400)}`);
+  // The wait ends on a state that holds (open-state.ts): a Sign in button drawn for an instant before the entry form is not one.
+  const probe = {
+    principal: () => $('[data-testid="principal"]').isExisting(),
+    entry: () => $('form[aria-label="Enter recovery"]').isExisting(),
+    signin: () => $("button*=Sign in").isExisting(),
+  };
+  const reach = async (signinOk: boolean) => {
+    try {
+      return await openState(probe, { entryOk: act === "enter", signinOk, timeoutMs: 30_000, settleMs: 1_500 });
+    } catch {
+      // The page's own words are the diagnosis: the text is public page text, never a token.
+      throw new Error(`the page showed neither a signed-in principal, a Sign in button nor (for the entry) the entry form; it said: ${(await $("body").getText()).replace(/\s+/g, " ").slice(0, 400)}`);
+    }
+  };
+  let state = await reach(true);
+  if (state === "signin") {
+    await $("button*=Sign in").click();
+    state = await reach(false);
   }
-  if (act === "enter" && (await entryForm())) {
+  if (state === "entry") {
     say("the entry form, before any identity is read");
     return;
   }
-  const signin = await $("button*=Sign in");
-  if (await signin.isExisting()) await signin.click();
-  await expect($('[data-testid="principal"]')).toBeExisting({ wait: 30_000 });
   say(`${await $('[data-testid="principal"]').getText()}; ${await $('[data-testid="roles"]').getText()}`);
   if (act === "enter") return;
   if (OPERATION.includes(act)) {
