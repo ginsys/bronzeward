@@ -1,10 +1,7 @@
 package compile
 
 import (
-	"bytes"
 	"errors"
-	"io"
-	"maps"
 	"strings"
 
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
@@ -45,91 +42,57 @@ func (c Compiled) Hostname() Hostname { return c.hostname }
 // NodeName is the Kubernetes node name the composed configuration gives its node, and whether it may
 // be compared with another machine's (compilation.md §6.1 item 6). It is not compared, and no error
 // returns, where the composition holds no hostname, where the hostname or the effective
-// registerWithFQDN value depends on a secret reference (the redacted configuration reads another
-// value there: comparing it would make a refusal an equality test on a secret), and where the derived
-// name is empty, so two empty names never clash. It holds no configured value beyond the derived name.
+// registerWithFQDN value is the value of a secret reference (the compiler's own trace says which
+// leaves hold one: comparing it would make a refusal an equality test on a secret), and where the
+// derived name is empty, so two empty names never clash. It holds no configured value beyond the
+// derived name.
 func (c Compiled) NodeName() (string, bool, error) {
 	host, fqdn, ok := nodeInputs(c.m.bytes())
-	if !ok || host == "" {
-		return "", false, nil
-	}
-	shown, err := c.Redacted()
-	if err != nil {
-		return "", false, nil
-	}
-	// The redacted text is no loadable configuration (its tokens sit in typed fields), so the two leaves
-	// are read from both texts as plain YAML: a leaf redaction changed depends on a secret.
-	real, okReal := nodeLeaves(c.m.bytes())
-	seen, okSeen := nodeLeaves([]byte(shown))
-	if !okReal || !okSeen || !maps.Equal(real, seen) {
+	if !ok || host == "" || c.nodeSecret {
 		return "", false, nil
 	}
 	node := nodeName(host, fqdn)
 	return node, node != "", nil
 }
 
-// nodeLeaves are the scalar values, as written, of the four leaves the node name is derived from: the
-// hostname of a HostnameConfig document or of machine.network, and registerWithFQDN of a
-// KubeNodeConfig document or of machine.kubelet. ok is false for text that is no YAML stream.
-func nodeLeaves(b []byte) (map[string]string, bool) {
-	out := map[string]string{}
-	dec := yaml.NewDecoder(bytes.NewReader(b))
-	for {
-		var n yaml.Node
-		err := dec.Decode(&n)
-		if errors.Is(err, io.EOF) {
-			return out, true
-		}
-		if err != nil {
-			return nil, false
-		}
-		if len(n.Content) == 0 {
-			continue
-		}
-		doc := n.Content[0]
-		kind := nodeMember(doc, "kind")
-		var paths map[string][]string
-		switch {
-		case kind == nil:
-			paths = map[string][]string{"hostname": {"machine", "network", "hostname"},
-				"registerWithFQDN": {"machine", "kubelet", "registerWithFQDN"}}
-		case kind.Value == "HostnameConfig":
-			paths = map[string][]string{"hostname": {"hostname"}}
-		case kind.Value == "KubeNodeConfig":
-			paths = map[string][]string{"registerWithFQDN": {"registerWithFQDN"}}
-		}
-		for name, path := range paths {
-			at := doc
-			for _, key := range path {
-				if at = nodeMember(at, key); at == nil {
-					break
-				}
-			}
-			if at != nil {
-				out[name+":"+kindOf(kind)] = at.Value
-			}
+// holdsNodeLeaf reports whether a secret reference's value reached one of the four leaves the node name
+// is derived from: the hostname of a HostnameConfig document or of machine.network, and
+// registerWithFQDN of a KubeNodeConfig document or of machine.kubelet. It reads the output paths the
+// trace and flip passes attributed to a reference, never the text of the redacted configuration, which
+// also redacts a public value that happens to equal an unrelated secret. A document that cannot be
+// walked counts as holding one.
+func holdsNodeLeaf(b []byte, outcomes []outcome) bool {
+	held := map[string]bool{}
+	for _, o := range outcomes {
+		for _, p := range o.paths {
+			held[p] = true
 		}
 	}
-}
-
-func kindOf(k *yaml.Node) string {
-	if k == nil {
-		return "v1alpha1"
+	if len(held) == 0 {
+		return false
 	}
-	return k.Value
-}
-
-// nodeMember is the value of key in a mapping node, or nil.
-func nodeMember(n *yaml.Node, key string) *yaml.Node {
-	if n == nil || n.Kind != yaml.MappingNode {
+	found := false
+	err := ingest.WalkLeaves(b, nil, func(p ingest.Path, _ *yaml.Node) error {
+		if held[p.String()] && p.Format == "" && nodeLeafPointer(p.Pointer) {
+			found = true
+		}
 		return nil
+	})
+	return found || err != nil
+}
+
+// nodeLeafPointer is whether a pointer names one of the four leaves, in a typed document (one token) or
+// in the legacy one. A top-level `hostname` of a document of another kind is counted too: the check
+// then skips a comparison it could have made, never makes one it should not.
+func nodeLeafPointer(p []string) bool {
+	switch len(p) {
+	case 1:
+		return p[0] == "hostname" || p[0] == "registerWithFQDN"
+	case 3:
+		return p[0] == "machine" && (p[1] == "network" && p[2] == "hostname" ||
+			p[1] == "kubelet" && p[2] == "registerWithFQDN")
 	}
-	for i := 0; i+1 < len(n.Content); i += 2 {
-		if n.Content[i].Value == key {
-			return n.Content[i+1]
-		}
-	}
-	return nil
+	return false
 }
 
 // nodeInputs are the two values Talos derives the node name from: the hostname the accessor returns and

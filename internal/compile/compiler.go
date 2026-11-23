@@ -50,6 +50,8 @@ type Compiled struct {
 	redactErr error
 	formOnly  bool
 	hostname  Hostname
+	// nodeSecret is whether a secret reference's value is a leaf the node name derives from.
+	nodeSecret bool
 }
 
 // FormOnly reports whether the composed configuration holds the same documents, keys and values as
@@ -262,7 +264,8 @@ func compile(in Input, sources []Source, decide bool) (Compiled, error) {
 	// The kept outcomes hold redacted paths only: fmt reaches an unexported field by reflection,
 	// past Compiled's own placeholder.
 	red := newRedactor(sources)
-	c := Compiled{m: m, origins: origins(sources), formOnly: sameInForm(real[0], m), hostname: hostname}
+	c := Compiled{m: m, origins: origins(sources), formOnly: sameInForm(real[0], m), hostname: hostname,
+		nodeSecret: holdsNodeLeaf(m.bytes(), outcomes)}
 	if text, err := redactedText(m.bytes(), hosts, outcomes, red); err != nil {
 		c.redactErr = err
 	} else {

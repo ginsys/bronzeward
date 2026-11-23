@@ -111,6 +111,24 @@ func TestNodeNameHeldByAReference(t *testing.T) {
 	}
 }
 
+// TestNodeNameUnrelatedSecret: a secret reference that sits elsewhere and happens to resolve to the
+// filled name does not hide the node name. The redacted text also redacts that literal at the hostname
+// leaf, so a comparison of the two texts would skip the machine and a clash would pass. The control is
+// the same reference resolving to another value, and the contrast with the held hostname above, which
+// is skipped.
+func TestNodeNameUnrelatedSecret(t *testing.T) {
+	label := func(v string) Source {
+		return source(t, "machine:\n  nodeLabels:\n    s: !bwref app/short\n", strRef("app/short"),
+			map[string]provider.Value{"app/short": value(t, provider.KindString, v)})
+	}
+	for _, v := range []string{"abc", "another-value"} {
+		c := compiled(t, hostIn(generated(t), "abc", ModeMetal, label(v)))
+		if node, known, err := c.NodeName(); err != nil || !known || node != "abc" {
+			t.Errorf("a label resolving to %q: NodeName() = %q, %v, %v; want abc, true, nil", v, node, known, err)
+		}
+	}
+}
+
 // TestNodeNameShowsNoValue: the answer of a skipped hostname holds nothing of its value, and the
 // compared one only the derived name.
 func TestNodeNameShowsNoValue(t *testing.T) {
