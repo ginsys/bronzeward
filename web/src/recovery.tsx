@@ -51,7 +51,7 @@ export function scopeSummary(scopes: readonly Scope[]): string {
   return `${held} of ${scopes.length} scopes not released: ${held === scopes.length ? "none can commit" : "those cannot commit"}.`;
 }
 
-// What the epoch is, where a person compares it: only entering recovery mode starts a new one (a restore alone does not).
+// What the epoch is, where a person compares it: only entering recovery mode mints a new one (a restore alone does not, and can rewind it).
 const EPOCH_MEANS = " (entering recovery mode starts a new one)";
 
 // Shown while responses carry Bronzeward-Recovery-Mode: true. It never disables an action: only a
