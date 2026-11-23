@@ -9,7 +9,8 @@ anything.
 approve it. One operator who holds both can do every step. An automation token can create a plan
 but cannot approve one: an approval is for a human sign-in only. The release comes from
 [publication](publication.md). What happens after the approval is in
-[operation tracking](operation-tracking.md).
+[operation tracking](operation-tracking.md). Words such as plan, approval, evidence and
+self-approval are in [the word list](terms.md).
 
 The `text` blocks on this page show the shape of the output, read from the source. This page does
 not claim that a run printed them.

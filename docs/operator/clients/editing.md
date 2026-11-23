@@ -44,11 +44,14 @@ printed them. Three things to know:
 2. **A fragment's document never goes on the command line.** Give `--file <path>` or `-` for
    standard input; `--declarations <path>` adds the file that declares the document's references.
    `fragment set` runs on Linux only.
-3. **`assignment set --none` selects nothing.** The machine's configuration is then its import base
-   alone (the configuration read from the machine, see [the word list](terms.md)). A release can bind
-   a machine only if the machine has an assignment at the revision the release was compiled from; an
-   assignment that selects nothing is enough, and one that selects profiles or fragments works as
-   well. Use `--none` only when you want the import base alone.
+3. **`assignment set --none` selects no profile and no fragment.** The machine's configuration is
+   then its import base (the configuration read from the machine, see [the word list](terms.md)),
+   with one addition: where the base sets no hostname and the machine has a name, publication fills
+   the name in as the hostname (not where the base's hostname setting is off or the base sets a stable
+   hostname itself). A release can bind a machine only if the machine has an assignment at the
+   revision the release was compiled from; an assignment that selects nothing is enough, and one that
+   selects profiles or fragments works as well. Use `--none` only when you want the import base and
+   nothing else from the draft.
 
 `draft show` lists the draft's entries and marks which changed against their base. It does not
 render any machine's configuration: nothing is rendered until the draft is published.
