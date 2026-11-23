@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 // The launcher logs and ignores any other error a launcher hook throws, and runs the specs anyway.
 import { remote, SevereServiceError } from "webdriverio";
 import { binPath, died, missingBinaries, spawnChild } from "./children.ts";
-import { edgeDriver } from "./edge-driver.ts";
+import { edgeCapability, edgeDriver } from "./edge-driver.ts";
 import { safariKeys } from "./safari-keys.ts";
 import { settled } from "./safari-navigation.ts";
 import { FAKE_ISSUER, PAGE_LISTEN, PAGE_ORIGIN, TARGET_ORIGIN } from "./ports.ts";
@@ -35,13 +35,14 @@ const previous = JSON.parse(readFileSync(new URL("previous-majors.json", import.
   chrome: string; edge: { version: string }; firefox: string;
 };
 const edgeChoice = edgeDriver(process.env);
+// Printed by each launcher hook (this config's and auth.conf.ts's, which replaces it) on a run that has an Edge leg.
+export function announceEdgeDriver() {
+  if (process.env["BW_BROWSERS"]?.split(",").includes("edge")) console.log(edgeChoice.line);
+}
 const capabilities: Record<string, WebdriverIO.Capabilities> = {
   chrome: { browserName: "chrome", "goog:chromeOptions": { args: headless ? ["--headless=new"] : [] } },
   // The runner image's own driver where it has one, so that no download is on the leg's path (edge-driver.ts).
-  edge: {
-    browserName: "MicrosoftEdge", "ms:edgeOptions": { args: headless ? ["--headless=new"] : [] },
-    ...(edgeChoice.binary !== undefined ? { "wdio:edgedriverOptions": { binary: edgeChoice.binary } as unknown as WebdriverIO.EdgedriverOptions } : {}),
-  },
+  edge: edgeCapability(headless, edgeChoice),
   // Both Firefoxes are downloaded at their current release, not taken from the host. A case that
   // leaves a page with a write still open meets its leave guard: Firefox shows that dialog and
   // holds the navigation until it times out, where Chrome and Edge never show it without a user
@@ -219,7 +220,7 @@ export const config: WebdriverIO.Config = {
   async onPrepare() {
     // First, before anything starts: a binary that is not there fails the run by name.
     if (missingBinaries(root, ["webhost"]).length > 0) throw new SevereServiceError(`not an executable file: bin/webhost (mise run browser builds it)`);
-    if (browsers.includes("edge")) console.log(edgeChoice.line);
+    announceEdgeDriver();
     target = createServer((req, res) => {
       if (req.url === "/__hits") return res.end(JSON.stringify({ hits }));
       if (req.url === "/__reset") return (hits = 0), res.end();
