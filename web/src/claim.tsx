@@ -35,8 +35,8 @@ export function claimSpec(id: string, verb: Verb): WriteSpec {
 
 const LABEL: Record<Verb, string> = { continue: "Continue import", takeover: "Take over import", abandon: "Abandon import" };
 const WHAT: Record<Verb, (d: { operation?: string }) => ReactNode> = {
-  continue: (d) => `The import continues in operation ${short(d.operation ?? "")}.`,
-  takeover: (d) => `The import was taken over and resumes in operation ${short(d.operation ?? "")}.`,
+  continue: () => "The import continues.",
+  takeover: () => "The import was taken over and resumes.",
   abandon: () => "The import was abandoned. Its staged input is discarded.",
 };
 
