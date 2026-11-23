@@ -89,7 +89,7 @@ bronzewardctl plan create --release <release> --machine <machine> --operation ad
 bronzewardctl approve <plan>
 ```
 
-`--none` selects nothing, so the machine's configuration is its import base alone. `publish` needs
+`--none` selects nothing (see [editing](editing.md)). `publish` needs
 `publisher`: it makes the release the desired one and sends nothing to any machine. `plan create`
 needs `publisher` too; the plan is proposed and not approved, and it sends nothing. `approve` needs a
 person with `approver`. It starts no operation and does not wait: the controller records the adoption
