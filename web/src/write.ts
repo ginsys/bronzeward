@@ -23,6 +23,9 @@ export interface WriteSpec {
   resource: string;
   // A fragment write, which ingests: a repeat's in-progress 409 waits for the first request.
   ingests?: boolean;
+  // Sent once: one attempt, no repeat and no wait, so a 503 the layer would repeat ends `not-done` at once and a failed
+  // send ends `unknown`. For a request that only reads and records nothing, where trying the next entry of a list beats a repeat.
+  once?: true;
   // The recovery entry (§8.4 item 3): its own commit mints the new epoch, so it is sent without
   // Bronzeward-Expected-Epoch and with no epoch read, repeated under its key with the principal
   // checked and not the epoch, and never set aside by an epoch change.
@@ -369,7 +372,8 @@ export class Writes {
     let since = 0;
     let waited = 0;
     const spent = () => Math.max(waited, this.now() - since);
-    for (let n = 0; n <= BACKOFF.length; n++) {
+    const repeats = w.spec.once === true ? 0 : BACKOFF.length;
+    for (let n = 0; n <= repeats; n++) {
       // A read sent to learn the last answer's epoch ended the sign-in: nothing is repeated.
       if (n > 0 && end.e !== undefined) return aside(SIGN_IN_REFUSED);
       // A read sent to learn it met a recovery start: nothing is repeated, and nothing read again.
@@ -433,7 +437,7 @@ export class Writes {
         // after the last attempt, the sign-in stays and the write is not sent again.
         if (code === "unauthenticated" && !renewed && (await client.renew())) {
           renewed = true;
-          if (n < BACKOFF.length) continue;
+          if (n < repeats) continue;
           return early({ kind: "not-done", why: RENEWED_LAST, problem: p });
         }
         // Any other 401 code is a refusal by its status class, as for a read.

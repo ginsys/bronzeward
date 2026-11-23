@@ -210,6 +210,8 @@ export function endpointNote(text: string | undefined, context: string, typed: s
 function discoveryWhy(o: Outcome): string {
   if (o.kind === "refused") return o.problem === null ? `The server answered ${o.status}.` : problemSentences(o.problem, o.status);
   if (o.kind === "done") return "";
+  // Every attempt answered 503: the problem's sentences are the answer, as for a refusal; "every attempt was answered" says nothing a person acts on.
+  if (unavailable(o) && o.problem !== null) return problemSentences(o.problem, 503);
   return `${sentence(o.why)}${words(o.problem, true)}`;
 }
 
@@ -245,9 +247,17 @@ export interface Tries {
 // one every endpoint would give the same way (a refused key, a malformed request, a cluster too large, a
 // sign-in, a defect), or that says nothing about an endpoint (an outcome that is unknown), stops the list.
 function movesOn(o: Outcome): boolean {
-  if (o.kind !== "refused" || o.problem === null) return false;
-  if (o.status === 503) return o.problem.type === "urn:bronzeward:problem:talos-access-unavailable";
-  return o.status === 422 && o.problem["rule"] === "first-key-endpoint-no-control-plane";
+  if (unavailable(o)) return true;
+  return o.kind === "refused" && o.status === 422 && o.problem?.["rule"] === "first-key-endpoint-no-control-plane";
+}
+
+// The answer of an endpoint that does not answer, or whose node refuses the key: the server's 503 talos-access-unavailable.
+// The write layer repeats that 503 and ends `not-done` with the problem (or, sent once, ends so at once); `refused` is the
+// shape of a 503 it does not repeat. Both are read the same.
+const TALOS_UNAVAILABLE = "urn:bronzeward:problem:talos-access-unavailable";
+function unavailable(o: Outcome): boolean {
+  if (o.kind === "refused") return o.status === 503 && o.problem?.type === TALOS_UNAVAILABLE;
+  return o.kind === "not-done" && o.problem?.type === TALOS_UNAVAILABLE;
 }
 
 // A listed entry that cannot be an endpoint (it holds a space, a slash, an at sign and the like) is not sent: the
@@ -290,11 +300,12 @@ export async function discoverCluster(env: Env, text: string, o: { context?: str
     endpoint = listed;
     sent++;
     o.onTry?.(endpoint, i + 1, tries.length);
-    out = await env.send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", document: cut.document, endpoint }, released: () => {} });
+    // A try from a list is sent once: a discovery only reads, so a repeat protects nothing and the next entry is the better one.
+    out = await env.send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", document: cut.document, endpoint }, released: () => {}, ...(tries.length > 1 && { once: true as const }) });
     if (out.kind === "done") break;
     last = out;
-    if (out.kind === "refused" && out.status === 503) unreachable++;
-    failures.push({ endpoint, why: `${discoveryWhy(out)}${out.kind === "refused" && out.status === 503 && !isAddress(endpoint) ? nameHint(endpoint) : ""}` });
+    if (unavailable(out)) unreachable++;
+    failures.push({ endpoint, why: `${discoveryWhy(out)}${unavailable(out) && !isAddress(endpoint) ? nameHint(endpoint) : ""}` });
     if (!movesOn(out)) break;
   }
   if (out === undefined || out.kind !== "done") {
