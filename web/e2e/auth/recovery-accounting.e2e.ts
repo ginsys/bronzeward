@@ -170,7 +170,7 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
   const attemptForm = () => $('section[aria-label="Account for an attempt"]').$('form[aria-label="Record accounting"]');
 
   // The seeded attempt's deadline is a minute ahead: First is the first read after it, Later is a read after that.
-  it("an attempt's accounting is refused for a start that is not the first read after the deadline, then recorded once for the right one", async function () {
+  it("an attempt's accounting marks the first read after the deadline, keeps a later read off with its reason, and is recorded once for the marked one", async function () {
     this.timeout(240_000);
     await start();
     const att = await attempt();
@@ -180,18 +180,16 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await expect(form).toBeExisting({ wait: 30_000 });
     await expect(form.$('[data-testid="settle-judgment"]')).toHaveText(expect.stringContaining("no copy of the request this attempt sent, whose response was lost"), { wait: 30_000 });
     const route = `/operations/${seed.operation}/attempts/${att.id}/accountings`;
-    await choose(form, "start", obs.machine.later);
+    // The page names the start the server accepts: the first read after the attempt's own deadline is marked, a later read is off.
+    const later = form.$(`input[name="start"][value="${obs.machine.later}"]`);
+    await expect(later).toBeDisabled({ wait: 30_000 });
+    await expect(later.$("..")).toHaveText(expect.stringContaining("it is not the first read after the transport deadline"));
+    await expect(form.$(`input[name="start"][value="${obs.machine.first}"]`).$("..")).toHaveText(expect.stringContaining("(the first read after the deadline)"));
+    await choose(form, "start", obs.machine.first);
     await choose(form, "end", obs.machine.end);
     await form.$("button=Record accounting").click();
-    await expect(form.$('[data-testid="settle-answer"]')).toHaveText(expect.stringContaining("not the first successful read"), { wait: 60_000 });
-    await expect(form.$('[data-testid="write-next"]')).toHaveText(expect.stringContaining("Choose the first read of the machine after that deadline"), { wait: 20_000 });
-    expect(await posts(route)).toHaveLength(1);
-    expect((await attempt()).accounting).toBeNull();
-    // A second press under a new key, with the right start.
-    await choose(form, "start", obs.machine.first);
-    await form.$("button=Record accounting").click();
     await expect(form.$('[data-testid="settle-answer"]')).toHaveText(expect.stringMatching(/^Recorded\. Attempt \S+ is accounted for; the operation's state is unchanged\./), { wait: 60_000 });
-    expect(await posts(route)).toHaveLength(2);
+    expect(await posts(route)).toHaveLength(1);
     expect((await attempt()).accounting).not.toBeNull();
     // The reread that follows the answer shows the attempt accounted: the answer stays, and the form is off, not offered again.
     await absent(async () => !(await form.$('[data-testid="settle-answer"]').getText()).startsWith("Recorded."), "the answer dropped by the reread");
@@ -199,7 +197,7 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     expect(await form.$("button=Record accounting").isEnabled()).toBe(false);
     await browser.refresh();
     await expect($('[data-testid="recovery-operation-state"]')).toBeExisting({ wait: 30_000 });
-    await absent(async () => (await posts(route)).length > 2, "an accounting sent again after the reload");
+    await absent(async () => (await posts(route)).length > 1, "an accounting sent again after the reload");
     expect((await $$('form[aria-label="Record accounting"]')).length).toBe(0);
   });
 });
