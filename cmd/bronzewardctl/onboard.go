@@ -236,7 +236,7 @@ func (e *env) clusterOnboard(args []string) (err error) {
 	}
 	var res discover.Result
 	if err := e.cancellable("the cluster's Talos nodes", func(ctx context.Context) (err error) {
-		res, err = discoverCluster(ctx, a.config, a.talosContext, a.endpoint)
+		res, a.endpoint, err = discoverCluster(ctx, a.config, a.talosContext, a.endpoint)
 		return err
 	}); errors.Is(err, discover.ErrNoEndpoint) {
 		return usageError{errors.New("the talosconfig names no endpoint: give --endpoint <host|ip[:port]>")}

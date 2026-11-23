@@ -423,13 +423,13 @@ func (f *apiFake) operation(w http.ResponseWriter, r *http.Request, rest string)
 
 // onboardEnv is one test's world.
 type onboardEnv struct {
-	t      *testing.T
-	api    *apiFake
-	file   string // the talosconfig
-	result discover.Result
-	answered string // the endpoint the stub says answered, as discoverCluster returns it
-	calls  []string // "context|endpoint" of each discovery call
-	given  [][]byte
+	t        *testing.T
+	api      *apiFake
+	file     string // the talosconfig
+	result   discover.Result
+	answered string   // the endpoint the stub says answered, as discoverCluster returns it
+	calls    []string // "context|endpoint" of each discovery call
+	given    [][]byte
 }
 
 var obTwoMembers = discover.Result{
@@ -454,7 +454,8 @@ func newOnboard(t *testing.T) *onboardEnv {
 	old, oldMargin := discoverCluster, leaseMargin
 	discoverCluster = func(_ context.Context, tc []byte, contextName, endpoint string) (discover.Result, string, error) {
 		e.calls, e.given = append(e.calls, contextName+"|"+endpoint), append(e.given, tc)
-		return e.result, e.answered, nil
+		// Like discoverEach: a typed endpoint is the one named, else the stub's own answer.
+		return e.result, cmp.Or(endpoint, e.answered), nil
 	}
 	leaseMargin = 0
 	t.Cleanup(func() { discoverCluster, leaseMargin = old, oldMargin })

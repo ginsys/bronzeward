@@ -38,32 +38,37 @@ var (
 // command (Ctrl-C), which ends the list. An endpoint that fails alone gives its own error; several give one
 // error that names each with its own cause. A context that lists none is discover.ErrNoEndpoint, and one the
 // file does not hold is discover.ErrUnknownContext, both before any read.
-func discoverEach(ctx context.Context, talosconfig []byte, contextName, endpoint string) (discover.Result, error) {
+//
+// The string it returns is the endpoint the commands it prints, or the run's rerun, select with --endpoint: the
+// typed one; the listed one that answered when several were listed, so a repeat does not wait out the silent
+// ones; "" for a list of one, which needs no flag.
+func discoverEach(ctx context.Context, talosconfig []byte, contextName, endpoint string) (discover.Result, string, error) {
 	if endpoint != "" {
-		return discoverTyped(ctx, talosconfig, contextName, endpoint)
+		res, err := discoverTyped(ctx, talosconfig, contextName, endpoint)
+		return res, endpoint, err
 	}
 	listed, err := discover.Endpoints(talosconfig, contextName)
 	if err != nil {
-		return discover.Result{}, err
+		return discover.Result{}, "", err
 	}
 	if len(listed) == 0 {
-		return discover.Result{}, discover.ErrNoEndpoint
+		return discover.Result{}, "", discover.ErrNoEndpoint
 	}
 	var failed []string
 	for _, ep := range listed {
 		res, err := discoverListed(ctx, talosconfig, contextName, ep)
 		if err == nil {
-			return res, nil
+			if len(listed) == 1 {
+				return res, "", nil
+			}
+			return res, ep, nil
 		}
-		if ctx.Err() != nil {
-			return discover.Result{}, err
-		}
-		if len(listed) == 1 {
-			return discover.Result{}, err
+		if ctx.Err() != nil || len(listed) == 1 {
+			return discover.Result{}, "", err
 		}
 		failed = append(failed, client.Printable(ep)+": "+err.Error())
 	}
-	return discover.Result{}, fmt.Errorf("no endpoint of the talosconfig gave the cluster: %s", strings.Join(failed, "; "))
+	return discover.Result{}, "", fmt.Errorf("no endpoint of the talosconfig gave the cluster: %s", strings.Join(failed, "; "))
 }
 
 // maxTalosconfig bounds the file read: a talosconfig is a few KiB.
@@ -100,7 +105,7 @@ func (e *env) clusterDiscover(args []string) error {
 	}
 	var res discover.Result
 	if err := e.cancellable("the cluster's Talos nodes", func(ctx context.Context) (err error) {
-		res, err = discoverCluster(ctx, b, talosContext, endpoint)
+		res, endpoint, err = discoverCluster(ctx, b, talosContext, endpoint)
 		return err
 	}); errors.Is(err, discover.ErrUnknownContext) {
 		return usageError{errors.New("--talos-context names a context that the talosconfig does not hold")}
