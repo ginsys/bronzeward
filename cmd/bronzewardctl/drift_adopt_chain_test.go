@@ -23,6 +23,8 @@ type adoptChain struct {
 	// pubUnknown answers the publication with a redirect, which the client cannot read: its outcome is unknown.
 	pubUnknown  bool
 	read, moved bool
+	// machines, when set, is the GET /machines answer, for a machine given by name.
+	machines string
 	// identity, when set, is the GET /identity answer instead of a person who is author and publisher.
 	identity string
 	// identityEpoch, when set, is the epoch of the GET /identity answer, so a client whose context
@@ -113,6 +115,9 @@ func (f *adoptChain) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		fmt.Fprint(w, `{"kind":"human","principal":"h_BWSYNTH","roles":["author","publisher"]}`)
+	case path == "/machines" && f.machines != "":
+		w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
+		fmt.Fprint(w, f.machines)
 	case strings.HasPrefix(path, "/ingestions"), strings.HasPrefix(path, "/operations/op_BWSYNTH-ing"):
 		f.imp.ServeHTTP(w, r)
 	case strings.HasSuffix(path, "/publications") && r.Method == http.MethodPost && f.pubUnknown:
