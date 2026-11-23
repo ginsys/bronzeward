@@ -123,7 +123,7 @@ func Compile(in Input) (Compiled, error) {
 	if err := notOverriddenByPatch(filled.outcomes, len(in.Fragments)); err != nil {
 		return Compiled{}, err
 	}
-	filled.hostname, filled.origins = c.hostname, c.origins
+	filled.hostname, filled.origins = c.hostname, origins(sources)
 	return filled, nil
 }
 
@@ -203,6 +203,17 @@ func compile(in Input, sources []Source, decide bool) (Compiled, error) {
 		}
 		flips = append(flips, fm)
 	}
+	var hostname Hostname
+	if decide {
+		if hostname, err = decideHostname(in.Name, m, tm, flips); err != nil {
+			return Compiled{}, fidelity()
+		}
+		if hostname.Source == HostnameMachineName {
+			// The fill comes before the output check (steps 5a and 7): the second compile, over the
+			// patch, checks and validates everything, and a copy of the literal it replaces is none.
+			return Compiled{hostname: hostname}, nil
+		}
+	}
 	pre := prefixes{sources: sources, real: real, trace: trace, first: first, hosts: hs}
 	outcomes := make([]outcome, len(ts))
 	for i, t := range ts {
@@ -251,12 +262,7 @@ func compile(in Input, sources []Source, decide bool) (Compiled, error) {
 	// The kept outcomes hold redacted paths only: fmt reaches an unexported field by reflection,
 	// past Compiled's own placeholder.
 	red := newRedactor(sources)
-	c := Compiled{m: m, origins: origins(sources), formOnly: sameInForm(real[0], m)}
-	if decide {
-		if c.hostname, err = decideHostname(in.Name, m, tm, flips); err != nil {
-			return Compiled{}, fidelity()
-		}
-	}
+	c := Compiled{m: m, origins: origins(sources), formOnly: sameInForm(real[0], m), hostname: hostname}
 	if text, err := redactedText(m.bytes(), hosts, outcomes, red); err != nil {
 		c.redactErr = err
 	} else {
