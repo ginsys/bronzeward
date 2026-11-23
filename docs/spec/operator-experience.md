@@ -1449,7 +1449,8 @@ as typed (a padded subject records a new human and revokes that one, leaving the
 is always the value shown. No valid target falls outside the rule: an OpenID Connect subject is ASCII by definition
 (OIDC Core, ID Token; recalled, not read), the identity is the server's own `idn_` identifier and the issuer must be
 the configured one. The command refuses the same values before its question, with exit 2 and the same reason, so for
-every value it asks about, the text between the quotes is the value a `y` sends and no escape is ever written. The
+every value it asks about, the printed text is the value a `y` sends in shell quoting, so two different values never
+print alike (a single quote prints as `'\''`). The
 command prints the same limits, then asks `Revoke <the identity, or the subject of the issuer> in <context>? A
 revocation is permanent [y/N]`; only `y` or `yes` sends, and `--no-input` refuses, with no `--yes`. The reasons of
 the accounting decision above hold unchanged: a typed copy proves a person copied a value, and the evidence on the
