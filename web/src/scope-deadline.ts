@@ -14,9 +14,10 @@ type Operation = components["schemas"]["OperationBody"];
 
 export const MAX_OPERATIONS = 8;
 
-// `again` reads once more each time it changes. Undefined until the first answer, or while the entry or the settings are not read.
+// `again` reads once more each time it changes, and so does the shell's own re-read (a reconnection, "Show current state"): the form's
+// observations follow that counter, so a deadline that did not would combine fresh observations with an obsolete one. Undefined until the first answer, or while the entry or the settings are not read.
 export function useScopeDeadline(machine: string, stoppedAt: string | undefined, maxSeconds: number | undefined, again: number): Deadline | undefined {
-  const { client, settle, undropped } = useReads();
+  const { client, settle, undropped, again: shell } = useReads();
   const [deadline, setDeadline] = useState<Deadline | undefined>();
   useEffect(() => {
     if (stoppedAt === undefined || maxSeconds === undefined) return;
@@ -46,6 +47,6 @@ export function useScopeDeadline(machine: string, stoppedAt: string | undefined,
       if (current()) setDeadline({ at });
     })();
     return () => { live = false; };
-  }, [machine, stoppedAt, maxSeconds, again]);
+  }, [machine, stoppedAt, maxSeconds, again, shell]);
   return deadline;
 }
