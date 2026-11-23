@@ -386,12 +386,18 @@ secret: a value the base held as a reference stays a reference in the base or
 in the fragment that took it, which is source text like any other. The rule is
 checked on stored source text in the draft transaction (T1), with no provider
 read. A document that breaks it is `422 validation-failed` with rule
-`import-base`, naming the machine and the kind of violation (a document, a key
-or a reference row the base does not hold) and no path, key or name from the
-body: this check resolves no secret, so it cannot tell whether an added key or
-document name is an earlier extracted value, and compilation §3.6 withholds
-paths for the same reason. A machine with no `Applied` release is `422` too: it
-has no base to thin, and its import comes by ingestion.
+`import-base`, naming the machine and one kind of violation and no path, key or
+name from the body. The kinds are `added` (a document, key, leaf or value the
+base does not hold, which covers a key renamed or moved to another path),
+`list` (a list neither kept whole nor dropped whole) and `reference` (a
+reference row the base does not hold, or one with another name or version). The
+refusal names no path because this check resolves no secret, so it cannot tell
+whether an added key or document name is an earlier extracted value, and
+compilation §3.6 withholds paths for the same reason. A machine with no
+`Applied` release is `422` too: it has no base to thin, and its import comes by
+ingestion. The stored revision carries the step 2a record of the `Applied`
+import base (the name and whether the removed document was the fill's own)
+unchanged: the route removes no hostname document and compares no name.
 
 **What gates the write: the typed equivalence check, at publication.** The
 draft transaction proves that nothing was added, and nothing more. Whether the
@@ -2358,7 +2364,7 @@ API revisions:
 | 16 | the `hostname` rule of `422 validation-failed` on publication, with a release compiling a machine's name as its hostname where nothing sets one (§9.2, §3.5, compilation §6.1 item 6) |
 | 17 | the name form of `409 stale-input` from the `ingest` draft transaction, with `expected` and `actual` as machine names, each a string or `null`, and `formOnly` true for a machine whose import removed the fill's own `HostnameConfig` while its name is unchanged (§4.2, choice §17.45, compilation §2.3 step 2a, §6.1 item 5) |
 
-A second part is specified and not yet served, taking a revision in the change that serves it: the thinner import base, with `PUT` and `DELETE /drafts/{id}/import-bases/{machine}`, the `import-base` and `equivalence` rules of `422 validation-failed`, and the `equivalence` member of a release machine and of an `apply-config` plan (§3.2, §9.2, choice §17.50; ginsys/bronzeward#918 specifies it, an implementation issue serves it).
+One further part is specified and not yet served, taking the next revision in the change that serves it: the thinner import base, with `PUT` and `DELETE /drafts/{id}/import-bases/{machine}`, the `import-base` and `equivalence` rules of `422 validation-failed`, and the `equivalence` member of a release machine and of an `apply-config` plan (§3.2, §9.2, choice §17.50; ginsys/bronzeward#918 specifies it, an implementation issue serves it).
 
 ### 9.2 Resources and routes
 
@@ -4228,7 +4234,7 @@ or Desired change; it does not erase earlier evidence.
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
 | Draft | The machine's name is not the one ingestion used when it removed a filled hostname (§3.2, compilation §2.3 step 2a) | `409 stale-input` naming the machine, expected and actual name; claim abandoned | claim row; orphans |
 | Publish | A covered machine's name changed since the snapshot (§4.2) | operation `failed`, `409 stale-input` | operation, act |
-| Draft update | A thinner import base (§3.2) that adds a leaf, a value or a reference its machine's `Applied` import base lacks, or for a machine with no `Applied` release | `422 validation-failed`, rule `import-base`, naming the machine and the kind of violation, never a path from the body | nothing |
+| Draft update | A thinner import base that breaks the subset rule of §3.2 (every kind it lists), or for a machine with no `Applied` release | `422 validation-failed`, rule `import-base`, naming the machine and the kind of violation, never a path from the body | nothing |
 | Publish | A machine whose entry carries an import base under the check (§3.2, compilation §6.2): the typed equivalence check finds it different (`not-equal`) or cannot decide, a pending machine or one holding an adopted baseline its `Applied` release did not compose included (`cannot-decide`) (compilation §6.2) | operation `failed`, `422 validation-failed`, rule `equivalence`, naming the machine and, for `not-equal`, the paths | operation, act |
 | Publish | The `Applied` import base of a machine with an entry under the check (§4.2, compilation §6.2) is no longer the one the entry was written from (§4.2) | operation `failed`, `409 stale-input` naming the machine and both revisions | operation, act |
 | Publish | A hostname filled from a machine's name that another machine holds explicitly (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
