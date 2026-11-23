@@ -33,12 +33,14 @@ export scenario=s5-cli-test
 # The functions under test, cut from the scenario by name. A name that is not cut fails the run at once.
 s5=$repo_src/fixtures/scenarios/s5
 ctl_rm_text=$(sed -n '/^ctl_rm() {/,/^}/p' "$s5")
+recorded_text=$(sed -n '/^unseen_recorded() {/,/^}/p' "$s5")
 unseen_text=$(sed -n '/^cli_unseen() {/,/^}/p' "$s5")
 refusal_text=$(sed -n '/^unfreeze_refused_cli() {/,/^}/p' "$s5")
 eval "$ctl_rm_text"
+eval "$recorded_text"
 eval "$unseen_text"
 eval "$refusal_text"
-for fn in ctl_rm cli_unseen unfreeze_refused_cli; do
+for fn in ctl_rm unseen_recorded cli_unseen unfreeze_refused_cli; do
   declare -F "$fn" >/dev/null || { echo "FAIL $fn was not found in fixtures/scenarios/s5"; exit 1; }
 done
 
