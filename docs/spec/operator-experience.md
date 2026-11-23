@@ -1595,13 +1595,27 @@ off it: the release list is filtered in the browser (G9 of the
 **Connect a cluster** is `cluster onboard` ([§5.2](#52-inventory)) as a page, reached from the
 **Connect a cluster** button of the Machines and Clusters pages for an `author`. The operator chooses
 the cluster's talosconfig, and may name a context (else the current one) and an endpoint (else the
-context's first), which may be an address or a DNS name: before the button the page says which
-endpoint it will use (the context's first, and how many it lists), the server resolves a name once,
+context's endpoints, in order), which may be an address or a DNS name: before the button the page says
+which endpoints it will try (the context's, in order, and how many it lists; a typed endpoint is alone), the server resolves a name once,
 and the page then says what it resolved the name to; a name the server cannot use (it does not
 resolve, or the nodes' certificates do not list the name) is a refusal that says the nodes'
 certificates may not list the name and asks for the name in `machine.certSANs` of the control-plane
-machines, or a control-plane node's address. The page tries only the first endpoint; trying each in
-order is a separate change. The page cuts the file to that one context in memory, reads the cluster's members
+machines, or a control-plane node's address. The page tries the context's endpoints in order and stops
+at the first that gives the cluster; a typed endpoint is the only one tried. While it tries a list it
+says which endpoint it is on and its place in the list, and **Stop** ends the list after the try in
+flight (a request already sent cannot be taken back). An endpoint that does not answer, or that is no
+control plane, moves on to the next. An answer that every endpoint would give the same way stops the
+list: a first key the server refuses, a malformed request, a cluster with too many members, a lost
+sign-in. When every endpoint fails the page names each one with its own answer. The server answers a first
+key that every node refuses as it answers an unreachable endpoint (`talos-access-unavailable`), so
+such a key is tried at each endpoint, and the answers say which. The page states no wait, because it
+depends on how an endpoint fails, and these are the bounds. An endpoint that does not answer costs
+about 10 seconds: the server reads the first key under `nodeTimeout` (`internal/api/node.go`), so three
+such endpoints cost about 30 seconds. An endpoint that answers and then stalls, or a name whose lookup
+stalls, costs up to 60 seconds, the whole-call deadline `discoverDeadline` (`internal/api/discover.go`),
+so three such endpoints cost up to 3 minutes. The command's own bound for one endpoint is 15 seconds for
+the lookup, the dial and the first reads (`startTimeout` in `internal/talos/discover`), then 10 seconds
+for each address of each member (`memberTimeout`). The page cuts the file to that one context in memory, reads the cluster's members
 through `POST /discoveries`, and shows the Talos version, the contract and the members, with a
 name and a Kubernetes endpoint (the cluster's own where its control-plane members agree on one, else the first control-plane member's address) to confirm. It refuses an
 unsupported contract and a cluster where no control-plane member answered before anything is
