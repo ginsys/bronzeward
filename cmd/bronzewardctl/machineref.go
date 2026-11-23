@@ -92,7 +92,7 @@ func (e *env) writeNamed(ref, cluster string, prep func(*client.Client) error, b
 func machineByName(c *client.Client, ref, cluster string) (string, epochBind, error) {
 	if isMachineID(ref) {
 		if cluster != "" {
-			return "", epochBind{}, usageError{fmt.Errorf("--cluster narrows a name; an identifier needs none; nothing was sent")}
+			return "", epochBind{}, usageError{fmt.Errorf("--cluster narrows a name; an identifier needs none")}
 		}
 		return ref, epochBind{}, nil
 	}
