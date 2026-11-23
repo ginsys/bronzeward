@@ -337,6 +337,9 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	if ref, err := checkInputs(j, u, draftState, draftRev, heads, locked, bases, scopes, names, held, recovery); ref != nil || err != nil {
 		return "", ref, err
 	}
+	if ref, err := checkHostnameSwap(ctx, tx, j.cluster, u); ref != nil || err != nil {
+		return "", ref, err
+	}
 
 	for _, m := range u.machines {
 		if ref, err := a.publicationEvidence(ctx, tx, j, m.machine, m.observation, u.renderer.Contract, true); ref != nil || err != nil {
