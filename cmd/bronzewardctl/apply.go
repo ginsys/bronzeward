@@ -196,7 +196,9 @@ func applyStanding(p *apitypes.PositionBody, release string) (plan, line string)
 		return "", "stopped: the machine is frozen; an approver can unfreeze it"
 	case p.Step == apitypes.PositionBodyStepAwaitingApproval && mine:
 		return p.Plan.Id, ""
-	case m.Applied != nil && m.Applied.Release == release && !m.PendingConvergence:
+	// The apply page's rule (rowOf in web/src/apply.ts): this release is what the machine runs, or it is the Desired one
+	// and leaves the Applied configuration unchanged.
+	case m.Applied != nil && !m.PendingConvergence && (m.Applied.Release == release || (m.Desired != nil && *m.Desired == release)):
 		return "", "applied: this release is what the machine runs"
 	}
 	return "", ""

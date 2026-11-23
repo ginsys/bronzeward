@@ -11,10 +11,41 @@ import (
 	"testing"
 
 	"github.com/ginsys/bronzeward/internal/client"
+	"github.com/ginsys/bronzeward/internal/client/apitypes"
 )
 
-// An approval line counts a later plan as of unknown outcome only where an attempt of it may have committed: a
-// set-aside write with no such attempt (a 412 epoch mismatch), a write not sent and a refusal are not.
+// A machine stands applied by the apply page's rule too (web/src/apply.ts rowOf): Applied is set, nothing is pending,
+// and the release is the Applied one or the Desired one (it leaves the Applied configuration unchanged).
+func TestApplyStandingUnchangedMachine(t *testing.T) {
+	const rel, older = "rel_BWSYNTH", "rel_older"
+	position := func(applied *string, desired string, pending bool) *apitypes.PositionBody {
+		p := &apitypes.PositionBody{Step: apitypes.PositionBodyStepNeedsPlan}
+		p.Machine.Desired, p.Machine.PendingConvergence = &desired, pending
+		if applied != nil {
+			p.Machine.Applied = &apitypes.Applied{Release: *applied}
+		}
+		return p
+	}
+	o, r := older, rel
+	for _, c := range []struct {
+		name string
+		p    *apitypes.PositionBody
+		want bool // applied
+	}{
+		{"older applied, this release desired, nothing pending", position(&o, rel, false), true},
+		{"older applied, this release desired, pending", position(&o, rel, true), false},
+		{"older applied, another release desired", position(&o, older, false), false},
+		{"this release applied, nothing pending", position(&r, rel, false), true},
+		{"no Applied state", position(nil, rel, false), false},
+	} {
+		if _, line := applyStanding(c.p, rel); (line != "") != c.want || (c.want && !strings.HasPrefix(line, "applied:")) {
+			t.Errorf("%s: line %q, want applied=%v", c.name, line, c.want)
+		}
+	}
+}
+
+// A failed approval is said to have approved nothing only where no attempt of it may have committed: a set-aside
+// write with no such attempt (a 412 epoch mismatch), a write not sent and a refusal.
 func TestMayHaveCommitted(t *testing.T) {
 	for _, c := range []struct {
 		name string
