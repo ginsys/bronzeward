@@ -138,6 +138,14 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	for _, ex := range exs {
 		decl.References[ex.name] = Reference{Kind: ex.kind, Version: 1}
 	}
+	// The filled document leaves the stream here: the guard and the validation read the stored stream, so
+	// the declarations and the holders move with their documents, and a refusal is given the input's
+	// positions again on its way out.
+	if dropAt >= 0 {
+		docs = slices.Delete(docs, dropAt, dropAt+1)
+		decl.Embedded, declared = shiftEmbedded(decl.Embedded, dropAt)
+		removed = storedHolders(removed, dropAt)
+	}
 	out, back, err := encodeStable(docs)
 	if err != nil {
 		return nil, err
@@ -145,21 +153,12 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	seam.At("substitute") // step 4 done: the candidate document and its declarations built, not guarded
 	if guarded {
 		if err := guard(back, exs, declared); err != nil {
-			return nil, from(err, guardSources(back, exs, declared, err))
+			return nil, inInput(from(err, guardSources(back, exs, declared, err)), dropAt)
 		}
 	}
 	misplaced := map[string]bool{}
 	if err := validateRefs(back, decl, misplaced); err != nil {
-		return nil, from(err, validateSources(exs, removed, misplaced, err))
-	}
-	// The guard and the validation ran on the stream with its positions, so every refusal names the input's.
-	// Only what is stored loses the filled document, and its later embedded declarations move with their
-	// documents.
-	if dropAt >= 0 {
-		if out, _, err = encodeStable(slices.Delete(docs, dropAt, dropAt+1)); err != nil {
-			return nil, err
-		}
-		decl.Embedded = shiftEmbedded(decl.Embedded, dropAt)
+		return nil, inInput(from(err, validateSources(exs, removed, misplaced, err)), dropAt)
 	}
 	c := &Candidate{docs: out, decl: decl, filled: filled}
 	for _, ex := range exs {

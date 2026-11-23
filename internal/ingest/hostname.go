@@ -1,6 +1,10 @@
 package ingest
 
-import "go.yaml.in/yaml/v3"
+import (
+	"errors"
+
+	"go.yaml.in/yaml/v3"
+)
 
 // Filled records compilation.md §2.3 step 2a for one machine: the stored stream no longer holds the
 // HostnameConfig document whose hostname equals Name, the machine's name when the request read it, and
@@ -38,22 +42,72 @@ func filledHostname(docs []*yaml.Node, name string) (int, Filled) {
 	return -1, Filled{}
 }
 
-// shiftEmbedded renumbers the embedded declarations after step 2a removed the document at dropAt: the
-// stored stream has one document fewer, so a declaration of a later document names it one position lower,
-// and one inside the removed document is dropped with it. Marks and every refusal keep the positions of
-// the input; only what is stored moves.
-func shiftEmbedded(list []Embedded, dropAt int) []Embedded {
+// Step 2a leaves the stream one document shorter from the document at dropAt on. Marks and every
+// refusal keep the positions of the input; what the stream's checks and what is stored read are the
+// stream's own. toStored and toInput translate a document path between the two.
+
+// toStored is the path of an input document in the shortened stream; ok is false for the removed one.
+func toStored(s string, dropAt int) (string, bool) {
+	p, err := ParsePath(s)
+	switch {
+	case err != nil || p.Doc < dropAt:
+		return s, true
+	case p.Doc == dropAt:
+		return "", false
+	}
+	p.Doc--
+	return p.String(), true
+}
+
+// toInput is the path of a document of the shortened stream, as the input numbers it.
+func toInput(s string, dropAt int) string {
+	p, err := ParsePath(s)
+	if err != nil || p.Doc < dropAt {
+		return s
+	}
+	p.Doc++
+	return p.String()
+}
+
+// shiftEmbedded renumbers the embedded declarations for the shortened stream, dropping one inside the
+// removed document; the second result is the same set by path, for the guard.
+func shiftEmbedded(list []Embedded, dropAt int) ([]Embedded, map[string]string) {
 	var out []Embedded
+	declared := map[string]string{}
 	for _, e := range list {
-		p, err := ParsePath(e.Path)
-		if err != nil || p.Doc == dropAt {
+		path, ok := toStored(e.Path, dropAt)
+		if !ok {
 			continue
 		}
-		if p.Doc > dropAt {
-			p.Doc--
-			e.Path = p.String()
-		}
+		e.Path = path
 		out = append(out, e)
+		if p, err := ParsePath(path); err == nil {
+			declared[p.String()] = e.Format
+		}
+	}
+	return out, declared
+}
+
+// inInput gives a refusal of the shortened stream the input's positions.
+func inInput(err error, dropAt int) error {
+	var r *Refusal
+	if dropAt >= 0 && errors.As(err, &r) {
+		for i, s := range r.Paths {
+			r.Paths[i] = toInput(s, dropAt)
+		}
+	}
+	return err
+}
+
+// storedHolders is removed, the holders of embedded documents, for the shortened stream.
+func storedHolders(removed [][]string, dropAt int) [][]string {
+	out := make([][]string, len(removed))
+	for k, hs := range removed {
+		for _, h := range hs {
+			if s, ok := toStored(h, dropAt); ok {
+				out[k] = append(out[k], s)
+			}
+		}
 	}
 	return out
 }
