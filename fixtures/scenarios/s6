@@ -129,40 +129,13 @@ cli_account() {
   ctl "$1" "$2" recovery account "$op" "$attempt" --start "$start" --end "$end" \
     --explanation "$mutation_ref: the node was cut off" <<<y
 }
-# Mode web: web_act <name> <act> <operation> <text> runs fixture/acts.e2e.ts through wdio, which signs the page in as h-recovery and makes
-# the act (account: start and end are the ones just chosen; resolve: the text is the reason). The token is minted now and reaches the
-# driver's environment only, never a command line; the driver's output is kept as web-<name>.txt. web_kept <name> <ERE> reads it.
-web_ready() {
-  local repo=$here/../..
-  [ -z "${web_ok:-}" ] || return 0
-  need node npx
-  { [ -f "$repo/web/dist/index.html" ] && [ -d "$repo/web/node_modules" ]; } || die "mode web needs web/dist and web/node_modules: run mise run web"
-  check "$mutation_ref" 'the web host built from this checkout' go -C "$repo" build -o bin/webhost ./fixtures/webhost
-  web_ok=1
-}
-# The canary below is the prefix wdio.conf.ts demands, written in two parts: the prefix itself is the leak scan's pattern, and a literal
-# in this file would be found in the fixtures diff that bin/evidence bundles. The driver's browser cache goes under TMPDIR, which is on disk
-# unless the caller set BW_WDIO_CACHE (the mise browser tasks set the same default).
-web_act() {
-  local name=$1 tok rc=0
-  web_ready
-  tok=$(mint h-recovery) || return 1
-  keep_secret "$tok"
-  (
-    cd -- "$here/../../web" &&
-      BW_FIXTURE_TOKEN=$tok BW_FIXTURE_API=http://127.0.0.1:$SERVER_B_PORT BW_FIXTURE_ACT=$2 BW_FIXTURE_OP=$3 BW_FIXTURE_TEXT=$4 \
-        BW_FIXTURE_START=${start:-} BW_FIXTURE_END=${end:-} BW_BROWSERS=chrome BW_WEB_CANARY=BWSYNTH""-fixture-web BW_WDIO_CACHE=${BW_WDIO_CACHE:-${TMPDIR:-/tmp}} \
-        timeout 600 npx wdio run e2e/fixture.conf.ts
-  ) >"$EV/web-$name.txt" 2>&1 || rc=$?
-  return "$rc"
-}
-web_kept() { grep --quiet --extended-regexp -- "$2" "$EV/web-$1.txt"; }
+# Mode web: the helpers web_act and web_kept are in common.sh; the act's variables are BW_FIXTURE_OP, _START, _END and _TEXT (fixture/acts.e2e.ts).
 # account_ok <name>: h-recovery's accounting of op's first attempt is recorded.
 account_ok() {
   if [ "$s6_mode" = cli ]; then
     cli_account "$1" h-recovery && cli_kept "$1" '^Recorded\. Attempt [a-z]+_[a-z2-7]+ of operation [a-z]+_[a-z2-7]+ is accounted for by decision\.'
   elif [ "$s6_mode" = web ]; then
-    web_act "$1" account "$op" "$mutation_ref: the node was cut off" && web_kept "$1" 'ACT account: answer: Recorded\.' && web_kept "$1" '1 passing'
+    web_act "$1" account BW_FIXTURE_OP="$op" BW_FIXTURE_TEXT="$mutation_ref: the node was cut off" BW_FIXTURE_START="${start:-}" BW_FIXTURE_END="${end:-}" && web_kept "$1" 'ACT account: answer: Recorded\.' && web_kept "$1" '1 passing'
   else
     account "$1" 201 - '.attempt | type == "string"'
   fi
@@ -183,7 +156,7 @@ resolve_held() {
     cli_ready "$mutation_ref" h-recovery h-approver
     ctl resolve h-recovery recovery resolve "$held" --reason "$1" && cli_kept resolve '^Operation [a-z]+_[a-z2-7]+ resolved \(act [a-z]+_[a-z2-7]+\): cancelled\.'
   elif [ "$s6_mode" = web ]; then
-    web_act resolve resolve "$held" "$1" && web_kept resolve 'ACT resolve: answer: Resolved:' && web_kept resolve '1 passing'
+    web_act resolve resolve BW_FIXTURE_OP="$held" BW_FIXTURE_TEXT="$1" && web_kept resolve 'ACT resolve: answer: Resolved:' && web_kept resolve '1 passing'
   else
     resolve "$1"
   fi
