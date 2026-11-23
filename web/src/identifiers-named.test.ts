@@ -283,6 +283,11 @@ describe("the node identifier is cut where a list shows it and labelled on the m
     expect(text()).toBe("node 4c1f…");
     expect(titles()).toEqual([whole]);
   });
+  test("a value with a control character is shown as unknown and is not the title either", async () => {
+    await mount(h(NodeCell, { m: { hardware: { talosNodeId: "abc\u202Eevil", smbiosUuid: null } } as never }));
+    expect(text()).toBe("node unknown");
+    expect(titles()).toEqual([]);
+  });
   test("a short value is shown as it is", async () => {
     await mount(h(NodeCell, { m: { hardware: { talosNodeId: "n1", smbiosUuid: null } } as never }));
     expect(text()).toBe("node n1");

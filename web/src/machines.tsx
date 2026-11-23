@@ -65,10 +65,11 @@ export function observed(m: Machine, now: number): string {
 }
 
 // G8: the node ID when the machine was recorded by it, else its SMBIOS UUID.
+const safeValue = (v: unknown): string => (typeof v === "string" && SAFE.test(v) ? v : "unknown");
 // A machine's page keeps the whole value, labelled with what it is: a person compares it with what Talos itself reports.
-export const node = (m: Machine) => (m.hardware.talosNodeId != null ? `Talos node ID ${m.hardware.talosNodeId}` : `SMBIOS UUID ${m.hardware.smbiosUuid ?? "unknown"}`);
+export const node = (m: Machine) => (m.hardware.talosNodeId != null ? `Talos node ID ${safeValue(m.hardware.talosNodeId)}` : `SMBIOS UUID ${safeValue(m.hardware.smbiosUuid)}`);
 // A list's cell: nobody acts on the whole opaque value there, so it is cut (`node 4c1f…`) and the whole is the title attribute.
-export const NodeCell = ({ m }: { m: Machine }) => <span title={m.hardware.talosNodeId ?? m.hardware.smbiosUuid ?? undefined}>{nodeShort(m.hardware)}</span>;
+export const NodeCell = ({ m }: { m: Machine }) => <span title={((v) => (typeof v === "string" && SAFE.test(v) ? v : undefined))(m.hardware.talosNodeId ?? m.hardware.smbiosUuid)}>{nodeShort(m.hardware)}</span>;
 // A release as its title (the identifier is the title attribute): `Named` reads it through the page's store.
 export const release = (id: string | null) => <Named id={id} />;
 

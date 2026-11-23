@@ -2099,7 +2099,7 @@ one. The rule is one for both clients:
    `subject` lacking what its kind needs leaves the shortened identifier, and an unsafe draft title reads "Untitled draft" (rule 3). A view reads at most four title bodies
    at a time, each distinct one once. A view that names a release, plan, operation, draft, import or cluster by its
    identifier shows the same title, the identifier as the title attribute and the shortened identifier where the read
-   does not answer ([#996](https://github.com/ginsys/bronzeward/issues/996)): a plan's release, committed operation and
+   does not answer (a cluster reads "This cluster" there) ([#996](https://github.com/ginsys/bronzeward/issues/996)): a plan's release, committed operation and
    change, a release's draft and publication, an import's draft and operation, the plans, imports and dependency
    tables, an act's subjects, an operation's Subject cell (its machine, plan, draft and import), the applied release of
    its outcome line, the review's release and the publication's result line and progress heading. A
