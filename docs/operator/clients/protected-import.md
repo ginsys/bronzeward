@@ -64,6 +64,7 @@ Steps:
 | You see | What it establishes | What to do |
 |---|---|---|
 | Command line: "…The draft changed after this import started, so the import was not applied and its claim is abandoned. Read the draft's current revision, which keeps its ETag, then import again:" (exit 4) | Another write moved the draft while the import ran. The import applied nothing. | Run the `draft show` the message prints, then `import start` again. The server keeps no marks: add `--file` or `--marks` again if you used them. |
+| "This client did not start import `<id>`, so it keeps no ETag of draft `<draft>`. Read the draft before writing to it:" | The client has no version of the draft to send, because it did not start the import. | Run the `draft show` the message prints, then write. |
 | "…its staged input could not be decrypted (resume-failed …)" | The import was not applied. Its claim stays held until its lease lapses. | Read its lease with `import status`. Once it lapsed, `import takeover` it, or `import abandon` it. |
 | A held import whose lease lapsed | Its runner is gone; nothing is running it. | `bronzewardctl import takeover <import>` to resume it, or `import abandon`. |
 | Web: the buttons **Continue import**, **Take over import** and **Abandon import** | The page offers only the ones the claim's state allows now. | Press the one that fits; the page reads the claim again after it. |
@@ -96,7 +97,8 @@ rendered review and **Approve** on the plan's page.
 - A mark covers the paths you typed. It does not show that the document holds no other secret. Read
   the whole review before you continue.
 - An approved adopt plan records the machine's own bytes as applied. It does not show that those
-  bytes equal what a release would compile: the plan's evidence says whether they differ.
+  bytes equal what a release would compile: the plan's evidence says whether they differ. What a later
+  apply plan shows when they differ is part of plans and approval, not this page.
 - Nothing here shows the review text was not captured outside the client.
 
 Next: back to [the inventory](inventory.md), where the machine now shows an applied release.
