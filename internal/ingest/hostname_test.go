@@ -135,12 +135,34 @@ func TestShiftEmbedded(t *testing.T) {
 	list := []Embedded{
 		{Path: "doc[0]/a", Format: "yaml"}, {Path: "doc[1]/b", Format: "json"}, {Path: "doc[3]/c", Format: "yaml"},
 	}
-	got, set := shiftEmbedded(list, 1)
+	got := shiftEmbedded(list, 1)
 	want := []Embedded{{Path: "doc[0]/a", Format: "yaml"}, {Path: "doc[2]/c", Format: "yaml"}}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("shifted %+v, want %+v", got, want)
 	}
-	if len(set) != 2 || set["doc[0]/a"] != "yaml" || set["doc[2]/c"] != "yaml" {
-		t.Errorf("set %v", set)
+}
+
+// A refusal of the stream names the input's positions and the mark it arises from, with the filled
+// document removed or not: the guard and the validation run before the document leaves the stored stream.
+func TestFilledHostnameRefusalKeepsInputPositions(t *testing.T) {
+	body := "machine:\n  nodeLabels:\n    safe: harmless-5839\n---\n" + manifestStream("password: sensitive-9284\n")
+	holder := "doc[1]/cluster/inlineManifests/0/contents"
+	refuse := func(text, label, embedded string, name string) *Refusal {
+		t.Helper()
+		req := request(t, text, label, embedded)
+		req.Name = name
+		req.Declarations = Declarations{Embedded: []Embedded{{Path: embedded, Format: "yaml"}}}
+		_, err := Extract(req)
+		var ref *Refusal
+		if !errors.As(err, &ref) {
+			t.Fatalf("got %v, want a refusal", err)
+		}
+		return ref
+	}
+	without := refuse(body, "doc[0]/machine/nodeLabels/safe", "doc[0]/cluster/inlineManifests/0/contents", "")
+	with := refuse(hostDocFill+"---\n"+body, "doc[1]/machine/nodeLabels/safe", holder, "node-a")
+	if with.Rule != without.Rule || with.Position != without.Position {
+		t.Errorf("with the filled document: rule %s position %d, without it: rule %s position %d",
+			with.Rule, with.Position, without.Rule, without.Position)
 	}
 }
