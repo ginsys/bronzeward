@@ -306,6 +306,9 @@ func TestApplyStops(t *testing.T) {
 	setStdin(t, "n\n")
 	if code, _, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--machine", "alpha"); code != 2 || strings.Contains(errOut, "Cancellation recorded") {
 		t.Errorf("prepared plan, n: exit %d, stderr %q", code, errOut)
+	} else if !strings.Contains(errOut, "Answering y records your approval of the 1 plan listed as you. Approve it? [y/N]: ") || strings.Contains(errOut, "1 plans") {
+		// The question agrees with its count (ginsys/bronzeward#1055, part 9b).
+		t.Errorf("one plan: the question reads %q; want the 1 plan, singular", errOut)
 	}
 	if b := f.took(); len(b) != 0 {
 		t.Errorf("prepared plan, n: sent %q", b)
@@ -518,7 +521,7 @@ func TestApplyLeavesOutWhatIsDone(t *testing.T) {
 	setStdin(t, "y\n")
 	code, out, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--all")
 	if code != 0 || !strings.Contains(errOut, "beta  worker  worker-base,storage  applied: this release is what the machine runs") ||
-		!strings.Contains(out, "beta: applied: this release is what the machine runs") || !strings.Contains(errOut, "Approve them? [y/N]") ||
+		!strings.Contains(out, "beta: applied: this release is what the machine runs") || !strings.Contains(errOut, "the 1 plan listed as you. Approve it? [y/N]") ||
 		!strings.Contains(errOut, "  the plan's change is 3 lines; --diff shows it\n") {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, out, errOut)
 	}

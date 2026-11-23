@@ -59,6 +59,10 @@ func TestValidationRefusal(t *testing.T) {
 		{map[string]any{"rule": "unknown-reference", "reference": "s-a"}, "\nRefused: rule unknown-reference, reference s-a."},
 		{map[string]any{"rule": "BWSYNTH", "position": float64(2)}, "\nRefused: rule BWSYNTH, position 2."},
 		{map[string]any{"rule": "BWSYNTH", "paths": []any{"machine.a", "machine.b"}}, "\nRefused: rule BWSYNTH, paths [machine.a machine.b]."},
+		// The input and the server's message (ginsys/bronzeward#1055, part 9b): the page gives both, so the command line does.
+		{map[string]any{"rule": "kind-mismatch", "input": "fragment[1]", "message": "a fragment overrode a key"}, "\nRefused: rule kind-mismatch, input fragment[1], message a fragment overrode a key."},
+		{map[string]any{"rule": "invalid", "message": "1 error occurred:\n\t* .machine.nodeLabels is already set in v1alpha1 config"}, "\nRefused: rule invalid, message 1 error occurred: * .machine.nodeLabels is already set in v1alpha1 config."},
+		{map[string]any{"rule": "invalid", "message": "a\x1b[2Jb"}, "\nRefused: rule invalid, message a\\x1b[2Jb."},
 		{map[string]any{}, ""},
 	} {
 		tc.doc["type"], tc.doc["title"], tc.doc["instance"] = problemPrefix+"validation-failed", "Compilation refused the input", "req_BWSYNTH"

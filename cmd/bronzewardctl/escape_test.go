@@ -109,7 +109,7 @@ const notShown = "AccessVersionBody.Created AccessVersionBody.NotAfter AccessVer
 var markersShown = map[string][3]int{
 	"status": {5, 7, 4}, "version": {1, 1, 1}, "whoami": {5, 5, 5}, "context list": {3, 3, 3},
 	"cluster list": {6, 6, 6}, "cluster show c1": {5, 5, 5},
-	"machine list": {8, 8, 8}, "machine show m1": {13, 13, 13}, "machine timeline m1": {3, 3, 3}, "machine observations m1": {6, 6, 6},
+	"machine list": {8, 8, 8}, "machine show mch_1": {13, 13, 13}, "machine timeline m1": {3, 3, 3}, "machine observations m1": {6, 6, 6},
 	"fragment show f1": {6, 6, 6}, "fragment show frv_1": {8, 8, 8}, "fragment history f1": {5, 5, 5},
 	"profile show p1": {5, 5, 5}, "profile show prv_1": {5, 5, 5}, "profile history p1": {5, 5, 5},
 	"assignment show a1": {4, 4, 4}, "assignment show asr_1": {6, 6, 6}, "assignment history a1": {6, 6, 6},
@@ -118,7 +118,7 @@ var markersShown = map[string][3]int{
 	"cluster add --name n --endpoint https://e --contract c --talos-cluster-id t":    {5, 5, 5},
 	"machine add --cluster c1 --talos-node-id n --platform metal --talos-endpoint e": {5, 5, 5},
 	"machine set-endpoint m1 --talos-endpoint e":                                     {3, 3, 3},
-	"machine rename m1 --name n":                                                     {3, 3, 3},
+	"machine rename mch_1 --name n":                                                  {3, 3, 3},
 	"draft create --cluster c1 --title t":                                            {2, 2, 2},
 }
 
@@ -263,7 +263,7 @@ func (f *filler) routes() []route {
 var commands = [][]string{
 	{"status"}, {"version"}, {"whoami"}, {"context", "list"},
 	{"cluster", "list"}, {"cluster", "show", "c1"},
-	{"machine", "list"}, {"machine", "show", "m1"}, {"machine", "timeline", "m1"}, {"machine", "observations", "m1"},
+	{"machine", "list"}, {"machine", "show", "mch_1"}, {"machine", "timeline", "m1"}, {"machine", "observations", "m1"},
 	{"fragment", "show", "f1"}, {"fragment", "show", "frv_1"}, {"fragment", "history", "f1"},
 	{"profile", "show", "p1"}, {"profile", "show", "prv_1"}, {"profile", "history", "p1"},
 	{"assignment", "show", "a1"}, {"assignment", "show", "asr_1"}, {"assignment", "history", "a1"},
@@ -272,7 +272,7 @@ var commands = [][]string{
 	{"cluster", "add", "--name", "n", "--endpoint", "https://e", "--contract", "c", "--talos-cluster-id", "t"},
 	{"machine", "add", "--cluster", "c1", "--talos-node-id", "n", "--platform", "metal", "--talos-endpoint", "e"},
 	{"machine", "set-endpoint", "m1", "--talos-endpoint", "e"},
-	{"machine", "rename", "m1", "--name", "n"},
+	{"machine", "rename", "mch_1", "--name", "n"},
 	{"draft", "create", "--cluster", "c1", "--title", "t"},
 }
 

@@ -857,9 +857,10 @@ func TestRevokeConfirmsOnlyPrintableASCII(t *testing.T) {
 	}
 }
 
-// TestRevokeQuestionPrintsTheValueItSends: for every value the guard lets through, the text printed between the
-// quotes of the question is the value that a y sends, so no escape is written for a value that can be confirmed and
-// two targets cannot read alike. The backslash and x09 typed as text stays a backslash and x09.
+// TestRevokeQuestionPrintsTheValueItSends: for every value the guard lets through, the printed text is the value in
+// shell quoting, so two different values never print alike. The question is compared whole, delimiters included,
+// with the quoted value computed from the value that a y sends. The backslash and x09 typed as text stays a
+// backslash and x09.
 func TestRevokeQuestionPrintsTheValueItSends(t *testing.T) {
 	const route = "POST /api/v1/identity-revocations"
 	for _, v := range []string{"svc_x", "svc x", "svc  x", "svc'x", `svc\x09y`, `svc\y`, "~!#%^&*()+={}[]|;:,.<>?/\"-_@$`"} {
@@ -875,8 +876,12 @@ func TestRevokeQuestionPrintsTheValueItSends(t *testing.T) {
 				}
 			})
 			quoted := "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
-			if !strings.Contains(errb.String(), "Revoke the ") || !strings.Contains(errb.String(), quoted) {
-				t.Errorf("%q: the question does not print %s as it is:\n%q", args, quoted, errb.String())
+			want := "Revoke the identity " + quoted + " in"
+			if args[0] == "--iss" {
+				want = "Revoke the subject " + quoted + " of the issuer 'https://idp.BWSYNTH.example' in"
+			}
+			if !strings.Contains(errb.String(), want) {
+				t.Errorf("%q: the question does not print %q:\n%q", args, want, errb.String())
 			}
 		}
 	}
