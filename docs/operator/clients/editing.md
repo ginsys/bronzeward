@@ -47,9 +47,9 @@ printed them. Three things to know:
 3. **`assignment set --none` selects no profile and no fragment.** The machine's configuration is
    then its import base (the configuration read from the machine, see [the word list](terms.md)),
    with one addition: where the base sets no hostname and the machine has a name, publication fills
-   the name in as the hostname. A base that sets `HostnameConfig` `auto: stable` and no hostname still
-   gets the name; one with `auto: off`, or with `machine.features.stableHostname: true` in its
-   v1alpha1 document, gets no fill. A release can bind a machine only if the machine has an assignment at the
+   the name in as the hostname, except in the cases the
+   [compilation specification](../../spec/compilation.md) lists under "Which hostname wins" (an
+   explicit hostname, `auto: off`, a stable hostname set in the base's own document). A release can bind a machine only if the machine has an assignment at the
    revision the release was compiled from; an assignment that selects nothing is enough, and one that
    selects profiles or fragments works as well. Use `--none` only when you want the import base and
    nothing else from the draft.
