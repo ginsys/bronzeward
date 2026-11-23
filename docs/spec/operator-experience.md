@@ -608,7 +608,10 @@ plane's configuration to take the CA key from it.
 writes, for each machine whose import was released into that draft and that has no assignment entry in it
 and no assignment head, an assignment that selects nothing (the machine's configuration is its import base
 alone), so that the release the draft makes holds an assignment revision a plan can bind; running it again
-writes none that exists. It needs
+writes none that exists. It sends
+every write of one run under the epoch the run's first read showed, as the Connect a cluster page does for a plan: once the
+epoch has changed the next write is not sent, no later write goes out, and the output names what was done and what was
+not (each machine and import by name, then the later steps), and running it again begins under the new epoch. It needs
 an `author` signed in as a person (exit 1 otherwise, with nothing sent) and takes the flags of
 `cluster discover` and these:
 
