@@ -2045,7 +2045,7 @@ to 100 identifiers in one read, in [persistence and API §9.2](persistence-api.m
 the batch read was chosen over names in the bodies (choice
 [§17.40](persistence-api.md#17-choices-for-owner-review)). A client resolves the identifiers a
 web view or a table output shows in requests of at most 100 identifiers each, each given once, and shows a human by its
-`display` name, served from API revision 5, or by subject and issuer when `display` is `null`
+`display` name, served from API revision 5, or, when `display` is `null`, as "an operator with no name on record, subject <subject> at <issuer>" (the web client says "you" for the signed-in person)
 ([persistence and API §10](persistence-api.md#10-authentication-and-authorization)), a service
 by its name, and the identifier for one answered `unknown` or when the read fails: shortened in
 the web client, whole in the CLI, which prints every identifier whole. The text is the same in both clients for the same answer, and it is remote text like any other
