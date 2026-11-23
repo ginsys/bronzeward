@@ -277,12 +277,20 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await expect(answer).toHaveText(expect.stringMatching(/^Recorded\. Scope \S+ is now blocked until it is marked\./), { wait: 60_000 });
     expect(await posts("/recovery/accountings")).toHaveLength(1);
     expect(await scopeState(m)).toBe("blocked");
+    // The row can hold several results at once (the accounting's, until the console rereads, then the mark's and the release's), so they
+    // are read together and each decision's is the one that starts with its own words.
+    const results = async (): Promise<string[]> => {
+      const found = await row(m).$$('[data-testid="write-result"]');
+      const texts: string[] = [];
+      for (const e of found) texts.push(await e.getText());
+      return texts;
+    };
     // Mark: the console rereads the scopes, the row offers Mark, and Enter on it records the act.
     await expect(row(m).$("button=Mark")).toBeExisting({ wait: 30_000 });
     await fromTitle();
     await tabTo("Mark");
     await browser.keys("Enter");
-    await expect(row(m).$('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Scope marked (blocked|ready|unresolved), was blocked/), { wait: 60_000 });
+    await browser.waitUntil(async () => (await results()).some((t) => /^Scope marked (blocked|ready|unresolved), was blocked/.test(t)), { timeout: 60_000, timeoutMsg: "no result of the row says the scope was marked" });
     // Release: a ready scope offers Release; Enter on it releases the scope with the sentence that it is not an approval.
     const ready = await fetch(`${CONTROL}/scope?machine=${m}&state=ready`, { method: "POST" });
     expect([ready.status, await ready.text()]).toEqual([200, ""]);
@@ -290,13 +298,6 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await fromTitle();
     await tabTo("Release");
     await browser.keys("Enter");
-    // The row keeps the mark's result beside the release's, so the results are read together and the release's is the one that starts so.
-    const results = async (): Promise<string[]> => {
-      const found = await row(m).$$('[data-testid="write-result"]');
-      const texts: string[] = [];
-      for (const e of found) texts.push(await e.getText());
-      return texts;
-    };
     await browser.waitUntil(async () => (await results()).some((t) => t.startsWith("Scope released, was ready")), { timeout: 60_000, timeoutMsg: "no result of the row says the scope was released" });
     expect((await results()).find((t) => t.startsWith("Scope released, was ready"))).toContain("A release is not an approval");
     const seen = await measure();
