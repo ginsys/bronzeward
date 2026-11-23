@@ -26,6 +26,13 @@ type draftEnv struct {
 	redacted                            string               // d.release's redacted configuration of d.machine, when set; noRedacted for none
 	artifact                            []byte               // d.release's artifact configuration digest, when set
 	heads                               map[string][2]string // a machine's assignment and its head revision, by d.assignment
+	hostnames                           [2]hostRecord        // d.release's hostname record of d.machine and of the second machine; none for the zero value
+}
+
+// hostRecord is a seeded release machine's hostname source and name column.
+type hostRecord struct {
+	source string
+	name   *string
 }
 
 // noRedacted as draftEnv.redacted seeds d.machine's release row without a redacted configuration.
