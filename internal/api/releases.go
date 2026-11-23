@@ -119,7 +119,7 @@ var errHostname = errors.New("a stored hostname record does not have the hostnam
 // enumeration, and a name for machine-name alone. Anything else is errHostname, answered 500.
 func projectHostname(source string, name sql.NullString) (hostnameBody, error) {
 	switch {
-	case source == "machine-name" && name.Valid:
+	case source == "machine-name" && name.Valid && name.String != "":
 		return hostnameBody{Source: source, Name: name.String}, nil
 	case !name.Valid && slices.Contains([]string{"configuration", "none", "legacy-stable", "unrecorded"}, source):
 		return hostnameBody{Source: source}, nil

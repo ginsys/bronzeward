@@ -67,6 +67,7 @@ func TestReleaseServesHostname(t *testing.T) {
 func TestReleaseHostnameOutsideTheEnumeration(t *testing.T) {
 	const standIn = "STORED-HOSTNAME-STAND-IN"
 	name := standIn
+	empty := ""
 	for i, c := range []struct {
 		label string
 		host  hostRecord
@@ -74,6 +75,7 @@ func TestReleaseHostnameOutsideTheEnumeration(t *testing.T) {
 	}{
 		{"a source outside the enumeration", hostRecord{standIn, nil}, true},
 		{"machine-name with no name", hostRecord{"machine-name", nil}, true},
+		{"machine-name with an empty name", hostRecord{"machine-name", &empty}, true},
 		{"a name on none", hostRecord{"none", &name}, true},
 		{"a name on configuration", hostRecord{"configuration", &name}, true},
 		{"a name on legacy-stable", hostRecord{"legacy-stable", &name}, true},
@@ -82,9 +84,9 @@ func TestReleaseHostnameOutsideTheEnumeration(t *testing.T) {
 	} {
 		d := newDraftEnv(t)
 		// The table refuses these records at commit (internal/migrate TestReleaseConstraints); the
-		// read's own guard is shown on a database without those two checks.
+		// read's own guard is shown on a database without those three checks.
 		mustExec(t, d.db, `ALTER TABLE release_machine DROP CONSTRAINT release_machine_hostname_source,
-			DROP CONSTRAINT release_machine_hostname_name`)
+			DROP CONSTRAINT release_machine_hostname_name, DROP CONSTRAINT release_machine_hostname_name_check`)
 		draft := d.draft
 		if i > 0 {
 			draft = d.newReleaseDraft(i)
