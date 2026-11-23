@@ -206,3 +206,19 @@ func TestCheckEndpoint(t *testing.T) {
 		t.Errorf("a check looked up %v", got)
 	}
 }
+
+// TestDiscoverListedReadsAnEndpointTheFileLists: an endpoint taken from the talosconfig's list is read like
+// one given by flag, and a name of it that does not resolve says it came from a talosconfig endpoint, never
+// from --endpoint, which the person did not give.
+func TestDiscoverListedReadsAnEndpointTheFileLists(t *testing.T) {
+	c := newCluster(t)
+	names(t, nil)
+	got, err := DiscoverListed(ctx20(t), c.p.Talosconfig(c.a.Endpoint, "", ""), "", c.a.Endpoint)
+	if err != nil || got.Endpoint != c.a.Endpoint {
+		t.Fatalf("a listed address: %+v, %v", got, err)
+	}
+	_, err = DiscoverListed(ctx20(t), c.p.Talosconfig(c.a.Endpoint, "", ""), "", "gone.test:"+portOf(t, c.a.Endpoint))
+	if err == nil || !strings.Contains(err.Error(), "a talosconfig endpoint") || strings.Contains(err.Error(), "--endpoint") {
+		t.Errorf("a listed name that does not resolve: %v, want a refusal that names a talosconfig endpoint and not --endpoint", err)
+	}
+}
