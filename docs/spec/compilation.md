@@ -1187,9 +1187,12 @@ unmeasured.
    applied release no longer holds it. The recorded value is the derived node
    name above, so the comparison covers a hostname filled from a name, an
    explicit hostname and the `registerWithFQDN` setting alike; it is not made
-   where either `nodeName` is `null`, which it is where a secret reference or
-   a value the review redacts (§8.3, any length) is an input to the name and
-   where no hostname is set. Each machine has its own plan, so a release that renames machine node-a
+   where either `nodeName` is `null` (not compared), which it is where a secret
+   reference or a value the review redacts (§8.3, any length) is an input to the
+   name and where no hostname is set, or absent (not recorded), which it is on a
+   release made before the record existed; for such an applied release with
+   source `machine-name` the recorded name is compared as it was, so that release
+   keeps the protection it had. Each machine has its own plan, so a release that renames machine node-a
    and gives its old name to machine node-b could be applied in the wrong
    order and leave two nodes with one hostname. Once both renames are stored,
    every release carries machine node-b's new name and is refused, so the
@@ -1217,7 +1220,8 @@ unmeasured.
    machine's applied release (persistence and API §9.3), so it does not cover a
    hostname that depends on a secret reference (`nodeName` `null`, not
    compared), a machine whose configuration sets no hostname (`null` as well:
-   the node chooses its own), or an adopted baseline whose record names a
+   the node chooses its own), a release with an explicit hostname made before the
+   record existed (absent, not recorded), or an adopted baseline whose record names a
    hostname the node does not run (execution and recovery §9.3). An apply that
    is committed but not finished, and a name that moved after publication, are
    the commitment's: its hostname gate refuses a plan while another machine's

@@ -340,7 +340,7 @@ under which §4.1 allocates timeline revisions (on PostgreSQL, `FOR UPDATE`),
 and reads the other records named below `FOR SHARE`; the lock order is
 persistence's (see `persistence-api.md`), and for an `apply-config` plan the
 machine's row is taken at its place in one id-ordered pass over the cluster's
-machine rows (after comparison 6a below), never before the others.
+machine rows (see comparison 6a below), never before the others.
 
 0. no operation exists for this plan yet: the transaction creates it, so a
    second executor for the same plan is refused (DS row 009; §2,
@@ -416,7 +416,8 @@ machine rows (after comparison 6a below), never before the others.
    compares the bound release's `nodeName` with that of each other machine's
    `Applied` release and refuses when two are equal, unless the machine's own
    `Applied` release already holds that name: a name it holds now is not a name
-   it takes, so two machines that already shared one stay as they were. A `null` on either side is
+   it takes, so two machines that already shared one stay as they were. A `null` (not compared) or an absent
+   `nodeName` (not recorded, a release made before it existed) on either side is
    not compared: the record holds `null` where any input to the name is a
    secret reference or a value the review redacts (persistence and API §9.3),
    because the comparison would be an equality test on a secret, and where the configuration sets no hostname, because no name is
@@ -2047,7 +2048,10 @@ Three further cases are not compared at all: a hostname that depends on a secret
 reference (`nodeName` `null`), whose clash an equality test would make a test on
 the secret; a configuration that sets none, where the node chooses its own
 name; and a machine whose applied release was made before `nodeName` was
-recorded, which reads `null` until a later apply replaces it. Closing these cases would need one compared value per machine, the
+recorded (absent, not recorded) until a later apply replaces it; publication
+still compares such a release on its recorded name where its source is
+`machine-name`, so the commitment gate adds no protection there and removes none
+that part D gave. Closing these cases would need one compared value per machine, the
 `Applied` release's `nodeName` except that an adoption-set `Applied` takes the
 name observed at that adoption, ending at the next completed apply, and, for the
 failed case, the node name of the release that apply sent until a later apply
