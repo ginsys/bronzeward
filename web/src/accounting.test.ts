@@ -24,6 +24,12 @@ describe("the start and the end", () => {
     expect(endWhy(obs("obs_e", { startedAt: "2026-11-22T10:00:20Z" }), start)).toBe("it began before the start observation was recorded");
     expect(endWhy(obs("obs_e", { startedAt: "2026-11-22T10:01:00Z" }), start)).toBeUndefined();
   });
+  test("an end in the same millisecond as the start's record is compared at the precision the server sends", () => {
+    const start = obs("obs_s", { at: "2026-11-22T10:00:20.123100Z" });
+    expect(endWhy(obs("obs_e", { startedAt: "2026-11-22T10:00:20.123400Z" }), start)).toBeUndefined();
+    expect(endWhy(obs("obs_e", { startedAt: "2026-11-22T10:00:20.123000Z" }), start)).toBe("it began before the start observation was recorded");
+    expect(endWhy(obs("obs_e", { startedAt: "2026-11-22T10:00:20.123100Z" }), start)).toBe("it began before the start observation was recorded");
+  });
   test("a purpose with control characters is shown as safe text, never as it came", () => {
     expect(endWhy(obs("obs_e", { purpose: "a\nb" }), undefined)).toBe("its purpose is (not shown), not recovery");
   });

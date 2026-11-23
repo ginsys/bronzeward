@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
-import { startMarks } from "./start-mark.ts";
+import { instant, startMarks } from "./start-mark.ts";
 
 type Observation = components["schemas"]["ObservationBody"];
 
@@ -35,6 +35,26 @@ describe("the start the server accepts", () => {
     const m = startMarks(list, deadline);
     expect(m.mark).toBe("b");
     expect(m.why(list[0]!)).toBe("it began at or before the transport deadline");
+  });
+
+  // The server sends microseconds and compares them as sent: a start in the same millisecond as the deadline and after it is the mark,
+  // and one before it, or equal to it, is not (a millisecond comparison read both as equal and turned the valid start off).
+  test("a start in the same millisecond as the deadline is compared at the precision the server sends", () => {
+    const sub = Date.parse("2026-11-01T10:01:00.123Z") + 0.1; // 10:01:00.123100
+    const list = [obs("before", 1, "2026-11-01T10:01:00.123000Z"), obs("equal", 2, "2026-11-01T10:01:00.123100Z"), obs("after", 3, "2026-11-01T10:01:00.123400Z")];
+    const m = startMarks(list, sub);
+    expect(m.mark).toBe("after");
+    expect(m.why(list[0]!)).toBe("it began at or before the transport deadline");
+    expect(m.why(list[1]!)).toBe("it began at or before the transport deadline");
+    expect(m.why(list[2]!)).toBeUndefined();
+  });
+
+  test("a time is read with its fraction, with or without one, in any zone the server may send", () => {
+    const whole = Date.parse("2026-11-01T10:00:00Z");
+    expect(instant("2026-11-01T10:00:00Z")).toBe(whole);
+    expect(instant("2026-11-01T10:00:00.5Z")).toBe(whole + 500);
+    expect(instant("2026-11-01T10:00:00.123456Z") - whole).toBeCloseTo(123.456, 3);
+    expect(instant("2026-11-01T11:00:00.25+01:00")).toBe(whole + 250);
   });
 
   test("an observation that read none of identity, running version and configuration is not a read", () => {

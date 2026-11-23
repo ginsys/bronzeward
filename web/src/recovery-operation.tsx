@@ -13,6 +13,7 @@ import { REASON_MAX, reasonProblem } from "./plan.tsx";
 import { Who } from "./principals.tsx";
 import { safeWord } from "./safe.ts";
 import { Action, useFocusOn, useRoles } from "./shell.tsx";
+import { instant } from "./start-mark.ts";
 import { Status } from "./states.tsx";
 import { MachineById, OperationHeading } from "./titles.tsx";
 import { ACCOUNT_TEXT, RECOVERY_OPERATION_NOTE, RECOVERY_OPERATION_ROLE_NOTE, RESOLVE_NO_OUTCOME, RESOLVE_TEXT, TAKE_OVER_TEXT } from "./words.ts";
@@ -142,7 +143,7 @@ function Accounts({ op, machine, attempts }: { op: string; machine: string; atte
         <div key={a.id}>
           <h4>Attempt {a.number}</h4>
           <AccountingForm machine={machine} path={`/operations/${enc(op)}/attempts/${enc(a.id)}/accountings`} resource={`/operations/${enc(op)}`}
-            what={ATTEMPT_WHAT} done={accountedAttempt} due={due(a)} deadline={{ at: Date.parse(a.transportDeadline) }} onStart={() => setStarted((s) => (s.includes(a.id) ? s : [...s, a.id]))} />
+            what={ATTEMPT_WHAT} done={accountedAttempt} due={due(a)} deadline={{ at: instant(a.transportDeadline) }} onStart={() => setStarted((s) => (s.includes(a.id) ? s : [...s, a.id]))} />
         </div>
       ))}
     </section>
