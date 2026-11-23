@@ -990,7 +990,10 @@ every plan listed, each by its own approval, bound to the epoch the plans were r
 since refuses the rest, and one that moves while they are read stops the command before the list), and each
 answered on its own line; a refusal for one machine leaves the others approved and exits non-zero, and so
 does a plan that could not be made. An approval or a cancellation whose outcome is unknown is reported as
-unknown, never as unapproved or as not cancelled, and exits 3. Enter, `n` and the end of input approve nothing and cancel the
+unknown, never as unapproved or as not cancelled, and exits 3. Unlike the console's apply page, which sends
+nothing new while one of its writes has an unknown outcome, the command goes on with the plans after an approval of
+unknown outcome and says so on that line: each approval is its own plan under the same read epoch, the one `y`
+confirmed them all, and the command has no open write to hold or repeat. Enter, `n` and the end of input approve nothing and cancel the
 plans this command made, never one it read. A Ctrl-C at the question leaves the plans to expire at the time
 each shows. A machine already applied, frozen, in drift or in an operation is left out with its reason, and
 so is one whose waiting plan is for another operation (an adopt plan is decided on the machine's page). A
