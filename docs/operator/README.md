@@ -17,8 +17,10 @@ The guide has three parts:
   [command line](clients/quick-start-cli.md) or the [web interface](clients/quick-start-web.md).
   The journeys follow: [sign in and renewal](clients/sign-in-and-renewal.md),
   [connect a cluster](clients/connect-a-cluster.md),
-  [the inventory](clients/inventory.md), [editing](clients/editing.md) and
-  [protected import](clients/protected-import.md). The [command reference](clients/cli-reference.md)
+  [the inventory](clients/inventory.md), [editing](clients/editing.md),
+  [protected import](clients/protected-import.md), [publication](clients/publication.md),
+  [plans and approval](clients/plan-and-approval.md) and
+  [operation tracking](clients/operation-tracking.md). The [command reference](clients/cli-reference.md)
   of `bronzewardctl` is generated from its command table. The pages for the later journeys are still
   being written ([ginsys/bronzeward#404](https://github.com/ginsys/bronzeward/issues/404)).
 - **Deployment**: [hosting](deployment/hosting.md) (TLS, routing, the web files and the
