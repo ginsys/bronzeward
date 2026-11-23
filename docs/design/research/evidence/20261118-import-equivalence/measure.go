@@ -54,6 +54,8 @@ func main() {
 		splitCases(ms)
 	case "pairs":
 		pairs(ms)
+	case "hostname":
+		hostname(ms)
 	case "placeholder":
 		// the redacted form carries no secret: print the lines that show what a reference becomes
 		b, _, _ := importBase("ph", ms[3].node)
@@ -68,6 +70,50 @@ func main() {
 		}
 	default:
 		fatal(fmt.Errorf("unknown command %q", os.Args[1]))
+	}
+}
+
+// importNamed is importBase for a machine whose name the API reads: step 2a of compilation.md §2.3 removes a
+// HostnameConfig that holds the name, and the record says what it removed.
+func importNamed(revision string, text []byte, name string) (compile.Source, ingest.Filled) {
+	u := must(ingest.Read(bytes.NewReader(text), 1<<20))
+	c := must(ingest.Extract(ingest.Request{Input: u, Name: name}))
+	values := map[string]provider.Value{}
+	s := must(c.Commit(context.Background(), func(_ context.Context, n string, v provider.Value) error {
+		values[n] = v
+		return nil
+	}))
+	sum := sha256.Sum256(text)
+	return compile.Source{Revision: revision, Digest: hex.EncodeToString(sum[:]), Text: s, Values: values}, c.Filled()
+}
+
+// holdsHostname says whether the stored base still holds a HostnameConfig document.
+func holdsHostname(s compile.Source) bool {
+	return strings.Contains(string(s.Text.Documents()), "kind: HostnameConfig")
+}
+
+// hostname is the amendment of ginsys/bronzeward#1040. The same node bytes are imported with the machine's
+// name as the API reads it. Where the node's HostnameConfig holds that name, the import removes it, the
+// compiler fills it back from the name (compilation.md §6 step 5a), and the release is form-only against
+// the base as imported: the filled hostname is treated as equal to the original document. Controls: the
+// same bytes imported with no name, and with another name, keep the document and record nothing removed.
+func hostname(ms []machine) {
+	fmt.Println("== B3: the node's own hostname document, imported with the machine's name")
+	fmt.Println("machine  removed equal  baseHolds(no name) baseHolds(name) baseHolds(other)  digest(compiled)==digest(node)  formOnly")
+	for _, m := range ms {
+		noName, _ := importNamed("b3", m.node, "")
+		other, otherFilled := importNamed("b3", m.node, "not-"+m.name)
+		named, filled := importNamed("b3", m.node, m.name)
+		compiled, err := compile.Compile(compile.Input{Base: named, Mode: compile.ModeMetal, Name: m.name,
+			Imported: compile.ImportedHostname{Name: filled.Name, Equal: filled.Equal}})
+		if err != nil {
+			fmt.Printf("%-7s  refused: %v\n", m.name, err)
+			continue
+		}
+		d := must(compiled.Materialized().Digest())
+		fmt.Printf("%-7s  %v %v  %v %v %v  %v  %v  (other name removed: %v)\n", m.name, filled.Name != "", filled.Equal,
+			holdsHostname(noName), holdsHostname(named), holdsHostname(other), d == talos.ConfigurationDigest(m.node),
+			compiled.FormOnly(), otherFilled.Name != "")
 	}
 }
 

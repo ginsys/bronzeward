@@ -28,6 +28,7 @@ run() { # label, then the measurement's arguments; a failure is recorded and the
   run "split, rule R2 on, emptied documents kept as identity-only shells in the base" env BW_SHELLS=1 go run $M split "$W/machines"
   run "pairs" go run $M pairs "$W/machines"
   run "what a reference becomes in the redacted form (w1)" go run $M placeholder "$W/machines"
+  run "hostname, the node's own HostnameConfig imported with the machine's name (ginsys/bronzeward#1040)" go run $M hostname "$W/machines"
 } >"$OUT" 2>&1
 echo "exit=$rc lines=$(wc -l <"$OUT")"
 exit $rc
