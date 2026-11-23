@@ -6,8 +6,11 @@ import (
 	"io"
 	"math/big"
 	"regexp"
+	"slices"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/ginsys/bronzeward/internal/ingest"
 )
 
 // formOnly reports whether two plaintext configurations hold the same documents, keys and values and
@@ -36,6 +39,88 @@ func formOnly(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// sameInFormBut is formOnly of the base's text and the composition without the one HostnameConfig the
+// compiler filled for name, which an import removed from the base (compilation.md §2.3 step 2a). The
+// document is set aside only when it is exactly what the fill writes: apiVersion v1alpha1, kind, auto off
+// and hostname equal to name, as plain strings; a composition with another HostnameConfig, or with this
+// one changed in any member, is not form-only. Every other document is compared as formOnly does.
+func sameInFormBut(base ingest.Resolved, m Materialized, name string) bool {
+	if base.Embedded() {
+		return false
+	}
+	text, err := base.Input().Bytes()
+	if err != nil {
+		return false
+	}
+	da, err := parseDocuments(text)
+	if err != nil {
+		return false
+	}
+	db, err := parseDocuments(m.bytes())
+	if err != nil {
+		return false
+	}
+	at := -1
+	for i, d := range db {
+		if kindOf(d) != "HostnameConfig" {
+			continue
+		}
+		if at >= 0 || !isFill(d, name) {
+			return false
+		}
+		at = i
+	}
+	if at < 0 || len(da) != len(db)-1 {
+		return false
+	}
+	db = slices.Delete(db, at, at+1)
+	for i := range da {
+		if !sameNode(da[i], db[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// kindOf is a document's kind when it is a mapping with a plain string kind, else empty.
+func kindOf(d *yaml.Node) string {
+	n := d
+	if n.Kind == yaml.DocumentNode && len(n.Content) == 1 {
+		n = n.Content[0]
+	}
+	if n.Kind != yaml.MappingNode {
+		return ""
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == "kind" && n.Content[i+1].Kind == yaml.ScalarNode {
+			return n.Content[i+1].Value
+		}
+	}
+	return ""
+}
+
+// isFill reports whether d is exactly {apiVersion v1alpha1, kind HostnameConfig, auto off, hostname name},
+// every value a plain string; comments and key order do not count.
+func isFill(d *yaml.Node, name string) bool {
+	n := d
+	if n.Kind == yaml.DocumentNode && len(n.Content) == 1 {
+		n = n.Content[0]
+	}
+	if n.Kind != yaml.MappingNode || len(n.Content) != 8 {
+		return false
+	}
+	want := map[string]string{"apiVersion": "v1alpha1", "kind": "HostnameConfig", "auto": "off", "hostname": name}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k, v := n.Content[i], n.Content[i+1]
+		w, ok := want[k.Value]
+		if k.Kind != yaml.ScalarNode || v.Kind != yaml.ScalarNode || v.Tag != "!!str" || !ok || v.Value != w {
+			return false
+		}
+		delete(want, k.Value)
+	}
+	return len(want) == 0
 }
 
 func parseDocuments(text []byte) ([]*yaml.Node, error) {

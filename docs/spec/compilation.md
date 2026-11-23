@@ -195,7 +195,9 @@ give a node a path that reads as an embedded document's.
    continuation and a takeover, so that a recovered run still holds the name it
    compared; the draft transaction refuses when the machine's name is no
    longer that one
-   ([persistence and API §3.2](persistence-api.md), choice §17.45 there). It is
+   ([persistence and API §3.2](persistence-api.md), choice §17.45 there). The
+   name and whether the removed document was exactly the fill's own are stored
+   with the import base revision (§6.1 item 5). It is
    the one value ingestion removes that is not a secret, and the baseline of
    step 8 stays the exact input.
 3. **Identify** the values to extract: every field the pinned Talos machinery
@@ -999,13 +1001,16 @@ identified embedded document, whose string the resolver writes back in its own
 encoding (§5.4). It proves that the artifact equals the resolved base, and not
 that the node runs it: the pinned secret values are the provider's version, and
 the baseline cannot be decrypted by any identity (§2.3), so no comparison with
-the node's own bytes is offered. A machine whose import removed a hostname
-document equal to its name (§2.3 step 2a) and whose release writes one back
-(step 5a) reads false although nothing changes on the node; that limit is the
-fill's change to decide (ginsys/bronzeward#1040). So does a base that omits a
+the node's own bytes is offered. One document is set aside: where the import
+removed a `HostnameConfig` that was exactly the fill's own (§2.3 step 2a: `apiVersion`, `kind`,
+`auto: off` and the hostname, nothing else), the decided hostname source is the machine's name and
+the name is the one recorded at import, the composition's own fill is set aside and every
+other document is compared as above, so the machine reads true at its first apply. After a rename
+the verdict is false and what differs is the hostname; a removed document that held more than the fill writes,
+or any document the composition changes besides it, keeps the verdict false.
+A base that omits a
 key the composition writes with an empty value (a configuration not written by
-`talosctl` can be in that case): the release then holds a key the base lacks,
-reads false, and the first apply's diff is withheld. The comparison does not treat an empty
+`talosctl` can be in that case) also reads false: the release then holds a key the base lacks, and the first apply's diff is withheld. The comparison does not treat an empty
 default as absent; that would change what the verdict means. The compilation's
 own transformations, the digest and the artifact are unchanged.
 
@@ -1113,7 +1118,10 @@ unmeasured.
    release compiled from the thinner base writes the document again, as
    `auto: off` with `hostname`, so its artifact digest can differ from the
    baseline's and the machine is then pending convergence, which §6.3 already
-   covers. Drift is otherwise ordinary: a hostname changed on the node by hand
+   covers. The record of step 2a (the name and whether the removed document was
+   the fill's own) is stored with the import base revision, and the form-only
+   verdict (§6, step 8) sets that one document aside while the name is the
+   recorded one. Drift is otherwise ordinary: a hostname changed on the node by hand
    is a configuration edit and a digest mismatch; a hostname from DHCP, cloud
    or `auto: stable` is not in the configuration and is not drift. A machine
    with no name at import keeps its hostname explicit when it is named later;

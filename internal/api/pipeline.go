@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ginsys/bronzeward/internal/compile"
 	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
 )
@@ -40,6 +41,7 @@ type storedSource struct {
 	document     string
 	declarations ingest.Declarations
 	generations  map[string]string
+	filled       compile.ImportedHostname // an import base's step 2a record (compilation §2.3 step 2a); zero for a fragment
 }
 
 // pinKey is one KV version: a generation path and a version.
@@ -418,14 +420,17 @@ func (r *snapshotReader) readSources(machines []snapshotMachine) (map[string]sto
 	slices.Sort(revisions)
 	revisions = slices.Compact(revisions)
 	out := map[string]storedSource{}
-	err := r.query(`SELECT id, document, embedded, '', '' FROM import_base_revision WHERE id = ANY ($1)
-		UNION ALL SELECT id, document, embedded, name, layer FROM fragment_revision WHERE id = ANY ($1)`, func(row *sql.Rows) error {
+	err := r.query(`SELECT id, document, embedded, '', '', filled_hostname, filled_hostname_equal FROM import_base_revision WHERE id = ANY ($1)
+		UNION ALL SELECT id, document, embedded, name, layer, NULL, NULL FROM fragment_revision WHERE id = ANY ($1)`, func(row *sql.Rows) error {
 		var revision string
 		var embedded []byte
+		var filled sql.NullString
+		var equal sql.NullBool
 		s := storedSource{declarations: ingest.Declarations{References: map[string]ingest.Reference{}}, generations: map[string]string{}}
-		if err := row.Scan(&revision, &s.document, &embedded, &s.name, &s.layer); err != nil {
+		if err := row.Scan(&revision, &s.document, &embedded, &s.name, &s.layer, &filled, &equal); err != nil {
 			return err
 		}
+		s.filled = compile.ImportedHostname{Name: filled.String, Equal: equal.Bool}
 		if err := json.Unmarshal(embedded, &s.declarations.Embedded); err != nil {
 			return fmt.Errorf("source %s: embedded: %w", revision, err)
 		}

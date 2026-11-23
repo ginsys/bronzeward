@@ -77,7 +77,7 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 		if err != nil {
 			return releaseUnit{}, nil, fmt.Errorf("machine %s: %w", m.machine, err)
 		}
-		in := compile.Input{Base: sources[m.importBase], Mode: mode, Name: m.name}
+		in := compile.Input{Base: sources[m.importBase], Mode: mode, Name: m.name, Imported: s.sources[m.importBase].filled}
 		for _, frv := range m.fragments {
 			in.Fragments = append(in.Fragments, sources[frv])
 		}
