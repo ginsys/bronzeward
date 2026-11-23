@@ -690,6 +690,9 @@ func (e *env) onboardImport(a *onboardArgs, m *onboardMachine, draft string, rer
 		c, acc, err = e.ingest("cluster onboard", "import", args)
 		return err
 	})
+	if c != nil && e.runEpoch != nil {
+		e.runEpoch.now = c.Context.LastEpoch // the follow's reads may have shown another epoch than the write's answer
+	}
 	if err != nil {
 		state, cmd := classify(err, acc.Ingestion != ""), rerun()
 		if acc.Ingestion != "" {

@@ -66,6 +66,19 @@ func TestOnboardEpochSentenceOnlyWhenTheEpochMoved(t *testing.T) {
 	}
 }
 
+// TestOnboardEpochSentenceAfterAnImportFollowSawIt: the epoch changes with the first import's start, and the import
+// then fails with no write after it. The follow's reads showed the new epoch, and the output says so
+// (no write answered under it, so only the follow could tell).
+func TestOnboardEpochSentenceAfterAnImportFollowSawIt(t *testing.T) {
+	e := newOnboard(t)
+	e.api.switchAfter, e.api.failImportAt = 6, 1
+	code, out, errOut := e.run()
+	const cause = "The server's epoch changed from 'ep_OB-1' to 'ep_OB-2' since this run began; nothing more was sent."
+	if code == 0 || strings.Count(out, cause) != 1 {
+		t.Errorf("exit %d, stdout %q, stderr %q; want the failure and the epoch sentence once", code, out, errOut)
+	}
+}
+
 // TestOnboardWithNoEpochSendsNothing: a run whose first read shows no epoch has none to send its writes under, and
 // says so before it sends any, also where the context kept an epoch from an earlier command (the web page's
 // NO_EPOCH_YET, in the command's words).
