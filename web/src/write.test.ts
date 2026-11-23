@@ -1391,9 +1391,11 @@ describe("a write sent once and answered 401 (spec.once)", () => {
   test("a second 401 after the renewal is sent no further and ends the sign-in", async () => {
     const renew = vi.fn(async () => true);
     const { writes, writesSent } = page([expired(), expired()], [], { renew });
+    writes.onEnded = vi.fn();
     expect(await writes.submit(once())).toMatchObject({ kind: "refused", status: 401 });
     expect(renew).toHaveBeenCalledTimes(1);
     expect(writesSent()).toHaveLength(2);
+    expect(writes.onEnded).toHaveBeenCalledWith({ kind: "unauthenticated", problem: expect.objectContaining({ type: "urn:bronzeward:problem:unauthenticated" }) });
   });
 
   test("a 503 on the resend ends the write at once: two sends in all, no further wait", async () => {
