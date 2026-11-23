@@ -372,7 +372,7 @@ export class Writes {
     let since = 0;
     let waited = 0;
     const spent = () => Math.max(waited, this.now() - since);
-    const repeats = w.spec.once === true ? 0 : BACKOFF.length;
+    let repeats = w.spec.once === true ? 0 : BACKOFF.length;
     for (let n = 0; n <= repeats; n++) {
       // A read sent to learn the last answer's epoch ended the sign-in: nothing is repeated.
       if (n > 0 && end.e !== undefined) return aside(SIGN_IN_REFUSED);
@@ -434,9 +434,11 @@ export class Writes {
       const refused: Outcome = { kind: "refused", status: a.status, problem: p, replayed, ...(a.data === CUT ? { cut: true as const } : {}) };
       if (a.status === 401) {
         // Renew once; renewed, the next attempt is a repeat with its checks (§8.2 401 row). Renewed
-        // after the last attempt, the sign-in stays and the write is not sent again.
+        // after the last attempt, the sign-in stays and the write is not sent again, except a write
+        // sent once: a renewal is not a repeat of a failure, so that one goes out once more.
         if (code === "unauthenticated" && !renewed && (await client.renew())) {
           renewed = true;
+          if (w.spec.once === true) repeats = Math.max(repeats, n + 1);
           if (n < repeats) continue;
           return early({ kind: "not-done", why: RENEWED_LAST, problem: p });
         }
