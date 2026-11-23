@@ -5,7 +5,7 @@
 // Every value is synthetic.
 import { $, $$, browser, expect } from "@wdio/globals";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { absent, answers, api, disposable, faults, fixtureSignIn, mint, storageEmpty, type Seed } from "./helpers.ts";
+import { absent, answers, api, disposable, faults, fixtureSignIn, fromTitle, measure, mint, storageEmpty, tab, type Seed } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -199,5 +199,101 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await expect($('[data-testid="recovery-operation-state"]')).toBeExisting({ wait: 30_000 });
     await absent(async () => (await posts(route)).length > 1, "an accounting sent again after the reload");
     expect((await $$('form[aria-label="Record accounting"]')).length).toBe(0);
+  });
+
+  // T11 (journeys §13), WCAG 2.2 AA on the console's scope row: every control by Tab alone, in reading order, each focus visible
+  // (2.1.1, 2.1.2, 2.4.7), then the task itself, "account a pre-restore-unaccounted scope, then mark and release it", with the keyboard
+  // alone. The keys are Tab, Shift+Tab, the arrow keys inside a radio group, Space and Enter, and typing in a field. A radio group is
+  // one Tab stop, so it counts as one control, and the arrow keys skip a disabled radio. The mark's result depends on the machine, so
+  // the scope is readied by the harness before the release (as recovery-scopes does); the walk of mark and release on real machines is
+  // fixtures/scenarios/s7 web. The screen-reader pass is owed by ginsys/bronzeward#447.
+  it("keyboard only (T11): Tab reaches every control of a scope's row, and the accounting, mark and release are made with the keyboard", async function () {
+    this.timeout(300_000);
+    await start();
+    await openConsole();
+    const m = seed.machine2;
+    await expect(scopeForm(m)).toBeExisting({ wait: 30_000 });
+    // Every control of the row, a radio group as one (the controls of a group share the number).
+    const total = await browser.execute((machine: string) => {
+      const groups = new Map<string, number>();
+      let n = 0;
+      for (const e of document.querySelectorAll(`[data-testid="scope-${machine}"] a[href], [data-testid="scope-${machine}"] button, [data-testid="scope-${machine}"] input, [data-testid="scope-${machine}"] select, [data-testid="scope-${machine}"] textarea`)) {
+        const radio = e instanceof HTMLInputElement && e.type === "radio";
+        const key = radio ? `radio:${(e as HTMLInputElement).name}` : "";
+        if (radio && groups.has(key)) {
+          e.setAttribute("data-t11", String(groups.get(key)));
+          continue;
+        }
+        if (radio) groups.set(key, n);
+        e.setAttribute("data-t11", String(n++));
+      }
+      return n;
+    }, m);
+    expect(total).toBeGreaterThan(0);
+    await fromTitle();
+    const reached: number[] = [];
+    for (let i = 0; i < 120 && reached.length < total; i++) {
+      const f = await tab();
+      if (f.same) throw new Error(`Tab did not leave ${f.tag} "${f.text}" on the way through the console`);
+      const k = await browser.execute(() => document.activeElement?.closest("[data-t11]")?.getAttribute("data-t11") ?? null);
+      if (k !== null && !reached.includes(Number(k))) reached.push(Number(k));
+    }
+    expect(reached).toEqual([...reached].sort((a, b) => a - b));
+    expect(reached.length).toBe(total);
+    // Only a boolean and a value leave the page: where the focus is, never a field's text.
+    const on = (machine: string, name: string) =>
+      browser.execute((mm: string, n: string) => {
+        const e = document.activeElement as HTMLInputElement | null;
+        return e !== null && e.closest(`[data-testid="scope-${mm}"]`) !== null && (e.getAttribute("name") === n || e.textContent?.trim() === n);
+      }, machine, name);
+    const tabTo = async (name: string) => {
+      for (let i = 0; i < 120; i++) {
+        await tab();
+        if (await on(m, name)) return;
+      }
+      throw new Error(`Tab never reached "${name}" in the row of the scope`);
+    };
+    const held = () => browser.execute(() => ((document.activeElement as HTMLInputElement | null)?.value ?? ""));
+    const checked = (which: "start" | "end") => browser.execute((mm: string, w: string) => (document.querySelector(`[data-testid="scope-${mm}"] input[name="${w}"]:checked`) as HTMLInputElement | null)?.value ?? "", m, which);
+    // Start: the group takes one Tab, which lands on the marked start (the first enabled radio), and Space chooses it.
+    await fromTitle();
+    await tabTo("start");
+    expect(await held()).toBe(obs.machine2.start);
+    await browser.keys("Space");
+    expect(await checked("start")).toBe(obs.machine2.start);
+    // End: the observation that is the start is off and comes first, so Tab lands past it, and the arrow key moves on to the next one.
+    await tabTo("end");
+    expect(await held()).toBe(obs.machine2.soon);
+    await browser.keys("ArrowDown");
+    expect(await held()).toBe(obs.machine2.end);
+    expect(await checked("end")).toBe(obs.machine2.end);
+    await tabTo("explanation");
+    await browser.keys("the operator re-applied the restored configuration".split(""));
+    await tabTo("Record accounting");
+    await browser.keys("Enter");
+    const answer = scopeForm(m).$('[data-testid="settle-answer"]');
+    await expect(answer).toHaveText(expect.stringMatching(/^Recorded\. Scope \S+ is now blocked until it is marked\./), { wait: 60_000 });
+    expect(await posts("/recovery/accountings")).toHaveLength(1);
+    expect(await scopeState(m)).toBe("blocked");
+    // Mark: the console rereads the scopes, the row offers Mark, and Enter on it records the act.
+    await expect(row(m).$("button=Mark")).toBeExisting({ wait: 30_000 });
+    await fromTitle();
+    await tabTo("Mark");
+    await browser.keys("Enter");
+    await expect(row(m).$('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Scope marked (blocked|ready|unresolved), was blocked/), { wait: 60_000 });
+    // Release: a ready scope offers Release; Enter on it releases the scope with the sentence that it is not an approval.
+    const ready = await fetch(`${CONTROL}/scope?machine=${m}&state=ready`, { method: "POST" });
+    expect([ready.status, await ready.text()]).toEqual([200, ""]);
+    await expect(row(m).$("button=Release")).toBeExisting({ wait: 30_000 });
+    await fromTitle();
+    await tabTo("Release");
+    await browser.keys("Enter");
+    const released = row(m).$('[data-testid="write-result"]');
+    await expect(released).toHaveText(expect.stringContaining("Scope released, was ready"), { wait: 60_000 });
+    await expect(released).toHaveText(expect.stringContaining("A release is not an approval"));
+    const seen = await measure();
+    expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(seen.small).toBe(0);
+    await storageEmpty();
   });
 });
