@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siderolabs/talos/pkg/machinery/constants"
-
 	"github.com/ginsys/bronzeward/internal/compile"
 )
 
@@ -216,46 +214,10 @@ func TestPublishCommitRecordsHostname(t *testing.T) {
 	}
 }
 
-// withHostnameFill turns the fill on for the calling test and restores it at its end. The caller is
-// a top-level test with no t.Parallel() and no parallel subtest (see fillHostname).
-func withHostnameFill(t *testing.T) {
-	t.Helper()
-	fillHostname = true
-	t.Cleanup(func() { fillHostname = false })
-}
-
-// Until the clash refusal exists (part D of ginsys/bronzeward#1040) a release fills no hostname: a
-// named machine records `none`, the unit still carries the name the snapshot read (the name check
-// of the commit compares it), and two machines whose names share a first label, which Talos would
-// give one node name, both build without a fill.
-func TestBuildReleaseFillsNoHostname(t *testing.T) {
-	b := newBuildEnv(t)
-	second := b.secondMachine(constants.DefaultKubernetesVersion)
-	none := compile.Hostname{Source: compile.HostnameNone}
-	for _, c := range []struct{ first, second string }{{"", ""}, {"web-1", ""}, {"a.x.org", "a.y.org"}} {
-		mustExec(t, b.db, `UPDATE machine SET name = NULLIF($2, '') WHERE id = $1`, b.machine, c.first)
-		mustExec(t, b.db, `UPDATE machine SET name = NULLIF($2, '') WHERE id = $1`, second, c.second)
-		u, ref := b.build()
-		if ref != nil {
-			t.Fatalf("names %q %q: buildRelease refused: %v %v", c.first, c.second, ref, ref.extra)
-		}
-		want := map[string]string{b.machine: c.first, second: c.second}
-		if len(u.machines) != 2 {
-			t.Fatalf("machines %d", len(u.machines))
-		}
-		for _, m := range u.machines {
-			if m.name != want[m.machine] || m.hostname != none {
-				t.Fatalf("names %q %q: machine %s has name %q, hostname %+v; want the name carried and %+v",
-					c.first, c.second, m.machine, m.name, m.hostname, none)
-			}
-		}
-	}
-}
-
-// With the fill on (compilation §6.1): an unnamed machine takes no fill, a named one is filled, and
-// the unit carries the name the snapshot read beside the decision, which the commit then stores.
+// A release fills a named machine's hostname (compilation §6.1): an unnamed machine takes no fill, a
+// named one is filled, and the unit carries the name the snapshot read beside the decision, which the
+// commit then stores.
 func TestBuildReleaseFillsHostname(t *testing.T) {
-	withHostnameFill(t)
 	b := newBuildEnv(t)
 	u, ref := b.build()
 	if ref != nil {
