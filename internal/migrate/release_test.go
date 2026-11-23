@@ -30,11 +30,11 @@ const (
 		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, epoch, now() FROM installation_state`
 	insertReleaseMachine = `INSERT INTO release_machine (release, cluster, machine, import_base_revision,
 		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation,
-		hostname_source)
+		hostname_source, hostname_name)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, (SELECT o.id FROM observation o
    JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
    JOIN release r ON r.operation = s.operation WHERE r.id = $1 AND o.machine = $3
-   ORDER BY o.basis DESC LIMIT 1), 'none')`
+   ORDER BY o.basis DESC LIMIT 1), $13, $14)`
 	insertReleaseSource = `INSERT INTO release_source (release, cluster, kind, fragment, profile, assignment, name, machine,
 		fragment_revision, profile_revision, assignment_revision, head_revision)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
@@ -82,7 +82,7 @@ func releaseRows(t *testing.T, db *sql.DB) release {
 	mustExec(t, tx, insertRelease, r.rel, r.cluster, r.draft, 1, digest(3), "v1.13", machinery, checksum, "v1.36.0",
 		r.publish, r.human, "publisher")
 	mustExec(t, tx, insertReleaseMachine, r.rel, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5),
-		"machine:\n  type: worker\n", `[]`, "bw-artifact")
+		"machine:\n  type: worker\n", `[]`, "bw-artifact", "none", nil)
 	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "fragment", r.frg, nil, nil, "registries", nil, r.frv1, nil, nil, 1)
 	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "fragment", r.frgSite, nil, nil, "site-dns", nil, r.frvSite, nil, nil, 1)
 	mustExec(t, tx, insertReleaseSource, r.rel, r.cluster, "profile", nil, r.prf, nil, "workers", nil, nil, r.prv, nil, 1)
@@ -166,7 +166,7 @@ func TestReleaseConstraints(t *testing.T) {
 	withRelease := []stmt{{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
 		"v1.36.0", op2, r.human, "publisher"}}}
 	withMachine := append(withRelease, stmt{insertReleaseMachine, []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal",
-		cipher, digest(4), digest(5), "x: 1\n", `[]`, "bw-artifact"}})
+		cipher, digest(4), digest(5), "x: 1\n", `[]`, "bw-artifact", "none", nil}})
 	newRelease := func(args ...any) []any {
 		base := []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum, "v1.36.0", op2, r.human, "publisher"}
 		for i := 0; i+1 < len(args); i += 2 {
@@ -175,7 +175,7 @@ func TestReleaseConstraints(t *testing.T) {
 		return base
 	}
 	machineRow := func(args ...any) []any {
-		base := []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5), "x: 1\n", `[]`, "bw-artifact"}
+		base := []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5), "x: 1\n", `[]`, "bw-artifact", "none", nil}
 		for i := 0; i+1 < len(args); i += 2 {
 			base[args[i].(int)] = args[i+1]
 		}
@@ -295,6 +295,17 @@ func TestReleaseConstraints(t *testing.T) {
 		{"empty redacted configuration", withRelease, insertReleaseMachine, machineRow(9, ""), "release_machine_redacted_check"},
 		{"provenance that is not a list", withRelease, insertReleaseMachine, machineRow(10, `{}`), "release_machine_provenance_check"},
 		{"second row of one machine", withMachine, insertReleaseMachine, machineRow(), "23505"},
+		// persistence-api.md §9.2, choice §17.44: a release is immutable, so the hostname record is
+		// refused at commit when it is outside the enumeration or its name does not match its source.
+		{"hostname source outside the enumeration", withRelease, insertReleaseMachine, machineRow(12, "stable"), "release_machine_hostname_source"},
+		{"hostname source empty", withRelease, insertReleaseMachine, machineRow(12, ""), "release_machine_hostname_source"},
+		{"hostname source null", withRelease, insertReleaseMachine, machineRow(12, nil), "23502"},
+		{"machine-name without a name", withRelease, insertReleaseMachine, machineRow(12, "machine-name"), "release_machine_hostname_name"},
+		{"a name on none", withRelease, insertReleaseMachine, machineRow(13, "web-1"), "release_machine_hostname_name"},
+		{"a name on legacy-stable", withRelease, insertReleaseMachine, machineRow(12, "legacy-stable", 13, "web-1"), "release_machine_hostname_name"},
+		{"an empty name on machine-name", withRelease, insertReleaseMachine, machineRow(12, "machine-name", 13, ""), "release_machine_hostname_name_check"},
+		{"control: machine-name with its name", withRelease, insertReleaseMachine, machineRow(12, "machine-name", 13, "web-1"), ""},
+		{"control: unrecorded without a name", withRelease, insertReleaseMachine, machineRow(12, "unrecorded"), ""},
 		// Compilation §9: each machine's artifact has one encryption dependency, checked at commit.
 		{"machine without its encryption dependency", append(withMachine, assignmentSource, profileSource, pinnedSource, siteSource),
 			commit, nil, "release_machine_encryption"},
@@ -608,7 +619,7 @@ func TestReleaseConstraintControl(t *testing.T) {
 	withRelease := stmt{insertRelease, []any{rel2, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum,
 		"v1.36.0", op2, r.human, "publisher"}}
 	withMachine := stmt{insertReleaseMachine, []any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4),
-		digest(5), "x: 1\n", `[]`, "bw-artifact"}}
+		digest(5), "x: 1\n", `[]`, "bw-artifact", "none", nil}}
 	for _, c := range []struct {
 		drop string
 		pre  []stmt
@@ -640,7 +651,7 @@ func TestReleaseConstraintControl(t *testing.T) {
 			[]any{id.New(id.Dependency), "kv", kv, 2, "blocked", "Soft-Deleted", nil, created}},
 		{"ALTER TABLE release_machine DROP CONSTRAINT release_machine_key_version", []stmt{withRelease}, insertReleaseMachine,
 			[]any{rel2, r.cluster, r.machine, r.ibr, r.asr, "metal", "vault:v9223372036854775808:YWJj", digest(4), digest(5), "x: 1\n", `[]`,
-				"bw-artifact"}},
+				"bw-artifact", "none", nil}},
 		{"ALTER TABLE release_machine DROP CONSTRAINT release_machine_assignment_source", []stmt{withRelease, withMachine,
 			{insertDependency, []any{rel2, r.machine, "encryption", "transit", "bw-artifact", 1, "2026-09-26T09:12:40Z", nil, nil, nil, nil, nil}}},
 			`SET CONSTRAINTS ALL IMMEDIATE`, nil},
@@ -718,7 +729,7 @@ func TestReleaseImmutableTables(t *testing.T) {
 	}
 	for _, c := range []stmt{
 		{insertReleaseMachine, []any{r.rel, r.cluster, r.machine, r.ibr, r.asr, "metal", cipher, digest(4), digest(5), "x: 1\n", `[]`,
-			"bw-artifact"}},
+			"bw-artifact", "none", nil}},
 		{insertReleaseSource, []any{r.rel, r.cluster, "fragment", nil, nil, nil, "site-dns", nil, r.frvSite, nil, nil, 1}},
 		{insertDependency, []any{r.rel, r.machine, "effective", "kv", generation(r.cluster, r.claim), 1, created,
 			"registry/late", nil, nil, nil, nil}},
