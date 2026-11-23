@@ -8,7 +8,7 @@ import { deprecated, incompatible } from "../../src/shell.tsx";
 import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_API, FIXTURE_PAGE } from "../auth.conf.ts";
 import type { Faults } from "../injector.ts";
-import { absent, answered, eventually, faults, fixtureSignIn, mint, mirrored, references, release, seen, settled, storageEmpty, where } from "./helpers.ts";
+import { absent, answered, eventually, faults, fixtureSignIn, mint, mirrored, newEpoch, references, release, seen, settled, storageEmpty, where } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 const testid = (id: string) => $(`[data-testid="${id}"]`);
@@ -429,6 +429,51 @@ describe("recovery", () => {
     await $("button=Read again").click();
     await expect(testid("principal")).toHaveText("Signed in as a person");
     expect(await testid("server").getText()).toMatch(SERVER);
+  });
+});
+
+// Where the keyboard is: the body (focus lost), the page's own `main` (where a path change puts it), a control inside the page, or
+// a control outside it, by its text.
+const focusAt = () =>
+  browser.execute(() => {
+    const a = document.activeElement;
+    if (a === null || a === document.body) return "the body";
+    if (a.id === "main") return "main";
+    return a.closest("main") !== null ? "a control of the page" : `outside the page: ${a.textContent}`;
+  });
+
+describe("focus after an epoch change (ginsys/bronzeward#1121)", () => {
+  let at: string;
+  // A new epoch supersedes the deployment it is committed in, so each case starts its own and the order cannot matter.
+  beforeEach(async () => {
+    const res = await fetch(`${CONTROL}/disposable?start=normal`, { method: "POST" });
+    expect(res.status).toBe(200);
+    at = await res.text();
+  });
+
+  // A new epoch is committed in the deployment, and the shell reads again as it does when the connection is back: its read meets
+  // the new epoch, the page is replaced by the wait for the server, and then read again.
+  async function epochChange() {
+    await newEpoch();
+    await announced("epoch-changed", `${EPOCH_CHANGED}.`);
+    await expect($("main h2")).toHaveText("Machines");
+  }
+
+  it("FOC-01: focus on a control of the page goes to the page's main when the epoch changes, never to the body", async () => {
+    await fixtureSignIn("h-viewer", {}, { upstream: at });
+    for (let i = 0; i < 60 && (await focusAt()) !== "a control of the page"; i++) await browser.keys("Tab");
+    expect(await focusAt()).toBe("a control of the page");
+    await epochChange();
+    expect(await focusAt()).toBe("main");
+  });
+
+  it("FOC-02: focus on a control outside the page stays there when the epoch changes", async () => {
+    await fixtureSignIn("h-viewer", {}, { upstream: at });
+    // The header's button is drawn through the reads; the navigation is not, so it would not keep its place.
+    await browser.execute(() => document.querySelector<HTMLElement>("header button")?.focus());
+    expect(await focusAt()).toBe("outside the page: Sign out");
+    await epochChange();
+    expect(await focusAt()).toBe("outside the page: Sign out");
   });
 });
 

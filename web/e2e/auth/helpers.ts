@@ -51,6 +51,13 @@ export async function absent(read: () => Promise<boolean>, what: string) {
   expect([`${what} is absent after a pause`, await read()]).toEqual([`${what} is absent after a pause`, false]);
 }
 
+// A new epoch is committed in the disposable deployment the page reads (the case's `upstream`), and the shell reads again as it does
+// when the connection is back: its read meets the new epoch.
+export async function newEpoch() {
+  expect((await fetch(`${CONTROL}/epoch`, { method: "POST" })).status).toBe(200);
+  await browser.execute(() => void dispatchEvent(new Event("online")));
+}
+
 // Waits until the page is back on `page`/ with its reads settled: the footer's server versions once
 // the shell shows a page, which may hold a state of its own (an empty list), else the state text.
 // Checked and read in one step in the page: an element a re-render replaced between two WebDriver
