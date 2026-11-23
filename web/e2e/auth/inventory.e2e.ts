@@ -553,7 +553,7 @@ function synthetic(cl: string, machine: string) {
     id: sid("rel", "h"), cluster: cl, draft: sid("drf", "d"), draftRevision: 2, operation: sid("op", "p"), publishedBy: { principal: author, role: "publisher" }, publishedAt: T0,
     renderer: { contract: "v1.13", machineryVersion: "v1.13.6", machineryChecksum: "sha256:synthetic", kubernetesVersion: "v1.34.1" },
     sources: [{ kind: "fragment", head: frg.id, revision: frv.id, headRevision: 3 }],
-    machines: [{ machine, mode: "metal", review: "redacted", publicationObservation: sid("obs", "o") }],
+    machines: [{ machine, mode: "metal", review: "redacted", publicationObservation: sid("obs", "o"), hostname: { source: "none" } }],
   };
   const plan: S["PlanBody"] = {
     id: sid("pln", "q"), revision: 1, state: "proposed", committedOperation: null, approval: null, cluster: cl, machine, release: rel.id, operation: "apply-config",
@@ -765,7 +765,7 @@ describe("the rendered review of a release's machine", () => {
     const s = synthetic(cl.id, m!);
     const path = reviewOf(s.rel.id, m!);
     const review: S["ReviewBody"] = {
-      release: s.rel.id, machine: m!, mode: "metal", configuration: DOC,
+      release: s.rel.id, machine: m!, mode: "metal", configuration: DOC, hostname: { source: "none" },
       provenance: [{ reference: "registry/example-pass", version: 1, member: null, source: { revision: s.frv.id, digest: "sha256:synthetic", path: "doc[0]/machine/registries/config/registry.example.test/auth/password", occurrence: 0 }, output: "doc[0]/machine/registries/config/registry.example.test/auth/password" }],
       ...over,
     };
