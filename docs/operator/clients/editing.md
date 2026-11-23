@@ -39,7 +39,8 @@ revision 6)." Three things to know:
    holds for it. After you change a fragment, set the profile again to use the new one. The command
    says so: "A profile pins revisions: after changing a fragment, set the profile again to use it."
 2. **A fragment's document never goes on the command line.** Give `--file <path>` or `-` for
-   standard input. `fragment set` runs on Linux only.
+   standard input; `--declarations <path>` adds the file that declares the document's references.
+   `fragment set` runs on Linux only.
 3. **`assignment set --none` selects nothing.** The machine's configuration is then its import base
    alone. This is the form a machine needs before a release can bind it.
 
@@ -60,7 +61,8 @@ Steps:
 5. For an assignment, the list of profile names and each layer's list of fragment names work the
    same way. The machine is the entry's name.
 6. Press **Show composition and references** to read the order in which the lists compose and, for
-   each fragment, each reference with its state. It shows no document and no secret value.
+   each fragment, each reference with its declared kind and version and whether it is declared, carried
+   and not declared, or declared and not in the document. It shows no document and no secret value.
 7. **Discard draft** drops the whole draft.
 
 ## The refusal you will meet: the draft changed
@@ -77,6 +79,12 @@ nothing and says so. This protects the other change from being overwritten witho
   and then read their change.
 
 After reading, repeat the write if it is still right.
+
+The command line sends the draft's version (its ETag) from the last `draft show` or write of that
+draft, or the one you give with `--if-match`. That is why a draft someone else changed is refused. A
+write whose outcome is unknown (the answer never came) is repeated with the flags the client prints in
+its outcome-unknown block, `--if-match` included. The [reference](cli-reference.md#fragment-set)
+lists them.
 
 ## What this page does not establish
 
