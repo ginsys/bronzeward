@@ -9,6 +9,9 @@ a person signed in, not an automation token.
 
 A cluster the installation does not know yet comes first: [connect it](connect-a-cluster.md).
 
+Words such as Desired, Applied, Observed, drift and frozen are in [the word list](terms.md); the
+table "Read the columns" below also says what each column shows.
+
 ## Read the machines
 
 **Command line.** Each list shows one page. `--all` reads every page, and `--cluster` limits the machine

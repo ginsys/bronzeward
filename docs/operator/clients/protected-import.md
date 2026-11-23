@@ -9,7 +9,8 @@ text may hold secrets, so it is shown in one place and kept nowhere.
 operator who holds all three can do every step. An automation token cannot import, review or approve.
 
 You also need a recorded machine and an open draft for its cluster: see
-[the inventory](inventory.md) and [editing](editing.md).
+[the inventory](inventory.md) and [editing](editing.md). Words such as import base, plan and
+approval are in [the word list](terms.md).
 
 The `text` blocks and quoted messages on this page are read from the source. This page does not
 claim that a run printed them.
@@ -89,9 +90,9 @@ bronzewardctl plan create --release <release> --machine <machine> --operation ad
 bronzewardctl approve <plan>
 ```
 
-`--none` selects nothing (see [editing](editing.md)). `publish` needs
+`--none` selects nothing (see [editing](editing.md)). `publish` ([publication](publication.md)) needs
 `publisher`: it makes the release the desired one and sends nothing to any machine. `plan create`
-needs `publisher` too; the plan is proposed and not approved, and it sends nothing. `approve` needs a
+([plans and approval](plan-and-approval.md)) needs `publisher` too; the plan is proposed and not approved, and it sends nothing. `approve` needs a
 person with `approver`. It starts no operation and does not wait: the controller records the adoption
 afterwards, and the machine's Applied column changes only once it has. Read it with `bronzewardctl
 machine show <machine>` before you rely on it.
@@ -108,8 +109,10 @@ On the web, **Plan adopt** on the release's rendered review opens the plan's cre
   the whole review before you continue.
 - An approved adopt plan records the machine's own bytes as applied. It does not show that those
   bytes equal what a release would compile: the plan's evidence says whether they differ. What a later
-  apply plan shows when they differ is part of plans and approval, not this page.
+  apply plan shows when they differ is part of [plans and approval](plan-and-approval.md), not this page.
 - Nothing here shows the review text was not captured outside the client.
 
 Next: back to [the inventory](inventory.md), where the machine shows an applied release once the
-controller has recorded the adoption.
+controller has recorded the adoption. To send a later change to the machine, [plans and
+approval](plan-and-approval.md) is the next page, and [operation tracking](operation-tracking.md)
+shows what happened after it.

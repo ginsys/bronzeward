@@ -110,3 +110,8 @@ which revision the server has and sends nothing.
 - Times marked "received" are this client's clock. Only the completion line carries the server's
   time.
 - A stopped watch says nothing about the operation. Read it again with `operation show`.
+
+Next: read the machine's row in [the inventory](inventory.md), where Applied now names the
+release. A change that failed or was refused goes back to
+[plans and approval](plan-and-approval.md). An operation that ends "unresolved" needs the recovery
+pages, which are not written yet.

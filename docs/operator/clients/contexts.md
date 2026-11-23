@@ -1,5 +1,9 @@
 # Contexts, TLS trust and sign-in
 
+Read this page when you add a server to `bronzewardctl`, when you keep more than one, or when the
+client says it does not trust a server's certificate. Other words of the guide are in
+[the word list](terms.md).
+
 A **context** is one server that `bronzewardctl` knows, with the way you sign in to it. You can keep
 several, for example one for a test installation and one for the real one. A command picks its
 context in this order: the `--context <name>` flag, then the `BRONZEWARD_CONTEXT` environment

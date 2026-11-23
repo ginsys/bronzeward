@@ -37,11 +37,13 @@ Expires    2026-12-23 12:15:19 UTC
 The block shows an automation identity, with shortened identifiers (the dots are not output). For
 a person, the Identity line has no service name before the word `human`, and a last line, "Token
 (bronzewardctl's reading)", gives the subject and issuer that the client read from your own token.
-Read the roles first: they are what the server will check on your next step. `whoami` shows what the
-server saw when you asked. It does not show that a later command is allowed. To check that you are
-the person you meant to be, compare the subject and issuer on the Token line with your identity
-provider, and the Principal with the one your administrator gave you: the server names no person
-here.
+The **Principal** is the identifier the server holds for you, and the **Epoch** is the
+installation's current generation, which changes when it is restored; both are explained in [the
+word list](terms.md). Read the roles first: they are what the server will check on your next step.
+`whoami` shows what the server saw when you asked. It does not show that a later command is
+allowed. To check that you are the person you meant to be, compare the subject and issuer on the
+Token line with your identity provider, and the Principal with the one your administrator gave you:
+the server names no person here.
 
 **Web.** Steps:
 

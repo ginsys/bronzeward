@@ -1,8 +1,10 @@
 # Journey: publish a draft and read what it built
 
 **You want** to turn a finished draft into a **release**: the configuration of every machine of
-one cluster, rendered and checked, and made each machine's **Desired** release. Then you want to
-read what was built, machine by machine, before anybody plans to send it.
+one cluster, rendered and checked, and made each machine's **Desired** release (the release the
+installation wants the machine to run; see [the inventory](inventory.md)). Then you want to
+read what was built, machine by machine, before anybody plans to send it. Words such as ETag and
+epoch are in [the word list](terms.md).
 
 **You need** the `publisher` role to publish. Reading a release, a rendered configuration and its
 provenance needs no role. A draft you have just finished is in [editing](editing.md); sending a
@@ -89,7 +91,7 @@ bronzewardctl release provenance <release> <machine>
 | `Needs one of the roles [publisher].` and `You are signed in as ...` | You lack the role. The text is the one in [the inventory page](inventory.md); ask for `publisher`. |
 | "The draft changed since you last read it (you saw revision N, it is now revision M). Nothing was saved. Review the change before writing again:" | Somebody changed the draft after you read it. Read it with the command printed under the message, then publish again. The web page says "Not published: someone changed this draft since this page read it." with **Read the draft again**. |
 | "Not sent: this page has not read the draft under the current epoch. Read it again first." | The page holds no ETag of the draft that is valid in this installation's current epoch, so it sends nothing. Press **Read the draft again**. |
-| "publication operation <operation> failed: <reason>; nothing was sent to any machine" | The publication failed and left the draft open. Exit code 4. Fix what the reason names and publish again. A publication that cannot get fresh evidence for every covered machine fails in this way and does not move any Desired release. |
+| "publication operation <operation> failed: <reason>; nothing was sent to any machine" | The publication failed and left the draft open. Exit code 4. Fix what the reason names and publish again. The server checks the observation behind each covered machine before it makes the release, so a publication whose evidence for one machine does not hold fails in this way and makes no release, so no Desired release moves. |
 | "This draft is <state>, not open: it cannot be published." | The draft was published or discarded. |
 | "release <release> was published for <n> machines, but it is no longer Desired for <k> of them" | A later publication replaced it for those machines. Plan nothing for them from this release. |
 | "The epoch changed from <a> to <b> while the machines were read, so no next step is shown." | The installation was restored while the command read the machines. Read them again with `release show`. |
@@ -103,3 +105,6 @@ bronzewardctl release provenance <release> <machine>
   does that, and the machine's observation after it.
 - The rendered review is the configuration as redacted. Provenance covers secret references only,
   so it does not trace any other field.
+
+Next: [plan the release for a machine and have it approved](plan-and-approval.md). A draft that
+needs more changes first goes back to [editing](editing.md).
