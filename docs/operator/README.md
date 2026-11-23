@@ -12,8 +12,11 @@ and the [acceptance plan](../spec/acceptance-plan.md) defines what must be check
 
 The guide has three parts:
 
-- **Operator clients**: `bronzewardctl` and the web interface. The [command reference](clients/cli-reference.md)
-  of `bronzewardctl` is generated from its command table; the other pages are being written
+- **Operator clients**: `bronzewardctl` and the web interface. Start with [install](clients/install.md),
+  then [contexts and TLS trust](clients/contexts.md), then a quick start for the
+  [command line](clients/quick-start-cli.md) or the [web interface](clients/quick-start-web.md).
+  The [command reference](clients/cli-reference.md) of `bronzewardctl` is generated from its command
+  table. The pages for the journeys are still being written
   ([ginsys/bronzeward#404](https://github.com/ginsys/bronzeward/issues/404)).
 - **Deployment**: [hosting](deployment/hosting.md) (TLS, routing, the web files and the
   client-configuration file), the [identity provider](deployment/identity-provider.md) (Zitadel),
