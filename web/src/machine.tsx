@@ -8,7 +8,7 @@ import type { components } from "./api/v1";
 import { ChangeEndpoint, RenameMachine } from "./forms.tsx";
 import { Detail, type Dropped, Head, Id, type Keep, type Listed, type Load, type Page, Ref, type Reads, ReadsProvider, RESTARTED, Scroll, settling, short, useHeld, useItem, useList, usePending, useReads } from "./list.tsx";
 import { type Machine, machineHeading, machineName, node, release } from "./machines.tsx";
-import { ClusterRef, Named } from "./titles.tsx";
+import { ClusterRef, Named, useReleaseNames } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
 import { PageNote } from "./page-note.tsx";
 import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, roleWords, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
@@ -61,7 +61,7 @@ export const driftLinkText = (m: Pick<Machine, "openDrift" | "frozen">): string 
   m.frozen ? (m.openDrift === null ? UNFREEZE_THE_MACHINE : UNFREEZE_OR_DECIDE) : m.openDrift === null ? FREEZE_THIS_MACHINE : DECIDE_ON_THE_CHANGE;
 
 // Journeys §2.4's sentences. openDrift alone says "drifted"; a matching release never says healthy.
-export function sentences(m: Machine, obs: Observation[]): string[] {
+export function sentences(m: Machine, obs: Observation[], name: (release: string) => string = short): string[] {
   const { desired: d, applied: a, observed: o, openDrift: drift } = m;
   const out: string[] = [];
   if (drift !== null) {
@@ -71,23 +71,23 @@ export function sentences(m: Machine, obs: Observation[]): string[] {
   } else if (o === null) {
     out.push("No configuration read recorded.");
   } else if (a !== null && o.release === a.release) {
-    out.push(`The configuration read at ${at(o.at)} is attributed to ${short(o.release)}, which is the Applied release (by ${safeWord(a.source)}).`);
+    out.push(`The configuration read at ${at(o.at)} is attributed to ${name(o.release)}, which is the Applied release (by ${safeWord(a.source)}).`);
     if (a.source === "adoption") out.push(ADOPTED);
     if (a.source === "adoption" && d === a.release) out.push(EITHER);
   } else if (o.release === null) {
     out.push(`The configuration read at ${at(o.at)} matched neither Applied nor Desired, and no drift is open; an operation may hold the machine. See the timeline.`);
   } else {
     // The read is the selected release's with no drift open: an operation holds the machine.
-    out.push(`The configuration read at ${at(o.at)} is attributed to the selected release ${short(o.release)}.`);
+    out.push(`The configuration read at ${at(o.at)} is attributed to the selected release ${name(o.release)}.`);
   }
   const late = latestUnread(m, obs);
   if (late !== undefined) out.push(`The latest read at ${at(late.at)} could not read: ${causes(late).join("; ")}.`);
   if (a === null) out.push("Not applied or adopted by Bronzeward.");
   if (d === null) out.push("No release selected.");
-  else if (m.pendingConvergence && a === null) out.push(`${RELEASE_NOT_APPLIED_YET}: the selected release ${short(d)} has not been applied to this machine.`);
-  else if (m.formOnly) out.push(`${DIFFERS_IN_FORM_ONLY}: the selected release ${short(d)} for this machine. ${FORM_ONLY_NOTE}`);
-  else if (m.pendingConvergence && drift === null) out.push(`${RELEASE_NOT_APPLIED_YET}: the configuration of the selected release ${short(d)} for this machine differs from what Bronzeward applied.`);
-  else if (!m.pendingConvergence && drift === null && a !== null && d !== a.release) out.push(`The selected release ${short(d)} carries this machine's applied configuration unchanged.`);
+  else if (m.pendingConvergence && a === null) out.push(`${RELEASE_NOT_APPLIED_YET}: the selected release ${name(d)} has not been applied to this machine.`);
+  else if (m.formOnly) out.push(`${DIFFERS_IN_FORM_ONLY}: the selected release ${name(d)} for this machine. ${FORM_ONLY_NOTE}`);
+  else if (m.pendingConvergence && drift === null) out.push(`${RELEASE_NOT_APPLIED_YET}: the configuration of the selected release ${name(d)} for this machine differs from what Bronzeward applied.`);
+  else if (!m.pendingConvergence && drift === null && a !== null && d !== a.release) out.push(`The selected release ${name(d)} carries this machine's applied configuration unchanged.`);
   if (m.frozen) out.push(FROZEN);
   out.push(HEALTH);
   return out;
@@ -446,6 +446,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
   const [pm, po, timeline] = [usePending(m, "the machine"), usePending(obs, "the observations"), usePending(tl, "the timeline")];
   const d = m.kind === "ok" ? m.data : km.data;
   const read = obs.kind === "ok" ? obs.data : ko.data;
+  const name = useReleaseNames(d?.desired, d?.applied?.release, d?.observed?.release);
   if (d === undefined) return <><h2>Machine {short(id)}</h2>{pm}</>;
   const list = read === undefined ? [] : byBasis(read.items);
   return (
@@ -458,7 +459,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
       <p><ClusterRef id={d.cluster} />, {d.talosEndpoint}, {node(d)}, {safeWord(d.platform)}{d.role !== null && d.role !== undefined && <>, {safeWord(roleWords(d.role))}</>}.</p>
       {changed !== undefined && <RenameMachine machine={d} onChanged={changed} />}
       {changed !== undefined && <ChangeEndpoint machine={d} onChanged={changed} />}
-      <ul aria-label="Status" data-testid="sentences">{sentences(d, list).map((s) => <li key={s}>{s}</li>)}</ul>
+      <ul aria-label="Status" data-testid="sentences">{sentences(d, list, name).map((s) => <li key={s}>{s}</li>)}</ul>
       <p data-testid="drift-link"><Ref to={driftPath(d.id)} id={d.id}>{driftLinkText(d)}</Ref></p>
       <NextStep position={position} recovery={recovery} />
       <dl>

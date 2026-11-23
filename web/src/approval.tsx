@@ -7,6 +7,7 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "rea
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { type Load, Id, type Reads, settledRead, short, useItem, useReads } from "./list.tsx";
+import { useReleaseNames } from "./titles.tsx";
 import { PageNote } from "./page-note.tsx";
 import { Who } from "./principals.tsx";
 import { safeWord } from "./safe.ts";
@@ -27,8 +28,8 @@ const enc = encodeURIComponent;
 export const UNPREDICTED = "Import-base authorship and automation you own are not predicted. The approval records the actual reasons. Allowed and marked.";
 // W7's approved variant, on the revoke control (B22).
 export const REVOKE_LIMIT = "Revoking after the controller commits does not stop an attempt already recorded.";
-export const afterApproval = (p: Plan) => p.operation === "adopt"
-  ? `The controller records the adoption without sending anything; Applied becomes ${short(p.release)} (adoption) once it does.`
+export const afterApproval = (p: Plan, name: (release: string) => string = short) => p.operation === "adopt"
+  ? `The controller records the adoption without sending anything; Applied becomes ${name(p.release)} (adoption) once it does.`
   : "The controller re-checks the plan at use time; it applies it only if every check passes.";
 // An apply-config plan bound to a drift record overwrites a configuration no reviewer has seen.
 export const overwrites = (p: Plan) => p.operation === "apply-config" && p.driftRecord !== null
@@ -124,13 +125,14 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
   const [w, send] = useSend();
   const answer = useRef<HTMLDivElement>(null);
   useFocusOn(w?.outcome, answer);
+  const releaseName = useReleaseNames(p.release);
   const done = w?.outcome?.kind === "done";
   useEffect(() => {
     if (done) reread();
   }, [done, reread]);
   const recorded = (data: unknown) => {
     const a = data as Approval;
-    return <>Approved (<Id id={a.id} />). {recordedReasons(a)} {afterApproval(p)}</>;
+    return <>Approved (<Id id={a.id} />). {recordedReasons(a)} {afterApproval(p, releaseName)}</>;
   };
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -144,7 +146,7 @@ export function ApproveControl({ p, reread }: { p: Plan; reread: () => void }) {
       <Prediction p={p} />
       {over !== undefined && <Status testid="unseen-overwrite">{over}</Status>}
       <form onSubmit={submit} aria-label="Approve plan">
-        <p>Pressing Approve records your approval of this plan. {afterApproval(p)} Approval is for a human sign-in only.</p>
+        <p>Pressing Approve records your approval of this plan. {afterApproval(p, releaseName)} Approval is for a human sign-in only.</p>
         <p><Action label="Approve" needs={["approver"]} submit busy={busy} /></p>
       </form>
     </section>

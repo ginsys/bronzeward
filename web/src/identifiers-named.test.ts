@@ -7,6 +7,7 @@ import { act, createElement as h, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { MachineShown, TimelineRows } from "./machine.tsx";
+import { NextStepSection } from "./review.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { PlanItem, ReleaseItem } from "./resources.tsx";
 import { ShellContext } from "./shell.tsx";
@@ -163,5 +164,48 @@ describe("a person is named, and is you when they are the signed-in person", () 
     await mount(h(ReleaseItem, { id: REL }), OTHER);
     await settled();
     expect(field("Published")).toContain("Ada Lovelace");
+  });
+});
+
+describe("a release named in a sentence is its title", () => {
+  const REL2 = "rel_zzzzzzzzzzzzzzzzzzzzzzzzzz";
+  beforeEach(() => {
+    answers[`/releases/${REL2}`] = ok({ ...release, id: REL2, draft: "drf_zzzzzzzzzzzzzzzzzzzzzzzzzz" });
+    answers["/drafts/drf_zzzzzzzzzzzzzzzzzzzzzzzzzz"] = ok({ id: "drf_zzzzzzzzzzzzzzzzzzzzzzzzzz", title: "Rename the lab hosts", state: "published", revision: 2, cluster: CL });
+  });
+  test("the machine page's status sentences name the selected release", async () => {
+    const m = { ...machine, desired: REL2, applied: null, pendingConvergence: true, formOnly: false };
+    await mount(h(MachineShown, {
+      id: MCH, m: { kind: "ok", data: m }, obs: { kind: "ok", data: { items: [], next: undefined, restarted: false } }, km: { view: "v", data: m, restarted: false },
+      ko: { view: "v", data: undefined, restarted: false }, tl: { kind: "ok", data: { items: [], older: undefined, tail: undefined, read: true, restarted: false } },
+      kt: { view: "v", data: undefined, restarted: false }, older: undefined, busy: false,
+    } as never));
+    await settled();
+    const sentence = box.querySelector('[data-testid="sentences"]')?.textContent ?? "";
+    expect(sentence).toContain("the selected release Rename the lab hosts");
+    expect(sentence).not.toContain("rel_zzzz");
+  });
+  test("a release page says which release is the machine's Desired one by its title", async () => {
+    const pos = { kind: "ok", data: { step: "none", machine: { ...machine, desired: REL2, applied: null, pendingConvergence: false }, plan: null, draft: null, ingestion: null, operation: null, rolloutHeldBy: null } };
+    await mount(h(NextStepSection, { release: REL, machine: MCH, pos: pos as never, readAgain: () => {} }));
+    await settled();
+    expect(box.querySelector('[data-testid="next-step"]')?.textContent).toContain("(Desired is Rename the lab hosts");
+  });
+  test("an approved plan says which Desired release the machine has now, and which it had, by title", async () => {
+    answers[`/machines/${MCH}`] = ok({ ...machine, desired: REL2 });
+    answers["/approvals/apr_k2pq3rstuvwxyz234567abcdef"] = ok({ id: "apr_k2pq3rstuvwxyz234567abcdef", epoch: "ep_a", selfApproval: { reasons: [] } });
+    answers["/identity"] = ok({ kind: "human", principal: YOU, epoch: "ep_a", roles: [] });
+    answers[`/plans/${PLN}`] = ok({ ...plan, state: "approved", approval: "apr_k2pq3rstuvwxyz234567abcdef" });
+    await mount(h(PlanItem, { id: PLN }));
+    await settled();
+    expect(text()).toContain("Predicted stale: the machine's Desired release is now Rename the lab hosts, published");
+    expect(text()).toContain("and it was Add the office labels, published");
+    expect(text()).not.toContain("rel_zzzz");
+  });
+  test("an adopt plan's approval says which release Applied becomes, by its title", async () => {
+    answers[`/plans/${PLN}`] = ok({ ...plan, operation: "adopt", mode: "adopt" });
+    await mount(h(PlanItem, { id: PLN }));
+    await settled();
+    expect(text()).toContain("Applied becomes Add the office labels");
   });
 });

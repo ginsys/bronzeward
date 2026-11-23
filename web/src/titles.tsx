@@ -111,6 +111,13 @@ export function useReleaseTitle(id: string | undefined, held?: S["ReleaseBody"])
   return r === undefined ? undefined : releaseTitle(r, d);
 }
 
+// The names of up to three releases a sentence mentions, for a builder that returns text: each is its title once its read
+// answers, else its shortened identifier, as every other identifier is shown.
+export function useReleaseNames(a?: string | null, b?: string | null, c?: string | null): (id: string) => string {
+  const titles = new Map<string, string | undefined>([[a ?? "", useReleaseTitle(a ?? undefined)], [b ?? "", useReleaseTitle(b ?? undefined)], [c ?? "", useReleaseTitle(c ?? undefined)]]);
+  return (id) => titles.get(id) ?? short(id);
+}
+
 export function usePlanTitle(id: string | undefined, held?: S["PlanBody"], machineHeld?: Held): string | undefined {
   const p = useOwn("plans", id, held);
   const release = useReleaseTitle(p?.release);
