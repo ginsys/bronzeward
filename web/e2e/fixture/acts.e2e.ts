@@ -30,6 +30,27 @@ async function open() {
   say(`the page: ${await state.getText()}`);
 }
 
+// What the accounting form offers, as page text: each radio's group, its label and whether it is off. It is printed before any choice,
+// so a run that stops says what the page showed and needs no second run to find out.
+async function offer(form: WebdriverIO.Element): Promise<string[]> {
+  const lines: string[] = [];
+  for (const r of await form.$$('input[type="radio"]')) {
+    lines.push(`${await r.getAttribute("name")} ${(await (await r.parentElement()).getText()).replace(/\s+/g, " ").slice(0, 160)}${(await r.isEnabled()) ? "" : " (off)"}`);
+  }
+  return lines;
+}
+// The radio of a group with the wanted value, chosen only when it is drawn and on. It is waited for up to 30 s, since the form draws the
+// observations as they arrive, and a run that stops says which of the two it met: not drawn, or drawn but off (the form marks one start valid).
+async function pick(form: WebdriverIO.Element, group: string, value: string): Promise<WebdriverIO.Element> {
+  const css = `input[type="radio"][name="${group}"][value="${value}"]`;
+  const drawn = await browser.waitUntil(async () => (await form.$$(css)).length === 1, { timeout: 30_000, interval: 500 }).then(() => true, () => false);
+  const listing = (await offer(form)).join(" | ");
+  if (!drawn) throw new Error(`the ${group} radio ${value} was not drawn within 30 s; the form offers: ${listing}`);
+  const radio = await choice(form, group, value);
+  if (!(await radio.isEnabled())) throw new Error(`the ${group} radio ${value} is drawn but off; the form offers: ${listing}`);
+  return radio;
+}
+
 describe(`fixture act ${act}`, () => {
   before(open);
 
@@ -39,10 +60,11 @@ describe(`fixture act ${act}`, () => {
       const form = await control(await region($("main"), "Account for an attempt"), 'form[aria-label="Record accounting"]', "the accounting form");
       // The form reads the machine's observations after the page is up and draws no radio until they arrive.
       await form.$('input[type="radio"]').waitForExist({ timeout: 30_000, timeoutMsg: "the accounting form listed no observation within 30 s" });
-      const start = await choice(form, "start", need("BW_FIXTURE_START"));
+      for (const line of await offer(form)) say(`offered: ${line}`);
+      const start = await pick(form, "start", need("BW_FIXTURE_START"));
       say(`start: ${(await (await start.parentElement()).getText())}`);
       await start.click();
-      const end = await choice(form, "end", need("BW_FIXTURE_END"));
+      const end = await pick(form, "end", need("BW_FIXTURE_END"));
       say(`end: ${(await (await end.parentElement()).getText())}`);
       await end.click();
       await (await field(form, "explanation")).setValue(need("BW_FIXTURE_TEXT"));
