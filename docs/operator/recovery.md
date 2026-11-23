@@ -122,7 +122,9 @@ request left, or whether it landed. Bronzeward does not guess. You decide, from 
 
 - `start`: the first observation, begun after the attempt's transport deadline, that read anything
   from the node. It must be that one, not a later one, and it must have a `resourceVersion`; if the
-  first read lacks one, the server refuses the decision.
+  first read lacks one, the server refuses the decision. No later observation can then serve as the
+  start, so for that settle no decision can be recorded today, and what an operator does in that case
+  is not decided yet.
 - `end`: a `recovery` observation, with a `resourceVersion`, begun after `start` was recorded (its
   `at`) and at least the settle floor (`execution.settleFloor`, 30 s by default) after the latest
   of the transport deadline, the last takeover, and `start`'s `at`. The server takes `recovery`
