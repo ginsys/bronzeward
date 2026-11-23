@@ -42,14 +42,19 @@ async function offer(form: WebdriverIO.Element): Promise<string[]> {
   return lines;
 }
 // The radio of a group with the wanted value, chosen only when it is drawn and on. It is waited for up to 30 s, since the form draws the
-// observations as they arrive, and a run that stops says which of the two it met: not drawn, or drawn but off (the form marks one start valid).
+// observations as they arrive and turns a radio on or off when the server's settings and the deadline arrive; a run that stops says which
+// of the two it met: not drawn, or drawn but off (the form marks one start valid).
 async function pick(form: WebdriverIO.Element, group: string, value: string): Promise<WebdriverIO.Element> {
   const css = `input[type="radio"][name="${group}"][value="${value}"]`;
-  const drawn = await browser.waitUntil(async () => (await form.$$(css)).length === 1, { timeout: 30_000, interval: 500 }).then(() => true, () => false);
+  const ready = async () => {
+    const found = await form.$$(css);
+    return found.length === 1 && (await found[0]!.isEnabled());
+  };
+  await browser.waitUntil(ready, { timeout: 30_000, interval: 500 }).catch(() => undefined);
   const listing = (await offer(form)).join(" | ");
-  if (!drawn) throw new Error(`the ${group} radio ${value} was not drawn within 30 s; the form offers: ${listing}`);
+  if ((await form.$$(css)).length !== 1) throw new Error(`the ${group} radio ${value} was not drawn within 30 s; the form offers: ${listing}`);
   const radio = await choice(form, group, value);
-  if (!(await radio.isEnabled())) throw new Error(`the ${group} radio ${value} is drawn but off; the form offers: ${listing}`);
+  if (!(await radio.isEnabled())) throw new Error(`the ${group} radio ${value} is drawn but off after 30 s; the form offers: ${listing}`);
   return radio;
 }
 
