@@ -113,6 +113,13 @@ describe("a cluster is named on the release page and the plan page", () => {
     expect(field("Target")).toContain("cluster office");
     expect(field("Target")).not.toContain("cl_k2pq");
   });
+  test("the plan page shows the whole epoch it was made in, with what an epoch is as its title", async () => {
+    answers[`/plans/${PLN}`] = ok({ ...plan, epoch: "ep_whole_epoch_value_01" });
+    await mount(h(PlanItem, { id: PLN }));
+    await settled();
+    expect(field("Bound to")).toContain("made in epoch ep_whole_epoch_value_01");
+    expect(titles()).toContain("The server's epoch changes when recovery mode is entered; a restore alone does not change it.");
+  });
   test("a cluster whose read fails reads as this cluster, never as its identifier", async () => {
     answers[`/clusters/${CL}`] = missing;
     await mount(h(ReleaseItem, { id: REL }));
@@ -266,7 +273,7 @@ describe("the two revision numbers of one published draft say what each counts",
     expect(field("Draft")).toBe("Add the office labels, built from its revision 5");
     await mount(h(DraftItem, { id: DRF }));
     await settled();
-    expect(box.querySelector('[data-testid="draft-line"]')?.textContent).toBe("published, revision 6 (publishing added the last revision: its release was built from the one before), Cluster office.");
+    expect(box.querySelector('[data-testid="draft-line"]')?.textContent).toBe("published, revision 6 (publishing made revision 6; its release was built from revision 5), Cluster office.");
   });
   test("a draft that is not published says nothing of a release", async () => {
     answers[`/drafts/${DRF}`] = ok({ id: DRF, title: "Add the office labels", state: "open", revision: 6, cluster: CL, entries: [] });

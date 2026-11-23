@@ -25,9 +25,7 @@ type EntryBody = components["schemas"]["EntryBody"];
 // §8.5 start mode: the last one an answer showed, unknown before any.
 export type StartMode = "normal" | "recovery" | "unknown";
 
-// What the epoch is, where a person compares it: only entering recovery mode starts a new one (a restore alone does not).
-const EPOCH_MEANS = " (entering recovery mode starts a new one)";
-export const PRE_ENTRY ="This server was started for recovery and serves only the recovery entry until it is recorded.";
+export const PRE_ENTRY = "This server was started for recovery and serves only the recovery entry until it is recorded.";
 export const RECOVERY_START =
   "Server started for recovery: plan creation, approval and unfreeze wait for its normal restart, and publications it accepts complete only then. Imports complete here.";
 export const UNKNOWN_START = "Whether this server was started for recovery is not known yet.";
@@ -52,6 +50,9 @@ export function scopeSummary(scopes: readonly Scope[]): string {
   if (held === 0) return `All ${scopes.length} scopes released.`;
   return `${held} of ${scopes.length} scopes not released: ${held === scopes.length ? "none can commit" : "those cannot commit"}.`;
 }
+
+// What the epoch is, where a person compares it: only entering recovery mode starts a new one (a restore alone does not).
+const EPOCH_MEANS = " (entering recovery mode starts a new one)";
 
 // Shown while responses carry Bronzeward-Recovery-Mode: true. It never disables an action: only a
 // scope's state or the process refuses one, and the server's refusal says which.

@@ -206,6 +206,7 @@ export function NextStepSection({ release, machine, pos, readAgain }: { release:
 export function ReviewItem({ release, machine }: { release: string; machine: string }) {
   // [Read again] reads the whole page again: the review and the position share one counter.
   const [n, readAgain] = useState(0);
+  const releaseTitle = useReleaseTitle(release) ?? short(release);
   const review = useItem<Review>(`/releases/${enc(release)}/machines/${enc(machine)}/review`, undefined, n);
   const pending = usePending(review, "the rendered review");
   // The position holds the machine record, so the page's name and address cost no further read.
@@ -213,7 +214,7 @@ export function ReviewItem({ release, machine }: { release: string; machine: str
   const held = pos.kind === "ok" ? pos.data.machine : undefined;
   return (
     <>
-      <h2>Rendered configuration of {held === undefined ? THE_MACHINE : machineText(held)} in release {useReleaseTitle(release) ?? short(release)}</h2>
+      <h2>Rendered configuration of {held === undefined ? THE_MACHINE : machineText(held)} in release {releaseTitle}</h2>
       <p><Ref to={`/releases/${enc(release)}`} id={release}>Back to the release</Ref></p>
       {review.kind === "ok" ? <ReviewBody r={review.data} {...(held !== undefined && { machine: held })} /> : pending}
       <h3>Next step</h3>
