@@ -1,0 +1,77 @@
+name: Release build
+
+# Called by release.yml and release-dry-run.yml only (ginsys/bronzeward#262); it has no trigger of
+# its own. It builds the archives of the commit the release tags exactly as CI's package job does
+# (mise run package, with BW_VERSION the tag), checks that every binary reports the tag and the
+# commit and that the web bundle's footer names the tag (scripts/release/check-build.sh), writes an
+# SPDX SBOM per archive and uploads both as the artifact release-bronzeward, which the shared
+# publish workflow picks up. It does not use the shared Go build workflow: that one runs GoReleaser
+# alone, and these archives need the web bundle and the notices built first (web-package.sh).
+# SHA256SUMS is not uploaded: the shared publish workflow writes its own over every file.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The tag the release makes, from the shared release workflow's output"
+        required: true
+        type: string
+      sha:
+        description: "The commit the tag names, from the shared release workflow's output"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  # As in ci.yml: tools come from jdx/mise-action's install step only.
+  MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BW_VERSION: ${{ inputs.tag }}
+      COMMIT: ${{ inputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache: false
+          install_args: go node goreleaser
+      - run: mise run package
+      - name: Check the binaries and the bundle name the tag and the commit
+        run: EXPECT_REVISION="$COMMIT" scripts/release/check-build.sh dist
+
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+        with:
+          syft-version: v1.55.0
+      - name: Write an SPDX SBOM per archive
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        # A binary's SBOM lists the modules of its build information. The web bundle carries no
+        # package metadata, so its SBOM lists the lockfile's production packages; the bundlers'
+        # injected helpers are in its notices only.
+        run: |
+          for a in dist/*.tar.gz; do
+            src=file:$a
+            case $a in dist/bronzeward-web_*) src=file:web/package-lock.json ;; esac
+            "$SYFT" scan "$src" -o "spdx-json=$a.spdx.json"
+          done
+
+      # Two release-* artifacts holding a file of the same name overwrite each other without a
+      # message; this is the only one, and every name here carries the version.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-bronzeward
+          path: |
+            dist/*.tar.gz
+            dist/*.spdx.json
+          retention-days: 14
+          if-no-files-found: error

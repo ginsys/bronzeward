@@ -1,0 +1,72 @@
+name: Release dry run
+
+# Proves the release before a change to it merges: a dry run of the shared release workflow, the
+# archive build and the publish step on the pull request, with no secret. The dry run is literal
+# (`dry_run: true`, DRY_RUN=1) and this file has no dispatch, so it can never make a release. It is
+# not a required check: a pull request from a fork has a read-only token, so the called workflow,
+# which asks for `contents: write`, does not start there. The real release is release.yml
+# (ginsys/bronzeward#262).
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/release.yml"
+      - ".github/workflows/release-build.yml"
+      - ".github/workflows/release-dry-run.yml"
+      - ".goreleaser.yaml"
+      - "VERSION"
+      - "CHANGELOG.md"
+      - "changelog.d/**"
+      - "scripts/release/**"
+
+permissions:
+  contents: read
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Check VERSION and the licence (a missing LICENSE is a warning here)
+        env:
+          DRY_RUN: "1"
+        run: scripts/release/stop.sh
+
+  release:
+    needs: stop
+    # The release pull request changes VERSION and CHANGELOG.md, and its new section has no tag until
+    # the merge, so the dry run would fail there for a reason that is not a fault.
+    if: ${{ !startsWith(github.head_ref, 'release/') }}
+    permissions:
+      contents: write
+      pull-requests: read
+    uses: ginsys/.github/.github/workflows/release.yml@31fe25d73f696b3b13d7a728f4d5dd4518d58a86 # 2026-11-23
+    with:
+      action: release
+      dry_run: true
+
+  build:
+    needs: release
+    if: ${{ needs.release.outputs.tag != '' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-build.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+      sha: ${{ needs.release.outputs.sha }}
+
+  publish:
+    needs: [release, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    # A dry run reads and previews only, so it needs no write grant.
+    permissions:
+      contents: read
+    uses: ginsys/.github/.github/workflows/publish-github.yml@31fe25d73f696b3b13d7a728f4d5dd4518d58a86 # 2026-11-23
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+      sha: ${{ needs.release.outputs.sha }}
+      dry_run: true

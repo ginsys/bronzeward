@@ -1,0 +1,87 @@
+name: Release
+
+# The one way a release is made (ginsys/bronzeward#262), through the shared workflows of
+# ginsys/.github (docs/release.md there): pick an action and whether it is a dry run (the default).
+# A real run cuts a release pull request from the changelog.d/ fragments, waits for its merge, makes
+# the tag on the merged commit, then builds the archives and publishes the GitHub pre-release, all in
+# this one run. A real run stops at the `stop` job while the repository has no LICENSE
+# (ginsys/bronzeward#16). No tag is pushed by hand.
+#
+# This file has one trigger, a dispatch, because it can make a real release. The dry run that proves
+# a change to the release before it merges is release-dry-run.yml. The tag the release makes starts
+# no other workflow, so everything after the tag is a job of this run.
+#
+# The actions that would leave the decided scheme (a stable tag, a new major) are not offered.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to do"
+        required: true
+        type: choice
+        default: release
+        options:
+          - release
+          - release-as-beta
+          - release-as-rc
+          - start-next-minor
+          - skip-prerelease-number
+      dry_run:
+        description: "Dry run: preview and build, change nothing"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  stop:
+    # The stops the shared workflows do not make: the form of VERSION and the licence. In a dry run
+    # a missing LICENSE is a warning; in a real run it fails, and `release` waits for this job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Check VERSION and the licence
+        env:
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+        run: scripts/release/stop.sh
+
+  release:
+    needs: stop
+    permissions:
+      contents: write
+      pull-requests: read
+    uses: ginsys/.github/.github/workflows/release.yml@31fe25d73f696b3b13d7a728f4d5dd4518d58a86 # 2026-11-23
+    with:
+      action: ${{ inputs.action }}
+      dry_run: ${{ inputs.dry_run }}
+
+  # The two jobs below run only for an action that makes a tag: the others leave `tag` empty.
+  build:
+    needs: release
+    if: ${{ needs.release.outputs.tag != '' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-build.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+      sha: ${{ needs.release.outputs.sha }}
+
+  publish:
+    needs: [release, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ginsys/.github/.github/workflows/publish-github.yml@31fe25d73f696b3b13d7a728f4d5dd4518d58a86 # 2026-11-23
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+      sha: ${{ needs.release.outputs.sha }}
+      dry_run: ${{ inputs.dry_run }}
+      sign: true
