@@ -15,7 +15,8 @@ import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
 import { safeWord } from "./safe.ts";
-import { DraftHead, Named } from "./titles.tsx";
+import { whyRefused } from "./problems.tsx";
+import { DraftHead, MachineById, Named } from "./titles.tsx";
 import { PUBLISH_NOTE } from "./words.ts";
 import type { Outcome } from "./write.ts";
 
@@ -31,7 +32,8 @@ export const NO_DRAFT = "Not read: the address names no draft. Open the draft an
 
 // What the publish operation's end says: the release it names, or the text that explains why none is
 // named. A failed operation sent nothing to any machine, whatever its code.
-export type Ended = { release: string } | { text: string };
+// A refusal's machine is named by the page that shows the text, which can read its name.
+export type Ended = { release: string } | { text: string; machine?: string };
 export function publishEnd(o: Operation): Ended {
   if (o.state === "succeeded") {
     const r = o.result as S["PublishResult"] | null;
@@ -39,7 +41,8 @@ export function publishEnd(o: Operation): Ended {
     return { release: r.release };
   }
   const code = refusalOf({ problem: o.error }).code;
-  return { text: `The publication ${safeWord(o.state)}${code === undefined ? "" : `: ${code}`}. ${SENT_NOTHING}` };
+  const why = whyRefused(o.error as Record<string, unknown> | null);
+  return { text: `The publication ${safeWord(o.state)}${code === undefined ? "" : `: ${code}`}. ${why.facts === "" ? "" : `${why.facts} `}${SENT_NOTHING}`, ...(why.machine !== undefined && { machine: why.machine }) };
 }
 
 // What the accepted answer says: the draft's revision and the operation, each only when the answer names it.
@@ -100,7 +103,7 @@ function Progress({ op, draft, onFailed }: { op: string; draft: string; onFailed
       // A publication that definitively failed left the draft open: Publish may send again (the server
       // reuses only a queued or running operation).
       else onFailed(op);
-      show({ type: "end", text: "release" in e ? <>Publication succeeded: release <Named id={e.release} /> was published. {SENT_NOTHING}</> : e.text });
+      show({ type: "end", text: "release" in e ? <>Publication succeeded: release <Named id={e.release} /> was published. {SENT_NOTHING}</> : <>{e.text}{e.machine !== undefined && <> The machine it names: <MachineById id={e.machine} />.</>}</> });
     });
     return () => abort.abort();
   }, [client, op, draft, onFailed]);

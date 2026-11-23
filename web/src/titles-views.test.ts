@@ -599,6 +599,16 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
     expect(titled(released)).toBe(REL);
   });
 
+  test("the outcome line of a failed publication says why: the rule, the input, the paths, the server's message and the machine by name", async () => {
+    const error = { type: "urn:bronzeward:problem:validation-failed", status: 422, rule: "base-override", machine: MCH, input: "fragment[1]", paths: ["spec.a", "spec.b"], message: "a fragment overrode <redacted:ref@1>\u001b[2J" };
+    const o = { ...operation("publish", { draft: DRF }), state: "failed", error };
+    await mount(h(Outcome, { o: o as never }));
+    await settled();
+    const line = box.querySelector("[data-testid=outcome]")?.textContent;
+    expect(line).toBe("Failed: validation-failed. The rule: base-override. The input: the fragment at position 1 (the first is 0). The paths: spec.a, spec.b. The server says: a fragment overrode <redacted:ref@1>�[2J. The machine it names: worker-1.");
+    expect(box.querySelector("[data-testid=outcome] a")?.getAttribute("title")).toBe(MCH);
+  });
+
   test("an operation's page reads each distinct body once for its heading, Subject and outcome", async () => {
     answers[`/operations/${OP}`] = ok({ ...operation("apply-config", { plan: PLN, machine: MCH }), state: "completed", result: { appliedRelease: REL, observation: "obs_aaaaaaaaaaaaaaaaaaaaaaaaaa" } });
     await mount(h(OperationItem, { id: OP }));
