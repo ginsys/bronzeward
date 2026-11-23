@@ -111,6 +111,22 @@ type provenanceSource struct {
 // a field it should not hold could hold anything.
 var errProvenance = errors.New("a stored provenance record does not have the provenance record's shape")
 
+// errHostname is a stored hostname record that is not §9.2's. Its content is never named, as a
+// provenance record's is not.
+var errHostname = errors.New("a stored hostname record does not have the hostname record's shape")
+
+// projectHostname is a stored hostname record as the release and review answer it: a source of the
+// enumeration, and a name for machine-name alone. Anything else is errHostname, answered 500.
+func projectHostname(source string, name sql.NullString) (hostnameBody, error) {
+	switch {
+	case source == "machine-name" && name.Valid:
+		return hostnameBody{Source: source, Name: name.String}, nil
+	case !name.Valid && slices.Contains([]string{"configuration", "none", "legacy-stable", "unrecorded"}, source):
+		return hostnameBody{Source: source}, nil
+	}
+	return hostnameBody{}, errHostname
+}
+
 // projectProvenance decodes stored provenance into §8.2's fields alone and checks each record's
 // shape, so a field outside them, or a record of another shape, is refused, never forwarded. The
 // projection must encode back to the stored value exactly: the decoder matches a field name in any
@@ -208,12 +224,17 @@ func withReleaseParts(ctx context.Context, tx *sql.Tx, rs []*releaseBody) error 
 	if err != nil {
 		return err
 	}
-	return eachRow(ctx, tx, `SELECT release, machine, mode, publication_observation FROM release_machine
+	return eachRow(ctx, tx, `SELECT release, machine, mode, publication_observation, hostname_source, hostname_name FROM release_machine
 		WHERE release = ANY (string_to_array($1, ',')) ORDER BY release, machine`,
 		strings.Join(ids, ","), func(row *sql.Rows) error {
-			var rel string
+			var rel, source string
+			var name sql.NullString
 			var m releaseMachineBody
-			if err := row.Scan(&rel, &m.Machine, &m.Mode, &m.PublicationObservation); err != nil {
+			if err := row.Scan(&rel, &m.Machine, &m.Mode, &m.PublicationObservation, &source, &name); err != nil {
+				return err
+			}
+			var err error
+			if m.Hostname, err = projectHostname(source, name); err != nil {
 				return err
 			}
 			m.Review = prefix + "/releases/" + rel + "/machines/" + m.Machine + "/review"
@@ -257,16 +278,20 @@ func getReview(a *API, w http.ResponseWriter, q *request) {
 		}
 		var b reviewBody
 		var provenance []byte
-		var importBase, fragments string
+		var importBase, fragments, source string
+		var hostname sql.NullString
 		err := tx.QueryRowContext(ctx, `SELECT release, machine, mode, redacted, provenance::text, import_base_revision,
 				COALESCE((SELECT string_agg(fragment_revision, ',') FROM release_source s
-					WHERE s.release = m.release AND fragment_revision IS NOT NULL), '')
+					WHERE s.release = m.release AND fragment_revision IS NOT NULL), ''), hostname_source, hostname_name
 			FROM release_machine m WHERE release = $1 AND machine = $2`, rel, m).Scan(&b.Release, &b.Machine, &b.Mode,
-			&b.Configuration, &provenance, &importBase, &fragments)
+			&b.Configuration, &provenance, &importBase, &fragments, &source, &hostname)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil, refuse(http.StatusNotFound, "not-found", "no such resource")
 		}
 		if err != nil {
+			return "", nil, err
+		}
+		if b.Hostname, err = projectHostname(source, hostname); err != nil {
 			return "", nil, err
 		}
 		if b.Configuration == nil {

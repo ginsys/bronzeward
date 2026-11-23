@@ -195,12 +195,14 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		covered[i] = m.machine
 	}
 	slices.Sort(covered)
-	scopes := map[string]string{}
-	err = eachRow(ctx, tx, `SELECT id, scope_state FROM machine WHERE id = ANY ($1) ORDER BY id FOR SHARE`, covered,
+	// The name is read under the row lock the rename takes (§3.5), so a rename either committed
+	// before this read or waits for this commit.
+	scopes, names := map[string]string{}, map[string]string{}
+	err = eachRow(ctx, tx, `SELECT id, scope_state, coalesce(name, '') FROM machine WHERE id = ANY ($1) ORDER BY id FOR SHARE`, covered,
 		func(row *sql.Rows) error {
-			var m, s string
-			err := row.Scan(&m, &s)
-			scopes[m] = s
+			var m, s, n string
+			err := row.Scan(&m, &s, &n)
+			scopes[m], names[m] = s, n
 			return err
 		})
 	if err != nil {
@@ -332,7 +334,7 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	case !errors.Is(err, sql.ErrNoRows):
 		return "", nil, err
 	}
-	if ref, err := checkInputs(j, u, draftState, draftRev, heads, locked, bases, scopes, held, recovery); ref != nil || err != nil {
+	if ref, err := checkInputs(j, u, draftState, draftRev, heads, locked, bases, scopes, names, held, recovery); ref != nil || err != nil {
 		return "", ref, err
 	}
 
@@ -428,7 +430,7 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 // (§12.2). A changed assignment of a machine the release does not cover is the unit's defect, and
 // an error (ruling R13).
 func checkInputs(j publishJob, u releaseUnit, draftState string, draftRev int, heads, locked []sourceHead,
-	bases, scopes, held map[string]string, recovery bool) (*refusal, error) {
+	bases, scopes, names, held map[string]string, recovery bool) (*refusal, error) {
 	switch {
 	case draftState != "open":
 		return refuse(http.StatusConflict, "conflict", "the draft is no longer open").with("draft", j.draft), nil
@@ -454,6 +456,12 @@ func checkInputs(j publishJob, u releaseUnit, draftState string, draftRev int, h
 				actual = "absent"
 			}
 			conflicts = append(conflicts, map[string]any{"machine": m.machine, "expected": m.importBase, "actual": actual})
+		}
+		// The name form (§4.2): compilation may have filled the name into the hostname, so a rename
+		// since the snapshot is refused for every covered machine, filled or not. A string or null
+		// each side, never "absent".
+		if n := names[m.machine]; n != m.name {
+			conflicts = append(conflicts, map[string]any{"machine": m.machine, "expected": nameOrNull(m.name), "actual": nameOrNull(n)})
 		}
 	}
 	// A machine covered now that the unit does not cover (ruling R21').
@@ -687,6 +695,14 @@ func seedStatuses(ctx context.Context, tx *sql.Tx, statuses []unitStatus) error 
 	return nil
 }
 
+// nameOrNull is a machine name as the name form of a conflict answers it: null for no name.
+func nameOrNull(name string) any {
+	if name == "" {
+		return nil
+	}
+	return name
+}
+
 // createdText is a provider creation time as the status and dependency rows keep it: RFC 3339 in
 // UTC with its nanoseconds, trailing zeros dropped.
 func createdText(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
@@ -716,10 +732,11 @@ func insertReleaseMachine(ctx context.Context, tx *sql.Tx, rel, cluster string, 
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision,
 		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation,
-		form_only)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`, rel, cluster, m.machine, m.importBase,
+		form_only, hostname_source, hostname_name)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`, rel, cluster, m.machine, m.importBase,
 		sql.NullString{String: m.assignment, Valid: m.assignment != ""}, m.mode, string(m.ciphertext), cipherDigest[:],
-		m.configuration[:], redacted, string(provenance), m.encryption.object, m.observation, m.formOnly)
+		m.configuration[:], redacted, string(provenance), m.encryption.object, m.observation, m.formOnly,
+		string(m.hostname.Source), sql.NullString{String: m.hostname.Name, Valid: m.hostname.Name != ""})
 	return err
 }
 

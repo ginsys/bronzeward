@@ -29,11 +29,12 @@ const (
 		machinery_checksum, kubernetes_version, operation, published_by, published_role, epoch, published_at)
 		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, epoch, now() FROM installation_state`
 	insertReleaseMachine = `INSERT INTO release_machine (release, cluster, machine, import_base_revision,
-		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation)
+		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation,
+		hostname_source)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, (SELECT o.id FROM observation o
    JOIN observation_start s ON s.machine = o.machine AND s.revision = o.basis
    JOIN release r ON r.operation = s.operation WHERE r.id = $1 AND o.machine = $3
-   ORDER BY o.basis DESC LIMIT 1))`
+   ORDER BY o.basis DESC LIMIT 1), 'none')`
 	insertReleaseSource = `INSERT INTO release_source (release, cluster, kind, fragment, profile, assignment, name, machine,
 		fragment_revision, profile_revision, assignment_revision, head_revision)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`

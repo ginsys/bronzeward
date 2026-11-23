@@ -140,6 +140,33 @@ func (e FragmentInputLayer) Valid() bool {
 	}
 }
 
+// Defines values for HostnameBodySource.
+const (
+	HostnameBodySourceConfiguration HostnameBodySource = "configuration"
+	HostnameBodySourceLegacyStable  HostnameBodySource = "legacy-stable"
+	HostnameBodySourceMachineName   HostnameBodySource = "machine-name"
+	HostnameBodySourceNone          HostnameBodySource = "none"
+	HostnameBodySourceUnrecorded    HostnameBodySource = "unrecorded"
+)
+
+// Valid indicates whether the value is a known member of the HostnameBodySource enum.
+func (e HostnameBodySource) Valid() bool {
+	switch e {
+	case HostnameBodySourceConfiguration:
+		return true
+	case HostnameBodySourceLegacyStable:
+		return true
+	case HostnameBodySourceMachineName:
+		return true
+	case HostnameBodySourceNone:
+		return true
+	case HostnameBodySourceUnrecorded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for IdentityBodyKind.
 const (
 	IdentityBodyKindHuman   IdentityBodyKind = "human"
@@ -1518,6 +1545,16 @@ type Hardware struct {
 	TalosNodeId *string `json:"talosNodeId"`
 }
 
+// HostnameBody Where a release machine's hostname came from, a fact about the release and never read again from the machine (persistence-api.md §9.2, choice §17.44).
+type HostnameBody struct {
+	// Name The name used; present for machine-name alone.
+	Name   *string            `json:"name,omitempty"`
+	Source HostnameBodySource `json:"source"`
+}
+
+// HostnameBodySource defines model for HostnameBody.Source.
+type HostnameBodySource string
+
 // IdentityBody A member that does not apply to the caller's kind is null. Nothing else of the credential is served.
 type IdentityBody struct {
 	// Epoch The epoch the read held, as its Bronzeward-Epoch.
@@ -2162,10 +2199,12 @@ type ReleaseBody struct {
 
 // ReleaseMachineBody defines model for ReleaseMachineBody.
 type ReleaseMachineBody struct {
-	Machine                string `json:"machine"`
-	Mode                   string `json:"mode"`
-	PublicationObservation string `json:"publicationObservation"`
-	Review                 string `json:"review"`
+	// Hostname Where a release machine's hostname came from, a fact about the release and never read again from the machine (persistence-api.md §9.2, choice §17.44).
+	Hostname               HostnameBody `json:"hostname"`
+	Machine                string       `json:"machine"`
+	Mode                   string       `json:"mode"`
+	PublicationObservation string       `json:"publicationObservation"`
+	Review                 string       `json:"review"`
 }
 
 // ReleaseSourceBody defines model for ReleaseSourceBody.
@@ -2219,12 +2258,15 @@ type RestoredBackupFamily string
 
 // ReviewBody defines model for ReviewBody.
 type ReviewBody struct {
-	Configuration *string            `json:"configuration"`
-	Machine       string             `json:"machine"`
-	Mode          string             `json:"mode"`
-	Notice        *string            `json:"notice,omitempty"`
-	Provenance    []ProvenanceRecord `json:"provenance"`
-	Release       string             `json:"release"`
+	Configuration *string `json:"configuration"`
+
+	// Hostname Where a release machine's hostname came from, a fact about the release and never read again from the machine (persistence-api.md §9.2, choice §17.44).
+	Hostname   HostnameBody       `json:"hostname"`
+	Machine    string             `json:"machine"`
+	Mode       string             `json:"mode"`
+	Notice     *string            `json:"notice,omitempty"`
+	Provenance []ProvenanceRecord `json:"provenance"`
+	Release    string             `json:"release"`
 }
 
 // RevocationBody defines model for RevocationBody.

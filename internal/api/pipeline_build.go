@@ -76,7 +76,7 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 		if err != nil {
 			return releaseUnit{}, nil, fmt.Errorf("machine %s: %w", m.machine, err)
 		}
-		in := compile.Input{Base: sources[m.importBase], Mode: mode}
+		in := compile.Input{Base: sources[m.importBase], Mode: mode, Name: m.name}
 		for _, frv := range m.fragments {
 			in.Fragments = append(in.Fragments, sources[frv])
 		}
@@ -139,7 +139,7 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 // object the generation its source declares and each identity the one step 3 classified.
 func machineRecords(m snapshotMachine, c compile.Compiled, s snapshot, pins pinned) (unitMachine, error) {
 	um := unitMachine{machine: m.machine, importBase: m.importBase, assignment: m.assignment, mode: m.mode, provenance: c.Provenance(),
-		formOnly: c.FormOnly()}
+		formOnly: c.FormOnly(), name: m.name, hostname: c.Hostname()}
 	var err error
 	if um.configuration, err = c.Materialized().Digest(); err != nil {
 		return unitMachine{}, err
