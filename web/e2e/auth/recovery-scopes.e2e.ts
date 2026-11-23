@@ -122,6 +122,22 @@ describe("the scope decisions of the recovery console (#365)", () => {
     await absent(async () => (await posts("releases")).length > 2, "a release sent again after the reload");
   });
 
+  it("a mark whose answer is dropped after the commit is repeated under its key and is one act, and a reload sends nothing", async function () {
+    this.timeout(120_000);
+    await open([[m, "blocked"]]);
+    await faults({ upstream: at, steps: { path: `/recovery/scopes/${m}/marks`, take: ["commit-drop"] } });
+    await row(m).$("button=Mark").click();
+    await expect(row(m).$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("Scope marked"), { wait: 60_000 });
+    const sent = await posts("marks");
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.split(" ")[2]).toBe(sent[0]!.split(" ")[2]);
+    expect(await acts(m, "restoration-mark")).toBe(1);
+    await browser.refresh();
+    await expect($('[data-testid="scopes"]')).toBeExisting({ wait: 20_000 });
+    await expect(row(m)).toBeExisting({ wait: 20_000 });
+    await absent(async () => (await posts("marks")).length > 2, "a mark sent again after the reload");
+  });
+
   it("a scope another operator released shows the refusal of a second release, and no control sends for more than one machine", async function () {
     this.timeout(120_000);
     await open([[m, "ready"], [seed.machine, "ready"]]);
