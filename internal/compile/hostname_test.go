@@ -1,6 +1,7 @@
 package compile
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -242,6 +243,32 @@ func TestHostnameRefusesAnInvalidName(t *testing.T) {
 	// A refused name that the composition would not use compiles: the explicit hostname wins first.
 	if _, err := Compile(hostIn(generated(t), "Web-1", ModeMetal, frag(t, hostDocExplicit))); err != nil {
 		t.Errorf("an explicit hostname beside an unused invalid name: %v", err)
+	}
+}
+
+// The guard after the second compile: an outcome overridden by the patch (an index past the caller's
+// fragments) is the bare fidelity refusal; one overridden by a fragment, or by none, passes.
+func TestNotOverriddenByPatch(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		by   []int
+		bad  bool
+	}{
+		{"none overridden", []int{-1, -1}, false},
+		{"overridden by the last fragment", []int{-1, 1}, false},
+		{"overridden by the patch", []int{-1, 2}, true},
+		{"overridden past the patch", []int{3}, true},
+		{"no outcome", nil, false},
+	} {
+		var outcomes []outcome
+		for _, by := range tc.by {
+			outcomes = append(outcomes, outcome{by: by})
+		}
+		err := notOverriddenByPatch(outcomes, 2)
+		var e *Error
+		if tc.bad != (err != nil) || (tc.bad && (!errors.As(err, &e) || e.Rule != RuleFidelity || len(e.Paths) != 0)) {
+			t.Errorf("%s: %v, want bare fidelity refusal: %v", tc.name, err, tc.bad)
+		}
 	}
 }
 

@@ -946,7 +946,7 @@ For each machine:
    reference, so no record of §8.2 names it, and the compile that composes it
    takes no decision of its own: the decision above stands. A reference at
    `auto` is refused at step 6 already, and `hostname` is the document's only
-   other field, so no occurrence can sit in a document the patch replaces.
+   other value field, so no occurrence can sit in a document the patch replaces.
 6. **Trace** the composition for provenance (§8.1).
 7. **Check the output**: no string scalar holds reserved text (§5.5), and no
    resolved `string` value's stored or placed form of six bytes or more (each

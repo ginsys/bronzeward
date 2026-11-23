@@ -53,6 +53,10 @@ func TestValidateAuthoring(t *testing.T) {
 		{"tag on a mapping", "a: !bwref {k: " + secretText + "}\n", refs("s-one"), RuleTagPlacement},
 		{"alias of a reference as a key", "a: &t !bwref s-one\n? *t\n: " + secretText + "\n", refs("s-one"), RuleTagPlacement},
 		{"reference as the document", "!bwref s-one\n", refs("s-one"), RuleTagPlacement},
+		// A mapping reference holding a whole document is refused the same way, so no reference can hold
+		// a HostnameConfig document the compiler's patch would replace (compilation.md §6 step 5a).
+		{"mapping reference as the document", "!bwref s-one\n",
+			Declarations{References: map[string]Reference{"s-one": {Kind: provider.KindMapping, Version: 1}}}, RuleTagPlacement},
 		{"reference as an embedded document", "a: \"!bwref s-one\"\n",
 			Declarations{References: refs("s-one").References, Embedded: []Embedded{{Path: "doc[0]/a", Format: "yaml"}}}, RuleTagPlacement},
 		{"reserved text in a value", "a: \"!bwref " + secretText + "\"\n", Declarations{}, RuleReservedText},
