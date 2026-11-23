@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { WritesProvider } from "./forms.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { Client } from "./request.ts";
+import { ATTEMPT_WHAT, AccountingForm, accountedAttempt } from "./accounting.tsx";
 import { ScopeDecision } from "./scope-decisions.tsx";
 import { type Role, ShellContext } from "./shell.tsx";
 import { Writes } from "./write.ts";
@@ -195,5 +196,82 @@ describe("a scope's accounting form on the console's row", () => {
     await mount(row("blocked"));
     await settled();
     expect(box.querySelector('form[aria-label="Record accounting"]')).toBeNull();
+  });
+});
+
+// The Start choice where the page can name the deadline (ginsys/bronzeward#365): the one start the server accepts is marked and every
+// other observation says why it is off; where it cannot, the choice is left to the person and the server.
+const attemptForm = (deadline: { at: number } | { unknown: string }) =>
+  h(AccountingForm, { machine: MCH, path: "/operations/op_a/attempts/att_a/accountings", resource: "/operations/op_a", what: ATTEMPT_WHAT, done: accountedAttempt, due: true, deadline });
+const startInput = (id: string) => box.querySelector(`input[name="start"][value="${id}"]`) as HTMLInputElement;
+
+describe("the Start choice names the start the server accepts", () => {
+  test("the first read after the deadline is marked, and the one before it is off with its reason", async () => {
+    await mount(attemptForm({ at: Date.parse("2026-11-01T09:02:00Z") }));
+    await settled();
+    expect(startInput(START).disabled).toBe(true);
+    expect(startInput(START).closest("li")!.textContent).toContain("off: it began at or before the transport deadline");
+    expect(startInput(END).disabled).toBe(false);
+    expect(startInput(END).closest("li")!.textContent).toContain("(the first read after the deadline)");
+  });
+
+  test("no observation after the deadline: the page says it finds no start yet, and offers none", async () => {
+    await mount(attemptForm({ at: Date.parse("2026-11-01T09:30:00Z") }));
+    await settled();
+    expect(text("settle-start-none")).toContain("the page finds no start yet");
+    expect(startInput(START).disabled).toBe(true);
+    expect(startInput(END).disabled).toBe(true);
+  });
+
+  test("a deadline the page cannot name leaves the choice to the person and says the server decides", async () => {
+    await mount(attemptForm({ unknown: "an operation of the machine could not be read." }));
+    await settled();
+    expect(text("settle-start-unknown")).toBe("The page cannot name the valid start: an operation of the machine could not be read. The server decides.");
+    expect(startInput(START).disabled).toBe(false);
+    expect(startInput(END).disabled).toBe(false);
+  });
+});
+
+// A scope's deadline is the later of the entry's stoppedAt plus the maximum transport deadline (30 s floor, 60 s maximum here) and the
+// transport deadline of each attempt of the machine that no accounting covers, which takes one read per apply operation of the machine.
+describe("the Start choice of a scope reads the machine's unaccounted attempts", () => {
+  const STOPPED = "2026-11-01T08:00:00Z";
+  const scopeRow = () => h(ScopeDecision, { machine: MCH, state: "pre-restore-unaccounted", stoppedAt: STOPPED });
+  const operation = (id: string, deadline: string, accounted: boolean) =>
+    ({ id, attempts: [{ id: `att_${id}`, number: 1, transportDeadline: deadline, accounting: accounted ? { basis: "response" } : null }] });
+
+  test("without a later unaccounted attempt the deadline is the stop plus the maximum, and the first read after it is marked", async () => {
+    served["/operations"] = { items: [{ id: "op_a" }], next: undefined };
+    served["/operations/op_a"] = operation("op_a", "2026-11-01T09:02:00Z", true);
+    await mount(scopeRow());
+    await settled();
+    expect(startInput(START).disabled).toBe(false);
+    expect(startInput(START).closest("li")!.textContent).toContain("(the first read after the deadline)");
+  });
+
+  test("an unaccounted attempt with a later transport deadline moves the deadline past the first observation", async () => {
+    served["/operations"] = { items: [{ id: "op_a" }], next: undefined };
+    served["/operations/op_a"] = operation("op_a", "2026-11-01T09:02:00Z", false);
+    await mount(scopeRow());
+    await settled();
+    expect(startInput(START).disabled).toBe(true);
+    expect(startInput(END).closest("li")!.textContent).toContain("(the first read after the deadline)");
+  });
+
+  test("more apply operations than the page reads: no mark, and the server decides", async () => {
+    served["/operations"] = { items: Array.from({ length: 9 }, (_, i) => ({ id: `op_${i}` })), next: undefined };
+    await mount(scopeRow());
+    await settled();
+    expect(text("settle-start-unknown")).toBe("The page cannot name the valid start: the machine has more than 8 apply operations, too many to read here. The server decides.");
+    expect(startInput(START).disabled).toBe(false);
+  });
+
+  test("an operation that cannot be read gives no mark, whatever the others say", async () => {
+    served["/operations"] = { items: [{ id: "op_a" }, { id: "op_b" }], next: undefined };
+    served["/operations/op_a"] = operation("op_a", "2026-11-01T07:00:00Z", true);
+    await mount(scopeRow());
+    await settled();
+    expect(text("settle-start-unknown")).toBe("The page cannot name the valid start: an operation of the machine could not be read. The server decides.");
+    expect(startInput(START).disabled).toBe(false);
   });
 });
