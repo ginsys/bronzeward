@@ -25,7 +25,8 @@ type applyFake struct {
 	createFails           int    // the status making a plan answers with, 0 for none
 	moveAt                string // the epoch moves after this path is served
 	cancelFails, moved    bool
-	cancelRefused         bool   // a cancellation answers 409, as for a plan somebody cancelled meanwhile
+	cancelRefused         bool // a cancellation answers 409, as for a plan somebody cancelled meanwhile
+	unreadPrepared        bool
 	withheld              string // the plan whose change the server withholds
 }
 
@@ -128,6 +129,12 @@ func (f *applyFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/machines/mch_beta/position":
 		fmt.Fprint(w, f.position("mch_beta"))
 	case "/plans/pln_prepared":
+		if f.unreadPrepared {
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, `{"type":"urn:bronzeward:problem:internal-error","title":"Internal Server Error","status":500,"detail":"BWSYNTH"}`)
+			return
+		}
 		fmt.Fprint(w, f.plan("pln_prepared", "mch_alpha"))
 	case "/plans/pln_made":
 		if f.unreadMade {
@@ -330,6 +337,99 @@ func TestApplyFaults(t *testing.T) {
 	f, code, out, errOut = run(func(f *applyFake) { f.unreadMade, f.cancelFails = true, true })
 	if code != 3 || !strings.Contains(errOut, "whether plan pln_made was cancelled is unknown") || strings.Contains(errOut, "was not cancelled") || !strings.Contains(out, "alpha: approved") {
 		t.Errorf("a cancellation of unknown outcome: exit %d, stdout %q, stderr %q, sent %q", code, out, errOut, f.took())
+	}
+}
+
+// TestApplySentences pins every sentence the command prints about a plan, against the state it describes: a
+// plan it made (beta's pln_made) or one somebody prepared (alpha's pln_prepared), crossed with each outcome the
+// command can meet. A sentence claims only what a request returned or a read showed, so each row names what
+// must be said and what must not, and every row asserts that a plan somebody prepared is never cancelled.
+func TestApplySentences(t *testing.T) {
+	const cancelled = "Cancellation recorded for the plans this command made: pln_made. "
+	for _, c := range []struct {
+		name   string
+		set    func(*applyFake)
+		stdin  string
+		code   int
+		must   []string // each in the output of the run (standard output and error together)
+		mustNo []string
+		sent   []string // each in the requests sent
+		sentNo []string
+	}{
+		{"made, approved", func(f *applyFake) {}, "y\n", 0,
+			[]string{"beta: approved", "plan pln_made (made by this command)"},
+			[]string{"Cancellation recorded", "nothing was approved", "outcome unknown"}, []string{"pln_made/approvals"}, []string{"pln_made/cancellations"}},
+		{"made, refused", func(f *applyFake) { f.refuse = "pln_made" }, "y\n", 1,
+			[]string{"beta: ", "BWSYNTH the plan changed", "nothing was approved for this machine"},
+			[]string{"beta: approved", "outcome unknown", "Cancellation recorded"}, []string{"pln_made/approvals"}, []string{"pln_made/cancellations"}},
+		{"made, approval unknown", func(f *applyFake) { f.unknown = "pln_made" }, "y\n", 3,
+			[]string{"outcome unknown"},
+			[]string{"beta: approved", "nothing was approved for this machine", "Cancellation recorded"}, []string{"pln_made/approvals"}, []string{"pln_made/cancellations"}},
+		{"made, declined and cancelled", func(f *applyFake) {}, "n\n", 2,
+			[]string{cancelled + cancelLimits, "Plans prepared by somebody else were left as they were."},
+			[]string{"was not cancelled", "stays until it expires", "approved ("}, []string{"pln_made/cancellations"}, []string{"/approvals"}},
+		{"made, cancellation unknown", func(f *applyFake) { f.cancelFails = true }, "n\n", 3,
+			[]string{"whether plan pln_made was cancelled is unknown"},
+			[]string{"Cancellation recorded", "was not cancelled", "stays until it expires"}, []string{"pln_made/cancellations"}, []string{"/approvals"}},
+		{"made, cancellation refused", func(f *applyFake) { f.cancelRefused = true }, "n\n", 2,
+			[]string{"the request to cancel plan pln_made was refused (", "plan show 'pln_made' reads its state"},
+			[]string{"Cancellation recorded", "was not cancelled", "stays until it expires"}, []string{"pln_made/cancellations"}, []string{"/approvals"}},
+		{"made, withheld", func(f *applyFake) { f.withheld = "pln_made" }, "y\n", 0,
+			[]string{"beta  worker  worker-base,storage  stopped: the change of its plan cannot be shown", "make a plan with plan create", cancelled + cancelLimits, "alpha: approved"},
+			[]string{"approve 'pln_made'", "beta: approved"}, []string{"pln_made/cancellations"}, []string{"pln_made/approvals"}},
+		{"made, unread", func(f *applyFake) { f.unreadMade = true }, "y\n", 0,
+			[]string{"the change of its plan could not be read", cancelled + cancelLimits, "alpha: approved"},
+			[]string{"beta: approved"}, []string{"pln_made/cancellations"}, []string{"pln_made/approvals"}},
+		{"prepared, approved", func(f *applyFake) {}, "y\n", 0,
+			[]string{"alpha: approved", "plan pln_prepared (prepared by somebody else)"},
+			[]string{"nothing was approved", "outcome unknown"}, []string{"pln_prepared/approvals"}, nil},
+		{"prepared, refused", func(f *applyFake) { f.refuse = "pln_prepared" }, "y\n", 1,
+			[]string{"alpha: ", "BWSYNTH the plan changed", "nothing was approved for this machine", "beta: approved"},
+			[]string{"alpha: approved", "outcome unknown"}, []string{"pln_prepared/approvals"}, nil},
+		{"prepared, approval unknown", func(f *applyFake) { f.unknown = "pln_prepared" }, "y\n", 3,
+			[]string{"outcome unknown", "beta: approved"},
+			[]string{"alpha: approved", "nothing was approved for this machine"}, []string{"pln_prepared/approvals"}, nil},
+		{"prepared, declined", func(f *applyFake) {}, "n\n", 2,
+			[]string{cancelled + cancelLimits},
+			[]string{"alpha: approved", "pln_prepared was cancelled", "plan pln_prepared was not"}, []string{"pln_made/cancellations"}, []string{"/approvals"}},
+		{"prepared, withheld", func(f *applyFake) { f.withheld = "pln_prepared" }, "y\n", 0,
+			[]string{"alpha  controlplane  cp-base  stopped: the change of its plan cannot be shown", "approve 'pln_prepared'", "beta: approved"},
+			[]string{"alpha: approved", "Cancellation recorded", "make a plan with plan create"}, nil, []string{"pln_prepared/approvals"}},
+		{"prepared, unread", func(f *applyFake) { f.unreadPrepared = true }, "y\n", 0,
+			[]string{"alpha  controlplane  cp-base  stopped: the change of its plan could not be read", "beta: approved"},
+			[]string{"alpha: approved", "Cancellation recorded"}, nil, []string{"pln_prepared/approvals"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := applyServer(t)
+			c.set(f)
+			setStdin(t, c.stdin)
+			code, out, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--all")
+			all := out + "\n" + errOut
+			sent := strings.Join(f.took(), "\n")
+			if code != c.code {
+				t.Errorf("exit %d, want %d; stdout %q, stderr %q", code, c.code, out, errOut)
+			}
+			for _, s := range c.must {
+				if !strings.Contains(all, s) {
+					t.Errorf("missing %q; stdout %q, stderr %q", s, out, errOut)
+				}
+			}
+			for _, s := range c.mustNo {
+				if strings.Contains(all, s) {
+					t.Errorf("must not say %q; stdout %q, stderr %q", s, out, errOut)
+				}
+			}
+			for _, s := range c.sent {
+				if !strings.Contains(sent, s) {
+					t.Errorf("did not send %q; sent %q", s, sent)
+				}
+			}
+			for _, s := range append(c.sentNo, "pln_prepared/cancellations") {
+				if strings.Contains(sent, s) {
+					t.Errorf("must not send %q; sent %q", s, sent)
+				}
+			}
+		})
 	}
 }
 
