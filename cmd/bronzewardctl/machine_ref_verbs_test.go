@@ -7,7 +7,7 @@ import (
 
 // Every other verb that takes a machine takes its name too (ginsys/bronzeward#1055, part 9b, pull request 3): the
 // resolver of pull request 2 (machineByName) reads the machine list once for a name, and an identifier never lists.
-// A verb given a name says, in its result line, which machine the act landed on, as `<name> (<identifier>)`.
+// A verb given a name says, in its result line, which machine the act landed on, as `<identifier> (<name>)`.
 
 // namedVerbs is every verb of this pull request with a machine by name, the request it must send for the machine
 // mch_b (named db-1) and the answer it needs. {m} stands for the machine as the person typed it.
@@ -127,7 +127,7 @@ func TestClusterWithAnIdentifierIsRefused(t *testing.T) {
 	}
 }
 
-// A verb given a name says which machine the act landed on, `<name> (<identifier>)`, in the line a person reads
+// A verb given a name says which machine the act landed on, `<identifier> (<name>)`, in the line a person reads
 // afterwards; given an identifier it prints the identifier alone.
 func TestResultLineNamesTheMachine(t *testing.T) {
 	for _, c := range []struct {
@@ -184,7 +184,7 @@ func TestScopeAccountByNameRefusesAMoveAfterTheLookup(t *testing.T) {
 	}
 }
 
-// Scope accounting heads its window with the machine as `<name> (<identifier>)` when given a name, and posts the
+// Scope accounting heads its window with the machine as `<identifier> (<name>)` when given a name, and posts the
 // identifier.
 func TestScopeAccountByName(t *testing.T) {
 	answers := accAnswers(accScopeAnswer)
