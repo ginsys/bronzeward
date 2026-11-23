@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { SevereServiceError } from "webdriverio";
 import { type Binary, binPath, died, missingBinaries, spawnChild } from "./children.ts";
 import { printFailure } from "./print-failure.ts";
-import { announceEdgeDriver, config as base, removeProfiles } from "./wdio.conf.ts";
+import { announceDrivers, config as base, removeProfiles } from "./wdio.conf.ts";
 import { type Faults, type Injector, startInjector } from "./injector.ts";
 import {
   BAO_PROXY, CONTROL, DISPOSABLE_API, FIXTURE_API, FIXTURE_ISSUER, FIXTURE_LISTEN, FIXTURE_PAGE, IDP_API, INJECTOR, KEYS,
@@ -586,7 +586,7 @@ export const config: WebdriverIO.Config = {
   specs: process.env["BW_SPECS"] ? process.env["BW_SPECS"].split(",").map((s) => `./auth/${s}.e2e.ts`) : ["./driver-controls.e2e.ts", "./auth/*.e2e.ts"],
   baseUrl: IDP_PAGE,
   async onPrepare() {
-    announceEdgeDriver();
+    announceDrivers();
     try {
       await prepare();
     } catch (e) {

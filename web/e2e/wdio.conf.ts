@@ -11,7 +11,8 @@ import { fileURLToPath } from "node:url";
 // The launcher logs and ignores any other error a launcher hook throws, and runs the specs anyway.
 import { remote, SevereServiceError } from "webdriverio";
 import { binPath, died, missingBinaries, spawnChild } from "./children.ts";
-import { edgeCapability, edgeDriver } from "./edge-driver.ts";
+import { edgeCapability, edgeDriver, legHas } from "./edge-driver.ts";
+import { acceptLeave, firefoxCapability, geckoDriver } from "./gecko-driver.ts";
 import { safariKeys } from "./safari-keys.ts";
 import { settled } from "./safari-navigation.ts";
 import { FAKE_ISSUER, PAGE_LISTEN, PAGE_ORIGIN, TARGET_ORIGIN } from "./ports.ts";
@@ -25,30 +26,30 @@ const canary = process.env["BW_WEB_CANARY"];
 if (canary === undefined || !canary.startsWith("BWSYNTH-")) throw new Error("BW_WEB_CANARY must hold the run's synthetic canary");
 
 const headless = process.env["BW_HEADED"] === undefined;
-// WebDriver's map form of unhandledPromptBehavior: only the leave dialog is accepted, and every
-// other prompt keeps the default (dismiss and report), so a case still meets the page's confirm().
-// WebdriverIO types the capability as the string form only.
-const acceptLeave = { beforeUnload: "accept" } as unknown as string;
 // The previous major of each browser, pinned to one build from the vendor's own source (decision
 // B6, ginsys/bronzeward#893). previous-majors.json holds the pins and previous-majors.yml runs them.
 const previous = JSON.parse(readFileSync(new URL("previous-majors.json", import.meta.url), "utf8")) as {
   chrome: string; edge: { version: string }; firefox: string;
 };
 const edgeChoice = edgeDriver(process.env);
-// Printed by each launcher hook (this config's and auth.conf.ts's, which replaces it) on a run that has an Edge leg.
-export function announceEdgeDriver() {
-  if (process.env["BW_BROWSERS"]?.split(",").includes("edge")) console.log(edgeChoice.line);
+const geckoChoice = geckoDriver(process.env);
+// Printed by each launcher hook (this config's and auth.conf.ts's, which replaces it): which driver an Edge leg
+// and a Firefox or Firefox ESR leg of the run take.
+export function announceDrivers() {
+  if (legHas(process.env["BW_BROWSERS"], "edge")) console.log(edgeChoice.line);
+  if (legHas(process.env["BW_BROWSERS"], "firefox", "firefox-esr")) console.log(geckoChoice.line);
 }
 const capabilities: Record<string, WebdriverIO.Capabilities> = {
   chrome: { browserName: "chrome", "goog:chromeOptions": { args: headless ? ["--headless=new"] : [] } },
   // The runner image's own driver where it has one, so that no download is on the leg's path (edge-driver.ts).
   edge: edgeCapability(headless, edgeChoice),
-  // Both Firefoxes are downloaded at their current release, not taken from the host. A case that
+  // Both Firefoxes are downloaded at their current release, not taken from the host; the driver is the runner image's
+  // where it has one, so that no "latest driver" lookup is on the leg's path (gecko-driver.ts). A case that
   // leaves a page with a write still open meets its leave guard: Firefox shows that dialog and
   // holds the navigation until it times out, where Chrome and Edge never show it without a user
   // gesture. Firefox accepts it, so each case's own navigation proceeds as in the other browsers.
-  firefox: { browserName: "firefox", browserVersion: "stable", unhandledPromptBehavior: acceptLeave, "moz:firefoxOptions": { args: headless ? ["-headless"] : [] } },
-  "firefox-esr": { browserName: "firefox", browserVersion: "esr", unhandledPromptBehavior: acceptLeave, "moz:firefoxOptions": { args: headless ? ["-headless"] : [] } },
+  firefox: firefoxCapability("stable", headless, geckoChoice),
+  "firefox-esr": firefoxCapability("esr", headless, geckoChoice),
   safari: { browserName: "safari" },
   "chrome-previous": { browserName: "chrome", browserVersion: previous.chrome, "goog:chromeOptions": { args: headless ? ["--headless=new"] : [] } },
   // The job installs this Edge at the default path; the driver is pinned to the same version, or
@@ -220,7 +221,7 @@ export const config: WebdriverIO.Config = {
   async onPrepare() {
     // First, before anything starts: a binary that is not there fails the run by name.
     if (missingBinaries(root, ["webhost"]).length > 0) throw new SevereServiceError(`not an executable file: bin/webhost (mise run browser builds it)`);
-    announceEdgeDriver();
+    announceDrivers();
     target = createServer((req, res) => {
       if (req.url === "/__hits") return res.end(JSON.stringify({ hits }));
       if (req.url === "/__reset") return (hits = 0), res.end();
