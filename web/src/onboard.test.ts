@@ -619,9 +619,9 @@ describe("the endpoint the page will use, said before the button", () => {
     expect(endpointNote(talosconfig(), "", "lb.example.test")).toBe(say("lb.example.test"));
   });
 
-  test("a context that lists several endpoints says the page tries the first of them; a typed one is alone", () => {
+  test("a context that lists several endpoints says the page tries them in order, starting with the first; a typed one is alone", () => {
     const several = talosconfig().replace("endpoints: [10.0.0.1:50000]", "endpoints: [cp.example.test, 10.0.0.2, 10.0.0.3]");
-    expect(endpointNote(several, "", "")).toBe("The page will try the first of 3 endpoints, cp.example.test.");
+    expect(endpointNote(several, "", "")).toBe("The page will try the 3 endpoints in order, starting with cp.example.test.");
     expect(endpointNote(several, "", "10.9.9.9")).toBe("The page will try the cluster at 10.9.9.9.");
     // One entry, and an entry that is not text, are not a list.
     expect(endpointNote(talosconfig(), "", "")).toBe("The page will try the cluster at 10.0.0.1:50000.");
@@ -1044,5 +1044,127 @@ describe("Connect gives each imported machine an assignment that selects nothing
     const second = await run(s, plan);
     expect(second.ok).toBe(true);
     expect(s.drafts.values().next().value!.entries.filter((e) => e.kind === "assignment")).toHaveLength(2);
+  });
+});
+
+describe("a context that lists several endpoints is tried in order, and a typed endpoint alone", () => {
+  const LIST = ["10.0.0.1", "10.0.0.2", "10.0.0.3"];
+  const several = named(LIST.join(", "));
+  const unreachable = (endpoint: string): Outcome => refused(503, "talos-access-unavailable", { title: "Talos is unavailable", detail: `the endpoint ${endpoint} did not answer` });
+  // A server whose endpoints in `dead` answer as an unreachable one does, and which records each endpoint a discovery was sent to.
+  const tryList = (dead: string[], answer?: (endpoint: string) => Outcome | undefined) => {
+    const s = new Server();
+    const asked: string[] = [];
+    const env: Env = {
+      ...s.env(),
+      send: async (spec: WriteSpec) => {
+        if (spec.path === "/discoveries") {
+          const endpoint = (spec.body as { endpoint: string }).endpoint;
+          asked.push(endpoint);
+          const o = answer?.(endpoint) ?? (dead.includes(endpoint) ? unreachable(endpoint) : undefined);
+          if (o !== undefined) {
+            spec.released?.({} as never);
+            return o;
+          }
+        }
+        return s.env().send(spec);
+      },
+    };
+    return { env, asked };
+  };
+
+  test("the cut keeps the whole list of text entries, in order", () => {
+    expect(cutContext(several, undefined).endpoints).toEqual(LIST);
+    expect(cutContext(named("10.0.0.1:50000, 7"), undefined).endpoints).toEqual(["10.0.0.1:50000"]);
+  });
+
+  // Every order of live and dead endpoints for a list of three: the page reads through the first live one and goes no further.
+  test.each(Array.from({ length: 8 }, (_, mask) => mask))("live and dead, pattern %i", async (mask) => {
+    const dead = LIST.filter((_, i) => ((mask >> i) & 1) === 1);
+    const { env, asked } = tryList(dead);
+    const r = await discoverCluster(env, several, {});
+    const firstLive = LIST.find((e) => !dead.includes(e));
+    if (firstLive === undefined) {
+      expect(asked).toEqual(LIST);
+      expect(r.ok).toBe(false);
+      if (!r.ok) for (const e of LIST) expect(r.why).toContain(`the endpoint ${e} did not answer`);
+      return;
+    }
+    expect(asked).toEqual(LIST.slice(0, LIST.indexOf(firstLive) + 1));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.plan.endpoint).toBe(firstLive);
+  });
+
+  test("an answer from every endpoint refused says that a key every node refuses reads the same", async () => {
+    const { env } = tryList(LIST);
+    const r = await discoverCluster(env, several, {});
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.why).toContain("the same answer as for an endpoint that does not answer");
+  });
+
+  test("one endpoint that fails keeps its one answer, with nothing about a list", async () => {
+    const { env } = tryList(["10.0.0.1"]);
+    const r = await discoverCluster(env, named("10.0.0.1"), {});
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.why).not.toContain("the same answer");
+  });
+
+  test("a typed endpoint is the only one tried, whatever the file lists", async () => {
+    const { env, asked } = tryList(["10.9.9.9", ...LIST]);
+    const r = await discoverCluster(env, several, { endpoint: "10.9.9.9" });
+    expect(r.ok).toBe(false);
+    expect(asked).toEqual(["10.9.9.9"]);
+  });
+
+  test.each([
+    ["an endpoint that is no control plane", refused(422, "validation-failed", { rule: "first-key-endpoint-no-control-plane" })],
+    ["an endpoint that does not answer", refused(503, "talos-access-unavailable")],
+  ])("%s moves on to the next endpoint", async (_what, o) => {
+    const { env, asked } = tryList([], (e) => (e === "10.0.0.1" ? o : undefined));
+    const r = await discoverCluster(env, several, {});
+    expect(asked).toEqual(["10.0.0.1", "10.0.0.2"]);
+    expect(r.ok).toBe(true);
+  });
+
+  // What every endpoint would answer the same way, or what is no statement about an endpoint, ends the loop at the first.
+  test.each([
+    ["a certificate that lacks the role", refused(422, "validation-failed", { rule: "first-key-role-insufficient" })],
+    ["a first key the server cannot use", refused(422, "validation-failed", { rule: "first-key-unusable" })],
+    ["a cluster with too many members", refused(422, "validation-failed", { rule: "too-many-members" })],
+    ["a malformed request", refused(400, "invalid-request")],
+    ["a certificate lifetime the deployment cannot cover", refused(503, "dependency-unavailable")],
+    ["a sign-in that is gone", refused(401, "unauthenticated")],
+    ["a defect of the server", refused(500, "internal-error")],
+    ["an outcome that is unknown", { kind: "unknown", why: "the connection was lost", problem: null } as Outcome],
+    ["a send that did not go", { kind: "not-done", why: "the page was left", problem: null } as Outcome],
+  ])("%s stops at the first endpoint", async (_what, o) => {
+    const { env, asked } = tryList([], () => o);
+    const r = await discoverCluster(env, several, {});
+    expect(r.ok).toBe(false);
+    expect(asked).toEqual(["10.0.0.1"]);
+  });
+
+  test("a listed entry that is no endpoint is named and not sent", async () => {
+    const { env, asked } = tryList(["10.0.0.1", "10.0.0.3"]);
+    const r = await discoverCluster(env, named("10.0.0.1, bad/entry, 10.0.0.3"), {});
+    expect(asked).toEqual(["10.0.0.1", "10.0.0.3"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.why).toMatch(/bad\/entry.*not tried/);
+  });
+
+  test("the page names each endpoint as it tries it, with its place in the list", async () => {
+    const { env } = tryList(LIST);
+    const seen: [string, number, number][] = [];
+    await discoverCluster(env, several, { onTry: (endpoint, n, of) => seen.push([endpoint, n, of]) });
+    expect(seen).toEqual([["10.0.0.1", 1, 3], ["10.0.0.2", 2, 3], ["10.0.0.3", 3, 3]]);
+  });
+
+  test("a stop during a try sends nothing further, and says so", async () => {
+    const { env, asked } = tryList(LIST);
+    let stop = false;
+    const r = await discoverCluster(env, several, { onTry: () => { stop = true; }, stopped: () => stop });
+    expect(asked).toEqual(["10.0.0.1"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.why.startsWith("Stopped before trying the other endpoints.")).toBe(true);
   });
 });
