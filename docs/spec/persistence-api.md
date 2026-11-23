@@ -398,8 +398,8 @@ digest equal to that release's own artifact digest (§9.3; compilation choice
 refuses `409 stale-input`, naming the machine with the expected and the actual
 import base revision, when the machine's `Applied` release no longer has the
 import base the entry was written from; it is §4.2's third form, extended to an
-entry that carries one. A preview of the check before publication is not
-specified; it is an owner choice (choice §17.52).
+entry that carries one. The PoC has no preview of the check before
+publication (choice §17.52).
 
 **How the thinner base takes effect.** Storing the revision is half of the
 route: the import base is the import base revision of the `Applied` release and
@@ -5392,13 +5392,15 @@ design and evidence do not settle the question. Each is marked in place as
     the release equal to `Applied`. It is rejected because the rule it would
     extend is not the one that withholds this diff, so no owner decision is
     left in it.
-52. **Open: a read-only preview of the check before publication** (§3.2). The
-    specification names no route for it: the check needs the provider's pinned
-    values, so a preview is a compilation that publishes nothing and spends the
-    provider reads and the publish worker. Options: no preview, the author
-    learns at publication, which the specification states; a preview route on
-    the draft that runs the compilation of §6.1 steps 2 and 3 and reports the
-    check's result per machine. This choice stays open for the owner.
+52. **No read-only preview of the check in the PoC** (§3.2). Publication runs
+    the check, and a refusal names the paths that differ, which is enough to
+    iterate on a draft. Alternative: a preview route on the draft that runs the
+    compilation of §6.1 steps 2 and 3 and reports the check's result per
+    machine. It is rejected for the PoC because the check needs the provider's
+    pinned values, so a preview is a compilation that publishes nothing and
+    spends the provider reads and the publish worker, for a result the
+    publication gives anyway. A preview is a later change if a person asks for
+    one.
 
 ## 18. Traceability
 
