@@ -4,7 +4,7 @@
 // scope (pre-restore-unaccounted) is not on this page's rows yet. Every value is synthetic.
 import { $, $$, browser, expect } from "@wdio/globals";
 import { CONTROL } from "../auth.conf.ts";
-import { absent, answers, api, disposable, eventually, faults, fixtureSignIn, holding, mint, storageEmpty, type Seed, writes } from "./helpers.ts";
+import { absent, answers, api, disposable, eventually, faults, fixtureSignIn, holding, mint, mirrored, storageEmpty, type Seed, writes } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 
@@ -80,6 +80,9 @@ describe("the scope decisions of the recovery console (#365)", () => {
     const result = row(m).$('[data-testid="write-result"]');
     await expect(result).toHaveText(expect.stringContaining("Scope released, was ready"), { wait: 30_000 });
     await expect(result).toHaveText(expect.stringContaining("A release is not an approval"));
+    // 4.1.3: the outcome is mirrored into the page's one status region, which is not the row's own text.
+    await eventually(async () => (await mirrored()).some((t) => t.includes("Scope released")), "the release answer mirrored");
+    expect(await browser.execute(() => document.querySelectorAll('[role="status"]').length)).toBe(1);
     await expect(row(m).$('[data-testid="scope-state"]')).toHaveText("released", { wait: 20_000 });
     await absent(() => row(m).$("button=Release").isExisting(), "a release control on a released scope");
     await absent(() => row(m).$("button=Mark").isExisting(), "a mark control on a released scope");
@@ -98,6 +101,8 @@ describe("the scope decisions of the recovery console (#365)", () => {
     await row(m).$("button=Release").click();
     const result = row(m).$('[data-testid="write-result"]');
     await expect(result).toHaveText(expect.stringContaining("only a ready scope is released"), { wait: 30_000 });
+    // 4.1.3: a server refusal is an alert on its own element.
+    await expect(result).toHaveAttribute("role", "alert");
     await expect(row(m).$('[data-testid="write-next"]')).toHaveText(expect.stringContaining("Mark the scope, then read its recorded cause"));
     expect((await answers()).filter((a) => a.startsWith(`/recovery/scopes/${m}/releases `))).toEqual([`/recovery/scopes/${m}/releases 409`]);
     // once: read after the server's 409 was answered and shown, so the refused write is settled and the act list cannot still grow from it

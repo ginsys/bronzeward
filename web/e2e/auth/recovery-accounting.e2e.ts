@@ -66,6 +66,8 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await absent(async () => /type (the|back)/i.test(await form.getText()), "an instruction to type anything back in the accounting form");
     await form.$("button=Record accounting").click();
     await expect(form.$('[data-testid="settle-input"]')).toHaveText("Choose the start observation.", { wait: 20_000 });
+    // 4.1.3: the refused input is an alert on its own element.
+    await expect(form.$('[data-testid="settle-input"]')).toHaveAttribute("role", "alert");
     await choose(form, "start", obs.machine2.start);
     await form.$("button=Record accounting").click();
     await expect(form.$('[data-testid="settle-input"]')).toHaveText("Choose the end observation.", { wait: 20_000 });
