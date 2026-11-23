@@ -581,6 +581,12 @@ Adoption begins with observation, while the running cluster remains authoritativ
 
 Exact adoption preserves full configuration only as ciphertext. Reconstructed adoption can follow once native composition proves equivalence. A baseline publication or handover does not approve arbitrary future mutations.
 
+**Decision: refactoring an imported configuration.** Step 5's "must prove equivalent output" is defined by the typed equivalence check in [compilation contract §6.2](../spec/compilation.md#62-the-typed-equivalence-check), and the route that stores a thinner import base is a later draft write in [persistence and API §3.2](../spec/persistence-api.md#32-the-import-base). The owner decided the order on 2026-11-19 (ginsys/bronzeward#861): the check comes first, then an assisted proposal, and there is no automatic split. The level of the check, the place of the split and the rule that the thinner base is a subset of the current one are choices of the specification, following [the research note](research/20261118-import-analysis-and-equivalence.md), which the owner may overrule.
+
+- **Rationale.** A digest of the render refuses exactly the refactoring it should approve, because a moved document changes the bytes (note §5.3). A comparison of redacted forms cannot see a changed secret behind a reference (note §5.5). Comparing the typed documents of two compositions, from plaintext inside the compiler, sees both and reports paths only. A later write has the old composition and the author's intent at hand; an ingestion-time split would have neither. The subset rule keeps the new route from minting or moving a secret.
+- **Alternatives.** Manual refactoring only, with no check (offered to the owner and not chosen); deferring the question; a split at ingestion; a digest of the render, or of the redacted form, as the check; applying typed defaults before comparing (not built).
+- **Limits that stay open.** The check can refuse an equivalent change (a default written against omitted), counts list order, and was measured on six synthetic machines. Compilation contract choices §16.40 and §16.41 and persistence and API choices §17.50 to §17.52 record the rest, two of them open for the owner: whether an approver also sees a diff, and whether the check has a preview.
+
 ### 9.2 Enrol and assign a maintenance-mode machine
 
 > **1.** Discover or receive call-home from a Talos maintenance machine.
@@ -1229,7 +1235,7 @@ The platform should generate redacted support bundles containing machine invento
 | SideroLink headend              | Build on open SideroLink packages or implement only a site relay initially.                      | Prototype before committing to production support.                                            |
 | Configuration compiler          | Pinned talosctl subprocess versus Talos Go machinery.                                            | Go machinery in process for the PoC, conditional on re-measured composition parity, with the pinned subprocess as the fallback; decided by the owner ([compilation contract §10](../spec/compilation.md#10-renderer-selection-and-compatibility-limits), [§16](../spec/compilation.md#16-choices-for-owner-review)). |
 | Artifact retention | Retention windows and provider layout remain open beyond the PoC | Exact encrypted artifacts decided; no silent re-render at apply; retain secret/key dependencies for promised actions; the PoC removes nothing (§7.8) |
-| Adoption baseline               | Exact current per-node configurations versus immediate refactor into profiles.                   | Exact baseline first, refactor later.                                                         |
+| Adoption baseline               | Exact current per-node configurations versus immediate refactor into profiles.                   | Exact baseline first, refactor later, behind the typed equivalence check (§9.1).              |
 | Drift response                  | Automatic revert versus report/adopt/freeze.                                                     | Report by default.                                                                            |
 | Machine discovery               | Pre-created inventory, DHCP integration, subnet discovery, talos.config call-home or SideroLink. | Support inventory + manual claim first.                                                       |
 | Kubernetes API for remote sites | Normal site endpoint, SideroLink proxy or relay path.                                            | Normal endpoint whenever available.                                                           |
@@ -1554,7 +1560,7 @@ The proposed platform makes a stricter separation between a mutable draft, an im
 
 Omni backs up current configurations, generates the default configuration it would have produced for the initial Talos/Kubernetes versions, derives patches for the differences, excludes fields reserved by Omni, connects the nodes, and leaves the imported cluster locked until the operator explicitly hands over management. This is a strong pattern and should influence this design. [M5]
 
-The proposed platform should support two adoption modes: an exact encrypted baseline of each running configuration, and a later reconstructed baseline based on shared fragments/profiles. Authority changes only after a dry-run, review and explicit unlock. Exact adoption is safer; reconstruction is cleaner but must prove equivalence.
+The proposed platform should support two adoption modes: an exact encrypted baseline of each running configuration, and a later reconstructed baseline based on shared fragments/profiles. Authority changes only after a dry-run, review and explicit unlock. Exact adoption is safer; reconstruction is cleaner but must prove equivalence. The proof and the route that stores the thinner base are specified in [compilation contract §6.2](../spec/compilation.md#62-the-typed-equivalence-check) and [persistence and API §3.2](../spec/persistence-api.md#32-the-import-base); the decision is in §9.1.
 
 ### 20.8 Where Omni is stronger today
 
