@@ -39,6 +39,8 @@ func TestFilledHostnameRemoved(t *testing.T) {
 	}{
 		{"the hostname equals the name", "node-a", hostMachine + "---\n" + hostDocFill, true},
 		{"a bare document has no auto: removed, not equal to the fill", "node-a", hostMachine + "---\n" + hostDocBare, false},
+		{"`auto: null` leaves Talos's pointer unset: removed, not equal to the fill", "node-a",
+			hostMachine + "---\napiVersion: v1alpha1\nkind: HostnameConfig\nauto: null\nhostname: node-a\n", false},
 		{"a full hostname equal to a full name", "node-a.example.org",
 			hostMachine + "---\n" + strings.Replace(hostDocFill, "node-a", "node-a.example.org", 1), true},
 	} {
@@ -103,5 +105,42 @@ func TestFilledHostnameKeepsALoneDocument(t *testing.T) {
 	docs, filled := extractNamed(t, "node-a", hostDocFill)
 	if !strings.Contains(docs, "HostnameConfig") || filled != (Filled{}) {
 		t.Errorf("filled %+v, documents:\n%s", filled, docs)
+	}
+}
+
+// A declaration of an embedded document after the removed one moves with its document: the stored stream
+// has one document fewer, so the stored declaration names it one position lower, and the import is not
+// refused for a declaration that names no document. The mark keeps the position of the input.
+func TestFilledHostnameShiftsLaterEmbeddedDeclarations(t *testing.T) {
+	text := hostDocFill + "---\n" + manifestStream("secret: 314159\n")
+	input := "doc[1]/cluster/inlineManifests/0/contents"
+	req := request(t, text, input+"|yaml/secret")
+	req.Name = "node-a"
+	req.Declarations = Declarations{Embedded: []Embedded{{Path: input, Format: "yaml"}}}
+	c, err := Extract(req)
+	if err != nil {
+		t.Fatalf("an embedded declaration after the removed document: %v", err)
+	}
+	want := []Embedded{{Path: manifestPath, Format: "yaml"}}
+	if got := c.decl.Embedded; len(got) != 1 || got[0] != want[0] {
+		t.Errorf("stored declarations %+v, want %+v", got, want)
+	}
+	if s, _ := commitAll(t, c); strings.Contains(string(s.Documents()), "HostnameConfig") {
+		t.Error("the filled document stays")
+	}
+}
+
+// shiftEmbedded drops a declaration inside the removed document and leaves one before it as written.
+func TestShiftEmbedded(t *testing.T) {
+	list := []Embedded{
+		{Path: "doc[0]/a", Format: "yaml"}, {Path: "doc[1]/b", Format: "json"}, {Path: "doc[3]/c", Format: "yaml"},
+	}
+	got, set := shiftEmbedded(list, 1)
+	want := []Embedded{{Path: "doc[0]/a", Format: "yaml"}, {Path: "doc[2]/c", Format: "yaml"}}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("shifted %+v, want %+v", got, want)
+	}
+	if len(set) != 2 || set["doc[0]/a"] != "yaml" || set["doc[2]/c"] != "yaml" {
+		t.Errorf("set %v", set)
 	}
 }

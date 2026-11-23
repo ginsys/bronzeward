@@ -180,12 +180,15 @@ give a node a path that reads as an embedded document's.
    resolved against the stream as step 2 parsed it, with the removed document
    still counted, so no surviving document changes its `doc[N]`. Only the
    stored sanitized document is shorter, and a later mark on a staged document
-   (§3) uses that document's own positions. The document is recorded as
+   (§3) uses that document's own positions. A declaration of an embedded
+   document (§5.2) after the removed one is stored under its new position, and
+   one inside the removed document is dropped with it. The document is recorded as
    filled from the name, not kept as an explicit hostname. Talos's document
    holds only `auto` and `hostname`, so nothing else is lost, and a document
    that kept `auto: off` would stop the fill (§6.1). Only that document is
    removed. A hostname that differs from the name (a different case
-   included; a full hostname equal to a full name is removed like any other), a
+   included; a full hostname equal to a full name is removed like any other, and
+   `auto: null` counts as no `auto`), a
    machine with no name, and a configuration without a `HostnameConfig` stay as
    they are. The removal comes first so that nothing is minted for a value
    that is then dropped: an operator mark that addresses a node of the removed

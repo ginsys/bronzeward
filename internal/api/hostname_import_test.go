@@ -85,6 +85,10 @@ func TestImportRefusesAfterARename(t *testing.T) {
 	op, j := ie.startJob(t, map[string]any{"document": "machine:\n  token: " + runToken + "\n---\n" + hostnameDoc})
 	ie.runWith(t, options{beforeT1: func() { ie.nameMachine(t, "node-b") }}, j)
 	p := ie.wantFailed(t, op, j.claim.ID, 409, "stale-input")
+	const want = "Import refused: the machine's name changed while the import ran; the claim is abandoned."
+	if p["detail"] != want {
+		t.Errorf("detail %q, want %q", p["detail"], want)
+	}
 	conflicts, _ := p["conflicts"].([]any)
 	if len(conflicts) != 1 {
 		t.Fatalf("problem %v", p)
