@@ -23,7 +23,14 @@
 # stays the server's, made at B's start (ER 3.4). The kept output is cli-<name>.txt in the evidence
 # directory s6-cli-<utc>, which s8 does not read. The DS rows are S4's and are not read in this mode:
 # each is a SKIP naming that.
-# Usage: scenarios/s6 run|cli   (run after scenarios/s4 run and s4 ds on the same up; cli after
+# Mode web (ginsys/bronzeward#365): the same run with two of the recovery-admin's acts made in a headless browser as h-recovery,
+# through the web pages: the accounting of point 020 and of the lost response (the accounting form of the operation's recovery
+# page) and the step 7 resolution (its resolve form). The page signs in through the synthetic provider (web/e2e/fixture.conf.ts),
+# which hands it a fixture token minted for h-recovery, and a web host serves it on B's own port: the page's role is the server's
+# read of that token. h-approver's refused accounting is not made in a browser: it stays the API call of mode run. Each act's
+# output is web-<name>.txt in the evidence directory s6-web-<utc>, which s8 does not read. The DS rows are not read, as in cli.
+# Needs web/dist, web/node_modules and a browser: mise run web first.
+# Usage: scenarios/s6 run|cli|web   (run after scenarios/s4 run and s4 ds on the same up; cli and web after
 # scenarios/s4 cli on the same up, with no s4 ds)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -32,7 +39,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s6_mode=${1:-}
-case $s6_mode in run | cli) ;; *) die "usage: scenarios/s6 run|cli" ;; esac
+case $s6_mode in run | cli | web) ;; *) die "usage: scenarios/s6 run|cli|web" ;; esac
 need docker curl jq timeout id sleep date awk wc
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
@@ -122,10 +129,39 @@ cli_account() {
   ctl "$1" "$2" recovery account "$op" "$attempt" --start "$start" --end "$end" \
     --explanation "$mutation_ref: the node was cut off" <<<y
 }
+# Mode web: web_act <name> <act> <operation> <text> runs fixture/acts.e2e.ts through wdio, which signs the page in as h-recovery and makes
+# the act (account: start and end are the ones just chosen; resolve: the text is the reason). The token is minted now and reaches the
+# driver's environment only, never a command line; the driver's output is kept as web-<name>.txt. web_kept <name> <ERE> reads it.
+web_ready() {
+  local repo=$here/../..
+  [ -z "${web_ok:-}" ] || return 0
+  need node npx
+  { [ -f "$repo/web/dist/index.html" ] && [ -d "$repo/web/node_modules" ]; } || die "mode web needs web/dist and web/node_modules: run mise run web"
+  check "$mutation_ref" 'the web host built from this checkout' go -C "$repo" build -o bin/webhost ./fixtures/webhost
+  web_ok=1
+}
+# The canary below is the prefix wdio.conf.ts demands, written in two parts: the prefix itself is the leak scan's pattern, and a literal
+# in this file would be found in the fixtures diff that bin/evidence bundles.
+web_act() {
+  local name=$1 tok rc=0
+  web_ready
+  tok=$(mint h-recovery) || return 1
+  keep_secret "$tok"
+  (
+    cd -- "$here/../../web" &&
+      BW_FIXTURE_TOKEN=$tok BW_FIXTURE_API=http://127.0.0.1:$SERVER_B_PORT BW_FIXTURE_ACT=$2 BW_FIXTURE_OP=$3 BW_FIXTURE_TEXT=$4 \
+        BW_FIXTURE_START=${start:-} BW_FIXTURE_END=${end:-} BW_BROWSERS=chrome BW_WEB_CANARY=BWSYNTH""-fixture-web BW_WDIO_CACHE=${BW_WDIO_CACHE:-${TMPDIR:-/tmp}} \
+        timeout 600 npx wdio run e2e/fixture.conf.ts
+  ) >"$EV/web-$name.txt" 2>&1 || rc=$?
+  return "$rc"
+}
+web_kept() { grep --quiet --extended-regexp -- "$2" "$EV/web-$1.txt"; }
 # account_ok <name>: h-recovery's accounting of op's first attempt is recorded.
 account_ok() {
   if [ "$s6_mode" = cli ]; then
     cli_account "$1" h-recovery && cli_kept "$1" '^Recorded\. Attempt [a-z]+_[a-z2-7]+ of operation [a-z]+_[a-z2-7]+ is accounted for by decision\.'
+  elif [ "$s6_mode" = web ]; then
+    web_act "$1" account "$op" "$mutation_ref: the node was cut off" && web_kept "$1" 'ACT account: answer: Recorded\.' && web_kept "$1" '1 passing'
   else
     account "$1" 201 - '.attempt | type == "string"'
   fi
@@ -145,6 +181,8 @@ resolve_held() {
   if [ "$s6_mode" = cli ]; then
     cli_ready "$mutation_ref" h-recovery h-approver
     ctl resolve h-recovery recovery resolve "$held" --reason "$1" && cli_kept resolve '^Operation [a-z]+_[a-z2-7]+ resolved \(act [a-z]+_[a-z2-7]+\): cancelled\.'
+  elif [ "$s6_mode" = web ]; then
+    web_act resolve resolve "$held" "$1" && web_kept resolve 'ACT resolve: answer: Resolved:' && web_kept resolve '1 passing'
   else
     resolve "$1"
   fi
@@ -401,8 +439,8 @@ s6() {
 
   # The negative controls no request reaches, and the settle floor, are S4's DS rows on this up.
   ref='S6.1 negative control'
-  if [ "$s6_mode" = cli ]; then
-    result SKIP "$ref" 'mode cli: the DS rows 013, 008, 010, 011 and 023 are S4 ds rows of the run mode, not read here'
+  if [ "$s6_mode" != run ]; then
+    result SKIP "$ref" "mode $s6_mode: the DS rows 013, 008, 010, 011 and 023 are S4 ds rows of the run mode, not read here"
   elif last_ds_table; then
     check "$ref" "accounting before the settle floor refused (DS row 013, live)" ds_passed 013
     check "$ref" "the fence without its owner and generation comparison: the stale owner records an attempt (DS row 008)" ds_passed 008
