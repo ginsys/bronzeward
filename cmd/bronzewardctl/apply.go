@@ -237,6 +237,12 @@ func (e *env) applyRead(c *client.Client, rows []*applyRow) {
 		}
 		if err := getJSON(c, "/plans/"+url.PathEscape(r.plan), &r.body); err != nil {
 			r.plan, r.line = "", sf("stopped: the change of its plan could not be read (%v), so it is left out", err)
+			continue
+		}
+		// The server withholds a change it cannot redact or cannot compare; a batch is never approved over one.
+		if d := r.body.Evidence.Diff; d != nil && d.Withheld {
+			id := r.plan
+			r.plan, r.line = "", sf("stopped: the change of its plan cannot be shown, either because the configuration could not be redacted or because the machine holds a configuration other than the one Bronzeward last applied; it is left out. Read it with plan show %s, approve it with approve %[1]s, or leave this machine out", client.ShellWord(id))
 		}
 	}
 }
@@ -268,8 +274,8 @@ func (e *env) applyShow(rows []*applyRow, diff bool) {
 		if r.plan != "" {
 			d := r.body.Evidence.Diff
 			switch {
-			case d == nil || d.Withheld:
-				tf(e.err, "  the plan's change is withheld\n")
+			case d == nil:
+				tf(e.err, "  the plan records no change\n")
 			case !diff:
 				tf(e.err, "  the plan's change is %d lines; --diff shows it\n", strings.Count(d.Unified, "\n"))
 			default:
