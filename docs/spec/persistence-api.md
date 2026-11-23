@@ -3085,16 +3085,19 @@ compilation §6.1 item 6 states it, for every `source` that sets a hostname
 (`machine-name`, `configuration`). It is `null` for a source that sets none
 (`none`, `legacy-stable`, `unrecorded`) and wherever any input to the name,
 the hostname or the `registerWithFQDN` value that decides whether the first
-label alone is used, is attributed to a secret reference (compilation §8.1), so
-a non-null value never derives from a secret and a `null` is never compared. A
+label alone is used, is attributed to a secret reference (compilation §8.1) or
+is a scalar the review redacts by value (compilation §8.3, the value means,
+which matches a resolved secret of any length, below the six bytes that step 7
+refuses as a literal), so a non-null value never derives from a secret and a
+`null` is never compared. A
 release made before the revision reads `null` by a column default, never an
 `UPDATE`, as `unrecorded` does. Any role reads it with the record, as it reads
-the redacted review (route table, §9.2): the review already shows a literal
-hostname, since the machinery marks no hostname secret (`pkg/machinery` v1.14.5,
-the version this specification pins), and a hostname attributed to a reference
-is redacted by path and gives `null`, so `nodeName` follows the review's read
-rule and adds the same literal in derived form. A later machinery pin is a
-re-read of that list. The stored value
+the redacted review (route table, §9.2): the review shows a literal hostname,
+since the machinery marks no hostname secret (`pkg/machinery` v1.14.5, the
+version this specification pins), except where the path or value means redacts
+it, and in every such case `nodeName` is `null`, so it follows the review's
+read rule and adds the same literal in derived form, never more. A later
+machinery pin is a re-read of that list. The stored value
 outside that enumeration is `500 internal-error`, as a provenance record is. It
 is a fact about the release and never read again from the machine, whose name
 may have changed since. `GET /releases` lists releases in identifier order, each as the

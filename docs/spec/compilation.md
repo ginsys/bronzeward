@@ -1187,8 +1187,9 @@ unmeasured.
    applied release no longer holds it. The recorded value is the derived node
    name above, so the comparison covers a hostname filled from a name, an
    explicit hostname and the `registerWithFQDN` setting alike; it is not made
-   where either `nodeName` is `null`, which it is where a secret reference is
-   an input to the name and where no hostname is set. Each machine has its own plan, so a release that renames machine node-a
+   where either `nodeName` is `null`, which it is where a secret reference or
+   a value the review redacts (§8.3, any length) is an input to the name and
+   where no hostname is set. Each machine has its own plan, so a release that renames machine node-a
    and gives its old name to machine node-b could be applied in the wrong
    order and leave two nodes with one hostname. Once both renames are stored,
    every release carries machine node-b's new name and is refused, so the
@@ -1197,7 +1198,7 @@ unmeasured.
    machine node-b again. A temporary name is itself filled as the hostname
    where nothing else sets one. The refusal says so: "Machine node-b would take
    the hostname node-a from its name, but the last release applied to machine
-   node-a still sets that hostname. Give machine node-b another name for now,
+   node-a still gives the Kubernetes node name node-a. Give machine node-b another name for now,
    apply the release for machine node-a, then give machine node-b the name
    node-a." Each machine is named by the name it holds when the release is
    published, and by its identifier where it has none, so in that sentence the
