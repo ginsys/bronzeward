@@ -1893,8 +1893,8 @@ fail:
   release;
 - comparison 6a refusing a commitment while another machine's `Applied` release
   holds the same `nodeName`, the plan staying `approved` and committing once
-  that `Applied` changes, with the controls that a `null` `nodeName` on either
-  side and the machine's own `Applied` are not refused, and the unlocked
+  that `Applied` changes, with the controls that a `null` or absent `nodeName` on
+  either side and the machine's own `Applied` are not refused, and the unlocked
   control showing the race with an adoption record on the other machine (§3.2);
 - takeover at controller start of every operation another instance owns;
 - the §5 precedence: a retry admitted only with attempts left, a passing
@@ -2045,8 +2045,8 @@ passes comparison 5 and comparison 6a while the first machine runs it. An
 `unresolved` outcome is not this case: it keeps the cluster's one rollout slot
 (comparison 5), so no other commitment passes until it is settled.
 Three further cases are not compared at all: a hostname that depends on a secret
-reference (`nodeName` `null`), whose clash an equality test would make a test on
-the secret; a configuration that sets none, where the node chooses its own
+reference or a value the review redacts (`nodeName` `null`), whose clash an
+equality test would make a test on the secret; a configuration that sets none, where the node chooses its own
 name; and a machine whose applied release was made before `nodeName` was
 recorded (absent, not recorded) until a later apply replaces it; publication
 still compares such a release on its recorded name where its source is
@@ -2496,8 +2496,9 @@ conservative option; those that do not say so. Each is marked in place as
     refuses what changed after publication, and the plan stays `approved` and
     waits, never ends (choice §10.27). It compares the derived node name, which
     the release records for every machine (persistence and API §9.3), and never
-    a hostname: a name that depends on a secret reference records `null` and is
-    not compared. Agent decision, 2026-11-23 (ginsys/bronzeward#1052).
+    a hostname: a name that depends on a secret reference or a value the review
+    redacts, or that nothing sets, records `null` (not compared), and a release
+    made before the record has none (not recorded); neither is compared. Agent decision, 2026-11-23 (ginsys/bronzeward#1052).
     Alternatives: a refusal at plan creation, which reads `Applied` at a moment
     that is stale by dispatch, so an apply in flight and an adoption record stay
     open; a review warning only, which leaves the failure on the live cluster to
