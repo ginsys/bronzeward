@@ -96,12 +96,12 @@ three vendors' download servers in the merge path. The builds are pinned in
 
 | Browser | Build | Source |
 | --- | --- | --- |
-| Chrome | 156.0.8078.80 | Chrome for Testing, downloaded by WebdriverIO |
-| Edge | 156.0.4314.58 | Microsoft's package repository, the `.deb` checked against its pinned sha256; the driver at the same version |
+| Chrome | 157.0.8103.78 | Chrome for Testing, downloaded by WebdriverIO |
+| Edge | 157.0.4341.60 | Microsoft's package repository, the `.deb` checked against its pinned sha256; the driver at the same version |
 | Firefox | 159.0.1 | Mozilla's release archive, downloaded by WebdriverIO |
 
 The run on 19 November 2026 ([run 44437080904](https://github.com/ginsys/bronzeward/actions/runs/44437080904)),
-passed on all three: `mise run browser` (both specs in each browser, 6 of 6 spec files) and `mise run browser-auth` (14 of
+with the pins of that day (Chrome 156.0.8078.80, Edge 156.0.4314.58), passed on all three: `mise run browser` (both specs in each browser, 6 of 6 spec files) and `mise run browser-auth` (14 of
 14 spec files in each browser), with the artifact scan's planted control finding each planted value in
 every job. The log shows the Edge and its driver at 156.0.4314.58. Every previous major was obtainable,
 so none is recorded as untested. The jobs took 1 min 30 s for `browser` and 14 min 40 s to 15 min 34 s for each
