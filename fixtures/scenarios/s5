@@ -745,10 +745,10 @@ cli_plan() {
   [ -n "$plan_id" ] &&
     [ "$(sql "SELECT count(*) FROM act WHERE action = 'plan.create' AND role = 'publisher' AND subjects = ARRAY['$plan_id', '$machine_w']")" = 1 ]
 }
-# cli_approve <plan> <name>: h-approver's approve, the plan's ID typed back on standard input: one approval of
-# the plan, recorded with one plan.approve act.
+# cli_approve <plan> <name>: h-approver's approve, y answered on standard input to the question that names the plan: one
+# approval of the plan, recorded with one plan.approve act.
 cli_approve() {
-  ctl_rm "approve-$2" h-approver approve "$1" <<<"$1" || return 1
+  ctl_rm "approve-$2" h-approver approve "$1" <<<y || return 1
   [ "$(sql "SELECT (SELECT count(*) FROM approval WHERE plan = '$1') || ' ' ||
       (SELECT count(*) FROM act WHERE action = 'plan.approve' AND '$1' = ANY (subjects))")" = '1 1' ]
 }
@@ -818,7 +818,7 @@ adopt() {
     plan=$plan_id
     [ -n "$plan" ] || die "s5: no adopt plan; nothing after it can run"
     check "$ref" 'the plan binds the open record' same "$(sql "SELECT drift_record FROM plan WHERE id = '$plan'")" "$opened"
-    check "$ref" 'h-approver approves it with approve, the plan ID typed back: one approval, one plan.approve act' cli_approve "$plan" adopt
+    check "$ref" 'h-approver approves it with approve, y answered: one approval, one plan.approve act' cli_approve "$plan" adopt
   else
     plan_body_json=$(jq -nc --arg r "$new_release" --arg m "$machine_w" '{releaseId: $r, machine: $m, operation: "adopt"}')
     fresh h-publisher
@@ -938,7 +938,7 @@ revert_step() {
   [ -n "$rplan" ] || die "s5: no revert plan; nothing after it can run"
   check "$ref" 'the plan binds the new record' same "$(sql "SELECT drift_record FROM plan WHERE id = '$rplan'")" "$redrift"
   if [ -n "$via_cli" ]; then
-    check "$ref" 'h-approver approves it with approve, the plan ID typed back: one approval, one plan.approve act' cli_approve "$rplan" revert
+    check "$ref" 'h-approver approves it with approve, y answered: one approval, one plan.approve act' cli_approve "$rplan" revert
     check "$ref" 'the approval prints that it approves an unseen overwrite, and is recorded as doing so on the timeline' cli_unseen "$rplan" revert
     check 'S5 negative controls' 'unfreezing as h-publisher, not an approver: refused naming the approver role, the scope still frozen' unfreeze_refused_cli h-publisher
   else

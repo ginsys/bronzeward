@@ -299,7 +299,7 @@ cli_apply() {
   plan=$(grep --only-matching --extended-regexp -- 'pln_[a-z2-7]{26}' "$EV/cli-plan-create.txt" | head -n 1) || plan=
   [ -n "$plan" ] || die "s4: plan create named no plan; nothing after it can run"
   ref='S4 CLI step 2'
-  check "$ref" 'approve as h-approver, the plan ID typed back on standard input' ctl approve h-approver approve "$plan" <<<"$plan"
+  check "$ref" 'approve as h-approver, y answered on standard input to the question that names the plan' ctl approve h-approver approve "$plan" <<<y
   check "$ref" 'the operation that runs the plan exists within a minute' within 60 plan_operation
   [ -n "$op" ] || die "s4: the plan has no operation; nothing after it can run"
   ref='S4 CLI step 3'
