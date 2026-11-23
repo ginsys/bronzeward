@@ -223,6 +223,15 @@ describe("a release's sources are named by what they are", () => {
     answers[`/releases/${REL}`] = ok({ ...release, sources });
     answers[`/assignments/${ASG}`] = ok({ id: ASG, machine: MCH });
     answers[`/fragments/${FRG}`] = ok({ id: FRG, name: "office-labels", layer: "base" });
+    answers["/assignment-revisions/asr_k2pq3rstuvwxyz234567abcdef"] = ok({ id: "asr_k2pq3rstuvwxyz234567abcdef", createdAt: "2026-11-21T14:02:00Z" });
+  });
+  test("a source revision reads as when it was saved, with the identifier as title; one not read keeps the short identifier", async () => {
+    await mount(h(ReleaseItem, { id: REL }));
+    await settled();
+    const cells = [...box.querySelectorAll('[aria-label="Source revisions"] tbody tr td:nth-child(3)')].map((c) => c.textContent);
+    expect(cells[0]).toMatch(/^Saved .*2026/);
+    expect(cells[1]).toBe("frr_k2pq…cdef");
+    expect(titles()).toContain("asr_k2pq3rstuvwxyz234567abcdef");
   });
   test("an assignment reads as the assignment of its machine and a fragment by its name, with the identifier as title", async () => {
     await mount(h(ReleaseItem, { id: REL }));

@@ -35,6 +35,14 @@ describe("the approval's prediction (ginsys/bronzeward#358, B21, W7)", () => {
     expect(out).not.toContain("frg_ccc");
   });
 
+  test("an authored revision is named by what it is and when it was saved, never by its identifier", () => {
+    const rev = `frg_${"a".repeat(26)}`;
+    const out = text(predict(plan(), me("prn_me"), release("prn_pub"), draft(rev), [source(rev, ok({ author: "prn_me", name: "network-base", createdAt: "2026-11-21T14:02:00Z" }))]));
+    expect(out).toMatch(/you authored fragment network-base, saved .*2026.*, which this release's draft introduced/);
+    expect(out).not.toContain(rev);
+    expect(out).not.toContain("frg_aaaa");
+  });
+
   test("a read in flight or failed is named and its reason is not claimed either way", () => {
     const failed: Load<{ author: string }> = { kind: "transport" };
     const out = predict(plan(), me("prn_other"), release("prn_pub"), draft(), [source(`frg_${"a".repeat(26)}`, { kind: "loading" }), source(`frg_${"b".repeat(26)}`, failed)]);
@@ -47,7 +55,7 @@ describe("the approval's prediction (ginsys/bronzeward#358, B21, W7)", () => {
   test("with no answer for the release the two cheap reasons are shown, and with no identity nothing is claimed", () => {
     const partial = predict(plan(), me("prn_other"), { kind: "loading" }, undefined, []);
     expect(partial[0]).toBe("Self-approval, predicted: you did not create this plan.");
-    expect(partial[1]).toContain("Not predicted yet: release");
+    expect(partial[1]).toContain("Not predicted yet: the release");
     expect(predict(plan(), me(null), release("prn_pub"), draft(), [])[0]).toBe("Self-approval is not predicted.");
     expect(predict(plan(), { kind: "loading" }, release("prn_pub"), draft(), [])[0]).toBe("Self-approval is not predicted.");
   });
