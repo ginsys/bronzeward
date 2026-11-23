@@ -10,7 +10,8 @@ import { useWrites } from "./forms.tsx";
 import { settledReads } from "./imports.tsx";
 import { type Failed, Id, readPages, Ref, useReads } from "./list.tsx";
 import { operationNext, operationNow, recoveryOperationPath } from "./operation-words.ts";
-import { Named } from "./titles.tsx";
+import { whyRefused } from "./problems.tsx";
+import { MachineById, Named } from "./titles.tsx";
 import { safeText, safeWord } from "./safe.ts";
 import { eventLine, RESTORED, watch } from "./progress.ts";
 import { Status } from "./states.tsx";
@@ -80,6 +81,11 @@ export function Outcome({ o, cause: why }: { o: Operation; cause?: string | unde
   const cause = causeText(err["cause"]) ?? token(typeof err["type"] === "string" ? err["type"].replace(/^urn:bronzeward:problem:/, "") : undefined);
   const n = typeof err["attempts"] === "number" ? err["attempts"] : 0;
   const count = `${n} ${n === 1 ? "attempt" : "attempts"}`;
+  // A publish or ingest problem document says why the configuration was refused; an apply record has no such members.
+  const refused = typeof err["type"] === "string" ? whyRefused(err) : { facts: "" };
+  const refusal = (refused.facts !== "" || refused.machine !== undefined) && (
+    <> {refused.facts}{refused.machine !== undefined && <> The machine it names: <MachineById id={refused.machine} />.</>}</>
+  );
   switch (o.state) {
     case "completed": {
       const applied = o.result !== null && "appliedRelease" in o.result ? o.result : undefined;
@@ -102,8 +108,8 @@ export function Outcome({ o, cause: why }: { o: Operation; cause?: string | unde
           </Status>
         );
     }
-    case "failed": return <Status testid="outcome">Failed{cause === undefined ? "" : `: ${cause}`}{n === 0 ? "" : ` (${count})`}.</Status>;
-    case "rejected": return <Status testid="outcome">Rejected: the node refused every attempt as invalid{cause === undefined ? "" : ` (${cause})`}{n === 0 ? "" : `, ${count}`}.</Status>;
+    case "failed": return <Status testid="outcome">Failed{cause === undefined ? "" : `: ${cause}`}{n === 0 ? "" : ` (${count})`}.{refusal}</Status>;
+    case "rejected": return <Status testid="outcome">Rejected: the node refused every attempt as invalid{cause === undefined ? "" : ` (${cause})`}{n === 0 ? "" : `, ${count}`}.{refusal}</Status>;
     case "cancelled": return <Status testid="outcome">Cancelled{why === undefined ? "" : `: ${why}`}.</Status>;
     case "succeeded": return <Status testid="outcome">Succeeded.</Status>;
     case "unresolved":

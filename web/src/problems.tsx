@@ -4,7 +4,7 @@
 
 import { CopyButton } from "./copy.tsx";
 import type { Problem } from "./request.ts";
-import { safeSentence } from "./safe.ts";
+import { safeSentence, safeWord } from "./safe.ts";
 
 export interface Words {
   what: string;
@@ -98,6 +98,30 @@ export const refusedAt = (p: Problem) => (p.status === 422 && p.type === VALIDAT
 
 // The detail a person may read: none where it is absent or hidden for a refused mark.
 export const visibleDetail = (p: Problem): string | undefined => (p.detail !== undefined && refusedAt(p) === "" ? safeSentence(p.detail) : undefined);
+
+// Why a configuration was refused, from the problem document a failed publication or import carries (compilation
+// §8.3): the rule, the input, the paths and the server's message, as safe text. The server redacts the paths and the
+// message, so neither holds a value. The machine comes back as its identifier, for the caller to show by name.
+const MAX_PATHS = 20;
+const INPUT = /^fragment\[(\d+)\]$/;
+const ended = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
+export function whyRefused(e: Record<string, unknown> | null | undefined): { facts: string; machine?: string } {
+  const text = (k: string) => (typeof e?.[k] === "string" && e[k] !== "" ? (e[k] as string) : undefined);
+  const rule = text("rule");
+  const input = text("input");
+  const message = text("message");
+  const paths = Array.isArray(e?.["paths"]) ? e["paths"].filter((p): p is string => typeof p === "string") : [];
+  const at = input === undefined ? undefined : input === "base" ? "the base" : INPUT.test(input) ? `the fragment at position ${INPUT.exec(input)![1]} (the first is 0)` : safeWord(input);
+  const more = paths.length > MAX_PATHS ? ` and ${paths.length - MAX_PATHS} more` : "";
+  const facts = [
+    rule === undefined ? "" : `The rule: ${safeWord(rule)}.`,
+    at === undefined ? "" : `The input: ${at}.`,
+    paths.length === 0 ? "" : `The paths: ${paths.slice(0, MAX_PATHS).map((p) => safeWord(p)).join(", ")}${more}.`,
+    message === undefined ? "" : `The server says: ${ended(safeSentence(message))}`,
+  ].filter((s) => s !== "").join(" ");
+  const machine = text("machine");
+  return { facts, ...(machine !== undefined && { machine }) };
+}
 
 // An earlier-epoch idempotency record's 409 (§8.2 409 row, §8.4 item 7): the request it recorded and that request's epoch.
 export const earlierOf = (p: Problem): { request: string; epoch: string } | undefined =>

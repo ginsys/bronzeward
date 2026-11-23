@@ -78,7 +78,7 @@ describe("the publication page (#342)", () => {
     // The server accepts the write (202, which needs the kept ETag as If-Match) and the operation fails
     // at its node evidence check: the page names the operation, then says nothing was sent.
     await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Publishing this draft at revision \d+\.$/), { wait: 60_000 });
-    await expect($('[data-testid="ended"]')).toHaveText(expect.stringMatching(/^The publication (failed|rejected)(: .+)?\. Nothing has been sent to any machine\.$/), { wait: 120_000 });
+    await expect($('[data-testid="ended"]')).toHaveText(expect.stringMatching(/^The publication (failed|rejected)(: .+)?\. Nothing has been sent to any machine\.( The machine it names: .+\.)?$/), { wait: 120_000 });
     // The operation failed and left the draft open, so Publish is available again.
     await expect($("main").$("button=Publish")).toBeEnabled({ wait: 20_000 });
     expect((await writes()).filter(([m]) => m === "POST").map(([, r]) => r)).toEqual([`/drafts/${id}/publications`]);

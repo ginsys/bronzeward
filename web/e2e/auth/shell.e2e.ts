@@ -139,14 +139,17 @@ describe("the shell", () => {
     await announced("deprecation", deprecated("/api/v1/identity"));
     await nav("Audit").click();
     await expect($("main h2")).toHaveText("Audit");
-    await browser.waitUntil(async () => (await seen()).includes("/principals"), { timeout: 10_000, timeoutMsg: "the Audit page did not read the names" });
+    // The Audit page reads GET /acts on every visit. It reads GET /principals (G23) only when an act is by someone other
+    // than the signed-in person, so this case waits on the acts and counts the names read apart.
+    await browser.waitUntil(async () => (await seen()).includes("/acts"), { timeout: 10_000, timeoutMsg: "the Audit page did not read the acts" });
     await nav("Fragments and profiles").click();
     await expect($("main h2")).toHaveText("Fragments and profiles");
-    // The Audit page names the principals of the acts it lists with one read of GET /principals (G23), once for the visit.
-    await reads(13);
-    expect(await ordered()).toEqual(sorted([
-      "/server", "/identity", "/machines", "/clusters", "/acts", "/principals", "/identity", "/fragments", "/profiles", "/assignments", "/dependencies", "/dependency-alerts", "/identity",
+    const pages = async () => (await seen()).filter((p) => p !== "/principals");
+    await browser.waitUntil(async () => (await pages()).length === 12, { timeout: 10_000, timeoutMsg: "the page did not make 12 reads besides the names" });
+    expect(sorted(await pages())).toEqual(sorted([
+      "/server", "/identity", "/machines", "/clusters", "/acts", "/identity", "/fragments", "/profiles", "/assignments", "/dependencies", "/dependency-alerts", "/identity",
     ]));
+    expect((await seen()).filter((p) => p === "/principals").length).toBeLessThanOrEqual(1);
     expect(await $$('[data-testid="deprecation"]').length).toBe(1);
   });
 

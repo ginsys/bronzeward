@@ -31,6 +31,21 @@ describe("the publication page (ginsys/bronzeward#342, journeys §5.5)", () => {
     expect(e).toEqual({ text: `The publication failed: validation-failed. ${SENT_NOTHING}` });
   });
 
+  test("a failed publication says why: the rule, the input, the paths and the server's message, and names its machine for the page to show", () => {
+    const error = { type: "urn:bronzeward:problem:validation-failed", status: 422, rule: "invalid", machine: "mch_BWSYNTH", input: "base", paths: ["spec.a"], message: "the field is not allowed: <redacted:value>" };
+    expect(publishEnd(op("failed", null, error))).toEqual({
+      text: `The publication failed: validation-failed. The rule: invalid. The input: the base. The paths: spec.a. The server says: the field is not allowed: <redacted:value>. ${SENT_NOTHING}`,
+      machine: "mch_BWSYNTH",
+    });
+  });
+
+  test("a refusal's rule, input, paths and message are safe text, a long path list says how many are left out, and a cluster refusal names no machine", () => {
+    const paths = Array.from({ length: 23 }, (_, i) => `p${i}`);
+    const e = publishEnd(op("failed", null, { type: "urn:bronzeward:problem:validation-failed", rule: "fidelity\u001b[2J", input: "fragment\u001b[2J", paths, message: "no stop" }));
+    expect("machine" in e).toBe(false);
+    expect((e as { text: string }).text).toBe(`The publication failed: validation-failed. The rule: (not shown). The input: (not shown). The paths: ${paths.slice(0, 20).join(", ")} and 3 more. The server says: no stop. ${SENT_NOTHING}`);
+  });
+
   test("a failure whose error carries no usable code still says it failed, and echoes no server text", () => {
     expect(publishEnd(op("failed", null, null))).toEqual({ text: `The publication failed. ${SENT_NOTHING}` });
     const e = publishEnd(op("rejected", null, { type: "urn:bronzeward:problem:\u001b[2J bad", title: "BWSYNTH\u001b[2J" }));
