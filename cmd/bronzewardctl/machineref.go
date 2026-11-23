@@ -91,6 +91,9 @@ func (e *env) writeNamed(ref, cluster string, prep func(*client.Client) error, b
 // the lookup (the cluster names) that shows another epoch refuses the write.
 func machineByName(c *client.Client, ref, cluster string) (string, epochBind, error) {
 	if isMachineID(ref) {
+		if cluster != "" {
+			return "", epochBind{}, usageError{fmt.Errorf("--cluster narrows a name; an identifier needs none; nothing was sent")}
+		}
 		return ref, epochBind{}, nil
 	}
 	items, epoch, moves, err := c.ListBound("/machines?limit=500")
