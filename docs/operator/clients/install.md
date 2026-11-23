@@ -34,7 +34,8 @@ You can build every archive from a checkout of this repository. The result has t
 and the same checks as a release, with a version you choose. Use a version that cannot be mistaken
 for a release, such as `v0.0.0-dev`.
 
-You need the tools the repository pins in `mise.toml` (run `mise install` once), and `python3`
+You need the tools the repository pins in `mise.toml` (run `mise trust` once in a fresh checkout,
+because mise refuses an untrusted `mise.toml`, then `mise install`), and `python3`
 and `tar` from your system. The build writes `dist/` and `build/`, which Git ignores. It builds
 every platform, so it takes a while.
 
