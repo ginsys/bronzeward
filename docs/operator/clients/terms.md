@@ -35,8 +35,8 @@ which page shows it at work. Nothing here is a command; the command pages are li
   it makes it each machine's Desired release. See [publication](publication.md).
 - **Desired, Applied, Observed**: Desired is the release the installation wants a machine to run.
   Applied is the configuration Bronzeward last verified or adopted, and the release it came
-  from. Observed is the machine's best recorded read of its configuration, and whether that read
-  equals Applied or Desired. See [the inventory](inventory.md).
+  from. Observed is the recorded read of the machine's configuration that the installation counts, and
+  whether that read equals Applied or Desired. See [the inventory](inventory.md).
 - **Observation**: a recorded read of a machine's configuration.
 - **Drift**: a read of the machine that differs from Applied while no operation holds the machine.
   It opens a **drift record**.
@@ -53,9 +53,12 @@ which page shows it at work. Nothing here is a command; the command pages are li
 - **Approval**: a person with the `approver` role records that they approve one plan. An approval
   made by an automation token is refused.
 - **Self-approval**: approving a plan when you also created it, published its release or wrote a
-  change in it. It is allowed, and the approval records the reason.
-- **Evidence**: what a plan shows an approver before the approval: the validation result, the
-  change (the **diff**) and whether a dry run exists.
+  change in it, or when an automation you own did one of these. It is allowed, and the approval
+  records the reasons. A client's prediction before you approve can miss a reason, so only the
+  recorded approval is final.
+- **Evidence**: what a plan shows an approver before the approval: the validation result, a dry run
+  (the proof of concept has none), and, for an apply plan, the change (the **diff**), which the
+  server can withhold; for an adopt plan, the adoption baseline instead of a diff.
 - **Controller**: the part of the installation that commits an approved plan after its own checks,
   sends it to the machine, verifies the result and records Applied.
 - **Operation**: one run of something the installation does: a publication, an import, an apply or
