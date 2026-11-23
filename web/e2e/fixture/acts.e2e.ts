@@ -14,7 +14,7 @@
 //   exit:     the exit form (no machine).
 // On the drift and plan pages (S5; BW_FIXTURE_MACHINE names the machine; the page signs in as the human the scenario named):
 //   freeze, unfreeze: the drift page's form of that name, on the reason in BW_FIXTURE_TEXT.
-//   unfreeze-off: reads that the drift page's Unfreeze control is off and says what it needs; sends nothing.
+//   unfreeze-off: reads that the drift page's Unfreeze control is off and says what it needs. It presses nothing and records no request.
 //   plan:     a plan made on the create-plan page, BW_FIXTURE_OPERATION adopt (from the release in BW_FIXTURE_RELEASE) or revert (from
 //             the drift page's Plan revert link); the plan's id is printed.
 //   approve:  the plan in BW_FIXTURE_PLAN approved on its page; the page's unseen-overwrite sentence is printed first.
@@ -219,7 +219,7 @@ describe(`fixture act ${act}`, () => {
       await driftDecision(act === "freeze" ? "Freeze" : "Unfreeze", act === "freeze" ? "Frozen." : "Unfrozen.");
     });
   } else if (act === "unfreeze-off") {
-    it("reads that the Unfreeze control is off for this human, with what it needs, and sends nothing", async function () {
+    it("reads that the Unfreeze control is off for this human, with what it needs", async function () {
       this.timeout(120_000);
       const form = await driftForm("Unfreeze");
       const unfreeze = await button(form, "Unfreeze");
