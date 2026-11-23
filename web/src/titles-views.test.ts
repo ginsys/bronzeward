@@ -541,6 +541,35 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
     expect(hrefs()).toEqual(expect.arrayContaining([DRF, OP]));
   });
 
+  describe("ginsys/bronzeward#1055: a release's publication observation", () => {
+    const OBS = "obs_k2pq3rstuvwxyz234567abcdef";
+    const covering = () => (answers[`/releases/${REL}`] = ok({ ...release(), machines: [{ machine: MCH, mode: "config", publicationObservation: OBS }] }));
+    const observed = () => asked.filter((p) => p.endsWith("/observations"));
+
+    test("reads when it was taken and why, the identifier staying the link's title, with one list read per covered machine", async () => {
+      covering();
+      answers[`/machines/${MCH}/observations`] = ok({ items: [{ id: OBS, machine: MCH, purpose: "publication", at }], next: null });
+      await mount(h(ReleaseItem, { id: REL }));
+      await settled();
+      expect(text()).toContain(`Read ${when(at)} (publication)`);
+      expect(titled("Read ")).toBe(OBS);
+      expect(observed()).toEqual([`/machines/${MCH}/observations`]);
+    });
+
+    test("keeps the shortened identifier when the machine's list does not hold it or cannot be read", async () => {
+      covering();
+      answers[`/machines/${MCH}/observations`] = ok({ items: [], next: null });
+      await mount(h(ReleaseItem, { id: REL }));
+      await settled();
+      expect(text()).toContain("obs_k2pq…cdef");
+      expect(text()).not.toContain("(publication)");
+      answers[`/machines/${MCH}/observations`] = missing;
+      await mount(h(ReleaseItem, { id: REL }), { ...freshReads(), view: "w" });
+      await settled();
+      expect(text()).toContain("obs_k2pq…cdef");
+    });
+  });
+
   test("the plans list names each plan's release, the dependency's releases theirs", async () => {
     answers["/plans"] = ok({ items: [plan("apply-config")], next: null });
     await mount(h(Plans, { query: "", go: () => {} }));
@@ -615,6 +644,63 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
     await mount(h(Outcome, { o: o as never }));
     await settled();
     expect(box.querySelector("[data-testid=outcome]")?.textContent).toBe("Failed: validation-failed. The rule: kind-mismatch. The input: the fragment network in layer site (position 1, the first is 0). The machine it names: worker-1.");
+  });
+
+  test("ginsys/bronzeward#1055: the outcome line of a failed publication reads a tab or a line break in the server's message as a space", async () => {
+    const error = { type: "urn:bronzeward:problem:validation-failed", status: 422, rule: "invalid", message: "1 error occurred:\n\t* .machine.nodeLabels is already set in v1alpha1 config" };
+    const o = { ...operation("publish", { draft: DRF }), state: "failed", error };
+    await mount(h(Outcome, { o: o as never }));
+    await settled();
+    expect(box.querySelector("[data-testid=outcome]")?.textContent).toContain("The server says: 1 error occurred: * .machine.nodeLabels is already set in v1alpha1 config.");
+  });
+
+  describe("ginsys/bronzeward#1055: the Error row of an operation's page", () => {
+    const refused = { type: "urn:bronzeward:problem:validation-failed", title: "Validation failed", status: 422, rule: "invalid", machine: MCH, instance: "req_a", message: "1 error occurred:\n\t* .machine.nodeLabels is already set" };
+    const failed = (error: unknown) => (answers[`/operations/${OP}`] = ok({ ...operation("publish", { draft: DRF, draftRevision: 3 }), state: "failed", error }));
+    const labels = () => [...box.querySelectorAll("dt")].map((dt) => dt.textContent);
+
+    test("a problem document sits whole in the one closed reference section, and no machine identifier is in the page's text outside it", async () => {
+      failed(refused);
+      await mount(h(OperationItem, { id: OP }));
+      await settled();
+      const refs = box.querySelectorAll("[data-testid=request-ref]");
+      expect(refs).toHaveLength(1);
+      const ref = refs[0]!;
+      expect(ref.tagName).toBe("DETAILS");
+      expect(ref.hasAttribute("open")).toBe(false);
+      expect(labels()).not.toContain("Error");
+      expect(JSON.parse(ref.querySelector("pre")?.textContent ?? "null")).toEqual(refused);
+      expect(ref.textContent).toContain("Code: validation-failed");
+      expect(ref.textContent).toContain("Status: 422");
+      const outside = box.cloneNode(true) as HTMLElement;
+      outside.querySelector("[data-testid=request-ref]")?.remove();
+      expect(outside.textContent).not.toMatch(/mch_/);
+    });
+
+    test("a document that stores no status reads its code, never undefined", async () => {
+      failed({ type: "urn:bronzeward:problem:validation-failed", rule: "invalid" });
+      await mount(h(OperationItem, { id: OP }));
+      await settled();
+      const ref = box.querySelector("[data-testid=request-ref]");
+      expect(ref?.textContent).toContain("Code: validation-failed");
+      expect(ref?.textContent).not.toContain("undefined");
+    });
+
+    test("an apply's error record keeps its row and has no reference section", async () => {
+      failed({ cause: "timeout", attempts: 2 });
+      await mount(h(OperationItem, { id: OP }));
+      await settled();
+      expect(labels()).toContain("Error");
+      expect(box.querySelector("[data-testid=request-ref]")).toBeNull();
+    });
+
+    test("an operation with no error keeps its row reading none", async () => {
+      failed(null);
+      await mount(h(OperationItem, { id: OP }));
+      await settled();
+      expect(box.querySelector("dt + dd")).not.toBeNull();
+      expect([...box.querySelectorAll("dt")].find((dt) => dt.textContent === "Error")?.nextElementSibling?.textContent).toBe("none");
+    });
   });
 
   test("an operation's page reads each distinct body once for its heading, Subject and outcome", async () => {

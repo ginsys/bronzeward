@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { publishPath } from "./drafts.tsx";
 import { type Reads, ReadsProvider, short } from "./list.tsx";
-import { accepted, NO_DRAFT, NOT_OPEN, notEstablished, operationId, PublishDraft, publishEnd, publishLocked, SENT_NOTHING } from "./publish.tsx";
+import { accepted, DraftChanges, NO_DRAFT, NOT_OPEN, notEstablished, operationId, PublishDraft, publishEnd, publishLocked, SENT_NOTHING } from "./publish.tsx";
 import type { Outcome } from "./write.ts";
 
 type Operation = components["schemas"]["OperationBody"];
@@ -32,11 +32,27 @@ describe("the publication page (ginsys/bronzeward#342, journeys §5.5)", () => {
   });
 
   test("a failed publication says why: the rule, the input, the paths and the server's message, and names its machine for the page to show", () => {
-    const error = { type: "urn:bronzeward:problem:validation-failed", status: 422, rule: "invalid", machine: "mch_BWSYNTH", input: "base", paths: ["spec.a"], message: "the field is not allowed: <redacted:value>" };
+    const error = { type: "urn:bronzeward:problem:validation-failed", status: 422, rule: "kind-mismatch", machine: "mch_BWSYNTH", input: "base", paths: ["spec.a"], message: "the field is not allowed: <redacted:value>" };
     expect(publishEnd(op("failed", null, error))).toEqual({
-      text: `The publication failed: validation-failed. The rule: invalid. The input: the base. The paths: spec.a. The server says: the field is not allowed: <redacted:value>. ${SENT_NOTHING}`,
+      text: `The publication failed: validation-failed. The rule: kind-mismatch. The input: the base. The paths: spec.a. The server says: the field is not allowed: <redacted:value>. ${SENT_NOTHING}`,
       machine: "mch_BWSYNTH",
     });
+  });
+
+  // ginsys/bronzeward#1055 part 9b: the rule `invalid` is Talos's validation of the machine's whole configuration, and
+  // the bare word said nothing a person could act on.
+  test("the rule invalid says what it means, and the other rules keep their name", () => {
+    const text = (rule: string) => (publishEnd(op("failed", null, { type: "urn:bronzeward:problem:validation-failed", status: 422, rule, message: "x" })) as { text: string }).text;
+    expect(text("invalid")).toContain("The configuration of the machine as a whole, its adopted configuration plus the fragments selected for it, did not pass Talos's validation; the server's message is Talos's.");
+    expect(text("invalid")).not.toContain("The rule: invalid");
+    expect(text("kind-mismatch")).toContain("The rule: kind-mismatch.");
+  });
+
+  test("a run of tabs and line breaks in the server's message reads as one space, and another control character still reads U+FFFD", () => {
+    const message = "1 error occurred:\n\t* .machine.nodeLabels is already set in v1alpha1 config";
+    const text = (m: string) => (publishEnd(op("failed", null, { type: "urn:bronzeward:problem:validation-failed", status: 422, rule: "invalid", message: m })) as { text: string }).text;
+    expect(text(message)).toContain("The server says: 1 error occurred: * .machine.nodeLabels is already set in v1alpha1 config.");
+    expect(text("a\r\n\r\nb\u001bc")).toContain("The server says: a b�c.");
   });
 
   test("a refused fragment is named by its name and layer, with the position in brackets; without a name the position stays as it was", () => {
@@ -106,5 +122,40 @@ describe("the publication page (ginsys/bronzeward#342, journeys §5.5)", () => {
     expect(publishLocked(false, done({ id: "op_a" }), "op_b"), "another operation failed").toBe(true);
     expect(publishLocked(false, done({ id: "op_a" }), "op_a"), "accepted operation failed").toBe(false);
     expect(publishLocked(false, done(null), undefined), "accepted, names no operation").toBe(true);
+  });
+});
+
+// ginsys/bronzeward#1055 part 9b: after a refused publication the page says what the draft it holds changes, since the
+// refusal of the whole configuration names no fragment.
+describe("what the draft changes, said after a refused publication", () => {
+  const entry = (kind: string, name: string, head: string | null, revision: string | null) => ({ kind, name, head, base: head === null ? null : 1, revision });
+  const draft = (revision: number, entries: unknown[]) => ({ id: "drf_a", cluster: "cl_a", title: "t", state: "open", revision, entries }) as unknown as components["schemas"]["DraftBody"];
+  const said = (d: ReturnType<typeof draft> | undefined, revision: number | undefined) => html(h(DraftChanges, { d, revision })).replace(/<[^>]*>/g, "");
+
+  test("names each changed entry by kind and name, and says the cause may be a fragment the draft does not change", () => {
+    const d = draft(3, [entry("fragment", "network", "fgh_a", "frv_a"), entry("fragment", "site-a", null, "frv_b"), entry("profile", "old", "prh_a", null), { kind: "import-base", id: "imb_a" }]);
+    expect(said(d, 3)).toBe(" This draft changes: fragment network (changed), fragment site-a (new), profile old (removed). The conflict may also be with a fragment this draft does not change, one selected for the machine.");
+  });
+
+  test("lists at most 10 entries and counts the rest", () => {
+    const d = draft(3, Array.from({ length: 13 }, (_, i) => entry("fragment", `f${i}`, "fgh_a", "frv_a")));
+    const s = said(d, 3);
+    expect(s).toContain("fragment f9 (changed) and 3 more.");
+    expect(s).not.toContain("f10");
+  });
+
+  test("a draft saved again since the refusal lists nothing and says so", () => {
+    const d = draft(4, [entry("fragment", "network", "fgh_a", "frv_a")]);
+    expect(said(d, 3)).toBe(" This draft has changed since this publication was refused, so the changes it made are not listed.");
+  });
+
+  test("a draft not read yet, an operation that names no revision and a draft with no source entry say nothing", () => {
+    expect(said(undefined, 3)).toBe("");
+    expect(said(draft(3, [entry("fragment", "network", "fgh_a", "frv_a")]), undefined)).toBe("");
+    expect(said(draft(3, [{ kind: "import-base", id: "imb_a" }]), 3)).toBe("");
+  });
+
+  test("a name that is not safe text reads (name not shown)", () => {
+    expect(said(draft(3, [entry("fragment", "net\u001b[2Jwork", "fgh_a", "frv_a")]), 3)).toContain("fragment (name not shown) (changed)");
   });
 });
