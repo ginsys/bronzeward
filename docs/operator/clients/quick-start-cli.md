@@ -25,7 +25,13 @@ bronzewardctl context add office --from https://bronzeward.example.com
 
 If the installation uses a private certificate authority, add `--certificate-authority
 ./office-ca.pem`. The result names the server, where its certificate trust comes from, the
-credential and the current context.
+credential and the current context. The first context you add becomes the current one. If you
+already have another, run `bronzewardctl context use office` before the next step, or add
+`--context office` to every command below.
+
+This page is written from the client's source and its specification. No command on it was run for
+this page, and the `text` blocks of the other client pages show the shape of the output, not a
+recorded run.
 
 ## 2. Sign in
 
@@ -69,15 +75,23 @@ bronzewardctl cluster list
 bronzewardctl machine list
 ```
 
-Each list shows one page. Add `--all` to read every page. `-o json` prints the server's own
-answer unchanged, for a script. An empty list shows only its column names: the installation has
-none recorded. It does not show that no machine exists.
+Each list shows one page. Add `--all` to read every page. `-o json` prints the server's own answer
+for one page, for a script. With `--all`, it prints one object `{"items": [...]}` that the client
+builds from every page, so a script must not assume the same shape with and without `--all`. An
+empty list shows its column names, and the machine list adds "Health is not checked in this
+installation." The installation has none recorded. That does not show that no machine exists.
 
 ## What you did, and what you did not
 
 You added a context, signed in and read the identity, the versions, the status and the two lists.
 You changed nothing on the server or on any machine. Nothing here shows that a machine runs the configuration it should: that is a drift
-check, in the journey pages. The reference lists every command: [command reference](cli-reference.md).
+check, in the journey pages.
+
+## Next
+
+- The same first read in a browser: [quick start for the web](quick-start-web.md).
+- Several servers, TLS trust and scripts: [contexts](contexts.md).
+- Every command and flag: [command reference](cli-reference.md).
 
 ## If a step fails
 

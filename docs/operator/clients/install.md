@@ -35,19 +35,24 @@ and the same checks as a release, with a version you choose. Use a version that 
 for a release, such as `v0.0.0-dev`.
 
 You need the tools the repository pins in `mise.toml` (run `mise install` once), and `python3`
-and `tar` from your system. The build took about two minutes on the machine used to write this
-page. It writes `dist/` and `build/`, which Git ignores.
+and `tar` from your system. The build writes `dist/` and `build/`, which Git ignores. It builds
+every platform, so it takes a while.
+
+**What the output blocks on this page are.** A block that shows output shows its shape, read from
+the source and the checks the repository runs. This page does not claim that a run printed it.
+A block marked to run is run in a later documentation run, and this page is changed to say so
+only after that run.
 
 ```bash {.bw-run}
 BW_VERSION=v0.0.0-dev mise run package
 ```
 
 The command ends with the list of archives in `dist/`. Next, check each archive against its
-checksum. `sha256sum --check` reads `SHA256SUMS` and says `OK` or `FAILED` for every file.
+checksum. `sha256sum --check` reads `SHA256SUMS` and says `OK` or `FAILED` for every file. The
+parentheses keep your shell in the directory you started in.
 
 ```bash {.bw-run}
-cd dist
-sha256sum --check --strict SHA256SUMS
+( cd dist && sha256sum --check --strict SHA256SUMS )
 ```
 
 ```text
@@ -79,7 +84,9 @@ shows no command for them that you could copy and run today.
    `.github/workflows/release-publish.yml`. Read both from the certificate inside the bundle
    instead of copying a value from a page you cannot check, and compare them with the workflow
    file in the repository at the release's tag.
-3. Check the archive against `SHA256SUMS` with `sha256sum --check`, as above.
+3. Check the archive against `SHA256SUMS`. You downloaded one archive, so check only its line:
+   `grep -F -- " <archive>" SHA256SUMS | sha256sum --check --strict -`. (Checking the whole
+   file, as in the build above, reports every archive you did not download as missing.)
 4. Check the build attestation of the archive with `gh attestation verify <archive> --repo
    ginsys/bronzeward`.
 
