@@ -73,7 +73,7 @@ export const withMark = (marks: string, path: string): string =>
 // What a done send says: the progress watch follows the run and shows how it ended.
 export const markSent = (d: unknown): string => {
   const a = (d ?? {}) as { operation?: unknown; generation?: unknown };
-  return `The marks were accepted in operation ${short(typeof a.operation === "string" ? a.operation : "")} at generation ${typeof a.generation === "number" ? a.generation : "?"}. How the run ended shows under Progress.`;
+  return `The marks were accepted at generation ${typeof a.generation === "number" ? a.generation : "?"}. How the run ended shows under Progress.`;
 };
 
 // The marks panel under an open review: the values to choose from, the typed list and [Send marks].

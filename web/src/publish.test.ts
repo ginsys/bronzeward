@@ -22,20 +22,20 @@ describe("the publication page (ginsys/bronzeward#342, journeys §5.5)", () => {
   test("a success that names no release is said so, never shown as a release (G4)", () => {
     for (const result of [null, {}, { release: "" }, { release: 7 }]) {
       const e = publishEnd(op("succeeded", result));
-      expect(e, JSON.stringify(result)).toEqual({ text: `Publication operation ${short("op_BWSYNTH-pub")} succeeded without naming its release.` });
+      expect(e, JSON.stringify(result)).toEqual({ text: "The publication succeeded without naming its release." });
     }
   });
 
   test("a failed publication gives its code and says nothing was sent to any machine", () => {
     const e = publishEnd(op("failed", null, { type: "urn:bronzeward:problem:validation-failed", status: 422 }));
-    expect(e).toEqual({ text: `Publication operation ${short("op_BWSYNTH-pub")} failed: validation-failed. ${SENT_NOTHING}` });
+    expect(e).toEqual({ text: `The publication failed: validation-failed. ${SENT_NOTHING}` });
   });
 
   test("a failure whose error carries no usable code still says it failed, and echoes no server text", () => {
-    expect(publishEnd(op("failed", null, null))).toEqual({ text: `Publication operation ${short("op_BWSYNTH-pub")} failed. ${SENT_NOTHING}` });
+    expect(publishEnd(op("failed", null, null))).toEqual({ text: `The publication failed. ${SENT_NOTHING}` });
     const e = publishEnd(op("rejected", null, { type: "urn:bronzeward:problem:\u001b[2J bad", title: "BWSYNTH\u001b[2J" }));
     expect(JSON.stringify(e)).not.toContain("\u001b");
-    expect(e).toEqual({ text: `Publication operation ${short("op_BWSYNTH-pub")} rejected. ${SENT_NOTHING}` });
+    expect(e).toEqual({ text: `The publication rejected. ${SENT_NOTHING}` });
   });
 
   test("an operation id is read from the accepted answer only when it names one", () => {
@@ -44,13 +44,13 @@ describe("the publication page (ginsys/bronzeward#342, journeys §5.5)", () => {
   });
 
   test("an accepted answer that is null or not an object still renders, naming only what it holds", () => {
-    for (const data of [null, undefined, "text", 7, {}]) expect(accepted("drf_a", data)).toBe(`Publishing draft ${short("drf_a")} revision ?.`);
-    expect(accepted("drf_a", { id: "op_x", subject: { draftRevision: 3 } })).toBe(`Publishing draft ${short("drf_a")} revision 3 (operation ${short("op_x")}).`);
+    for (const data of [null, undefined, "text", 7, {}]) expect(accepted("drf_a", data)).toBe("Publishing this draft at revision ?.");
+    expect(accepted("drf_a", { id: "op_x", subject: { draftRevision: 3 } })).toBe("Publishing this draft at revision 3.");
   });
 
   test("an operation read under another epoch is not an outcome", () => {
-    expect(notEstablished("op_BWSYNTH-pub")).toContain("its outcome is not established");
-    expect(notEstablished("op_BWSYNTH-pub")).not.toContain("succeeded");
+    expect(notEstablished()).toContain("its outcome is not established");
+    expect(notEstablished()).not.toContain("succeeded");
   });
 
   test("the draft page links to the publication page by the draft's id", () => {

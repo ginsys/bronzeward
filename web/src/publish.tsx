@@ -35,19 +35,18 @@ export type Ended = { release: string } | { text: string };
 export function publishEnd(o: Operation): Ended {
   if (o.state === "succeeded") {
     const r = o.result as S["PublishResult"] | null;
-    if (r === null || typeof r.release !== "string" || r.release === "") return { text: `Publication operation ${short(o.id)} succeeded without naming its release.` };
+    if (r === null || typeof r.release !== "string" || r.release === "") return { text: `The publication succeeded without naming its release.` };
     return { release: r.release };
   }
   const code = refusalOf({ problem: o.error }).code;
-  return { text: `Publication operation ${short(o.id)} ${safeWord(o.state)}${code === undefined ? "" : `: ${code}`}. ${SENT_NOTHING}` };
+  return { text: `The publication ${safeWord(o.state)}${code === undefined ? "" : `: ${code}`}. ${SENT_NOTHING}` };
 }
 
 // What the accepted answer says: the draft's revision and the operation, each only when the answer names it.
 export function accepted(draft: string, data: unknown): string {
   const o = typeof data === "object" && data !== null ? (data as Partial<Operation>) : {};
   const rev = o.subject?.draftRevision;
-  const op = operationId(data);
-  return `Publishing draft ${short(draft)} revision ${rev ?? "?"}${op === undefined ? "." : ` (operation ${short(op)}).`}`;
+  return `Publishing this draft at revision ${rev ?? "?"}.`;
 }
 
 // The id of the operation a publication's answer names, when it can be read and names one.
@@ -58,8 +57,8 @@ export const operationId = (data: unknown): string | undefined => {
 
 // An operation read under another epoch than the client's now decides nothing (§8.5, §8.6 item 2):
 // the installation was restored or entered recovery mode after it, so the state is not established.
-export const notEstablished = (op: string) =>
-  `Publication operation ${short(op)} ended when it was read, but the installation was restored or entered recovery mode after that, so its outcome is not established. Read the operation again.`;
+export const notEstablished = () =>
+  `The publication ended when it was read, but the installation was restored or entered recovery mode after that, so its outcome is not established. Read the operation again.`;
 
 // Whether a watched operation's end decides anything: it is terminal and was read under the client's epoch.
 export const established = (r: { operation: Operation; epoch: string | undefined }, epoch: string | undefined) =>
@@ -93,7 +92,7 @@ function Progress({ op, draft, onFailed }: { op: string; draft: string; onFailed
     }).then((r) => {
       if (r.kind === "stopped" || abort.signal.aborted) return;
       if (r.kind === "failed") return show({ type: "end", text: now.current.failure(r.res) });
-      if (!established(r, client.currentEpoch)) return show({ type: "end", text: notEstablished(op) });
+      if (!established(r, client.currentEpoch)) return show({ type: "end", text: notEstablished() });
       const e = publishEnd(r.operation);
       // A published draft takes no write: its ETag is forgotten once the operation is known to have succeeded,
       // whether or not its result names the release (the CLI does the same).

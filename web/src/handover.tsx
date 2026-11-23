@@ -95,7 +95,7 @@ export function Handover({ draft, machines, etag, seeChange, written }: { draft:
       const r = await watch(reading, op, { show: () => {}, clear: () => {}, signal: ctl.signal });
       if (r.kind === "stopped" || !current()) return { kind: "stopped" };
       if (r.kind === "failed") return { kind: "unread" };
-      if (!established(r, client.currentEpoch)) return { kind: "ended", text: notEstablished(op) };
+      if (!established(r, client.currentEpoch)) return { kind: "ended", text: notEstablished() };
       const e = publishEnd(r.operation);
       return "release" in e ? { kind: "released" } : { kind: "ended", text: e.text };
     };

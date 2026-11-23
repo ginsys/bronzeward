@@ -94,10 +94,10 @@ const differing = (error: unknown) => {
 // Why a mark was not applied although its operation succeeded: refused at its pause, its staged input
 // not decryptable, or no pause at its generation at all.
 const notApplied = (last: string, run: Pick<RunState, "refused" | "replacedBy">, o: Operation) =>
-  run.replacedBy !== undefined ? `a takeover at generation ${run.replacedBy} resumed the import without it, and operation ${short(o.id)} then released it.`
-  : run.refused !== undefined ? `it was refused, and operation ${short(o.id)} then released the import without it. ${refusalWords(run.refused)}`
-  : last === "resume-failed" ? `its staged input could not be decrypted, and operation ${short(o.id)} then released the import without it.`
-  : `operation ${short(o.id)} succeeded without pausing at the mark's generation.`;
+  run.replacedBy !== undefined ? `a takeover at generation ${run.replacedBy} resumed the import without it, and its operation then released it.`
+  : run.refused !== undefined ? `it was refused, and its operation then released the import without it. ${refusalWords(run.refused)}`
+  : last === "resume-failed" ? `its staged input could not be decrypted, and its operation then released the import without it.`
+  : `its operation succeeded without pausing at the mark's generation.`;
 
 // What a watch's end says. A success of an import this page started adopts the draft's ETag only at
 // the import's own draft revision (ETAG-02): a higher one means another write followed, treated as a
@@ -107,7 +107,7 @@ const notApplied = (last: string, run: Pick<RunState, "refused" | "replacedBy">,
 export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion, o: Operation, last: string, now: number, epoch: string | undefined, run?: Pick<RunState, "marked" | "refused" | "replacedBy">): Promise<ReactNode> {
   if (o.state === "succeeded") {
     const r = o.result as S["IngestResult"] | null;
-    if (r === null || typeof r.draftRevision !== "number") return `Import operation ${short(o.id)} succeeded without naming its draft revision.`;
+    if (r === null || typeof r.draftRevision !== "number") return `This import succeeded without naming its draft revision.`;
     // A mark that no pause applied is not applied, whatever released the import after it (the CLI's markOutcome).
     const lost = run !== undefined && ((run.marked && (last !== "paused" || run.refused !== undefined)) || run.replacedBy !== undefined) ? `The mark was not applied: ${notApplied(last, run, o)} ` : "";
     const base = b.machine == null ? <Id id={r.importBaseRevision} /> : <ImportedConfigurationRef machine={b.machine} revision={r.importBaseRevision} />;
@@ -130,10 +130,10 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
       "ingestion-abandoned": " The ingestion was abandoned, so nothing of it reached the draft.",
     };
     const why = (reasons[code(o.error)] ?? ` ${refusalWords({ code: code(o.error), rule: ruleOf(o.error) })}`) + differing(o.error);
-    return <>Import {short(b.id)} (operation {short(o.id)}) {safeWord(o.state)}.{why} <ImportAgain b={b} /></>;
+    return <>This import {safeWord(o.state)}.{why} <ImportAgain b={b} /></>;
   }
   // An abandoned claim whose operation has no recorded end: the pause the events replay is not current.
-  if (b.state === "abandoned") return `Import ${short(b.id)} is abandoned, but operation ${short(o.id)} has no recorded end yet: its outcome is unknown. Read it again later.`;
+  if (b.state === "abandoned") return `This import is abandoned, but its operation has no recorded end yet: its outcome is unknown. Read it again later.`;
   if (last === "paused" && run?.refused !== undefined) {
     return `The mark was not applied: it was refused. ${refusalWords(run.refused)} The import is paused again (expires ${when(b.expiresAt)}). Review it again and mark again, continue it, or abandon it.`;
   }
@@ -142,12 +142,12 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
   }
   if (last === "paused" && run?.marked) return `The marks were applied: re-staged and paused again (expires ${when(b.expiresAt)}). Review again, continue or abandon it.`;
   if (last === "paused") return `Paused for review (expires ${when(b.expiresAt)}).`;
-  if (last === "resume-failed") return `Import ${short(b.id)} was not applied: its staged input could not be decrypted. The claim stays held until its lease lapses at ${when(b.leaseUntil)}; then take it over, or abandon it now.`;
+  if (last === "resume-failed") return `This import was not applied: its staged input could not be decrypted. The claim stays held until its lease lapses at ${when(b.leaseUntil)}; then take it over, or abandon it now.`;
   if (lapsed(b, now)) {
     const next = b.mode === "transient" ? "or abandon it (transient staging cannot be taken over)" : "take it over, or abandon it";
     // A takeover discarded the mark whatever the takeover's own run does next, so that part is known.
     const lost = run?.replacedBy !== undefined ? `The earlier mark was not applied: a takeover at generation ${run.replacedBy} resumed the import without it. ` : "";
-    return `${lost}Its claim is ${safeWord(b.state)} and its lease lapsed at ${when(b.leaseUntil)}, while operation ${short(o.id)} still runs: the outcome is unknown. Read it again later, ${next}.`;
+    return `${lost}Its claim is ${safeWord(b.state)} and its lease lapsed at ${when(b.leaseUntil)}, while its operation still runs: the outcome is unknown. Read it again later, ${next}.`;
   }
   return undefined;
 }

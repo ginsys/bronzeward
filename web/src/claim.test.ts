@@ -266,7 +266,7 @@ describe("the outcome of a sent action stays after its verb leaves the offered l
     expect(shownVerbs(["continue", "abandon"], [])).toEqual(["continue", "abandon"]);
     expect(shownVerbs(["takeover", "abandon"], ["takeover", "abandon"])).toEqual(["takeover", "abandon"]);
     const html = view("continue", false, sent("continue", done({ operation: "op_zcfw5mcm" })));
-    expect(html).toContain("The import continues in operation");
+    expect(html).toContain("The import continues.");
     expect(html).not.toContain("Continue import");
     // While the verb is offered, its button shows with the line.
     expect(view("continue", true, sent("continue", done({ operation: "op_zcfw5mcm" })))).toContain("Continue import");

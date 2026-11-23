@@ -46,7 +46,7 @@ describe("the marks a request carries (§11.2, compilation §2.2)", () => {
     expect(s.body).toEqual({});
   });
   test("an accepted send names its operation and generation and never a path", () => {
-    expect(markSent({ operation: "op_zcfw5mcm", generation: 3, ingestion: "ing_6fdq2la" })).toBe("The marks were accepted in operation op_zcfw5mcm at generation 3. How the run ended shows under Progress.");
+    expect(markSent({ operation: "op_zcfw5mcm", generation: 3, ingestion: "ing_6fdq2la" })).toBe("The marks were accepted at generation 3. How the run ended shows under Progress.");
     expect(markSent(null)).toContain("generation ?");
   });
   test("choosing a value adds its path once, on its own line", () => {
@@ -251,7 +251,7 @@ describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () =>
       const s = events(2, [["marked", { generation: 2 }], ["mark-refused", refusal], ["paused", { generation: 2 }], ["continued", { generation: 3 }]]);
       const done = op({ state: "succeeded", result: { draft: "drf_2rmp457a", draftRevision: 5, importBaseRevision: "rev_1" } });
       const out = renderToStaticMarkup(h(ReadsProvider, { value: noReads }, await ended(unused, ing({ state: "released" }), done, "", NOW, "e1", s))).replace(/<[^>]+>/g, "");
-      expect(out).toMatch(/^The mark was not applied: it was refused, and operation \S+ then released the import without it\. The server checked this and found it not valid\. The mark at position/);
+      expect(out).toMatch(/^The mark was not applied: it was refused, and its operation then released the import without it\. The server checked this and found it not valid\. The mark at position/);
     });
   });
   test("the page says applied, refused by position and rule, or not applied by code, and never names a path", async () => {
@@ -284,7 +284,7 @@ describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () =>
       const flat = (n: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: noReads }, n)).replace(/<[^>]+>/g, "");
       const done = op({ state: "succeeded", result: { draft: "drf_2rmp457a", draftRevision: 5, importBaseRevision: "rev_1" } });
       expect(flat(await ended(unused, ing({ state: "released" }), done, "paused", NOW, "e1", { replacedBy: 3 }))).toMatch(
-        /^The mark was not applied: a takeover at generation 3 resumed the import without it, and operation op_zcfw5mcm then released it\. This import released/);
+        /^The mark was not applied: a takeover at generation 3 resumed the import without it, and its operation then released it\. This import released/);
     });
     test("a takeover run that stalls and lapses is unknown, and the earlier mark is still said not applied (local review)", async () => {
       const out = String(await ended(unused, ing({ state: "held" }), op(), "", Date.parse("2026-11-01T07:06:00Z"), "e1", { replacedBy: 3 }));
@@ -297,13 +297,13 @@ describe("how the run of a mark ends (§11.3, PROT-03, PROT-05, PROT-06)", () =>
     const flat = (n: ReactNode) => renderToStaticMarkup(h(ReadsProvider, { value: noReads }, n)).replace(/<[^>]+>/g, "").replaceAll("&#x27;", "'");
     const text = async (run: Parameters<typeof ended>[6], last = "paused") => flat(await ended(unused, ing({ state: "released" }), done, last, NOW, "e1", run));
     test("a success with no pause at the mark's generation says the mark was not applied", async () => {
-      expect(await text({ marked: true }, "")).toMatch(/^The mark was not applied: operation op_zcfw5mcm succeeded without pausing at the mark's generation\. This import released/);
+      expect(await text({ marked: true }, "")).toMatch(/^The mark was not applied: its operation succeeded without pausing at the mark's generation\. This import released/);
     });
     test("a refusal or a resume-failed before the release is named, and the mark is not applied", async () => {
       expect(await text({ marked: true, refused: { code: "validation-failed", rule: "mark-kind", position: 0 } })).toMatch(
-        /^The mark was not applied: it was refused, and operation op_zcfw5mcm then released the import without it\. The server checked this and found it not valid\. The mark at position 0 \(the first is 0\) is refused\./);
+        /^The mark was not applied: it was refused, and its operation then released the import without it\. The server checked this and found it not valid\. The mark at position 0 \(the first is 0\) is refused\./);
       expect(await text({ marked: true }, "resume-failed")).toMatch(
-        /^The mark was not applied: its staged input could not be decrypted, and operation op_zcfw5mcm then released the import without it\./);
+        /^The mark was not applied: its staged input could not be decrypted, and its operation then released the import without it\./);
     });
     test("a mark applied at its pause, then continued, and an import with no mark, add no such line", async () => {
       expect(await text({ marked: true })).not.toContain("not applied");
