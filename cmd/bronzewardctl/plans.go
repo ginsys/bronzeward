@@ -150,6 +150,7 @@ type planRequest struct {
 	in        apitypes.PlanInput
 	operation string
 	rp        *client.Repeat
+	cluster   string // narrows a machine given by name
 }
 
 // planCreateWith is plan create, its table followed by the lines extra gives for the created plan;
@@ -165,19 +166,31 @@ func (e *env) planCreateWith(name string, args []string, extra func(*client.Clie
 		return err
 	}
 	defer func() { err = errors.Join(err, c.Save()) }()
-	return e.planCreateOn(c, req, planOpts{extra: extra})
+	opts := planOpts{extra: extra}
+	id, at, err := machineByName(c, req.in.Machine, req.cluster)
+	if err != nil {
+		return err
+	}
+	if id != req.in.Machine {
+		// A name: the plan is bound to the epoch of the machine list, and a repeat is told the identifier.
+		opts.bind = &at
+		opts.input = "machine " + client.ShellWord(id) + " in place of " + client.ShellWord(req.in.Machine)
+	}
+	req.in.Machine = id
+	return e.planCreateOn(c, req, opts)
 }
 
 // planParse reads and checks plan create's flags.
 func (e *env) planParse(name string, args []string) (*planRequest, error) {
 	var in apitypes.PlanInput
-	var operation string
+	var operation, cluster string
 	var expires, age, validity, transport, verification seconds
 	var mode, attempts given
 	var rf repeatFlags
 	if _, err := e.parse(name, args, 0, func(fs *flag.FlagSet) {
 		fs.StringVar(&in.ReleaseId, "release", "", "")
 		fs.StringVar(&in.Machine, "machine", "", "")
+		fs.StringVar(&cluster, "cluster", "", "")
 		fs.StringVar(&operation, "operation", "", "")
 		fs.Var(&mode, "mode", "")
 		fs.Var(&expires, "expires-in", "")
@@ -218,7 +231,7 @@ func (e *env) planParse(name string, args []string) (*planRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &planRequest{in: in, operation: operation, rp: rp}, nil
+	return &planRequest{in: in, operation: operation, rp: rp, cluster: cluster}, nil
 }
 
 // planCreateOn sends a parsed plan create on a client already open, which the caller saves. A

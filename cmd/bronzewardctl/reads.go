@@ -110,7 +110,7 @@ func (e *env) session(do func(*client.Client, *client.Response, *apitypes.Server
 }
 
 // noun reads a noun's verb, list or show, and its arguments; list's paging and extra flags.
-func (e *env) noun(name string, args []string, l *listing, extra func(*flag.FlagSet)) (string, []string, error) {
+func (e *env) noun(name string, args []string, l *listing, extra func(*flag.FlagSet), showExtra ...func(*flag.FlagSet)) (string, []string, error) {
 	args, err := e.parse(name, args, -1, nil)
 	if err != nil {
 		return "", nil, err
@@ -119,7 +119,11 @@ func (e *env) noun(name string, args []string, l *listing, extra func(*flag.Flag
 		return "", nil, usageError{fmt.Errorf("%s needs list or show <id>", name)}
 	}
 	if args[0] == "show" {
-		pos, err := e.parse(name+" show", args[1:], 1, nil)
+		var fs func(*flag.FlagSet)
+		if len(showExtra) > 0 {
+			fs = showExtra[0]
+		}
+		pos, err := e.parse(name+" show", args[1:], 1, fs)
 		return "show", pos, err
 	}
 	_, err = e.paged(name+" list", args[1:], 0, l, extra)
@@ -194,13 +198,18 @@ func (e *env) machineCmd(args []string) error {
 	}
 	var l listing
 	var cluster string
-	verb, pos, err := e.noun("machine", args, &l, func(fs *flag.FlagSet) { fs.StringVar(&cluster, "cluster", "", "") })
+	clusterFlag := func(fs *flag.FlagSet) { fs.StringVar(&cluster, "cluster", "", "") }
+	verb, pos, err := e.noun("machine", args, &l, clusterFlag, clusterFlag)
 	if err != nil {
 		return err
 	}
 	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
 		if verb == "show" {
-			return e.machineShow(c, pos[0])
+			id, _, err := machineByName(c, pos[0], cluster)
+			if err != nil {
+				return err
+			}
+			return e.machineShow(c, id)
 		}
 		q := url.Values{}
 		if cluster != "" {

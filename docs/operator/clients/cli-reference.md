@@ -387,11 +387,15 @@ Global flags and exit codes: bronzewardctl help global.
 ### machine show
 
 ```text
-usage: bronzewardctl machine show <machine>
+usage: bronzewardctl machine show <machine> [--cluster <cluster>]
 
 show one machine.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
+
 Roles: any.
+
+Flags: --cluster
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -469,15 +473,16 @@ Global flags and exit codes: bronzewardctl help global.
 ### machine rename
 
 ```text
-usage: bronzewardctl machine rename <machine> --name <name>
+usage: bronzewardctl machine rename <machine> --name <name> [--cluster <cluster>]
 
 name a machine.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 repeat a write whose outcome was unknown exactly with --idempotency-key, --expect-epoch and --expect-principal as printed.
 
 Roles: author. Needs a person signed in, not an automation token.
 
-Flags: --expect-epoch, --expect-principal, --idempotency-key, --name
+Flags: --cluster, --expect-epoch, --expect-principal, --idempotency-key, --name
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -485,15 +490,16 @@ Global flags and exit codes: bronzewardctl help global.
 ### machine freeze
 
 ```text
-usage: bronzewardctl machine freeze <machine> --reason <text>
+usage: bronzewardctl machine freeze <machine> --reason <text> [--cluster <cluster>]
 
 stop new commitments and attempts on a machine.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 a freeze stops new commitments and attempts, not an attempt already recorded, and an adoption can still be recorded.
 
 Roles: author, publisher, approver or recovery-admin.
 
-Flags: --expect-epoch, --expect-principal, --idempotency-key, --reason
+Flags: --cluster, --expect-epoch, --expect-principal, --idempotency-key, --reason
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -501,15 +507,16 @@ Global flags and exit codes: bronzewardctl help global.
 ### machine unfreeze
 
 ```text
-usage: bronzewardctl machine unfreeze <machine> --reason <text>
+usage: bronzewardctl machine unfreeze <machine> --reason <text> [--cluster <cluster>]
 
 lift a machine's freeze.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 a server started for recovery, or a scope still pre-restore unaccounted, refuses an unfreeze.
 
 Roles: approver.
 
-Flags: --expect-epoch, --expect-principal, --idempotency-key, --reason
+Flags: --cluster, --expect-epoch, --expect-principal, --idempotency-key, --reason
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -1171,18 +1178,19 @@ Global flags and exit codes: bronzewardctl help global.
 ### plan create
 
 ```text
-usage: bronzewardctl plan create --release <release> --machine <machine> --operation apply-config|adopt [--mode no-reboot]
+usage: bronzewardctl plan create --release <release> --machine <machine> [--cluster <cluster>] --operation apply-config|adopt [--mode no-reboot]
                      [--expires-in <d>] [--max-observation-age <d>] [--check-validity <d>]
                      [--transport-deadline <d>] [--verification-deadline <d>] [--max-attempts <n>]
 
 create a plan for a machine.
 
+<machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 a duration is in whole seconds, such as 90s or 24h; an omitted value takes the server's default. An adopt plan takes no
 mode, deadline or attempt limit. The plan is not approved and nothing runs until an approver approves.
 
 Roles: publisher.
 
-Flags: --check-validity, --expect-epoch, --expect-principal, --expires-in, --idempotency-key, --machine, --max-attempts, --max-observation-age, --mode, --operation, --release, --transport-deadline, --verification-deadline
+Flags: --check-validity, --cluster, --expect-epoch, --expect-principal, --expires-in, --idempotency-key, --machine, --max-attempts, --max-observation-age, --mode, --operation, --release, --transport-deadline, --verification-deadline
 
 Global flags and exit codes: bronzewardctl help global.
 ```

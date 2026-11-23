@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -68,11 +69,16 @@ func (p *Problem) Error() string {
 		}
 	case "validation-failed":
 		// The rule and where in the body: a path, position or name the server gives, never a value
-		// (client-contracts.md §8.2; #347).
+		// (client-contracts.md §8.2; #347). The input and the server's message are what the page gives too
+		// (compilation §8.3); a run of tabs and line breaks in the message reads as one space.
 		var at []string
-		for _, k := range []string{"rule", "path", "paths", "position", "reference", "revision", "machine"} {
+		for _, k := range []string{"rule", "input", "path", "paths", "position", "reference", "revision", "machine", "message"} {
 			if v, ok := p.Doc[k]; ok {
-				at = append(at, k+" "+printable(fmt.Sprint(v)))
+				s := fmt.Sprint(v)
+				if k == "message" {
+					s = oneLine.ReplaceAllString(s, " ")
+				}
+				at = append(at, k+" "+printable(s))
 			}
 		}
 		if len(at) > 0 {
@@ -91,6 +97,9 @@ func (p *Problem) Error() string {
 	}
 	return s
 }
+
+// oneLine is a run of the whitespace Talos wraps its errors in.
+var oneLine = regexp.MustCompile(`[\t\n\r]+`)
 
 // ruleLine names the rule the server refused by, when its answer carries one: a refusal that has
 // two causes, such as the import base text's not-the-importer and import-not-reviewed, is told

@@ -346,8 +346,10 @@ var renameReaches = []string{
 func (e *env) machineRename(args []string) error {
 	var in apitypes.NameInput
 	var rf repeatFlags
+	var cluster string
 	pos, err := e.parse("machine rename", args, 1, func(fs *flag.FlagSet) {
 		fs.StringVar(&in.Name, "name", "", "")
+		fs.StringVar(&cluster, "cluster", "", "")
 		rf.flags(fs)
 	})
 	if err != nil {
@@ -358,18 +360,20 @@ func (e *env) machineRename(args []string) error {
 		return err
 	}
 	body, _ := json.Marshal(in)
-	m := url.PathEscape(pos[0])
-	return e.writeAfter(needNameRevision, &client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/names", Body: body, HumanOnly: true,
-		Repeat: rp, Check: "machine timeline " + client.ShellWord(pos[0]),
-		Read: func(c *client.Client) (string, error) {
-			r, err := c.Get("/machines/" + m)
-			if err != nil {
-				return "", err
-			}
-			var x apitypes.MachineBody
-			err = json.Unmarshal(r.Body, &x)
-			return "GET /api/v1/machines/" + m + " shows the name " + deref(x.Name), err
-		}}, func(_ *client.Client, r *client.Response) ([]string, error) {
+	return e.writeNamed(pos[0], cluster, needNameRevision, func(id string) *client.Write {
+		m := url.PathEscape(id)
+		return &client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/names", Body: body, HumanOnly: true,
+			Repeat: rp, Check: "machine timeline " + client.ShellWord(id),
+			Read: func(c *client.Client) (string, error) {
+				r, err := c.Get("/machines/" + m)
+				if err != nil {
+					return "", err
+				}
+				var x apitypes.MachineBody
+				err = json.Unmarshal(r.Body, &x)
+				return "GET /api/v1/machines/" + m + " shows the name " + deref(x.Name), err
+			}}
+	}, func(_ *client.Client, r *client.Response) ([]string, error) {
 		var x apitypes.NameChangeBody
 		err := json.Unmarshal(r.Body, &x)
 		return append([]string{sf("Machine %s: name %s, was %s (timeline revision %d).", x.Machine, x.Name, deref(x.PreviousName), x.Revision)}, renameReaches...), err

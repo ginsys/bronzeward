@@ -84,7 +84,7 @@ var cmdTable = []cmdEntry{
 
 	{path: "machine", line: "the machines of a cluster"},
 	{path: "machine list", line: "list the machines", synopsis: "machine list [--cluster <cluster>]", roles: "any"},
-	{path: "machine show", line: "show one machine", synopsis: "machine show <machine>", roles: "any"},
+	{path: "machine show", line: "show one machine", synopsis: "machine show <machine> [--cluster <cluster>]", roles: "any", notes: machineByNameNote},
 	{path: "machine timeline", line: "a machine's history", roles: "any",
 		synopsis: "machine timeline <machine> [--follow] [--limit <n>]",
 		notes: "with --follow: the newest entries, then each new one as the server records it, read every 5s; Ctrl-C stops it with\n" +
@@ -103,13 +103,13 @@ var cmdTable = []cmdEntry{
 	{path: "machine set-endpoint", line: "change a machine's Talos endpoint", synopsis: "machine set-endpoint <machine> --talos-endpoint <ip>[:<port>]",
 		roles: "author", person: true,
 		notes: "repeat a write whose outcome was unknown exactly with --idempotency-key, --expect-epoch and --expect-principal as printed."},
-	{path: "machine rename", line: "name a machine", synopsis: "machine rename <machine> --name <name>", roles: "author", person: true,
-		notes: "repeat a write whose outcome was unknown exactly with --idempotency-key, --expect-epoch and --expect-principal as printed."},
-	{path: "machine freeze", line: "stop new commitments and attempts on a machine", synopsis: "machine freeze <machine> --reason <text>",
+	{path: "machine rename", line: "name a machine", synopsis: "machine rename <machine> --name <name> [--cluster <cluster>]", roles: "author", person: true,
+		notes: machineByNameNote + "\nrepeat a write whose outcome was unknown exactly with --idempotency-key, --expect-epoch and --expect-principal as printed."},
+	{path: "machine freeze", line: "stop new commitments and attempts on a machine", synopsis: "machine freeze <machine> --reason <text> [--cluster <cluster>]",
 		roles: "author, publisher, approver or recovery-admin",
-		notes: "a freeze stops new commitments and attempts, not an attempt already recorded, and an adoption can still be recorded."},
-	{path: "machine unfreeze", line: "lift a machine's freeze", synopsis: "machine unfreeze <machine> --reason <text>", roles: "approver",
-		notes: "a server started for recovery, or a scope still pre-restore unaccounted, refuses an unfreeze."},
+		notes: machineByNameNote + "\na freeze stops new commitments and attempts, not an attempt already recorded, and an adoption can still be recorded."},
+	{path: "machine unfreeze", line: "lift a machine's freeze", synopsis: "machine unfreeze <machine> --reason <text> [--cluster <cluster>]", roles: "approver",
+		notes: machineByNameNote + "\na server started for recovery, or a scope still pre-restore unaccounted, refuses an unfreeze."},
 
 	{path: "drift", line: "a machine that no longer reports what Bronzeward applied"},
 	{path: "drift show", line: "the open drift of a machine", synopsis: "drift show <machine>", roles: "any",
@@ -200,10 +200,11 @@ var cmdTable = []cmdEntry{
 	{path: "plan list", line: "list the plans", synopsis: "plan list [--state <s>] [--machine <id>]", roles: "any"},
 	{path: "plan show", line: "show a plan, its evidence and what can be done next", synopsis: "plan show <plan>", roles: "any"},
 	{path: "plan create", line: "create a plan for a machine", roles: "publisher",
-		synopsis: "plan create --release <release> --machine <machine> --operation apply-config|adopt [--mode no-reboot]\n" +
+		synopsis: "plan create --release <release> --machine <machine> [--cluster <cluster>] --operation apply-config|adopt [--mode no-reboot]\n" +
 			"            [--expires-in <d>] [--max-observation-age <d>] [--check-validity <d>]\n" +
 			"            [--transport-deadline <d>] [--verification-deadline <d>] [--max-attempts <n>]",
-		notes: "a duration is in whole seconds, such as 90s or 24h; an omitted value takes the server's default. An adopt plan takes no\n" +
+		notes: machineByNameNote + "\n" +
+			"a duration is in whole seconds, such as 90s or 24h; an omitted value takes the server's default. An adopt plan takes no\n" +
 			"mode, deadline or attempt limit. The plan is not approved and nothing runs until an approver approves."},
 	{path: "plan cancel", line: "cancel a plan", synopsis: "plan cancel <plan> --reason <text>", roles: "publisher (its own plan), approver or recovery-admin",
 		notes: "a cancelled plan cannot be committed; a committed plan's operation ends only while no attempt is recorded, and an attempt\n" +
