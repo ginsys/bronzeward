@@ -2198,9 +2198,10 @@ not part of this rule.
    the same constant.
 2. A command that takes a `<machine>` takes its identifier or its name. A name is unique only within a
    cluster ([persistence and API §3.5](persistence-api.md#35-a-machines-name)), so the first design
-   kept identifiers only, since a command taking a name would need the cluster too. The owner decided
-   otherwise after the hands-on test of 2026-11-21, which found that objects are shown and addressed
-   by name ([#1055](https://github.com/ginsys/bronzeward/issues/1055)): the command reads the machine
+   kept identifiers only, since a command taking a name would need the cluster too. The real-node walk
+   recorded on [#1055](https://github.com/ginsys/bronzeward/issues/1055) found that this left a machine
+   taken by name in `apply --machine` and refused in the other verbs (`machine show <name>` answered
+   404), so the commands now take a name: the command reads the machine
    list once, matches the name across the clusters the credential reads, and refuses a name no machine
    holds and a name that machines of two clusters hold, which answers the need for the cluster
    (`--cluster`, a cluster's name or identifier, narrows it, or the identifier is given). An
