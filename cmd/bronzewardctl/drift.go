@@ -446,7 +446,7 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if marks {
 		importArgs = append(importArgs, "--marks")
 	}
-	if err := e.say(fmt.Sprintf("Step 1/3  import (drift-adoption) of machine %s into draft %s", label, draft)); err != nil {
+	if err := e.say(sf("Step 1/3  import (drift-adoption) of machine %s into draft %s", label, draft)); err != nil {
 		return err
 	}
 	co.begin(1)
