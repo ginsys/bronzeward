@@ -42,6 +42,8 @@ let hold: { path: string; release: () => void; gate: Promise<void> } | undefined
 let dropped: boolean;
 // Whether the fake server refuses a mark with a 409 that names the scope's state.
 let refuseMarks = false;
+// Whether the fake server answers an accounting with a 201 whose body is not JSON.
+let unreadableAnswer = false;
 
 const reads = (again = 0): Reads => ({
   client: {
@@ -71,6 +73,9 @@ const writes = () => {
       sent.push({ method: init?.method ?? "GET", path, body: init?.body === undefined ? undefined : JSON.parse(String(init.body)) });
       if (refuseMarks && path.endsWith("/marks")) {
         return new Response(JSON.stringify({ type: "about:blank", title: "Conflict", status: 409, detail: "the scope moved", scope: "blocked" }), { status: 409, headers: { "Content-Type": "application/problem+json", "Bronzeward-Epoch": EPOCH } });
+      }
+      if (unreadableAnswer && path.endsWith("/accountings")) {
+        return new Response("not json", { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH } });
       }
       const body = path.endsWith("/marks") ? { state: "blocked", from: "blocked", act: "act_markmarkmarkmarkmark", missing: [] } : answerBody;
       return new Response(JSON.stringify(body), { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH } });
@@ -129,6 +134,7 @@ beforeEach(() => {
   hold = undefined;
   dropped = false;
   refuseMarks = false;
+  unreadableAnswer = false;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -246,6 +252,18 @@ describe("a scope's accounting form on the console's row", () => {
     await mount(row("ready"));
     await settled();
     expect(text("settle-answer")).toBeUndefined();
+  });
+
+  test("a saved accounting whose answer cannot be read leaves the page standing and says so", async () => {
+    unreadableAnswer = true;
+    await mount(row("pre-restore-unaccounted"));
+    await settled();
+    await choose("start", START);
+    await choose("end", END);
+    await explain("the operator re-applied the restored configuration");
+    await press();
+    expect(box.querySelector('form[aria-label="Record accounting"]')).not.toBeNull();
+    expect(box.textContent).toContain("could not be read");
   });
 
   test("a person who waits for a later observation reads the machine's observations again and keeps what was typed", async () => {
