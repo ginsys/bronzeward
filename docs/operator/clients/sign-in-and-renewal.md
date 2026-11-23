@@ -71,8 +71,10 @@ A person's access token is short-lived. The server refuses a human token that li
 
 A renewal that comes back for **another account** is not carried on silently, but the two clients
 differ. The command line prints "a new sign-in: the renewed token is for X at Y, not A at B." and
-then carries on with the new token: the command that renewed it still runs, as the new account. Read
-that line and stop if the account is not the one you meant. The web page stops: it says "The identity
+then carries on with the new token as the new account. A write that has to be repeated after such
+a renewal is the exception: the client compares the account, finds it changed, and sets the write
+aside. It does not repeat it, says the outcome is unknown, and leaves you to read the resource.
+Read the line and stop if the account is not the one you meant. The web page stops: it says "The identity
 provider renewed the sign-in for another account. Sign in again to continue." and runs nothing until
 you sign in again on purpose.
 
