@@ -609,6 +609,14 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
     expect(box.querySelector("[data-testid=outcome] a")?.getAttribute("title")).toBe(MCH);
   });
 
+  test("the outcome line of a failed publication names the refused fragment by name and layer, with the position in brackets", async () => {
+    const error = { type: "urn:bronzeward:problem:validation-failed", status: 422, rule: "kind-mismatch", machine: MCH, input: "fragment[1]", fragment: "network", layer: "site" };
+    const o = { ...operation("publish", { draft: DRF }), state: "failed", error };
+    await mount(h(Outcome, { o: o as never }));
+    await settled();
+    expect(box.querySelector("[data-testid=outcome]")?.textContent).toBe("Failed: validation-failed. The rule: kind-mismatch. The input: the fragment network in layer site (position 1, the first is 0). The machine it names: worker-1.");
+  });
+
   test("an operation's page reads each distinct body once for its heading, Subject and outcome", async () => {
     answers[`/operations/${OP}`] = ok({ ...operation("apply-config", { plan: PLN, machine: MCH }), state: "completed", result: { appliedRelease: REL, observation: "obs_aaaaaaaaaaaaaaaaaaaaaaaaaa" } });
     await mount(h(OperationItem, { id: OP }));
