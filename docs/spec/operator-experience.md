@@ -572,9 +572,12 @@ Dialled 10.5.0.2:50000: the address that cp-1.lab.example resolved to, once. The
 ```
 
 The `--talos-endpoint` values in the printed commands stay IP addresses, because the server stores
-an IP address only (below). If the name does not resolve, the command stops before any dial. The
-refusal names where the value came from, `--endpoint` or a talosconfig endpoint, and
-quotes neither the name nor the talosconfig.
+an IP address only (below). If a name does not resolve, no dial is made at that endpoint. With
+`--endpoint` that is the end of the command; with the talosconfig's list, the command goes on to the next
+endpoint. The refusal names where the value came from, `--endpoint` or a talosconfig endpoint, and
+quotes no talosconfig. Where several listed endpoints fail, the one error names each endpoint with its own
+cause. The commands the run prints, and the command that carries a `cluster onboard` run on, select the
+endpoint that answered with `--endpoint`, so a repeat does not wait out the silent ones; a list of one needs no flag.
 
 A talosconfig can hold several contexts. By default the command uses the file's current context.
 If you give `--talos-context <name>`, the command uses that talosconfig context and no other.

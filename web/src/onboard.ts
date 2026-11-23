@@ -298,7 +298,7 @@ export async function discoverCluster(env: Env, text: string, o: { context?: str
   if (out === undefined || out.kind !== "done") {
     // One answer from one try is the answer as it was; several, or a stop, say each endpoint with its own.
     const ref = last === undefined ? {} : referenceOf(last);
-    if (failures.length === 1 && !stopped) return { ok: false, why: failures[0]!.why, ...ref };
+    if (failures.length === 1 && !stopped && sent === 1) return { ok: false, why: failures[0]!.why, ...ref };
     const lead = stopped ? "Stopped before trying the other endpoints." : "No endpoint gave the cluster.";
     const said = failures.map((f) => `${f.endpoint}: ${f.why}`).join(" ");
     const tail = failures.length > 1 ? " Every node that refuses the first key gives the same answer as for an endpoint that does not answer, so read each answer above." : "";

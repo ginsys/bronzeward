@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +37,8 @@ func discoverFixture(t *testing.T, res discover.Result, err error) *discoverCall
 	old := discoverCluster
 	discoverCluster = func(_ context.Context, tc []byte, contextName, endpoint string) (discover.Result, string, error) {
 		c.given, c.contexts, c.contents = append(c.given, endpoint), append(c.contexts, contextName), tc
-		return res, c.answered, err
+		// Like discoverEach: a typed endpoint is the one named, else the stub's own answer.
+		return res, cmp.Or(endpoint, c.answered), err
 	}
 	t.Cleanup(func() { discoverCluster = old })
 	return c
