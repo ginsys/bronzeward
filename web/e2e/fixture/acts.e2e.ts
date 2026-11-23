@@ -29,7 +29,19 @@ const OPERATION = ["account", "resolve", "takeover"];
 // form the shell shows on any page of a recovery start before its entry) the page the sign-in returns to.
 async function open() {
   await browser.url(`${FIXTURE_PAGE}/`);
-  await browser.waitUntil(async () => (await $('[data-testid="principal"]').isExisting()) || (await $("button*=Sign in").isExisting()), { timeout: 30_000, timeoutMsg: "the page showed neither a signed-in principal nor a Sign in button" });
+  // Before the entry the server refuses every read but the entry, so the shell shows the entry form and no identity: there is no
+  // principal to wait for, and the sign-in has already returned to the page (the provider signs the fixture's person in at once).
+  const entryForm = () => $('form[aria-label="Enter recovery"]').isExisting();
+  try {
+    await browser.waitUntil(async () => (await $('[data-testid="principal"]').isExisting()) || (await $("button*=Sign in").isExisting()) || (act === "enter" && (await entryForm())), { timeout: 30_000 });
+  } catch {
+    // The page's own words are the diagnosis: the text is public page text, never a token.
+    throw new Error(`the page showed neither a signed-in principal, a Sign in button nor (for the entry) the entry form; it said: ${(await $("body").getText()).replace(/\s+/g, " ").slice(0, 400)}`);
+  }
+  if (act === "enter" && (await entryForm())) {
+    say("the entry form, before any identity is read");
+    return;
+  }
   const signin = await $("button*=Sign in");
   if (await signin.isExisting()) await signin.click();
   await expect($('[data-testid="principal"]')).toBeExisting({ wait: 30_000 });
