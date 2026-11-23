@@ -96,7 +96,9 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await expect(answer).toHaveText(expect.stringContaining("Next: mark the scope."));
     expect(await posts("/recovery/accountings")).toHaveLength(1);
     expect(await scopeState(m)).toBe("blocked");
-    // The console rereads the scopes while the page is open, and the scope is no longer owed: the answer stays, and the form is off.
+    // The console rereads the scopes while the page is open. The row's state comes only from that read, so once it says blocked the
+    // reread holds the accounting: the answer stays, and the form is off.
+    await expect(row(m).$('[data-testid="scope-state"]')).toHaveText(expect.stringContaining("blocked"), { wait: 30_000 });
     await absent(async () => !(await form.$('[data-testid="settle-answer"]').getText()).startsWith("Recorded."), "the answer dropped by the console's reread");
     // once: off in the same render as the recorded answer awaited above (`busy` in web/src/accounting.tsx), so it cannot be read early.
     expect(await form.$("button=Record accounting").isEnabled()).toBe(false);
