@@ -120,13 +120,24 @@ func Compile(in Input) (Compiled, error) {
 	if err != nil {
 		return Compiled{}, newRedactor(sources).paths(err)
 	}
-	for _, o := range filled.outcomes {
-		if o.by >= len(in.Fragments) { // overridden by the patch: no record can name it
-			return Compiled{}, fidelity()
-		}
+	if err := notOverriddenByPatch(filled.outcomes, len(in.Fragments)); err != nil {
+		return Compiled{}, err
 	}
 	filled.hostname, filled.origins = c.hostname, c.origins
 	return filled, nil
+}
+
+// notOverriddenByPatch refuses an outcome overridden by the hostname patch, the source past the
+// caller's fragments: no record can name it, and Provenance would read past the origins. No input
+// reaches it today (a reference cannot sit in the document the patch replaces); it stands between a
+// future field of that document and the out-of-range read.
+func notOverriddenByPatch(outcomes []outcome, fragments int) error {
+	for _, o := range outcomes {
+		if o.by >= fragments {
+			return fidelity()
+		}
+	}
+	return nil
 }
 
 func compile(in Input, sources []Source, decide bool) (Compiled, error) {
