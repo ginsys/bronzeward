@@ -1254,7 +1254,7 @@ assignment after the draft, or with none, compiling on its base alone
 **(choice §17.33)**, and each covered machine's name, or none, as stored
 **(choice §17.45)**: T3 compares against these names. For the hostname swap
 check (compilation §6.1 item 6) it also reads, for each covered machine, the
-`nodeName` its `Applied` release's machine record holds (§9.2), `null` where the
+`nodeName` its `Applied` release's machine record holds (§9.3), `null` where the
 record holds none; a
 change of `Applied` before commit is caught where §4.2's third form applies, and
 the check is otherwise as current as the snapshot. A machine with an assignment but no import base is not
@@ -1301,7 +1301,7 @@ different Kubernetes versions are `422` with rule `kubernetes`, and a hostname
 filled from a machine's name that another machine of the release holds
 explicitly is `422` with rule `hostname`, naming both machines in words, as is
 a machine whose release gives it a node name that another machine's `Applied`
-release still holds and its own does not (the recorded `nodeName`, §9.2; not
+release still holds and its own does not (the recorded `nodeName`, §9.3; not
 compared where either is `null`)
 (compilation §6.1 item 6; the release covers every machine of the cluster with
 an import base, choice §17.33, so one release holds every such pair). A dependency
@@ -1446,7 +1446,7 @@ INSERT INTO release_machine ...;     -- per machine: ciphertext and its digest,
                                      -- hostname record (source, the name used
                                      -- where it was filled, and the derived
                                      -- node name, null where it depends on a
-                                     -- secret reference; §9.2); its
+                                     -- secret reference; §9.3); its
                                      -- assignment revision its assignment
                                      -- source's (checked at commit)
 INSERT INTO release_source ...;      -- every revision and head revision used:
@@ -2253,7 +2253,7 @@ API revisions:
 | 16 | the `hostname` rule of `422 validation-failed` on publication, with a release compiling a machine's name as its hostname where nothing sets one (§9.2, §3.5, compilation §6.1 item 6) |
 | 17 | the name form of `409 stale-input` from the `ingest` draft transaction, with `expected` and `actual` as machine names, each a string or `null`, and `formOnly` true for a machine whose import removed the fill's own `HostnameConfig` while its name is unchanged (§4.2, choice §17.45, compilation §2.3 step 2a, §6.1 item 5) |
 
-One further part is specified and not yet served, taking the next revision in the change that serves it, so this table names no revision for it: `nodeName` on the `hostname` member of each machine of a release and its review (§9.2), the `hostnameHeldBy` member of `GET /machines/{id}/position` (§9.3) and the publication comparison reading `nodeName` (compilation §6.1 item 6), together in one revision (execution and recovery choice §10.39, ginsys/bronzeward#1052).
+One further part is specified and not yet served, taking the next revision in the change that serves it, so this table names no revision for it: `nodeName` on the `hostname` member of each machine of a release and its review (§9.3), the `hostnameHeldBy` member of `GET /machines/{id}/position` (§9.3) and the publication comparison reading `nodeName` (compilation §6.1 item 6), together in one revision (execution and recovery choice §10.39, ginsys/bronzeward#1052).
 
 ### 9.2 Resources and routes
 
@@ -2889,7 +2889,7 @@ unknown machine, and every refusal that applies to a read applies to it
 | `plan` | The newest plan of the machine that reads `proposed` or `approved` at the snapshot (expiry and a revoked approving identity are evaluated as for any plan read, §8.1) and that would pass comparison 2 of a commitment against the machine now (execution and recovery §3.2 item 2), newest by `createdAt`, then identifier; null when there is none. The comparison names three terms that move with the machine, and a plan whose bound value differs on any of them can never commit, so the read does not pick it: the machine's assignment revision, its baseline revision (advanced by an adoption or another operation's completion, so the second of two approved plans is dropped once the first completes) and its `Desired` release (a plan bound to no `Desired` matches a machine with none, as a first adoption does, and an `apply-config` plan is for the `Desired` release it bound). It is the plan's own bound values that are compared: an `adopt` plan's adopted `release` is free of `desired`, so a first adoption with no `Desired` still has its plan picked. The three terms explain the comparison and the comparison decides: if it gains a term the read follows it, so the read never shows a plan the commitment refuses on these grounds. A plan that went stale disappears from the answer and the step falls to the machine's own fields, `needs-plan` where that applies, without saying that an approved plan went stale; the plan still lists under `GET /plans`. A `committed` plan is never picked: its state is final and says nothing of its operation. An `adopt` plan that a refusal entry on the machine names (execution and recovery §6.3: a refused adoption ends its attempts and a new plan is the retry) is not picked either, though its state stays `approved`; a refusal entry on an `apply-config` plan does not exclude it, since that plan is attempted again. A plan the drift gate can never admit is not picked either (execution and recovery §3.2; the commitment's scope gate): while a drift record is open on the machine, only a plan that binds that record is picked (a revert or a drift adoption), and while none is open, only a plan that binds none, so an ordinary plan approved before the drift opened, or one binding a record since closed, reads as no plan and the step is `drift-open` or by the machine's own fields. Members `id`, `state`, `operation` (the plan's kind, `apply-config` or `adopt`), `release`, `approvalCurrent`, `createdAt` and `expiresAt`. `approvalCurrent` is `true` when the plan's approval was recorded in the current epoch, `false` when it is from an earlier one (§8.1: such a plan stays `approved` but cannot commit until approved again), and null while the plan has no approval. |
 | `operation` | The `apply-config` operation that holds the machine scope (state `committed`, `sending`, `verifying` or `unresolved`), as `id`, `kind`, `state`, `plan` and `createdAt`, or null. At most one exists: the machine-scope unique index of the schema allows one. An `adopt` operation is created `completed` and never holds the scope (§8.1). |
 | `rolloutHeldBy` | The operation that holds the machine's cluster rollout scope when it belongs to another machine, as `id` and `machine`, or null. At most one exists, as the rollout-scope index allows one. It says why an approved plan is not dispatched yet. |
-| `hostnameHeldBy` | The other machine of the cluster whose `Applied` release holds the node name the `plan` member's release gives this machine and this machine's own `Applied` release does not (execution and recovery §3.2 comparison 6a), as `id` and `name` (null when it has none), or null. It is null unless `plan` is an `apply-config` plan, and null where either `nodeName` is null (§9.2). When several machines hold the name, the one with the lowest identifier. It is computed by the gate's own rule from the same snapshot, never read from a refusal entry, so it also says a plan waits before any commitment was tried. It says why an approved plan is not dispatched yet, and it names no hostname value. |
+| `hostnameHeldBy` | The other machine of the cluster whose `Applied` release holds the node name the `plan` member's release gives this machine and this machine's own `Applied` release does not (execution and recovery §3.2 comparison 6a), as `id` and `name` (null when it has none), or null. It is null unless `plan` is an `apply-config` plan, and null where either `nodeName` is null (§9.3). When several machines hold the name, the one with the lowest identifier. It is computed by the gate's own rule from the same snapshot, never read from a refusal entry, so it also says a plan waits before any commitment was tried. It says why an approved plan is not dispatched yet, and it names no hostname value. |
 | `step` | One value of the closed list below, chosen by the first row whose facts hold. |
 
 `step` is decided by the facts of the same answer, in this order, and the first
