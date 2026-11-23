@@ -109,12 +109,12 @@ export function doneOnce(w: Write | undefined): Done | undefined {
 }
 
 const enc = encodeURIComponent;
-const isSource = (e: Draft["entries"][number]): e is Source => e.kind !== "import-base";
+export const isSource = (e: Draft["entries"][number]): e is Source => e.kind !== "import-base";
 const nameOf = (e: Source) => e.name ?? e.machine ?? "";
 const keyOf = (e: Source) => `${e.kind}:${nameOf(e)}`;
 // An entry as the list names it: a fragment's or a profile's own name, and an assignment's machine as a machine is
 // named everywhere (the shortened identifier until it is read).
-function EntryName({ e }: { e: Source }) {
+export function EntryName({ e }: { e: Source }) {
   const machine = useMachineText(e.kind === "assignment" && nameOf(e) !== "" ? nameOf(e) : undefined);
   const name = nameOf(e);
   return <>{e.kind} {e.kind === "assignment" ? machine ?? short(name) : safeText(name) ?? NAME_NOT_SHOWN}</>;

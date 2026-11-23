@@ -2277,7 +2277,11 @@ outcome line, and under it the next step an operator can take, from the steps of
    what the server serves. The server redacts a message by template and withholds one it cannot explain, and searches the
    rest for exact copies of resolved string values of six bytes or more (compilation §8.3); a shorter copy, or a copy of
    an integer or boolean, inside an authored literal is not detected, and a message or a path may quote that literal
-   from a fragment (compilation §8.4). The sentence says what
+   from a fragment (compilation §8.4). A run of tabs and line breaks in a message reads as one space. The rule `invalid`,
+   Talos's validation of the machine's whole configuration, is said in words and names no fragment; after a refused
+   publication the publish page lists the entries of the draft it holds, but only while that draft's revision is the
+   one the refused publication was made from. The operation page shows a problem document in the one closed reference
+   section, in place of an Error row. The sentence says what
    the state means and the outcome line says what happened in it, so neither repeats the other.
 3. A kind or state the table does not know, and a pair the server cannot produce, show both values as the server wrote them
    in a sentence that says the page has no description of it, and no next step. Never a blank. A test runs every pair of the

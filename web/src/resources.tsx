@@ -14,6 +14,7 @@ import { CreateDraft, DraftItem, Drafts } from "./drafts.tsx";
 import { DriftItem, driftId } from "./drift.tsx";
 import { RecoveryOperation, recoveryOperationId } from "./recovery-operation.tsx";
 import { CancelPlan, FrozenLine, PlanNew, PlanState, PROPOSED, takeFresh } from "./plan.tsx";
+import { RequestRef, storedProblem } from "./problems.tsx";
 import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { OnboardCluster } from "./onboard.tsx";
@@ -447,6 +448,14 @@ function SourceRevision({ kind, revision }: { kind: string; revision: string | n
   if (body?.createdAt === undefined || revision === null || view === undefined) return <Id id={revision} none="removed" />;
   return <Ref to={`/${view}/${encodeURIComponent(revision)}`} id={revision}>Saved {when(body.createdAt)}</Ref>;
 }
+// The observation a release was published with, by when it was read and why; its identifier is the title. The machine's list is
+// read once (its first page) for each covered machine, and an observation it does not hold keeps the shortened identifier.
+function PublicationObservation({ machine, id }: { machine: string; id: string }) {
+  const list = useBody<{ items?: S["ObservationBody"][] }>(`/machines/${encodeURIComponent(machine)}/observations`);
+  const o = list?.items?.find((x) => x.id === id);
+  const purpose = o === undefined ? undefined : safeWord(o.purpose);
+  return o === undefined || purpose === undefined ? <Id id={id} /> : <span title={id}>Read {when(o.at)} ({purpose})</span>;
+}
 const BUILT: readonly Col<S["ReleaseSourceBody"]>[] = [
   ["Kind", (s) => safeWord(s.kind)], ["Source", (s) => <SourceName kind={s.kind} head={s.head} />], ["Revision", (s) => <SourceRevision kind={s.kind} revision={s.revision} />],
 ];
@@ -454,7 +463,7 @@ const RenderedLink = ({ to, machine }: { to: string; machine: string }) => (
   <Ref to={to} id={machine}>Rendered configuration of {useMachineText(machine) ?? short(machine)}</Ref>
 );
 const covered = (release: string): readonly Col<S["ReleaseMachineBody"]>[] => [
-  ["Machine", (m) => <MachineById id={m.machine} />], ["Mode", (m) => safeWord(m.mode)], ["Publication observation", (m) => <Id id={m.publicationObservation} />],
+  ["Machine", (m) => <MachineById id={m.machine} />], ["Mode", (m) => safeWord(m.mode)], ["Publication observation", (m) => <PublicationObservation machine={m.machine} id={m.publicationObservation} />],
   ["Rendered configuration", (m) => {
     const to = reviewPath(release, m.machine);
     return to === undefined ? "none" : <RenderedLink to={to} machine={m.machine} />;
@@ -597,6 +606,14 @@ const ATTEMPTS: readonly Col<S["AttemptBody"]>[] = [
 ];
 // A result or error record as the server wrote it, as text.
 const Record = ({ v }: { v: unknown }) => (v === null ? "none" : <pre>{JSON.stringify(v, null, 2)}</pre>);
+// An error that is a problem document (a publish or an import refusal, which carries a `type`), unlike an apply's error record
+// with its cause and attempts. Its words are in the outcome line; the document itself is a reference for a bug report,
+// closed, so the page's text holds no identifier it carries.
+const isProblem = (e: unknown): e is Record<string, unknown> => typeof e === "object" && e !== null && typeof (e as { type?: unknown }).type === "string";
+function ProblemRef({ e }: { e: Record<string, unknown> }) {
+  const { problem, status } = storedProblem(e);
+  return <RequestRef problem={problem} status={status} document={e} />;
+}
 
 export function OperationItem({ id }: { id: string }) {
   // The timeline bumps `n` soon after events arrive, so the state and outcome follow the operation.
@@ -611,8 +628,10 @@ export function OperationItem({ id }: { id: string }) {
           <OperationTimeline id={id} o={o} reread={reread} />
           <Fields rows={[
             ["Kind", safeWord(o.kind)], ["State", safeWord(o.state)], ["Subject", <Subject s={o.subject} />], ["Created", <>{when(o.createdAt)} by <StartedBy o={o} /></>],
-            ["Epoch", o.epoch], ["Last event", o.lastEvent], ["Result", <Record v={o.result} />], ["Error", <Record v={o.error} />],
+            ["Epoch", o.epoch], ["Last event", o.lastEvent], ["Result", <Record v={o.result} />],
+            ...(isProblem(o.error) ? [] : ([["Error", <Record v={o.error} />]] as const)),
           ]} />
+          {isProblem(o.error) && <ProblemRef e={o.error} />}
           <h3>Attempts</h3>
           {(o.attempts ?? []).length === 0 ? <p>No attempt recorded.</p>
             : <Rows label="Attempts" cols={ATTEMPTS} items={o.attempts ?? []} keyOf={(a) => a.id} />}
