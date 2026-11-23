@@ -18,7 +18,48 @@ import (
 
 // discoverCluster reads the cluster; tests replace it, because the CLI's tests may not link the
 // stand-in node (internal/client's closure test refuses it).
-var discoverCluster = discover.Discover
+var discoverCluster = discoverEach
+
+// discoverTyped reads the cluster at an endpoint the person gave, and discoverListed at one the talosconfig
+// lists; discoverEach's own tests replace them.
+var (
+	discoverTyped  = discover.Discover
+	discoverListed = discover.DiscoverListed
+)
+
+// discoverEach reads the cluster at the endpoint given with --endpoint, which is the only one tried. With none
+// given it tries the context's endpoints in order and stops at the first that gives the cluster, as talosctl
+// does. A discovery only reads, so every failure of one endpoint moves on to the next, except the end of the
+// command (Ctrl-C), which ends the list. An endpoint that fails alone gives its own error; several give one
+// error that names each with its own cause. A context that lists none is discover.ErrNoEndpoint, and one the
+// file does not hold is discover.ErrUnknownContext, both before any read.
+func discoverEach(ctx context.Context, talosconfig []byte, contextName, endpoint string) (discover.Result, error) {
+	if endpoint != "" {
+		return discoverTyped(ctx, talosconfig, contextName, endpoint)
+	}
+	listed, err := discover.Endpoints(talosconfig, contextName)
+	if err != nil {
+		return discover.Result{}, err
+	}
+	if len(listed) == 0 {
+		return discover.Result{}, discover.ErrNoEndpoint
+	}
+	var failed []string
+	for _, ep := range listed {
+		res, err := discoverListed(ctx, talosconfig, contextName, ep)
+		if err == nil {
+			return res, nil
+		}
+		if ctx.Err() != nil {
+			return discover.Result{}, err
+		}
+		if len(listed) == 1 {
+			return discover.Result{}, err
+		}
+		failed = append(failed, client.Printable(ep)+": "+err.Error())
+	}
+	return discover.Result{}, fmt.Errorf("no endpoint of the talosconfig gave the cluster: %s", strings.Join(failed, "; "))
+}
 
 // maxTalosconfig bounds the file read: a talosconfig is a few KiB.
 const maxTalosconfig = 1 << 20

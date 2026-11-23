@@ -113,7 +113,14 @@ var ErrNoEndpoint = errors.New("discover: the talosconfig names no endpoint")
 // A name endpoint's certificate check is against the name, and the dial is on the address
 // (persistence-api §3.3): the name is the one resolveEndpoint resolved.
 func Discover(ctx context.Context, talosconfig []byte, contextName, endpoint string) (Result, error) {
-	return walk(ctx, talosconfig, contextName, endpoint, "", 0, false)
+	return walk(ctx, talosconfig, contextName, endpoint, "", 0, false, "")
+}
+
+// DiscoverListed is Discover for an endpoint the caller took from the talosconfig's own list (Endpoints), one of
+// several it tries in order: a refusal of its name says it came from a talosconfig endpoint and not from
+// --endpoint, which the person did not give.
+func DiscoverListed(ctx context.Context, talosconfig []byte, contextName, endpoint string) (Result, error) {
+	return walk(ctx, talosconfig, contextName, endpoint, "", 0, false, sourceListed)
 }
 
 // DiscoverLimited is Discover for a caller that bounds its work, the server, with its ctx alone: the
@@ -128,17 +135,22 @@ func Discover(ctx context.Context, talosconfig []byte, contextName, endpoint str
 // option, and an endpoint that is itself a name is checked against its own name, as in Discover. The
 // members are dialled at the addresses the member list gives, with no server name.
 func DiscoverLimited(ctx context.Context, talosconfig []byte, contextName, endpoint, serverName string, maxMembers int) (Result, error) {
-	return walk(ctx, talosconfig, contextName, endpoint, serverName, maxMembers, true)
+	return walk(ctx, talosconfig, contextName, endpoint, serverName, maxMembers, true, "")
 }
 
-// walk is both: limited says the caller's ctx is the only bound on the reads from the endpoint, and
-// that a ctx that ends after the identity is read is a Cut result, not an error.
-func walk(ctx context.Context, talosconfig []byte, contextName, endpoint, serverName string, maxMembers int, limited bool) (Result, error) {
+// walk is all three: limited says the caller's ctx is the only bound on the reads from the endpoint, and
+// that a ctx that ends after the identity is read is a Cut result, not an error. listedFrom is the source a
+// refusal of the endpoint names when the caller took it from the talosconfig's list ("" for the usual two:
+// the flag, or the file's first endpoint when none is given).
+func walk(ctx context.Context, talosconfig []byte, contextName, endpoint, serverName string, maxMembers int, limited bool, listedFrom string) (Result, error) {
 	creds, first, err := credentials(talosconfig, contextName)
 	if err != nil {
 		return Result{}, err
 	}
 	source := sourceFlag
+	if listedFrom != "" {
+		source = listedFrom
+	}
 	if endpoint == "" {
 		endpoint, source = first, sourceFile
 	}

@@ -18,6 +18,8 @@ var lookup = func(ctx context.Context, host string) ([]netip.Addr, error) {
 const (
 	sourceFlag = "--endpoint"
 	sourceFile = "the talosconfig's first endpoint"
+	// sourceListed is an endpoint of the talosconfig's list that a caller tries among others (DiscoverListed).
+	sourceListed = "a talosconfig endpoint"
 )
 
 // resolveEndpoint is the address to dial for s, an endpoint that is an IP literal or a DNS name, with
