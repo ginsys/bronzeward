@@ -1102,6 +1102,19 @@ describe("a context that lists several endpoints is tried in order, and a typed 
     if (!r.ok) expect(r.why).toContain("the same answer as for an endpoint that does not answer");
   });
 
+  // The sentence is about answers that read alike, so it is said only when at least two tries got the unreachable answer.
+  test("the sentence about a key every node refuses is not said for entries that were not tried, or for one unreachable endpoint", async () => {
+    const tail = "the same answer as for an endpoint that does not answer";
+    const none = tryList([]);
+    const allBad = await discoverCluster(none.env, named("bad/one, bad/two"), {});
+    expect(allBad.ok).toBe(false);
+    if (!allBad.ok) expect(allBad.why).not.toContain(tail);
+    const one = tryList(["10.0.0.1"]);
+    const oneDead = await discoverCluster(one.env, named("10.0.0.1, bad/entry"), {});
+    expect(oneDead.ok).toBe(false);
+    if (!oneDead.ok) expect(oneDead.why).not.toContain(tail);
+  });
+
   test("one endpoint that fails keeps its one answer, with nothing about a list", async () => {
     const { env } = tryList(["10.0.0.1"]);
     const r = await discoverCluster(env, named("10.0.0.1"), {});
