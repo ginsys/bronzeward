@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# The dry controls of scenarios/hostname-measure: no fixture, no Docker, no Talos. The script runs from a
+# copy of the fixture directory, whose .state and .cache are empty, with a talosctl stub on PATH and
+# in the copy's cache that records each call. Prints PASS or FAIL per control; exit 1 on any FAIL.
+#   1. positive control: the recorder records a call made to it (one line), so a zero below means none.
+#   2. no fixture state: the script exits non-zero and the recorder holds zero calls.
+#   3. a caller's foreign TALOSCONFIG, as well: the same, and lib.sh sets TALOSCONFIG to the copy's own
+#      state, never the caller's.
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+fix=$(CDPATH='' cd -- "$here/.." && pwd)
+tmp=$(mktemp -d)
+trap 'rm -rf -- "$tmp"' EXIT
+copy=$tmp/fixtures
+mkdir -p -- "$copy/scenarios" "$copy/.cache" "$tmp/path"
+cp -- "$fix/lib.sh" "$fix/versions.env" "$copy/"
+cp -- "$fix"/scenarios/hostname-measure "$fix"/scenarios/common.sh "$fix"/scenarios/dispatch.sh "$copy/scenarios/"
+log=$tmp/calls
+: >"$log"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s"\n' "$log" >"$tmp/path/talosctl"
+chmod +x -- "$tmp/path/talosctl"
+cp -- "$tmp/path/talosctl" "$copy/.cache/talosctl"
+failed=0
+# verdict <what> <command...>: PASS when the command succeeds.
+verdict() {
+  local what=$1
+  shift
+  if "$@"; then printf 'PASS\t%s\n' "$what"; else printf 'FAIL\t%s\n' "$what"; failed=$((failed + 1)); fi
+}
+calls() { wc -l <"$log" | tr -d ' '; }
+# refused <rc> <calls>: a non-zero exit and no recorded call.
+refused() { [ "$1" -ne 0 ] && [ "$2" = 0 ]; }
+
+PATH=$tmp/path:$PATH talosctl get nodename
+verdict 'control: the recorder holds one line after one call' test "$(calls)" = 1
+: >"$log"
+
+rc=0
+PATH=$tmp/path:$PATH "$copy/scenarios/hostname-measure" >"$tmp/out1" 2>&1 || rc=$?
+verdict "no fixture state: exit $rc, $(calls) recorded calls" refused "$rc" "$(calls)"
+
+rc=0
+TALOSCONFIG=/nonexistent/foreign-talosconfig PATH=$tmp/path:$PATH "$copy/scenarios/hostname-measure" >"$tmp/out2" 2>&1 || rc=$?
+verdict "a foreign TALOSCONFIG, no fixture state: exit $rc, $(calls) recorded calls" refused "$rc" "$(calls)"
+
+# lib.sh hashes the command that loaded it, so the probe is a file in the copy, not bash -c.
+# shellcheck disable=SC2016 # the probe's own expansions, written literally
+printf '#!/usr/bin/env bash\n. "$(dirname "$0")/lib.sh"\nprintf %%s "$TALOSCONFIG"\n' >"$copy/probe"
+chmod +x -- "$copy/probe"
+seen=$(TALOSCONFIG=/nonexistent/foreign-talosconfig "$copy/probe" 2>"$tmp/out3") || seen=''
+verdict "lib.sh overrides a foreign TALOSCONFIG with the copy's own: ${seen:-<empty>}" test "$seen" = "$copy/.state/talosconfig"
+[ "$failed" -eq 0 ]

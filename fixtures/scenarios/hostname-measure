@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Measurement for ginsys/bronzeward#1040: what a changed hostname does to a Talos node, through the
+# product. It names the fixture's worker, applies the release that fills its hostname, renames it,
+# applies again, and reads after each apply what the node reports. Nothing here asserts a measured
+# value: the reads are the record (compilation.md §6.1), and the checks only prove each step ran.
+#
+# Usage: scenarios/hostname-measure   (on a fresh fixtures/bin/up, after scenarios/s1 onboard, which
+# names both machines from their nodes' hostnames). Step 3 is the Talos-default case, step 4 the
+# commonest case (an import of a configuration that holds the hostname document), steps 5 and 6
+# renames. Writes $STATE/evidence/hostname-measure-<time>/, not committed as it
+# is: the committed record is hand-written from it, after bin/evidence's leak scan.
+#
+# Talos is touched by reads (get nodename, get hostnamestatus, read /proc/uptime) and by the one
+# dry run of step 2. Every mutation goes through the product's own apply-config operation, never a
+# direct apply-config. The nodes are the fixture's own: lib.sh fixes STATE, CACHE and TALOSCONFIG to
+# this checkout and need_state refuses without a running fixture, so a caller's TALOSCONFIG, -e or -n
+# reaches no call here.
+# Step 4 is written against part C of ginsys/bronzeward#1040, which removes the document the compiler
+# fills; on a build without it the import keeps the original document, which the release record shows.
+set -euo pipefail
+here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+bin=$here/../bin
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+
+need docker curl jq timeout id sleep date awk
+need_state
+umask 077
+image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
+image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
+# The two addresses are the fixture's own: both lie inside its subnet, which versions.env names.
+for ip in "$TALOS_CONTROLPLANE_IP" "$TALOS_WORKER_IP"; do
+  [[ $ip == "${TALOS_SUBNET%.*}".* ]] || die "hostname-measure: $ip is not inside the fixture subnet $TALOS_SUBNET"
+done
+EV=$STATE/evidence/hostname-measure-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p -- "$EV" "$EV/http"
+scenario=hostname-measure
+# shellcheck source-path=SCRIPTDIR source=common.sh
+. "$here/common.sh"
+# shellcheck source-path=SCRIPTDIR source=dispatch.sh
+. "$here/dispatch.sh"
+run_key=$(date -u +%s%N)
+ref='E1 hostname'
+
+cluster='' machine_cp='' machine_w='' plan='' op='' draft='' etag=''
+dry=$STATE/hostname-measure-dry.yaml
+trap 'rm -f -- "$dry"' EXIT
+
+# read_node <name>: the worker's nodename, hostname status and uptime, kept as one file. The machine
+# configuration is never read into the record: these three resources hold a hostname and a number.
+read_node() {
+  {
+    printf '## nodename\n'
+    node_talos "$TALOS_WORKER_IP" get nodename -o yaml || return 1
+    printf '## hostnamestatus\n'
+    node_talos "$TALOS_WORKER_IP" get hostnamestatus -o yaml || return 1
+    printf '## uptime\n'
+    node_talos "$TALOS_WORKER_IP" read /proc/uptime || return 1
+  } >"$EV/node-$1.txt"
+}
+# uptime_of <name>: the first number of the uptime line, in seconds.
+uptime_of() { awk '/^## uptime/ { getline; print int($1) }' "$EV/node-$1.txt"; }
+# name_is <name>: the worker's machine row holds that name.
+name_is() { [ "$(sql "SELECT name FROM machine WHERE id = '$machine_w'")" = "$1" ]; }
+# name_as <human> <name>: POST /machines/{id}/names: 201.
+name_as() {
+  fresh "$1"
+  answers 201 - POST "/api/v1/machines/$machine_w/names" "$tok" "$(jq -nc --arg n "$2" '{name: $n}')" "$(key "name-$2")"
+}
+# release_hostname: the worker's Desired release records its hostname source and value, kept as
+# release-<name>.json (the release's own record, no configuration value).
+release_hostname() {
+  keep_body "release-$1" "/api/v1/releases/$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")"
+}
+# apply_as_product <name> [command...]: a draft, the optional command on it (an import, which needs
+# the draft and its ETag), its publication, the release's review of the worker (kept: its formOnly is
+# the plan's verdict), an apply-config plan, its approval and the operation that completes; the
+# worker's reads before and after are node-<name>-before/after.txt.
+apply_as_product() {
+  local n=$1
+  shift
+  read_node "$n-before" || return 1
+  draft_by h-author "$n" || return 1
+  [ "$#" -eq 0 ] || "$@" || return 1
+  publish_by h-publisher "$n" || return 1
+  release_hostname "$n" || return 1
+  keep_body "review-$n" "/api/v1/releases/$new_release/machines/$machine_w/review" || return 1
+  plan_by h-publisher "$n" || return 1
+  keep_body "plan-$n" "/api/v1/plans/$plan" || return 1
+  approve_by h-approver "$plan" "$n" || return 1
+  within 300 completed || return 1
+  read_node "$n-after"
+}
+# applied: the worker's Applied is its Desired.
+applied() { [ "$(sql "SELECT applied_release = desired FROM machine_state WHERE machine = '$machine_w'")" = t ]; }
+# row <name>: the reads of one step in one line of the table: the nodename and the uptime before
+# and after, from the files read_node kept.
+row() {
+  printf '%s\tuptime %s -> %s s\tnodename %s -> %s\n' "$1" "$(uptime_of "$1-before")" "$(uptime_of "$1-after")" \
+    "$(awk '/^## nodename/ {f=1} f && /nodename:/ {print $2; exit}' "$EV/node-$1-before.txt")" \
+    "$(awk '/^## nodename/ {f=1} f && /nodename:/ {print $2; exit}' "$EV/node-$1-after.txt")" | tee -a "$EV/table.tsv"
+}
+
+machines
+check "$ref" 'the worker is named: onboarding named it from its node (s1 onboard)' \
+  test -n "$(sql "SELECT name FROM machine WHERE id = '$machine_w'")"
+worker_name=$(sql "SELECT name FROM machine WHERE id = '$machine_w'")
+
+# Step 1: the worker as it is.
+check "$ref step 1" 'the worker'"'"'s nodename, hostname status and uptime are read' read_node start
+
+# Step 2: the dry run of the filled document (the A2 proof for the steps that mutate). The machine
+# configuration is written to a 0600 file under $STATE and removed at exit; it is never kept.
+dry_run() {
+  {
+    node_talos "$TALOS_WORKER_IP" get machineconfig -o jsonpath='{.spec}' || return 1
+    printf '\n---\napiVersion: v1alpha1\nkind: HostnameConfig\nauto: off\nhostname: %s\n' "$worker_name"
+  } >"$dry" || return 1
+  talosctl_timed 60 -e "$TALOS_WORKER_IP" -n "$TALOS_WORKER_IP" apply-config --dry-run --mode no-reboot -f "$dry" >"$EV/dry-run.txt" 2>&1
+}
+check "$ref step 2" 'apply-config --dry-run of the configuration plus the filled document: what it reports is the record' dry_run
+
+# Step 3, the Talos-default case, its own row: a node whose hostname is automatic, named from it at
+# onboarding, gets its first release through the product, which writes `auto: off` plus that name.
+# The reads answer whether a reboot is requested (uptime before and after), whether the nodename
+# changes, and what the review says of the release (formOnly); no sentence is chosen here.
+check "$ref step 3 default" 'the onboarded worker, first release applied through the product: the operation completes' apply_as_product default
+check "$ref step 3 default" 'the worker'"'"'s Applied is its Desired after it' applied
+row default
+
+# Step 4, the commonest case, its own row: the worker's configuration now holds exactly the document
+# a node with an explicit hostname holds, `auto: off` plus its name. The product path that imports it
+# again is a second POST /ingestions of kind import from the machine into a new draft (startIngestion
+# admits it for a machine that has an import base: internal/api/ingestions.go, no Applied check), with
+# part C's removal of the document the compiler fills. It is then published, reviewed, planned and
+# applied. A refusal of the import (a secret the import wants marked, a guard) is the row's result:
+# the case is then "not shown", and the refusal is read from $EV/last.body, never replaced by another
+# case under this name.
+reimport() {
+  fresh_author
+  ingest "$machine_w" '[]' explicit
+}
+check "$ref step 4 explicit" 'the worker is imported again from its node, published, planned and applied: the operation completes' \
+  apply_as_product explicit reimport
+check "$ref step 4 explicit" 'the worker'"'"'s Applied is its Desired after it' applied
+row explicit
+
+# Step 5: a rename to a dotted name, applied. The nodename read shows whether the Node name follows.
+check "$ref step 5" 'the worker is renamed to a dotted name by an author' name_as h-author hm-renamed.fixture.test
+check "$ref step 5" 'the worker holds that name' name_is hm-renamed.fixture.test
+check "$ref step 5" 'the rename, applied through the product: the operation completes' apply_as_product rename
+check "$ref step 5" 'the worker'"'"'s Applied is its Desired after it' applied
+row rename
+
+# Step 6, under its own name: a rename back to the first name, a third rename and not step 4's case.
+check "$ref step 6 rename-back" 'the worker is renamed back to its first name' name_as h-author "$worker_name"
+check "$ref step 6 rename-back" 'the rename back, applied through the product: the operation completes' apply_as_product back
+check "$ref step 6 rename-back" 'the worker'"'"'s Applied is its Desired after it' applied
+row back
+
+# registerWithFQDN set against unset is not measured here: it needs a kubelet fragment the fixture
+# has no scenario for. Recorded as a limit, not as a row.
+# The configuration file of step 2 is gone on every path: removed here, and by the trap on a failed step.
+rm -f -- "$dry"
+check "$ref end" 'the configuration file of the dry run is gone' test ! -e "$dry"
+echo "hostname-measure: $failed failed; the reads are in $EV (table.tsv, node-*.txt, dry-run.txt, release-*.json, review-*.json)"
+[ "$failed" -eq 0 ]
