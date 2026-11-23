@@ -6,7 +6,7 @@
 import { act, createElement as h, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { MachineShown, TimelineRows } from "./machine.tsx";
+import { MachineShown, sentences, TimelineRows } from "./machine.tsx";
 import { NextStepSection } from "./review.tsx";
 import { NodeCell } from "./machines.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
@@ -129,6 +129,14 @@ describe("a plan and an operation are named in the machine's timeline", () => {
     expect(links).toContainEqual([expect.stringContaining("Add the office labels"), OP]);
     expect(links.map((l) => l[1])).toContain(PLN);
     expect(links.every((l) => !/^(pln|op)_/.test(l[0] ?? ""))).toBe(true);
+  });
+  test("an applied change names the release it left and the release it reached by title", async () => {
+    const change = { epoch: "e0", revision: 2, at, kind: "applied-change", entry: { from: REL, to: REL, source: "operation" } };
+    await mount(h(TimelineRows, { tl: { items: [change], older: undefined, tail: undefined, read: true, restarted: false }, older: undefined, busy: false } as never));
+    await settled();
+    const links = [...box.querySelectorAll("tbody td:nth-child(3) a")].map((a) => [a.textContent, a.getAttribute("title")]);
+    expect(links).toHaveLength(2);
+    expect(links.every((l) => l[1] === REL && !/^rel_/.test(l[0] ?? ""))).toBe(true);
   });
 });
 
@@ -277,5 +285,14 @@ describe("the node identifier is cut where a list shows it and labelled on the m
   test("a short value is shown as it is", async () => {
     await mount(h(NodeCell, { m: { hardware: { talosNodeId: "n1", smbiosUuid: null } } as never }));
     expect(text()).toBe("node n1");
+  });
+});
+
+describe("the open-drift sentence names the release Bronzeward last verified", () => {
+  test("by the name function, never by the shortened identifier", () => {
+    const drifted = { ...machine, openDrift: { observation: "obs_aaaaaaaaaaaaaaaaaaaaaaaaaa", frozen: false } } as never;
+    const out = sentences(drifted, [], (id) => (id === REL ? "Add the office labels, published 21 Nov" : id)).join(" ");
+    expect(out).toContain("(Add the office labels, published 21 Nov)");
+    expect(out).not.toContain("rel_k2pq");
   });
 });

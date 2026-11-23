@@ -95,12 +95,13 @@ is refused. An Actions v2 **target** adds the claim:
 
 ### The name a person shows under
 
-The console shows a person by name only when the access token carries the claim `name`, else
-`preferred_username`, or the one claim that `auth.oidc.displayClaim` names. A token with none of
-them leaves every person as "an operator with no name on record, subject … at …": the number is
-the person's subject at the issuer, and everything else works. Where your provider's access token
-does not carry a name, add it as the target above adds `groups` (`append_claims`); the fixture's
-target does not do this. The server keeps a person's name current from the person's admitted requests that change something.
+The server stores a person's display name from the access token of a request that changes
+something: the claim `name`, else `preferred_username`, or the one claim that
+`auth.oidc.displayClaim` names. A later token without the claim keeps the stored name. A person
+whose tokens never carried one shows in the web console as "an operator with no name on record,
+subject … at …" (the subject is the person's number at the issuer), and everything else works.
+Where your provider's access token does not carry a name, add it as the target above adds
+`groups` (`append_claims`); the fixture's target does not do this.
 
 ## 5. The server and the clients
 

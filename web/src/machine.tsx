@@ -66,7 +66,7 @@ export function sentences(m: Machine, obs: Observation[], name: (release: string
   const out: string[] = [];
   if (drift !== null) {
     const { opened } = driftReads(drift, obs);
-    out.push(`${CHANGED_ON_THE_MACHINE} since ${opened === undefined ? `the read ${short(drift.observation)}` : at(opened.at)}: a read differed from what Bronzeward last verified (${a === null ? "none" : short(a.release)}).`);
+    out.push(`${CHANGED_ON_THE_MACHINE} since ${opened === undefined ? `the read ${short(drift.observation)}` : at(opened.at)}: a read differed from what Bronzeward last verified (${a === null ? "none" : name(a.release)}).`);
     if (o?.release != null && o.release === d) out.push("It equals the selected release; that does not close the drift.");
   } else if (o === null) {
     out.push("No configuration read recorded.");
@@ -264,7 +264,7 @@ export function details(e: Entry): ReactNode {
   const r = (e.entry ?? {}) as Record<string, unknown>;
   const names = e.kind === "name-change" ? [r["previous"], r["new"]].map(machineName).filter((n): n is string => n !== undefined) : [];
   return [...names.map((n, i) => ({ k: `name${i}`, v: n })), ...SHOWN.filter((k) => typeof r[k] === "string" && r[k] !== "").map((k) => ({ k, v: r[k] as string }))].map(({ k, v }, i) => (
-    <Fragment key={k}>{i > 0 && " "}{k === "reason" ? `"${safeWord(v)}"` : k === "principal" && principalId(v) ? <Who id={v} /> : (k === "plan" || k === "operation") && /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Named id={v} /> : /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Id id={v} /> : safeWord(v)}</Fragment>
+    <Fragment key={k}>{i > 0 && " "}{k === "reason" ? `"${safeWord(v)}"` : k === "principal" && principalId(v) ? <Who id={v} /> : (k === "plan" || k === "operation" || ((k === "from" || k === "to") && v.startsWith("rel_"))) && /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Named id={v} /> : /^[a-z]+_[a-z2-7]{26}$/.test(v) ? <Id id={v} /> : safeWord(v)}</Fragment>
   ));
 }
 
