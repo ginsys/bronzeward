@@ -4,8 +4,9 @@
 machine. You collect the change in a **draft**, a set of changes to one cluster that stays open
 until it is published or discarded. Publishing and applying are other journeys.
 
-**You need** the `author` role for every write on this page. Reading a draft needs no role. An
-automation token may edit a draft, but it cannot record a cluster or a machine.
+**You need** the `author` role for every write on this page. Reading a draft needs at least one role
+(`viewer`, `author`, `publisher`, `approver` or `recovery-admin`). An automation token may edit a
+draft, but it cannot record a cluster or a machine.
 
 Three kinds of thing make up a machine's configuration, and a name for each helps:
 
@@ -43,7 +44,9 @@ printed them. Three things to know:
    standard input; `--declarations <path>` adds the file that declares the document's references.
    `fragment set` runs on Linux only.
 3. **`assignment set --none` selects nothing.** The machine's configuration is then its import base
-   alone. This is the form a machine needs before a release can bind it.
+   alone. A release can bind a machine only if the machine has an assignment at the revision the
+   release was compiled from; an assignment that selects nothing is enough, and one that selects
+   profiles or fragments works as well. Use `--none` only when you want the import base alone.
 
 `draft show` lists the draft's entries and marks which changed against their base. It does not
 render any machine's configuration: nothing is rendered until the draft is published.
@@ -52,8 +55,10 @@ render any machine's configuration: nothing is rendered until the draft is publi
 
 Steps:
 
-1. Open **Drafts and releases** in the navigation. Press **Create draft**, choose the **Cluster:**
-   and fill in **Title:**. The page shows the new draft.
+1. Open **Drafts and releases** in the navigation, and the **Create draft** form. Choose the
+   **Cluster:**, fill in **Title:** and press the form's **Create draft** button. The form then
+   says "Draft" and the draft's name as a link, "created", and its cluster. Press the draft's name
+   to open it.
 2. In the draft's **Entries** list press an entry to edit it, or **Add fragment**.
 3. Edit the document in the fragment editor. Press **Save** (needs `author`). **Revert to base**
    restores the base text of the entry, and **Remove** removes the entry from the draft.
