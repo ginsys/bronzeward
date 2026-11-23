@@ -7,6 +7,19 @@ import (
 
 // Every other verb that takes a machine takes its name too (ginsys/bronzeward#1055, part 9b, pull request 3): the
 // resolver of pull request 2 (machineByName) reads the machine list once for a name, and an identifier never lists.
+// A repeat of a write built from a name gives the identifier, and an identifier with --cluster is refused, so the
+// instruction also says to leave --cluster out.
+func TestRepeatInstructionDropsCluster(t *testing.T) {
+	setServerFacts(t, 10, nil)
+	answers := namedAnswers()
+	answers["POST /api/v1/machines/mch_b/freezes"] = "500 " + problemHead + `internal","title":"BWSYNTH","status":500` + problemTail
+	recoveryServer(t, answers, "")
+	code, _, errOut := runDrift(t, "machine", "freeze", "db-1", "--reason", "r", "--cluster", "alpha")
+	if code != 3 || !strings.Contains(errOut, "the same input, with machine 'mch_b' in place of 'db-1' and without --cluster,") {
+		t.Errorf("freeze by name and cluster, outcome unknown: exit %d, stderr %q; want the repeat to drop --cluster", code, errOut)
+	}
+}
+
 // A verb given a name says, in its result line, which machine the act landed on, as `<identifier> (<name>)`.
 
 // namedVerbs is every verb of this pull request with a machine by name, the request it must send for the machine

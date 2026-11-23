@@ -49,6 +49,8 @@ type importFake struct {
 	stallEpoch string
 	// refuseStart, when set, is the problem document that the import start answers with 409.
 	refuseStart string
+	// startUnknown, when set, answers the import start with a redirect, which the client cannot read: its outcome is unknown.
+	startUnknown bool
 }
 
 const ingAccepted = `{"ingestion":"ing_BWSYNTH","operation":"op_BWSYNTH-ing"}`
@@ -106,6 +108,11 @@ func (f *importFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		record()
 		if r.Header.Get("If-Match") != f.etag() {
 			f.refuse(w)
+			return
+		}
+		if f.startUnknown {
+			w.Header().Set("Location", "/elsewhere")
+			w.WriteHeader(http.StatusTemporaryRedirect)
 			return
 		}
 		// The server checks the draft's ETag before it looks for an open drift record.
