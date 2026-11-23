@@ -620,8 +620,8 @@ plane's configuration to take the CA key from it.
 
 `cluster onboard` runs those steps in one command, and imports each machine into one draft. It then
 writes, for each machine whose import was released into that draft and that has no assignment entry in it
-and no assignment head, an assignment that selects nothing (the machine's configuration is its import base,
-with the hostname fill of a named machine where the base sets none), so that the release the draft makes holds an assignment revision a plan can bind; running it again
+and no assignment head, an assignment that selects nothing (the machine's configuration is its import base
+plus the hostname fill that [compilation](compilation.md), "Which hostname wins", defines), so that the release the draft makes holds an assignment revision a plan can bind; running it again
 writes none that exists. It sends
 every write of one run under the epoch the run's first read showed, as the Connect a cluster page does for a plan: once the
 epoch has changed the next write is not sent and no later write goes out. The table output says once that the epoch
@@ -774,8 +774,8 @@ for it is refused until it is adopted (`internal/api/plans.go`). Adopting
 gives the machine an assignment in the import draft, publishes it and adopts
 the machine with an adopt plan that binds no drift record. An assignment may select nothing
 (`bronzewardctl assignment set <machine> --draft <draft> --none`): the machine's configuration is
-then its import base, with the hostname fill of a named machine where the base sets none
-([compilation](compilation.md), "Which hostname wins"), the same configuration as with no
+then its import base plus the hostname fill that [compilation](compilation.md), "Which hostname
+wins", defines, the same configuration as with no
 assignment, and the release holds the
 assignment revision a plan binds ([persistence and API choice §17.47](persistence-api.md)). A machine
 published with no assignment has no assignment revision in the release, and any plan for it is
@@ -1048,7 +1048,7 @@ the campaign lead's session, answering "A" to the question whether one action ma
 under management). On a draft that holds an import base, for a person who holds the author, publisher and
 approver roles, the web client's "Adopt these machines" first adds, to a machine of the draft that has
 no assignment entry and no assignment head, an assignment that selects nothing (the machine's configuration is
-its import base, with the hostname fill of a named machine where the base sets none), each write under the ETag the one before answered, then publishes the draft as the page
+its import base plus the hostname fill that [compilation](compilation.md), "Which hostname wins", defines), each write under the ETag the one before answered, then publishes the draft as the page
 showed it (the publication carries the ETag of the last write, or the page's when none was needed, and is
 refused when another author changed the draft since), creates an adopt plan for each machine with no `Applied` and approves each
 plan as the signed-in person: the sentence above the button, which says what the press does and that it

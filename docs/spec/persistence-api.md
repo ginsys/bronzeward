@@ -305,8 +305,8 @@ fragment selected under a layer must carry that layer. Otherwise the update is
 refused `422 validation-failed`, naming the body path (compilation §7, stage
 1). Publication checks the same again. An assignment may select nothing (0 to
 256 names in all): its revision then has no selection rows, the machine's
-configuration is its import base, with the hostname fill of a named machine where the base sets none
-([compilation](compilation.md), "Which hostname wins"), the same configuration as with no
+configuration is its import base plus the hostname fill that [compilation](compilation.md), "Which
+hostname wins", defines, the same configuration as with no
 assignment, and the release holds the revision so a plan can bind it **(choice
 §17.47)**. A removal of a name the draft
 introduces, with no head, leaves an entry whose base is absent and whose

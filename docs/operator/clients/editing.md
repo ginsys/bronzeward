@@ -46,11 +46,9 @@ printed them. Three things to know:
    `fragment set` runs on Linux only.
 3. **`assignment set --none` selects no profile and no fragment.** The machine's configuration is
    then its import base (the configuration read from the machine, see [the word list](terms.md)),
-   with one addition: where the base sets no hostname and the machine has a name, publication fills
-   the name in as the hostname, except in the cases the
-   [compilation specification](../../spec/compilation.md) lists under "Which hostname wins" (an
-   explicit hostname, `auto: off`, a stable hostname set in the base's own document). A release can bind a machine only if the machine has an assignment at the
-   revision the release was compiled from; an assignment that selects nothing is enough, and one that
+   with one addition: publication may fill the machine's name in as its hostname, by the rules of the
+   [compilation specification](../../spec/compilation.md), "Which hostname wins". A release can bind
+   a machine only if the machine has an assignment at the revision the release was compiled from; an assignment that selects nothing is enough, and one that
    selects profiles or fragments works as well. Use `--none` only when you want the import base and
    nothing else from the draft.
 
