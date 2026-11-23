@@ -274,6 +274,7 @@ export async function discoverCluster(env: Env, text: string, o: { context?: str
   const failures: { endpoint: string; why: string }[] = [];
   let last: Outcome | undefined;
   let sent = 0;
+  let unreachable = 0; // tries answered 503, the answer a key every node refuses also gets
   let stopped = false;
   let out: Outcome | undefined;
   let endpoint = "";
@@ -292,6 +293,7 @@ export async function discoverCluster(env: Env, text: string, o: { context?: str
     out = await env.send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", document: cut.document, endpoint }, released: () => {} });
     if (out.kind === "done") break;
     last = out;
+    if (out.kind === "refused" && out.status === 503) unreachable++;
     failures.push({ endpoint, why: `${discoveryWhy(out)}${out.kind === "refused" && out.status === 503 && !isAddress(endpoint) ? nameHint(endpoint) : ""}` });
     if (!movesOn(out)) break;
   }
@@ -301,7 +303,7 @@ export async function discoverCluster(env: Env, text: string, o: { context?: str
     if (failures.length === 1 && !stopped && sent === 1) return { ok: false, why: failures[0]!.why, ...ref };
     const lead = stopped ? "Stopped before trying the other endpoints." : "No endpoint gave the cluster.";
     const said = failures.map((f) => `${f.endpoint}: ${f.why}`).join(" ");
-    const tail = failures.length > 1 ? " Every node that refuses the first key gives the same answer as for an endpoint that does not answer, so read each answer above." : "";
+    const tail = unreachable > 1 ?" Every node that refuses the first key gives the same answer as for an endpoint that does not answer, so read each answer above." : "";
     return { ok: false, why: `${lead} ${said}${tail}`.trim(), ...ref };
   }
   const found = out.data as Discovery;
