@@ -1427,8 +1427,7 @@ The check fails closed: it never reads "equal" for a case it could not decide.
 A refusal of the composition itself (a dependency, a validation, the contract)
 keeps the reasons of §13, and a refusal never quotes a value. No override
 exists in the PoC; a refused equivalent change is repaired by keeping more in
-the base, or by making the change without thinning the base: an entry that
-does not come from the route of persistence and API §3.2 is not checked.
+the base.
 
 **Values redaction does not cover (§8.4).** The check reads plaintext after the
 references resolve (§6 step 4), so a value that changes behind an unchanged

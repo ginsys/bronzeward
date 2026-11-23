@@ -4226,7 +4226,7 @@ or Desired change; it does not erase earlier evidence.
 | Publish | A covered machine's name changed since the snapshot (§4.2) | operation `failed`, `409 stale-input` | operation, act |
 | Draft update | A thinner import base (§3.2) that adds a leaf, a value or a reference its machine's `Applied` import base lacks, or for a machine with no `Applied` release | `422 validation-failed`, rule `import-base`, naming the machine and the kind of violation, never a path from the body | nothing |
 | Publish | A machine whose entry carries an import base under the check (§3.2, compilation §6.2): the typed equivalence check finds it different (`not-equal`) or cannot decide, a pending machine or one holding an adopted baseline its `Applied` release did not compose included (`cannot-decide`) (compilation §6.2) | operation `failed`, `422 validation-failed`, rule `equivalence`, naming the machine and, for `not-equal`, the paths | operation, act |
-| Publish | The `Applied` import base of a machine with a thinner-base entry is no longer the one the entry was written from (§4.2) | operation `failed`, `409 stale-input` naming the machine and both revisions | operation, act |
+| Publish | The `Applied` import base of a machine with an entry under the check (§4.2, compilation §6.2) is no longer the one the entry was written from (§4.2) | operation `failed`, `409 stale-input` naming the machine and both revisions | operation, act |
 | Publish | A hostname filled from a machine's name that another machine holds explicitly (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
 | Publish | Moved head, a covered machine's import base changed (§4.2), a machine of the cluster covered since the snapshot (§6.2, expected "absent"), or T3 finds missing, misbound or superseded publication evidence (§6.1.1) | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
@@ -5383,9 +5383,8 @@ design and evidence do not settle the question. Each is marked in place as
     ginsys/bronzeward#861 (2026-11-19) fix the order, check first, then an
     assisted proposal, no automatic split. The route, the place of the split and
     the subset rule are this specification's choices, and the owner may overrule
-    them. Alternatives: the split at ingestion, where no old composition exists
-    to compare with and the tool decides the split, which is the automatic
-    split; both at ingestion and later, which needs two routes with one
+    them. Alternatives: the split at ingestion, where no author's intent exists
+    and the tool decides the split, which is the automatic split; both at ingestion and later, which needs two routes with one
     contract; a route that takes the fragments and the base together, which
     leaves the subset rule nothing to check on source text and lets one request
     mint a value; no rule on the document, relying on the check alone, which
