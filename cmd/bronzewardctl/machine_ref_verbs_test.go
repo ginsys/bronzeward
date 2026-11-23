@@ -104,8 +104,9 @@ func TestMachineVerbRefusesAnAmbiguousName(t *testing.T) {
 	}
 }
 
-// --cluster narrows a name. With an identifier it would do nothing, so it is a usage error and nothing is sent, in every
-// verb that takes the flag (an advisory finding on ginsys/bronzeward#1125).
+// --cluster narrows a name. With an identifier it would do nothing, so it is a usage error (exit 2) that sends no read of the
+// machine and no write, in every verb that takes the flag (an advisory finding on ginsys/bronzeward#1125). The
+// command's own reads of /server and /identity may come first.
 func TestClusterWithAnIdentifierIsRefused(t *testing.T) {
 	for _, args := range [][]string{
 		{"machine", "freeze", "mch_b", "--reason", "r", "--cluster", "alpha"}, {"machine", "rename", "mch_b", "--name", "n", "--cluster", "alpha"},
