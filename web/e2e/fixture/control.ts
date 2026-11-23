@@ -28,4 +28,11 @@ export const button = (scope: Scope, name: string) => control(scope, `button=${n
 export const field = (scope: Scope, name: string) => control(scope, `input[name="${name}"]`, `field ${name}`);
 export const choice = (scope: Scope, group: string, value: string) => control(scope, `input[type="radio"][name="${group}"][value="${value}"]`, `choice ${group}=${value}`);
 export const region = (scope: Scope, label: string) => control(scope, `section[aria-label="${label}"]`, `section "${label}"`);
-export const shown = (scope: Scope, testid: string) => control(scope, `[data-testid="${testid}"]`, `element ${testid}`);
+// An answer exists only after the server's response settles, and a press returns before that: wait until one is drawn, and only then
+// insist on exactly one.
+export async function shown(scope: Scope, testid: string): Promise<WebdriverIO.Element> {
+  const how = `[data-testid="${testid}"]`;
+  const from = await scope;
+  await browser.waitUntil(async () => (await from.$$(how)).length > 0, { timeout: 60_000, interval: 100, timeoutMsg: `element ${testid} was not drawn within 60 s` });
+  return control(scope, how, `element ${testid}`);
+}

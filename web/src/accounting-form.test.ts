@@ -213,6 +213,26 @@ describe("a scope's accounting form on the console's row", () => {
     expect(text("settle-answer")).toMatch(/^Recorded\. Scope \S+ is now blocked until it is marked\./);
   });
 
+  test("a refused mark does not keep the accounting's answer once the next read shows the scope released by another administrator", async () => {
+    refuseMarks = true;
+    await mount(row("pre-restore-unaccounted"));
+    await settled();
+    await choose("start", START);
+    await choose("end", END);
+    await explain("the operator re-applied the restored configuration");
+    await press();
+    await mount(row("blocked"));
+    await settled();
+    await act(async () => {
+      (Array.from(box.querySelectorAll("button")).find((b) => b.textContent === "Mark") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(text("settle-answer")).toMatch(/is now blocked/);
+    await mount(row("released"));
+    await settled();
+    expect(text("settle-answer")).toBeUndefined();
+  });
+
   test("a person who waits for a later observation reads the machine's observations again and keeps what was typed", async () => {
     const all = (served[`/machines/${MCH}/observations`] as { items: unknown[] }).items;
     served[`/machines/${MCH}/observations`] = { items: all.slice(0, 1), next: undefined };

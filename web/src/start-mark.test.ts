@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
-import { instant, startMarks } from "./start-mark.ts";
+import { instant, startMarks, stopDeadline } from "./start-mark.ts";
 
 type Observation = components["schemas"]["ObservationBody"];
 
@@ -101,5 +101,18 @@ describe("the start the server accepts", () => {
   test("a mark that can be recorded carries no refusal", () => {
     expect(startMarks([obs("a", 1, at(70))], deadline).refused).toBeUndefined();
     expect(startMarks([obs("a", 1, at(10))], deadline).refused).toBeUndefined();
+  });
+});
+
+describe("the instant a scope's settle first counts from", () => {
+  // The stop the entry recorded can carry microseconds (an API or CLI entry); Date.parse would drop them and move the deadline up to a
+  // millisecond early, so an observation one microsecond after the true deadline would read as before it.
+  test("keeps the microseconds of the stop, so the observation one microsecond later is the first after it", () => {
+    const base = stopDeadline("2026-01-01T10:00:00.123456Z", 60);
+    expect(base).toBeGreaterThan(Date.parse("2026-01-01T10:01:00.123Z"));
+    const list = [obs("a", 1, "2026-01-01T10:01:00.123456Z"), obs("b", 2, "2026-01-01T10:01:00.123457Z")];
+    const m = startMarks(list, base);
+    expect(m.mark).toBe("b");
+    expect(m.why(list[0]!)).toBe("it began at or before the transport deadline");
   });
 });

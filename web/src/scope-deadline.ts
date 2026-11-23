@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import type { components } from "./api/v1";
 import { useReads } from "./list.tsx";
-import { type Deadline, instant } from "./start-mark.ts";
+import { type Deadline, instant, stopDeadline } from "./start-mark.ts";
 
 type Operation = components["schemas"]["OperationBody"];
 
@@ -37,7 +37,7 @@ export function useScopeDeadline(machine: string, stoppedAt: string | undefined,
       if (!current()) return;
       if (list === undefined) return unknown("the machine's operations could not be read.");
       if (list.items.length > MAX_OPERATIONS || list.next !== undefined) return unknown(`the machine has more than ${MAX_OPERATIONS} apply operations, too many to read here.`);
-      let at = Date.parse(stoppedAt) + maxSeconds * 1000;
+      let at = stopDeadline(stoppedAt, maxSeconds);
       for (const op of list.items) {
         const full = await get<Operation>(`/operations/${enc(op.id)}`);
         if (!current()) return;

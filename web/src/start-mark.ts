@@ -15,6 +15,9 @@ export const instant = (t: string): number => {
   return m === null ? Date.parse(t) : Date.parse(`${m[1]}${m[3]}`) + Number(`0.${m[2] ?? "0"}`) * 1000;
 };
 
+// The instant a scope's settle first counts from: the entry's stoppedAt plus the maximum transport time, at the server's precision.
+export const stopDeadline = (stoppedAt: string, maxSeconds: number): number => instant(stoppedAt) + maxSeconds * 1000;
+
 const READ_KEYS = ["identity", "runningVersion", "configuration"] as const;
 const read = (o: Observation) => READ_KEYS.some((k) => !(k in (o.unread ?? {})));
 
