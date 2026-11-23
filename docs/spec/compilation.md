@@ -1781,7 +1781,8 @@ or encrypted values:
   ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)),
   the redacted review data, the provenance records (§8.2), the hostname record
   (§6.1 item 4: its source, where filled the name used, and the derived node
-  name of §6.1 item 6, `null` where a secret reference is an input) and both
+  name of §6.1 item 6, `null` where a secret reference or a value the review
+  redacts is an input or no hostname is set) and both
   dependency records with the encryption dependency (§9);
 - per pinned version and encryption dependency: the classification step 3 and
   §11 made, as the dependency monitor seeds it
