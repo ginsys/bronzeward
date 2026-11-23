@@ -47,11 +47,6 @@ browser for this page. You signed in and read the pages you opened. You asked fo
 server or on any machine. A list that shows a machine does not show that the machine runs what it
 should: the drift page does that, in the journey pages.
 
-## Next
-
-- The same first read from the command line: [quick start for the command line](quick-start-cli.md).
-- The reference for every command: [command reference](cli-reference.md).
-
 ## If a step fails
 
 - Step 1 shows a certificate warning from the browser: the installation uses a certificate your
@@ -60,3 +55,10 @@ should: the drift page does that, in the journey pages.
 - Step 2 returns to a page that says "Not accepted by this installation. Sign in again.": the
   server did not accept the sign-in. Press **Sign in with the identity provider**. If it repeats,
   give your administrator the time and the text of the message.
+
+## Next
+
+- To stay signed in and to read a refusal: [sign in and renewal](sign-in-and-renewal.md).
+- To read the machines and clusters in detail: [the inventory](inventory.md).
+- For the same first read on the command line: [quick start for the command line](quick-start-cli.md).
+- For a word you do not know, such as a role: [the word list](terms.md).

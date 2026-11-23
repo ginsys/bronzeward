@@ -51,7 +51,7 @@ bronzewardctl whoami
 The answer is what the **server** sees. It lists the context, your identity, your principal (the
 server's own identifier for you), your roles, the installation's epoch and whether recovery mode is
 on. You do not need the epoch yet: it matters when a command repeats a write, which this page does
-not do. If a role you need is missing, no command that needs it will work; ask your administrator.
+not do (it is explained in [the word list](terms.md)). If a role you need is missing, no command that needs it will work; ask your administrator.
 Do not try another sign-in to get it. The answer says what the server saw when you asked, not
 that a command you run later is allowed.
 
@@ -87,15 +87,16 @@ You added a context, signed in and read the identity, the versions, the status a
 You changed nothing on the server or on any machine. Nothing here shows that a machine runs the configuration it should: that is a drift
 check, in the journey pages.
 
-## Next
-
-- The same first read in a browser: [quick start for the web](quick-start-web.md).
-- Several servers, TLS trust and scripts: [contexts](contexts.md).
-- Every command and flag: [command reference](cli-reference.md).
-
 ## If a step fails
 
 - `context add` fails and names the address it could not reach, or a certificate it does not
   trust: [contexts and TLS trust](contexts.md#tls-trust).
 - A command says there is no context: run `bronzewardctl context list`, then `context use <name>`.
 - A command exits with a number: [exit codes](cli-reference.md#global-flags-and-exit-codes).
+
+## Next
+
+- To stay signed in and to read a refusal: [sign in and renewal](sign-in-and-renewal.md).
+- To read the machines and clusters in detail: [the inventory](inventory.md).
+- For the same first read in a browser: [quick start for the web](quick-start-web.md).
+- For a word you do not know: [the word list](terms.md).

@@ -147,12 +147,19 @@ sends nothing.
    cancelled when you untick its machine or leave the page, and a plan you pressed Apply for is
    never cancelled.
 
-**Adopting a draft's machines.** The draft page has an **Adopt these machines** button for a draft
-that holds an import base. Pressing it publishes the draft and approves the adopt plans of the
-machines with no Applied release in the same press, as you. The sentence above the button says what
-the press does and that it sends nothing to any machine. It is for a person who holds the author,
-publisher and approver roles. The import journey that leads to it is in
-[import and adopt](protected-import.md).
+**Adopting a draft's machines.** An open draft page that holds a machine's import has a section
+"Adopt these machines" with one button of the same name. The sentence above it reads: "Adopting
+records what each machine runs as its starting point. This adds an assignment that selects nothing
+for each machine that has none, publishes the draft, then creates an adopt plan for each machine
+and approves each plan as you, recorded as your own approval. It sends nothing to any machine. A
+change you apply later keeps its own plan and approval." The button needs the author, publisher
+and approver roles; without them the page says "Needs the <roles> role. The separate steps stay:
+publish this draft, then on each machine's release page plan the adopt, then approve each plan."
+It acts only on a machine with no Applied configuration; a machine that has one is left, and the
+line says "Left as it is: this machine already has an applied configuration, so its changes keep
+their own steps." If the draft editor holds text you have not saved, the press sends nothing and
+says so. A second press after a closed page continues from the recorded state and repeats no step.
+The import journey that leads to it is in [import and adopt](protected-import.md).
 
 ## What can go wrong
 
@@ -185,3 +192,6 @@ publisher and approver roles. The import journey that leads to it is in
 - The revert of a drifted configuration has an extra approval line that says the approver
   approves overwriting a configuration nobody reviewed. That belongs to the drift journey and is
   not written here yet.
+
+Next: [follow the operation the approved plan starts](operation-tracking.md). A release you still
+need to make is in [publication](publication.md).

@@ -1,12 +1,15 @@
 # Install the clients
 
+This page says how to get the command-line client `bronzewardctl` and the web files the browser
+client is served from. Read it first: every other page of the client guide assumes the client is
+installed. (Words such as "context" are explained in [the word list](terms.md).)
+
 **No release is published yet.** There is no download page, no signed archive and no checksum file
 to fetch. This page says what a release will carry, and how to build the same archives from a
 checkout today. Nothing here says that a release is ready or supported.
 
-You need two things from a release: the command-line client `bronzewardctl`, and the web files
-the browser client is served from. Your administrator needs the server too. This page covers the
-client and shows where the other two are described.
+Your administrator needs the server too. This page covers the client and shows where the other
+two are described.
 
 ## What a release will carry
 
@@ -25,7 +28,7 @@ A release is one set of seven archives and a checksum file. The names come from
 Each client and server archive also holds `LICENSE-STATUS.md` and `THIRD_PARTY_NOTICES.txt`.
 The release workflow (`.github/workflows/release-publish.yml`, lines 101-130) adds a software bill of
 materials file for each archive (`<archive>.spdx.json`), a signature bundle for `SHA256SUMS`
-(`SHA256SUMS.sigstore.json`) and a build attestation for each archive. It publishes them as a
+(`SHA256SUMS.sigstore.json`) and a build attestation (a signed statement of how the archive was built) for each archive. It publishes them as a
 pre-release that is never marked as the latest release.
 
 ## Build the same archives today

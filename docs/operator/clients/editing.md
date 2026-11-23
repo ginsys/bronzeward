@@ -2,7 +2,8 @@
 
 **You want** to change what a machine's configuration is made of, without sending anything to a
 machine. You collect the change in a **draft**, a set of changes to one cluster that stays open
-until it is published or discarded. Publishing and applying are other journeys.
+until it is published or discarded. Publishing is [another journey](publication.md), and applying is
+[a third](plan-and-approval.md). Other words of the guide are in [the word list](terms.md).
 
 **You need** the `author` role for every write on this page. Reading a draft needs at least one role
 (`viewer`, `author`, `publisher`, `approver` or `recovery-admin`). An automation token may edit a
@@ -44,9 +45,10 @@ printed them. Three things to know:
    standard input; `--declarations <path>` adds the file that declares the document's references.
    `fragment set` runs on Linux only.
 3. **`assignment set --none` selects nothing.** The machine's configuration is then its import base
-   alone. A release can bind a machine only if the machine has an assignment at the revision the
-   release was compiled from; an assignment that selects nothing is enough, and one that selects
-   profiles or fragments works as well. Use `--none` only when you want the import base alone.
+   alone (the configuration read from the machine, see [the word list](terms.md)). A release can bind
+   a machine only if the machine has an assignment at the revision the release was compiled from; an
+   assignment that selects nothing is enough, and one that selects profiles or fragments works as
+   well. Use `--none` only when you want the import base alone.
 
 `draft show` lists the draft's entries and marks which changed against their base. It does not
 render any machine's configuration: nothing is rendered until the draft is published.
@@ -90,7 +92,7 @@ nothing and says so. This protects the other change from being overwritten witho
 
 After reading, repeat the write if it is still right.
 
-The command line sends the draft's version (its ETag) from the last `draft show` or write of that
+The command line sends the draft's version (its ETag, see [the word list](terms.md)) from the last `draft show` or write of that
 draft, or the one you give with `--if-match`. That is why a draft someone else changed is refused. A
 write whose outcome is unknown (the answer never came) is repeated with the flags the client prints in
 its outcome-unknown block, `--if-match` included. The [reference](cli-reference.md#fragment-set)
@@ -105,4 +107,5 @@ lists them.
 - "Saved" does not show that the configuration is valid for a machine. That shows when the draft is
   published and a machine's configuration is rendered.
 
-Next: [import a machine's configuration under review](protected-import.md).
+Next: [import a machine's configuration under review](protected-import.md), or, when the draft is
+finished, [publish it](publication.md).
