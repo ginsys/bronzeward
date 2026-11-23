@@ -3088,15 +3088,17 @@ The member also answers `nodeName`, a string or `null` **(execution and recovery
 choice §10.39; the API revision is the one the note after the revision table
 names)**: the Kubernetes node name the release gives the machine, derived as
 compilation §6.1 item 6 states it, for every `source` that sets a hostname
-(`machine-name`, `configuration`). It is `null` for a source that sets none
-(`none`, `legacy-stable`, `unrecorded`) and wherever any input to the name,
+(`machine-name`, `configuration`). On a release made after the revision it is
+`null` for a source that sets none (`none`, `legacy-stable`) and wherever any input to the name,
 the hostname or the `registerWithFQDN` value that decides whether the first
 label alone is used, is attributed to a secret reference (compilation §8.1) or
 is a scalar the review redacts by value (compilation §8.3, the value means,
 which matches a resolved secret of any length, below the six bytes that step 7
 refuses as a literal), so a non-null value never derives from a secret and a
 `null` is never compared: `null` means **not compared**. The member is absent,
-which means **not recorded**, on a release made before the revision: a
+which means **not recorded**, on every release made before the revision, one
+with source `unrecorded` included, and that rule comes before the value rules
+above: a
 `node_name_recorded` column, `NOT NULL DEFAULT false`, is set true by every
 release made after it, never by an `UPDATE`, as `unrecorded` is. A reader can
 so tell "not recorded, made before the revision" from "not compared, a secret
