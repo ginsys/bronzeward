@@ -82,11 +82,11 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 		}
 		compiled, err := compile.Compile(in)
 		if ref, err := compileRefusal(m.machine, err); ref != nil || err != nil {
-			return releaseUnit{}, ref, err
+			return releaseUnit{}, namingFragment(ref, m, s), err
 		}
 		k, err := compiled.KubernetesVersion(version)
 		if ref, err := compileRefusal(m.machine, err); ref != nil || err != nil {
-			return releaseUnit{}, ref, err
+			return releaseUnit{}, namingFragment(ref, m, s), err
 		}
 		if kubernetes != "" && k != kubernetes {
 			return releaseUnit{}, refuse(http.StatusUnprocessableEntity, "validation-failed",
@@ -200,6 +200,25 @@ func machineRecords(m snapshotMachine, c compile.Compiled, s snapshot, pins pinn
 		um.reproduction = append(um.reproduction, d)
 	}
 	return um, nil
+}
+
+// namingFragment adds the name and layer of the fragment a refusal's input is ("fragment[N]" is
+// the Nth of m's fragments, compile.inputName) so a person reads the word they chose, not a
+// position. A refusal of the base, of the cluster, or with no input is returned as it was.
+func namingFragment(ref *refusal, m snapshotMachine, s snapshot) *refusal {
+	if ref == nil {
+		return nil
+	}
+	var n int
+	input, _ := ref.extra["input"].(string)
+	if _, err := fmt.Sscanf(input, "fragment[%d]", &n); err != nil || n < 0 || n >= len(m.fragments) {
+		return ref
+	}
+	src, ok := s.sources[m.fragments[n]]
+	if !ok || src.name == "" {
+		return ref
+	}
+	return ref.with("fragment", src.name).with("layer", src.layer)
 }
 
 // compileRefusal is ruling R33 for a compilation's failure on machine ("" for the cluster): a
