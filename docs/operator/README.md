@@ -15,9 +15,11 @@ The guide has three parts:
 - **Operator clients**: `bronzewardctl` and the web interface. Start with [install](clients/install.md),
   then [contexts and TLS trust](clients/contexts.md), then a quick start for the
   [command line](clients/quick-start-cli.md) or the [web interface](clients/quick-start-web.md).
-  The [command reference](clients/cli-reference.md) of `bronzewardctl` is generated from its command
-  table. The pages for the journeys are still being written
-  ([ginsys/bronzeward#404](https://github.com/ginsys/bronzeward/issues/404)).
+  The journeys follow: [sign in and renewal](clients/sign-in-and-renewal.md),
+  [the inventory](clients/inventory.md), [editing](clients/editing.md) and
+  [protected import](clients/protected-import.md). The [command reference](clients/cli-reference.md)
+  of `bronzewardctl` is generated from its command table. The pages for the later journeys are still
+  being written ([ginsys/bronzeward#404](https://github.com/ginsys/bronzeward/issues/404)).
 - **Deployment**: [hosting](deployment/hosting.md) (TLS, routing, the web files and the
   client-configuration file), the [identity provider](deployment/identity-provider.md) (Zitadel),
   and [upgrade and rollback](deployment/upgrade.md).
