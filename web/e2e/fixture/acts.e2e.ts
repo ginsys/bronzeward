@@ -35,7 +35,9 @@ async function open() {
 async function offer(form: WebdriverIO.Element): Promise<string[]> {
   const lines: string[] = [];
   for (const r of await form.$$('input[type="radio"]')) {
-    lines.push(`${await r.getAttribute("name")} ${(await (await r.parentElement()).getText()).replace(/\s+/g, " ").slice(0, 160)}${(await r.isEnabled()) ? "" : " (off)"}`);
+    const value = await r.getAttribute("value");
+    const wanted = value === process.env["BW_FIXTURE_START"] || value === process.env["BW_FIXTURE_END"] ? " (the scenario's)" : "";
+    lines.push(`${await r.getAttribute("name")} ${value} ${(await (await r.parentElement()).getText()).replace(/\s+/g, " ").slice(0, 160)}${(await r.isEnabled()) ? "" : " (off)"}${wanted}`);
   }
   return lines;
 }
@@ -60,6 +62,7 @@ describe(`fixture act ${act}`, () => {
       const form = await control(await region($("main"), "Account for an attempt"), 'form[aria-label="Record accounting"]', "the accounting form");
       // The form reads the machine's observations after the page is up and draws no radio until they arrive.
       await form.$('input[type="radio"]').waitForExist({ timeout: 30_000, timeoutMsg: "the accounting form listed no observation within 30 s" });
+      say(`the scenario's start ${process.env["BW_FIXTURE_START"] || "<empty>"}, end ${process.env["BW_FIXTURE_END"] || "<empty>"}`);
       for (const line of await offer(form)) say(`offered: ${line}`);
       const start = await pick(form, "start", need("BW_FIXTURE_START"));
       say(`start: ${(await (await start.parentElement()).getText())}`);
