@@ -72,12 +72,13 @@ prediction never shows you as clear of it.
 
 ## Command line, several machines
 
-`apply` makes one apply-config plan for each machine you choose, shows every change, and asks one
-question for all of them.
+`apply` makes one apply-config plan for each machine you choose, shows every change when you pass
+`--diff` (without it, only the number of lines of each change), and asks one question for all of
+them.
 
 ```bash
 bronzewardctl apply <release> --machine <machine>,<machine> --diff
-bronzewardctl apply <release> --all
+bronzewardctl apply <release> --all --diff
 ```
 
 Each machine is named by name or ID. `--diff` prints each plan's change. The command prints, for
@@ -105,9 +106,9 @@ The command leaves a machine out, with its reason, and never approves it unseen:
 | "stopped: the machine changed since Bronzeward last verified it; decide on the drift first" | Drift is its own journey, not written here yet. |
 | "stopped: an operation on this machine is unresolved; open it with operation list" | Read the operation. Recovery is its own journey, not written here yet. |
 | "stopped: the plan waiting for this machine is not an apply plan; open it with plan show <plan>" | Decide that plan on its own. |
-| "stopped: the change of its plan cannot be shown ... it is left out" | The configuration could not be redacted, or the machine holds a configuration other than the one Bronzeward last applied. Read the plan with `plan show` and approve it alone with `approve`, or leave the machine out. |
+| "stopped: the change of its plan cannot be shown ... it is left out" | The configuration could not be redacted, or the machine holds a configuration other than the one Bronzeward last applied. A plan somebody else prepared stays: read it with `plan show` and approve it alone with `approve`, or leave the machine out. A plan this command made is cancelled: make a new one with `plan create` and approve that, or leave the machine out. |
 | "stopped: the change of its plan could not be read (<reason>), so it is left out" | Try again; read the plan with `plan show`. |
-| "stopped: its plan overwrites the drifted configuration of drift record <n>, which no reviewer has seen; it is left out." | The plan is bound to a drift record. Approve it alone with `approve`, or leave the machine out. Drift is its own journey, not written here yet. |
+| "stopped: its plan overwrites the drifted configuration of drift record <n>, which no reviewer has seen; it is left out." | The plan is bound to a drift record. A plan somebody else prepared stays: approve it alone with `approve`, or leave the machine out. A plan this command made is cancelled: make a new one with `plan create`, or leave the machine out. Drift is its own journey, not written here yet. |
 | "not a machine of release <release>: <names>; nothing was sent" | A name you gave is not covered by this release. |
 
 If you choose a control plane machine, the command says: "A control plane machine is chosen.
@@ -148,8 +149,10 @@ sends nothing.
 4. **Apply** stays off while any plan's change is unread, bound to a drift record, or withheld by
    the server. The page names that plan and links to it. Open it, read it, and approve it there
    one plan at a time, or untick the machine. A plan the page made and you did not approve is
-   cancelled when you untick its machine or leave the page, and a plan you pressed Apply for is
-   never cancelled.
+   cancelled when you untick its machine or leave the page, with one exception: a plan the page
+   handed over to you because its change is withheld or bound to a drift record stays either way.
+   Cancel it on its own page with **Cancel plan** if you do not want it. A plan you pressed Apply
+   for is never cancelled.
 
 **Adopting a draft's machines.** An open draft page that holds a machine's import has a section
 "Adopt these machines" with one button of the same name. The sentence above it reads: "Adopting

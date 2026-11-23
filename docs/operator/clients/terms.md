@@ -40,7 +40,8 @@ which page shows it at work. Nothing here is a command; the command pages are li
 - **Observation**: a recorded read of a machine's configuration.
 - **Drift**: a read of the machine that differs from Applied while no operation holds the machine.
   It opens a **drift record**.
-- **Frozen**: a machine whose plans cannot commit until an approver unfreezes it.
+- **Frozen**: a machine whose apply plans cannot commit, and on which no new attempt starts, until
+  an approver unfreezes it. An adopt plan still commits, since an adoption sends nothing.
 - **Import base**: the sanitized configuration read from a machine and kept in a draft as that
   machine's starting point. See [protected import](protected-import.md).
 - **Adopt**: record what a machine runs as its Applied configuration, by observation. Adopting

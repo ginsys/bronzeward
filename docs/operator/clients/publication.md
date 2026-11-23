@@ -1,7 +1,7 @@
 # Journey: publish a draft and read what it built
 
 **You want** to turn a finished draft into a **release**: the configuration of every machine of
-one cluster, rendered and checked, and made each machine's **Desired** release (the release the
+one cluster that has an import base, rendered and checked, and made each such machine's **Desired** release (the release the
 installation wants the machine to run; see [the inventory](inventory.md)). Then you want to
 read what was built, machine by machine, before anybody plans to send it. Words such as ETag and
 epoch are in [the word list](terms.md).

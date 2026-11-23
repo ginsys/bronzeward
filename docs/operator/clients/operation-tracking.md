@@ -113,8 +113,9 @@ which revision the server has and sends nothing.
 
 - "Completed" for an apply names the observation that confirmed the release. It is the
   controller's reading of the machine at that time, and not a guarantee about any later time.
-- Times marked "received" are this client's clock. Only the completion line carries the server's
-  time.
+- On the command line, times marked "received" are this client's clock, and only the completion
+  line carries the server's time. On the web, a finished operation's timeline is read again from the
+  server, so its rows then show the server's times without the word "received".
 - A stopped watch says nothing about the operation. Read it again with `operation show`.
 
 Next: read the machine's row in [the inventory](inventory.md), where Applied now names the
