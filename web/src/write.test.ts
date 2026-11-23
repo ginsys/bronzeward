@@ -1373,3 +1373,34 @@ describe("a write sent once (spec.once)", () => {
     expect(waits).toEqual(BACKOFF);
   });
 });
+
+// A renewal of the sign-in is not a repeat of a failure: a write sent once goes out once more after it.
+describe("a write sent once and answered 401 (spec.once)", () => {
+  const once = () => new Write({ method: "POST", path: "/discoveries", body: { kind: "talosconfig" }, resource: "/clusters", once: true });
+  const expired = () => problem(401, "unauthenticated", {}, null);
+
+  test("a renewed 401 is sent once more, after the 1 s every renewed repeat waits, and done ends it", async () => {
+    const renew = vi.fn(async () => true);
+    const { writes, waits, writesSent } = page([expired(), created({ id: "d1" })], [], { renew });
+    expect((await writes.submit(once())).kind).toBe("done");
+    expect(renew).toHaveBeenCalledTimes(1);
+    expect(writesSent()).toHaveLength(2);
+    expect(waits).toEqual([BACKOFF[0]]);
+  });
+
+  test("a second 401 after the renewal is sent no further and ends the sign-in", async () => {
+    const renew = vi.fn(async () => true);
+    const { writes, writesSent } = page([expired(), expired()], [], { renew });
+    expect(await writes.submit(once())).toMatchObject({ kind: "refused", status: 401 });
+    expect(renew).toHaveBeenCalledTimes(1);
+    expect(writesSent()).toHaveLength(2);
+  });
+
+  test("a 503 on the resend ends the write at once: two sends in all, no further wait", async () => {
+    const renew = vi.fn(async () => true);
+    const { writes, waits, writesSent } = page([expired(), problem(503, "talos-access-unavailable")], [], { renew });
+    expect((await writes.submit(once())).kind).toBe("not-done");
+    expect(writesSent()).toHaveLength(2);
+    expect(waits).toEqual([BACKOFF[0]]);
+  });
+});
