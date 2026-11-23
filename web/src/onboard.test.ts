@@ -1252,3 +1252,39 @@ describe("a list of endpoints through the real write layer", () => {
     }
   });
 });
+
+// A discovery whose answer was lost is held and repeated as the same write; a repeat that changes between a list try and a typed
+// endpoint takes the retry policy of the repeat, not of the first send.
+describe("the page's send keeps the retry policy of each send of a held discovery", () => {
+  const discovery = (once: boolean): WriteSpec => ({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", endpoint: "10.0.0.1" }, released: () => {}, ...(once && { once: true as const }) });
+  // One shared write layer whose every discovery send is lost; `posts` counts the sends.
+  const lost = () => {
+    const writes = new Writes(() => "p", async () => {});
+    const counted = { posts: 0 };
+    writes.client = {
+      currentEpoch: "e1",
+      attempt: async (m: string) => {
+        if (m === "GET") return { status: 200, headers: new Headers({ "Bronzeward-Epoch": "e1" }), data: {} };
+        counted.posts++;
+        return undefined;
+      },
+    } as unknown as Client;
+    return { send: sender(writes, () => true), counted };
+  };
+
+  test("a list try that was lost, then the same endpoint typed: the typed send makes its four attempts", async () => {
+    const { send, counted } = lost();
+    expect((await send(discovery(true))).kind).toBe("unknown");
+    expect(counted.posts).toBe(1);
+    expect((await send(discovery(false))).kind).toBe("unknown");
+    expect(counted.posts).toBe(1 + 4);
+  });
+
+  test("a typed endpoint that was lost, then the same endpoint as a list try: the list send makes one attempt", async () => {
+    const { send, counted } = lost();
+    expect((await send(discovery(false))).kind).toBe("unknown");
+    expect(counted.posts).toBe(4);
+    expect((await send(discovery(true))).kind).toBe("unknown");
+    expect(counted.posts).toBe(4 + 1);
+  });
+});
