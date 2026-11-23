@@ -292,6 +292,9 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await browser.keys("Enter");
     await browser.waitUntil(async () => (await results()).some((t) => /^Scope marked (blocked|ready|unresolved), was blocked/.test(t)), { timeout: 60_000, timeoutMsg: "no result of the row says the scope was marked" });
     expect((await results()).filter((t) => /^Scope marked /.test(t))).toHaveLength(1);
+    // The text alone would pass on a second send that answers later: the sends are counted too, and none follows.
+    expect(await posts(`/recovery/scopes/${m}/marks`)).toHaveLength(1);
+    await absent(async () => (await posts(`/recovery/scopes/${m}/marks`)).length > 1, "a second mark sent");
     // The accounting's answer ("is now blocked until it is marked") is stale once the mark is made, so the row no longer shows it.
     // The accounting form itself has left the row by now, so the answer is looked for in the row: a lookup through the form would throw.
     await absent(() => row(m).$('[data-testid="settle-answer"]').isExisting(), "the accounting's answer after the mark");
@@ -305,6 +308,8 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await browser.waitUntil(async () => (await results()).some((t) => t.startsWith("Scope released, was ready")), { timeout: 60_000, timeoutMsg: "no result of the row says the scope was released" });
     const releases = (await results()).filter((t) => t.startsWith("Scope released, was ready"));
     expect(releases).toHaveLength(1);
+    expect(await posts(`/recovery/scopes/${m}/releases`)).toHaveLength(1);
+    await absent(async () => (await posts(`/recovery/scopes/${m}/releases`)).length > 1, "a second release sent");
     expect(releases[0]).toContain("A release is not an approval");
     const seen = await measure();
     expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
