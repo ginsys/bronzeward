@@ -335,10 +335,12 @@ wait for or precede. On PostgreSQL a plain read does not stop a concurrent
 change before commit
 ([DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication)
 rows 010 and 011); design §7.7's consequences require such locks, each with a
-test that can fail. The transaction first locks the machine's row, the lock
+test that can fail. The transaction locks the machine's row, the lock
 under which §4.1 allocates timeline revisions (on PostgreSQL, `FOR UPDATE`),
 and reads the other records named below `FOR SHARE`; the lock order is
-persistence's (see `persistence-api.md`).
+persistence's (see `persistence-api.md`), and for an `apply-config` plan the
+machine's row is taken at its place in one id-ordered pass over the cluster's
+machine rows (after comparison 6a below), never before the others.
 
 0. no operation exists for this plan yet: the transaction creates it, so a
    second executor for the same plan is refused (DS row 009; §2,
@@ -416,8 +418,8 @@ persistence's (see `persistence-api.md`).
    `Applied` release already holds that name: a name it holds now is not a name
    it takes, so two machines that already shared one stay as they were. A `null` on either side is
    not compared: the record holds `null` where any input to the name is a
-   secret reference, because the comparison would be an equality test on a
-   secret, and where the configuration sets no hostname, because no name is
+   secret reference or a value the review redacts (persistence and API §9.2),
+   because the comparison would be an equality test on a secret, and where the configuration sets no hostname, because no name is
    known. Another machine with no `Applied` holds no name, and an adopt plan
    sends nothing, so the gate does not apply to it. The refusal leaves the plan
    `approved`: it commits once the other machine's `Applied` no longer holds the
@@ -434,7 +436,9 @@ and could deadlock with an identity revocation or recovery-mode entry, which
 take every machine row in id order (persistence and API T5c and T9). At the PoC
 limit of one no other machine's operation holds the rollout slot when a
 commitment commits (comparison 5), so the gate reads another machine's
-`Applied` after the apply that would have raced it has completed. It also
+`Applied` after the apply that would have raced it has ended, and sees what
+that apply recorded: a completed apply replaced `Applied`, and one that ended
+without it left the old record, a case the gate does not close (§9.3). It also
 refuses a name that moved after publication: a completed apply or an adoption
 record that set another machine's `Applied` since the release was published,
 which publication's own check (compilation §6.1 item 6) could not see. The refusal's
@@ -2031,15 +2035,22 @@ the recorded `Applied` releases and never a node's hostname, so it cannot see an
 adopted baseline whose record names a hostname the node does not run. An
 adoption advances `Applied` without changing the node (§6.3), so the recorded
 `nodeName` can differ from what the node runs, and a clash with the running
-name is not refused until a completed apply replaces the record.
+name is not refused until a completed apply replaces the record. The same
+holds for an apply that sent a new hostname to the node and then ended without
+recording `Applied` (a failed health postcondition, §4, or an unresolved
+outcome): the machine's `Applied` still names the earlier node name, so a
+commitment that gives the new name to another machine passes comparison 6a
+while the first machine runs it. The first machine's drift or unresolved
+record does not stop that commitment, and the gate does not read it.
 Three further cases are not compared at all: a hostname that depends on a secret
 reference (`nodeName` `null`), whose clash an equality test would make a test on
 the secret; a configuration that sets none, where the node chooses its own
 name; and a machine whose applied release was made before `nodeName` was
-recorded, which reads `null` until a later apply replaces it. Closing the adopted case would need one compared value per machine, the
+recorded, which reads `null` until a later apply replaces it. Closing these cases would need one compared value per machine, the
 `Applied` release's `nodeName` except that an adoption-set `Applied` takes the
-name observed at that adoption, ending at the next completed apply; that is not
-specified here (ginsys/bronzeward#1052).
+name observed at that adoption, ending at the next completed apply, and, for the
+ended-without-`Applied` case, the node name of the release that apply sent while
+its outcome is not completed; that is not specified here (ginsys/bronzeward#1052).
 
 Until these close, an implementation must expose unresolved outcomes and stop
 conflicting work rather than claim safe retry beyond §5.1, exactly-once
