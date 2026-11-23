@@ -313,13 +313,15 @@ func (e *env) applyShow(rows []*applyRow, diff bool) {
 // nothing: an unknown outcome may have been committed, and its error says so.
 func (e *env) applyApprove(c *client.Client, rows []*applyRow, epoch string, moves int) error {
 	var errs []error
-	// outcomes has one entry per plan sent; firstUnknown indexes the first unknown one there and unknownAt its error in errs.
-	var outcomes []string
-	firstUnknown, unknownAt := -1, -1
+	// unknownAt is the first approval of unknown outcome's error in errs, and tried counts the plans sent after it.
+	unknownAt, tried := -1, 0
 	for _, r := range rows {
 		if r.plan == "" {
 			tf(e.out, "%s: %s\n", r.label(), r.line)
 			continue
+		}
+		if unknownAt >= 0 {
+			tried++
 		}
 		w := &client.Write{Method: http.MethodPost, Path: "/plans/" + url.PathEscape(r.plan) + "/approvals", Body: []byte("{}"), HumanOnly: true,
 			Check: "plan show " + client.ShellWord(r.plan),
@@ -340,37 +342,22 @@ func (e *env) applyApprove(c *client.Client, rows []*applyRow, epoch string, mov
 		})
 		if err != nil {
 			if mayHaveCommitted(err) {
-				outcomes = append(outcomes, "unknown")
-				if firstUnknown < 0 {
-					firstUnknown, unknownAt = len(outcomes)-1, len(errs)
+				if unknownAt < 0 {
+					unknownAt = len(errs)
 				}
 				errs = append(errs, fmt.Errorf("%s: %w", r.label(), err))
 			} else {
-				outcomes = append(outcomes, "not approved")
 				errs = append(errs, fmt.Errorf("%s: %w; nothing was approved for this machine", r.label(), err))
 			}
 			continue
 		}
-		outcomes = append(outcomes, "approved")
 		tf(e.out, "%s\n", approved)
 	}
 	// Unlike the apply page, which holds its batch on an unknown outcome, the command goes on while the epoch
 	// holds: each approval is its own plan, and the person confirmed them all with one y. The first unknown line
-	// says what became of the plans after it, from what the loop saw plan by plan.
-	if firstUnknown >= 0 {
-		count := map[string]int{}
-		for _, o := range outcomes[firstUnknown+1:] {
-			count[o]++
-		}
-		var said []string
-		for _, o := range []struct{ key, text string }{{"approved", "approved"}, {"unknown", "sent with an unknown outcome"}, {"not approved", "not approved (each line above says why)"}} {
-			if n := count[o.key]; n > 0 {
-				said = append(said, sf("%d %s", n, o.text))
-			}
-		}
-		if len(said) > 0 {
-			errs[unknownAt] = fmt.Errorf("%w; of the plans after it: %s", errs[unknownAt], strings.Join(said, ", "))
-		}
+	// says that, in one sentence that classifies nothing: each plan's own line says what happened to it.
+	if unknownAt >= 0 && tried > 0 {
+		errs[unknownAt] = fmt.Errorf("%w; the plans after it were tried in order, and each plan's own line says what happened to it", errs[unknownAt])
 	}
 	return errors.Join(errs...)
 }
