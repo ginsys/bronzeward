@@ -1182,7 +1182,7 @@ unmeasured.
    A node name that moves between machines is the second clash: a machine whose
    release gives it a node name equal to the node name that another machine's
    last applied release recorded (the release's `nodeName`, persistence and API
-   §9.2), and that its own applied release does not already hold, is refused the
+   §9.3), and that its own applied release does not already hold, is refused the
    same way, naming both machines, until that machine's
    applied release no longer holds it. The recorded value is the derived node
    name above, so the comparison covers a hostname filled from a name, an
@@ -1214,7 +1214,7 @@ unmeasured.
    earlier name. Publish and apply the release for the first machine. Give the
    second machine the first's old name, publish and apply. Then give the first
    machine its final name, publish and apply. The check is no guarantee. It reads the recorded `nodeName` of each
-   machine's applied release (persistence and API §9.2), so it does not cover a
+   machine's applied release (persistence and API §9.3), so it does not cover a
    hostname that depends on a secret reference (`nodeName` `null`, not
    compared), a machine whose configuration sets no hostname (`null` as well:
    the node chooses its own), or an adopted baseline whose record names a
@@ -2374,7 +2374,7 @@ in place as
     over a warning that leaves it to whoever approves the plan. The same choice
     covers a machine whose release gives it a node name that another machine's
     applied release holds, compared on the recorded `nodeName` (persistence and
-    API §9.2) so that an explicit hostname and `registerWithFQDN` are covered
+    API §9.3) so that an explicit hostname and `registerWithFQDN` are covered
     too; the commitment refuses what moved after publication (execution and
     recovery choice §10.39). Agent decision, 2026-11-23
     (ginsys/bronzeward#1052).

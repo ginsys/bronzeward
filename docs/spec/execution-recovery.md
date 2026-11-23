@@ -412,13 +412,13 @@ machine rows (after comparison 6a below), never before the others.
    of the plan's cluster has an `Applied` release whose machine record holds
    the node name the bound release gives this machine. The record's `nodeName`
    is the Kubernetes node name derived from the machine's hostname as
-   compilation §6.1 item 6 states it (persistence and API §9.2). The gate
+   compilation §6.1 item 6 states it (persistence and API §9.3). The gate
    compares the bound release's `nodeName` with that of each other machine's
    `Applied` release and refuses when two are equal, unless the machine's own
    `Applied` release already holds that name: a name it holds now is not a name
    it takes, so two machines that already shared one stay as they were. A `null` on either side is
    not compared: the record holds `null` where any input to the name is a
-   secret reference or a value the review redacts (persistence and API §9.2),
+   secret reference or a value the review redacts (persistence and API §9.3),
    because the comparison would be an equality test on a secret, and where the configuration sets no hostname, because no name is
    known. Another machine with no `Applied` holds no name, and an adopt plan
    sends nothing, so the gate does not apply to it. The refusal leaves the plan
@@ -438,7 +438,7 @@ limit of one no other machine's operation holds the rollout slot when a
 commitment commits (comparison 5), so the gate reads another machine's
 `Applied` after the apply that would have raced it has ended, and sees what
 that apply recorded: a completed apply replaced `Applied`, and one that ended
-without it left the old record, a case the gate does not close (§9.3). It also
+`failed` left the old record, a case the gate does not close (§9.3). It also
 refuses a name that moved after publication: a completed apply or an adoption
 record that set another machine's `Applied` since the release was published,
 which publication's own check (compilation §6.1 item 6) could not see. The refusal's
@@ -2036,12 +2036,13 @@ adopted baseline whose record names a hostname the node does not run. An
 adoption advances `Applied` without changing the node (§6.3), so the recorded
 `nodeName` can differ from what the node runs, and a clash with the running
 name is not refused until a completed apply replaces the record. The same
-holds for an apply that sent a new hostname to the node and then ended without
-recording `Applied` (a failed health postcondition, §4, or an unresolved
-outcome): the machine's `Applied` still names the earlier node name, so a
-commitment that gives the new name to another machine passes comparison 6a
-while the first machine runs it. The first machine's drift or unresolved
-record does not stop that commitment, and the gate does not read it.
+holds for an apply that sent a new hostname to the node and then ended
+`failed` without recording `Applied` (a failed health postcondition, §4): the
+operation released the rollout slot and the machine's `Applied` still names the
+earlier node name, so a commitment that gives the new name to another machine
+passes comparison 5 and comparison 6a while the first machine runs it. An
+`unresolved` outcome is not this case: it keeps the cluster's one rollout slot
+(comparison 5), so no other commitment passes until it is settled.
 Three further cases are not compared at all: a hostname that depends on a secret
 reference (`nodeName` `null`), whose clash an equality test would make a test on
 the secret; a configuration that sets none, where the node chooses its own
@@ -2049,8 +2050,8 @@ name; and a machine whose applied release was made before `nodeName` was
 recorded, which reads `null` until a later apply replaces it. Closing these cases would need one compared value per machine, the
 `Applied` release's `nodeName` except that an adoption-set `Applied` takes the
 name observed at that adoption, ending at the next completed apply, and, for the
-ended-without-`Applied` case, the node name of the release that apply sent while
-its outcome is not completed; that is not specified here (ginsys/bronzeward#1052).
+failed case, the node name of the release that apply sent until a later apply
+completes; that is not specified here (ginsys/bronzeward#1052).
 
 Until these close, an implementation must expose unresolved outcomes and stop
 conflicting work rather than claim safe retry beyond §5.1, exactly-once
@@ -2490,7 +2491,7 @@ conservative option; those that do not say so. Each is marked in place as
     every machine's `Applied` under locks and after the rollout slot, so it
     refuses what changed after publication, and the plan stays `approved` and
     waits, never ends (choice §10.27). It compares the derived node name, which
-    the release records for every machine (persistence and API §9.2), and never
+    the release records for every machine (persistence and API §9.3), and never
     a hostname: a name that depends on a secret reference records `null` and is
     not compared. Agent decision, 2026-11-23 (ginsys/bronzeward#1052).
     Alternatives: a refusal at plan creation, which reads `Applied` at a moment
