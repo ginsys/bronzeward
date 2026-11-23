@@ -56,6 +56,17 @@
 #                                step 8's and step 10's two releases and step 11's exit, each with the
 #                                output kept as cli-<name>.txt in the evidence directory. Steps 1, 2, 4
 #                                and 5 and the checks of each state are as in run.)
+#        scenarios/s7 web       (as run, after scenarios/s4 cli on the same up; the recovery-admin's acts
+#                                of steps 3 and 6 to 11 made in a browser as h-recovery, through the web
+#                                host and web/e2e/fixture (ginsys/bronzeward#365): step 3's entry form on
+#                                the recovery start before its entry, step 6's takeover of held on the
+#                                operation's page, step 7's two scope accountings on the console's rows
+#                                (one decision per scope), the three marks, step 8's and step 10's two
+#                                releases and step 11's exit, each with the page's text kept as
+#                                web-<name>.txt in the evidence directory. Steps 1, 2, 4 and 5, the restores,
+#                                B-recovery's start, the snapshots, the revocations and the checks of each
+#                                state are as in run; the browser's acts need web/dist, web/node_modules and
+#                                a built bin/webhost, as s6 web does.)
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 bin=$here/../bin
@@ -63,7 +74,7 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 s7_mode=${1:-}
-case $s7_mode in run | cli | closing | no-entry | transit | old-bao | t11) ;; *) die "usage: scenarios/s7 run|cli|closing|no-entry|transit|old-bao|t11" ;; esac
+case $s7_mode in run | cli | web | closing | no-entry | transit | old-bao | t11) ;; *) die "usage: scenarios/s7 run|cli|web|closing|no-entry|transit|old-bao|t11" ;; esac
 need docker curl jq timeout id sleep date awk wc sha256sum
 need_state
 # No fixture lock of its own: inject and evidence each take the one they need.
@@ -202,6 +213,37 @@ enter_cli() {
   who=$(who_id h-recovery) && [ -n "$who" ] || return 1
   same "$(sql "SELECT entered_by FROM recovery_epoch WHERE epoch = '$epoch'")" "$who"
 }
+# web_done <name> <ERE>: the browser act's output holds the answer the ERE names and the one passing case.
+web_done() { web_kept "$1" "$2" && web_kept "$1" '1 passing'; }
+# enter_web: the entry of mode web, through the entry form of the recovery start. The page's answer names the act; the new epoch
+# and the entry's actor are read from the database, as the CLI's are, and held taken over is checked by held_taken_over.
+enter_web() {
+  local who
+  web_act enter enter BW_FIXTURE_DB_BACKUP="$db_backup" BW_FIXTURE_DB_TAKEN="$t_at" BW_FIXTURE_PROVIDER_BACKUP="$bao_backup" \
+    BW_FIXTURE_PROVIDER_TAKEN="$bao_at" BW_FIXTURE_STOPPED="$stopped_at" BW_FIXTURE_TEXT="$entry_reason" &&
+    web_done enter 'ACT enter: answer: Recovery mode entered \(act ' || return 1
+  epoch=$(sql "SELECT epoch FROM installation_state") && [ -n "$epoch" ] && [ "$epoch" != "$restored_epoch" ] || return 1
+  who=$(who_id h-recovery) && [ -n "$who" ] || return 1
+  same "$(sql "SELECT entered_by FROM recovery_epoch WHERE epoch = '$epoch'")" "$who"
+}
+# web_account_scope <name> <machine> <start> <end> <state text>: h-recovery accounts one scope on its row of the console, and the
+# answer says the scope is now in that state.
+web_account_scope() {
+  web_act "$1" scope-account BW_FIXTURE_MACHINE="$2" BW_FIXTURE_START="$3" BW_FIXTURE_END="$4" BW_FIXTURE_TEXT="$mutation_ref: the scope's settle reads" &&
+    web_done "$1" "ACT scope-account: answer: Recorded\. Scope .* is now $5\."
+}
+# mark_web <machine> <name> <state> <missing item or ->: the Mark press on the scope's row; the answer says the scope marked in that
+# state, with that one item missing or none; its restoration observation, read from the scope's timeline, in marked.
+mark_web() {
+  web_act "mark-$2" mark BW_FIXTURE_MACHINE="$1" && web_done "mark-$2" "ACT mark: answer: Scope marked $3, was " || return 1
+  if [ "$4" = - ]; then
+    ! web_kept "mark-$2" 'Missing [a-z-]+: '
+  else
+    web_kept "mark-$2" "Missing $4: "
+  fi || return 1
+  marked=$(sql "SELECT entry->>'observation' FROM machine_event WHERE machine = '$1' AND kind = 'scope-state'
+    AND entry->>'cause' = 'restoration-mark' ORDER BY revision DESC LIMIT 1") && [ -n "$marked" ]
+}
 # enter: h-recovery records the entry on call_port: 201, a new epoch fencing the restored one, by
 # h-recovery as recovery-admin, every machine marked and held, when set, among the operations taken
 # over; the new epoch in epoch.
@@ -209,6 +251,9 @@ enter() {
   local who body
   if [ "$s7_mode" = cli ]; then
     enter_cli
+    return
+  elif [ "$s7_mode" = web ]; then
+    enter_web
     return
   fi
   fresh h-recovery
@@ -335,6 +380,9 @@ takeover_held() {
     cli_ready "$mutation_ref" h-recovery
     ctl takeover h-recovery recovery takeover "$held" --reason "$ds_ref 6" &&
       cli_kept takeover "^Operation $held taken over \(act [a-z]+_[a-z2-7]+\): unresolved at generation 3\."
+  elif [ "$s7_mode" = web ]; then
+    web_act takeover takeover BW_FIXTURE_OP="$held" BW_FIXTURE_TEXT="$ds_ref 6" &&
+      web_done takeover 'ACT takeover: answer: Taken over: generation 3, state unresolved'
   else
     take_over "$held" 6 2
   fi
@@ -347,6 +395,10 @@ account_both() {
   if [ "$s7_mode" = cli ]; then
     cli_account_scope account-controlplane "$machine_cp" "$cp_start" "$cp_end" 'blocked until it is marked' &&
       cli_account_scope account-worker "$machine_w" "$w_start" "$w_end" 'unresolved: a restored operation still holds it'
+    return
+  elif [ "$s7_mode" = web ]; then
+    web_account_scope account-controlplane "$machine_cp" "$cp_start" "$cp_end" 'blocked until it is marked' &&
+      web_account_scope account-worker "$machine_w" "$w_start" "$w_end" 'unresolved: a restored operation still holds it'
     return
   fi
   fresh h-recovery
@@ -382,6 +434,9 @@ mark_as() {
   if [ "$s7_mode" = cli ] && [ "$#" -ge 5 ]; then
     mark_cli "$1" "$3" "$4" "$5"
     return
+  elif [ "$s7_mode" = web ] && [ "$#" -ge 5 ]; then
+    mark_web "$1" "$3" "$4" "$5"
+    return
   fi
   fresh h-recovery
   answers_with "$2" 201 - POST "/api/v1/recovery/scopes/$1/marks" "$tok" '{"facts": {}}' "$(key "mark-$3")" || return 1
@@ -393,6 +448,9 @@ release_scope() {
     cli_ready "$mutation_ref" h-recovery
     ctl "release-$2" h-recovery recovery release "$1" &&
       cli_kept "release-$2" "^Scope $1 released, was [a-z-]+ \(act [a-z]+_[a-z2-7]+\)\."
+    return
+  elif [ "$s7_mode" = web ]; then
+    web_act "release-$2" release BW_FIXTURE_MACHINE="$1" && web_done "release-$2" 'ACT release: answer: Scope released, was '
     return
   fi
   fresh h-recovery
@@ -425,6 +483,9 @@ exited() {
     ctl exit h-recovery recovery exit &&
       cli_kept exit "^Recovery mode left \(act [a-z]+_[a-z2-7]+\) in epoch $epoch\.$" &&
       cli_kept exit "^Scopes returned to normal: 2: .*$machine_cp" && cli_kept exit "^Scopes returned to normal: 2: .*$machine_w"
+    return
+  elif [ "$s7_mode" = web ]; then
+    web_act exit exit && web_done exit 'ACT exit: answer: Recovery mode left \(act '
     return
   fi
   fresh h-recovery

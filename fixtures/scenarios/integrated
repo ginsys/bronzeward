@@ -20,9 +20,10 @@
 # up s1p s3h s2p s4cli s6cli down (S6.1's accounting and resolution through bronzewardctl);
 # up s1p s3h s2p s4cli s6web down (the same acts made in a headless browser as h-recovery; needs mise run web first);
 # up s1p s3h s2p s4cli s7cli down (S7's takeover, scope accounting, marks and releases through
-# bronzewardctl; s4cli replaces s3 run, so there is no s3rp).
+# bronzewardctl; s4cli replaces s3 run, so there is no s3rp);
+# up s1p s3h s2p s4cli s7web down (the same acts made in a headless browser as h-recovery; needs mise run web first).
 # Steps: up down s0 s0p s0walk s1 s1p s1nid s3h s3hc s2 s2p s3r s3rp s4 s4c s4x s4ds s4cli s5 s5p
-# s5cli s5roles s6 s6cli s6web s7 s7cli s7c s7n s7t s7o s8 s8controls s8revocation; a step ending in p is that
+# s5cli s5roles s6 s6cli s6web s7 s7cli s7web s7c s7n s7t s7o s8 s8controls s8revocation; a step ending in p is that
 # scenario's pass mode. A step appears once per list: its log is <step>.log.
 # The record: <record dir>/<preset>-<utc>/chain.log (checkout, start, end and exit status of each
 # step), <step>.log, evidence/ (a copy of the fixture's evidence directories).
@@ -91,6 +92,7 @@ command_of() {
     s6web) cmd=("$here/s6" web) ;;
     s7) cmd=("$here/s7" run) ;;
     s7cli) cmd=("$here/s7" cli) ;;
+    s7web) cmd=("$here/s7" web) ;;
     s7c) cmd=("$here/s7" closing) ;;
     s7n) cmd=("$here/s7" no-entry) ;;
     s7t) cmd=("$here/s7" transit) ;;
