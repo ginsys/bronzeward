@@ -39,6 +39,19 @@ describe("the publication page (ginsys/bronzeward#342, journeys §5.5)", () => {
     });
   });
 
+  test("a refused fragment is named by its name and layer, with the position in brackets; without a name the position stays as it was", () => {
+    const base = { type: "urn:bronzeward:problem:validation-failed", status: 422, rule: "kind-mismatch", input: "fragment[1]" };
+    const text = (error: unknown) => (publishEnd(op("failed", null, error)) as { text: string }).text;
+    expect(text({ ...base, fragment: "network", layer: "site" })).toContain("The input: the fragment network in layer site (position 1, the first is 0).");
+    expect(text(base)).toContain("The input: the fragment at position 1 (the first is 0).");
+    expect(text({ ...base, input: "base" })).toContain("The input: the base.");
+  });
+
+  test("a fragment name or layer that is not safe text reads (not shown), with the position kept", () => {
+    const error = { type: "urn:bronzeward:problem:validation-failed", status: 422, input: "fragment[0]", fragment: "net\u001b[2Jwork", layer: "si\u001bte" };
+    expect((publishEnd(op("failed", null, error)) as { text: string }).text).toContain("The input: the fragment (not shown) in layer (not shown) (position 0, the first is 0).");
+  });
+
   test("a refusal's rule, input, paths and message are safe text, a long path list says how many are left out, and a cluster refusal names no machine", () => {
     const paths = Array.from({ length: 23 }, (_, i) => `p${i}`);
     const e = publishEnd(op("failed", null, { type: "urn:bronzeward:problem:validation-failed", rule: "fidelity\u001b[2J", input: "fragment\u001b[2J", paths, message: "no stop" }));

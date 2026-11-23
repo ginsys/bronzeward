@@ -321,6 +321,64 @@ func TestBuildReleaseCommits(t *testing.T) {
 	b.noSecretIn(rows + fmt.Sprint(u.machines[0].redacted))
 }
 
+// kindMismatch makes the network fragment, the second composed after the fixture's base-layer one,
+// resolve a reference to a value of another kind than it declares.
+func kindMismatch(b *buildEnv) {
+	before := maps.Clone(b.held.values)
+	b.fragment("network", "site", buildFragment(""))
+	for gen := range b.held.values {
+		if _, ok := before[gen]; !ok {
+			v, err := provider.NewValue(provider.KindMapping, map[string]string{"member": "other"})
+			if err != nil {
+				b.t.Fatal(err)
+			}
+			b.held.values[gen] = v
+		}
+	}
+}
+
+// A refusal that names a fragment by position names it by name and layer too (persistence and API, Refusals), so a
+// person need not count; a refusal that names no fragment names none, as before.
+func TestBuildReleaseRefusalNamesFragment(t *testing.T) {
+	b := newBuildEnv(t)
+	kindMismatch(b)
+	_, ref := b.build()
+	if ref == nil || ref.extra["input"] != "fragment[1]" {
+		t.Fatalf("buildRelease: %v; want a refusal naming fragment[1]", ref)
+	}
+	if ref.extra["fragment"] != "network" || ref.extra["layer"] != "site" {
+		t.Fatalf("refusal names fragment %v in layer %v; want network in site", ref.extra["fragment"], ref.extra["layer"])
+	}
+	b.noSecretIn(fmt.Sprint(ref.extra) + ref.detail)
+
+	for _, c := range []struct {
+		name    string
+		prepare func(b *buildEnv)
+	}{
+		{"the base", func(b *buildEnv) { b.fragment("network", "site", buildFragment("  type: bogus\n")) }},
+		{"a cluster-level refusal", func(b *buildEnv) {
+			mustExec(b.t, b.db, `UPDATE cluster SET contract = 'v1.12' WHERE id = $1`, b.cluster)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b := newBuildEnv(t)
+			c.prepare(b)
+			_, ref := b.build()
+			if ref == nil {
+				t.Fatal("buildRelease: no refusal")
+			}
+			if in, _ := ref.extra["input"].(string); strings.HasPrefix(in, "fragment[") {
+				return // the case names a fragment: the check above covers it
+			}
+			for _, k := range []string{"fragment", "layer"} {
+				if _, ok := ref.extra[k]; ok {
+					t.Fatalf("refusal %v names %s though it names no fragment", ref.extra, k)
+				}
+			}
+		})
+	}
+}
+
 // A refused compilation fails the publication 422 naming the machine and rule (ruling R33), and
 // names no value.
 func TestBuildReleaseRefuses(t *testing.T) {
@@ -346,19 +404,7 @@ func TestBuildReleaseRefuses(t *testing.T) {
 		}, "", true, ""},
 		// Ingestion's rules applied while composing name the input they refused (PA §6.1): the
 		// network fragment, after the publish fixture's base-layer fragment.
-		{"value of another kind", func(b *buildEnv) {
-			before := maps.Clone(b.held.values)
-			b.fragment("network", "site", buildFragment(""))
-			for gen := range b.held.values {
-				if _, ok := before[gen]; !ok {
-					v, err := provider.NewValue(provider.KindMapping, map[string]string{"member": "other"})
-					if err != nil {
-						b.t.Fatal(err)
-					}
-					b.held.values[gen] = v
-				}
-			}
-		}, "kind-mismatch", true, "fragment[1]"},
+		{"value of another kind", kindMismatch, "kind-mismatch", true, "fragment[1]"},
 		{"Kubernetes outside the window", func(b *buildEnv) {
 			// The image is set in the KubeletConfig document. The v1.14.5 base holds that document, and
 			// validation refuses the v1alpha1 field machine.kubelet beside it, with rule "invalid".
