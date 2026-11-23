@@ -49,6 +49,7 @@ type Compiled struct {
 	redacted  *string
 	redactErr error
 	formOnly  bool
+	hostname  Hostname
 }
 
 // FormOnly reports whether the composed configuration holds the same documents, keys and values as
@@ -97,16 +98,38 @@ func (c Compiled) Materialized() Materialized { return c.m }
 // passes, so a step-7 refusal or a pass that fails to compose or attribute is returned first; an
 // invalid real configuration is then returned as Validate returns it, before any pass's own
 // validation.
+//
+// The hostname is decided once, from the first compilation (step 5a): where the composition sets
+// none and the machine has a name, the patch of hostnamePatch is composed last and the same compile
+// runs again over every source and the patch, taking no decision. The patch holds no reference, so
+// no record names it.
 func Compile(in Input) (Compiled, error) {
 	sources := append([]Source{in.Base}, in.Fragments...)
-	c, err := compile(in, sources)
+	c, err := compile(in, sources, true)
 	if err != nil {
 		return Compiled{}, newRedactor(sources).paths(err)
 	}
-	return c, nil
+	if c.hostname.Source != HostnameMachineName {
+		return c, nil
+	}
+	patch, err := hostnamePatch(c.hostname.Name)
+	if err != nil {
+		return Compiled{}, err
+	}
+	filled, err := compile(in, append(sources, patch), false)
+	if err != nil {
+		return Compiled{}, newRedactor(sources).paths(err)
+	}
+	for _, o := range filled.outcomes {
+		if o.by >= len(in.Fragments) { // overridden by the patch: no record can name it
+			return Compiled{}, fidelity()
+		}
+	}
+	filled.hostname, filled.origins = c.hostname, c.origins
+	return filled, nil
 }
 
-func compile(in Input, sources []Source) (Compiled, error) {
+func compile(in Input, sources []Source, decide bool) (Compiled, error) {
 	if _, err := ParseMode(string(in.Mode)); err != nil {
 		return Compiled{}, err
 	}
@@ -150,6 +173,7 @@ func compile(in Input, sources []Source) (Compiled, error) {
 	if err != nil {
 		return Compiled{}, fidelity()
 	}
+	var flips []Materialized
 	for _, t := range ts {
 		if t.Kind() != ingest.TraceBoolean {
 			continue
@@ -166,6 +190,7 @@ func compile(in Input, sources []Source) (Compiled, error) {
 		if attrs[t.ID()], err = flipped(traceLeaves, fm.bytes(), hosts); err != nil {
 			return Compiled{}, err
 		}
+		flips = append(flips, fm)
 	}
 	pre := prefixes{sources: sources, real: real, trace: trace, first: first, hosts: hs}
 	outcomes := make([]outcome, len(ts))
@@ -216,6 +241,11 @@ func compile(in Input, sources []Source) (Compiled, error) {
 	// past Compiled's own placeholder.
 	red := newRedactor(sources)
 	c := Compiled{m: m, origins: origins(sources), formOnly: sameInForm(real[0], m)}
+	if decide {
+		if c.hostname, err = decideHostname(in.Name, m, tm, flips); err != nil {
+			return Compiled{}, fidelity()
+		}
+	}
 	if text, err := redactedText(m.bytes(), hosts, outcomes, red); err != nil {
 		c.redactErr = err
 	} else {
