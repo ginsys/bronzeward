@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -50,6 +51,9 @@ type obMachine struct{ id, cluster, key, platform, endpoint, name string }
 type obIngestion struct {
 	id, machine, draft, op, state, result string
 	events                                [][2]string
+	// epoch is the epoch the operation was created in, which its body keeps whatever the answer's header shows
+	// later; empty means ep_OB-1.
+	epoch string
 }
 
 // apiFake is the Bronzeward server of the onboard tests.
@@ -355,7 +359,7 @@ func (f *apiFake) startImport(w http.ResponseWriter, r *http.Request, body []byt
 		f.problem(w, http.StatusPreconditionFailed, "precondition-failed", "")
 		return
 	}
-	i := obIngestion{id: id.New(id.Ingestion), machine: in.Machine, draft: in.Draft, op: id.New(id.Operation)}
+	i := obIngestion{id: id.New(id.Ingestion), machine: in.Machine, draft: in.Draft, op: id.New(id.Operation), epoch: f.epoch()}
 	f.starts++
 	switch {
 	case f.failImportAt != 0 && f.starts == f.failImportAt:
@@ -414,7 +418,7 @@ func (f *apiFake) operation(w http.ResponseWriter, r *http.Request, rest string)
 		state, result = "running", "null"
 	}
 	fmt.Fprintf(w, `{"id":%q,"kind":"ingest","state":%q,"subject":{"draft":%q,"draftRevision":1},"result":%s,"error":%s,`+
-		`"createdAt":"2026-11-01T06:00:00Z","epoch":%q,"lastEvent":%d}`, op, state, ing.draft, result, problem, f.epoch(), len(ing.events))
+		`"createdAt":"2026-11-01T06:00:00Z","epoch":%q,"lastEvent":%d}`, op, state, ing.draft, result, problem, cmp.Or(ing.epoch, "ep_OB-1"), len(ing.events))
 }
 
 // onboardEnv is one test's world.

@@ -610,8 +610,10 @@ and no assignment head, an assignment that selects nothing (the machine's config
 alone), so that the release the draft makes holds an assignment revision a plan can bind; running it again
 writes none that exists. It sends
 every write of one run under the epoch the run's first read showed, as the Connect a cluster page does for a plan: once the
-epoch has changed the next write is not sent, no later write goes out, and the output names what was done and what was
-not (each machine and import by name, then the later steps), and running it again begins under the new epoch. It needs
+epoch has changed the next write is not sent and no later write goes out. The table output says once that the epoch
+changed and that nothing more was sent, shows the steps as far as they got, and gives the command that runs it again,
+which begins under the new epoch (`-o json` and `-o yaml` carry the steps and the error, not that sentence). A run whose
+first read shows no epoch sends nothing. It needs
 an `author` signed in as a person (exit 1 otherwise, with nothing sent) and takes the flags of
 `cluster discover` and these:
 
