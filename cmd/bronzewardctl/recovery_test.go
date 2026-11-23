@@ -120,7 +120,17 @@ func posted() []string {
 func resetPosted() {
 	recoveryPostedMu.Lock()
 	defer recoveryPostedMu.Unlock()
-	recoveryPosted = nil
+	recoveryPosted, recoveryURIs = nil, nil
+}
+
+// recoveryURIs holds the method, path and query of every request recoveryServer saw since resetPosted, for a test
+// that reads a filter (the query of a list); uris returns them.
+var recoveryURIs []string
+
+func uris() []string {
+	recoveryPostedMu.Lock()
+	defer recoveryPostedMu.Unlock()
+	return slices.Clone(recoveryURIs)
 }
 
 // recoveryServer is a fake server for the recovery commands, answering reads from answers by
@@ -132,6 +142,9 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		seen = append(seen, r.Method+" "+r.URL.Path)
+		recoveryPostedMu.Lock()
+		recoveryURIs = append(recoveryURIs, r.Method+" "+r.URL.RequestURI())
+		recoveryPostedMu.Unlock()
 		if r.Method == http.MethodPost {
 			b, _ := io.ReadAll(r.Body)
 			recoveryPostedMu.Lock()
