@@ -29,6 +29,7 @@ type snapshot struct {
 
 type snapshotMachine struct {
 	machine, mode, importBase, assignment string
+	name                                  string // the machine's name at the snapshot, "" for none (§3.5)
 	fragments                             []string
 }
 
@@ -120,14 +121,14 @@ func (r *snapshotReader) read() (snapshot, *refusal, error) {
 	// The covered machines (ruling R21'): an import base after the draft, its entry's or its
 	// Applied release's (§3.2).
 	var machines []snapshotMachine
-	err := r.query(`SELECT m.id, m.platform, coalesce(e.import_base_revision, rm.import_base_revision, '')
+	err := r.query(`SELECT m.id, m.platform, coalesce(e.import_base_revision, rm.import_base_revision, ''), coalesce(m.name, '')
 		FROM machine m
 		LEFT JOIN draft_entry e ON e.draft = $1 AND e.machine = m.id
 		LEFT JOIN machine_state st ON st.machine = m.id
 		LEFT JOIN release_machine rm ON rm.release = st.applied_release AND rm.machine = m.id
 		WHERE m.cluster = $2 ORDER BY m.id`, func(row *sql.Rows) error {
 		var m snapshotMachine
-		if err := row.Scan(&m.machine, &m.mode, &m.importBase); err != nil {
+		if err := row.Scan(&m.machine, &m.mode, &m.importBase, &m.name); err != nil {
 			return err
 		}
 		machines = append(machines, m)

@@ -2239,16 +2239,9 @@ API revisions:
 | 12 | `GET /clusters/{id}/talos-access` (§9.2, §3.3 "Presence") |
 | 13 | `formOnly` on a machine and on an adopt plan's `baseline` evidence, `fromFormOnly` on a plan's `diff` (§9.3, choice §17.48) |
 | 14 | `role` on a machine (§3.2, §9.2, choice §17.49) |
+| 15 | `hostname` (`source`, and `name` for `machine-name`) on each machine of a release and its review, and the name form of `409 stale-input` of the publication check (§9.2, §3.5, §4.2, choices §17.44, §17.45) |
 
-Revision 15 is specified and not yet served. It adds `hostname` (`source`, and
-`name` for `machine-name`) on each machine of a release and its review, and the
-`hostname` rule of `422 validation-failed` (§9.2, §3.5, choice §17.44), and the
-name form of `409 stale-input` (§4.2, choice §17.45): the publication check and
-the `ingest` draft transaction (T1) return it, with `expected` and `actual` as
-machine names, each a string or `null`. Its row
-replaces this paragraph in the change that serves it (ginsys/bronzeward#1041),
-because the table's last row is the revision the server serves and a test holds
-the two equal.
+Revision 15 also specifies two parts not yet served, each joining row 15 in the change that serves it (ginsys/bronzeward#1040): the `hostname` rule of `422 validation-failed` (§9.2, §3.5), and the name form of `409 stale-input` from the `ingest` draft transaction (§4.2, choice §17.45), with `expected` and `actual` as machine names, each a string or `null`.
 
 ### 9.2 Resources and routes
 

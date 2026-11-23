@@ -35,9 +35,9 @@ func TestReleasePublicationEvidence(t *testing.T) {
 			rel := id.New(id.Release)
 			mustExec(t, tx, insertRelease, rel, r.cluster, r.draft2, 1, digest(3), "v1.13", machinery, checksum, "v1.36.0", op, r.human, "publisher")
 			_, err = tx.Exec(`INSERT INTO release_machine (release,cluster,machine,import_base_revision,assignment_revision,mode,ciphertext,
-   ciphertext_digest,configuration_digest,redacted,provenance,key_name,publication_observation)
+   ciphertext_digest,configuration_digest,redacted,provenance,key_name,publication_observation,hostname_source,hostname_name)
    SELECT $1,cluster,machine,import_base_revision,assignment_revision,mode,ciphertext,ciphertext_digest,configuration_digest,
-    redacted,provenance,key_name,$3 FROM release_machine WHERE release=$2`, rel, r.rel, c.observation)
+    redacted,provenance,key_name,$3,hostname_source,hostname_name FROM release_machine WHERE release=$2`, rel, r.rel, c.observation)
 			if err == nil {
 				mustExec(t, tx, `INSERT INTO release_source (release,cluster,kind,fragment,profile,assignment,name,machine,fragment_revision,profile_revision,assignment_revision,head_revision)
     SELECT $1,cluster,kind,fragment,profile,assignment,name,machine,fragment_revision,profile_revision,assignment_revision,head_revision FROM release_source WHERE release=$2`, rel, r.rel)

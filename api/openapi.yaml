@@ -3318,6 +3318,18 @@ components:
         talosNodeId: {type: [string, 'null']}
         serial: {type: [string, 'null']}
       additionalProperties: false
+    HostnameBody:
+      type: object
+      description: Where a release machine's hostname came from, a fact about the release and never read again from the machine (persistence-api.md §9.2, choice §17.44).
+      required: [source]
+      properties:
+        source:
+          type: string
+          enum: [machine-name, configuration, none, legacy-stable, unrecorded]
+        name:
+          type: string
+          description: The name used; present for machine-name alone.
+      additionalProperties: false
     IngestResult:
       type: object
       description: An ingest operation's result once it succeeded (runner.go finish).
@@ -4053,12 +4065,13 @@ components:
       additionalProperties: false
     ReleaseMachineBody:
       type: object
-      required: [machine, mode, review, publicationObservation]
+      required: [machine, mode, review, publicationObservation, hostname]
       properties:
         machine: {type: string}
         mode: {type: string}
         review: {type: string}
         publicationObservation: {type: string}
+        hostname: {$ref: '#/components/schemas/HostnameBody'}
       additionalProperties: false
     ReleaseSourceBody:
       type: object
@@ -4109,13 +4122,14 @@ components:
       additionalProperties: false
     ReviewBody:
       type: object
-      required: [release, machine, mode, configuration, provenance]
+      required: [release, machine, mode, configuration, hostname, provenance]
       properties:
         release: {type: string}
         machine: {type: string}
         mode: {type: string}
         configuration: {type: [string, 'null']}
         notice: {type: string}
+        hostname: {$ref: '#/components/schemas/HostnameBody'}
         provenance:
           type: array
           items: {$ref: '#/components/schemas/ProvenanceRecord'}

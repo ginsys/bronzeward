@@ -1053,6 +1053,12 @@ CREATE TABLE release_machine (
   -- values and differ in form only (compilation.md §6), decided at publication on the plaintext.
   -- A release published before this column existed reads false: it differs.
   form_only            boolean NOT NULL DEFAULT false,
+  -- Where the machine's hostname came from (compilation §6.1 item 2) and, for machine-name, the
+  -- name used: a fact about the release, never read again from the machine. The release read
+  -- checks the enumeration (machine-name, configuration, none, legacy-stable, unrecorded) and a
+  -- stored value outside it is a 500, as a provenance record is; nothing here writes unrecorded.
+  hostname_source      text NOT NULL,
+  hostname_name        text CHECK (hostname_name <> ''),
   PRIMARY KEY (release, machine),
   UNIQUE (release, machine, import_base_revision),
   UNIQUE (release, machine, key_name, key_version),
