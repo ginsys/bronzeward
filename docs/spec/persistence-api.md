@@ -376,9 +376,12 @@ secret: a value the base held as a reference stays a reference in the base or
 in the fragment that took it, which is source text like any other. The rule is
 checked on stored source text in the draft transaction (T1), with no provider
 read. A document that breaks it is `422 validation-failed` with rule
-`import-base`, naming the body path (compilation §8.3 writes the path) and
-holding no value. A machine with no `Applied` release is `422` too: it has no
-base to thin, and its import comes by ingestion.
+`import-base`, naming the machine and the kind of violation (a document, a key
+or a reference row the base does not hold) and no path, key or name from the
+body: this check resolves no secret, so it cannot tell whether an added key or
+document name is an earlier extracted value, and compilation §3.6 withholds
+paths for the same reason. A machine with no `Applied` release is `422` too: it
+has no base to thin, and its import comes by ingestion.
 
 **What gates the write: the typed equivalence check, at publication.** The
 draft transaction proves that nothing was added, and nothing more. Whether the
@@ -388,8 +391,10 @@ machine whose entry this route wrote; an entry that ingestion wrote, an import
 or a drift adoption, is not checked. A refusal is `422
 validation-failed` with rule `equivalence` and reason `not-equal` or
 `cannot-decide` (compilation §13), commits no release and moves no head, and the
-draft stays open for another edit. The check runs only where the machine is
-not pending convergence (§9.3; compilation choice §16.41). Publication also
+draft stays open for another edit. The check runs only where the machine holds
+what its `Applied` release composed: not pending convergence, and an `Applied`
+digest equal to that release's own artifact digest (§9.3; compilation choice
+§16.41). Publication also
 refuses `409 stale-input`, naming the machine with the expected and the actual
 import base revision, when the machine's `Applied` release no longer has the
 import base the entry was written from; it is §4.2's third form, extended to an
@@ -404,13 +409,17 @@ approval and apply; no new plan kind exists. Because the check passed against
 the `Applied` composition, the plan sends the configuration the node already
 holds, in the typed sense of compilation §6.2. When that operation completes,
 `Applied` is the new release and its import base, the thinner revision. What an
-approver sees: the form-only verdict (compilation §6) reads false for every
-thinner base, since the composition holds the content the base gave up, so the
-plan's diff is withheld (choice §17.48). The evidence is the release's recorded
-result of the check, served per machine on the release read and its review as
-`equivalence` (`equal`, `byteIdentical`, never a path or a value, null where no
-check ran) and on the plan body of an `apply-config` plan for that release. Whether
-the approver should also see a diff is an owner choice (choice §17.51).
+approver sees: nothing in §9.3 changes. The check ran only where the machine
+holds its `Applied` release's artifact, so the plan's diff is the ordinary one,
+from the redacted whole configuration of the `Applied` release to that of the
+plan's release, and it is withheld only where §9.3 already withholds it. The
+form-only verdict (compilation §6) reads false for a thinner base, but it
+governs the diff of a machine that holds the import base's bytes, the case the
+check's condition excludes (choice §17.51). Beside the diff, the evidence is the
+release's recorded result of the check, served per machine on the release read
+and its review as `equivalence` (`equal`, `byteIdentical`, never a path or a
+value, null where no check ran) and on the plan body of an `apply-config` plan
+for that release.
 
 **Audit.** The revision records its author, as every import base revision does,
 and the write is an act (§10.5). The release records the check's result with
@@ -4204,8 +4213,8 @@ or Desired change; it does not erase earlier evidence.
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
 | Draft | The machine's name is not the one ingestion used when it removed a filled hostname (§3.2, compilation §2.3 step 2a) | `409 stale-input` naming the machine, expected and actual name; claim abandoned | claim row; orphans |
 | Publish | A covered machine's name changed since the snapshot (§4.2) | operation `failed`, `409 stale-input` | operation, act |
-| Draft update | A thinner import base (§3.2) that adds a leaf, a value or a reference its machine's `Applied` import base lacks, or for a machine with no `Applied` release | `422 validation-failed`, rule `import-base`, naming the body path | nothing |
-| Publish | A machine whose entry carries a thinner import base: the typed equivalence check finds it different (`not-equal`) or cannot decide, a pending release included (`cannot-decide`) (compilation §6.2) | operation `failed`, `422 validation-failed`, rule `equivalence`, naming the machine and, for `not-equal`, the paths | operation, act |
+| Draft update | A thinner import base (§3.2) that adds a leaf, a value or a reference its machine's `Applied` import base lacks, or for a machine with no `Applied` release | `422 validation-failed`, rule `import-base`, naming the machine and the kind of violation, never a path from the body | nothing |
+| Publish | A machine whose entry carries a thinner import base: the typed equivalence check finds it different (`not-equal`) or cannot decide, a machine that does not hold its `Applied` release's bytes included (`cannot-decide`) (compilation §6.2) | operation `failed`, `422 validation-failed`, rule `equivalence`, naming the machine and, for `not-equal`, the paths | operation, act |
 | Publish | The `Applied` import base of a machine with a thinner-base entry is no longer the one the entry was written from (§4.2) | operation `failed`, `409 stale-input` naming the machine and both revisions | operation, act |
 | Publish | A hostname filled from a machine's name that another machine holds explicitly (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
 | Publish | Moved head, a covered machine's import base changed (§4.2), a machine of the cluster covered since the snapshot (§6.2, expected "absent"), or T3 finds missing, misbound or superseded publication evidence (§6.1.1) | operation `failed`, `409 stale-input` | operation, act |
@@ -5373,16 +5382,16 @@ design and evidence do not settle the question. Each is marked in place as
     a comparison to catch it, after a provider read. The cost is two steps for
     the author, the entry and the publication, and a refusal that arrives at
     publication and not at the write.
-51. **Open: whether an approver of a refactoring release also sees a diff**
-    (§3.2). The plan's diff is withheld while the node holds the import base's
-    configuration, unless the release differs in form only (choice §17.48), and
-    a thinner base never does. Options: (a) evidence only, the release's
-    recorded `equivalence` and no diff, which the specification states and
-    recommends, since a diff from the node's own bytes has no redacted whole
-    form (choice §17.38); (b) extend the form-only rule to a diff shown when the
-    typed equivalence check found the release equal to `Applied`, which needs a
-    redacted whole form of `Applied`'s composition that the API does not serve
-    today. This choice stays open for the owner.
+51. **An approver of a refactoring release sees the ordinary diff and the
+    recorded `equivalence`, and no diff rule changes** (§3.2). The check runs
+    only where the machine holds its `Applied` release's artifact (compilation
+    choice §16.41), so §9.3 already serves that release's redacted whole
+    configuration and the plan's diff from it; the form-only verdict
+    (choice §17.48) governs only a machine that holds the import base's bytes.
+    Alternative: extend the form-only rule to show a diff when the check found
+    the release equal to `Applied`. It is rejected because the rule it would
+    extend is not the one that withholds this diff, so no owner decision is
+    left in it.
 52. **Open: a read-only preview of the check before publication** (§3.2). The
     specification names no route for it: the check needs the provider's pinned
     values, so a preview is a compilation that publishes nothing and spends the
