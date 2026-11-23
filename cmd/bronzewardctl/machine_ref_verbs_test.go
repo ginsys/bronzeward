@@ -217,3 +217,22 @@ func TestScopeAccountByName(t *testing.T) {
 		}
 	}
 }
+
+// --cluster narrows a machine name, so a list that takes it without --machine has nothing to narrow: a usage error
+// and no read, not a flag accepted and ignored (the lists refused the flag as unknown before the names).
+func TestClusterWithoutAMachineIsRefused(t *testing.T) {
+	for _, args := range [][]string{
+		{"plan", "list", "--cluster", "alpha"}, {"operation", "list", "--cluster", "alpha"}, {"import", "status", "--cluster", "alpha"},
+		{"import", "status", "ing_x", "--cluster", "alpha"},
+	} {
+		setServerFacts(t, 10, nil)
+		seen := recoveryServer(t, namedAnswers(), `{}`)
+		code, _, errOut := runDrift(t, args...)
+		if code != 2 || !strings.Contains(errOut, "--cluster narrows a machine name; give --machine <name> with it") {
+			t.Errorf("%v: exit %d, stderr %q; want the usage error", args, code, errOut)
+		}
+		if got := seen(); len(got) != 0 {
+			t.Errorf("%v: sent %q before the refusal", args, got)
+		}
+	}
+}
