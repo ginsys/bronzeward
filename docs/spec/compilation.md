@@ -1386,7 +1386,7 @@ machine holds an adopted baseline its Applied release did not compose: apply a
 release, then publish the refactoring". The old side is the composition of the
 `Applied` release, so it describes the node only when the node holds that
 release's bytes. An adopted machine whose release differs from its import base
-bytes (comments, a filled hostname that differs, a moved document) therefore
+bytes (comments, a filled hostname the base does not hold, a moved document) therefore
 waits until a release is applied. The alternative, comparing with the pending
 `Desired` release and saying so in the evidence, is rejected: it leaves the
 approver without a statement about the change from what the node holds.
