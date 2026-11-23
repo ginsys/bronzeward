@@ -174,7 +174,7 @@ func (e *env) planCreateWith(name string, args []string, extra func(*client.Clie
 	if id != req.in.Machine {
 		// A name: the plan is bound to the epoch of the machine list, and a repeat is told the identifier.
 		opts.bind = &at
-		opts.input = "machine " + client.ShellWord(id) + " in place of " + client.ShellWord(req.in.Machine)
+		opts.input = inPlaceOf(id, req.in.Machine, req.cluster)
 	}
 	req.in.Machine = id
 	return e.planCreateOn(c, req, opts)

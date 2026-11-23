@@ -394,7 +394,8 @@ func (e *env) driftAdopt(args []string) (err error) {
 	// deferred call, so it runs last, after the client was saved. Before the read, and when the read
 	// itself fails, nothing was run and nothing is printed.
 	co := newCollector(m, draft)
-	label := m // what a line calls the machine: its identifier with its name beside it, once a name is resolved
+	var named string // what a repeat of the import gives in place of a name, once one is resolved
+	label := m       // what a line calls the machine: its identifier with its name beside it, once a name is resolved
 	var id apitypes.IdentityBody
 	read := false
 	defer func() {
@@ -419,6 +420,9 @@ func (e *env) driftAdopt(args []string) (err error) {
 		machineID, _, err := machineByName(c, m, cluster)
 		if err != nil {
 			return err
+		}
+		if machineID != m {
+			named = inPlaceOf(machineID, m, cluster)
 		}
 		label, m = givenLabel(m, machineID), machineID
 		co.obj.Machine = m
@@ -450,7 +454,7 @@ func (e *env) driftAdopt(args []string) (err error) {
 		return err
 	}
 	co.begin(1)
-	c, a, err := e.ingest("drift adopt", "drift-adoption", importArgs)
+	c, a, err := e.ingestAs("drift adopt", "drift-adoption", importArgs, named)
 	// A client that could not save its context after the import ended well or paused leaves the state of
 	// the import to be read: it is read here as after any follow, so a paused import stays paused. Only
 	// the object needs that state; the table output stays as it was and prints the later steps (§5.8).

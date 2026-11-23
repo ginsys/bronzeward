@@ -118,6 +118,12 @@ func checkStaging(staging string, review bool) error {
 // ingest is import start's body for an ingestion of kind; drift adopt starts a drift-adoption. It
 // answers the client and the accepted ingestion, empty when the start was not accepted.
 func (e *env) ingest(name, kind string, args []string) (*client.Client, accepted, error) {
+	return e.ingestAs(name, kind, args, "")
+}
+
+// ingestAs is ingest with the input a repeat gives where the caller resolved a name before it (drift adopt), so that the
+// instruction after an unknown outcome names the identifier.
+func (e *env) ingestAs(name, kind string, args []string, input string) (*client.Client, accepted, error) {
 	var c *client.Client
 	var a accepted
 	var machine, draft, file, cluster string
@@ -170,7 +176,7 @@ func (e *env) ingest(name, kind string, args []string) (*client.Client, accepted
 	build := func(id string) *client.Write {
 		in.Machine = id
 		w = &client.Write{Method: http.MethodPost, Path: "/ingestions", Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, HumanOnly: true,
-			Check: "import status --machine " + client.ShellWord(id), Read: ingestionsRead(id, draft)}
+			Check: "import status --machine " + client.ShellWord(id), Read: ingestionsRead(id, draft), Input: input}
 		return w
 	}
 	err = e.held(func() error {
