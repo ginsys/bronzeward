@@ -1629,8 +1629,8 @@ about 10 seconds: the server reads the first key under `nodeTimeout` (`internal/
 such endpoints cost about 30 seconds. An endpoint that answers and then stalls, or a name whose lookup
 stalls, costs up to 60 seconds, the whole-call deadline `discoverDeadline` (`internal/api/discover.go`),
 so three such endpoints cost up to 3 minutes. A try from a list is sent once, because a discovery only
-reads; a typed endpoint, or a context that lists one, is repeated by the write layer up to four times
-(after 1, 2 and 4 seconds), so one such endpoint costs about 47 seconds when it does not answer and up
+reads; a typed endpoint, or a context that lists one, is tried by the write layer up to four times in all
+(three repeats, after 1, 2 and 4 seconds), so one such endpoint costs about 47 seconds when it does not answer and up
 to 4 minutes 7 seconds when it stalls. The command's own bound for one endpoint is 15 seconds for
 the lookup, the dial and the first reads (`startTimeout` in `internal/talos/discover`), then 10 seconds
 for each address of each member (`memberTimeout`). The page cuts the file to that one context in memory, reads the cluster's members

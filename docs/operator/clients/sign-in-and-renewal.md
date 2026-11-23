@@ -112,4 +112,5 @@ above it.
 - Nothing here shows the identity provider is well; it shows the installation accepted, or refused,
   one token.
 
-Next: [read the inventory](inventory.md).
+Next: [connect a cluster](connect-a-cluster.md), or, for a cluster the installation already knows,
+[read the inventory](inventory.md).
