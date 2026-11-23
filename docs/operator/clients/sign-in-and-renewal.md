@@ -34,11 +34,14 @@ Epoch      ep_…  recovery mode: off
 Expires    2026-12-23 12:15:19 UTC
 ```
 
-The block shows an automation identity, with shortened identifiers (the dots are not output). A
-person's answer shows their name and the word `human`. Read the roles first: they are what the server
-will check on your next step. `whoami` shows what the server saw when you asked. It does not show
-that a later command is allowed, and it does not show that the identity is the person you meant to
-be until you compare the name.
+The block shows an automation identity, with shortened identifiers (the dots are not output). For
+a person, the Identity line has no service name before the word `human`, and a last line, "Token
+(bronzewardctl's reading)", gives the subject and issuer that the client read from your own token.
+Read the roles first: they are what the server will check on your next step. `whoami` shows what the
+server saw when you asked. It does not show that a later command is allowed. To check that you are
+the person you meant to be, compare the subject and issuer on the Token line with your identity
+provider, and the Principal with the one your administrator gave you: the server names no person
+here.
 
 **Web.** Steps:
 
@@ -66,11 +69,12 @@ A person's access token is short-lived. The server refuses a human token that li
 - **Web.** One browser tab renews for all the tabs of the installation, so a second tab does not
   start a second renewal.
 
-A renewal that comes back for **another account** is not carried on silently.
-The command line prints "a new sign-in: the renewed token is for X at Y, not A at B." The web page
-says "The identity provider renewed the sign-in for another account. Sign in again to continue."
-Read the name and sign in again on purpose. This protects you from running a command as someone you
-did not mean to be.
+A renewal that comes back for **another account** is not carried on silently, but the two clients
+differ. The command line prints "a new sign-in: the renewed token is for X at Y, not A at B." and
+then carries on with the new token: the command that renewed it still runs, as the new account. Read
+that line and stop if the account is not the one you meant. The web page stops: it says "The identity
+provider renewed the sign-in for another account. Sign in again to continue." and runs nothing until
+you sign in again on purpose.
 
 ## Refusals you can meet, and what to do
 

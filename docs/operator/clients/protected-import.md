@@ -29,7 +29,8 @@ Review it, then continue it, or abandon it:
 `--review` needs encrypted staging and pauses the import before anything reaches the draft.
 
 **Review.** `import review <import>` shows the staged document and then reads marks. It works only
-when standard input and output are a terminal, and it has no `-o json`, `-o yaml`, save or export
+on Linux (on another system it refuses, and reads and sends nothing: use the browser review below)
+and only when standard input and output are a terminal, and it has no `-o json`, `-o yaml`, save or export
 form: the client writes the text nowhere else. It begins with the notice "protected review: this
 client writes it nowhere but this terminal. Terminal scrollback, session recording and screen
 capture are outside its control." The review is an interactive pager, so this step is not a marked
@@ -55,7 +56,8 @@ Steps:
 1. Open the list of imports and press **Start import**. Choose the **Machine:** and the **Draft:**
    (**Create draft** is beside it if the cluster has none open). Under **Source**, choose **Read from
    the machine**. Under **Staging**, choose **Encrypted staging**, and tick the box that pauses for
-   review before the draft changes. A review needs encrypted staging.
+   review before the draft changes. A review needs encrypted staging. Press the form's **Start
+   import** button. The form then names the import and says it started.
 2. When the import is paused, open its page. Press **Review import** (needs `author`). The
    **Protected review** section shows the document.
 3. For each value that is a secret, press **Mark as secret** beside its path. Press **Send marks**.
@@ -69,7 +71,7 @@ Steps:
 | Command line: "…The draft changed after this import started, so the import was not applied and its claim is abandoned. Read the draft's current revision, which keeps its ETag, then import again:" (exit 4) | Another write moved the draft while the import ran. The import applied nothing. | Run the `draft show` the message prints, then `import start` again. The server keeps no marks: add `--file` or `--marks` again if you used them. |
 | "This client did not start import `<id>`, so it keeps no ETag of draft `<draft>`. Read the draft before writing to it:" | The client has no version of the draft to send, because it did not start the import. | Run the `draft show` the message prints, then write. |
 | "…its staged input could not be decrypted (resume-failed …)" | The import was not applied. Its claim stays held until its lease lapses. | Read its lease with `import status`. Once it lapsed, `import takeover` it, or `import abandon` it. |
-| A held import whose lease lapsed | Its runner is gone; nothing is running it. | `bronzewardctl import takeover <import>` to resume it, or `import abandon`. |
+| Command line: "…its claim is … and its lease lapsed … ago, while operation … still runs: the outcome is unknown." (exit 3) | The claim's lease lapsed while its operation is recorded as running. The client cannot say that the runner stopped, and the outcome is unknown. | Read it again later with `import status`. A lapsed lease allows `bronzewardctl import takeover <import>` to resume it, or `import abandon`; an import with transient staging cannot be taken over. |
 | Web: the buttons **Continue import**, **Take over import** and **Abandon import** | The page offers only the ones the claim's state allows now. | Press the one that fits; the page reads the claim again after it. |
 
 Abandoning says "its staged input is cleared, and nothing of it reaches draft `<draft>`".
@@ -90,8 +92,13 @@ bronzewardctl approve <plan>
 `--none` selects nothing, so the machine's configuration is its import base alone. `publish` needs
 `publisher`: it makes the release the desired one and sends nothing to any machine. `plan create`
 needs `publisher` too; the plan is proposed and not approved, and it sends nothing. `approve` needs a
-person with `approver`. On the web, the same steps are the **Plan adopt** button on the release's
-rendered review and **Approve** on the plan's page.
+person with `approver`. It starts no operation and does not wait: the controller records the adoption
+afterwards, and the machine's Applied column changes only once it has. Read it with `bronzewardctl
+machine show <machine>` before you rely on it.
+
+On the web, **Plan adopt** on the release's rendered review opens the plan's creation page; press
+**Create plan** there (needs `publisher`), then press **Approve** on the plan's page (needs
+`approver`).
 
 ## What this page does not establish
 
@@ -104,4 +111,5 @@ rendered review and **Approve** on the plan's page.
   apply plan shows when they differ is part of plans and approval, not this page.
 - Nothing here shows the review text was not captured outside the client.
 
-Next: back to [the inventory](inventory.md), where the machine now shows an applied release.
+Next: back to [the inventory](inventory.md), where the machine shows an applied release once the
+controller has recorded the adoption.

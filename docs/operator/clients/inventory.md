@@ -3,13 +3,14 @@
 **You want** to see which clusters and machines the installation knows, how each machine's
 configuration compares with what was applied, and to record one machine that is missing.
 
-**You need** no role to read. Recording a machine needs the `author` role and a person signed in,
-not an automation token.
+**You need** at least one role to read: `viewer`, `author`, `publisher`, `approver` or
+`recovery-admin`. A credential with none is refused. Recording a machine needs the `author` role and
+a person signed in, not an automation token.
 
 ## Read the machines
 
 **Command line.** Each list shows one page. `--all` reads every page, and `--cluster` limits the machine
-list to one cluster, by name or ID. [Contexts](contexts.md) and the
+list to one cluster, given by its ID (the first column of `cluster list`; a name is refused here). [Contexts](contexts.md) and the
 [reference](cli-reference.md#machine-list) hold the flags.
 
 ```bash {.bw-run}
@@ -29,10 +30,13 @@ With nothing recorded, the lists print their column names and no rows, and the m
 the output, read from the source. This page does not claim that a run printed them.
 
 ```text
-MACHINE        ENDPOINT        DESIRED       APPLIED (SOURCE)          OBSERVED            STATE
-mch_k2p…7xqa   10.55.0.2:50000  rel_fgqv…j6m  rel_fgqv…j6m (operation)  = applied, 2m ago   last read matched what was applied
-mch_w4ze…n3fa  10.55.0.3:50000  rel_fgqv…j6m  rel_fgqv…j6m (operation)  no match, 5m ago   changed on the machine, frozen
+MACHINE        ENDPOINT         DESIRED       APPLIED (SOURCE)          OBSERVED           STATE
+mch_k2p…7xqa   10.55.0.2:50000  rel_fgqv…j6m  rel_fgqv…j6m (operation)  =applied, 2m0s ago  last read matched what was applied
+mch_w4ze…n3fa  10.55.0.3:50000  rel_fgqv…j6m  rel_fgqv…j6m (operation)  no match, 5m0s ago  changed on the machine, frozen
 ```
+
+The command line prints the age as a duration with seconds, such as `2m0s ago`, and prints `-` in
+the State column when no state applies. The web page uses its own badges, listed below.
 
 **Web.** Steps:
 
@@ -88,10 +92,13 @@ The endpoint is an IP address, with the port 50000 unless you give one.
 1. Open **Machines** and press **Add machine**. The button is absent or off for a person without
    `author`, with the reason.
 2. Choose the cluster. Fill in **Talos node ID:**, **Platform:** and **Talos endpoint:**.
-3. Press the button that records it. The page shows the machine's page, or the refusal.
+3. Press the form's **Add machine** button. The form then says "Machine" and the machine's name
+   as a link, "recorded in cluster" and its identifier, the endpoint, and the next step; it does
+   not open the machine's page. Press the link to open it. A refusal shows in the same place.
 
-A recorded machine is not yet managed: it has no desired or applied release, and the list shows "Not
-adopted yet". Recording does not read or change the node.
+A recorded machine is not yet managed: it has no desired or applied release. The web list shows "Not
+adopted yet" for it; the command line shows `-` in the State column. Recording does not read or
+change the node.
 
 ## Refusals you can meet
 
