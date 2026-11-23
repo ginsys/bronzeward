@@ -11,7 +11,8 @@ import (
 // its order; the current context when no name is given, the named one otherwise.
 func TestEndpointsListsTheContextsEndpointsInOrder(t *testing.T) {
 	c := newCluster(t)
-	tc := twoContexts(c.p, c.p, "10.0.0.1, cp.example.test:50000, [2001:db8::1]:50000", "10.1.0.1")
+	// A bracketed address is quoted, as Talos writes it, because a bare one is a list inside a list in YAML.
+	tc := twoContexts(c.p, c.p, `10.0.0.1, cp.example.test:50000, "[2001:db8::1]:50000"`, "10.1.0.1")
 	for name, want := range map[string][]string{
 		"":  {"10.0.0.1", "cp.example.test:50000", "[2001:db8::1]:50000"},
 		"a": {"10.0.0.1", "cp.example.test:50000", "[2001:db8::1]:50000"},
