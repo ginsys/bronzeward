@@ -20,6 +20,9 @@ type Request struct {
 	Input        Unresolved
 	Marks        []Path
 	Declarations Declarations
+	// Name is the machine's stored name as the API read it for this request, or empty. A HostnameConfig
+	// document whose hostname equals it is removed from the stored stream (compilation.md §2.3 step 2a).
+	Name string
 }
 
 // Candidate is a sanitized stream whose extracted values are not yet written (compilation.md
@@ -30,6 +33,7 @@ type Candidate struct {
 	decl      Declarations
 	values    []namedValue
 	committed bool
+	filled    Filled
 }
 
 type namedValue struct {
@@ -86,6 +90,15 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 			innerMarks = append(innerMarks, m)
 		}
 	}
+	// Step 2a: the document the fill writes again is found before anything is identified and removed
+	// after, so that every position stays that of the input. A mark that addresses it refuses as a mark
+	// that addresses no node does, and no value is minted for a document that is then dropped.
+	dropAt, filled := filledHostname(docs, req.Name)
+	for _, m := range req.Marks {
+		if m.Doc == dropAt {
+			return nil, refuseAt(RuleMarkUnaddressed, []Path{m}, m.String())
+		}
+	}
 	targets, err := identify(docs, outerMarks)
 	if err != nil {
 		return nil, err
@@ -125,6 +138,9 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	for _, ex := range exs {
 		decl.References[ex.name] = Reference{Kind: ex.kind, Version: 1}
 	}
+	if dropAt >= 0 {
+		docs = slices.Delete(docs, dropAt, dropAt+1)
+	}
 	out, back, err := encodeStable(docs)
 	if err != nil {
 		return nil, err
@@ -139,7 +155,7 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	if err := validateRefs(back, decl, misplaced); err != nil {
 		return nil, from(err, validateSources(exs, removed, misplaced, err))
 	}
-	c := &Candidate{docs: out, decl: decl}
+	c := &Candidate{docs: out, decl: decl, filled: filled}
 	for _, ex := range exs {
 		v, err := provider.NewValue(ex.kind, ex.plain)
 		if err != nil {
