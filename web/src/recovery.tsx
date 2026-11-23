@@ -25,8 +25,8 @@ type EntryBody = components["schemas"]["EntryBody"];
 // §8.5 start mode: the last one an answer showed, unknown before any.
 export type StartMode = "normal" | "recovery" | "unknown";
 
-// What the epoch is, where a person compares it: a restore and a recovery entry each start a new one.
-const EPOCH_MEANS = " (the number of this server life: a restore or a recovery entry starts a new one)";
+// What the epoch is, where a person compares it: only entering recovery mode starts a new one (a restore alone does not).
+const EPOCH_MEANS = " (entering recovery mode starts a new one)";
 export const PRE_ENTRY ="This server was started for recovery and serves only the recovery entry until it is recorded.";
 export const RECOVERY_START =
   "Server started for recovery: plan creation, approval and unfreeze wait for its normal restart, and publications it accepts complete only then. Imports complete here.";

@@ -2048,7 +2048,7 @@ web view or a table output shows in requests of at most 100 identifiers each, ea
 `display` name, served from API revision 5, or, when `display` is `null`, by subject and issuer (the web client words it "an operator with no name on record, subject <subject> at <issuer>" and says "you" for the signed-in person; the CLI keeps `<subject> at <issuer>`)
 ([persistence and API §10](persistence-api.md#10-authentication-and-authorization)), a service
 by its name, and the identifier for one answered `unknown` or when the read fails: shortened in
-the web client, whole in the CLI, which prints every identifier whole. The text is the same in both clients for the same answer, except the web client's wording for a person with no display name, and it is remote text like any other
+the web client, whole in the CLI, which prints every identifier whole. The text is the same in both clients for the same answer, except the web client's "you" for the signed-in person and its wording for a person with no display name, and it is remote text like any other
 (§6 item 8). `-o json` and `-o yaml` print the resource with the same values, full identifiers included
 ([operator experience §4](operator-experience.md#4-command-tree)).
 
