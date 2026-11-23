@@ -339,20 +339,14 @@ func (e *env) applyApprove(c *client.Client, rows []*applyRow, epoch string, mov
 			return nil, nil
 		})
 		if err != nil {
-			var u *client.Unknown
-			var ns client.NotSent
-			switch {
-			case errors.As(err, &u):
+			if mayHaveCommitted(err) {
 				outcomes = append(outcomes, "unknown")
 				if firstUnknown < 0 {
 					firstUnknown, unknownAt = len(outcomes)-1, len(errs)
 				}
 				errs = append(errs, fmt.Errorf("%s: %w", r.label(), err))
-			case errors.As(err, &ns):
-				outcomes = append(outcomes, "not sent")
-				errs = append(errs, fmt.Errorf("%s: %w; nothing was approved for this machine", r.label(), err))
-			default:
-				outcomes = append(outcomes, "refused")
+			} else {
+				outcomes = append(outcomes, "not approved")
 				errs = append(errs, fmt.Errorf("%s: %w; nothing was approved for this machine", r.label(), err))
 			}
 			continue
@@ -369,7 +363,7 @@ func (e *env) applyApprove(c *client.Client, rows []*applyRow, epoch string, mov
 			count[o]++
 		}
 		var said []string
-		for _, o := range []struct{ key, text string }{{"approved", "approved"}, {"unknown", "sent with an unknown outcome"}, {"refused", "refused"}, {"not sent", "not sent because the epoch moved"}} {
+		for _, o := range []struct{ key, text string }{{"approved", "approved"}, {"unknown", "sent with an unknown outcome"}, {"not approved", "not approved (each line above says why)"}} {
 			if n := count[o.key]; n > 0 {
 				said = append(said, sf("%d %s", n, o.text))
 			}
@@ -379,6 +373,15 @@ func (e *env) applyApprove(c *client.Client, rows []*applyRow, epoch string, mov
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// mayHaveCommitted is whether a failed write may still have been committed: an Unknown that was not set aside (its
+// outcome is unknown) or was set aside after an attempt that may have committed (client.Unknown.Ambiguous).
+// A refusal, a write not sent (the epoch moved) and a write set aside with no attempt that could have committed
+// are all certain not to have been.
+func mayHaveCommitted(err error) bool {
+	var u *client.Unknown
+	return errors.As(err, &u) && (!u.SetAside || u.Ambiguous)
 }
 
 // applyCancel cancels the plans this command made and no others, and says what it left. A cancellation

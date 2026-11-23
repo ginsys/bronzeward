@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,7 +9,31 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/ginsys/bronzeward/internal/client"
 )
+
+// An approval line counts a later plan as of unknown outcome only where an attempt of it may have committed: a
+// set-aside write with no such attempt (a 412 epoch mismatch), a write not sent and a refusal are not.
+func TestMayHaveCommitted(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"unknown outcome", &client.Unknown{}, true},
+		{"ambiguous set aside", &client.Unknown{SetAside: true, Ambiguous: true}, true},
+		{"set aside, no attempt can have committed", &client.Unknown{SetAside: true}, false},
+		{"not sent", client.NotSent{}, false},
+		{"refused", errors.New("answered 409"), false},
+		{"wrapped ambiguous", fmt.Errorf("alpha: %w", &client.Unknown{Ambiguous: true}), true},
+		{"wrapped set aside", fmt.Errorf("alpha: %w", &client.Unknown{SetAside: true}), false},
+	} {
+		if got := mayHaveCommitted(c.err); got != c.want {
+			t.Errorf("%s: mayHaveCommitted = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
 
 // applyFake serves a release of two machines: alpha (a control plane with a plan a publisher prepared)
 // and beta (a worker with none). Every POST is kept as "path body" in order.
@@ -388,9 +413,9 @@ func TestApplySentences(t *testing.T) {
 			[]string{"alpha: approved", "outcome unknown"}, []string{"pln_prepared/approvals"}, nil},
 		{"prepared, approval unknown", func(f *applyFake) { f.unknown = "pln_prepared" }, "y\n", 3,
 			[]string{"outcome unknown", "of the plans after it: 1 approved", "beta: approved"},
-			[]string{"alpha: approved", "nothing was approved for this machine", "still sent", "not sent because"}, []string{"pln_prepared/approvals", "pln_made/approvals"}, nil},
+			[]string{"alpha: approved", "nothing was approved for this machine", "still sent", "not approved"}, []string{"pln_prepared/approvals", "pln_made/approvals"}, nil},
 		{"prepared, approval unknown, then the epoch moves", func(f *applyFake) { f.unknown, f.moveAt = "pln_prepared", "/plans/pln_prepared/approvals" }, "y\n", 3,
-			[]string{"Its outcome is unknown", "of the plans after it: 1 not sent because the epoch moved", "beta: ", "nothing was approved for this machine"},
+			[]string{"Its outcome is unknown", "of the plans after it: 1 not approved (each line above says why)", "beta: ", "nothing was approved for this machine"},
 			[]string{"alpha: approved", "beta: approved", "still sent", "1 approved"}, []string{"pln_prepared/approvals"}, []string{"pln_made/approvals"}},
 		{"prepared, declined", func(f *applyFake) {}, "n\n", 2,
 			[]string{cancelled + cancelLimits},
