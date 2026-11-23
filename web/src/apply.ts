@@ -42,6 +42,7 @@ export const LINES = {
   otherPlan: "Stopped: the plan waiting for this machine is not an apply plan. Open the machine to decide on it.",
   unreadPlan: "The change of a plan could not be read, so Apply stays off until it can be: reload the page.",
   withheld: "cannot be shown: either the configuration could not be redacted, or the machine holds a configuration other than the one Bronzeward last applied, so the two cannot be compared. Apply stays off while this plan is listed. Open the plan to read what it records and approve it there, or untick this machine. The plan stays either way: cancel it on its own page if it is not wanted.",
+  handedOver: "Apply stays off while this plan is listed. Open the plan to read what it records and approve it there, or untick this machine. The plan stays either way: cancel it on its own page if it is not wanted.",
   held: "A write of this page has an unknown outcome, so nothing new is sent. Repeat it or dismiss its notice at the top of the page first.",
   planning: "Creating the plan.",
   approving: "Approving the plan as you.",

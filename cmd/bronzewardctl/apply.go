@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -23,7 +24,7 @@ import (
 // at the question leaves the plans made to expire at the time each one shows. A plan whose change cannot
 // be read is left out. The approvals are bound to the epoch the list was shown at. Standard output holds
 // one line for each machine. The structured outputs are not offered: the command asks a person a question.
-func (e *env) apply(args []string) error {
+func (e *env) apply(args []string) (err error) {
 	var machines string
 	var all, diff bool
 	pos, err := e.parse("apply", args, 1, func(fs *flag.FlagSet) {
@@ -96,13 +97,19 @@ func (e *env) apply(args []string) error {
 	}
 	failed = append(failed, e.applyCancel(c, unread))
 	made = slices.DeleteFunc(made, func(id string) bool { return slices.Contains(unread, id) })
-	e.applyShow(rows, diff)
+	if err := e.applyShow(rows, diff); err != nil {
+		// The person would confirm evidence that was not shown.
+		failed = append(failed, e.applyCancel(c, made))
+		return errors.Join(append(failed, notConfirmed{fmt.Errorf("showing the plans: %w; nothing was approved", err)})...)
+	}
 	if planned == 0 {
 		return errors.Join(append(failed, notConfirmed{errors.New("no plan to approve; nothing was approved")})...)
 	}
 	if err := e.confirmYes(sf("Answering y records your approval of the %d plans listed as you. Approve them?", planned)); err != nil {
 		failed = append(failed, e.applyCancel(c, made))
-		return errors.Join(append(failed, err)...)
+		// The plans this command made are already created, so "nothing was sent" would be false: nothing was approved.
+		msg, _ := strings.CutSuffix(err.Error(), "nothing was sent")
+		return errors.Join(append(failed, notConfirmed{errors.New(msg + "nothing was approved")})...)
 	}
 	return errors.Join(append(failed, e.applyApprove(c, rows, epoch, moves))...)
 }
@@ -241,24 +248,38 @@ func (e *env) applyRead(c *client.Client, rows []*applyRow) {
 			r.plan, r.line = "", sf("stopped: the change of its plan could not be read (%v), so it is left out", err)
 			continue
 		}
-		// The server withholds a change it cannot redact or cannot compare; a batch is never approved over one.
+		// The server withholds a change it cannot redact or cannot compare, and a plan with a drift record overwrites a
+		// configuration no reviewer has seen (single approve says so); a batch is never approved over either.
+		var why string
 		if d := r.body.Evidence.Diff; d != nil && d.Withheld {
-			why := "stopped: the change of its plan cannot be shown, either because the configuration could not be redacted or because the machine holds a configuration other than the one Bronzeward last applied; it is left out. "
-			if r.made {
-				// The plan is this command's own and is cancelled below, so approving it is no way forward.
-				why += "This command asks for the plan it made to be cancelled; to apply this machine anyway, make a plan with plan create, read it with plan show and approve it with approve, or leave this machine out"
-			} else {
-				why += sf("Read it with plan show %s, approve it with approve %[1]s, or leave this machine out", client.ShellWord(r.plan))
-			}
-			r.plan, r.line = "", why
+			why = "stopped: the change of its plan cannot be shown, either because the configuration could not be redacted or because the machine holds a configuration other than the one Bronzeward last applied; it is left out. "
+		} else if r.body.DriftRecord != nil {
+			why = sf("stopped: its plan overwrites the drifted configuration of drift record %d, which no reviewer has seen; it is left out. ", *r.body.DriftRecord)
 		}
+		if why == "" {
+			continue
+		}
+		if r.made {
+			// The plan is this command's own and is cancelled below, so approving it is no way forward.
+			why += "This command asks for the plan it made to be cancelled; to apply this machine anyway, make a plan with plan create, read it with plan show and approve it with approve, or leave this machine out"
+		} else {
+			why += sf("Read it with plan show %s, approve it with approve %[1]s, or leave this machine out", client.ShellWord(r.plan))
+		}
+		r.plan, r.line = "", why
 	}
 }
 
 // applyShow prints the list on standard error: each machine with its role and profiles and its plan
 // (with its own expiry) or the reason it has none, the diff of each plan with --diff, then the notes
 // the lead ruled on.
-func (e *env) applyShow(rows []*applyRow, diff bool) {
+func (e *env) applyShow(rows []*applyRow, diff bool) error {
+	// The first failure to write is kept: a person must never be asked to approve evidence that was not shown.
+	var shown error
+	tf := func(w io.Writer, format string, args ...any) {
+		if err := tf(w, format, args...); err != nil && shown == nil {
+			shown = err
+		}
+	}
 	controlPlane, noRole := false, false
 	for _, r := range rows {
 		role := "no role"
@@ -308,6 +329,7 @@ func (e *env) applyShow(rows []*applyRow, diff bool) {
 		tf(e.err, "A machine imported before its role was stored shows no role until it is imported again.\n")
 	}
 	tf(e.err, "The controller re-checks each plan when it sends it and applies it only if every check passes, one machine of a cluster at a time, in an order the controller does not promise. A plan that is not applied expires at the time shown for it.\n")
+	return shown
 }
 
 // applyApprove approves each listed plan, bound to the epoch and move count the list was shown from, and
