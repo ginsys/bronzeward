@@ -23,13 +23,16 @@ A release is one set of seven archives and a checksum file. The names come from
 | `bronzewardctl_<version>_darwin_amd64.tar.gz`, `..._darwin_arm64.tar.gz` | the command-line client for macOS | an operator on a Mac |
 | `bronzeward_<version>_linux_amd64.tar.gz`, `..._linux_arm64.tar.gz` | the server | the administrator |
 | `bronzeward-web_<version>.tar.gz` | the web files, a ready web server configuration and an example client configuration | the administrator ([hosting](../deployment/hosting.md)) |
-| `SHA256SUMS` | one checksum for each archive above | everyone who verifies |
+| `SHA256SUMS` | one checksum for each file of the release: the archives above and the bill of materials files below | everyone who verifies |
 
 Each client and server archive also holds `LICENSE-STATUS.md` and `THIRD_PARTY_NOTICES.txt`.
-The release workflow (`.github/workflows/release-publish.yml`, lines 101-130) adds a software bill of
-materials file for each archive (`<archive>.spdx.json`), a signature bundle for `SHA256SUMS`
-(`SHA256SUMS.sigstore.json`) and a build attestation (a signed statement of how the archive was built) for each archive. It publishes them as a
-pre-release that is never marked as the latest release.
+The release workflow (`.github/workflows/release.yml`) adds a software bill of materials file for
+each archive (`<archive>.spdx.json`) in `.github/workflows/release-build.yml`. The shared publish
+workflow of ginsys/.github (`publish-github.yml`) adds a signature bundle for `SHA256SUMS`
+(`SHA256SUMS.sigstore.json`) and a build attestation (a signed statement of how the file was built)
+for each file `SHA256SUMS` lists. It publishes them as a pre-release that is never marked as the
+latest release. These descriptions are read from the workflow files; no release has been made yet, so
+no run shows them.
 
 ## Build the same archives today
 
@@ -84,10 +87,10 @@ shows no command for them that you could copy and run today.
    signature is a keyless Sigstore signature, made by the release workflow with its GitHub
    identity and recorded in the public Rekor log. `cosign` needs two values from you: the
    identity that signed and the issuer of that identity. The issuer is GitHub's workflow token
-   issuer. The identity is the Publish workflow of this repository,
-   `.github/workflows/release-publish.yml`. Read both from the certificate inside the bundle
-   instead of copying a value from a page you cannot check, and compare them with the workflow
-   file in the repository at the release's tag.
+   issuer. The identity is the shared publish workflow of ginsys/.github (`publish-github.yml`),
+   which `.github/workflows/release.yml` of this repository calls at one pinned commit. Read both
+   from the certificate inside the bundle instead of copying a value from a page you cannot check,
+   and compare them with that file and the pinned commit in the repository at the release's tag.
 3. Check the archive against `SHA256SUMS`. You downloaded one archive, so check only its line:
    `grep -E "^[0-9a-f]{64} [ *]<archive>$" SHA256SUMS | sha256sum --check --strict -`. The
    `[ *]` accepts both markers the file may use before the name. (Checking the whole
@@ -97,6 +100,9 @@ shows no command for them that you could copy and run today.
 
 If step 2 fails, do not use the archives. If you cannot run `cosign`, you can still use the
 checksum check. Then you trust whoever gave you `SHA256SUMS`.
+
+Steps 2 and 4 are written from the workflow files. No release has been made, so no real signature
+or attestation shows the signer's name or that `gh attestation verify` accepts it as written.
 
 ## Install the command-line client
 
