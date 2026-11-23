@@ -84,7 +84,7 @@ export function ScopeDecision({ machine, state, stoppedAt }: { machine: string; 
       {state === "ready" && <p><Action label="Release" needs={["recovery-admin"]} onClick={send("releases")} busy={busy(release)} /></p>}
       <Result w={release} done={released} />
       {next(release) !== undefined && <Status testid="write-next">{next(release)}</Status>}
-      {/* The accounting's answer says what the scope "is now"; once a mark or a release has been made that sentence is stale, so the form leaves then. A refused one leaves it, since the scope is as it said. */}
+      {/* The accounting's answer says what the scope "is now"; once a mark or a release has been made that sentence is stale, so the form leaves then. A refused one leaves it, since the scope is as it said. A mark whose outcome is `unknown` (the answer never came) keeps the form, and so keeps the sentence "is now blocked", which may then be stale: that is accepted, because the next reread of the scopes replaces it. */}
       {(due || started) && mark?.outcome?.kind !== "done" && release?.outcome?.kind !== "done" && (
         <AccountingForm machine={machine} path="/recovery/accountings" resource="/recovery" what={SCOPE_WHAT} done={accountedScope} due={due} stoppedAt={stoppedAt} onStart={() => setStarted(true)} />
       )}

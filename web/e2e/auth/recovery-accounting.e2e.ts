@@ -205,7 +205,7 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
 
   // T11 (journeys §13), WCAG 2.2 AA on the console's scope row: every control by Tab alone, in reading order, each focus visible
   // (2.1.1, 2.1.2, 2.4.7), then the task itself, "account a pre-restore-unaccounted scope, then mark and release it", with the keyboard
-  // alone. The keys are Tab, Shift+Tab, the arrow keys inside a radio group, Space and Enter, and typing in a field. A radio group is
+  // alone. The keys are Tab, the arrow keys inside a radio group, Space and Enter, and typing in a field. A radio group is
   // one Tab stop, so it counts as one control, and the arrow keys skip a disabled radio. The mark's result depends on the machine, so
   // the scope is readied by the harness before the release (as recovery-scopes does); the walk of mark and release on real machines is
   // fixtures/scenarios/s7 web. The screen-reader pass is owed by ginsys/bronzeward#447.
@@ -291,6 +291,7 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await tabTo("Mark");
     await browser.keys("Enter");
     await browser.waitUntil(async () => (await results()).some((t) => /^Scope marked (blocked|ready|unresolved), was blocked/.test(t)), { timeout: 60_000, timeoutMsg: "no result of the row says the scope was marked" });
+    expect((await results()).filter((t) => /^Scope marked /.test(t))).toHaveLength(1);
     // The accounting's answer ("is now blocked until it is marked") is stale once the mark is made, so the row no longer shows it.
     // The accounting form itself has left the row by now, so the answer is looked for in the row: a lookup through the form would throw.
     await absent(() => row(m).$('[data-testid="settle-answer"]').isExisting(), "the accounting's answer after the mark");
@@ -302,7 +303,9 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await tabTo("Release");
     await browser.keys("Enter");
     await browser.waitUntil(async () => (await results()).some((t) => t.startsWith("Scope released, was ready")), { timeout: 60_000, timeoutMsg: "no result of the row says the scope was released" });
-    expect((await results()).find((t) => t.startsWith("Scope released, was ready"))).toContain("A release is not an approval");
+    const releases = (await results()).filter((t) => t.startsWith("Scope released, was ready"));
+    expect(releases).toHaveLength(1);
+    expect(releases[0]).toContain("A release is not an approval");
     const seen = await measure();
     expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
     expect(seen.small).toBe(0);
