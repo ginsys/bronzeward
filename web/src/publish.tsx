@@ -79,10 +79,18 @@ export function publishLocked(open: boolean, o: Outcome | undefined, failed: str
 }
 
 const MAX_CHANGES = 10;
+
+// The revision of the draft a failed publication was made from, only where its refusal is the one that names no fragment:
+// the rule `invalid`, Talos's validation of the whole configuration. A deadlock, a busy scope, a stale input or a recovery
+// mode is no reason to look at the draft's fragments, and a refusal of one fragment already names it.
+export function changesRevision(o: Operation): number | undefined {
+  const rule = (o.error as Record<string, unknown> | null)?.["rule"];
+  return rule === "invalid" ? o.subject?.draftRevision : undefined;
+}
 const changeWord = (e: Source) => (e.revision === null ? "removed" : e.head === null ? "new" : "changed");
 
-// After a refused publication: what the draft this page holds changes, because a refusal of the machine's whole
-// configuration names no fragment and the cause may be one the draft changed. The draft must be the one the refused
+// After a publication refused with the rule invalid (`changesRevision`): what the draft this page holds changes, because a
+// refusal of the machine's whole configuration names no fragment and the cause may be one the draft changed. The draft must be the one the refused
 // publication was made from (its revision); a draft saved since says it cannot be listed.
 export function DraftChanges({ d, revision }: { d: Draft | undefined; revision: number | undefined }) {
   if (d === undefined || revision === undefined) return null;
@@ -103,7 +111,7 @@ function Progress({ op, draft, held, onFailed }: { op: string; draft: string; he
   const reads = useReads();
   const now = useRef(reads);
   now.current = reads;
-  // The revision of the draft a failed publication was made from, once it is known to have failed.
+  // The revision to list the draft's changes for, once the publication is known to have failed with the rule invalid.
   const [refusedAt, setRefusedAt] = useState<number | undefined>();
   const [{ lines, cleared, end }, show] = useReducer(watchView, { lines: [] });
   useEffect(() => {
@@ -126,7 +134,7 @@ function Progress({ op, draft, held, onFailed }: { op: string; draft: string; he
       // A publication that definitively failed left the draft open: Publish may send again (the server
       // reuses only a queued or running operation).
       else {
-        setRefusedAt(r.operation.subject?.draftRevision);
+        setRefusedAt(changesRevision(r.operation));
         onFailed(op);
       }
       show({ type: "end", text: "release" in e ? <>Publication succeeded: release <Named id={e.release} /> was published. {SENT_NOTHING}</> : <>{e.text}{e.machine !== undefined && <> The machine it names: <MachineById id={e.machine} />.</>}</> });
