@@ -140,6 +140,7 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	}
 	if dropAt >= 0 {
 		docs = slices.Delete(docs, dropAt, dropAt+1)
+		decl.Embedded, declared = shiftEmbedded(decl.Embedded, dropAt)
 	}
 	out, back, err := encodeStable(docs)
 	if err != nil {
