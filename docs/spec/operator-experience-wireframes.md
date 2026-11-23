@@ -598,7 +598,11 @@ The form below is on the row of a pre-restore-unaccounted scope, in its Decision
 `recovery scope-account` in the console. Each observation is a choice with its purpose, when it began,
 when it was recorded and its resource version; one that cannot be the start or the end is off, with the
 reason after it ("its purpose is completion, not recovery", "it began before the start observation was
-recorded", "it read no machine-configuration resource version"). A server refusal shows in place with
+recorded", "it read no machine-configuration resource version"). Where the page can name the deadline the settle
+counts from, the Start choice marks the one observation the server accepts, the first after the deadline that
+read one of identity, running version and configuration, and gives each other its reason; where it cannot (a
+scope whose machine has more than eight apply operations, or one that could not be read) it says the server
+decides. A server refusal shows in place with
 the next step of its cause (the table of `recovery scope-account`).
 Mark and Release are one press for one machine, with no control for all scopes. The answer stays in
 the row: "Scope marked blocked, was blocked (act …). Missing identity: the identity the node showed is

@@ -158,7 +158,17 @@ In the web interface the recovery page of the operation, `/recovery/operations/<
 an "Account for an attempt" section for each attempt with no accounting. It shows the machine by
 name, the settle floor and the maximum transport deadline, and the machine's observations twice:
 once to choose the start, once to choose the end. An observation that cannot be the start or the
-end is off, with the reason. "Read the observations again" reads them again without losing what
+end is off, with the reason. The start is the first observation after the deadline that read at
+least one of identity, running version and configuration: where the page can name that deadline,
+it marks that one "the first read after the deadline" and gives every other its reason ("it began
+at or before the transport deadline", "it read none of identity, running version and
+configuration", "it is not the first read after the transport deadline"). For an attempt the
+deadline is the attempt's own transport deadline. For a scope on the console it is the later of
+the stop plus the maximum transport deadline and the transport deadline of each attempt of the
+machine that no accounting covers, which the page reads from the machine's apply operations; where
+the machine has more than eight of them, or one cannot be read, the page names no start and says
+the server decides. The server stays the judge and its refusal still shows. "Read the observations
+again" reads them again without losing what
 you chose or typed: use it when the settle floor asks you to wait for a later observation. The
 sentence above the button says what the decision records: your
 judgment that no copy of the request can still land, and that nothing shows whether it did. One
