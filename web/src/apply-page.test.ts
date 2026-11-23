@@ -282,6 +282,26 @@ describe("the apply page's plans and approvals", () => {
     await p.stop();
   });
 
+  // The guarantee reaches the rest of a running batch, not only the buttons: with two machines chosen, the second item
+  // of the batch is not sent after the first one's outcome is unknown.
+  test("the second item of a batch is not sent after the first has an unknown outcome", async () => {
+    const approvals = mount(served2(), (path) => (path === "/plans/pln_a/approvals" ? { kind: "unknown", why: "the connection was lost", problem: null } : done({ id: "apr_1" })));
+    await approvals.start();
+    await approvals.choose(A);
+    await approvals.choose(B);
+    await approvals.press("Apply");
+    expect(approvals.sent).toEqual(["/plans/pln_a/approvals"]);
+    await approvals.stop();
+    const none = (m: string) => ({ ...position(m, "x"), step: "needs-plan", plan: null });
+    const creations = mount(served2({ [`/machines/${A}/position`]: none(A), [`/machines/${B}/position`]: none(B) }), (path) => (path === "/plans" ? { kind: "unknown", why: "the connection was lost", problem: null } : done({})));
+    await creations.start();
+    await creations.choose(A);
+    await creations.choose(B);
+    await creations.press("Show apply");
+    expect(creations.sent).toEqual(["/plans"]);
+    await creations.stop();
+  });
+
   // list.tsx drops a read whose effect ran again, so a poll on a clock drops every read slower than the clock: the next
   // read starts five seconds after the last one settled.
   test("the rows are read again five seconds after the last read settled, never while one is slow", async () => {
@@ -336,8 +356,9 @@ describe("the apply page's plans and approvals", () => {
     }
   });
 
-  // The link to a withheld plan hands it to the person: the page that made it must not cancel it on the way out.
-  test("a plan this page made is not cancelled when the person opens it from its withheld line", async () => {
+  // The withheld line hands the plan to the person as it is drawn: no click is needed (a new tab, a copied address and
+  // a middle click fire no click event), so the page that made it does not cancel it on the way out, and says so.
+  test("a plan this page made is not cancelled once its withheld line is drawn, whatever the person does next", async () => {
     const none = (m: string) => ({ ...position(m, "x"), step: "needs-plan", plan: null });
     const withheld = { ...plan("pln_new", A), evidence: { diff: { withheld: true, from: "rel_x", to: REL, unified: "", fromFormOnly: false }, validation: null, dryRun: null, baseline: null } };
     const served = served2({ [`/machines/${A}/position`]: none(A), "/plans/pln_new": withheld });
@@ -353,7 +374,8 @@ describe("the apply page's plans and approvals", () => {
     await p.settled();
     const link = [...p.box.querySelectorAll('[data-testid="apply-withheld"] a')].find((a) => a.textContent === "Open the plan") as HTMLAnchorElement;
     expect(link).toBeDefined();
-    await act(async () => void link.click());
+    expect(p.box.querySelector('[data-testid="apply-withheld"]')!.textContent).toContain("The plan stays either way: cancel it on its own page if it is not wanted.");
+    // No click, no auxclick: the person leaves the page.
     await p.stop();
     expect(p.sent).toEqual(["/plans"]);
   });

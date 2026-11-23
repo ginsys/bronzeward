@@ -50,10 +50,15 @@ function Row({ release, machine, chosen, choose, locked, line, n, profiles, seen
 type Seeing = "shown" | "withheld" | "unread";
 
 // The plan of one machine, whose change is the one Apply approves. A plan another person prepared says who and when.
-function PlanChange({ id, machine, mine, onRead, onOpen }: { id: string; machine: string; mine: boolean; onRead: (id: string, s: Seeing) => void; onOpen: (id: string) => void }) {
+// A plan whose line says the change is withheld is handed over to the person as that line is drawn: the page does not
+// cancel it however the person gets to it (a click, a new tab, a copied address), and the line says it stays.
+function PlanChange({ id, machine, mine, onRead, onWithheld }: { id: string; machine: string; mine: boolean; onRead: (id: string, s: Seeing) => void; onWithheld: (id: string) => void }) {
   const p = useItem<S["PlanBody"]>(`/plans/${enc(id)}`);
   const seeing: Seeing = p.kind !== "ok" ? "unread" : p.data.evidence.diff?.withheld === true ? "withheld" : "shown";
   useEffect(() => onRead(id, seeing), [onRead, id, seeing]);
+  useEffect(() => {
+    if (seeing === "withheld") onWithheld(id);
+  }, [onWithheld, id, seeing]);
   return (
     <>
       <details data-testid="apply-plan" data-plan={id}>
@@ -61,7 +66,7 @@ function PlanChange({ id, machine, mine, onRead, onOpen }: { id: string; machine
         {p.kind === "ok" && <p data-testid="apply-plan-by">{mine ? LINES.madeHere : <>{LINES.preparedBy} <Who id={p.data.createdBy?.principal} /> on {when(p.data.createdAt)}.</>} It expires {when(p.data.expiresAt)}.</p>}
         {p.kind === "ok" ? <Change p={p.data} /> : <p>Not read yet.</p>}
       </details>
-      {seeing === "withheld" && <p data-testid="apply-withheld"><MachineById id={machine} />: the change of its plan {LINES.withheld} <span onClickCapture={() => onOpen(id)}><Ref to={`/plans/${enc(id)}`} id={id}>Open the plan</Ref></span></p>}
+      {seeing === "withheld" && <p data-testid="apply-withheld"><MachineById id={machine} />: the change of its plan {LINES.withheld} <Ref to={`/plans/${enc(id)}`} id={id}>Open the plan</Ref></p>}
     </>
   );
 }
@@ -85,6 +90,10 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   const [readable, setReadable] = useState<Readonly<Record<string, Seeing>>>({});
   const live = useRef(true);
   const sent = useRef<Write[]>([]);
+  // A write of this page that is still open (in flight, unknown or set aside after an attempt) is the logical write of
+  // its press: nothing new is sent until it ended or its notice was dismissed (forms.tsx startsNew). The buttons and
+  // every send of a batch read it here.
+  const openWrite = useCallback(() => sent.current.some((w) => !startsNew(writes, w)), [writes]);
 
   const io = useCallback((): ApplyIo => {
     const epoch = writes.client?.currentEpoch;
@@ -103,8 +112,9 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
         return line.state === "done" || line.state === "ready" ? rest : { ...rest, [m]: line };
       }),
       live: () => live.current && valid(),
+      canSend: () => live.current && valid() && !openWrite(),
     };
-  }, [writes, read]);
+  }, [writes, read, openWrite]);
 
   // The plans this page made for a machine that is not in `keep`, and that Apply was not pressed for, are cancelled:
   // when the page leaves (nothing is kept) and when a machine is no longer chosen. The rows are read again after.
@@ -182,9 +192,7 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   // server withholds says so, and where to go, in its own line.
   const unread = [...plans.values()].some((id) => readable[id] !== "shown");
   const unreadOnly = [...plans.values()].some((id) => readable[id] !== "shown" && readable[id] !== "withheld");
-  // A write of this page that is still open (in flight, unknown or set aside after an attempt) is the logical write of
-  // its press: nothing new is sent until it ended or its notice was dismissed (forms.tsx startsNew).
-  const held = sent.current.some((w) => !startsNew(writes, w));
+  const held = openWrite();
 
   const choose = (m: string, on: boolean) => {
     // The plans shown were made for the machines chosen: a machine no longer chosen has its plan cancelled.
@@ -205,7 +213,6 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
     await applyPlans(plans, io());
     if (live.current) (setBusy(false), setN((x) => x + 1), setWatching(true));
   };
-  // A plan the person opens from here is theirs to decide on its own page: leaving this page does not cancel it.
   const handOff = useCallback((id: string) => void pressed.current.add(id), []);
   const markRead = useCallback((id: string, s: Seeing) => setReadable((was) => (was[id] === s ? was : { ...was, [id]: s })), []);
 
@@ -226,7 +233,7 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
       {picked.length > 0 && plans.size < picked.length && <p data-testid="apply-needs-publisher">{APPLY_NEEDS_PUBLISHER}</p>}
       {plans.size > 0 && (
         <section aria-label="Plans to approve">
-          {[...plans].map(([m, id]) => <PlanChange key={id} id={id} machine={m} mine={made.current.has(id)} onRead={markRead} onOpen={handOff} />)}
+          {[...plans].map(([m, id]) => <PlanChange key={id} id={id} machine={m} mine={made.current.has(id)} onRead={markRead} onWithheld={handOff} />)}
           <p data-testid="apply-sentence">{APPLY_SENTENCE}</p>
           {unreadOnly && <p data-testid="apply-unread">{LINES.unreadPlan}</p>}
           <p><Action label="Apply" needs={["approver"]} onClick={() => void apply()} busy={busy || held || unread} /></p>

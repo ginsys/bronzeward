@@ -54,8 +54,10 @@ describe("what a machine's row says", () => {
 });
 
 // A server for the page: each machine's position, and what each write does. `log` is every write sent, in order.
-function world(positions: Record<string, Position>, refuse: { plan?: string[]; approve?: string[] } = {}) {
+function world(positions: Record<string, Position>, refuse: { plan?: string[]; approve?: string[]; unknownPlan?: string[]; unknownApprove?: string[] } = {}) {
   const log: string[] = [];
+  // A write with an unknown outcome stays open, and nothing new goes while one is (what the page's `canSend` reads).
+  let open = false;
   const lines: Record<string, Line> = {};
   let n = 0;
   const made: Record<string, string> = {};
@@ -71,16 +73,19 @@ function world(positions: Record<string, Position>, refuse: { plan?: string[]; a
       if (spec.method === "POST" && spec.path === "/plans") {
         const m = body.machine!;
         if (refuse.plan?.includes(m)) return Object.assign(w, { outcome: { kind: "refused", status: 409, problem: { detail: "no" } } });
+        if (refuse.unknownPlan?.includes(m)) return (open = true), Object.assign(w, { outcome: { kind: "unknown", why: "the connection was lost", problem: null } });
         const id = plan(String.fromCharCode(97 + ++n));
         made[m] = id;
         return Object.assign(w, { outcome: { kind: "done", data: { id } } });
       }
       const target = /^\/plans\/([^/]+)\/(approvals|cancellations)$/.exec(spec.path);
       if (target?.[2] === "approvals" && refuse.approve?.includes(target[1]!)) return Object.assign(w, { outcome: { kind: "refused", status: 403, problem: { detail: "no" } } });
+      if (target?.[2] === "approvals" && refuse.unknownApprove?.includes(target[1]!)) return (open = true), Object.assign(w, { outcome: { kind: "unknown", why: "the connection was lost", problem: null } });
       return Object.assign(w, { outcome: { kind: "done", data: {} } });
     },
     say: (key, line) => void (lines[key] = line),
     live: () => true,
+    canSend: () => !open,
   };
   return { io, log, lines, made };
 }
@@ -172,15 +177,22 @@ describe("Apply", () => {
   });
   test("sends nothing once the page has left", async () => {
     const w = world({});
-    await applyPlans(new Map([[A, plan("a")]]), { ...w.io, live: () => false });
+    await applyPlans(new Map([[A, plan("a")]]), { ...w.io, live: () => false, canSend: () => false });
     expect(w.log).toEqual([]);
   });
 });
 
-describe("a plan the page made and the person did not approve", () => {
-  test("is cancelled, and only that", async () => {
-    const w = world({});
-    await cancelPlans([plan("a")], w.io);
-    expect(w.log).toEqual([`POST /plans/${plan("a")}/cancellations`]);
+// A write whose outcome is unknown holds the page: the page's own sentence says nothing new is sent, so the next
+// request of a batch is not sent either, in either loop (one guard, `canSend`, decides every send).
+describe("a write of unknown outcome stops the rest of its batch", () => {
+  type World = ReturnType<typeof world>;
+  const cases: { name: string; positions: Record<string, Position>; fault: { unknownPlan?: string[]; unknownApprove?: string[] }; run: (w: World) => Promise<unknown>; sent: string[] }[] = [
+    { name: "creations", positions: { [A]: pos("needs-plan"), [B]: pos("needs-plan") }, fault: { unknownPlan: [A] }, run: (w) => showApply(REL, [A, B], w.io), sent: ["POST /plans"] },
+    { name: "approvals", positions: {}, fault: { unknownApprove: [plan("a")] }, run: (w) => applyPlans(new Map([[A, plan("a")], [B, plan("b")]]), w.io), sent: [`POST /plans/${plan("a")}/approvals`] },
+  ];
+  test.each(cases)("$name: the second item is not sent", async (c) => {
+    const w = world(c.positions, c.fault);
+    await c.run(w);
+    expect(w.log).toEqual(c.sent);
   });
 });

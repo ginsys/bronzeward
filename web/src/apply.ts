@@ -41,7 +41,7 @@ export const LINES = {
   frozen: "Stopped: the machine is frozen. An approver can unfreeze it on the machine's page.",
   otherPlan: "Stopped: the plan waiting for this machine is not an apply plan. Open the machine to decide on it.",
   unreadPlan: "The change of a plan could not be read, so Apply stays off until it can be: reload the page.",
-  withheld: "cannot be shown: either the configuration could not be redacted, or the machine holds a configuration other than the one Bronzeward last applied, so the two cannot be compared. Apply stays off while this plan is listed. Open the plan to read what it records and approve it there, or untick this machine.",
+  withheld: "cannot be shown: either the configuration could not be redacted, or the machine holds a configuration other than the one Bronzeward last applied, so the two cannot be compared. Apply stays off while this plan is listed. Open the plan to read what it records and approve it there, or untick this machine. The plan stays either way: cancel it on its own page if it is not wanted.",
   held: "A write of this page has an unknown outcome, so nothing new is sent. Repeat it or dismiss its notice at the top of the page first.",
   planning: "Creating the plan.",
   approving: "Approving the plan as you.",
@@ -75,6 +75,9 @@ export interface ApplyIo {
   send(spec: WriteSpec): Promise<Write>;
   say(machine: string, line: Line): void;
   live(): boolean;
+  // Whether the next request of a batch may go: the page is still here and no write of it has an unknown outcome.
+  // Every send of both loops asks this, and nothing else.
+  canSend(): boolean;
 }
 
 const done = (w: Write) => w.outcome?.kind === "done";
@@ -114,7 +117,7 @@ export async function showApply(release: string, machines: readonly string[], io
       io.say(m, { state: "stopped", text: body.error });
       continue;
     }
-    if (!io.live()) break;
+    if (!io.canSend()) break;
     io.say(m, { state: "working", text: LINES.planning });
     const w = await io.send({ method: "POST", path: "/plans", body: body.body, resource: "/plans" });
     if (!done(w)) {
@@ -142,7 +145,7 @@ export async function showApply(release: string, machines: readonly string[], io
 export async function applyPlans(plans: ReadonlyMap<string, string>, io: ApplyIo): Promise<Set<string>> {
   const approved = new Set<string>();
   for (const [m, id] of plans) {
-    if (!io.live()) break;
+    if (!io.canSend()) break;
     io.say(m, { state: "working", text: LINES.approving });
     const w = await io.send({ method: "POST", path: `/plans/${enc(id)}/approvals`, body: {}, resource: `/plans/${id}` });
     if (done(w)) approved.add(id);
