@@ -97,23 +97,50 @@ func holdsHostname(s compile.Source) bool {
 // compiler fills it back from the name (compilation.md §6 step 5a), and the release is form-only against
 // the base as imported: the filled hostname is treated as equal to the original document. Controls: the
 // same bytes imported with no name, and with another name, keep the document and record nothing removed.
+// gen.sh writes the document with no `auto`, which the import removes but does not call equal to the fill
+// (§2.3 step 2a: equal means exactly `auto: off` and the hostname), so each machine is read twice: as
+// written, and with `auto: off` added, which is what a node holds after the fill. The run fails, and so
+// fails step 0 of hostname-measure before `up`, unless the controls hold on every row and at least one
+// machine with `auto: off` was removed, equal and form-only: without it every row could read "removed
+// false" and the measurement would prove nothing. No other value is asserted.
 func hostname(ms []machine) {
 	fmt.Println("== B3: the node's own hostname document, imported with the machine's name")
-	fmt.Println("machine  removed equal  baseHolds(no name) baseHolds(name) baseHolds(other)  digest(compiled)==digest(node)  formOnly")
+	fmt.Println("machine  case  removed equal  baseHolds(no name) baseHolds(name) baseHolds(other)  digest(compiled)==digest(node)  formOnly")
+	equalSeen, controlsHold := false, true
 	for _, m := range ms {
-		noName, _ := importNamed("b3", m.node, "")
-		other, otherFilled := importNamed("b3", m.node, "not-"+m.name)
-		named, filled := importNamed("b3", m.node, m.name)
-		compiled, err := compile.Compile(compile.Input{Base: named, Mode: compile.ModeMetal, Name: m.name,
-			Imported: compile.ImportedHostname{Name: filled.Name, Equal: filled.Equal}})
-		if err != nil {
-			fmt.Printf("%-7s  refused: %v\n", m.name, err)
-			continue
+		withOff := strings.Replace(string(m.node), "kind: HostnameConfig\n", "kind: HostnameConfig\nauto: off\n", 1)
+		cases := []struct{ label, text string }{{"as-written", string(m.node)}}
+		if !strings.Contains(string(m.node), "kind: HostnameConfig\nauto:") {
+			cases = append(cases, struct{ label, text string }{"auto-off", withOff})
 		}
-		d := must(compiled.Materialized().Digest())
-		fmt.Printf("%-7s  %v %v  %v %v %v  %v  %v  (other name removed: %v)\n", m.name, filled.Name != "", filled.Equal,
-			holdsHostname(noName), holdsHostname(named), holdsHostname(other), d == talos.ConfigurationDigest(m.node),
-			compiled.FormOnly(), otherFilled.Name != "")
+		for _, c := range cases {
+			node := []byte(c.text)
+			noName, _ := importNamed("b3", node, "")
+			other, otherFilled := importNamed("b3", node, "not-"+m.name)
+			named, filled := importNamed("b3", node, m.name)
+			compiled, err := compile.Compile(compile.Input{Base: named, Mode: compile.ModeMetal, Name: m.name,
+				Imported: compile.ImportedHostname{Name: filled.Name, Equal: filled.Equal}})
+			if err != nil {
+				fmt.Printf("%-7s  %-10s  refused: %v\n", m.name, c.label, err)
+				controlsHold = false
+				continue
+			}
+			d := must(compiled.Materialized().Digest())
+			formOnly := compiled.FormOnly()
+			fmt.Printf("%-7s  %-10s  %v %v  %v %v %v  %v  %v  (other name removed: %v)\n", m.name, c.label, filled.Name != "", filled.Equal,
+				holdsHostname(noName), holdsHostname(named), holdsHostname(other), d == talos.ConfigurationDigest(node),
+				formOnly, otherFilled.Name != "")
+			// the controls: no name, and another name, keep the document and record nothing removed
+			if !holdsHostname(noName) || !holdsHostname(other) || otherFilled.Name != "" {
+				controlsHold = false
+			}
+			if c.label == "auto-off" && filled.Name != "" && filled.Equal && formOnly {
+				equalSeen = true
+			}
+		}
+	}
+	if !controlsHold || !equalSeen {
+		fatal(fmt.Errorf("B3 is vacuous or a control failed: controls hold %v, a machine removed+equal+form-only with auto: off %v", controlsHold, equalSeen))
 	}
 }
 
