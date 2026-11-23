@@ -261,6 +261,11 @@ func TestHostnameInvalidHeldValueIsWithheld(t *testing.T) {
 		if strings.Contains(err.Error(), long) {
 			t.Errorf("name %q: the refusal shows the held value", name)
 		}
+		// Main's answer for an invalid composition, named or not: the rule `invalid`, from step 8.
+		var e *Error
+		if !errors.As(err, &e) || e.Rule != RuleInvalid {
+			t.Errorf("name %q: the refusal is not the rule %q", name, RuleInvalid)
+		}
 	}
 }
 
