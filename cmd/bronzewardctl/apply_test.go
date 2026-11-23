@@ -25,7 +25,8 @@ type applyFake struct {
 	createFails           int    // the status making a plan answers with, 0 for none
 	moveAt                string // the epoch moves after this path is served
 	cancelFails, moved    bool
-	cancelRefused         bool // a cancellation answers 409, as for a plan somebody cancelled meanwhile
+	cancelRefused         bool   // a cancellation answers 409, as for a plan somebody cancelled meanwhile
+	withheld              string // the plan whose change the server withholds
 }
 
 func (f *applyFake) took() []string {
@@ -35,8 +36,12 @@ func (f *applyFake) took() []string {
 }
 
 func (f *applyFake) plan(id, machine string) string {
+	evidence := diffEvidence
+	if id == f.withheld {
+		evidence = withheldEvidence
+	}
 	body := fmt.Sprintf(planJSON, "proposed", "null", "null", "apply-config", `"no-reboot"`, "4", "null", "60", "600", "3",
-		map[string]string{"pln_prepared": "2026-11-24T09:15:00Z", "pln_made": "2026-11-24T10:30:00Z"}[id], diffEvidence)
+		map[string]string{"pln_prepared": "2026-11-24T09:15:00Z", "pln_made": "2026-11-24T10:30:00Z"}[id], evidence)
 	return strings.NewReplacer("pln_BWSYNTH", id, "mch_a", machine).Replace(body)
 }
 
@@ -267,6 +272,21 @@ func TestApplyFaults(t *testing.T) {
 		!strings.Contains(errOut, "Cancellation recorded for the plans this command made: pln_made. "+cancelLimits) || !strings.Contains(out, "alpha: approved") || strings.Contains(out, "beta: approved") ||
 		strings.Contains(sent(f), "pln_made/approvals") || !strings.Contains(sent(f), "pln_made/cancellations") {
 		t.Errorf("unread plan: exit %d, stdout %q, stderr %q, sent %q", code, out, errOut, f.took())
+	}
+
+	// A plan whose change the server withholds is never approved in a batch, as the apply page keeps Apply off
+	// for it: a plan this command made is cancelled, one somebody else prepared is left as it was.
+	f, code, out, errOut = run(func(f *applyFake) { f.withheld = "pln_made" })
+	if code != 0 || !strings.Contains(errOut, "beta  worker  worker-base,storage  stopped: the change of its plan cannot be shown") ||
+		!strings.Contains(errOut, "plan show 'pln_made'") || !strings.Contains(errOut, "Cancellation recorded for the plans this command made: pln_made. "+cancelLimits) ||
+		!strings.Contains(out, "alpha: approved") || strings.Contains(sent(f), "pln_made/approvals") || !strings.Contains(sent(f), "pln_made/cancellations") {
+		t.Errorf("a withheld change, made plan: exit %d, stdout %q, stderr %q, sent %q", code, out, errOut, f.took())
+	}
+
+	f, code, out, errOut = run(func(f *applyFake) { f.withheld = "pln_prepared" })
+	if code != 0 || !strings.Contains(errOut, "alpha  controlplane  cp-base  stopped: the change of its plan cannot be shown") || strings.Contains(errOut, "Cancellation recorded") ||
+		!strings.Contains(out, "beta: approved") || strings.Contains(sent(f), "pln_prepared") {
+		t.Errorf("a withheld change, prepared plan: exit %d, stdout %q, stderr %q, sent %q", code, out, errOut, f.took())
 	}
 
 	f, code, out, errOut = run(func(f *applyFake) { f.unknown = "pln_prepared" })

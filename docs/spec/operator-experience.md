@@ -982,7 +982,10 @@ apply-config plan for each machine chosen, by name or ID, so that every change e
 reuses a plan somebody prepared for this operation that is ready. It reads every plan before it shows
 anything and prints each machine with its role and profiles, each plan's own expiry, and the size of its
 change (the change itself with `--diff`), on standard error, then asks once. A plan whose change cannot be
-read is left out, and one this command made is cancelled, so that nothing is approved unseen. `y` approves
+read, or that the server withholds (a configuration that could not be redacted, or a machine holding a
+configuration other than the one last applied), is left out, and one this command made is cancelled, so that
+nothing is approved unseen; the apply page keeps Apply off for the same reason, and `approve <plan>` approves such a
+plan one at a time. `y` approves
 every plan listed, each by its own approval, bound to the epoch the plans were read at (an epoch that moved
 since refuses the rest, and one that moves while they are read stops the command before the list), and each
 answered on its own line; a refusal for one machine leaves the others approved and exits non-zero, and so

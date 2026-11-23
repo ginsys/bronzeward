@@ -211,7 +211,7 @@ var cmdTable = []cmdEntry{
 	{path: "apply", line: "apply a release to the machines you choose", synopsis: "apply <release> (--machine <a,b> | --all) [--diff]", roles: "publisher, then approver", person: true,
 		notes: "makes one apply-config plan for each machine chosen, by name or ID, or --all of the release's machines, prints each machine with\n" +
 			"its role, profiles and plan expiry, and with --diff each plan's change, on standard error, then asks Approve them? [y/N] and approves\n" +
-			"every plan listed only on y or yes. A plan whose change cannot be read is left out. Enter, n and the end of input send no approval\n" +
+			"every plan listed only on y or yes. A plan whose change cannot be read or is withheld is left out. Enter, n and the end of input send no approval\n" +
 			"and cancel the plans this command made; a plan somebody else prepared is approved as it stands and never cancelled here. A Ctrl-C at\n" +
 			"the question leaves the plans to expire at the time each shows. A machine already applied, frozen, in drift, in an operation or with\n" +
 			"another operation's plan waiting is left out with its reason.\n" +
