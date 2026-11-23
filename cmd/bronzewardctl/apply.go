@@ -105,7 +105,11 @@ func (e *env) apply(args []string) (err error) {
 	if planned == 0 {
 		return errors.Join(append(failed, notConfirmed{errors.New("no plan to approve; nothing was approved")})...)
 	}
-	if err := e.confirmYes(sf("Answering y records your approval of the %d plans listed as you. Approve them?", planned)); err != nil {
+	question := sf("Answering y records your approval of the %d plans listed as you. Approve them?", planned)
+	if planned == 1 {
+		question = "Answering y records your approval of the 1 plan listed as you. Approve it?"
+	}
+	if err := e.confirmYes(question); err != nil {
 		failed = append(failed, e.applyCancel(c, made))
 		// The plans this command made are already created, so "nothing was sent" would be false: nothing was approved.
 		msg, _ := strings.CutSuffix(err.Error(), "nothing was sent")

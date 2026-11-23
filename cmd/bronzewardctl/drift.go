@@ -149,8 +149,10 @@ func appliedRelease(m apitypes.MachineBody) string {
 func (e *env) machineFreeze(verb string, args []string) error {
 	var reason given
 	var rf repeatFlags
+	var cluster string
 	pos, err := e.parse("machine "+verb, args, 1, func(fs *flag.FlagSet) {
 		fs.Var(&reason, "reason", "")
+		fs.StringVar(&cluster, "cluster", "", "")
 		rf.flags(fs)
 	})
 	if err != nil {
@@ -163,10 +165,12 @@ func (e *env) machineFreeze(verb string, args []string) error {
 	if err != nil {
 		return err
 	}
-	m := url.PathEscape(pos[0])
 	body, _ := json.Marshal(apitypes.ReasonInput{Reason: reason.v})
-	err = e.write(&client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/" + verb + "s", Body: body, Repeat: rp,
-		Check: "machine timeline " + client.ShellWord(pos[0]), Read: freezeRead(m)},
+	err = e.writeNamed(pos[0], cluster, nil, func(id string) *client.Write {
+		m := url.PathEscape(id)
+		return &client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/" + verb + "s", Body: body, Repeat: rp,
+			Check: "machine timeline " + client.ShellWord(id), Read: freezeRead(m)}
+	},
 		func(c *client.Client, r *client.Response) ([]string, error) {
 			var x apitypes.FreezeBody
 			if err := json.Unmarshal(r.Body, &x); err != nil {

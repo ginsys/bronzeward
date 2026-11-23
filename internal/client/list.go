@@ -17,6 +17,8 @@ type Page struct {
 	Body  []byte            `json:"-"`
 	// Epoch is the Bronzeward-Epoch of the answer itself, empty when the answer had none.
 	Epoch string `json:"-"`
+	// Moves is EpochMoves as this answer left it, before a later read moved it.
+	Moves int `json:"-"`
 }
 
 // Page reads the page of the list at path that cursor names, the first for "". A refused cursor
@@ -47,7 +49,7 @@ func (c *Client) page(path, cursor string) (*Page, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Page{Body: r.Body, Epoch: r.Header.Get("Bronzeward-Epoch")}
+	p := &Page{Body: r.Body, Epoch: r.Header.Get("Bronzeward-Epoch"), Moves: r.Moves}
 	if err := json.Unmarshal(r.Body, p); err != nil {
 		return nil, c.Context.fail(fmt.Errorf("GET %s: %w", path, err))
 	}
@@ -76,7 +78,14 @@ func (c *Client) List(path string) ([]json.RawMessage, error) {
 // epoch of its cursor, so that is the epoch of the whole list (§8.5). It is empty when that answer
 // had none.
 func (c *Client) ListAt(path string) ([]json.RawMessage, string, error) {
-	items, next, epoch := []json.RawMessage{}, "", ""
+	items, epoch, _, err := c.ListBound(path)
+	return items, epoch, err
+}
+
+// ListBound is ListAt, and it returns EpochMoves as the last page's answer left it, so a write built from the
+// list binds to that read and not to a refresh that followed it (§8.5).
+func (c *Client) ListBound(path string) ([]json.RawMessage, string, int, error) {
+	items, next, epoch, moves := []json.RawMessage{}, "", "", 0
 	for restarts := 0; ; {
 		page, err := c.page(path, next)
 		if next != "" && restarts < 3 && c.restart(path, err) {
@@ -84,11 +93,11 @@ func (c *Client) ListAt(path string) ([]json.RawMessage, string, error) {
 			continue
 		}
 		if err != nil {
-			return nil, "", err
+			return nil, "", 0, err
 		}
-		items, epoch = append(items, page.Items...), page.Epoch
+		items, epoch, moves = append(items, page.Items...), page.Epoch, page.Moves
 		if next = page.Next; next == "" {
-			return items, epoch, nil
+			return items, epoch, moves, nil
 		}
 	}
 }
