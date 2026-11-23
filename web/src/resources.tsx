@@ -15,7 +15,7 @@ import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { OnboardCluster } from "./onboard.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
-import { Detail, EmptyList, Head, Id, IdentifierText, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
+import { Detail, EmptyList, Head, Id, IdentifierText, type Listed, More, Ref, Scroll, short, useItem, useList, usePending, viewOf } from "./list.tsx";
 import { Who } from "./principals.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
@@ -426,8 +426,17 @@ export function Changes() {
   );
 }
 
+// What a release's source is, by name: "Assignment of cp1" for an assignment, a fragment's or a profile's name, else the
+// identifier. The identifier is the link's title; the shortened one stands in until the source is read.
+function SourceName({ kind, head }: { kind: string; head: string }) {
+  const path = kind === "assignment" ? "assignments" : kind === "fragment" ? "fragments" : kind === "profile" ? "profiles" : undefined;
+  const body = useBody<{ machine?: string; name?: string }>(path === undefined ? undefined : `/${path}/${encodeURIComponent(head)}`);
+  const machine = useMachineText(kind === "assignment" ? body?.machine : undefined);
+  const text = kind === "assignment" ? (machine === undefined ? undefined : assignmentName(machine)) : body?.name === undefined ? undefined : safeText(body.name);
+  return text === undefined || viewOf(head) === undefined ? <Id id={head} /> : <Ref to={`/${viewOf(head)}/${encodeURIComponent(head)}`} id={head}>{text}</Ref>;
+}
 const BUILT: readonly Col<S["ReleaseSourceBody"]>[] = [
-  ["Kind", (s) => safeWord(s.kind)], ["Source", (s) => <Id id={s.head} />], ["Revision", (s) => <Id id={s.revision} none="removed" />],
+  ["Kind", (s) => safeWord(s.kind)], ["Source", (s) => <SourceName kind={s.kind} head={s.head} />], ["Revision", (s) => <Id id={s.revision} none="removed" />],
 ];
 const RenderedLink = ({ to, machine }: { to: string; machine: string }) => (
   <Ref to={to} id={machine}>Rendered configuration of {useMachineText(machine) ?? short(machine)}</Ref>
@@ -449,7 +458,7 @@ export function ReleaseItem({ id }: { id: string }) {
           <Fields rows={[
             ["Identifier", r.id], ["Cluster", <ClusterLink id={r.cluster} />], ["Published", <>{when(r.publishedAt)} by {by(r.publishedBy)}</>],
             ["Renderer", `contract ${r.renderer.contract} · machinery ${r.renderer.machineryVersion} · Kubernetes ${r.renderer.kubernetesVersion}`],
-            ["Draft", <><Named id={r.draft} />, revision {r.draftRevision}</>], ["Publication", <Named id={r.operation} />],
+            ["Draft", <><Named id={r.draft} />, built from its revision {r.draftRevision}</>], ["Publication", <Named id={r.operation} />],
           ]} />
           <h3>Source revisions this release was built from (these are not configuration)</h3>
           <Rows label="Source revisions" cols={BUILT} items={r.sources} keyOf={(s) => `${s.kind}:${s.head}`} />
