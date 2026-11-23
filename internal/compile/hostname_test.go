@@ -246,6 +246,24 @@ func TestHostnameRefusesAnInvalidName(t *testing.T) {
 	}
 }
 
+// A hostname a reference holds is a secret value: when its resolved value is invalid (too long), the
+// refusal quotes neither it nor, since the compiler redacts what a reference holds (§8.3), anything
+// that tells it. The test prints no text, only that the value is shown.
+func TestHostnameInvalidHeldValueIsWithheld(t *testing.T) {
+	long := strings.Repeat("a", 64)
+	f := source(t, "apiVersion: v1alpha1\nkind: HostnameConfig\nauto: off\nhostname: !bwref app/host\n", strRef("app/host"),
+		map[string]provider.Value{"app/host": value(t, provider.KindString, long)})
+	for _, name := range []string{"", hostMachine} {
+		_, err := Compile(hostIn(generated(t), name, ModeMetal, f))
+		if err == nil {
+			t.Fatalf("name %q: an invalid held hostname compiled", name)
+		}
+		if strings.Contains(err.Error(), long) {
+			t.Errorf("name %q: the refusal shows the held value", name)
+		}
+	}
+}
+
 // The guard after the second compile: an outcome overridden by the patch (an index past the caller's
 // fragments) is the bare fidelity refusal; one overridden by a fragment, or by none, passes.
 func TestNotOverriddenByPatch(t *testing.T) {
