@@ -309,7 +309,7 @@ export function RecoveryConsole() {
         Recovery mode {r.recoveryMode ? "on" : "off"}, epoch {r.epoch}{EPOCH_MEANS}. {mode === "recovery" ? RECOVERY_START : mode === "normal" ? "Server started normally." : UNKNOWN_START}
       </Status>
       <RecoveryFacts r={r} />
-      <Scopes scopes={inRecovery(r.scopes)} />
+      <Scopes scopes={inRecovery(r.scopes)} stoppedAt={r.entry?.stoppedAt} />
       <ExitRecovery held={held.length} recoveryMode={r.recoveryMode} onChanged={() => again((i) => i + 1)} />
       <Revocation />
       <Steps />
@@ -317,7 +317,7 @@ export function RecoveryConsole() {
   );
 }
 
-function Scopes({ scopes }: { scopes: readonly Scope[] }) {
+function Scopes({ scopes, stoppedAt }: { scopes: readonly Scope[]; stoppedAt?: string | undefined }) {
   if (scopes.length === 0) return <Status testid="scopes">No scope is in recovery.</Status>;
   return (
     <Scroll label="Scopes in recovery" testid="scopes">
@@ -328,7 +328,7 @@ function Scopes({ scopes }: { scopes: readonly Scope[] }) {
             <td><MachineById id={s.machine} /></td>
             <td data-testid="scope-state">{safeWord(s.state)}</td>
             <td>{nextStep(s.state)}</td>
-            <td><ScopeDecision machine={s.machine} state={s.state} /></td>
+            <td><ScopeDecision machine={s.machine} state={s.state} stoppedAt={stoppedAt} /></td>
           </tr>
         ))}
       </tbody>

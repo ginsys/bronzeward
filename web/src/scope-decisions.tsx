@@ -62,7 +62,7 @@ export function scopeNext(p: Problem | null): string | undefined {
   return state === "ready" ? `Mark the scope, then release it. ${RELEASE_NOT_APPROVAL}` : nextStep(state);
 }
 
-export function ScopeDecision({ machine, state }: { machine: string; state: string }) {
+export function ScopeDecision({ machine, state, stoppedAt }: { machine: string; state: string; stoppedAt?: string | undefined }) {
   const writes = useWrites()!;
   const [mark, sendMark] = useSend();
   const [release, sendRelease] = useSend();
@@ -85,7 +85,7 @@ export function ScopeDecision({ machine, state }: { machine: string; state: stri
       <Result w={release} done={released} />
       {next(release) !== undefined && <Status testid="write-next">{next(release)}</Status>}
       {(due || started) && (
-        <AccountingForm machine={machine} path="/recovery/accountings" resource="/recovery" what={SCOPE_WHAT} done={accountedScope} due={due} onStart={() => setStarted(true)} />
+        <AccountingForm machine={machine} path="/recovery/accountings" resource="/recovery" what={SCOPE_WHAT} done={accountedScope} due={due} stoppedAt={stoppedAt} onStart={() => setStarted(true)} />
       )}
     </>
   );
