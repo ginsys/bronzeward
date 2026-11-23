@@ -4,11 +4,14 @@
 # applies again, and reads after each apply what the node reports. Nothing here asserts a measured
 # value: the reads are the record (compilation.md §6.1), and the checks only prove each step ran.
 #
-# Usage: scenarios/hostname-measure   (on a fresh fixtures/bin/up, after scenarios/s1 onboard, which
-# names both machines from their nodes' hostnames). Step 3 is the Talos-default case, step 4 the
-# commonest case (an import of a configuration that holds the hostname document), steps 5 and 6
-# renames. Writes $STATE/evidence/hostname-measure-<time>/, not committed as it
-# is: the committed record is hand-written from it, after bin/evidence's leak scan.
+# Usage: scenarios/hostname-measure   (on a fresh fixtures/bin/up, after scenarios/s1 pass and
+# scenarios/s3 handover: the worker is imported, published and adopted, so it has an import base and
+# an Applied release, which an apply-config plan needs). The script names the worker from its node's
+# hostname, as onboarding does. Every release of a row is made as scenarios/s2 makes its
+# publications: a new draft, the worker imported into it with its file content marked, published.
+# Step 3 is the Talos-default case, step 4 the commonest case (an import of a configuration that holds
+# the hostname document), steps 5 and 6 renames. Writes $STATE/evidence/hostname-measure-<time>/, not
+# committed as it is: the committed record is hand-written from it, after bin/evidence's leak scan.
 #
 # Talos is touched by reads (get nodename, get hostnamestatus, read /proc/uptime) and by the one
 # dry run of step 2. Every mutation goes through the product's own apply-config operation, never a
@@ -43,6 +46,10 @@ run_key=$(date -u +%s%N)
 ref='E1 hostname'
 
 cluster='' machine_cp='' machine_w='' plan='' op='' draft='' etag=''
+# The mark that sets the worker's planted file content aside as a secret (up writes it as the worker's first
+# document, /var/etc/bw-s1.conf): without it the content would sit in the draft and the release, and in
+# the kept release and review reads. Every import below carries it, as s1, s2 and s5 do.
+WORKER_MARK='doc[0]/machine/files/0/content'
 dry=$STATE/hostname-measure-dry.yaml
 trap 'rm -f -- "$dry"' EXIT
 
@@ -72,20 +79,27 @@ name_as() {
 release_hostname() {
   keep_body "release-$1" "/api/v1/releases/$(sql "SELECT desired FROM machine_state WHERE machine = '$machine_w'")"
 }
-# apply_as_product <name> [command...]: a draft, the optional command on it (an import, which needs
-# the draft and its ETag), its publication, the release's review of the worker (kept: its formOnly is
-# the plan's verdict), an apply-config plan, its approval and the operation that completes; the
-# worker's reads before and after are node-<name>-before/after.txt.
+# import_worker <key suffix>: the worker imported into the draft, its file content marked (an import
+# needs the draft and its ETag, which draft_by leaves). The suffix is the import's own Idempotency-Key.
+import_worker() {
+  fresh_author
+  ingest "$machine_w" "$(jq -nc --arg p "$WORKER_MARK" '[$p]')" "$1"
+}
+# apply_as_product <name>: a draft, the worker imported into it with its mark, its publication, the
+# release's review of the worker (kept: its formOnly is the plan's verdict), an apply-config plan, its
+# approval and the operation that completes; the worker's reads before and after are
+# node-<name>-before/after.txt. plan_by leaves the plan's id in plan_id, which the reads below and
+# dispatch.sh's `completed` take from plan.
 apply_as_product() {
   local n=$1
-  shift
   read_node "$n-before" || return 1
   draft_by h-author "$n" || return 1
-  [ "$#" -eq 0 ] || "$@" || return 1
+  import_worker "$n" || return 1
   publish_by h-publisher "$n" || return 1
   release_hostname "$n" || return 1
   keep_body "review-$n" "/api/v1/releases/$new_release/machines/$machine_w/review" || return 1
   plan_by h-publisher "$n" || return 1
+  plan=$plan_id
   keep_body "plan-$n" "/api/v1/plans/$plan" || return 1
   approve_by h-approver "$plan" "$n" || return 1
   within 300 completed || return 1
@@ -120,8 +134,18 @@ equivalence() {
 check "$ref step 0" 'the equivalence measurements run with the pinned talosctl and exit 0' equivalence
 
 machines
-check "$ref" 'the worker is named: onboarding named it from its node (s1 onboard)' \
-  test -n "$(sql "SELECT name FROM machine WHERE id = '$machine_w'")"
+# name_worker: the worker is named by its node's hostname as `cluster onboard` names a machine, unless it
+# already has a name (a run after s1 onboard). s1 run and s3 handover leave it unnamed.
+node_hostname() { node_talos "$TALOS_WORKER_IP" get hostnamestatus -o yaml | awk '$1 == "hostname:" { print $2; exit }'; }
+name_worker() {
+  local n
+  if [ -n "$(sql "SELECT name FROM machine WHERE id = '$machine_w'")" ]; then return 0; fi
+  n=$(node_hostname) && [ -n "$n" ] || return 1
+  name_as h-author "$n"
+}
+check "$ref" 'the worker is adopted and has an import base (s1 pass, s3 handover)' \
+  test "$(sql "SELECT applied_release = desired FROM machine_state WHERE machine = '$machine_w'")" = t
+check "$ref" 'the worker is named from its node'"'"'s hostname' name_worker
 worker_name=$(sql "SELECT name FROM machine WHERE id = '$machine_w'")
 
 # Step 1: the worker as it is.
@@ -142,7 +166,7 @@ check "$ref step 2" 'apply-config --dry-run of the configuration plus the filled
 # onboarding, gets its first release through the product, which writes `auto: off` plus that name.
 # The reads answer whether a reboot is requested (uptime before and after), whether the nodename
 # changes, and what the review says of the release (formOnly); no sentence is chosen here.
-check "$ref step 3 default" 'the onboarded worker, first release applied through the product: the operation completes' apply_as_product default
+check "$ref step 3 default" 'the named worker, first release applied through the product: the operation completes' apply_as_product default
 check "$ref step 3 default" 'the worker'"'"'s Applied is its Desired after it' applied
 row default
 
@@ -154,12 +178,8 @@ row default
 # applied. A refusal of the import (a secret the import wants marked, a guard) is the row's result:
 # the case is then "not shown", and the refusal is read from $EV/last.body, never replaced by another
 # case under this name.
-reimport() {
-  fresh_author
-  ingest "$machine_w" '[]' explicit
-}
 check "$ref step 4 explicit" 'the worker is imported again from its node, published, planned and applied: the operation completes' \
-  apply_as_product explicit reimport
+  apply_as_product explicit
 check "$ref step 4 explicit" 'the worker'"'"'s Applied is its Desired after it' applied
 row explicit
 
