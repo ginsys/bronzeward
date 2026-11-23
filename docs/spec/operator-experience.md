@@ -942,7 +942,7 @@ when its machine is no longer chosen and when the page is left, including a plan
 after that; the choice cannot change while the page works, and a plan Apply was pressed for is never
 cancelled. One the page loses (the tab is closed) expires with the plan default; a creation whose outcome is
 unknown leaves a plan the page has no ID for, which the machine's page shows with who prepared it. No route returns a change before a plan exists, so showing it means making the plan.
-**Apply** stays off while any plan's change is unread or withheld by the server (a configuration that could not be
+**Apply** stays off while any plan's change is unread, bound to a drift record (it overwrites a configuration no reviewer has seen), or withheld by the server (a configuration that could not be
 redacted, or a machine holding a configuration other than the one Bronzeward applied, so the two cannot be
 compared): the page names that plan and links to its plan page, where the person can read what it records and
 approve it one plan at a time, a choice the plan page leaves to the person and the batch does not. That plan is
@@ -982,7 +982,7 @@ apply-config plan for each machine chosen, by name or ID, so that every change e
 reuses a plan somebody prepared for this operation that is ready. It reads every plan before it shows
 anything and prints each machine with its role and profiles, each plan's own expiry, and the size of its
 change (the change itself with `--diff`), on standard error, then asks once. A plan whose change cannot be
-read, or that the server withholds (a configuration that could not be redacted, or a machine holding a
+read, that overwrites a drifted configuration (a plan with a drift record), or that the server withholds (a configuration that could not be redacted, or a machine holding a
 configuration other than the one last applied), is left out, and one this command made is cancelled, so that
 nothing is approved unseen; the apply page keeps Apply off for the same reason, and `approve <plan>` approves such a
 plan one at a time. `y` approves

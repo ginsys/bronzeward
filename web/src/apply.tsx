@@ -48,18 +48,19 @@ function Row({ release, machine, chosen, choose, locked, line, n, profiles, seen
 }
 
 // What the page knows of a plan's change: shown (Apply may approve it), withheld by the server (it cannot be shown, so
-// Apply is off) or unread (the read has not answered).
-type Seeing = "shown" | "withheld" | "unread";
+// Apply is off), bound to a drift record (it overwrites a configuration no reviewer has seen, so Apply is off) or unread
+// (the read has not answered).
+type Seeing = "shown" | "withheld" | "drift" | "unread";
 
 // The plan of one machine, whose change is the one Apply approves. A plan another person prepared says who and when.
 // A plan whose line says the change is withheld is handed over to the person as that line is drawn: the page does not
 // cancel it however the person gets to it (a click, a new tab, a copied address), and the line says it stays.
 function PlanChange({ id, machine, mine, onRead, onWithheld }: { id: string; machine: string; mine: boolean; onRead: (id: string, s: Seeing) => void; onWithheld: (id: string) => void }) {
   const p = useItem<S["PlanBody"]>(`/plans/${enc(id)}`);
-  const seeing: Seeing = p.kind !== "ok" ? "unread" : p.data.evidence.diff?.withheld === true ? "withheld" : "shown";
+  const seeing: Seeing = p.kind !== "ok" ? "unread" : p.data.evidence.diff?.withheld === true ? "withheld" : p.data.operation === "apply-config" && p.data.driftRecord != null ? "drift" : "shown";
   useEffect(() => onRead(id, seeing), [onRead, id, seeing]);
   useEffect(() => {
-    if (seeing === "withheld") onWithheld(id);
+    if (seeing === "withheld" || seeing === "drift") onWithheld(id);
   }, [onWithheld, id, seeing]);
   return (
     <>
@@ -69,6 +70,7 @@ function PlanChange({ id, machine, mine, onRead, onWithheld }: { id: string; mac
         {p.kind === "ok" ? <Change p={p.data} /> : <p>Not read yet.</p>}
       </details>
       {seeing === "withheld" && <p data-testid="apply-withheld"><MachineById id={machine} />: the change of its plan {LINES.withheld} <Ref to={`/plans/${enc(id)}`} id={id}>Open the plan</Ref></p>}
+      {seeing === "drift" && p.kind === "ok" && <p data-testid="apply-drift"><MachineById id={machine} />: its plan overwrites the drifted configuration of drift record {p.data.driftRecord}, which no reviewer has seen. {LINES.handedOver} <Ref to={`/plans/${enc(id)}`} id={id}>Open the plan</Ref></p>}
     </>
   );
 }
@@ -194,7 +196,7 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   // Apply needs every plan's change shown: a person never approves a change they could not see. A plan whose change the
   // server withholds says so, and where to go, in its own line.
   const unread = [...plans.values()].some((id) => readable[id] !== "shown");
-  const unreadOnly = [...plans.values()].some((id) => readable[id] !== "shown" && readable[id] !== "withheld");
+  const unreadOnly = [...plans.values()].some((id) => readable[id] !== "shown" && readable[id] !== "withheld" && readable[id] !== "drift");
   const held = openWrite();
 
   const choose = (m: string, on: boolean) => {

@@ -248,6 +248,27 @@ describe("the apply page's plans and approvals", () => {
     await p.stop();
   });
 
+  // A plan bound to a drift record overwrites a configuration no reviewer has seen: the plan page says so, and the
+  // page never approves it in a batch. It is handed over to the plan page like a withheld one.
+  test("Apply stays off for a plan that overwrites a drifted configuration, with the way to the plan", async () => {
+    const drifted = { ...plan("pln_a", A), driftRecord: 7, evidence: { diff: { withheld: false, from: "rel_x", to: REL, unified: "-a\n+b\n", fromFormOnly: false }, validation: null, dryRun: null, baseline: null } };
+    const p = mount(served2({ "/plans/pln_a": drifted }), () => done({ id: "apr_1" }));
+    await p.start();
+    await p.choose(A);
+    expect(p.off("Apply")).toBe(true);
+    const note = p.box.querySelector('[data-testid="apply-drift"]')!;
+    expect(note.textContent).toContain("drift record 7");
+    expect(note.textContent).toContain("no reviewer has seen");
+    expect([...note.querySelectorAll("a")].find((a) => a.textContent === "Open the plan")?.getAttribute("href")).toContain("/plans/pln_a");
+    await p.press("Apply");
+    expect(p.sent).toEqual([]);
+    await p.choose(A);
+    await p.choose(B);
+    expect(p.box.querySelector('[data-testid="apply-drift"]')).toBeNull();
+    expect(p.off("Apply")).toBe(false);
+    await p.stop();
+  });
+
   // forms.tsx's rule: a new write starts only once the last one ended or its notice was dismissed.
   test("Show apply and Apply send nothing new while a write of the page has an unknown outcome", async () => {
     const none = (m: string) => ({ ...position(m, "x"), step: "needs-plan", plan: null });

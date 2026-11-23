@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -84,6 +86,9 @@ type applyFake struct {
 	cancelRefused         bool // a cancellation answers 409, as for a plan somebody cancelled meanwhile
 	unreadPrepared        bool
 	withheld              string // the plan whose change the server withholds
+	drift                 string // the plan that carries a drift record
+	lockAt                string // a POST to this path answers another epoch and makes the configuration directory read-only
+	lock                  func()
 }
 
 func (f *applyFake) took() []string {
@@ -97,7 +102,11 @@ func (f *applyFake) plan(id, machine string) string {
 	if id == f.withheld {
 		evidence = withheldEvidence
 	}
-	body := fmt.Sprintf(planJSON, "proposed", "null", "null", "apply-config", `"no-reboot"`, "4", "null", "60", "600", "3",
+	driftRecord := "null"
+	if id == f.drift {
+		driftRecord = "7"
+	}
+	body := fmt.Sprintf(planJSON, "proposed", "null", "null", "apply-config", `"no-reboot"`, "4", driftRecord, "60", "600", "3",
 		map[string]string{"pln_prepared": "2026-11-24T09:15:00Z", "pln_made": "2026-11-24T10:30:00Z"}[id], evidence)
 	return strings.NewReplacer("pln_BWSYNTH", id, "mch_a", machine).Replace(body)
 }
@@ -131,6 +140,10 @@ func (f *applyFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.moved = true // the epoch moves after this path, so every later read sees the new one
 	}
 	f.mu.Unlock()
+	if f.lockAt != "" && path == f.lockAt {
+		epoch = "ep_BWSYNTH-9"
+		f.lock()
+	}
 	w.Header().Set("Bronzeward-Epoch", epoch)
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodPost {
@@ -277,7 +290,7 @@ func TestApplyStops(t *testing.T) {
 		setStdin(t, c.stdin)
 		code, out, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--machine", "alpha,mch_beta")
 		got := f.took()
-		if code != 2 || out != "" || !strings.Contains(errOut, "nothing was sent") ||
+		if code != 2 || out != "" || !strings.Contains(errOut, "nothing was approved") || strings.Contains(errOut, "nothing was sent") ||
 			!strings.Contains(errOut, "Cancellation recorded for the plans this command made: pln_made. "+cancelLimits+" Plans prepared by somebody else were left as they were.") {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q", c.name, code, out, errOut)
 		}
@@ -423,7 +436,7 @@ func TestApplySentences(t *testing.T) {
 			[]string{"beta: approved", "nothing was approved for this machine", "Cancellation recorded", "were still sent", "tried in order"}, []string{"pln_made/approvals"}, []string{"pln_made/cancellations"}},
 		{"made, declined and cancelled", func(f *applyFake) {}, "n\n", 2,
 			[]string{cancelled + cancelLimits, "Plans prepared by somebody else were left as they were."},
-			[]string{"was not cancelled", "stays until it expires", "approved ("}, []string{"pln_made/cancellations"}, []string{"/approvals"}},
+			[]string{"was not cancelled", "stays until it expires", "approved (", "nothing was sent"}, []string{"pln_made/cancellations"}, []string{"/approvals"}},
 		{"made, cancellation unknown", func(f *applyFake) { f.cancelFails = true }, "n\n", 3,
 			[]string{"whether plan pln_made was cancelled is unknown"},
 			[]string{"Cancellation recorded", "was not cancelled", "stays until it expires"}, []string{"pln_made/cancellations"}, []string{"/approvals"}},
@@ -433,6 +446,12 @@ func TestApplySentences(t *testing.T) {
 		{"made, withheld", func(f *applyFake) { f.withheld = "pln_made" }, "y\n", 0,
 			[]string{"beta  worker  worker-base,storage  stopped: the change of its plan cannot be shown", "make a plan with plan create", cancelled + cancelLimits, "alpha: approved"},
 			[]string{"approve 'pln_made'", "beta: approved"}, []string{"pln_made/cancellations"}, []string{"pln_made/approvals"}},
+		{"made, drift record", func(f *applyFake) { f.drift = "pln_made" }, "y\n", 0,
+			[]string{"beta  worker  worker-base,storage  stopped: its plan overwrites the drifted configuration of drift record 7, which no reviewer has seen", "make a plan with plan create", cancelled + cancelLimits, "alpha: approved"},
+			[]string{"approve 'pln_made'", "beta: approved"}, []string{"pln_made/cancellations"}, []string{"pln_made/approvals"}},
+		{"prepared, drift record", func(f *applyFake) { f.drift = "pln_prepared" }, "y\n", 0,
+			[]string{"alpha  controlplane  cp-base  stopped: its plan overwrites the drifted configuration of drift record 7", "approve 'pln_prepared'", "beta: approved"},
+			[]string{"alpha: approved", "Cancellation recorded", "make a plan with plan create"}, nil, []string{"pln_prepared/approvals"}},
 		{"made, unread", func(f *applyFake) { f.unreadMade = true }, "y\n", 0,
 			[]string{"the change of its plan could not be read", cancelled + cancelLimits, "alpha: approved"},
 			[]string{"beta: approved"}, []string{"pln_made/cancellations"}, []string{"pln_made/approvals"}},
@@ -505,5 +524,39 @@ func TestApplyLeavesOutWhatIsDone(t *testing.T) {
 	}
 	if b := f.took(); len(b) != 1 || b[0] != "/plans/pln_prepared/approvals {}" {
 		t.Errorf("sent %q; want only alpha's approval", b)
+	}
+}
+
+// A plan list that cannot be written to the person is never approved on a y: the question is not asked, nothing is
+// approved, and the plan this command made is cancelled.
+func TestApplyStopsWhenTheListCannotBeShown(t *testing.T) {
+	f := applyServer(t)
+	setStdin(t, "y\n")
+	var errb failOn
+	errb.part = "plan pln_made"
+	code := run([]string{"apply", "rel_BWSYNTH", "--all"}, io.Discard, &errb)
+	if code == 0 || !strings.Contains(errb.String(), "showing the plans: ") || !strings.Contains(errb.String(), "nothing was approved") || strings.Contains(errb.String(), "Approve them?") {
+		t.Errorf("a list that fails to show: exit %d, stderr %q", code, errb.String())
+	}
+	if s := strings.Join(f.took(), "\n"); strings.Contains(s, "/approvals") || !strings.Contains(s, "pln_made/cancellations") {
+		t.Errorf("a list that fails to show: sent %q; want no approval and the made plan cancelled", s)
+	}
+}
+
+// The approvals went through and only keeping the epoch failed: the exit says so, as every other write's does.
+func TestApplyReportsAContextThatCannotBeSaved(t *testing.T) {
+	f := applyServer(t)
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward")
+	f.lockAt = "/plans/pln_made/approvals"
+	f.lock = func() {
+		if err := os.Chmod(dir, 0o500); err != nil {
+			t.Errorf("the configuration directory stays writable: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	}
+	setStdin(t, "y\n")
+	code, out, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--all")
+	if code == 0 || !strings.Contains(errOut, "keeping the epoch") || !strings.Contains(out, "beta: approved") {
+		t.Errorf("exit %d, stdout %q, stderr %q; want the approvals printed and a nonzero exit naming the epoch that could not be kept", code, out, errOut)
 	}
 }
