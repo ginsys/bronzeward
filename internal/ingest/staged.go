@@ -19,6 +19,7 @@ type Staged struct {
 	Sanitized   Sanitized
 	Generations map[string]string // logical name -> generation path
 	Baseline    Baseline
+	Filled      Filled // what step 2a removed (compilation.md §2.3 step 2a); the zero value is nothing
 }
 
 // envelope is Staged's encoding. Map members are sorted by encoding/json, so equal content seals
@@ -29,6 +30,10 @@ type envelope struct {
 	Declarations Declarations      `json:"declarations"`
 	Generations  map[string]string `json:"generations"`
 	Baseline     envelopeBaseline  `json:"baseline"`
+	// FilledName and FilledEqual are step 2a's record, optional so that an envelope staged before it
+	// still opens as "nothing removed", the version staying 1.
+	FilledName  string `json:"filledName,omitempty"`
+	FilledEqual bool   `json:"filledEqual,omitempty"`
 }
 
 type envelopeBaseline struct {
@@ -70,6 +75,8 @@ func (s Staged) Seal() (plaintext []byte, sum [32]byte, err error) {
 			DigestKey:     s.Baseline.DigestKey,
 			Configuration: hex.EncodeToString(s.Baseline.Configuration[:]),
 		},
+		FilledName:  s.Filled.Name,
+		FilledEqual: s.Filled.Equal,
 	})
 	if err != nil {
 		return nil, sum, errors.New("ingest: the envelope could not be encoded")
@@ -100,7 +107,8 @@ func Open(plaintext []byte, sum [32]byte) (Staged, error) {
 	if _, err := dec.Token(); err != io.EOF {
 		return Staged{}, errEnvelope
 	}
-	if e.Version != 1 || e.Documents == "" || e.Baseline.Ciphertext == "" || e.Baseline.DigestKey == "" {
+	if e.Version != 1 || e.Documents == "" || e.Baseline.Ciphertext == "" || e.Baseline.DigestKey == "" ||
+		(e.FilledEqual && e.FilledName == "") {
 		return Staged{}, errEnvelope
 	}
 	digest, err1 := digest32(e.Baseline.Digest)
@@ -128,6 +136,7 @@ func Open(plaintext []byte, sum [32]byte) (Staged, error) {
 		Generations: e.Generations,
 		Baseline: Baseline{Ciphertext: provider.Ciphertext(e.Baseline.Ciphertext), Digest: digest,
 			DigestKey: e.Baseline.DigestKey, Configuration: conf},
+		Filled: Filled{Name: e.FilledName, Equal: e.FilledEqual},
 	}, nil
 }
 
