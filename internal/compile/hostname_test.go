@@ -264,6 +264,18 @@ func TestHostnameInvalidHeldValueIsWithheld(t *testing.T) {
 	}
 }
 
+// A composition the loader refuses takes no decision, named or not: step 8 refuses it as invalid, as
+// it did before the fill existed, and no fidelity refusal replaces that answer.
+func TestHostnameDecisionOfAnUnloadableComposition(t *testing.T) {
+	bad := "apiVersion: v1alpha1\nkind: NoSuchDocumentKind\n"
+	m := Materialized{s: &bad}
+	for _, name := range []string{"", hostMachine} {
+		if h := decideHostname(name, m, m, []Materialized{m}); h.Source != HostnameNone || h.Name != "" {
+			t.Errorf("name %q: decision %+v; want none", name, h)
+		}
+	}
+}
+
 // The guard after the second compile: an outcome overridden by the patch (an index past the caller's
 // fragments) is the bare fidelity refusal; one overridden by a fragment, or by none, passes.
 func TestNotOverriddenByPatch(t *testing.T) {
