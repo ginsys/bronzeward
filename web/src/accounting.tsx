@@ -105,8 +105,10 @@ function Choice({ name, o, off, checked, onChoose, marked }: { name: string; o: 
 // `due` is whether the latest read still shows the accounting owed: a form that was pressed stays mounted after the read says
 // otherwise, to keep its answer, but is off; one never pressed is not drawn. `onStart` tells the parent a press was made, so the
 // parent keeps this form mounted when the reread that follows the answer stops showing the accounting as owed.
-export function AccountingForm({ machine, path, resource, what, label = "Record accounting", done, due, onStart, deadline: given, stoppedAt }: {
+export function AccountingForm({ machine, path, resource, what, label = "Record accounting", done, due, onStart, onAnswered, deadline: given, stoppedAt }: {
   machine: string; path: string; resource: string; what: string; label?: string; done: (data: unknown) => ReactNode; due: boolean; onStart?: () => void;
+  // The server's answer once it is recorded, so the parent can tell when a later read makes what the answer says untrue.
+  onAnswered?: (data: unknown) => void;
   deadline?: Deadline; stoppedAt?: string | undefined;
 }) {
   const writes = useWrites()!;
@@ -129,6 +131,7 @@ export function AccountingForm({ machine, path, resource, what, label = "Record 
   const recorded = w?.outcome?.kind === "done";
   const pressed = w !== undefined;
   useEffect(() => { if (pressed) onStart?.(); }, [pressed]);
+  useEffect(() => { if (w?.outcome?.kind === "done") onAnswered?.(w.outcome.data); }, [recorded]);
   // The limits are what the person reads before pressing, so a press waits for them.
   const busy = (w !== undefined && !startsNew(writes, w)) || recorded || !due || sdone !== undefined || server.kind !== "ok";
   if (!due && !pressed) return null;

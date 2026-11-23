@@ -233,6 +233,21 @@ describe("a scope's accounting form on the console's row", () => {
     expect(text("settle-answer")).toBeUndefined();
   });
 
+  test("the answer leaves when the next read shows the scope ready, since another administrator marked it, and stays while it reads blocked", async () => {
+    await mount(row("pre-restore-unaccounted"));
+    await settled();
+    await choose("start", START);
+    await choose("end", END);
+    await explain("the operator re-applied the restored configuration");
+    await press();
+    await mount(row("blocked"));
+    await settled();
+    expect(text("settle-answer")).toMatch(/is now blocked/);
+    await mount(row("ready"));
+    await settled();
+    expect(text("settle-answer")).toBeUndefined();
+  });
+
   test("a person who waits for a later observation reads the machine's observations again and keeps what was typed", async () => {
     const all = (served[`/machines/${MCH}/observations`] as { items: unknown[] }).items;
     served[`/machines/${MCH}/observations`] = { items: all.slice(0, 1), next: undefined };
