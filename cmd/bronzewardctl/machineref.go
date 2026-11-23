@@ -49,6 +49,15 @@ func withCluster(cluster *string, flags func(*flag.FlagSet)) func(*flag.FlagSet)
 	}
 }
 
+// clusterNeedsMachine refuses --cluster in a list that was given no --machine: the flag narrows a machine name and has
+// nothing to narrow there, so accepting it would let a person believe the list is filtered by cluster.
+func clusterNeedsMachine(machine, cluster string) error {
+	if cluster != "" && machine == "" {
+		return usageError{fmt.Errorf("--cluster narrows a machine name; give --machine <name> with it")}
+	}
+	return nil
+}
+
 // machineFilter is a list's path and query with the machine filter ref (when given) resolved to its identifier.
 func machineFilter(ref, cluster, path string, q url.Values) func(*client.Client) (string, url.Values, error) {
 	return func(c *client.Client) (string, url.Values, error) {

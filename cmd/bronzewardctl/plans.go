@@ -36,6 +36,9 @@ func (e *env) planCmd(args []string) error {
 		return err
 	}
 	if v == "list" {
+		if err := clusterNeedsMachine(machine, cluster); err != nil {
+			return err
+		}
 		return listResolved(e, l, machineFilter(machine, cluster, "/plans", values(f)), nil, nil,
 			func(c *client.Client, ps []apitypes.PlanBody) {
 				e.titlePlans(c, ps...)

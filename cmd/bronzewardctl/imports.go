@@ -320,6 +320,9 @@ func (e *env) importStatus(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := clusterNeedsMachine(machine, cluster); err != nil {
+		return err
+	}
 	if len(pos) == 0 {
 		return listResolved(e, l, machineFilter(machine, cluster, "/ingestions", values(f)), nil, nil, func(c *client.Client, bs []apitypes.IngestionBody) {
 			for i := range bs {

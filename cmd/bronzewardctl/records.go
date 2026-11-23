@@ -454,6 +454,9 @@ func (e *env) operationCmd(args []string) error {
 		return err
 	}
 	if v == "list" {
+		if err := clusterNeedsMachine(machine, cluster); err != nil {
+			return err
+		}
 		return listResolved(e, l, machineFilter(machine, cluster, "/operations", values(f)), nil,
 			func(o *apitypes.OperationBody) []string {
 				if o.CreatedBy == nil {
