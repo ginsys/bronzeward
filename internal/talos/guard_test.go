@@ -310,6 +310,32 @@ func policyViolations(t *testing.T, name string, src []byte, pol policy) []strin
 		local[n] = p
 	}
 
+	// The parser leaves a receiver type parameter's name unresolved (Obj == nil), as it does an
+	// import's, so isPkgSel would take grpc.WithAuthority in `func (_ box[grpc]) …` for the package.
+	ast.Inspect(f, func(n ast.Node) bool {
+		d, ok := n.(*ast.FuncDecl)
+		if !ok || d.Recv == nil || len(d.Recv.List) == 0 {
+			return true
+		}
+		recv := ast.Unparen(d.Recv.List[0].Type)
+		if s, ok := recv.(*ast.StarExpr); ok {
+			recv = ast.Unparen(s.X)
+		}
+		var params []ast.Expr
+		switch v := recv.(type) {
+		case *ast.IndexExpr:
+			params = []ast.Expr{v.Index}
+		case *ast.IndexListExpr:
+			params = v.Indices
+		}
+		for _, e := range params {
+			if id, ok := e.(*ast.Ident); ok && local[id.Name] != "" {
+				flag(id, "receiver type parameter %s has the name of an imported package", id.Name)
+			}
+		}
+		return true
+	})
+
 	parents := map[ast.Node]ast.Node{}
 	var stack []ast.Node
 	ast.Inspect(f, func(n ast.Node) bool {
