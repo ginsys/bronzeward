@@ -67,7 +67,8 @@ var cmdTable = []cmdEntry{
 			"Bronzeward's cluster ID (cl_...), which this command prints."},
 	{path: "cluster discover", line: "read a cluster, print the commands that record it", roles: "any",
 		synopsis: "cluster discover --talosconfig <file> [--talos-context <name>] [--endpoint <host|ip[:port]>]",
-		notes:    "reads the Talos nodes with your talosconfig and prints the commands that record the cluster; it writes nothing."},
+		notes: "reads the Talos nodes with your talosconfig and prints the commands that record the cluster; it writes nothing.\n" +
+			endpointsNote},
 	{path: "cluster first-key", line: "supply or replace a cluster's first key", roles: "author", person: true,
 		synopsis: "cluster first-key --cluster <cluster> --kind talosconfig|machine-config|secrets-bundle --file <file>\n" +
 			"                  --endpoint <ip[:port]> [--talos-context <name>]",
@@ -80,7 +81,8 @@ var cmdTable = []cmdEntry{
 			"                [--review] [--no-import]",
 		notes: "discovers the cluster, records it and its machines, supplies its first key (the talosconfig unless --first-key-* names\n" +
 			"another document), then imports each machine into one draft. Run it again after a failure: what exists is found, the\n" +
-			"first key is supplied again (replacing it), and --skip-first-key skips it."},
+			"first key is supplied again (replacing it), and --skip-first-key skips it.\n" +
+			endpointsNote},
 
 	{path: "machine", line: "the machines of a cluster"},
 	{path: "machine list", line: "list the machines", synopsis: "machine list [--cluster <cluster>]", roles: "any"},

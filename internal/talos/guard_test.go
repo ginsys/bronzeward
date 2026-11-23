@@ -862,7 +862,7 @@ func TestMachineryCallsAllowlisted(t *testing.T) {
 }
 
 var discoverSurface = []string{
-	"CheckEndpoint", "Discover", "DiscoverLimited", "ErrNoEndpoint", "ErrUnknownContext", "Member", "Member.Address", "Member.Answered", "Member.Hostname",
+	"CheckEndpoint", "Discover", "DiscoverLimited", "DiscoverListed", "Endpoints", "ErrNoEndpoint", "ErrUnknownContext", "Member", "Member.Address", "Member.Answered", "Member.Hostname",
 	"Member.NodeID", "Member.Platform", "Member.Role", "Member.SMBIOSUUID", "OneContext", "ResolveEndpoint", "Result", "Result.ClusterID", "Result.Contract",
 	"Result.Cut", "Result.Endpoint", "Result.KubernetesEndpoint", "Result.Members", "Result.ResolvedFrom", "Result.Supported", "Result.Version",
 	"TooManyMembers", "TooManyMembers.Error", "TooManyMembers.Limit", "node.close",

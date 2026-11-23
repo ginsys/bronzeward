@@ -551,8 +551,13 @@ accepts a connection and says nothing does not hold the command. A cluster whose
 cluster either, because the server refuses it. The proposed contract is the minor of the Talos
 version and the proposed Kubernetes endpoint is a guess for the operator to replace.
 
-`--endpoint` and the talosconfig's first endpoint are each an IP address or a DNS name, with an
-optional port. If the endpoint is a DNS name, the command resolves it once and dials the address it
+`--endpoint` and each endpoint the talosconfig lists are each an IP address or a DNS name, with an
+optional port. With no `--endpoint` the command tries the context's endpoints in order and stops at the first
+that gives the cluster, as `talosctl` does; `--endpoint` is the only one tried. A failure of one endpoint
+moves on to the next, except the end of the command (Ctrl-C). One endpoint that fails gives its own error;
+several give one error that names each endpoint with its own cause. The wait for an endpoint that does not
+answer is up to 15 seconds for the lookup, the dial and the first reads, so three silent endpoints take about 45
+seconds (the figures of the page are with its own paragraph, under Connect a cluster). If the endpoint is a DNS name, the command resolves it once and dials the address it
 got. It never looks the name up again, so a DNS change cannot redirect the first reads to another
 node. The node's certificate is checked against the name, as `talosctl` does, so the name must be
 among the nodes' certificate names (`machine.certSANs`); a node's address given instead is checked as
@@ -568,7 +573,7 @@ Dialled 10.5.0.2:50000: the address that cp-1.lab.example resolved to, once. The
 
 The `--talos-endpoint` values in the printed commands stay IP addresses, because the server stores
 an IP address only (below). If the name does not resolve, the command stops before any dial. The
-refusal names where the value came from, `--endpoint` or the talosconfig's first endpoint, and
+refusal names where the value came from, `--endpoint` or a talosconfig endpoint, and
 quotes neither the name nor the talosconfig.
 
 A talosconfig can hold several contexts. By default the command uses the file's current context.
