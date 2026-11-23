@@ -183,7 +183,8 @@ key gives the same answer as for an endpoint that does not answer, so read each 
 | Does not answer | about 10 seconds each, so three take about 30 seconds | up to about 15 seconds each |
 | Answers and then stalls, or its name lookup stalls | up to 60 seconds each, so three take up to 3 minutes | not stated here |
 
-The page sends a try from a list once. An endpoint you give, or a context that lists only one, is
+The page sends a try from a list once. The one exception: a try answered `401 unauthenticated` is
+sent once more, after 1 second, when the sign-in renews, and the list then goes on. An endpoint you give, or a context that lists only one, is
 repeated up to four times, after 1, 2 and 4 seconds. One such endpoint then takes about 47 seconds
 when it does not answer, and up to 4 minutes 7 seconds when it stalls.
 
