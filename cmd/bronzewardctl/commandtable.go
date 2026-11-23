@@ -86,10 +86,10 @@ var cmdTable = []cmdEntry{
 	{path: "machine list", line: "list the machines", synopsis: "machine list [--cluster <cluster>]", roles: "any"},
 	{path: "machine show", line: "show one machine", synopsis: "machine show <machine> [--cluster <cluster>]", roles: "any", notes: machineByNameNote},
 	{path: "machine timeline", line: "a machine's history", roles: "any",
-		synopsis: "machine timeline <machine> [--follow] [--limit <n>]",
-		notes: "with --follow: the newest entries, then each new one as the server records it, read every 5s; Ctrl-C stops it with\n" +
+		synopsis: "machine timeline <machine> [--cluster <cluster>] [--follow] [--limit <n>]",
+		notes: machineByNameNote + "\nwith --follow: the newest entries, then each new one as the server records it, read every 5s; Ctrl-C stops it with\n" +
 			"exit 130; -o json prints one entry per line, -o yaml one document per entry."},
-	{path: "machine observations", line: "what Bronzeward last read from a machine", synopsis: "machine observations <machine>", roles: "any"},
+	{path: "machine observations", line: "what Bronzeward last read from a machine", synopsis: "machine observations <machine> [--cluster <cluster>]", roles: "any", notes: machineByNameNote},
 	{path: "machine add", line: "record a machine in a cluster", roles: "author", person: true,
 		synopsis: "machine add --cluster <cluster> (--talos-node-id <id> | --smbios-uuid <uuid>) [--serial <s>]\n" +
 			"            --platform metal|container|cloud --talos-endpoint <ip>[:<port>] [--name <name>]",
@@ -100,9 +100,9 @@ var cmdTable = []cmdEntry{
 			"node ID is refused later with machine-identity-mismatch. `bronzewardctl cluster discover` prints the right flag for each\n" +
 			"machine it reads.\n" +
 			"A write repeats with --idempotency-key, --expect-epoch and --expect-principal exactly as printed when its outcome was unknown."},
-	{path: "machine set-endpoint", line: "change a machine's Talos endpoint", synopsis: "machine set-endpoint <machine> --talos-endpoint <ip>[:<port>]",
+	{path: "machine set-endpoint", line: "change a machine's Talos endpoint", synopsis: "machine set-endpoint <machine> --talos-endpoint <ip>[:<port>] [--cluster <cluster>]",
 		roles: "author", person: true,
-		notes: "repeat a write whose outcome was unknown exactly with --idempotency-key, --expect-epoch and --expect-principal as printed."},
+		notes: machineByNameNote + "\nrepeat a write whose outcome was unknown exactly with --idempotency-key, --expect-epoch and --expect-principal as printed."},
 	{path: "machine rename", line: "name a machine", synopsis: "machine rename <machine> --name <name> [--cluster <cluster>]", roles: "author", person: true,
 		notes: machineByNameNote + "\nrepeat a write whose outcome was unknown exactly with --idempotency-key, --expect-epoch and --expect-principal as printed."},
 	{path: "machine freeze", line: "stop new commitments and attempts on a machine", synopsis: "machine freeze <machine> --reason <text> [--cluster <cluster>]",
@@ -112,16 +112,16 @@ var cmdTable = []cmdEntry{
 		notes: machineByNameNote + "\na server started for recovery, or a scope still pre-restore unaccounted, refuses an unfreeze."},
 
 	{path: "drift", line: "a machine that no longer reports what Bronzeward applied"},
-	{path: "drift show", line: "the open drift of a machine", synopsis: "drift show <machine>", roles: "any",
-		notes: "shows its observations, late landing and the choices; the time shown is that of the observation, the API serves no\n" +
+	{path: "drift show", line: "the open drift of a machine", synopsis: "drift show <machine> [--cluster <cluster>]", roles: "any",
+		notes: machineByNameNote + "\nshows its observations, late landing and the choices; the time shown is that of the observation, the API serves no\n" +
 			"opening time. There is no ignore command."},
 	{path: "drift adopt", line: "adopt the drift into a release", roles: "author, then publisher, then approver", person: true, ifMatch: true,
-		synopsis: "drift adopt <machine> --draft <draft> [--review] [--staging encrypted|transient] [--marks]",
-		notes: "imports the machine's configuration as a drift adoption (author, a person), publishes it (publisher), then creates an\n" +
+		synopsis: "drift adopt <machine> --draft <draft> [--cluster <cluster>] [--review] [--staging encrypted|transient] [--marks]",
+		notes: machineByNameNote + "\nimports the machine's configuration as a drift adoption (author, a person), publishes it (publisher), then creates an\n" +
 			"adopt plan (publisher). It stops at a missing role or a pause and prints the rest; it never approves. Its repeat flags\n" +
 			"repeat the import; -o json and yaml print one object with the state of each step instead of the API resources."},
-	{path: "drift revert", line: "revert a machine to Desired", synopsis: "drift revert <machine>", roles: "publisher", not: "idempotency-key expect-epoch expect-principal",
-		notes: "creates an apply-config plan of Desired, bound to the open drift record. It reads the machine first and takes no repeat\n" +
+	{path: "drift revert", line: "revert a machine to Desired", synopsis: "drift revert <machine> [--cluster <cluster>]", roles: "publisher", not: "idempotency-key expect-epoch expect-principal",
+		notes: machineByNameNote + "\ncreates an apply-config plan of Desired, bound to the open drift record. It reads the machine first and takes no repeat\n" +
 			"flag; a machine with no Applied configuration is pointed at an adopt plan, and nothing is sent."},
 
 	{path: "fragment", line: "configuration fragments"},
@@ -149,12 +149,12 @@ var cmdTable = []cmdEntry{
 	{path: "assignment show", line: "show an assignment head or revision", synopsis: "assignment show <head or revision ID>", roles: "any", not: "limit cursor all"},
 	{path: "assignment history", line: "an assignment's revisions", synopsis: "assignment history <head ID>", roles: "any"},
 	{path: "assignment set", line: "assign configuration to a machine in a draft", roles: "author",
-		synopsis: "assignment set <machine> --draft <draft> [--profiles <name>[,...]]\n" +
+		synopsis: "assignment set <machine> --draft <draft> [--cluster <cluster>] [--profiles <name>[,...]]\n" +
 			"               [--fragment <layer>=<name>[,...]]...",
 		ifMatch: true,
-		notes: "the layer is global, site, cluster, role, workload or override. --none instead selects nothing, so the machine's\n" +
+		notes: machineByNameNote + "\nthe layer is global, site, cluster, role, workload or override. --none instead selects nothing, so the machine's\n" +
 			"configuration is its import base alone.\n" + draftWrite},
-	{path: "assignment rm", line: "remove a machine's assignment from a draft", synopsis: "assignment rm <machine> --draft <draft>", roles: "author", ifMatch: true, notes: draftWrite},
+	{path: "assignment rm", line: "remove a machine's assignment from a draft", synopsis: "assignment rm <machine> --draft <draft> [--cluster <cluster>]", roles: "author", ifMatch: true, notes: machineByNameNote + "\n" + draftWrite},
 
 	{path: "draft", line: "drafts: changes gathered before a publish"},
 	{path: "draft list", line: "list the drafts", synopsis: "draft list [--cluster <cluster>]", roles: "any"},
@@ -164,13 +164,14 @@ var cmdTable = []cmdEntry{
 
 	{path: "import", line: "imports of a machine's configuration into a draft"},
 	{path: "import start", line: "import a machine's configuration into a draft", roles: "author", person: true, ifMatch: true,
-		synopsis: "import start --machine <machine> --draft <draft> [--file <path or ->] [--staging encrypted|transient]\n" +
+		synopsis: "import start --machine <machine> --draft <draft> [--cluster <cluster>] [--file <path or ->] [--staging encrypted|transient]\n" +
 			"             [--review] [--marks] [--no-wait]",
-		notes: "imports the machine's configuration, or with --file a document, into the draft, sending its kept ETag or --if-match. It\n" +
+		notes: "--machine is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.\n" +
+			"imports the machine's configuration, or with --file a document, into the draft, sending its kept ETag or --if-match. It\n" +
 			"waits until the import pauses for review or ends."},
 	{path: "import status", line: "one import's state, or a list", roles: "any",
-		synopsis: "import status [<ingestion>]\nimport status [--state <s>] [--machine <id>]",
-		notes:    "one import's state, lease and next steps, or a list: --state paused or held finds imports to continue or take over."},
+		synopsis: "import status [<ingestion>]\nimport status [--state <s>] [--machine <machine>] [--cluster <cluster>]",
+		notes:    "--machine is a machine's name or its ID (mch_...); --cluster narrows a name two clusters hold.\none import's state, lease and next steps, or a list: --state paused or held finds imports to continue or take over."},
 	{path: "import review", line: "read a paused import's staged document", synopsis: "import review <ingestion>", roles: "author", person: true,
 		notes: "only on a terminal, in a pager (space or f forward, b back, q quit) that writes nothing else; then marks from the prompt."},
 	{path: "import mark", line: "mark values as secret", synopsis: "import mark <ingestion> [--no-wait]", roles: "author", person: true,
@@ -193,11 +194,12 @@ var cmdTable = []cmdEntry{
 	{path: "release", line: "releases: published configuration"},
 	{path: "release list", line: "list the releases", synopsis: "release list [--cluster <cluster>] [--draft <draft>]", roles: "any"},
 	{path: "release show", line: "show a release", synopsis: "release show <release>", roles: "any"},
-	{path: "release review", line: "a machine's rendered, redacted configuration in a release", synopsis: "release review <release> <machine>", roles: "any"},
-	{path: "release provenance", line: "the secret references a machine's configuration was built from", synopsis: "release provenance <release> <machine>", roles: "any"},
+	{path: "release review", line: "a machine's rendered, redacted configuration in a release", synopsis: "release review <release> <machine> [--cluster <cluster>]", roles: "any", notes: machineByNameNote},
+	{path: "release provenance", line: "the secret references a machine's configuration was built from", synopsis: "release provenance <release> <machine> [--cluster <cluster>]", roles: "any", notes: machineByNameNote},
 
 	{path: "plan", line: "plans: what to send to a machine"},
-	{path: "plan list", line: "list the plans", synopsis: "plan list [--state <s>] [--machine <id>]", roles: "any"},
+	{path: "plan list", line: "list the plans", synopsis: "plan list [--state <s>] [--machine <machine>] [--cluster <cluster>]", roles: "any",
+		notes: "--machine is a machine's name or its ID (mch_...); --cluster narrows a name two clusters hold."},
 	{path: "plan show", line: "show a plan, its evidence and what can be done next", synopsis: "plan show <plan>", roles: "any"},
 	{path: "plan create", line: "create a plan for a machine", roles: "publisher",
 		synopsis: "plan create --release <release> --machine <machine> [--cluster <cluster>] --operation apply-config|adopt [--mode no-reboot]\n" +
@@ -227,7 +229,8 @@ var cmdTable = []cmdEntry{
 		notes: "a revocation ends an uncommitted approval and undoes no commitment; an attempt already recorded is not stopped."},
 
 	{path: "operation", line: "operations: what a plan did"},
-	{path: "operation list", line: "list the operations", synopsis: "operation list [--plan <id>] [--machine <id>] [--state <s>] [--kind <k>]", roles: "any"},
+	{path: "operation list", line: "list the operations", synopsis: "operation list [--plan <id>] [--machine <machine>] [--cluster <cluster>] [--state <s>] [--kind <k>]", roles: "any",
+		notes: "--machine is a machine's name or its ID (mch_...); --cluster narrows a name two clusters hold."},
 	{path: "operation show", line: "show an operation", synopsis: "operation show <operation>", roles: "any"},
 	{path: "operation watch", line: "follow an operation until it ends", synopsis: "operation watch <operation> [--timeout <d>]", roles: "any",
 		notes: "prints one line per event until the operation ends, then its outcome; it goes on past unresolved. --timeout (30m) ends the\n" +
@@ -245,8 +248,8 @@ var cmdTable = []cmdEntry{
 	{path: "recovery exit", line: "leave recovery", synopsis: "recovery exit [--fact name=value]...", roles: "recovery-admin", person: true,
 		notes: "once every scope is released."},
 	{path: "recovery scope-account", line: "account every unaccounted attempt of a machine after a restore", roles: "recovery-admin", person: true,
-		synopsis: "recovery scope-account <machine> --start <observation> --end <observation> [--explanation <text>]",
-		notes:    "shows the window and the risk, and is sent only when y is answered to the question that names the machine."},
+		synopsis: "recovery scope-account <machine> --start <observation> --end <observation> [--explanation <text>] [--cluster <cluster>]",
+		notes:    machineByNameNote + "\nshows the window and the risk, and is sent only when y is answered to the question that names the machine."},
 	{path: "recovery account", line: "account one attempt whose response was lost", roles: "recovery-admin", person: true,
 		synopsis: "recovery account <operation> <attempt> --start <observation> --end <observation> [--explanation <text>]",
 		notes:    "the same window, risk and question as scope-account."},
@@ -258,10 +261,10 @@ var cmdTable = []cmdEntry{
 		roles: "recovery-admin", person: true,
 		notes: "ends an unresolved operation with no attempt as cancelled and records no remote outcome. A repeat of an unknown outcome\n" +
 			"sends the same body without the state checks."},
-	{path: "recovery mark", line: "record what the evidence supports for a machine", synopsis: "recovery mark <machine> [--fact name=value]...",
-		roles: "recovery-admin", person: true, notes: "records the state the evidence supports: ready, blocked or unresolved."},
-	{path: "recovery release", line: "release a ready scope", synopsis: "recovery release <machine> [--fact name=value]...",
-		roles: "recovery-admin", person: true, notes: "a release is not an approval."},
+	{path: "recovery mark", line: "record what the evidence supports for a machine", synopsis: "recovery mark <machine> [--fact name=value]... [--cluster <cluster>]",
+		roles: "recovery-admin", person: true, notes: machineByNameNote + "\nrecords the state the evidence supports: ready, blocked or unresolved."},
+	{path: "recovery release", line: "release a ready scope", synopsis: "recovery release <machine> [--fact name=value]... [--cluster <cluster>]",
+		roles: "recovery-admin", person: true, notes: machineByNameNote + "\na release is not an approval."},
 	{path: "identity", line: "identities of people and services"},
 	{path: "identity revoke", line: "revoke an identity", roles: "recovery-admin", person: true,
 		synopsis: "identity revoke (--identity <id> | --iss <iss> --sub <sub>) --reason <text>",

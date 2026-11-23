@@ -32,13 +32,20 @@ const followRevision = 3
 func (e *env) machineTimeline(args []string) error {
 	var l listing
 	var follow bool
-	pos, err := e.paged("machine timeline", args, 1, &l, func(fs *flag.FlagSet) { fs.BoolVar(&follow, "follow", false, "") })
+	var cluster string
+	pos, err := e.paged("machine timeline", args, 1, &l, func(fs *flag.FlagSet) {
+		fs.BoolVar(&follow, "follow", false, "")
+		fs.StringVar(&cluster, "cluster", "", "")
+	})
 	if err != nil {
 		return err
 	}
-	path := "/machines/" + url.PathEscape(pos[0]) + "/timeline"
+	at := machinePath(pos[0], cluster, "/timeline")
 	if !follow {
-		return listWho(e, l, path, url.Values{}, nil, func(t *apitypes.TimelineEntry) []string { return entryPrincipals(t.Entry) },
+		return listResolved(e, l, func(c *client.Client) (string, url.Values, error) {
+			path, err := at(c)
+			return path, url.Values{}, err
+		}, nil, func(t *apitypes.TimelineEntry) []string { return entryPrincipals(t.Entry) }, nil,
 			"REVISION\tAT\tKIND\tENTRY", "", func(w *tabwriter.Writer, t *apitypes.TimelineEntry) {
 				tf(w, "%d\t%s\t%s\t%s\n", t.Revision, when(t.At), t.Kind, e.timelineText(t.Kind, t.Entry))
 			})
@@ -47,6 +54,10 @@ func (e *env) machineTimeline(args []string) error {
 		return usageError{errors.New("--follow starts at the newest entries: give no --cursor or --all")}
 	}
 	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+		path, err := at(c)
+		if err != nil {
+			return err
+		}
 		return e.followTimeline(c, path, l.limit, pos[0])
 	})
 }

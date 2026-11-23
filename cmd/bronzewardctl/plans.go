@@ -29,14 +29,14 @@ func (e *env) planCmd(args []string) error {
 		return e.planCancel(rest)
 	}
 	var l listing
-	var state, machine string
+	var state, machine, cluster string
 	f := map[string]*string{"state": &state, "machine": &machine}
-	v, pos, err := e.noun("plan", args, &l, filters(f))
+	v, pos, err := e.noun("plan", args, &l, withCluster(&cluster, filters(f)))
 	if err != nil {
 		return err
 	}
 	if v == "list" {
-		return listWith(e, l, "/plans", values(f), nil, nil,
+		return listResolved(e, l, machineFilter(machine, cluster, "/plans", values(f)), nil, nil,
 			func(c *client.Client, ps []apitypes.PlanBody) {
 				e.titlePlans(c, ps...)
 				for _, p := range ps {

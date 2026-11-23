@@ -55,14 +55,15 @@ func scopeNext(err error, machine string) error {
 func (e *env) recoveryMark(args []string) error {
 	var facts factsFlag
 	var rf repeatFlags
+	var cluster string
 	pos, err := e.parse("recovery mark", args, 1, func(fs *flag.FlagSet) {
 		fs.Var(&facts, "fact", "")
+		fs.StringVar(&cluster, "cluster", "", "")
 		rf.flags(fs)
 	})
 	if err != nil {
 		return err
 	}
-	machine := pos[0]
 	rp, err := rf.repeat(false)
 	if err != nil {
 		return err
@@ -72,11 +73,15 @@ func (e *env) recoveryMark(args []string) error {
 		in.Facts = (*map[string]string)(&facts)
 	}
 	body, _ := json.Marshal(in)
-	err = e.write(&client.Write{Method: http.MethodPost, Path: "/recovery/scopes/" + url.PathEscape(machine) + "/marks", Body: body, HumanOnly: true,
-		Repeat: rp, Check: "machine timeline " + client.ShellWord(machine), Read: newestEntry(machine)}, func(_ *client.Client, resp *client.Response) ([]string, error) {
+	var machine, label string
+	err = e.writeNamed(pos[0], cluster, nil, func(id string) *client.Write {
+		machine, label = id, givenLabel(pos[0], id)
+		return &client.Write{Method: http.MethodPost, Path: "/recovery/scopes/" + url.PathEscape(id) + "/marks", Body: body, HumanOnly: true,
+			Repeat: rp, Check: "machine timeline " + client.ShellWord(id), Read: newestEntry(id)}
+	}, func(_ *client.Client, resp *client.Response) ([]string, error) {
 		var x apitypes.ScopeMarkBody
 		err := json.Unmarshal(resp.Body, &x)
-		lines := []string{sf("Scope %s marked %s, was %s (act %s). Observation %s.", x.Machine, x.State, x.From, x.Act, x.Observation)}
+		lines := []string{sf("Scope %s marked %s, was %s (act %s). Observation %s.", label, x.State, x.From, x.Act, x.Observation)}
 		for _, m := range x.Missing {
 			meaning, ok := missingMeaning[m]
 			if !ok {
@@ -102,14 +107,15 @@ func (e *env) recoveryMark(args []string) error {
 func (e *env) recoveryRelease(args []string) error {
 	var facts factsFlag
 	var rf repeatFlags
+	var cluster string
 	pos, err := e.parse("recovery release", args, 1, func(fs *flag.FlagSet) {
 		fs.Var(&facts, "fact", "")
+		fs.StringVar(&cluster, "cluster", "", "")
 		rf.flags(fs)
 	})
 	if err != nil {
 		return err
 	}
-	machine := pos[0]
 	rp, err := rf.repeat(false)
 	if err != nil {
 		return err
@@ -119,11 +125,15 @@ func (e *env) recoveryRelease(args []string) error {
 		in.Facts = (*map[string]string)(&facts)
 	}
 	body, _ := json.Marshal(in)
-	err = e.write(&client.Write{Method: http.MethodPost, Path: "/recovery/scopes/" + url.PathEscape(machine) + "/releases", Body: body, HumanOnly: true,
-		Repeat: rp, Check: "machine timeline " + client.ShellWord(machine), Read: newestEntry(machine)}, func(_ *client.Client, resp *client.Response) ([]string, error) {
+	var machine, label string
+	err = e.writeNamed(pos[0], cluster, nil, func(id string) *client.Write {
+		machine, label = id, givenLabel(pos[0], id)
+		return &client.Write{Method: http.MethodPost, Path: "/recovery/scopes/" + url.PathEscape(id) + "/releases", Body: body, HumanOnly: true,
+			Repeat: rp, Check: "machine timeline " + client.ShellWord(id), Read: newestEntry(id)}
+	}, func(_ *client.Client, resp *client.Response) ([]string, error) {
 		var x apitypes.ScopeReleaseBody
 		err := json.Unmarshal(resp.Body, &x)
-		return []string{sf("Scope %s released, was %s (act %s).", x.Machine, x.From, x.Act),
+		return []string{sf("Scope %s released, was %s (act %s).", label, x.From, x.Act),
 			"A release is not an approval: it approves no plan and sends nothing. A plan still needs its own approval.",
 			"Next: recovery status."}, err
 	})

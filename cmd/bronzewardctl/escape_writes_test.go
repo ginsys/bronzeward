@@ -72,7 +72,7 @@ func TestRemoteTextInDraftDiscard(t *testing.T) {
 // of the entry, and that text from the server is escaped too. The sweep cannot run them, because it
 // keeps no ETag for a draft.
 func TestRemoteTextInDraftSourceWrites(t *testing.T) {
-	profile, machine, fragment := "p"+tail, "m"+tail, "f"+tail
+	profile, machine, fragment := "p"+tail, "mch_"+tail, "f"+tail
 	doc := t.TempDir() + "/doc.yaml"
 	if err := os.WriteFile(doc, []byte("machine:\n  nodeLabels:\n    BWSYNTH: x\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -130,9 +130,9 @@ func TestRemoteTextInDraftSourceWrites(t *testing.T) {
 		{[]string{"profile", "rm", profile, "--draft", "d1"},
 			"Profile p" + tailEsc + " removed from draft d1 (draft revision 2).", "with profile p" + tailEsc + " at prv_9"},
 		{[]string{"assignment", "set", machine, "--draft", "d1", "--profiles", "p"},
-			"Assignment saved (draft revision 2).", "with assignment m" + tailEsc + " at asr_9"},
+			"Assignment saved (draft revision 2).", "with assignment mch_" + tailEsc + " at asr_9"},
 		{[]string{"assignment", "rm", machine, "--draft", "d1"},
-			"Assignment m" + tailEsc + " removed from draft d1 (draft revision 2).", "with assignment m" + tailEsc + " at asr_9"},
+			"Assignment mch_" + tailEsc + " removed from draft d1 (draft revision 2).", "with assignment mch_" + tailEsc + " at asr_9"},
 		{[]string{"fragment", "set", fragment, "--draft", "d1", "--layer", "role", "--file", doc},
 			"Fragment f" + tailEsc + " saved in draft d" + tailEsc + " (revision frv_8" + tailEsc + "; draft revision 2).", "with fragment f" + tailEsc + " at frv_9"},
 		{[]string{"fragment", "rm", fragment, "--draft", "d1"},

@@ -644,7 +644,7 @@ export function OperationItem({ id }: { id: string }) {
 export const ACTS: readonly Col<S["ActItem"]>[] = [
   ["At", (a) => when(a.at)], ["Principal", (a) => <><Who id={a.principal} /> ({safeWord(a.principalKind)})</>], ["Via", (a) => safeWord(a.via) ?? "none"],
   ["Role", (a) => safeWord(a.role) ?? "none"], ["Action", (a) => safeWord(a.action)], ["Subjects", (a) => <Ids ids={a.subjects} />],
-  ["Request", (a) => a.requestId ?? "none"], ["Act", (a) => <Id id={a.id} />],
+  ["Request", (a) => safeWord(a.requestId) ?? "none"], ["Act", (a) => <Id id={a.id} />],
 ];
 
 export function Audit() {

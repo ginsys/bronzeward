@@ -76,6 +76,9 @@ func (w *Write) ReadsAt(epoch string, moves int) {
 	w.Reads, w.readMoves, w.counted = epoch, moves, true
 }
 
+// BoundMoves is the move count ReadsAt bound the send to; with w.Reads it is the read a later read must still agree with.
+func (w *Write) BoundMoves() int { return w.readMoves }
+
 // CheckRepeat runs a T10 repeat's checks, the principal and the confirming GET /recovery, for the
 // next Send of w on c: a command that reads before Send calls it first, so a refused repeat sends
 // only item 3's reads (§8.4 item 4). For a first send it does nothing.

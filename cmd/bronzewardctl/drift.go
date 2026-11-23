@@ -44,12 +44,16 @@ func (e *env) driftCmd(args []string) error {
 // no opening time (api/openapi.yaml OpenDriftBody), so the time shown is that of the observation
 // the record names, read from the machine's observations; every page is read, as machine show does.
 func (e *env) driftShow(args []string) error {
-	pos, err := e.parse("drift show", args, 1, nil)
+	var cluster string
+	pos, err := e.parse("drift show", args, 1, func(fs *flag.FlagSet) { fs.StringVar(&cluster, "cluster", "", "") })
 	if err != nil {
 		return err
 	}
-	id := pos[0]
 	return e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
+		id, _, err := machineByName(c, pos[0], cluster)
+		if err != nil {
+			return err
+		}
 		r, err := c.Get("/machines/" + url.PathEscape(id))
 		if err != nil {
 			return err
@@ -166,8 +170,10 @@ func (e *env) machineFreeze(verb string, args []string) error {
 		return err
 	}
 	body, _ := json.Marshal(apitypes.ReasonInput{Reason: reason.v})
+	var label string
 	err = e.writeNamed(pos[0], cluster, nil, func(id string) *client.Write {
 		m := url.PathEscape(id)
+		label = givenLabel(pos[0], id)
 		return &client.Write{Method: http.MethodPost, Path: "/machines/" + m + "/" + verb + "s", Body: body, Repeat: rp,
 			Check: "machine timeline " + client.ShellWord(id), Read: freezeRead(m)}
 	},
@@ -183,7 +189,7 @@ func (e *env) machineFreeze(verb string, args []string) error {
 				// "An attempt ..." is freezeLimits with its capital.
 				lines = []string{"Frozen. No new commitment or attempt for this machine until an approver unfreezes it.", "An" + freezeLimits[2:] + "."}
 			}
-			return append(lines, sf("Recorded by %s (%s): machine %s, timeline revision %d, act %s.", e.who(x.Principal), x.Role, x.Machine, x.Revision, x.Act)), nil
+			return append(lines, sf("Recorded by %s (%s): machine %s, timeline revision %d, act %s.", e.who(x.Principal), x.Role, label, x.Revision, x.Act)), nil
 		})
 	return whyBlocked(err, verb)
 }
@@ -250,7 +256,8 @@ func whyBlocked(err error, verb string) error {
 // which may have changed, so the outcome-unknown block names plan create with the release read.
 func (e *env) driftRevert(args []string) (err error) {
 	var rf repeatFlags
-	pos, err := e.parse("drift revert", args, 1, rf.flags)
+	var cluster string
+	pos, err := e.parse("drift revert", args, 1, withCluster(&cluster, rf.flags))
 	if err != nil {
 		return err
 	}
@@ -258,7 +265,6 @@ func (e *env) driftRevert(args []string) (err error) {
 		return usageError{errors.New("drift revert reads the machine's Desired release again, and it may have changed, so it cannot repeat a write; nothing was sent. " +
 			"Repeat through plan create, with the release and the flags the outcome-unknown block printed")}
 	}
-	m := pos[0]
 	c, err := e.open()
 	if err != nil {
 		return err
@@ -267,6 +273,11 @@ func (e *env) driftRevert(args []string) (err error) {
 	if _, _, err := c.Server(); err != nil {
 		return err
 	}
+	m, lookup, err := machineByName(c, pos[0], cluster)
+	if err != nil {
+		return err
+	}
+	label := givenLabel(pos[0], m)
 	path := "/machines/" + url.PathEscape(m)
 	r, err := c.Get(path)
 	if err != nil {
@@ -285,13 +296,13 @@ func (e *env) driftRevert(args []string) (err error) {
 			op = "adopt"
 		}
 		return notSent{fmt.Errorf("machine %s has no Desired release to revert to; nothing was sent. Publish a release that covers it, then: %s",
-			m, createWords("<release>", client.ShellWord(m), client.ShellWord(op)))}
+			label, createWords("<release>", client.ShellWord(m), client.ShellWord(op)))}
 	case x.Applied == nil:
 		return notSent{fmt.Errorf("machine %s has no Applied configuration, so it has no drift to revert; nothing was sent. Adopt it with an adopt plan: %s",
-			m, createLine(*x.Desired, m, "adopt"))}
+			label, createLine(*x.Desired, m, "adopt"))}
 	case x.OpenDrift == nil:
 		return notSent{fmt.Errorf("machine %s has no open drift record; nothing was sent. To apply its Desired release without a revert: %s",
-			m, createLine(*x.Desired, m, "apply-config"))}
+			label, createLine(*x.Desired, m, "apply-config"))}
 	}
 	req, err := e.planParse("drift revert", []string{"--release", *x.Desired, "--machine", m, "--operation", "apply-config"})
 	if err != nil {
@@ -299,7 +310,13 @@ func (e *env) driftRevert(args []string) (err error) {
 	}
 	// The write is bound to this machine answer's own epoch and move count, not to the client's last
 	// ones: a refresh inside the read can have moved them past it (§8.5).
-	return e.planCreateOn(c, req, planOpts{extra: revertLines, bind: boundTo(c, r),
+	bind := boundTo(c, r)
+	if m != pos[0] {
+		// A name was resolved: the write is bound to the lookup's epoch, so an epoch that moved after it refuses the
+		// plan, as in every write by name.
+		bind = &lookup
+	}
+	return e.planCreateOn(c, req, planOpts{extra: revertLines, bind: bind,
 		input: "the command " + createLine(*x.Desired, m, "apply-config") + " in place of drift revert"})
 }
 
@@ -332,10 +349,11 @@ func revertLines(c *client.Client, p *apitypes.PlanBody) []string {
 // review or a step not succeeding, and prints that step and each later one as its command with its
 // role. Its repeat flags repeat step 1; a later step is repeated by its own command.
 func (e *env) driftAdopt(args []string) (err error) {
-	var draft, staging string
+	var draft, staging, cluster string
 	var review, marks bool
 	var rf repeatFlags
 	pos, err := e.parse("drift adopt", args, 1, func(fs *flag.FlagSet) {
+		fs.StringVar(&cluster, "cluster", "", "")
 		fs.StringVar(&draft, "draft", "", "")
 		fs.StringVar(&staging, "staging", "encrypted", "")
 		fs.BoolVar(&review, "review", false, "")
@@ -376,6 +394,7 @@ func (e *env) driftAdopt(args []string) (err error) {
 	// deferred call, so it runs last, after the client was saved. Before the read, and when the read
 	// itself fails, nothing was run and nothing is printed.
 	co := newCollector(m, draft)
+	label := m // what a line calls the machine: its identifier with its name beside it, once a name is resolved
 	var id apitypes.IdentityBody
 	read := false
 	defer func() {
@@ -395,6 +414,14 @@ func (e *env) driftAdopt(args []string) (err error) {
 		if err := getJSON(c, "/identity", &id); err != nil {
 			return err
 		}
+		// A name is resolved once, here, and the three steps carry the identifier: each step has its own client,
+		// so the lookup binds none of them, which is `import start --machine mch_...` typed by hand.
+		machineID, _, err := machineByName(c, m, cluster)
+		if err != nil {
+			return err
+		}
+		label, m = givenLabel(m, machineID), machineID
+		co.obj.Machine = m
 		read = true
 		return nil
 	}); err != nil {
@@ -419,7 +446,7 @@ func (e *env) driftAdopt(args []string) (err error) {
 	if marks {
 		importArgs = append(importArgs, "--marks")
 	}
-	if err := e.say(fmt.Sprintf("Step 1/3  import (drift-adoption) of machine %s into draft %s", m, draft)); err != nil {
+	if err := e.say(fmt.Sprintf("Step 1/3  import (drift-adoption) of machine %s into draft %s", label, draft)); err != nil {
 		return err
 	}
 	co.begin(1)

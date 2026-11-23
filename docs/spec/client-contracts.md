@@ -2196,10 +2196,17 @@ not part of this rule.
    replaces A7's control and format character test, which a name that passes it cannot fail. The web
    client keeps that grammar in one place, and the onboarding page tests the node's hostname against
    the same constant.
-2. The commands keep taking identifiers. A name is unique only within a cluster
-   ([persistence and API §3.5](persistence-api.md#35-a-machines-name)), so a command taking a name
-   would need the cluster too; that is a separate decision, and no client resolves a name to an
-   identifier.
+2. A command that takes a `<machine>` takes its identifier or its name. A name is unique only within a
+   cluster ([persistence and API §3.5](persistence-api.md#35-a-machines-name)), so the first design
+   kept identifiers only, since a command taking a name would need the cluster too. The owner decided
+   otherwise after the hands-on test of 2026-11-21, which found that objects are shown and addressed
+   by name ([#1055](https://github.com/ginsys/bronzeward/issues/1055)): the command reads the machine
+   list once, matches the name across the clusters the credential reads, and refuses a name no machine
+   holds and a name that machines of two clusters hold, which answers the need for the cluster
+   (`--cluster`, a cluster's name or identifier, narrows it, or the identifier is given). An
+   identifier is sent as it is and reads no list. No other name is resolved to an identifier by a
+   client, except a profile's fragment pins ([operator experience §5.4](operator-experience.md#54-editing-fragments-profiles-and-assignments)).
+   The web client takes none of this; it links by identifier.
 3. `machine add` takes an optional `--name`, and `machine rename <id> --name <name>` is a write
    with the role and keying of the table in §3.2. A name another machine of the cluster holds is
    refused `409 name-in-use`, naming that machine; the machine's own current name is `409
