@@ -1152,6 +1152,14 @@ describe("a context that lists several endpoints is tried in order, and a typed 
     if (!r.ok) expect(r.why).toMatch(/bad\/entry.*not tried/);
   });
 
+  test("a single listed entry that is no endpoint is named too, and nothing is sent", async () => {
+    const { env, asked } = tryList([]);
+    const r = await discoverCluster(env, named("bad/entry"), {});
+    expect(asked).toEqual([]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.why).toMatch(/bad\/entry.*not tried/);
+  });
+
   test("the page names each endpoint as it tries it, with its place in the list", async () => {
     const { env } = tryList(LIST);
     const seen: [string, number, number][] = [];

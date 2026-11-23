@@ -458,6 +458,24 @@ func TestOnboardFirstKeySaveFails(t *testing.T) {
 	}
 }
 
+// TestOnboardRerunNamesTheEndpointThatAnswered: with no --endpoint and several listed, the command that carries
+// on selects the endpoint that answered, so a rerun does not wait out the ones that did not.
+func TestOnboardRerunNamesTheEndpointThatAnswered(t *testing.T) {
+	e := newOnboard(t)
+	e.answered = "10.0.0.2"
+	e.api.keyAnswer = func(_ int, w http.ResponseWriter) {
+		if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bronzeward", "config.yaml"), []byte("{"), 0o600); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Bronzeward-Epoch", "ep_OB-2")
+		_, _ = io.WriteString(w, `{"cluster":"cl_x","kind":"talosconfig","replaced":false,"caKeyVersion":{"version":1,"createdTime":"2026-11-19T21:00:00Z"}}`)
+	}
+	code, out, _ := e.run()
+	if code != 1 || !strings.Contains(out, "--endpoint '10.0.0.2'") {
+		t.Errorf("exit %d, stdout %q; want the rerun command to carry --endpoint '10.0.0.2'", code, out)
+	}
+}
+
 // TestOnboardFirstKeyAnswers: each class of answer of the first-key route. A refusal the route decides
 // before it stores anything is exit 1, naming the rule and nothing of the server's words; every other
 // answer leaves the outcome unknown, exit 3. Exactly one first key is sent, nothing after it runs, and

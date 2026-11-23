@@ -24,6 +24,7 @@ type discoverCalls struct {
 	given    []string // the endpoint of each call
 	contexts []string // the context name of each call
 	contents []byte
+	answered string // the endpoint the stub says answered, as discoverCluster returns it
 }
 
 func discoverFixture(t *testing.T, res discover.Result, err error) *discoverCalls {
@@ -33,9 +34,9 @@ func discoverFixture(t *testing.T, res discover.Result, err error) *discoverCall
 		t.Fatal(werr)
 	}
 	old := discoverCluster
-	discoverCluster = func(_ context.Context, tc []byte, contextName, endpoint string) (discover.Result, error) {
+	discoverCluster = func(_ context.Context, tc []byte, contextName, endpoint string) (discover.Result, string, error) {
 		c.given, c.contexts, c.contents = append(c.given, endpoint), append(c.contexts, contextName), tc
-		return res, err
+		return res, c.answered, err
 	}
 	t.Cleanup(func() { discoverCluster = old })
 	return c
@@ -307,5 +308,16 @@ func TestClusterDiscoverRefusesATalosContextItCannotQuote(t *testing.T) {
 	code, out, errOut := runCtl(t, "cluster", "discover", "--talosconfig", c.file, "--talos-context", "prod\tblue")
 	if code != 2 || !strings.Contains(errOut, "--talos-context") || out != "" || len(c.contexts) != 0 {
 		t.Errorf("exit %d, stdout %q, stderr %q, %d discoveries; want 2, the flag named and no discovery", code, out, errOut, len(c.contexts))
+	}
+}
+
+// TestClusterDiscoverPrintsTheEndpointThatAnswered: with no --endpoint and several listed, the onboarding
+// command printed at the end selects the endpoint that answered, so it does not wait out the ones that did not.
+func TestClusterDiscoverPrintsTheEndpointThatAnswered(t *testing.T) {
+	c := discoverFixture(t, twoMembers, nil)
+	c.answered = "10.0.0.2"
+	code, out, errOut := runCtl(t, "cluster", "discover", "--talosconfig", c.file)
+	if code != 0 || errOut != "" || !strings.Contains(out, "cluster onboard --talosconfig '"+c.file+"' --endpoint '10.0.0.2' --name <name>") {
+		t.Errorf("exit %d, stderr %q, stdout %q; want the onboard command to carry --endpoint '10.0.0.2'", code, errOut, out)
 	}
 }
