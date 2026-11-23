@@ -118,7 +118,7 @@ describe("a cluster is named on the release page and the plan page", () => {
     await mount(h(PlanItem, { id: PLN }));
     await settled();
     expect(field("Bound to")).toContain("made in epoch ep_whole_epoch_value_01");
-    expect(titles()).toContain("The server's epoch changes when recovery mode is entered; a restore alone does not change it.");
+    expect(titles()).toContain("The server's epoch changes when recovery mode is entered; a restore alone does not mint a new one.");
   });
   test("a cluster whose read fails reads as this cluster, never as its identifier", async () => {
     answers[`/clusters/${CL}`] = missing;
