@@ -217,6 +217,7 @@ that the release answer says a release is not an approval.
 | 2.4.7 Focus visible | every focus Tab reaches on the row shows an outline of at least 2 px |
 | 1.4.3 Contrast | the console with its row open: the lowest contrast of any shown text, at least 4.5:1 |
 | 2.5.8 Target size | every button, select and navigation link on the page, read after the release, at least 24 by 24 px; the radio choices and the explanation field are gone by then and are not measured here |
+| 4.1.3 Status messages | a release's outcome is mirrored into the page's one `role="status"` region (`recovery-scopes.e2e.ts`, "a ready scope is released by one press…"); a server refusal of a release is an alert on its own element (the case "a release of a scope someone else moved is refused…"); a refused input is an alert on its own element, on the take-over form (`recovery-operation.e2e.ts`, "a reason is required…") and on the accounting form (`recovery-accounting.e2e.ts`, the start observation refused) |
 
 A pass is the case passing in the `browser-auth` jobs of the pull request, on Chrome, Edge, Firefox and Firefox ESR on
 Linux, which must pass to merge; this file holds no per-browser cell that the jobs did not write. Not run here: the

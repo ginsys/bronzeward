@@ -135,6 +135,8 @@ describe("the recovery page of one operation (#365)", () => {
     await open();
     await $('form[aria-label="Take over"] button').click();
     await expect($('[data-testid="takeovers-input"]')).toHaveText("Give a reason.", { wait: 20_000 });
+    // 4.1.3: the refused input is an alert on its own element.
+    await expect($('[data-testid="takeovers-input"]')).toHaveAttribute("role", "alert");
     await absent(async () => (await posts("takeovers")).length > 0, "a take over sent with no reason");
   });
 
