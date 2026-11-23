@@ -46,6 +46,8 @@ a { text-decoration: underline; transition: none; }
 a:hover { color: var(--foreground); }
 button { --_hov: #2fb677; display: inline-block; white-space: normal; transition: none; margin-inline-end: 0.5rem; }
 button:disabled { color: var(--muted-foreground); background-color: var(--background); border: 1px dashed var(--muted-foreground); }
+/* A press that starts on a button's edge row must end on the button: Oat moves a pressed button 1 px, so the pointer would come up on what is behind it. */
+button:active:not(:disabled) { transform: none; }
 
 /* The controls are the browser's own: Oat draws a select arrow, a check mark and a radio dot as data:
    images, which the content policy's img-src 'self' refuses. */
