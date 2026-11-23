@@ -50,6 +50,10 @@ type env struct {
 	cutMu sync.Mutex
 	cut   *client.Interrupted
 
+	// runEpoch is the epoch a run of several writes began under, set by cluster onboard from its first read
+	// and empty for every other command: writeWith binds each write of the run to it.
+	runEpoch string
+
 	// collect is set while a composite prints one object for -o json or yaml: a write then hands its
 	// answer to it and prints nothing (composite.go).
 	collect *collector

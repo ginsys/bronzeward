@@ -96,6 +96,11 @@ type apiFake struct {
 	// machineRefusal, when set, is the code of a 409 that answers every POST /machines, naming the
 	// machine mch_holder as the server's `conflict` and `name-in-use` both do.
 	machineRefusal string
+	// switchAfter, when above 0, is the number of writes answered (from 1) after which every answer carries
+	// the epoch ep_OB-2 instead of ep_OB-1: the epoch changes between two writes of one run.
+	switchAfter, writesDone int
+	// noEpoch leaves the Bronzeward-Epoch header off every answer: a server that shows no epoch.
+	noEpoch bool
 }
 
 func (f *apiFake) writes() []string {
@@ -108,6 +113,15 @@ func (f *apiFake) writes() []string {
 		}
 	}
 	return w
+}
+
+// epoch is the installation's epoch now: ep_OB-1, and ep_OB-2 once switchAfter writes have been answered. The
+// caller holds f.mu.
+func (f *apiFake) epoch() string {
+	if f.switchAfter > 0 && f.writesDone >= f.switchAfter {
+		return "ep_OB-2"
+	}
+	return "ep_OB-1"
 }
 
 func (f *apiFake) etag() string { return fmt.Sprintf(`"%d-OB"`, f.draft.rev) }
@@ -151,7 +165,13 @@ func (f *apiFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.log = append(f.log, r.Method+" "+path)
-	w.Header().Set("Bronzeward-Epoch", "ep_OB-1")
+	epoch := f.epoch()
+	if r.Method != http.MethodGet {
+		defer func() { f.writesDone++ }()
+	}
+	if !f.noEpoch {
+		w.Header().Set("Bronzeward-Epoch", epoch)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	var body []byte
 	if r.Method != http.MethodGet {
@@ -374,14 +394,14 @@ func (f *apiFake) operation(w http.ResponseWriter, r *http.Request, rest string)
 		if r.Header.Get("Accept") == "text/event-stream" {
 			w.Header().Set("Content-Type", "text/event-stream")
 			for n, e := range ing.events {
-				fmt.Fprintf(w, "id: ep_OB-1:%d\nevent: %s\ndata: %s\n\n", n+1, e[0], e[1])
+				fmt.Fprintf(w, "id: %s:%d\nevent: %s\ndata: %s\n\n", f.epoch(), n+1, e[0], e[1])
 			}
 			fmt.Fprint(w, ": keep-alive\n\n")
 			return
 		}
 		var items []string
 		for n, e := range ing.events {
-			items = append(items, fmt.Sprintf(`{"id":"ep_OB-1:%d","at":"2026-11-01T06:00:00Z","type":%q,"data":%s}`, n+1, e[0], e[1]))
+			items = append(items, fmt.Sprintf(`{"id":"%s:%d","at":"2026-11-01T06:00:00Z","type":%q,"data":%s}`, f.epoch(), n+1, e[0], e[1]))
 		}
 		fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(items, ","))
 		return
@@ -394,7 +414,7 @@ func (f *apiFake) operation(w http.ResponseWriter, r *http.Request, rest string)
 		state, result = "running", "null"
 	}
 	fmt.Fprintf(w, `{"id":%q,"kind":"ingest","state":%q,"subject":{"draft":%q,"draftRevision":1},"result":%s,"error":%s,`+
-		`"createdAt":"2026-11-01T06:00:00Z","epoch":"ep_OB-1","lastEvent":%d}`, op, state, ing.draft, result, problem, len(ing.events))
+		`"createdAt":"2026-11-01T06:00:00Z","epoch":%q,"lastEvent":%d}`, op, state, ing.draft, result, problem, f.epoch(), len(ing.events))
 }
 
 // onboardEnv is one test's world.

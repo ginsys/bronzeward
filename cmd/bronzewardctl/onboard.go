@@ -212,12 +212,18 @@ func (e *env) clusterOnboard(args []string) (err error) {
 	}
 	var id apitypes.IdentityBody
 	if err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
-		return getJSON(c, "/identity", &id)
+		err := getJSON(c, "/identity", &id)
+		// The run's first read: every write of the run is sent under the epoch it showed (writeWith).
+		e.runEpoch = c.Context.LastEpoch
+		return err
 	}); err != nil {
 		return err
 	}
 	if id.Kind != "human" || !slices.Contains(id.Roles, apitypes.IdentityBodyRoles("author")) {
 		return errors.New("cluster onboard needs an author signed in as a person: it records a cluster, machines and imports. Nothing was sent")
+	}
+	if e.runEpoch == "" {
+		return errors.New("cluster onboard needs the installation's epoch to send its writes under, and the server showed none. Nothing was sent")
 	}
 	var res discover.Result
 	if err := e.cancellable("the cluster's Talos nodes", func(ctx context.Context) (err error) {
