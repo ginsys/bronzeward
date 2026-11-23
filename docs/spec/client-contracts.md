@@ -2276,7 +2276,10 @@ not part of this rule.
    not start yet: machine node-a still has the Kubernetes node name node-a." with no hostname value beyond that name.
    For a machine whose release records no `nodeName` because its hostname depends on a secret, the release review
    adds: "Not checked: this machine's hostname depends on a secret, so a clash with another machine's hostname cannot
-   be checked." and says nothing for a `none`, `legacy-stable` or `unrecorded` source, whose sentence in item 7
+   be checked." (`nodeName` `null`, not compared). For a release whose `nodeName` is absent, not recorded because
+   the release was made before it was recorded, the review says: "Not checked: this release was made before
+   hostname clashes were recorded, so a clash with another machine's hostname cannot be checked." and names no
+   secret. It says nothing for a `none`, `legacy-stable` or `unrecorded` source, whose sentence in item 7
    already says the node chooses its own. A `hostnameHeldBy` the client cannot show (a machine it cannot read)
    shows "This plan waits for another machine's hostname." and no more. The CLI and the web console are
    ginsys/bronzeward#1042 and ginsys/bronzeward#1043 for the words of item 7; this item's words ride with the one
