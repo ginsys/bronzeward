@@ -6,7 +6,8 @@ now. You also want the history of one machine, including plans that never ran.
 
 **You need** at least one role (viewer, author, publisher, approver or recovery-admin). Every
 command and page on this page reads. Plans and approvals are in [plans and
-approval](plan-and-approval.md).
+approval](plan-and-approval.md). Words such as operation, controller, Applied and Observed are in
+[the word list](terms.md).
 
 The `text` block on this page shows the shape of the output, read from the source. This page does
 not claim that a run printed it.

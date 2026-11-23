@@ -6,7 +6,7 @@ talosconfig file.
 **You need** the `author` role and a person signed in, not an automation token, and the cluster's
 talosconfig file.
 
-The installation reads the cluster's members through one endpoint of that file. This first read only reads: it records nothing.
+The installation reads the cluster's members through one endpoint of that file. This first read only reads: it records nothing. Words such as installation, context and role are in [the word list](terms.md).
 
 **Which endpoints are tried.**
 
