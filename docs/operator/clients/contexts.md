@@ -59,6 +59,13 @@ bronzewardctl context add office --server https://bronzeward.example.com \
   --issuer https://idp.example.com --client-id <the CLI client's ID> --audience <the server's audience>
 ```
 
+Without `--scopes`, the client asks the identity provider for `openid` and `offline_access` only.
+If your identity provider needs other scopes before it puts the server's audience into the token,
+add them as `--scopes a,b`. The reference provider, Zitadel, needs
+`urn:zitadel:iam:org:project:id:<project ID>:aud`; without it the server refuses every token (see
+[the identity provider](../deployment/identity-provider.md)). `--from` takes the scopes the server
+publishes, and `--scopes` can be added to it too.
+
 A context for **automation** has no identity provider. It uses a long-lived automation token you
 keep in a file ([below](#credentials-for-a-script)):
 
