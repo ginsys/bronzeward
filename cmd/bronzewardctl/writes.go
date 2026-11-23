@@ -119,12 +119,15 @@ func (e *env) writeWith(c *client.Client, prep func(*client.Client) error, w *cl
 			return err
 		}
 	}
-	if e.runEpoch != "" && w.Repeat == nil && !w.Entry && w.Reads == "" {
+	if p := e.runEpoch; p != nil && w.Repeat == nil && !w.Entry && w.Reads == "" {
 		// A run of several writes (cluster onboard) sends each under the epoch its first read showed; a write
 		// that binds itself keeps its own bind. Send refuses the write, sending nothing, once the context shows another.
-		w.ReadsAt(e.runEpoch, c.EpochMoves())
+		w.ReadsAt(p.began, c.EpochMoves())
 	}
 	r, err := c.Send(w)
+	if e.runEpoch != nil {
+		e.runEpoch.now = c.Context.LastEpoch // what the run says if it stops (onboard.go)
+	}
 	if err != nil {
 		return err
 	}

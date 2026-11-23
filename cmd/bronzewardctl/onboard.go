@@ -85,6 +85,9 @@ type onboarding struct {
 	again, ctx string
 }
 
+// runPin is the epoch a cluster onboard run began under, and the one the context showed after the run's last write.
+type runPin struct{ began, now string }
+
 // onboardArgs are the flags of cluster onboard.
 type onboardArgs struct {
 	file, endpoint, talosContext, name, kube string
@@ -212,17 +215,23 @@ func (e *env) clusterOnboard(args []string) (err error) {
 	}
 	var id apitypes.IdentityBody
 	if err := e.session(func(c *client.Client, _ *client.Response, _ *apitypes.ServerBody) error {
-		err := getJSON(c, "/identity", &id)
-		// The run's first read: every write of the run is sent under the epoch it showed (writeWith).
-		e.runEpoch = c.Context.LastEpoch
-		return err
+		r, err := c.Get("/identity")
+		if err != nil {
+			return err
+		}
+		// The run's first read: every write of the run is sent under the epoch this answer showed (writeWith), not a
+		// cached one the context kept from an earlier command.
+		if ep := r.Header.Get("Bronzeward-Epoch"); ep != "" {
+			e.runEpoch = &runPin{began: ep, now: ep}
+		}
+		return json.Unmarshal(r.Body, &id)
 	}); err != nil {
 		return err
 	}
 	if id.Kind != "human" || !slices.Contains(id.Roles, apitypes.IdentityBodyRoles("author")) {
 		return errors.New("cluster onboard needs an author signed in as a person: it records a cluster, machines and imports. Nothing was sent")
 	}
-	if e.runEpoch == "" {
+	if e.runEpoch == nil {
 		return errors.New("cluster onboard needs the installation's epoch to send its writes under, and the server showed none. Nothing was sent")
 	}
 	var res discover.Result
@@ -274,7 +283,13 @@ func (e *env) clusterOnboard(args []string) (err error) {
 		for _, p := range parts {
 			p.Command = obj.q(p.Command)
 		}
-		perr := e.say(onboardLines(obj)...)
+		lines := onboardLines(obj)
+		if p := e.runEpoch; err != nil && p != nil && p.now != p.began {
+			// The cause of a stop, whichever guard refused the write: the run's own epoch is no longer the server's.
+			lines = append([]string{sf("The server's epoch changed from %s to %s since this run began; nothing more was sent. Run it again to carry on under the new epoch.",
+				client.ShellWord(p.began), client.ShellWord(p.now))}, lines...)
+		}
+		perr := e.say(lines...)
 		if e.output != "table" {
 			perr = e.printComposite(obj)
 		}
