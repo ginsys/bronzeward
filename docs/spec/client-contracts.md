@@ -2264,6 +2264,23 @@ not part of this rule.
    machine's name, the next release will use node-b." A `source` the client does not know shows its raw value and no sentence. A publication refused for a
    hostname clash (compilation §6.1 item 6) shows the refusal's own sentence. The CLI and the web console are
    ginsys/bronzeward#1042 and ginsys/bronzeward#1043, and each tests its sentences against these.
+8. **A plan says when it waits for another machine's hostname** (persistence and API §9.3, the `hostnameHeldBy`
+   member; execution and recovery §3.2 comparison 6a). Where `hostnameHeldBy` names a machine, the plan's page
+   or command output and the machine's page say, in words and with no field name: "This plan waits. The last
+   release applied to machine node-a still sets the Kubernetes node name node-a, and this release gives the same
+   name to machine node-b. Nothing has been changed on either machine. Apply the release for machine node-a first,
+   or give machine node-b another hostname." The name is the `nodeName` of the plan's release for the machine,
+   which is never a secret; each machine is named by its name where it has one and by its identifier where it has
+   none (A8 rule 1). The sentence says "waits", never "refused" or "failed": the plan stays approved and nothing was
+   sent. Where a commitment was refused on this ground, the timeline's refusal entry is shown as: "The plan could
+   not start yet: machine node-a still has the Kubernetes node name node-a." with no hostname value beyond that name.
+   For a machine whose release records no `nodeName` because its hostname depends on a secret, the release review
+   adds: "Not checked: this machine's hostname depends on a secret, so a clash with another machine's hostname cannot
+   be checked." and says nothing for a `none`, `legacy-stable` or `unrecorded` source, whose sentence in item 7
+   already says the node chooses its own. A `hostnameHeldBy` the client cannot show (a machine it cannot read)
+   shows "This plan waits for another machine's hostname." and no more. The CLI and the web console are
+   ginsys/bronzeward#1042 and ginsys/bronzeward#1043 for the words of item 7; this item's words ride with the one
+   implementation issue that the specification of the plan's wait files when it merges.
 
 **A10. An operation says in words what it did, who started it and what comes next (client rule, no API change).**
 Closes G28 ([#998](https://github.com/ginsys/bronzeward/issues/998)). The web client's operation page shows one sentence

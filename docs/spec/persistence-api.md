@@ -1021,7 +1021,9 @@ Rules for every transaction:
    last wait (rule 5).
 5. **Lock order.** The request's idempotency-key lock (§7.2), installation
    state, machine rows by id (each with its MachineState; T1 takes one `FOR SHARE`
-   to read a name, choice §17.45), heads by id, the
+   to read a name, choice §17.45; a commitment takes the cluster's rows in one
+   pass, its own `FOR UPDATE` at its own place in the order and the others `FOR
+   SHARE`, execution and recovery §3.2 comparison 6a), heads by id, the
    draft, principals by id, approvals by id, plan states by id, then operations
    by id. A commitment then takes its cluster's rollout lock, which only
    commitments take (execution and recovery choice §10.29). The act-order lock comes last, just before the act is written, and is
@@ -1074,7 +1076,7 @@ The transactions this contract defines or constrains:
 | T5a | Approval | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted; approver's principal, and that of the approval it replaces, `FOR SHARE` in id order, the approver not revoked; plan state `FOR UPDATE`, unexpired, and `proposed`, or `approved` by an approval from an earlier epoch | approval (unique per plan and epoch, with the self-approval mark), plan state `approved`, machine timeline entry, idempotency record, act |
 | T5b | Approval revocation | key lock; installation state `FOR SHARE`; machine row `FOR UPDATE`; the revoking human's principal `FOR SHARE`, not revoked; approval `FOR UPDATE`, which waits for a commitment or attempt holding it `FOR SHARE` (§1.2 item 3), not already revoked; plan state `FOR UPDATE` | revocation row, for any approval, after the commitment too (execution and recovery §2); plan state `revoked` only when the plan is `approved` by the named approval and, at the time read after the act-order lock (rule 4), reads neither `expired` nor `revoked` (§8.1); a plan that then reads `expired`, or `revoked` by its approver's identity, is written as it reads (§8.1), and an earlier-epoch approval that a current one replaced, or a plan already terminal, keeps its state; machine timeline entry, idempotency record, act |
 | T5c | Identity revocation | key lock; installation state `FOR UPDATE`, which waits for every request holding it `FOR SHARE`, an inventory among them, and holds off new ones, so no machine is inserted that the next lock misses; every machine row `FOR UPDATE`, in id order, as T9 (rule 5); principal `FOR UPDATE`, which waits likewise | revocation row, principal `revoked`, a service identity's token revoked; an identity revocation entry (T7) on the timeline of each machine with a plan that identity approved whose plan or operation is not terminal, read under those machine locks, naming the identity and those plans (execution and recovery §4.1); idempotency record, act |
-| T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6; a commitment also compares the committing process's epoch with the current one (§5.1) | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1); a refusal writes nothing but its refusal entry, appended after the rollback by T7 (execution and recovery §4.1) |
+| T6 | Commitment, attempt, adoption record | execution and recovery; with §1.2 items 1–3 and 6; a commitment also compares the committing process's epoch with the current one (§5.1); a commitment of an `apply-config` plan takes the cluster's machine rows in one pass in id order, its own `FOR UPDATE` and the others `FOR SHARE`, and reads each other machine's `Applied` release's `nodeName` (execution and recovery §3.2 comparison 6a) | execution and recovery; the commitment creates the operation, and an adopt plan's commitment creates it in `completed` with the adoption record (§8.1); a refusal writes nothing but its refusal entry, appended after the rollback by T7 (execution and recovery §4.1) |
 | T7 | Timeline append | machine row `FOR UPDATE` for every entry in a machine scope: plan, operation or machine-scope fact; operation row `FOR UPDATE` for an entry of a `publish` or `ingest` operation | entry at the machine's `revision_counter + 1`, or at the operation's next event number |
 | T8 | Job claim, lease extension and completion; takeover of an `apply-config` operation; a staging claim's takeover, its pause by its owner (compilation §3.6), and its abandonment by the sweep, by a takeover with nothing to decrypt (compilation §3.4, §3.5) or by its owner after a refusal, under the owner check (compilation §2.3) | §5.1; for a takeover, its machine row `FOR UPDATE` first (T7); for a staging claim, compilation's conditional `UPDATE` of the claim | operation owner fields; for a job's completion, also its state and terminal event (§8.2); for a takeover, also its state and the ownership-transition entry on the machine's timeline (T7); for a staging claim, the claim and its `ingest` operation together: a takeover moves the operation's owner fields with the claim's, an abandonment fails the operation with its terminal event (§8.2): `ingestion-abandoned` from the sweep or a takeover, the refusal's own problem from its owner; a pause writes the claim `paused`, ends the operation's lease with the claim's (§5.1) and writes the operation's `paused` event, and a mark refused before any provider write also its `mark-refused` event (§8.3) |
 | T9 | Recovery-mode entry | key lock; installation state `FOR UPDATE`, its epoch the one the process read at its recovery start (§12.2); every machine row `FOR UPDATE`; every live staging claim `FOR UPDATE`, in id order; the row of each `publish` or `ingest` operation it fails `FOR UPDATE` (T7), in rule 5's order | §12.2 |
@@ -1251,8 +1253,9 @@ after the draft (its entry, else its `Applied` release's, §3.2), each with its
 assignment after the draft, or with none, compiling on its base alone
 **(choice §17.33)**, and each covered machine's name, or none, as stored
 **(choice §17.45)**: T3 compares against these names. For the hostname swap
-check (compilation §6.1 item 6) it also reads, for each covered machine, the name
-its `Applied` release's hostname record holds (§9.2, source `machine-name`); a
+check (compilation §6.1 item 6) it also reads, for each covered machine, the
+`nodeName` its `Applied` release's machine record holds (§9.2), `null` where the
+record holds none; a
 change of `Applied` before commit is caught where §4.2's third form applies, and
 the check is otherwise as current as the snapshot. A machine with an assignment but no import base is not
 covered: a draft that changes or removes its assignment is refused
@@ -1296,7 +1299,10 @@ quote an authored literal.
 Covered machines naming
 different Kubernetes versions are `422` with rule `kubernetes`, and a hostname
 filled from a machine's name that another machine of the release holds
-explicitly is `422` with rule `hostname`, naming both machines in words
+explicitly is `422` with rule `hostname`, naming both machines in words, as is
+a machine whose release gives it a node name that another machine's `Applied`
+release still holds and its own does not (the recorded `nodeName`, §9.2; not
+compared where either is `null`)
 (compilation §6.1 item 6; the release covers every machine of the cluster with
 an import base, choice §17.33, so one release holds every such pair). A dependency
 classified `blocked` or `lost`, or whose identity changed (a creation time
@@ -1437,8 +1443,10 @@ INSERT INTO release ...;             -- unique (draft_id, draft_revision);
 INSERT INTO release_machine ...;     -- per machine: ciphertext and its digest,
                                      -- the Transit key it was encrypted under,
                                      -- configuration digest, review data, the
-                                     -- hostname record (source, and the name
-                                     -- used where it was filled; §9.2); its
+                                     -- hostname record (source, the name used
+                                     -- where it was filled, and the derived
+                                     -- node name, null where it depends on a
+                                     -- secret reference; §9.2); its
                                      -- assignment revision its assignment
                                      -- source's (checked at commit)
 INSERT INTO release_source ...;      -- every revision and head revision used:
@@ -2245,6 +2253,8 @@ API revisions:
 | 16 | the `hostname` rule of `422 validation-failed` on publication, with a release compiling a machine's name as its hostname where nothing sets one (§9.2, §3.5, compilation §6.1 item 6) |
 | 17 | the name form of `409 stale-input` from the `ingest` draft transaction, with `expected` and `actual` as machine names, each a string or `null`, and `formOnly` true for a machine whose import removed the fill's own `HostnameConfig` while its name is unchanged (§4.2, choice §17.45, compilation §2.3 step 2a, §6.1 item 5) |
 
+One further part is specified and not yet served, taking the next revision in the change that serves it, so this table names no revision for it: `nodeName` on the `hostname` member of each machine of a release and its review (§9.2), the `hostnameHeldBy` member of `GET /machines/{id}/position` (§9.3) and the publication comparison reading `nodeName` (compilation §6.1 item 6), together in one revision (execution and recovery choice §10.39, ginsys/bronzeward#1052).
+
 ### 9.2 Resources and routes
 
 "Any role" means any authenticated principal holding at least one role: every
@@ -2832,6 +2842,7 @@ HTTP/1.1 200 OK
           "createdAt": "2026-11-18T10:40:31Z", "expiresAt": "2026-11-19T10:40:31Z"},
  "operation": null,
  "rolloutHeldBy": null,
+ "hostnameHeldBy": null,
  "step": "awaiting-approval"}
 ```
 
@@ -2878,6 +2889,7 @@ unknown machine, and every refusal that applies to a read applies to it
 | `plan` | The newest plan of the machine that reads `proposed` or `approved` at the snapshot (expiry and a revoked approving identity are evaluated as for any plan read, §8.1) and that would pass comparison 2 of a commitment against the machine now (execution and recovery §3.2 item 2), newest by `createdAt`, then identifier; null when there is none. The comparison names three terms that move with the machine, and a plan whose bound value differs on any of them can never commit, so the read does not pick it: the machine's assignment revision, its baseline revision (advanced by an adoption or another operation's completion, so the second of two approved plans is dropped once the first completes) and its `Desired` release (a plan bound to no `Desired` matches a machine with none, as a first adoption does, and an `apply-config` plan is for the `Desired` release it bound). It is the plan's own bound values that are compared: an `adopt` plan's adopted `release` is free of `desired`, so a first adoption with no `Desired` still has its plan picked. The three terms explain the comparison and the comparison decides: if it gains a term the read follows it, so the read never shows a plan the commitment refuses on these grounds. A plan that went stale disappears from the answer and the step falls to the machine's own fields, `needs-plan` where that applies, without saying that an approved plan went stale; the plan still lists under `GET /plans`. A `committed` plan is never picked: its state is final and says nothing of its operation. An `adopt` plan that a refusal entry on the machine names (execution and recovery §6.3: a refused adoption ends its attempts and a new plan is the retry) is not picked either, though its state stays `approved`; a refusal entry on an `apply-config` plan does not exclude it, since that plan is attempted again. A plan the drift gate can never admit is not picked either (execution and recovery §3.2; the commitment's scope gate): while a drift record is open on the machine, only a plan that binds that record is picked (a revert or a drift adoption), and while none is open, only a plan that binds none, so an ordinary plan approved before the drift opened, or one binding a record since closed, reads as no plan and the step is `drift-open` or by the machine's own fields. Members `id`, `state`, `operation` (the plan's kind, `apply-config` or `adopt`), `release`, `approvalCurrent`, `createdAt` and `expiresAt`. `approvalCurrent` is `true` when the plan's approval was recorded in the current epoch, `false` when it is from an earlier one (§8.1: such a plan stays `approved` but cannot commit until approved again), and null while the plan has no approval. |
 | `operation` | The `apply-config` operation that holds the machine scope (state `committed`, `sending`, `verifying` or `unresolved`), as `id`, `kind`, `state`, `plan` and `createdAt`, or null. At most one exists: the machine-scope unique index of the schema allows one. An `adopt` operation is created `completed` and never holds the scope (§8.1). |
 | `rolloutHeldBy` | The operation that holds the machine's cluster rollout scope when it belongs to another machine, as `id` and `machine`, or null. At most one exists, as the rollout-scope index allows one. It says why an approved plan is not dispatched yet. |
+| `hostnameHeldBy` | The other machine of the cluster whose `Applied` release holds the node name the `plan` member's release gives this machine and this machine's own `Applied` release does not (execution and recovery §3.2 comparison 6a), as `id` and `name` (null when it has none), or null. It is null unless `plan` is an `apply-config` plan, and null where either `nodeName` is null (§9.2). When several machines hold the name, the one with the lowest identifier. It is computed by the gate's own rule from the same snapshot, never read from a refusal entry, so it also says a plan waits before any commitment was tried. It says why an approved plan is not dispatched yet, and it names no hostname value. |
 | `step` | One value of the closed list below, chosen by the first row whose facts hold. |
 
 `step` is decided by the facts of the same answer, in this order, and the first
@@ -2936,14 +2948,16 @@ change:
   completion, so it fails the comparison, `plan` is null and the step falls to the
   machine's own fields, with nothing said of the stale plan.
 
-`machine.frozen`, `machine.scopeState` and `rolloutHeldBy` come from the same
-snapshot, so a client that says why an approved plan waits reads one answer, and
-the reason depends on `plan.operation`. An `apply-config` plan is held by a frozen
-machine, by a `scopeState` other than `normal` or `released` (and, in recovery
-mode, other than `released`; execution and recovery §7.4) and by `rolloutHeldBy`.
+`machine.frozen`, `machine.scopeState`, `rolloutHeldBy` and `hostnameHeldBy` come
+from the same snapshot, so a client that says why an approved plan waits reads
+one answer, and the reason depends on `plan.operation`. An `apply-config` plan is
+held by a frozen machine, by a `scopeState` other than `normal` or `released`
+(and, in recovery mode, other than `released`; execution and recovery §7.4), by
+`rolloutHeldBy` and by `hostnameHeldBy`.
 An `adopt` plan is held only by the machine scope (the `operation` member) and
-by the scope-state and recovery-mode rule: a freeze and another machine's
-rollout holder do not stop an adoption (execution and recovery §6.3). A client
+by the scope-state and recovery-mode rule: a freeze, another machine's
+rollout holder and another machine's node name do not stop an adoption
+(execution and recovery §6.3). A client
 treats a `step` value it does not know as `no-step`: a later revision may add a
 value (§9.1, additions are never breaking).
 
@@ -3063,7 +3077,24 @@ reference counts as set whatever its value, so the source never tells it) or `un
 whose hostname source was never recorded: it is no confirmed absence, and
 the migration gives every such release that value by a column default, never
 an `UPDATE`, since `release_machine` is immutable), and,
-for `machine-name`, `name`, the name used **(choice §17.44, API revision 15)**. The stored value
+for `machine-name`, `name`, the name used **(choice §17.44, API revision 15)**.
+The member also answers `nodeName`, a string or `null` **(execution and recovery
+choice §10.39; the API revision is the one the note after the revision table
+names)**: the Kubernetes node name the release gives the machine, derived as
+compilation §6.1 item 6 states it, for every `source` that sets a hostname
+(`machine-name`, `configuration`). It is `null` for a source that sets none
+(`none`, `legacy-stable`, `unrecorded`) and wherever any input to the name,
+the hostname or the `registerWithFQDN` value that decides whether the first
+label alone is used, is attributed to a secret reference (compilation §8.1), so
+a non-null value never derives from a secret and a `null` is never compared. A
+release made before the revision reads `null` by a column default, never an
+`UPDATE`, as `unrecorded` does. Any role reads it with the record, as it reads
+the redacted review (route table, §9.2): the review already shows a literal
+hostname, since the machinery marks no hostname secret (`pkg/machinery` v1.14.5,
+the version this specification pins), and a hostname attributed to a reference
+is redacted by path and gives `null`, so `nodeName` follows the review's read
+rule and adds the same literal in derived form. A later machinery pin is a
+re-read of that list. The stored value
 outside that enumeration is `500 internal-error`, as a provenance record is. It
 is a fact about the release and never read again from the machine, whose name
 may have changed since. `GET /releases` lists releases in identifier order, each as the
@@ -4071,7 +4102,7 @@ or Desired change; it does not erase earlier evidence.
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
 | Draft | The machine's name is not the one ingestion used when it removed a filled hostname (§3.2, compilation §2.3 step 2a) | `409 stale-input` naming the machine, expected and actual name; claim abandoned | claim row; orphans |
 | Publish | A covered machine's name changed since the snapshot (§4.2) | operation `failed`, `409 stale-input` | operation, act |
-| Publish | A hostname filled from a machine's name that another machine holds explicitly (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
+| Publish | A hostname filled from a machine's name that another machine holds explicitly, or a machine's release giving it the node name that another machine's `Applied` release holds (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
 | Publish | Moved head, a covered machine's import base changed (§4.2), a machine of the cluster covered since the snapshot (§6.2, expected "absent"), or T3 finds missing, misbound or superseded publication evidence (§6.1.1) | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
@@ -5082,7 +5113,9 @@ design and evidence do not settle the question. Each is marked in place as
     be the machine name (if set)" (ginsys/bronzeward#976, ruled by the
     bronzeward lead on 2026-11-21 on the plan's decisions). Design choices,
     owned by the specification and open to review: a release machine records a
-    `hostname` member (`source` and, for `machine-name`, the `name` used), a
+    `hostname` member (`source` and, for `machine-name`, the `name` used; the
+    derived `nodeName` joins it in the revision named after the revision table,
+    execution and recovery choice §10.39), a
     source column added `NOT NULL DEFAULT 'unrecorded'` with the default then
     dropped, so that a new release must state it and every older row reads
     `unrecorded` with no `UPDATE` (the table is immutable), and a nullable name

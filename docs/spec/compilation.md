@@ -1179,11 +1179,16 @@ unmeasured.
    `a`, which differ too. The check was built with the hostname fill
    (ginsys/bronzeward#1040), whose acceptance cases include `a.x.org` against
    `a.y.org` with `registerWithFQDN` unset (refused) and true on both (accepted).
-   A name that moves between machines is the second clash: a filled hostname
-   equal to the name that another machine's last applied release recorded
-   (source `machine-name`, persistence and API §9.2) is refused the same way,
-   naming both machines, until that machine's applied release no longer holds
-   it. That comparison is on full names only. Each machine has its own plan, so a release that renames machine node-a
+   A node name that moves between machines is the second clash: a machine whose
+   release gives it a node name equal to the node name that another machine's
+   last applied release recorded (the release's `nodeName`, persistence and API
+   §9.2), and that its own applied release does not already hold, is refused the
+   same way, naming both machines, until that machine's
+   applied release no longer holds it. The recorded value is the derived node
+   name above, so the comparison covers a hostname filled from a name, an
+   explicit hostname and the `registerWithFQDN` setting alike; it is not made
+   where either `nodeName` is `null`, which it is where a secret reference is
+   an input to the name and where no hostname is set. Each machine has its own plan, so a release that renames machine node-a
    and gives its old name to machine node-b could be applied in the wrong
    order and leave two nodes with one hostname. Once both renames are stored,
    every release carries machine node-b's new name and is refused, so the
@@ -1197,25 +1202,34 @@ unmeasured.
    node-a." Each machine is named by the name it holds when the release is
    published, and by its identifier where it has none, so in that sentence the
    machine that holds the name now is named by it and the other by its current
-   name; only the hostname is the old name. To exchange the names of two machines, give the first a third
+   name; only the hostname is the old name. Where the machine that would take the
+   node name has an explicit hostname, the refusal reads: "Machine node-b's
+   configured hostname gives the Kubernetes node name node-a, but the last
+   release applied to machine node-a still sets that. Give machine node-b
+   another hostname for now, apply the release for machine node-a, then set it."
+   It names the derived node name, which is never a secret, and no configured
+   value. To exchange the names of two machines, give the first a third
    name; if the second already holds the first's old name, give the second its
    earlier name. Publish and apply the release for the first machine. Give the
    second machine the first's old name, publish and apply. Then give the first
-   machine its final name, publish and apply. The check is no guarantee. It reads only the hostname record of
-   each machine's applied release, so it does not cover a hostname set
-   explicitly or held by a secret reference (not recorded per release), an
-   apply that is committed but not finished, or an adopted baseline whose
-   record names a hostname the node does not run, or two nodes that share a
-   Kubernetes node name only because the record holds no `registerWithFQDN`
-   setting (applied `a.x.org` against a new `a.y.org`); those cases are
-   ginsys/bronzeward#1052.
+   machine its final name, publish and apply. The check is no guarantee. It reads the recorded `nodeName` of each
+   machine's applied release (persistence and API §9.2), so it does not cover a
+   hostname that depends on a secret reference (`nodeName` `null`, not
+   compared), a machine whose configuration sets no hostname (`null` as well:
+   the node chooses its own), or an adopted baseline whose record names a
+   hostname the node does not run (execution and recovery §9.3). An apply that
+   is committed but not finished, and a name that moved after publication, are
+   the commitment's: its hostname gate refuses a plan while another machine's
+   applied release holds the name (execution and recovery §3.2 comparison 6a,
+   choice §10.39).
    The check reads the machines of one release, and a release covers every
    machine of its cluster that has an import base
    ([persistence and API choice §17.33](persistence-api.md)); a machine with no
    import base is not compared, and a later change to that coverage must carry
-   this check with it. Two explicit hostnames that were already equal are not
-   new and are not refused here, since the feature creates only the filled
-   case. Alternative: a review warning only, which leaves the failure on the
+   this check with it. A node name a machine already holds in its own applied
+   release is not a name it takes: two machines that already shared a node name
+   are not new, and are not refused here, so the check refuses only a machine
+   that would take a name it does not hold now. Alternative: a review warning only, which leaves the failure on the
    live cluster to whoever approves the plan.
 
 **Left open.** Whether a live node applies a changed hostname without a reboot,
@@ -1761,7 +1775,8 @@ or encrypted values:
   digest of its plaintext
   ([execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values)),
   the redacted review data, the provenance records (§8.2), the hostname record
-  (§6.1 item 4: its source and, where filled, the name used) and both
+  (§6.1 item 4: its source, where filled the name used, and the derived node
+  name of §6.1 item 6, `null` where a secret reference is an input) and both
   dependency records with the encryption dependency (§9);
 - per pinned version and encryption dependency: the classification step 3 and
   §11 made, as the dependency monitor seeds it
@@ -1907,7 +1922,7 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Compilation | An ordinary fragment overrides or deletes an import-base reference (§6) | Publication refused, naming the fragment and path | Nothing |
 | Compilation | Contract newer than renderer or not the node's minor; Kubernetes outside the window | Publication refused | Nothing |
 | Compilation | Native composition or validation rejects | Publication refused; message redacted or withheld (§8.3) | Nothing |
-| Compilation | A hostname filled from a machine's name that another machine of the cluster holds explicitly (§6.1 item 6) | Publication refused, rule `hostname`, naming both machines | Nothing |
+| Compilation | A hostname filled from a machine's name that another machine of the cluster holds explicitly, or a node name that another machine's applied release holds (§6.1 item 6) | Publication refused, rule `hostname`, naming both machines | Nothing |
 | Ingestion | The machine's name changed between the removal of a filled hostname (§2.3 step 2a) and the draft transaction | The draft transaction is refused `409 stale-input`; re-ingest | Claim row, no payload |
 | Compilation | Trace or flip fragment missing, shape differs, or passes disagree | Publication refused (§8.1) | Nothing |
 | Compilation | Reserved text or an unattributed exact copy in the output | Publication refused, naming paths | Nothing |
@@ -2355,7 +2370,13 @@ in place as
 38. **Publication refuses a filled hostname another machine holds
     explicitly** (§6.1 item 6). Alternative: a review warning only. The failure
     lands on a live cluster and is not cheap to undo, so a refusal is chosen
-    over a warning that leaves it to whoever approves the plan.
+    over a warning that leaves it to whoever approves the plan. The same choice
+    covers a machine whose release gives it a node name that another machine's
+    applied release holds, compared on the recorded `nodeName` (persistence and
+    API §9.2) so that an explicit hostname and `registerWithFQDN` are covered
+    too; the commitment refuses what moved after publication (execution and
+    recovery choice §10.39). Agent decision, 2026-11-23
+    (ginsys/bronzeward#1052).
 39. **Publication records whether a machine's configuration differs from its
     import base in form only** (§6 step 8; persistence and API choice §17.48).
     Alternatives: a compilation that reproduces the node's text when nothing is

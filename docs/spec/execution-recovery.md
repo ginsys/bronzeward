@@ -397,7 +397,7 @@ persistence's (see `persistence-api.md`).
    is a partial unique index on the rollout scope over those states, as
    comparison 4's is on the machine scope, and the commitment waits for the
    scope's lock before it reads its time (choice §10.29); a limit above one
-   needs a counted lock, which is open (choice §10.5); and
+   needs a counted lock, which is open (choice §10.5);
 6. the **scope gate** is open: the machine scope is not frozen (§6.2), no
    drift record is open on the machine other than one the plan binds, a drift
    record the plan binds is still open (§6.4; a revert whose record has closed
@@ -405,7 +405,41 @@ persistence's (see `persistence-api.md`).
    in the current recovery epoch (§7.3 step 7). The freeze, the open drift
    record and the scope's recovery state are read under the machine row's
    lock, and recovery mode
-   with the installation state of comparison 1.
+   with the installation state of comparison 1; and
+6a. for an `apply-config` plan, the **hostname gate** is open: no other machine
+   of the plan's cluster has an `Applied` release whose machine record holds
+   the node name the bound release gives this machine. The record's `nodeName`
+   is the Kubernetes node name derived from the machine's hostname as
+   compilation §6.1 item 6 states it (persistence and API §9.2). The gate
+   compares the bound release's `nodeName` with that of each other machine's
+   `Applied` release and refuses when two are equal, unless the machine's own
+   `Applied` release already holds that name: a name it holds now is not a name
+   it takes, so two machines that already shared one stay as they were. A `null` on either side is
+   not compared: the record holds `null` where any input to the name is a
+   secret reference, because the comparison would be an equality test on a
+   secret, and where the configuration sets no hostname, because no name is
+   known. Another machine with no `Applied` holds no name, and an adopt plan
+   sends nothing, so the gate does not apply to it. The refusal leaves the plan
+   `approved`: it commits once the other machine's `Applied` no longer holds the
+   name, as a lifted freeze or a freed rollout slot lets it (choice §10.27), so
+   the plan waits for the other machine's plan and nothing is applied in the
+   meantime **(choice §10.39)**.
+
+The gate reads other machines' rows, so the transaction's machine locks are one
+pass. It takes the cluster's machine rows in id order at the machine-rows step
+of persistence and API §5 rule 5, before the rollout lock: its own row `FOR
+UPDATE` at its own place in that order, every other row `FOR SHARE`. Taking its
+own row first and the others after would lock a lower-id machine out of order,
+and could deadlock with an identity revocation or recovery-mode entry, which
+take every machine row in id order (persistence and API T5c and T9). At the PoC
+limit of one no other machine's operation holds the rollout slot when a
+commitment commits (comparison 5), so the gate reads another machine's
+`Applied` after the apply that would have raced it has completed. It also
+refuses a name that moved after publication: a completed apply or an adoption
+record that set another machine's `Applied` since the release was published,
+which publication's own check (compilation §6.1 item 6) could not see. The refusal's
+entry names the other machine (§4.1). A refused commitment is not drift, and
+the gate reads recorded releases only; it never reads a node's hostname.
 
 The commitment transaction also creates the operation in `committed`, links the
 plan and its §3.1 evidence to it, and makes the committing controller instance
@@ -454,7 +488,11 @@ evidence recorded for the operation when it is a retry, and adds, in the
 prototype's numbering (DS §2.1), comparisons 7 to 9 below. It does not repeat
 comparison 2's `Desired` term: a publication after the commitment does not stop
 the committed operation, which applies its bound release and leaves the machine
-pending convergence towards the new one (§1). The added comparisons:
+pending convergence towards the new one (§1). It does not repeat comparison 6a
+either: the commitment admitted the operation, and a retry applies the same
+release. An adoption record on another machine in the window between the
+commitment and the request can still give that machine the name, a case
+the gate narrows and does not close (§9.3). The added comparisons:
 
 7. the recording controller is the operation's current owner at the current
    generation and epoch, and the operation is `committed`, or `unresolved` with
@@ -779,7 +817,7 @@ Required entries:
 | Observation | purpose (`evidence`, `completion`, `recovery`, `drift`, `restoration`, `publication`), basis, the Talos access it used (the CA key's path, version and `created_time`, and the signed certificate's serial and `NotAfter`; [persistence and API §3.3](persistence-api.md#33-talos-access)), identity, assignment evidence, running Talos version, configuration digest, machine-configuration resource version, health results, or which values could not be read and why: a failed access read or connection reads none, and records its `talos-access-unavailable` cause |
 | Use-time check | each dependency checked, its result, under which identity |
 | Commitment | the operation created, the §3.1 evidence it links, owner, generation, epoch, comparisons passed |
-| Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) and, for a commitment refused on its evidence's configuration digest, applies §6.1 and §6.5 to that evidence (§3.2) |
+| Refusal | the transaction and the comparison that failed, by number; recorded after the refused transaction rolls back, by a separate transaction that allocates its revision like any entry (below) and, for a commitment refused on its evidence's configuration digest, applies §6.1 and §6.5 to that evidence (§3.2); for comparison 6a it also names the other machine whose `Applied` release holds the name, by its name where it has one and by its identifier where it has none, and never a hostname value |
 | Attempt | attempt id, owner token, route, transport and verification deadlines; for a retry, the classification revision it is bound to, which admits that one attempt and whose observation the retry rests on |
 | Response | attempt id, class (acceptance, gRPC code, transport outcome), redacted text or the withheld notice (§3.5) |
 | Ownership transition | the operation, from and to owner, the generation and epoch it moved from and to, reason |
@@ -1848,6 +1886,11 @@ fail:
 - an assignment change refused while an operation holds the scope;
 - comparison 6 refusing under a freeze and under recovery mode without a
   release;
+- comparison 6a refusing a commitment while another machine's `Applied` release
+  holds the same `nodeName`, the plan staying `approved` and committing once
+  that `Applied` changes, with the controls that a `null` `nodeName` on either
+  side and the machine's own `Applied` are not refused, and the unlocked
+  control showing the race with an adoption record on the other machine (§3.2);
 - takeover at controller start of every operation another instance owns;
 - the §5 precedence: a retry admitted only with attempts left, a passing
   approval, an open gate and no definitive rejection, and `failed` otherwise;
@@ -1982,6 +2025,21 @@ that difference opens a drift record (§3.2).
 Closing it needs a rule that retires an interrupted
 read, so that completion can wait for outstanding reads without waiting
 forever.
+
+A third specification gap, in the hostname gate (§3.2 comparison 6a): it reads
+the recorded `Applied` releases and never a node's hostname, so it cannot see an
+adopted baseline whose record names a hostname the node does not run. An
+adoption advances `Applied` without changing the node (§6.3), so the recorded
+`nodeName` can differ from what the node runs, and a clash with the running
+name is not refused until a completed apply replaces the record.
+Three further cases are not compared at all: a hostname that depends on a secret
+reference (`nodeName` `null`), whose clash an equality test would make a test on
+the secret; a configuration that sets none, where the node chooses its own
+name; and a machine whose applied release was made before `nodeName` was
+recorded, which reads `null` until a later apply replaces it. Closing the adopted case would need one compared value per machine, the
+`Applied` release's `nodeName` except that an adoption-set `Applied` takes the
+name observed at that adoption, ending at the next completed apply; that is not
+specified here (ginsys/bronzeward#1052).
 
 Until these close, an implementation must expose unresolved outcomes and stop
 conflicting work rather than claim safe retry beyond §5.1, exactly-once
@@ -2410,6 +2468,28 @@ conservative option; those that do not say so. Each is marked in place as
     whichever is open at the record, which could adopt over a later drift a
     revert had already resolved; refusing the record instead of the plan when
     no record is open, which admits plans that can never be recorded.
+39. **A commitment waits while another machine's `Applied` release holds the
+    node name its release gives the machine** (§3.2 comparison 6a). Each machine
+    of a cluster has its own plan, so a hostname that moves from one machine to
+    another can reach the nodes in the wrong order and leave two nodes with one
+    name, the second kubelet taking over the first's Node object until the
+    first machine's plan lands. Publication refuses the case it can see
+    (compilation §6.1 item 6, which compares the recorded `nodeName` of each
+    machine's `Applied` release); the commitment is the one place that reads
+    every machine's `Applied` under locks and after the rollout slot, so it
+    refuses what changed after publication, and the plan stays `approved` and
+    waits, never ends (choice §10.27). It compares the derived node name, which
+    the release records for every machine (persistence and API §9.2), and never
+    a hostname: a name that depends on a secret reference records `null` and is
+    not compared. Agent decision, 2026-11-23 (ginsys/bronzeward#1052).
+    Alternatives: a refusal at plan creation, which reads `Applied` at a moment
+    that is stale by dispatch, so an apply in flight and an adoption record stay
+    open; a review warning only, which leaves the failure on the live cluster to
+    whoever approves the plan, the alternative part D rejected; comparing only
+    the `machine-name` names part D already records, which leaves an explicit
+    hostname and a `registerWithFQDN` case unchecked; comparing the hostname a
+    node reports, which needs an observation of every other machine at each
+    commitment and, for a secret-held name, an equality test on the secret.
 
 ## 11. Traceability
 
@@ -2422,6 +2502,7 @@ conservative option; those that do not say so. Each is marked in place as
 | §2 approval, revocation, cancellation | §13.7 items 2–4, 6 | none: policy (FR §9 item 5); DS row 003 for the approval lock |
 | §3.1 execution-time evidence | §7.6, §7.8, §12.7 | [KL §5.2](../design/research/20260924-key-loss-restoration.md#52-criterion-2-applying-is-not-regenerating-and-ciphertext-is-not-executability) |
 | §3.2 commitment | §12.7, §7.7 | [DS §4.1](../design/research/20260925-dispatch-safety.md#41-revocation-around-the-commitment-boundary-criterion-1), [DS §4.3](../design/research/20260925-dispatch-safety.md#43-the-machine-scope-and-a-after-b-criterion-2); [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication), [DB §4.3](../design/research/20260924-database-semantics.md#43-s3-unique-operation-intent) |
+| §3.2 comparison 6a, hostname gate | §12.3, §12.7 | none: a specification gap found by the review of the hostname fill (ginsys/bronzeward#1052) |
 | §3.3 attempt, residual | §12.7, §13.7 item 4 | DS §4.1, [DS §4.4](../design/research/20260925-dispatch-safety.md#44-uncertain-sends-reconnects-and-accounting-criteria-2-and-3), [DS §6.2](../design/research/20260925-dispatch-safety.md#62-criterion-2-uncertain-sends-stale-ownership-a-after-b); [DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions); [FR §7](../design/research/20260925-feasibility-evidence-review.md#7-reproduction-of-the-disputed-results) |
 | §3.4 takeover fence | §12.5 | [DS §4.2](../design/research/20260925-dispatch-safety.md#42-ownership-loss-and-a-second-executor-criterion-2), [DS §8](../design/research/20260925-dispatch-safety.md#8-recommendation); DB §4.4 |
 | §3.5 client, route, response text | §7.1, §12.2 | E3 §4.3, [E3 §6.2](../design/research/20260925-talos-compatibility.md#62-criterion-2-subprocess-against-machinery-and-the-structural-reference-evidence), E3 §7; DS §2.1, §4.4 |
