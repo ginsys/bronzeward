@@ -1036,7 +1036,10 @@ A base that omits a
 key the composition writes with an empty value (a configuration not written by
 `talosctl` can be in that case) also reads false: the release then holds a key the base lacks, and the first apply's diff is withheld. The comparison does not treat an empty
 default as absent; that would change what the verdict means. The compilation's
-own transformations, the digest and the artifact are unchanged.
+own transformations, the digest and the artifact are unchanged. A thinner import
+base always reads false here, because the composition holds the content the base
+gave up. For that case the evidence is the typed equivalence check of §6.2, not
+this verdict.
 
 The compiler's only transformations of native YAML are step 4's replacement of
 tagged nodes and re-serialization of identified embedded documents, and the
@@ -1276,67 +1279,168 @@ unmeasured.
    that would take a name it does not hold now. Alternative: a review warning only, which leaves the failure on the
    live cluster to whoever approves the plan.
 
-**Measured on the fixture** (ginsys/bronzeward#1040, 24 November 2026; the
-scenario `hostname-measure` of the fixture, which a person can run again).
-After a rename, an import from the node keeps the old name as an explicit
-hostname, so the rename does not reach the node (the rename row below). The
-measured node is the fixture's worker, Talos v1.14.5 running as a container
-and named from its own hostname, taken through the product: draft, import,
-publish, plan, approval, operation. The fixture starts its nodes with
-`talosctl cluster create docker` (`fixtures/bin/up`), so a node is a Docker
-container. A container has no reboot (the fixture README, Known limits), and
-the uptime that `/proc/uptime` shows inside it is the host kernel's, so this
-record holds no restart reading of any kind, in a container, a virtual machine
-or hardware. "Node name" below is Talos's `nodename` resource
-(`talosctl get nodename`), the name Talos derives from the hostname for the
-Kubernetes Node; the Node object itself (`kubectl get nodes`) was not read,
-and the node's hostname after each row was read, but the record that was kept
-holds no node read, so the hostname after a row is not in it.
+**Left open.** Whether a live node applies a changed hostname without a reboot,
+what becomes of its Kubernetes node name, whether applying the rewritten
+document with an unchanged hostname needs a reboot (the commonest case: an
+onboarded machine whose hostname equals its name gets the document back as
+`auto: off` plus `hostname`, so the hostname is the same and the document can
+differ, which then reads as pending convergence where the configuration
+digests differ), and `container` and `cloud`
+modes are unmeasured; the compiler issue (ginsys/bronzeward#1040) measures them on
+the fixture, and the client sentences that mention a restart or the node name
+are conditional on that result (client contracts A9 items 6 and 7). A
+`cloud` node's own hostname is overridden by the static one (`hostname` has
+the highest priority, line 73), read and not measured. The import-equivalence
+check of
+[the 20261118 evidence](../design/research/20261118-import-analysis-and-equivalence.md)
+needs an amendment, with its measurement: a filled hostname composes `auto:
+off` with `hostname`, a form that differs from the original document at every
+level that reads it, so the check must treat a filled hostname as equal to
+the original where the hostname equals the name. The fill is implemented by
+ginsys/bronzeward#1040, the API record by ginsys/bronzeward#1041, and the
+client words by ginsys/bronzeward#1042 and ginsys/bronzeward#1043. The typed
+equivalence check of §6.2 makes that amendment: both of its compositions carry
+the fill.
 
-| Row | What was applied | Result |
-|---|---|---|
-| default | the named worker's first release: the document `auto: off` plus its name, the node having an automatic hostname | completed; node name unchanged |
-| explicit | the worker imported again from the node, which now holds `auto: off` plus its name (the commonest case): the document removed at import and filled again | completed; node name unchanged |
-| rename | the worker renamed to a name with dots, imported again from the node, published and applied | the release records the source `configuration`, not `machine-name`: the node's old document is not equal to the new name, so it stays, and decision 2 lets an explicit hostname win; node name unchanged |
-| rename back | the worker renamed back to its first name, imported again, applied | source `machine-name`; node name unchanged |
+### 6.2 The typed equivalence check
 
-Every row sent the node a hostname equal to the one it already ran, so an
-unchanged node name is what the rows predict. What they show is that the
-rewritten document with an unchanged hostname (the commonest case) applies
-and completes through the product on the fixture's container node, and that
-the form of the document differs without the hostname doing so. They show
-nothing about a restart. The dry run of the same file (`apply-config --dry-run
---mode no-reboot`, the node's own configuration with its `HostnameConfig`,
-which held the keys `apiVersion`, `kind` and `auto`, replaced by the filled
-one, which is the product's merge of decision 1) answered "Applied
-configuration without a reboot", with a diff of 5 lines added and 3 removed
-in two places. The import-equivalence measurement
-([the 20261118 evidence](../design/research/20261118-import-analysis-and-equivalence.md),
-section 11, `output.txt` last section) shows, for each of the six machines,
-that the node's own document is removed and recorded at import in every case,
-recorded as exactly the fill's own only where it is `auto: off` plus the name,
-and that the form-only verdict (step 8) is true only for that case.
+Design: [§9.1](../design/Talos_Configuration_and_Machine_Management_Design.md#91-adopt-an-existing-configured-cluster)
+step 5, [§20.7](../design/Talos_Configuration_and_Machine_Management_Design.md#207-existing-cluster-adoption).
+Evidence: [the 20261118 research note](../design/research/20261118-import-analysis-and-equivalence.md)
+§3, §5 and §7.
 
-**Not shown**, each with its cause. (1) Whether a live node applies a *changed*
-hostname, whether it needs a restart to do so, and what becomes of its node
-name then: no row sent
-one, because the rename row's re-import (above) put the old hostname back. A row
-that renames and then assigns the machine's stored import base with no
-re-import is the case of item 3, and it is not yet run. (2) The node's
-hostname after the rename: read in the run, not kept in the record. (3) The form-only verdict of a plan: it is the
-evidence of an adopt plan, and no row adopted. (4) `container` and `cloud`
-modes, and `registerWithFQDN` set against unset: the fixture has no scenario
-for them, so they stay read and not measured, and so does a `cloud` node's own
-hostname being overridden by the static one (`hostname` has the highest
-priority, line 73). (5) A restart of any kind: the fixture's node is a
-container, which has no reboot, and its uptime is the host's, so whether the
-rewritten document, or a changed hostname, needs a restart stays unmeasured in
-a container, a virtual machine and hardware alike, until a run reads a start
-time of the node itself. The client sentences that
-mention a restart or the node name stay conditional on (1) (client contracts
-A9 items 6 and 7). The fill is implemented by ginsys/bronzeward#1040, the API
-record by ginsys/bronzeward#1041, and the client words by
-ginsys/bronzeward#1042 and ginsys/bronzeward#1043.
+A refactoring replaces a machine's import base by a thinner import base and
+fragments that hold what the base gave up
+([persistence and API §3.2](persistence-api.md#32-the-import-base)). The design
+says such a change "must prove equivalent output". This section is that proof,
+called the **typed equivalence check**. It answers one question for one
+machine: does the draft's composition equal the composition the machine has
+now. It is evidence for an approver and never an approval: publication never
+authorizes dispatch (§11), and a pass changes no hold, no plan and no approval
+rule.
+
+**Where it runs and for whom.** In the publish operation, in the compiler's
+process, from plaintext, before the release commits (persistence and API
+[§6.1](persistence-api.md#61-steps)). It runs for each machine whose draft
+entry carries a thinner import base, written by the route of persistence and
+API §3.2, and for nothing else. An import base that ingestion wrote, an import
+or a drift adoption, accepts what the node runs and is not checked. A machine
+the draft covers only through a changed fragment or assignment publishes under
+the ordinary rules. For a machine under
+the check, a change to its configuration beyond the move reads as not equal, so
+the draft carries no other change for that machine. A new fragment, or a new
+selection of it, that leaves the machine's composition equal is the refactoring
+itself and passes. A shared fragment that the split creates or edits also
+changes the composition of every other machine that selects it. Those machines
+are checked only if they carry a new import base revision themselves; otherwise
+the ordinary rules decide, and no check says the split is consistent across a
+group (a limit, below).
+
+**What is compared.** Two compositions of the machine, each made by steps 4 to
+5a of §6 with the pinned renderer:
+
+- the **old side** is the composition of the machine's `Applied` release: its
+  import base revision, the fragments it selected, the pins it recorded and the
+  hostname fill (§6.1). It is composed again at publication from the immutable
+  revisions the release names;
+- the **new side** is the composition of this draft, with the thinner import
+  base and the same fill.
+
+Both are compositions, never a base alone, so a machine whose release already
+selects fragments is not refused before any refactoring. The check does not
+compare with the node's own bytes: the baseline cannot be decrypted by any
+identity (§2.3). Where the machine is not pending convergence (next
+paragraph), the old side is what the node already holds. Its secrets are the
+provider's versions the release pinned, as in the form-only verdict (§6), and the
+check does not prove those values are the node's.
+
+**It runs only where the machine is not pending convergence (choice §16.41).**
+A machine is not pending when it has no `Desired` release or when its `Desired`
+digest equals its `Applied` digest ([persistence and API
+§9.3](persistence-api.md#93-examples), the machine's `pendingConvergence`). For a pending machine the check refuses `cannot-decide`
+with the words "a release is pending for this machine: apply it, then publish
+the refactoring". The reason: the plan that applies the thinner release would
+also carry the pending change to the node, so a pass shown as "equivalent" with
+no diff would describe a plan that does change the node. An adopted machine
+whose release differs from its import base bytes (comments, a filled hostname
+that differs, a moved document) is pending, so its refactoring waits until that
+release is applied. The alternative, comparing with the pending `Desired`
+release and saying so in the evidence, is rejected: it needs a second diff
+rule and still leaves the approver without a diff for the change from `Applied`.
+
+**What counts as equal (choice §16.40).** The documents of each side, loaded
+as typed documents of the pinned renderer and matched by kind and name (level
+E3 of the research note), are equal when no document stands on one side only
+and each matched pair is equal as typed values. It ignores comments, key order,
+document order, formatting and whatever the typed form normalises itself. It
+does not ignore the order of a list, which counts: whether a given Talos list is
+ordered was not tested field by field. Typed defaults are not applied, so a
+field written with its default and the same field omitted read as different
+(measured: `defaultRuntimeSeccompProfileEnabled` explicit false against
+omitted). Embedded text is one leaf: equal or not equal, never partly (§5.4).
+
+**The result.** Per machine, the check records `equal`, true or false, and
+`byteIdentical`, whether the two renders are the same bytes, which is the
+digest of the render reported beside the result and never the gate. With a
+false `equal` it also records the paths that differ and, for each, whether it
+stands on one side only or holds a different value, never the value. A path is
+written by the path means of §8.3. The result is recorded with the release
+([persistence and API §3.2](persistence-api.md#32-the-import-base)). **A digest
+of the render alone never approves a refactoring:** a moved document or a
+comment changes the bytes of a configuration that is equal in every typed
+value, so such a digest refuses exactly the change the check exists to approve
+(research note §5.1, §5.3).
+
+**Refusals.** A refusal is `422 validation-failed` with rule `equivalence`,
+naming the machine, and it commits no release.
+
+| Reason | When | Reports |
+| --- | --- | --- |
+| `not-equal` | The sides differ | The paths, and the sentence "the typed equivalence check can refuse a change that is equivalent in behaviour; it compares typed values and applies no defaults" |
+| `cannot-decide` | The machine is pending convergence, or the comparison cannot decide a case | The reason in words; no paths |
+
+The check fails closed: it never reads "equal" for a case it could not decide.
+A refusal of the composition itself (a dependency, a validation, the contract)
+keeps the reasons of §13, and a refusal never quotes a value. No override
+exists in the PoC; a refused equivalent change is repaired by keeping more in
+the base or by publishing the change as an ordinary draft without the check.
+
+**Values redaction does not cover (§8.4).** The check reads plaintext after the
+references resolve (§6 step 4), so a value that changes behind an unchanged
+reference name changes the compared tree and shows. The compositions never
+leave the compiler, and the result holds paths and booleans only. Three limits
+follow from §8.4. The research note measured a changed value behind a
+reference only for the render's digest and for a redacted form, and the redacted
+form missed it, so the typed comparison's detection rests on its construction,
+and the required check below is what turns it into a measurement. A secret in a field the
+schema does not mark and nothing references is an ordinary leaf to the check:
+a change shows, as a path that carries the key names, and nothing marks the leaf
+secret. A secret that was never marked stays unknown to every means. A
+thinner base must also add none: the stored document is a subset of the
+current one ([persistence and API §3.2](persistence-api.md#32-the-import-base)),
+so the check never has to read a value the source does not already hold.
+
+**Required rejection checks.** An implementation shows each with a control that
+can fail (§15):
+
+- **N1, a changed value:** the new side differs from the old at one leaf (a
+  value in a shared fragment). `equal` is false and the path is named.
+- **N2, a dropped key:** the new side omits one key the old side holds. `equal`
+  is false and the path is named.
+- **N4, a changed secret behind an unchanged reference:** the two sides resolve
+  one reference name to different values. `equal` is false, the result names
+  the path of the leaf and holds no value, and a comparison of the redacted
+  forms of the same two sides reads equal, which is the control that the check
+  does what that comparison cannot.
+
+**Limits that stay open.** The check can refuse a refactoring that is equivalent
+in behaviour (a default written against omitted). Typed defaults are not
+applied, and a level that applies them was not built. List order counts. The
+split was shown consistent on six synthetic machines that classify alike, not
+across a group whose machines classify differently, so no check says that a
+shared fragment is right for every machine that selects it. Whether an
+identity-only document is valid for every document kind was measured on those
+six machines only. Nothing here was applied to a node.
 
 ## 7. Validation stages
 
@@ -2011,6 +2115,8 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Compilation | Native composition or validation rejects | Publication refused; message redacted or withheld (§8.3) | Nothing |
 | Compilation | A hostname filled from a machine's name that another machine of the cluster holds explicitly, or a node name that another machine's applied release holds (§6.1 item 6) | Publication refused, rule `hostname`, naming both machines | Nothing |
 | Ingestion | The machine's name changed between the removal of a filled hostname (§2.3 step 2a) and the draft transaction | The draft transaction is refused `409 stale-input`; re-ingest | Claim row, no payload |
+| Compilation | A machine whose draft entry carries a thinner import base: the typed equivalence check finds the two compositions different (§6.2) | Publication refused, rule `equivalence`, reason `not-equal`, naming the machine and the paths | Nothing |
+| Compilation | The same machine is pending convergence, or the check cannot decide a case (§6.2) | Publication refused, rule `equivalence`, reason `cannot-decide` | Nothing |
 | Compilation | Trace or flip fragment missing, shape differs, or passes disagree | Publication refused (§8.1) | Nothing |
 | Compilation | Reserved text or an unattributed exact copy in the output | Publication refused, naming paths | Nothing |
 | Compilation | Encryption fails, or persistence rejects a stale input | Publication refused | Nothing of the release |
@@ -2046,6 +2152,10 @@ check.
    ciphertext digest (§11) is over ciphertext.
 9. **Renderer minor equals the node's minor and is at least the target
    contract's**; Kubernetes is inside the window.
+10. **A thinner import base is published only with its typed equivalence
+    recorded.** A release whose machine carries a thinner import base commits
+    only after the check of §6.2 found the machine equal, and no digest of the
+    render stands in for it.
 
 ## 15. Verification and evidence limits
 
@@ -2076,6 +2186,12 @@ each:
   with references in the import base as well as in fragments, and SP's oracle
   over the PoC's own log and support formats (§8.4);
 - a fidelity check that fires on an injected structural change (§8.1);
+- the typed equivalence check of §6.2 through the compiler's own composition
+  path, with its three required rejection checks, each of which must fail
+  without the check: N1 (a changed value), N2 (a dropped key) and N4 (a changed
+  secret behind an unchanged reference, with a comparison of the redacted
+  forms as the control that reads it equal), and a pass for a moved document
+  that a digest of the render refuses;
 - every refusal in §13.
 
 Evidence gaps this contract carries rather than closes:
@@ -2204,6 +2320,18 @@ acceptance.
   fidelity failure (§8.1), so a short value can block a publication that would
   otherwise be correct; no case measured how often.
 - **Embedded formatting**: an author's formatting is not preserved (§5.4).
+- **The typed equivalence check** (§6.2): measured on a synthetic cluster of
+  six machines from one generated configuration, in a program that calls the
+  ingestion and compilation packages as a library
+  ([research note §4, §9](../design/research/20261118-import-analysis-and-equivalence.md)).
+  A changed value (N1) and a dropped key (N2) were detected on two machines. A
+  changed secret behind an unchanged reference (N4) was measured only for the
+  digest of the render and for a redacted form; the typed comparison's detection
+  of it rests on its construction, and the required check of §6.2 is what
+  measures it. It can refuse an equivalent change (a default written against
+  omitted), applies no typed defaults, counts list order, and was not run on a
+  group whose machines classify differently. No real node, no comments served by
+  a real node, and no cluster was involved.
 
 **Dependencies**
 
@@ -2489,6 +2617,27 @@ in place as
     added, which one later fragment defeats and which drops a normalisation the
     compilation states on purpose; a normalised form in every comparison, which
     makes Applied and drift stop meaning the bytes on the node.
+40. **The typed equivalence check is the proof that a refactoring does not
+    change a machine's configuration** (§6.2; persistence and API choice
+    §17.50). The owner's words on ginsys/bronzeward#861 (2026-11-19) are that
+    the check comes first, then an assisted proposal, with no automatic split:
+    the order is his. The level of the check is this specification's choice,
+    following the research note's recommendation, and he may overrule it. The
+    check compares the typed documents of two compositions, matched by kind and
+    name, on plaintext, inside the compiler, and reports paths. Alternatives: a
+    digest of the render, which refuses a moved document and a comment
+    (research note §5.1, §5.3); a comparison after a typed re-encoding, which
+    still counts document order; a comparison of parsed trees, which leaves the
+    typed form's normalisation to the reader; a comparison of redacted forms,
+    which cannot see a changed secret behind a reference (N4). The cost is a
+    check that can refuse an equivalent change and applies no typed defaults.
+41. **The check runs only where the machine is not pending convergence, and
+    refuses otherwise** (§6.2). Alternative: compare with the pending `Desired`
+    release and say so in the evidence. The refusal is chosen because the plan
+    that applies the thinner release then carries the pending change to the node
+    too, and an approver would read "equivalent" beside a diff the form-only
+    rule withholds. The cost is that a machine with a pending release waits to
+    be refactored until that release is applied.
 
 ## 17. Traceability
 
@@ -2515,6 +2664,7 @@ in place as
 | §6 early resolution, superset | §6.2, §6.9, §7.4 | SR §4, §5, [SR §6.2](../design/research/20260924-structural-reference-composition.md#62-criterion-2-effective-and-superset-dependencies), §6.4, §9 |
 | §2.3 step 2a, §6 step 5a, §6.1 hostname | none | Talos machinery v1.14.5 `config/types/network/hostname.go`, `config/generate/network.go`, `config/container/container.go`, the Talos 1.14 "Hostname" page; a scratch probe on the generated base, not kept (§6.1); none for `container` and `cloud`: choices §16.36 to §16.38 |
 | §6 step 7 literal copies | §6.9 | [SP §6.3](../design/research/20260925-sensitivity-provenance.md#63-criterion-3-remaining-leakage-risks-and-dependency-records), [SP §10](../design/research/20260925-sensitivity-provenance.md#10-hand-off) |
+| §6.2 typed equivalence check | §9.1 step 5, §20.7 | [the 20261118 research note](../design/research/20261118-import-analysis-and-equivalence.md) §3, §5, §7; choices §16.40 and §16.41; [persistence and API](persistence-api.md#17-choices-for-owner-review) choice §17.50 |
 | §7 validation stages | §6.9 | [SR §6.3](../design/research/20260924-structural-reference-composition.md#63-criterion-3-parity-validation-collisions-and-rejections) |
 | §8.1 tracer, fidelity | §6.9 | [SP §6.1](../design/research/20260925-sensitivity-provenance.md#61-criterion-1-sensitivity-through-each-transformation), [SP §8](../design/research/20260925-sensitivity-provenance.md#8-limits), [SP §9](../design/research/20260925-sensitivity-provenance.md#9-alternatives-and-decision-enabled) |
 | §8.2 provenance record | §6.9 | SP §6.3; [SP §4.4](../design/research/20260925-sensitivity-provenance.md#44-controls) |
