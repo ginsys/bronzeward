@@ -313,7 +313,10 @@ func (e *env) applyShow(rows []*applyRow, diff bool) {
 // nothing: an unknown outcome may have been committed, and its error says so.
 func (e *env) applyApprove(c *client.Client, rows []*applyRow, epoch string, moves int) error {
 	var errs []error
-	for i, r := range rows {
+	// outcomes has one entry per plan sent; firstUnknown indexes the first unknown one there and unknownAt its error in errs.
+	var outcomes []string
+	firstUnknown, unknownAt := -1, -1
+	for _, r := range rows {
 		if r.plan == "" {
 			tf(e.out, "%s: %s\n", r.label(), r.line)
 			continue
@@ -337,20 +340,43 @@ func (e *env) applyApprove(c *client.Client, rows []*applyRow, epoch string, mov
 		})
 		if err != nil {
 			var u *client.Unknown
-			if errors.As(err, &u) {
-				// Unlike the apply page, which holds its batch on an unknown outcome, the command goes on: each
-				// approval is its own plan, and the person confirmed them all with one y. Say so where it applies.
-				later := slices.ContainsFunc(rows[i+1:], func(n *applyRow) bool { return n.plan != "" })
-				if later {
-					err = fmt.Errorf("%w; the plans after it were still sent", err)
+			var ns client.NotSent
+			switch {
+			case errors.As(err, &u):
+				outcomes = append(outcomes, "unknown")
+				if firstUnknown < 0 {
+					firstUnknown, unknownAt = len(outcomes)-1, len(errs)
 				}
 				errs = append(errs, fmt.Errorf("%s: %w", r.label(), err))
-			} else {
+			case errors.As(err, &ns):
+				outcomes = append(outcomes, "not sent")
+				errs = append(errs, fmt.Errorf("%s: %w; nothing was approved for this machine", r.label(), err))
+			default:
+				outcomes = append(outcomes, "refused")
 				errs = append(errs, fmt.Errorf("%s: %w; nothing was approved for this machine", r.label(), err))
 			}
 			continue
 		}
+		outcomes = append(outcomes, "approved")
 		tf(e.out, "%s\n", approved)
+	}
+	// Unlike the apply page, which holds its batch on an unknown outcome, the command goes on while the epoch
+	// holds: each approval is its own plan, and the person confirmed them all with one y. The first unknown line
+	// says what became of the plans after it, from what the loop saw plan by plan.
+	if firstUnknown >= 0 {
+		count := map[string]int{}
+		for _, o := range outcomes[firstUnknown+1:] {
+			count[o]++
+		}
+		var said []string
+		for _, o := range []struct{ key, text string }{{"approved", "approved"}, {"unknown", "sent with an unknown outcome"}, {"refused", "refused"}, {"not sent", "not sent because the epoch moved"}} {
+			if n := count[o.key]; n > 0 {
+				said = append(said, sf("%d %s", n, o.text))
+			}
+		}
+		if len(said) > 0 {
+			errs[unknownAt] = fmt.Errorf("%w; of the plans after it: %s", errs[unknownAt], strings.Join(said, ", "))
+		}
 	}
 	return errors.Join(errs...)
 }
