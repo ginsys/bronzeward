@@ -40,6 +40,8 @@ let sent: { method: string; path: string; body: unknown }[];
 let requested: string[];
 let hold: { path: string; release: () => void; gate: Promise<void> } | undefined;
 let dropped: boolean;
+// Whether the fake server refuses a mark with a 409 that names the scope's state.
+let refuseMarks = false;
 
 const reads = (again = 0): Reads => ({
   client: {
@@ -67,6 +69,9 @@ const writes = () => {
       const path = String(url).replace("/api/v1", "");
       if (path === "/recovery") return new Response(JSON.stringify({ mode: "normal" }), { status: 200, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH } });
       sent.push({ method: init?.method ?? "GET", path, body: init?.body === undefined ? undefined : JSON.parse(String(init.body)) });
+      if (refuseMarks && path.endsWith("/marks")) {
+        return new Response(JSON.stringify({ type: "about:blank", title: "Conflict", status: 409, detail: "the scope moved", scope: "blocked" }), { status: 409, headers: { "Content-Type": "application/problem+json", "Bronzeward-Epoch": EPOCH } });
+      }
       const body = path.endsWith("/marks") ? { state: "blocked", from: "blocked", act: "act_markmarkmarkmarkmark", missing: [] } : answerBody;
       return new Response(JSON.stringify(body), { status: 201, headers: { "Content-Type": "application/json", "Bronzeward-Epoch": EPOCH } });
     }) as typeof fetch,
@@ -123,6 +128,7 @@ beforeEach(() => {
   requested = [];
   hold = undefined;
   dropped = false;
+  refuseMarks = false;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -187,6 +193,24 @@ describe("a scope's accounting form on the console's row", () => {
     });
     expect(text("write-result")).toMatch(/^Scope marked blocked, was blocked/);
     expect(text("settle-answer")).toBeUndefined();
+  });
+
+  test("a mark the server refuses leaves the accounting's answer in place, since the scope is as it said", async () => {
+    refuseMarks = true;
+    await mount(row("pre-restore-unaccounted"));
+    await settled();
+    await choose("start", START);
+    await choose("end", END);
+    await explain("the operator re-applied the restored configuration");
+    await press();
+    await mount(row("blocked"));
+    await settled();
+    await act(async () => {
+      (Array.from(box.querySelectorAll("button")).find((b) => b.textContent === "Mark") as HTMLButtonElement).click();
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    expect(text("write-result")).toBeDefined();
+    expect(text("settle-answer")).toMatch(/^Recorded\. Scope \S+ is now blocked until it is marked\./);
   });
 
   test("a person who waits for a later observation reads the machine's observations again and keeps what was typed", async () => {
