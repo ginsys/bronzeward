@@ -313,7 +313,7 @@ func (e *env) applyShow(rows []*applyRow, diff bool) {
 // nothing: an unknown outcome may have been committed, and its error says so.
 func (e *env) applyApprove(c *client.Client, rows []*applyRow, epoch string, moves int) error {
 	var errs []error
-	for _, r := range rows {
+	for i, r := range rows {
 		if r.plan == "" {
 			tf(e.out, "%s: %s\n", r.label(), r.line)
 			continue
@@ -338,6 +338,12 @@ func (e *env) applyApprove(c *client.Client, rows []*applyRow, epoch string, mov
 		if err != nil {
 			var u *client.Unknown
 			if errors.As(err, &u) {
+				// Unlike the apply page, which holds its batch on an unknown outcome, the command goes on: each
+				// approval is its own plan, and the person confirmed them all with one y. Say so where it applies.
+				later := slices.ContainsFunc(rows[i+1:], func(n *applyRow) bool { return n.plan != "" })
+				if later {
+					err = fmt.Errorf("%w; the plans after it were still sent", err)
+				}
 				errs = append(errs, fmt.Errorf("%s: %w", r.label(), err))
 			} else {
 				errs = append(errs, fmt.Errorf("%s: %w; nothing was approved for this machine", r.label(), err))
