@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"database/sql"
 	"strings"
 	"testing"
@@ -103,5 +104,33 @@ func TestImportWithoutARemovalIgnoresARename(t *testing.T) {
 	ie.runWith(t, options{beforeT1: func() { ie.nameMachine(t, "node-b") }}, j)
 	if r := readOp(t, ie.db, op); r.state != "succeeded" {
 		t.Fatalf("operation %+v", r)
+	}
+}
+
+// Step 2a shortens the stored document and nothing else: the baseline stays the exact input, so the
+// configuration digest the adoption comparison reads (execution-recovery §6.3) is the same whether or not
+// the machine has a name that removes the document.
+func TestImportBaselineStaysTheExactInput(t *testing.T) {
+	digest := func(t *testing.T, name string) (string, []byte) {
+		ie := newIngestEnv(t, options{})
+		if name != "" {
+			ie.nameMachine(t, name)
+		}
+		_, j := ie.startJob(t, map[string]any{"document": "machine:\n  token: " + runToken + "\n---\n" + hostnameDoc})
+		ie.runWith(t, options{}, j)
+		var doc string
+		var conf []byte
+		if err := ie.db.QueryRow(`SELECT document, configuration_digest FROM import_base_revision`).Scan(&doc, &conf); err != nil {
+			t.Fatal(err)
+		}
+		return doc, conf
+	}
+	named, confNamed := digest(t, "node-a")
+	unnamed, confUnnamed := digest(t, "")
+	if strings.Contains(named, "HostnameConfig") || !strings.Contains(unnamed, "HostnameConfig") {
+		t.Fatalf("control: named %q, unnamed %q", named, unnamed)
+	}
+	if !bytes.Equal(confNamed, confUnnamed) {
+		t.Error("the configuration digest follows the removal")
 	}
 }
