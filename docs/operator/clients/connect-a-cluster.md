@@ -33,7 +33,8 @@ endpoints in order. A silent endpoint costs up to about 15 seconds, so three sil
 about 45 seconds. A failure of one endpoint moves on to the next, except Ctrl-C, which ends the list.
 
 When one endpoint fails alone, the command prints that endpoint's own error. When several fail, it
-prints one error that names each of them:
+prints one error that names each of them. The `text` block on this page shows the shape of the
+output, read from the source. This page does not claim that a run printed it.
 
 ```text
 no endpoint of the talosconfig gave the cluster: 10.55.0.2:50000: <error>; 10.55.0.3:50000: <error>
