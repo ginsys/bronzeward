@@ -26,8 +26,8 @@ bronzewardctl context add office --from https://bronzeward.example.com
 If the installation uses a private certificate authority, add `--certificate-authority
 ./office-ca.pem`. The result names the server, where its certificate trust comes from, the
 credential and the current context. The first context you add becomes the current one. If you
-already have another, run `bronzewardctl context use office` before the next step, or add
-`--context office` to every command below.
+already have another, or the `BRONZEWARD_CONTEXT` environment variable is set (it wins over the
+current context), add `--context office` to every command below.
 
 This page is written from the client's source and its specification. No command on it was run for
 this page, and the `text` blocks of the other client pages show the shape of the output, not a
