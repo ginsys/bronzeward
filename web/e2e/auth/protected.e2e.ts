@@ -244,7 +244,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await expect($('[data-testid="review-notice"]')).toHaveText(holds("PROTECTED REVIEW"));
     await choose(TIER);
     await sendMarks();
-    await claimShows("The marks were accepted in operation", 30_000);
+    await claimShows("The marks were accepted at generation", 30_000);
     await expect(ended()).toHaveText(holds("The marks were applied: re-staged and paused again"), { wait: 60_000 });
     // The marked value's path is not shown anywhere once it was sent.
     await absent(() => pageShows(TIER), "the marked path");
@@ -335,7 +335,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // A mapping that holds a mapping has no kind: compilation refuses it after the 202 (mark-kind).
     await typeMarks(["doc[0]/machine"]);
     await sendMarks();
-    await claimShows("The marks were accepted in operation", 30_000);
+    await claimShows("The marks were accepted at generation", 30_000);
     await expect(ended()).toHaveText(holds("The mark was not applied: it was refused."), { wait: 60_000 });
     await expect(ended()).toHaveText(holds("The mark at position 0 (the first is 0) is refused."));
     await expect(ended()).toHaveText(holds("The import is paused again"));
@@ -350,7 +350,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await choose(TIER);
     await post("/bao/fault?mode=kv");
     await sendMarks();
-    await claimShows("The marks were accepted in operation", 30_000);
+    await claimShows("The marks were accepted at generation", 30_000);
     await expect(ended()).toHaveText(holds("The mark was not applied: it was refused. Something the server depends on is not available or not set up."), { wait: 60_000 });
     await expect(ended()).toHaveText(holds("The import is paused again"));
     await absent(() => pageShows(TIER), "the path of a mark refused on a dependency");
@@ -385,7 +385,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await choose(TIER);
     await post("/bao/fault?mode=decrypt");
     await sendMarks();
-    await claimShows("The marks were accepted in operation", 30_000);
+    await claimShows("The marks were accepted at generation", 30_000);
     await expect(events()).toHaveText(holds("resume-failed: dependency-unavailable"), { wait: 60_000 });
     // The mark is reported as not applied and the claim stays held (client contracts, row PROT-05).
     await expect(ended()).toHaveText(holds("was not applied: its staged input could not be decrypted."), { wait: 20_000 });
@@ -408,9 +408,9 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // The run waits for the staged envelope's decrypt, so the process is killed before it writes an event.
     await post("/bao/decrypt-hold?ms=120000");
     await sendMarks();
-    await claimShows("The marks were accepted in operation", 30_000);
+    await claimShows("The marks were accepted at generation", 30_000);
     // The generation the mark's run took the claim at, read in the page: only the number crosses WebDriver.
-    const read = await browser.execute(() => /The marks were accepted in operation \S+ at generation (\d+)\./.exec(document.querySelector('section[aria-label="Claim"]')?.textContent ?? "")?.[1] ?? null);
+    const read = await browser.execute(() => /The marks were accepted at generation (\d+)\./.exec(document.querySelector('section[aria-label="Claim"]')?.textContent ?? "")?.[1] ?? null);
     const markGeneration = Number(read);
     if (!Number.isInteger(markGeneration) || markGeneration < 2) throw new Error(`the accepted mark's generation read as ${String(read)}, not an integer of at least 2`);
     await post("/disposable/kill");
@@ -420,7 +420,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     // The takeover, killed the same way.
     await post("/bao/decrypt-hold?ms=120000");
     await $("button=Take over import").click();
-    await claimShows("The import was taken over and resumes in operation", 30_000);
+    await claimShows("The import was taken over and resumes.", 30_000);
     await post("/disposable/kill");
     await post("/bao/decrypt-hold?ms=0");
     await restart();
@@ -434,7 +434,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await pausedImport();
     await post("/bao/decrypt-hold?ms=120000");
     await $("button=Continue import").click();
-    await claimShows("The import continues in operation", 30_000);
+    await claimShows("The import continues.", 30_000);
     await post("/disposable/kill");
     await post("/bao/decrypt-hold?ms=0");
     await restart();
@@ -449,7 +449,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await interrupt("draft-commit stall");
     await $("button=Continue import").click();
     const began = Date.now();
-    await claimShows("The import continues in operation", 30_000);
+    await claimShows("The import continues.", 30_000);
     await unknownOutcome("during the stall");
     // The read of the operation answers while the commit stalls (ginsys/bronzeward#803). The lease lapses about
     // 17 s in, and the page reads again at LEASE_MARGIN, 10 s later (web/src/imports.tsx:30). The watch then ends

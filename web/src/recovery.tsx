@@ -52,7 +52,7 @@ export function scopeSummary(scopes: readonly Scope[]): string {
 }
 
 // What the epoch is, where a person compares it: only entering recovery mode mints a new one (a restore alone does not, and can rewind it).
-const EPOCH_MEANS = " (entering recovery mode starts a new one)";
+export const EPOCH_MEANS = " (entering recovery mode starts a new one)";
 
 // Shown while responses carry Bronzeward-Recovery-Mode: true. It never disables an action: only a
 // scope's state or the process refuses one, and the server's refusal says which.

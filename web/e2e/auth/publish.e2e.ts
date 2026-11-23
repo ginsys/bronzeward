@@ -11,7 +11,6 @@
 // The cases sign in as h-publisher.
 import { randomBytes } from "node:crypto";
 import { $, browser, expect } from "@wdio/globals";
-import { short } from "../../src/list.tsx";
 import { CONTROL, syntheticDocument } from "../auth.conf.ts";
 import { eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, itNarrow, measure, mint, mirrored, narrow, onMain, overflows, releaseHeading, storageEmptyAfterPause, tabTo } from "./helpers.ts";
 
@@ -78,8 +77,8 @@ describe("the publication page (#342)", () => {
     await $("main").$("button=Publish").click();
     // The server accepts the write (202, which needs the kept ETag as If-Match) and the operation fails
     // at its node evidence check: the page names the operation, then says nothing was sent.
-    await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Publishing draft \S+ revision \d+ \(operation \S+\)\.$/), { wait: 60_000 });
-    await expect($('[data-testid="ended"]')).toHaveText(expect.stringMatching(/^Publication operation \S+ (failed|rejected)(: .+)?\. Nothing has been sent to any machine\.$/), { wait: 120_000 });
+    await expect($('[data-testid="write-result"]')).toHaveText(expect.stringMatching(/^Publishing this draft at revision \d+\.$/), { wait: 60_000 });
+    await expect($('[data-testid="ended"]')).toHaveText(expect.stringMatching(/^The publication (failed|rejected)(: .+)?\. Nothing has been sent to any machine\.$/), { wait: 120_000 });
     // The operation failed and left the draft open, so Publish is available again.
     await expect($("main").$("button=Publish")).toBeEnabled({ wait: 20_000 });
     expect((await writes()).filter(([m]) => m === "POST").map(([, r]) => r)).toEqual([`/drafts/${id}/publications`]);
@@ -132,7 +131,7 @@ describe("the publication page (#342)", () => {
     await $("main").$("a=Publish this draft").click();
     await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });
     await $("main").$("button=Publish").click();
-    await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
+    await expect($('[data-testid="write-result"]')).toHaveText("Publishing this draft at revision 2.", { wait: 60_000 });
     await expect($('[data-testid="ended"]')).toHaveText(releasePublished(), { wait: 120_000 });
     await expect($(`main a[title="${REL}"]`)).toBeExisting();
     // A published draft takes no second write: Publish stays disabled.
@@ -164,9 +163,9 @@ describe("the publication page (#342)", () => {
     await focusSettles(onMain, "the new page");
     await tabTo((f) => f.tag === "BUTTON" && f.text === "Publish", "Publish");
     await browser.keys("Enter");
-    await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
+    await expect($('[data-testid="write-result"]')).toHaveText("Publishing this draft at revision 2.", { wait: 60_000 });
     // The accepted line is a status, announced without moving focus; the button that had focus is now disabled.
-    await eventually(async () => (await mirrored()).some((t) => t.includes("Publishing draft")), "the accepted line mirrored");
+    await eventually(async () => (await mirrored()).some((t) => t.includes("Publishing this draft")), "the accepted line mirrored");
     // once: the busy state and the accepted line come from one operation in one render (web/src/publish.tsx:145,163), so the button is already disabled here.
     expect(await $("main").$("button=Publish").isEnabled()).toBe(false);
     await focusSettles(focusKept, "the page, not the body");
@@ -201,7 +200,7 @@ describe("the publication page (#342)", () => {
       await expect($("main h2")).toHaveText(expect.stringContaining("Publish draft: "), { wait: 20_000 });
       expect(["the publication page", await overflows()]).toEqual(["the publication page", 0]);
       await $("main").$("button=Publish").click();
-      await expect($('[data-testid="write-result"]')).toHaveText(`Publishing draft ${short(id)} revision 2 (operation ${short(OP)}).`, { wait: 60_000 });
+      await expect($('[data-testid="write-result"]')).toHaveText("Publishing this draft at revision 2.", { wait: 60_000 });
       expect(["the accepted line", await overflows()]).toEqual(["the accepted line", 0]);
       await expect($('[data-testid="ended"]')).toHaveText(releasePublished(), { wait: 120_000 });
       expect(["the end", await overflows()]).toEqual(["the end", 0]);

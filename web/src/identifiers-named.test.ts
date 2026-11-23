@@ -8,7 +8,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { MachineShown, sentences, TimelineRows } from "./machine.tsx";
 import { NextStepSection } from "./review.tsx";
-import { NodeCell } from "./machines.tsx";
+import { node, nodeLabel } from "./machines.tsx";
 import { Named } from "./titles.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { DraftItem } from "./drafts.tsx";
@@ -283,21 +283,16 @@ describe("the two revision numbers of one published draft say what each counts",
   });
 });
 
-describe("the node identifier is cut where a list shows it and labelled on the machine's page", () => {
-  const whole = "4c1f9a0b7d2e4c1f9a0b7d2e4c1f9a0b";
-  test("a list cell shows the start of the opaque value and keeps the whole as its title", async () => {
-    await mount(h(NodeCell, { m: { hardware: { talosNodeId: whole, smbiosUuid: null } } as never }));
-    expect(text()).toBe("node 4c1f…");
-    expect(titles()).toEqual([whole]);
+describe("the node identifier is whole in a list and on the machine's page, and unsafe text is never shown", () => {
+  const m = (id: string | null, uuid: string | null = null) => ({ hardware: { talosNodeId: id, smbiosUuid: uuid } }) as never;
+  test("a list cell shows the whole value, and the machine page labels it", () => {
+    expect(nodeLabel(m("4c1f9a0b7d2e4c1f9a0b7d2e4c1f9a0b"))).toBe("node 4c1f9a0b7d2e4c1f9a0b7d2e4c1f9a0b");
+    expect(node(m("4c1f9a0b7d2e4c1f9a0b7d2e4c1f9a0b"))).toBe("Talos node ID 4c1f9a0b7d2e4c1f9a0b7d2e4c1f9a0b");
+    expect(nodeLabel(m(null, "u-1"))).toBe("UUID u-1");
   });
-  test("a value with a control character is shown as unknown and is not the title either", async () => {
-    await mount(h(NodeCell, { m: { hardware: { talosNodeId: "abc\u202Eevil", smbiosUuid: null } } as never }));
-    expect(text()).toBe("node unknown");
-    expect(titles()).toEqual([]);
-  });
-  test("a short value is shown as it is", async () => {
-    await mount(h(NodeCell, { m: { hardware: { talosNodeId: "n1", smbiosUuid: null } } as never }));
-    expect(text()).toBe("node n1");
+  test("a value with a control character is shown as unknown", () => {
+    expect(nodeLabel(m("abc\u202Eevil"))).toBe("node unknown");
+    expect(node(m("abc\u202Eevil"))).toBe("Talos node ID unknown");
   });
 });
 

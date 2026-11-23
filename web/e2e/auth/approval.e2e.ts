@@ -12,7 +12,6 @@
 // Every value is synthetic.
 import { $, $$, browser, expect } from "@wdio/globals";
 import { REVOKE_LIMIT, UNPREDICTED } from "../../src/approval.tsx";
-import { short } from "../../src/list.tsx";
 import { RECOVERY_START } from "../../src/recovery.tsx";
 import { SCOPE_NO_MODE, SET_ASIDE } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
@@ -86,7 +85,7 @@ describe("approval and revocation (#358)", () => {
     await browser.execute(() => document.querySelector<HTMLFormElement>('main form[aria-label="Approve plan"]')?.requestSubmit());
     // The reasons are the returned approval's, and the controller's next step is named.
     await expect($("main")).toHaveText(expect.stringContaining("Recorded self-approval reasons: created-plan."), { wait: 20_000 });
-    await expect($("main")).toHaveText(expect.stringContaining(`Applied becomes ${short(REL)} (adoption) once it does.`));
+    await expect($("main")).toHaveText(expect.stringMatching(/Applied becomes synthetic, published .+ \(adoption\) once it does\./));
     // The injected plan still reads as proposed after the reread, so the form stays: a forced submit
     // now, after the approval was recorded, must send nothing.
     await browser.execute(() => document.querySelector<HTMLFormElement>('main form[aria-label="Approve plan"]')?.requestSubmit());
@@ -98,7 +97,7 @@ describe("approval and revocation (#358)", () => {
     this.timeout(60_000);
     await open("h-all", { "/identity": await identity("h-all"), [`/plans/${PLAN}`]: plan("proposed") });
     await expect($('[data-testid="self-approval"]')).toHaveText(
-      expect.stringContaining(`Self-approval, predicted: you did not create this plan. Not predicted, since this read failed: release ${short(REL)}.`),
+      expect.stringContaining(`Self-approval, predicted: you did not create this plan. Not predicted, since this read failed: the release.`),
       { wait: 20_000 },
     );
     // once: no step of the case submits, and the page sends a write only from a submit (web/src/approval.tsx:132-135).
@@ -235,7 +234,7 @@ describe("approval and revocation (#358)", () => {
       await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan(: .+ \(revoked\)| \S+: revoked)$/), { wait: 20_000 });
       await focusSettles(focusKept, "the page, not the body");
       await focusSettles(() => focusIn(REVOKE_ANSWER), "the revocation's answer");
-      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by h-\S+ at \S+: seeded reason$/), { wait: 20_000 });
+      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by (you|an operator with no name on record, subject h-\S+ at \S+): seeded reason$/), { wait: 20_000 });
       expect(await posts()).toEqual([expect.stringMatching(/^POST \/approvals\/apr_\w+\/revocations$/)]);
     });
 
@@ -272,7 +271,7 @@ describe("approval and revocation (#358)", () => {
       await $("main").$("button=Revoke approval").click();
       // The page reads the plan again and shows it revoked, with the reason on the machine's timeline.
       await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan(: .+ \(revoked\)| \S+: revoked)$/), { wait: 20_000 });
-      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by h-\S+ at \S+: seeded reason$/), { wait: 20_000 });
+      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by (you|an operator with no name on record, subject h-\S+ at \S+): seeded reason$/), { wait: 20_000 });
       expect(await posts()).toEqual([expect.stringMatching(/^POST \/approvals\/apr_\w+\/revocations$/)]);
       expect((await api(at, "h-viewer", "GET", `/plans/${seed.plans.approved}`)).body!["state"]).toBe("revoked");
     });
@@ -280,7 +279,7 @@ describe("approval and revocation (#358)", () => {
     it("a revoked plan shows the reason its revocation recorded on the machine's timeline", async function () {
       this.timeout(60_000);
       await open("h-all", undefined, "revoked", {}, seed.plans.revoked);
-      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by h-\S+ at \S+: seeded$/), { wait: 20_000 });
+      await expect($('[data-testid="revocation-reason"]')).toHaveText(expect.stringMatching(/^Revoked by (you|an operator with no name on record, subject h-\S+ at \S+): seeded$/), { wait: 20_000 });
     });
 
     // AMB-05: the first send is committed and its answer dropped, then the epoch changes. The repeat
