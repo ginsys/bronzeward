@@ -128,6 +128,7 @@ func publishFixture(t *testing.T, d *draftEnv) *publishEnv {
 			{kind: "profile", head: p.prf, revision: p.prv, headRevision: 1}},
 		machines: []unitMachine{{
 			machine: d.machine, importBase: p.ibr, assignment: p.asr, mode: "container",
+			hostname:   compile.Hostname{Source: compile.HostnameNone},
 			ciphertext: releaseCipher, configuration: sha256.Sum256([]byte("machine: {}")), redacted: &redacted,
 			effective: []unitDependency{{reference: "registry/pass", object: p.kvPath, version: 1, created: kvCreated}},
 			reproduction: []unitDependency{{reference: "registry/pass", object: p.kvPath, version: 1, created: kvCreated,
