@@ -1331,6 +1331,7 @@ func TestDialOptionGuard(t *testing.T) {
 		"a dial of the connection's own":            {"func f() { _, _ = grpc.NewClient(\"x\") }\n", "grpc.NewClient is not allowlisted"},
 		"the option function passed as a value":     {"func f(ctx context.Context) { c, err := client.New(ctx,client.WithGRPCDialOptions(grpc.WithAuthority)) }\n", "not called with exactly one grpc.WithAuthority(x)"},
 		"a local variable spelled like the package": {"func f(ctx context.Context, n string) { grpc := box(); c, err := client.New(ctx, client.WithGRPCDialOptions(grpc.WithAuthority(n))) }\nfunc box() struct{ WithAuthority func(string) any } { return struct{ WithAuthority func(string) any }{} }\n", "not called with exactly one grpc.WithAuthority(x)"},
+		"a receiver type parameter spelled alike":   {"type box[T any] struct{}\nfunc (_ box[grpc]) option(x grpc) client.OptionFunc { return client.WithGRPCDialOptions(grpc.WithAuthority(x)) }\n", "receiver type parameter grpc has the name of an imported package"},
 		"the option without the machinery's setter": {"func f(n string) []grpc.DialOption { return []grpc.DialOption{grpc.WithAuthority(n)} }\n", "grpc.WithAuthority is used other than as an argument of client.WithGRPCDialOptions"},
 	}
 	for polName, pol := range map[string]policy{"reader": readerPolicy, "discover": discoverPolicy} {
