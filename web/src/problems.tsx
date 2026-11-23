@@ -101,11 +101,14 @@ export const visibleDetail = (p: Problem): string | undefined => (p.detail !== u
 
 // Why a configuration was refused, from the problem document a failed publication or import carries (compilation
 // §8.3): the rule, the input, the paths and the server's message, as safe text, shown as the server serves them. A fragment
-// input is shown by the name and layer the server adds, with its position in brackets. The server redacts resolved string
-// values only (a secret of six bytes or more); integers and booleans are not detected, and a message or a path may quote
-// an authored literal from a fragment (compilation §8.4). The machine comes back as its identifier, for the caller to
-// show by name.
+// input is shown by the name and layer the server adds, with its position in brackets. The server redacts a message by
+// template and searches the rest for exact copies of resolved strings of six bytes or more, so a shorter copy, or a copy
+// of an integer or a boolean inside an authored literal, is not detected, and a message or a path may quote an authored
+// literal from a fragment (compilation §8.3, §8.4). A run of tabs and line breaks in the message reads as one space, as
+// Talos wraps its errors in them. The machine comes back as its identifier, for the caller to show by name.
 const MAX_PATHS = 20;
+// What the rule `invalid` means: Talos refused the composed configuration, so no one fragment is named.
+const RULE_INVALID = "The configuration of the machine as a whole, its adopted configuration plus the fragments selected for it, did not pass Talos's validation; the server's message is Talos's.";
 const INPUT = /^fragment\[(\d+)\]$/;
 const ended = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
 export function whyRefused(e: Record<string, unknown> | null | undefined): { facts: string; machine?: string } {
@@ -120,10 +123,10 @@ export function whyRefused(e: Record<string, unknown> | null | undefined): { fac
   const at = input === undefined ? undefined : input === "base" ? "the base" : INPUT.test(input) ? place(INPUT.exec(input)![1]!) : safeWord(input);
   const more = paths.length > MAX_PATHS ? ` and ${paths.length - MAX_PATHS} more` : "";
   const facts = [
-    rule === undefined ? "" : `The rule: ${safeWord(rule)}.`,
+    rule === undefined ? "" : rule === "invalid" ? RULE_INVALID : `The rule: ${safeWord(rule)}.`,
     at === undefined ? "" : `The input: ${at}.`,
     paths.length === 0 ? "" : `The paths: ${paths.slice(0, MAX_PATHS).map((p) => safeWord(p)).join(", ")}${more}.`,
-    message === undefined ? "" : `The server says: ${ended(safeSentence(message))}`,
+    message === undefined ? "" : `The server says: ${ended(safeSentence(message.replace(/[\t\n\r]+/g, " ")))}`,
   ].filter((s) => s !== "").join(" ");
   const machine = text("machine");
   return { facts, ...(machine !== undefined && { machine }) };
@@ -144,27 +147,40 @@ export function sentence(p: Problem, next = true): string {
 const BY_HAND = "Select the text above to copy it.";
 
 // The labelled lines of the reference, in the order a bug report wants them.
-function referenceLines(p: Problem, status: number): [string, string][] {
-  const lines: [string, string][] = [["Status", String(status)], ["Code", codeOf(p)]];
+function referenceLines(p: Problem, status: number | undefined): [string, string][] {
+  const lines: [string, string][] = [...(status === undefined ? [] : [["Status", String(status)] as [string, string]]), ["Code", codeOf(p)]];
   if (typeof p["rule"] === "string") lines.push(["Rule", p["rule"]]);
   if (typeof p["scope"] === "string") lines.push(["Scope", p["scope"]]);
   if (p.instance !== undefined) lines.push(["Request", p.instance]);
   const earlier = earlierOf(p);
   if (earlier !== undefined) lines.push(["Earlier record", `request ${earlier.request}, epoch ${earlier.epoch}`]);
   const detail = visibleDetail(p);
-  lines.push(["What the server said", detail === undefined ? safeSentence(p.title) : `${safeSentence(p.title)}: ${detail}`]);
+  const said = detail === undefined ? safeSentence(p.title) : `${safeSentence(p.title)}: ${detail}`;
+  if (said !== "") lines.push(["What the server said", said]);
   return lines;
 }
 
-export const referenceText = (p: Problem, status: number) => referenceLines(p, status).map(([label, value]) => `${label}: ${value}`).join("\n");
+export const referenceText = (p: Problem, status: number | undefined) => referenceLines(p, status).map(([label, value]) => `${label}: ${value}`).join("\n");
 
-// The reference block: closed until opened, outside the status paragraph so the live region never reads it.
-export function RequestRef({ problem, status }: { problem: Problem; status: number }) {
+// A problem document an operation stored, read as a `Problem` whose members may be absent: no status reads as none,
+// never "undefined".
+export function storedProblem(e: Record<string, unknown>): { problem: Problem; status: number | undefined } {
+  const str = (k: string) => (typeof e[k] === "string" ? (e[k] as string) : undefined);
+  const status = typeof e["status"] === "number" ? e["status"] : undefined;
+  const detail = str("detail");
+  const instance = str("instance");
+  return { problem: { ...e, type: str("type") ?? "", title: str("title") ?? "", status: status ?? 0, ...(detail !== undefined && { detail }), ...(instance !== undefined && { instance }) }, status };
+}
+
+// The reference block: closed until opened, outside the status paragraph so the live region never reads it. A caller that
+// holds the whole problem document passes it as `document`, shown as JSON inside the same section.
+export function RequestRef({ problem, status, document }: { problem: Problem; status: number | undefined; document?: unknown }) {
   const lines = referenceLines(problem, status);
   return (
     <details data-testid="request-ref">
       <summary>Reference for a bug report</summary>
       <ul>{lines.map(([label, value]) => <li key={label}>{label}: {value}</li>)}</ul>
+      {document !== undefined && <pre>{JSON.stringify(document, null, 2)}</pre>}
       <CopyButton text={referenceText(problem, status)} byHand={BY_HAND} />
     </details>
   );

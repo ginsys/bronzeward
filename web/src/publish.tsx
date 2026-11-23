@@ -4,9 +4,9 @@
 // progress reader (B16) and, once it succeeded, names the release from the operation's result (G4) and
 // says that nothing was sent to any machine. The release page shows what each machine needs next (W6).
 
-import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { forgetETag, keepETag, keptETag, lastGood, NO_ETAG, WriteResult } from "./drafts.tsx";
+import { EntryName, forgetETag, isSource, keepETag, keptETag, lastGood, NO_ETAG, WriteResult } from "./drafts.tsx";
 import { startsNew, useSend, useWrites } from "./forms.tsx";
 import { settledReads, watchView } from "./imports.tsx";
 import { Ref, short, useItem, usePending, useReads } from "./list.tsx";
@@ -23,6 +23,7 @@ import type { Outcome } from "./write.ts";
 type S = components["schemas"];
 type Draft = S["DraftBody"];
 type Operation = S["OperationBody"];
+type Source = S["SourceEntry"];
 
 const enc = encodeURIComponent;
 
@@ -77,11 +78,33 @@ export function publishLocked(open: boolean, o: Outcome | undefined, failed: str
   return op === undefined || failed !== op;
 }
 
-function Progress({ op, draft, onFailed }: { op: string; draft: string; onFailed: (op: string) => void }) {
+const MAX_CHANGES = 10;
+const changeWord = (e: Source) => (e.revision === null ? "removed" : e.head === null ? "new" : "changed");
+
+// After a refused publication: what the draft this page holds changes, because a refusal of the machine's whole
+// configuration names no fragment and the cause may be one the draft changed. The draft must be the one the refused
+// publication was made from (its revision); a draft saved since says it cannot be listed.
+export function DraftChanges({ d, revision }: { d: Draft | undefined; revision: number | undefined }) {
+  if (d === undefined || revision === undefined) return null;
+  if (d.revision !== revision) return <> This draft has changed since this publication was refused, so the changes it made are not listed.</>;
+  const sources = d.entries.filter(isSource);
+  if (sources.length === 0) return null;
+  const more = sources.length - MAX_CHANGES;
+  return (
+    <>
+      {" "}This draft changes: {sources.slice(0, MAX_CHANGES).map((e, i) => <Fragment key={`${e.kind}:${e.name ?? e.machine}`}>{i > 0 && ", "}<EntryName e={e} /> ({changeWord(e)})</Fragment>)}
+      {more > 0 && ` and ${more} more`}. The conflict may also be with a fragment this draft does not change, one selected for the machine.
+    </>
+  );
+}
+
+function Progress({ op, draft, held, onFailed }: { op: string; draft: string; held: Draft | undefined; onFailed: (op: string) => void }) {
   const client = useWrites()?.client;
   const reads = useReads();
   const now = useRef(reads);
   now.current = reads;
+  // The revision of the draft a failed publication was made from, once it is known to have failed.
+  const [refusedAt, setRefusedAt] = useState<number | undefined>();
   const [{ lines, cleared, end }, show] = useReducer(watchView, { lines: [] });
   useEffect(() => {
     if (client === undefined) return;
@@ -102,7 +125,10 @@ function Progress({ op, draft, onFailed }: { op: string; draft: string; onFailed
       if (r.operation.state === "succeeded") forgetETag(draft);
       // A publication that definitively failed left the draft open: Publish may send again (the server
       // reuses only a queued or running operation).
-      else onFailed(op);
+      else {
+        setRefusedAt(r.operation.subject?.draftRevision);
+        onFailed(op);
+      }
       show({ type: "end", text: "release" in e ? <>Publication succeeded: release <Named id={e.release} /> was published. {SENT_NOTHING}</> : <>{e.text}{e.machine !== undefined && <> The machine it names: <MachineById id={e.machine} />.</>}</> });
     });
     return () => abort.abort();
@@ -112,7 +138,7 @@ function Progress({ op, draft, onFailed }: { op: string; draft: string; onFailed
       <h3>Progress of operation <Named id={op} /></h3>
       {cleared !== undefined && <Status testid="cleared">{cleared}</Status>}
       <ol aria-live="polite" data-testid="events">{lines.map((l, i) => <li key={i}>{l}</li>)}</ol>
-      {end !== undefined && <Status testid="ended">{end}</Status>}
+      {end !== undefined && <Status testid="ended">{end}<DraftChanges d={held} revision={refusedAt} /></Status>}
     </section>
   );
 }
@@ -169,7 +195,7 @@ function Publish({ id }: { id: string }) {
           conflict={<Status testid="write-result" role="alert">Not published: someone changed this draft since this page read it. <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
         />
         {o?.kind === "done" && typeof o.data === "object" && op === undefined && <Status testid="no-operation">The publication was accepted without naming its operation. Find it in the operations list, kind publish.</Status>}
-        {op !== undefined && <Progress key={op} op={op} draft={id} onFailed={setFailed} />}
+        {op !== undefined && <Progress key={op} op={op} draft={id} held={d} onFailed={setFailed} />}
       </div>
       <p><Ref to={`/drafts/${id}`} id={id}>Back to the draft</Ref></p>
     </>
