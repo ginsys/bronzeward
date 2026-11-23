@@ -11,7 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { CopyButton } from "./copy.tsx";
 import { COPIED, COPY } from "./words.ts";
-import { PROBLEM_WORDS, referenceText, RequestRef, RULE_WORDS, wordsFor } from "./problems.tsx";
+import { PROBLEM_WORDS, referenceText, RequestRef, RULE_WORDS, storedProblem, wordsFor } from "./problems.tsx";
 import type { Problem } from "./request.ts";
 import { problemSentences, Refused, SetAside, Unknown } from "./states.tsx";
 
@@ -20,6 +20,22 @@ import { problemSentences, Refused, SetAside, Unknown } from "./states.tsx";
 const problem = (code: string, more: Record<string, unknown> = {}, status = 400): Problem => ({ type: `urn:bronzeward:problem:${code}`, title: `Title of ${code}`, status, ...more });
 // The server's codes, read from the Go file that answers them, so a new code fails the table test.
 const serverCodes = [...readFileSync(resolve(process.cwd(), "../internal/api/problem.go"), "utf8").matchAll(/^\t"([a-z-]+)":\s+\S.*,$/gm)].map((m) => m[1]!);
+
+describe("ginsys/bronzeward#1055: the reference of a stored problem document", () => {
+  test.each([
+    ["a title and a detail", { type: "urn:bronzeward:problem:conflict", title: "T", detail: "D" }, "What the server said: T: D"],
+    ["a detail and no title", { type: "urn:bronzeward:problem:conflict", title: "", detail: "Explanation" }, "What the server said: Explanation"],
+  ])("%s says one clean line", (_, doc, line) => {
+    const { problem: p, status } = storedProblem(doc);
+    expect(referenceText(p, status)).toContain(line);
+    expect(referenceText(p, status)).not.toContain(": :");
+  });
+
+  test("neither a title nor a detail adds no line, and no status adds no Status line", () => {
+    const { problem: p, status } = storedProblem({ type: "urn:bronzeward:problem:conflict" });
+    expect(referenceText(p, status)).toBe("Code: conflict");
+  });
+});
 
 describe("the words table", () => {
   test("the test reads all 26 server codes", () => {

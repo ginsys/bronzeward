@@ -155,7 +155,7 @@ function referenceLines(p: Problem, status: number | undefined): [string, string
   const earlier = earlierOf(p);
   if (earlier !== undefined) lines.push(["Earlier record", `request ${earlier.request}, epoch ${earlier.epoch}`]);
   const detail = visibleDetail(p);
-  const said = detail === undefined ? safeSentence(p.title) : `${safeSentence(p.title)}: ${detail}`;
+  const said = [safeSentence(p.title), detail].filter((s) => s !== undefined && s !== "").join(": ");
   if (said !== "") lines.push(["What the server said", said]);
   return lines;
 }
