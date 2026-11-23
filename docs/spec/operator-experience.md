@@ -946,8 +946,8 @@ unknown leaves a plan the page has no ID for, which the machine's page shows wit
 redacted, or a machine holding a configuration other than the one Bronzeward applied, so the two cannot be
 compared): the page names that plan and links to its plan page, where the person can read what it records and
 approve it one plan at a time, a choice the plan page leaves to the person and the batch does not. That plan is
-handed to the person as its line is drawn: leaving the page, by any route, does not cancel it, and the line says
-it stays and can be cancelled on its own page. Show apply and Apply send nothing new while a write of the page is
+handed to the person as its line is drawn: leaving the page, by any route, does not cancel it (the late answer of
+its own creation included), and the line says it stays and can be cancelled on its own page. Show apply and Apply send nothing new while a write of the page is
 open, with an unknown outcome, until the person repeats it or dismisses its notice (the rule of every form of the
 console, `startsNew`); that holds for the next request of a running batch too, so one check decides every send. While machines wait or apply, the rows
 are read again five seconds after the last read answered, so a slow read is never dropped by the next one, for ten

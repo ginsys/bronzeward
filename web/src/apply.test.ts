@@ -10,9 +10,9 @@ const C = `mch_${"c".repeat(26)}`;
 const plan = (n: string) => `pln_${n.repeat(26)}`;
 
 // A position as the server serves it, with only what the page reads: the step, this release's plan, the operation, who holds the rollout.
-const pos = (step: Position["step"], over: { applied?: string; plan?: string; planRelease?: string; held?: string; frozen?: boolean; drift?: boolean } = {}): Position =>
+const pos = (step: Position["step"], over: { applied?: string; desired?: string; pending?: boolean; plan?: string; planRelease?: string; held?: string; frozen?: boolean; drift?: boolean } = {}): Position =>
   ({
-    machine: { applied: over.applied === undefined ? null : { release: over.applied, source: "operation", importBase: null }, frozen: over.frozen === true, openDrift: over.drift === true ? { revision: 1 } : null },
+    machine: { desired: over.desired ?? null, pendingConvergence: over.pending === true, applied: over.applied === undefined ? null : { release: over.applied, source: "operation", importBase: null }, frozen: over.frozen === true, openDrift: over.drift === true ? { revision: 1 } : null },
     plan: over.plan === undefined ? null : { id: over.plan, state: step === "awaiting-dispatch" ? "approved" : "proposed", operation: "apply-config", release: over.planRelease ?? REL, approvalCurrent: null, createdAt: "", expiresAt: "" },
     operation: step === "operation-in-flight" ? { id: "op_x", kind: "apply-config", state: "sending", plan: over.plan ?? "", createdAt: "" } : null,
     rolloutHeldBy: over.held === undefined ? null : { id: "op_y", machine: over.held },
@@ -41,6 +41,12 @@ describe("what a machine's row says", () => {
     expect(say(pos("operation-unresolved"))).toEqual({ state: "stopped", text: LINES.unresolved });
     expect(say(pos("drift-open", { drift: true }))).toEqual({ state: "stopped", text: LINES.drift });
     expect(say(pos("no-step", { applied: REL }))).toEqual({ state: "applied", text: LINES.applied });
+  });
+  test("a machine this release leaves unchanged is applied, and one whose configuration still differs is not", () => {
+    const older = `rel_${"o".repeat(26)}`;
+    expect(say(pos("no-step", { applied: older, desired: REL }))).toEqual({ state: "applied", text: LINES.applied });
+    expect(say(pos("needs-plan", { applied: older, desired: REL, pending: true }))).toEqual({ state: "not-applied", text: LINES.notApplied });
+    expect(say(pos("needs-plan", { applied: older, desired: older }))).toEqual({ state: "not-applied", text: LINES.notApplied });
   });
   test("a plan of this release for another operation is not an apply plan, and the row says it is decided on the machine's page", () => {
     const adopt = (step: Position["step"]) => ({ ...pos(step, { plan: plan("p") }), plan: { ...pos(step, { plan: plan("p") }).plan!, operation: "adopt" } }) as unknown as Position;
@@ -86,6 +92,7 @@ function world(positions: Record<string, Position>, refuse: { plan?: string[]; a
     say: (key, line) => void (lines[key] = line),
     live: () => true,
     canSend: () => !open,
+    handedOver: () => false,
   };
   return { io, log, lines, made };
 }
@@ -133,6 +140,20 @@ describe("Show apply", () => {
     expect([...plans.keys()]).toEqual([B]);
     // The plan a publisher prepared is reused and never cancelled, whichever way the press ends.
     expect(w.log.join(" ")).not.toContain(plan("z"));
+  });
+  // The answer arrives after the person left, but the plan was handed over meanwhile (its withheld line was drawn,
+  // and that line says the plan stays): the late answer cancels nothing.
+  test("a plan handed over to the person is not cancelled by the late answer of its creation", async () => {
+    const w = world({ [A]: pos("needs-plan") });
+    let caring = true;
+    const send = w.io.send;
+    const io: ApplyIo = { ...w.io, live: () => caring, handedOver: () => true, send: async (spec) => {
+      const out = await send(spec);
+      if (spec.path === "/plans") caring = false;
+      return out;
+    } };
+    await showApply(REL, [A], io, new Map());
+    expect(w.log).toEqual(["POST /plans"]);
   });
   // A creation whose outcome is unknown has no plan ID for the page: the row says so, and the page cancels nothing.
   test("a creation whose outcome is unknown stops that machine's row and cancels nothing", async () => {

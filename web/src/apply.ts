@@ -66,7 +66,9 @@ export function rowOf(p: Position, release: string): Row {
   if (m.openDrift != null) return { state: "stopped", text: LINES.drift };
   if (m.frozen) return { state: "stopped", text: LINES.frozen };
   if (p.step === "awaiting-approval" && mine) return { state: "ready", text: LINES.ready };
-  if (m.applied?.release === release && !m.pendingConvergence) return { state: "applied", text: LINES.applied };
+  // Applied for this release: what the machine runs is this release's, or this release is the Desired one and leaves
+  // the Applied configuration unchanged (planFor in plan.tsx offers no plan there either).
+  if (m.applied != null && !m.pendingConvergence && (m.applied.release === release || m.desired === release)) return { state: "applied", text: LINES.applied };
   return { state: "not-applied", text: LINES.notApplied };
 }
 
@@ -78,6 +80,8 @@ export interface ApplyIo {
   // Whether the next request of a batch may go: the page is still here and no write of it has an unknown outcome.
   // Every send of both loops asks this, and nothing else.
   canSend(): boolean;
+  // Whether the plan was handed over to the person (its withheld line was drawn): the page never cancels it.
+  handedOver(id: string): boolean;
 }
 
 const done = (w: Write) => w.outcome?.kind === "done";
@@ -130,7 +134,7 @@ export async function showApply(release: string, machines: readonly string[], io
       continue;
     }
     if (!io.live()) {
-      await cancelPlans([id], io);
+      if (!io.handedOver(id)) await cancelPlans([id], io);
       break;
     }
     made.set(id, m);
