@@ -139,7 +139,7 @@ function Create({ release, machine, first }: { release: string; machine: string;
       ))}
       <p><Action label="Create plan" needs={["publisher"]} submit busy={busy} /></p>
       {note !== undefined && <p role="alert" data-testid="plan-input">{note}</p>}
-      {mine && <Result w={w} done={(): ReactNode => (planned === undefined ? <>The plan was created, but the answer named no plan. Find it in <Ref to="/plans" id="plans">the plans list</Ref>.</> : <>{PROPOSED} <Ref to={`/plans/${enc(planned)}`} id={planned} /></>)} />}
+      {mine && <Result w={w} done={(): ReactNode => (planned === undefined ? <>The plan was created, but the answer named no plan. Find it in <Ref to="/plans" id="plans">the plans list</Ref>.</> : <>{PROPOSED} <Named id={planned} /></>)} />}
       {next !== null && <p data-testid="plan-next">{next}</p>}
     </form>
   );

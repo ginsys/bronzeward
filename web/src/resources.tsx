@@ -539,7 +539,7 @@ export function PlanItem({ id }: { id: string }) {
               ["Target", <>machine <MachineById id={p.machine} {...(held(p) !== undefined && { held: held(p)! })} />, cluster <ClusterLink id={p.cluster} />, route {safeWord(p.route)}</>],
               ["Operation", p.mode === null ? safeWord(p.operation) : `${safeWord(p.operation)}, mode ${safeWord(p.mode)}`],
               ["Release", <><Named id={p.release} /> (the machine's Desired when planned: <Named id={p.desiredRelease} />)</>],
-              ["Bound to", <>assignment revision <Id id={p.assignmentRevision} />, baseline revision {p.baselineRevision ?? "none"}, drift record {p.driftRecord ?? "none"}, made in epoch <span title="The server's epoch changes when it is restored or enters recovery mode; an approval from an earlier epoch authorizes nothing.">{short(String(p.epoch))}</span></>],
+              ["Bound to", <>assignment revision <Id id={p.assignmentRevision} />, baseline revision {p.baselineRevision ?? "none"}, drift record {p.driftRecord ?? "none"}, made in epoch <span title="The server's epoch changes when recovery mode is entered; a restore alone does not change it.">{short(String(p.epoch))}</span></>],
               ["Limits", `transport ${seconds(p.transportDeadlineSeconds)}, verification ${seconds(p.verificationDeadlineSeconds)}, observation age ${seconds(p.maxObservationAgeSeconds)}, check validity ${seconds(p.checkValiditySeconds)}, attempts ${p.maxAttempts ?? "none"}, rollout limit ${p.rolloutLimit}`],
               ["Approval", <>policy {p.approvalPolicy}; <Id id={p.approval} none="not approved" /></>],
               ["Committed operation", <Named id={p.committedOperation} />],
