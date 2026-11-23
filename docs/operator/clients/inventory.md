@@ -23,9 +23,10 @@ MACHINE  ENDPOINT  DESIRED  APPLIED (SOURCE)  OBSERVED  STATE
 Health is not checked in this installation.
 ```
 
-This output is from an installation with nothing recorded: the lists print their column names and
-no rows. With machines recorded, each row looks like this (shortened identifiers; the dots are not
-output):
+With nothing recorded, the lists print their column names and no rows, and the machine list adds
+"Health is not checked in this installation." With machines recorded, each row looks like this
+(shortened identifiers; the dots are not output). The `text` blocks on this page show the shape of
+the output, read from the source. This page does not claim that a run printed them.
 
 ```text
 MACHINE        ENDPOINT        DESIRED       APPLIED (SOURCE)          OBSERVED            STATE
