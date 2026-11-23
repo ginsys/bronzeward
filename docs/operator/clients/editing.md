@@ -61,7 +61,9 @@ Steps:
    to open it.
 2. In the draft's **Entries** list press an entry to edit it, or **Add fragment**.
 3. Edit the document in the fragment editor. Press **Save** (needs `author`). **Revert to base**
-   restores the base text of the entry, and **Remove** removes the entry from the draft.
+   restores the base text of the entry, and **Remove** records a proposed removal of the entry in
+   the draft. The entry stays in the draft, and publishing the draft clears the entry's current
+   revision, while a release that used it still names it.
 4. For a profile, build its list: **Add to profile** adds a fragment, and each row has buttons to
    move it up or down or remove it. The same buttons work from the keyboard. The list is not saved
    until you press **Save** (needs `author`).
