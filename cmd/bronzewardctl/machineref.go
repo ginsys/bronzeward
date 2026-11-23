@@ -81,9 +81,19 @@ func (e *env) writeNamed(ref, cluster string, prep func(*client.Client) error, b
 	w := build(id)
 	if id != ref {
 		w.ReadsAt(at.epoch, at.moves)
-		w.Input = "machine " + client.ShellWord(id) + " in place of " + client.ShellWord(ref)
+		w.Input = inPlaceOf(id, ref, cluster)
 	}
 	return e.writeWith(c, prep, w, say)
+}
+
+// inPlaceOf is what a repeat gives for a machine that was given by name: the identifier, and no --cluster, which an
+// identifier refuses.
+func inPlaceOf(id, ref, cluster string) string {
+	s := "machine " + client.ShellWord(id) + " in place of " + client.ShellWord(ref)
+	if cluster != "" {
+		s += " and without --cluster"
+	}
+	return s
 }
 
 // machineByName is the identifier of the machine ref names, on a client already open, which the caller saves, with the
