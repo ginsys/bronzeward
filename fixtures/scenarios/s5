@@ -45,7 +45,7 @@
 # acts are checked in the database as `cli`'s are: each freeze's entry, each plan's act and each approval's act. What
 # stays the API's: the patches, the refused adoption, the drift adoption's import and its publish (the wizard, its
 # own journey), the label fragment, the observations and every database assertion. The server's 403 of an unfreeze
-# by h-publisher is `cli`'s row (run `cli` in the same chain); the page row here shows the control off and sends nothing.
+# by h-publisher is `cli`'s row (run `cli` in the same chain); the page row here shows the control off and presses nothing.
 # Usage: scenarios/s5 run|pass|cli|web|roles|drift   (run, pass, cli, web or drift after scenarios/s4 run on
 # the same up; roles after run)
 set -euo pipefail
