@@ -271,6 +271,11 @@ CREATE TABLE import_base_revision (
   configuration_digest bytea NOT NULL CHECK (length(configuration_digest) = 32),
   -- the machine's Talos type read from the document at import (ginsys/bronzeward#1096); null when the document names none
   machine_role         text CHECK (machine_role IN ('controlplane', 'worker')),
+  -- the machine name whose HostnameConfig the import removed (compilation §2.3 step 2a) and whether that
+  -- document was exactly the fill's own; both null when nothing was removed (ginsys/bronzeward#1040)
+  filled_hostname       text CHECK (btrim(filled_hostname) <> ''),
+  filled_hostname_equal boolean,
+  CHECK ((filled_hostname IS NULL) = (filled_hostname_equal IS NULL)),
   created_at           timestamptz NOT NULL,
   writer               xid8 NOT NULL,
   author               text NOT NULL REFERENCES principal (id),
