@@ -82,6 +82,7 @@ export function Action({ label, needs, onClick, submit = false, busy = false }: 
 // view whose content changes names its new content: `target` takes focus each time `key` takes a new
 // truthy value (a counter, an outcome, or `true` for content that has just appeared), but only where
 // focus was lost. A user who moved on while the action ran, to a field or another control, keeps it.
+// The shell uses it too, for a new epoch: the page is replaced by the wait for the server, and its focused control with it.
 export const focusLost = (active: object | null, body: unknown): boolean => active === null || active === body || ("disabled" in active && active.disabled === true);
 export function useFocusOn(key: unknown, target: RefObject<HTMLElement | null>) {
   const last = useRef<unknown>(undefined);
@@ -379,7 +380,8 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
   const [recovery, setRecovery] = useState<Load<Recovery>>({ kind: "loading" });
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [mode, setMode] = useState<StartMode>("unknown");
-  const [epochChanged, setEpochChanged] = useState(false);
+  // How many times the epoch changed (`again` also moves for a read the operator asks for); the notice shows after the first.
+  const [epochs, setEpochs] = useState(0);
   // The view (path and query) that held unsaved text when the epoch last changed: that page is kept
   // shown, and sends nothing, until the operator opens another (keepsPage, useGate).
   const viewKey = JSON.stringify([path, query]);
@@ -395,7 +397,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     onRevoked: ending(writes, () => reads.client, onRevoked),
     onEpochChange: () => {
       writes.setAside(EPOCH_CHANGED_ASIDE);
-      setEpochChanged(true);
+      setEpochs((n) => n + 1);
       keepView(unsaved.size > 0 ? viewKey : undefined);
       setServer({ kind: "loading" });
       setIdentity({ load: { kind: "loading" } });
@@ -436,6 +438,9 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
     if (shownPath.current !== path) page.current?.focus();
     shownPath.current = path;
   }, [path]);
+  // A new epoch replaces the page by the wait for the server, so a focused control of it is gone: focus goes to the page's
+  // `main` as on a path change, and stays where the operator moved it to.
+  useFocusOn(epochs, page);
   // In render, before any page's effect sends a read for the new path or query: effects run child
   // first, so a page's read sent before this shell's effect would be discarded with the old ones.
   client.setView({ principal, route: path, query });
@@ -534,7 +539,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
         {recoveryMode && <RecoveryBanner recovery={recovery.kind === "ok" ? recovery.data : undefined} mode={mode} />}
         {recoveryMode && recovery.kind !== "loading" && <RecoveryRead res={recovery} />}
         <Entered />
-        {epochChanged && <Status testid="epoch-changed">{EPOCH_CHANGED}.</Status>}
+        {epochs > 0 && <Status testid="epoch-changed">{EPOCH_CHANGED}.</Status>}
         <Deprecations routes={notices} />
         <WriteNotices go={show} />
         {offline !== undefined && <Offline since={offline} readAt={reads.readAt} />}
