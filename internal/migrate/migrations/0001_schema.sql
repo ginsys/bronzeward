@@ -1054,11 +1054,14 @@ CREATE TABLE release_machine (
   -- A release published before this column existed reads false: it differs.
   form_only            boolean NOT NULL DEFAULT false,
   -- Where the machine's hostname came from (compilation §6.1 item 2) and, for machine-name, the
-  -- name used: a fact about the release, never read again from the machine. The release read
-  -- checks the enumeration (machine-name, configuration, none, legacy-stable, unrecorded) and a
-  -- stored value outside it is a 500, as a provenance record is; nothing here writes unrecorded.
-  hostname_source      text NOT NULL,
+  -- name used: a fact about the release, never read again from the machine. A release is
+  -- immutable, so a value outside the enumeration is refused at commit; the release read checks it
+  -- again and answers 500 (persistence-api.md §9.2). Nothing writes unrecorded: it is the value a
+  -- release made before the record would read.
+  hostname_source      text NOT NULL
+    CONSTRAINT release_machine_hostname_source CHECK (hostname_source IN ('machine-name', 'configuration', 'none', 'legacy-stable', 'unrecorded')),
   hostname_name        text CHECK (hostname_name <> ''),
+  CONSTRAINT release_machine_hostname_name CHECK ((hostname_source = 'machine-name') = (hostname_name IS NOT NULL)),
   PRIMARY KEY (release, machine),
   UNIQUE (release, machine, import_base_revision),
   UNIQUE (release, machine, key_name, key_version),

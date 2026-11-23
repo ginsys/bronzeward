@@ -81,6 +81,10 @@ func TestReleaseHostnameOutsideTheEnumeration(t *testing.T) {
 		{"control: machine-name with its name", hostRecord{"machine-name", &name}, false},
 	} {
 		d := newDraftEnv(t)
+		// The table refuses these records at commit (internal/migrate TestReleaseConstraints); the
+		// read's own guard is shown on a database without those two checks.
+		mustExec(t, d.db, `ALTER TABLE release_machine DROP CONSTRAINT release_machine_hostname_source,
+			DROP CONSTRAINT release_machine_hostname_name`)
 		draft := d.draft
 		if i > 0 {
 			draft = d.newReleaseDraft(i)
