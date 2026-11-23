@@ -5,14 +5,20 @@
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import { Id, useReads } from "./list.tsx";
 import { namesOf, principalId, principalText } from "./principals.ts";
+import { usePrincipal } from "./shell.tsx";
+
+// The signed-in person is "you" wherever a principal is shown; the identifier stays the title.
+const YOU = "you";
 
 export function Who({ id, none }: { id: string | null | undefined; none?: string }): ReactNode {
   const { client, view, again, settle, undropped } = useReads();
+  const me = usePrincipal();
   const names = namesOf(client);
   // The page's reads start again with the view and with each read again, a new epoch included, and a
   // restore may change who an identifier names: a name read under another generation is not kept.
   const gen = `${view}|${again}`;
-  const ask = id != null && principalId(id);
+  const you = id != null && id === me;
+  const ask = id != null && principalId(id) && !you;
   useEffect(() => {
     if (!ask) return;
     // A refusal the names read meets that the shell must act on ends the page as any read's does:
@@ -22,6 +28,6 @@ export function Who({ id, none }: { id: string | null | undefined; none?: string
   }, [names, gen, id, ask, settle, undropped]);
   const snapshot = () => (ask ? names.get(gen, id) : undefined);
   const name = useSyncExternalStore(names.subscribe, snapshot, snapshot);
-  const text = principalText(name);
+  const text = you ? YOU : principalText(name);
   return text === undefined || id == null ? <Id id={id} {...(none !== undefined && { none })} /> : <span title={id}>{text}</span>;
 }

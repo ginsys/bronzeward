@@ -19,10 +19,10 @@ const unknown = (i: number): P => ({ id: id(i), kind: "unknown", issuer: null, s
 const answer = (items: P[]): ReadResult<{ items: P[] }> => ({ kind: "ok", data: { items } });
 
 describe("principalText: the fallbacks of A7 (G23)", () => {
-  test("a human's display name, else its subject at its issuer, a service's name", () => {
+  test("a human's display name, else an operator with no name on record and its subject at its issuer, a service's name", () => {
     expect(principalText(human(0, { display: "Ada Lovelace" }))).toBe("Ada Lovelace");
-    expect(principalText(human(0))).toBe("sub-0 at https://idp.example");
-    expect(principalText(human(0, { display: "" }))).toBe("sub-0 at https://idp.example");
+    expect(principalText(human(0))).toBe("an operator with no name on record, subject sub-0 at https://idp.example");
+    expect(principalText(human(0, { display: "" }))).toBe("an operator with no name on record, subject sub-0 at https://idp.example");
     expect(principalText(service(1, "backup-agent"))).toBe("backup-agent");
   });
 
@@ -233,7 +233,7 @@ describe("Who (G23): the name, with the identifier in the title, else the shorte
     expect(show(h(Who, { id: id(1) }))).toBe(shortened);
     names.want(gen, [id(1)]);
     await names.idle();
-    expect(show(h(Who, { id: id(1) }))).toBe(`<span title="${id(1)}">sub-0 at https://idp.example</span>`);
+    expect(show(h(Who, { id: id(1) }))).toBe(`<span title="${id(1)}">an operator with no name on record, subject sub-0 at https://idp.example</span>`);
   });
 
   test("shows the shortened identifier when the read failed, the identifier is unknown or the name is not safe", async () => {
@@ -265,7 +265,7 @@ describe("Who (G23): the name, with the identifier in the title, else the shorte
 });
 
 describe("the sites that show a principal (G23): each shows the name, and the shortened identifier until it is read", () => {
-  const named = "sub-0 at https://idp.example";
+  const named = "an operator with no name on record, subject sub-0 at https://idp.example";
   const seeded = async () => {
     const m = make();
     m.names.want(gen, [id(1)]);

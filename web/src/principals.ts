@@ -16,7 +16,11 @@ export const PRINCIPAL_READS = 100;
 export const principalId = (id: string) => /^idn_[a-z2-7]{25}[aeimquy4]$/.test(id);
 
 
-// A human's display name, else its subject at its issuer; a service's name. Nothing (the caller shows
+// What a person with no display name is called: the provider's access token carried no `name` or
+// `preferred_username` (or the claim `auth.oidc.displayClaim` names), so the subject is all there is.
+export const NO_NAME = "an operator with no name on record";
+
+// A human's display name, else "an operator with no name on record, subject <subject> at <issuer>"; a service's name. Nothing (the caller shows
 // the shortened identifier) for an identifier no row holds, a read that did not answer, a record that
 // names nobody, and text any member of which is not safe.
 export function principalText(p: Principal | undefined): string | undefined {
@@ -25,7 +29,7 @@ export function principalText(p: Principal | undefined): string | undefined {
   if (!given.every((v) => SAFE.test(v))) return undefined;
   if (p.kind === "service") return p.service || undefined;
   if (p.kind !== "human") return undefined;
-  return p.display || (p.subject && p.issuer ? `${p.subject} at ${p.issuer}` : undefined);
+  return p.display || (p.subject && p.issuer ? `${NO_NAME}, subject ${p.subject} at ${p.issuer}` : undefined);
 }
 
 export interface Names {
