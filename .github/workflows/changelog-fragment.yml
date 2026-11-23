@@ -1,0 +1,28 @@
+name: Changelog fragment
+
+# A pull request records its release note as a file in changelog.d/ (see its README), so two pull
+# requests never edit the same CHANGELOG.md lines (ginsys/bronzeward#262). The check is the shared
+# workflow of ginsys/.github; it is skipped for a branch starting `dependabot/`, `renovate/` or
+# `release/`, and for a pull request labelled `no-changelog` (a change that needs no entry: CI,
+# tests, documentation only). This file is its own small workflow so that toggling the label re-runs
+# it alone and not the CI jobs.
+
+permissions:
+  contents: read
+
+# The caller owns the group: a reusable workflow that built it from github.workflow would equal this
+# one and be cancelled as a deadlock.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+jobs:
+  changelog-fragment:
+    permissions:
+      contents: read
+    uses: ginsys/.github/.github/workflows/changelog-fragment.yml@0baa5b46e705654542af90d2af0ebaea32d03ee1 # 2026-11-24

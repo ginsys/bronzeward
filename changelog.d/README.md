@@ -14,5 +14,7 @@ Fixed
 - A malformed database DSN no longer reaches the error text. Fixes owner/repo#587.
 ```
 
-The release workflow and the full rules are in
+A change that needs no entry (CI, tests, documentation only) carries the label `no-changelog`
+instead; the `Changelog fragment` check then passes without a file. The release workflow and the
+full rules are in
 [ginsys/.github, docs/release.md](https://github.com/ginsys/.github/blob/main/docs/release.md).

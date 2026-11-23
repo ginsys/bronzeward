@@ -56,7 +56,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
-    uses: ginsys/.github/.github/workflows/release.yml@31fe25d73f696b3b13d7a728f4d5dd4518d58a86 # 2026-11-23
+    uses: ginsys/.github/.github/workflows/release.yml@0baa5b46e705654542af90d2af0ebaea32d03ee1 # 2026-11-24
     with:
       action: ${{ inputs.action }}
       dry_run: ${{ inputs.dry_run }}
@@ -79,7 +79,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    uses: ginsys/.github/.github/workflows/publish-github.yml@31fe25d73f696b3b13d7a728f4d5dd4518d58a86 # 2026-11-23
+    uses: ginsys/.github/.github/workflows/publish-github.yml@0baa5b46e705654542af90d2af0ebaea32d03ee1 # 2026-11-24
     with:
       tag: ${{ needs.release.outputs.tag }}
       sha: ${{ needs.release.outputs.sha }}

@@ -15,6 +15,7 @@ on:
       - ".github/workflows/release-build.yml"
       - ".github/workflows/release-dry-run.yml"
       - ".goreleaser.yaml"
+      - "mise.toml"
       - "VERSION"
       - "CHANGELOG.md"
       - "changelog.d/**"
@@ -44,7 +45,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
-    uses: ginsys/.github/.github/workflows/release.yml@31fe25d73f696b3b13d7a728f4d5dd4518d58a86 # 2026-11-23
+    uses: ginsys/.github/.github/workflows/release.yml@0baa5b46e705654542af90d2af0ebaea32d03ee1 # 2026-11-24
     with:
       action: release
       dry_run: true
@@ -65,7 +66,7 @@ jobs:
     # A dry run reads and previews only, so it needs no write grant.
     permissions:
       contents: read
-    uses: ginsys/.github/.github/workflows/publish-github.yml@31fe25d73f696b3b13d7a728f4d5dd4518d58a86 # 2026-11-23
+    uses: ginsys/.github/.github/workflows/publish-github.yml@0baa5b46e705654542af90d2af0ebaea32d03ee1 # 2026-11-24
     with:
       tag: ${{ needs.release.outputs.tag }}
       sha: ${{ needs.release.outputs.sha }}
