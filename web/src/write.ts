@@ -25,6 +25,7 @@ export interface WriteSpec {
   ingests?: boolean;
   // Sent once: one attempt, no repeat and no wait, so a 503 the layer would repeat ends `not-done` at once and a failed
   // send ends `unknown`. For a request that only reads and records nothing, where trying the next entry of a list beats a repeat.
+  // The one exception is a 401 whose renewal succeeds: a renewal is not a repeat of a failure, so it is sent once more, after 1 s.
   once?: true;
   // The recovery entry (§8.4 item 3): its own commit mints the new epoch, so it is sent without
   // Bronzeward-Expected-Epoch and with no epoch read, repeated under its key with the principal

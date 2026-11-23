@@ -1298,10 +1298,11 @@ describe("a list try answered 401 through the real write layer", () => {
     const writes = new Writes(() => "p", async (ms) => void waits.push(ms));
     const attempts: Record<string, number> = {};
     let renewals = 0;
+    let ended = 0;
     writes.client = {
       currentEpoch: "e1",
       renew: async () => (renewals++, true),
-      endWrites: () => {},
+      endWrites: () => void ended++,
       attempt: async (m: string, _path: string, _h: unknown, body: string) => {
         const headers = new Headers({ "Bronzeward-Epoch": "e1" });
         if (m === "GET") return { status: 200, headers, data: {} };
@@ -1311,7 +1312,7 @@ describe("a list try answered 401 through the real write layer", () => {
         return { status: 201, headers, data: { ...DISCOVERY, endpoint } };
       },
     } as unknown as Client;
-    return { env: { send: sender(writes, () => true) } as unknown as Env, attempts, waits, renewals: () => renewals };
+    return { env: { send: sender(writes, () => true) } as unknown as Env, attempts, waits, renewals: () => renewals, ended: () => ended };
   };
 
   test("the first endpoint answered 401 once is sent twice, gives the cluster, and the second is not sent; the 1 s wait is the only wait", async () => {
@@ -1325,9 +1326,11 @@ describe("a list try answered 401 through the real write layer", () => {
   });
 
   test("the first endpoint answered 401 again after the renewal ends the list as a lost sign-in, and the second is not sent", async () => {
-    const { env, attempts } = layer([401, 401]);
+    const { env, attempts, ended } = layer([401, 401]);
     const r = await discoverCluster(env, named(LIST.join(", ")), {});
     expect(r.ok).toBe(false);
     expect(attempts).toEqual({ [LIST[0]!]: 2 });
+    expect(ended()).toBe(1);
+    if (!r.ok) expect(r.reference?.status).toBe(401);
   });
 });
