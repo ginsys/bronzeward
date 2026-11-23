@@ -85,7 +85,7 @@ export function nameOf(hostname: string): { name: string; note?: string } | { na
 // The talosconfig cut to one context: the one `name` gives, else the current one, with its certificate
 // authority, certificate and key and nothing else, as discover.OneContext writes it (the Go golden and
 // this one's test read the same two files). The reasons name no text of the file.
-export function cutContext(text: string, name: string | undefined): { document: string; endpoint: string; count: number } {
+export function cutContext(text: string, name: string | undefined): { document: string; endpoint: string; endpoints: string[]; count: number } {
   if (text.length > MAX_FILE) throw new Error("the file is larger than 512 KiB, the most a first key may be");
   let cfg: unknown;
   try {
@@ -101,11 +101,11 @@ export function cutContext(text: string, name: string | undefined): { document: 
   const c = (contexts as Record<string, unknown>)[picked] as Record<string, unknown> | null;
   const { ca, crt, key, endpoints } = c ?? {};
   if (![ca, crt, key].every((v) => typeof v === "string" && v !== "")) throw new Error(NO_CREDENTIALS);
-  const endpoint = Array.isArray(endpoints) && typeof endpoints[0] === "string" ? endpoints[0] : "";
-  // How many endpoints the context lists: the page uses the first and says so.
-  const count = Array.isArray(endpoints) ? endpoints.filter((e) => typeof e === "string").length : 0;
+  // The endpoints the context lists, in order: the page tries each until one gives the cluster.
+  const listed = Array.isArray(endpoints) ? endpoints.filter((e): e is string => typeof e === "string") : [];
+  const endpoint = listed[0] ?? "";
   // `endpoints: []` as Talos writes it, so the two cuts parse to one document.
-  return { document: stringify({ context: picked, contexts: { [picked]: { endpoints: [], ca, crt, key } } }), endpoint, count };
+  return { document: stringify({ context: picked, contexts: { [picked]: { endpoints: [], ca, crt, key } } }), endpoint, endpoints: listed, count: listed.length };
 }
 
 // The page's `send`. A write that carries the document (it has a `released` hook) is kept per write layer,
@@ -199,8 +199,9 @@ export function endpointNote(text: string | undefined, context: string, typed: s
   const read = readEndpoint(text, context, typed.trim());
   if (read === undefined) return undefined;
   if (read.endpoint === "") return NO_ENDPOINT;
-  // The page uses one endpoint: the first of a list says so, and says how long the list is.
-  if (read.count > 1) return `The page will try the first of ${read.count} endpoints, ${read.endpoint}.`;
+  // A list is tried in order, from the first; a typed endpoint is alone. No wait is stated here: the figures
+  // belong to the server and the command, and the specification states them.
+  if (read.count > 1) return `The page will try the ${read.count} endpoints in order, starting with ${read.endpoint}.`;
   return `The page will try the cluster at ${read.endpoint}.`;
 }
 
@@ -232,12 +233,35 @@ const endpointOf = (address: string) => (address.includes(":") && !address.start
 // The address that carries the first key: the first control-plane member that answered.
 const keyAddress = (f: Discovery) => members(f).find((m) => m.role === "controlplane" && m.answered)?.address;
 
+// What the page tells the caller about a list it is trying: each endpoint as it goes (its place in the list), and
+// whether the person stopped, which is read between tries (the write layer cannot end one in flight).
+export interface Tries {
+  onTry?: (endpoint: string, n: number, of: number) => void;
+  stopped?: () => boolean;
+}
+
+// Whether a failed try leaves the next endpoint worth trying. A discovery only reads, so moving on costs time and
+// nothing else. An answer that belongs to the endpoint (no answer, or a node that is no control plane) moves on;
+// one every endpoint would give the same way (a refused key, a malformed request, a cluster too large, a
+// sign-in, a defect), or that says nothing about an endpoint (an outcome that is unknown), stops the list.
+function movesOn(o: Outcome): boolean {
+  if (o.kind !== "refused" || o.problem === null) return false;
+  if (o.status === 503) return o.problem.type === "urn:bronzeward:problem:talos-access-unavailable";
+  return o.status === 422 && o.problem["rule"] === "first-key-endpoint-no-control-plane";
+}
+
+// A listed entry that cannot be an endpoint (it holds a space, a slash, an at sign and the like) is not sent: the
+// server refuses it as a malformed request, which would stop the whole list for one bad entry. The server's own
+// grammar (internal/talos ParseEndpoint) is not copied, so an entry that looks right and is not still stops it.
+const sendable = (endpoint: string) => /^[^\s/@%\\#?]+$/.test(endpoint);
+
 // Reads the cluster's members with the cut talosconfig, and refuses what the CLI refuses before it records
 // anything: a contract this server does not render, and a cluster with no control-plane member to carry the
 // first key. The file's text is held only as its cut. A name is sent as it is: the server resolves it once
-// and answers the address it dialled (found.endpoint). Each `why` is whole sentences with no lead of its
-// own, because the page writes "Nothing was recorded." once: a discovery only reads.
-export async function discoverCluster(env: Env, text: string, o: { context?: string; endpoint?: string }): Promise<{ ok: true; plan: Plan } | { ok: false; why: string; reference?: Reference }> {
+// and answers the address it dialled (found.endpoint). A typed endpoint is the only one tried; with none typed
+// the context's endpoints are tried in order until one gives the cluster. Each `why` is whole sentences with no
+// lead of its own, because the page writes "Nothing was recorded." once: a discovery only reads.
+export async function discoverCluster(env: Env, text: string, o: { context?: string; endpoint?: string } & Tries): Promise<{ ok: true; plan: Plan } | { ok: false; why: string; reference?: Reference }> {
   let cut;
   try {
     cut = cutContext(text, o.context);
@@ -245,10 +269,41 @@ export async function discoverCluster(env: Env, text: string, o: { context?: str
     return { ok: false, why: sentence((e as Error).message) };
   }
   const typed = (o.endpoint ?? "").trim();
-  const endpoint = typed !== "" ? typed : cut.endpoint;
-  if (endpoint === "") return { ok: false, why: NO_ENDPOINT };
-  const out = await env.send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", document: cut.document, endpoint }, released: () => {} });
-  if (out.kind !== "done") return { ok: false, why: `${discoveryWhy(out)}${out.kind === "refused" && out.status === 503 && !isAddress(endpoint) ? nameHint(endpoint) : ""}`, ...referenceOf(out) };
+  const tries = typed !== "" ? [typed] : cut.endpoints;
+  if (tries.length === 0) return { ok: false, why: NO_ENDPOINT };
+  const failures: { endpoint: string; why: string }[] = [];
+  let last: Outcome | undefined;
+  let sent = 0;
+  let stopped = false;
+  let out: Outcome | undefined;
+  let endpoint = "";
+  for (const [i, listed] of tries.entries()) {
+    if (!sendable(listed)) {
+      failures.push({ endpoint: listed, why: "it is not an endpoint, so it was not tried." });
+      continue;
+    }
+    if (sent > 0 && o.stopped?.() === true) {
+      stopped = true;
+      break;
+    }
+    endpoint = listed;
+    sent++;
+    o.onTry?.(endpoint, i + 1, tries.length);
+    out = await env.send({ method: "POST", path: "/discoveries", resource: "/clusters", body: { kind: "talosconfig", document: cut.document, endpoint }, released: () => {} });
+    if (out.kind === "done") break;
+    last = out;
+    failures.push({ endpoint, why: `${discoveryWhy(out)}${out.kind === "refused" && out.status === 503 && !isAddress(endpoint) ? nameHint(endpoint) : ""}` });
+    if (!movesOn(out)) break;
+  }
+  if (out === undefined || out.kind !== "done") {
+    // One answer from one try is the answer as it was; several, or a stop, say each endpoint with its own.
+    const ref = last === undefined ? {} : referenceOf(last);
+    if (failures.length === 1 && !stopped) return { ok: false, why: failures[0]!.why, ...ref };
+    const lead = stopped ? "Stopped before trying the other endpoints." : "No endpoint gave the cluster.";
+    const said = failures.map((f) => `${f.endpoint}: ${f.why}`).join(" ");
+    const tail = failures.length > 1 ? " Every node that refuses the first key gives the same answer as for an endpoint that does not answer, so read each answer above." : "";
+    return { ok: false, why: `${lead} ${said}${tail}`.trim(), ...ref };
+  }
   const found = out.data as Discovery;
   if (!found.supported) return { ok: false, why: `Contract ${found.contract} is not the contract of the machinery in this server, so it would refuse the cluster.` };
   if (keyAddress(found) === undefined) return { ok: false, why: "No control-plane member answered, so no address can carry the first key. Run it again once one does." };

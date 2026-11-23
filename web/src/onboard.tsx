@@ -41,6 +41,10 @@ export function OnboardCluster() {
   const [lines, setLines] = useState<Line[]>([]);
   const [held, setHeld] = useState(false);
   const [busy, setBusy] = useState(false);
+  // The endpoint the read is on, with its place in the list, while it tries a list; Stop ends the list after the try in flight.
+  const [trying, setTrying] = useState<string>();
+  const [stopping, setStopping] = useState(false);
+  const stop = useRef(false);
   const [ended, setEnded] = useState<boolean>();
   // The epoch changed after the plan's first press began: the plan cannot be run again, only chosen again.
   const [moved, setMoved] = useState(false);
@@ -89,13 +93,19 @@ export function OnboardCluster() {
     if (file.size > MAX_FILE) return setNote({ text: "The file is larger than 512 KiB, the most a first key may be." });
     setBusy(true);
     setNote(undefined);
+    stop.current = false;
+    setStopping(false);
+    setTrying(undefined);
     // The read's own answer says what is wrong; a note for the previous text, or a preview still being read,
     // must not stand beside it.
     unsay();
     const text = await file.text().catch(() => undefined);
-    const r = text === undefined ? ({ ok: false, why: "The file could not be read." } as const) : await discoverCluster(env, text, { context: String(d.get("context") ?? ""), endpoint: String(d.get("endpoint") ?? "") });
+    // Several endpoints are tried in order: the page says which one it is on, and Stop ends the list after the try in flight.
+    const tries = { onTry: (endpoint: string, n: number, of: number) => alive.current && setTrying(of > 1 ? `Trying ${endpoint} (${n} of ${of}).` : undefined), stopped: () => stop.current };
+    const r = text === undefined ? ({ ok: false, why: "The file could not be read." } as const) : await discoverCluster(env, text, { ...tries, context: String(d.get("context") ?? ""), endpoint: String(d.get("endpoint") ?? "") });
     if (!alive.current) return;
     setBusy(false);
+    setTrying(undefined);
     // A discovery only reads, so this lead is true; its reasons are whole sentences with none of their own.
     if (!r.ok) return setNote({ text: `Nothing was recorded. ${r.why}`, ...("reference" in r && r.reference !== undefined && { reference: r.reference }) });
     unsay();
@@ -161,10 +171,11 @@ export function OnboardCluster() {
           </p>
           <p><label>Talosconfig file: <input type="file" name="file" required /></label></p>
           <p><label>Talos context: <input name="context" autoComplete="off" /></label> the current one when empty</p>
-          <p><label>Talos endpoint: <input name="endpoint" autoComplete="off" /></label> the context's first endpoint when empty</p>
+          <p><label>Talos endpoint: <input name="endpoint" autoComplete="off" /></label> the context's endpoints, tried in order, when empty</p>
           {said !== undefined && <p role="status" data-testid="onboard-endpoint">{said}</p>}
           <p><Action label="Read cluster" needs={["author"]} submit busy={busy} /></p>
-          {busy && <p role="status">Reading the cluster's nodes</p>}
+          {busy && <p role="status" data-testid="onboard-trying">{stopping ? "Stopping: no other endpoint will be tried after this one." : (trying ?? "Reading the cluster's nodes")}</p>}
+          {busy && trying !== undefined && !stopping && <p><button type="button" onClick={() => { stop.current = true; setStopping(true); }}>Stop</button></p>}
         </form>
       )}
       {phase === "confirm" && p !== undefined && (
