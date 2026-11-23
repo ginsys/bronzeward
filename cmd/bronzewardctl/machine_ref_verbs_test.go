@@ -104,6 +104,28 @@ func TestMachineVerbRefusesAnAmbiguousName(t *testing.T) {
 	}
 }
 
+// --cluster narrows a name. With an identifier it would do nothing, so it is a usage error and nothing is sent, in every
+// verb that takes the flag (an advisory finding on ginsys/bronzeward#1125).
+func TestClusterWithAnIdentifierIsRefused(t *testing.T) {
+	for _, args := range [][]string{
+		{"machine", "freeze", "mch_b", "--reason", "r", "--cluster", "alpha"}, {"machine", "rename", "mch_b", "--name", "n", "--cluster", "alpha"},
+		{"machine", "timeline", "mch_b", "--cluster", "alpha"}, {"drift", "show", "mch_b", "--cluster", "alpha"},
+		{"plan", "list", "--machine", "mch_b", "--cluster", "alpha"}, {"recovery", "mark", "mch_b", "--cluster", "alpha"},
+	} {
+		setServerFacts(t, 10, nil)
+		seen := recoveryServer(t, namedAnswers(), `{}`)
+		code, _, errOut := runDrift(t, args...)
+		if code != 2 || !strings.Contains(errOut, "--cluster narrows a name; an identifier needs none") {
+			t.Errorf("%v: exit %d, stderr %q; want the usage error", args, code, errOut)
+		}
+		for _, s := range seen() {
+			if strings.Contains(s, "mch_b") {
+				t.Errorf("%v: sent %q after the refusal", args, s)
+			}
+		}
+	}
+}
+
 // A verb given a name says which machine the act landed on, `<name> (<identifier>)`, in the line a person reads
 // afterwards; given an identifier it prints the identifier alone.
 func TestResultLineNamesTheMachine(t *testing.T) {
