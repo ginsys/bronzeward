@@ -24,6 +24,14 @@ type publishClients struct {
 	encrypter compile.ArtifactEncrypter
 }
 
+// fillHostname is whether a release compiles a machine's name as its hostname (compilation.md §6.1
+// item 2). It stays false until the change that refuses a hostname clash between machines (§6.1 item
+// 6, which the fill needs: ginsys/bronzeward#1040 part D) turns it on and removes it. A test that
+// sets it is a top-level test with no t.Parallel() and no parallel subtest: Go holds the parallel
+// tests until every serial one has finished and the cleanup has restored the value, so a
+// t.Parallel() added to such a test is a data race on this variable.
+var fillHostname = false
+
 // buildRelease performs compilation.md §6 and §11 for j up to the hand-off: the snapshot, the
 // pins classified and read, each covered machine compiled in its platform mode, the renderer
 // record (§10.2), the provenance, effective and reproduction records (§8.2, §9), and every
@@ -76,7 +84,10 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 		if err != nil {
 			return releaseUnit{}, nil, fmt.Errorf("machine %s: %w", m.machine, err)
 		}
-		in := compile.Input{Base: sources[m.importBase], Mode: mode, Name: m.name}
+		in := compile.Input{Base: sources[m.importBase], Mode: mode}
+		if fillHostname {
+			in.Name = m.name
+		}
 		for _, frv := range m.fragments {
 			in.Fragments = append(in.Fragments, sources[frv])
 		}
