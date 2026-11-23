@@ -241,8 +241,14 @@ func (e *env) applyRead(c *client.Client, rows []*applyRow) {
 		}
 		// The server withholds a change it cannot redact or cannot compare; a batch is never approved over one.
 		if d := r.body.Evidence.Diff; d != nil && d.Withheld {
-			id := r.plan
-			r.plan, r.line = "", sf("stopped: the change of its plan cannot be shown, either because the configuration could not be redacted or because the machine holds a configuration other than the one Bronzeward last applied; it is left out. Read it with plan show %s, approve it with approve %[1]s, or leave this machine out", client.ShellWord(id))
+			why := "stopped: the change of its plan cannot be shown, either because the configuration could not be redacted or because the machine holds a configuration other than the one Bronzeward last applied; it is left out. "
+			if r.made {
+				// The plan is this command's own and is cancelled below, so approving it is no way forward.
+				why += "This command asks for the plan it made to be cancelled; to apply this machine anyway, make a plan with plan create, read it with plan show and approve it with approve, or leave this machine out"
+			} else {
+				why += sf("Read it with plan show %s, approve it with approve %[1]s, or leave this machine out", client.ShellWord(r.plan))
+			}
+			r.plan, r.line = "", why
 		}
 	}
 }

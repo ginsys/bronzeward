@@ -278,14 +278,14 @@ func TestApplyFaults(t *testing.T) {
 	// for it: a plan this command made is cancelled, one somebody else prepared is left as it was.
 	f, code, out, errOut = run(func(f *applyFake) { f.withheld = "pln_made" })
 	if code != 0 || !strings.Contains(errOut, "beta  worker  worker-base,storage  stopped: the change of its plan cannot be shown") ||
-		!strings.Contains(errOut, "plan show 'pln_made'") || !strings.Contains(errOut, "Cancellation recorded for the plans this command made: pln_made. "+cancelLimits) ||
+		!strings.Contains(errOut, "make a plan with plan create") || strings.Contains(errOut, "approve 'pln_made'") || !strings.Contains(errOut, "Cancellation recorded for the plans this command made: pln_made. "+cancelLimits) ||
 		!strings.Contains(out, "alpha: approved") || strings.Contains(sent(f), "pln_made/approvals") || !strings.Contains(sent(f), "pln_made/cancellations") {
 		t.Errorf("a withheld change, made plan: exit %d, stdout %q, stderr %q, sent %q", code, out, errOut, f.took())
 	}
 
 	f, code, out, errOut = run(func(f *applyFake) { f.withheld = "pln_prepared" })
 	if code != 0 || !strings.Contains(errOut, "alpha  controlplane  cp-base  stopped: the change of its plan cannot be shown") || strings.Contains(errOut, "Cancellation recorded") ||
-		!strings.Contains(out, "beta: approved") || strings.Contains(sent(f), "pln_prepared") {
+		!strings.Contains(errOut, "approve 'pln_prepared'") || !strings.Contains(out, "beta: approved") || strings.Contains(sent(f), "pln_prepared") {
 		t.Errorf("a withheld change, prepared plan: exit %d, stdout %q, stderr %q, sent %q", code, out, errOut, f.took())
 	}
 
