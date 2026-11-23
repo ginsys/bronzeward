@@ -993,7 +993,7 @@ does a plan that could not be made. An approval or a cancellation whose outcome 
 unknown, never as unapproved or as not cancelled, and exits 3. Unlike the console's apply page, which sends
 nothing new while one of its writes has an unknown outcome, the command goes on with the plans after an approval of
 unknown outcome while the epoch holds, and says on that line what became of each of them (approved, of unknown
-outcome, refused, or not sent because the epoch moved), counted from what it saw: each approval is its own plan under
+outcome, or not approved: a refusal, a write not sent because the epoch moved), counted from what it saw: each approval is its own plan under
 the same read epoch, the one `y` confirmed them all, and the command has no open write to hold or repeat. Enter, `n` and the end of input approve nothing and cancel the
 plans this command made, never one it read. A Ctrl-C at the question leaves the plans to expire at the time
 each shows. A machine already applied, frozen, in drift or in an operation is left out with its reason, and
