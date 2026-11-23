@@ -58,7 +58,8 @@ snapshot:
 changelog:
   disable: true
 
-# GoReleaser only builds. Release / Publish (.github/workflows/release-publish.yml) publishes these
-# same snapshot archives with their signature and SBOMs, and waits for the licence (#16).
+# GoReleaser only builds. The release workflow (.github/workflows/release.yml) builds these snapshot
+# archives, adds their SBOMs, and has the shared publish workflow sign and publish them; it stops
+# at the licence (#16).
 release:
   disable: true
