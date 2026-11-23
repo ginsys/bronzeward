@@ -8,6 +8,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { MachineShown, TimelineRows } from "./machine.tsx";
 import { NextStepSection } from "./review.tsx";
+import { NodeCell } from "./machines.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { DraftItem } from "./drafts.tsx";
 import { PlanItem, ReleaseItem } from "./resources.tsx";
@@ -254,5 +255,18 @@ describe("the two revision numbers of one published draft say what each counts",
     await mount(h(DraftItem, { id: DRF }));
     await settled();
     expect(box.querySelector('[data-testid="draft-line"]')?.textContent).toBe("open, revision 6, Cluster office.");
+  });
+});
+
+describe("the node identifier is cut where a list shows it and labelled on the machine's page", () => {
+  const whole = "4c1f9a0b7d2e4c1f9a0b7d2e4c1f9a0b";
+  test("a list cell shows the start of the opaque value and keeps the whole as its title", async () => {
+    await mount(h(NodeCell, { m: { hardware: { talosNodeId: whole, smbiosUuid: null } } as never }));
+    expect(text()).toBe("node 4c1f…");
+    expect(titles()).toEqual([whole]);
+  });
+  test("a short value is shown as it is", async () => {
+    await mount(h(NodeCell, { m: { hardware: { talosNodeId: "n1", smbiosUuid: null } } as never }));
+    expect(text()).toBe("node n1");
   });
 });

@@ -25,7 +25,9 @@ type EntryBody = components["schemas"]["EntryBody"];
 // §8.5 start mode: the last one an answer showed, unknown before any.
 export type StartMode = "normal" | "recovery" | "unknown";
 
-export const PRE_ENTRY = "This server was started for recovery and serves only the recovery entry until it is recorded.";
+// What the epoch is, where a person compares it: a restore and a recovery entry each start a new one.
+const EPOCH_MEANS = " (the number of this server life: a restore or a recovery entry starts a new one)";
+export const PRE_ENTRY ="This server was started for recovery and serves only the recovery entry until it is recorded.";
 export const RECOVERY_START =
   "Server started for recovery: plan creation, approval and unfreeze wait for its normal restart, and publications it accepts complete only then. Imports complete here.";
 export const UNKNOWN_START = "Whether this server was started for recovery is not known yet.";
@@ -57,7 +59,7 @@ export function RecoveryBanner({ recovery, mode }: { recovery: Recovery | undefi
   const since = recovery?.entry != null ? ` since ${clock(new Date(recovery.entry.enteredAt))}` : "";
   return (
     <Status testid="recovery">
-      Recovery mode{since}{recovery !== undefined ? `, epoch ${recovery.epoch}. ${scopeSummary(recovery.scopes)}` : "."} Drafts can be edited.{" "}
+      Recovery mode{since}{recovery !== undefined ? `, epoch ${recovery.epoch}${EPOCH_MEANS}. ${scopeSummary(recovery.scopes)}` : "."} Drafts can be edited.{" "}
       {mode === "recovery" ? RECOVERY_START : mode === "unknown" ? UNKNOWN_START : ""}
     </Status>
   );
@@ -303,7 +305,7 @@ export function RecoveryConsole() {
       <h2>Recovery</h2>
       <PageNote parts={[RECOVERY_NOTE, !roles.includes("recovery-admin") && RECOVERY_ROLE_NOTE]} />
       <Status testid="recovery-state">
-        Recovery mode {r.recoveryMode ? "on" : "off"}, epoch {r.epoch}. {mode === "recovery" ? RECOVERY_START : mode === "normal" ? "Server started normally." : UNKNOWN_START}
+        Recovery mode {r.recoveryMode ? "on" : "off"}, epoch {r.epoch}{EPOCH_MEANS}. {mode === "recovery" ? RECOVERY_START : mode === "normal" ? "Server started normally." : UNKNOWN_START}
       </Status>
       <RecoveryFacts r={r} />
       <Scopes scopes={inRecovery(r.scopes)} />

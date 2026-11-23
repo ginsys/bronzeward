@@ -65,7 +65,10 @@ export function observed(m: Machine, now: number): string {
 }
 
 // G8: the node ID when the machine was recorded by it, else its SMBIOS UUID.
-export const node = (m: Machine) => (m.hardware.talosNodeId != null ? `node ${m.hardware.talosNodeId}` : `UUID ${m.hardware.smbiosUuid ?? "unknown"}`);
+// A machine's page keeps the whole value, labelled with what it is: a person compares it with what Talos itself reports.
+export const node = (m: Machine) => (m.hardware.talosNodeId != null ? `Talos node ID ${m.hardware.talosNodeId}` : `SMBIOS UUID ${m.hardware.smbiosUuid ?? "unknown"}`);
+// A list's cell: nobody acts on the whole opaque value there, so it is cut (`node 4c1f…`) and the whole is the title attribute.
+export const NodeCell = ({ m }: { m: Machine }) => <span title={m.hardware.talosNodeId ?? m.hardware.smbiosUuid ?? undefined}>{nodeShort(m.hardware)}</span>;
 // A release as its title (the identifier is the title attribute): `Named` reads it through the page's store.
 export const release = (id: string | null) => <Named id={id} />;
 
@@ -213,7 +216,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
                 <tr key={m.id}>
                   <th scope="row"><MachineRef machine={m} shared={shared} /></th>
                   <td>{m.talosEndpoint}</td>
-                  <td>{node(m)}</td>
+                  <td><NodeCell m={m} /></td>
                   <td>{release(m.desired)}</td>
                   <td>{m.applied === null ? "none" : <>{release(m.applied.release)} ({safeWord(m.applied.source)})</>}</td>
                   <td title={m.observed?.at}>{observed(m, now)}</td>
@@ -314,7 +317,7 @@ export function MachineSummary({ machines }: { machines: readonly Machine[] }) {
             <tr key={m.id}>
               <th scope="row"><MachineRef machine={m} shared={shared} /></th>
               <td>{m.talosEndpoint}</td>
-              <td>{node(m)}</td>
+              <td><NodeCell m={m} /></td>
               <td>{badges(m).join(", ")}</td>
             </tr>
           ))}

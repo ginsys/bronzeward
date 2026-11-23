@@ -882,7 +882,7 @@ describe("the machine heading (client contracts A9)", () => {
     })));
     expect(page).toContain('<p><small>Identifier <code>mch_a</code> <button type="button">Copy</button></small></p>');
     // No word stands before the fallback link: "Cluster This cluster" would read as a name.
-    expect(page).toContain('<p><a href="/clusters/cl_a" title="cl_a">This cluster</a>, 10.5.0.2:50000, node node-a, metal.</p>');
+    expect(page).toContain('<p><a href="/clusters/cl_a" title="cl_a">This cluster</a>, 10.5.0.2:50000, Talos node ID node-a, metal.</p>');
   });
   // A machine's role stands beside its platform in a person's words, and no word stands there for a machine
   // that has none: one imported before the role was stored shows nothing, not a sentence about it (ginsys/bronzeward#1096).
@@ -897,6 +897,6 @@ describe("the machine heading (client contracts A9)", () => {
       km: { view: "v", data: m, restarted: false }, ko: { view: "v", data: undefined, restarted: false },
       tl: { kind: "ok", data: { ...UNREAD, read: true } }, kt: { view: "v", data: { ...UNREAD, read: true }, restarted: false }, older: undefined, busy: false,
     })));
-    expect(page).toContain(`node node-a, ${tail}</p>`);
+    expect(page).toContain(`Talos node ID node-a, ${tail}</p>`);
   });
 });

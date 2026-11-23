@@ -45,8 +45,8 @@ describe("the recovery banner", () => {
   test("states the entry, the epoch, the scopes and the process's restriction, or that the mode is unknown", () => {
     const enteredAt = new Date("2026-10-26T10:42:00").toISOString();
     const recovery = { epoch: "ep_r2l", recoveryMode: true, exit: null, scopes: scopes("ready"), entry: { enteredBy: "h-recovery", enteredAt, stoppedAt: enteredAt, reason: "restore", restored: [] } };
-    expect(status(h(RecoveryBanner, { recovery, mode: "recovery" }))).toBe(`Recovery mode since 10:42, epoch ep_r2l. 1 of 1 scopes not released: none can commit. Drafts can be edited. ${RECOVERY_START}`);
-    expect(status(h(RecoveryBanner, { recovery, mode: "normal" }))).toBe("Recovery mode since 10:42, epoch ep_r2l. 1 of 1 scopes not released: none can commit. Drafts can be edited.");
+    expect(status(h(RecoveryBanner, { recovery, mode: "recovery" }))).toBe(`Recovery mode since 10:42, epoch ep_r2l (the number of this server life: a restore or a recovery entry starts a new one). 1 of 1 scopes not released: none can commit. Drafts can be edited. ${RECOVERY_START}`);
+    expect(status(h(RecoveryBanner, { recovery, mode: "normal" }))).toBe("Recovery mode since 10:42, epoch ep_r2l (the number of this server life: a restore or a recovery entry starts a new one). 1 of 1 scopes not released: none can commit. Drafts can be edited.");
     expect(status(h(RecoveryBanner, { recovery: undefined, mode: "unknown" }))).toBe(`Recovery mode. Drafts can be edited. ${UNKNOWN_START}`);
   });
 
