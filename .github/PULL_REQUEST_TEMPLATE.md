@@ -6,6 +6,11 @@
 
 <!-- What this PR changes and what it deliberately leaves out. -->
 
+<!-- Only where the change makes a code decision (a new package or boundary, dependency, data model,
+     protocol or format, or concurrency model), add at most 5 lines:
+     Code shape: <the choice>. Rejected: <the option not taken, and why>.
+     ARCHITECTURE.md: <updated | not affected>. -->
+
 ## Validation
 
 <!-- Exact checks run and their results: `mise run verify` (or `python3 scripts/verify-docs.py`,
