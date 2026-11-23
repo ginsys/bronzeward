@@ -37,6 +37,8 @@ describe(`fixture act ${act}`, () => {
     it("accounts for the attempt by decision on the chosen start and end", async function () {
       this.timeout(120_000);
       const form = await control(await region($("main"), "Account for an attempt"), 'form[aria-label="Record accounting"]', "the accounting form");
+      // The form reads the machine's observations after the page is up and draws no radio until they arrive.
+      await form.$('input[type="radio"]').waitForExist({ timeout: 30_000, timeoutMsg: "the accounting form listed no observation within 30 s" });
       const start = await choice(form, "start", need("BW_FIXTURE_START"));
       say(`start: ${(await (await start.parentElement()).getText())}`);
       await start.click();
