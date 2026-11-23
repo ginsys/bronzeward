@@ -1285,9 +1285,12 @@ redacted paths and message (compilation §8.3). Where the input is a fragment
 (`fragment[N]`, the Nth fragment of the machine's composition), the refusal also
 carries `fragment`, the name its author gave the fragment, and `layer`; a
 refusal of the base, of the cluster, or with no input carries neither, and a
-client that does not read them still has the position in `input`. Redaction
-covers resolved string values only: integers and booleans are not detected
-(compilation §8.4), and a path or message may quote an authored literal.
+client that does not read them still has the position in `input`. A message is
+redacted by template and withheld where the template cannot explain it, and
+the rest is searched for exact copies of resolved string values of six bytes or
+more; a shorter copy, or a copy of an integer or boolean, inside an authored
+literal is not detected (compilation §8.3, §8.4), so a path or message may
+quote an authored literal.
 Covered machines naming
 different Kubernetes versions are `422` with rule `kubernetes`, and a hostname
 filled from a machine's name that another machine of the release holds
