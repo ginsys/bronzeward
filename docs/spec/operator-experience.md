@@ -420,7 +420,7 @@ Global: --context, -o table|json|yaml, --no-input, --no-wait, --idempotency-key,
   as well: the command reads the machine list once, matches the name across the clusters the credential reads
   (`--cluster`, a cluster's name or ID, narrows it), refuses a name no machine holds and a name that machines of
   two clusters hold, sends the identifier and shows the machine with its name beside it; an identifier is sent as
-  it is and reads no list; `--cluster` with an identifier, or in a list given no `--machine`, is a usage error
+  it is and reads no list; `--cluster` with an identifier, or in `plan list`, `operation list` and `import status` given no `--machine`, is a usage error
   (client contracts A9; the web client is unchanged: it links by identifier). A cluster is
   addressed by its ID and displayed with its recorded
   `name` beside it (`cl_9fd… (lab-a)`), and a machine the same way when it has a name
