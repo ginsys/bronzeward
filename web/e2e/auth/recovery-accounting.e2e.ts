@@ -290,9 +290,15 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await fromTitle();
     await tabTo("Release");
     await browser.keys("Enter");
-    const released = row(m).$('[data-testid="write-result"]');
-    await expect(released).toHaveText(expect.stringContaining("Scope released, was ready"), { wait: 60_000 });
-    await expect(released).toHaveText(expect.stringContaining("A release is not an approval"));
+    // The row keeps the mark's result beside the release's, so the results are read together and the release's is the one that starts so.
+    const results = async (): Promise<string[]> => {
+      const found = await row(m).$$('[data-testid="write-result"]');
+      const texts: string[] = [];
+      for (const e of found) texts.push(await e.getText());
+      return texts;
+    };
+    await browser.waitUntil(async () => (await results()).some((t) => t.startsWith("Scope released, was ready")), { timeout: 60_000, timeoutMsg: "no result of the row says the scope was released" });
+    expect((await results()).find((t) => t.startsWith("Scope released, was ready"))).toContain("A release is not an approval");
     const seen = await measure();
     expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
     expect(seen.small).toBe(0);
