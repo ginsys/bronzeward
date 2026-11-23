@@ -216,7 +216,7 @@ that the release answer says a release is not an approval.
 | 2.1.1 Keyboard, 2.1.2 No keyboard trap | a scope's row by Tab alone: every control is reached, and no Tab stays on one stop |
 | 2.4.7 Focus visible | every focus Tab reaches on the row shows an outline of at least 2 px |
 | 1.4.3 Contrast | the console with its row open: the lowest contrast of any shown text, at least 4.5:1 |
-| 2.5.8 Target size | every button and choice at least 24 by 24 px |
+| 2.5.8 Target size | every button, select and navigation link on the page, read after the release, at least 24 by 24 px; the radio choices and the explanation field are gone by then and are not measured here |
 
 A pass is the case passing in the `browser-auth` jobs of the pull request, on Chrome, Edge, Firefox and Firefox ESR on
 Linux, which must pass to merge; this file holds no per-browser cell that the jobs did not write. Not run here: the

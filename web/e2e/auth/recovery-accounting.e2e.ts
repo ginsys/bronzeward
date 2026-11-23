@@ -215,6 +215,21 @@ describe("the accounting forms of the recovery decisions (#365)", () => {
     await openConsole();
     const m = seed.machine2;
     await expect(scopeForm(m)).toBeExisting({ wait: 30_000 });
+    // The radio groups and the explanation are drawn after the observations are read, and the cluster link after its own read: count
+    // the controls only once the row holds all of them and the count has stopped moving.
+    let last = -1;
+    await browser.waitUntil(async () => {
+      const now = await browser.execute((machine: string) => {
+        const row = document.querySelector(`[data-testid="scope-${machine}"]`);
+        if (row === null) return -1;
+        const has = (s: string) => row.querySelector(s) !== null;
+        if (!has('input[type="radio"][name="start"]') || !has('input[type="radio"][name="end"]') || !has('input[name="explanation"]') || !has("a[href]")) return -1;
+        return row.querySelectorAll("a[href], button, input, select, textarea").length;
+      }, m);
+      const settled = now > 0 && now === last;
+      last = now;
+      return settled;
+    }, { timeout: 30_000, interval: 500, timeoutMsg: "the scope row never held its radio groups, explanation and cluster link with a steady control count" });
     // Every control of the row, a radio group as one (the controls of a group share the number).
     const total = await browser.execute((machine: string) => {
       const groups = new Map<string, number>();
