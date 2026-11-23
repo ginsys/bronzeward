@@ -12,19 +12,21 @@ The steps are numbered. Each one names what you do and what you should see.
 
 1. **Open the address.** Type the web address in the browser. The page loads, shows "Loading" for a
    moment, and then shows a button: **Sign in with the identity provider**. If instead it shows a
-   refusal that names the server, read it: it says what the page could not reach and what to do
-   next.
+   message and no button, read it: the page puts the reason on the screen. An open page does not
+   show that the server is well, only that it answered.
 2. **Sign in.** Press the button. The browser moves to the identity provider. Sign in there. The
    identity provider sends the browser back to the installation.
 3. **Read who you are.** The header shows "Signed in as" and your name, then "Roles:" and the list
    of your roles. This is what the **server** sees, not what you hoped for. If a role you need is
    missing, ask your administrator. Pressing the button again does not add roles.
-4. **Read the machines.** The first page is **Machines**. It lists every machine the installation
-   knows. Each row names a machine, not only an identifier.
+4. **Read the machines.** The first page is **Machines**. It shows the machines the server
+   returned to you just now. If it says "No machines recorded yet.", the installation has none
+   recorded. It does not show that a machine is reachable, or that it runs the configuration it
+   should.
 5. **Look around.** The left navigation has three groups. Inventory holds Machines, Clusters and
    Fragments and profiles. Delivery holds Drafts and releases, Plans and Operations. Governance
-   holds Audit and, for a recovery administrator, Recovery. Press a name to open it. Every page
-   only reads until you press a button that says what it will do.
+   holds Audit and, for a recovery administrator, Recovery. Press a name to open it. This page
+   only asks you to read: stop at any page that shows a button for a change.
 6. **Read the versions.** At the bottom of every page the footer reads "Server" with the server's
    version, then "API revision" and its number. The page needs a minimum API revision. A server
    below it is not used: the page says "This server serves API revision N; this client needs API
@@ -34,9 +36,9 @@ The steps are numbered. Each one names what you do and what you should see.
 
 ## What you did, and what you did not
 
-You signed in and read four pages. You changed nothing on the server or on any machine. A list that
-shows a machine does not show that the machine runs what it should: the drift page does that, in
-the journey pages.
+You signed in and read the pages you opened. You asked for no change on the server or on any
+machine. A list that shows a machine does not show that the machine runs what it should: the
+drift page does that, in the journey pages.
 
 ## If a step fails
 

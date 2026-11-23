@@ -89,7 +89,8 @@ checksum check. Then you trust whoever gave you `SHA256SUMS`.
 ## Install the command-line client
 
 Unpack the archive for your system and put `bronzewardctl` on your `PATH`. This puts it in
-`~/.local/bin`, which most systems already search.
+`~/.local/bin`. Check that this directory is on your `PATH` (`echo "$PATH"`); if it is not, add it
+to your shell's start-up file.
 
 ```bash {.bw-run}
 mkdir -p ~/.local/bin
@@ -102,7 +103,8 @@ Use the archive for your system and version. The archive also holds `LICENSE-STA
 
 Check that it starts. At this point you have no context, which is the server your client talks to
 ([contexts](contexts.md) explains them). So the command prints the client's part and then stops
-with exit status 1. That is the expected result.
+with exit status 1, which the [reference](cli-reference.md#global-flags-and-exit-codes) lists as
+"refused or failed". That is the expected result here.
 
 ```bash
 bronzewardctl version

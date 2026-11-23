@@ -107,8 +107,9 @@ sign-in on any other device.
 bronzewardctl login --device
 ```
 
-`bronzewardctl whoami` shows what the server sees: your identity, your roles and the installation's
-epoch. Use it after every sign-in to check that you are the person you meant to be.
+`bronzewardctl whoami` shows what the server sees: the context, your identity, your roles and
+whether recovery mode is on. Use it after every sign-in to check that you are the person you meant
+to be.
 `bronzewardctl logout` removes the stored sign-in and revokes its refresh token.
 
 ### Where the sign-in is kept

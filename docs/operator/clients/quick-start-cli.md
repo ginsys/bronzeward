@@ -42,9 +42,12 @@ Your browser opens at the identity provider. Sign in there. On a computer with n
 bronzewardctl whoami
 ```
 
-The answer is what the **server** sees: your identity, the roles that came from your sign-in and
-the installation's epoch. If a role you need is missing, no command that needs it will work; ask
-your administrator. Do not try another sign-in to get it.
+The answer is what the **server** sees. It lists the context, your identity, your principal (the
+server's own identifier for you), your roles, the installation's epoch and whether recovery mode is
+on. You do not need the epoch yet: it matters when a command repeats a write, which this page does
+not do. If a role you need is missing, no command that needs it will work; ask your administrator.
+Do not try another sign-in to get it. The answer says what the server saw when you asked, not
+that a command you run later is allowed.
 
 ## 4. Check the server
 
@@ -53,11 +56,11 @@ bronzewardctl version
 bronzewardctl status
 ```
 
-`version` shows the client's version, the server's version and the server's API revision. The
-client refuses to write to a server older than it can use, so a mismatch shows here first.
-`status` shows whether the installation is in normal or recovery mode, whether any machine has
-changed outside Bronzeward (drift) and whether any operation is unresolved. A reading is not a
-verdict: `status` says what the server knows now, not that the machines are well.
+`version` shows the client's version, then the server's version, its API revision and its start
+mode. The client needs a minimum API revision, and `version` prints it, so a mismatch shows here
+first. `status` shows the recovery mode, open drift (a machine changed outside Bronzeward) and
+unresolved operations, and a "Health" line. A reading is not a verdict: `none` means the server
+recorded none, and "not checked" means nobody asked the machines.
 
 ## 5. Read what the installation manages
 
@@ -67,12 +70,13 @@ bronzewardctl machine list
 ```
 
 Each list shows one page. Add `--all` to read every page. `-o json` prints the server's own
-answer unchanged, for a script.
+answer unchanged, for a script. An empty list shows only its column names: the installation has
+none recorded. It does not show that no machine exists.
 
 ## What you did, and what you did not
 
-You added a context, signed in and made four reads. You changed nothing on the server or on any
-machine. Nothing here shows that a machine runs the configuration it should: that is a drift
+You added a context, signed in and read the identity, the versions, the status and the two lists.
+You changed nothing on the server or on any machine. Nothing here shows that a machine runs the configuration it should: that is a drift
 check, in the journey pages. The reference lists every command: [command reference](cli-reference.md).
 
 ## If a step fails
