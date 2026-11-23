@@ -1,8 +1,12 @@
 # Contexts, TLS trust and sign-in
 
 A **context** is one server that `bronzewardctl` knows, with the way you sign in to it. You can keep
-several, for example one for a test installation and one for the real one. Every command runs
-against the **current** context, unless you choose another with `--context <name>`.
+several, for example one for a test installation and one for the real one. A command picks its
+context in this order: the `--context <name>` flag, then the `BRONZEWARD_CONTEXT` environment
+variable, then the **current** context.
+
+The `text` blocks on this page show the shape of the output, read from the source. This page does
+not claim that a run printed them.
 
 The reference lists every flag of the commands on this page:
 [context](cli-reference.md#context), [login](cli-reference.md#login), [whoami](cli-reference.md#whoami).
@@ -26,7 +30,8 @@ CURRENT  NAME    SERVER                          CREDENTIAL
 ```
 
 The star marks the current context. `bronzewardctl context use <name>` moves it. The first context
-you add becomes the current one.
+you add becomes the current one. A context you add later does not: select it with `--context`, or
+with `context use`.
 
 ## Add a context
 
@@ -143,8 +148,11 @@ environment value, since both can end up in logs and process lists. Give it by:
 The file must be a regular file that only you can read (mode `600`). The client refuses a file
 others can read, and says to run `chmod 600`. It must hold one line that starts with `bwt_`.
 
+Name the automation context with `--context`. If another context is the current one and it signs
+in with `oidc`, the client refuses `--token-stdin` and `--token-file` for it.
+
 ```bash
-bronzewardctl --token-stdin status < ~/.config/bronzeward-ci.token
+bronzewardctl --context ci --token-stdin status < ~/.config/bronzeward-ci.token
 ```
 
 ## Exit codes
