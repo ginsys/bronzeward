@@ -828,8 +828,8 @@ there.
 ### 3.5 A machine's name
 
 A machine may carry a name, an operator's label for finding it **(choice §17.43)**. It is stored
-in the database and is not part of any fragment or plan; from the API revision that serves the
-`hostname` rule of `422 validation-failed` (§9.1) a release compiles it as the machine's hostname
+in the database and is not part of any fragment or plan; from API revision 16, which serves the
+`hostname` rule of `422 validation-failed` (§9.1), a release compiles it as the machine's hostname
 where nothing sets one and records the name used (the last bullet below). It is served from API
 revision 10 (§9.1), which adds `name` on a machine and on `POST /machines`, the route
 `POST /machines/{id}/names`, the `name-change` timeline entry and the `name-in-use` problem code.
@@ -2241,8 +2241,9 @@ API revisions:
 | 13 | `formOnly` on a machine and on an adopt plan's `baseline` evidence, `fromFormOnly` on a plan's `diff` (§9.3, choice §17.48) |
 | 14 | `role` on a machine (§3.2, §9.2, choice §17.49) |
 | 15 | `hostname` (`source`, and `name` for `machine-name`) on each machine of a release and its review, and the name form of `409 stale-input` of the publication check (§9.2, §3.5, §4.2, choices §17.44, §17.45) |
+| 16 | the `hostname` rule of `422 validation-failed` on publication, with a release compiling a machine's name as its hostname where nothing sets one (§9.2, §3.5, compilation §6.1 item 6) |
 
-Two further parts are specified and not yet served, each taking the next revision in the change that serves it (ginsys/bronzeward#1040): the `hostname` rule of `422 validation-failed` together with a release compiling a machine's name as its hostname (§9.2, §3.5), and the name form of `409 stale-input` from the `ingest` draft transaction (§4.2, choice §17.45), with `expected` and `actual` as machine names, each a string or `null`. Revision 15 serves the `hostname` member and the name form of the publication check only.
+One further part is specified and not yet served, taking the next revision in the change that serves it (ginsys/bronzeward#1040): the name form of `409 stale-input` from the `ingest` draft transaction (§4.2, choice §17.45), with `expected` and `actual` as machine names, each a string or `null`. Revision 16 serves the `hostname` member, the name form of the publication check and the `hostname` rule.
 
 ### 9.2 Resources and routes
 
