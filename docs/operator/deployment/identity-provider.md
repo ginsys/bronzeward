@@ -93,6 +93,15 @@ is refused. An Actions v2 **target** adds the claim:
 3. Bind it to the function (`PUT /v2/actions/executions`, condition
    `{"function":{"name":"preaccesstoken"}}`).
 
+### The name a person shows under
+
+The console shows a person by name only when the access token carries the claim `name`, else
+`preferred_username`, or the one claim that `auth.oidc.displayClaim` names. A token with none of
+them leaves every person as "an operator with no name on record, subject … at …": the number is
+the person's subject at the issuer, and everything else works. Where your provider's access token
+does not carry a name, add it as the target above adds `groups` (`append_claims`); the fixture's
+target does not do this. The server keeps a person's name current from the person's admitted requests that change something.
+
 ## 5. The server and the clients
 
 In the server's configuration ([Configure](../README.md#configure)):
