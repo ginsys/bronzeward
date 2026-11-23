@@ -33,6 +33,9 @@ type Input struct {
 	Base      Source
 	Fragments []Source
 	Mode      Mode
+	// Name is the machine's name, or empty for a machine with none: the hostname the compiler fills
+	// where the composition sets none (compilation.md §6 step 5a).
+	Name string
 }
 
 // Compiled is one machine's compiled configuration and the outcome of every reference
