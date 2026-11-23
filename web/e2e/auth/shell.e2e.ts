@@ -3,7 +3,7 @@
 // deployment, through the injector.
 import { $, $$, browser, expect } from "@wdio/globals";
 import { NOT_ACCEPTED, REVOKED } from "../../src/app.tsx";
-import { PRE_ENTRY, RECOVERY_START } from "../../src/recovery.tsx";
+import { EPOCH_MEANS, PRE_ENTRY, RECOVERY_START } from "../../src/recovery.tsx";
 import { deprecated, incompatible } from "../../src/shell.tsx";
 import { EPOCH_CHANGED, TRANSPORT_FAILURE } from "../../src/request.ts";
 import { CONTROL, FIXTURE_API, FIXTURE_PAGE } from "../auth.conf.ts";
@@ -385,12 +385,12 @@ describe("recovery", () => {
     await nav("Drafts and releases").click();
     await eventually(async () => !(await testid("recovery-read").isExisting()), "the banner's read state gone after the next page's read");
     await absent(() => testid("recovery-read").isExisting(), "the banner's read state after the next page's read");
-    await announced("recovery", new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}\\. No machine scopes\\. Drafts can be edited\\. ${literal(RECOVERY_START)}$`));
+    await announced("recovery", new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}${literal(EPOCH_MEANS)}\\. No machine scopes\\. Drafts can be edited\\. ${literal(RECOVERY_START)}$`));
     expect(await testid("server").getText()).toMatch(SERVER);
     // The process restarts for recovery again, under the same epoch: whichever of the page's next
     // reads meets its refusal first, nothing read before stays shown, the other read's late answer
     // included, and the page reads again on request.
-    const since = new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}\\.`);
+    const since = new RegExp(`^Recovery mode since \\d\\d:\\d\\d, epoch ${literal(epoch)}${literal(EPOCH_MEANS)}\\.`);
     for (const [refused, late, page] of [["/recovery", "/identity", "Machines"], ["/identity", "/recovery", "Drafts and releases"]] as const) {
       await faults({ upstream: at, processRefused: [refused, "/server"], held: late });
       await nav(page).click();

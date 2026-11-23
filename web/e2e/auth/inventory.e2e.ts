@@ -305,7 +305,7 @@ describe("the machine detail (W3)", () => {
     expect(said.join(" ")).not.toContain("Release not applied yet");
     expect(await texts('[data-testid="observations"] tbody tr td:last-child')).toEqual(["configDigest (node unreachable)", "nothing", "nothing"]);
     // The principal is the identity Bronzeward recorded for h-author, named by GET /principals (G23).
-    await expect($('[data-testid="timeline"]')).toHaveText(expect.stringMatching(/freeze h-\S+ at \S+ author "synthetic incident"/), { wait: 20_000 });
+    await expect($('[data-testid="timeline"]')).toHaveText(expect.stringMatching(/freeze (you|an operator with no name on record, subject h-\S+ at \S+) author "synthetic incident"/), { wait: 20_000 });
     await absent(async () => /healthy|converged/i.test(await $("main").getText()), "a health or convergence word while the drift is open");
   });
 
@@ -615,10 +615,10 @@ describe("the read-only lists and items", () => {
       await browser.waitUntil(async () => (await texts('main [data-testid="status"]')).includes(empty), { timeout: 20_000, timeoutMsg: `${page} did not show ${empty}` });
     }
     await nav("Audit");
-    const row = $(`//main//tbody/tr[contains(., "${short(cl.id)}")]`);
+    const row = $(`//main//tbody/tr[.//a[@title="${cl.id}"]]`);
     await expect(row).toHaveText(expect.stringContaining("cluster.create"));
     // The names read answers after the row is drawn (G23): the cell shows the shortened identifier until then.
-    await browser.waitUntil(async () => (await row.$$("td").map((td) => td.getText())).some((t) => /^h-\S+ at \S+ \(\w+\)$/.test(t)), { timeout: 20_000, timeoutMsg: "the audit row's Principal cell never showed the principal's name" });
+    await browser.waitUntil(async () => (await row.$$("td").map((td) => td.getText())).some((t) => /^(you|an operator with no name on record, subject h-\S+ at \S+) \(\w+\)$/.test(t)), { timeout: 20_000, timeoutMsg: "the audit row's Principal cell never showed the principal's name" });
   });
 
   it("keyboard only: every focus visible, the skip link, a filter, and each identifier's link opens its item at its path", async () => {

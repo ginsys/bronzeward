@@ -68,8 +68,8 @@ export function observed(m: Machine, now: number): string {
 const safeValue = (v: unknown): string => (typeof v === "string" && SAFE.test(v) ? v : "unknown");
 // A machine's page keeps the whole value, labelled with what it is: a person compares it with what Talos itself reports.
 export const node = (m: Machine) => (m.hardware.talosNodeId != null ? `Talos node ID ${safeValue(m.hardware.talosNodeId)}` : `SMBIOS UUID ${safeValue(m.hardware.smbiosUuid)}`);
-// A list's cell: nobody acts on the whole opaque value there, so it is cut (`node 4c1f…`) and the whole is the title attribute.
-export const NodeCell = ({ m }: { m: Machine }) => <span title={((v) => (typeof v === "string" && SAFE.test(v) ? v : undefined))(m.hardware.talosNodeId ?? m.hardware.smbiosUuid)}>{nodeShort(m.hardware)}</span>;
+// A list's cell keeps the whole value too: machines of one fixture or one image share a prefix, so a cut makes rows read alike.
+export const nodeLabel = (m: Machine) => (m.hardware.talosNodeId != null ? `node ${safeValue(m.hardware.talosNodeId)}` : `UUID ${safeValue(m.hardware.smbiosUuid)}`);
 // A release as its title (the identifier is the title attribute): `Named` reads it through the page's store.
 export const release = (id: string | null) => <Named id={id} />;
 
@@ -217,7 +217,7 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
                 <tr key={m.id}>
                   <th scope="row"><MachineRef machine={m} shared={shared} /></th>
                   <td>{m.talosEndpoint}</td>
-                  <td><NodeCell m={m} /></td>
+                  <td>{nodeLabel(m)}</td>
                   <td>{release(m.desired)}</td>
                   <td>{m.applied === null ? "none" : <>{release(m.applied.release)} ({safeWord(m.applied.source)})</>}</td>
                   <td title={m.observed?.at}>{observed(m, now)}</td>
@@ -318,7 +318,7 @@ export function MachineSummary({ machines }: { machines: readonly Machine[] }) {
             <tr key={m.id}>
               <th scope="row"><MachineRef machine={m} shared={shared} /></th>
               <td>{m.talosEndpoint}</td>
-              <td><NodeCell m={m} /></td>
+              <td>{nodeLabel(m)}</td>
               <td>{badges(m).join(", ")}</td>
             </tr>
           ))}
