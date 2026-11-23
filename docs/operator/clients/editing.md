@@ -33,7 +33,8 @@ bronzewardctl draft show <draft>
 
 Each write answers with what it saved and the draft's revision, for example "Fragment `<name>`
 saved in draft `<draft>` (revision `<revision>`; draft revision 4)." and "Assignment saved (draft
-revision 6)." Three things to know:
+revision 6)." These sentences are read from the source; this page does not claim that a run
+printed them. Three things to know:
 
 1. **A profile pins revisions.** `profile set` takes a fragment name and pins the revision the draft
    holds for it. After you change a fragment, set the profile again to use the new one. The command

@@ -9,8 +9,12 @@ reports them: you cannot choose them here.
 
 ## Sign in and check who you are
 
-**Command line.** `login` signs in to the current context, or to the one `--context` names.
-It opens your browser on this computer; `--device` is for a computer with no browser
+The `text` blocks on this page show the shape of the output, read from the source. This page does
+not claim that a run printed them.
+
+**Command line.** `login` signs in to the context the client selects: the `--context` flag, else
+the `BRONZEWARD_CONTEXT` environment variable, else the current context. Name the context with
+`--context` when you are not sure which one is current. It opens your browser on this computer; `--device` is for a computer with no browser
 (see [contexts](contexts.md#sign-in-as-a-person)). `whoami` then asks the server.
 
 ```bash
@@ -38,9 +42,14 @@ be until you compare the name.
 
 **Web.** Steps:
 
-1. Open the installation's web address. The page shows **Sign in with the identity provider**.
-2. Press it, and sign in at the identity provider. The browser returns to the installation.
-3. Read the header: "Signed in as" and your name, then "Roles:" and your roles.
+1. Open the installation's web address. With no sign-in open in another tab of this browser, the
+   page sends the browser to the identity provider by itself, with no button to press.
+2. Sign in at the identity provider. The browser returns to the installation. If the sign-in
+   fails, the page shows the reason and a button, **Sign in with the identity provider**, to
+   start again.
+3. Read the header: "Signed in as" and then "Roles:" and your roles. The name after "Signed in
+   as" comes from your identity provider, never from the server; if it gives none, the header
+   reads "Signed in as a person".
 4. To leave, press **Sign out**. The page says "You are signed out of Bronzeward." and offers
    **Sign in**.
 

@@ -11,6 +11,9 @@ operator who holds all three can do every step. An automation token cannot impor
 You also need a recorded machine and an open draft for its cluster: see
 [the inventory](inventory.md) and [editing](editing.md).
 
+The `text` blocks and quoted messages on this page are read from the source. This page does not
+claim that a run printed them.
+
 ## Command line
 
 ```bash
