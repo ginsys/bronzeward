@@ -272,11 +272,28 @@ func TestNotOverriddenByPatch(t *testing.T) {
 	}
 }
 
-// No refusal and no decision shows an explicit hostname.
+// The fill comes before the output check (compilation.md §6 steps 5a and 7): a value held by a
+// reference that equals the generated document's literal `auto: stable` is no copy once the patch
+// has replaced that literal. An unnamed machine keeps the literal, so the copy is refused.
+func TestHostnameFillPrecedesTheOutputCheck(t *testing.T) {
+	f := source(t, "machine:\n  nodeLabels:\n    example: !bwref app/value\n", strRef("app/value"),
+		map[string]provider.Value{"app/value": value(t, provider.KindString, "stable")})
+	c := compiled(t, hostIn(generated(t), hostMachine, ModeMetal, f))
+	wantHost(t, c, 1, Hostname{HostnameMachineName, hostMachine}, hostMachine)
+	if _, err := Compile(hostIn(generated(t), "", ModeMetal, f)); err == nil {
+		t.Error("an unnamed machine kept a copy of the literal and compiled")
+	}
+}
+
+// The refusal for an invalid name is fixed text: it shows neither the name nor any hostname the
+// composition holds, and the decision of a compilation with an explicit hostname does not either.
 func TestHostnameShowsNoExplicitValue(t *testing.T) {
 	_, err := Compile(hostIn(generated(t), "Web-1", ModeMetal))
-	if err != nil && strings.Contains(err.Error(), hostExplicit) {
-		t.Errorf("the refusal shows an explicit hostname: %v", err)
+	if err == nil {
+		t.Fatal("an invalid name compiled")
+	}
+	if strings.Contains(err.Error(), "Web-1") {
+		t.Errorf("the refusal shows the name: %v", err)
 	}
 	c := compiled(t, hostIn(generated(t), hostMachine, ModeMetal, frag(t, hostDocExplicit)))
 	if s := fmt.Sprintf("%+v %v", c.Hostname(), c.Provenance()); strings.Contains(s, hostExplicit) {
