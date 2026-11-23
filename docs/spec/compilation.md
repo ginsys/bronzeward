@@ -1165,7 +1165,7 @@ unmeasured.
    machine's node name is computed from its own composition, so with
    `registerWithFQDN` true on both the node names are the full names and
    differ, and with it true on one only the compared values are `a.x.org` and
-   `a`, which differ too. The check is built with the hostname fill
+   `a`, which differ too. The check was built with the hostname fill
    (ginsys/bronzeward#1040), whose acceptance cases include `a.x.org` against
    `a.y.org` with `registerWithFQDN` unset (refused) and true on both (accepted).
    A name that moves between machines is the second clash: a filled hostname
@@ -1183,7 +1183,10 @@ unmeasured.
    the hostname node-a from its name, but the last release applied to machine
    node-a still sets that hostname. Give machine node-b another name for now,
    apply the release for machine node-a, then give machine node-b the name
-   node-a." To exchange the names of two machines, give the first a third
+   node-a." Each machine is named by the name it holds when the release is
+   published, and by its identifier where it has none, so in that sentence the
+   machine that holds the name now is named by it and the other by its current
+   name; only the hostname is the old name. To exchange the names of two machines, give the first a third
    name; if the second already holds the first's old name, give the second its
    earlier name. Publish and apply the release for the first machine. Give the
    second machine the first's old name, publish and apply. Then give the first
