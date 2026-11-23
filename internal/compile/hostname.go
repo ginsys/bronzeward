@@ -68,39 +68,44 @@ func hostnameOf(m Materialized) (hostState, error) {
 // boolean's flip pass. A flip that changes whether stableHostname is set makes the setting depend on
 // a secret: it counts as set, whatever its value.
 //
-// A composition the loader refuses takes no decision (none): the validation of step 8 refuses it as
-// invalid, as it did before the fill existed, and a refusal of this step would replace that answer.
-func decideHostname(name string, real, trace Materialized, flips []Materialized) Hostname {
+// A real composition the loader refuses takes no decision (none, no error): the validation of step 8
+// loads the same bytes with the same loader and refuses it as invalid, as it did before the fill
+// existed, and a refusal here would replace that answer. The trace and flip compositions are read
+// only for a named machine, and one that will not load, where the real one does, is the error: the
+// machine's decision cannot be taken, and no step 8 load of those two compositions exists (it
+// validates the restored passes), so the error is a fidelity refusal and never a silent skip of the
+// fill. An unnamed machine reads neither, and its answers stay those of main.
+func decideHostname(name string, real, trace Materialized, flips []Materialized) (Hostname, error) {
 	none := Hostname{Source: HostnameNone}
 	r, err := hostnameOf(real)
 	if err != nil {
-		return none
+		return none, nil
 	}
 	if r.explicit {
-		return Hostname{Source: HostnameConfiguration}
+		return Hostname{Source: HostnameConfiguration}, nil
 	}
 	if name == "" {
-		return none
+		return none, nil
 	}
 	t, err := hostnameOf(trace)
 	if err != nil {
-		return none
+		return Hostname{}, err
 	}
 	legacy := r.legacyStable
 	for _, f := range flips {
 		s, err := hostnameOf(f)
 		if err != nil {
-			return none
+			return Hostname{}, err
 		}
 		legacy = legacy || s.legacyStable != t.legacyStable
 	}
 	switch {
 	case legacy:
-		return Hostname{Source: HostnameLegacyStable}
+		return Hostname{Source: HostnameLegacyStable}, nil
 	case r.doc && r.auto != nethelpers.AutoHostnameKindStable:
-		return none // the operator chose another source
+		return none, nil // the operator chose another source
 	}
-	return Hostname{Source: HostnameMachineName, Name: name}
+	return Hostname{Source: HostnameMachineName, Name: name}, nil
 }
 
 // hostnamePatchRevision names the compiler's own source: not a fragment revision, and never

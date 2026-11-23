@@ -270,8 +270,20 @@ func TestHostnameDecisionOfAnUnloadableComposition(t *testing.T) {
 	bad := "apiVersion: v1alpha1\nkind: NoSuchDocumentKind\n"
 	m := Materialized{s: &bad}
 	for _, name := range []string{"", hostMachine} {
-		if h := decideHostname(name, m, m, []Materialized{m}); h.Source != HostnameNone || h.Name != "" {
-			t.Errorf("name %q: decision %+v; want none", name, h)
+		if h, err := decideHostname(name, m, m, []Materialized{m}); err != nil || h.Source != HostnameNone || h.Name != "" {
+			t.Errorf("name %q: decision %+v, error %v; want none and no error", name, h, err)
+		}
+	}
+	// The real composition loads and a trace or flip composition does not: an unnamed machine reads
+	// neither and decides as before; a named one cannot be decided, which is an error, never a skipped fill.
+	good := string(generatedBase(t))
+	real := Materialized{s: &good}
+	for _, tc := range []struct{ trace, flip Materialized }{{m, real}, {real, m}} {
+		if h, err := decideHostname("", real, tc.trace, []Materialized{tc.flip}); err != nil || h.Source != HostnameNone {
+			t.Errorf("unnamed: decision %+v, error %v; want none and no error", h, err)
+		}
+		if h, err := decideHostname(hostMachine, real, tc.trace, []Materialized{tc.flip}); err == nil {
+			t.Errorf("named: decision %+v and no error for a pass that does not load", h)
 		}
 	}
 }
