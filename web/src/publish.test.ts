@@ -153,6 +153,7 @@ describe("what the draft changes, said after a refused publication", () => {
     expect(said(undefined, 3)).toBe("");
     expect(said(draft(3, [entry("fragment", "network", "fgh_a", "frv_a")]), undefined)).toBe("");
     expect(said(draft(3, [{ kind: "import-base", id: "imb_a" }]), 3)).toBe("");
+    expect(said(draft(4, [{ kind: "import-base", id: "imb_a" }]), 3), "saved again, and no source entry").toBe("");
   });
 
   test("a name that is not safe text reads (name not shown)", () => {

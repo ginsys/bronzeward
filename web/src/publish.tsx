@@ -86,9 +86,9 @@ const changeWord = (e: Source) => (e.revision === null ? "removed" : e.head === 
 // publication was made from (its revision); a draft saved since says it cannot be listed.
 export function DraftChanges({ d, revision }: { d: Draft | undefined; revision: number | undefined }) {
   if (d === undefined || revision === undefined) return null;
-  if (d.revision !== revision) return <> This draft has changed since this publication was refused, so the changes it made are not listed.</>;
   const sources = d.entries.filter(isSource);
   if (sources.length === 0) return null;
+  if (d.revision !== revision) return <> This draft has changed since this publication was refused, so the changes it made are not listed.</>;
   const more = sources.length - MAX_CHANGES;
   return (
     <>
