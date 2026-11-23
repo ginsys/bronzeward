@@ -40,11 +40,10 @@ func filledHostname(docs []*yaml.Node, name string) (int, Filled) {
 
 // shiftEmbedded renumbers the embedded declarations after step 2a removed the document at dropAt: the
 // stored stream has one document fewer, so a declaration of a later document names it one position lower,
-// and one inside the removed document is dropped with it. The second result is the same set by
-// normalised path, for the guard. Marks and every refusal keep the positions of the input; only what is stored moves.
-func shiftEmbedded(list []Embedded, dropAt int) ([]Embedded, map[string]string) {
+// and one inside the removed document is dropped with it. Marks and every refusal keep the positions of
+// the input; only what is stored moves.
+func shiftEmbedded(list []Embedded, dropAt int) []Embedded {
 	var out []Embedded
-	shifted := map[string]string{}
 	for _, e := range list {
 		p, err := ParsePath(e.Path)
 		if err != nil || p.Doc == dropAt {
@@ -55,9 +54,8 @@ func shiftEmbedded(list []Embedded, dropAt int) ([]Embedded, map[string]string) 
 			e.Path = p.String()
 		}
 		out = append(out, e)
-		shifted[p.String()] = e.Format
 	}
-	return out, shifted
+	return out
 }
 
 // plainMembers is the members of a mapping node as text, and whether every value is a plain string

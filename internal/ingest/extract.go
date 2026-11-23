@@ -138,10 +138,6 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	for _, ex := range exs {
 		decl.References[ex.name] = Reference{Kind: ex.kind, Version: 1}
 	}
-	if dropAt >= 0 {
-		docs = slices.Delete(docs, dropAt, dropAt+1)
-		decl.Embedded, declared = shiftEmbedded(decl.Embedded, dropAt)
-	}
 	out, back, err := encodeStable(docs)
 	if err != nil {
 		return nil, err
@@ -155,6 +151,15 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	misplaced := map[string]bool{}
 	if err := validateRefs(back, decl, misplaced); err != nil {
 		return nil, from(err, validateSources(exs, removed, misplaced, err))
+	}
+	// The guard and the validation ran on the stream with its positions, so every refusal names the input's.
+	// Only what is stored loses the filled document, and its later embedded declarations move with their
+	// documents.
+	if dropAt >= 0 {
+		if out, _, err = encodeStable(slices.Delete(docs, dropAt, dropAt+1)); err != nil {
+			return nil, err
+		}
+		decl.Embedded = shiftEmbedded(decl.Embedded, dropAt)
 	}
 	c := &Candidate{docs: out, decl: decl, filled: filled}
 	for _, ex := range exs {
