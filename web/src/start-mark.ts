@@ -16,6 +16,9 @@ export interface StartMarks {
   mark: string | undefined;
   // Why an observation cannot be the start, or undefined where it can.
   why: (o: Observation) => string | undefined;
+  // Set where the one start the server accepts is one it refuses: the server does not skip to the next read (settle.go), and an
+  // observation's resource version never changes, so no start can be recorded for this settle.
+  refused: string | undefined;
 }
 
 // `deadline` is the instant the settle counts from, in milliseconds: an attempt's transport deadline, or for a scope the later of
@@ -28,7 +31,10 @@ export function startMarks(observations: Observation[], deadline: number): Start
     if (o.id !== first?.id) return "it is not the first read after the transport deadline";
     return o.resourceVersion == null ? "it read no machine-configuration resource version" : undefined;
   };
-  return { mark: first?.id, why };
+  const refused = first !== undefined && first.resourceVersion == null
+    ? "the first read after the transport deadline read no machine-configuration resource version, and the server accepts only that read as the start and refuses it without one, so no start can be recorded for this settle."
+    : undefined;
+  return { mark: first?.id, why, refused };
 }
 
 // Where the form's deadline comes from: known (milliseconds), or not known with the reason the page cannot say. Not known leaves the

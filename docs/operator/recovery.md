@@ -167,7 +167,7 @@ deadline is the attempt's own transport deadline. For a scope on the console it 
 the stop plus the maximum transport deadline and the transport deadline of each attempt of the
 machine that no accounting covers, which the page reads from the machine's apply operations; where
 the machine has more than eight of them, or one cannot be read, the page names no start and says
-the server decides. The server stays the judge and its refusal still shows. "Read the observations
+the server decides. Where that first read read no machine-configuration resource version, the page marks no start and says that the server accepts only that read and refuses it without a version, so no start can be recorded for this settle. The server stays the judge and its refusal still shows. "Read the observations
 again" reads them again without losing what
 you chose or typed: use it when the settle floor asks you to wait for a later observation. The
 sentence above the button says what the decision records: your

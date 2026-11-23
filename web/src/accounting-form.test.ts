@@ -232,6 +232,20 @@ describe("the Start choice names the start the server accepts", () => {
     expect(startInput(END).disabled).toBe(true);
   });
 
+  test("a first read after the deadline that read no resource version is not marked, and the page says no start can be recorded", async () => {
+    served[`/machines/${MCH}/observations`] = {
+      items: [observation(START, 1, "2026-11-01T09:00:00Z", "2026-11-01T09:00:01Z", null), observation(END, 2, "2026-11-01T09:05:00Z", "2026-11-01T09:05:01Z", "rv2")],
+      next: undefined,
+    };
+    await mount(attemptForm({ at: Date.parse("2026-11-01T08:00:00Z") }));
+    await settled();
+    expect(text("settle-start-refused")).toContain("refuses it without one, so no start can be recorded for this settle");
+    expect(startInput(START).disabled).toBe(true);
+    expect(startInput(START).closest("li")!.textContent).not.toContain("(the first read after the deadline)");
+    expect(startInput(START).closest("li")!.textContent).toContain("off: it read no machine-configuration resource version");
+    expect(startInput(END).disabled).toBe(true);
+  });
+
   test("a deadline the page cannot name leaves the choice to the person and says the server decides", async () => {
     await mount(attemptForm({ unknown: "an operation of the machine could not be read." }));
     await settled();

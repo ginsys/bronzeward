@@ -75,5 +75,11 @@ describe("the start the server accepts", () => {
     expect(m.mark).toBe("a");
     expect(m.why(list[0]!)).toBe("it read no machine-configuration resource version");
     expect(m.why(list[1]!)).toBe("it is not the first read after the transport deadline");
+    expect(m.refused).toMatch(/refuses it without one, so no start can be recorded/);
+  });
+
+  test("a mark that can be recorded carries no refusal", () => {
+    expect(startMarks([obs("a", 1, at(70))], deadline).refused).toBeUndefined();
+    expect(startMarks([obs("a", 1, at(10))], deadline).refused).toBeUndefined();
   });
 });

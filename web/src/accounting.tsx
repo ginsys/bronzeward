@@ -162,8 +162,9 @@ export function AccountingForm({ machine, path, resource, what, label = "Record 
           <fieldset disabled={busy}>
             <legend>Start: the first successful read of the machine after the transport deadline</legend>
             {deadline !== undefined && "unknown" in deadline && <Status testid="settle-start-unknown">The page cannot name the valid start: {deadline.unknown} The server decides.</Status>}
+            {marks?.refused !== undefined && <Status testid="settle-start-refused">The page offers no start: {marks.refused}</Status>}
             {marks !== undefined && marks.mark === undefined && <Status testid="settle-start-none">No observation of this machine began after the transport deadline and read something, so the page finds no start yet. Read the observations again once one has.</Status>}
-            <ul>{observations.map((x) => <Choice key={x.id} name="start" o={x} off={startReason(x)} marked={x.id === marks?.mark} checked={x.id === startId} onChoose={() => setStart(x.id)} />)}</ul>
+            <ul>{observations.map((x) => <Choice key={x.id} name="start" o={x} off={startReason(x)} marked={x.id === marks?.mark && startReason(x) === undefined} checked={x.id === startId} onChoose={() => setStart(x.id)} />)}</ul>
           </fieldset>
           <fieldset disabled={busy}>
             <legend>End: a recovery observation that began at least the settle floor after that</legend>
