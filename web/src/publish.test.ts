@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { publishPath } from "./drafts.tsx";
 import { type Reads, ReadsProvider, short } from "./list.tsx";
-import { accepted, DraftChanges, NO_DRAFT, NOT_OPEN, notEstablished, operationId, PublishDraft, publishEnd, publishLocked, SENT_NOTHING } from "./publish.tsx";
+import { accepted, changesRevision, DraftChanges, NO_DRAFT, NOT_OPEN, notEstablished, operationId, PublishDraft, publishEnd, publishLocked, SENT_NOTHING } from "./publish.tsx";
 import type { Outcome } from "./write.ts";
 
 type Operation = components["schemas"]["OperationBody"];
@@ -147,6 +147,18 @@ describe("what the draft changes, said after a refused publication", () => {
   test("a draft saved again since the refusal lists nothing and says so", () => {
     const d = draft(4, [entry("fragment", "network", "fgh_a", "frv_a")]);
     expect(said(d, 3)).toBe(" This draft has changed since this publication was refused, so the changes it made are not listed.");
+  });
+
+  // The refusal of the machine's whole configuration is the one that names no fragment; a deadlock, a scope that is busy or an
+  // entry into recovery mode is no reason to look at the draft's fragments.
+  test("only a refusal of rule invalid asks for the draft's changes, with the revision the publication was made from", () => {
+    const failed = (error: unknown) => ({ ...op("failed", null, error), subject: { draft: "drf_a", draftRevision: 3 } }) as unknown as Operation;
+    const code = (c: string, more: Record<string, unknown> = {}) => ({ type: `urn:bronzeward:problem:${c}`, status: 409, ...more });
+    expect(changesRevision(failed(code("validation-failed", { rule: "invalid" })))).toBe(3);
+    for (const c of ["scope-busy", "transient-conflict", "internal-error", "stale-input", "recovery-mode-active", "recovery-mode-entered"]) expect(changesRevision(failed(code(c))), c).toBeUndefined();
+    expect(changesRevision(failed(code("validation-failed", { rule: "kind-mismatch", input: "fragment[1]" })))).toBeUndefined();
+    expect(changesRevision(failed(null))).toBeUndefined();
+    expect(changesRevision({ ...failed(code("validation-failed", { rule: "invalid" })), subject: {} } as unknown as Operation)).toBeUndefined();
   });
 
   test("a draft not read yet, an operation that names no revision and a draft with no source entry say nothing", () => {
