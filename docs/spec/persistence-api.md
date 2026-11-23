@@ -3095,8 +3095,11 @@ the hostname or the `registerWithFQDN` value that decides whether the first
 label alone is used, is attributed to a secret reference (compilation §8.1) or
 is a scalar the review redacts by value (compilation §8.3, the value means,
 which matches a resolved secret of any length, below the six bytes that step 7
-refuses as a literal), so a non-null value never derives from a secret and a
-`null` is never compared: `null` means **not compared**. The member is absent,
+refuses as a literal), or where the review of that composition is withheld in
+whole (compilation §8.3: a token that names a reference whose name equals a
+value form), so that `nodeName` is non-null only where the review shows every
+input to the name as a literal, never derives from a secret and is never more
+than the review shows, and a `null` is never compared: `null` means **not compared**. The member is absent,
 which means **not recorded**, on every release made before the revision, one
 with source `unrecorded` included, and that rule comes before the value rules
 above: a
@@ -3108,8 +3111,8 @@ or nothing set"; neither is ever compared, and a release with source
 recorded `name` by publication (compilation §6.1 item 6). Any role reads it with the record, as it reads
 the redacted review (route table, §9.2): the review shows a literal hostname,
 since the machinery marks no hostname secret (`pkg/machinery` v1.14.5, the
-version this specification pins), except where the path or value means redacts
-it, and in every such case `nodeName` is `null`, so it follows the review's
+version this specification pins), except where the path or value means redacts it or the review is withheld in
+whole, and in every such case `nodeName` is `null`, so it follows the review's
 read rule and adds the same literal in derived form, never more. A later
 machinery pin is a re-read of that list. The stored value
 outside that enumeration is `500 internal-error`, as a provenance record is. It

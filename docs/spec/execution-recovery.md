@@ -419,8 +419,8 @@ machine rows (see comparison 6a below), never before the others.
    it takes, so two machines that already shared one stay as they were. A `null` (not compared) or an absent
    `nodeName` (not recorded, a release made before it existed) on either side is
    not compared: the record holds `null` where any input to the name is a
-   secret reference or a value the review redacts (persistence and API §9.3),
-   because the comparison would be an equality test on a secret, and where the configuration sets no hostname, because no name is
+   secret reference or a value the review redacts or withholds (persistence and
+   API §9.3), because the comparison would be an equality test on a secret, and where the configuration sets no hostname, because no name is
    known. Another machine with no `Applied` holds no name, and an adopt plan
    sends nothing, so the gate does not apply to it. The refusal leaves the plan
    `approved`: it commits once the other machine's `Applied` no longer holds the
@@ -2045,7 +2045,7 @@ passes comparison 5 and comparison 6a while the first machine runs it. An
 `unresolved` outcome is not this case: it keeps the cluster's one rollout slot
 (comparison 5), so no other commitment passes until it is settled.
 Three further cases are not compared at all: a hostname that depends on a secret
-reference or a value the review redacts (`nodeName` `null`), whose clash an
+reference or a value the review redacts or withholds (`nodeName` `null`), whose clash an
 equality test would make a test on the secret; a configuration that sets none, where the node chooses its own
 name; and a machine whose applied release was made before `nodeName` was
 recorded (absent, not recorded) until a later apply replaces it; publication
@@ -2497,7 +2497,7 @@ conservative option; those that do not say so. Each is marked in place as
     waits, never ends (choice §10.27). It compares the derived node name, which
     the release records for every machine (persistence and API §9.3), and never
     a hostname: a name that depends on a secret reference or a value the review
-    redacts, or that nothing sets, records `null` (not compared), and a release
+    redacts or withholds, or that nothing sets, records `null` (not compared), and a release
     made before the record has none (not recorded); neither is compared. Agent decision, 2026-11-23 (ginsys/bronzeward#1052).
     Alternatives: a refusal at plan creation, which reads `Applied` at a moment
     that is stale by dispatch, so an apply in flight and an adoption record stay

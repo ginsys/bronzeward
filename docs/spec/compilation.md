@@ -1158,7 +1158,9 @@ unmeasured.
    a cloud supplies is not in the configuration and is not compared. An
    explicit hostname that carries a secret reference is not compared either,
    nor one whose compared node name depends on a secret reference (a
-   `registerWithFQDN` value held in one), and a clash with one is therefore not
+   `registerWithFQDN` value held in one), nor one the review redacts by value or
+   whose review is withheld in whole (§8.3): the cases in which the recorded
+   `nodeName` is `null`. A clash with one is therefore not
    caught: comparing it would make the refusal an equality test on a secret,
    and an author could confirm a guess by renaming a machine and publishing.
    Publication refuses it, before any release is committed,
@@ -1189,7 +1191,7 @@ unmeasured.
    explicit hostname and the `registerWithFQDN` setting alike; it is not made
    where either `nodeName` is `null` (not compared), which it is where a secret
    reference or a value the review redacts (§8.3, any length) is an input to the
-   name and where no hostname is set, or absent (not recorded), which it is on a
+   name, where the review is withheld in whole and where no hostname is set, or absent (not recorded), which it is on a
    release made before the record existed; for such an applied release with
    source `machine-name` the recorded name is compared as it was, so that release
    keeps the protection it had. Each machine has its own plan, so a release that renames machine node-a
@@ -1782,7 +1784,8 @@ or encrypted values:
   the redacted review data, the provenance records (§8.2), the hostname record
   (§6.1 item 4: its source, where filled the name used, and the derived node
   name of §6.1 item 6, `null` where a secret reference or a value the review
-  redacts is an input or no hostname is set) and both
+  redacts is an input, the review is withheld in whole, or no hostname is set)
+  and both
   dependency records with the encryption dependency (§9);
 - per pinned version and encryption dependency: the classification step 3 and
   §11 made, as the dependency monitor seeds it
