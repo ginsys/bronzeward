@@ -20,7 +20,9 @@ bronzewardctl operation show <operation>
 bronzewardctl operation watch <operation>
 ```
 
-`operation list` filters by `--plan`, `--machine`, `--state` and `--kind`. `operation show` prints
+`<machine>` is the machine's name or its ID (see [the inventory](inventory.md)).
+`operation list` filters by `--plan`, `--machine`, `--state` and `--kind`; `--cluster` there needs
+`--machine`. `operation show` prints
 the operation once: who started it, a sentence for its kind and state, its outcome, and the next
 step. For an apply or an adoption the starter is "the controller", with the plan it committed.
 

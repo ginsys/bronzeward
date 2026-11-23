@@ -24,6 +24,7 @@ command for each machine (see [publication](publication.md)).
 bronzewardctl plan create --release <release> --machine <machine> --operation apply-config
 ```
 
+`<machine>` is the machine's name or its ID (see [the inventory](inventory.md)).
 `--operation` is `apply-config` or `adopt`. An `apply-config` plan sends the release; its only
 mode is `no-reboot`. An `adopt` plan records what the machine runs as its starting point and sends
 nothing, and it takes no `--mode`, deadline or attempt flags. Leave a limit out to use the

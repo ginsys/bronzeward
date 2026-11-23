@@ -51,6 +51,8 @@ bronzewardctl release review <release> <machine>
 bronzewardctl release provenance <release> <machine>
 ```
 
+`<machine>` is the machine's name or its ID (see [the inventory](inventory.md)).
+
 - `release show` names the cluster, who published it and when, the draft and revision it was
   built from, the renderer (contract, machinery and Kubernetes versions), the **source
   revisions** and the machines it covers, each with the mode it was validated in. The source revisions are the fragments, profiles and

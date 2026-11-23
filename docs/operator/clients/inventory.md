@@ -69,8 +69,12 @@ open drift record, which the machine's page and `bronzewardctl status` show. A m
 health result, and a time such as "5m ago" is the age of the last read, not the age of the machine.
 
 Read one machine and its history with `machine show`, `machine observations` and `machine
-timeline`. A machine's name works wherever the command takes a machine; a name that two clusters
-hold needs `--cluster` or the ID.
+timeline`. Every command that takes a `<machine>` accepts its name as well as its ID. The
+command reads the machine list once and matches the name across the clusters you can read.
+`--cluster` (a cluster's name or ID) narrows that match: a name that two clusters hold is refused
+without it. An ID is sent as it is, and `--cluster` given with an ID is a usage error. So are
+`plan list`, `operation list` and `import status` given `--cluster` and no `--machine`. The web
+pages link machines by ID.
 
 ## Record one machine
 
