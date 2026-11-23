@@ -36,6 +36,16 @@ type Input struct {
 	// Name is the machine's name, or empty for a machine with none: the hostname the compiler fills
 	// where the composition sets none (compilation.md §6 step 5a).
 	Name string
+	// Imported is what the import removed from the stored base (compilation.md §2.3 step 2a), the zero
+	// value when it removed nothing.
+	Imported ImportedHostname
+}
+
+// ImportedHostname is the record of an import's step 2a: Name is the machine name whose HostnameConfig
+// the import removed, and Equal says that document was exactly the one the fill writes for it.
+type ImportedHostname struct {
+	Name  string
+	Equal bool
 }
 
 // Compiled is one machine's compiled configuration and the outcome of every reference
@@ -266,6 +276,11 @@ func compile(in Input, sources []Source, decide bool) (Compiled, error) {
 	red := newRedactor(sources)
 	c := Compiled{m: m, origins: origins(sources), formOnly: sameInForm(real[0], m), hostname: hostname,
 		nodeSecret: holdsNodeLeaf(m.bytes(), outcomes)}
+	if !decide && !c.formOnly && in.Imported.Equal && in.Imported.Name == in.Name {
+		// The second compile of a fill: the base lost the fill's own document at import, and the composition
+		// has it back. Only that document is set aside (compilation.md §6.1 item 5).
+		c.formOnly = sameInFormBut(real[0], m, in.Name)
+	}
 	if text, err := redactedText(m.bytes(), hosts, outcomes, red); err != nil {
 		c.redactErr = err
 	} else {

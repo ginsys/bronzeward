@@ -235,7 +235,7 @@ statement.
 | FragmentRevision | immutable | sanitized YAML text, canonical parsed form, declarations, reference rows, author | compilation §2, §5 |
 | Profile / ProfileRevision | mutable head / immutable | ordered fragment revision ids | this contract |
 | Assignment / AssignmentRevision | mutable head / immutable | per machine: selected profiles and fragments per layer | this contract |
-| ImportBaseRevision | immutable | a machine's sanitized imported document with references and the embedded documents the import identified (publication rebuilds the base with them, §6.1), baseline ciphertext, its keyed digest and its configuration digest | compilation §2.3, §6 |
+| ImportBaseRevision | immutable | a machine's sanitized imported document with references and the embedded documents the import identified (publication rebuilds the base with them, §6.1), baseline ciphertext, its keyed digest and its configuration digest, and where step 2a removed a `HostnameConfig`, the machine name it compared and whether that document was exactly the fill's own | compilation §2.3, §6 |
 | Draft | mutable, revisioned | change set: entries and their base head revisions | this contract |
 | Release, ReleaseMachine | immutable | the compilation §11 unit, with each machine's configuration digest (§1.1) and the name of the Transit key its artifact was encrypted under; the release covers one cluster and a set of its machines | compilation §11; this contract |
 | Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity: the machine's key at its ciphertext's key version. Each effective dependency has a reproduction dependency of its machine at the same version and creation time, whose source is in the machine's composition and declares it at that version and generation; indexed by its DependencyStatus identity (dependency monitor §6.1) | compilation §9 |
@@ -2242,8 +2242,7 @@ API revisions:
 | 14 | `role` on a machine (§3.2, §9.2, choice §17.49) |
 | 15 | `hostname` (`source`, and `name` for `machine-name`) on each machine of a release and its review, and the name form of `409 stale-input` of the publication check (§9.2, §3.5, §4.2, choices §17.44, §17.45) |
 | 16 | the `hostname` rule of `422 validation-failed` on publication, with a release compiling a machine's name as its hostname where nothing sets one (§9.2, §3.5, compilation §6.1 item 6) |
-
-One further part is specified and not yet served, taking the next revision in the change that serves it (ginsys/bronzeward#1040): the name form of `409 stale-input` from the `ingest` draft transaction (§4.2, choice §17.45), with `expected` and `actual` as machine names, each a string or `null`. Revision 16 serves the `hostname` member, the name form of the publication check and the `hostname` rule.
+| 17 | the name form of `409 stale-input` from the `ingest` draft transaction, with `expected` and `actual` as machine names, each a string or `null`, and `formOnly` true for a machine whose import removed the fill's own `HostnameConfig` while its name is unchanged (§4.2, choice §17.45, compilation §2.3 step 2a, §6.1 item 5) |
 
 ### 9.2 Resources and routes
 
