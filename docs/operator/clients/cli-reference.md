@@ -304,6 +304,8 @@ usage: bronzewardctl cluster discover --talosconfig <file> [--talos-context <nam
 read a cluster, print the commands that record it.
 
 reads the Talos nodes with your talosconfig and prints the commands that record the cluster; it writes nothing.
+with no --endpoint, the context's endpoints are tried in order until one gives the cluster; a silent one costs up to
+about 15 seconds, so three silent endpoints about 45. --endpoint is the only one tried.
 
 Roles: any.
 
@@ -342,6 +344,8 @@ discover a cluster, record it and its machines, supply its first key, import eac
 discovers the cluster, records it and its machines, supplies its first key (the talosconfig unless --first-key-* names
 another document), then imports each machine into one draft. Run it again after a failure: what exists is found, the
 first key is supplied again (replacing it), and --skip-first-key skips it.
+with no --endpoint, the context's endpoints are tried in order until one gives the cluster; a silent one costs up to
+about 15 seconds, so three silent endpoints about 45. --endpoint is the only one tried.
 
 Roles: author. Needs a person signed in, not an automation token.
 

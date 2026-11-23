@@ -20,6 +20,11 @@ import (
 // stand-in node (internal/client's closure test refuses it).
 var discoverCluster = discoverEach
 
+// endpointsNote is the sentence of the help of the commands that read a cluster from a talosconfig: which
+// endpoints they try, and what a silent one costs (discover's startTimeout, 15 seconds, for each endpoint).
+const endpointsNote = "with no --endpoint, the context's endpoints are tried in order until one gives the cluster; a silent one costs up to\n" +
+	"about 15 seconds, so three silent endpoints about 45. --endpoint is the only one tried."
+
 // discoverTyped reads the cluster at an endpoint the person gave, and discoverListed at one the talosconfig
 // lists; discoverEach's own tests replace them.
 var (
