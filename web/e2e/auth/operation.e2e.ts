@@ -8,6 +8,7 @@
 // resolution (cancelled, by h-recovery) is the event that follows. Every value is synthetic.
 import { $, $$, browser, expect } from "@wdio/globals";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
+import { epochRead, failedWith } from "../focus-context.ts";
 import type { Faults } from "../injector.ts";
 import { absent, answers, api, counts, disposable, faults, fixtureSignIn, fromTitle, itNarrow, measure, mint, narrow, overflows, type Seed, storageEmpty, tab } from "./helpers.ts";
 
@@ -288,17 +289,26 @@ describe("the operation page's stream (#359)", () => {
       return all.length;
     }, CONTROLS);
     expect(total).toBeGreaterThan(0);
+    // What a failure below adds, to tell a page mounted anew by a new epoch (its marks gone, the epoch moved) from one that
+    // was not (focus-context.ts): the marks left and the epoch the recovery banner names, now against the marking.
+    const banner = () => browser.execute(() => document.querySelector('[data-testid="recovery"]')?.textContent ?? null);
+    const epochThen = await epochRead(banner);
+    const failed = (e: unknown) => failedWith(e, () => browser.execute(() => document.querySelectorAll("[data-t9]").length), banner, total, epochThen);
     await fromTitle();
     const reached: number[] = [];
     for (let i = 0; i < 80 && reached.length < total; i++) {
-      const f = await tab();
+      const f = await tab().catch(async (e: unknown) => { throw await failed(e); });
       if (f.same) throw new Error(`Tab did not leave ${f.tag} "${f.text}" on the way through the page`);
       const k = await browser.execute(() => document.activeElement?.closest("[data-t9]")?.getAttribute("data-t9") ?? null);
       if (k !== null && !reached.includes(Number(k))) reached.push(Number(k));
     }
     // Every control was reached, and in the order the page lists them.
     expect(reached).toEqual([...reached].sort((a, b) => a - b));
-    expect(reached.length).toBe(total);
+    try {
+      expect(reached.length).toBe(total);
+    } catch (e) {
+      throw await failed(e);
+    }
     const seen = await measure();
     expect(seen.contrast).toBeGreaterThanOrEqual(4.5);
     expect(seen.small).toBe(0);
