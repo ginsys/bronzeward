@@ -81,7 +81,7 @@ key gives the same answer as for an endpoint that does not answer, so read each 
 
 The page sends a try from a list once. The one exception: a try answered `401 unauthenticated` is
 sent once more, after 1 second, when the sign-in renews, and the list then goes on. An endpoint you give, or a context that lists only one, is
-repeated up to four times, after 1, 2 and 4 seconds. One such endpoint then takes about 47 seconds
+tried up to four times in all: three repeats, after 1, 2 and 4 seconds. One such endpoint then takes about 47 seconds
 when it does not answer, and up to 4 minutes 7 seconds when it stalls.
 
 The steps that run after the cluster is read are not written here yet.
