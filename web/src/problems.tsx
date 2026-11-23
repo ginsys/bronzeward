@@ -100,10 +100,11 @@ export const refusedAt = (p: Problem) => (p.status === 422 && p.type === VALIDAT
 export const visibleDetail = (p: Problem): string | undefined => (p.detail !== undefined && refusedAt(p) === "" ? safeSentence(p.detail) : undefined);
 
 // Why a configuration was refused, from the problem document a failed publication or import carries (compilation
-// §8.3): the rule, the input, the paths and the server's message, as safe text, shown as the server serves them. The
-// server redacts a resolved secret value of six bytes or more; a message may quote an authored literal from a fragment,
-// and a shorter copy of a secret is not detected (compilation §8.3, §8.4). The machine comes back as its identifier, for
-// the caller to show by name.
+// §8.3): the rule, the input, the paths and the server's message, as safe text, shown as the server serves them. A fragment
+// input is shown by the name and layer the server adds, with its position in brackets. The server redacts resolved string
+// values only (a secret of six bytes or more); integers and booleans are not detected, and a message or a path may quote
+// an authored literal from a fragment (compilation §8.4). The machine comes back as its identifier, for the caller to
+// show by name.
 const MAX_PATHS = 20;
 const INPUT = /^fragment\[(\d+)\]$/;
 const ended = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`);
@@ -113,7 +114,10 @@ export function whyRefused(e: Record<string, unknown> | null | undefined): { fac
   const input = text("input");
   const message = text("message");
   const paths = Array.isArray(e?.["paths"]) ? e["paths"].filter((p): p is string => typeof p === "string") : [];
-  const at = input === undefined ? undefined : input === "base" ? "the base" : INPUT.test(input) ? `the fragment at position ${INPUT.exec(input)![1]} (the first is 0)` : safeWord(input);
+  const fragment = text("fragment");
+  const layer = text("layer");
+  const place = (n: string) => (fragment === undefined ? `the fragment at position ${n} (the first is 0)` : `the fragment ${safeWord(fragment)}${layer === undefined ? "" : ` in layer ${safeWord(layer)}`} (position ${n}, the first is 0)`);
+  const at = input === undefined ? undefined : input === "base" ? "the base" : INPUT.test(input) ? place(INPUT.exec(input)![1]!) : safeWord(input);
   const more = paths.length > MAX_PATHS ? ` and ${paths.length - MAX_PATHS} more` : "";
   const facts = [
     rule === undefined ? "" : `The rule: ${safeWord(rule)}.`,

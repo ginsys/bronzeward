@@ -1281,7 +1281,14 @@ can only refuse more.
 **Refusals.** A compilation refusal (composition, validation, contract,
 Kubernetes version, ingestion's rules applied while composing) is
 `422 validation-failed` naming the rule, the machine, the input and the
-redacted paths and message (compilation §8.3); covered machines naming
+redacted paths and message (compilation §8.3). Where the input is a fragment
+(`fragment[N]`, the Nth fragment of the machine's composition), the refusal also
+carries `fragment`, the name its author gave the fragment, and `layer`; a
+refusal of the base, of the cluster, or with no input carries neither, and a
+client that does not read them still has the position in `input`. Redaction
+covers resolved string values only: integers and booleans are not detected
+(compilation §8.4), and a path or message may quote an authored literal.
+Covered machines naming
 different Kubernetes versions are `422` with rule `kubernetes`, and a hostname
 filled from a machine's name that another machine of the release holds
 explicitly is `422` with rule `hostname`, naming both machines in words
