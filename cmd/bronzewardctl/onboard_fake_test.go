@@ -427,6 +427,7 @@ type onboardEnv struct {
 	api    *apiFake
 	file   string // the talosconfig
 	result discover.Result
+	answered string // the endpoint the stub says answered, as discoverCluster returns it
 	calls  []string // "context|endpoint" of each discovery call
 	given  [][]byte
 }
@@ -451,9 +452,9 @@ func newOnboard(t *testing.T) *onboardEnv {
 		t.Fatal(err)
 	}
 	old, oldMargin := discoverCluster, leaseMargin
-	discoverCluster = func(_ context.Context, tc []byte, contextName, endpoint string) (discover.Result, error) {
+	discoverCluster = func(_ context.Context, tc []byte, contextName, endpoint string) (discover.Result, string, error) {
 		e.calls, e.given = append(e.calls, contextName+"|"+endpoint), append(e.given, tc)
-		return e.result, nil
+		return e.result, e.answered, nil
 	}
 	leaseMargin = 0
 	t.Cleanup(func() { discoverCluster, leaseMargin = old, oldMargin })

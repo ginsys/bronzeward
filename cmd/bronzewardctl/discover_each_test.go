@@ -47,7 +47,7 @@ func TestDiscoverEachTriesTheListInOrder(t *testing.T) {
 			}
 		}
 		_, listed := eachFixture(t, dead...)
-		res, err := discoverEach(context.Background(), listedConfig(strings.Join(all, ", ")), "", "")
+		res, answered, err := discoverEach(context.Background(), listedConfig(strings.Join(all, ", ")), "", "")
 		first := -1
 		for i, e := range all {
 			if !slices.Contains(dead, e) {
@@ -67,8 +67,8 @@ func TestDiscoverEachTriesTheListInOrder(t *testing.T) {
 			}
 			continue
 		}
-		if err != nil || res.Endpoint != all[first]+":50000" || !slices.Equal(*listed, all[:first+1]) {
-			t.Errorf("pattern %d: %+v, %v, asked %q, want the first live endpoint %s after %d earlier tries", mask, res, err, *listed, all[first], first)
+		if err != nil || res.Endpoint != all[first]+":50000" || answered != all[first] || !slices.Equal(*listed, all[:first+1]) {
+			t.Errorf("pattern %d: %+v, answered %q, %v, asked %q, want the first live endpoint %s (named as answering) after %d earlier tries", mask, res, answered, err, *listed, all[first], first)
 		}
 	}
 }
@@ -76,7 +76,7 @@ func TestDiscoverEachTriesTheListInOrder(t *testing.T) {
 // TestDiscoverEachTypedEndpointAlone: an endpoint given by flag is the only one tried, whatever the file lists.
 func TestDiscoverEachTypedEndpointAlone(t *testing.T) {
 	typed, listed := eachFixture(t, "10.9.9.9", "10.0.0.1", "10.0.0.2")
-	_, err := discoverEach(context.Background(), listedConfig("10.0.0.1, 10.0.0.2"), "", "10.9.9.9")
+	_, _, err := discoverEach(context.Background(), listedConfig("10.0.0.1, 10.0.0.2"), "", "10.9.9.9")
 	if err == nil || !slices.Equal(*typed, []string{"10.9.9.9"}) || len(*listed) != 0 {
 		t.Errorf("error %v, typed %q, listed %q, want one try of the typed endpoint and none of the listed", err, *typed, *listed)
 	}
@@ -86,7 +86,7 @@ func TestDiscoverEachTypedEndpointAlone(t *testing.T) {
 // the command gave it before a list was tried.
 func TestDiscoverEachOneListedEndpointKeepsItsOwnError(t *testing.T) {
 	eachFixture(t, "10.0.0.1")
-	_, err := discoverEach(context.Background(), listedConfig("10.0.0.1"), "", "")
+	_, _, err := discoverEach(context.Background(), listedConfig("10.0.0.1"), "", "")
 	if err == nil || err.Error() != "discover: version: Unavailable (10.0.0.1)" {
 		t.Errorf("error %v, want the endpoint's own error alone", err)
 	}
@@ -96,10 +96,10 @@ func TestDiscoverEachOneListedEndpointKeepsItsOwnError(t *testing.T) {
 // before any read, so the commands keep their usage errors.
 func TestDiscoverEachRefusals(t *testing.T) {
 	typed, listed := eachFixture(t)
-	if _, err := discoverEach(context.Background(), listedConfig(""), "", ""); !errors.Is(err, discover.ErrNoEndpoint) {
+	if _, _, err := discoverEach(context.Background(), listedConfig(""), "", ""); !errors.Is(err, discover.ErrNoEndpoint) {
 		t.Errorf("no endpoint: %v, want ErrNoEndpoint", err)
 	}
-	if _, err := discoverEach(context.Background(), listedConfig("10.0.0.1"), "c", ""); !errors.Is(err, discover.ErrUnknownContext) {
+	if _, _, err := discoverEach(context.Background(), listedConfig("10.0.0.1"), "c", ""); !errors.Is(err, discover.ErrUnknownContext) {
 		t.Errorf("an unknown context: %v, want ErrUnknownContext", err)
 	}
 	if len(*typed)+len(*listed) != 0 {
@@ -119,8 +119,24 @@ func TestDiscoverEachStopsWhenTheOperatorStops(t *testing.T) {
 		return discover.Result{}, context.Canceled
 	}
 	t.Cleanup(func() { discoverListed = old })
-	_, err := discoverEach(ctx, listedConfig("10.0.0.1, 10.0.0.2"), "", "")
+	_, _, err := discoverEach(ctx, listedConfig("10.0.0.1, 10.0.0.2"), "", "")
 	if !errors.Is(err, context.Canceled) || !slices.Equal(asked, []string{"10.0.0.1"}) {
 		t.Errorf("error %v, asked %q, want the cancellation and one try", err, asked)
+	}
+}
+
+// TestDiscoverEachNamesTheEndpointThatAnswered: the printed commands carry the endpoint that gave the cluster,
+// so a typed endpoint is named as typed, one listed endpoint needs no flag, and one of several is named.
+func TestDiscoverEachNamesTheEndpointThatAnswered(t *testing.T) {
+	eachFixture(t)
+	for _, c := range []struct{ name, config, typed, want string }{
+		{"typed", "10.0.0.1, 10.0.0.2", "10.9.9.9", "10.9.9.9"},
+		{"one listed", "10.0.0.1", "", ""},
+		{"several listed", "10.0.0.1, 10.0.0.2", "", "10.0.0.1"},
+	} {
+		_, answered, err := discoverEach(context.Background(), listedConfig(c.config), "", c.typed)
+		if err != nil || answered != c.want {
+			t.Errorf("%s: answered %q, %v, want %q", c.name, answered, err, c.want)
+		}
 	}
 }
