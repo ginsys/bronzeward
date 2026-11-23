@@ -73,7 +73,10 @@ A renewal that comes back for **another account** is not carried on silently, bu
 differ. The command line prints "a new sign-in: the renewed token is for X at Y, not A at B." and
 then carries on with the new token as the new account. A write that has to be repeated after such
 a renewal is the exception: the client compares the account, finds it changed, and sets the write
-aside. It does not repeat it, says the outcome is unknown, and leaves you to read the resource.
+aside. It does not repeat it and says "set aside, not repeated". It adds "No attempt of it can have
+committed anything" when the first send was refused, or "Its outcome is unknown: it may already have
+been committed" when an earlier attempt may have reached the server. Read the resource before you
+decide.
 Read the line and stop if the account is not the one you meant. The web page stops: it says "The identity
 provider renewed the sign-in for another account. Sign in again to continue." and runs nothing until
 you sign in again on purpose.
