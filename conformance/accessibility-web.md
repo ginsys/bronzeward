@@ -203,7 +203,7 @@ Safari runs the keyboard case and skips the 320 pixel case (its window stops at 
 A scope's row on the recovery console: its accounting form, its Mark button and its Release button, from
 [#365](https://github.com/ginsys/bronzeward/issues/365). Automated, in `web/e2e/auth/recovery-accounting.e2e.ts`
 ("keyboard only (T11)"), run by `mise run browser-auth` with `BW_SPECS=recovery-accounting` against a disposable
-deployment with synthetic data. The keys used are Tab, Shift+Tab, the arrow keys inside a group of choices, Space and
+deployment with synthetic data. The keys used are Tab, the arrow keys inside a group of choices, Space and
 Enter. The case marks each control of the row (a group of choices counts as one) and presses Tab from the page's title
 until every one has held focus, in the order the row lists them. It then makes the decision with the keyboard alone:
 Space chooses the start observation, Tab skips the disabled one in the end group and an arrow key moves within it,
