@@ -354,15 +354,25 @@ release, written by the route of the next paragraph.
 
 **A thinner import base is a later write, as a draft entry (choice §17.50).**
 A refactoring replaces a machine's import base by a thinner one and fragments
-that hold what the base gave up (design §9.1 step 5). No route wrote an import
-base but ingestion, so none could thin one. The route is `PUT
+that hold what the base gave up (design §9.1 step 5). Ingestion is no route for
+the split: it holds no author's intent. Today it can also store a new import
+base for a machine that already has an `Applied` release: `startIngestion` in
+`internal/api/ingestions.go` makes no check on the machine's `Applied` release
+(it checks the machine, the draft and its cluster, an open drift record for a
+drift adoption, and a running ingest), and source `document` is open to
+`import` (§9.3). A base read from the node has the source `machine`, and a node
+that changed outside Bronzeward has its own route, drift adoption, so a
+`document` import that changes the content of such a machine has no legitimate
+use: a configuration edit belongs in fragments and drafts. Such an import
+therefore faces the same check as a thinner base (below, and compilation
+§6.2); the refusal is new behaviour for the implementation. The route is `PUT
 /drafts/{id}/import-bases/{machine}` (§9.2): it stores a new import base
 revision for a machine that has an `Applied` release, as that machine's entry
 in the draft, under the draft's `If-Match`, for an `author`, human only, as
 ingestion is. The body is the proposed sanitized document. The split does not
-happen at ingestion: ingestion reads no old composition to compare with and
-holds no author's intent, so a split there is the automatic split the owner
-excluded, and one contract serves both the write and its check.
+happen at ingestion: it holds no author's intent, so a split there is the
+automatic split the owner excluded, and one contract serves both the write and
+its check.
 
 **The subset rule.** The stored document is a subset of the import base of the
 machine's `Applied` release, the base this section defines as the machine's
@@ -387,14 +397,14 @@ has no base to thin, and its import comes by ingestion.
 draft transaction proves that nothing was added, and nothing more. Whether the
 composition still equals what the machine has is compilation §6.2's check, and
 it needs both plaintexts, so it runs in the publish operation (§6.1) for each
-machine whose entry this route wrote; an entry that ingestion wrote, an import
-or a drift adoption, is not checked. A refusal is `422
+machine whose entry this route wrote, and for each machine whose entry an
+ingestion wrote from source `document` for a machine with an `Applied` release
+(compilation §6.2); an import read from the node (source `machine`) and a drift
+adoption are not checked. A refusal is `422
 validation-failed` with rule `equivalence` and reason `not-equal` or
 `cannot-decide` (compilation §13), commits no release and moves no head, and the
-draft stays open for another edit. The check runs only where the machine holds
-what its `Applied` release composed: not pending convergence, and an `Applied`
-digest equal to that release's own artifact digest (§9.3; compilation choice
-§16.41). Publication also
+draft stays open for another edit. The check runs only where the conditions of
+compilation §6.2 and choice §16.41 hold. Publication also
 refuses `409 stale-input`, naming the machine with the expected and the actual
 import base revision, when the machine's `Applied` release no longer has the
 import base the entry was written from; it is §4.2's third form, extended to an
@@ -1048,8 +1058,9 @@ actual revision (the fourth, a name, with the names):
 - a covered machine's import base (§3.2), where the draft carries none for it,
   is no longer the import base revision the snapshot read: an adoption record
   or a completed operation changed its `Applied` in between; an entry that
-  carries a thinner import base (§3.2) is held to the revision it was written
-  from in the same way, naming the machine and both revisions;
+  carries an import base under the typed equivalence check (§3.2, compilation
+  §6.2) is held to the revision it was written from in the same way, naming
+  the machine and both revisions;
 - a covered machine's name (§3.5), which compilation may have filled into the
   hostname (compilation §6.1), is no longer the name the snapshot read: a rename
   committed in between **(choice §17.45)**. The check holds for every covered
@@ -1388,8 +1399,8 @@ other machine's `Applied` release has no `nodeName` recorded and its source is
 so a release made before it keeps the protection it had)
 (compilation §6.1 item 6; the release covers every machine of the cluster with
 an import base, choice §17.33, so one release holds every such pair). A machine
-whose draft entry carries a thinner import base (§3.2) that the typed
-equivalence check finds different, or cannot decide, is `422` with rule
+whose draft entry carries an import base under the typed equivalence check
+(§3.2, compilation §6.2) that the check finds different, or cannot decide, is `422` with rule
 `equivalence`, reason `not-equal` or `cannot-decide`, naming the machine and,
 for `not-equal`, its paths and never a value (compilation §6.2, §13). A dependency
 classified `blocked` or `lost`, or whose identity changed (a creation time
@@ -4214,7 +4225,7 @@ or Desired change; it does not erase earlier evidence.
 | Draft | The machine's name is not the one ingestion used when it removed a filled hostname (§3.2, compilation §2.3 step 2a) | `409 stale-input` naming the machine, expected and actual name; claim abandoned | claim row; orphans |
 | Publish | A covered machine's name changed since the snapshot (§4.2) | operation `failed`, `409 stale-input` | operation, act |
 | Draft update | A thinner import base (§3.2) that adds a leaf, a value or a reference its machine's `Applied` import base lacks, or for a machine with no `Applied` release | `422 validation-failed`, rule `import-base`, naming the machine and the kind of violation, never a path from the body | nothing |
-| Publish | A machine whose entry carries a thinner import base: the typed equivalence check finds it different (`not-equal`) or cannot decide, a pending machine or one holding an adopted baseline its `Applied` release did not compose included (`cannot-decide`) (compilation §6.2) | operation `failed`, `422 validation-failed`, rule `equivalence`, naming the machine and, for `not-equal`, the paths | operation, act |
+| Publish | A machine whose entry carries an import base under the check (§3.2, compilation §6.2): the typed equivalence check finds it different (`not-equal`) or cannot decide, a pending machine or one holding an adopted baseline its `Applied` release did not compose included (`cannot-decide`) (compilation §6.2) | operation `failed`, `422 validation-failed`, rule `equivalence`, naming the machine and, for `not-equal`, the paths | operation, act |
 | Publish | The `Applied` import base of a machine with a thinner-base entry is no longer the one the entry was written from (§4.2) | operation `failed`, `409 stale-input` naming the machine and both revisions | operation, act |
 | Publish | A hostname filled from a machine's name that another machine holds explicitly (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
 | Publish | Moved head, a covered machine's import base changed (§4.2), a machine of the cluster covered since the snapshot (§6.2, expected "absent"), or T3 finds missing, misbound or superseded publication evidence (§6.1.1) | operation `failed`, `409 stale-input` | operation, act |
@@ -5381,7 +5392,13 @@ design and evidence do not settle the question. Each is marked in place as
     would let an author write a new leaf or reference into the base and rely on
     a comparison to catch it, after a provider read. The cost is two steps for
     the author, the entry and the publication, and a refusal that arrives at
-    publication and not at the write.
+    publication and not at the write. The check also covers an ingestion from
+    source `document` for a machine with an `Applied` release, a gate keyed on
+    a new base not read from the node. Alternative: state that import as an
+    ordinary content change and leave it unchecked. It is rejected because a
+    node that changed outside Bronzeward has drift adoption, and a configuration
+    edit belongs in fragments and drafts, so such an import has no legitimate
+    use, and a thinning through it would escape the check.
 51. **An approver of a refactoring release sees the ordinary diff and the
     recorded `equivalence`, and no diff rule changes** (§3.2). The check runs
     only where the machine holds its `Applied` release's artifact (compilation

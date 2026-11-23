@@ -1322,9 +1322,18 @@ rule.
 **Where it runs and for whom.** In the publish operation, in the compiler's
 process, from plaintext, before the release commits (persistence and API
 [§6.1](persistence-api.md#61-steps)). It runs for each machine whose draft
-entry carries a thinner import base, written by the route of persistence and
-API §3.2, and for nothing else. An import base that ingestion wrote, an import
-or a drift adoption, accepts what the node runs and is not checked. A machine
+entry carries an **import base under the check**, and for nothing else: a
+thinner import base written by the route of persistence and API §3.2, or an
+import base that an ingestion wrote from source `document` for a machine that
+already has an `Applied` release. The second case has an old composition to
+compare with, so a document that leaves the configuration unchanged passes and
+one that changes it reads not equal. An import base read from the node (source
+`machine`) and a drift adoption accept what the node runs, and a machine with
+no `Applied` release has no old composition, so none of them is checked. Today's
+code admits a document import for a machine with an `Applied` release with no
+check (`startIngestion` in `internal/api/ingestions.go`; the `document` source
+in persistence and API §9.3); the refusal is new behaviour for the implementation.
+A machine
 the draft covers only through a changed fragment or assignment publishes under
 the ordinary rules. For a machine under
 the check, a change to its configuration beyond the move reads as not equal, so
@@ -1418,7 +1427,8 @@ The check fails closed: it never reads "equal" for a case it could not decide.
 A refusal of the composition itself (a dependency, a validation, the contract)
 keeps the reasons of §13, and a refusal never quotes a value. No override
 exists in the PoC; a refused equivalent change is repaired by keeping more in
-the base or by publishing the change as an ordinary draft without the check.
+the base, or by making the change without thinning the base: an entry that
+does not come from the route of persistence and API §3.2 is not checked.
 
 **Values redaction does not cover (§8.4).** The check reads plaintext after the
 references resolve (§6 step 4), so a value that changes behind an unchanged
@@ -2130,7 +2140,7 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Compilation | Native composition or validation rejects | Publication refused; message redacted or withheld (§8.3) | Nothing |
 | Compilation | A hostname filled from a machine's name that another machine of the cluster holds explicitly, or a node name that another machine's applied release holds (§6.1 item 6) | Publication refused, rule `hostname`, naming both machines | Nothing |
 | Ingestion | The machine's name changed between the removal of a filled hostname (§2.3 step 2a) and the draft transaction | The draft transaction is refused `409 stale-input`; re-ingest | Claim row, no payload |
-| Compilation | A machine whose draft entry carries a thinner import base: the typed equivalence check finds the two compositions different (§6.2) | Publication refused, rule `equivalence`, reason `not-equal`, naming the machine and the paths | Nothing |
+| Compilation | A machine whose draft entry carries an import base under the check (§6.2): the typed equivalence check finds the two compositions different (§6.2) | Publication refused, rule `equivalence`, reason `not-equal`, naming the machine and the paths | Nothing |
 | Compilation | The same machine is pending convergence, or its `Applied` digest is not its `Applied` release's artifact digest (an adopted baseline not yet replaced), or the check cannot decide a case (§6.2) | Publication refused, rule `equivalence`, reason `cannot-decide` | Nothing |
 | Compilation | Trace or flip fragment missing, shape differs, or passes disagree | Publication refused (§8.1) | Nothing |
 | Compilation | Reserved text or an unattributed exact copy in the output | Publication refused, naming paths | Nothing |
@@ -2167,8 +2177,8 @@ check.
    ciphertext digest (§11) is over ciphertext.
 9. **Renderer minor equals the node's minor and is at least the target
    contract's**; Kubernetes is inside the window.
-10. **A thinner import base is published only with its typed equivalence
-    recorded.** A release whose machine carries a thinner import base commits
+10. **An import base under the check is published only with its typed
+    equivalence recorded.** A release whose machine carries one (§6.2) commits
     only after the check of §6.2 found the machine equal, and no digest of the
     render stands in for it.
 
