@@ -14,7 +14,7 @@
 // IndexedDB or caches, and the protected cases find no cached answer of their review.
 import { $, browser, expect } from "@wdio/globals";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
-import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, itNarrow, measure, narrow, onMain, overflows, pickByKeys, storageControl, storageEmptyAfterPause, syntheticMachine, tab, tabTo } from "./helpers.ts";
+import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, itNarrow, measure, narrow, newEpoch, onMain, overflows, pickByKeys, storageControl, storageEmptyAfterPause, syntheticMachine, tab, tabTo } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -101,15 +101,17 @@ const REVIEW = 'section[aria-label="Protected review"]';
 // The editor pane: Save is disabled while it runs, and a browser that keeps focus on a disabled control leaves it on Save.
 const PANE = 'section[aria-label^="Fragment"]';
 
+async function freshDeployment() {
+  at = await disposable("start=normal");
+  machine = await syntheticMachine(at);
+  const body = (await api(at, "h-author", "GET", `/machines/${machine}`)).body!;
+  cluster = body["cluster"] as string;
+  // The server stores the endpoint with its port ("192.0.2.7:50000"); the pages name the machine by the address alone.
+  address = (body["talosEndpoint"] as string).replace(/:\d+$/, "");
+}
+
 describe("the import wizard, the protected review and the conflict view, by keyboard and at 320 CSS pixels (ginsys/bronzeward#894)", () => {
-  before(async () => {
-    at = await disposable("start=normal");
-    machine = await syntheticMachine(at);
-    const body = (await api(at, "h-author", "GET", `/machines/${machine}`)).body!;
-    cluster = body["cluster"] as string;
-    // The server stores the endpoint with its port ("192.0.2.7:50000"); the pages name the machine by the address alone.
-    address = (body["talosEndpoint"] as string).replace(/:\d+$/, "");
-  });
+  before(freshDeployment);
   afterEach(leavesNothing);
 
   it("controls: the storage check and the HTTP cache check each find what is planted", async function () {
@@ -372,6 +374,23 @@ describe("the import wizard, the protected review and the conflict view, by keyb
       expect(w.lost).toEqual([]);
     });
 
+    // The page kept across an epoch change for its unsaved text (ginsys/bronzeward#517 H10, ginsys/bronzeward#1121): the editor with an edit not
+    // saved, then a new epoch. The page stays mounted with its text, and its actions are disabled until another page opens.
+    async function toUnsaved() {
+      const { name } = await toStaleSave();
+      await $('main ul[aria-label="Entries"]').$(`button=fragment ${name}`).click();
+      await loaded();
+      await edit();
+    }
+    const keptAfterEpoch = async () => {
+      await newEpoch();
+      await expect($('[data-testid="epoch-changed"]')).toBeExisting({ wait: 30_000 });
+      await eventually(async () => !(await $("main").$("*=under the new epoch").isExisting()), "the kept page's wait for the new epoch over");
+      // The page is the same one, with its text.
+      await expect($('main section[aria-label^="Fragment"]')).toBeExisting();
+    };
+    const onPage = () => browser.execute(() => document.activeElement?.id === "main");
+
     itNarrow("320 CSS pixels: the conflict view with their text and mine does not scroll the page sideways", async function () {
       this.timeout(180_000);
       const { id, name, etag } = await toStaleSave();
@@ -389,6 +408,30 @@ describe("the import wizard, the protected review and the conflict view, by keyb
         // Each comparison label holds its own read-only textarea; the page answers a boolean, never a text.
         const both = await browser.execute(() => ["Their text", "Your text"].every((t) => [...document.querySelectorAll("main label")].some((l) => l.firstChild?.textContent?.trim() === t && l.querySelector("textarea") !== null)));
         expect(both).toBe(true);
+      });
+    });
+
+    // A new epoch supersedes the deployment it is committed in: it takes no write afterwards. So each case here starts its own
+    // deployment, and these cases are the last of the file, so nothing after them needs the one the cases above share.
+    describe("after an epoch change", () => {
+      beforeEach(freshDeployment);
+
+      it("FOC-03: a field the operator is typing in keeps focus when the epoch changes and the page is kept", async function () {
+        this.timeout(180_000);
+        await toUnsaved();
+        await $('main section[aria-label^="Fragment"]').$("label*=Document").$("textarea").click();
+        expect(await focusedLabel()).toMatch(/^Document/);
+        await keptAfterEpoch();
+        expect([await focusedLabel(), await onPage()]).toEqual([expect.stringMatching(/^Document/), false]);
+      });
+
+      it("FOC-04: a Save that was focused and is disabled by the new epoch hands focus to the page's main, not to the body", async function () {
+        this.timeout(180_000);
+        await toUnsaved();
+        await browser.execute(() => [...document.querySelectorAll<HTMLButtonElement>("main section button")].find((b) => b.textContent === "Save")?.focus());
+        expect(await browser.execute(() => document.activeElement?.textContent)).toBe("Save");
+        await keptAfterEpoch();
+        expect(await onPage()).toBe(true);
       });
     });
   });
