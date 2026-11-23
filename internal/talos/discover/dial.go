@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -85,6 +86,18 @@ func credentials(talosconfig []byte, name string) (creds *clientconfig.Context, 
 		endpoint = c.Endpoints[0]
 	}
 	return &clientconfig.Context{CA: c.CA, Crt: c.Crt, Key: c.Key}, endpoint, nil
+}
+
+// Endpoints are the endpoints of the talosconfig's context called name (the current one when name is ""), as the
+// file lists them and in its order, for a caller that tries each until one gives the cluster. A context that lists
+// none gives an empty list and no error, so the caller says which flag to give. A name that the file does not hold is
+// ErrUnknownContext. The read is `chosen`'s, so a document that is no talosconfig is refused without being quoted.
+func Endpoints(talosconfig []byte, name string) ([]string, error) {
+	c, _, err := chosen(talosconfig, name)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Clone(c.Endpoints), nil
 }
 
 // OneContext is a talosconfig of one context: the one called name in talosconfig (the current one when
