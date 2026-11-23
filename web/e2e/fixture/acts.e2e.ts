@@ -61,7 +61,8 @@ describe(`fixture act ${act}`, () => {
       this.timeout(120_000);
       const form = await control(await region($("main"), "Account for an attempt"), 'form[aria-label="Record accounting"]', "the accounting form");
       // The form reads the machine's observations after the page is up and draws no radio until they arrive.
-      await form.$('input[type="radio"]').waitForExist({ timeout: 30_000, timeoutMsg: "the accounting form listed no observation within 30 s" });
+      // There are many radios, so the wait counts them: a single-element wait fails on a strict-selector error as soon as there is more than one.
+      await browser.waitUntil(async () => (await form.$$('input[type="radio"]')).length > 0, { timeout: 30_000, interval: 500, timeoutMsg: "the accounting form listed no observation within 30 s" });
       say(`the scenario's start ${process.env["BW_FIXTURE_START"] || "<empty>"}, end ${process.env["BW_FIXTURE_END"] || "<empty>"}`);
       for (const line of await offer(form)) say(`offered: ${line}`);
       const start = await pick(form, "start", need("BW_FIXTURE_START"));
