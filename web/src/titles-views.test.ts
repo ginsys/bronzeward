@@ -536,7 +536,7 @@ describe("ginsys/bronzeward#996: an object named by its identifier", () => {
     answers[`/operations/${OP}`] = ok(operation("publish", { draft: DRF, draftRevision: 3 }));
     await mount(h(ReleaseItem, { id: REL }));
     await settled();
-    expect(text()).toContain("DraftAdd the office labels, revision 3");
+    expect(text()).toContain("DraftAdd the office labels, built from its revision 3");
     expect(text()).toContain("PublicationPublish of Add the office labels");
     expect(hrefs()).toEqual(expect.arrayContaining([DRF, OP]));
   });

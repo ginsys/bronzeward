@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { MachineShown, TimelineRows } from "./machine.tsx";
 import { NextStepSection } from "./review.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
+import { DraftItem } from "./drafts.tsx";
 import { PlanItem, ReleaseItem } from "./resources.tsx";
 import { ShellContext } from "./shell.tsx";
 import type { ReadResult } from "./request.ts";
@@ -62,7 +63,7 @@ beforeEach(() => {
   answers = {
     [`/machines/${MCH}`]: ok(machine),
     [`/clusters/${CL}`]: ok({ id: CL, name: "office" }),
-    [`/drafts/${DRF}`]: ok({ id: DRF, title: "Add the office labels", state: "published", revision: 6, cluster: CL }),
+    [`/drafts/${DRF}`]: ok({ id: DRF, title: "Add the office labels", state: "published", revision: 6, cluster: CL, entries: [] }),
     [`/releases/${REL}`]: ok(release),
     [`/plans/${PLN}`]: ok(plan),
     [`/operations/${OP}`]: ok({ id: OP, kind: "publish", state: "succeeded", epoch: "ep_a", lastEvent: 1, subject: { draft: DRF, draftRevision: 5 }, createdBy: null, createdAt: at }),
@@ -207,5 +208,51 @@ describe("a release named in a sentence is its title", () => {
     await mount(h(PlanItem, { id: PLN }));
     await settled();
     expect(text()).toContain("Applied becomes Add the office labels");
+  });
+});
+
+describe("a release's sources are named by what they are", () => {
+  const ASG = "asg_k2pq3rstuvwxyz234567abcdef";
+  const FRG = "frg_k2pq3rstuvwxyz234567abcdef";
+  const sources = [
+    { kind: "assignment", head: ASG, revision: "asr_k2pq3rstuvwxyz234567abcdef", headRevision: 2 },
+    { kind: "fragment", head: FRG, revision: "frr_k2pq3rstuvwxyz234567abcdef", headRevision: 1 },
+  ];
+  beforeEach(() => {
+    answers[`/releases/${REL}`] = ok({ ...release, sources });
+    answers[`/assignments/${ASG}`] = ok({ id: ASG, machine: MCH });
+    answers[`/fragments/${FRG}`] = ok({ id: FRG, name: "office-labels", layer: "base" });
+  });
+  test("an assignment reads as the assignment of its machine and a fragment by its name, with the identifier as title", async () => {
+    await mount(h(ReleaseItem, { id: REL }));
+    await settled();
+    const cells = [...box.querySelectorAll('[aria-label="Source revisions"] tbody tr td:nth-child(2)')].map((c) => c.textContent);
+    expect(cells).toEqual(["Assignment of worker-1", "office-labels"]);
+    expect(titles()).toEqual(expect.arrayContaining([ASG, FRG]));
+  });
+  test("a source not read yet keeps its shortened identifier, never a blank", async () => {
+    answers[`/assignments/${ASG}`] = missing;
+    answers[`/fragments/${FRG}`] = missing;
+    await mount(h(ReleaseItem, { id: REL }));
+    await settled();
+    const cells = [...box.querySelectorAll('[aria-label="Source revisions"] tbody tr td:nth-child(2)')].map((c) => c.textContent);
+    expect(cells).toEqual(["asg_k2pq…cdef", "frg_k2pq…cdef"]);
+  });
+});
+
+describe("the two revision numbers of one published draft say what each counts", () => {
+  test("the release page says it was built from the revision, the draft page that publishing added the last one", async () => {
+    await mount(h(ReleaseItem, { id: REL }));
+    await settled();
+    expect(field("Draft")).toBe("Add the office labels, built from its revision 5");
+    await mount(h(DraftItem, { id: DRF }));
+    await settled();
+    expect(box.querySelector('[data-testid="draft-line"]')?.textContent).toBe("published, revision 6 (publishing added the last revision: its release was built from the one before), Cluster office.");
+  });
+  test("a draft that is not published says nothing of a release", async () => {
+    answers[`/drafts/${DRF}`] = ok({ id: DRF, title: "Add the office labels", state: "open", revision: 6, cluster: CL, entries: [] });
+    await mount(h(DraftItem, { id: DRF }));
+    await settled();
+    expect(box.querySelector('[data-testid="draft-line"]')?.textContent).toBe("open, revision 6, Cluster office.");
   });
 });

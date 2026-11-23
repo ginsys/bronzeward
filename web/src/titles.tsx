@@ -51,12 +51,15 @@ export function useClusterText(id: string | null | undefined): string | undefine
 // is not safe, the shortened identifier where the draft is unread), then its state, revision and cluster, then the
 // identifier with Copy.
 export function DraftHead({ id, d, lead }: { id: string; d: S["DraftBody"] | undefined; lead: string }) {
+  // Publishing is itself a revision of the draft (internal/api/publish.go), and its release keeps the revision it was built
+  // from: the two pages say which number counts what, so "revision 6" and "revision 5" for one draft can be reconciled.
+  const built = d?.state === "published" ? " (publishing added the last revision: its release was built from the one before)" : "";
   return (
     <>
       <h2>{d === undefined ? `${lead} ${short(id)}` : `${lead}: ${draftName(d)}`}</h2>
       {d !== undefined && (
         <>
-          <p data-testid="draft-line">{safeWord(d.state)}, revision {d.revision}, <ClusterRef id={d.cluster} />.</p>
+          <p data-testid="draft-line">{safeWord(d.state)}, revision {d.revision}{built}, <ClusterRef id={d.cluster} />.</p>
           <Detail id={d.id} />
         </>
       )}

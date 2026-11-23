@@ -9,7 +9,7 @@ import { useReads, Ref, useSettled } from "./list.tsx";
 import { type Discovery, type Env, endpointNote, isAddress, type Line, pressOnboarding, type Plan, discoverCluster, type Reference, sender, stoppedSentence } from "./onboard.ts";
 import { RequestRef } from "./problems.tsx";
 import { Action, KEPT_PAGE, useGate } from "./shell.tsx";
-import { MachineById } from "./titles.tsx";
+import { MachineById, Named } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
 import { useUnsaved, useWrites } from "./forms.tsx";
 import { PageNote } from "./page-note.tsx";
@@ -199,7 +199,7 @@ export function OnboardCluster() {
           {busy && <p role="status" data-testid="onboard-running">Running</p>}
           {ended === true && p?.draft !== undefined && (
             <p role="status" data-testid="onboard-result">
-              Onboarded. Review what was imported in the draft <Ref to={`/drafts/${p.draft}`} id={p.draft} />, or <a href="/machines" onClick={(e) => { e.preventDefault(); go("/machines"); }}>see the machines</a>.
+              Onboarded. Review what was imported in the draft <Named id={p.draft} />, or <a href="/machines" onClick={(e) => { e.preventDefault(); go("/machines"); }}>see the machines</a>.
             </p>
           )}
           {ended === false && (
