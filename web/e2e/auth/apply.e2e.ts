@@ -45,7 +45,7 @@ describe("the apply page (#1096)", () => {
     id: REL, cluster: CL, draft: id("drf", "d"), draftRevision: 1, operation: id("op", "o"), publishedBy: { principal: "prn_synthetic_publisher", role: "publisher" }, publishedAt: T0,
     renderer: { contract: "v1.14", machineryVersion: "v1.14.0", machineryChecksum: "x", kubernetesVersion: "v1.34.1" },
     sources: [{ kind: "assignment", head: id("asg", "a"), revision: id("asr", "a"), headRevision: 1 }, { kind: "assignment", head: id("asg", "b"), revision: id("asr", "b"), headRevision: 1 }],
-    machines: [A, B].map((m) => ({ machine: m, mode: "no-reboot", review: id("rev", "r"), publicationObservation: id("obs", "o") })),
+    machines: [A, B].map((m) => ({ machine: m, mode: "no-reboot", review: id("rev", "r"), publicationObservation: id("obs", "o"), hostname: { source: "none" } })),
   };
   // Machine A is a control plane with a plan a publisher prepared; B is a worker with another prepared plan: their two changes differ.
   const mA = machine(A, "alpha", "controlplane");
