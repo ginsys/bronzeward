@@ -172,12 +172,13 @@ function NamedImport({ id }: { id: string }) {
 }
 
 // An object a view names by its identifier, by the view its prefix names: a machine, release, plan,
-// operation, draft or import shows its title, any other identifier as `Id` shows it. Each body is read
+// operation, draft, import or cluster shows its title, any other identifier as `Id` shows it. Each body is read
 // once through the page's store.
 export function Named({ id, none = "none" }: { id: string | null | undefined; none?: string }): ReactNode {
   if (id == null) return none;
   switch (viewOf(id)) {
     case "machines": return <MachineById id={id} />;
+    case "clusters": return <ClusterLink id={id} />;
     case "releases": return <NamedRelease id={id} />;
     case "plans": return <NamedPlan id={id} />;
     case "operations": return <NamedOperation id={id} />;
