@@ -1253,10 +1253,13 @@ epoch than the events shown. It reads both again (CLI: `cmd/bronzewardctl/import
 operation it reads has another epoch, even if the operation has no event to replace them, **when
 the operation is not terminal** (CLI: `internal/client/watch.go:234-237`; web:
 `web/src/progress.ts:223-226`). A terminal read of another epoch than the kept events clears them
-only through the pages it drains, and ends once the drained pages hold the operation's epoch; where
-they do not, the operation is read again after the backoff (CLI:
-`internal/client/watch.go:204-216`; web: `web/src/progress.ts:208-216`,
-`web/src/progress.ts:268-275`). Every
+only through the pages it drains, and ends once the drained events hold the operation's epoch;
+where the pages show another epoch than the operation read's, it is read again after the backoff
+(CLI: `internal/client/watch.go:204-216`; web: `web/src/progress.ts:208-216`,
+`web/src/progress.ts:268-275`). **Proposed** for the CLI: an empty event list of the operation's
+epoch also clears the events kept from another epoch, as the web does
+(`web/src/progress.ts:268`); the CLI keeps them and reads the operation again after the backoff
+until an event replaces them (`internal/client/watch.go:533-552`, `internal/client/watch.go:204-215`). Every
 other multi-page read needs no such comparison, because a cursor carries its epoch and a change
 makes it `400 cursor-invalid`.
 
