@@ -6,9 +6,9 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { LINES, rowOf } from "./apply.ts";
-import { HostWaitsLine, hostWaitsText } from "./host-waits.tsx";
+import { HostWaitsLine, hostRefusalNode, hostWaitsText } from "./host-waits.tsx";
 import type { Position } from "./nextstep.tsx";
-import { HOST_WAITS_SHORT, hostWaits } from "./words.ts";
+import { HOST_WAITS_SHORT, hostRefusal, hostWaits } from "./words.ts";
 
 type Plan = NonNullable<Position["plan"]>;
 
@@ -77,6 +77,26 @@ describe("HostWaitsLine", () => {
     expect(html).toContain(`data-testid="host-waits"`);
     expect(html).toContain(hostWaits("node-a", "node-a", "node-b"));
     expect(renderToStaticMarkup(h(HostWaitsLine, { position: held({ hostnameHeldBy: null }), node: "node-a" }))).toBe("");
+  });
+});
+
+describe("the timeline's refusal entry", () => {
+  const id = "mch_aaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const entry = { comparison: "6a", holder: id, nodeName: "node-a", plan: "pln_x", cause: "the Applied release of machine web-9 holds the Kubernetes node name this release gives the machine" };
+  test("the sentence is the contract's own, and says the plan could not start yet", () => {
+    const s = hostRefusal("node-a", "node-a");
+    expect(s).toBe("The plan could not start yet: the last release applied to machine node-a records the Kubernetes node name node-a.");
+    expect(itemEight()).toContain(s);
+    expect(s).not.toMatch(/refused|failed/);
+  });
+  test("an entry with the holder and the node name is worded from them, an entry without them is not", () => {
+    expect(hostRefusalNode("refusal", entry)).toBeDefined();
+    expect(hostRefusalNode("refusal", { ...entry, holder: undefined })).toBeUndefined();
+    expect(hostRefusalNode("refusal", { ...entry, nodeName: undefined })).toBeUndefined();
+    expect(hostRefusalNode("refusal", { ...entry, holder: "web-9" })).toBeUndefined(); // an entry written before the member, or not an identifier
+    expect(hostRefusalNode("refusal", { ...entry, comparison: "6" })).toBeUndefined(); // only comparison 6a's entry is worded so
+    expect(hostRefusalNode("commitment", entry)).toBeUndefined();
+    expect(hostRefusalNode("refusal", { ...entry, nodeName: "node\u001b[31m" })).toBeUndefined(); // remote text that is not safe is not shown
   });
 });
 

@@ -16,6 +16,9 @@ import (
 // (errAlreadyCommitted).
 type commitRefused struct {
 	Comparison, Cause, Observation string
+	// Holder and NodeName are comparison 6a's: the other machine's identifier and the node name it holds. A node name is
+	// never a secret (client contracts A9 item 8); the entry holds no hostname.
+	Holder, NodeName string
 	// Drift marks comparison 3's refusal on the evidence's configuration digest, whose recording
 	// applies §6.1 and §6.5 to that evidence (§3.2, choice §10.23).
 	Drift bool
@@ -323,7 +326,8 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 		return r, machine, err
 	}
 	if holder != nil {
-		return r, machine, refuseCommitment("6a", "the Applied release of machine "+holder.label()+" holds the Kubernetes node name this release gives the machine")
+		return r, machine, &commitRefused{Comparison: "6a", Holder: holder.ID, NodeName: holder.NodeName,
+			Cause: "the Applied release of machine " + holder.label() + " holds the Kubernetes node name this release gives the machine"}
 	}
 
 	r.Operation, r.Observation = id.New(id.Operation), obs.String
@@ -356,8 +360,8 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 // publication, an adoption and a completed apply change under their machine's row. Two commitments of
 // one cluster take rows in the same order, so neither waits for a row the other holds while holding
 // one the other wants. A machine inserted after the list is read has no Applied release to read, so
-// the gate cannot miss it. The control (options.noReadLock "other machines") drops the share locks, and so
-// does the rollout lock's, since this pass orders the commitments that lock orders.
+// the gate cannot miss it. The control (options.noReadLock "other machines") drops the share locks. The
+// rollout control (noReadLock "rollout") drops them too, since this pass orders the commitments that lock orders.
 func (a *API) lockClusterMachines(ctx context.Context, tx *sql.Tx, cluster, machine, own string) error {
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM machine WHERE cluster = $1 ORDER BY id`, cluster)
 	if err != nil {
@@ -498,5 +502,5 @@ func scopeGate(frozen bool, open, bound sql.NullInt64, scope string, recovery bo
 // transaction.
 func (a *API) recordCommitRefusal(ctx context.Context, machine, plan string, refused *commitRefused) error {
 	return a.recordRefusalEntry(ctx, machine, plan, "commitment", refused.Comparison, refused.Cause, refused.Observation,
-		errAlreadyCommitted, false, refused.Drift)
+		refused.Holder, refused.NodeName, errAlreadyCommitted, false, refused.Drift)
 }

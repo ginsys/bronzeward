@@ -47,7 +47,9 @@ machine records the Kubernetes node name this plan's release gives its own machi
 and the machine's page then say "This plan waits." and name both machines, the node name and
 what to do: apply the release for the other machine first, or give this machine another hostname.
 The plan stays approved and nothing was sent. Where the page cannot show the node name it says
-"This plan waits for another machine's hostname."
+"This plan waits for another machine's hostname." The machine's timeline records each held start as
+"The plan could not start yet: the last release applied to machine <a> records the Kubernetes node
+name <n>."
 
 ```bash
 bronzewardctl plan show <plan>

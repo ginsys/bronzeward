@@ -193,6 +193,10 @@ func eventFields(typ string, d map[string]any) (text string, known bool) {
 	case "attempt":
 		return join("attempt ", "number", "route ", "route", "transport deadline ", "transportDeadline", "controller ", "controller", "generation ", "generation"), true
 	case "refusal":
+		if s := hostRefusalText(d); s != "" {
+			// The sentence stands where the server's cause did.
+			return strings.Join(slices.DeleteFunc([]string{join("plan ", "plan"), s, join("observation ", "observation")}, func(p string) bool { return p == "" }), ", "), true
+		}
 		return join("plan ", "plan", "comparison ", "comparison", "cause ", "cause", "observation ", "observation"), true
 	case "use-time-check":
 		return join("result ", "result", "plan ", "plan", "controller ", "controller"), true

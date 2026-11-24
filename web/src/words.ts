@@ -132,6 +132,10 @@ export const HOST_WAITS_SHORT = "This plan waits for another machine's hostname.
 export const hostWaits = (holder: string, node: string, mine: string) =>
   `This plan waits. The last release applied to machine ${holder} records the Kubernetes node name ${node}, and this release gives the same name to machine ${mine}. ` +
   `This plan has sent nothing to either machine. Apply the release for machine ${holder} first, or give machine ${mine} another hostname.`;
+// A9 item 8: the machine timeline's entry for a commitment the hostname gate refused, from its `holder` and `nodeName`.
+export const HOST_REFUSAL_BEFORE = "The plan could not start yet: the last release applied to machine ";
+export const hostRefusalAfter = (node: string) => ` records the Kubernetes node name ${node}.`;
+export const hostRefusal = (holder: string, node: string) => HOST_REFUSAL_BEFORE + holder + hostRefusalAfter(node);
 export const hostnameTaken = (name: string) => `Hostname: ${name}, taken from the machine's name.`;
 export const hostnameSets = (name: string) => `This release sets the machine's hostname to ${name}, taken from its name.`;
 export const hostnameNowFromName = (name: string) => `This release now takes the machine's hostname from its name, ${name}, in place of the setting it had before.`;

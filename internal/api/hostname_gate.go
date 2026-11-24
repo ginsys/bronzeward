@@ -17,7 +17,7 @@ import (
 // candidate read judge one rule, each against its own row: hostnameHolderQuery("$1", "$2") answers a
 // machine and the release its plan binds; a caller inside another query names that query's columns.
 func hostnameHolderQuery(machine, release string) string {
-	return `SELECT o.machine, c.name
+	return `SELECT o.machine, c.name, mine.node_name
 		FROM release_machine mine
 			JOIN machine_state o ON o.machine <> mine.machine
 			JOIN machine c ON c.id = o.machine AND c.cluster = mine.cluster
@@ -35,6 +35,8 @@ func hostnameHolderQuery(machine, release string) string {
 type hostnameHolder struct {
 	ID   string
 	Name string // "" for none
+	// NodeName is the node name the release gives the machine, which the holder's Applied release records too.
+	NodeName string
 }
 
 // label names the holder in words: by name where it has one, by identifier only where it has none.
@@ -53,7 +55,7 @@ func hostnameHeldBy(ctx context.Context, q interface {
 }, machine, release string) (*hostnameHolder, error) {
 	var h hostnameHolder
 	var name sql.NullString
-	err := q.QueryRowContext(ctx, hostnameHolderQuery("$1", "$2"), machine, release).Scan(&h.ID, &name)
+	err := q.QueryRowContext(ctx, hostnameHolderQuery("$1", "$2"), machine, release).Scan(&h.ID, &name, &h.NodeName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

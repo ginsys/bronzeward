@@ -54,6 +54,36 @@ func TestHostWaits(t *testing.T) {
 	}
 }
 
+// TestHostRefusal: the timeline's entry for a commitment the hostname gate refused is the document's sentence, from the
+// entry's holder (named by its whole identifier: the text path reads no machine) and node name, in place of the server's
+// cause; an entry without the members, or of another comparison, reads as before.
+func TestHostRefusal(t *testing.T) {
+	const id = "mch_k2pq3rstuvwxyz234567abcdef"
+	want := "The plan could not start yet: the last release applied to machine " + id + " records the Kubernetes node name node-a."
+	if !strings.Contains(itemEight(t), "The plan could not start yet: the last release applied to machine node-a records the Kubernetes node name node-a.") {
+		t.Fatal("A9 item 8 does not hold the refusal sentence")
+	}
+	cause := "the Applied release of machine web-9 holds the Kubernetes node name this release gives the machine"
+	entry := map[string]any{"comparison": "6a", "plan": "pln_x", "cause": cause, "holder": id, "nodeName": "node-a"}
+	got, known := eventFields("refusal", entry)
+	if !known || !strings.Contains(got, want) || strings.Contains(got, cause) || !strings.Contains(got, "plan pln_x") {
+		t.Errorf("a 6a entry with the members: %q (known %v), want %q and the plan, and not the cause", got, known, want)
+	}
+	for label, d := range map[string]map[string]any{
+		"no holder":          {"comparison": "6a", "plan": "pln_x", "cause": cause, "nodeName": "node-a"},
+		"no node name":       {"comparison": "6a", "plan": "pln_x", "cause": cause, "holder": id},
+		"another comparison": {"comparison": "6", "plan": "pln_x", "cause": cause, "holder": id, "nodeName": "node-a"},
+	} {
+		if got, _ := eventFields("refusal", d); !strings.Contains(got, "cause "+cause) || strings.Contains(got, "could not start yet") {
+			t.Errorf("%s: %q, want the entry as it was read before", label, got)
+		}
+	}
+	d := map[string]any{"comparison": "6a", "holder": id, "nodeName": "node-\x1b[31ma"}
+	if got, _ := eventFields("refusal", d); strings.Contains(got, "\x1b") {
+		t.Errorf("a node name with a control byte is printed raw: %q", got)
+	}
+}
+
 // TestWaitsMachine: a machine is named by its name where it has one, else by its whole identifier (A8 rule 1, CLI).
 func TestWaitsMachine(t *testing.T) {
 	name, empty := "node-a", ""
