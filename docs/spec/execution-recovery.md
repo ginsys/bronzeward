@@ -1149,7 +1149,9 @@ state is being accepted (design §12.1).
    `machine.network.hostname` equal to it goes as a key alone, where no such
    document is present and `machine.features.stableHostname` is neither `true`
    nor a reference (otherwise the key stays): the hostname is then
-   filled from the name again, and a rename reaches the machine through a release.
+   filled from the name again, and a rename reaches the machine through a release,
+   except after a rename whose release is not yet applied: a hostname equal to
+   the previous name stays explicit (compilation contract §6.1 item 5).
    The baseline stays the exact input, so this step's comparison below is
    unchanged.
 2. **Publish.** The sanitized document becomes the machine's new import base,
