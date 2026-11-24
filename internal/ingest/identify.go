@@ -195,12 +195,13 @@ func plainDeletes(n *yaml.Node) bool {
 	return true
 }
 
-// documentSelector reports whether the root of a document is a delete selector for a whole typed document:
-// exactly `$patch: delete`, `apiVersion` and `kind`, each a plain string with no tag, anchor or alias. The
-// machinery reads apiVersion and kind to choose the document it deletes (and loads nothing else of it), so the
+// documentSelector reports whether the root of a document is the delete selector for a HostnameConfig:
+// exactly `$patch: delete`, `apiVersion: v1alpha1` and `kind: HostnameConfig`, each a plain string with no
+// tag, anchor or alias. The machinery reads apiVersion and kind to choose the document it deletes, so the
 // reason plainDeletes refuses members beside a directive, that they would be stored without ever being
-// loaded, does not apply: the loader refuses a pair it does not know. A selector with `name`, any other
-// member, a nested one or a list entry's stays refused (compilation.md §2.3 step 3).
+// loaded, does not apply. It does not check the pair (an unknown kind loads as a selector too, measured), so
+// the pair is fixed here and nothing else is free text. A selector with `name`, any other member, another
+// pair, a nested one or a list entry's stays refused (compilation.md §2.3 step 3).
 func documentSelector(n *yaml.Node) bool {
 	if n.Kind != yaml.MappingNode || len(n.Content) != 6 {
 		return false
@@ -215,9 +216,7 @@ func documentSelector(n *yaml.Node) bool {
 		}
 		seen[k.Value] = v.Value
 	}
-	_, hasAPI := seen["apiVersion"]
-	_, hasKind := seen["kind"]
-	return len(seen) == 3 && hasAPI && hasKind && seen["$patch"] == "delete"
+	return len(seen) == 3 && seen["$patch"] == "delete" && seen["apiVersion"] == "v1alpha1" && seen["kind"] == "HostnameConfig"
 }
 
 // directive reports whether n is a mapping holding a delete directive.

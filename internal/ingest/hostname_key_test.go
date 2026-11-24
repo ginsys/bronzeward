@@ -106,15 +106,12 @@ func TestFilledHostnameKeyStays(t *testing.T) {
 		{"a machine with no name", "", keyBase},
 		{"an empty hostname", "node-a", strings.Replace(keyBase, "node-a", "\"\"", 1)},
 		{"a HostnameConfig document with another hostname", "node-a", keyBase + doc("node-b")},
-		{"a hostname that is a sequence", "node-a", strings.Replace(keyBase, "hostname: node-a", "hostname: [node-a]", 1)},
 		{"a hostname that is a number", "123", strings.Replace(keyBase, "node-a", "123", 1)},
 		{"a hostname that is a reference", "node-a", strings.Replace(keyBase, "hostname: node-a", "hostname: !bwref s-name", 1)},
 		{"stableHostname true", "node-a", strings.Replace(keyStable, "false", "true", 1)},
 		{"stableHostname a reference", "node-a", strings.Replace(keyStable, "false", "!bwref s-stab", 1)},
-		{"stableHostname not a boolean", "node-a", strings.Replace(keyStable, "false", "\"false\"", 1)},
 		{"features a reference", "node-a", "machine:\n  features: !bwref s-feats\n  network:\n    hostname: node-a\n"},
 		{"features null", "node-a", "machine:\n  features:\n  network:\n    hostname: node-a\n"},
-		{"features a scalar", "node-a", "machine:\n  features: x\n  network:\n    hostname: node-a\n"},
 		{"two documents hold the key", "node-a", keyBase + "---\n" + keyBase},
 		{"the hostname node carries an anchor", "node-a", strings.Replace(keyBase, "hostname: node-a", "hostname: &h node-a", 1)},
 	} {
@@ -128,6 +125,34 @@ func TestFilledHostnameKeyStays(t *testing.T) {
 			}
 			if !strings.Contains(docs, "hostname") {
 				t.Errorf("the key was removed:\n%s", docs)
+			}
+		})
+	}
+}
+
+// K2 for shapes the machinery's loader refuses as a whole, so no import reaches them: the rule itself still
+// keeps the key, which this reads straight from the parsed stream. A hostname that is a sequence,
+// stableHostname that is not a boolean and features that is a scalar each keep it.
+func TestReleaseLegacyKeyKeepsWhatItCannotRead(t *testing.T) {
+	for label, text := range map[string]string{
+		"a hostname that is a sequence":    strings.Replace(keyBase, "hostname: node-a", "hostname: [node-a]", 1),
+		"stableHostname not a boolean":     strings.Replace(keyStable, "false", "\"false\"", 1),
+		"features a scalar":                "machine:\n  features: x\n  network:\n    hostname: node-a\n",
+		"features an alias":                "machine:\n  other: &f {}\n  features: *f\n  network:\n    hostname: node-a\n",
+		"a control: the plain key is read": keyBase,
+	} {
+		t.Run(label, func(t *testing.T) {
+			docs, err := parseStream([]byte(text))
+			if err != nil {
+				t.Fatal(err)
+			}
+			filled, err := releaseLegacyKey(docs, "node-a", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := strings.HasPrefix(label, "a control")
+			if (filled == Filled{Name: "node-a", Key: true}) != want {
+				t.Errorf("recorded %+v, released = %v", filled, want)
 			}
 		})
 	}

@@ -41,6 +41,7 @@ func TestDocumentSelectorRefused(t *testing.T) {
 		{"no apiVersion", "kind: HostnameConfig\n$patch: delete\n"},
 		{"an unknown kind", "apiVersion: v1alpha1\nkind: NoSuchKind\n$patch: delete\n"},
 		{"another apiVersion", "apiVersion: v9\nkind: HostnameConfig\n$patch: delete\n"},
+		{"a known kind that is not the hostname's", "apiVersion: v1alpha1\nkind: ResolverConfig\n$patch: delete\n"},
 		{"the kind a mapping", "apiVersion: v1alpha1\nkind:\n  x: y\n$patch: delete\n"},
 		{"the apiVersion a number", "apiVersion: 1\nkind: HostnameConfig\n$patch: delete\n"},
 		{"the kind null", "apiVersion: v1alpha1\nkind:\n$patch: delete\n"},
