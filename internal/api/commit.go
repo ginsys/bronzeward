@@ -43,10 +43,11 @@ type committed struct {
 
 // commitPlan commits an approved apply-config plan (T6, execution-recovery.md §3.2,
 // persistence-api.md §5) as this process, the controller of the current epoch. It holds, in
-// persistence-api.md §5 rule 5's order, the installation state FOR SHARE, the machine FOR UPDATE,
-// its assignment head, the approver's principal and the approval FOR SHARE, the plan's state FOR
-// UPDATE and the cluster's rollout lock (choice §10.29); reads the time after the last lock (rule
-// 4); compares 0 to 6 in order; and creates the plan's apply-config operation in committed, owned
+// persistence-api.md §5 rule 5's order, the installation state FOR SHARE, the cluster's machine rows in
+// one id-ordered pass (its own FOR UPDATE, the others FOR SHARE, for comparison 6a), its assignment
+// head, the approver's principal and the approval FOR SHARE, the plan's state FOR UPDATE and the
+// cluster's rollout lock (choice §10.29); reads the time after the last lock (rule 4); compares 0 to
+// 6a in order; and creates the plan's apply-config operation in committed, owned
 // by this process at generation 1 in the current epoch, commits the plan to it and appends the
 // commitment entry. A refusal rolls back and is
 // recorded as a refusal entry by a separate transaction (§4.1). It sends nothing: §3.1 item 2's
@@ -105,14 +106,14 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 		return r, "", errNotController
 	}
 	// A plan row and its release are immutable, so their bindings are read before the machine's lock.
-	var machine, cluster, kind, assignment, contract string
+	var machine, cluster, kind, assignment, contract, release string
 	var desired sql.NullString
 	var baseline, bound sql.NullInt64
 	var maxAgeMicros int64
 	err := tx.QueryRowContext(ctx, `SELECT p.machine, p.cluster, p.kind, p.assignment_revision, p.desired_release,
-			p.baseline_revision, p.drift_record, (extract(epoch FROM p.max_observation_age) * 1000000)::bigint, r.contract
+			p.baseline_revision, p.drift_record, (extract(epoch FROM p.max_observation_age) * 1000000)::bigint, r.contract, p.release
 		FROM plan p JOIN release r ON r.id = p.release WHERE p.id = $1`, plan).Scan(&machine, &cluster, &kind, &assignment,
-		&desired, &baseline, &bound, &maxAgeMicros, &contract)
+		&desired, &baseline, &bound, &maxAgeMicros, &contract, &release)
 	if err != nil {
 		return r, "", fmt.Errorf("commitment of plan %s: %w", plan, err)
 	}
@@ -121,15 +122,19 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 	}
 	maxAge := time.Duration(maxAgeMicros) * time.Microsecond
 	// The machine's lock is the one a publication's selection takes (publish.go), so Desired, read
-	// under it, is the one a publication committed before it or will change only after it.
+	// under it, is the one a publication committed before it or will change only after it. It is taken
+	// in one pass over the cluster's machine rows, which comparison 6a reads.
 	lock := ` FOR UPDATE`
 	if a.o.noMachineLock {
 		lock = ``
 	}
+	if err := a.lockClusterMachines(ctx, tx, cluster, machine, lock); err != nil {
+		return r, machine, err
+	}
 	var scope string
 	var frozen bool
 	var drift sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT scope_state, frozen FROM machine WHERE id = $1`+lock, machine).Scan(&scope,
+	if err := tx.QueryRowContext(ctx, `SELECT scope_state, frozen FROM machine WHERE id = $1`, machine).Scan(&scope,
 		&frozen); err != nil {
 		return r, machine, err
 	}
@@ -309,6 +314,17 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 	if cause := scopeGate(frozen, drift, bound, scope, recovery); cause != "" && !a.o.noScopeGate {
 		return r, machine, refuseCommitment("6", cause)
 	}
+	// 6a: the hostname gate. No other machine of the cluster has an Applied release that holds the node
+	// name the bound release gives this machine, unless this machine's own Applied holds it already. The
+	// cluster's machine rows are held, so no publication, adoption or completed apply changes an Applied
+	// release between this read and the commit. The refusal names the other machine, never a hostname.
+	holder, err := hostnameHeldBy(ctx, tx, machine, release)
+	if err != nil {
+		return r, machine, err
+	}
+	if holder != nil {
+		return r, machine, refuseCommitment("6a", "the Applied release of machine "+holder.label()+" holds the Kubernetes node name this release gives the machine")
+	}
 
 	r.Operation, r.Observation = id.New(id.Operation), obs.String
 	_, err = tx.ExecContext(ctx, `INSERT INTO operation (id, kind, state, epoch, owner, owner_gen, owner_epoch, plan, machine,
@@ -325,13 +341,58 @@ func (a *API) commitTx(ctx context.Context, tx *sql.Tx, plan string) (committed,
 	if _, err := tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 		VALUES ($1, $2, $3, 'commitment', jsonb_build_object('plan', $4::text, 'operation', $5::text, 'approval', $6::text,
 			'observation', $7::text, 'controller', $8::text, 'generation', 1,
-			'comparisons', jsonb_build_array('0', '1', '2', '3', '4', '5', '6')), $9)`,
+			'comparisons', jsonb_build_array('0', '1', '2', '3', '4', '5', '6', '6a')), $9)`,
 		machine, r.Revision, current, plan, r.Operation, approval.String, r.Observation, a.d.owner.ID, at); err != nil {
 		return r, machine, err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE plan_state SET state = 'committed', operation = $2, revision = revision + 1,
 		updated_at = $3 WHERE plan = $1`, plan, r.Operation, at)
 	return r, machine, err
+}
+
+// lockClusterMachines takes the machine rows of the plan's cluster in id order, one row at a time
+// (persistence-api.md §5 rule 5; execution-recovery.md §3.2 comparison 6a): the commitment's own row
+// with own, every other row FOR SHARE. The gate reads other machines' Applied releases, which a
+// publication, an adoption and a completed apply change under their machine's row. Two commitments of
+// one cluster take rows in the same order, so neither waits for a row the other holds while holding
+// one the other wants. A machine inserted after the list is read has no Applied release to read, so
+// the gate cannot miss it. The control (options.noReadLock "other machines") drops the share locks, and so
+// does the rollout lock's, since this pass orders the commitments that lock orders.
+func (a *API) lockClusterMachines(ctx context.Context, tx *sql.Tx, cluster, machine, own string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM machine WHERE cluster = $1 ORDER BY id`, cluster)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		ids = append(ids, m)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	other := a.share("other machines")
+	if a.o.noReadLock == "rollout" {
+		// The pass orders two commitments of one cluster by itself, so the rollout lock's control drops it too.
+		other = ``
+	}
+	for _, m := range ids {
+		lock := other
+		if m == machine {
+			lock = own
+		}
+		if _, err := tx.ExecContext(ctx, `SELECT FROM machine WHERE id = $1`+lock, m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 const rolloutCause = "an operation holds the cluster's rollout scope"
