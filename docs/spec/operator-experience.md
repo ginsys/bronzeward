@@ -207,9 +207,10 @@ server; whatever it cannot decide, and a machine with an identified embedded doc
 "differs". A machine whose import removed a hostname document that was exactly what the fill
 writes (`auto: off` and the hostname, nothing else) reads form only while its name is the one
 recorded at import, and "differs" after a rename (compilation §6, choice §16.39). A machine whose
-import removed a document that held more, or a legacy `machine.network.hostname` key equal to its
-name (compilation §2.3 step 2a), reads "differs": the node holds a key
-and the release sends a document, and whether that is no change on the node is unmeasured
+import removed a document that held more than the fill writes reads "differs" (compilation §6). So
+does one whose import removed a legacy `machine.network.hostname` key equal to its name
+(compilation §2.3 step 2a): the node holds a key and the release sends a document, and whether that is
+no change on the node is unmeasured
 ([ginsys/bronzeward#1040](https://github.com/ginsys/bronzeward/issues/1040)). A machine with an open
 drift never reads form only, and its adopt plan does not say it.
 
