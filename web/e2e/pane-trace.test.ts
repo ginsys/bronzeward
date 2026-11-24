@@ -62,6 +62,20 @@ describe("failedWithPane", () => {
     expect(e.cause).toBe(first);
   });
 
+  it("keeps the original failure where the read throws before it returns a promise", async () => {
+    const e = await failedWithPane(first, () => {
+      throw new Error("trace read failed synchronously");
+    });
+    expect(e.message).toBe(first.message);
+    expect(e.cause).toBe(first);
+  });
+
+  it("keeps the original failure where the samples cannot be written out", async () => {
+    const e = await failedWithPane(first, async () => null as unknown as Sample[]);
+    expect(e.message).toBe(first.message);
+    expect(e.cause).toBe(first);
+  });
+
   it("takes the text of a failure that is not an Error", async () => {
     const e = await failedWithPane("plain", async () => []);
     expect(e.message).toBe("plain; pane trace: no sample taken");
