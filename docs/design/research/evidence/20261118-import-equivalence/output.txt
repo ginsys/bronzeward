@@ -177,3 +177,19 @@ explicit false against omitted: same behaviour: both load=true E0=false E1=false
   token: <redacted:s-ifwigspm7o7yccmtqvru3prkqm@1>
   token: <redacted:s-fojfnqxdxssfhc4mttzpr4tgl4@1>
 clusterSecret: <redacted:s-uryw6ie37z7l53ipen7ip3lrxy@1>
+
+### hostname, the node's own HostnameConfig imported with the machine's name (ginsys/bronzeward#1040)
+== B3: the node's own hostname document, imported with the machine's name
+machine  case  removed equal  baseHolds(no name) baseHolds(name) baseHolds(other)  digest(compiled)==digest(node)  formOnly
+cp1      as-written  true false  true false true  false  false  (other name removed: false)
+cp1      auto-off    true true  true false true  false  true  (other name removed: false)
+cp2      as-written  true false  true false true  false  false  (other name removed: false)
+cp2      auto-off    true true  true false true  false  true  (other name removed: false)
+cp3      as-written  true false  true false true  false  false  (other name removed: false)
+cp3      auto-off    true true  true false true  false  true  (other name removed: false)
+w1       as-written  true false  true false true  false  false  (other name removed: false)
+w1       auto-off    true true  true false true  false  true  (other name removed: false)
+w2       as-written  true false  true false true  false  false  (other name removed: false)
+w2       auto-off    true true  true false true  false  true  (other name removed: false)
+w3       as-written  true false  true false true  false  false  (other name removed: false)
+w3       auto-off    true true  true false true  false  true  (other name removed: false)
