@@ -13,7 +13,7 @@ import { Detail, Id, type Load, type Reads, Ref, short, useItem, useList, usePen
 import { markLines } from "./marks.tsx";
 import { eventLine, type Refusal, refusalOf, terminal, type Watch, type Watched, watch } from "./progress.ts";
 import { refusalWords } from "./problems.tsx";
-import type { Client, ReadResult } from "./request.ts";
+import type { Client, Phase, ReadResult } from "./request.ts";
 import { importPath } from "./router.ts";
 import { machineOptions, sharedAddresses } from "./machines.tsx";
 import { PageNote } from "./page-note.tsx";
@@ -277,9 +277,9 @@ export function settledReads(client: Pick<Client, "read" | "readWithEpoch" | "op
       const ok = reads.undropped();
       return settle(await client.read<T>(path), ok);
     },
-    readWithEpoch: async <T,>(path: string, tries?: number) => {
+    readWithEpoch: async <T,>(path: string, tries?: number, phase?: Phase) => {
       const ok = reads.undropped();
-      const got = await client.readWithEpoch<T>(path, tries);
+      const got = await client.readWithEpoch<T>(path, tries, phase);
       return { ...got, result: settle(got.result, ok) };
     },
     open: (path, headers, signal) => client.open(path, headers, signal),
