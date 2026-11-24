@@ -234,10 +234,12 @@ export const viewOf = (id: string) => {
   return Object.hasOwn(VIEWS, prefix) ? VIEWS[prefix] : undefined;
 };
 
-export function Id({ id, none = "none" }: { id: string | null | undefined; none?: string }) {
+// `text` stands for the shortened identifier as the link's text once it is known. A caller whose text arrives after a read
+// passes it here in every state: the link is then one element before and after, and keeps the focus a person put on it.
+export function Id({ id, none = "none", text }: { id: string | null | undefined; none?: string; text?: ReactNode }) {
   if (id == null) return none;
   const view = viewOf(id);
-  return view === undefined ? <IdentifierText id={id} /> : <Ref to={`/${view}/${encodeURIComponent(id)}`} id={id} />;
+  return view === undefined ? <IdentifierText id={id} /> : <Ref to={`/${view}/${encodeURIComponent(id)}`} id={id}>{text}</Ref>;
 }
 
 // The detail line under a heading: the machine-made identifier, in small type, with a control that copies it. The

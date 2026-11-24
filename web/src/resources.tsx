@@ -19,7 +19,7 @@ import { PublishDraft } from "./publish.tsx";
 import { AddCluster, RecordMachine } from "./forms.tsx";
 import { OnboardCluster } from "./onboard.tsx";
 import { IngestionItem, StartImport } from "./imports.tsx";
-import { Detail, EmptyList, Head, Id, IdentifierText, type Listed, More, Ref, Scroll, short, useItem, useList, usePending, viewOf } from "./list.tsx";
+import { Detail, EmptyList, Head, Id, IdentifierText, type Listed, More, Ref, Scroll, short, useItem, useList, usePending } from "./list.tsx";
 import { Who } from "./principals.tsx";
 import { MachineItem } from "./machine.tsx";
 import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
@@ -437,16 +437,14 @@ function SourceName({ kind, head }: { kind: string; head: string }) {
   const body = useBody<{ machine?: string; name?: string }>(path === undefined ? undefined : `/${path}/${encodeURIComponent(head)}`);
   const machine = useMachineText(kind === "assignment" ? body?.machine : undefined);
   const text = kind === "assignment" ? (machine === undefined ? undefined : assignmentName(machine)) : body?.name === undefined ? undefined : safeText(body.name);
-  return text === undefined || viewOf(head) === undefined ? <Id id={head} /> : <Ref to={`/${viewOf(head)}/${encodeURIComponent(head)}`} id={head}>{text}</Ref>;
+  return <Id id={head} text={text} />;
 }
 // The revision a release was built from, by when it was saved; its identifier is the title. "removed" and a revision not read
 // yet or not readable keep the shortened identifier.
 function SourceRevision({ kind, revision }: { kind: string; revision: string | null }) {
   const known = kind === "assignment" || kind === "fragment" || kind === "profile";
   const body = useBody<{ createdAt?: string }>(known && revision !== null ? `/${kind}-revisions/${encodeURIComponent(revision)}` : undefined);
-  const view = revision === null ? undefined : viewOf(revision);
-  if (body?.createdAt === undefined || revision === null || view === undefined) return <Id id={revision} none="removed" />;
-  return <Ref to={`/${view}/${encodeURIComponent(revision)}`} id={revision}>Saved {when(body.createdAt)}</Ref>;
+  return <Id id={revision} none="removed" text={body?.createdAt === undefined ? undefined : `Saved ${when(body.createdAt)}`} />;
 }
 // The observation a release was published with, by when it was read and why; its identifier is the title. The machine's list is
 // read once (its first page) for each covered machine, and an observation it does not hold keeps the shortened identifier.
