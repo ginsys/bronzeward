@@ -2261,7 +2261,9 @@ not part of this rule.
    The sentence describes the release and never claims what the machine reports, since an adopted release may not
    match what the machine holds. Where the machine's current name differs
    from the name the release recorded: "This release used the earlier name node-a. While its hostname comes from the
-   machine's name, the next release will use node-b." A `source` the client does not know shows its raw value and no sentence. A publication refused for a
+   machine's name, the next release will use node-b." A `source` the client does not know shows its raw value and no sentence. Where the
+   release last applied to the machine cannot be read, the review keeps the sentence of its own source and adds only: "The comparison with the
+   release last applied to this machine could not be read." It never guesses the comparison. A publication refused for a
    hostname clash (compilation §6.1 item 6) shows the refusal's own sentence. The CLI and the web console are
    ginsys/bronzeward#1042 and ginsys/bronzeward#1043, and each tests its sentences against these.
 8. **A plan says when it waits for another machine's hostname** (persistence and API §9.3, the `hostnameHeldBy`

@@ -113,6 +113,23 @@ export const RENAME_REACHES = [
   "Whether the machine needs a restart to take the new name is not yet confirmed.",
   "On the node, the Kubernetes node name normally follows the hostname.",
 ] as const;
+// Where a release's hostname came from (client contracts A9 item 7), word for word; the command line prints the same
+// sentences. A release's hostname taken from the configuration is never shown as a value: the release records none.
+export const HOSTNAME_BY_SOURCE = {
+  configuration: "Hostname: set in the configuration. The machine's name does not change it.",
+  none: "Hostname: not set in the configuration; the node chooses its own.",
+  "legacy-stable": "Hostname: the configuration holds the legacy stable-hostname setting, so the machine's name is not used. Remove that setting to use the name.",
+  unrecorded: "Hostname: not recorded for this release.",
+} as const;
+export const HOSTNAME_NODE_NAME = "The machine's Kubernetes node name normally follows the hostname, so it may change too.";
+export const HOSTNAME_LEFT_TO_NODE = "The last release applied to it left the hostname to the node.";
+export const HOSTNAME_UNREAD = "The comparison with the release last applied to this machine could not be read.";
+export const hostnameTaken = (name: string) => `Hostname: ${name}, taken from the machine's name.`;
+export const hostnameSets = (name: string) => `This release sets the machine's hostname to ${name}, taken from its name.`;
+export const hostnameNowFromName = (name: string) => `This release now takes the machine's hostname from its name, ${name}, in place of the setting it had before.`;
+export const hostnameLastSet = (name: string) => `The last release applied to it set ${name}.`;
+export const hostnameEarlier = (used: string, now: string) => `This release used the earlier name ${used}. While its hostname comes from the machine's name, the next release will use ${now}.`;
+export const hostnameUnknownSource = (source: string) => `Hostname source: ${source}`;
 /** The label, heading and page name for taking an existing cluster in; it replaces "Onboard cluster". */
 export const CONNECT_A_CLUSTER = "Connect a cluster";
 /** Said beside the Copy control once the text is on the clipboard. */
