@@ -1,7 +1,7 @@
 // What the keyboard-only case of the operation page adds to a failure, so that the next one says whether the page was
 // mounted anew (ginsys/bronzeward#1121).
 import { describe, expect, it } from "vitest";
-import { bannerEpoch, epochRead, failedWith, withFocusContext } from "./focus-context.ts";
+import { bannerEpoch, type Change, changesText, epochRead, failedWith, withFocusContext } from "./focus-context.ts";
 
 describe("bannerEpoch", () => {
   it("reads the epoch the recovery banner names, in both of its wordings", () => {
@@ -55,6 +55,36 @@ describe("failedWith", () => {
       expect(e.message).toBe(`focus on BODY is not visible; [data-t9] ${want}`);
       expect(e.cause).toBe(first);
     }
+  });
+});
+
+describe("changesText", () => {
+  const removed = (mark: string, ms: number, href: string | null = "/machines/mch_a"): Change => ({ kind: "removed", ms, mark, tag: "a", href, text: "mch_k2pq…cdef" });
+  const added = (ms: number, href: string | null = "/machines/mch_a"): Change => ({ kind: "added", ms, mark: null, tag: "a", href, text: "worker-1" });
+
+  it("says that no marked control changed, and which one held focus last", () => {
+    expect(changesText([], 2)).toBe("last focus on control 2; no marked control removed and no control added since the marking");
+    expect(changesText([], null)).toBe("last focus on no control; no marked control removed and no control added since the marking");
+  });
+
+  it("reads a removal and an add of the same href as one replacement of the control that held focus", () => {
+    expect(changesText([removed("2", 120), added(121)], 2)).toBe(
+      'last focus on control 2; control 2 (a /machines/mch_a "mch_k2pq…cdef") removed at 120 ms, held focus last; ' +
+        'added at 121 ms (a /machines/mch_a "worker-1"), the href of removed control 2',
+    );
+  });
+
+  it("does not call a removal a replacement where no added node has its href", () => {
+    expect(changesText([removed("1", 40, "/a"), added(50, "/b")], 0)).toBe(
+      'last focus on control 0; control 1 (a /a "mch_k2pq…cdef") removed at 40 ms; added at 50 ms (a /b "worker-1")',
+    );
+  });
+
+  it("keeps the first change of an add with no href and caps the list", () => {
+    const many = Array.from({ length: 12 }, (_, i) => added(i, null));
+    const text = changesText(many, null);
+    expect(text.startsWith('last focus on no control; added at 0 ms (a - "worker-1"); added at 1 ms')).toBe(true);
+    expect(text.endsWith("; and 4 more")).toBe(true);
   });
 });
 
