@@ -1,8 +1,12 @@
 package compile
 
 import (
+	"errors"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 
 	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
@@ -37,6 +41,7 @@ func TestNodeNameRules(t *testing.T) {
 		{"a.y.org", false, "a"},
 		{"a.x.org", true, "a.x.org"},
 		{"nöde-a", false, "nde-a"},
+		{"node!-a", false, "node-a"},
 		{".node-a.", true, "node-a"},
 		{"-.-", true, ""},
 		{"___", false, ""},
@@ -178,5 +183,84 @@ func TestRecordedNodeName(t *testing.T) {
 		if err != nil || known != tc.known || node != tc.node {
 			t.Errorf("%s: RecordedNodeName = %q, %v, %v; want %q, %v, nil", tc.name, node, known, err, tc.node, tc.known)
 		}
+	}
+}
+
+// kubeletFQDN sets the v1alpha1 machine.kubelet.registerWithFQDN of a generated stream, and docFQDN the
+// field of its KubeNodeConfig document ("" leaves the document's own, unset). Each insertion must land.
+func kubeletFQDN(t *testing.T, stream, v string) string {
+	t.Helper()
+	// The generated stream holds the kubelet's image in a KubeletConfig document, which the loader
+	// refuses beside a v1alpha1 machine.kubelet: that document is left out, and the field added.
+	var docs []string
+	for _, d := range strings.Split(stream, "\n---\n") {
+		if !strings.Contains(d, "kind: KubeletConfig") {
+			docs = append(docs, d)
+		}
+	}
+	stream = strings.Join(docs, "\n---\n")
+	re := regexp.MustCompile(`(?m)^machine:[^\n]*\n`)
+	if !re.MatchString(stream) {
+		t.Fatal("the generated stream holds no machine section")
+	}
+	return re.ReplaceAllString(stream, "machine:\n    kubelet:\n        registerWithFQDN: "+v+"\n") // the encoder indents by four
+}
+
+func docFQDN(t *testing.T, stream, v string) string {
+	t.Helper()
+	re := regexp.MustCompile(`(?m)^kind: KubeNodeConfig[^\n]*\n`)
+	if !re.MatchString(stream) {
+		t.Fatal("the generated stream holds no KubeNodeConfig document")
+	}
+	return re.ReplaceAllString(stream, "kind: KubeNodeConfig\nregisterWithFQDN: "+v+"\n")
+}
+
+// TestNodeInputsKubeNodeConfigWins pins where the precedence is decided (compilation.md §6.1 item 6): the
+// effective registerWithFQDN is the KubeNodeConfig document's field, and the v1alpha1 machine.kubelet one
+// only where no such document is present. A document that leaves the field unset therefore means false,
+// whatever the legacy field holds. The controls show each side is read.
+func TestNodeInputsKubeNodeConfigWins(t *testing.T) {
+	full := string(generatedStream(t))  // holds a KubeNodeConfig document, field unset
+	trimmed := string(generatedBase(t)) // no KubeNodeConfig document
+	for _, tc := range []struct {
+		name   string
+		stream string
+		want   bool
+	}{
+		{"document unset, legacy true: the document wins", kubeletFQDN(t, full, "true"), false},
+		{"document false, legacy true: the document wins", kubeletFQDN(t, docFQDN(t, full, "false"), "true"), false},
+		{"document true, legacy false: the document wins", kubeletFQDN(t, docFQDN(t, full, "true"), "false"), true},
+		{"control, no document, legacy true: the legacy field is read", kubeletFQDN(t, trimmed, "true"), true},
+		{"control, no document, legacy false", kubeletFQDN(t, trimmed, "false"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := configloader.NewFromBytes([]byte(tc.stream)); err != nil {
+				t.Fatalf("the loader refuses the stream: %v", err)
+			}
+			_, fqdn, ok := nodeInputs([]byte(tc.stream))
+			if !ok || fqdn != tc.want {
+				t.Errorf("nodeInputs: fqdn %v, ok %v; want %v, true", fqdn, ok, tc.want)
+			}
+		})
+	}
+}
+
+// TestCompileKubeletFQDNBesideKubeNodeConfig states what a composition holding both does, as a v1alpha1
+// nodeLabels fragment over a base with a KubeNodeConfig document does (TestCompileNodeLabelsGoThroughKubeNodeConfig):
+// the v1alpha1 machine.kubelet.registerWithFQDN fragment is refused as invalid, and a KubeNodeConfig
+// fragment with the same value composes. The refusal is why a stored stream holding both is a case of
+// nodeInputs only.
+func TestCompileKubeletFQDNBesideKubeNodeConfig(t *testing.T) {
+	base := source(t, string(generatedStream(t)), ingest.Declarations{}, nil)
+	in := func(frag string) Input {
+		return Input{Base: base, Fragments: []Source{source(t, frag, ingest.Declarations{}, nil)}, Mode: ModeMetal, Name: "a.x.org"}
+	}
+	_, err := Compile(in("machine:\n  kubelet:\n    registerWithFQDN: true\n"))
+	var e *Error
+	if !errors.As(err, &e) || e.Rule != RuleInvalid {
+		t.Fatalf("a v1alpha1 registerWithFQDN fragment beside a KubeNodeConfig document: got %v, want an invalid verdict", err)
+	}
+	if _, err := Compile(in(nodeFQDNOn)); err != nil {
+		t.Fatalf("a KubeNodeConfig fragment with the same value: %v", err)
 	}
 }

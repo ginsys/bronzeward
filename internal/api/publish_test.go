@@ -782,6 +782,13 @@ func (p *publishEnv) nextDraft() {
 	}
 	mustExec(p.t, p.db, `UPDATE machine_state SET applied_release = $2, applied_digest = $3, applied_source = 'operation',
 		baseline_revision = 1 WHERE machine = $1`, p.machine, rel, make([]byte, 32))
+	p.rebind()
+}
+
+// rebind binds a new draft that changes nothing, with its own operation, as the job and the unit of
+// the next commit; the unit's machines stay as they are.
+func (p *publishEnv) rebind() {
+	p.t.Helper()
 	var storageHead, asg string
 	if err := p.db.QueryRow(`SELECT id FROM fragment WHERE cluster = $1 AND name = 'storage'`, p.cluster).Scan(&storageHead); err != nil {
 		p.t.Fatal(err)
@@ -798,7 +805,9 @@ func (p *publishEnv) nextDraft() {
 		VALUES ($1, 'publish', 'running', $2, 1, $3, now() + interval '1 minute', $4, 1, $5, 'human', 'publisher', $3, now())`,
 		op, p.owner.ID, p.owner.Epoch, d2, p.seed)
 	p.job = publishJob{op: op, draft: d2, cluster: p.cluster, draftRev: 1, gen: 1}
-	p.unit.machines[0].observation = dbtest.PublicationObservation(p.t, p.db, p.machine, op)
+	for i, m := range p.unit.machines {
+		p.unit.machines[i].observation = dbtest.PublicationObservation(p.t, p.db, m.machine, op)
+	}
 	p.unit.unchanged = []usedHead{{kind: "fragment", head: p.base, revision: p.baseRev, headRevision: 1},
 		{kind: "profile", head: p.prf, revision: p.prv, headRevision: 1},
 		{kind: "fragment", head: p.network, revision: p.networkNew, headRevision: 2},
