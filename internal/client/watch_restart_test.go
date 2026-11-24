@@ -159,8 +159,8 @@ func TestWatchTrustRefusalIsRepeated(t *testing.T) {
 			Show:  func(Event) {},
 			Until: func() (bool, error) { return sumWaits(waits) >= 3*time.Second, nil },
 		})
-		if !errors.Is(err, ErrWatchEnded) || !errors.As(err, new(*trust)) || !strings.Contains(err.Error(), "is not trusted by the system trust store") {
-			t.Errorf("watch: %v; want an error that is ErrWatchEnded and the trust refusal itself", err)
+		if errors.Is(err, ErrWatchEnded) || !errors.As(err, new(*trust)) || !strings.Contains(err.Error(), "is not trusted by the system trust store") {
+			t.Errorf("watch: %v; want the trust refusal itself, which is not ErrWatchEnded (the command would then show the first read)", err)
 		}
 		if sumWaits(waits) < 3*time.Second || strings.Count(notices.String(), "is not trusted by the system trust store") < 3 {
 			t.Errorf("waits %v, notices %q; want 3 s of waits and a notice naming the refusal at each try", waits, notices)
@@ -189,7 +189,32 @@ func TestWatchEndedInTrustRefusalAfterARead(t *testing.T) {
 	}
 	t.Cleanup(func() { waitFor = defaultWait })
 	op, _, err := c.Watch("op_BWSYNTH", Watch{Show: func(Event) {}, Until: func() (bool, error) { return sumWaits(waits) >= 3*time.Second, nil }})
-	if op != nil || !errors.Is(err, ErrWatchEnded) || !errors.As(err, new(*trust)) {
-		t.Errorf("watch: %v, %v; want no operation and an error that is ErrWatchEnded and the trust refusal", op, err)
+	if op != nil || errors.Is(err, ErrWatchEnded) || !errors.As(err, new(*trust)) {
+		t.Errorf("watch: %v, %v; want no operation and the trust refusal, which is not ErrWatchEnded", op, err)
+	}
+}
+
+// TestWatchEndedInTrustRefusalAfterAFailedDrain checks the same for a terminal read whose drain failed: the read
+// of the operation after the failed drain meets a refused certificate until the watch ends, and the refusal is
+// returned with the failed drain, not the terminal read before them (§8.6 item 2).
+func TestWatchEndedInTrustRefusalAfterAFailedDrain(t *testing.T) {
+	const e1 = "ep_BWSYNTH1"
+	untrusted := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(untrusted.Close)
+	o := &opServer{streams: []func(http.ResponseWriter, *http.Request){sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"failed"}, pagesStatus: http.StatusForbidden}
+	var c *Client
+	f := &fake{epoch: e1, post: func(_ int, w http.ResponseWriter, r *http.Request) {
+		o.serve(w, r)
+		if r.Header.Get("Accept") != "text/event-stream" && r.URL.Path == "/api/v1/operations/op_BWSYNTH/events" {
+			c.Context.Server = untrusted.URL // the drain is refused, and the server then presents a refused certificate
+		}
+	}}
+	c, _, _ = writeClient(t, f, e1)
+	var waits []time.Duration
+	waitFor = func(ctx context.Context, d time.Duration) error { waits = append(waits, d); return ctx.Err() }
+	t.Cleanup(func() { waitFor = defaultWait })
+	op, _, err := c.Watch("op_BWSYNTH", Watch{Show: func(Event) {}, Until: func() (bool, error) { return sumWaits(waits) >= 3*time.Second, nil }})
+	if op != nil || errors.Is(err, ErrWatchEnded) || !errors.As(err, new(*trust)) || !strings.Contains(err.Error(), "403") {
+		t.Errorf("watch: %v, %v; want no operation and the refused drain with the trust refusal, not ErrWatchEnded", op, err)
 	}
 }

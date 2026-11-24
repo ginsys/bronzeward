@@ -206,10 +206,11 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	// (§8.5, start mode): what the command prints next, the banner included, is of the new epoch. A read
 	// before or between the sends that shows one is no answer of the write, and the write's own result
 	// stands whatever the read answers. A recovery start refuses GET /server the way it refuses this write,
-	// before its entry, so its scope-less refusal reads nothing.
-	moved, recoveryStart := false, false
+	// before its entry, and its refusal already shows the start mode (problem handling in client.go), so
+	// that refusal reads nothing: neither this refresh nor the outcome's own read of the resource.
+	moved := false
 	defer func() {
-		if !moved || recoveryStart || !c.newEpoch {
+		if !moved || !c.newEpoch {
 			return
 		}
 		if _, _, serr := c.Server(); serr != nil {
@@ -344,7 +345,9 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		movesBefore := c.moves
 		a := c.post(w, key, ref, sctx)
 		moved = moved || c.moves != movesBefore
-		recoveryStart = a.p != nil && a.p.Code() == "recovery-mode-active" && a.p.Doc["scope"] == nil
+		if a.p != nil && a.p.Code() == "recovery-mode-active" && a.p.Doc["scope"] == nil {
+			moved, c.newEpoch = false, false
+		}
 		stopped := disarm()
 		p, code := a.p, ""
 		if p != nil {

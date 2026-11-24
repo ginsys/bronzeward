@@ -99,6 +99,8 @@ func TestWriteAnswerOfNewEpochReadsServer(t *testing.T) {
 			}}
 		c, notices, _ := writeClient(t, f, e1)
 		w := clusterWrite()
+		// The outcome's own read of the resource goes through Get, as the commands' callbacks do.
+		w.Read = func(c *Client) (string, error) { _, err := c.Get("/clusters"); return "BWSYNTH shows", err }
 		w.Repeat = &Repeat{Key: "BWSYNTH-aaaaaaaaaaaaaaa", Epoch: e1, Principal: "svc_BWSYNTH"}
 		_, err := c.Send(w)
 		if err == nil {
