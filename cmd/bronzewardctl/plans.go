@@ -466,11 +466,13 @@ func (e *env) stateLines(c *client.Client, p *apitypes.PlanBody, m apitypes.Mach
 	var stale, unread []string
 	// An approved apply-config plan that waits for another machine's hostname says so (A9 item 8); the position is the
 	// server's own answer for it.
-	var pos apitypes.PositionBody
-	if err := getJSON(c, "/machines/"+url.PathEscape(p.Machine)+"/position", &pos); err != nil {
-		unread = append(unread, sf("the machine's position cannot be read: %v", err))
-	} else if w := hostnameWaits(c, &pos, p.Id); w != "" {
-		lines = append(lines, w)
+	if p.Operation == "apply-config" {
+		var pos apitypes.PositionBody
+		if err := getJSON(c, "/machines/"+url.PathEscape(p.Machine)+"/position", &pos); err != nil {
+			unread = append(unread, sf("the machine's position cannot be read: %v", err))
+		} else if w := hostnameWaits(c, &pos, p.Id); w != "" {
+			lines = append(lines, w)
+		}
 	}
 	if mErr != nil {
 		unread = append(unread, sf("the machine cannot be read: %v", mErr))
