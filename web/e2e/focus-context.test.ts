@@ -45,6 +45,14 @@ describe("failedWith", () => {
     expect(e.cause).toBe(first);
   });
 
+  it("adds what the page changed, and leaves it out where that read fails", async () => {
+    const banner = async () => "epoch ep_a";
+    expect((await failedWith(first, async () => 3, banner, 5, "ep_a", async () => "last focus on control 2; x")).message).toBe(
+      "focus on BODY is not visible; [data-t9] marks 3 of 5; epoch at marking ep_a, now ep_a; last focus on control 2; x",
+    );
+    expect((await failedWith(first, async () => 3, banner, 5, "ep_a", down)).message).toBe("focus on BODY is not visible; [data-t9] marks 3 of 5; epoch at marking ep_a, now ep_a");
+  });
+
   it("keeps the original failure when either read fails, or both", async () => {
     for (const [marks, banner, want] of [
       [down, async () => "epoch ep_b", "marks unread of 5; epoch at marking ep_a, now ep_b"],
