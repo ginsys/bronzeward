@@ -6,6 +6,7 @@
 import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
+import { PlanHostWaits } from "./host-waits.tsx";
 import { type Load, Id, Ref, short, usePending, useReads, useSettled } from "./list.tsx";
 import { PageNote } from "./page-note.tsx";
 import type { Problem } from "./request.ts";
@@ -253,6 +254,7 @@ export function PlanState({ p, reread, answers = 0, onMachine }: { p: Plan; rere
     <>
       {terminal !== undefined && <Status testid="plan-terminal"><span className="badge">{p.state}</span> {terminal(p)}{again(p)}</Status>}
       {p.state === "approved" && <Approved p={p} reread={reread} answers={answers} onMachine={onMachine} />}
+      {p.state === "approved" && p.operation === "apply-config" && <PlanHostWaits plan={p.id} machine={p.machine} />}
       {p.state === "committed" && p.committedOperation !== null && <Status testid="plan-committed">Committed: operation <Named id={p.committedOperation} />.</Status>}
     </>
   );

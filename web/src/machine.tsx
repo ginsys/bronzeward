@@ -12,6 +12,7 @@ import { ClusterRef, Named, useReleaseNames } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
 import { PageNote } from "./page-note.tsx";
 import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, roleWords, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
+import { HostWaits } from "./host-waits.tsx";
 import { NextStep, PlanPreparedBy, type Position } from "./nextstep.tsx";
 import { driftPath } from "./plan.tsx";
 import { principalId } from "./principals.ts";
@@ -462,6 +463,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list, name).map((s) => <li key={s}>{s}</li>)}</ul>
       <p data-testid="drift-link"><Ref to={driftPath(d.id)} id={d.id}>{driftLinkText(d)}</Ref></p>
       <NextStep position={position} recovery={recovery} />
+      <HostWaits position={position} />
       <PlanPreparedBy position={position} />
       <dl>
         <dt>Desired</dt><dd>{release(d.desired)}</dd>

@@ -127,6 +127,11 @@ export const HOSTNAME_UNREAD = "The comparison with the release last applied to 
 // A9 item 8: where no node-name clash was checked. Neither names a cause or a value.
 export const NODE_NOT_CHECKED_HIDDEN = "Not checked: the review hides an input to this machine's Kubernetes node name, so a clash with another machine's node name cannot be checked.";
 export const NODE_NOT_CHECKED_OLD = "Not checked: this release was made before hostname clashes were recorded, so a clash with another machine's hostname cannot be checked.";
+// A9 item 8: an approved plan waits for another machine's hostname. It says "waits", never "refused" or "failed": the plan stays approved and nothing was sent.
+export const HOST_WAITS_SHORT = "This plan waits for another machine's hostname.";
+export const hostWaits = (holder: string, node: string, mine: string) =>
+  `This plan waits. The last release applied to machine ${holder} records the Kubernetes node name ${node}, and this release gives the same name to machine ${mine}. ` +
+  `This plan has sent nothing to either machine. Apply the release for machine ${holder} first, or give machine ${mine} another hostname.`;
 export const hostnameTaken = (name: string) => `Hostname: ${name}, taken from the machine's name.`;
 export const hostnameSets = (name: string) => `This release sets the machine's hostname to ${name}, taken from its name.`;
 export const hostnameNowFromName = (name: string) => `This release now takes the machine's hostname from its name, ${name}, in place of the setting it had before.`;
