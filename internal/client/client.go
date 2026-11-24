@@ -233,6 +233,7 @@ func (c *Client) retryUntil(path string, stop func() bool, tries int) (*Response
 // renew is not cancelled: a refresh the identity provider already answered must be kept (§9.5).
 func (c *Client) retryIn(ctx context.Context, path string, stop func() bool, tries int) (*Response, error) {
 	delay, renewed := time.Second, false
+	var refused error // the last refused certificate this read met: a later failure does not erase it
 	for try := 1; ; try++ {
 		r, retry, err := c.once(ctx, path)
 		if ctx.Err() != nil {
@@ -252,7 +253,7 @@ func (c *Client) retryIn(ctx context.Context, path string, stop func() bool, tri
 		// until the watch ends asks again, with the refusal as the notice of each try: a server that restarts
 		// behind a proxy can present another certificate for a while, and the client accepts none (§8.6 item 2).
 		if !retry && stop != nil && errors.As(err, new(*trust)) {
-			retry = true
+			retry, refused = true, err
 		}
 		if !retry || stop == nil && try == tries {
 			return r, err
@@ -273,6 +274,9 @@ func (c *Client) retryIn(ctx context.Context, path string, stop func() bool, tri
 					return nil, werr
 				}
 				if left -= step; stop() {
+					if refused != nil && !errors.As(err, new(*trust)) {
+						err = errors.Join(refused, err)
+					}
 					return r, errors.Join(err, ErrWatchEnded)
 				}
 			}
