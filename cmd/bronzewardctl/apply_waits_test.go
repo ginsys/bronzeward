@@ -47,24 +47,22 @@ func TestPlanShowHeldIsNotRead(t *testing.T) {
 }
 
 // TestPlanShowReadsPositionOnlyForApplyConfig: the machine's position is read only to word an approved apply-config plan that
-// waits. An approved plan of another operation has no such sentence, so its plan show neither reads the position nor names
-// a position it could not read (the hosted advisory review of the changeset).
+// waits. An approved plan of another operation has no such sentence, so a position it could not read is not named in its
+// plan show, while an apply-config plan names it (the hosted advisory review of the changeset). The fake counts no failing
+// read, so the unread line is what shows whether the read was made.
 func TestPlanShowReadsPositionOnlyForApplyConfig(t *testing.T) {
 	for _, c := range []struct {
-		op   string
-		read int
-	}{{"adopt", 0}, {"apply-config", 1}} {
+		op     string
+		unread bool
+	}{{"adopt", false}, {"apply-config", true}} {
 		f := planServer(t)
 		f.set(func(f *planFake) {
 			f.op, f.state, f.approval, f.approvalEpoch = c.op, "approved", "apr_BWSYNTH", "ep_BWSYNTH-2"
 			f.fail = map[string]string{"/machines/mch_a/position": "BWSYNTH no position"}
 		})
 		_, out, _ := runCtl(t, "plan", "show", "pln_BWSYNTH")
-		if n := f.got("/machines/mch_a/position"); n != c.read {
-			t.Errorf("%s: the position was read %d times, want %d", c.op, n, c.read)
-		}
-		if has := strings.Contains(out, "the machine's position cannot be read"); has != (c.read == 1) {
-			t.Errorf("%s: unread line present = %v, want %v:\n%s", c.op, has, c.read == 1, out)
+		if has := strings.Contains(out, "the machine's position cannot be read"); has != c.unread {
+			t.Errorf("%s: unread line present = %v, want %v:\n%s", c.op, has, c.unread, out)
 		}
 	}
 }
