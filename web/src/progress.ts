@@ -254,7 +254,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     // The epoch comes from the response the result comes from: the client's epoch can be a newer one
     // by the time this continues.
     // One send: the waits between the sends are this loop's, so they end with the watch (§8.6 item 2).
-    const { result: res, epoch, moves: records } = await client.readWithEpoch<Operation>(path, 1, phase);
+    const { result: res, epoch, moves: records } = await client.readWithEpoch<Operation>(path, 1, phase, w.signal);
     // The page left while the read was pending: its answer is not acted on, and nothing more is sent.
     if (w.signal.aborted) return { kind: "stopped" };
     reread = outage(res);

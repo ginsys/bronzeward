@@ -553,6 +553,17 @@ describe("stale-response discard", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("a refused token is not renewed, and the read not sent again, once the signal ended while the answer was on its way", async () => {
+    const ctl = new AbortController();
+    const renew = vi.fn(async () => true);
+    const fetchMock = vi.fn(async () => (ctl.abort(), problem(401, "unauthenticated")));
+    const c = new Client({ fetch: fetchMock as unknown as typeof fetch, renew });
+    c.setView(base);
+    expect(await c.readWithEpoch("/identity", undefined, undefined, ctl.signal)).toMatchObject({ result: { kind: "discarded" } });
+    expect(renew).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   test("a read whose signal ended before its first send sends nothing", async () => {
     const ctl = new AbortController();
     ctl.abort();
