@@ -93,7 +93,7 @@ func TestApplyRowWaitsForAnotherMachinesHostname(t *testing.T) {
 		{"a node name not recorded", "-", hostWaitsUnread, "approved already"},
 		// The node name is remote text: it is printed escaped, never as the control bytes it holds.
 		{"a node name with a control byte", `node-\u001b[31m9`, "records the Kubernetes node name node-\\x1b[31m9, and", "\x1b"},
-		{"no holder", "", "approved already: the controller sends it when its gates allow", "This plan waits"},
+		{"no holder", "+", "approved already: the controller sends it when its gates allow", "This plan waits"},
 	} {
 		f := applyServer(t)
 		f.held = c.held
@@ -102,7 +102,7 @@ func TestApplyRowWaitsForAnotherMachinesHostname(t *testing.T) {
 		if !strings.Contains(errOut, c.want) || strings.Contains(errOut, c.not) {
 			t.Errorf("%s: want %q and not %q in\n%s", c.label, c.want, c.not, errOut)
 		}
-		if c.held != "" && (strings.Contains(errOut, "refused") || strings.Contains(errOut, "failed")) {
+		if c.held != "" && c.held != "+" && (strings.Contains(errOut, "refused") || strings.Contains(errOut, "failed")) {
 			t.Errorf("%s: a waiting plan is described as refused or failed:\n%s", c.label, errOut)
 		}
 		if s := strings.Join(f.took(), "\n"); strings.Contains(s, "/approvals") {

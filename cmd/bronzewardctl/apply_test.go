@@ -89,7 +89,7 @@ type applyFake struct {
 	withheld              string // the plan whose change the server withholds
 	drift                 string // the plan that carries a drift record
 	lockAt                string // a POST to this path answers another epoch and makes the configuration directory read-only
-	held                  string // alpha's plan is approved and waits for beta's hostname: "" none, "-" its node name is not recorded, else that name
+	held                  string // alpha's plan is approved and waits for beta's hostname: "" it is not approved, "+" approved and no holder, "-" its node name is not recorded, else that name
 	lock                  func()
 }
 
@@ -131,7 +131,9 @@ func (f *applyFake) position(machine string) string {
 	if machine == "mch_alpha" && f.held != "" {
 		step = "awaiting-dispatch"
 		plan = strings.Replace(plan, `"state":"proposed"`, `"state":"approved"`, 1)
-		holder = `{"id":"mch_beta","name":"beta"}`
+		if f.held != "+" {
+			holder = `{"id":"mch_beta","name":"beta"}`
+		}
 	}
 	pending := "true"
 	if machine == "mch_beta" && f.applied {
