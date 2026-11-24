@@ -1454,7 +1454,8 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    out, not within 250 ms (ginsys/bronzeward#1175). The web client's waits end at once on the watch's
    abort (`web/src/progress.ts:87-94`), and the waits of an outage and after a void terminal read also
    end within 250 ms of `until`; the web's backoff between the attempts of a stream or of the JSON
-   pages ends on the abort only, not within 250 ms of `until` (`web/src/progress.ts:319`). CLI: a TLS trust refusal is a transport failure the CLI does not
+   pages ends on the abort only, not within 250 ms of `until` (`web/src/progress.ts:319`;
+   ginsys/bronzeward#1175). CLI: a TLS trust refusal is a transport failure the CLI does not
    repeat (`internal/client/client.go:284`).
 3. A `reset` event clears what the watch showed, prints that the installation was restored or
    entered recovery mode, and shows the replay from the start. The epoch change is handled as in
