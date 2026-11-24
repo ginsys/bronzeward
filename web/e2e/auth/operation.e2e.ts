@@ -8,7 +8,7 @@
 // resolution (cancelled, by h-recovery) is the event that follows. Every value is synthetic.
 import { $, $$, browser, expect } from "@wdio/globals";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
-import { epochRead, failedWith } from "../focus-context.ts";
+import { type Change, changesText, epochRead, failedWith } from "../focus-context.ts";
 import type { Faults } from "../injector.ts";
 import { absent, answers, api, counts, disposable, faults, fixtureSignIn, fromTitle, itNarrow, measure, mint, narrow, overflows, type Seed, storageEmpty, tab } from "./helpers.ts";
 
@@ -289,17 +289,36 @@ describe("the operation page's stream (#359)", () => {
       return all.length;
     }, CONTROLS);
     expect(total).toBeGreaterThan(0);
+    // From the marking on, the page's own record of each marked control that leaves it and each control that joins it, so a
+    // failure names the control and whether the same link was made again (a replacement) or not (focus-context.ts).
+    await browser.execute((sel: string) => {
+      const log: Change[] = [];
+      const t0 = performance.now();
+      const note = (kind: Change["kind"], n: Node) => {
+        if (!(n instanceof Element)) return;
+        for (const e of [n, ...n.querySelectorAll("*")]) {
+          if (kind === "removed" ? !e.hasAttribute("data-t9") : !e.matches(sel)) continue;
+          log.push({ kind, ms: Math.round(performance.now() - t0), mark: e.getAttribute("data-t9"), tag: e.tagName.toLowerCase(), href: e.getAttribute("href"), text: (e.textContent ?? "").slice(0, 40) });
+        }
+      };
+      new MutationObserver((ms) => ms.forEach((m) => { m.removedNodes.forEach((n) => note("removed", n)); m.addedNodes.forEach((n) => note("added", n)); }))
+        .observe(document.body, { childList: true, subtree: true });
+      (window as unknown as { t9log: Change[] }).t9log = log;
+    }, CONTROLS);
     // What a failure below adds, to tell a page mounted anew by a new epoch (its marks gone, the epoch moved) from one that
-    // was not (focus-context.ts): the marks left and the epoch the recovery banner names, now against the marking.
+    // was not: the marks left and the epoch the recovery banner names, now against the marking, and those changes.
     const banner = () => browser.execute(() => document.querySelector('[data-testid="recovery"]')?.textContent ?? null);
     const epochThen = await epochRead(banner);
-    const failed = (e: unknown) => failedWith(e, () => browser.execute(() => document.querySelectorAll("[data-t9]").length), banner, total, epochThen);
+    let lastFocus: number | null = null;
+    const changes = async () => changesText(await browser.execute(() => (window as unknown as { t9log?: Change[] }).t9log ?? []), lastFocus);
+    const failed = (e: unknown) => failedWith(e, () => browser.execute(() => document.querySelectorAll("[data-t9]").length), banner, total, epochThen, changes);
     await fromTitle();
     const reached: number[] = [];
     for (let i = 0; i < 80 && reached.length < total; i++) {
       const f = await tab().catch(async (e: unknown) => { throw await failed(e); });
       if (f.same) throw new Error(`Tab did not leave ${f.tag} "${f.text}" on the way through the page`);
       const k = await browser.execute(() => document.activeElement?.closest("[data-t9]")?.getAttribute("data-t9") ?? null);
+      if (k !== null) lastFocus = Number(k);
       if (k !== null && !reached.includes(Number(k))) reached.push(Number(k));
     }
     // Every control was reached, and in the order the page lists them.
