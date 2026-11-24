@@ -1218,12 +1218,16 @@ change each:
    (`internal/client/client.go:341-345`, `web/src/request.ts:441-449`).
 
 **Current** for the web client, with one exception to item 1's discard of every cached page: the
-page holding unsaved text stays shown, and sends nothing, while the new epoch's server and identity
-reads are pending, and through a failure a later read can mend (no answer, a `503` after its
-retries); it ends once both reads answer for an accepted server, and on a refusal, a `403` or an
-incompatible server (`web/src/shell.test.ts:248`, `web/src/shell.test.ts:273`). The retention
-bullet of [§8.6](#86-event-resumption) item 6 states the same rule, and those tests pin it as
-intended (H10 of [#517](https://github.com/ginsys/bronzeward/issues/517)).
+page holding unsaved text stays shown, with its actions disabled and a notice to copy the text, and
+sends nothing, until the operator opens another page (`web/src/shell.tsx:385-389`,
+`web/src/shell.tsx:509-512`). While the new epoch's server and identity reads are pending, and
+through a failure a later read can mend (no answer, a `503` after its retries), the shell holds the
+page as it was; once both reads answer for an accepted server, it shows under the new identity,
+still disabled. On a refusal, a `403` or an incompatible server the page goes
+(`web/src/shell.tsx:135-143`, `web/src/shell.tsx:508-526`, `web/src/shell.test.ts:248`,
+`web/src/shell.test.ts:273`). The retention bullet of [§8.6](#86-event-resumption) item 6 states
+the same rule, and those tests pin it as intended (H10 of
+[#517](https://github.com/ginsys/bronzeward/issues/517)).
 
 A command that shows one snapshot built from several reads (`status`, `recovery status`, the
 table of `machine show`) shows nothing when an epoch change falls between the first and the last
@@ -1502,10 +1506,10 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
      ([§9.6](#96-failure-cases)), and nothing stays (`web/src/request.test.ts:119`,
      `web/src/request.test.ts:149`, `web/src/shell.test.ts:348`).
    - A new epoch and the process's recovery refusal end the page ([§8.5](#85-epoch-changes)), and
-     nothing stays. A new epoch does so once its server and identity reads answer; until then a
-     page holding unsaved text stays shown and sends nothing. The recovery refusal does so at once
-     (`web/src/shell.test.ts:302`, `web/src/shell.test.ts:316`, `web/src/shell.test.ts:248`,
-     `web/src/shell.test.ts:273`).
+     nothing stays, with one exception for a new epoch: a page holding unsaved text stays shown,
+     with its actions disabled, and sends nothing, until the operator opens another page. The
+     recovery refusal ends the page at once (`web/src/shell.test.ts:302`,
+     `web/src/shell.test.ts:316`, `web/src/shell.test.ts:248`, `web/src/shell.test.ts:273`).
    - An observations read that restarted after a refused cursor and then failed keeps nothing: the
      list goes with its cursor ([§8.2](#82-errors)). W3 still shows the machine's own rows with
      the observations' failure; only the latest read's line needs the observations. If the machine
