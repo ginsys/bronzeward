@@ -61,6 +61,17 @@ func TestBuildReleaseHostnameClash(t *testing.T) {
 		{"filled against an explicit hostname of a named machine", machine{name: "web-1"}, machine{name: "db-1", hostname: "WEB_1"}, true,
 			[]string{"Machine web-1 would take the hostname web-1 from its name, but the hostname configured on machine db-1 gives the same Kubernetes node name. " +
 				"Rename machine web-1, or change the hostname in the configuration of machine db-1."}},
+		// The strings of ginsys/bronzeward#1040: the node name is derived by Talos's rules, so a case,
+		// an underscore and a dropped character do not hide a clash.
+		{"filled against an explicit hostname in capitals, with an underscore and a domain", machine{name: "node-a"}, machine{hostname: "NODE_A.example.org"}, true,
+			[]string{"Machine node-a would take the hostname node-a from its name, but the hostname configured on machine %S gives the same Kubernetes node name. " +
+				"Rename machine node-a, or change the hostname in the configuration of machine %S."}},
+		{"filled against an explicit hostname with underscores at both ends", machine{name: "node-a"}, machine{hostname: "_node-a_"}, true,
+			[]string{"Machine node-a would take the hostname node-a from its name, but the hostname configured on machine %S gives the same Kubernetes node name. " +
+				"Rename machine node-a, or change the hostname in the configuration of machine %S."}},
+		{"filled against an explicit hostname with a character the node name drops", machine{name: "node-a"}, machine{hostname: "node!-a"}, true,
+			[]string{"Machine node-a would take the hostname node-a from its name, but the hostname configured on machine %S gives the same Kubernetes node name. " +
+				"Rename machine node-a, or change the hostname in the configuration of machine %S."}},
 		{"two explicit hostnames already equal", machine{hostname: "same"}, machine{hostname: "same"}, false, nil},
 		{"an unnamed machine against an explicit hostname", machine{}, machine{hostname: "web-1"}, false, nil},
 		{"filled against another name", machine{name: "web-1"}, machine{name: "web-2"}, false, nil},

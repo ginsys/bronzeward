@@ -112,3 +112,83 @@ func TestPublishCommitHostnameSwapAccepts(t *testing.T) {
 		}
 	}
 }
+
+// swapRoute is a cluster of two machines whose last applied releases record the hostnames filled from
+// their names and the node names derived from them, as a release covers every machine of the cluster (persistence-api.md choice §17.33). The
+// first is the draft env's machine, the second the seed's.
+type swapRoute struct {
+	p      *publishEnv
+	second string
+	seed   string // the import base of the first machine's seeded release, the one it has Applied at the start
+}
+
+func newSwapRoute(t *testing.T, first, second string) *swapRoute {
+	t.Helper()
+	p := newPublishEnv(t)
+	p.draftEnv.nodeNames = [2]nodeRecord{{true, &first}, {true, &second}} // the seeded release records each node name
+	s := p.applied(1, [2]hostRecord{{"machine-name", &first}, {"machine-name", &second}}, func(s releaseSeed) string { return p.machine })
+	mustExec(t, p.db, `UPDATE machine_state SET applied_release = $2, applied_digest = $3, applied_source = 'adoption',
+		baseline_revision = 1 WHERE machine = $1`, s.machine2, s.rel, make([]byte, 32))
+	r := &swapRoute{p: p, second: s.machine2, seed: s.ibr}
+	mustExec(t, p.db, `UPDATE machine SET name = $2 WHERE id = $1`, p.machine, first)
+	mustExec(t, p.db, `UPDATE machine SET name = $2 WHERE id = $1`, s.machine2, second)
+	p.cover(s, s.machine2, &second)
+	return r
+}
+
+// publish publishes a release naming the two machines as given, each filled from its name.
+func (r *swapRoute) publish(first, second string) (string, *refusal) {
+	r.p.t.Helper()
+	mustExec(r.p.t, r.p.db, `UPDATE machine SET name = $2 WHERE id = $1`, r.p.machine, first)
+	mustExec(r.p.t, r.p.db, `UPDATE machine SET name = $2 WHERE id = $1`, r.second, second)
+	for i, name := range []string{first, second} {
+		m := &r.p.unit.machines[i]
+		m.name = name
+		m.hostname = compile.Hostname{Source: compile.HostnameMachineName, Name: name}
+		m.nodeName = &name // the release records the node name Talos derives from it, and the check compares that
+	}
+	return r.p.commit()
+}
+
+// apply records the release as the Applied one of the machine, as its plan does.
+func (r *swapRoute) apply(machine, release string) {
+	r.p.t.Helper()
+	mustExec(r.p.t, r.p.db, `UPDATE machine_state SET applied_release = $2, applied_digest = $3, applied_source = 'operation',
+		baseline_revision = 1 WHERE machine = $1`, machine, release, make([]byte, 32))
+	r.p.rebind()
+}
+
+// The route the refusal's text names (compilation.md §6.1 item 6) works, and the two machines exchange their
+// names through a third, every release publishing: (1) the first machine is renamed to a new name; (2) until
+// that release is applied the second may not take the old name, and after it may; (3) the first then takes the
+// name the second gave up. Names are unique in a cluster, so the exchange is never one rename. Each release
+// covers both machines.
+func TestPublishCommitHostnameExchange(t *testing.T) {
+	r := newSwapRoute(t, "web-1", "web-2")
+	p := r.p
+
+	rel1, ref := r.publish("web-3", "web-2") // the first machine takes a third name
+	if ref != nil {
+		t.Fatalf("step 1, the first machine renamed web-3: %+v", ref)
+	}
+	p.rebind()
+	// Before the first machine's release is applied, the second still may not take the name it gave up. A draft
+	// with no import base entry compiles on its machine's Applied release's (§3.2), which is still the seed's.
+	first := &p.unit.machines[0]
+	fixture := first.importBase
+	first.importBase, first.reproduction[0].source = r.seed, r.seed
+	_, ref = r.publish("web-3", "web-1")
+	first.importBase, first.reproduction[0].source = fixture, fixture
+	if ref == nil || ref.status != 422 || ref.extra["rule"] != "hostname" {
+		t.Fatalf("step 2 before step 1 is applied: got %+v, want 422 with the rule hostname", ref)
+	}
+	r.apply(p.machine, rel1)
+	rel2, ref := r.publish("web-3", "web-1") // the second takes the name the first gave up
+	if ref != nil {
+		t.Fatalf("step 2, the second machine renamed web-1: %+v", ref)
+	}
+	r.apply(r.second, rel2)
+	if _, ref := r.publish("web-2", "web-1"); ref != nil { // the first takes the name the second gave up
+		t.Fatalf("step 3, the first machine renamed web-2: %+v", ref)
+	}
+}
