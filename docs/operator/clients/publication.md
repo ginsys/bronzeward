@@ -87,7 +87,7 @@ bronzewardctl release provenance <release> <machine>
    machines covered, and for each a link **Rendered configuration of <machine>**.
 4. Open a machine's rendered configuration. The page shows the document, the note "A field that
    shows as empty is empty in the rendered review. A redacted field shows as a badge, so an empty
-   one was not redacted.", where the release's hostname came from (taken from the machine's name, set in the configuration, left to the node, the legacy stable-hostname setting, or not recorded) and, for a name taken from the machine's name, how it differs from the release last applied to the machine and from the machine's current name, and a table "Provenance (secret references only)" with the
+   one was not redacted.", where the release's hostname came from (taken from the machine's name, set in the configuration, left to the node, the legacy stable-hostname setting, or not recorded) and, for a name taken from the machine's name, how it differs from the release last applied to the machine and from the machine's current name, a line "Not checked: ..." where a clash with another machine's node name could not be checked (the review hides an input to the node name, or the release was made before clashes were recorded), and a table "Provenance (secret references only)" with the
    same records as the command, with the source revision and its path in separate columns. Under "Next step" it offers **Plan adopt** or **Plan apply** for a
    machine that needs one. Pressing it opens the plan page and sends nothing.
 

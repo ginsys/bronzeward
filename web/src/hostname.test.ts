@@ -23,7 +23,25 @@ const itemSeven = () => {
   return spec.slice(from, to).replace(/\s+/g, " ");
 };
 
-const hb = (source: string, name?: string): Hostname => ({ source, ...(name === undefined ? {} : { name }) }) as Hostname;
+// A9 item 8 of the contract, the same way.
+const itemEight = () => {
+  const spec = readFileSync(`${import.meta.dirname}/../../docs/spec/client-contracts.md`, "utf8");
+  const from = spec.indexOf("8. **A plan says when it waits");
+  const to = spec.indexOf("**A10.");
+  expect(from).toBeGreaterThan(0);
+  expect(to).toBeGreaterThan(from);
+  return spec.slice(from, to).replace(/\s+/g, " ");
+};
+
+// A hostname as a release records it, with a node name recorded (a string): none of the cases of item 7 gets a notice of item 8.
+const hb = (source: string, name?: string): Hostname =>
+  ({ source, ...(name === undefined ? {} : { name }), nodeName: name ?? "node-a" }) as Hostname;
+// The same with the node name not compared (null) or not recorded (undefined).
+const withNode = (host: Hostname, nodeName: string | null | undefined): Hostname => {
+  const copy = { ...host } as Record<string, unknown>;
+  delete copy.nodeName;
+  return (nodeName === undefined ? copy : { ...copy, nodeName }) as Hostname;
+};
 const none: Applied = { state: "none" };
 const was = (hostname: Hostname): Applied => ({ state: "known", hostname });
 const node = "The machine's Kubernetes node name normally follows the hostname, so it may change too.";
@@ -82,6 +100,49 @@ describe("what a release review says of a machine's hostname (client contracts A
   test("a name that is not safe text is never shown as it is", () => {
     const [line] = hostnameLines(hb("machine-name", "node‮a"), none, "node-a");
     expect(line).not.toContain("‮");
+  });
+});
+
+describe("what a release review says where no node-name clash was checked (client contracts A9 item 8)", () => {
+  // The contract's sentences, written out here: a row that took them from words.ts would pass with the two swapped.
+  const hidden = "Not checked: the review hides an input to this machine's Kubernetes node name, so a clash with another machine's node name cannot be checked.";
+  const old = "Not checked: this release was made before hostname clashes were recorded, so a clash with another machine's hostname cannot be checked.";
+  const configuration = "Hostname: set in the configuration. The machine's name does not change it.";
+  const noneLine = "Hostname: not set in the configuration; the node chooses its own.";
+  const legacy = "Hostname: the configuration holds the legacy stable-hostname setting, so the machine's name is not used. Remove that setting to use the name.";
+  const unrecordedLine = "Hostname: not recorded for this release.";
+  const ms = hb("machine-name", "node-a");
+  const cases: [string, Hostname, Applied, string[]][] = [
+    ["null, from the machine's name", withNode(ms, null), none, [taken, hidden]],
+    ["null, from the configuration", withNode(hb("configuration"), null), none, [configuration, hidden]],
+    ["null, none: its item 7 sentence already says it", withNode(hb("none"), null), none, [noneLine]],
+    ["null, legacy-stable: its item 7 sentence already says it", withNode(hb("legacy-stable"), null), none, [legacy]],
+    ["absent, from the machine's name", withNode(ms, undefined), none, [taken, old]],
+    ["absent, from the configuration", withNode(hb("configuration"), undefined), none, [configuration, old]],
+    ["absent, none", withNode(hb("none"), undefined), none, [noneLine, old]],
+    ["absent, legacy-stable", withNode(hb("legacy-stable"), undefined), none, [legacy, old]],
+    ["absent, unrecorded: its item 7 sentence stands beside it", withNode(hb("unrecorded"), undefined), none, [unrecordedLine, old]],
+    ["recorded, from the machine's name", ms, none, [taken]],
+    ["null, comparison unread: the notice still ends the lines", withNode(ms, null), { state: "unread" }, [taken, HOSTNAME_UNREAD, hidden]],
+    ["absent, comparison unread", withNode(ms, undefined), { state: "unread" }, [taken, HOSTNAME_UNREAD, old]],
+    ["null, with a comparison", withNode(ms, null), was(hb("none")), [taken, `${sets} The last release applied to it left the hostname to the node. ${node}`, restart, hidden]],
+    ["absent, renamed since", withNode(ms, undefined), was(withNode(ms, undefined)), [taken, "This release used the earlier name node-a. While its hostname comes from the machine's name, the next release will use node-b.", old]],
+    ["a source this client does not know gets no notice", withNode(hb("from-the-moon"), undefined), none, ["Hostname source: from-the-moon"]],
+    ["a source this client does not know, null", withNode(hb("from-the-moon"), null), none, ["Hostname source: from-the-moon"]],
+  ];
+
+  test("each notice appears where item 8 says, last, once", () => {
+    for (const [name, host, applied, want] of cases) {
+      const current = name === "absent, renamed since" ? "node-b" : "node-a";
+      expect(hostnameLines(host, applied, current), name).toEqual(want);
+    }
+  });
+
+  test("each notice is a sentence of item 8 word for word, and names no cause and no value", () => {
+    const item = itemEight();
+    expect(item).toContain(hidden);
+    expect(item).toContain(old);
+    expect(`${hidden} ${old}`).not.toMatch(/secret|redact|withheld|literal|rel_|mch_|nodeName/);
   });
 });
 
