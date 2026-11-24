@@ -55,7 +55,7 @@ function server(o: {
   streams: (Stream | Error)[]; states: string[]; pages?: OpEvent[]; pageRefusals?: number[]; epoch?: string;
   pagesEpoch?: string; probeEpoch?: string; clock?: { t: number }; readTime?: number; streamTime?: number; pagesGate?: Promise<void>;
   pagesUnavailable?: boolean; opFetches?: Fetch[]; pagesDown?: number; pagesOk?: number; renew?: () => Promise<boolean>;
-  duringOp?: (nth: number) => Promise<unknown>;
+  duringOp?: (nth: number) => Promise<unknown>; clientSleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }) {
   const opened: Record<string, string>[] = [];
   const urls: string[] = [];
@@ -113,7 +113,7 @@ function server(o: {
     if (u === `${API_BASE}/probe`) return json({}, o.probeEpoch ?? o.pagesEpoch ?? o.epoch);
     throw new Error(`unexpected ${u}`);
   };
-  const client = new Client({ fetch: fetch as typeof globalThis.fetch, token: () => "SYNTH-token", sleep: async () => {}, ...(o.renew === undefined ? {} : { renew: o.renew }) });
+  const client = new Client({ fetch: fetch as typeof globalThis.fetch, token: () => "SYNTH-token", sleep: o.clientSleep ?? (async () => {}), ...(o.renew === undefined ? {} : { renew: o.renew }) });
   return { client, opened, urls };
 }
 
@@ -161,9 +161,9 @@ function reader(s: ReturnType<typeof server>, where: (path: string) => boolean, 
       if (when === "after") await probe(path);
       return result;
     }) as typeof s.client.read,
-    readWithEpoch: (async (path: string, tries?: number, phase?: Phase) => {
+    readWithEpoch: (async (path: string, tries?: number, phase?: Phase, signal?: AbortSignal) => {
       if (when === "before") await probe(path);
-      const result = await s.client.readWithEpoch(path, tries, phase);
+      const result = await s.client.readWithEpoch(path, tries, phase, signal);
       if (when === "after") await probe(path);
       return result;
     }) as typeof s.client.readWithEpoch,
@@ -180,9 +180,9 @@ function discarding(s: ReturnType<typeof server>, nth: number) {
   let n = 0;
   return {
     read: s.client.read.bind(s.client),
-    readWithEpoch: (async (path: string, tries?: number, phase?: Phase) => {
+    readWithEpoch: (async (path: string, tries?: number, phase?: Phase, signal?: AbortSignal) => {
       if (path === `/operations/${OP}` && ++n === nth) return { result: { kind: "discarded" }, epoch: undefined, moves: s.client.moves };
-      return s.client.readWithEpoch(path, tries, phase);
+      return s.client.readWithEpoch(path, tries, phase, signal);
     }) as typeof s.client.readWithEpoch,
     open: (...a: Parameters<typeof s.client.open>) => s.client.open(...a),
     get writesEnded() { return s.client.writesEnded; },
@@ -600,6 +600,17 @@ describe("the operation progress reader (§8.6)", () => {
     });
   });
 
+  // The retry wait of an events page read is the client's, and the watch's abort reaches it: a page that left
+  // does not wait out the backoff of its reads (1 + 2 + 4 + 8 s) and does not send them (ginsys/bronzeward#1175).
+  test("a watch that ends during the retry wait of an events page read sends no further page request", async () => {
+    const r = recorder();
+    const s = server({ streams: [{ chunks: ["{}"], type: "application/json" }], states: ["running"], pagesUnavailable: true, clientSleep: async () => r.abort.abort() });
+    const out = await watch(s.client, OP, r.w, bounded(r, 100));
+    expect(out).toEqual({ kind: "stopped" });
+    // The one page request that was refused: the stream request is not a page request.
+    expect(s.urls.filter((u) => u.startsWith(EVENTS)).length - s.opened.length).toBe(1);
+  });
+
   test("event pages that stay unavailable fail the watch", async () => {
     const s = server({ streams: [{ chunks: ["{}"], type: "application/json" }], states: ["running"], pagesUnavailable: true });
     const r = recorder();
@@ -919,8 +930,8 @@ describe("the operation progress reader (§8.6)", () => {
   // The page leaves while the operation read is pending: the reader's read resolves after the abort.
   const leavingAtRead = (s: ReturnType<typeof server>, abort: AbortController) => ({
     read: ((path: string) => s.client.read(path)) as typeof s.client.read,
-    readWithEpoch: (async (path: string, tries?: number, phase?: Phase) => {
-      const out = await s.client.readWithEpoch(path, tries, phase);
+    readWithEpoch: (async (path: string, tries?: number, phase?: Phase, signal?: AbortSignal) => {
+      const out = await s.client.readWithEpoch(path, tries, phase, signal);
       if (operationPath(path)) abort.abort();
       return out;
     }) as typeof s.client.readWithEpoch,
@@ -990,7 +1001,7 @@ describe("the operation progress reader (§8.6)", () => {
   // The page leaves while the stream opens: the answer arrives after the abort.
   const leavingAtOpen = (s: ReturnType<typeof server>, abort: AbortController) => ({
     read: ((path: string) => s.client.read(path)) as typeof s.client.read,
-    readWithEpoch: ((path: string, tries?: number, phase?: Phase) => s.client.readWithEpoch(path, tries, phase)) as typeof s.client.readWithEpoch,
+    readWithEpoch: ((path: string, tries?: number, phase?: Phase, signal?: AbortSignal) => s.client.readWithEpoch(path, tries, phase, signal)) as typeof s.client.readWithEpoch,
     open: (async (...a: Parameters<typeof s.client.open>) => {
       const out = await s.client.open(...a);
       abort.abort();

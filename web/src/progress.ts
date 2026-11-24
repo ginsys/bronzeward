@@ -347,7 +347,8 @@ async function drain(client: Reader, path: string, run: Run, stoppable: boolean)
   run.pagesEpoch = undefined;
   const pageReads: Pick<Client, "read"> = {
     read: async <T>(p: string) => {
-      const { result, epoch } = await client.readWithEpoch<T>(p);
+      // The watch's signal reaches the page read's retry waits: a page that left sends nothing more.
+      const { result, epoch } = await client.readWithEpoch<T>(p, undefined, undefined, run.w.signal);
       if (epoch !== undefined) run.pagesEpoch = epoch;
       return result;
     },
