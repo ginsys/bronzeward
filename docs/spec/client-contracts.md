@@ -2294,7 +2294,7 @@ scale is not yet the only source in the shell rules. (c) Item 6: the bordered pa
 holds a section only on `web/src/operation.tsx:241` and `web/src/machines.tsx:334` and `:358`, and the
 `toolbar` row (`web/src/app.css:111`) only on the machine and cluster lists
 (`web/src/machines.tsx:237`, `:274`); the filters of the other lists are bare `<Filter>` elements
-(`web/src/resources.tsx:221`, `:411`, `:516`, `:593`, `:594`). (d) Item 2: a disabled field's muted
+(`web/src/resources.tsx:221`, `:411`, `:514`, `:591`, `:592`). (d) Item 2: a disabled field's muted
 background is Oat's own rule, relied on by the comment at `web/src/app.css:36-38` and not opened
 here; Oat's layering was not opened either (Oat is not installed in this tree). (e) The note
 sentence "holds no identifier and no role word" is asserted by `web/src/page-notes.test.ts`, which
