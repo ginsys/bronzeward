@@ -327,13 +327,14 @@ client ID (`internal/client/config.go:178-181`), so an empty audience skips the 
 2. Every command that talks to a server shows the context's name and server in its error and
    wait output, so an operator with two installations never acts on the wrong one unseen (built:
    `internal/client/client.go:101`, `internal/client/client.go:289`). **Proposed:** a
-   write in an interactive session always prints the context before it sends. Today it does so only in
-   two cases: the warning of a human-only write sent with an automation credential
-   (`internal/client/write.go:207-209`), and the recovery banner when the server is in recovery mode
-   (`internal/client/client.go:140`, `internal/client/client.go:358-364`). `writeWith` and `Send`
-   themselves print no context line for an ordinary write (`cmd/bronzewardctl/writes.go:112`,
-   `internal/client/write.go:197`), and only some recovery commands name the context in their own
-   confirmation lines.
+   write in an interactive session always prints the context before it sends. Today a write names the
+   context only when a notice happens to carry it, for example the warning of a human-only write
+   sent with an automation credential (`internal/client/write.go:207-209`), the recovery banner
+   (`internal/client/client.go:358-364`), or a retry or deprecation notice of the preliminary server
+   read (`internal/client/client.go:249`, `internal/client/client.go:354`). `writeWith` and `Send`
+   print no line of their own for the context (`cmd/bronzewardctl/writes.go:112`,
+   `internal/client/write.go:197`), so an ordinary write with no such notice names none, and only
+   some recovery commands name it in their own confirmation lines.
 3. The web interface serves exactly one installation, the one at its own origin
    ([§10.1](#101-hosting-and-origin)). Switching installations is navigating to another origin,
    which starts with an empty state; nothing read under one origin is shown under another. (Built:
