@@ -48,7 +48,7 @@ func TestMachineTimeline(t *testing.T) {
 		q := r.URL.Query()
 		switch r.URL.Path {
 		case "/api/v1/server":
-			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 			return
 		case "/api/v1/machines/mch_a/timeline":
 		default:
@@ -250,7 +250,7 @@ func TestMachineTimelineInterruptedRead(t *testing.T) {
 		q := r.URL.Query()
 		switch r.URL.Path {
 		case "/api/v1/server":
-			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 		case "/api/v1/machines/mch_a/timeline":
 			if q.Get("order") == "newest" {
 				fmt.Fprintf(w, `{"items":[%s],"tail":"t1"}`, entry(1, "plan", `{"plan":"pln_1"}`))
@@ -321,7 +321,7 @@ func TestMachineTimelineFollowWriteError(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/v1/server":
-			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 		case "/api/v1/machines/mch_a/timeline":
 			q := r.URL.Query()
 			seen = append(seen, q.Get("order")+" "+q.Get("cursor"))

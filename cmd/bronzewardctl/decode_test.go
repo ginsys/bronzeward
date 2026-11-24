@@ -27,7 +27,7 @@ func TestDecodeWholeBody(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
 				case "/api/v1/server":
-					fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
+					fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 				case "/api/v1/machines/mch_a":
 					fmt.Fprint(w, `{"id":"mch_a"}`+c.suffix)
 				default:

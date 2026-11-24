@@ -74,7 +74,7 @@ func (f *principalFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.moved && len(f.calls) > 0 {
 			w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-2")
 		}
-		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":5,"startMode":"normal"}`)
+		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 	case "/acts":
 		var items []string
 		for i, p := range f.acts {

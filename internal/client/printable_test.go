@@ -188,7 +188,7 @@ func TestTransportErrorsArePrintable(t *testing.T) {
 	})
 
 	t.Run("identity-provider discovery", func(t *testing.T) {
-		x := &Context{Name: "lab", OIDC: &OIDC{Issuer: bad, ClientID: "BWSYNTH-cli", CertificateAuthority: bundleOf(t, badDER)}}
+		x := &Context{Name: "lab", OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: bad, ClientID: "BWSYNTH-cli", CertificateAuthority: bundleOf(t, badDER)}}
 		_, err := refresh(x, "BWSYNTH-rt")
 		if err == nil || hostile(err.Error()) || !strings.Contains(err.Error(), "cannot reach the identity provider "+bad) ||
 			!strings.Contains(err.Error(), `BWSYNTH-\x1b[2J.example.invalid`) {
@@ -208,7 +208,7 @@ func TestTransportErrorsArePrintable(t *testing.T) {
 				"token_endpoint": bad + "/token", "revocation_endpoint": bad + "/revoke", "jwks_uri": iss.URL + "/jwks", "id_token_signing_alg_values_supported": []string{"ES256"}})
 		}))
 		defer iss.Close()
-		x := &Context{Name: "lab", OIDC: &OIDC{Issuer: iss.URL, ClientID: "BWSYNTH-cli", CertificateAuthority: bundleOf(t, iss.Certificate().Raw, badDER)}}
+		x := &Context{Name: "lab", OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: iss.URL, ClientID: "BWSYNTH-cli", CertificateAuthority: bundleOf(t, iss.Certificate().Raw, badDER)}}
 		_, err := refresh(x, "BWSYNTH-rt")
 		if err == nil || hostile(err.Error()) || !strings.Contains(err.Error(), "renewing at the identity provider "+iss.URL) ||
 			!strings.Contains(err.Error(), `BWSYNTH-\x1b[2J.example.invalid`) {
@@ -328,7 +328,7 @@ func TestServerTextIsPrintable(t *testing.T) {
 func TestURLsWithControlCharactersAreRefused(t *testing.T) {
 	for _, raw := range []string{"https://BWSYNTH.example.invalid/\u009b2J", "https://BWSYNTH.example.invalid/\xff"} {
 		x := &Context{Name: "lab", Server: "https://BWSYNTH.example.invalid", Credential: "oidc",
-			OIDC: &OIDC{Issuer: raw, ClientID: "BWSYNTH-cli"}}
+			OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: raw, ClientID: "BWSYNTH-cli"}}
 		for name, err := range map[string]error{
 			"issuer": x.Check(), "server": (&Context{Name: "lab", Server: raw, Credential: "automation"}).Check(),
 			"token endpoint": providerEndpoint(raw, "token_endpoint"),

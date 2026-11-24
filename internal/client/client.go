@@ -37,6 +37,10 @@ type Client struct {
 	Cut     func(*Interrupted) *Interrupted
 	sending bool
 
+	// Interactive is set by a command run by a person at a terminal: a write then names its context
+	// before it sends (client-contracts.md §5 item 2).
+	Interactive bool
+
 	// Revision is the API revision the latest GET /server showed: a read can refresh it after a new
 	// epoch, so a caller that gates on it reads it where it needs it (§7 item 1).
 	Revision int

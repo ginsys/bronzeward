@@ -172,7 +172,7 @@ func TestRecoveryStatusStopsOnCtrlCInTheHolderLookup(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/v1/server":
-			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"recovery"}`)
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"recovery"}`)
 		case "/api/v1/identity":
 			fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
 		case "/api/v1/recovery":
@@ -355,7 +355,7 @@ func TestFailedSaveAfterACtrlCOfAReadIsPrinted(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/server") {
 			w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
-			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 			return
 		}
 		if !stall.Load() {

@@ -233,7 +233,7 @@ func TestStreamRefusalBodyStalledEndsOnInterrupt(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Context.Credential = "oidc"
-	c.Context.OIDC = &OIDC{Issuer: "https://idp.example.invalid", TokenFile: tokens}
+	c.Context.OIDC = &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", TokenFile: tokens}
 	c.signIn = &signIn{store: openStore(c.Context, true), tokens: &Tokens{AccessToken: "BWSYNTH-old", RefreshToken: "BWSYNTH-rt"}}
 	c.token = "BWSYNTH-old"
 	a := newArmed(t)

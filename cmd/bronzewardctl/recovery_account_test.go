@@ -275,7 +275,7 @@ func TestAccountEpochChange(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			resetPosted()
-			setServerFacts(t, 3, map[string]string{c.moves: "ep_BWSYNTH-2"})
+			setServerFacts(t, 10, map[string]string{c.moves: "ep_BWSYNTH-2"})
 			recoveryRefreshEpoch = c.refresh
 			seen := recoveryServer(t, accAnswers(c.post), c.post)
 			code, out, errb := account(t, "y\n", c.args...)
@@ -306,7 +306,7 @@ func TestAccountPreflightEpochBack(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			resetPosted()
-			setServerFacts(t, 3, map[string]string{"/api/v1/identity": "ep_BWSYNTH-2"})
+			setServerFacts(t, 10, map[string]string{"/api/v1/identity": "ep_BWSYNTH-2"})
 			recoveryRefreshEpoch = "ep_BWSYNTH-1"
 			seen := recoveryServer(t, accAnswers(c.post), c.post)
 			code, out, errb := account(t, "y\n", c.args...)

@@ -299,7 +299,7 @@ func TestResolveRepeatAfterTheCommit(t *testing.T) {
 // the client refreshes its server facts, so the client's last epoch is past the answer's own. The send
 // stays bound to the answer that the checks read, and nothing is sent (§8.5, §8.6 item 3).
 func TestResolveBindsToTheOperationAnswer(t *testing.T) {
-	setServerFacts(t, 3, map[string]string{"/api/v1/operations/op_2": "ep_BWSYNTH-2"})
+	setServerFacts(t, 10, map[string]string{"/api/v1/operations/op_2": "ep_BWSYNTH-2"})
 	recoveryRefreshEpoch = "ep_BWSYNTH-3"
 	code, out, errb := scRun(t, scAnswers(), scResolveAnswer, "recovery", "resolve", "op_2", "--reason", "BWSYNTH")
 	if code == 0 || out != "" || len(recoveryPosted) != 0 || !strings.Contains(errb, "epoch") {

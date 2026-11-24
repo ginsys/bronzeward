@@ -90,7 +90,7 @@ func TestDriftShowEpoch(t *testing.T) {
 		{"the move comes with the machine answer", map[string]string{"/api/v1/machines/mch_a": "ep_BWSYNTH-2"}, "", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			setServerFacts(t, 3, c.moves)
+			setServerFacts(t, 10, c.moves)
 			recoveryRefreshEpoch = c.refresh
 			recoveryServer(t, answers, "")
 			code, out, errOut := runDrift(t, "drift", "show", "mch_a")

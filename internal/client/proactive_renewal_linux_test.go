@@ -47,7 +47,7 @@ func TestProactiveRenewalLockWaitContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 	x := Context{Name: "lab", Server: "https://bw.example.invalid", Credential: "oidc",
-		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli", TokenFile: p}}
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli", TokenFile: p}}
 	var notices bytes.Buffer
 	c, err := Open(&x, TokenInput{NoInput: true}, &notices, nil)
 	if err != nil {
@@ -93,7 +93,7 @@ func TestProactiveRenewalStoreTimeoutContinues(t *testing.T) {
 	t.Setenv("BRONZEWARD_TOKEN_FILE", "")
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "bus"))
 	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
-		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
 	current := Tokens{AccessToken: expiringJWT(), RefreshToken: "BWSYNTH-rt"}
 	b, err := json.Marshal(entry{Server: x.Server, Issuer: x.OIDC.Issuer, Tokens: current})
 	if err != nil {
@@ -155,7 +155,7 @@ func TestProactiveRenewalUnsettledWriteStatesOutcome(t *testing.T) {
 	t.Setenv("BRONZEWARD_TOKEN_FILE", "")
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "bus"))
 	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
-		OIDC: &OIDC{Issuer: iss.URL, ClientID: "BWSYNTH-cli", CertificateAuthority: bundleOf(t, iss.Certificate().Raw)}}
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: iss.URL, ClientID: "BWSYNTH-cli", CertificateAuthority: bundleOf(t, iss.Certificate().Raw)}}
 	current := Tokens{AccessToken: expiringJWT(), RefreshToken: "BWSYNTH-rt"}
 	b, err := json.Marshal(entry{Server: x.Server, Issuer: x.OIDC.Issuer, Tokens: current})
 	if err != nil {

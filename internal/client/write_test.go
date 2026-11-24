@@ -73,14 +73,14 @@ func (f *fake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if committed {
-			fmt.Fprint(w, cmp.Or(f.server, `{"version":"BWSYNTH","apiRevision":2,"startMode":"recovery","maxTokenLifetimeSeconds":300}`))
+			fmt.Fprint(w, cmp.Or(f.server, `{"version":"BWSYNTH","apiRevision":10,"startMode":"recovery","maxTokenLifetimeSeconds":300}`))
 			return
 		}
 		if f.beforeEntry {
 			problemAnswer(w, http.StatusConflict, "recovery-mode-active", "")
 			return
 		}
-		fmt.Fprint(w, cmp.Or(f.server, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal","maxTokenLifetimeSeconds":300}`))
+		fmt.Fprint(w, cmp.Or(f.server, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal","maxTokenLifetimeSeconds":300}`))
 	case "GET /api/v1/identity":
 		fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH","service":"ci","roles":["author"],"epoch":"`+epoch+`"}`)
 	case "GET /api/v1/recovery":
@@ -206,7 +206,7 @@ func TestPrincipalAfterRenewal(t *testing.T) {
 			t.Fatal(err)
 		}
 		c.Context.Server, c.Context.Credential = srv.URL, "oidc"
-		c.Context.OIDC = &OIDC{Issuer: "https://idp.example.invalid", TokenFile: tokens}
+		c.Context.OIDC = &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", TokenFile: tokens}
 		c.signIn = &signIn{store: openStore(c.Context, true), tokens: &Tokens{AccessToken: first, RefreshToken: "BWSYNTH-rt"}}
 		c.token, c.service = first, ""
 		w := clusterWrite()
@@ -946,7 +946,7 @@ func TestInProgress(t *testing.T) {
 				inProgress(w)
 			}},
 		{name: "the served lease raises the bound", wait: time.Second, posts: 4, waits: []time.Duration{time.Second, time.Second, time.Second},
-			server: `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal","ingestionClaim":{"leaseSeconds":2,"absoluteExpirySeconds":600}}`,
+			server: `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal","ingestionClaim":{"leaseSeconds":2,"absoluteExpirySeconds":600}}`,
 			says:   "after 2s",
 			answer: func(n int, w http.ResponseWriter) {
 				if n == 1 {
@@ -1038,5 +1038,25 @@ func TestInProgress(t *testing.T) {
 				t.Errorf("notices %q", notices.String())
 			}
 		})
+	}
+}
+
+// TestInteractiveWriteNamesTheContextBeforeItSends: a write in an interactive session prints the
+// context before it sends (client-contracts.md §5 item 2); a script's write adds no line, and a
+// repeat of the same write prints none either.
+func TestInteractiveWriteNamesTheContextBeforeItSends(t *testing.T) {
+	for _, interactive := range []bool{true, false} {
+		f := &fake{epoch: "ep_BWSYNTH-1", post: func(_ int, w http.ResponseWriter, _ *http.Request) { created(w) }}
+		c, notices, _ := writeClient(t, f, "ep_BWSYNTH-1")
+		c.Interactive = interactive
+		w := &Write{Method: http.MethodPost, Path: "/clusters", Body: []byte(`{"name":"lab-a"}`),
+			Check: "cluster list", Read: func(*Client) (string, error) { return "BWSYNTH shows", nil }}
+		if _, err := c.Send(w); err != nil {
+			t.Fatal(err)
+		}
+		line := "lab (" + c.Context.Server + "): sending POST /api/v1/clusters.\n"
+		if got := strings.Count(notices.String(), line); got != map[bool]int{true: 1, false: 0}[interactive] {
+			t.Errorf("interactive=%v: the context line appeared %d times in %q", interactive, got, notices.String())
+		}
 	}
 }

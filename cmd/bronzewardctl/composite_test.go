@@ -254,7 +254,7 @@ func TestWriteWithCollectsAnswer(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/v1/server":
-			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 		case "GET /api/v1/identity":
 			fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
 		case "POST /api/v1/clusters":

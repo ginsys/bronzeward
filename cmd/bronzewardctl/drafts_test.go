@@ -96,7 +96,7 @@ func (f *draftFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.serverEpoch != "" {
 			w.Header().Set("Bronzeward-Epoch", f.serverEpoch)
 		}
-		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
+		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 	case "GET /identity":
 		if f.identityEpoch != "" {
 			w.Header().Set("Bronzeward-Epoch", f.identityEpoch)

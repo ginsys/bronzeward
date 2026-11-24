@@ -53,7 +53,7 @@ func TestKeyringLockedRefused(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "bus"))
 	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
-		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
 	lockFile := filepath.Join(home, "state", "bronzeward", "store.renewal.lock")
 	// free reports whether the renewal lock is free, without waiting for it.
 	free := func() bool {
@@ -166,7 +166,7 @@ func TestKeyringErrorWithLineFeedIsShownEscaped(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "bus"))
 	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
-		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
 	keyringGetCall = func(string, string) (string, error) { return "", errors.New("BWSYNTH-no-answer\nFORGED") }
 	_, err := ClearStored(&x, false)
 	if err == nil || !strings.Contains(err.Error(), "BWSYNTH-no-answer\nFORGED") {
@@ -188,7 +188,7 @@ func TestNoInputNeverPrompts(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "bus"))
 	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
-		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
 	var prompting, refused, writes atomic.Int32
 	keyringGetCall = func(string, string) (string, error) { prompting.Add(1); return "", errStoreLocked }
 	keyringGetHeldCall = func(string, string) (string, error) { refused.Add(1); return "", errStoreLocked }
@@ -248,7 +248,7 @@ func TestClearStored(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "bus"))
 	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
-		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
 	var deleted atomic.Int32
 	keyringDeleteCall = func(string, string) error { deleted.Add(1); return nil }
 	stored := func(found bool) {

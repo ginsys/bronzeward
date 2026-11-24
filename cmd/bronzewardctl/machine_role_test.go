@@ -19,7 +19,7 @@ func TestMachineShowRole(t *testing.T) {
 		{"no role", `null`, "", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			setServerFacts(t, 3, nil)
+			setServerFacts(t, 10, nil)
 			recoveryServer(t, map[string]string{
 				"GET /api/v1/machines/mch_a": `{"id":"mch_a","cluster":"c1","name":null,"role":` + c.role + `,"platform":"metal","talosEndpoint":"10.0.0.1",` +
 					`"hardware":{"talosNodeId":"n1"},"scopeState":"normal","frozen":false,"pendingConvergence":false,"applied":null,"desired":null,` +

@@ -124,7 +124,7 @@ func (f *planFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.gets[path]++
 	switch path {
 	case "/server":
-		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
+		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 	case "/identity":
 		fmt.Fprint(w, `{"kind":"service","principal":"svc_BWSYNTH"}`)
 	case "/recovery":

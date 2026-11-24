@@ -92,7 +92,7 @@ func (f *opFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, "not json")
 			return
 		}
-		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":3,"startMode":"normal"}`)
+		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 	case "/operations/op_BWSYNTH":
 		w.Header().Set("Content-Type", "application/json")
 		if f.readHang != nil {

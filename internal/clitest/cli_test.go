@@ -590,9 +590,12 @@ func rewrite(r *http.Response, old, new string) {
 var servedRevision = regexp.MustCompile(`"apiRevision":[0-9]+`)
 
 // revisionOne rewrites a GET /server answer to API revision 1, below the client's minimum.
-func revisionOne(r *http.Response) {
+func revisionOne(r *http.Response) { revisionAt(r, 1) }
+
+// revisionAt rewrites a GET /server answer to API revision n.
+func revisionAt(r *http.Response, n int) {
 	b, _ := io.ReadAll(r.Body)
-	b = servedRevision.ReplaceAll(b, []byte(`"apiRevision":1`))
+	b = servedRevision.ReplaceAll(b, fmt.Appendf(nil, `"apiRevision":%d`, n))
 	r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(b)), int64(len(b))
 	r.Header.Set("Content-Length", fmt.Sprint(len(b)))
 }
@@ -661,7 +664,7 @@ var sharedCases = map[string]func(*testing.T, *fixture, *injector){
 				revisionOne(r)
 			}
 		})
-		f.want(f.ctl(nil, "", "--context", "trusted", "whoami"), 1, "API revision 1", "needs revision 2 or later")
+		f.want(f.ctl(nil, "", "--context", "trusted", "whoami"), 1, "API revision 1", "needs revision 10 or later")
 		if slices.Contains(in.requests(), "GET /api/v1/identity") {
 			t.Error("the identity read was sent after the refusal")
 		}

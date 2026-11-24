@@ -826,7 +826,7 @@ func oidcRenewalContext(t *testing.T, srv string) (lock string, release func()) 
 	if err := client.UpdateConfig(func(c *client.Config) error {
 		c.Current = "lab"
 		c.Contexts = []client.Context{{Name: "lab", Server: srv, Credential: "oidc",
-			OIDC: &client.OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli", TokenFile: tok}}}
+			OIDC: &client.OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli", TokenFile: tok}}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
