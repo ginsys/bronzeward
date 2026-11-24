@@ -187,12 +187,11 @@ give a node a path that reads as an embedded document's.
    holds only `auto` and `hostname`, so nothing else is lost, and a document
    that kept `auto: off` would stop the fill (§6.1). **A legacy hostname is
    released the same way, as a key**: where the stream holds no `HostnameConfig`
-   document (Talos refuses both) and its v1alpha1 document does not set
-   `machine.features.stableHostname` to `true` or to a reference and no
-   operator mark (step 3) addresses that field or a mapping that holds it
-   (the stable-hostname guard: step 5a would then suppress the fill and the
-   hostname would be lost), a
-   `machine.network.hostname` that is a plain string equal to the name exactly
+   document (Talos refuses both) and step 5a will fill the hostname (the
+   stable-hostname guard: `machine.features.stableHostname` is not `true`, and
+   neither it nor any mapping that holds it is a reference or carries a mark of
+   step 3, or step 5a would suppress the fill and the hostname would be lost),
+   a `machine.network.hostname` that is a plain string equal to the name exactly
    is removed from that document, the key alone: its parent mapping stays,
    even left empty. The key goes because the filled document cannot stand
    beside it (§6.1), and nothing else is lost. It is recorded as filled from
