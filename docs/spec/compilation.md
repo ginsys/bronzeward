@@ -1423,7 +1423,7 @@ naming the machine, and it commits no release.
 
 | Reason | When | Reports |
 | --- | --- | --- |
-| `not-equal` | The sides differ | The paths, and the sentence "the typed equivalence check can refuse a change that is equivalent in behaviour; it compares typed values and applies no defaults" |
+| `not-equal` | The sides differ | To a caller who passes the root read authorization ([persistence and API §3.2](persistence-api.md#32-the-import-base) rule 1): the paths, and the sentence "the typed equivalence check can refuse a change that is equivalent in behaviour; it compares typed values and applies no defaults" |
 | `cannot-decide` | The machine is pending convergence, or its `Applied` digest is not its `Applied` release's artifact digest (an adopted baseline not yet replaced), or the comparison cannot decide a case | The reason in words, the failed condition's own; no paths |
 
 The check fails closed: it never reads "equal" for a case it could not decide.

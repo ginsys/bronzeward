@@ -386,13 +386,17 @@ for a machine that has an `Applied` release, written by that route or by an
 ingestion from source `document`. Three rules hold for every such entry,
 whichever wrote it, and are stated here only.
 
-1. *Authorization first (choice §17.54).* The writer must pass the document
-   read's authorization (§9.2) for the root of the `Applied` import base before
-   anything of the new document is compared with it: the route before its
-   subset rule, an ingestion before it is admitted. A caller who fails gets that
-   read's own `403` or `409`, and no later answer (the `200`, a `422`, a
-   publication refusal that lists paths) tells it a value of a document it
-   cannot read.
+1. *Authorization first (choices §17.54 and §17.57).* Every principal whose
+   request runs the check, or receives its result, first passes the root read
+   authorization: the document read's authorization (§9.2) for the root of the
+   `Applied` import base. A request that runs the check (the route, an
+   ingestion, a publication of a draft that holds the entry) and fails it gets
+   that read's own `403` or `409` before anything of the document is compared.
+   A read that returns the result (the release read and its review, a plan body,
+   a publish operation's recorded failure) serves it withheld to a caller who
+   fails it: `equivalence` as `null`, and a recorded `equivalence` failure with
+   neither reason nor paths. So no answer (the `200`, a `422`, a path list, a
+   boolean) tells a caller a value of a document it cannot read.
 2. *The base's references stay (choice §17.55).* The new document drops no
    reference node of the `Applied` import base and no document or key that holds
    one, and its reference rows are the base's with the same names and versions.
@@ -496,7 +500,7 @@ governs the diff of a machine that holds the import base's bytes, the case the
 check's condition excludes (choice §17.51). Beside the diff, the evidence is the
 release's recorded result of the check, served per machine on the release read
 and its review as `equivalence` (`equal`, `byteIdentical`, never a path or a
-value, null where no check ran) and on the plan body of an `apply-config` plan
+value, null where no check ran or the caller fails rule 1) and on the plan body of an `apply-config` plan
 for that release.
 
 **Audit.** The revision records its author, as every import base revision does,
@@ -1230,7 +1234,7 @@ The transactions this contract defines or constrains:
 | # | Transaction | Locks and checks | Writes |
 | --- | --- | --- | --- |
 | T1 | Draft update (compilation's draft transaction) | key lock (§7.2); installation state `FOR SHARE`; for an `ingest` job that removed a filled hostname (compilation §2.3 step 2a), the machine row `FOR SHARE`, its name equal to the one the claim's staged payload keeps, else the operation fails `409 stale-input` (choice §17.45); the fragment and profile heads a profile's pins or an assignment's selections are checked against (§3.1), `FOR SHARE` in id order, a head created after this step counting as no head; draft `FOR UPDATE`, `open`, revision equals `If-Match`, no `publish` operation for it `queued` or `running` (§3.1; draft discard in T11 checks the same); claim owner and generation in the release's conditional `UPDATE` | revision rows, reference rows, draft entry, draft revision, claim `released`, idempotency record, act. An `ingest` job's draft transaction takes no key lock and writes neither record: the `POST /ingestions` request's T11 wrote them. In place of `If-Match` it compares the draft's revision with the one the operation bound from that request's `If-Match` (§9.2); a machine whose name moved fails the operation `409 stale-input`, with its terminal event and in the owner-checked transaction that abandons its claim, as the `412` case does; a moved draft fails the operation `412 precondition-failed`, and a draft no longer `open`, compared before its revision so that a discarded draft is this case, or one with an active publication fails it `409 conflict` (naming that publication), each with its terminal event, in the owner-checked transaction that abandons its claim once the draft transaction has rolled back (§8.2). An import of a machine already in the draft replaces its draft entry. Its claim owner and generation are the operation's (§5.1), and the transaction that releases the claim also writes the operation `succeeded`, with its result and terminal event (T7), under the same owner check, so no `running` operation outlives its released claim |
-| T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match` | publish operation `queued` (or the active `publish` one, §7.3), idempotency record, act |
+| T2 | Publication request | key lock; installation state `FOR SHARE`; draft `FOR UPDATE`: a `published` draft answers `409 conflict` naming its release, otherwise `open` and revision equals `If-Match`; for a draft that holds an entry under the check, the publisher passes the root read authorization (§3.2 rule 1) | publish operation `queued` (or the active `publish` one, §7.3), idempotency record, act |
 | T3 | Publication commit (§6.2) | as §6.2 | release rows, heads, Desired, draft `published`, operation `succeeded`, its event |
 | T4 | Plan creation | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted (§12.2); release published and covering the machine; for an `apply-config` plan, the release the machine's `Desired` (execution and recovery choice §10.24), an `Applied` to diff from, and an open drift record makes the plan a revert, which binds it and expects its observed digest (execution and recovery §2, §6.4); for an `adopt` plan, no `Applied` (§9.3) or an open drift record, which the plan binds with the baseline revision (execution and recovery choice §10.38); the machine's assignment head `FOR SHARE`, still the revision the release was compiled from for it; execution and recovery's binding checks | plan, plan state `proposed`, machine timeline entry, idempotency record, act |
 | T5a | Approval | key lock; installation state `FOR SHARE` (§12.2); machine row `FOR UPDATE`, its scope not pre-restore unaccounted; approver's principal, and that of the approval it replaces, `FOR SHARE` in id order, the approver not revoked; plan state `FOR UPDATE`, unexpired, and `proposed`, or `approved` by an approval from an earlier epoch | approval (unique per plan and epoch, with the self-approval mark), plan state `approved`, machine timeline entry, idempotency record, act |
@@ -1473,7 +1477,7 @@ an import base, choice §17.33, so one release holds every such pair). A machine
 whose draft entry carries an import base under the typed equivalence check
 (§3.2, compilation §6.2) that the check finds different, or cannot decide, is `422` with rule
 `equivalence`, reason `not-equal` or `cannot-decide`, naming the machine and,
-for `not-equal`, its paths and never a value (compilation §6.2, §13). A dependency
+for `not-equal`, its paths and never a value (compilation §6.2, §13), to a caller who passes the root read authorization (§3.2 rule 1); the operation's recorded failure is served to any other reader without reason or paths. A dependency
 classified `blocked` or `lost`, or whose identity changed (a creation time
 other than the recorded one, the first read's, or none), is
 `422 validation-failed` naming its provider, object, version and reference.
@@ -2464,7 +2468,7 @@ idempotency and conflict behavior.
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
 | `PUT` or `DELETE /drafts/{id}/import-bases/{machine}` (`PUT` stores a thinner import base for a machine that has an `Applied` release, as its entry in the draft, §3.2, recording the `Applied` import base revision it derives from; the body is the proposed sanitized document, which must be a subset of the import base of the machine's `Applied` release; the rules of §3.2 for an entry under the check apply (the document read's authorization first, choice §17.54; the base's references stay, choice §17.55); `422 validation-failed` with rule `import-base` otherwise. `DELETE` drops only that draft entry: the machine keeps its `Applied` import base, the `import-base` rule does not apply, and no import base revision is removed) | 200, ETag | `author`, human only (§10.3); `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
-| `POST /drafts/{id}/publications` | 202, `publish`, created `queued` (§5.1), or the one already queued or running for the draft revision (§7.3); the body is the operation resource, with its `Location`. `503 dependency-unavailable` from a process without a provider | `publisher`; `If-Match` |
+| `POST /drafts/{id}/publications` | 202, `publish`, created `queued` (§5.1), or the one already queued or running for the draft revision (§7.3); the body is the operation resource, with its `Location`. `503 dependency-unavailable` from a process without a provider. For a draft that holds an entry under the check, the request first passes the root read authorization (§3.2 rule 1): otherwise that read's `403` or `409`, and no operation is created | `publisher`; `If-Match` |
 | `POST /plans` with `operation: apply-config` | 201 | `publisher` (EaR) |
 | `POST /plans` with `operation: adopt` | 201 | `publisher` (EaR; §10.3) |
 | `POST /plans/{id}/cancellations` | 200 | the creating identity, under the role it created the plan with; `approver`; `recovery-admin` (EaR; design §13.7 item 6) |
@@ -2749,7 +2753,8 @@ recovery, plan binding), which every plan body carries:
   leaves the machine pending convergence (execution and recovery §6.3), and
   `formOnly` (choice §17.48), and for an `apply-config` plan whose release
   carries the result for the machine, `equivalence`, the same two booleans the
-  release read serves (§3.2, choice §17.50), and null where the plan does not
+  release read serves (§3.2, choice §17.50), null to a caller who fails the root
+  read authorization (§3.2 rule 1, choice §17.57), and null where the plan does not
   describe a change from what the check compared: a revert, which overwrites a
   drifted configuration (execution and recovery §6.4), and a plan made while
   the machine's `Applied` release is no longer the one the check read (an
@@ -3318,7 +3323,9 @@ the machine is `404 not-found`. Each machine of a release, on the item read and
 on the review, also carries `equivalence`: the result of the typed equivalence
 check of compilation §6.2 as `{"equal": true, "byteIdentical": false}`, two
 booleans and nothing else, or `null` where no check ran for that machine in
-that release (§3.2, choice §17.50). It holds no path and no value.
+that release (§3.2, choice §17.50), and `null` to a caller who may not read the
+root of that machine's `Applied` import base (§3.2 rule 1, choice §17.57). It
+holds no path and no value.
 
 Entering recovery mode, which names the restored backups (§12.2):
 
@@ -4307,7 +4314,7 @@ or Desired change; it does not erase earlier evidence.
 | Draft | The machine's name is not the one ingestion used when it removed a filled hostname (§3.2, compilation §2.3 step 2a) | `409 stale-input` naming the machine, expected and actual name; claim abandoned | claim row; orphans |
 | Publish | A covered machine's name changed since the snapshot (§4.2) | operation `failed`, `409 stale-input` | operation, act |
 | Draft update | A thinner import base that breaks the subset rule of §3.2 (every kind it lists, `no-base` included for a machine with no `Applied` release), or an entry under the check (route or `document` ingestion) that drops a reference of the `Applied` base (kind `reference`) | `422 validation-failed`, rule `import-base`, naming the machine and the kind of violation, never a path from the body | nothing |
-| Draft update | A writer of an entry under the check (route or `document` ingestion) who may not read the `Applied` import base's document (§3.2 rule 1) | the document read's own `403` or `409`, before any comparison | nothing |
+| Draft update, publication request | A principal who runs the check (the route, a `document` ingestion, a publication of a draft that holds the entry) and may not read the `Applied` import base's document (§3.2 rule 1) | the document read's own `403` or `409`, before any comparison and, for a publication, before an operation is created | nothing |
 | Publish | A machine whose entry carries an import base under the check (§3.2, compilation §6.2): the typed equivalence check finds it different (`not-equal`) or cannot decide, a pending machine or one holding an adopted baseline its `Applied` release did not compose included (`cannot-decide`) (compilation §6.2) | operation `failed`, `422 validation-failed`, rule `equivalence`, naming the machine and, for `not-equal`, the paths | operation, act |
 | Publish | The `Applied` import base of a machine with an entry under the check (§4.2, compilation §6.2) is no longer the one the entry was written from (§4.2) | operation `failed`, `409 stale-input` naming the machine and both revisions | operation, act |
 | Publish | T3 finds, under the machine's `MachineState` lock, that the `Applied` release or the not-pending condition the check used is no longer current, as an apply that completed during the compilation (§3.2, §4.2) | operation `failed`, `409 stale-input` naming the machine, with the expected and the actual `Applied` release identifier | operation, act |
@@ -5561,12 +5568,29 @@ design and evidence do not settle the question. Each is marked in place as
     unchanged" tied to the check's recorded result, which a revert and an import
     of unchanged bytes read from a node (an unchecked source) each break, and
     that a plan made after another release became `Applied` reads null although
-    its predicate may hold; the owner may reverse it. The member is derived from digests at plan creation: the artifact
-    digest equals the `Applied` digest and the import base revision differs.
+    its predicate may hold; the owner may reverse it. The member is derived at plan creation by the canonical predicate of §3.2
+    (the digests equal, and the plan exists only because the import base
+    revision differs, which excludes a revert).
     Alternative: limit the pending rule of choice §17.53 to entries under the
     check, rejected because pending would then depend on the entry's source
     and an unchanged import read from a node could never be recorded as
     `Applied`.
+57. **The root read authorization binds every principal who runs the check
+    or receives its result** (§3.2 rule 1). Decided by the lead of the
+    Bronzeward campaign on 24 November 2026 after a review found that
+    checking the writer of an entry left a second author who edits fragments
+    and publishes free to probe the `Applied` composition through the check's
+    `not-equal` paths; the owner may reverse it. The rule is stated once, for
+    the principal and not for a route, so a further hop cannot exist, and the
+    routes that run the check or return its result follow it (publication
+    request, publish operation failure, release read and review, plan body).
+    Cost: a publisher who may not read a file import's root cannot publish a
+    draft that holds its entry and sees `equivalence` as null; with the PoC's
+    single operator nobody meets it today. Alternatives: name no paths for
+    `not-equal` and keep the writer-only check, rejected because success
+    against refusal still tells a publisher whether a guessed value matches;
+    take document imports and the thinner base out of the check, rejected
+    because the route has the same oracle.
 
 ## 18. Traceability
 
@@ -5575,7 +5599,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
 | §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31, §17.32, §17.47 |
-| §3.2 thinner import base, typed equivalence check | §9.1 step 5, §20.7 | [the 20261118 research note](../design/research/20261118-import-analysis-and-equivalence.md) §3, §5, §6, §7; choices §17.50 to §17.56; compilation §6.2 |
+| §3.2 thinner import base, typed equivalence check | §9.1 step 5, §20.7 | [the 20261118 research note](../design/research/20261118-import-analysis-and-equivalence.md) §3, §5, §6, §7; choices §17.50 to §17.57; compilation §6.2 |
 | §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.14.5, the same result as on v1.13.6); signing from a control plane configuration or a secrets bundle, a key read through an `os:admin` talosconfig, and a node accepting the signed certificate: [signing locally](../design/research/20261118-local-talos-signing.md) and [the extraction](../design/research/20261118-local-talos-signing-extract.md), Talos v1.14.5 only; revocation, CA rotation and a held connection across a CA replacement not measured; the provider grants on `secret/data/access/talos-ca/*` not measured (choice §17.29); the presence read's answers for a never-written path and a path whose metadata was deleted (HTTP 404, no tombstone) and for a soft-deleted and a destroyed latest version are [RC §4.1](../design/research/20260924-retention-metadata-classification.md#41-openbao) rows 010, 024, 021 and 022 on OpenBao 2.6.1; the access-presence identity's policy (exactly `read` on the metadata path), its refusal of a data read, a list, a delete, a generation read and the Transit calls beside the same request with the grant added, and the classification of its read for a stored, a soft-deleted, an undeleted and a destroyed latest version are measured by `TestLivePresencePolicyExact` and `TestLivePresenceIdentity` against the fixture's OpenBao (choice §17.42); §16 names what they leave unmeasured |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7; bodies and bindings: choice §17.35 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011; none for the name check: choice §17.45 |
