@@ -114,7 +114,7 @@ func (e *env) publishDraftOn(c *client.Client, bind *epochBind, d string, rp *cl
 		return "", rerr
 	}
 	if o.State != "succeeded" {
-		return "", operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine", c.Context.Where(), pr(o.Id), pr(o.State), pr(compact(o.Error)))}
+		return "", operationFailed{fmt.Errorf("%s: publication operation %s %s: %s; nothing was sent to any machine%s", c.Context.Where(), pr(o.Id), pr(o.State), pr(compact(o.Error)), publishNext(o.Error))}
 	}
 	keep(e, c, d, "")
 	var res apitypes.PublishResult
@@ -125,6 +125,20 @@ func (e *env) publishDraftOn(c *client.Client, bind *epochBind, d string, rp *cl
 		return "", releaselessErr{fmt.Errorf("%s: publication operation %s succeeded without naming its release: %s", c.Context.Where(), pr(o.Id), pr(compact(o.Result)))}
 	}
 	return res.Release, nil
+}
+
+// publishNext is the table row's next step for the code a failed publication carries
+// (client-contracts.md §8.2): only recovery-mode-entered, which entering recovery mode gives a
+// publish job, has one the CLI words; another code has none.
+func publishNext(opErr any) string {
+	var p struct {
+		Type string `json:"type"`
+	}
+	_ = json.Unmarshal([]byte(compact(opErr)), &p)
+	if strings.TrimPrefix(p.Type, "urn:bronzeward:problem:") == "recovery-mode-entered" {
+		return ". Wait for the recovery to finish, then publish again."
+	}
+	return ""
 }
 
 // pr escapes the control characters of text the server chose (client-contracts.md §6 item 4).

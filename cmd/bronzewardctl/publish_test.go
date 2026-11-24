@@ -19,6 +19,7 @@ type publishFake struct {
 	*draftFake
 	mu           sync.Mutex
 	state        string
+	failCode     string // the code a failed operation carries; empty means validation-failed
 	streams      int
 	first        string
 	bare         bool
@@ -55,7 +56,10 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
 	f.mu.Lock()
 	state, first, bare, pagesRefused, machineEpoch, goneEpoch, goneMoved := f.state, f.first, f.bare, f.pagesRefused, f.machineEpoch, f.goneEpoch, f.goneMoved
-	goneBack, titled, draftEpoch := f.goneBack, f.titled, f.draftEpoch
+	goneBack, titled, draftEpoch, failCode := f.goneBack, f.titled, f.draftEpoch, f.failCode
+	if failCode == "" {
+		failCode = "validation-failed"
+	}
 	desiredA, desiredB := `"rel_BWSYNTH"`, `"rel_BWSYNTH"`
 	if f.replaced {
 		desiredA, desiredB = `"rel_BWSYNTH-new"`, `null`
@@ -68,7 +72,7 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if state == "succeeded" {
 		result = `{"release":"rel_BWSYNTH"}`
 	} else {
-		problem = "{\"type\":\"urn:bronzeward:problem:validation-failed\",\"title\":\"BWSYNTH\u009b2J\",\"status\":422}" // a raw C1 CSI
+		problem = "{\"type\":\"urn:bronzeward:problem:" + failCode + "\",\"title\":\"BWSYNTH\u009b2J\",\"status\":422}" // a raw C1 CSI
 	}
 	w.Header().Set("Bronzeward-Epoch", "ep_BWSYNTH-1")
 	if machineEpoch != "" && strings.HasPrefix(path, "/machines/") {
@@ -208,6 +212,14 @@ func TestPublication(t *testing.T) {
 	if strings.Contains(stderr, "\u009b") {
 		t.Errorf("a failed publication: stderr %q holds the raw C1 control", stderr)
 	}
+	// §8.2: a publication ended by recovery-mode entry names the table row's next step.
+	f.mu.Lock()
+	f.failCode = "recovery-mode-entered"
+	f.mu.Unlock()
+	step("a publication ended by recovery-mode entry names its next step", pub, 4, "", "nothing was sent to any machine. Wait for the recovery to finish, then publish again.", "Publication succeeded")
+	f.mu.Lock()
+	f.failCode = ""
+	f.mu.Unlock()
 	if out := step("-o json prints the answer unchanged", append(pub, "-o", "json"), 4, "", "failed"); out != fmt.Sprintf(publishOp, "queued", `null`, `null`)+"\n" {
 		t.Errorf("-o json printed %q", out)
 	}

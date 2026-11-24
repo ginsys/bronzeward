@@ -609,8 +609,6 @@ func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.Ope
 		// table words it (client-contracts.md §8.2; the two clients cannot share one file).
 		case "machine-identity-mismatch":
 			why += " Check which machine answers at that address; nothing it read was kept."
-		case "recovery-mode-entered":
-			why += " Wait for the recovery to finish, then publish again."
 		case "talos-access-unavailable":
 			why += " The server's explanation is in the error above."
 		}
