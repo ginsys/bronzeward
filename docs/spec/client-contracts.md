@@ -877,7 +877,9 @@ neither client does anything repeat the request. Built for the next step, at the
 ginsys/bronzeward#1176: the web client words a failed operation by the row's `what` and its `next`, and
 leaves out a `next` that points at a server explanation the page does not show
 (`web/src/problems.tsx:91-95`, `web/src/imports.tsx:132`), with "Import again" beside it
-(`web/src/imports.tsx:133`); the CLI shows the operation's identifier and state with the raw error and
+(`web/src/imports.tsx:133`), and the publication page words a failed publication by the same `next`
+after its own sentence, which includes `recovery-mode-entered` (`web/src/publish.tsx:44-49`); the CLI
+shows the operation's identifier and state with the raw error and
 names the row's next step, for a failed import, for `precondition-failed`, `ingestion-abandoned`,
 `machine-identity-mismatch` and `talos-access-unavailable` (`cmd/bronzewardctl/imports.go:592-615`), and,
 for a failed publication, for `recovery-mode-entered`, the code that recovery-mode entry gives a publish
@@ -941,13 +943,13 @@ Built, on a `412`, where the clause says the client "shows the current state": t
 revision the draft has now and the command that reads it (`internal/client/write.go:560-570`). At the
 revision that lands ginsys/bronzeward#1176 the web publication page does too: it reads the draft once,
 with a plain read that sends no `If-Match`, and says its revision and state under the refusal, which
-stays shown whatever the read answers (`web/src/publish.tsx:191-196`, `web/src/publish.tsx:205-209`,
-`web/src/publish.tsx:226`); a read answered after a newer press or re-read, or after the page is gone,
+stays shown whatever the read answers (`web/src/publish.tsx:194-199`, `web/src/publish.tsx:208-212`,
+`web/src/publish.tsx:229`); a read answered after a newer press or re-read, or after the page is gone,
 is not live, so the shell does not settle it and the page does not show it, and a refusal that answers
-after that starts no read (`web/src/publish.tsx:177-182`, `web/src/publish.tsx:192-197`,
-`web/src/publish.tsx:199`, `web/src/publish.tsx:208`). That read keeps no ETag: Publish still
-sends nothing until the operator presses "Read the draft again" (`web/src/publish.tsx:162-163`,
-`web/src/publish.tsx:180-186`).
+after that starts no read (`web/src/publish.tsx:180-185`, `web/src/publish.tsx:195-200`,
+`web/src/publish.tsx:202`, `web/src/publish.tsx:211`). That read keeps no ETag: Publish still
+sends nothing until the operator presses "Read the draft again" (`web/src/publish.tsx:165-166`,
+`web/src/publish.tsx:183-189`).
 
 ### 8.4 Idempotency and ambiguous responses
 
