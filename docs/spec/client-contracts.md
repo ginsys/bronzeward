@@ -307,11 +307,17 @@ browser, and no WebSocket (polling and SSE only, [persistence and API §8.3](per
 
 A **context** names one Bronzeward installation and how to reach and sign in to
 it. It holds no secret. The CLI holds contexts as the table says (`internal/client/config.go:19-56`,
-`internal/client/config.go:166-231`); the web client has none (item 3). **Proposed:** `oidc.scopes`
-and `oidc.audience` are required with `oidc`; today the CLI takes an empty scopes list as
-`openid offline_access` (`internal/client/login.go:58-62`), and it requires only the issuer and the
-client ID (`internal/client/config.go:178-181`), so an empty audience skips the audience pre-check
-(`internal/client/credentials.go:504`).
+`internal/client/config.go:166-231`); the web client has none (item 3). `oidc.scopes`
+and `oidc.audience` are required with `oidc`: `Context.Check` refuses a context that lacks either,
+naming each missing field and what to add, and `Open` and the sign-in run it before any request
+(`internal/client/config.go:166-203`, `internal/client/client.go:76`, `internal/client/login.go:312`,
+`cmd/bronzewardctl/commands.go:164`). A contexts file written
+before the rule still loads, and `context list`, `use` and `remove` work on it; only a command that
+opens the context refuses. `context add` stores `openid offline_access` when no `--scopes` is given
+and requires `--audience`; `--from` stores the base scopes followed by the file's and requires the
+file's `audience` (`cmd/bronzewardctl/commands.go:145-148`, `cmd/bronzewardctl/commands.go:160-162`,
+`internal/client/discovery.go:31-36`, `internal/client/discovery.go:115-117`). The audience pre-check
+(`internal/client/credentials.go:504`) therefore always has an audience to compare.
 
 | Field | Meaning | Required |
 | --- | --- | --- |
@@ -332,15 +338,13 @@ client ID (`internal/client/config.go:178-181`), so an empty audience skips the 
    [§9.2](#92-cli-sign-in). (Built: `internal/client/config.go:58`, `internal/client/config.go:148-162`.)
 2. Every command that talks to a server shows the context's name and server in its error and
    wait output, so an operator with two installations never acts on the wrong one unseen (built:
-   `internal/client/client.go:101`, `internal/client/client.go:289`). **Proposed:** a
-   write in an interactive session always prints the context before it sends. Today a write names the
-   context only when a notice happens to carry it, for example the warning of a human-only write
-   sent with an automation credential (`internal/client/write.go:207-209`), the recovery banner
-   (`internal/client/client.go:358-364`), or a retry or deprecation notice of the preliminary server
-   read (`internal/client/client.go:249`, `internal/client/client.go:354`). `writeWith` and `Send`
-   print no line of their own for the context (`cmd/bronzewardctl/writes.go:112`,
-   `internal/client/write.go:197`), so an ordinary write with no such notice names none, and only
-   some recovery commands name it in their own confirmation lines.
+   `internal/client/client.go:107`, `internal/client/client.go:248-260`). A
+   write in an interactive session always prints the context before it sends: `Send` prints
+   `<context> (<server>): sending <route>.` to standard error before its first attempt, and none
+   before a repeat (`internal/client/write.go:210-212`). A session is interactive when standard
+   input and standard error are terminals and neither `--no-input` nor `--token-stdin` is given
+   (`cmd/bronzewardctl/main.go:402`), so a script's or a pipe's output gains no line. Several
+   writes of one command each print the line.
 3. The web interface serves exactly one installation, the one at its own origin
    ([§10.1](#101-hosting-and-origin)). Switching installations is navigating to another origin,
    which starts with an empty state; nothing read under one origin is shown under another. (Built:
@@ -351,7 +355,10 @@ client ID (`internal/client/config.go:178-181`), so an empty audience skips the 
    a static client-configuration file served next to the web files, `bronzeward-client.json` at
    the web root, names them: a JSON object with the string members `issuer`, `audience`,
    `cliClientId` and `webClientId`, the last two the client IDs of the two registrations of
-   [§9.1](#91-identity-provider-requirements) item 2, and an optional string member `scopes`:
+   [§9.1](#91-identity-provider-requirements) item 2, an optional number member
+   `ingestWaitSeconds` (positive, web client only: the bound of the in-progress wait of
+   [§8.4](#84-idempotency-and-ambiguous-responses) item 2, in seconds; absent is its default of 120, a wrong type or a
+   value that is not positive is a configuration error, and the CLI ignores it), and an optional string member `scopes`:
    space-separated scopes requested after `openid offline_access`, as the CLI's `oidc.scopes`,
    for a provider that puts the audience into a token only when a scope asks for it (Zitadel's
    project audience scope is one). The web client also asks for `profile` itself where the
@@ -368,8 +375,8 @@ client ID (`internal/client/config.go:178-181`), so an empty audience skips the 
    Built in the web client: it reads the file from its own origin with `credentials: "omit"`,
    requires all four string members, checks `scopes` and uses the web client's ID
    (`web/src/config.ts:11-54`, `web/src/auth.ts:120`). Built in the
-   CLI: `context add --from` reads it, requires `issuer` and `cliClientId` (it reads `audience`
-   and does not require it, and ignores `webClientId`), checks `scopes` the same way, stores the
+   CLI: `context add --from` reads it, requires `issuer`, `cliClientId` and `audience` (it ignores
+   `webClientId` and `ingestWaitSeconds`), checks `scopes` the same way, stores the
    CLI client's ID and the scopes as described, sends no `Authorization` header, and keeps the
    by-hand flags (`internal/client/discovery.go:16-59`, `internal/client/discovery.go:69-125`,
    `cmd/bronzewardctl/commands.go:106-118`, `cmd/bronzewardctl/commands.go:147-160`).
@@ -622,29 +629,29 @@ process's version, its API revision, a whole number raised by one with each addi
 entry commits the read is refused with `409 recovery-mode-active`, as every request but the entry
 is.
 
-Built in both clients, except the part of item 1 that the CLI does not meet and the part of item 2
-that the web client does not meet, marked **Proposed** there; item 2's rule over every other
-enumeration was not traced. Sources are given per item.
+Built in both clients; item 2's rule over every other enumeration was not traced and stays
+**Proposed** there. Sources are given per item.
 
 1. A client sends only fields the server it talks to is known to accept. Because the server
    refuses unknown request fields, a newer client sending a field an older server lacks fails with
    `400 invalid-request`, which is safe but useless; the client feature-gates such fields on the
    served API revision. (Built in the web client: its minimum, 12, is the highest revision of any
-   route it calls, `web/src/shell.tsx:25-33`, `web/src/shell.tsx:476`. **Proposed** for the CLI: its
-   minimum is 2 (`internal/client/client.go:19`) and it gates only a machine's name, the timeline's
-   `--follow` and some drift and recovery reads on a revision (`cmd/bronzewardctl/writes.go:335`,
-   `cmd/bronzewardctl/timeline.go:68`, `cmd/bronzewardctl/drift.go:208`,
-   `cmd/bronzewardctl/recovery.go:146`, `cmd/bronzewardctl/recovery_account.go:194`), while it calls
-   `GET /machines/{id}/position`, served from revision 6, and
-   `GET /import-base-revisions/{id}/document`, served from revision 7, with no gate
-   (`cmd/bronzewardctl/apply.go:162`, `cmd/bronzewardctl/importbase.go:63`).)
+   route it calls, `web/src/shell.tsx:25-33`, `web/src/shell.tsx:476`. Built in the CLI: its minimum, 10, is the highest revision of any
+   route it calls, a machine's name (`internal/client/client.go:19-21`); the others it calls are
+   `GET /principals` (4), `GET /machines/{id}/position` (6),
+   `GET /import-base-revisions/{id}/document` (7) and `POST /clusters/{id}/first-keys` (8). A server
+   below 10 is refused once, with both revisions named, before any command's own request
+   (`internal/client/client.go:161-163`), so the CLI carries no per-command gate. The clause covers
+   request fields and routes: the CLI also reads response members added at revisions 13 to 18 (a
+   machine's `role` and `formOnly`, a release's `hostname`), which a server below them omits, and it
+   shows nothing for an absent member (`cmd/bronzewardctl/hostname_lines.go:33-35`,
+   `cmd/bronzewardctl/reads.go:281`, `cmd/bronzewardctl/reads.go:342`).)
 2. A client ignores unknown response fields, and never maps an unknown enumeration value to a
    known state or to success. It shows a start mode as `unknown` ([§6](#6-tls-trust) item 4) and
    any other such value as the text it received. In the CLI's human output, [§6](#6-tls-trust)
-   item 8 escapes that text. (Built, for the start mode: the CLI, `internal/client/printable.go:104-110`.
-   **Proposed** for the web client: it reads any value but `normal` and `recovery` as no start mode
-   (`web/src/recovery.tsx:41-42`) and then keeps the mode it showed before
-   (`web/src/shell.tsx:467-468`), where the clause asks for `unknown`. For an operation's state the CLI treats only the five listed states as
+   item 8 escapes that text. (Built, for the start mode: the CLI, `internal/client/printable.go:104-110`,
+   and the web client, which reads a value that is neither `normal` nor `recovery` as `unknown` and
+   keeps no earlier mode for it, `web/src/recovery.tsx:42-48`, `web/src/shell.tsx:467-468`. For an operation's state the CLI treats only the five listed states as
    terminal, `internal/client/watch.go:61-67`. The rest of the item, over every enumeration both
    clients read, was not traced and stays **Proposed**.)
 3. A client declares the minimum API revision it needs. It reads `GET /server` on context use and
@@ -654,14 +661,13 @@ enumeration was not traced. Sources are given per item.
    allows only the entry, whose request it already
    knows from revision 1, and reads the revision once the entry has committed. The revision
    describes the process that answered; another instance behind the same endpoint may differ, so
-   a refusal names the revision that answer served. The web client's minimum is the highest
-   revision of any route it calls, raised in the pull request that adds such a call; it is 12.
-   (Built in the CLI: the declared minimum, the read on context use and the refusal naming both
-   revisions, `internal/client/client.go:19`, `internal/client/client.go:139-158`; before a write,
-   `internal/client/write.go:226-228`; the recovery-start exception, `internal/client/write.go:227`.
-   Built in the web client: `web/src/shell.tsx:33-40`, `web/src/shell.tsx:476`, the recovery-start
-   refusal read at `web/src/shell.tsx:519`. The CLI's declared minimum is not the highest revision
-   of every route it calls: see item 1.)
+   a refusal names the revision that answer served. A client's minimum is the highest revision of
+   any route it calls, raised in the pull request that adds such a call; the web client's is 12 and
+   the CLI's is 10. (Built in the CLI: the declared minimum, the read on context use and the refusal
+   naming both revisions, `internal/client/client.go:19-21`, `internal/client/client.go:145-165`;
+   before a write, `internal/client/write.go:229-230`; the recovery-start exception,
+   `internal/client/write.go:230`. Built in the web client: `web/src/shell.tsx:33-40`,
+   `web/src/shell.tsx:476`, the recovery-start refusal read at `web/src/shell.tsx:519`.)
 4. A `Deprecation` header on any response is shown once per command or page load, naming the
    route. (Built: CLI `internal/client/client.go:352-355`; web client `web/src/shell.tsx:40`,
    `web/src/shell.tsx:213`.)
@@ -1005,13 +1011,14 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    `internal/client/write.go:394-418`, web `web/src/write.ts:476-490`; the recorded refusal with both
    members, CLI `internal/client/write.go:445-448`, web `web/src/write.ts:476`, `web/src/write.ts:513`;
    the bound at least the served lease, CLI `internal/client/write.go:230-236`, web
-   `web/src/write.ts:548-550`; the replay text, CLI `internal/client/write.go:363-365`, web
+   `web/src/write.ts:554`; the replay text, CLI `internal/client/write.go:363-365`, web
    `web/src/write.ts:423`, `web/src/states.tsx:19`; a replayed problem as the earlier refusal in the
    CLI, `internal/client/write.go:394-396`; the keyed `422`, CLI `internal/client/write.go:425-427`, web
-   `web/src/write.ts:495`. **Proposed:** (a) a configurable bound for the in-progress wait in the
-   web client. The CLI has it (`cmd/bronzewardctl/fragments.go:58`, `internal/client/write.go:414-415`);
-   the web client's is the constant `INGEST_WAIT` (`web/src/write.ts:83`) and no setting reads it.
-   (b) A replayed refusal in the web client: it carries the success replay text "Already done earlier;
+   `web/src/write.ts:495`. The bound is configurable in both clients: the CLI's `--ingest-wait`
+   (`cmd/bronzewardctl/fragments.go:58`, `internal/client/write.go:414-415`) and the web client's
+   `ingestWaitSeconds` member of `bronzeward-client.json` (§5 item 4; `web/src/config.ts:43-47`,
+   `web/src/app.tsx:202`, `web/src/write.ts:152`, `web/src/write.ts:554`), which `INGEST_WAIT`
+   (`web/src/write.ts:83`) defaults. **Proposed:** a replayed refusal in the web client: it carries the success replay text "Already done earlier;
    showing that result." before the refusal (`web/src/states.tsx:19`, `web/src/states.tsx:142-146`),
    where the clause asks for the earlier attempt's refusal alone.
 3. **Same principal and epoch only.** Before any repeat the client checks that its credential
