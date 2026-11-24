@@ -192,8 +192,9 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     if (last.drain === undefined) return { kind: "ended", operation: last.operation, epoch: last.epoch };
     return { kind: "failed", res: last.moves === moves() ? last.drain : NO_READ };
   };
-  // The wait of an outage is in steps of 250 ms, each asking `until`, so a watch that ends is left within
-  // 250 ms (§8.6 item 2; the CLI's retryIn). The page leaving ends it at once.
+  // The wait of an outage and the wait after a void terminal read are in steps of 250 ms, each asking
+  // `until`, so a watch that ends is left within 250 ms (§8.6 item 2; the CLI's retryIn). The page leaving
+  // ends it at once.
   const outageWait = async (ms: number): Promise<boolean> => {
     for (let left = ms; left > 0; ) {
       const step = Math.min(left, 250);
@@ -257,7 +258,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
         // the delay, with no second drain of it (the CLI's watch.go).
         last = undefined;
         voided = true;
-        await pace.sleep(delay, w.signal);
+        if (await outageWait(delay)) return endedIn(NO_READ);
         delay = Math.min(2 * delay, 30_000);
         continue;
       }
@@ -274,7 +275,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
         // so a server whose events never match is not asked again without a pause (the CLI's watch.go).
         last = undefined;
         voided = true;
-        await pace.sleep(delay, w.signal);
+        if (await outageWait(delay)) return endedIn(NO_READ);
         delay = Math.min(2 * delay, 30_000);
         continue;
       }
