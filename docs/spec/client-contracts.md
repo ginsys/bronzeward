@@ -1589,8 +1589,8 @@ current token expires
 ### 9.2 CLI sign-in
 
 Built in the CLI, which is the only client this section names, except the parts marked **Proposed**
-in the paragraph "Built, by item" at the end of the section. That paragraph holds the code
-sites for each item, and what today does where it differs.
+in the paragraph "**Proposed**, where today differs" at the end of the section. The paragraph "Built,
+by item" before it holds the code sites for each item.
 
 1. `bronzewardctl login` runs the authorization-code grant with PKCE `S256`, `state` and `nonce`,
    using a loopback redirect on `127.0.0.1` with a port the operating system chooses, and opens
@@ -1728,7 +1728,8 @@ read as "a document with only a refresh token is the CLI's own" (`internal/clien
 ### 9.3 Browser sign-in
 
 Built in the web client, the only client this section names, except the parts marked **Proposed** in
-the paragraph "Built, by item" at the end of the section. Provider behaviour (the provider answers
+the paragraph "Built, by item" at the end of the section and in the paragraph "**Proposed**, where
+today differs" after it. Provider behaviour (the provider answers
 a redirect from its own session, rotation, the server's `displayClaim`) and the rejected options are
 not claims about client code.
 
@@ -2340,8 +2341,8 @@ review, and a client offers the action to any `author` and shows the refusal.
 
 ### 11.2 Rules for both clients
 
-Built in the clients each item names, except the parts marked **Proposed** in the paragraph after
-item 7. Sources follow each item.
+Built in the clients each item names, except the parts marked **Proposed** inline in an item and in
+the paragraph after item 7. Sources follow each item.
 
 1. **Argv and history.** No flag takes a protected value. Documents come from a file, standard
    input or a prompt; marks only from a prompt or standard input ([§11.3](#113-cli-review) item
@@ -2417,7 +2418,8 @@ bodies live until the process ends, which the clause "held no longer than the re
 ### 11.3 CLI review
 
 Built in the CLI (the web interface's part is the last sentence of item 3 and
-[§11.4](#114-web-review-and-document-input)), with the sources in the paragraph after item 3. This
+[§11.4](#114-web-review-and-document-input)), with the sources in the paragraph after item 3, except the
+parts marked **Proposed** in the paragraph after those sources. This
 qualifies the journeys' candidate C4 against [compilation §3.6](compilation.md#36-operator-review):
 
 1. `import review` shows the review only when standard output is a terminal, through an
