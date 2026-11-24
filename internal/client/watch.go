@@ -135,6 +135,12 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 			if w.halt.err != nil { // Until failed: its error stands, as at the stop below
 				return nil, OperationRead{}, w.halt.err
 			}
+			// A watch that ended while the server's certificate was refused returns the refusal, which no
+			// earlier read of the operation hides: the operator asked what the server shows, and it is not
+			// trusted (§8.6 item 2).
+			if errors.As(err, new(*trust)) {
+				return nil, OperationRead{}, err
+			}
 			if lastOp != nil && (!Terminal(lastOp.State) || c.EpochHolds(lastRead)) {
 				return lastOp, lastRead, nil
 			}

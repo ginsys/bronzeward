@@ -202,15 +202,14 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		}
 	}
 	defer c.banner()
-	// An answer that showed a new epoch is followed by GET /server, as a read's is (§8.5, start mode): what the
-	// command prints next, the banner included, is of the new epoch. The write's own result stands whatever
-	// the read answers. A recovery start refuses GET /server the way it refuses this write, before its entry.
-	answered := false // the server answered the write itself: a read that confirms an epoch before a repeat is no answer
+	// An answer of the write itself that showed a new epoch is followed by GET /server, as a read's is
+	// (§8.5, start mode): what the command prints next, the banner included, is of the new epoch. A read
+	// before or between the sends that shows one is no answer of the write, and the write's own result
+	// stands whatever the read answers. A recovery start refuses GET /server the way it refuses this write,
+	// before its entry, so its scope-less refusal reads nothing.
+	moved, recoveryStart := false, false
 	defer func() {
-		if !answered || !c.newEpoch {
-			return
-		}
-		if p := new(*Problem); errors.As(err, p) && (*p).Code() == "recovery-mode-active" && (*p).Doc["scope"] == nil {
+		if !moved || recoveryStart || !c.newEpoch {
 			return
 		}
 		if _, _, serr := c.Server(); serr != nil {
@@ -342,8 +341,10 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		if w.Once && c.Arm != nil { // the Ctrl-C of the request in flight, never of the reads before it
 			sctx, disarm = c.Arm()
 		}
+		movesBefore := c.moves
 		a := c.post(w, key, ref, sctx)
-		answered = answered || a.p != nil || a.r != nil
+		moved = moved || c.moves != movesBefore
+		recoveryStart = a.p != nil && a.p.Code() == "recovery-mode-active" && a.p.Doc["scope"] == nil
 		stopped := disarm()
 		p, code := a.p, ""
 		if p != nil {
