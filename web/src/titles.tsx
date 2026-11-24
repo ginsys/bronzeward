@@ -7,7 +7,7 @@
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import type { components } from "./api/v1";
 import { Detail, Id, Ref, short, useReads, viewOf } from "./list.tsx";
-import { MachineRef, machineText } from "./machines.tsx";
+import { machineText } from "./machines.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
 import { SAFE, safeWord } from "./safe.ts";
 import { draftName, draftText, importedConfiguration, operationTitle, planTitle, releaseTitle } from "./titles.ts";
@@ -98,8 +98,9 @@ export function MachineById({ id, none = "none", held }: { id: string | null | u
   if (id == null) return none;
   const body = held === undefined ? m : held.body;
   if (!asked) return <Id id={id} />;
-  // A machine not read yet shows as any identifier does, until its body arrives.
-  return body == null ? <Id id={id} /> : <MachineRef machine={body} />;
+  // A machine not read yet shows as any identifier does, until its body arrives. It is the one link throughout, so
+  // the answer changes its text and replaces no element: a person's focus on it stays (ginsys/bronzeward#1121).
+  return <Ref to={`/machines/${encodeURIComponent(id)}`} id={id}>{body == null ? undefined : machineText(body)}</Ref>;
 }
 
 // A title wants the body it is built on: held, as a list row holds it, or read by its identifier.
