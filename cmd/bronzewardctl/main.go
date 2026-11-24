@@ -22,6 +22,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
 )
@@ -399,7 +401,8 @@ func (e *env) openTo(notices, verbose io.Writer) (*client.Client, error) {
 	if c != nil {
 		c.Arm, c.Cut = e.arm, e.cutNow
 		// A person at a terminal (standard input and error), who did not forbid input (§5 item 2).
-		c.Interactive = !e.noInput && !e.tokenStdin && isTerminal(stdin) && isTerminal(os.Stderr)
+		// term.IsTerminal, not isTerminal: that is false outside Linux, where a person is still at a terminal.
+		c.Interactive = !e.noInput && !e.tokenStdin && term.IsTerminal(int(stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
 	}
 	return c, err
 }
