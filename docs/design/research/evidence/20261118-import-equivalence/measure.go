@@ -106,7 +106,7 @@ func holdsHostname(s compile.Source) bool {
 func hostname(ms []machine) {
 	fmt.Println("== B3: the node's own hostname document, imported with the machine's name")
 	fmt.Println("machine  case  removed equal  baseHolds(no name) baseHolds(name) baseHolds(other)  digest(compiled)==digest(node)  formOnly")
-	equalSeen, controlsHold := false, true
+	equalSeen, controlsHold, refused := false, true, false
 	for _, m := range ms {
 		withOff := strings.Replace(string(m.node), "kind: HostnameConfig\n", "kind: HostnameConfig\nauto: off\n", 1)
 		cases := []struct{ label, text string }{{"as-written", string(m.node)}}
@@ -122,7 +122,7 @@ func hostname(ms []machine) {
 				Imported: compile.ImportedHostname{Name: filled.Name, Equal: filled.Equal}})
 			if err != nil {
 				fmt.Printf("%-7s  %-10s  refused: %v\n", m.name, c.label, err)
-				controlsHold = false
+				refused = true
 				continue
 			}
 			d := must(compiled.Materialized().Digest())
@@ -139,8 +139,8 @@ func hostname(ms []machine) {
 			}
 		}
 	}
-	if !controlsHold || !equalSeen {
-		fatal(fmt.Errorf("B3 is vacuous or a control failed: controls hold %v, a machine removed+equal+form-only with auto: off %v", controlsHold, equalSeen))
+	if refused || !controlsHold || !equalSeen {
+		fatal(fmt.Errorf("B3 failed: the compiler refused a case %v; the controls hold %v; a machine with auto: off was removed, equal and form-only %v", refused, controlsHold, equalSeen))
 	}
 }
 

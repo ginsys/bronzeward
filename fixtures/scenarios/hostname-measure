@@ -72,7 +72,8 @@ name_is() { [ "$(sql "SELECT name FROM machine WHERE id = '$machine_w'")" = "$1"
 # name_as <human> <name>: POST /machines/{id}/names: 201.
 name_as() {
   fresh "$1"
-  answers 201 - POST "/api/v1/machines/$machine_w/names" "$tok" "$(jq -nc --arg n "$2" '{name: $n}')" "$(key "name-$2")"
+  # The Idempotency-Key takes [A-Za-z0-9_-] only (internal/api/api.go), and a dotted name is not one.
+  answers 201 - POST "/api/v1/machines/$machine_w/names" "$tok" "$(jq -nc --arg n "$2" '{name: $n}')" "$(key "name-${2//[^A-Za-z0-9_-]/_}")"
 }
 # release_hostname: the worker's Desired release records its hostname source and value, kept as
 # release-<name>.json (the release's own record, no configuration value).
@@ -115,6 +116,24 @@ row() {
     "$(awk '/^## nodename/ {f=1} f && /nodename:/ {print $2; exit}' "$EV/node-$1-after.txt")" | tee -a "$EV/table.tsv"
 }
 
+# rowstep <ref> <what> <command...>: check, and where it fails say why in the step's own words and return 1,
+# so that a row stops at its first failed step and a void row cannot run on. The words are the problem
+# detail of the last answer when it was an error (a refusal names no configuration value), else the exit
+# status of the command.
+rowstep() {
+  local before=$failed
+  check "$@"
+  [ "$failed" -ne "$before" ] || return 0
+  if [ "${last_status:-0}" -ge 400 ] 2>/dev/null; then
+    printf '  the step'"'"'s own error: HTTP %s %s\n' "$last_status" "$(jq -r '[.title, .detail] | map(select(. != null)) | join(": ")' "$EV/last.body" 2>/dev/null | head -c 400)"
+  else
+    echo "  the step's own error: its command failed; the last answer was HTTP ${last_status:-none}"
+  fi
+  return 1
+}
+# skip_row <name> <why>: the row did not run past a failed step, and says so.
+skip_row() { printf 'SKIP\t%s\t%s\n' "$1" "$2" | tee -a "$EV/table.tsv"; }
+
 # Step 0: the equivalence measurements of docs/design/research/20261118-import-analysis-and-equivalence.md
 # rerun with the fixture's own pinned talosctl (the manifest pins the version the note names). Before
 # `up` is used, so a failure costs nothing; its wall time is the record's, since the note holds none. gen.sh
@@ -155,7 +174,7 @@ check "$ref step 1" 'the worker'"'"'s nodename, hostname status and uptime are r
 # configuration is written to a 0600 file under $STATE and removed at exit; it is never kept.
 dry_run() {
   {
-    node_talos "$TALOS_WORKER_IP" get machineconfig -o jsonpath='{.spec}' || return 1
+    node_talos "$TALOS_WORKER_IP" get machineconfig v1alpha1 -o jsonpath='{.spec}' 2>"$EV/dry-get.err" || return 1
     printf '\n---\napiVersion: v1alpha1\nkind: HostnameConfig\nauto: off\nhostname: %s\n' "$worker_name"
   } >"$dry" || return 1
   talosctl_timed 60 -e "$TALOS_WORKER_IP" -n "$TALOS_WORKER_IP" apply-config --dry-run --mode no-reboot -f "$dry" >"$EV/dry-run.txt" 2>&1
@@ -166,9 +185,13 @@ check "$ref step 2" 'apply-config --dry-run of the configuration plus the filled
 # onboarding, gets its first release through the product, which writes `auto: off` plus that name.
 # The reads answer whether a reboot is requested (uptime before and after), whether the nodename
 # changes, and what the review says of the release (formOnly); no sentence is chosen here.
-check "$ref step 3 default" 'the named worker, first release applied through the product: the operation completes' apply_as_product default
-check "$ref step 3 default" 'the worker'"'"'s Applied is its Desired after it' applied
-row default
+default_ok=0
+row_default() {
+  rowstep "$ref step 3 default" 'the named worker, first release applied through the product: the operation completes' apply_as_product default &&
+    rowstep "$ref step 3 default" 'the worker'"'"'s Applied is its Desired after it' applied &&
+    row default
+}
+if row_default; then default_ok=1; else skip_row default 'a step of the row failed; its reads are void'; fi
 
 # Step 4, the commonest case, its own row: the worker's configuration now holds exactly the document
 # a node with an explicit hostname holds, `auto: off` plus its name. The product path that imports it
@@ -178,28 +201,75 @@ row default
 # applied. A refusal of the import (a secret the import wants marked, a guard) is the row's result:
 # the case is then "not shown", and the refusal is read from $EV/last.body, never replaced by another
 # case under this name.
-check "$ref step 4 explicit" 'the worker is imported again from its node, published, planned and applied: the operation completes' \
-  apply_as_product explicit
-check "$ref step 4 explicit" 'the worker'"'"'s Applied is its Desired after it' applied
-row explicit
+row_explicit() {
+  rowstep "$ref step 4 explicit" 'the worker is imported again from its node, published, planned and applied: the operation completes' \
+    apply_as_product explicit &&
+    rowstep "$ref step 4 explicit" 'the worker'"'"'s Applied is its Desired after it' applied &&
+    row explicit
+}
+# The row needs row default: only after it does the node hold `auto: off` plus its name.
+if [ "$default_ok" -ne 1 ]; then
+  skip_row explicit 'row default did not complete, so the node does not hold auto: off plus its name'
+elif ! row_explicit; then
+  skip_row explicit 'a step of the row failed; its reads are void'
+fi
 
 # Step 5: a rename to a dotted name, applied. The nodename read shows whether the Node name follows.
-check "$ref step 5" 'the worker is renamed to a dotted name by an author' name_as h-author hm-renamed.fixture.test
-check "$ref step 5" 'the worker holds that name' name_is hm-renamed.fixture.test
-check "$ref step 5" 'the rename, applied through the product: the operation completes' apply_as_product rename
-check "$ref step 5" 'the worker'"'"'s Applied is its Desired after it' applied
-row rename
+rename_ok=0
+row_rename() {
+  rowstep "$ref step 5" 'the worker is renamed to a dotted name by an author' name_as h-author hm-renamed.fixture.test &&
+    rowstep "$ref step 5" 'the worker holds that name' name_is hm-renamed.fixture.test &&
+    rowstep "$ref step 5" 'the rename, applied through the product: the operation completes' apply_as_product rename &&
+    rowstep "$ref step 5" 'the worker'"'"'s Applied is its Desired after it' applied &&
+    row rename
+}
+if row_rename; then rename_ok=1; else skip_row rename 'a step of the row failed; its reads are void'; fi
 
 # Step 6, under its own name: a rename back to the first name, a third rename and not step 4's case.
-check "$ref step 6 rename-back" 'the worker is renamed back to its first name' name_as h-author "$worker_name"
-check "$ref step 6 rename-back" 'the rename back, applied through the product: the operation completes' apply_as_product back
-check "$ref step 6 rename-back" 'the worker'"'"'s Applied is its Desired after it' applied
-row back
+row_back() {
+  rowstep "$ref step 6 rename-back" 'the worker is renamed back to its first name' name_as h-author "$worker_name" &&
+    rowstep "$ref step 6 rename-back" 'the worker holds its first name' name_is "$worker_name" &&
+    rowstep "$ref step 6 rename-back" 'the rename back, applied through the product: the operation completes' apply_as_product back &&
+    rowstep "$ref step 6 rename-back" 'the worker'"'"'s Applied is its Desired after it' applied &&
+    row back
+}
+if [ "$rename_ok" -ne 1 ]; then
+  skip_row back 'row rename did not complete, so there is no rename to undo'
+elif ! row_back; then
+  skip_row back 'a step of the row failed; its reads are void'
+fi
 
 # registerWithFQDN set against unset is not measured here: it needs a kubelet fragment the fixture
 # has no scenario for. Recorded as a limit, not as a row.
 # The configuration file of step 2 is gone on every path: removed here, and by the trap on a failed step.
 rm -f -- "$dry"
 check "$ref end" 'the configuration file of the dry run is gone' test ! -e "$dry"
-echo "hostname-measure: $failed failed; the reads are in $EV (table.tsv, node-*.txt, dry-run.txt, release-*.json, review-*.json)"
+
+# derive: the one file that leaves the fixture state, written here from the reads in place (they stay under
+# $STATE, mode 0600, and die with bin/down). It holds derived results only: the table, the equivalence
+# output (counts and booleans, as measure.go prints them), each release's hostname source and value and each
+# review's formOnly, and of the dry run the lines that are not diff lines and the counts of the diff lines.
+# No node read, no configuration and no response body is copied.
+derive() {
+  local d=$EV/derived.txt n
+  # a failed step 2 may have left no dry-run.txt: an empty one then reads as no lines
+  : >>"$EV/dry-run.txt"
+  {
+    echo '## table.tsv'
+    cat -- "$EV/table.tsv"
+    echo '## equivalence output (counts and booleans only)'
+    cat -- "$EV/equivalence-output.txt"
+    for n in default explicit rename back; do
+      [ -f "$EV/review-$n.json" ] || continue
+      printf '## %s: review formOnly %s; release hostname %s\n' "$n" "$(jq -c '.formOnly' "$EV/review-$n.json")" \
+        "$(jq -c '[.machines[]?.hostname]' "$EV/release-$n.json")"
+    done
+    echo '## dry run (step 2): lines that are not diff lines, then the counts of diff lines'
+    awk '!/^[ +-]/' "$EV/dry-run.txt" | head -n 20
+    awk '/^\+/ && !/^\+\+\+/ { a++ } /^-/ && !/^---/ { r++ } END { printf "diff lines added %d removed %d\n", a, r }' "$EV/dry-run.txt"
+  } >"$d"
+}
+check "$ref end" 'the derived file is written' derive
+check "$ref end" 'the derived file exists and is not empty (the positive control before bin/down)' test -s "$EV/derived.txt"
+echo "hostname-measure: $failed failed; the derived results are in $EV/derived.txt, the reads stay under the fixture state"
 [ "$failed" -eq 0 ]
