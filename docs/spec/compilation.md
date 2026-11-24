@@ -1366,9 +1366,12 @@ check does not prove those values are the node's.
 **It runs only where the machine holds what its `Applied` release composed
 (choice §16.41).** Two conditions hold. The machine is not pending
 convergence: it has no `Desired` release, or its `Desired` digest equals its
-`Applied` digest ([persistence and API
+`Applied` digest and its `Desired` release records the `Applied` release's
+import base ([persistence and API
 §9.3](persistence-api.md#93-examples), the machine's `pendingConvergence`,
-which the API serves; the digests behind it stay unserved). And its `Applied`
+which the API serves; the digests behind it stay unserved; a release that
+thinned the base and renders the same bytes is pending until it is applied,
+persistence and API choice §17.53). And its `Applied`
 digest equals the configuration digest of its `Applied` release's own
 artifact, read from the machine's records by the publish operation and never
 served. The second condition is not implied by the first: after an adoption the `Applied`

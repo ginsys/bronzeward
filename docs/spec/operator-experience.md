@@ -192,6 +192,14 @@ the machine?" only from that diff: "Changes shown below", "No differences in the
 configurations", or "Diff withheld: the change cannot be shown". It never infers "unchanged"
 from matching release IDs, names or sources.
 
+**A refactoring that sends nothing new (specified, not yet served;
+[persistence and API](persistence-api.md) §3.2, choice §17.53).** A release that thins a
+machine's import base and renders the same bytes leaves the machine pending, because its
+recorded import base differs, so the ordinary `apply-config` plan exists. Its diff shows no
+difference, and where the plan's `equivalence` reads `byteIdentical` the plan view and
+`plan show` add: "The configuration sent is unchanged; only the recorded import base moves."
+Without that sentence an empty diff on a plan that needs approval reads as a fault.
+
 **Form only (API revision 13, [persistence and API](persistence-api.md) choice §17.48).** A
 node's text carries comments and the compilation never does, so a machine adopted from its own
 bytes read "release not applied yet" although the release held the same documents, keys and
@@ -287,7 +295,7 @@ timeline:
 | --- | --- |
 | no open drift, observed.release = applied.release | "The configuration read at `<observed.at>` is attributed to `<observed.release>`, which is the `Applied` release (by `<applied.source>`)." |
 | as above, applied.source = adoption | adds "Adopted from the node's own bytes; the release's compiled configuration may differ. The adopt plan's evidence says whether it does (release not applied yet); a later `apply-config` plan withholds its diff when it does, unless it differs in form only." If desired = applied.release, also adds "The read may match the adopted bytes or this release's compiled configuration; the API does not say which." (`internal/api/reads.go:163-164`) |
-| pendingConvergence, applied not null, no open drift | adds "Release not applied yet: the configuration of the selected release `<desired>` for this machine differs from what Bronzeward applied." |
+| pendingConvergence, applied not null, no open drift | adds "Release not applied yet: the configuration of the selected release `<desired>` for this machine, or its recorded import base, differs from what Bronzeward applied." |
 | formOnly | adds "Differs in form only (comments and encoding): the selected release `<desired>` for this machine. The release has the same documents, keys and values as the configuration Bronzeward adopted from the machine. The first apply sends the release's text, without the comments of the adopted configuration." in place of the previous row's sentence |
 | pendingConvergence, applied null | adds "Release not applied yet: the selected release `<desired>` has not been applied to this machine." |
 | desired not null, desired ≠ applied.release, not pendingConvergence, no open drift | adds "The selected release `<desired>` carries this machine's applied configuration unchanged." |
@@ -310,7 +318,8 @@ which after an adoption is the digest of the node's own bytes
 ([execution and recovery §6.3](execution-recovery.md#63-adopt)), so equal release IDs do not
 rule it out. The machine read serves it as `pendingConvergence`, without either digest
 (`internal/api/reads.go:155-171`; [§11](#11-api-gap-audit), G16). A newly selected release can
-carry the same configuration for an unchanged machine, and is then not pending; a machine with a
+carry the same configuration for an unchanged machine, and is then not pending unless it records
+another import base for it (§2.3); a machine with a
 `Desired` release and no `Applied` is. The adopt plan's `pendingConvergence` evidence shows the
 same comparison for the release it adopts (`internal/api/plans.go:315`). A freeze closes the scope gate for commitments and attempts but
 does not stop an attempt already recorded, and does not block an adoption record
