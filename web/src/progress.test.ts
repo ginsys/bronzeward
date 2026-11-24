@@ -456,7 +456,7 @@ describe("the operation progress reader (§8.6)", () => {
       });
       let ops = 0;
       // The wait after the void read asks until too (§8.6 item 2), and it answers false until the read after it.
-      const r = recorder(() => ops >= 3);
+      const r = recorder(() => opReads(s) >= 3);
       const out = await watch(reader(s, (p) => operationPath(p) && ++ops === 2, "before"), OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "ended", operation: { state: "running" }, epoch: "e2" });
       expect(r.sleeps).toEqual([250, 250, 250, 250]);
@@ -472,11 +472,11 @@ describe("the operation progress reader (§8.6)", () => {
       });
       let ops = 0;
       let waits = 0;
-      const r = recorder(() => ops >= 2 && ++waits >= 2);
+      const r = recorder(() => opReads(s) >= 2 && ++waits >= 2);
       const out = await watch(reader(s, (p) => operationPath(p) && ++ops === 2, "before"), OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "failed", res: { kind: "defect" } });
       expect(r.sleeps).toEqual([250, 250]);
-      expect(ops).toBe(2);
+      expect(opReads(s)).toBe(2);
     });
 
     // The retry phase of the operation read has its own backoff, from 1 s at each phase (the CLI's retryIn),
