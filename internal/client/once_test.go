@@ -107,7 +107,7 @@ func TestOnceWriteIsNotRepeatedAfterARenewal(t *testing.T) {
 			t.Fatal(err)
 		}
 		c.Context.Server, c.Context.Credential = srv.URL, "oidc"
-		c.Context.OIDC = &OIDC{Issuer: "https://idp.example.invalid", TokenFile: tokens}
+		c.Context.OIDC = &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", TokenFile: tokens}
 		c.signIn = &signIn{store: openStore(c.Context, true), tokens: &Tokens{AccessToken: first, RefreshToken: "BWSYNTH-rt"}}
 		c.token, c.service = first, ""
 		w := clusterWrite()

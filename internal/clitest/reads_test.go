@@ -188,7 +188,7 @@ func TestReads(t *testing.T) {
 	var cfg client.Config
 	b, _ := os.ReadFile(filepath.Join(f.home, "bronzeward", "config.yaml"))
 	if yaml.Unmarshal(b, &cfg); cfg.Find("signin") == nil || cfg.Find("signin").OIDC == nil ||
-		!reflect.DeepEqual(*cfg.Find("signin").OIDC, client.OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli", Audience: "bronzeward"}) {
+		!reflect.DeepEqual(*cfg.Find("signin").OIDC, client.OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli", Audience: "bronzeward", Scopes: []string{"openid", "offline_access"}}) {
 		t.Errorf("--from did not keep the file's issuer, audience and CLI client ID:\n%s", b)
 	}
 	// The optional scopes, as the test identity provider's file names its project audience scope,
@@ -241,7 +241,7 @@ func TestReads(t *testing.T) {
 	f.want(f.ctl(nil, "", "context", "add", "hashidp", "--server", in.URL, "--issuer", "https://idp.example.invalid/#", "--client-id", "BWSYNTH-cli"), 2, "oidc.issuer", "fragment")
 	f.want(f.ctl(nil, "", "context", "add", "hashserver", "--server", in.URL+"/#", "--automation-token-file", f.tokenFile), 2, "server", "fragment")
 	f.want(f.ctl(nil, "", "context", "add", "byhand", "--server", in.URL, "--certificate-authority", in.ca,
-		"--issuer", "https://idp.example.invalid", "--client-id", "BWSYNTH-cli", "--scopes", "openid,groups"), 0, "credential oidc")
+		"--issuer", "https://idp.example.invalid", "--client-id", "BWSYNTH-cli", "--audience", "bronzeward", "--scopes", "openid,groups"), 0, "credential oidc")
 	in.set(nil, nil)
 	f.want(f.ctl(nil, "", "context", "add", "nofile", "--from", in.URL, "--certificate-authority", in.ca), 1,
 		"bronzeward-client.json answered 401 Unauthorized, not the client configuration file")

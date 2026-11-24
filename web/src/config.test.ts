@@ -48,3 +48,16 @@ test("a missing file, a non-JSON body and a transport failure, before or during 
   const cut = async () => new Response(new ReadableStream({ pull: (ctl) => ctl.error(new TypeError("network error")) }));
   expect((await loadClientConfig(cut as unknown as typeof fetch)).kind).toBe("transport");
 });
+
+test("ingestWaitSeconds: the optional in-progress wait bound, in seconds (§8.4 item 2)", async () => {
+  expect(await loadClientConfig(answer({ ...valid, ingestWaitSeconds: 600 }))).toEqual({ kind: "ok", config: { ...valid, scopes: [], ingestWaitSeconds: 600 } });
+  const absent = await loadClientConfig(answer(valid));
+  expect(absent.kind === "ok" && "ingestWaitSeconds" in absent.config).toBe(false);
+});
+
+test.each([0, -5, "600", null, Number.NaN, [600]])("ingestWaitSeconds %j is a configuration error", async (ingestWaitSeconds) => {
+  expect(await loadClientConfig(answer({ ...valid, ingestWaitSeconds }))).toEqual({
+    kind: "invalid",
+    reason: `${CLIENT_CONFIG_PATH}: ingestWaitSeconds is not a positive number of seconds`,
+  });
+});

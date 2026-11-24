@@ -383,7 +383,7 @@ func TestLogin(t *testing.T) {
 	t.Run("hand-edited", func(t *testing.T) {
 		f.edit(func(c *client.Config) {
 			c.Contexts = append(c.Contexts,
-				client.Context{Name: "a/b", Server: f.base, Credential: "oidc", OIDC: &client.OIDC{Issuer: f.iss.URL, ClientID: "BWSYNTH-cli"}},
+				client.Context{Name: "a/b", Server: f.base, Credential: "oidc", OIDC: &client.OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: f.iss.URL, ClientID: "BWSYNTH-cli"}},
 				client.Context{Name: "bare", Server: f.base, Credential: "oidc"})
 		})
 		defer f.edit(func(c *client.Config) {

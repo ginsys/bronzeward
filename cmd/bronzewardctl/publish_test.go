@@ -80,7 +80,7 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Bronzeward-Epoch", draftEpoch)
 		fmt.Fprint(w, `{"id":"drf_BWSYNTH","title":"BWSYNTH","state":"open","revision":1,"entries":[]}`)
 	case draftEpoch != "" && path == "/server":
-		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
+		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 	case r.Method == http.MethodPost && path == "/drafts/drf_BWSYNTH/publications":
 		if r.Header.Get("If-Match") != f.etag() {
 			f.refuse(w)
@@ -132,7 +132,7 @@ func (f *publishFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			w.Header().Set("Bronzeward-Epoch", goneEpoch)
 		}
-		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":2,"startMode":"normal"}`)
+		fmt.Fprint(w, `{"version":"BWSYNTH","apiRevision":10,"startMode":"normal"}`)
 	case path == "/machines/mch_b" && goneEpoch != "":
 		f.mu.Lock()
 		f.goneMoved = true // the epoch moved: GET /server shows it from here on

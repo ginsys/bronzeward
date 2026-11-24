@@ -54,7 +54,7 @@ func (f *firstKeyFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Unlock()
 	switch {
 	case path == "/server":
-		fmt.Fprint(w, `{"version":"FK","apiRevision":2,"startMode":"normal"}`)
+		fmt.Fprint(w, `{"version":"FK","apiRevision":10,"startMode":"normal"}`)
 	case path == "/identity":
 		fmt.Fprint(w, `{"kind":"human","principal":"h_FK","roles":["author"]}`)
 	case path == "/recovery":

@@ -56,7 +56,7 @@ func TestRemoteTextIsNotShown(t *testing.T) {
 			}
 			return m
 		})
-		return &Context{Name: "lab", OIDC: &OIDC{Issuer: iss, ClientID: "BWSYNTH-cli"}}
+		return &Context{Name: "lab", OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: iss, ClientID: "BWSYNTH-cli"}}
 	}
 	disc := func(f func(iss string) string) map[string]func(string) string {
 		return map[string]func(string) string{"/.well-known/openid-configuration": f}
@@ -142,7 +142,7 @@ func TestRemoteTextIsNotShown(t *testing.T) {
 	// x509 quotes a certificate's URI it cannot parse; tls puts that error in the handshake's.
 	t.Run("certificate x509 cannot parse", func(t *testing.T) {
 		bad := uriServer(t)
-		x := &Context{Name: "lab", OIDC: &OIDC{Issuer: bad, ClientID: "BWSYNTH-cli"}}
+		x := &Context{Name: "lab", OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: bad, ClientID: "BWSYNTH-cli"}}
 		_, ferr := FetchClientConfig(&Context{Name: "lab", Server: bad, Credential: "automation"}, bad, nil)
 		proxy, _ := url.Parse(bad)
 		hc, err := newHTTPClient(&Context{Name: "lab", Server: "https://BWSYNTH.example.invalid", Credential: "automation"}, nil,

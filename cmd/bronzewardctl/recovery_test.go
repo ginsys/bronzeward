@@ -88,7 +88,7 @@ func setEpochHeader(t *testing.T, epoch string) {
 // recoveryRevision is the API revision GET /server shows; a test sets them with setServerFacts.
 var (
 	recoveryEpochByPath map[string]string
-	recoveryRevision    = 3
+	recoveryRevision    = 10
 	// recoveryRevisionMoved, when not 0, is the revision GET /server shows once the epoch moved.
 	recoveryRevisionMoved = 0
 	// recoveryRefreshEpoch, when not empty, is the epoch of the first GET /server read after the epoch
@@ -98,7 +98,7 @@ var (
 
 func setServerFacts(t *testing.T, revision int, epochByPath map[string]string) {
 	t.Cleanup(func() {
-		recoveryEpochByPath, recoveryRevision, recoveryRevisionMoved, recoveryRefreshEpoch = nil, 3, 0, ""
+		recoveryEpochByPath, recoveryRevision, recoveryRevisionMoved, recoveryRefreshEpoch = nil, 10, 0, ""
 	})
 	recoveryEpochByPath, recoveryRevision = epochByPath, revision
 }
@@ -451,7 +451,7 @@ func TestRecoveryStatusRefusesAStaleSnapshot(t *testing.T) {
 		"GET /api/v1/machines/mch_c/timeline": `{"items":[{"kind":"scope-state","revision":9,"entry":{"to":"blocked","cause":"restoration-mark","missing":["provider"]}}]}`,
 	}
 	t.Run("the epoch moves during the timeline read", func(t *testing.T) {
-		setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_c/timeline": "ep_BWSYNTH-2"})
+		setServerFacts(t, 10, map[string]string{"/api/v1/machines/mch_c/timeline": "ep_BWSYNTH-2"})
 		recoveryServer(t, answers, "")
 		var out, errb bytes.Buffer
 		rc := run([]string{"recovery", "status"}, &out, &errb)
@@ -485,7 +485,7 @@ func TestMachineShowRefusesAMixedSnapshot(t *testing.T) {
 		"the second observation page": "/api/v1/machines/mch_a/observations?cursor=p2",
 	} {
 		t.Run("the epoch moves with "+name, func(t *testing.T) {
-			setServerFacts(t, 3, map[string]string{moves: "ep_BWSYNTH-2"})
+			setServerFacts(t, 10, map[string]string{moves: "ep_BWSYNTH-2"})
 			recoveryServer(t, answers, "")
 			var out, errb bytes.Buffer
 			rc := run([]string{"machine", "show", "mch_a"}, &out, &errb)
@@ -496,7 +496,7 @@ func TestMachineShowRefusesAMixedSnapshot(t *testing.T) {
 		})
 	}
 	t.Run("the epoch moves with the machine read", func(t *testing.T) {
-		setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_a": "ep_BWSYNTH-2"})
+		setServerFacts(t, 10, map[string]string{"/api/v1/machines/mch_a": "ep_BWSYNTH-2"})
 		recoveryServer(t, answers, "")
 		var out, errb bytes.Buffer
 		if rc := run([]string{"machine", "show", "mch_a"}, &out, &errb); rc != 0 || !strings.Contains(out.String(), "mch_a") {
@@ -505,7 +505,7 @@ func TestMachineShowRefusesAMixedSnapshot(t *testing.T) {
 	})
 	t.Run("the epoch moves again before the server refresh", func(t *testing.T) {
 		// The machine answer shows epoch 2; the refresh of GET /server, and then the observations, show epoch 3.
-		setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_a": "ep_BWSYNTH-2"})
+		setServerFacts(t, 10, map[string]string{"/api/v1/machines/mch_a": "ep_BWSYNTH-2"})
 		recoveryRefreshEpoch = "ep_BWSYNTH-3"
 		recoveryServer(t, answers, "")
 		var out, errb bytes.Buffer
@@ -517,7 +517,7 @@ func TestMachineShowRefusesAMixedSnapshot(t *testing.T) {
 	t.Run("the epoch moves with an observation page and the refresh moves it back", func(t *testing.T) {
 		// The observations answer epoch 2 and the refresh of GET /server answers epoch 1 again: the
 		// epoch of the last answer equals the first, and only the count of moves tells (§8.5, §8.6 item 3).
-		setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_a/observations": "ep_BWSYNTH-2"})
+		setServerFacts(t, 10, map[string]string{"/api/v1/machines/mch_a/observations": "ep_BWSYNTH-2"})
 		recoveryRefreshEpoch = "ep_BWSYNTH-1"
 		recoveryServer(t, answers, "")
 		var out, errb bytes.Buffer
@@ -535,7 +535,7 @@ func TestMachineShowRefusesAMixedSnapshot(t *testing.T) {
 		}
 	})
 	t.Run("-o json reads the machine alone", func(t *testing.T) {
-		setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_a/observations": "ep_BWSYNTH-2"})
+		setServerFacts(t, 10, map[string]string{"/api/v1/machines/mch_a/observations": "ep_BWSYNTH-2"})
 		seen := recoveryServer(t, answers, "")
 		var out, errb bytes.Buffer
 		if rc := run([]string{"machine", "show", "mch_a", "-o", "json"}, &out, &errb); rc != 0 || !strings.Contains(out.String(), `"id":"mch_a"`) {
@@ -561,7 +561,7 @@ func TestStatusRefusesAStaleSnapshot(t *testing.T) {
 	for _, form := range [][]string{{"status"}, {"status", "-o", "json"}} {
 		for _, moves := range []string{"/api/v1/recovery", "/api/v1/machines", "/api/v1/operations"} {
 			t.Run(strings.Join(form, " ")+" "+moves, func(t *testing.T) {
-				setServerFacts(t, 3, map[string]string{moves: "ep_BWSYNTH-2"})
+				setServerFacts(t, 10, map[string]string{moves: "ep_BWSYNTH-2"})
 				recoveryRevisionMoved = 2
 				recoveryServer(t, answers, "")
 				var out, errb bytes.Buffer
@@ -574,7 +574,7 @@ func TestStatusRefusesAStaleSnapshot(t *testing.T) {
 			t.Run(strings.Join(form, " ")+" "+moves+" moves and the refresh moves it back", func(t *testing.T) {
 				// A later read answers epoch 2 and the refresh of GET /server answers epoch 1 again: the
 				// epoch of the last answer equals the first, and only the count of moves tells (§8.5, §8.6 item 3).
-				setServerFacts(t, 3, map[string]string{moves: "ep_BWSYNTH-2"})
+				setServerFacts(t, 10, map[string]string{moves: "ep_BWSYNTH-2"})
 				recoveryRefreshEpoch = "ep_BWSYNTH-1"
 				recoveryServer(t, answers, "")
 				var out, errb bytes.Buffer
@@ -622,7 +622,7 @@ func TestRecoveryStatusNamesTheRevisionForMissingKeys(t *testing.T) {
 // GET /server again, and that read shows API revision 2. The next scope then gets no order on its
 // timeline (section 7 item 1), though the first read showed revision 3.
 func TestRecoveryStatusGatesOnTheRefreshedRevision(t *testing.T) {
-	setServerFacts(t, 3, map[string]string{"/api/v1/operations": "ep_BWSYNTH-2"})
+	setServerFacts(t, 10, map[string]string{"/api/v1/operations": "ep_BWSYNTH-2"})
 	recoveryRevisionMoved = 2
 	seen := recoveryServer(t, map[string]string{
 		"GET /api/v1/recovery":   `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_b","state":"unresolved"},{"machine":"mch_c","state":"blocked"}]}`,
@@ -644,7 +644,7 @@ func TestRecoveryStatusGatesOnTheRefreshedRevision(t *testing.T) {
 // TestRecoveryStatusGatesEachTimelinePage: the first timeline page shows a new epoch, and the re-read
 // of GET /server shows API revision 2. The client then sends no second page with an order.
 func TestRecoveryStatusGatesEachTimelinePage(t *testing.T) {
-	setServerFacts(t, 3, map[string]string{"/api/v1/machines/mch_c/timeline": "ep_BWSYNTH-2"})
+	setServerFacts(t, 10, map[string]string{"/api/v1/machines/mch_c/timeline": "ep_BWSYNTH-2"})
 	recoveryRevisionMoved = 2
 	seen := recoveryServer(t, map[string]string{
 		"GET /api/v1/recovery":                `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
@@ -668,7 +668,7 @@ func TestRecoveryStatusGatesEachTimelinePage(t *testing.T) {
 // first page again with an order.
 func TestRecoveryStatusGatesTheCursorRestart(t *testing.T) {
 	const p = "/api/v1/machines/mch_c/timeline"
-	setServerFacts(t, 3, map[string]string{p + "?cursor=cur_BWSYNTH": "ep_BWSYNTH-2"})
+	setServerFacts(t, 10, map[string]string{p + "?cursor=cur_BWSYNTH": "ep_BWSYNTH-2"})
 	recoveryRevisionMoved = 2
 	seen := recoveryServer(t, map[string]string{
 		"GET /api/v1/recovery":             `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
@@ -913,7 +913,7 @@ func TestMachineAddNamesTheClusterFromTheSameEpoch(t *testing.T) {
 		{"the epoch holds", nil, "Machine mch_new recorded in cluster cl_c (lab-a). Endpoint 10.0.0.5:50000."},
 		{"the epoch moves before the cluster read", map[string]string{"/api/v1/clusters/cl_c": "ep_BWSYNTH-2"}, "Machine mch_new recorded in cluster cl_c. Endpoint 10.0.0.5:50000."},
 	} {
-		setServerFacts(t, 3, c.moved)
+		setServerFacts(t, 10, c.moved)
 		recoveryServer(t, map[string]string{
 			"GET /api/v1/recovery":      `{"epoch":"ep_BWSYNTH-1","recoveryMode":false}`,
 			"GET /api/v1/clusters/cl_c": `{"id":"cl_c","name":"lab-a"}`,

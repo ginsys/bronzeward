@@ -525,7 +525,7 @@ func TestWatchRenewal(t *testing.T) {
 					t.Fatal(err)
 				}
 				cl.Context.Credential = "oidc"
-				cl.Context.OIDC = &OIDC{Issuer: "https://idp.example.invalid", TokenFile: tokens}
+				cl.Context.OIDC = &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", TokenFile: tokens}
 				cl.signIn = &signIn{store: openStore(cl.Context, true), tokens: &Tokens{AccessToken: c.token, RefreshToken: "BWSYNTH-rt"}}
 				cl.token = c.token
 			})

@@ -195,7 +195,7 @@ func (f *apiFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case path == "/server":
-		fmt.Fprint(w, `{"version":"OB","apiRevision":2,"startMode":"normal"}`)
+		fmt.Fprint(w, `{"version":"OB","apiRevision":10,"startMode":"normal"}`)
 	case path == "/identity":
 		fmt.Fprint(w, f.roles)
 	case path == "/recovery": // the read a repeat of a write is confirmed by

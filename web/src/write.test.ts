@@ -481,6 +481,16 @@ describe("a fragment write's in-progress 409 (§8.4 item 2, AMB-02)", () => {
     expect(waits.slice(1).reduce((a, b) => a + b, 0)).toBe(300_000);
   });
 
+  test("a configured bound replaces the default, and a longer served lease still raises it (§8.4 item 2)", async () => {
+    for (const [configured, lease, bound] of [[60, 30, 60], [60, 300, 300], [600, 30, 600]]) {
+      const { writes, waits } = page([new TypeError("Failed to fetch"), inProgress(), server(lease), ...Array.from({ length: 200 }, () => inProgress())]);
+      writes.ingestWait = configured * 1000;
+      const o = await writes.submit(fragment());
+      expect(o).toMatchObject({ kind: "unknown", why: `the first request with this key was still ingesting (ingestion ing_1) after ${bound} s` });
+      expect(waits.slice(1).reduce((a, b) => a + b, 0)).toBe(bound * 1000);
+    }
+  });
+
   test("ginsys/bronzeward#517 H12: the bound's /server read ends the sign-in on a final 401 and stops at a recovery start", async () => {
     let p = page([new TypeError("Failed to fetch"), inProgress(), problem(401, "unauthenticated"), ...Array.from({ length: 5 }, () => inProgress())]);
     p.writes.onEnded = vi.fn();

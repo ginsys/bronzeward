@@ -108,7 +108,7 @@ func TestSecurityUnavailable(t *testing.T) {
 		t.Errorf("a missing tool: %q, want it named", why)
 	}
 	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
-		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
 	if s := openStore(&x, false); s.none == "" || !strings.Contains(s.kept(), "this process's memory only") {
 		t.Errorf("with no tool the sign-in is kept in %q, want memory only", s.kept())
 	}
@@ -386,7 +386,7 @@ func TestRefusedNameAndUnreadableEntryDoNotBlockRemoval(t *testing.T) {
 			return nil, nil
 		})
 		x := Context{Name: c.name, Server: "https://bw.example.invalid", Credential: "oidc",
-			OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+			OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
 		if _, err := ClearStored(&x, true); err != nil {
 			t.Errorf("context remove of %q: %v, want it to go on", c.name, err)
 		}
@@ -426,7 +426,7 @@ func TestMatchedClearKeepsWhatItCannotAttribute(t *testing.T) {
 		return nil, nil
 	})
 	x := Context{Name: "unreadable", Server: "https://bw.example.invalid", Credential: "oidc",
-		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
 	s := openStore(&x, true)
 	if _, err := s.clear(func(*Tokens) bool { return true }); !errors.Is(err, ErrOtherSignIn) || deleted {
 		t.Errorf("a matched clear of an entry it cannot read: %v, removed %v; want ErrOtherSignIn and the entry kept", err, deleted)
@@ -452,7 +452,7 @@ func TestMatchedClearOfARefusedNameIsKeptToo(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	calls := fakeSecurity(t, unlocked)
 	x := Context{Name: "it's", Server: "https://bw.example.invalid", Credential: "oidc",
-		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
 	c := &Client{Context: &x, Notices: io.Discard, token: "BWSYNTH-at", signIn: &signIn{store: openStore(&x, true)}}
 	p := &Problem{Status: 403, Doc: map[string]any{"type": problemPrefix + "identity-revoked"}}
 	c.signedIn(p)
@@ -635,7 +635,7 @@ func TestSignInRefusedWhenKeychainFailsAfterAnswering(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", home)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	x := Context{Name: "store", Server: "https://bw.example.invalid", Credential: "oidc",
-		OIDC: &OIDC{Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
+		OIDC: &OIDC{Scopes: []string{"openid", "offline_access"}, Audience: "BWSYNTH-aud", Issuer: "https://idp.example.invalid", ClientID: "BWSYNTH-cli"}}
 	var prompts strings.Builder
 	tokens, _, err := SignIn(&x, false, &prompts)
 	if err == nil || !strings.Contains(err.Error(), "the system credential store is locked") {

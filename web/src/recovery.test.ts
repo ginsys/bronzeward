@@ -32,6 +32,12 @@ describe("client contracts §8.5 start mode", () => {
     expect(startModeOf(refused(problem("conflict")))).toBeUndefined();
     expect(startModeOf({ kind: "transport" })).toBeUndefined();
   });
+
+  test("a start mode the page does not know is unknown, never the mode it showed before (§7 item 2)", () => {
+    expect(startModeOf({ kind: "ok", data: { startMode: "paused" } })).toBe("unknown");
+    expect(startModeOf({ kind: "ok", data: { startMode: "" } })).toBe("unknown");
+    expect(startModeOf({ kind: "ok", data: {} })).toBeUndefined();
+  });
 });
 
 describe("the recovery banner", () => {

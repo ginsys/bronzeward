@@ -458,7 +458,7 @@ func TestRemoteTextInOwnErrors(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/v1/server":
-			fmt.Fprint(w, `{"version":"v","apiRevision":2,"startMode":"normal"}`)
+			fmt.Fprint(w, `{"version":"v","apiRevision":10,"startMode":"normal"}`)
 		case "/api/v1/fragments":
 			fmt.Fprint(w, `{"items":[]}`)
 		default:
