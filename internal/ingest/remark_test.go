@@ -23,7 +23,7 @@ func stagedFrom(t *testing.T, req Request) Staged {
 	for _, c := range calls {
 		gens[c.name] = "gen/c1/claim/" + c.name
 	}
-	return Staged{Sanitized: s, Generations: gens,
+	return Staged{Sanitized: s, Generations: gens, Filled: c.Filled(),
 		Baseline: Baseline{Ciphertext: "vault:v1:baseline", DigestKey: "digest/1"}}
 }
 
