@@ -1217,13 +1217,13 @@ change each:
 4. records the new epoch. A context's first epoch is recorded without a notice
    (`internal/client/client.go:341-345`, `web/src/request.ts:441-449`).
 
-**Proposed, not built by every client.** Item 1 asks the web client to discard every cached page.
-It keeps one: the page holding unsaved text stays shown, and sends nothing, while the new epoch's
-server and identity reads are pending, and through a failure a later read can mend (no answer, a
-`503` after its retries); it ends once both reads answer for an accepted server, and on a refusal, a
-`403` or an incompatible server (`web/src/shell.test.ts:248`, `web/src/shell.test.ts:273`). Those
-tests pin it as intended (H10 of [#517](https://github.com/ginsys/bronzeward/issues/517)), so this
-text and the code disagree until the owner decides which stands.
+**Current** for the web client, with one exception to item 1's discard of every cached page: the
+page holding unsaved text stays shown, and sends nothing, while the new epoch's server and identity
+reads are pending, and through a failure a later read can mend (no answer, a `503` after its
+retries); it ends once both reads answer for an accepted server, and on a refusal, a `403` or an
+incompatible server (`web/src/shell.test.ts:248`, `web/src/shell.test.ts:273`). The retention
+bullet of [§8.6](#86-event-resumption) item 6 states the same rule, and those tests pin it as
+intended (H10 of [#517](https://github.com/ginsys/bronzeward/issues/517)).
 
 A command that shows one snapshot built from several reads (`status`, `recovery status`, the
 table of `machine show`) shows nothing when an epoch change falls between the first and the last
