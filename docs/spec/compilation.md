@@ -1231,10 +1231,10 @@ and neither was the node's hostname after any row.
 
 | Row | What was applied | Result |
 |---|---|---|
-| default | the named worker's first release: the document `auto: off` plus its name, the node having an automatic hostname | completed; node name unchanged; uptime 15 s later than before, so no restart |
-| explicit | the worker imported again from the node, which now holds `auto: off` plus its name (the commonest case): the document removed at import and filled again | completed; node name unchanged; no restart (12 s) |
-| rename | the worker renamed to a name with dots, imported again from the node, published and applied | the release records the source `configuration`, not `machine-name`: the node's old document is not equal to the new name, so it stays, and decision 2 lets an explicit hostname win; node name unchanged; no restart (9 s) |
-| rename back | the worker renamed back to its first name, imported again, applied | source `machine-name`; node name unchanged; no restart (8 s) |
+| default | the named worker's first release: the document `auto: off` plus its name, the node having an automatic hostname | completed; node name unchanged; uptime grew by 15 s, so no restart |
+| explicit | the worker imported again from the node, which now holds `auto: off` plus its name (the commonest case): the document removed at import and filled again | completed; node name unchanged; uptime grew by 12 s, so no restart |
+| rename | the worker renamed to a name with dots, imported again from the node, published and applied | the release records the source `configuration`, not `machine-name`: the node's old document is not equal to the new name, so it stays, and decision 2 lets an explicit hostname win; node name unchanged; uptime grew by 9 s, so no restart |
+| rename back | the worker renamed back to its first name, imported again, applied | source `machine-name`; node name unchanged; uptime grew by 8 s, so no restart |
 
 Every row sent the node a hostname equal to the one it already ran, so an
 unchanged node name is what the rows predict. What they show is that applying
