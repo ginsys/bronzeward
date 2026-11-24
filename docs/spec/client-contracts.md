@@ -2440,7 +2440,7 @@ the paragraph after item 7. Sources follow each item.
    an epoch change or another sign-in sets it aside, when the sign-in it was sent under ends
    (sign-out, refusal or revocation, also after the page disconnected the client), and when the
    page is hidden. A garbage-collected runtime cannot guarantee erasure; this is a stated limit,
-   not a guarantee. (Built, web: `web/src/write.ts:188-193`, `:206-214`, `:278`, `:297`, `:302-319`,
+   not a guarantee. (Built, web: `web/src/write.ts:188-193`, `:206-214`, `:282`, `:301`, `:304-324`,
    `web/src/app.tsx:81-93`. CLI: the review and the import base body are cleared after decoding,
    `cmd/bronzewardctl/review.go:71` and `cmd/bronzewardctl/importbase.go:69`; other request bodies
    live until the process ends, so only that part of the item is read as built; the rest is
