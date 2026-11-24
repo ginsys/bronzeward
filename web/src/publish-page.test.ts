@@ -29,17 +29,23 @@ describe("a publication refused 412", () => {
     box.remove();
   });
 
-  test("shows the draft's revision and state without a press, keeps the refusal and no ETag, and Publish then sends nothing", async () => {
+  // The page over a fake draft: `draft` is what the server holds now, `held` takes the next draft read aside until
+  // it is released, and every Publish press is answered 412.
+  const mount = async () => {
     forgetETag(DRF);
-    let revision = 3;
-    let etag = '"1"';
+    const draft = { revision: 3, etag: '"1"' };
+    const held: { release?: () => void; next: boolean } = { next: false };
     let draftReads = 0;
     const reads = {
       client: {
         read: vi.fn(async (path: string) => {
           if (path !== `/drafts/${DRF}`) return { kind: "refused", status: 404, problem: null };
           draftReads++;
-          return { kind: "ok", data: { id: DRF, title: "Add the office labels", state: "open", revision, cluster: "cl_a", entries: [] }, etag };
+          const answer = { kind: "ok", data: { id: DRF, title: "Add the office labels", state: "open", revision: draft.revision, cluster: "cl_a", entries: [] }, etag: draft.etag };
+          if (!held.next) return answer;
+          held.next = false;
+          await new Promise<void>((r) => (held.release = r));
+          return answer;
         }),
       },
       settle: (res: unknown, set: (r: unknown) => void, live: () => boolean) => (live() && set(res), true),
@@ -61,23 +67,53 @@ describe("a publication refused 412", () => {
       root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(PublishDraft, { query: `draft=${DRF}` }))))),
     );
     await settle();
+    return { draft, held, sent, settle, click, reads: () => draftReads };
+  };
+
+  test("shows the draft's revision and state without a press, keeps the refusal and no ETag, and Publish then sends nothing", async () => {
+    const p = await mount();
     expect(keptETag(DRF, "e0")).toBe('"1"');
     // Another author saved the draft; the first press meets the refusal.
-    revision = 5;
-    etag = '"2"';
-    const before = draftReads;
-    await click("Publish");
-    await settle();
-    expect(sent).toEqual(['"1"']);
-    expect(draftReads).toBe(before + 1);
+    p.draft.revision = 5;
+    p.draft.etag = '"2"';
+    const before = p.reads();
+    await p.click("Publish");
+    await p.settle();
+    expect(p.sent).toEqual(['"1"']);
+    expect(p.reads()).toBe(before + 1);
     const text = box.textContent!;
     expect(text).toContain("Not published: someone changed this draft since this page read it.");
     expect(text).toContain("The draft is now at revision 5, state open.");
     // The re-read kept no ETag: Publish sends nothing, and the page says to read the draft again.
     expect(keptETag(DRF, "e0")).toBeUndefined();
-    await click("Publish");
-    await settle();
-    expect(sent).toEqual(['"1"']);
+    await p.click("Publish");
+    await p.settle();
+    expect(p.sent).toEqual(['"1"']);
     expect(box.querySelector('[data-testid="no-etag"]')!.textContent).toContain(NO_ETAG);
+  });
+
+  test("a read still pending when a newer refusal is answered cannot overwrite it", async () => {
+    const p = await mount();
+    // The first refusal's read is slow.
+    p.draft.revision = 5;
+    p.draft.etag = '"2"';
+    p.held.next = true;
+    await p.click("Publish");
+    await p.settle();
+    expect(box.textContent).not.toContain("The draft is now at revision");
+    // The person reads the draft again, then publishes again: the second refusal's read answers at once.
+    p.draft.revision = 7;
+    p.draft.etag = '"3"';
+    await p.click("Read the draft again");
+    await p.settle();
+    await p.click("Publish");
+    await p.settle();
+    expect(p.sent).toEqual(['"1"', '"3"']);
+    expect(box.textContent).toContain("The draft is now at revision 7, state open.");
+    // The slow read answers last, with the older revision.
+    await act(async () => p.held.release!());
+    await p.settle();
+    expect(box.textContent).toContain("The draft is now at revision 7, state open.");
+    expect(box.textContent).not.toContain("revision 5");
   });
 });

@@ -174,8 +174,12 @@ function Publish({ id }: { id: string }) {
   // Publish is disabled once the write is accepted (publishLocked), so focus falls to the page: it goes to the answer (WCAG 2.4.3).
   const answer = useRef<HTMLDivElement>(null);
   useFocusOn(o, answer);
+  // The newest refusal's read is the only one shown: a read still pending when the person reads the draft again or
+  // publishes again answers a refusal that is no longer the page's, so a later start invalidates it.
+  const newest = useRef(0);
   const readAgain = () => {
     keep.current = true;
+    newest.current++;
     setNote(undefined);
     setNow(undefined);
     reread((x) => x + 1);
@@ -184,8 +188,12 @@ function Publish({ id }: { id: string }) {
   // (`keep` stays false), so it keeps no ETag and Publish sends nothing until the person reads the draft again.
   const [now, setNow] = useState<{ revision: number; state: string }>();
   const read = useSettled();
-  const showNow = () => void read<Draft>(`/drafts/${enc(id)}`).then((r) => r?.kind === "ok" && setNow({ revision: r.data.revision, state: r.data.state }));
+  const showNow = () => {
+    const mine = ++newest.current;
+    void read<Draft>(`/drafts/${enc(id)}`).then((r) => mine === newest.current && r?.kind === "ok" && setNow({ revision: r.data.revision, state: r.data.state }));
+  };
   const publish = () => {
+    newest.current++;
     const ifMatch = keptETag(id, epoch);
     setNote(ifMatch === undefined ? NO_ETAG : undefined);
     setNow(undefined);
