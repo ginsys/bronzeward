@@ -22,16 +22,37 @@ function json(body: unknown, epoch = "e1", status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers });
 }
 
+// The client reads a 5xx up to this many times before it reports the read unavailable (request.ts).
+const TRIES = 5;
+// What one operation fetch answers in `opFetches`: "503" is a dependency-unavailable problem, "502" an
+// answer that is not a Bronzeward problem, "superseded" a 503 epoch-superseded, "500" an internal-error
+// problem, and a state `x@e2` an ok read of that state under e2.
+type Fetch = "503" | "502" | "superseded" | "500" | string;
+const scripted = (f: Fetch, epoch = "e1"): Response => {
+  const problem = (code: string, status: number) => json({ type: `urn:bronzeward:problem:${code}`, title: code, status }, epoch, status);
+  if (f === "503") return problem("dependency-unavailable", 503);
+  if (f === "502") return new Response("bad gateway", { status: 502, headers: { "Content-Type": "text/html" } });
+  if (f === "superseded") return problem("epoch-superseded", 503);
+  if (f === "500") return problem("internal-error", 500);
+  const [state, e] = f.split("@");
+  return json({ id: OP, kind: "ingest", state }, e ?? epoch);
+};
+// `reads` watch reads of the operation that stay unavailable: the client reads each TRIES times.
+const down = (kind: "503" | "502" | "superseded" | "500", reads = 1): Fetch[] => Array<Fetch>(TRIES * reads).fill(kind);
+const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+
 // A fake server. Each stream request takes the next of `streams` (an Error is a transport
 // failure); each operation read the next of `states`, the last repeated; each JSON events read
 // answers `pages`, or the next of `pageRefusals`. A state `x@e2` is read under the epoch e2, and
 // the pages are read under `pagesEpoch`, and a read of `/probe` is answered under it too. Each operation
 // read takes `readTime` ms of the `clock`, and each stream request `streamTime` ms. The pages are
-// answered when `pagesGate` is open.
+// answered when `pagesGate` is open. `opFetches` answers the first operation fetches one by one (each
+// watch read of an unavailable operation is TRIES fetches), and `pagesDown` the first events fetches
+// with a 503.
 function server(o: {
   streams: (Stream | Error)[]; states: string[]; pages?: OpEvent[]; pageRefusals?: number[]; epoch?: string;
   pagesEpoch?: string; probeEpoch?: string; clock?: { t: number }; readTime?: number; streamTime?: number; pagesGate?: Promise<void>;
-  opUnavailable?: boolean; pagesUnavailable?: boolean;
+  pagesUnavailable?: boolean; opFetches?: Fetch[]; pagesDown?: number;
 }) {
   const opened: Record<string, string>[] = [];
   const urls: string[] = [];
@@ -63,13 +84,18 @@ function server(o: {
     }
     if (u.startsWith(EVENTS)) {
       await o.pagesGate;
+      if (o.pagesDown !== undefined && o.pagesDown > 0) {
+        o.pagesDown--;
+        return json(DEPENDENCY_UNAVAILABLE, o.epoch, 503);
+      }
       if (o.pagesUnavailable === true) return json(DEPENDENCY_UNAVAILABLE, o.epoch, 503);
       const refusal = o.pageRefusals?.shift();
       if (refusal !== undefined) return json({ type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: refusal }, o.epoch, refusal);
       return json({ items: (o.pages ?? []).map((e) => ({ ...e, at: "2026-11-01T06:00:00Z" })) }, o.pagesEpoch ?? o.epoch);
     }
     if (u === `${API_BASE}/operations/${OP}`) {
-      if (o.opUnavailable === true) return json(DEPENDENCY_UNAVAILABLE, o.epoch, 503);
+      const next = o.opFetches?.shift();
+      if (next !== undefined) return scripted(next, o.epoch);
       const [state, epoch] = (o.states.length > 1 ? o.states.shift()! : o.states[0]!).split("@");
       if (o.clock !== undefined) o.clock.t += o.readTime ?? 0;
       return json({ id: OP, kind: "ingest", state }, epoch ?? o.epoch);
@@ -124,6 +150,7 @@ function reader(s: ReturnType<typeof server>, where: (path: string) => boolean, 
     open: (...a: Parameters<typeof s.client.open>) => s.client.open(...a),
     get currentEpoch() { return s.client.currentEpoch; },
     get writesEnded() { return s.client.writesEnded; },
+    get moves() { return s.client.moves; },
   };
 }
 const eventsPath = (path: string) => path.endsWith("/events");
@@ -269,22 +296,119 @@ describe("the operation progress reader (§8.6)", () => {
     expect(out).toMatchObject({ kind: "failed", res: { kind: "refused", status: 403 } });
   });
 
-  // A read that stays unavailable once the client's tries ran out is reported, as the CLI's watch
-  // does, and never read again for ever. The fake pace ends a watch that does repeat, so that a
-  // regression fails the assertion and does not hang the run.
-  const bounded = (r: ReturnType<typeof recorder>): Pace => ({
+  // The fake pace ends a watch that reads for ever after `n` waits, so that a regression fails the
+  // assertion and does not hang the run.
+  const bounded = (r: ReturnType<typeof recorder>, n = 3): Pace => ({
     ...r.pace,
     sleep: async (ms) => {
       r.sleeps.push(ms);
-      if (r.sleeps.length >= 3) r.abort.abort();
+      if (r.sleeps.length >= n) r.abort.abort();
     },
   });
+  const opReads = (s: ReturnType<typeof server>) => s.urls.filter((u) => u === `${API_BASE}/operations/${OP}`).length;
+  const quiet = (n: number): Stream[] => Array.from({ length: n }, () => ({ chunks: [] }));
 
-  test("an operation read that stays unavailable fails the watch", async () => {
-    const s = server({ streams: [{ chunks: [frame(ev("e1:1"))] }, { chunks: [] }, { chunks: [] }, { chunks: [] }], states: ["running"], opUnavailable: true });
-    const r = recorder();
-    const out = await watch(s.client, OP, r.w, bounded(r));
-    expect(out).toMatchObject({ kind: "failed", res: { kind: "unavailable", status: 503 } });
+  // §8.6 item 2: the operation read is repeated through an outage of the server until the watch ends,
+  // with the backoff of 1 s doubling to 30 s, as the CLI's watch does (internal/client/watch.go).
+  describe("an outage of the server (ginsys/bronzeward#1173)", () => {
+    test("an operation read that stays unavailable is read again with backoff until it answers", async () => {
+      const s = server({ streams: quiet(4), states: ["succeeded"], opFetches: down("503", 2) });
+      const r = recorder();
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+      expect(sum(r.sleeps)).toBe(3000);
+    });
+
+    test("a 5xx that is not a Bronzeward problem is read again too", async () => {
+      const s = server({ streams: quiet(3), states: ["succeeded"], opFetches: down("502") });
+      const r = recorder();
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+      expect(sum(r.sleeps)).toBe(1000);
+    });
+
+    // The CLI does not repeat these (internal/client/client.go: Problem.unavailable names three 503 codes).
+    test("epoch-superseded and a 500 internal-error are not read again", async () => {
+      for (const kind of ["superseded", "500"] as const) {
+        const s = server({ streams: quiet(3), states: ["succeeded"], opFetches: down(kind, 3) });
+        const r = recorder();
+        const out = await watch(s.client, OP, r.w, bounded(r, 100));
+        expect(out, kind).toMatchObject({ kind: "failed", res: { kind: "unavailable" } });
+        expect(opReads(s), kind).toBeLessThanOrEqual(TRIES);
+      }
+    });
+
+    test("the wait is in steps of 250 ms, each asking until, and an until that answers true ends the watch with the last read", async () => {
+      const s = server({ streams: quiet(3), states: ["running"], opFetches: ["running", ...down("503")] });
+      let asked = 0;
+      const r = recorder(() => ++asked >= 3);
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "ended", operation: { state: "running" }, epoch: "e1" });
+      // The first wait is the ordinary one after a running read; the waits of the outage are steps.
+      expect(r.sleeps.length).toBeGreaterThan(1);
+      expect(Math.max(...r.sleeps.slice(1))).toBeLessThanOrEqual(250);
+      expect(asked).toBe(3);
+    });
+
+    test("an outage that ends the watch before any read answered reports the outage", async () => {
+      const s = server({ streams: quiet(3), states: ["running"], opFetches: down("503") });
+      let asked = 0;
+      const r = recorder(() => { asked++; return true; });
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "failed", res: { kind: "unavailable", status: 503 } });
+      expect(asked).toBe(1);
+    });
+
+    test("a leaving page ends the wait of an outage at once", async () => {
+      const s = server({ streams: quiet(3), states: ["running"], opFetches: down("503", 3) });
+      const r = recorder();
+      const out = await watch(s.client, OP, r.w, { ...r.pace, sleep: async () => r.abort.abort() });
+      expect(out).toEqual({ kind: "stopped" });
+    });
+
+    // A terminal state whose last events cannot be read: the operation is read again, as the CLI's watch does.
+    test("a terminal drain that stays unavailable reads the operation again, and the watch ends once the events are read", async () => {
+      const s = server({ streams: quiet(3), states: ["succeeded"], pagesDown: TRIES });
+      const r = recorder();
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+      expect(opReads(s)).toBe(2);
+    });
+
+    test("a terminal drain that is refused reads the operation again, and a terminal read of the same epoch fails with the refusal, with no second drain", async () => {
+      const s = server({ streams: quiet(3), states: ["succeeded"], pageRefusals: [403] });
+      const r = recorder();
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "failed", res: { kind: "refused", status: 403 } });
+      expect(opReads(s)).toBe(2);
+    });
+
+    test("a terminal read whose drain failed is kept across an outage that ends the watch: the failure of its drain is reported", async () => {
+      const s = server({ streams: quiet(3), states: ["succeeded"], pageRefusals: [403], opFetches: ["succeeded", ...down("503")] });
+      let asked = 0;
+      const r = recorder(() => { asked++; return true; });
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "failed", res: { kind: "refused", status: 403 } });
+      expect(asked).toBe(1);
+    });
+
+    // The count of signs of another epoch is the client's, so a read outside the watch counts too.
+    test("a kept terminal read stands no longer once a read outside the watch showed another epoch", async () => {
+      const s = server({ streams: quiet(3), states: ["succeeded"], pageRefusals: [403], opFetches: ["succeeded", ...down("503")], probeEpoch: "e2" });
+      const r = recorder(async () => {
+        await s.client.read("/probe");
+        return true;
+      });
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "failed", res: { kind: "defect", message: expect.stringContaining("restored") } });
+    });
+
+    test("a kept terminal read stands no longer once a stream event showed another epoch", async () => {
+      const s = server({ streams: [{ chunks: [] }, { chunks: [frame(ev("e2:1"))] }, ...quiet(2)], states: ["succeeded"], pageRefusals: [403], opFetches: ["succeeded", ...down("503")] });
+      const r = recorder(() => true);
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "failed", res: { kind: "defect", message: expect.stringContaining("restored") } });
+    });
   });
 
   test("event pages that stay unavailable fail the watch", async () => {
@@ -295,11 +419,14 @@ describe("the operation progress reader (§8.6)", () => {
     expect(r.shown).toEqual([]);
   });
 
-  test("event pages that stay unavailable after a terminal state fail the watch", async () => {
+  // The CLI reads the operation again after such a drain and reports the drain's failure when that read
+  // is terminal under the same epoch (internal/client/watch.go).
+  test("event pages that stay unavailable after a terminal state fail the watch once the operation was read again", async () => {
     const s = server({ streams: [{ chunks: [frame(ev("e1:1", "succeeded"))] }, { chunks: [] }, { chunks: [] }, { chunks: [] }], states: ["succeeded"], pagesUnavailable: true });
     const r = recorder();
-    const out = await watch(s.client, OP, r.w, bounded(r));
+    const out = await watch(s.client, OP, r.w, bounded(r, 100));
     expect(out).toMatchObject({ kind: "failed", res: { kind: "unavailable", status: 503 } });
+    expect(opReads(s)).toBe(2);
   });
 
   test("a stream without Bronzeward-Epoch is a defect", async () => {
