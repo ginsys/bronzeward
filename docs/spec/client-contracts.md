@@ -455,7 +455,7 @@ say that such a test exists.
    header, `internal/client/client.go:396`; the signed-in subject and issuer,
    `cmd/bronzewardctl/commands.go:282`; the escaping place for errors,
    `internal/client/shown.go:30`; the error that shows a stream redirect's `Location` quotes it by
-   item 8's rule, at the revision that lands ginsys/bronzeward#1176: `internal/client/watch.go:424`.)
+   item 8's rule, at the revision that lands ginsys/bronzeward#1176: `internal/client/watch.go:471`.)
 5. Certificate pinning is not offered: a bundle per context limits trust enough for this
    milestone, and pinning a leaf breaks on every renewal. (Built: `VerifyPeerCertificate`,
    `VerifyConnection` and an SPKI check appear nowhere in `internal/client/` or `cmd/`, a search
@@ -560,7 +560,7 @@ say that such a test exists.
    `cmd/bronzewardctl/output.go:151`, `cmd/bronzewardctl/writes.go:167`; the `-o json` document and a
    composite object, `cmd/bronzewardctl/output.go:151`, `cmd/bronzewardctl/output.go:170`; the
    double-quote rule in every message that quotes a remote value, at the revision that lands ginsys/bronzeward#1176: the
-   stream redirect's `Location` (`internal/client/watch.go:424`, `internal/client/write.go:694`) and a
+   stream redirect's `Location` (`internal/client/watch.go:471`, `internal/client/write.go:717`) and a
    machine name (`cmd/bronzewardctl/onboard.go:173`, `cmd/bronzewardctl/onboard.go:175`) included,
    through `client.Quoted` (`internal/client/printable.go:77`).
 
@@ -697,7 +697,7 @@ than relying on the server's `400`. Built in the CLI: the headers, `internal/cli
 `internal/client/write.go:684-689`. Built in the web client: the one-megabyte refusal before any
 send, `web/src/write.ts:70`, `web/src/write.ts:331-333`, and the keyed headers,
 `web/src/write.ts:352-354`. At the revision that lands ginsys/bronzeward#1176: the web client names `Content-Type` only
-for a request that has a body, so a `DELETE` sends neither (`web/src/write.ts:349-350`), and the CLI
+for a request that has a body, so a `DELETE` sends neither (`web/src/write.ts:352-354`), and the CLI
 refuses a larger body for every input in `Send`, before any request (`internal/client/write.go:206-209`),
 so a body built from flags is bounded too. Each document, file and mark input also keeps its own earlier
 check (`cmd/bronzewardctl/fragments.go:28`, `cmd/bronzewardctl/fragments.go:160`,
@@ -797,9 +797,9 @@ request stay as server facts.
 
 Built, at the revision that lands ginsys/bronzeward#1176: a `403 forbidden` that carries a `plan` member
 refuses after the lookup and is a known refusal in both clients. The web client treats it so
-(`web/src/write.ts:463`); the CLI answers it as the send's own refusal after an ambiguous attempt
-(`internal/client/write.go:439-442`), where every other `403 forbidden` stays decided before the lookup
-and keeps the outcome unknown (`internal/client/write.go:443-447`). The CLI shows the plan form's
+(`web/src/write.ts:465-467`); the CLI answers it as the send's own refusal after an ambiguous attempt
+(`internal/client/write.go:462-465`), where every other `403 forbidden` stays decided before the lookup
+and keeps the outcome unknown (`internal/client/write.go:466-470`). The CLI shows the plan form's
 `detail` and "You are signed in as" the subject, and not the roles
 (`internal/client/problem.go:33-35`, `internal/client/problem.go:56-61`).
 
