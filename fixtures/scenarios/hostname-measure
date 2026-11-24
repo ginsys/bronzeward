@@ -13,7 +13,7 @@
 # the hostname document), steps 5 and 6 renames. Writes $STATE/evidence/hostname-measure-<time>/, not
 # committed as it is: the committed record is hand-written from it, after bin/evidence's leak scan.
 #
-# Talos is touched by reads (get nodename, get hostnamestatus, read /proc/uptime) and by the one
+# Talos is touched by reads (get nodename, get hostnamestatus) and by the one
 # dry run of step 2. Every mutation goes through the product's own apply-config operation, never a
 # direct apply-config. The nodes are the fixture's own: lib.sh fixes STATE, CACHE and TALOSCONFIG to
 # this checkout and need_state refuses without a running fixture, so a caller's TALOSCONFIG, -e or -n
@@ -54,20 +54,18 @@ WORKER_MARK='doc[0]/machine/files/0/content'
 dry=$STATE/hostname-measure-dry.yaml
 trap 'rm -f -- "$dry"' EXIT
 
-# read_node <name>: the worker's nodename, hostname status and uptime, kept as one file. The machine
-# configuration is never read into the record: these three resources hold a hostname and a number.
+# read_node <name>: the worker's nodename and hostname status, kept as one file. The machine
+# configuration is never read into the record: these two resources hold a hostname. No uptime is
+# read: the nodes are Docker containers (bin/up), whose /proc/uptime is the host kernel's, so it
+# shows nothing about a restart of the node.
 read_node() {
   {
     printf '## nodename\n'
     node_talos "$TALOS_WORKER_IP" get nodename -o yaml || return 1
     printf '## hostnamestatus\n'
     node_talos "$TALOS_WORKER_IP" get hostnamestatus -o yaml || return 1
-    printf '## uptime\n'
-    node_talos "$TALOS_WORKER_IP" read /proc/uptime || return 1
   } >"$EV/node-$1.txt"
 }
-# uptime_of <name>: the first number of the uptime line, in seconds.
-uptime_of() { awk '/^## uptime/ { getline; print int($1) }' "$EV/node-$1.txt"; }
 # name_is <name>: the worker's machine row holds that name.
 name_is() { [ "$(sql "SELECT name FROM machine WHERE id = '$machine_w'")" = "$1" ]; }
 # name_as <human> <name>: POST /machines/{id}/names: 201.
@@ -112,10 +110,10 @@ apply_as_product() {
 }
 # applied: the worker's Applied is its Desired.
 applied() { [ "$(sql "SELECT applied_release = desired FROM machine_state WHERE machine = '$machine_w'")" = t ]; }
-# row <name>: the reads of one step in one line of the table: the nodename and the uptime before
+# row <name>: the reads of one step in one line of the table: the nodename and the hostname before
 # and after, from the files read_node kept.
 row() {
-  printf '%s\tuptime %s -> %s s\tnodename %s -> %s\thostname %s -> %s\n' "$1" "$(uptime_of "$1-before")" "$(uptime_of "$1-after")" \
+  printf '%s\tnodename %s -> %s\thostname %s -> %s\n' "$1" \
     "$(awk '/^## nodename/ {f=1} f && /nodename:/ {print $2; exit}' "$EV/node-$1-before.txt")" \
     "$(awk '/^## nodename/ {f=1} f && /nodename:/ {print $2; exit}' "$EV/node-$1-after.txt")" \
     "$(awk '/^## hostnamestatus/ {f=1} f && $1 == "hostname:" {print $2; exit}' "$EV/node-$1-before.txt")" \
@@ -174,7 +172,7 @@ check "$ref" 'the worker is named from its node'"'"'s hostname' name_worker
 worker_name=$(sql "SELECT name FROM machine WHERE id = '$machine_w'")
 
 # Step 1: the worker as it is.
-check "$ref step 1" 'the worker'"'"'s nodename, hostname status and uptime are read' read_node start
+check "$ref step 1" 'the worker'"'"'s nodename and hostname status are read' read_node start
 
 # Step 2: the dry run of the filled document (the A2 proof for the steps that mutate). The machine
 # configuration is written to a 0600 file under $STATE and removed at exit; it is never kept.
@@ -205,8 +203,8 @@ check "$ref step 2" 'apply-config --dry-run of the configuration plus the filled
 
 # Step 3, the Talos-default case, its own row: a node whose hostname is automatic, named from it at
 # onboarding, gets its first release through the product, which writes `auto: off` plus that name.
-# The reads answer whether a reboot is requested (uptime before and after), whether the nodename
-# changes, and what the review says of the release (formOnly); no sentence is chosen here.
+# The reads answer whether the nodename changes, and what the review says of the release (formOnly);
+# a restart is not read, and no sentence is chosen here.
 default_ok=0
 row_default() {
   rowstep "$ref step 3 default" 'the named worker, first release applied through the product: the operation completes' apply_as_product default &&
