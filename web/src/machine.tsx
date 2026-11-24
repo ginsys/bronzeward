@@ -335,7 +335,7 @@ export function MachineItem({ id }: { id: string }) {
   // flight.
   const readAgain = useCallback(() => step("advance"), []);
   return (
-    <ReadsProvider value={{ ...reads, settle, again: reads.again + again.n }}>
+    <ReadsProvider value={{ ...reads, settle, shell: reads.shell ?? reads.settle, again: reads.again + again.n }}>
       <MachineState id={id} path={path} tl={tl} older={older} busy={busy} readAgain={readAgain} changed={readAgain} />
     </ReadsProvider>
   );
