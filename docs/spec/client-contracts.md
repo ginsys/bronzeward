@@ -29,7 +29,9 @@ current; a later change that cites client code at its own head adds one more exc
 below, naming the sections whose client citations it covers and "read at the revision that lands"
 its pull request, and does not re-pin this revision; the client citations of §8.4 items 5 to 8
 and §9.2 to §12 are read at the revision that lands the pull request that moved those sections to
-current),
+current; the client citations that follow the words "at the revision that lands ginsys/bronzeward#1176"
+([#1176](https://github.com/ginsys/bronzeward/issues/1176)), in §6 items 4 and 8 and in §8.1 to §8.4,
+are read there),
 except the code [#277](https://github.com/ginsys/bronzeward/issues/277) adds or changes, the identity read
 (`internal/api/identity.go`, `internal/api/routes.go:97`, `internal/api/api.go:339`), which is
 read with it applied, and the expected-epoch check
@@ -452,8 +454,8 @@ say that such a test exists.
    `internal/client/config.go:214-252`; the log, `cmd/bronzewardctl/main.go:125`; a `Deprecation`
    header, `internal/client/client.go:396`; the signed-in subject and issuer,
    `cmd/bronzewardctl/commands.go:282`; the escaping place for errors,
-   `internal/client/shown.go:30`.) **Proposed:** the `%q` in an error that shows a redirect's
-   `Location` (`internal/client/watch.go:470`) is the Go form, not `\x22`; item 8 states the rule.
+   `internal/client/shown.go:30`; the error that shows a stream redirect's `Location` quotes it by
+   item 8's rule, at the revision that lands ginsys/bronzeward#1176: `internal/client/watch.go:424`.)
 5. Certificate pinning is not offered: a bundle per context limits trust enough for this
    milestone, and pinning a leaf breaks on every renewal. (Built: `VerifyPeerCertificate`,
    `VerifyConnection` and an SPKI check appear nowhere in `internal/client/` or `cmd/`, a search
@@ -556,10 +558,11 @@ say that such a test exists.
    the Go form, `cmd/bronzewardctl/main.go:374`; the table writer, `cmd/bronzewardctl/output.go:137`;
    JSON the CLI encodes itself, `internal/client/printable.go:49-65`,
    `cmd/bronzewardctl/output.go:151`, `cmd/bronzewardctl/writes.go:167`; the `-o json` document and a
-   composite object, `cmd/bronzewardctl/output.go:151`, `cmd/bronzewardctl/output.go:170`. **Proposed:**
-   the double-quote rule for every message that quotes a remote value. The Go `%q` verb still
-   quotes the `Location` header in `internal/client/watch.go:470` and a machine name in
-   `cmd/bronzewardctl/onboard.go:173` and `cmd/bronzewardctl/onboard.go:175`.
+   composite object, `cmd/bronzewardctl/output.go:151`, `cmd/bronzewardctl/output.go:170`; the
+   double-quote rule in every message that quotes a remote value, at the revision that lands ginsys/bronzeward#1176: the
+   stream redirect's `Location` (`internal/client/watch.go:424`, `internal/client/write.go:694`) and a
+   machine name (`cmd/bronzewardctl/onboard.go:173`, `cmd/bronzewardctl/onboard.go:175`) included,
+   through `client.Quoted` (`internal/client/printable.go:77`).
 
    **Required check.** One test fills each remote source with a value that holds ESC, a tab, a
    line feed, a carriage return, DEL, a C1 character, a bidirectional control and a byte that is
@@ -693,13 +696,14 @@ than relying on the server's `400`. Built in the CLI: the headers, `internal/cli
 (`internal/client/write.go:674-678`, `internal/client/write.go:681-683`); the keyed headers,
 `internal/client/write.go:684-689`. Built in the web client: the one-megabyte refusal before any
 send, `web/src/write.ts:70`, `web/src/write.ts:331-333`, and the keyed headers,
-`web/src/write.ts:352-354`. **Proposed:**
-for the web client, a `DELETE` sends neither: its writes always set `Content-Type: application/json`
-(`web/src/write.ts:352`). For the CLI, the refusal of a larger body: it checks each document, file
-and mark input (`cmd/bronzewardctl/fragments.go:28`, `cmd/bronzewardctl/fragments.go:160`,
+`web/src/write.ts:352-354`. At the revision that lands ginsys/bronzeward#1176: the web client names `Content-Type` only
+for a request that has a body, so a `DELETE` sends neither (`web/src/write.ts:349-350`), and the CLI
+refuses a larger body for every input in `Send`, before any request (`internal/client/write.go:206-209`),
+so a body built from flags is bounded too. Each document, file and mark input also keeps its own earlier
+check (`cmd/bronzewardctl/fragments.go:28`, `cmd/bronzewardctl/fragments.go:160`,
 `cmd/bronzewardctl/fragments.go:290-294`, `cmd/bronzewardctl/imports.go:200`,
-`cmd/bronzewardctl/review.go:275`) but `Send` has no such check, so a body built from flags is not
-bounded.
+`cmd/bronzewardctl/review.go:275`), which take the limit and its wording from `Send`'s constants
+(`internal/client/write.go:193-194`).
 
 ### 8.2 Errors
 
@@ -743,7 +747,7 @@ sentence, `web/src/states.tsx:180`; the import page's sentences, `web/src/import
 | 400 `invalid-request` | a malformed request: operator input, a client defect or an incompatible server. Operator input includes a mark that is not a valid path on the start and fragment routes (`internal/api/ingestions.go:69-73`, `internal/api/fragments.go:52-56`; the index is in `detail`, there is no `position` member), an empty document (`internal/api/tx.go:119-120`), an invalid name (`internal/api/drafts.go:190-191`) and the recovery entry's body checks (`internal/api/recovery_entries.go:49-71`). Show `detail` and stop; never repeat |
 | 400 `cursor-invalid` | discard the cursor and restart the list. Run the epoch-change handling of [§8.5](#85-epoch-changes) only when `Bronzeward-Epoch` changed: the same code also answers a cursor that does not parse (`internal/api/acts.go:154-156`) |
 | 401 `unauthenticated` | renew once ([§9.5](#95-renewal)); repeat a read; for a write follow [§8.4](#84-idempotency-and-ambiguous-responses); a second `401` stops with the failure text of [§9.6](#96-failure-cases) |
-| 403 `forbidden` | show the route's `roles`, and "humans only" when `humanOnly` is true; no retry. For the plan cancellation's creator check, the form that carries a `plan` member, show its `detail` instead: its `roles` are the route's, `publisher` included, which the caller already holds (`internal/api/cancellations.go:64-72`, `internal/api/routes.go:123`). After an ambiguous attempt, the route-level role check's refusal, like the process `409`s, is decided before the idempotency lookup (`internal/api/api.go:339-359`, `internal/api/api.go:380-391`; for example a renewal dropped a role, [§9.6](#96-failure-cases)), so it says nothing about the earlier attempt: the outcome stays unknown ([§8.4](#84-idempotency-and-ambiguous-responses) item 4). The plan cancellation's creator check, a `403 forbidden` that carries a `plan` member, refuses after the lookup instead (`internal/api/cancellations.go:61-73`, `internal/api/tx.go:198-202`): it means the key has no record, in this epoch or an earlier one, so the earlier attempt did not commit or a restore removed it |
+| 403 `forbidden` | show the route's `roles`, and "humans only" when `humanOnly` is true; no retry. For the plan cancellation's creator check, the form that carries a `plan` member, show its `detail` instead: its `roles` are the route's, `publisher` included, which the caller already holds (`internal/api/cancellations.go:64-72`, `internal/api/routes.go:123`). After an ambiguous attempt, the route-level role check's refusal, like the process `409`s, is decided before the idempotency lookup (`internal/api/api.go:339-359`, `internal/api/api.go:380-391`; for example a renewal dropped a role, [§9.6](#96-failure-cases)), so it says nothing about the earlier attempt: the outcome stays unknown ([§8.4](#84-idempotency-and-ambiguous-responses) item 4). The plan cancellation's creator check, a `403 forbidden` that carries a `plan` member, refuses after the lookup instead (`internal/api/cancellations.go:61-73`, `internal/api/tx.go:218-226`): it means the key has no record, in this epoch or an earlier one, so the earlier attempt did not commit or a restore removed it |
 | 403 `identity-revoked` | stop; clear the context's stored credential, meaning the tokens the client itself keeps in its credential store, its memory or its D2 (b) token file, never an operator-supplied automation token file, which it leaves untouched and reports as no longer accepted; do not start a new sign-in by itself ([§9.6](#96-failure-cases)) |
 | 404 `not-found` | the resource does not exist in this epoch; after a restore a handle issued later answers `404` ([persistence and API §12.3](persistence-api.md#123-what-a-restored-state-means-record-by-record)) |
 | 409 `conflict`, `stale-input`, `scope-busy`, `machine-identity-mismatch`, `ingestion-abandoned`, `recovery-mode-entered`, `recovery-mode-active` | show the named resource and state; read it; never repeat automatically, with one exception. A `409 recovery-mode-active` without a `scope` member, and a `409 conflict` to the recovery entry without `epoch` and `request` members, are process refusals that show the start mode ([§8.5](#85-epoch-changes)). A `409 conflict` that carries `request` and `epoch` is an earlier-epoch idempotency record: it is read and reported, not repeated, under either key ([§8.4](#84-idempotency-and-ambiguous-responses) item 7). The one exception: a `409 conflict` on a draft fragment write (`PUT /drafts/{id}/fragments/{name}`) that answers a repeat, carries an `ingestion` member but no `draft` member, and has no `Idempotent-Replayed: true` is the first request still running, or ended without committing while its claim's lease has not lapsed (`internal/api/fragments.go:105-114`, `internal/api/tx.go:80-98`; looked up by principal and key, so it never answers a first send). A `409` with both `ingestion` and `draft`, replayed or not, is a recorded refusal (`internal/api/fragments.go:291-296`, `internal/api/drafts.go:94-104`): the write was refused, not pending. For the in-progress case, repeat the identical request with the same key, with backoff, until it answers otherwise or the client's wait bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 2 expires; the contract says the repeat then gets the first request's replay ([persistence and API §7.2](persistence-api.md#72-behavior); [§8.4](#84-idempotency-and-ambiguous-responses) item 2), or, when the first request ended without committing, executes as a new request, unless its `Bronzeward-Expected-Epoch` names another epoch (`412 epoch-mismatch`, A6), reported as this send's own result (`internal/api/fragments.go:105-114`) |
@@ -791,17 +795,22 @@ client reads `Retry-After` (`rg 'Retry-After' web/src internal/client cmd` finds
 `epoch-mismatch` after an ambiguous attempt, and the server's behaviour for an unfinished first
 request stay as server facts.
 
-**Proposed**, where today differs: (a) a `403 forbidden` that carries a `plan` member refuses after
-the lookup and is a known refusal. The web client treats it so (`web/src/write.ts:465`); the CLI
-treats every `403 forbidden` as decided before the lookup and keeps an ambiguous outcome unknown
-(`internal/client/write.go:451-455`). (b) `412 epoch-mismatch`: handle the epoch change with the `epoch`
+Built, at the revision that lands ginsys/bronzeward#1176: a `403 forbidden` that carries a `plan` member
+refuses after the lookup and is a known refusal in both clients. The web client treats it so
+(`web/src/write.ts:463`); the CLI answers it as the send's own refusal after an ambiguous attempt
+(`internal/client/write.go:439-442`), where every other `403 forbidden` stays decided before the lookup
+and keeps the outcome unknown (`internal/client/write.go:443-447`). The CLI shows the plan form's
+`detail` and "You are signed in as" the subject, and not the roles
+(`internal/client/problem.go:33-35`, `internal/client/problem.go:56-61`).
+
+**Proposed**, where today differs: (a) `412 epoch-mismatch`: handle the epoch change with the `epoch`
 member. Neither client reads the member to adopt the epoch; both adopt it from the
 `Bronzeward-Epoch` header (`internal/client/client.go:383-392`, `web/src/request.ts:453-471`), and the
-CLI only prints the member (`internal/client/write.go:446`). (c) `422 validation-failed` for marks:
+CLI only prints the member (`internal/client/write.go:446`). (b) `422 validation-failed` for marks:
 the position only, never a path. The web client does so (`web/src/problems.tsx:92-96`) and the CLI
 does for a mark refusal that arrives as an event (`cmd/bronzewardctl/review.go:369-381`), but a
 `422` answer to a mark write prints `detail`, `path` and `paths` (`internal/client/problem.go:33-34`,
-`internal/client/problem.go:75-81`, `cmd/bronzewardctl/review.go:282`). (d) `501 not-implemented` is a
+`internal/client/problem.go:75-81`, `cmd/bronzewardctl/review.go:282`). (c) `501 not-implemented` is a
 known refusal. The web client excludes it from the unknown-outcome path (`web/src/write.ts:506`); the
 CLI treats a `501` problem as ambiguous and repeats it (`internal/client/write.go:420`).
 
@@ -864,12 +873,18 @@ shows such a problem with the operation's identifier and final state, applies th
 what the operator may do next, and never repeats the request that started the operation: the
 `202` was already a success. Built in the web client, which words a failed operation by code and
 rule from the same tables (`web/src/problems.tsx:83-87`, `web/src/imports.tsx:127-133`), and in
-neither client does anything repeat the request. **Proposed** for the web client's next step: it
-words the operation by `what` only, not the row's `next` (`web/src/problems.tsx:86`), and offers
-"Import again" beside it (`web/src/imports.tsx:133`). **Proposed** for the CLI's next step: it shows the
-operation's identifier and state with the raw error (`cmd/bronzewardctl/imports.go:592-609`) and
-applies the row's next step only for `precondition-failed` and `ingestion-abandoned`
-(`cmd/bronzewardctl/imports.go:601-608`); that function names no other code.
+neither client does anything repeat the request. Built for the next step, at the revision that lands
+ginsys/bronzeward#1176: the web client words a failed operation by the row's `what` and its `next`, and
+leaves out a `next` that points at a server explanation the page does not show
+(`web/src/problems.tsx:91-95`, `web/src/imports.tsx:132`), with "Import again" beside it
+(`web/src/imports.tsx:133`); the CLI shows the operation's identifier and state with the raw error and
+names the row's next step for `precondition-failed`, `ingestion-abandoned`, `machine-identity-mismatch`,
+`recovery-mode-entered` and `talos-access-unavailable` (`cmd/bronzewardctl/imports.go:592-617`). The
+next-step words exist in two places, the web table (`web/src/problems.tsx:23-48`) and the CLI's cases
+(`cmd/bronzewardctl/imports.go:602-615`), because the two clients cannot share one file; a change to a
+row's `next` changes both. For `talos-access-unavailable`, whose web `next` is "The server's explanation
+follows", the CLI says "The server's explanation is in the error above", because it prints the raw
+error before the step. Another code a failed operation carries has no CLI next step.
 
 ### 8.3 ETags
 
@@ -916,11 +931,13 @@ web `web/src/drafts.tsx:44-52`, in page memory. An ETag kept under another epoch
 `:58-62`. The ingestion start's `If-Match`: CLI `cmd/bronzewardctl/imports.go:178`; web
 `web/src/imports.tsx:566`.
 
-**Proposed**, where today differs: on a `412` the clause says the client "shows the current state".
-The CLI prints the revision the draft has now and the command that reads it
-(`internal/client/write.go:560-570`). The web publication page says that someone changed the draft
-and shows no state: the operator has to press "Read the draft again" first
-(`web/src/publish.tsx:177-181`, `web/src/publish.tsx:203`).
+Built, on a `412`, where the clause says the client "shows the current state": the CLI prints the
+revision the draft has now and the command that reads it (`internal/client/write.go:560-570`). At the
+revision that lands ginsys/bronzeward#1176 the web publication page does too: it reads the draft once,
+with a plain read that sends no `If-Match`, and says its revision and state under the refusal, which
+stays shown whatever the read answers (`web/src/publish.tsx:187`, `web/src/publish.tsx:193-196`,
+`web/src/publish.tsx:214`). That read keeps no ETag: Publish still sends nothing until the operator
+presses "Read the draft again" (`web/src/publish.tsx:162-163`, `web/src/publish.tsx:178`).
 
 ### 8.4 Idempotency and ambiguous responses
 
@@ -930,7 +947,7 @@ method, route, path parameters, `If-Match` and the canonical body, keyed with th
 digest key on keyed routes (`internal/api/body.go:165-185`); where the key has a record, the same
 request under it replays, another is `422`, an earlier epoch's record is `409`
 (`internal/api/idempotency.go:60-106`); where it has none, any request under it executes as a new
-one (`internal/api/tx.go:198-202`), unless its `Bronzeward-Expected-Epoch` names another epoch
+one (`internal/api/tx.go:218-229`), unless its `Bronzeward-Expected-Epoch` names another epoch
 (`412 epoch-mismatch`, A6); a request whose effect a restore removed lost its record too and
 executes again under the same exception
 ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the same key does
@@ -1019,9 +1036,10 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    (`cmd/bronzewardctl/fragments.go:58`, `internal/client/write.go:437-438`) and the web client's
    `ingestWaitSeconds` member of `bronzeward-client.json` (§5 item 4; `web/src/config.ts:43-47`,
    `web/src/app.tsx:202`, `web/src/write.ts:152`, `web/src/write.ts:554`), which `INGEST_WAIT`
-   (`web/src/write.ts:84`) defaults. **Proposed:** a replayed refusal in the web client: it carries the success replay text "Already done earlier;
-   showing that result." before the refusal (`web/src/states.tsx:19`, `web/src/states.tsx:142-146`),
-   where the clause asks for the earlier attempt's refusal alone.
+   (`web/src/write.ts:84`) defaults. At the revision that lands ginsys/bronzeward#1176, a replayed
+   refusal in the web client is the earlier attempt's refusal alone, with no success replay text
+   before it (`web/src/states.tsx:142-145`, `web/src/forms.tsx:59`), and the replay text stays for a
+   replayed success (`web/src/forms.tsx:57`, `web/src/forms.tsx:206-208`).
 3. **Same principal and epoch only.** Before any repeat the client checks that its credential
    still names the same principal: for OIDC, the same `iss` and `sub` in the renewed token; for
    automation, the same service identity, compared by the `principal` the identity read serves
