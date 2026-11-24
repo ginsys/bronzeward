@@ -47,6 +47,11 @@ export function paneTraceText(samples: readonly Sample[]): string {
 // message's start and the `cause` either way: a read made to explain a failure must never be the failure.
 export async function failedWithPane(error: unknown, read: () => Promise<readonly Sample[]>): Promise<Error> {
   const text = error instanceof Error ? error.message : String(error);
-  const trace = await read().then(paneTraceText, () => undefined);
+  let trace: string | undefined;
+  try {
+    trace = paneTraceText(await read());
+  } catch {
+    trace = undefined;
+  }
   return new Error(trace === undefined ? text : `${text}; pane trace: ${trace}`, { cause: error });
 }
