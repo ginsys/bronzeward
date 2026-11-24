@@ -169,7 +169,7 @@ describe("a watch's end", () => {
   // points at a detail this text does not show.
   test("a failed operation shows the table row's next step, and none that points at a detail it does not show", async () => {
     const c = reading({ kind: "transport" }).client;
-    const failed = (code: string) => op({ state: "failed", error: { type: `urn:bronzeward:problem:${code}`, title: code, status: 409, instance: "req_1" } });
+    const failed = (code: "recovery-mode-entered" | "talos-access-unavailable") => op({ state: "failed", error: { type: `urn:bronzeward:problem:${code}` as const, title: code, status: 409, instance: "req_1" } });
     expect(text(await ended(c, ing(), failed("recovery-mode-entered"), "failed", NOW, "e1"))).toBe(
       "This import failed. The server went into recovery while this was publishing, so nothing was published. Wait for the recovery to finish, then publish again. Import again",
     );
