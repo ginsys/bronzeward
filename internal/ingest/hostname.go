@@ -137,6 +137,10 @@ func releaseLegacyKey(docs []*yaml.Node, name string, marks []Path) (Filled, err
 	if k := found.key; k.Kind != yaml.ScalarNode || k.Tag != "!!str" || k.Anchor != "" || k.Value != name {
 		return Filled{}, nil
 	}
+	// An anchor on the key node itself: an alias after it would read another node once the pair is gone.
+	if found.network.Content[found.at].Anchor != "" {
+		return Filled{}, nil
+	}
 	// A mapping an alias can reach is shared: deleting the key would change what the alias reads as well.
 	if found.root.Anchor != "" || found.machine.Anchor != "" || found.network.Anchor != "" {
 		return Filled{}, nil
