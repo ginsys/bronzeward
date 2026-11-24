@@ -1323,17 +1323,16 @@ rule.
 process, from plaintext, before the release commits (persistence and API
 [§6.1](persistence-api.md#61-steps)). It runs for each machine whose draft
 entry carries an **import base under the check**, and for nothing else: a
-thinner import base written by the route of persistence and API §3.2, or an
-import base that an ingestion wrote from source `document` for a machine that
-already has an `Applied` release. The second case has an old composition to
-compare with, so a document that leaves the configuration unchanged passes and
-one that changes it reads not equal. An import base read from the node (source
-`machine`) and a drift adoption accept what the node runs, and a machine with
-no `Applied` release has no old composition, so none of them is checked. Today's
-code admits a document import for a machine with an `Applied` release with no
-check (`startIngestion` in `internal/api/ingestions.go`; the `document` source
-in persistence and API §9.3); the refusal is new behaviour for the implementation.
-A machine
+thinner import base written by the route of persistence and API §3.2, which
+writes only over an `Applied` import base read from the node. Every input of
+the check is then readable by any `author`, so the paths below and the
+recorded `equal` and `byteIdentical` disclose nothing a caller may not read. An
+import of any source, including a `document` import for a machine that already
+has an `Applied` release, and a drift adoption are not checked: an import base
+read from the node and a drift adoption accept what the node runs, a machine
+with no `Applied` release has no old composition, and a `document` import is an
+ordinary change under the ordinary review, as today (`startIngestion` in
+`internal/api/ingestions.go`; persistence and API choice §17.57). A machine
 the draft covers only through a changed fragment or assignment publishes under
 the ordinary rules. For a machine under
 the check, a change to its configuration beyond the move reads as not equal, so
@@ -1423,7 +1422,7 @@ naming the machine, and it commits no release.
 
 | Reason | When | Reports |
 | --- | --- | --- |
-| `not-equal` | The sides differ | To a caller who passes the root read authorization ([persistence and API §3.2](persistence-api.md#32-the-import-base) rule 1): the paths, and the sentence "the typed equivalence check can refuse a change that is equivalent in behaviour; it compares typed values and applies no defaults" |
+| `not-equal` | The sides differ | The paths, and the sentence "the typed equivalence check can refuse a change that is equivalent in behaviour; it compares typed values and applies no defaults" |
 | `cannot-decide` | The machine is pending convergence, or its `Applied` digest is not its `Applied` release's artifact digest (an adopted baseline not yet replaced), or the comparison cannot decide a case | The reason in words, the failed condition's own; no paths |
 
 The check fails closed: it never reads "equal" for a case it could not decide.
