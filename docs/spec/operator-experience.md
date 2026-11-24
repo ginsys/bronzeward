@@ -975,19 +975,21 @@ shown only where the read has one) and the profiles of its assignment revision a
 stored change on request, the change a person reads being the change of the plan approved. **Apply** records
 one approval for each plan shown (an approver), carries on past a machine the server refuses, and says so in
 that machine's line. Each line says where the machine stands for this release, read from the machine's
-position (`web/src/apply.ts:59-74`): not applied, a plan ready, waiting behind another machine's apply (the
-controller applies one machine of a cluster at a time), applying, applied, or stopped, with the reason.
-**Proposed:** the line is read from the position and no other source; today the page's own line stands
-while one of its steps runs and after one stops (`web/src/apply.tsx:37-38`). A plan
+position and no other source (`web/src/apply.ts:60-76`, drawn at `web/src/apply.tsx:39-40`): not applied, a plan
+ready, waiting behind another machine's apply (the controller applies one machine of a cluster at a time),
+applying, applied, or stopped, with the reason. What a step of the page says while it runs, and the answer of a write
+that was refused or has an unknown outcome, is a note about the press, drawn after the line in the same row until the
+write has succeeded; it is not the machine's state. A plan
 that somebody else prepared and that is ready is reused and never made twice, so an approver who cannot make
 plans can apply plans a publisher prepared. A plan the page made and the person did not approve is cancelled
 when its machine is no longer chosen and when the page is left, including a plan whose creation is answered
 after that; the choice cannot change while the page works, and a plan Apply was pressed for is never
 cancelled. One the page loses (the tab is closed) expires with the plan default; a creation whose outcome is
 unknown leaves a plan the page has no ID for (`web/src/apply.ts:100`, `web/src/apply.ts:128-131`).
-**Proposed:** the machine's page shows that plan with who prepared it; today its plans list shows the
-creation time only and the plan page shows who created it (`web/src/resources.tsx:154`,
-`web/src/resources.tsx:555`). No route returns a change before a plan exists, so showing it means making the plan.
+The machine's page shows the plan its position names, which is that plan whenever it is the newest plan of the machine,
+with who prepared it and when, read once from the plan (`web/src/nextstep.tsx:112-119`, `web/src/machine.tsx:465`); an
+older plan stays reachable through the page's list of the machine's plans. No route returns a change before a plan
+exists, so showing it means making the plan.
 **Apply** stays off while any plan's change is unread, bound to a drift record (it overwrites a configuration no reviewer has seen), or withheld by the server (a configuration that could not be
 redacted, or a machine holding a configuration other than the one Bronzeward applied, so the two cannot be
 compared): the page names that plan and links to its plan page, where the person can read what it records and
@@ -996,11 +998,10 @@ handed to the person as its line is drawn: leaving the page, by any route, does 
 its own creation included), and the line says it stays and can be cancelled on its own page. Show apply and Apply send nothing new while a write of the page is
 open, with an unknown outcome, until the person repeats it or dismisses its notice (the rule of every form of the
 console, `startsNew`); that holds for the next request of a running batch too, so one check decides every send
-(`web/src/apply.tsx:100`, `web/src/apply.tsx:234`, `web/src/apply.tsx:244`). After the Apply press the rows
-are read again five seconds after the last read answered, so a slow read is never dropped by the next one, for ten
-minutes (`web/src/apply.tsx:25-26`, `web/src/apply.tsx:161-181`, `web/src/apply.tsx:219`). **Proposed:** the
-re-reading runs only while machines wait or apply; today it runs the whole ten minutes whatever the rows say, and Show apply
-starts none.
+(`web/src/apply.tsx:100`, `web/src/apply.tsx:234`, `web/src/apply.tsx:244`). After a press of either button, Show apply
+or Apply, the rows are read again five seconds after the last read answered, so a slow read is never dropped by the next
+one, for ten minutes and only while a machine waits or applies: each round of reads, once drawn, decides whether
+another follows (`web/src/apply.tsx:26`, `web/src/apply.tsx:160-180`, `web/src/apply.tsx:219`, `web/src/apply.tsx:225`).
 A control plane may be chosen: the server does not refuse it and the acceptance tests do not cover it, so the
 page says that, and the operator limits say it too. Alternatives: one page per machine and plan (the
 repetition above); approving without showing the change (the person approves what they never read); a new
@@ -1047,9 +1048,10 @@ each plan's own line says what happened to it, never a count: each approval is i
 the same read epoch, the one `y` confirmed them all, and the command has no open write to hold or repeat. Enter, `n` and the end of input approve nothing and cancel the
 plans this command made, never one it read. A Ctrl-C at the question leaves the plans to expire at the time
 each shows. A machine already applied (or one whose Desired release this is, with nothing pending: the release leaves its Applied configuration unchanged, as the page decides), frozen, in drift or in an operation is left out with its reason, and
-so is one whose waiting plan for this release is for another operation (an adopt plan is decided on the
-machine's page; `cmd/bronzewardctl/apply.go:200-201`). **Proposed:** the same for a waiting plan of another release; today the
-command goes on and tries to make a plan for such a machine (`cmd/bronzewardctl/apply.go:192`). A
+so is one whose waiting plan is not this release's apply plan: another operation's (an adopt plan is decided on the
+machine's page) or another release's, for which the server would answer 409, since an apply-config plan is for the
+machine's Desired release; no request is sent for it, and the apply page leaves out the same machines in the same
+way (`cmd/bronzewardctl/apply.go:201-206`, `web/src/apply.ts:63-67`). A
 control plane machine may be chosen: the command says that applying to one was not covered by the acceptance
 tests, that machines are applied one at a time and that the order is not promised.
 The structured outputs are not offered, since the command asks a person a question. The console's apply
