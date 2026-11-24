@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { eventLine, type OpEvent, type Pace, RESTORED, RESTORED_WHILE_READ, sleep, terminal, watch } from "./progress.ts";
+import { eventLine, type OpEvent, type Pace, RESTORED, RESTORED_WHILE_READ, sleep, stepWait, terminal, watch } from "./progress.ts";
 import { API_BASE, Client, type Phase } from "./request.ts";
 import { noHeaders } from "./test-stalls.ts";
 
@@ -120,11 +120,21 @@ function server(o: {
 function recorder(until?: (shown: OpEvent[]) => boolean | Promise<boolean>, clock = { t: 0 }) {
   const shown: OpEvent[] = [];
   const log: string[] = [];
+  // One entry for each wait of the watch, however many steps it takes; `steps` holds the steps of the
+  // waits that ask `until` (§8.6 item 2), in ms.
   const sleeps: number[] = [];
+  const steps: number[] = [];
   const abort = new AbortController();
-  const pace: Pace = { sleep: async (ms) => { sleeps.push(ms); }, now: () => clock.t, idle: 20 };
+  const wait = (onWait?: () => void): Pace["wait"] => async (ms, signal, stop) => {
+    sleeps.push(ms);
+    onWait?.();
+    return stepWait(async (step) => { steps.push(step); }, ms, signal, stop);
+  };
+  const pace: Pace = { sleep: async (ms) => { sleeps.push(ms); }, wait: wait(), now: () => clock.t, idle: 20 };
+  // The same pace, with `onWait` called at the start of each wait, the ones that step included.
+  const paced = (onWait: () => void): Pace => ({ ...pace, sleep: async (ms) => { sleeps.push(ms); onWait(); }, wait: wait(onWait) });
   return {
-    shown, log, sleeps, abort, pace, clock,
+    shown, log, sleeps, steps, abort, pace, paced, clock,
     w: {
       show: (e: OpEvent) => { shown.push(e); log.push(`show ${e.id}`); },
       clear: (why: string) => { shown.length = 0; log.push(`clear: ${why}`); },
@@ -324,12 +334,8 @@ describe("the operation progress reader (§8.6)", () => {
 
   // The fake pace ends a watch that reads for ever after `n` waits, so that a regression fails the
   // assertion and does not hang the run.
-  const bounded = (r: ReturnType<typeof recorder>, n = 3): Pace => ({
-    ...r.pace,
-    sleep: async (ms) => {
-      r.sleeps.push(ms);
-      if (r.sleeps.length >= n) r.abort.abort();
-    },
+  const bounded = (r: ReturnType<typeof recorder>, n = 3): Pace => r.paced(() => {
+    if (r.sleeps.length >= n) r.abort.abort();
   });
   const opReads = (s: ReturnType<typeof server>) => s.urls.filter((u) => u === `${API_BASE}/operations/${OP}`).length;
   const quiet = (n: number): Stream[] => Array.from({ length: n }, () => ({ chunks: [] }));
@@ -374,8 +380,8 @@ describe("the operation progress reader (§8.6)", () => {
       const out = await watch(s.client, OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "ended", operation: { state: "running" }, epoch: "e1" });
       // The first wait is the ordinary one after a running read; the waits of the outage are steps.
-      expect(r.sleeps.length).toBeGreaterThan(1);
-      expect(Math.max(...r.sleeps.slice(1))).toBeLessThanOrEqual(250);
+      expect(r.sleeps).toEqual([1000, 1000]);
+      expect(r.steps).toEqual([250, 250]);
       expect(asked).toBe(3);
     });
 
@@ -391,7 +397,7 @@ describe("the operation progress reader (§8.6)", () => {
     test("a leaving page ends the wait of an outage at once", async () => {
       const s = server({ streams: quiet(3), states: ["running"], opFetches: down("503", 3) });
       const r = recorder();
-      const out = await watch(s.client, OP, r.w, { ...r.pace, sleep: async () => r.abort.abort() });
+      const out = await watch(s.client, OP, r.w, r.paced(() => r.abort.abort()));
       expect(out).toEqual({ kind: "stopped" });
     });
 
@@ -415,7 +421,8 @@ describe("the operation progress reader (§8.6)", () => {
       expect(out).toMatchObject({ kind: "failed", res: { kind: "unavailable", status: 503 } });
       expect(renewed).toBe(1);
       expect(opReads(s)).toBe(2);
-      expect(r.sleeps).toEqual([250]);
+      expect(r.sleeps).toEqual([1000]);
+      expect(r.steps).toEqual([250]);
     });
 
     // An answer under another epoch than one recorded after its send is dropped (§8.5), and the watch, not the
@@ -459,7 +466,8 @@ describe("the operation progress reader (§8.6)", () => {
       const r = recorder(() => opReads(s) >= 3);
       const out = await watch(reader(s, (p) => operationPath(p) && ++ops === 2, "before"), OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "ended", operation: { state: "running" }, epoch: "e2" });
-      expect(r.sleeps).toEqual([250, 250, 250, 250]);
+      expect(r.sleeps).toEqual([1000]);
+      expect(r.steps).toEqual([250, 250, 250, 250]);
       expect(s.urls.filter((u) => u.startsWith(EVENTS)).length - s.opened.length).toBe(1);
     });
 
@@ -475,7 +483,8 @@ describe("the operation progress reader (§8.6)", () => {
       const r = recorder(() => opReads(s) >= 2 && ++waits >= 2);
       const out = await watch(reader(s, (p) => operationPath(p) && ++ops === 2, "before"), OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "failed", res: { kind: "defect" } });
-      expect(r.sleeps).toEqual([250, 250]);
+      expect(r.sleeps).toEqual([1000]);
+      expect(r.steps).toEqual([250, 250]);
       expect(opReads(s)).toBe(2);
     });
 
@@ -486,10 +495,9 @@ describe("the operation progress reader (§8.6)", () => {
       const r = recorder();
       const out = await watch(s.client, OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
-      // The ordinary wait after the running read, then the two waits of the outage in steps of 250 ms.
-      expect(r.sleeps[0]).toBe(1000);
-      expect(sum(r.sleeps.slice(1, 5))).toBe(1000);
-      expect(sum(r.sleeps.slice(5))).toBe(2000);
+      // The ordinary wait after the running read, then the two waits of the outage, each in steps of 250 ms.
+      expect(r.sleeps).toEqual([1000, 1000, 2000]);
+      expect(r.steps).toEqual(Array(12).fill(250));
     });
 
     // A 401 is renewed once for all the sends of a phase (the CLI's retryIn keeps `renewed`), so the second
@@ -647,7 +655,8 @@ describe("the operation progress reader (§8.6)", () => {
     expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
     expect(r.log).toEqual(["show e1:1", `clear: ${RESTORED}`, "show e2:1", "show e2:2", "show e2:3"]);
     // The delay is waited in steps of 250 ms that ask until (§8.6 item 2).
-    expect(r.sleeps).toEqual([250, 250, 250, 250]);
+    expect(r.sleeps).toEqual([1000]);
+    expect(r.steps).toEqual([250, 250, 250, 250]);
   });
 
   test("R1-2: a clear asks until again: the replay of a restored installation is shown past its first event", async () => {
@@ -849,7 +858,8 @@ describe("the operation progress reader (§8.6)", () => {
     const out = await watch(reader(s, eventsPath, "before"), OP, r.w, r.pace);
     expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
     expect(r.log).toEqual(["show e1:1", `clear: ${RESTORED}`]);
-    expect(r.sleeps).toEqual([250, 250, 250, 250]);
+    expect(r.sleeps).toEqual([1000]);
+    expect(r.steps).toEqual([250, 250, 250, 250]);
   });
 
   test("R3-1b: an empty drain under another epoch than the terminal read does not end the watch when nothing was shown", async () => {
@@ -863,7 +873,8 @@ describe("the operation progress reader (§8.6)", () => {
     const out = await watch(reader(s, eventsPath, "before"), OP, r.w, r.pace);
     expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
     expect(r.log).toEqual([]);
-    expect(r.sleeps).toEqual([250, 250, 250, 250]);
+    expect(r.sleeps).toEqual([1000]);
+    expect(r.steps).toEqual([250, 250, 250, 250]);
   });
 
   // The page leaves while the operation read is pending: the reader's read resolves after the abort.

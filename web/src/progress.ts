@@ -74,6 +74,10 @@ export type Watched =
 
 export interface Pace {
   sleep: (ms: number, signal: AbortSignal) => Promise<void>;
+  // Waits `ms` in steps of at most 250 ms, each asking `stop`, so a watch that ends is left within one step
+  // (§8.6 item 2; the CLI's retryIn). True when `stop` answered true, false when the wait ran out or `signal`
+  // was aborted. A fake records one wait, however many steps it takes.
+  wait: (ms: number, signal: AbortSignal, stop: () => Promise<boolean>) => Promise<boolean>;
   now: () => number;
   // A stream that sends nothing, not even its keep-alive comment every 15 s, for this long is taken
   // as cut (§8.6 item 5). The wait starts at the request, so an answer that never sends its headers
@@ -93,8 +97,25 @@ export function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+// The step of a watch's waits, in ms: the longest a watch that ended goes on waiting.
+const STEP = 250;
+
+// The one stepping loop of the watch's waits: `sleep` for each step, then `stop` is asked, so the real wait
+// and a fake that records logical waits step in the same way.
+export async function stepWait(sleepFor: Pace["sleep"], ms: number, signal: AbortSignal, stop: () => Promise<boolean>): Promise<boolean> {
+  for (let left = ms; left > 0; ) {
+    const step = Math.min(left, STEP);
+    await sleepFor(step, signal);
+    left -= step;
+    if (signal.aborted) return false;
+    if (await stop()) return true;
+  }
+  return false;
+}
+
 const PACE: Pace = {
   sleep,
+  wait: (ms, signal, stop) => stepWait(sleep, ms, signal, stop),
   now: () => Date.now(),
   idle: 45_000,
 };
@@ -195,16 +216,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
   // The wait of an outage and the wait after a void terminal read are in steps of 250 ms, each asking
   // `until`, so a watch that ends is left within 250 ms (§8.6 item 2; the CLI's retryIn). The page leaving
   // ends it at once.
-  const outageWait = async (ms: number): Promise<boolean> => {
-    for (let left = ms; left > 0; ) {
-      const step = Math.min(left, 250);
-      await pace.sleep(step, w.signal);
-      left -= step;
-      if (w.signal.aborted) return false;
-      if (await run.stop()) return true;
-    }
-    return false;
-  };
+  const outageWait = (ms: number): Promise<boolean> => pace.wait(ms, w.signal, () => run.stop());
   // The operation is read again with no stream or page read first: after a terminal read whose events could
   // not be read, and for as long as the operation read is an outage. That is the CLI's operationReadUntil,
   // which keeps the read inside its own retry phase, so no event read comes between two attempts of it.
