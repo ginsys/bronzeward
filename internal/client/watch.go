@@ -124,23 +124,40 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 	var lastRead OperationRead // the last read of the operation in this loop
 	voided := false            // the terminal read that was the last read is of an installation restored since
 	pages, delay := false, time.Second
+	// The refusal the watch ends with is kept from here on, and only while it runs (noteRefusal).
+	note := &refusalNote{}
+	c.watchRefusal = note
+	defer func() { c.watchRefusal = nil }()
+	// readOp reads the operation until the watch ends. A read that succeeds came over a trusted connection and
+	// is the new last read, so it supersedes any refusal met before it.
+	readOp := func() (*apitypes.OperationBody, OperationRead, error) {
+		o, rd, err := c.operationReadUntil(op, w.stop)
+		if err == nil {
+			note.err = nil
+		}
+		return o, rd, err
+	}
 	// stopped is what the watch returns when a wait of it ends, whether the wait is the operation read's
 	// retry or the pause between two attempts. A watch that ended while the server was out of reach, or
 	// while it waited, returns the operation as the last read showed it, which is not terminal, or the error
 	// when no read in this loop gave one. A terminal read that the events or a later read showed to be of a
 	// restored installation is no last read: the error then says that no read stands. An error that is not
-	// the end of the watch (a Ctrl-C, a refusal) is returned as it is.
-	stopped := func(err error) (*apitypes.OperationBody, OperationRead, error) {
+	// the end of the watch (a Ctrl-C, a refusal) is returned as it is. A refusal the watch met and no later read
+	// of the operation superseded (a refused certificate, or a recovery start's) is what it returns instead of
+	// an earlier state, bare, with no ErrWatchEnded: a caller that reads that error as "the first read stands"
+	// would hide it again. What the caller names in before stays beside it.
+	stopped := func(err error, before ...error) (*apitypes.OperationBody, OperationRead, error) {
 		if errors.Is(err, ErrWatchEnded) {
 			if w.halt.err != nil { // Until failed: its error stands, as at the stop below
 				return nil, OperationRead{}, w.halt.err
 			}
-			// A watch that ended while the server's certificate was refused returns the refusal itself, which
-			// no earlier read of the operation hides: the operator asked what the server shows, and it is
-			// not trusted. It is returned without ErrWatchEnded, because a caller that reads that error as
-			// "the first read stands" would hide it again (§8.6 item 2).
-			if t := trustRefusal(err); t != nil {
-				return nil, OperationRead{}, t
+			if r := note.err; r != nil {
+				for _, b := range before {
+					if errors.Is(b, r) {
+						return nil, OperationRead{}, b
+					}
+				}
+				return nil, OperationRead{}, errors.Join(append(before, r)...)
 			}
 			if lastOp != nil && (!Terminal(lastOp.State) || c.EpochHolds(lastRead)) {
 				return lastOp, lastRead, nil
@@ -175,7 +192,7 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 		// The attempt's own time: an operation read that is slow does not skip the backoff.
 		took := time.Since(began)
 		// The read is repeated through an outage of the server until the watch ends (§8.6 item 2).
-		o, rd, err := c.operationReadUntil(op, w.stop)
+		o, rd, err := readOp()
 		epoch := rd.Epoch
 		if err != nil {
 			return stopped(err)
@@ -191,7 +208,7 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 			all.Until, all.halt = nil, &halt{}
 			pageEpoch, derr := c.drain(op, &last, all)
 			if derr != nil {
-				again, rdAgain, err := c.operationReadUntil(op, w.stop)
+				again, rdAgain, err := readOp()
 				switch {
 				case errors.Is(err, ErrWatchEnded):
 					// The watch ended before the second read: the terminal read stands, and the failed drain is reported.
@@ -200,15 +217,9 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 					if w.halt.err != nil { // Until failed: its error stands too, as at the stop below
 						return nil, OperationRead{}, errors.Join(derr, w.halt.err)
 					}
-					// A refused certificate ends the watch with the refusal, as in stopped: the terminal read
-					// before it is of a server the client no longer trusts.
-					// The drain's own refusal, whatever the second read met after it: a refused certificate, or the
-					// refusal of a recovery start, which no read of the operation can precede with its state.
-					if trustRefusal(derr) != nil || processRefusal(derr) {
-						return nil, OperationRead{}, derr
-					}
-					if t := trustRefusal(err); t != nil {
-						return nil, OperationRead{}, errors.Join(derr, t)
+					// A refusal the watch met ends it with the refusal, beside the drain's own error.
+					if note.err != nil {
+						return stopped(err, derr)
 					}
 					if !c.EpochHolds(rd) {
 						return nil, OperationRead{}, errors.Join(derr, err, ErrWatchRestored)
@@ -324,15 +335,6 @@ func (c *Client) renewSoon() {
 // eventsRoute is the route of an operation's event stream, as a stop line names it.
 func eventsRoute(op string) string {
 	return "GET /api/v1/operations/" + url.PathEscape(op) + "/events"
-}
-
-// trustRefusal is the refused server certificate in err, or nil.
-func trustRefusal(err error) error {
-	var t *trust
-	if errors.As(err, &t) {
-		return t
-	}
-	return nil
 }
 
 // pause waits d before the watch's next attempt. A Ctrl-C ends the wait and the watch, as it ends the
@@ -458,6 +460,7 @@ func (c *Client) streamIn(armed context.Context, op string, last *string, w Watc
 			// A refused server certificate is a transport failure here as any other: noticed, and the
 			// operation is read next, which repeats it until the watch ends (§8.6 item 2).
 			err = transportError(c.Context, c.Context.Host(), err)
+			c.noteRefusal(err)
 			fmt.Fprintf(c.Notices, "%s: %s: %v\n", c.Context.Where(), route, err)
 			return false, false, nil
 		}

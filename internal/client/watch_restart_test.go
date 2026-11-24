@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -303,5 +304,109 @@ func TestWatchEndedAfterARecoveryRefusedDrain(t *testing.T) {
 	var p *Problem
 	if op != nil || errors.Is(err, ErrWatchEnded) || !errors.As(err, &p) || p.Code() != "recovery-mode-active" {
 		t.Errorf("watch: %v, %v; want no operation and the recovery start's refusal, which is not ErrWatchEnded", op, err)
+	}
+}
+
+// hookWriter is a Notices writer that runs on, once its text appears.
+type hookWriter struct {
+	buf  bytes.Buffer
+	text string
+	on   func()
+	done bool
+}
+
+func (h *hookWriter) Write(p []byte) (int, error) {
+	h.buf.Write(p)
+	if !h.done && strings.Contains(h.buf.String(), h.text) {
+		h.done = true
+		h.on()
+	}
+	return len(p), nil
+}
+
+// TestWatchEndedAfterAStreamOnlyRefusal checks that a refused certificate met only by the open of the event stream, with
+// every read of the operation after it failing to connect until the watch ended, still gives the refusal (§8.6 item 2).
+func TestWatchEndedAfterAStreamOnlyRefusal(t *testing.T) {
+	const e1 = "ep_BWSYNTH1"
+	untrusted := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(untrusted.Close)
+	gone := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	gone.Close()
+	o := &opServer{streams: []func(http.ResponseWriter, *http.Request){sse()}, epochs: []string{e1}, states: []string{"running"}}
+	f := &fake{epoch: e1, post: func(_ int, w http.ResponseWriter, r *http.Request) { o.serve(w, r) }}
+	c, _, _ := writeClient(t, f, e1)
+	// The refusal of the stream open is the only one: once it is noticed, nothing answers.
+	c.Notices = &hookWriter{text: "is not trusted by the system trust store", on: func() { c.Context.Server = gone.URL }}
+	var waits []time.Duration
+	waitFor = func(ctx context.Context, d time.Duration) error {
+		if waits = append(waits, d); len(waits) == 4 { // the pause of the first attempt ends
+			c.Context.Server = untrusted.URL
+		}
+		return ctx.Err()
+	}
+	t.Cleanup(func() { waitFor = defaultWait })
+	op, _, err := c.Watch("op_BWSYNTH", Watch{Show: func(Event) {}, Until: func() (bool, error) { return sumWaits(waits) >= 4*time.Second, nil }})
+	if op != nil || errors.Is(err, ErrWatchEnded) || !errors.As(err, new(*trust)) {
+		t.Errorf("watch: %v, %v; want no operation and the trust refusal, which is not ErrWatchEnded", op, err)
+	}
+}
+
+// TestWatchRefusalSupersededByARead checks that a successful read of the operation clears a refusal met before it:
+// the watch that then ends in an outage returns the last read, and no refusal.
+func TestWatchRefusalSupersededByARead(t *testing.T) {
+	const e1 = "ep_BWSYNTH1"
+	untrusted := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(untrusted.Close)
+	gone := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	gone.Close()
+	o := &opServer{streams: []func(http.ResponseWriter, *http.Request){sse()}, epochs: []string{e1}, states: []string{"running"}}
+	f := &fake{epoch: e1, post: func(_ int, w http.ResponseWriter, r *http.Request) { o.serve(w, r) }}
+	c, _, _ := writeClient(t, f, e1)
+	reached := false // the server is back: the stream open's refusal is followed by a read that succeeds
+	hw := &hookWriter{text: "is not trusted by the system trust store", on: func() { c.Context.Server = o2(f, t); reached = true }}
+	c.Notices = hw
+	var waits []time.Duration
+	waitFor = func(ctx context.Context, d time.Duration) error {
+		switch waits = append(waits, d); {
+		case len(waits) == 4: // the pause of the first attempt ends: the certificate is refused
+			c.Context.Server = untrusted.URL
+		case reached && len(waits) > 4 && c.Context.Server != gone.URL: // a read succeeded since: now nothing answers
+			c.Context.Server = gone.URL
+		}
+		return ctx.Err()
+	}
+	t.Cleanup(func() { waitFor = defaultWait })
+	op, _, err := c.Watch("op_BWSYNTH", Watch{Show: func(Event) {}, Until: func() (bool, error) { return sumWaits(waits) >= 8*time.Second, nil }})
+	if op == nil || err != nil {
+		t.Errorf("watch: %v, %v; want the last read, running, and no refusal: a read that succeeded came after it", op, err)
+	}
+}
+
+// o2 starts a plain server that answers like f, for the test above.
+func o2(f *fake, t *testing.T) string {
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// TestWatchCtrlCStaysInterruptedWithARefusalMet checks that a Ctrl-C taken while the read of the operation waits to
+// try again, after it met a refused certificate, still ends the command with Interrupted, not with the refusal.
+func TestWatchCtrlCStaysInterruptedWithARefusalMet(t *testing.T) {
+	untrusted := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(untrusted.Close)
+	c, _, _ := writeClient(t, &fake{epoch: "ep_BWSYNTH-1"}, "ep_BWSYNTH-1")
+	c.Context.Server = untrusted.URL
+	a := newArmed(t)
+	c.Arm = a.hook
+	waitFor = func(ctx context.Context, _ time.Duration) error {
+		a.cancel() // the Ctrl-C comes while the read waits to try again
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	t.Cleanup(func() { waitFor = defaultWait })
+	err := ended(t, c, Watch{})
+	var cut *Interrupted
+	if !errors.As(err, &cut) || errors.As(err, new(*trust)) {
+		t.Errorf("error %v; want Interrupted, not the refusal", err)
 	}
 }
