@@ -53,8 +53,18 @@ describe("what a machine's row says", () => {
     expect(say(adopt("awaiting-approval"))).toEqual({ state: "stopped", text: LINES.otherPlan });
     expect(say(adopt("awaiting-dispatch"))).toEqual({ state: "stopped", text: LINES.otherPlan });
   });
-  test("a plan of another release is not this release's plan, and a frozen machine says so", () => {
-    expect(say(pos("awaiting-approval", { plan: plan("p"), planRelease: `rel_${"s".repeat(26)}` }))).toEqual({ state: "not-applied", text: LINES.notApplied });
+  test("a waiting plan of another release is not this release's plan: the row stops, whatever the plan does, and says so (ginsys/bronzeward#1159)", () => {
+    const other = `rel_${"s".repeat(26)}`;
+    const stopped = { state: "stopped", text: LINES.otherRelease };
+    expect(say(pos("awaiting-approval", { plan: plan("p"), planRelease: other }))).toEqual(stopped);
+    expect(say(pos("awaiting-dispatch", { plan: plan("p"), planRelease: other }))).toEqual(stopped);
+    const adopt = (step: Position["step"]) => ({ ...pos(step, { plan: plan("p"), planRelease: other }), plan: { ...pos(step, { plan: plan("p"), planRelease: other }).plan!, operation: "adopt" } }) as unknown as Position;
+    expect(say(adopt("awaiting-approval"))).toEqual(stopped);
+    expect(say(adopt("awaiting-dispatch"))).toEqual(stopped);
+    // The CLI's applyStanding decides the same four shapes the same way (cmd/bronzewardctl/apply.go).
+    expect(LINES.otherRelease).not.toBe(LINES.otherPlan);
+  });
+  test("a frozen machine says so", () => {
     expect(say(pos("needs-plan", { frozen: true }))).toEqual({ state: "stopped", text: LINES.frozen });
   });
 });
@@ -178,6 +188,15 @@ describe("Show apply", () => {
     expect(w.lines[A]?.state).toBe("stopped");
     expect(w.lines[B]?.state).toBe("ready");
     expect(w.lines[C]?.state).toBe("ready");
+  });
+  // The server answers 409 to a create for a machine whose Desired is not this release (a waiting plan of another
+  // release implies it), so the press leaves the machine out with its reason and sends nothing for it.
+  test("a machine whose waiting plan is another release's gets no plan made and says why", async () => {
+    const w = world({ [A]: pos("awaiting-approval", { plan: plan("p"), planRelease: `rel_${"s".repeat(26)}` }), [B]: pos("needs-plan") });
+    const { plans } = await showApply(REL, [A, B], w.io);
+    expect(w.log).toEqual(["POST /plans"]);
+    expect([...plans.keys()]).toEqual([B]);
+    expect(w.lines[A]).toEqual({ state: "stopped", text: LINES.otherRelease });
   });
   test("leaves out a machine that cannot be planned, in words, and goes on with the others", async () => {
     const w = world({ [A]: pos("needs-plan"), [B]: pos("operation-in-flight", { plan: plan("q") }), [C]: pos("needs-plan") }, { plan: [A] });

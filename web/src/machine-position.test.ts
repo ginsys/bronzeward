@@ -38,10 +38,14 @@ let root: Root;
 let box: HTMLElement;
 // What the position's path answers now; every other path of the page answers at once.
 let answer: ReadResult<unknown>;
+// What the position's plan reads as, and whether its read answers at all.
+let planRead: ReadResult<unknown>;
+const prepared = { id: "pln_1", createdBy: { principal: "prn_cp3aaaaaaaaaaaaaaaaaaaaaaaa", role: "publisher" }, createdAt: "2026-10-26T09:40:00Z" };
 
 const client: Reads["client"] = {
   read: async <T,>(path: string) =>
     (path.endsWith("/position") ? answer
+      : path.startsWith("/plans/") ? planRead
       : path.includes("/observations") || path.includes("/timeline") ? ok({ items: [] })
       : ok(machine)) as ReadResult<T>,
 };
@@ -63,13 +67,38 @@ const settled = () => act(async () => void (await new Promise((r) => setTimeout(
 const line = () => box.querySelector('[data-testid="next-step"]')?.textContent ?? null;
 
 beforeEach(() => {
-  box = document.createElement("div");
+  planRead = ok(prepared);
+  box =document.createElement("div");
   document.body.append(box);
   root = createRoot(box);
 });
 afterEach(async () => {
   await act(async () => root.unmount());
   box.remove();
+});
+
+// A plan nobody on this page can name the ID of (a creation whose outcome was unknown) is the position's plan: the
+// machine's page says who prepared it and when, from the plan's own read (ginsys/bronzeward#1159, item 2).
+describe("the machine page says who prepared the position's plan", () => {
+  const by = () => box.querySelector('[data-testid="next-step-by"]')?.textContent ?? null;
+  test("a waiting plan shows its preparer and time; a plan read that fails draws nothing", async () => {
+    answer = ok({ ...position, step: "awaiting-approval" });
+    planRead = ok(prepared);
+    await mount(0);
+    await settled();
+    expect(by()).toMatch(/^Prepared by .+ on .+\./);
+    planRead = { kind: "transport" };
+    await mount(1);
+    await settled();
+    expect(by()).toBeNull();
+  });
+  test("a position with no plan, or an operation in flight, shows none", async () => {
+    planRead = ok(prepared);
+    answer = ok({ ...position, step: "operation-in-flight", plan: null, operation: { id: "op_1", kind: "apply-config", state: "sending", plan: "pln_1", createdAt: "2026-10-26T09:46:00Z" } });
+    await mount(0);
+    await settled();
+    expect(by()).toBeNull();
+  });
 });
 
 describe("ginsys/bronzeward#891: the machine page draws its next-step line from its own position read", () => {

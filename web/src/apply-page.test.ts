@@ -23,6 +23,8 @@ const position = (id: string, plan: string) => ({
   machine: machine(id), ingestion: null, draft: null, operation: null, rolloutHeldBy: null, step: "awaiting-approval",
   plan: { id: plan, state: "proposed", operation: "apply-config", release: REL, approvalCurrent: null, createdAt: T0, expiresAt: "2026-11-23T08:00:00Z" },
 });
+// The position of a machine whose plan is approved and waits for the controller.
+const waiting = (id: string, plan: string) => ({ ...position(id, plan), step: "awaiting-dispatch" });
 const plan = (id: string, m: string) => ({ id, machine: m, release: REL, operation: "apply-config", createdBy: { principal: "prn_x", role: "publisher" }, createdAt: T0, evidence: { diff: null, validation: null, dryRun: null, baseline: null } });
 const release = { id: REL, sources: [], machines: [{ machine: A }, { machine: B }] };
 
@@ -303,18 +305,115 @@ describe("the apply page's plans and approvals", () => {
     await p.stop();
   });
 
-  // The row keeps the stop line of a write only while the write has not succeeded: once the person repeats the approval
-  // and it is done, the machine's own position speaks again.
-  test("a row stops saying Stopped once the approval it stopped at has been repeated successfully", async () => {
+  // A machine's line is read from its position and no other source (ginsys/bronzeward#1159, item 1): what a write of the
+  // page says is a note about the press, drawn in the same row, and it is not the machine's state. The note stays while
+  // the write has not succeeded; once the person repeats the approval and it is done, the note goes.
+  test("a row's state is its position's while a write of the page has an unknown outcome, and the note goes once it is repeated", async () => {
     const p = mount(served2(), (path) => (path === "/plans/pln_a/approvals" ? { kind: "unknown", why: "the connection was lost", problem: null } : done({ id: "apr_1" })));
     await p.start();
     await p.choose(A);
     await p.press("Apply");
-    expect(p.row(A).getAttribute("data-state")).toBe("stopped");
+    expect(p.row(A).getAttribute("data-state")).toBe("ready");
+    expect(p.row(A).textContent).toContain(LINES.ready);
+    expect(p.row(A).querySelector('[data-testid="apply-note"]')).not.toBeNull();
     p.all[0]!.outcome = done({ id: "apr_1" }) as never;
     await p.render(p.writes);
-    expect(p.row(A).getAttribute("data-state")).not.toBe("stopped");
+    expect(p.row(A).getAttribute("data-state")).toBe("ready");
+    expect(p.row(A).querySelector('[data-testid="apply-note"]')).toBeNull();
     await p.stop();
+  });
+
+  test("a step in progress is a note beside the position's line, not the line", async () => {
+    const p = mount(served2(), () => done({ id: "apr_1" }));
+    await p.start();
+    await p.choose(A);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    vi.spyOn(p.writes, "submit").mockImplementation(async (w) => {
+      await gate;
+      w.outcome = done({ id: "apr_1" }) as never;
+      return w.outcome;
+    });
+    await act(async () => void p.button("Apply").click());
+    expect(p.row(A).getAttribute("data-state")).toBe("ready");
+    expect(p.row(A).querySelector('[data-testid="apply-note"]')?.textContent).toContain(LINES.approving);
+    release();
+    await p.settled();
+    await p.stop();
+  });
+
+  // The positions are re-read only while a machine waits or applies, for ten minutes after a press of either button
+  // (ginsys/bronzeward#1159, item 3). The decision is made on the round that has just answered, so a row that was
+  // ready before the press and waits after it keeps the watch going.
+  describe("the rows are read again only while a machine waits or applies", () => {
+    const path = `/machines/${A}/position`;
+    const afterApproval = (served: Record<string, unknown>) => (p: string) => {
+      if (p.endsWith("/approvals")) served[path] = waiting(A, "pln_a");
+      return done({ id: "apr_1" });
+    };
+    const withTimers = async (run: () => Promise<void>) => {
+      vi.useFakeTimers();
+      try {
+        await run();
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+    test("a row that was ready before Apply and waits after it keeps the watch going, for ten minutes", () =>
+      withTimers(async () => {
+        const served = served2();
+        const p = mount(served, afterApproval(served), true);
+        await p.start();
+        await p.choose(A);
+        await p.press("Apply");
+        const first = p.calls[path]!;
+        await p.elapse(5000);
+        expect(p.calls[path]).toBe(first + 1);
+        await p.elapse(5000);
+        expect(p.calls[path]).toBe(first + 2);
+        await p.elapse(10 * 60 * 1000);
+        const last = p.calls[path]!;
+        await p.elapse(60 * 1000);
+        expect(p.calls[path]).toBe(last);
+        await p.stop();
+      }));
+    test("rows that neither wait nor apply are not read again after Apply", () =>
+      withTimers(async () => {
+        const p = mount(served2(), () => done({ id: "apr_1" }), true);
+        await p.start();
+        await p.choose(A);
+        await p.press("Apply");
+        const first = p.calls[path]!;
+        await p.elapse(60 * 1000);
+        expect(p.calls[path]).toBe(first);
+        await p.stop();
+      }));
+    test("the watch ends when the last waiting row is done", () =>
+      withTimers(async () => {
+        const served = served2();
+        const p = mount(served, afterApproval(served), true);
+        await p.start();
+        await p.choose(A);
+        await p.press("Apply");
+        await p.elapse(5000);
+        served[path] = { ...position(A, "x"), step: "no-step", plan: null, machine: { ...machine(A), applied: { release: REL, source: "operation" }, pendingConvergence: false } };
+        await p.elapse(5000);
+        const last = p.calls[path]!;
+        await p.elapse(60 * 1000);
+        expect(p.calls[path]).toBe(last);
+        await p.stop();
+      }));
+    test("Show apply starts the watch when a machine already waits", () =>
+      withTimers(async () => {
+        const p = mount(served2({ [path]: waiting(A, "pln_a") }), () => done({}), true);
+        await p.start();
+        await p.choose(A);
+        await p.press("Show apply");
+        const first = p.calls[path]!;
+        await p.elapse(5000);
+        expect(p.calls[path]).toBe(first + 1);
+        await p.stop();
+      }));
   });
 
   // The guarantee reaches the rest of a running batch, not only the buttons: with two machines chosen, the second item
@@ -342,7 +441,9 @@ describe("the apply page's plans and approvals", () => {
   test("the rows are read again five seconds after the last read settled, never while one is slow", async () => {
     vi.useFakeTimers();
     try {
-      const p = mount(served2(), () => done({ id: "apr_1" }), true);
+      // The approved plan waits for the controller from the press on: only a waiting row is read again.
+      const served = served2();
+      const p = mount(served, (path) => (path.endsWith("/approvals") ? (served[`/machines/${A}/position`] = waiting(A, "pln_a"), done({ id: "apr_1" })) : done({ id: "apr_1" })), true);
       await p.start();
       await p.choose(A);
       await p.press("Apply");
@@ -369,7 +470,9 @@ describe("the apply page's plans and approvals", () => {
   test("a refresh of the shell's reads restarts the count of a round and the pending wait", async () => {
     vi.useFakeTimers();
     try {
-      const p = mount(served2(), () => done({ id: "apr_1" }), true);
+      // The approved plan waits for the controller from the press on: only a waiting row is read again.
+      const served = served2();
+      const p = mount(served, (path) => (path.endsWith("/approvals") ? (served[`/machines/${A}/position`] = waiting(A, "pln_a"), done({ id: "apr_1" })) : done({ id: "apr_1" })), true);
       await p.start();
       await p.choose(A);
       await p.press("Apply");
