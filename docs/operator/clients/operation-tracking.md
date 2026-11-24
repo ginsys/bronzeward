@@ -110,6 +110,17 @@ which revision the server has and sends nothing.
    Open it again and the server's state is read."
 4. A machine's page shows the machine's timeline, newest first.
 
+![The operation page of the web client for a finished adopt operation. The title reads "Operation:
+Adopt of 10.55.0.3 to S1 import, published 24 Nov 2026, 06:40 (adopt, completed)". A notice says an
+adoption record was made. The "Timeline" lists "adoption" and "applied-change" at 06:40:54, then
+"Live: ended." and "Closing this page does not stop the operation." Below, the page shows Kind
+adopt, State completed, Subject and Created. Taken on the participant fixture at revision
+454b5609, with synthetic names.](images/operation-tracking-1.png)
+
+This screenshot shows a finished adopt operation, which sends nothing to a machine. It does not
+show an apply that is still held, "Live: connected", or an outcome line for an applied release: no
+screenshot of those states was taken.
+
 ## What the result does and does not show
 
 - "Completed" for an apply names the observation that confirmed the release. It is the

@@ -8,9 +8,10 @@ the server itself is the problem is in the [server troubleshooting guide](../tro
 
 **You need** no role: none of these cases reaches the point where a role is checked. The `text`
 blocks show the sentences as the source builds them. This page does not claim that a run printed
-them.
+them, except one: a browser run on the participant fixture showed the web sentence "The server
+could not be reached", in the screenshot in the web section.
 
-**Nothing on this page changes a machine or the installation.** A command that stops in any of
+**Nothing this page asks you to run changes a machine or the installation.** A command that stops in any of
 these cases sends nothing more, and a redirect or a certificate refusal stops it before the
 request is repeated.
 
@@ -136,6 +137,15 @@ network may be down, or the server answered with a redirect, which this page ref
 "the connection failed. The network may be down, or the server answered with a redirect, which this
 page refuses" and its outcome is unknown. The page cannot tell the two causes apart. The header
 shows "Server <version>, API revision <n>" while the server answers.
+
+![The web client after the server stopped answering. The header shows the name Bronzeward and a
+**Sign out** button, with no navigation. A notice reads "The server could not be reached. The
+network may be down, or the server answered with a redirect, which this page refuses." The rest of
+the page is empty and the footer reads "Client (devel). Server unknown". Taken on the participant
+fixture at revision 454b5609, with the server stopped on purpose.](images/client-troubleshooting-1.png)
+
+This screenshot shows the one sentence for a network failure. It does not show the too-old or the
+deprecated-route sentence: neither was run in a browser.
 
 If the page itself does not load, the browser shows its own error page, and the certificate of the
 page is the browser's to judge. For a cause the page cannot name, run a command such as `status` from

@@ -27,6 +27,14 @@ The steps are numbered. Each one names what you do and what you should see.
    returned to you just now. If it says "No machines recorded yet.", the installation has none
    recorded. It does not show that a machine is reachable, or that it runs the configuration it
    should.
+
+   ![The Machines page of the web client, as a viewer sees it after sign-in. The header reads
+   "Signed in as h-viewer synthetic. Roles: viewer." The navigation on the left shows Inventory,
+   Delivery and Governance. The table lists two machines, 10.55.0.3 and 10.55.0.2, each with
+   Desired and Applied "S1 import", Observed "= applied, 7 min ago" and State "Release not
+   applied yet". The footer reads "Client (devel). Server (devel), API revision 17". Taken on the
+   participant fixture at revision 454b5609, with synthetic names.](images/quick-start-web-1.png)
+
 5. **Look around.** The left navigation has three groups. Inventory holds Machines, Clusters and
    Fragments and profiles. Delivery holds Drafts and releases, Plans and Operations. Governance
    holds Audit and, for a recovery administrator or while the installation is in recovery mode,
@@ -42,8 +50,10 @@ The steps are numbered. Each one names what you do and what you should see.
 
 ## What you did, and what you did not
 
-This page is written from the web client's source and its specification. No step was run in a
-browser for this page. You signed in and read the pages you opened. You asked for no change on the
+This page is written from the web client's source and its specification. One part was run in a
+browser: a sign-in on the participant fixture at revision 454b5609, then a read of Machines, which
+gave the screenshot in step 4. No other step was run in a browser, and neither was any failure case
+below. You signed in and read the pages you opened. You asked for no change on the
 server or on any machine. A list that shows a machine does not show that the machine runs what it
 should: the drift page does that, in the journey pages.
 

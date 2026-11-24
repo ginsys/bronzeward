@@ -214,7 +214,7 @@ approval](plan-and-approval.md)).
    instance, from the owner generation read from its events and attempts.") and **Resolve as
    cancelled** ("Cancel an operation that has no attempt. This action sends nothing to the node and
    records no remote outcome."). An **Account for an attempt** section lists each attempt with no
-   accounting, with the same form as step 3.
+   accounting, with the form of web step 3.
 7. **Exit recovery** stays off until every scope is released. The state `ready` is not released.
 8. **Revoke identity** takes the identity, or the issuer and subject, and a reason; one press sends
    it. A revocation is permanent. The same act on the command line is `identity revoke` (see the
@@ -222,6 +222,19 @@ approval](plan-and-approval.md)).
 
 A control you may not use is shown off with the reason beside it. The server's answer stays the
 authority: a refusal is shown in place with its next step.
+
+![The Recovery page of the web client after the entry, signed in as a recovery administrator. The
+banner reads "Recovery mode since 06:50, epoch" and an epoch name, and "1 of 2 scopes not
+released: those cannot commit. Drafts can be edited." The navigation shows Recovery. The page
+shows the entry that was recorded, with the two restored backups and their digests, and the table
+of scopes: machine 10.55.0.3 "released" and machine 10.55.0.2 "pre-restore-unaccounted" with its
+next step. The first lines of the form **Record accounting** show under the second row. Taken on
+the participant fixture at revision 454b5609, with synthetic names and backup
+files.](images/recovery-after-restore-1.png)
+
+This screenshot shows the top of the page in steps 2 and 3. It does not show the rest of the form
+**Record accounting**, **Mark**, **Release**, **Exit recovery** or **Revoke identity**, which lie
+below it: nothing on the page was filled in or pressed.
 
 ## What can go wrong
 

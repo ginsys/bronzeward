@@ -113,5 +113,8 @@ bronzewardctl release provenance <release> <machine>
 - The rendered review is the configuration as redacted. Provenance covers secret references only,
   so it does not trace any other field.
 
+This page has no screenshot: the release page lists rendered configuration, and no screenshot of one
+is kept in this documentation.
+
 Next: [plan the release for a machine and have it approved](plan-and-approval.md). A draft that
 needs more changes first goes back to [editing](editing.md).

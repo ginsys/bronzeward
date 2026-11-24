@@ -109,5 +109,8 @@ lists them.
 - "Saved" does not show that the configuration is valid for a machine. That shows when the draft is
   published and a machine's configuration is rendered.
 
+This page has no screenshot: an editor page shows configuration text, and no screenshot of one is
+kept in this documentation.
+
 Next: [import a machine's configuration under review](protected-import.md), or, when the draft is
 finished, [publish it](publication.md).
