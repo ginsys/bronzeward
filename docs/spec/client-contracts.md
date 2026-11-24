@@ -3055,14 +3055,15 @@ not part of this rule.
    be checked." It names no
    cause and no value. For a release whose `nodeName` is absent, not recorded because
    the release was made before it was recorded, the review says: "Not checked: this release was made before
-   hostname clashes were recorded, so a clash with another machine's hostname cannot be checked." and names no
-   secret; a release with an `unrecorded` source is one of these, and its item 7 sentence ("not recorded for this
+   Kubernetes node names were recorded, so a clash with another machine's node name cannot be checked." and names no
+   secret. The sentence is scoped to the node-name comparison: publication still compares such a release's recorded
+   hostname with the other machines'. A release with an `unrecorded` source is one of these, and its item 7 sentence ("not recorded for this
    release") stands beside it. A release made after the record with a `none` or `legacy-stable` source and
    `nodeName` `null` gets no sentence of this item: its sentence in item 7 already says the node chooses its own or
    that the setting is legacy. A `hostnameHeldBy` the client cannot show (a machine it cannot read)
    shows "This plan waits for another machine's hostname." and no more. The CLI and the web console are
-   ginsys/bronzeward#1042 and ginsys/bronzeward#1043 for the words of item 7; this item's words ride with the one
-   implementation issue that the specification of the plan's wait files when it merges.
+   ginsys/bronzeward#1042 and ginsys/bronzeward#1043 for the words of item 7; this item's words are built in both
+   clients by ginsys/bronzeward#1149.
 
 **A10. An operation says in words what it did, who started it and what comes next (client rule, no API change).**
 Closes G28 ([#998](https://github.com/ginsys/bronzeward/issues/998)). The web client's operation page shows one sentence
