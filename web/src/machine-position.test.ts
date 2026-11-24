@@ -116,7 +116,13 @@ describe("the machine page says who prepared the position's plan", () => {
     await settled();
     expect(by()).toMatch(/^Prepared by /);
   });
-  test("a position with no plan, or an operation in flight, shows none", async () => {
+  test("a plan the position names while an operation runs (a second plan after a completion) shows its preparer too", async () => {
+    answer = ok({ ...position, step: "operation-in-flight", operation: { id: "op_1", kind: "apply-config", state: "sending", plan: "pln_0", createdAt: "2026-10-26T09:46:00Z" } });
+    await mount(0);
+    await settled();
+    expect(by()).toMatch(/^Prepared by /);
+  });
+  test("a position with no plan shows none", async () => {
     planRead = ok(prepared);
     answer = ok({ ...position, step: "operation-in-flight", plan: null, operation: { id: "op_1", kind: "apply-config", state: "sending", plan: "pln_1", createdAt: "2026-10-26T09:46:00Z" } });
     await mount(0);
