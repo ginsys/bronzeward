@@ -1549,8 +1549,9 @@ memory, `internal/client/store.go:25-27`, `internal/client/store.go:166-168`; a 
 `internal/client/store.go:110-153`; the notice of a renewal that fails,
 `internal/client/client.go:86-90`; the token file, `cmd/bronzewardctl/commands.go:111`,
 `internal/client/credentials.go:37-65`, `internal/client/credentials.go:94-176`,
-`internal/client/login.go:324-388`, `internal/client/token.go:67`. Item 4: `Setenv` and `os.Environ` appear nowhere in
-`cmd/bronzewardctl` or `internal/client`, and `exec` is used only to open the authorization URL
+`internal/client/login.go:324-388`, `internal/client/token.go:67`. Item 4: `Setenv` appears nowhere in
+`cmd/bronzewardctl` or `internal/client`, `os.Environ` only in the re-execution that sets
+`GOTRACEBACK=none` (`cmd/bronzewardctl/main.go:118`), and `exec` is used only to open the authorization URL
 (`internal/client/login.go:299`, the control of that search) and to run `security` with the secret
 on its standard input (`internal/client/store_security.go:27`); the token's claims are the only
 output of a token (`cmd/bronzewardctl/commands.go:278-279`). That is a search of those two
@@ -1762,8 +1763,9 @@ abort signal, `web/src/auth.ts:445-461`; the redirect and its thresholds, `web/s
 `web/src/auth.ts:232`, `web/src/auth.ts:276`, `web/src/auth.ts:370-371`. Item 4: neither `iframe` nor
 `prompt=none` appears in `web/src` outside tests. Item 5: `web/src/request.ts:4`,
 `web/src/request.ts:356`, with the other fetches at `web/src/auth.ts:430`, `web/src/auth.ts:448`,
-`web/src/userinfo.ts:31` and `web/src/config.ts:27`; the page also fetches the provider's discovery
-document (`web/src/auth.ts:60`), which the sentence does not list. Item 6: `profile`,
+`web/src/userinfo.ts:31` and `web/src/config.ts:27`. **Proposed** for item 5's list of provider
+endpoints: it adds the discovery document, which the page fetches (`web/src/auth.ts:60`) and the
+sentence does not list. Item 6: `profile`,
 `web/src/auth.ts:84-86`, `web/src/auth.ts:123`; the `userinfo` read and the name,
 `web/src/userinfo.ts:11-48`, `web/src/app.tsx:164`, `web/src/shell.tsx:363-368`,
 `web/src/shell.tsx:534`; `invalid_scope`, `web/src/auth.ts:107`, `web/src/auth.ts:113`,
@@ -1801,8 +1803,9 @@ Built, except the parts marked **Proposed** below. Sources follow each item.
    `internal/client/token.go:46`. It says so before a write marked human-only,
    `internal/client/write.go:207-209`, but not before a human-only read such as `import review`,
    `cmd/bronzewardctl/review.go:28`.)
-4. The web interface accepts no automation token. (Built: `bwt_` appears in `web/src` outside tests
-   only in the `403` text of `web/src/states.tsx:22`.)
+4. The web interface accepts no automation token. (Built: `bwt_` appears nowhere in `web/src` outside tests, so the
+   page holds only a token its own sign-in obtained; the one place that names automation tokens is
+   the human-only refusal text, `web/src/states.tsx:22`, which has no prefix.)
 5. After a restore, automation tokens from the earlier epoch answer `401`; the CLI's message says
    the token must be reissued by the operator with the server-side command
    ([persistence and API §12.3](persistence-api.md#123-what-a-restored-state-means-record-by-record)).
@@ -1819,8 +1822,8 @@ Built in the clients each item names, except the part marked **Proposed**.
    `internal/client/watch.go:392`, `internal/client/watch.go:435`; web `web/src/auth.ts:12`,
    `web/src/auth.ts:20-23`, `web/src/page.ts:88`, `web/src/request.ts:190`,
    `web/src/request.ts:231-238`, `web/src/request.ts:383-417`, `web/src/write.ts:362`,
-   `web/src/write.ts:440`. The web client renews at `max(left - 60 s, left / 2)`, which is 60 s
-   for a lifetime of 120 s or more.)
+   `web/src/write.ts:440`. The web client renews after a delay of `max(left - 60 s, left / 2)`, where `left` is the
+   remaining lifetime: 60 s before expiry when `left` is 120 s or more, and halfway to expiry when it is shorter.)
 2. A renewal that returns a different `sub` or `iss` is a new sign-in: pending writes are set
    aside ([§8.4](#84-idempotency-and-ambiguous-responses) item 3) and the change is shown. (Built:
    CLI `internal/client/credentials.go:308-312`, `internal/client/write.go:304-308`; web
@@ -1999,11 +2002,13 @@ any script running in the page can call the API as the operator. (Built in the w
 `web/index.html:8` loads only `/src/main.tsx`; a search of `web/src` and `web/index.html` outside
 tests for `https?://` finds a documentation link (`web/src/recovery.tsx:91`) and URL-shape strings,
 and a search for `sentry|analytics|telemetry|onerror|unhandledrejection|sendBeacon|EventSource|WebSocket`
-finds nothing; the network calls are `web/src/request.ts:356`, `web/src/auth.ts:430`,
-`web/src/config.ts:27` and `web/src/userinfo.ts:31`. No `dangerouslySetInnerHTML`, `innerHTML`,
+finds nothing; the network calls are `web/src/request.ts:356`, `web/src/auth.ts:60` (discovery),
+`web/src/auth.ts:430` (revocation), `web/src/auth.ts:448` (token), `web/src/config.ts:27` and
+`web/src/userinfo.ts:31`. No `dangerouslySetInnerHTML`, `innerHTML`,
 `outerHTML`, `insertAdjacentHTML` or `document.write` appears in `web/src` outside tests. There is no
-syntax highlighting: `yaml` is used only to parse (`web/src/position.ts:7`, `web/src/marks.tsx:9`,
-`web/src/onboard.ts:9`) and a diff is plain text (`web/src/app.css:134`).)
+syntax highlighting: `yaml` parses (`web/src/position.ts:7`, `web/src/marks.tsx:9`,
+`web/src/onboard.ts:9`) and writes one document, the onboarding contexts file
+(`web/src/onboard.ts:108`), and a diff is plain text (`web/src/app.css:134`).)
 
 **CSRF.** The API authenticates only by the `Authorization` header and never by a cookie, so a
 cross-site request carries no credential. This holds only while no cookie authentication is
@@ -2032,7 +2037,7 @@ which stays **Proposed**; item 1's server half is a server fact. Sources follow 
    on a `pageshow` with `persisted` true the application discards any state and renders nothing
    until signed in again, so the guarantee rests on items 3 and 4, not on the header alone.
    (Built in the client: `web/src/app.tsx:94-96` reloads on a persisted `pageshow`, and the page
-   renders nothing without a token, `web/src/app.tsx:26-28`. **Proposed:** the header, see above.)
+   renders nothing without a token, `web/src/app.tsx:26-28`, `web/src/app.tsx:237-238`. **Proposed:** the header, see above.)
 
 ### 10.4 Styling and the content policy
 
@@ -2113,20 +2118,20 @@ measured by `measure()` in `web/e2e/auth/helpers.ts:372` and asserted at
 `web/src/app.css:48`, case `web/e2e/styling.e2e.ts:110-120` and `:170-176`. Item 3:
 `web/src/app.css:45-47`, `web/src/app.css:86-88`, case `web/e2e/styling.e2e.ts:178-196`. Item 4:
 `web/src/app.css:54-58`, case `web/e2e/styling.e2e.ts:122-146` (the positive control at `:137-145`).
-Item 5: the only positions in `web/src/app.css` are `.skip` and `.sr-only` (`:31-33`) and the
-navigation track (`:77`). Item 6: the top bar, `web/src/shell.tsx:530-545`; the navigation and its
+Item 5: the only positions in `web/src/app.css` are `.skip` and `.sr-only` (`:31-33`); the
+navigation column is a grid track with a width and no position (`:74`, `:77`). Item 6: the top bar, `web/src/shell.tsx:530-545`; the navigation and its
 groups, `web/src/shell.tsx:548-557`, `web/src/router.ts:22-26`, `web/src/layout.test.ts:9-17`, with no
 `<aside` in `web/src`; the column and the stacking, `web/src/app.css:89-95`; the alert box and the
 detail grid, `web/src/states.tsx:85`, `web/src/app.css:70` and `:102`; the words,
 `web/src/words.ts:92-104`, `web/src/machines.tsx:25-40`, `web/src/drift.tsx:64`; the row titles,
 `web/src/titles.ts:29`, `:35`, `:58`; the page notes, `web/src/page-note.tsx`,
 `web/src/page-notes.test.ts`; the CLI's state words and §2.4 sentences,
-`cmd/bronzewardctl/reads.go:278-296` and `:352` (the sentences were not compared word for word
-against operator experience §2.4). Item 7: `web/src/icons.tsx:1-45`, `web/src/layout.test.ts:21-29`,
+`cmd/bronzewardctl/reads.go:278-296` and `:353-355` (the sentences were not compared word for word
+against operator experience §2.4). Item 7: `web/src/icons.tsx:1-49`, `web/src/layout.test.ts:21-29`,
 and no `style=` in `web/src` outside tests.
 
 **Proposed**, where today differs: (a) item 1: the 3:1 pairs for borders, rules and the focus ring
-are quoted in the header comment of `web/src/app.css:18-24` and no case measures them (the only
+are quoted in the header comment of `web/src/app.css:7-10` and no case measures them (the only
 related check is the ring colour at `web/e2e/styling.e2e.ts:115`). (b) Item 6: the spacing scale is
 `web/src/app.css:75`, but `.alert .icon` takes an off-scale margin (`web/src/app.css:105`), so the
 scale is not yet the only source in the shell rules. (c) Item 6: the bordered panel (`web/src/app.css:120`)
@@ -2207,7 +2212,8 @@ item 7. Sources follow each item.
    editor is the operator's file; the documentation says that editors keep swap and backup files
    the client cannot control. (Built for the first sentence: a search of `cmd/bronzewardctl` and
    `internal/client` outside tests for `CreateTemp|MkdirTemp|TempDir|EDITOR|VISUAL|exec.Command`
-   finds `xdg-open` with a URL only (`internal/client/login.go:299`), a temporary file for the
+   finds `xdg-open` with a URL only (`internal/client/login.go:299`), the `security` tool on macOS,
+   which takes the secret on its standard input (`internal/client/store_security.go:27`), a temporary file for the
    context file (`internal/client/config.go:126`) and one for the token file
    (`internal/client/credentials.go:138`, written and renamed; tokens are in the table above and
    the clause names protected input and the review, which that file is not); the web client has no
@@ -2343,12 +2349,12 @@ qualifies the journeys' candidate C4 against [compilation §3.6](compilation.md#
 the signals are taken before the terminal goes raw and an inherited-ignored one is skipped,
 `cmd/bronzewardctl/review.go:131-150`, with the restore and the end by the signal,
 `cmd/bronzewardctl/review.go:152-186` and `cmd/bronzewardctl/main.go:94-104`, and no marks prompt
-after an error, `cmd/bronzewardctl/review.go:80-83`; a terminal that takes no output,
-`cmd/bronzewardctl/pagerout.go:33-66`, and the failed leave, `cmd/bronzewardctl/review.go:160-165`;
+after an error, `cmd/bronzewardctl/review.go:78-79`; a terminal that takes no output,
+`cmd/bronzewardctl/pagerout.go:33-66`, and the failed leave, `cmd/bronzewardctl/review.go:168-169`;
 the resize, the small window, the cells and the wrap, `cmd/bronzewardctl/pager.go:20-29`,
 `cmd/bronzewardctl/pager.go:85-107`, `cmd/bronzewardctl/pager.go:132-148`,
 `cmd/bronzewardctl/pager.go:182-232`; the case `internal/clitest/testdata/protected-cases.yaml:37`.
-Item 2: `cmd/bronzewardctl/review.go:22-24` and `:78`. Item 3: marks, `cmd/bronzewardctl/fragments.go:235-254`,
+Item 2: `cmd/bronzewardctl/review.go:25-26` and `:75`. Item 3: marks, `cmd/bronzewardctl/fragments.go:235-254`,
 `cmd/bronzewardctl/fragments.go:361-368`, `cmd/bronzewardctl/fragments.go:437-446`;
 the refusal by position, `internal/client/problem.go` and `cmd/bronzewardctl/review.go:372-386`; the
 follow after the `marked` event at the `202`'s generation and the settlement events,
