@@ -1420,7 +1420,9 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    (`web/src/progress.ts:239`, `web/src/request.ts:197-208`, `web/src/request.ts:226-230`,
    `web/src/request.ts:277`; a `401` is renewed and sent again first, `web/src/request.ts:253-268`).
    The wait is in steps of 250 ms, each asking `until`, so a watch that ends is left within 250 ms,
-   and the page leaving ends it at once (`web/src/progress.ts:195-206`). While the operation read
+   and the page leaving ends it at once (`web/src/progress.ts:195-207`). The wait after a void
+   terminal read is the same wait, and a watch that ends in it fails with the defect that no read
+   stands (`web/src/progress.ts:261`, `web/src/progress.ts:278`). While the operation read
    is an outage it is read again with no stream or page read between two attempts, as the CLI's
    read keeps its own retry phase (`web/src/progress.ts:210`, `web/src/progress.ts:218`,
    `web/src/progress.ts:242`). That phase has its own backoff, 1 s doubling to 30 s, and its own
@@ -1431,7 +1433,7 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    `internal/client/client.go:236-244`, `internal/client/client.go:268`). The drain of a terminal state that is refused or stays unavailable
    is followed at once by a read of the operation in that phase (`web/src/progress.ts:286`): a
    read of the same epoch that is terminal reports the failure of that drain, with no second
-   drain; a terminal read of another epoch is void, and the watch goes on after the delay; any
+   drain; a terminal read of another epoch is void, and the watch goes on after the delay, which is that wait; any
    other read goes on (`web/src/progress.ts:254-263`; the CLI: `internal/client/watch.go:181-203`,
    `internal/client/watch.go:218-229`). A watch that ends
    in an outage returns the last read of the operation as ended; a terminal read whose events could

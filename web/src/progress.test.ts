@@ -455,11 +455,28 @@ describe("the operation progress reader (§8.6)", () => {
         streams: [{ chunks: [] }, ...later()], states: ["succeeded", "succeeded@e2", "running@e2"], pageRefusals: [403], pagesEpoch: "e2", probeEpoch: "e2",
       });
       let ops = 0;
-      const r = recorder(() => true);
+      // The wait after the void read asks until too (§8.6 item 2), and it answers false until the read after it.
+      const r = recorder(() => ops >= 3);
       const out = await watch(reader(s, (p) => operationPath(p) && ++ops === 2, "before"), OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "ended", operation: { state: "running" }, epoch: "e2" });
-      expect(r.sleeps).toEqual([1000]);
+      expect(r.sleeps).toEqual([250, 250, 250, 250]);
       expect(s.urls.filter((u) => u.startsWith(EVENTS)).length - s.opened.length).toBe(1);
+    });
+
+    // The wait after a void terminal read is a wait between attempts: a watch that ends is left within 250 ms
+    // of it ending, as in the outage's wait, and no read stands.
+    test("an until that answers true during the wait after a void terminal read ends the watch within 250 ms", async () => {
+      const later = (): Stream[] => Array.from({ length: 3 }, () => ({ chunks: [], epoch: "e2" }));
+      const s = server({
+        streams: [{ chunks: [] }, ...later()], states: ["succeeded", "succeeded@e2", "running@e2"], pageRefusals: [403], pagesEpoch: "e2", probeEpoch: "e2",
+      });
+      let ops = 0;
+      let waits = 0;
+      const r = recorder(() => ops >= 2 && ++waits >= 2);
+      const out = await watch(reader(s, (p) => operationPath(p) && ++ops === 2, "before"), OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "failed", res: { kind: "defect" } });
+      expect(r.sleeps).toEqual([250, 250]);
+      expect(ops).toBe(2);
     });
 
     // The retry phase of the operation read has its own backoff, from 1 s at each phase (the CLI's retryIn),
