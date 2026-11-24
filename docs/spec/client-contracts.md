@@ -956,8 +956,7 @@ recovery mode mints no new epoch, so no epoch comparison can detect it
 ([persistence and API §12.1](persistence-api.md#121-the-epoch)); that residual is the
 contract's, and this specification does not close it.
 
-Items 1 to 4 are built in the clients they name, except where marked **Proposed** in them. Items 5
-to 8 stay **Proposed** here: their code was not read for this change.
+Items 1 to 8 are built in the clients they name, except where marked **Proposed** in them.
 
 1. **Key.** One key per logical write, 128 bits from the operating system's random source,
    base64url without padding (22 characters, within `internal/api/api.go:394`). Never derived from
