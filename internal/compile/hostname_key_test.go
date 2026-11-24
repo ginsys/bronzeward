@@ -96,41 +96,41 @@ func patched(t *testing.T, text []byte, patch string) []byte {
 
 // K7: is there a fragment route that hands a legacy key's hostname to the fill, as a `$patch: delete` of the
 // document does? Each candidate is applied to a base that holds the key under the previous name, and the
-// result is compiled for the current name. The answers pinned here are the measurement compilation.md §6.1
-// item 5 cites.
+// result is compiled for the current name. Measured at machinery v1.14.5 (2026-11-24, a routed Job): a
+// `$patch: delete` of the key, or of the mapping that holds it, removes the key and the fill then writes the
+// document; an empty string or a null changes nothing, the key stays and stays explicit. The answers are the
+// ones compilation.md §6.1 item 5 cites. Every candidate is accepted by the gate and compiles.
 func TestLegacyKeyFragmentRoutes(t *testing.T) {
 	for _, tc := range []struct {
 		label, patch string
+		kept         bool     // the key is still in the composition
+		want         Hostname // the decision for the current name
+		composed     string   // the hostname the composition ends up with
+		document     bool     // the composition holds a HostnameConfig document
 	}{
-		{"delete the key", "machine:\n  network:\n    hostname:\n      $patch: delete\n"},
-		{"delete the mapping that holds it", "machine:\n  network:\n    $patch: delete\n"},
-		{"an empty string", "machine:\n  network:\n    hostname: \"\"\n"},
-		{"null", "machine:\n  network:\n    hostname: null\n"},
-		{"control: another name", "machine:\n  network:\n    hostname: other-1\n"},
+		{"delete the key", "machine:\n  network:\n    hostname:\n      $patch: delete\n",
+			false, Hostname{HostnameMachineName, hostMachine}, hostMachine, true},
+		{"delete the mapping that holds it", "machine:\n  network:\n    $patch: delete\n",
+			false, Hostname{HostnameMachineName, hostMachine}, hostMachine, true},
+		{"an empty string", "machine:\n  network:\n    hostname: \"\"\n",
+			true, Hostname{HostnameConfiguration, ""}, keyPrevious, false},
+		{"null", "machine:\n  network:\n    hostname: null\n",
+			true, Hostname{HostnameConfiguration, ""}, keyPrevious, false},
+		{"control: another name", "machine:\n  network:\n    hostname: other-1\n",
+			false, Hostname{HostnameConfiguration, ""}, "other-1", false},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
-			p, err := configpatcher.LoadPatch([]byte(tc.patch))
-			if err != nil {
-				t.Logf("MEASURED %s: the gate refuses the patch at load: %v", tc.label, err)
-				return
+			b := patched(t, withKey(t, keyPrevious), tc.patch)
+			if held := strings.Contains(string(b), keyPrevious); held != tc.kept {
+				t.Errorf("key kept = %v, want %v", held, tc.kept)
 			}
-			res, err := configpatcher.Apply(configpatcher.WithBytes(withKey(t, keyPrevious)), []configpatcher.Patch{p})
-			if err != nil {
-				t.Logf("MEASURED %s: the patch does not apply: %v", tc.label, err)
-				return
+			c := compiled(t, hostIn(source(t, string(b), ingest.Declarations{}, nil), hostMachine, ModeMetal))
+			if got := c.Hostname(); got != tc.want {
+				t.Errorf("decision %+v, want %+v", got, tc.want)
 			}
-			b, err := res.Bytes()
-			if err != nil {
-				t.Fatal(err)
+			if host, doc := composedHostname(t, c); host != tc.composed || doc != tc.document {
+				t.Errorf("composed hostname %q (document %v), want %q (document %v)", host, doc, tc.composed, tc.document)
 			}
-			held := strings.Contains(string(b), keyPrevious)
-			c, err := Compile(hostIn(source(t, string(b), ingest.Declarations{}, nil), hostMachine, ModeMetal))
-			if err != nil {
-				t.Logf("MEASURED %s: key kept %v, compile refused: %v", tc.label, held, err)
-				return
-			}
-			host, doc := composedHostname(t, c)
-			t.Logf("MEASURED %s: key kept %v, decision %+v, composed hostname %q, document %v", tc.label, held, c.Hostname(), host, doc)
 		})
 	}
 }
