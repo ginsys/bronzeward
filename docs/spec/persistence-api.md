@@ -5275,14 +5275,21 @@ design and evidence do not settle the question. Each is marked in place as
     and cannot see an older import; a field on the machine row, which a second
     import of a machine whose type changed would have to update, and the import base
     already keeps one value per import.
-50. **Refactoring an imported configuration is proved by the ordinary diff and
-    the approver; a typed equivalence check and a thinner-base route are not
-    specified yet** (design §9.1 step 5; ginsys/bronzeward#918). Decided by the
+50. **Refactoring an imported configuration rests on the ordinary diff and the
+    approver, within the limits of the plan's diff (§9.3); a typed equivalence
+    check and a thinner-base route are not adopted** (design §9.1 step 5;
+    ginsys/bronzeward#918). The plan's diff is a line diff of redacted
+    configurations, and it is withheld, with no text, where either has no
+    redacted form or the machine holds a configuration other than its `Applied`
+    release's artifact, unless the release differs from the import base in form
+    only; where it is withheld the approver has no comparison and approving does
+    not establish equivalence. Decided by the
     lead of the Bronzeward campaign on 24 November 2026, after specification
     reviews could not make the check disclosure-free; the owner may reverse it.
     The owner's order of 19 November 2026 (ginsys/bronzeward#861) stands: the
     check first, then an assisted proposal, and no automatic split; this choice
-    defers the first step, it does not reorder them. **The rejected design:** a
+    defers the first step, it does not reorder them. **The rejected design,
+    drafted in the review of ginsys/bronzeward#1145 and not adopted:** a
     check, run in the publish operation on plaintext, that compares the typed
     documents of the `Applied` composition and the draft's, with a draft route
     that stores a thinner import base as a subset of the current one; narrowed
