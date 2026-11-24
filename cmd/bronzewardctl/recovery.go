@@ -136,17 +136,11 @@ func nextStep(c *client.Client, s apitypes.RecoveryScope) string {
 		}
 		return "operation " + client.Printable(op.Id) + " holds it, with no attempt: recovery resolve " + client.ShellWord(op.Id)
 	case "blocked":
-		// A revision 2 server refuses order on the timeline (client-contracts section 8.6 item 6), so
-		// the request is not sent to it (section 7 item 1).
 		// Newest first, page by page, until the scope's latest move to blocked: later observations can
 		// push it past the first page. A bound on the pages ends in the command that shows the history.
-		// A page can show a new epoch and a server of another revision: each request checks it again.
 		path, cursor := "/machines/"+url.PathEscape(s.Machine)+"/timeline?order=newest&limit=100", ""
 		for range 20 {
-			if c.Revision < 3 {
-				return "the missing keys need API revision 3; see machine timeline " + m + ", then recovery mark " + m
-			}
-			pg, err := c.PageIf(path, cursor, func() bool { return c.Revision >= 3 })
+			pg, err := c.Page(path, cursor)
 			var entries []apitypes.TimelineEntry
 			if err == nil {
 				entries, err = decode[apitypes.TimelineEntry](c, pg.Items...)

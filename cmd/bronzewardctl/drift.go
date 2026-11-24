@@ -205,9 +205,6 @@ func freezeRead(m string) func(*client.Client) (string, error) {
 			return "", err
 		}
 		s := sf("GET /api/v1%s shows frozen %t", path, x.Frozen)
-		if c.Revision < 3 {
-			return s, nil
-		}
 		pg, err := c.Page(path+"/timeline?order=newest&limit=1", "")
 		if err != nil {
 			return "", err

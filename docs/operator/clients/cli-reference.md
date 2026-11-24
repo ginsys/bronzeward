@@ -140,7 +140,7 @@ Global flags and exit codes: bronzewardctl help global.
 
 ```text
 usage: bronzewardctl context add <name> --server <url> [--certificate-authority <file>] [--automation-token-file <path>]
-       bronzewardctl context add <name> --server <url> --issuer <url> --client-id <id> [--audience <aud>] [--scopes a,b]
+       bronzewardctl context add <name> --server <url> --issuer <url> --client-id <id> --audience <aud> [--scopes a,b]
                      [--oidc-certificate-authority <file>] [--oidc-token-file <path>]
        bronzewardctl context add <name> --from <url> [--server <url>] [--certificate-authority <file>] [--scopes a,b]
                      [--oidc-certificate-authority <file>] [--oidc-token-file <path>]

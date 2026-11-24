@@ -15,8 +15,10 @@ import (
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
 )
 
-// MinRevision is the lowest API revision this client works with (decision T7 of #254).
-const MinRevision = 2
+// MinRevision is the lowest API revision this client works with: the highest revision of any route it
+// calls (a machine's name, revision 10), raised in the change that adds a call to a later one
+// (client-contracts.md §7 items 1 and 3).
+const MinRevision = 10
 
 const problemPrefix = "urn:bronzeward:problem:"
 

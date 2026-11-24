@@ -207,6 +207,9 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	if w.HumanOnly && c.signIn == nil {
 		fmt.Fprintf(c.Notices, "%s: %s is for a person signed in, not an automation token: the server refuses it.\n", c.Context.Where(), route)
 	}
+	if c.Interactive && w.Repeat == nil {
+		fmt.Fprintf(c.Notices, "%s: sending %s.\n", c.Context.Where(), route)
+	}
 	// Only item 3's reads come before a repeat's refusal, so the context-use read follows them.
 	err = c.CheckRepeat(w)
 	w.checked = nil // a passed check serves this send only

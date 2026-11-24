@@ -43,7 +43,7 @@ var cmdTable = []cmdEntry{
 	{path: "context use", line: "make a context the current one", synopsis: "context use <name>", roles: "any"},
 	{path: "context add", line: "add a context", roles: "any",
 		synopsis: "context add <name> --server <url> [--certificate-authority <file>] [--automation-token-file <path>]\n" +
-			"context add <name> --server <url> --issuer <url> --client-id <id> [--audience <aud>] [--scopes a,b]\n" +
+			"context add <name> --server <url> --issuer <url> --client-id <id> --audience <aud> [--scopes a,b]\n" +
 			"            [--oidc-certificate-authority <file>] [--oidc-token-file <path>]\n" +
 			"context add <name> --from <url> [--server <url>] [--certificate-authority <file>] [--scopes a,b]\n" +
 			"            [--oidc-certificate-authority <file>] [--oidc-token-file <path>]",

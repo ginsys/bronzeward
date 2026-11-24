@@ -56,9 +56,7 @@ func openIDP(x *Context, d time.Duration) (*idp, context.CancelFunc, error) {
 		}
 	}
 	scopes := x.OIDC.Scopes
-	if len(scopes) == 0 {
-		scopes = []string{"openid", "offline_access"}
-	} else if !slices.Contains(scopes, "openid") {
+	if !slices.Contains(scopes, "openid") {
 		scopes = append([]string{"openid"}, scopes...)
 	}
 	return &idp{ctx: ctx, hc: hc, p: p, conf: oauth2.Config{ClientID: x.OIDC.ClientID, Endpoint: ep, Scopes: scopes}}, cancel, nil

@@ -178,7 +178,28 @@ func (x *Context) Check() error {
 	case x.OIDC == nil || x.OIDC.ClientID == "":
 		return errors.New("an oidc context needs its issuer and client ID")
 	}
-	return endpoint(x.OIDC.Issuer, "oidc.issuer")
+	if err := endpoint(x.OIDC.Issuer, "oidc.issuer"); err != nil {
+		return err
+	}
+	return x.OIDC.checkRequired()
+}
+
+// checkRequired refuses an oidc context with no scopes or no audience (§5, the table's oidc.scopes
+// and oidc.audience rows), naming each field it lacks and what to add. A contexts file with such a
+// context still loads, so context list, use and remove work on it; a command that opens a client or
+// signs in meets this refusal first, before any request.
+func (o *OIDC) checkRequired() error {
+	var lacks []string
+	if len(o.Scopes) == 0 {
+		lacks = append(lacks, "oidc.scopes is empty: add scopes: [openid, offline_access] under oidc (context add: --scopes openid,offline_access)")
+	}
+	if o.Audience == "" {
+		lacks = append(lacks, "oidc.audience is empty: add audience: <the value the server's auth.oidc.audience holds> under oidc (context add: --audience)")
+	}
+	if lacks == nil {
+		return nil
+	}
+	return errors.New(strings.Join(lacks, "; "))
 }
 
 // checkName refuses a name that cannot name a file, such as its renewal lock.

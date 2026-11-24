@@ -199,6 +199,7 @@ export function App() {
       const config = await loadClientConfig();
       if (!still()) return abandon();
       if (config.kind !== "ok") return fail(config.kind === "transport" ? TRANSPORT_FAILURE : config.reason);
+      if (config.config.ingestWaitSeconds !== undefined) writes.ingestWait = config.config.ingestWaitSeconds * 1000;
       const found = await discover(config.config.issuer);
       if (!still()) return abandon();
       if (found.kind !== "ok") return fail(failure(found));
