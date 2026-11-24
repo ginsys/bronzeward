@@ -467,8 +467,8 @@ func (c *Client) streamIn(armed context.Context, op string, last *string, w Watc
 		defer r.Body.Close()
 		c.observe(route, r)
 		if r.StatusCode >= 300 && r.StatusCode < 400 {
-			return false, false, c.Context.fail(fmt.Errorf("%s answered %s redirecting to %q; bronzewardctl follows no redirect",
-				route, printable(r.Status), r.Header.Get("Location")))
+			return false, false, c.Context.fail(fmt.Errorf("%s answered %s redirecting to \"%s\"; bronzewardctl follows no redirect",
+				route, printable(r.Status), quoted(r.Header.Get("Location"))))
 		}
 		if r.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
