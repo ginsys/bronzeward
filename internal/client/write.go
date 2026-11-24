@@ -233,9 +233,6 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	if w.HumanOnly && c.signIn == nil {
 		fmt.Fprintf(c.Notices, "%s: %s is for a person signed in, not an automation token: the server refuses it.\n", c.Context.Where(), route)
 	}
-	if c.Interactive { // a person's repeat of an unknown write is a new command: it names its context too
-		fmt.Fprintf(c.Notices, "%s: sending %s.\n", c.Context.Where(), route)
-	}
 	// Only item 3's reads come before a repeat's refusal, so the context-use read follows them.
 	err = c.CheckRepeat(w)
 	w.checked = nil // a passed check serves this send only
@@ -316,6 +313,11 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 	stillIngesting := func() error {
 		u.Why = fmt.Sprintf("the first request with this key was still ingesting (ingestion %s) after %s", ingestion, waited)
 		return c.unknown(w, u)
+	}
+	// Before the first attempt, so a write refused before it is sent never says "sending"; a person's
+	// repeat of an unknown write is a new command and names its context too (§5 item 2).
+	if c.Interactive {
+		fmt.Fprintf(c.Notices, "%s: sending %s.\n", c.Context.Where(), route)
 	}
 	for try := 0; ; try++ {
 		if ingesting != "" || try > 0 {
