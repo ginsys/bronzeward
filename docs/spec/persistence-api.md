@@ -3107,7 +3107,8 @@ above: a
 `node_name_recorded` column, `NOT NULL DEFAULT false`, is set true by every
 release made after it, never by an `UPDATE`, as `unrecorded` is. A reader can
 so tell "not recorded, made before the revision" from "not compared, a secret
-or nothing set"; neither is ever compared, and a release with source
+or a redacted value as an input, a review withheld in whole, or nothing set";
+neither is ever compared, and a release with source
 `machine-name` that has no `nodeName` recorded is still compared on its
 recorded `name` by publication (compilation §6.1 item 6). Any role reads it with the record, as it reads
 the redacted review (route table, §9.2): the review shows a literal hostname,

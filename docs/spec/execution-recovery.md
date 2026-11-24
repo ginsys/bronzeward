@@ -433,8 +433,12 @@ pass. It takes the cluster's machine rows in id order at the machine-rows step
 of persistence and API §5 rule 5, before the rollout lock: its own row `FOR
 UPDATE` at its own place in that order, every other row `FOR SHARE`. Taking its
 own row first and the others after would lock a lower-id machine out of order,
-and could deadlock with an identity revocation or recovery-mode entry, which
-take every machine row in id order (persistence and API T5c and T9). At the PoC
+and two commitments of one cluster, each holding its own row `FOR UPDATE` and
+waiting for the other's `FOR SHARE`, would deadlock. An identity revocation or a
+recovery-mode entry, which take every machine row in id order (persistence and
+API T5c and T9), cannot interleave with a commitment, since each holds the
+installation state `FOR UPDATE` before its machine rows and a commitment holds it
+`FOR SHARE` (comparison 1; persistence and API §5 rule 5). At the PoC
 limit of one no other machine's operation holds the rollout slot when an
 `apply-config` commitment commits (comparison 5), so the gate reads another machine's
 `Applied` after the apply that would have raced it has ended, and sees what

@@ -1211,7 +1211,7 @@ unmeasured.
    name; only the hostname is the old name. Where the machine that would take the
    node name has an explicit hostname, the refusal reads: "Machine node-b's
    configured hostname gives the Kubernetes node name node-a, but the last
-   release applied to machine node-a still sets that. Give machine node-b
+   release applied to machine node-a records that. Give machine node-b
    another hostname for now, apply the release for machine node-a, then set it."
    It names the derived node name, which is never a secret, and no configured
    value. To exchange the names of two machines, give the first a third
