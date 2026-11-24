@@ -19,6 +19,7 @@ import { NOT_RENDERED } from "../../src/drafts.tsx";
 import { REPLAYED, unknown } from "../../src/states.tsx";
 import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
 import type { Step } from "../injector.ts";
+import { failedWithPane, type Sample } from "../pane-trace.ts";
 import { secondSession } from "../wdio.conf.ts";
 import { absent, dialogsDuring, eventually, faults, fixtureSignIn, inSafari, itNarrow, mint, storageEmpty } from "./helpers.ts";
 
@@ -32,7 +33,52 @@ const writes = async (): Promise<string[][]> => ((await (await fetch(`${CONTROL}
 // Each helper acts in `b`, the spec's browser unless a case passes its second session (ETAG-01).
 type B = WebdriverIO.Browser;
 const pane = (b: B = browser) => b.$('main section[aria-label^="Fragment"]');
-const result = (b: B = browser) => pane(b).$('[data-testid="write-result"]');
+// The page's own record of what the pane showed, from before the first fragment's Save to the absence read after it
+// (pane-trace.ts): the case's failure carries it, and nothing is printed when the read passes. The record only reads, in a
+// MutationObserver callback, and the case's reads and waits are the same with or without it.
+interface PaneTrace { samples: Sample[]; take: (note?: string) => void; stop: () => void }
+async function paneTraceStart(entry: string) {
+  await browser.execute((entryName: string) => {
+    const sections = 'main section[aria-label^="Fragment"]';
+    // The matcher of `label*=name` as WebdriverIO builds it: a label whose whole text contains "name" and holds no label.
+    const matcher = './/label[contains(., "name") and not(.//label)]';
+    const t0 = performance.now();
+    const samples: Sample[] = [];
+    const first = document.querySelector(sections);
+    let last = "";
+    const take = (note?: string) => {
+      const all = document.querySelectorAll(sections);
+      const s = all[0] ?? null;
+      const label = s === null ? null : document.evaluate(matcher, s, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+      const now: Sample = {
+        ms: Math.round(performance.now() - t0),
+        field: label !== null,
+        which: (label?.firstChild?.textContent ?? "").slice(0, 16),
+        remove: s !== null && [...s.querySelectorAll("button")].some((b) => b.textContent === "Remove"),
+        listed: (document.querySelector('main ul[aria-label="Entries"]')?.textContent ?? "").includes(`fragment ${entryName}`),
+        sections: all.length,
+        same: s !== null && s === first,
+      };
+      const key = JSON.stringify([now.field, now.which, now.remove, now.listed, now.sections, now.same]);
+      if (note === undefined && key === last) return;
+      last = key;
+      samples.push(note === undefined ? now : { ...now, note });
+    };
+    const observer = new MutationObserver(() => take());
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    take();
+    (window as unknown as { __pane?: PaneTrace }).__pane = { samples, take, stop: () => observer.disconnect() };
+  }, entry);
+}
+const paneNote = (note: string) => browser.execute((n: string) => (window as unknown as { __pane?: PaneTrace }).__pane?.take(n), note);
+// The samples, with one taken now; none where the page lost its record (a reload), which the trace then says.
+const paneSamples = () => browser.execute(() => {
+  const p = (window as unknown as { __pane?: PaneTrace }).__pane;
+  p?.take("failure read");
+  return p?.samples ?? [];
+});
+const paneTraceStop = () => browser.execute(() => (window as unknown as { __pane?: PaneTrace }).__pane?.stop());
+const result =(b: B = browser) => pane(b).$('[data-testid="write-result"]');
 const notice = () => $('[data-testid="write-notice"]');
 const profilePane = (b: B = browser) => b.$('main section[aria-label^="Profile"]');
 
@@ -211,6 +257,7 @@ describe("the draft editor (#339)", () => {
     await $("main").$("button=Add fragment").click();
     const name = `save-${hex()}`;
     await pane().$("label*=name").$("input").setValue(name);
+    await paneTraceStart(name);
     await putDocument(name);
     await expect(pane().$("p*=Layer:")).toHaveText(expect.stringContaining("new -> unsaved"));
     // The guard asks before the page leaves unsaved text, and the text stays.
@@ -228,7 +275,16 @@ describe("the draft editor (#339)", () => {
     // ginsys/bronzeward#517 H1: the pane now edits the entry it created. H4: Add fragment with that
     // name again sends nothing.
     await expect(pane().$("button=Remove")).toBeExisting();
-    await absent(() => pane().$("label*=name").isExisting(), "the name field of a new entry in the pane after the save");
+    await paneNote("remove waited");
+    try {
+      await paneNote("absence read");
+      await absent(() => pane().$("label*=name").isExisting(), "the name field of a new entry in the pane after the save");
+    } catch (e) {
+      throw await failedWithPane(e, paneSamples);
+    } finally {
+      // The record ends with the read it was made for; a window that is gone must not hide the failure above.
+      await paneTraceStop().catch(() => undefined);
+    }
     await $("main").$("button=Add fragment").click();
     await pane().$("label*=name").$("input").setValue(name);
     await pane().$("button=Save").click();
