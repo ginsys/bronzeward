@@ -1,0 +1,2 @@
+Added
+- A plan waits in words for another machine's hostname: where the last release applied to another machine records the Kubernetes node name this plan's release gives its machine, the plan page, the machine page, the apply page and `bronzewardctl plan show` and `apply` say so and name both machines, and `bronzewardctl release review` says when no node-name clash was checked. Refs ginsys/bronzeward#1149.
