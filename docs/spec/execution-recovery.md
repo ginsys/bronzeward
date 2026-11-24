@@ -121,8 +121,10 @@ Two differences are kept apart:
   base whose release renders the same bytes; [persistence and
   API](persistence-api.md) choice §17.53). A plan and approval resolve it; an
   offline machine in this state is simply not yet converged. The second case
-  sends the configuration the node already holds, and the completed operation
-  records the `Applied` release with its import base like any other.
+  sends a configuration equal to the `Applied` one when the artifact digest is
+  the `Applied` digest, and the completed operation records the `Applied`
+  release with its import base like any other; the plan's pre-dispatch
+  comparison (§3) still decides whether the node holds that configuration.
 - **Drift**: the observed digest differs from the `Applied` digest while no
   operation holds the machine's scope (§6).
 

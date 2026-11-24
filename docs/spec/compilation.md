@@ -1445,7 +1445,10 @@ a change shows, as a path that carries the key names, and nothing marks the leaf
 secret. A secret that was never marked stays unknown to every means. A
 thinner base must also add none: the stored document is a subset of the
 current one ([persistence and API §3.2](persistence-api.md#32-the-import-base)),
-so the check never has to read a value the source does not already hold.
+so the check never has to read a value the source does not already hold. It
+also drops no reference node, so step 7's protection of the base's references
+(§6) stays on every one of them after a refactoring (persistence and API choice
+§17.55).
 
 **Required rejection checks.** An implementation shows each with a control that
 can fail (§15):
