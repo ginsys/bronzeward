@@ -543,6 +543,25 @@ describe("stale-response discard", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  // §8.6 item 2: the watch's abort reaches the retry wait of a page read, so a page that left sends nothing more
+  // (ginsys/bronzeward#1175).
+  test("a read whose signal ends during a 503 retry wait is discarded and not sent again", async () => {
+    const ctl = new AbortController();
+    const { c, fetchMock } = client([problem(503, "dependency-unavailable"), ok({})], { sleep: async () => ctl.abort() });
+    c.setView(base);
+    expect(await c.readWithEpoch("/identity", undefined, undefined, ctl.signal)).toMatchObject({ result: { kind: "discarded" } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("a read whose signal ended before its first send sends nothing", async () => {
+    const ctl = new AbortController();
+    ctl.abort();
+    const { c, fetchMock } = client([ok({})]);
+    c.setView(base);
+    expect(await c.readWithEpoch("/identity", undefined, undefined, ctl.signal)).toMatchObject({ result: { kind: "discarded" } });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test("a read whose epoch is ambiguous when it arrives after the reads were dropped is not sent again", async () => {
     const { fetchImpl: slow, release } = delayed(ok({ stale: true }, "e1"));
     const answers: (Response | typeof fetch)[] = [ok({}), slow, ok({}, "e2"), ok({}, "e2")];

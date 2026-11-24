@@ -85,7 +85,9 @@ export interface ClientOptions {
   // §7 item 4: a route answered with a Deprecation header, told once per route.
   onDeprecation?: (route: string) => void;
   fetch?: typeof fetch;
-  sleep?: (ms: number) => Promise<void>;
+  // The wait of a read's retry; it gets the read's signal, if the caller passed one, and need not obey it:
+  // the read is discarded after the wait when the signal ended.
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 const PROBLEM_PREFIX = "urn:bronzeward:problem:";
@@ -199,17 +201,20 @@ export class Client {
   // operation read of a watch passes 1 and waits itself, so its waits end with the watch (§8.6 item 2).
   // `phase` carries the renewal allowance across such reads: a 401 is renewed once for all the sends of
   // one retry phase, as the CLI's retryIn keeps `renewed` for its whole loop.
-  async readWithEpoch<T>(path: string, tries = MAX_TRIES, phase: Phase = { renewed: false }): Promise<{ result: ReadResult<T>; epoch: string | undefined; moves: number }> {
+  // `signal` is the caller's end: once it is aborted nothing more is sent, and a retry wait ends at once; the
+  // read is then discarded (§8.6 item 2). A request already sent is not cancelled (§8.4 item 8).
+  async readWithEpoch<T>(path: string, tries = MAX_TRIES, phase: Phase = { renewed: false }, signal?: AbortSignal): Promise<{ result: ReadResult<T>; epoch: string | undefined; moves: number }> {
     const seen: Seen = { epoch: undefined, moves: 0 };
-    const result = await this.readFrom<T>(path, seen, tries, phase);
+    const result = await this.readFrom<T>(path, seen, tries, phase, signal);
     return { result, epoch: seen.epoch, moves: seen.moves };
   }
 
-  private async readFrom<T>(path: string, seen: Seen, tries = MAX_TRIES, phase: Phase = { renewed: false }): Promise<ReadResult<T>> {
+  private async readFrom<T>(path: string, seen: Seen, tries = MAX_TRIES, phase: Phase = { renewed: false }, signal?: AbortSignal): Promise<ReadResult<T>> {
     const sent = this.generation;
     const drops = this.drops;
     const principal = this.view.principal;
     for (let attempt = 0; ; attempt++) {
+      if (signal?.aborted) return { kind: "discarded" };
       const records = this.epochRecords;
       const res = await this.send(path);
       // The sign-in ended: the page that asked is ending too.
@@ -275,8 +280,8 @@ export class Client {
       const retried = problem === null || code === "internal-error" || (res.status === 503 && RETRIED_503.has(code ?? ""));
       if (!retried) return { kind: code === "epoch-superseded" ? "unavailable" : "refused", status: res.status, problem };
       if (attempt + 1 >= tries) return { kind: "unavailable", status: res.status, problem };
-      await (this.opts.sleep ?? delay)(backoff(attempt));
-      if (sent !== this.generation) return { kind: "discarded" };
+      await (this.opts.sleep ?? delay)(backoff(attempt), signal);
+      if (sent !== this.generation || signal?.aborted) return { kind: "discarded" };
     }
   }
 
@@ -538,4 +543,11 @@ async function credentialProblem(res: Response): Promise<Problem | null | typeof
   return null;
 }
 
-const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+// Waits `ms`, or ends at once when `signal` is aborted, also when it was before the call. Both ends clear the
+// timer and remove the listener.
+const delay = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve) => {
+  if (signal?.aborted) return resolve();
+  const end = () => { clearTimeout(t); signal?.removeEventListener("abort", end); resolve(); };
+  const t = setTimeout(end, ms);
+  signal?.addEventListener("abort", end, { once: true });
+});
