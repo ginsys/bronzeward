@@ -148,7 +148,7 @@ skip_row() { printf 'SKIP\t%s\t%s\n' "$1" "$2" | tee -a "$EV/table.tsv"; }
 equivalence() {
   local ev=$here/../../docs/design/research/evidence/20261118-import-equivalence w=$STATE/hostname-equivalence start=$SECONDS
   rm -rf -- "$w" && mkdir -p -- "$w/gen/bin" "$STATE/gocache" "$STATE/gotmp" || return 1
-  tool_verify talosctl "$TALOSCTL_SHA256"
+  tool_verify talosctl "$TALOSCTL_SHA256" # a mismatch is a `die`, which exits the script from inside check
   ln -s -- "$CACHE/talosctl" "$w/gen/bin/talosctl" && cp -- "$ev/gen.sh" "$w/gen/" || return 1
   bash "$w/gen/gen.sh" "$w/work" >"$EV/equivalence-gen.txt" 2>&1 || return 1
   GOCACHE=$STATE/gocache GOTMPDIR=$STATE/gotmp bash "$ev/runall.sh" "$here/../.." "$w/work" "$EV/equivalence-output.txt" \
@@ -283,6 +283,11 @@ derive() {
     cat -- "$EV/equivalence-output.txt"
     for n in default explicit rename back; do
       [ -f "$EV/review-$n.json" ] || continue
+      # a row that failed at its plan step kept a review and no plan: say so, never print an empty reading
+      if [ ! -f "$EV/plan-$n.json" ] || [ ! -f "$EV/release-$n.json" ]; then
+        printf '## %s: plan or release not kept, the row stopped before its plan\n' "$n"
+        continue
+      fi
       # formOnly is the plan's verdict: plan.baseline.{pendingConvergence,formOnly} (PlanBaseline, no revision id)
       printf '## %s: plan baseline %s; release hostname %s\n' "$n" \
         "$(jq -c '.baseline | if . == null then null else {pendingConvergence, formOnly} end' "$EV/plan-$n.json")" \

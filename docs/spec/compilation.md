@@ -1243,9 +1243,12 @@ unmeasured.
 scenario `hostname-measure` of the fixture, which a person can run again).
 After a rename, an import from the node keeps the old name as an explicit
 hostname, so the rename does not reach the node (the rename row below). The
-measured node is the fixture's worker, a real Talos v1.14.5 node named from
-its own hostname, taken through the product: draft, import, publish, plan,
-approval, operation. "Node name" below is Talos's `nodename` resource
+measured node is the fixture's worker, Talos v1.14.5 running as a container
+and named from its own hostname, taken through the product: draft, import,
+publish, plan, approval, operation. A container has no reboot, so a restart
+cannot be measured on it (the fixture README, Known limits): where a row says
+the uptime grew, that shows only that no restart happened there, and what a
+virtual machine or a hardware node does is not measured. "Node name" below is Talos's `nodename` resource
 (`talosctl get nodename`), the name Talos derives from the hostname for the
 Kubernetes Node; the Node object itself (`kubectl get nodes`) was not read,
 and the node's hostname after each row was read, but the record that was kept
@@ -1253,16 +1256,18 @@ holds no node read, so the hostname after a row is not in it.
 
 | Row | What was applied | Result |
 |---|---|---|
-| default | the named worker's first release: the document `auto: off` plus its name, the node having an automatic hostname | completed; node name unchanged; uptime grew by 15 s, so no restart |
-| explicit | the worker imported again from the node, which now holds `auto: off` plus its name (the commonest case): the document removed at import and filled again | completed; node name unchanged; uptime grew by 12 s, so no restart |
-| rename | the worker renamed to a name with dots, imported again from the node, published and applied | the release records the source `configuration`, not `machine-name`: the node's old document is not equal to the new name, so it stays, and decision 2 lets an explicit hostname win; node name unchanged; uptime grew by 9 s, so no restart |
-| rename back | the worker renamed back to its first name, imported again, applied | source `machine-name`; node name unchanged; uptime grew by 8 s, so no restart |
+| default | the named worker's first release: the document `auto: off` plus its name, the node having an automatic hostname | completed; node name unchanged; uptime grew by 15 s: no restart in the container |
+| explicit | the worker imported again from the node, which now holds `auto: off` plus its name (the commonest case): the document removed at import and filled again | completed; node name unchanged; uptime grew by 12 s: no restart in the container |
+| rename | the worker renamed to a name with dots, imported again from the node, published and applied | the release records the source `configuration`, not `machine-name`: the node's old document is not equal to the new name, so it stays, and decision 2 lets an explicit hostname win; node name unchanged; uptime grew by 9 s: no restart in the container |
+| rename back | the worker renamed back to its first name, imported again, applied | source `machine-name`; node name unchanged; uptime grew by 8 s: no restart in the container |
 
 Every row sent the node a hostname equal to the one it already ran, so an
-unchanged node name is what the rows predict. What they show is that applying
-the rewritten document with an unchanged hostname needs no restart (the
-commonest case) and that the form of the document differs without the
-hostname doing so. The dry run of the same file (`apply-config --dry-run
+unchanged node name is what the rows predict. What they show is that the
+rewritten document with an unchanged hostname (the commonest case) applies
+and completes through the product on the fixture's container node, with no
+restart there, and that the form of the document differs without the
+hostname doing so. They do not show that a virtual machine or a hardware
+node needs no restart. The dry run of the same file (`apply-config --dry-run
 --mode no-reboot`, the node's own configuration with its `HostnameConfig`,
 which held the keys `apiVersion`, `kind` and `auto`, replaced by the filled
 one, which is the product's merge of decision 1) answered "Applied
@@ -1284,8 +1289,10 @@ evidence of an adopt plan, and no row adopted. (4) `container` and `cloud`
 modes, and `registerWithFQDN` set against unset: the fixture has no scenario
 for them, so they stay read and not measured, and so does a `cloud` node's own
 hostname being overridden by the static one (`hostname` has the highest
-priority, line 73). (5) A restart of a physical machine: the node is a virtual
-machine, and a restart is read from its uptime. The client sentences that
+priority, line 73). (5) A restart of a virtual machine or a hardware node: the
+fixture's node is a container, which has no reboot, so whether the rewritten
+document, or a changed hostname, needs one stays unmeasured until a run on
+a virtual machine or hardware. The client sentences that
 mention a restart or the node name stay conditional on (1) (client contracts
 A9 items 6 and 7). The fill is implemented by ginsys/bronzeward#1040, the API
 record by ginsys/bronzeward#1041, and the client words by
