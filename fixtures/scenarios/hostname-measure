@@ -72,8 +72,11 @@ name_is() { [ "$(sql "SELECT name FROM machine WHERE id = '$machine_w'")" = "$1"
 # name_as <human> <name>: POST /machines/{id}/names: 201.
 name_as() {
   fresh "$1"
-  # The Idempotency-Key takes [A-Za-z0-9_-] only (internal/api/api.go), and a dotted name is not one.
-  answers 201 - POST "/api/v1/machines/$machine_w/names" "$tok" "$(jq -nc --arg n "$2" '{name: $n}')" "$(key "name-${2//[^A-Za-z0-9_-]/_}")"
+  # The Idempotency-Key takes [A-Za-z0-9_-] only (internal/api/api.go), and a dotted name is not one. A
+  # key that repeats with the same body is a replay of the first answer and writes nothing, which is how
+  # the rename back to the first name (the key name_worker used) answered 201 and changed no row: the
+  # key carries the time, so every call is a new write.
+  answers 201 - POST "/api/v1/machines/$machine_w/names" "$tok" "$(jq -nc --arg n "$2" '{name: $n}')" "$(key "name-${2//[^A-Za-z0-9_-]/_}-$(date +%s%N)")"
 }
 # release_hostname: the worker's Desired release records its hostname source and value, kept as
 # release-<name>.json (the release's own record, no configuration value).
@@ -172,11 +175,22 @@ check "$ref step 1" 'the worker'"'"'s nodename, hostname status and uptime are r
 
 # Step 2: the dry run of the filled document (the A2 proof for the steps that mutate). The machine
 # configuration is written to a 0600 file under $STATE and removed at exit; it is never kept.
+# strip_hostname: stdin's documents without any HostnameConfig; on stderr, how many it dropped. The node holds
+# its own HostnameConfig, and apply-config refuses two ("duplicate document v1alpha1/HostnameConfig/", the
+# first slot's step 2): the product replaces the node's document with the filled one, so the dry run does too.
+strip_hostname() {
+  awk 'function flush() { if (n > 0) { if (hc) dropped++; else { if (out++) print "---"; printf "%s", doc } } doc = ""; n = 0; hc = 0 }
+    /^---[ \t]*$/ { flush(); next }
+    { doc = doc $0 "\n"; n++; if ($0 ~ /^kind:[ \t]*HostnameConfig[ \t]*$/) hc = 1 }
+    END { flush(); print dropped + 0 > "/dev/stderr" }'
+}
 dry_run() {
-  {
-    node_talos "$TALOS_WORKER_IP" get machineconfig v1alpha1 -o jsonpath='{.spec}' 2>"$EV/dry-get.err" || return 1
-    printf '\n---\napiVersion: v1alpha1\nkind: HostnameConfig\nauto: off\nhostname: %s\n' "$worker_name"
-  } >"$dry" || return 1
+  local ps
+  node_talos "$TALOS_WORKER_IP" get machineconfig v1alpha1 -o jsonpath='{.spec}' 2>"$EV/dry-get.err" |
+    strip_hostname 2>"$EV/dry-dropped.txt" >"$dry"
+  ps=("${PIPESTATUS[@]}")
+  [ "${ps[0]}" -eq 0 ] && [ "${ps[1]}" -eq 0 ] || return 1
+  printf '\n---\napiVersion: v1alpha1\nkind: HostnameConfig\nauto: off\nhostname: %s\n' "$worker_name" >>"$dry" || return 1
   talosctl_timed 60 -e "$TALOS_WORKER_IP" -n "$TALOS_WORKER_IP" apply-config --dry-run --mode no-reboot -f "$dry" >"$EV/dry-run.txt" 2>&1
 }
 check "$ref step 2" 'apply-config --dry-run of the configuration plus the filled document: what it reports is the record' dry_run
@@ -261,9 +275,13 @@ derive() {
     cat -- "$EV/equivalence-output.txt"
     for n in default explicit rename back; do
       [ -f "$EV/review-$n.json" ] || continue
-      printf '## %s: review formOnly %s; release hostname %s\n' "$n" "$(jq -c '.formOnly' "$EV/review-$n.json")" \
+      # formOnly is the plan's verdict: plan.baseline.{pendingConvergence,formOnly} (PlanBaseline, no revision id)
+      printf '## %s: plan baseline %s; release hostname %s\n' "$n" \
+        "$(jq -c '.baseline | if . == null then null else {pendingConvergence, formOnly} end' "$EV/plan-$n.json")" \
         "$(jq -c '[.machines[]?.hostname]' "$EV/release-$n.json")"
     done
+    printf '## dry run (step 2): HostnameConfig documents the node held and the dry run dropped: %s\n' \
+      "$(cat -- "$EV/dry-dropped.txt" 2>/dev/null || echo unread)"
     echo '## dry run (step 2): lines that are not diff lines, then the counts of diff lines'
     awk '!/^[ +-]/' "$EV/dry-run.txt" | head -n 20
     awk '/^\+/ && !/^\+\+\+/ { a++ } /^-/ && !/^---/ { r++ } END { printf "diff lines added %d removed %d\n", a, r }' "$EV/dry-run.txt"
