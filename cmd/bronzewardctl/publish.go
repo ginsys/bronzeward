@@ -226,12 +226,12 @@ func (e *env) releaseReview(verb string, args []string) error {
 		}
 		// at gives /machines/<id>/review; the review route is under the release.
 		return "/releases/" + url.PathEscape(pos[0]) + path, nil
-	}, func(c *client.Client, _ *client.Response, r *apitypes.ReviewBody) error {
+	}, func(c *client.Client, resp *client.Response, r *apitypes.ReviewBody) error {
 		if verb != "provenance" {
 			e.titleRef(c, "release", r.Release)
 		}
 		if verb == "review" && e.output != "json" && e.output != "yaml" {
-			hostLines = e.reviewHostname(c, r)
+			hostLines = withNodeNotice(e.reviewHostname(c, r), r.Hostname, nodeNameKindOf(resp.Body))
 		}
 		return nil
 	}, func(w *tabwriter.Writer, r *apitypes.ReviewBody) {
