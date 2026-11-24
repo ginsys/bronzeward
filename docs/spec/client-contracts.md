@@ -1252,8 +1252,9 @@ epoch than the events shown. It reads both again (CLI: `cmd/bronzewardctl/import
 `web/src/imports.tsx:254-261`). The watch clears the events shown when the
 operation it reads has another epoch, even if the operation has no event to replace them, **when
 the operation is not terminal** (CLI: `internal/client/watch.go:234-237`; web:
-`web/src/progress.ts:223-226`). A terminal read of another epoch than the kept events is read again
-after the backoff, and clears only through the pages it drains (CLI:
+`web/src/progress.ts:223-226`). A terminal read of another epoch than the kept events clears them
+only through the pages it drains, and ends once the drained pages hold the operation's epoch; where
+they do not, the operation is read again after the backoff (CLI:
 `internal/client/watch.go:204-216`; web: `web/src/progress.ts:208-216`,
 `web/src/progress.ts:268-275`). Every
 other multi-page read needs no such comparison, because a cursor carries its epoch and a change
