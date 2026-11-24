@@ -15,7 +15,7 @@ import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
 import { safeWord } from "./safe.ts";
-import { whyRefused, wordsOfCode } from "./problems.tsx";
+import { operationNext, whyRefused, wordsOfCode } from "./problems.tsx";
 import { DraftHead, MachineById, Named } from "./titles.tsx";
 import { PUBLISH_NOTE } from "./words.ts";
 import type { Outcome } from "./write.ts";
@@ -43,9 +43,8 @@ export function publishEnd(o: Operation): Ended {
   }
   const { code, rule } = refusalOf({ problem: o.error });
   const why = whyRefused(o.error as Record<string, unknown> | null);
-  // The table row's next step (§8.2, Failed operations), unless it points at the server's explanation this text shows.
-  const words = code === undefined ? undefined : wordsOfCode(code, rule);
-  const next = words === undefined || words.explains === true ? "" : ` ${words.next}`;
+  // The table row's next step (§8.2, Failed operations), where this text can carry it.
+  const next = operationNext(code === undefined ? undefined : wordsOfCode(code, rule));
   return { text: `The publication ${safeWord(o.state)}${code === undefined ? "" : `: ${code}`}. ${why.facts === "" ? "" : `${why.facts} `}${SENT_NOTHING}${next}`, ...(why.machine !== undefined && { machine: why.machine }) };
 }
 

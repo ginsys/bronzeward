@@ -169,11 +169,13 @@ describe("a watch's end", () => {
   // points at a detail this text does not show.
   test("a failed operation shows the table row's next step, and none that points at a detail it does not show", async () => {
     const c = reading({ kind: "transport" }).client;
-    const failed = (code: "recovery-mode-entered" | "talos-access-unavailable") => op({ state: "failed", error: { type: `urn:bronzeward:problem:${code}` as const, title: code, status: 409, instance: "req_1" } });
+    const failed = (code: "recovery-mode-entered" | "talos-access-unavailable" | "internal-error") => op({ state: "failed", error: { type: `urn:bronzeward:problem:${code}` as const, title: code, status: 409, instance: "req_1" } });
     expect(text(await ended(c, ing(), failed("recovery-mode-entered"), "failed", NOW, "e1"))).toBe(
       "This import failed. The server went into recovery while this was publishing, so nothing was published. Wait for the recovery to finish, then publish again. Import again",
     );
     expect(text(await ended(c, ing(), failed("talos-access-unavailable"), "failed", NOW, "e1"))).toBe("This import failed. The server could not work with Talos for this machine or cluster. Import again");
+    // A step that says to report "with the reference below" points at a block this text does not carry.
+    expect(text(await ended(c, ing(), failed("internal-error"), "failed", NOW, "e1"))).toBe("This import failed. The server failed while handling the request. Import again");
   });
   test("a pause, a resume-failed and a lapsed lease end the watch on a running operation, the last of unknown outcome", async () => {
     const c = reading({ kind: "transport" }).client;
