@@ -1146,8 +1146,9 @@ state is being accepted (design §12.1).
    a name and the drifted configuration holds a `HostnameConfig` whose hostname
    equals it, ingestion removes that document from the sanitized document, as an
    import does (compilation contract §2.3 step 2a, §6.1), and a legacy
-   `machine.network.hostname` equal to it, where no such document is present,
-   goes as a key alone: the hostname is then
+   `machine.network.hostname` equal to it goes as a key alone, where no such
+   document is present and `machine.features.stableHostname` is neither `true`
+   nor a reference (otherwise the key stays): the hostname is then
    filled from the name again, and a rename reaches the machine through a release.
    The baseline stays the exact input, so this step's comparison below is
    unchanged.

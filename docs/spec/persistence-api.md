@@ -5223,11 +5223,14 @@ design and evidence do not settle the question. Each is marked in place as
     key, a duplicate key, a tag outside YAML's core schema, a parse error)
     reads "differs". A machine whose import base declares an identified
     embedded document reads "differs" as well: the resolver writes that string
-    back in its own encoding, so its value is not the node's. So does a machine
-    whose import removed a hostname document equal to its name and whose release
-    writes one back (compilation §2.3 step 2a and §6 step 5a, ginsys/bronzeward#1040),
-    although nothing changes on the node: that limit is the fill's change to
-    decide. The verdict is read in three places, each with its own condition:
+    back in its own encoding, so its value is not the node's. A machine whose
+    import removed a hostname document that was exactly what the fill writes
+    reads true while its name is the one recorded at import, and "differs" after
+    a rename (compilation §6, choice §16.39). So does a machine whose import
+    removed a document that held more, or a legacy `machine.network.hostname`
+    key equal to its name (compilation §2.3 step 2a): the node holds a key and
+    the release sends a document, and whether that changes nothing on the node
+    is unmeasured (ginsys/bronzeward#1040). The verdict is read in three places, each with its own condition:
     the machine's `formOnly`, true while its Desired release is pending, no
     drift is open and Applied's digest is the import base's; an adopt plan's
     `baseline.formOnly`, true for a first adoption whose release is pending,

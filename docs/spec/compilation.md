@@ -1138,8 +1138,8 @@ unmeasured.
    baseline's and the machine is then pending convergence, which §6.3 already
    covers. The record of step 2a (the name and whether the removed document was
    the fill's own) is stored with the import base revision, and the form-only
-   verdict (§6, step 8) sets that one document aside while the name is the
-   recorded one. **A removed legacy key is recorded as not the fill's own, so
+   verdict (§6, step 8) sets that one document aside, where it was exactly the
+   fill's own, while the name is the recorded one. **A removed legacy key is recorded as not the fill's own, so
    its machine's verdict reads false at the first apply**: the node holds the
    key and the release sends a document, and whether Talos treats that move as
    no change on the node is unmeasured here. **A hostname equal to the
