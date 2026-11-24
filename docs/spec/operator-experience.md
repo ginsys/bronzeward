@@ -472,10 +472,11 @@ signature, with the same `401 unauthenticated` and no detail; a revoked identity
 response establishes: "Not accepted by lab: sign in again", "Your access was revoked; contact a
 recovery administrator", "Authentication could not reach the identity provider or the database;
 nothing was committed".
+A renewal that returns a different principal is shown as a new sign-in, never silently continued,
+by both clients (the CLI in `internal/client/credentials.go:307-313`, the web client in
+`web/src/auth.ts:195` and `web/src/app.tsx:112-121`; [§8](#8-states-every-view-must-handle)).
 **Proposed for #253:** a client may add what it can see locally, such as its own token's
-expiry time, labelled as the client's reading and never as the server's reason. A renewal that
-returns a different principal is shown as a new sign-in, never silently continued
-([§8](#8-states-every-view-must-handle)).
+expiry time, labelled as the client's reading and never as the server's reason.
 
 ### 5.2 Inventory
 
@@ -752,13 +753,17 @@ A mark is refused with the rule and the mark's position, never its path
 `internal/api/runner.go:384-386`, `internal/api/runner.go:457-468`). Marks are HMAC-keyed in the idempotency
 fingerprint and never stored (`internal/api/marks.go:58-68`).
 
-**Proposed**, as qualified by [client contracts §11.3](client-contracts.md#113-cli-review) against
-[compilation §3.6](compilation.md#36-operator-review): the review is shown only on a terminal,
-through an in-process pager with no temporary file and no `$EDITOR`. It is refused when stdout
-is not a terminal, with no override, and it has no `-o json`, `-o yaml`, export or save form: a
+As qualified by [client contracts §11.3](client-contracts.md#113-cli-review) against
+[compilation §3.6](compilation.md#36-operator-review), the CLI shows the review only on a terminal,
+through an in-process pager with no temporary file and no `$EDITOR`
+(`cmd/bronzewardctl/review.go:29-31`, `cmd/bronzewardctl/review.go:78`). It is refused when stdout
+is not a terminal, with no override (`cmd/bronzewardctl/review.go:47-48`, which also asks for a
+terminal on stdin), and it has no `-o json`, `-o yaml`, export or save form
+(`cmd/bronzewardctl/review.go:44`): a
 warning would not stop ordinary redirection or log retention. This limits what the client
 itself persists; it does not prevent capture by the terminal, a recording, a host crash dump or
-the operator copying it. Marks come from the prompt or stdin, never from argv or a client-read file,
+the operator copying it. Marks come from the prompt or stdin, never from argv or a client-read file
+(`cmd/bronzewardctl/fragments.go:266-278`, `cmd/bronzewardctl/commandtable.go:136`),
 because a mark's path can name a secret mapping key
 ([persistence and API §7.1](persistence-api.md#71-the-key); [§9](#9-secret-handling-in-the-clients),
 [§12](#12-alternatives-and-recommendations) C4).
@@ -854,9 +859,10 @@ says that the profile pins it. A name can resolve to another revision later. So 
 of `profile set` is unknown, the block of
 [client contracts §8.4](client-contracts.md#84-idempotency-and-ambiguous-responses) item 4 names the revision IDs it
 sent, and a repeat takes only those IDs and resolves nothing. The draft's ETag changes on every write
-(`internal/api/drafts.go:174-180`). **Proposed:** the
+(`internal/api/drafts.go:174-180`). The
 CLI remembers the last ETag it saw for each draft in the context, sends it as `If-Match`, and
-stores the new one from each response. If another author changed the draft:
+stores the new one from each response (`internal/client/state.go:80-104`,
+`internal/client/write.go:563`, `internal/client/write.go:666`). If another author changed the draft:
 
 ```text
 $ bronzewardctl fragment set worker-labels --draft drf_8kdq…z6pa --file worker-labels.yaml
@@ -958,7 +964,8 @@ and `owned-automation` cannot be predicted: no read serves an import-base revisi
 a release, or a service principal's responsible human. The prediction therefore never presents
 an approver as clear of self-approval; the returned approval owns the reasons.
 
-**Proposed: the web client's apply page** (`/releases/<id>/apply`, ginsys/bronzeward#1096). A release's
+**The web client's apply page** (`/releases/<id>/apply`, ginsys/bronzeward#1096; `web/src/apply.tsx`,
+`web/src/apply.ts`). A release's
 changes reach several machines at once, and one plan page per machine asks the same question again each
 time. The page lists the release's machines, each with its name, its role (`role`, control plane or worker,
 shown only where the read has one) and the profiles of its assignment revision as small labels, none chosen.
@@ -966,14 +973,19 @@ shown only where the read has one) and the profiles of its assignment revision a
 stored change on request, the change a person reads being the change of the plan approved. **Apply** records
 one approval for each plan shown (an approver), carries on past a machine the server refuses, and says so in
 that machine's line. Each line says where the machine stands for this release, read from the machine's
-position and no other source: not applied, a plan ready, waiting behind another machine's apply (the
-controller applies one machine of a cluster at a time), applying, applied, or stopped, with the reason. A plan
+position (`web/src/apply.ts:59-74`): not applied, a plan ready, waiting behind another machine's apply (the
+controller applies one machine of a cluster at a time), applying, applied, or stopped, with the reason.
+**Proposed:** the line is read from the position and no other source; today the page's own line stands
+while one of its steps runs and after one stops (`web/src/apply.tsx:37-38`). A plan
 that somebody else prepared and that is ready is reused and never made twice, so an approver who cannot make
 plans can apply plans a publisher prepared. A plan the page made and the person did not approve is cancelled
 when its machine is no longer chosen and when the page is left, including a plan whose creation is answered
 after that; the choice cannot change while the page works, and a plan Apply was pressed for is never
 cancelled. One the page loses (the tab is closed) expires with the plan default; a creation whose outcome is
-unknown leaves a plan the page has no ID for, which the machine's page shows with who prepared it. No route returns a change before a plan exists, so showing it means making the plan.
+unknown leaves a plan the page has no ID for (`web/src/apply.ts:100`, `web/src/apply.ts:128-131`).
+**Proposed:** the machine's page shows that plan with who prepared it; today its plans list shows the
+creation time only and the plan page shows who created it (`web/src/resources.tsx:154`,
+`web/src/resources.tsx:555`). No route returns a change before a plan exists, so showing it means making the plan.
 **Apply** stays off while any plan's change is unread, bound to a drift record (it overwrites a configuration no reviewer has seen), or withheld by the server (a configuration that could not be
 redacted, or a machine holding a configuration other than the one Bronzeward applied, so the two cannot be
 compared): the page names that plan and links to its plan page, where the person can read what it records and
@@ -981,18 +993,21 @@ approve it one plan at a time, a choice the plan page leaves to the person and t
 handed to the person as its line is drawn: leaving the page, by any route, does not cancel it (the late answer of
 its own creation included), and the line says it stays and can be cancelled on its own page. Show apply and Apply send nothing new while a write of the page is
 open, with an unknown outcome, until the person repeats it or dismisses its notice (the rule of every form of the
-console, `startsNew`); that holds for the next request of a running batch too, so one check decides every send. While machines wait or apply, the rows
+console, `startsNew`); that holds for the next request of a running batch too, so one check decides every send
+(`web/src/apply.tsx:100`, `web/src/apply.tsx:234`, `web/src/apply.tsx:244`). After the Apply press the rows
 are read again five seconds after the last read answered, so a slow read is never dropped by the next one, for ten
-minutes after the press.
+minutes (`web/src/apply.tsx:25-26`, `web/src/apply.tsx:161-181`, `web/src/apply.tsx:219`). **Proposed:** the
+re-reading runs only while machines wait or apply; today it runs the whole ten minutes whatever the rows say, and Show apply
+starts none.
 A control plane may be chosen: the server does not refuse it and the acceptance tests do not cover it, so the
 page says that, and the operator limits say it too. Alternatives: one page per machine and plan (the
 repetition above); approving without showing the change (the person approves what they never read); a new
 read that computes the changes without a plan (a second source of the diff the plan stores, which could
 disagree with it).
 
-**Proposed:** in the console the plan page is the confirmation: it shows the plan, the
+In the console the plan page is the confirmation: it shows the plan, the
 prediction and, above one "Approve" button, a sentence saying that pressing it records the
-person's approval and what the controller does after it. No field asks for the plan ID
+person's approval and what the controller does after it (`web/src/approval.tsx:150-157`). No field asks for the plan ID
 ([#1096](https://github.com/ginsys/bronzeward/issues/1096); the owner removed the typed plan ID
 from approval on 2026-11-22, as recorded at the accounting decision in §5.9). Alternatives
 rejected: a plan ID typed per machine, which a person does by copying and so shows nothing
@@ -1007,9 +1022,10 @@ class: an automation credential gets `403` with `humanOnly: true`
 (`internal/api/api.go:380-392`), and the CLI says so before sending when the context holds an
 automation token.
 
-**Proposed: `bronzewardctl apply <release> (--machine <a,b> | --all) [--diff]`** applies one release to
+**`bronzewardctl apply <release> (--machine <a,b> | --all) [--diff]`** applies one release to
 several machines with one question (ginsys/bronzeward#1096; the campaign lead's ruling of 2026-11-22, 12:23 CET,
-that the question is `y/N`, with no `--yes`, and that the end of input sends nothing). It makes one
+that the question is `y/N`, with no `--yes`, and that the end of input sends nothing;
+`cmd/bronzewardctl/apply.go`, `cmd/bronzewardctl/confirm.go:36-69`). It makes one
 apply-config plan for each machine chosen, by name or ID, so that every change exists to read, and
 reuses a plan somebody prepared for this operation that is ready. It reads every plan before it shows
 anything and prints each machine with its role and profiles, each plan's own expiry, and the size of its
@@ -1029,7 +1045,9 @@ each plan's own line says what happened to it, never a count: each approval is i
 the same read epoch, the one `y` confirmed them all, and the command has no open write to hold or repeat. Enter, `n` and the end of input approve nothing and cancel the
 plans this command made, never one it read. A Ctrl-C at the question leaves the plans to expire at the time
 each shows. A machine already applied (or one whose Desired release this is, with nothing pending: the release leaves its Applied configuration unchanged, as the page decides), frozen, in drift or in an operation is left out with its reason, and
-so is one whose waiting plan is for another operation (an adopt plan is decided on the machine's page). A
+so is one whose waiting plan for this release is for another operation (an adopt plan is decided on the
+machine's page; `cmd/bronzewardctl/apply.go:200-201`). **Proposed:** the same for a waiting plan of another release; today the
+command goes on and tries to make a plan for such a machine (`cmd/bronzewardctl/apply.go:192`). A
 control plane machine may be chosen: the command says that applying to one was not covered by the acceptance
 tests, that machines are applied one at a time and that the order is not promised.
 The structured outputs are not offered, since the command asks a person a question. The console's apply
@@ -1263,8 +1281,11 @@ The adopt plan binds the open drift record; approval leads the controller to rec
 adoption without sending anything, even while frozen
 ([execution and recovery §6.3](execution-recovery.md#63-adopt)). An adopted base that now holds
 a value as a reference refuses a fragment that overrides it, so the author must stop selecting
-such fragments (`docs/operator/walkthrough.md:303-306`). **Proposed:** the composite command
-prints each role's step instead of failing at the first role the caller lacks.
+such fragments (`docs/operator/walkthrough.md:303-306`). The composite command reads the caller's
+roles once, before any write (`cmd/bronzewardctl/drift.go:415`, `cmd/bronzewardctl/drift.go:435`), and
+tests each step's role as that step is reached. At the first role the caller lacks it prints that step and
+every later one as a command and does not fail (`cmd/bronzewardctl/drift.go:443-444`,
+`cmd/bronzewardctl/drift.go:501-502`, `cmd/bronzewardctl/drift.go:548`).
 
 **Structured output of a composite.** With `-o json` or `-o yaml`, `drift adopt` prints one
 object, once, after its last step has settled. The text output above does not change. The object
@@ -1585,9 +1606,13 @@ runs at once on this process (`internal/api/api.go:190-198`, `internal/api/runne
 committed, and recovery mode continues
 (`internal/api/routes.go:18`, `internal/api/routes.go:120-127`;
 `docs/spec/execution-recovery.md:1286-1298`, `docs/spec/execution-recovery.md:1337-1342`). Entry is available only on a server started for
-recovery (`cmd/bronzeward/main.go:132-134`). **Proposed:** both clients show which restriction
-applies to an action, the scope's or the process's, and the clients say so when entry is
-refused.
+recovery (`cmd/bronzeward/main.go:132-134`). Both clients show which restriction
+applies to an action, the scope's or the process's, and say so when entry is
+refused. The CLI names the scope or the process in a refusal (`internal/client/problem.go:88-95`) and
+says that a server started normally takes no entry (`internal/client/write.go:347`). The web client
+does the same for a scope (`web/src/states.tsx:123-129`) and for the process
+(`web/src/recovery.tsx:28-43`, `web/src/recovery.tsx:64`), and says that a server started normally
+takes no entry (`web/src/recovery.tsx:111`, `web/src/recovery.tsx:133`).
 
 ## 6. Web interface
 
