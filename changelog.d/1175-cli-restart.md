@@ -1,0 +1,2 @@
+Fixed
+- `bronzewardctl` follows an operation through a server restart or outage as the client contract says: a write whose answer shows a new epoch is followed by a read of the server, a watch of a finished operation ends when its events list is empty at the operation's epoch, the pause between two watch attempts ends within 250 ms of the watch ending through `--timeout`, and a watch keeps asking again through a refused server certificate instead of ending at once. Refs ginsys/bronzeward#1175.
