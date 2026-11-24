@@ -2226,8 +2226,12 @@ item 7. Sources follow each item.
    (on Linux, `RLIMIT_CORE` 0 and not dumpable). A panic handler prints a fixed message and no
    stack values. (Built: `cmd/bronzewardctl/main.go:77`, `cmd/bronzewardctl/main.go:81-86`,
    `cmd/bronzewardctl/main.go:113-118`, `cmd/bronzewardctl/main.go:124`,
-   `cmd/bronzewardctl/coredump_linux.go:10-20`; protected input is refused off Linux,
-   `cmd/bronzewardctl/fragments.go:93`.)
+   `cmd/bronzewardctl/coredump_linux.go:10-20`; the commands that read an import fragment, marks, the
+   review or the import base are refused off Linux, `cmd/bronzewardctl/fragments.go:74`, `:93`,
+   `cmd/bronzewardctl/review.go:38`, `:254`, `cmd/bronzewardctl/imports.go:166`,
+   `cmd/bronzewardctl/importbase.go:36`. **Proposed:** the first-key document
+   (`cmd/bronzewardctl/firstkey.go:27`) and the automation token (`internal/client/token.go:23`)
+   are protected input too and are not refused off Linux.)
 6. **Memory.** Protected input is held no longer than the request needs. A write keeps its body
    only while it can be repeated. When it can no longer be repeated, the page releases the body
    and anything its owner holds for it, and offers no repeat of it, also under a later sign-in of
