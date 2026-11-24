@@ -100,7 +100,7 @@ func holdsHostname(s compile.Source) bool {
 // gen.sh writes the document with no `auto`, which the import removes but does not call equal to the fill
 // (§2.3 step 2a: equal means exactly `auto: off` and the hostname), so each machine is read twice: as
 // written, and with `auto: off` added, which is what a node holds after the fill. The run fails, and so
-// fails step 0 of hostname-measure before `up`, unless the controls hold on every row and at least one
+// fails step 0 of hostname-measure before it makes a release, unless the controls hold on every row and at least one
 // machine with `auto: off` was removed, equal and form-only: without it every row could read "removed
 // false" and the measurement would prove nothing. No other value is asserted.
 func hostname(ms []machine) {
