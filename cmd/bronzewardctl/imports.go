@@ -605,6 +605,14 @@ func (e *env) ended(c *client.Client, b *apitypes.IngestionBody, o *apitypes.Ope
 		case "ingestion-abandoned":
 			why += " The ingestion was abandoned, so nothing of it reached the draft. Import again:"
 			more = restart(b)
+		// The next step of the other codes a failed operation carries is the row's, as the web client's
+		// table words it (client-contracts.md §8.2; the two clients cannot share one file).
+		case "machine-identity-mismatch":
+			why += " Check which machine answers at that address; nothing it read was kept."
+		case "recovery-mode-entered":
+			why += " Wait for the recovery to finish, then publish again."
+		case "talos-access-unavailable":
+			why += " The server's explanation is in the error above."
 		}
 		return &client.Blocked{Err: operationFailed{fmt.Errorf("%s: %s", c.Context.Where(), why)}, More: more}
 	}

@@ -12,7 +12,7 @@ import { Form, field, NO_ASSIST, useSend, useUnsaved, useWrites } from "./forms.
 import { Detail, Id, type Load, type Reads, Ref, short, useItem, useList, usePending, useReads, useSettled } from "./list.tsx";
 import { markLines } from "./marks.tsx";
 import { eventLine, type Refusal, refusalOf, terminal, type Watch, type Watched, watch } from "./progress.ts";
-import { refusalWords } from "./problems.tsx";
+import { operationWords, refusalWords } from "./problems.tsx";
 import type { Client, Phase, ReadResult } from "./request.ts";
 import { importPath } from "./router.ts";
 import { machineOptions, sharedAddresses } from "./machines.tsx";
@@ -129,7 +129,7 @@ export async function ended(client: Pick<Client, "readWithEpoch">, b: Ingestion,
       "precondition-failed": " The draft changed after this import started, so the import was not applied and its claim is abandoned.",
       "ingestion-abandoned": " The ingestion was abandoned, so nothing of it reached the draft.",
     };
-    const why = (reasons[code(o.error)] ?? ` ${refusalWords({ code: code(o.error), rule: ruleOf(o.error) })}`) + differing(o.error);
+    const why = reasons[code(o.error)] ?? ` ${operationWords({ code: code(o.error), rule: ruleOf(o.error) }, differing(o.error))}`;
     return <>This import {safeWord(o.state)}.{why} <ImportAgain b={b} /></>;
   }
   // An abandoned claim whose operation has no recorded end: the pause the events replay is not current.
