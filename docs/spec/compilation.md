@@ -1248,7 +1248,8 @@ its own hostname, taken through the product: draft, import, publish, plan,
 approval, operation. "Node name" below is Talos's `nodename` resource
 (`talosctl get nodename`), the name Talos derives from the hostname for the
 Kubernetes Node; the Node object itself (`kubectl get nodes`) was not read,
-and neither was the node's hostname after any row.
+and the node's hostname after each row was read, but the record that was kept
+holds no node read, so the hostname after a row is not in it.
 
 | Row | What was applied | Result |
 |---|---|---|
@@ -1278,7 +1279,7 @@ hostname without a restart, and what becomes of its node name then: no row sent
 one, because the rename row's re-import (above) put the old hostname back. A row
 that renames and then assigns the machine's stored import base with no
 re-import is the case of item 3, and it is not yet run. (2) The node's
-hostname after the rename. (3) The form-only verdict of a plan: it is the
+hostname after the rename: read in the run, not kept in the record. (3) The form-only verdict of a plan: it is the
 evidence of an adopt plan, and no row adopted. (4) `container` and `cloud`
 modes, and `registerWithFQDN` set against unset: the fixture has no scenario
 for them, so they stay read and not measured, and so does a `cloud` node's own

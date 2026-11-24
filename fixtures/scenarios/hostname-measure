@@ -27,14 +27,15 @@ bin=$here/../bin
 . "$here/../lib.sh"
 
 need docker curl jq timeout id sleep date awk
+# The two addresses are the fixture's own: both lie inside its subnet, which versions.env names. Checked before
+# the state, from versions.env alone, so that a control can reach this refusal with no fixture running.
+for ip in "$TALOS_CONTROLPLANE_IP" "$TALOS_WORKER_IP"; do
+  [[ $ip == "${TALOS_SUBNET%.*}".* ]] || die "hostname-measure: $ip is not inside the fixture subnet $TALOS_SUBNET"
+done
 need_state
 umask 077
 image_id=$(cat -- "$STATE/up-image") || die "no server image is recorded in $STATE; run fixtures/bin/up"
 image_own "$image_id" || die "the recorded server image is not this run's; run fixtures/bin/down, then up"
-# The two addresses are the fixture's own: both lie inside its subnet, which versions.env names.
-for ip in "$TALOS_CONTROLPLANE_IP" "$TALOS_WORKER_IP"; do
-  [[ $ip == "${TALOS_SUBNET%.*}".* ]] || die "hostname-measure: $ip is not inside the fixture subnet $TALOS_SUBNET"
-done
 EV=$STATE/evidence/hostname-measure-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p -- "$EV" "$EV/http"
 scenario=hostname-measure
@@ -114,9 +115,11 @@ applied() { [ "$(sql "SELECT applied_release = desired FROM machine_state WHERE 
 # row <name>: the reads of one step in one line of the table: the nodename and the uptime before
 # and after, from the files read_node kept.
 row() {
-  printf '%s\tuptime %s -> %s s\tnodename %s -> %s\n' "$1" "$(uptime_of "$1-before")" "$(uptime_of "$1-after")" \
+  printf '%s\tuptime %s -> %s s\tnodename %s -> %s\thostname %s -> %s\n' "$1" "$(uptime_of "$1-before")" "$(uptime_of "$1-after")" \
     "$(awk '/^## nodename/ {f=1} f && /nodename:/ {print $2; exit}' "$EV/node-$1-before.txt")" \
-    "$(awk '/^## nodename/ {f=1} f && /nodename:/ {print $2; exit}' "$EV/node-$1-after.txt")" | tee -a "$EV/table.tsv"
+    "$(awk '/^## nodename/ {f=1} f && /nodename:/ {print $2; exit}' "$EV/node-$1-after.txt")" \
+    "$(awk '/^## hostnamestatus/ {f=1} f && /hostname:/ {print $2; exit}' "$EV/node-$1-before.txt")" \
+    "$(awk '/^## hostnamestatus/ {f=1} f && /hostname:/ {print $2; exit}' "$EV/node-$1-after.txt")" | tee -a "$EV/table.tsv"
 }
 
 # rowstep <ref> <what> <command...>: check, and where it fails say why in the step's own words and return 1,
