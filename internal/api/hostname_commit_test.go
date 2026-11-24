@@ -119,7 +119,7 @@ func TestCommitmentHostnameGateOpens(t *testing.T) {
 	ce := hostnameCommit(t, nodeRecord{}, nodeRecord{true, &a}, nodeRecord{true, &a}, "web-9")
 	for range 2 {
 		_, err := ce.a.commitPlan(context.Background(), ce.pid)
-		ce.wantRefused(t, err, "6a", "the Applied release of machine web-9"+clashCause, "")
+		ce.wantRefusedBy(t, err, "6a", "the Applied release of machine web-9"+clashCause, "", ce.target.machine2, a)
 	}
 	if n := count(t, ce.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'refusal'`, ce.machine); n != 2 {
 		t.Fatalf("%d refusal entries", n)
@@ -292,7 +292,7 @@ func TestCommitmentHostnameGateRace(t *testing.T) {
 				t.Fatal(err)
 			}
 			err = <-done
-			ce.wantRefused(t, err, "6a", "the Applied release of machine web-9"+clashCause, "")
+			ce.wantRefusedBy(t, err, "6a", "the Applied release of machine web-9"+clashCause, "", ce.target.machine2, a)
 		})
 	}
 }
