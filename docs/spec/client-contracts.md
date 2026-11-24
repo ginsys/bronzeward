@@ -2267,17 +2267,18 @@ not part of this rule.
 8. **A plan says when it waits for another machine's hostname** (persistence and API §9.3, the `hostnameHeldBy`
    member; execution and recovery §3.2 comparison 6a). Where `hostnameHeldBy` names a machine, the plan's page
    or command output and the machine's page say, in words and with no field name: "This plan waits. The last
-   release applied to machine node-a still sets the Kubernetes node name node-a, and this release gives the same
-   name to machine node-b. Nothing has been changed on either machine. Apply the release for machine node-a first,
+   release applied to machine node-a records the Kubernetes node name node-a, and this release gives the same
+   name to machine node-b. This plan has sent nothing to either machine. Apply the release for machine node-a first,
    or give machine node-b another hostname." The name is the `nodeName` of the plan's release for the machine,
    which is never a secret; each machine is named as A8 rule 1 names it: by its name where it has one, else in the web
    client by its address or "an unnamed machine", in the CLI by its whole identifier. The sentence says "waits", never "refused" or "failed": the plan stays approved and nothing was
    sent. Where a commitment was refused on this ground, the timeline's refusal entry is shown as: "The plan could
-   not start yet: machine node-a still has the Kubernetes node name node-a." with no hostname value beyond that name.
+   not start yet: the last release applied to machine node-a records the Kubernetes node name node-a." with no hostname value beyond that name. No sentence of this item says what a node runs or has: each says what a recorded release holds.
    For a machine whose release records `nodeName` `null` (not compared) for any cause of persistence and API §9.3
    that the review hides (an input to the hostname is a secret reference or a value the review redacts, or the review
    of the release is withheld in whole, a literal hostname included), the release review adds: "Not checked: the
-   review hides this machine's hostname, so a clash with another machine's hostname cannot be checked." It names no
+   review hides an input to this machine's Kubernetes node name, so a clash with another machine's node name cannot
+   be checked." It names no
    cause and no value. For a release whose `nodeName` is absent, not recorded because
    the release was made before it was recorded, the review says: "Not checked: this release was made before
    hostname clashes were recorded, so a clash with another machine's hostname cannot be checked." and names no
