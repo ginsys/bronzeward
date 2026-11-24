@@ -198,8 +198,9 @@ machine's import base and renders the same bytes leaves the machine pending, bec
 recorded import base differs, so the ordinary `apply-config` plan exists. Its diff shows no
 difference, and where the plan's `importBaseOnly` is true (a plan body member, derived from the
 digests: the artifact digest is the `Applied` digest and the plan exists only because the import
-base revision differs; false on a revert, which says what it overwrites instead, §5.8, and on a plan
-made after another release became `Applied`; true whatever the source of the import base) the plan
+base revision differs; false on a revert, which says what it overwrites instead, §5.8; true or
+false by that predicate against the current `Applied` release, whatever the source of the import
+base and whatever the plan's `equivalence` reads) the plan
 view and `plan show` add: "The configuration sent is unchanged; only the recorded import base moves."
 Without that sentence an empty diff on a plan that needs approval reads as a fault.
 
