@@ -444,7 +444,7 @@ say that such a test exists.
    to, is discarded. The server's own text keeps the rule above. (Built in the CLI, by clause: the
    trust refusal and the nothing-sent text, `internal/client/transport.go:105-123`, reached from the
    read path `internal/client/client.go:288`, the write path `internal/client/write.go:690`, the
-   event stream `internal/client/watch.go:455`, the liveness check `internal/client/client.go:124`
+   event stream `internal/client/watch.go:458`, the liveness check `internal/client/client.go:124`
    and `--from` `internal/client/discovery.go:89`; text the identity provider and the `--from`
    host send, shown by its cause and never by its own words, `internal/client/remote.go:62-78`,
    `internal/client/discovery.go:92`, `internal/client/login.go:76`,
@@ -454,7 +454,7 @@ say that such a test exists.
    header, `internal/client/client.go:360`; the signed-in subject and issuer,
    `cmd/bronzewardctl/commands.go:279`; the escaping place for errors,
    `internal/client/shown.go:30`.) **Proposed:** the `%q` in an error that shows a redirect's
-   `Location` (`internal/client/watch.go:462`) is the Go form, not `\x22`; item 8 states the rule.
+   `Location` (`internal/client/watch.go:465`) is the Go form, not `\x22`; item 8 states the rule.
 5. Certificate pinning is not offered: a bundle per context limits trust enough for this
    milestone, and pinning a leaf breaks on every renewal. (Built: `VerifyPeerCertificate`,
    `VerifyConnection` and an SPKI check appear nowhere in `internal/client/` or `cmd/`, a search
@@ -559,7 +559,7 @@ say that such a test exists.
    `cmd/bronzewardctl/output.go:151`, `cmd/bronzewardctl/writes.go:167`; the `-o json` document and a
    composite object, `cmd/bronzewardctl/output.go:151`, `cmd/bronzewardctl/output.go:170`. **Proposed:**
    the double-quote rule for every message that quotes a remote value. The Go `%q` verb still
-   quotes the `Location` header in `internal/client/watch.go:462` and a machine name in
+   quotes the `Location` header in `internal/client/watch.go:465` and a machine name in
    `cmd/bronzewardctl/onboard.go:173` and `cmd/bronzewardctl/onboard.go:175`.
 
    **Required check.** One test fills each remote source with a value that holds ESC, a tab, a
@@ -836,10 +836,10 @@ line, `internal/client/client.go:217-224`, `internal/client/client.go:251-273`,
 `cluster first-key` exception, `internal/client/write.go:339-349`, `cmd/bronzewardctl/main.go:182-191`,
 `cmd/bronzewardctl/main.go:258-259`; the renewal that runs to its end, `internal/client/client.go:226-227`
 (a comment) and `internal/client/credentials.go:264` (`renew` takes no context); no notice after the
-first Ctrl-C, `internal/client/watch.go:380-394`; no further read, `cmd/bronzewardctl/main.go:179-193`;
+first Ctrl-C, `internal/client/watch.go:383-397`; no further read, `cmd/bronzewardctl/main.go:179-193`;
 a write not yet started is not sent, `internal/client/write.go:199-203`; the error beside the stop,
 `cmd/bronzewardctl/main.go:245-252`, `cmd/bronzewardctl/main.go:278-300`; the stream of the import
-follow, `internal/client/watch.go:338-376`, `cmd/bronzewardctl/imports.go:405-430`, its save,
+follow, `internal/client/watch.go:341-379`, `cmd/bronzewardctl/imports.go:405-430`, its save,
 `cmd/bronzewardctl/imports.go:409`, the stream loop without an attempt count,
 `internal/client/watch.go:104-167`, and `operation watch`'s own handler,
 `cmd/bronzewardctl/opwatch.go:184-191`; `publish` saves in a deferred call and follows with the
@@ -1217,7 +1217,7 @@ change each:
 1. discards what it kept for the context. The CLI keeps no cursor or page between commands, drops
    the ETags kept at an earlier epoch (`internal/client/client.go:388-392`,
    `internal/client/state.go:129-133`) and clears the events a watch showed
-   (`internal/client/watch.go:251-254`). Within one list read it keeps the `next` cursor across
+   (`internal/client/watch.go:254-257`). Within one list read it keeps the `next` cursor across
    pages and compares no epoch between them: it relies on the server, which binds a cursor to its
    epoch ([persistence and API §12.1](persistence-api.md#121-the-epoch)) and refuses another
    epoch's as `400 cursor-invalid`, after which the CLI reads the list again from its start with
@@ -1281,22 +1281,22 @@ The wait of `import` does not end on a lapsed lease when the claim or operation 
 epoch than the events shown. It reads both again (CLI: `cmd/bronzewardctl/imports.go:499-508`; web:
 `web/src/imports.tsx:254-261`). The watch clears the events shown when the
 operation it reads has another epoch, even if the operation has no event to replace them, **when
-the operation is not terminal** (CLI: `internal/client/watch.go:251-254`; web:
+the operation is not terminal** (CLI: `internal/client/watch.go:254-257`; web:
 `web/src/progress.ts:223-226`). A terminal read of another epoch than the kept events clears them
 only through the pages it drains, and ends once the drained events hold the operation's epoch;
 where the pages show another epoch than the operation read's, it is read again after the backoff
-(CLI: `internal/client/watch.go:221-233`; web: `web/src/progress.ts:208-216`,
+(CLI: `internal/client/watch.go:224-236`; web: `web/src/progress.ts:208-216`,
 `web/src/progress.ts:268-275`). **Current** for the CLI, as for the web: an empty event list of the
 operation's epoch also clears the events kept from another epoch, so the watch ends with nothing
-shown again (CLI: `internal/client/watch.go:580-583`; web: `web/src/progress.ts:268`). Every
+shown again (CLI: `internal/client/watch.go:583-586`; web: `web/src/progress.ts:268`). Every
 other multi-page read needs no such comparison, because a cursor carries its epoch and a change
 makes it `400 cursor-invalid`.
 
 An epoch is never ordered or parsed: both clients compare it by equality, and split only an event
-ID at its first colon to compare the part before it (`internal/client/watch.go:619-623`,
+ID at its first colon to compare the part before it (`internal/client/watch.go:622-626`,
 `web/src/progress.ts:101`). A missing `Bronzeward-Epoch` on an authenticated success is a defect
 the client reports (CLI: `internal/client/client.go:304-307`, `internal/client/write.go:710-713`,
-`internal/client/watch.go:498-502`; web: `web/src/request.ts:459-463`, `web/src/write.ts:428-429`,
+`internal/client/watch.go:501-505`; web: `web/src/request.ts:459-463`, `web/src/write.ts:428-429`,
 `web/src/progress.ts:300-301`).
 
 **Start mode** (G22). Neither the headers nor `GET /recovery` say whether the process was started
@@ -1423,29 +1423,29 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    therefore waits between attempts. The CLI and the web reader both count this way.
 
    **Current** for both: the drain of a terminal state and the read again after the backoff when
-   its pages name another epoch (`internal/client/watch.go:184-233`,
-   `web/src/progress.ts:202-217`); the reconnect with `Last-Event-ID` (`internal/client/watch.go:442-443`,
+   its pages name another epoch (`internal/client/watch.go:184-236`,
+   `web/src/progress.ts:202-217`); the reconnect with `Last-Event-ID` (`internal/client/watch.go:445-446`,
    `web/src/progress.ts:293-295`) and the backoff from 1 s to 30 s
-   (`internal/client/watch.go:267-283`, `web/src/progress.ts:233-242`); the attempt that
-   showed nothing and what counts as progress (`internal/client/watch.go:272-275`,
+   (`internal/client/watch.go:270-286`, `web/src/progress.ts:233-242`); the attempt that
+   showed nothing and what counts as progress (`internal/client/watch.go:275-278`,
    `web/src/progress.ts:237-238`).
 
    **Current** for the CLI: the operation read after a stream that ended, and after a refused
    drain, is repeated until the watch ends (`internal/client/watch.go:177-178`,
    `internal/client/watch.go:194`); a watch that ends in an outage reports the last read as it
    showed it, unless a terminal read is of an installation restored since
-   (`internal/client/watch.go:133-155`, `internal/client/watch.go:208-210`,
-   `internal/client/watch.go:237-239`); the count of signs and the exit 3 are checked after the
+   (`internal/client/watch.go:133-155`, `internal/client/watch.go:211-213`,
+   `internal/client/watch.go:240-242`); the count of signs and the exit 3 are checked after the
    pages of the end are read (`cmd/bronzewardctl/opwatch.go:352-361`). The wait between two
    attempts goes in steps of 250 ms that ask whether the watch ended, so a watch that ends
    through its timeout leaves it within one step and reports as above, Ctrl-C keeping its own stop
-   (`internal/client/watch.go:338-362`, `internal/client/watch.go:243`, `internal/client/watch.go:278`).
+   (`internal/client/watch.go:341-365`, `internal/client/watch.go:246`, `internal/client/watch.go:281`).
    A TLS trust refusal is repeated in the two reads that run until the watch ends, the event
    stream's open and the operation read, each try giving a notice that names the refusal; a watch
    that ends in that state returns the refusal itself, whatever read of the operation came before, and
    not as the end of the watch: the command then reports the state as not read, never the state of its
-   first read (`internal/client/watch.go:138-143`, `internal/client/watch.go:205-207`). An ordinary read is refused at once, one
-   try (`internal/client/client.go:245-250`, `internal/client/watch.go:453-457`).
+   first read (`internal/client/watch.go:138-143`, `internal/client/watch.go:205-210`). An ordinary read is refused at once, one
+   try (`internal/client/client.go:245-250`, `internal/client/watch.go:456-460`).
 
    **Proposed, not built by every client.** Web: an operation read that stays unavailable (a `503`
    or a 5xx once the client's tries ran out) ends the watch as failed, so it is not repeated until
@@ -1456,7 +1456,7 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    CLI's watch does the same, which it does not (`internal/client/watch.go:177-178`). Web: the
    drain of a terminal state that is refused or stays unavailable also ends the watch as failed,
    where the CLI reads the operation again (`web/src/progress.ts:205-218`,
-   `internal/client/watch.go:192-215`); `web/src/progress.test.ts:298-302` pins that too. Web: the
+   `internal/client/watch.go:192-218`); `web/src/progress.test.ts:298-302` pins that too. Web: the
    pause between two attempts and the retry waits of a read are waited out whole when the watch
    ends through its timeout, not within 250 ms, where the CLI's end within one step
    (`web/src/progress.ts:83-90`).
@@ -1469,9 +1469,9 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    `Bronzeward-Epoch`; on a difference it ends the stream, applies [§8.5](#85-epoch-changes), clears
    what the watch showed and reopens the stream without `Last-Event-ID` (EVT-05). **Current** for
    both: a `reset` clears what was shown and the stream goes on
-   (`internal/client/watch.go:544-546`, `web/src/progress.ts:332-334`); an event ID whose epoch
+   (`internal/client/watch.go:547-549`, `web/src/progress.ts:332-334`); an event ID whose epoch
    part differs from the stream's clears it too and ends the stream, the CLI counting the move
-   (`internal/client/watch.go:547-555`, `web/src/progress.ts:335-339`), and the next attempt
+   (`internal/client/watch.go:550-558`, `web/src/progress.ts:335-339`), and the next attempt
    reopens the stream without `Last-Event-ID` after the operation read and the backoff.
 4. The browser cannot send `Authorization` with `EventSource`, so the web client reads the stream
    with `fetch` and a streamed response body, sending `Authorization`, `Accept` and
@@ -1495,9 +1495,9 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    its status. This is the behavior of the web reader, not a rule for every client. The CLI
    renews an eligible `401` of the stream itself and opens the stream again, reports another
    client refusal as the server sent it, and rejects a redirect ([§9.5](#95-renewal),
-   `internal/client/watch.go:367-371`, `internal/client/watch.go:461-463`,
-   `internal/client/watch.go:474-476`). **Current** for both: the comment lines and the 45 s
-   (`internal/client/watch.go:517-525`, `web/src/progress.ts:95`, `web/src/progress.ts:315-322`),
+   `internal/client/watch.go:370-374`, `internal/client/watch.go:464-466`,
+   `internal/client/watch.go:477-479`). **Current** for both: the comment lines and the 45 s
+   (`internal/client/watch.go:520-528`, `web/src/progress.ts:95`, `web/src/progress.ts:315-322`),
    and the web's refused stream read as pages (`web/src/progress.ts:188-191`,
    `web/src/progress.ts:298-299`).
 6. The machine timeline has no stream (G9). A client reads its newest page with `order=newest`
@@ -2003,7 +2003,7 @@ Built in the clients each item names, except the part marked **Proposed**.
    and once after a `401` on a token it believed valid. It never retries a `401` more than once
    per request. (Built: CLI `internal/client/credentials.go:33`, `internal/client/credentials.go:255-258`,
    `internal/client/client.go:86`, `internal/client/client.go:236-243`, `internal/client/write.go:420-421`,
-   `internal/client/watch.go:433`, `internal/client/watch.go:474`; web `web/src/auth.ts:12`,
+   `internal/client/watch.go:436`, `internal/client/watch.go:477`; web `web/src/auth.ts:12`,
    `web/src/auth.ts:20-23`, `web/src/page.ts:88`, `web/src/request.ts:190`,
    `web/src/request.ts:231-238`, `web/src/request.ts:383-417`, `web/src/write.ts:366`,
    `web/src/write.ts:444`. The web client renews after a delay of `max(left - 60 s, left / 2)`, where `left` is the
@@ -2022,7 +2022,7 @@ Built in the clients each item names, except the part marked **Proposed**.
    failed renewal; with no store `--no-input` refuses at `internal/client/credentials.go:243-244` and
    a refused `401` exits 1 at `cmd/bronzewardctl/main.go:269-270`.)
 4. Long waits (`operation watch`, `publish` waiting for its operation) renew in-process. (Built:
-   `internal/client/watch.go:158`, `internal/client/watch.go:307-316`,
+   `internal/client/watch.go:158`, `internal/client/watch.go:310-319`,
    `cmd/bronzewardctl/publish.go:100`.)
 
 ### 9.6 Failure cases
