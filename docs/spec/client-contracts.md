@@ -2411,8 +2411,8 @@ through (`cmd/bronzewardctl/commandtable.go:291`) and its only writer prints tha
 the clause that it never prints `Authorization`, a body or marks therefore holds without effect.
 (c) Item 4: no documentation says that editors keep swap and backup files (a search for `swap` and
 `backup file` in `docs/operator` and `cmd` finds none). (d) Item 6 for the CLI: only the review and
-the import base body are cleared after decoding; the item's own text says other request bodies live
-until the process ends, which the clause "held no longer than the request needs" does not allow.
+the import base body are cleared after decoding; the built note on the item records that other request
+bodies live until the process ends, which the clause "held no longer than the request needs" does not allow.
 
 ### 11.3 CLI review
 
