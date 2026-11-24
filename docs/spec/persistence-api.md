@@ -2262,6 +2262,8 @@ API revisions:
 | 16 | the `hostname` rule of `422 validation-failed` on publication, with a release compiling a machine's name as its hostname where nothing sets one (§9.2, §3.5, compilation §6.1 item 6) |
 | 17 | the name form of `409 stale-input` from the `ingest` draft transaction, with `expected` and `actual` as machine names, each a string or `null`, and `formOnly` true for a machine whose import removed the fill's own `HostnameConfig` while its name is unchanged (§4.2, choice §17.45, compilation §2.3 step 2a, §6.1 item 5) |
 
+One further part is specified and not yet served, taking the next revision in the change that serves it, so this table names no revision for it: `nodeName` on the `hostname` member of each machine of a release and its review (§9.3), the `hostnameHeldBy` member of `GET /machines/{id}/position` (§9.3) and the publication comparison reading `nodeName` (compilation §6.1 item 6), together in one revision (execution and recovery choice §10.39, ginsys/bronzeward#1052).
+
 ### 9.2 Resources and routes
 
 "Any role" means any authenticated principal holding at least one role: every
@@ -4123,7 +4125,7 @@ or Desired change; it does not erase earlier evidence.
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
 | Draft | The machine's name is not the one ingestion used when it removed a filled hostname (§3.2, compilation §2.3 step 2a) | `409 stale-input` naming the machine, expected and actual name; claim abandoned | claim row; orphans |
 | Publish | A covered machine's name changed since the snapshot (§4.2) | operation `failed`, `409 stale-input` | operation, act |
-| Publish | A hostname filled from a machine's name that another machine holds explicitly (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
+| Publish | A hostname filled from a machine's name that another machine holds explicitly, or a machine's release giving it the node name that another machine's `Applied` release holds (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
 | Publish | Moved head, a covered machine's import base changed (§4.2), a machine of the cluster covered since the snapshot (§6.2, expected "absent"), or T3 finds missing, misbound or superseded publication evidence (§6.1.1) | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
 | Publish | Assignment change while its scope is held | `failed`, `409 scope-busy` | operation, act |
