@@ -27,13 +27,13 @@ type ClientConfig struct {
 // baseScopes are always requested, so the client configuration file does not repeat them.
 var baseScopes = []string{"openid", "offline_access"}
 
-// OIDCScopes is the context's oidc.scopes for the file: none, so the defaults, when it names no
-// scopes, else openid offline_access followed by its scopes.
+// DefaultScopes are the scopes a context asks for when its person names none: openid offline_access.
+func DefaultScopes() []string { return slices.Clone(baseScopes) }
+
+// OIDCScopes is the context's oidc.scopes for the file: openid offline_access followed by the file's
+// scopes, which are none when it names no scopes. A stored context always holds its scopes (§5).
 func (cc *ClientConfig) OIDCScopes() []string {
-	if cc.Scopes == nil {
-		return nil
-	}
-	return append(slices.Clone(baseScopes), cc.Scopes...)
+	return append(DefaultScopes(), cc.Scopes...)
 }
 
 func splitScopes(s string) []string {
@@ -111,6 +111,9 @@ func FetchClientConfigContext(ctx context.Context, x *Context, from string, verb
 	}
 	if v, _ := url.Parse(cc.Issuer); v.RawQuery != "" || v.ForceQuery {
 		return nil, fmt.Errorf("GET %s: the file's issuer %s://%s: give a URL with no query", u, printable(v.Scheme), printable(v.Host))
+	}
+	if cc.Audience == "" {
+		return nil, fmt.Errorf("GET %s: the file names no audience, which a context needs (add --audience by hand)", u)
 	}
 	if cc.RawScopes != nil {
 		// A null is no string either; Unmarshal would leave s empty without an error.

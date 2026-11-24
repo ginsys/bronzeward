@@ -12,6 +12,9 @@ export interface ClientConfig {
   webClientId: string;
   // The optional `scopes` member, split: requested after `openid offline_access`; none if absent.
   scopes: string[];
+  // The optional `ingestWaitSeconds` member: how long a repeat waits for an in-progress write, in
+  // seconds (§8.4 item 2); absent when the file names none.
+  ingestWaitSeconds?: number;
 }
 
 const MEMBERS = ["issuer", "audience", "cliClientId", "webClientId"] as const;
@@ -37,7 +40,11 @@ export async function loadClientConfig(fetchImpl: typeof fetch = fetch): Promise
   if (missing !== undefined) return { kind: "invalid", reason: `${CLIENT_CONFIG_PATH} has no ${missing}` };
   const scopes = readScopes(record["scopes"]);
   if (typeof scopes === "string") return { kind: "invalid", reason: `${CLIENT_CONFIG_PATH}: ${scopes}` };
-  const config = { ...Object.fromEntries(MEMBERS.map((m) => [m, record[m]])), scopes } as unknown as ClientConfig;
+  const wait = record["ingestWaitSeconds"];
+  if (wait !== undefined && (typeof wait !== "number" || !Number.isFinite(wait) || wait <= 0)) {
+    return { kind: "invalid", reason: `${CLIENT_CONFIG_PATH}: ingestWaitSeconds is not a positive number of seconds` };
+  }
+  const config = { ...Object.fromEntries(MEMBERS.map((m) => [m, record[m]])), scopes, ...(wait === undefined ? {} : { ingestWaitSeconds: wait }) } as unknown as ClientConfig;
   if (!trustedIssuer(config.issuer)) return { kind: "invalid", reason: "the issuer must be https, or http to a loopback address" };
   return { kind: "ok", config };
 }

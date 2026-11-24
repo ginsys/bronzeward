@@ -63,12 +63,20 @@ bronzewardctl context add office --server https://bronzeward.example.com \
   --issuer https://idp.example.com --client-id <the CLI client's ID> --audience <the server's audience>
 ```
 
-Without `--scopes`, the client asks the identity provider for `openid` and `offline_access` only.
+`--audience` is required. Without `--scopes`, the context stores `openid offline_access` and the client
+asks the identity provider for those only.
 If your identity provider needs other scopes before it puts the server's audience into the token,
 add them as `--scopes a,b`. The reference provider, Zitadel, needs
 `urn:zitadel:iam:org:project:id:<project ID>:aud`; without it the server refuses every token (see
 [the identity provider](../deployment/identity-provider.md)). `--from` takes the scopes the server
 publishes, and `--scopes` can be added to it too.
+
+**A context saved without scopes or audience.** An earlier client let you save an identity-provider context
+with no `scopes` or no `audience`. Such a file still loads, and `context list`, `context use` and
+`context remove` still work. Any command that opens that context refuses at once, before it sends a
+request, and names what to add. Under `oidc` in the contexts file, add
+`scopes: [openid, offline_access]` and `audience: <the server's audience>`, or remove the context
+and add it again.
 
 A context for **automation** has no identity provider. It uses a long-lived automation token you
 keep in a file ([below](#credentials-for-a-script)):

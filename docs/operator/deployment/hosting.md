@@ -87,9 +87,15 @@ no secret: both clients are public, and the file is read before anyone signs in.
   "audience": "<the server's auth.oidc.audience>",
   "cliClientId": "<the CLI client's ID>",
   "webClientId": "<the web client's ID>",
-  "scopes": "<optional: scopes requested after openid offline_access>"
+  "scopes": "<optional: scopes requested after openid offline_access>",
+  "ingestWaitSeconds": "<optional, web only: a number of seconds>"
 }
 ```
+
+`ingestWaitSeconds` is how long the web interface waits for a write that the server still reports as
+in progress, before it tells the person the outcome is unknown. Leave it out for the default of 120
+seconds. A longer claim lease that the server serves raises the wait to the lease. The CLI keeps its
+own `--ingest-wait` and ignores this member. Write it as a JSON number, not a string.
 
 Leave `scopes` out when the provider needs none, and never list `openid` or `offline_access`
 in it. The web interface also asks for `profile` by itself when the provider lists it, to read the

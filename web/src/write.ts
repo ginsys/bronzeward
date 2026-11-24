@@ -79,7 +79,8 @@ const REPEATED_503 = new Set(["dependency-unavailable", "talos-access-unavailabl
 // The waits before each of a write's at most three repeats (§8.4 item 2, as the CLI's #346).
 export const BACKOFF = [1000, 2000, 4000];
 // How long a repeat waits for the first request of its key to finish ingesting, unless the
-// served claim lease is longer (as the CLI's --ingest-wait, #347).
+// served claim lease is longer (as the CLI's --ingest-wait, #347). The client configuration file's
+// ingestWaitSeconds replaces it (Writes.ingestWait).
 export const INGEST_WAIT = 120_000;
 // How long the in-progress wait's GET /server may take before the bound falls back without it
 // (ginsys/bronzeward#517 H13).
@@ -146,6 +147,9 @@ export class Writes {
   // The claim lease, in seconds, of the shell's last GET /server: the in-progress wait's bound
   // when its own read of it fails (ginsys/bronzeward#517 H14).
   lease: number | undefined;
+  // The in-progress wait bound in milliseconds, before the claim lease raises it: the client
+  // configuration file's setting, else INGEST_WAIT (§8.4 item 2).
+  ingestWait = INGEST_WAIT;
   private readonly all = new Set<Write>();
   private readonly listeners = new Set<() => void>();
   // The clients bound so far that have not ended their writes.
@@ -532,7 +536,7 @@ export class Writes {
     return now === w.epoch ? undefined : EPOCH_CHANGED_ASIDE;
   }
 
-  // The in-progress wait bound: INGEST_WAIT, or the claim lease if longer (§8.4 item 2). The lease
+  // The in-progress wait bound: this.ingestWait, or the claim lease if longer (§8.4 item 2). The lease
   // is the one GET /server serves now, or else the one the shell read (H14). That read is a read:
   // its credential refusals and a recovery start's refusal go to `end` (H12). It is not waited for
   // beyond SERVER_WAIT (H13).
@@ -547,7 +551,7 @@ export class Writes {
     if (a === undefined) void reading.then(() => (end.e !== undefined ? end.now?.(end.e) : end.pre !== undefined && end.nowPre?.(end.pre)), () => undefined);
     const served = a?.status === 200 ? (a.data as { ingestionClaim?: { leaseSeconds?: unknown } } | null)?.ingestionClaim?.leaseSeconds : undefined;
     const lease = typeof served === "number" ? served : this.lease;
-    return lease !== undefined && lease * 1000 > INGEST_WAIT ? lease * 1000 : INGEST_WAIT;
+    return lease !== undefined && lease * 1000 > this.ingestWait ? lease * 1000 : this.ingestWait;
   }
 
   // A sign-out, an ended sign-in or the end of the shell that held the client: nothing more is sent

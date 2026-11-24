@@ -89,8 +89,6 @@ func setEpochHeader(t *testing.T, epoch string) {
 var (
 	recoveryEpochByPath map[string]string
 	recoveryRevision    = 10
-	// recoveryRevisionMoved, when not 0, is the revision GET /server shows once the epoch moved.
-	recoveryRevisionMoved = 0
 	// recoveryRefreshEpoch, when not empty, is the epoch of the first GET /server read after the epoch
 	// moved: the epoch moves a second time before the client refreshes its server facts.
 	recoveryRefreshEpoch = ""
@@ -98,7 +96,7 @@ var (
 
 func setServerFacts(t *testing.T, revision int, epochByPath map[string]string) {
 	t.Cleanup(func() {
-		recoveryEpochByPath, recoveryRevision, recoveryRevisionMoved, recoveryRefreshEpoch = nil, 10, 0, ""
+		recoveryEpochByPath, recoveryRevision, recoveryRefreshEpoch = nil, 10, ""
 	})
 	recoveryEpochByPath, recoveryRevision = epochByPath, revision
 }
@@ -168,9 +166,6 @@ func recoveryServer(t *testing.T, answers map[string]string, post string) func()
 			epoch = moved
 		}
 		revision := recoveryRevision
-		if moved != "" && recoveryRevisionMoved != 0 {
-			revision = recoveryRevisionMoved
-		}
 		mu.Unlock()
 		w.Header().Set("Bronzeward-Epoch", epoch)
 		w.Header().Set("Content-Type", "application/json")
@@ -562,7 +557,6 @@ func TestStatusRefusesAStaleSnapshot(t *testing.T) {
 		for _, moves := range []string{"/api/v1/recovery", "/api/v1/machines", "/api/v1/operations"} {
 			t.Run(strings.Join(form, " ")+" "+moves, func(t *testing.T) {
 				setServerFacts(t, 10, map[string]string{moves: "ep_BWSYNTH-2"})
-				recoveryRevisionMoved = 2
 				recoveryServer(t, answers, "")
 				var out, errb bytes.Buffer
 				rc := run(form, &out, &errb)
@@ -592,100 +586,6 @@ func TestStatusRefusesAStaleSnapshot(t *testing.T) {
 				t.Errorf("rc %d, out %q, err %q; want the snapshot", rc, out.String(), errb.String())
 			}
 		})
-	}
-}
-
-// TestRecoveryStatusNamesTheRevisionForMissingKeys: a server of API revision 2 refuses order on the
-// timeline (client-contracts section 8.6 item 6), so the client does not send it (section 7 item 1)
-// and the next step says what the keys need.
-func TestRecoveryStatusNamesTheRevisionForMissingKeys(t *testing.T) {
-	setServerFacts(t, 2, nil)
-	seen := recoveryServer(t, map[string]string{
-		"GET /api/v1/recovery": `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
-	}, "")
-	var out, errb bytes.Buffer
-	if code := run([]string{"recovery", "status"}, &out, &errb); code != 0 {
-		t.Fatalf("exit %d\n%s", code, errb.String())
-	}
-	flat := strings.Join(strings.Fields(out.String()), " ")
-	if want := "the missing keys need API revision 3; see machine timeline 'mch_c', then recovery mark 'mch_c'"; !strings.Contains(flat, want) {
-		t.Errorf("output lacks %q:\n%s", want, out.String())
-	}
-	for _, r := range seen() {
-		if strings.Contains(r, "/timeline") {
-			t.Errorf("a revision 2 server was sent %s", r)
-		}
-	}
-}
-
-// TestRecoveryStatusGatesOnTheRefreshedRevision: a next-step read shows a new epoch, the client reads
-// GET /server again, and that read shows API revision 2. The next scope then gets no order on its
-// timeline (section 7 item 1), though the first read showed revision 3.
-func TestRecoveryStatusGatesOnTheRefreshedRevision(t *testing.T) {
-	setServerFacts(t, 10, map[string]string{"/api/v1/operations": "ep_BWSYNTH-2"})
-	recoveryRevisionMoved = 2
-	seen := recoveryServer(t, map[string]string{
-		"GET /api/v1/recovery":   `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_b","state":"unresolved"},{"machine":"mch_c","state":"blocked"}]}`,
-		"GET /api/v1/operations": `{"items":[]}`,
-	}, "")
-	var out, errb bytes.Buffer
-	run([]string{"recovery", "status"}, &out, &errb)
-	reqs := seen()
-	if !slices.Contains(reqs, "GET /api/v1/operations") {
-		t.Fatalf("no operations read, so the epoch never moved: %v", reqs)
-	}
-	for _, r := range reqs {
-		if strings.Contains(r, "/timeline") {
-			t.Errorf("a revision 2 server was sent %s after the refresh", r)
-		}
-	}
-}
-
-// TestRecoveryStatusGatesEachTimelinePage: the first timeline page shows a new epoch, and the re-read
-// of GET /server shows API revision 2. The client then sends no second page with an order.
-func TestRecoveryStatusGatesEachTimelinePage(t *testing.T) {
-	setServerFacts(t, 10, map[string]string{"/api/v1/machines/mch_c/timeline": "ep_BWSYNTH-2"})
-	recoveryRevisionMoved = 2
-	seen := recoveryServer(t, map[string]string{
-		"GET /api/v1/recovery":                `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
-		"GET /api/v1/machines/mch_c/timeline": `{"items":[{"kind":"observation","revision":9,"entry":{}}],"next":"cur_BWSYNTH"}`,
-	}, "")
-	var out, errb bytes.Buffer
-	run([]string{"recovery", "status"}, &out, &errb)
-	n := 0
-	for _, r := range seen() {
-		if strings.Contains(r, "/timeline") {
-			n++
-		}
-	}
-	if n != 1 {
-		t.Errorf("%d timeline requests; want the first page only, as the refreshed revision is 2", n)
-	}
-}
-
-// TestRecoveryStatusGatesTheCursorRestart: the second timeline page answers 400 cursor-invalid with a
-// new epoch, and the re-read of GET /server shows API revision 2. The client then does not read the
-// first page again with an order.
-func TestRecoveryStatusGatesTheCursorRestart(t *testing.T) {
-	const p = "/api/v1/machines/mch_c/timeline"
-	setServerFacts(t, 10, map[string]string{p + "?cursor=cur_BWSYNTH": "ep_BWSYNTH-2"})
-	recoveryRevisionMoved = 2
-	seen := recoveryServer(t, map[string]string{
-		"GET /api/v1/recovery":             `{"epoch":"ep_BWSYNTH-1","recoveryMode":true,"scopes":[{"machine":"mch_c","state":"blocked"}]}`,
-		"GET " + p:                         `{"items":[{"kind":"observation","revision":9,"entry":{}}],"next":"cur_BWSYNTH"}`,
-		"GET " + p + "?cursor=cur_BWSYNTH": `400 {"type":"urn:bronzeward:problem:cursor-invalid","title":"BWSYNTH","status":400,"instance":"req_BWSYNTH"}`,
-	}, "")
-	var out, errb bytes.Buffer
-	run([]string{"recovery", "status"}, &out, &errb)
-	n := 0
-	for _, r := range seen() {
-		if r == "GET "+p {
-			n++
-		}
-	}
-	// The fake records paths only: the first page and the refused cursor's page make two reads, a restart a third.
-	if n != 2 {
-		t.Errorf("%d timeline reads; want 2, with no restart on a revision 2 server", n)
 	}
 }
 

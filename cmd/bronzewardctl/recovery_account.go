@@ -191,10 +191,7 @@ func observationLine(label string, o apitypes.ObservationBody) string {
 // is another snapshot's record.
 func settleFacts(c *client.Client, machine, kind string, revision int, epoch string) string {
 	const none = "The settle floor and its anchor are on the machine's timeline: machine timeline %s."
-	if c.Revision < 3 {
-		return sf(none, client.ShellWord(machine))
-	}
-	pg, err := c.PageIf("/machines/"+url.PathEscape(machine)+"/timeline?order=newest&limit=100", "", func() bool { return c.Revision >= 3 })
+	pg, err := c.Page("/machines/"+url.PathEscape(machine)+"/timeline?order=newest&limit=100", "")
 	if err != nil {
 		return sf(none, client.ShellWord(machine))
 	}
@@ -216,9 +213,6 @@ func settleFacts(c *client.Client, machine, kind string, revision int, epoch str
 // newestEntry is what GET /machines/{id}/timeline shows last, for the block of an unknown outcome.
 func newestEntry(machine string) func(*client.Client) (string, error) {
 	return func(c *client.Client) (string, error) {
-		if c.Revision < 3 {
-			return "the timeline cannot be read newest first on this server", nil
-		}
 		pg, err := c.Page("/machines/"+url.PathEscape(machine)+"/timeline?order=newest&limit=1", "")
 		if err != nil {
 			return "", err

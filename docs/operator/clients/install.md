@@ -130,7 +130,7 @@ bronzewardctl version
 ```
 
 ```text
-Client  bronzewardctl v0.0.0-dev, needs API revision 2 or later
+Client  bronzewardctl v0.0.0-dev, needs API revision 10 or later
 Server  unknown
 bronzewardctl: no context selected: add one with bronzewardctl context add
 ```

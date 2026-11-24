@@ -143,6 +143,9 @@ func (e *env) contextAdd(args []string) error {
 	}
 	if x.Credential == "oidc" {
 		x.OIDC = o
+		if from == "" && o.Scopes == nil {
+			o.Scopes = client.DefaultScopes() // the stored context always holds its scopes (§5)
+		}
 	}
 	if from != "" {
 		var cc *client.ClientConfig

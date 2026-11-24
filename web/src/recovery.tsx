@@ -37,9 +37,13 @@ export function startRefusal(res: ReadResult<unknown>): boolean {
   return res.problem.type === "urn:bronzeward:problem:recovery-mode-active" && !("scope" in res.problem);
 }
 
-// The start mode an answer shows, or undefined when it shows none.
+// The start mode an answer shows, or undefined when it shows none. A value that is neither mode is
+// unknown, never the mode shown before (§7 item 2).
 export function startModeOf(res: ReadResult<{ startMode?: string }>): StartMode | undefined {
-  if (res.kind === "ok") return res.data.startMode === "recovery" ? "recovery" : res.data.startMode === "normal" ? "normal" : undefined;
+  if (res.kind === "ok") {
+    const mode = res.data.startMode;
+    return mode === undefined ? undefined : mode === "recovery" || mode === "normal" ? mode : "unknown";
+  }
   return startRefusal(res) ? "recovery" : undefined;
 }
 
