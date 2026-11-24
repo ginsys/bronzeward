@@ -124,6 +124,26 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 	var lastRead OperationRead // the last read of the operation in this loop
 	voided := false            // the terminal read that was the last read is of an installation restored since
 	pages, delay := false, time.Second
+	// stopped is what the watch returns when a wait of it ends, whether the wait is the operation read's
+	// retry or the pause between two attempts. A watch that ended while the server was out of reach, or
+	// while it waited, returns the operation as the last read showed it, which is not terminal, or the error
+	// when no read in this loop gave one. A terminal read that the events or a later read showed to be of a
+	// restored installation is no last read: the error then says that no read stands. An error that is not
+	// the end of the watch (a Ctrl-C, a refusal) is returned as it is.
+	stopped := func(err error) (*apitypes.OperationBody, OperationRead, error) {
+		if errors.Is(err, ErrWatchEnded) {
+			if w.halt.err != nil { // Until failed: its error stands, as at the stop below
+				return nil, OperationRead{}, w.halt.err
+			}
+			if lastOp != nil && (!Terminal(lastOp.State) || c.EpochHolds(lastRead)) {
+				return lastOp, lastRead, nil
+			}
+			if lastOp != nil || voided {
+				return nil, OperationRead{}, errors.Join(err, ErrWatchRestored)
+			}
+		}
+		return nil, OperationRead{}, err
+	}
 	// Until is asked before the first stream: a caller whose time ran out during the reads before the
 	// watch has already ended it, and no stream is opened for that. The operation read below is the result.
 	first := true
@@ -151,22 +171,7 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 		o, rd, err := c.operationReadUntil(op, w.stop)
 		epoch := rd.Epoch
 		if err != nil {
-			// The watch ended while the server was out of reach: the operation as the last read showed
-			// it, which is not terminal, or the error when no read in this loop gave one. A terminal read
-			// that the events or a later read showed to be of a restored installation is no last read: the
-			// error then says that no read stands.
-			if errors.Is(err, ErrWatchEnded) {
-				if w.halt.err != nil { // Until failed: its error stands, as at the stop below
-					return nil, OperationRead{}, w.halt.err
-				}
-				if lastOp != nil && (!Terminal(lastOp.State) || c.EpochHolds(lastRead)) {
-					return lastOp, lastRead, nil
-				}
-				if lastOp != nil || voided {
-					return nil, OperationRead{}, errors.Join(err, ErrWatchRestored)
-				}
-			}
-			return nil, OperationRead{}, err
+			return stopped(err)
 		}
 		lastOp, lastRead, voided = o, rd, false
 		if Terminal(o.State) {
@@ -223,7 +228,7 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 			// The watch goes on after the delay, so a server whose events never match its operation
 			// read's epoch is not asked again without a pause.
 			if err := c.pause(op, w, delay); err != nil {
-				return nil, OperationRead{}, err
+				return stopped(err)
 			}
 			delay = min(2*delay, 30*time.Second)
 			continue
@@ -258,7 +263,7 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 		}
 		if pages || !progress {
 			if err := c.pause(op, w, delay); err != nil {
-				return nil, OperationRead{}, err
+				return stopped(err)
 			}
 			if !progress {
 				delay = min(2*delay, 30*time.Second)
@@ -306,16 +311,31 @@ func eventsRoute(op string) string {
 
 // pause waits d before the watch's next attempt. A Ctrl-C ends the wait and the watch, as it ends the
 // stream, with the route of the stream (client-contracts.md §8.2). A Watch with a sleep of its own
-// waits with that, and takes no Ctrl-C.
+// waits with that, and takes no Ctrl-C. The wait goes in steps of watchStep that ask Until, so a watch
+// that ends through its timeout is left within one step, as the retry of the operation read is, and
+// ErrWatchEnded is what ends it (§8.6 item 2).
 func (c *Client) pause(op string, w Watch, d time.Duration) error {
 	if w.sleep != nil {
 		w.sleep(d)
 		return nil
 	}
 	ctx, disarm := c.arm()
-	_ = waitFor(ctx, d) // a taken Ctrl-C is what disarm reports
+	ended := false
+	for left := d; left > 0; {
+		step := min(left, watchStep)
+		if waitFor(ctx, step) != nil { // a taken Ctrl-C is what disarm reports
+			break
+		}
+		if left -= step; w.stop() {
+			ended = true
+			break
+		}
+	}
 	if disarm() {
 		return c.cut(&Interrupted{Route: eventsRoute(op)})
+	}
+	if ended {
+		return ErrWatchEnded
 	}
 	return nil
 }
@@ -409,11 +429,9 @@ func (c *Client) streamIn(armed context.Context, op string, last *string, w Watc
 		defer idle.Stop()
 		r, err := hc.Do(q)
 		if err != nil {
+			// A refused server certificate is a transport failure here as any other: noticed, and the
+			// operation is read next, which repeats it until the watch ends (§8.6 item 2).
 			err = transportError(c.Context, c.Context.Host(), err)
-			var t *trust
-			if errors.As(err, &t) {
-				return false, false, c.Context.fail(fmt.Errorf("%s: %w", route, err))
-			}
 			fmt.Fprintf(c.Notices, "%s: %s: %v\n", c.Context.Where(), route, err)
 			return false, false, nil
 		}
@@ -534,6 +552,13 @@ func (c *Client) drain(op string, last *string, w Watch) (string, error) {
 	items, epoch, err := c.ListAt("/operations/" + url.PathEscape(op) + "/events")
 	if err != nil {
 		return "", err
+	}
+	// A list with no event of the epoch the pages name leaves the events shown from another epoch in
+	// place: they are of the installation before the restore, so they are cleared, as the web's drain does
+	// (section 8.5). A terminal read of that epoch then ends the watch, with nothing shown again.
+	if len(items) == 0 && epoch != "" && *last != "" && epochOf(*last) != epoch {
+		c.cleared(w, "the installation was restored or entered recovery mode")
+		*last = ""
 	}
 	for i, raw := range items {
 		var ev Event

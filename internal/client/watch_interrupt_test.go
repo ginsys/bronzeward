@@ -141,8 +141,8 @@ func TestStreamBackoffEndsOnInterrupt(t *testing.T) {
 	switch {
 	case !errors.As(err, &cut) || cut.Route != streamRoute:
 		t.Errorf("error %v; want the watch stopped by Ctrl-C, naming %s", err, streamRoute)
-	case len(waits) != 1 || waits[0] != time.Second:
-		t.Errorf("waits %v; want the one wait of 1s that the Ctrl-C ended", waits)
+	case len(waits) != 1 || waits[0] != watchStep:
+		t.Errorf("waits %v; want the one step of %v, of the 1s pause, that the Ctrl-C ended", waits, watchStep)
 	case s.streams.Load() != 1:
 		t.Errorf("%d stream requests; want 1: a Ctrl-C during the wait opens no second stream", s.streams.Load())
 	case a.open.Load() != 0:
