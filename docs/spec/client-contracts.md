@@ -789,7 +789,7 @@ reads `internal/client/client.go:209`, `internal/client/client.go:263-308`,
 `internal/client/write.go:182-185`, `internal/client/write.go:491-494`, `web/src/write.ts:77-78`,
 `web/src/write.ts:500-505`, `web/src/write.ts:519`; the principal-name read that tries once,
 `internal/client/client.go:207`, `cmd/bronzewardctl/names.go:39`. An unknown code and a `5xx` that
-is no Bronzeward problem: `internal/client/write.go:422`, `internal/client/client.go:348-359`;
+is no Bronzeward problem: `internal/client/write.go:433-434`, `internal/client/client.go:348-359`;
 `web/src/request.ts:272-288`, `web/src/write.ts:506-510`. Neither
 client reads `Retry-After` (`rg 'Retry-After' web/src internal/client cmd` finds nothing; control:
 `rg 'Idempotency-Key'` finds `internal/client/write.go:701`). `404`, the server's meaning of
@@ -1326,7 +1326,7 @@ makes it `400 cursor-invalid`.
 An epoch is never ordered or parsed: both clients compare it by equality, and split only an event
 ID at its first colon to compare the part before it (`internal/client/watch.go:627-631`,
 `web/src/progress.ts:127`). A missing `Bronzeward-Epoch` on an authenticated success is a defect
-the client reports (CLI: `internal/client/client.go:339-342`, `internal/client/write.go:715-718`,
+the client reports (CLI: `internal/client/client.go:339-342`, `internal/client/write.go:730-733`,
 `internal/client/watch.go:506-510`; web: `web/src/request.ts:489-493`, `web/src/write.ts:432-433`,
 `web/src/progress.ts:405-406`).
 
@@ -2081,7 +2081,7 @@ Built, except the parts marked **Proposed** below. Sources follow each item.
    CLI knows an automation context from `credential: automation`, `internal/client/client.go:112`,
    `internal/client/config.go:174`, and checks the prefix only when it reads the token,
    `internal/client/token.go:46`. It says so before a write marked human-only,
-   `internal/client/write.go:222-224`, but not before a human-only read such as `import review`,
+   `internal/client/write.go:233-235`, but not before a human-only read such as `import review`,
    `cmd/bronzewardctl/review.go:28`.)
 4. The web interface accepts no automation token. (Built: `bwt_` appears nowhere in `web/src` outside tests, so the
    page holds only a token its own sign-in or another tab's sign-in produced
