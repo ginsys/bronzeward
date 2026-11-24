@@ -747,7 +747,7 @@ sentence, `web/src/states.tsx:180`; the import page's sentences, `web/src/import
 | 400 `invalid-request` | a malformed request: operator input, a client defect or an incompatible server. Operator input includes a mark that is not a valid path on the start and fragment routes (`internal/api/ingestions.go:69-73`, `internal/api/fragments.go:52-56`; the index is in `detail`, there is no `position` member), an empty document (`internal/api/tx.go:119-120`), an invalid name (`internal/api/drafts.go:190-191`) and the recovery entry's body checks (`internal/api/recovery_entries.go:49-71`). Show `detail` and stop; never repeat |
 | 400 `cursor-invalid` | discard the cursor and restart the list. Run the epoch-change handling of [§8.5](#85-epoch-changes) only when `Bronzeward-Epoch` changed: the same code also answers a cursor that does not parse (`internal/api/acts.go:154-156`) |
 | 401 `unauthenticated` | renew once ([§9.5](#95-renewal)); repeat a read; for a write follow [§8.4](#84-idempotency-and-ambiguous-responses); a second `401` stops with the failure text of [§9.6](#96-failure-cases) |
-| 403 `forbidden` | show the route's `roles`, and "humans only" when `humanOnly` is true; no retry. For the plan cancellation's creator check, the form that carries a `plan` member, show its `detail` instead: its `roles` are the route's, `publisher` included, which the caller already holds (`internal/api/cancellations.go:64-72`, `internal/api/routes.go:123`). After an ambiguous attempt, the route-level role check's refusal, like the process `409`s, is decided before the idempotency lookup (`internal/api/api.go:339-359`, `internal/api/api.go:380-391`; for example a renewal dropped a role, [§9.6](#96-failure-cases)), so it says nothing about the earlier attempt: the outcome stays unknown ([§8.4](#84-idempotency-and-ambiguous-responses) item 4). The plan cancellation's creator check, a `403 forbidden` that carries a `plan` member, refuses after the lookup instead (`internal/api/cancellations.go:61-73`, `internal/api/tx.go:218-226`): it means the key has no record, in this epoch or an earlier one, so the earlier attempt did not commit or a restore removed it |
+| 403 `forbidden` | show the route's `roles`, and "humans only" when `humanOnly` is true; no retry. For the plan cancellation's creator check, the form that carries a `plan` member, show its `detail` instead: its `roles` are the route's, `publisher` included, which the caller already holds (`internal/api/cancellations.go:64-72`, `internal/api/routes.go:123`). After an ambiguous attempt, the route-level role check's refusal, like the process `409`s, is decided before the idempotency lookup (`internal/api/api.go:339-359`, `internal/api/api.go:380-391`; for example a renewal dropped a role, [§9.6](#96-failure-cases)), so it says nothing about the earlier attempt: the outcome stays unknown ([§8.4](#84-idempotency-and-ambiguous-responses) item 4). The plan cancellation's creator check, a `403 forbidden` that carries a `plan` member, refuses after the lookup instead (`internal/api/cancellations.go:61-73`, `internal/api/tx.go:198-202`): it means the key has no record, in this epoch or an earlier one, so the earlier attempt did not commit or a restore removed it |
 | 403 `identity-revoked` | stop; clear the context's stored credential, meaning the tokens the client itself keeps in its credential store, its memory or its D2 (b) token file, never an operator-supplied automation token file, which it leaves untouched and reports as no longer accepted; do not start a new sign-in by itself ([§9.6](#96-failure-cases)) |
 | 404 `not-found` | the resource does not exist in this epoch; after a restore a handle issued later answers `404` ([persistence and API §12.3](persistence-api.md#123-what-a-restored-state-means-record-by-record)) |
 | 409 `conflict`, `stale-input`, `scope-busy`, `machine-identity-mismatch`, `ingestion-abandoned`, `recovery-mode-entered`, `recovery-mode-active` | show the named resource and state; read it; never repeat automatically, with one exception. A `409 recovery-mode-active` without a `scope` member, and a `409 conflict` to the recovery entry without `epoch` and `request` members, are process refusals that show the start mode ([§8.5](#85-epoch-changes)). A `409 conflict` that carries `request` and `epoch` is an earlier-epoch idempotency record: it is read and reported, not repeated, under either key ([§8.4](#84-idempotency-and-ambiguous-responses) item 7). The one exception: a `409 conflict` on a draft fragment write (`PUT /drafts/{id}/fragments/{name}`) that answers a repeat, carries an `ingestion` member but no `draft` member, and has no `Idempotent-Replayed: true` is the first request still running, or ended without committing while its claim's lease has not lapsed (`internal/api/fragments.go:105-114`, `internal/api/tx.go:80-98`; looked up by principal and key, so it never answers a first send). A `409` with both `ingestion` and `draft`, replayed or not, is a recorded refusal (`internal/api/fragments.go:291-296`, `internal/api/drafts.go:94-104`): the write was refused, not pending. For the in-progress case, repeat the identical request with the same key, with backoff, until it answers otherwise or the client's wait bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 2 expires; the contract says the repeat then gets the first request's replay ([persistence and API §7.2](persistence-api.md#72-behavior); [§8.4](#84-idempotency-and-ambiguous-responses) item 2), or, when the first request ended without committing, executes as a new request, unless its `Bronzeward-Expected-Epoch` names another epoch (`412 epoch-mismatch`, A6), reported as this send's own result (`internal/api/fragments.go:105-114`) |
@@ -878,13 +878,16 @@ ginsys/bronzeward#1176: the web client words a failed operation by the row's `wh
 leaves out a `next` that points at a server explanation the page does not show
 (`web/src/problems.tsx:91-95`, `web/src/imports.tsx:132`), with "Import again" beside it
 (`web/src/imports.tsx:133`); the CLI shows the operation's identifier and state with the raw error and
-names the row's next step for `precondition-failed`, `ingestion-abandoned`, `machine-identity-mismatch`,
-`recovery-mode-entered` and `talos-access-unavailable` (`cmd/bronzewardctl/imports.go:592-617`). The
+names the row's next step, for a failed import, for `precondition-failed`, `ingestion-abandoned`,
+`machine-identity-mismatch` and `talos-access-unavailable` (`cmd/bronzewardctl/imports.go:592-615`), and,
+for a failed publication, for `recovery-mode-entered`, the code that recovery-mode entry gives a publish
+job and no import (`cmd/bronzewardctl/publish.go:117`, `cmd/bronzewardctl/publish.go:133-142`). The
 next-step words exist in two places, the web table (`web/src/problems.tsx:23-48`) and the CLI's cases
-(`cmd/bronzewardctl/imports.go:602-615`), because the two clients cannot share one file; a change to a
-row's `next` changes both. For `talos-access-unavailable`, whose web `next` is "The server's explanation
-follows", the CLI says "The server's explanation is in the error above", because it prints the raw
-error before the step. Another code a failed operation carries has no CLI next step.
+(`cmd/bronzewardctl/imports.go:602-613`, `cmd/bronzewardctl/publish.go:138-139`), because the two clients
+cannot share one file; a change to a row's `next` changes both. For `talos-access-unavailable`, whose
+web `next` is "The server's explanation follows", the CLI says "The server's explanation is in the error
+above", because it prints the raw error before the step. Another code a failed operation carries has no
+CLI next step, and neither has a failed operation any other CLI command shows.
 
 ### 8.3 ETags
 
@@ -935,9 +938,11 @@ Built, on a `412`, where the clause says the client "shows the current state": t
 revision the draft has now and the command that reads it (`internal/client/write.go:560-570`). At the
 revision that lands ginsys/bronzeward#1176 the web publication page does too: it reads the draft once,
 with a plain read that sends no `If-Match`, and says its revision and state under the refusal, which
-stays shown whatever the read answers (`web/src/publish.tsx:187`, `web/src/publish.tsx:193-196`,
-`web/src/publish.tsx:214`). That read keeps no ETag: Publish still sends nothing until the operator
-presses "Read the draft again" (`web/src/publish.tsx:162-163`, `web/src/publish.tsx:178`).
+stays shown whatever the read answers (`web/src/publish.tsx:191-194`, `web/src/publish.tsx:201-205`,
+`web/src/publish.tsx:222`); a read answered after a newer press or re-read is dropped
+(`web/src/publish.tsx:177-182`, `web/src/publish.tsx:192-193`). That read keeps no ETag: Publish still
+sends nothing until the operator presses "Read the draft again" (`web/src/publish.tsx:162-163`,
+`web/src/publish.tsx:180-186`).
 
 ### 8.4 Idempotency and ambiguous responses
 
@@ -947,7 +952,7 @@ method, route, path parameters, `If-Match` and the canonical body, keyed with th
 digest key on keyed routes (`internal/api/body.go:165-185`); where the key has a record, the same
 request under it replays, another is `422`, an earlier epoch's record is `409`
 (`internal/api/idempotency.go:60-106`); where it has none, any request under it executes as a new
-one (`internal/api/tx.go:218-229`), unless its `Bronzeward-Expected-Epoch` names another epoch
+one (`internal/api/tx.go:198-202`), unless its `Bronzeward-Expected-Epoch` names another epoch
 (`412 epoch-mismatch`, A6); a request whose effect a restore removed lost its record too and
 executes again under the same exception
 ([persistence and API §12.4](persistence-api.md#124-restore-and-idempotency)); the same key does
