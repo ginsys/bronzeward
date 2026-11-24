@@ -1516,7 +1516,7 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    adds each event of another epoch than its stream (`web/src/progress.ts:144-146`,
    `web/src/progress.ts:443`), takes the sum at each read (`web/src/progress.ts:211`,
    `web/src/progress.ts:266`, `web/src/progress.ts:303`, `web/src/progress.ts:313`) and compares it by equality
-   (`web/src/progress.ts:215`). The cases are `web/src/progress.test.ts:351-674` and
+   (`web/src/progress.ts:215`). The cases are `web/src/progress.test.ts:351-684` and
    `web/src/request.test.ts:548-574`.
 
 3. A `reset` event clears what the watch showed, prints that the installation was restored or
