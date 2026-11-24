@@ -19,10 +19,14 @@ The guide has three parts:
   [connect a cluster](clients/connect-a-cluster.md),
   [the inventory](clients/inventory.md), [editing](clients/editing.md),
   [protected import](clients/protected-import.md), [publication](clients/publication.md),
-  [plans and approval](clients/plan-and-approval.md) and
-  [operation tracking](clients/operation-tracking.md). The [command reference](clients/cli-reference.md)
-  of `bronzewardctl` is generated from its command table. The pages for the later journeys are still
-  being written ([ginsys/bronzeward#404](https://github.com/ginsys/bronzeward/issues/404)).
+  [plans and approval](clients/plan-and-approval.md),
+  [operation tracking](clients/operation-tracking.md),
+  [decide on a change made on a machine](clients/drift.md) and
+  [recover after a restore](clients/recovery-after-restore.md). When a client cannot reach or use the
+  server, see [client troubleshooting](clients/client-troubleshooting.md). The
+  [command reference](clients/cli-reference.md) of `bronzewardctl` is generated from its command
+  table. The screenshots are still to come
+  ([ginsys/bronzeward#404](https://github.com/ginsys/bronzeward/issues/404)).
 - **Deployment**: [hosting](deployment/hosting.md) (TLS, routing, the web files and the
   client-configuration file), the [identity provider](deployment/identity-provider.md) (Zitadel),
   and [upgrade and rollback](deployment/upgrade.md).
