@@ -113,6 +113,7 @@ func TestFilledHostnameKeyStays(t *testing.T) {
 		{"features a reference", "node-a", "machine:\n  features: !bwref s-feats\n  network:\n    hostname: node-a\n"},
 		{"features null", "node-a", "machine:\n  features:\n  network:\n    hostname: node-a\n"},
 		{"two documents hold the key", "node-a", keyBase + "---\n" + keyBase},
+		{"the network mapping is shared by an alias", "node-a", "machine:\n  network: &net {hostname: node-a}\n  nodeLabels: *net\n"},
 		{"the hostname node carries an anchor", "node-a", strings.Replace(keyBase, "hostname: node-a", "hostname: &h node-a", 1)},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
@@ -135,11 +136,15 @@ func TestFilledHostnameKeyStays(t *testing.T) {
 // stableHostname that is not a boolean and features that is a scalar each keep it.
 func TestReleaseLegacyKeyKeepsWhatItCannotRead(t *testing.T) {
 	for label, text := range map[string]string{
-		"a hostname that is a sequence":    strings.Replace(keyBase, "hostname: node-a", "hostname: [node-a]", 1),
-		"stableHostname not a boolean":     strings.Replace(keyStable, "false", "\"false\"", 1),
-		"features a scalar":                "machine:\n  features: x\n  network:\n    hostname: node-a\n",
-		"features an alias":                "machine:\n  other: &f {}\n  features: *f\n  network:\n    hostname: node-a\n",
-		"a control: the plain key is read": keyBase,
+		"a hostname that is a sequence": strings.Replace(keyBase, "hostname: node-a", "hostname: [node-a]", 1),
+		"stableHostname not a boolean":  strings.Replace(keyStable, "false", "\"false\"", 1),
+		"features a scalar":             "machine:\n  features: x\n  network:\n    hostname: node-a\n",
+		"features an alias":             "machine:\n  other: &f {}\n  features: *f\n  network:\n    hostname: node-a\n",
+		// Review round 1: removing from a mapping an alias also reaches would empty the other member as well.
+		"network anchored and aliased":        "machine:\n  network: &net {hostname: node-a}\n  nodeLabels: *net\n",
+		"machine anchored and aliased":        "machine: &m\n  network:\n    hostname: node-a\nother: *m\n",
+		"kind of a document through an alias": keyBase + "---\napiVersion: v1alpha1\nhostname: &k HostnameConfig\nkind: *k\n",
+		"a control: the plain key is read":    keyBase,
 	} {
 		t.Run(label, func(t *testing.T) {
 			docs, err := parseStream([]byte(text))
