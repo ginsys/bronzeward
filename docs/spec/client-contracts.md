@@ -1435,7 +1435,7 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    adds each event of another epoch than its stream (`web/src/progress.ts:122-124`,
    `web/src/progress.ts:399`), takes the sum at each read (`web/src/progress.ts:189`,
    `web/src/progress.ts:240`, `web/src/progress.ts:267`) and compares it by equality
-   (`web/src/progress.ts:193`). The cases are `web/src/progress.test.ts:318-437`.
+   (`web/src/progress.ts:193`). The cases are `web/src/progress.test.ts:319-451`.
 
    **Proposed, not built by every client.** CLI: the wait between two attempts ends on Ctrl-C only
    (`internal/client/watch.go:310-321`), so a watch that ends through its timeout waits the pause
