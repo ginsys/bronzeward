@@ -141,8 +141,10 @@ func TestReleaseLegacyKeyKeepsWhatItCannotRead(t *testing.T) {
 		"features a scalar":             "machine:\n  features: x\n  network:\n    hostname: node-a\n",
 		"features an alias":             "machine:\n  other: &f {}\n  features: *f\n  network:\n    hostname: node-a\n",
 		// Review round 1: removing from a mapping an alias also reaches would empty the other member as well.
-		"network anchored and aliased":        "machine:\n  network: &net {hostname: node-a}\n  nodeLabels: *net\n",
-		"machine anchored and aliased":        "machine: &m\n  network:\n    hostname: node-a\nother: *m\n",
+		"network anchored and aliased": "machine:\n  network: &net {hostname: node-a}\n  nodeLabels: *net\n",
+		"machine anchored and aliased": "machine: &m\n  network:\n    hostname: node-a\nother: *m\n",
+		// Review round 2: an anchor on the key node itself is redefined by removing it, so a later alias would read another node.
+		"hostname key anchored":               "machine:\n  type: &h worker\n  network:\n    &h hostname: node-a\n  nodeLabels:\n    role: *h\n",
 		"kind of a document through an alias": keyBase + "---\napiVersion: v1alpha1\nhostname: &k HostnameConfig\nkind: *k\n",
 		"a control: the plain key is read":    keyBase,
 	} {
