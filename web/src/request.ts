@@ -90,6 +90,16 @@ export interface ClientOptions {
 
 const PROBLEM_PREFIX = "urn:bronzeward:problem:";
 const RETRIED_503 = new Set(["dependency-unavailable", "talos-access-unavailable", "transient-conflict"]);
+
+// What `readWithEpoch` reports of a response beside its result: the epoch it named and the client's count of epoch records after it.
+interface Seen { epoch: string | undefined; moves: number }
+
+// §8.6 item 2: the operation read of a watch that found no answer, which the watch reads again until it ends: a
+// transport failure, a 5xx that is not a Bronzeward problem, or one of the three 503s that §8.2 retries. A 500
+// `internal-error` and an `epoch-superseded` are not (the CLI's Problem.unavailable, internal/client/client.go).
+export const outage = (res: ReadResult<unknown>): res is Extract<ReadResult<unknown>, { kind: "transport" | "unavailable" }> =>
+  res.kind === "transport" ||
+  (res.kind === "unavailable" && (res.problem === null || (res.status === 503 && RETRIED_503.has(res.problem.type.slice(PROBLEM_PREFIX.length)))));
 // §8.2 503 row for reads: 1 s doubling to 30 s, at most 5 tries.
 const MAX_TRIES = 5;
 const backoff = (attempt: number) => Math.min(1000 * 2 ** attempt, 30_000);
@@ -169,21 +179,26 @@ export class Client {
     this.drops++;
   }
 
+  // How many times this client recorded an epoch other than the one it held (the first record included):
+  // the count of signs that the installation moved, which a caller compares by equality (§8.6 item 2).
+  get moves(): number { return this.epochRecords; }
+
   async read<T>(path: string): Promise<ReadResult<T>> {
-    return this.readFrom<T>(path, { epoch: undefined });
+    return this.readFrom<T>(path, { epoch: undefined, moves: 0 });
   }
 
   // `read` that also returns the Bronzeward-Epoch header of the response its result comes from,
   // taken in the same step as the result, not the client's epoch at a later time (§8.5): another
   // response can record a new epoch before the caller resumes. Undefined when the read gave no
-  // response that was used, or the response named no epoch.
-  async readWithEpoch<T>(path: string): Promise<{ result: ReadResult<T>; epoch: string | undefined }> {
-    const seen: { epoch: string | undefined } = { epoch: undefined };
+  // response that was used, or the response named no epoch. `moves` is the client's count after that
+  // response was recorded, taken in the same step.
+  async readWithEpoch<T>(path: string): Promise<{ result: ReadResult<T>; epoch: string | undefined; moves: number }> {
+    const seen: Seen = { epoch: undefined, moves: 0 };
     const result = await this.readFrom<T>(path, seen);
-    return { result, epoch: seen.epoch };
+    return { result, epoch: seen.epoch, moves: seen.moves };
   }
 
-  private async readFrom<T>(path: string, seen: { epoch: string | undefined }): Promise<ReadResult<T>> {
+  private async readFrom<T>(path: string, seen: Seen): Promise<ReadResult<T>> {
     const sent = this.generation;
     const drops = this.drops;
     const principal = this.view.principal;
@@ -211,6 +226,7 @@ export class Client {
       // A 403 is read before a stale answer is dropped: identity-revoked of the sign-in still current
       // clears its credential at once (§8.2), even when the view moved on; its data stays dropped.
       const stale = guarded(res, () => this.observeEpoch(res)) || sent !== this.generation;
+      seen.moves = this.epochRecords;
       if (stale && !(res.status === 403 && principal === this.view.principal)) {
         drop(res);
         return { kind: "discarded" };

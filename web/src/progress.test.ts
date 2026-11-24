@@ -367,11 +367,11 @@ describe("the operation progress reader (§8.6)", () => {
     });
 
     // A terminal state whose last events cannot be read: the operation is read again, as the CLI's watch does.
-    test("a terminal drain that stays unavailable reads the operation again, and the watch ends once the events are read", async () => {
-      const s = server({ streams: quiet(3), states: ["succeeded"], pagesDown: TRIES });
-      const r = recorder();
+    test("a terminal drain that stays unavailable reads the operation again, and a read that is no longer terminal goes on", async () => {
+      const s = server({ streams: quiet(3), states: ["succeeded", "running"], pagesDown: TRIES });
+      const r = recorder(() => true);
       const out = await watch(s.client, OP, r.w, bounded(r, 100));
-      expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+      expect(out).toMatchObject({ kind: "ended", operation: { state: "running" } });
       expect(opReads(s)).toBe(2);
     });
 
