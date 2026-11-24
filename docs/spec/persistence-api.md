@@ -447,7 +447,14 @@ the check do not apply to it. Publication also
 refuses `409 stale-input`, naming the machine with the expected and the actual
 import base revision, when the machine's `Applied` release no longer has the
 import base the entry was written from (the root can have changed with it); it
-is §4.2's third form, extended to an entry that carries one. The check's result
+is §4.2's third form, extended to an entry that carries one, and it is made at
+the start of the publish operation, before the composition and so before any
+comparison. The check also refuses `cannot-decide`, naming no path and
+reporting no boolean, where the two compositions do not hold the same set of
+(path, reference) pairs at the same pinned versions (compilation §6.2, choice
+§17.57): the refusal depends only on where references sit in the composed text
+and which pin each side records, and the release review shows both to any
+`author` (§9.3), so it discloses nothing a caller may not read. The check's result
 is also bound to the state it read:
 the publish operation's commit transaction (T3) compares, under the machine's
 `MachineState` lock, the `Applied` release and the not-pending condition the
@@ -1131,9 +1138,11 @@ actual revision (the fourth, a name, with the names):
   or a completed operation changed its `Applied` in between; an entry that
   carries an import base under the typed equivalence check (§3.2, compilation
   §6.2) is held to the revision it was written from in the same way, naming
-  the machine and both revisions, and to the `Applied` release and the
-  not-pending condition its check used, which T3 compares under the machine's
-  lock (§3.2), naming the machine and both release identifiers;
+  the machine and both revisions, and to the root source of that base, both
+  read at the start of the publish operation, before any composition, so a
+  changed derivation never reaches the check; and to the `Applied` release and
+  the not-pending condition its check used, which T3 compares under the
+  machine's lock (§3.2), naming the machine and both release identifiers;
 - a covered machine's name (§3.5), which compilation may have filled into the
   hostname (compilation §6.1), is no longer the name the snapshot read: a rename
   committed in between **(choice §17.45)**. The check holds for every covered
@@ -4309,8 +4318,8 @@ or Desired change; it does not erase earlier evidence.
 | Draft | The machine's name is not the one ingestion used when it removed a filled hostname (§3.2, compilation §2.3 step 2a) | `409 stale-input` naming the machine, expected and actual name; claim abandoned | claim row; orphans |
 | Publish | A covered machine's name changed since the snapshot (§4.2) | operation `failed`, `409 stale-input` | operation, act |
 | Draft update | A thinner import base that breaks a rule of §3.2 (every kind it lists: `added`, `list`, `reference`, `root` for a base read from a file, `no-base` for a machine with no `Applied` release) | `422 validation-failed`, rule `import-base`, naming the machine and the kind of violation, never a path from the body | nothing |
-| Publish | A machine whose entry the thinner-base route wrote (§3.2, compilation §6.2): the typed equivalence check finds it different (`not-equal`) or cannot decide, a pending machine or one holding an adopted baseline its `Applied` release did not compose included (`cannot-decide`) (compilation §6.2) | operation `failed`, `422 validation-failed`, rule `equivalence`, naming the machine and, for `not-equal`, the paths | operation, act |
-| Publish | The `Applied` import base of a machine with a thinner-base entry (§4.2, compilation §6.2) is no longer the one the entry was written from (§4.2) | operation `failed`, `409 stale-input` naming the machine and both revisions | operation, act |
+| Publish | A machine whose entry the thinner-base route wrote (§3.2, compilation §6.2): the typed equivalence check finds it different (`not-equal`) or cannot decide, a pending machine or one holding an adopted baseline its `Applied` release did not compose included (`cannot-decide`), or the two compositions hold different references or pins (`cannot-decide`, no path, no boolean) (compilation §6.2) | operation `failed`, `422 validation-failed`, rule `equivalence`, naming the machine and, for `not-equal`, the paths | operation, act |
+| Publish | The `Applied` import base of a machine with a thinner-base entry (§4.2, compilation §6.2) is no longer the one the entry was written from (§4.2), read at the start of the operation, before composition | operation `failed`, `409 stale-input` naming the machine and both revisions | operation, act |
 | Publish | T3 finds, under the machine's `MachineState` lock, that the `Applied` release or the not-pending condition the check used is no longer current, as an apply that completed during the compilation (§3.2, §4.2) | operation `failed`, `409 stale-input` naming the machine, with the expected and the actual `Applied` release identifier | operation, act |
 | Publish | A hostname filled from a machine's name that another machine holds explicitly (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
 | Publish | Moved head, a covered machine's import base changed (§4.2), a machine of the cluster covered since the snapshot (§6.2, expected "absent"), or T3 finds missing, misbound or superseded publication evidence (§6.1.1) | operation `failed`, `409 stale-input` | operation, act |
@@ -5570,10 +5579,18 @@ design and evidence do not settle the question. Each is marked in place as
     and `byteIdentical` values disclose nothing unreadable, by construction.
     This withdraws the earlier decision that a `document` import is also
     checked (choice §17.50): such an import stays an ordinary change under the
-    ordinary review, with `equivalence` null, as today. Cost: on a base read from a file
-    the route refuses with kind `root` and the person imports from the node
-    first; a thinning through a file import has no proof, only the ordinary
-    diff. Alternatives: a read-authorization rule per principal and per route,
+    ordinary review, with `equivalence` null, as today. The check also decides only where both
+    compositions hold the same references at the same pins, since a resolved
+    reference is a secret some `author` may not read (a fragment can reuse a
+    reference extracted from another author's private import, on the old side
+    as well as the new one); otherwise it refuses `cannot-decide` with no path
+    and no boolean, and a stale derivation is refused before the comparison.
+    Cost: on a base read from a file the route refuses with kind `root` and the
+    person imports from the node first; a thinning through a file import has no
+    proof, only the ordinary diff; a draft that drops, moves or adds a
+    reference, or publishes while a referenced secret has a newer pin, goes by
+    an ordinary change, and a rotated secret behind a reference reads
+    `cannot-decide`, never a reported difference. Alternatives: a read-authorization rule per principal and per route,
     rejected because each round found another hop; hiding the paths and the
     booleans from a caller who fails the read, rejected because success
     against refusal still tells the caller whether a guess matches.
