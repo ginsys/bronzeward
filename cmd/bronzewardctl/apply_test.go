@@ -79,6 +79,7 @@ type applyFake struct {
 	// the approval of the plan named answers 500 (an unknown outcome); making a plan answers 500; the
 	// the epoch moves after the last plan is read (moves; moved is that state).
 	adoptPlan, unreadMade bool
+	planRelease           string // the release alpha's waiting plan is for, when it is not the one applied
 	unknown               string
 	createFails           int    // the status making a plan answers with, 0 for none
 	moveAt                string // the epoch moves after this path is served
@@ -119,7 +120,11 @@ func (f *applyFake) position(machine string) string {
 		if f.adoptPlan {
 			op = "adopt"
 		}
-		plan = `{"id":"pln_prepared","state":"proposed","operation":"` + op + `","release":"rel_BWSYNTH","approvalCurrent":null,"createdAt":"2026-11-22T08:00:00Z","expiresAt":"2026-11-23T08:00:00Z"}`
+		rel := "rel_BWSYNTH"
+		if f.planRelease != "" {
+			rel = f.planRelease
+		}
+		plan = `{"id":"pln_prepared","state":"proposed","operation":"` + op + `","release":"` + rel + `","approvalCurrent":null,"createdAt":"2026-11-22T08:00:00Z","expiresAt":"2026-11-23T08:00:00Z"}`
 	}
 	pending := "true"
 	if machine == "mch_beta" && f.applied {
@@ -527,6 +532,55 @@ func TestApplyLeavesOutWhatIsDone(t *testing.T) {
 	}
 	if b := f.took(); len(b) != 1 || b[0] != "/plans/pln_prepared/approvals {}" {
 		t.Errorf("sent %q; want only alpha's approval", b)
+	}
+}
+
+// A machine whose waiting plan is not this release's apply plan is left out with its reason and no request is sent for
+// it (ginsys/bronzeward#1159, item 4): the plan of another operation of this release, the plan of another release, and
+// a plan of another release that is an adopt. The server would answer 409 to the create (plans.go: an apply-config plan
+// is for the machine's Desired release), which the command printed as a refusal and exited non-zero for.
+func TestApplyStandingLeavesOutAnotherWaitingPlan(t *testing.T) {
+	const rel = "rel_BWSYNTH"
+	waiting := func(release string, op apitypes.PositionPlanOperation, step apitypes.PositionBodyStep) *apitypes.PositionBody {
+		p := &apitypes.PositionBody{Step: step, Plan: &apitypes.PositionPlan{Id: "pln_w", Release: release, Operation: op}}
+		desired := rel
+		p.Machine.Desired = &desired
+		return p
+	}
+	for _, c := range []struct {
+		name string
+		p    *apitypes.PositionBody
+		plan string // the plan to approve, "" when the machine is left out
+		line string // a fragment of the reason, "" when it is not left out
+	}{
+		{"apply of this release, awaiting approval", waiting(rel, apitypes.PositionPlanOperationApplyConfig, apitypes.PositionBodyStepAwaitingApproval), "pln_w", ""},
+		{"adopt of this release", waiting(rel, apitypes.PositionPlanOperationAdopt, apitypes.PositionBodyStepAwaitingApproval), "", "is not an apply plan; open it with plan show pln_w"},
+		{"apply of another release, awaiting approval", waiting("rel_other", apitypes.PositionPlanOperationApplyConfig, apitypes.PositionBodyStepAwaitingApproval), "", "is for another release (rel_other); open it with plan show pln_w"},
+		{"apply of another release, awaiting dispatch", waiting("rel_other", apitypes.PositionPlanOperationApplyConfig, apitypes.PositionBodyStepAwaitingDispatch), "", "is for another release (rel_other); open it with plan show pln_w"},
+		{"adopt of another release", waiting("rel_other", apitypes.PositionPlanOperationAdopt, apitypes.PositionBodyStepAwaitingApproval), "", "is for another release (rel_other); open it with plan show pln_w"},
+	} {
+		plan, line := applyStanding(c.p, rel)
+		if plan != c.plan || (c.line == "") != (line == "") || !strings.Contains(line, c.line) || (c.line != "" && !strings.HasPrefix(line, "stopped: the plan waiting for this machine ")) {
+			t.Errorf("%s: plan %q, line %q; want plan %q and a reason holding %q", c.name, plan, line, c.plan, c.line)
+		}
+	}
+}
+
+// The command, end to end: alpha's waiting plan is another release's, so alpha is listed with its reason and gets no
+// plan; beta is planned and approved as before. Left out is not a failure: the exit is 0, like every other leave-out.
+func TestApplyLeavesOutAnotherReleasesWaitingPlan(t *testing.T) {
+	f := applyServer(t)
+	f.planRelease = "rel_other"
+	setStdin(t, "y\n")
+	code, out, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--all")
+	const reason = "alpha: stopped: the plan waiting for this machine is for another release (rel_other); open it with plan show pln_prepared"
+	if code != 0 || !strings.Contains(out, reason) || !strings.Contains(errOut, "alpha  controlplane  cp-base  stopped: the plan waiting for this machine is for another release (rel_other)") ||
+		strings.Contains(errOut, "not planned") || !strings.Contains(out, "beta: approved") {
+		t.Errorf("exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	want := []string{`/plans {"machine":"mch_beta","mode":"no-reboot","operation":"apply-config","releaseId":"rel_BWSYNTH"}`, "/plans/pln_made/approvals {}"}
+	if got := f.took(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("sent %q; want a plan for beta and its approval only", got)
 	}
 }
 
