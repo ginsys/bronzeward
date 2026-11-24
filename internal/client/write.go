@@ -459,6 +459,10 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		case code == "idempotency-key-reused" && (try > 0 || w.Repeat != nil):
 			u.Why = "the key is recorded for another request; this send did nothing, and the original outcome is still unknown"
 			return nil, c.unknown(w, u)
+		case code == "forbidden" && p.Doc["plan"] != nil:
+			// The plan cancellation's creator check is decided after the idempotency lookup, which found no
+			// record of this key: the refusal is this send's own, whatever an earlier attempt did (§8.2).
+			return nil, a.err
 		case p == nil, p.Status == http.StatusUnauthorized || code == "forbidden" || code == "identity-revoked" || code == "epoch-superseded" ||
 			code == "recovery-mode-active" && p.Doc["scope"] == nil:
 			// Decided before the idempotency lookup, or not by Bronzeward: nothing said of an earlier
