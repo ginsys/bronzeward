@@ -1278,8 +1278,9 @@ context (CLI: `internal/client/client.go:161-165`, saved at `internal/client/cli
 shell's `mode`, `web/src/shell.tsx:382`) and read `GET /server` on context use (CLI:
 `internal/client/client.go:140-158`; web: `web/src/shell.tsx:458-472`). After a new epoch the web
 client reads it again every time (`web/src/shell.tsx:398-406`). The CLI does after a read whose
-answer shows the new epoch (`internal/client/client.go:190-194`); **Proposed:** a write answer that
-shows a new epoch is not followed by that read, which waits for the next read of the command
+answer shows the new epoch (`internal/client/client.go:190-194`), and after the recovery entry
+commits (`internal/client/write.go:367-373`); **Proposed:** any other write answer that shows a new
+epoch is not followed by that read, which waits for the next read of the command
 (`internal/client/client.go:142`, `internal/client/client.go:345`).
 
 1. **Recovery start:** `GET /server` answering `"startMode": "recovery"`, which a recovery start
@@ -1381,8 +1382,9 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
 
    **Current** for both: the drain of a terminal state and the read again after the backoff when
    its pages name another epoch (`internal/client/watch.go:172-216`,
-   `web/src/progress.ts:202-217`); the reconnect with `Last-Event-ID` and the backoff from 1 s to
-   30 s (`internal/client/watch.go:250-266`, `web/src/progress.ts:233-242`); the attempt that
+   `web/src/progress.ts:202-217`); the reconnect with `Last-Event-ID` (`internal/client/watch.go:401-402`,
+   `web/src/progress.ts:293-295`) and the backoff from 1 s to 30 s
+   (`internal/client/watch.go:250-266`, `web/src/progress.ts:233-242`); the attempt that
    showed nothing and what counts as progress (`internal/client/watch.go:255-258`,
    `web/src/progress.ts:237-238`).
 
@@ -1400,7 +1402,10 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    it takes the epoch of the pages last-wins (`web/src/progress.ts:208-210`,
    `web/src/progress.ts:230-231`, `web/src/progress.ts:253-257`).
    `web/src/progress.test.ts:283-288` pins the failed watch as intended, and its comment says the
-   CLI's watch does the same, which it does not (`internal/client/watch.go:150-151`). CLI: the wait
+   CLI's watch does the same, which it does not (`internal/client/watch.go:150-151`). Web: the
+   drain of a terminal state that is refused or stays unavailable also ends the watch as failed,
+   where the CLI reads the operation again (`web/src/progress.ts:205-218`,
+   `internal/client/watch.go:180-198`); `web/src/progress.test.ts:298-302` pins that too. CLI: the wait
    between two attempts ends on Ctrl-C only (`internal/client/watch.go:310-321`), so a watch that
    ends through its timeout waits the pause out, not within 250 ms; the web client's waits end at
    once on the watch's abort (`web/src/progress.ts:83-90`). CLI: a TLS trust refusal is a transport
@@ -1413,10 +1418,11 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    compares the epoch part of every event ID (before the `:`) with the stream's
    `Bronzeward-Epoch`; on a difference it ends the stream, applies [§8.5](#85-epoch-changes), clears
    what the watch showed and reopens the stream without `Last-Event-ID` (EVT-05). **Current** for
-   both: the `reset` and the comparison of the event ID's epoch part with the stream's
-   (`internal/client/watch.go:505-516`, `web/src/progress.ts:332-339`); each clears what was shown
-   and ends the stream, and the next attempt reopens it without `Last-Event-ID` after the
-   operation read and the backoff.
+   both: a `reset` clears what was shown and the stream goes on
+   (`internal/client/watch.go:505-507`, `web/src/progress.ts:332-334`); an event ID whose epoch
+   part differs from the stream's clears it too and ends the stream, the CLI counting the move
+   (`internal/client/watch.go:508-516`, `web/src/progress.ts:335-339`), and the next attempt
+   reopens the stream without `Last-Event-ID` after the operation read and the backoff.
 4. The browser cannot send `Authorization` with `EventSource`, so the web client reads the stream
    with `fetch` and a streamed response body, sending `Authorization`, `Accept` and
    `Last-Event-ID` itself (assumption S1). No token is ever put in a URL. The stream request has
@@ -1457,8 +1463,9 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    again is in flight. A poll with new entries during it does not abandon it: the client reads
    both once more after both answer, so polls that come faster than a read do not stop every read.
    A view is one path and query. **Current** for the web: the newest page, "Load older", the poll
-   from `tail` in oldest order every 5 s, and the one read again at a time of the machine and its
-   observations (`web/src/machine.tsx:96-132`, `web/src/machine.tsx:160-172`,
+   from `tail` in oldest order every 5 s, and the one read again at a time, which for the web
+   covers the machine, its observations and its position, and waits for all three before it
+   starts another (`web/src/machine.tsx:96-132`, `web/src/machine.tsx:160-172`,
    `web/src/machine.tsx:292-312`, `web/src/machine.tsx:355-372`); the web declares API revision 12
    as its minimum, which includes revision 3 (`web/src/shell.tsx:33`). **Current** for the CLI,
    which has no view that shows the machine: `machine timeline --follow` reads the newest page,
@@ -1491,9 +1498,10 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
      ([§9.6](#96-failure-cases)), and nothing stays (`web/src/request.test.ts:119`,
      `web/src/request.test.ts:149`, `web/src/shell.test.ts:348`).
    - A new epoch and the process's recovery refusal end the page ([§8.5](#85-epoch-changes)), and
-     nothing stays, once the new epoch's server and identity reads answer; until then a page
-     holding unsaved text stays shown and sends nothing (`web/src/shell.test.ts:302`,
-     `web/src/shell.test.ts:316`, `web/src/shell.test.ts:248`, `web/src/shell.test.ts:273`).
+     nothing stays. A new epoch does so once its server and identity reads answer; until then a
+     page holding unsaved text stays shown and sends nothing. The recovery refusal does so at once
+     (`web/src/shell.test.ts:302`, `web/src/shell.test.ts:316`, `web/src/shell.test.ts:248`,
+     `web/src/shell.test.ts:273`).
    - An observations read that restarted after a refused cursor and then failed keeps nothing: the
      list goes with its cursor ([§8.2](#82-errors)). W3 still shows the machine's own rows with
      the observations' failure; only the latest read's line needs the observations. If the machine
