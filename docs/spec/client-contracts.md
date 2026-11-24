@@ -22,7 +22,10 @@ document's `G25`; this document adds `G13`-`G17`, `G19` and `G20`.
 
 **Facts and proposals are kept apart.** A statement about existing behaviour cites the contract
 section or the source line it comes from, read at revision `3cbe953` (`internal/api/api.go:382`
-means that file and line), except the code
+means that file and line; a line citation into client code, `cmd/bronzewardctl/`,
+`internal/client/` or `web/`, means that line at revision `36f3bae2`, where the clients were read
+when [#262](https://github.com/ginsys/bronzeward/issues/262) moved statements from Proposed to
+current), except the code
 [#277](https://github.com/ginsys/bronzeward/issues/277) adds or changes, the identity read
 (`internal/api/identity.go`, `internal/api/routes.go:97`, `internal/api/api.go:339`), which is
 read with it applied, and the expected-epoch check
@@ -295,8 +298,11 @@ browser, and no WebSocket (polling and SSE only, [persistence and API §8.3](per
 
 ## 5. Endpoint discovery and context selection
 
-**Proposed.** A **context** names one Bronzeward installation and how to reach and sign in to
-it. It holds no secret.
+A **context** names one Bronzeward installation and how to reach and sign in to
+it. It holds no secret. The CLI holds contexts as the table says (`internal/client/config.go:19-56`,
+`internal/client/config.go:166-231`); the web client has none (item 3). **Proposed:** `oidc.scopes`
+is required with `oidc`; today the CLI takes an empty list as `openid offline_access`
+(`internal/client/login.go:58-62`).
 
 | Field | Meaning | Required |
 | --- | --- | --- |
@@ -314,13 +320,20 @@ it. It holds no secret.
 1. The CLI keeps contexts in a configuration file under the user's configuration directory, with
    one current context. Precedence: `--context`, then `BRONZEWARD_CONTEXT`, then the current
    context. The file holds no token, key or secret; tokens live in the store of
-   [§9.2](#92-cli-sign-in).
+   [§9.2](#92-cli-sign-in). (Built: `internal/client/config.go:58`, `internal/client/config.go:148-162`.)
 2. Every command that talks to a server shows the context's name and server in its error and
-   wait output, so an operator with two installations never acts on the wrong one unseen. A
-   write in an interactive session prints the context before it sends.
+   wait output, so an operator with two installations never acts on the wrong one unseen (built:
+   `internal/client/client.go:101`, `internal/client/client.go:289`). **Proposed:** a
+   write in an interactive session prints the context before it sends. Today no write does:
+   `writeWith` and `Send` print nothing before the request (`cmd/bronzewardctl/writes.go:112`,
+   `internal/client/write.go:182`), and only some recovery commands name the context in their own
+   confirmation lines.
 3. The web interface serves exactly one installation, the one at its own origin
    ([§10.1](#101-hosting-and-origin)). Switching installations is navigating to another origin,
-   which starts with an empty state; nothing read under one origin is shown under another.
+   which starts with an empty state; nothing read under one origin is shown under another. (Built:
+   the web client's paths are relative to its own origin, `web/src/request.ts:4`,
+   `web/src/request.ts:356`, `web/src/config.ts:6`; its kept state lives in page memory,
+   `web/src/drafts.tsx:46`.)
 4. Today the issuer, client ID and audience are configured by hand (G14). Under decision D3 (b),
    a static client-configuration file served next to the web files, `bronzeward-client.json` at
    the web root, names them: a JSON object with the string members `issuer`, `audience`,
@@ -339,24 +352,51 @@ it. It holds no secret.
    client's ID, and as `oidc.scopes` `openid offline_access` followed by the file's scopes unless
    `--scopes` names others. Entering them by hand stays possible. The server is never asked
    for them through an authenticated route: the client needs them before it can authenticate.
+   Built in the web client: it reads the file from its own origin with `credentials: "omit"`,
+   requires all four string members, checks `scopes` and uses the web client's ID
+   (`web/src/config.ts:11-54`, `web/src/auth.ts:123`). Built in the
+   CLI: `context add --from` reads it, requires `issuer` and `cliClientId` (it reads `audience`
+   and does not require it, and ignores `webClientId`), checks `scopes` the same way, stores the
+   CLI client's ID and the scopes as described, sends no `Authorization` header, and keeps the
+   by-hand flags (`internal/client/discovery.go:16-59`, `internal/client/discovery.go:69-125`,
+   `cmd/bronzewardctl/commands.go:106-118`, `cmd/bronzewardctl/commands.go:147-160`).
 5. A context's `server` is checked once when it is added: `GET /livez` must answer `204`
    (`internal/server/server.go:19-21`), which shows only that something answers; it proves
-   neither the API nor its version.
+   neither the API nor its version. (Built: `internal/client/client.go:110-133`,
+   `cmd/bronzewardctl/commands.go:164-169`.)
 
 ## 6. TLS trust
 
-**Proposed.**
+Built in the CLI, except the clauses marked **Proposed** below; built in the web client where an
+item names it. Sources are given per item. Item 6 is a browser fact and the server's own rule in
+item 1 and its issuer fetches in item 7 are server facts, so none of the three cites client code.
+The required check of item 8 stays **Proposed**: it is a test criterion, and this section does not
+say that such a test exists.
 
 1. `server` and `oidc.issuer` must be `https`. Plain `http` is accepted only to a loopback
    address. This is the loopback half of the server's own rule for its issuer, which also admits
    hosts the deployment lists (`internal/config/config.go:386-402`); a client has no such list,
    because it cannot know which network protects a host. The development setup
    (`examples/bronzeward.yaml:7`, `examples/bronzeward.yaml:14`) works and nothing else does.
+   (Built in the CLI: `internal/client/config.go:166-231`, run by `internal/client/client.go:70` and
+   `cmd/bronzewardctl/commands.go:161`. Built in the web client: `web/src/config.ts:41`,
+   `web/src/config.ts:57-65` for the issuer and `web/src/auth.ts:73` for the endpoints it reads
+   from discovery.)
 2. Certificates are verified against the system trust store, or against the context's
    `certificateAuthority` bundle, which then replaces it for that host. Host name verification is
-   always on. TLS 1.2 is the minimum.
+   always on. TLS 1.2 is the minimum. (Built in the CLI: `internal/client/transport.go:31-40`,
+   `internal/client/transport.go:77`; `InsecureSkipVerify` appears nowhere in `cmd/`,
+   `internal/client/` or `web/src/`, a search whose control, `MinVersion`, finds
+   `internal/client/transport.go:31`.)
 3. No option disables verification, in configuration or on the command line, and no environment
-   variable does. An operator with a private CA adds the bundle to the context.
+   variable does. An operator with a private CA adds the bundle to the context. (Built in the CLI:
+   the `context add` flags `cmd/bronzewardctl/commands.go:100-112` hold none, the bundle is
+   `commands.go:102` and `internal/client/transport.go:32`, and no variable the CLI reads touches
+   verification: the reads are `internal/client/config.go:151`, `internal/client/token.go:35`,
+   `internal/client/credentials.go:41`, `internal/client/store.go:141`,
+   `internal/client/store_linux.go:24`, `internal/client/login.go:291` and
+   `cmd/bronzewardctl/main.go:113`. The Go runtime's own `SSL_CERT_FILE` and `SSL_CERT_DIR`
+   replace the system roots and disable nothing.)
 4. A verification failure names the host, the subject and issuer of the presented certificate and
    the trust source used, and sends nothing. What a TLS or transport error shows that the remote
    side chose, such as a certificate's DNS names, which may hold any ASCII, is shown with each
@@ -379,9 +419,24 @@ it. It holds no secret.
    `--from` or an https proxy still names the host, subject, issuer and trust source, fixed before
    anything is sent; a refused certificate's reason, on every path, is its host-name mismatch, which
    lists its names, or a fixed text (`internal/client/remote.go`). The standard library's log, which net/http writes a peer's text
-   to, is discarded. The server's own text keeps the rule above.
+   to, is discarded. The server's own text keeps the rule above. (Built in the CLI, by clause: the
+   trust refusal and the nothing-sent text, `internal/client/transport.go:105-123`, reached from the
+   read path `internal/client/client.go:282`, the write path `internal/client/write.go:670`, the
+   event stream `internal/client/watch.go:412`, the liveness check `internal/client/client.go:124`
+   and `--from` `internal/client/discovery.go:89`; text the identity provider and the `--from`
+   host send, shown by its cause and never by its own words, `internal/client/remote.go:62-78`,
+   `internal/client/discovery.go:92`, `internal/client/login.go:78`,
+   `internal/client/credentials.go:393`, `internal/client/credentials.go:439`; the https proxy's
+   certificate, `internal/client/transport.go:77`; URLs refused before use,
+   `internal/client/config.go:193-231`; the log, `cmd/bronzewardctl/main.go:123`; a `Deprecation`
+   header, `internal/client/client.go:354`; the signed-in subject and issuer,
+   `cmd/bronzewardctl/commands.go:279`; the escaping place for errors,
+   `internal/client/shown.go:30`.) **Proposed:** the `%q` in an error that shows a redirect's
+   `Location` (`internal/client/watch.go:423`) is the Go form, not `\x22`; item 8 states the rule.
 5. Certificate pinning is not offered: a bundle per context limits trust enough for this
-   milestone, and pinning a leaf breaks on every renewal.
+   milestone, and pinning a leaf breaks on every renewal. (Built: `VerifyPeerCertificate`,
+   `VerifyConnection` and an SPKI check appear nowhere in `internal/client/` or `cmd/`, a search
+   whose control, `MinVersion`, finds `internal/client/transport.go:31`.)
 6. The browser uses the browser's own trust and has no override.
 7. **Redirects and proxies.** Neither client follows a redirect from the API, so `Authorization`
    and a request body never reach another URL and nothing is resent. The CLI reports a `3xx` with
@@ -397,7 +452,18 @@ it. It holds no secret.
    honours the standard proxy environment variables, says so in verbose output, and never sends
    `Authorization` to a proxy in clear text: an `https` URL goes through a proxy only by a
    tunnel. The server's own issuer fetches follow a comparable rule
-   ([persistence and API §10.1](persistence-api.md#101-humans-oidc)).
+   ([persistence and API §10.1](persistence-api.md#101-humans-oidc)). (Built in the CLI: no
+   redirect followed, `internal/client/transport.go:94`; a `3xx` reported with its target,
+   `internal/client/client.go:288-289`; the identity provider's redirects limited to `https` or
+   loopback, `internal/client/credentials.go:476-485`, and none on a revocation,
+   `internal/client/credentials.go:436`; the proxy variables and the verbose line,
+   `internal/client/transport.go:24`, `internal/client/transport.go:48-50`; an https proxy dialled
+   with TLS, `internal/client/transport.go:51-89`; an `https` URL goes through an http proxy by
+   Go's tunnel, which the client leaves to `net/http` (`internal/client/transport.go:20-22`) and
+   this section does not read. Built in the web client: `redirect: "error"` on the one send path,
+   `web/src/request.ts:356-364`; the generic transport-failure text, `web/src/request.ts:8`,
+   `web/src/states.tsx:208`; a write's transport failure as an unknown outcome,
+   `web/src/write.ts:414`, `web/src/request.ts:13`.)
 8. **Remote text in human output.** The CLI escapes every string that it shows in table, record
    or sentence output (`-o table`, the default) and that did not come from the CLI itself. That
    covers text from the server, the identity provider and a proxy, and text read from a file that
@@ -457,6 +523,22 @@ it. It holds no secret.
    - Before this item, `draft show` wrote the title with `%q` (escaped) and `draft list` wrote it
      raw, and `cluster list` wrote a cluster's name raw while the server's version was escaped.
      The rule removes that difference.
+
+   Built in the CLI, by clause: the escape forms, `internal/client/printable.go:17-44` (`\xNN` and
+   `\uNNNN`), the double quote as `\x22`, `internal/client/printable.go:77-79`, and a rule with no
+   list of fields, `cmd/bronzewardctl/output.go:13-24`; the contexts file's text,
+   `cmd/bronzewardctl/commands.go:40`, `cmd/bronzewardctl/commands.go:188`; documents and diffs
+   split on their own line feeds, `cmd/bronzewardctl/records.go:196`,
+   `cmd/bronzewardctl/plans.go:424`; the one place for errors, `internal/client/shown.go:30` and
+   `cmd/bronzewardctl/main.go:264`; the last guard, `internal/client/printable.go:87-100`,
+   `cmd/bronzewardctl/main.go:128-133`, `cmd/bronzewardctl/output.go:75-85`; a flag error without
+   the Go form, `cmd/bronzewardctl/main.go:372`; the table writer, `cmd/bronzewardctl/output.go:137`;
+   JSON the CLI encodes itself, `internal/client/printable.go:49-65`,
+   `cmd/bronzewardctl/output.go:151`, `cmd/bronzewardctl/writes.go:167`; the `-o json` document and a
+   composite object, `cmd/bronzewardctl/output.go:151`, `cmd/bronzewardctl/output.go:170`. **Proposed:**
+   the double-quote rule for every message that quotes a remote value. The Go `%q` verb still
+   quotes the `Location` header in `internal/client/watch.go:423` and a machine name in
+   `cmd/bronzewardctl/onboard.go:173` and `cmd/bronzewardctl/onboard.go:175`.
 
    **Required check.** One test fills each remote source with a value that holds ESC, a tab, a
    line feed, a carriage return, DEL, a C1 character, a bidirectional control and a byte that is
@@ -527,16 +609,29 @@ process's version, its API revision, a whole number raised by one with each addi
 entry commits the read is refused with `409 recovery-mode-active`, as every request but the entry
 is.
 
-**Proposed.**
+Built in both clients, except the part of items 1 and 3 that the CLI does not meet, marked
+**Proposed** there. Sources are given per item.
 
 1. A client sends only fields the server it talks to is known to accept. Because the server
    refuses unknown request fields, a newer client sending a field an older server lacks fails with
    `400 invalid-request`, which is safe but useless; the client feature-gates such fields on the
-   served API revision.
+   served API revision. (Built in the web client: its minimum, 12, is the highest revision of any
+   route it calls, `web/src/shell.tsx:25-33`, `web/src/shell.tsx:476`. **Proposed** for the CLI: its
+   minimum is 2 (`internal/client/client.go:19`) and it gates only a machine's name, the timeline's
+   `--follow` and some drift and recovery reads on a revision (`cmd/bronzewardctl/writes.go:335`,
+   `cmd/bronzewardctl/timeline.go:68`, `cmd/bronzewardctl/drift.go:208`,
+   `cmd/bronzewardctl/recovery.go:146`, `cmd/bronzewardctl/recovery_account.go:194`), while it calls
+   `GET /machines/{id}/position`, served from revision 6, and
+   `GET /import-base-revisions/{id}/document`, served from revision 7, with no gate
+   (`cmd/bronzewardctl/apply.go:162`, `cmd/bronzewardctl/importbase.go:63`).)
 2. A client ignores unknown response fields, and never maps an unknown enumeration value to a
    known state or to success. It shows a start mode as `unknown` ([§6](#6-tls-trust) item 4) and
    any other such value as the text it received. In the CLI's human output, [§6](#6-tls-trust)
-   item 8 escapes that text.
+   item 8 escapes that text. (Built, for the start mode: the CLI, `internal/client/printable.go:104-110`;
+   the web client, `web/src/recovery.tsx:41-42`, which reads any value but `normal` and `recovery`
+   as no start mode. For an operation's state the CLI treats only the five listed states as
+   terminal, `internal/client/watch.go:61-67`. The rest of the item, over every enumeration both
+   clients read, was not traced and stays **Proposed**.)
 3. A client declares the minimum API revision it needs. It reads `GET /server` on context use and
    refuses, with both revisions named, a server below that minimum, before any write. `GET /server`
    answered `409 recovery-mode-active` without a `scope` member is a recovery start before its
@@ -546,17 +641,24 @@ is.
    describes the process that answered; another instance behind the same endpoint may differ, so
    a refusal names the revision that answer served. The web client's minimum is the highest
    revision of any route it calls, raised in the pull request that adds such a call; it is 12.
+   (Built in the CLI: the declared minimum, the read on context use and the refusal naming both
+   revisions, `internal/client/client.go:19`, `internal/client/client.go:139-158`; before a write,
+   `internal/client/write.go:226-228`; the recovery-start exception, `internal/client/write.go:227`.
+   Built in the web client: `web/src/shell.tsx:33-40`, `web/src/shell.tsx:476`, the recovery-start
+   refusal read at `web/src/shell.tsx:519`. The CLI's declared minimum is not the highest revision
+   of every route it calls: see item 1.)
 4. A `Deprecation` header on any response is shown once per command or page load, naming the
-   route.
+   route. (Built: CLI `internal/client/client.go:352-355`; web client `web/src/shell.tsx:40`,
+   `web/src/shell.tsx:213`.)
 5. Each client prints its own version and the server's, with its API revision, in
    `bronzewardctl version` and in the web footer; the server's as "unknown" while the read is
-   refused.
+   refused. (Built: CLI `cmd/bronzewardctl/commands.go:193-217`; web client `web/src/shell.tsx:203-210`.)
 
 ## 8. Request handling
 
 ### 8.1 Requests
 
-**Proposed.** Every request sends `Authorization` and `Accept: application/json` (or
+Every request sends `Authorization` and `Accept: application/json` (or
 `text/event-stream` for a stream). Every `POST` and `PUT` sends a JSON object, `{}` when the route
 takes no member, with `Content-Type: application/json`; a `DELETE` sends neither
 ([§2](#2-the-api-a-client-meets) request body row). Every write
@@ -564,14 +666,27 @@ sends exactly one `Idempotency-Key` ([§8.4](#84-idempotency-and-ambiguous-respo
 [§3.2](#32-writes) lists it, exactly one `If-Match`; every write but the recovery entry also sends
 exactly one `Bronzeward-Expected-Epoch` ([§8.4](#84-idempotency-and-ambiguous-responses) item 3). A body is at most 1 MiB
 (`internal/api/body.go:36`); a client refuses a larger input before sending and says so, rather
-than relying on the server's `400`.
+than relying on the server's `400`. Built in the CLI: the headers, `internal/client/client.go:278`,
+`internal/client/write.go:656-666`, including no body and no `Content-Type` on a `DELETE`
+(`internal/client/write.go:651-655`, `internal/client/write.go:658-660`); the keyed headers,
+`internal/client/write.go:661-666`. Built in the web client: the one-megabyte refusal before any
+send, `web/src/write.ts:70`, `web/src/write.ts:327-329`, and the keyed headers,
+`web/src/write.ts:348-350`. **Proposed:**
+for the web client, a `DELETE` sends neither: its writes always set `Content-Type: application/json`
+(`web/src/write.ts:348`). For the CLI, the refusal of a larger body: it checks each document, file
+and mark input (`cmd/bronzewardctl/fragments.go:28`, `cmd/bronzewardctl/fragments.go:160`,
+`cmd/bronzewardctl/fragments.go:290-294`, `cmd/bronzewardctl/imports.go:200`,
+`cmd/bronzewardctl/review.go:275`) but `Send` has no such check, so a body built from flags is not
+bounded.
 
 ### 8.2 Errors
 
-**Proposed** client behaviour per problem code, from the code table of
-[persistence and API §9.4](persistence-api.md#94-errors) and `internal/api/problem.go:11-36`. The
+Client behaviour per problem code, from the code table of
+[persistence and API §9.4](persistence-api.md#94-errors) and `internal/api/problem.go:11-36`, built in
+both clients except the rows and clauses marked **Proposed** after the table. The
 command-line client always shows `title`, `detail` when present, and `instance`, each escaped as
-[§6 item 4](#6-tls-trust) states, and never shows a request body. Exit codes are the journeys'
+[§6 item 4](#6-tls-trust) states, and never shows a request body (built:
+`internal/client/problem.go:28-47`). Exit codes are the journeys'
 (journeys §4).
 
 **The web client says it in words** (ginsys/bronzeward#1049). For each of the 26 codes of
@@ -595,7 +710,11 @@ the `request` and `epoch` of an earlier record sit in a closed reference block (
 report") with one Copy control that copies them as plain text and says whether it copied. Where
 the outcome of a write is unknown, the notice says so and says how to check ("Check the current
 state before you do it again.") and never says to try again, whatever the code: the next step of a
-code's sentence is left out there.
+code's sentence is left out there. (Sources: the table and its rule narrowing, `web/src/problems.tsx:19-76`;
+the sentence with no code, rule or request number and the title fallback,
+`web/src/problems.tsx:136-143`; the reference block, `web/src/problems.tsx:149-160`,
+`web/src/states.tsx:134-139`; the Copy control, `web/src/copy.tsx:11`; the unknown-outcome
+sentence, `web/src/states.tsx:180`; the import page's sentences, `web/src/imports.tsx:86-110`.)
 
 | Status, code | Client behaviour |
 | --- | --- |
@@ -616,6 +735,52 @@ code's sentence is left out there.
 | 503 `dependency-unavailable`, `talos-access-unavailable`, `transient-conflict`, `epoch-superseded` | reads: retry with backoff (1 s doubling to 30 s, at most 5 tries, then stop; the one exception is the operation read of a watch after a stream that ended or a refused drain, [§8.6](#86-event-resumption) item 2, and the CLI's read of principal names under A7, which tries once, because a failed read shows the identifiers and is not worth a wait; the web client's read keeps the bound behind the identifiers it already shows, since nothing waits on it; every other read keeps the bound). Writes: repeat with the same key at most 3 times. If every attempt of the write was answered `503`, report **not done**: each such `503` states that its attempt's own transaction committed nothing, so no act or idempotency record exists for it; a fragment write's claim, a scope mark's observation or its start, or a principal row, taken before it stays ([persistence and API §9.4](persistence-api.md#94-errors)). If any earlier attempt was ambiguous ([§8.4](#84-idempotency-and-ambiguous-responses) item 2), a `503` to the repeat says nothing about that attempt: report the outcome as unknown, as in [§8.4](#84-idempotency-and-ambiguous-responses) item 4. `epoch-superseded` is not repeated against the same server process: it started before the current epoch and cannot succeed until restarted. The server sends no `Retry-After` (G20), except `Retry-After: 1` on the `talos-access-unavailable` of `GET /clusters/{id}/talos-access` when a deletion time cannot be decided; the backoff above is not changed by it |
 | an unknown code | treat by status class: 4xx as a refusal, 5xx as an unknown outcome for a write |
 | a 5xx that is not a Bronzeward problem | an answer that is not `application/problem+json`, or whose `type` does not start `urn:bronzeward:problem:`, for example a `502`, `503` or `504` from the component in front of the server, may come after the server committed: for a write it is an ambiguous outcome as in [§8.4](#84-idempotency-and-ambiguous-responses) item 2, never **not done**; reads retry as for the `503` row |
+
+**Where each row is built**, CLI then web client. `400`s: `internal/client/client.go:305-307`,
+`internal/client/list.go:35-39`, `internal/client/list.go:81-98`; `web/src/request.ts:248-249`,
+`web/src/machine.tsx:128`; the epoch-change handling only on a changed header,
+`internal/client/client.go:190`, `internal/client/client.go:341-350`, `web/src/request.ts:431`.
+`401`: `internal/client/client.go:236-244`, `internal/client/write.go:400-405`,
+`internal/client/problem.go:56-62`, `internal/client/credentials.go:493-512`;
+`web/src/request.ts:250-268`, `web/src/write.ts:439-452`, `web/src/app.tsx:162-170`. `403
+forbidden`: `internal/client/problem.go:44-60`, `internal/client/write.go:428`;
+`web/src/states.tsx:112-121`, `web/src/problems.tsx:70-73`, `web/src/write.ts:461`. `403
+identity-revoked`: `internal/client/credentials.go:517-540`, `internal/client/problem.go:63-68`;
+`web/src/request.ts:236-240`, `web/src/app.tsx:157-173`, `web/src/auth.ts:377-380`. `409`:
+`internal/client/write.go:394-396`, `internal/client/write.go:406-424`,
+`internal/client/client.go:322-326`, `cmd/bronzewardctl/fragments.go:78`;
+`web/src/request.ts:60-64`, `web/src/write.ts:466-489`, `web/src/drafts.tsx:885`. `412
+precondition-failed`: `internal/client/write.go:445-449`, `internal/client/write.go:537-547`;
+`web/src/publish.tsx:186`, `web/src/states.tsx:134`. `412 epoch-mismatch`, set aside and never
+repeated: `internal/client/write.go:422`; `web/src/write.ts:507`. `422`: `internal/client/problem.go:70-90`,
+`internal/client/write.go:425`; `web/src/problems.tsx:92`, `web/src/write.ts:509`, `web/src/write.ts:536`.
+`428`: the default case of `internal/client/write.go:445`; `web/src/problems.tsx:19`,
+`web/src/problems.tsx:36-37`. `500`: `internal/client/write.go:397`; `web/src/write.ts:513-516`. `503`:
+reads `internal/client/client.go:175`, `internal/client/client.go:229-268`,
+`internal/client/client.go:330-334`, `web/src/request.ts:92-95`, `web/src/request.ts:222-263`; writes
+`internal/client/write.go:152`, `internal/client/write.go:451-455`, `web/src/write.ts:78-80`,
+`web/src/write.ts:365`, `web/src/write.ts:540`; the principal-name read that tries once,
+`internal/client/client.go:173`, `cmd/bronzewardctl/names.go:39`. An unknown code and a `5xx` that
+is no Bronzeward problem: `internal/client/write.go:397`, `internal/client/client.go:307-318`;
+`web/src/request.ts:250-266`, `web/src/write.ts:513-516`. Neither
+client reads `Retry-After` (`rg 'Retry-After' web/src internal/client cmd` finds nothing; control:
+`rg 'Idempotency-Key'` finds `internal/client/write.go:661`). `404`, the server's meaning of
+`epoch-mismatch` after an ambiguous attempt, and the server's behaviour for an unfinished first
+request stay as server facts.
+
+**Proposed**, where today differs: (a) a `403 forbidden` that carries a `plan` member refuses after
+the lookup and is a known refusal. The web client treats it so (`web/src/write.ts:461`); the CLI
+treats every `403 forbidden` as decided before the lookup and keeps an ambiguous outcome unknown
+(`internal/client/write.go:428`). (b) `412 epoch-mismatch`: handle the epoch change with the `epoch`
+member. Neither client reads the member to adopt the epoch; both adopt it from the
+`Bronzeward-Epoch` header (`internal/client/client.go:341-350`, `web/src/request.ts:431`), and the
+CLI only prints the member (`internal/client/write.go:423`). (c) `422 validation-failed` for marks:
+the position only, never a path. The web client does so (`web/src/problems.tsx:92-96`) and the CLI
+does for a mark refusal that arrives as an event (`cmd/bronzewardctl/review.go:369-381`), but a
+`422` answer to a mark write prints `detail`, `path` and `paths` (`internal/client/problem.go:44-45`,
+`internal/client/problem.go:75-77`, `cmd/bronzewardctl/review.go:282`). (d) `501 not-implemented` is a
+known refusal. The web client excludes it from the unknown-outcome path (`web/src/write.ts:513`); the
+CLI treats a `501` problem as ambiguous and repeats it (`internal/client/write.go:397`).
 
 A Ctrl-C ends a read at once: a request in flight and a wait before a retry stop, the command prints
 one line that names the request and exits 130. It does not change the retry rules above. The Ctrl-C
@@ -639,6 +804,24 @@ open it takes the Ctrl-C too. The stop line names the stream request, and the co
 state before it exits 130. The stream still has no attempt bound ([§8.4](#84-idempotency-and-ambiguous-responses)
 item 8). `operation watch` keeps its own handler of the Ctrl-C and does not use this one.
 
+Built in the CLI, which is the only client these two paragraphs name: the stop on a read and its
+line, `internal/client/client.go:217-224`, `internal/client/client.go:245-267`,
+`cmd/bronzewardctl/interrupt.go:22-25`, `internal/client/interrupt.go:23-41`,
+`cmd/bronzewardctl/main.go:243-252`; reads only, not writes, `internal/client/interrupt.go:23-26`; the
+`cluster first-key` exception, `internal/client/write.go:324-329`, `cmd/bronzewardctl/main.go:182-191`,
+`cmd/bronzewardctl/main.go:262-266`; the renewal that runs to its end, `internal/client/client.go:226-227`
+(a comment) and `internal/client/credentials.go:264` (`renew` takes no context); no notice after the
+first Ctrl-C, `internal/client/watch.go:339-353`; no further read, `cmd/bronzewardctl/main.go:179-193`;
+a write not yet started is not sent, `internal/client/write.go:199-203`; the error beside the stop,
+`cmd/bronzewardctl/main.go:245-252`, `cmd/bronzewardctl/main.go:278-300`; the stream of the import
+follow, `internal/client/watch.go:310-335`, `cmd/bronzewardctl/imports.go:405-430`, its save,
+`cmd/bronzewardctl/imports.go:409`, the stream loop without an attempt count,
+`internal/client/watch.go:104-140`, and `operation watch`'s own handler,
+`cmd/bronzewardctl/opwatch.go:184-191`; `publish` saves in a deferred call and follows with the
+same `Watch` (`cmd/bronzewardctl/publish.go:38`, `cmd/bronzewardctl/publish.go:100`). The `503` paragraph is built as the
+`503` row is (`internal/client/client.go:330-334`, `web/src/write.ts:78`); the server's own lines
+in it are server facts.
+
 The `503` row applies only to a Bronzeward problem with one of its four codes. The write `503`s
 say that the attempt they answer committed nothing of its own transaction (what a route committed
 before it stays, as the row says); for example authentication's
@@ -656,7 +839,12 @@ in an operation's `error` member or in an event's problem, where `instance` is t
 identifier, not a request's ([persistence and API §9.4](persistence-api.md#94-errors)). A client
 shows such a problem with the operation's identifier and final state, applies the row above for
 what the operator may do next, and never repeats the request that started the operation: the
-`202` was already a success.
+`202` was already a success. Built in the web client, which words a failed operation by code and
+rule from the same tables (`web/src/problems.tsx:57-61`, `web/src/imports.tsx:86-130`), and in
+neither client does anything repeat the request. **Proposed** for the CLI's next step: it shows the
+operation's identifier and state with the raw error (`cmd/bronzewardctl/imports.go:597-610`) and
+applies the row's next step only for `precondition-failed` and `ingestion-abandoned`
+(`cmd/bronzewardctl/imports.go:600-607`); that function names no other code.
 
 ### 8.3 ETags
 
@@ -668,7 +856,7 @@ epoch is not part of the ETag
 draft: when an ingestion's job commits its entries (`internal/api/runner.go:439-440`) and at
 publication, which also closes the draft (`internal/api/publish.go:398-399`).
 
-**Proposed.** The journeys' last-seen rule (journeys §5.4, C5): the client sends the ETag it last
+The journeys' last-seen rule (journeys §5.4, C5): the client sends the ETag it last
 read or was answered for that draft, stores the one each write answers, and on `412` stops and
 shows the current state. It never reads the new ETag and resends by itself: that would overwrite
 another author's change unseen. One exception: after an import the client itself started on that
@@ -687,6 +875,20 @@ CLI may keep them in its non-secret state for the length of a scripted sequence.
 change it drops them all: more than the contract strictly needs, since a pre-backup ETag still
 matches, but the client cannot tell which ETags were issued after *T*. The ingestion start's
 `If-Match` is the target draft's ETag.
+
+Built in both clients, by clause. The ETag sent and the one each write answers: CLI
+`internal/client/state.go:83`, `internal/client/write.go:562`, `cmd/bronzewardctl/imports.go:178`; web `web/src/composition.tsx:192`,
+`web/src/drafts.tsx:56`, `web/src/write.ts:426`. A `412` stops and shows the state: CLI
+`internal/client/write.go:445`, `internal/client/write.go:535-547`; web `web/src/publish.tsx:186`.
+No resend by itself: the same sites. The re-read after an import that reaches `succeeded`: CLI
+`cmd/bronzewardctl/imports.go:629-637`; web `web/src/imports.tsx:110-115`. The CLI's record of its own
+ingestions, its end and its drop at an epoch change: `cmd/bronzewardctl/imports.go:570-576`,
+`internal/client/client.go:382`, `internal/client/state.go:107-123`,
+`internal/client/state.go:131-135`; the web client's own-start map, `web/src/imports.tsx:115`.
+ETags per context and draft: CLI `internal/client/state.go:15-26`, `internal/client/state.go:83-105`;
+web `web/src/drafts.tsx:46`, in page memory. The drop of all of them at an epoch change:
+`internal/client/client.go:382`, `internal/client/state.go:131`, `web/src/drafts.tsx:56`. The ingestion start's `If-Match`: CLI
+`cmd/bronzewardctl/imports.go:178`; web `web/src/imports.tsx:565`.
 
 ### 8.4 Idempotency and ambiguous responses
 
@@ -734,11 +936,14 @@ recovery mode mints no new epoch, so no epoch comparison can detect it
 ([persistence and API §12.1](persistence-api.md#121-the-epoch)); that residual is the
 contract's, and this specification does not close it.
 
-**Proposed.**
+Items 1 to 4 are built in the clients they name, except where marked **Proposed** in them. Items 5
+to 8 stay **Proposed** here: their code was not read for this change.
 
 1. **Key.** One key per logical write, 128 bits from the operating system's random source,
    base64url without padding (22 characters, within `internal/api/api.go:394`). Never derived from
-   the request content, so a key reveals nothing about a document.
+   the request content, so a key reveals nothing about a document. (Built: CLI
+   `internal/client/write.go:176-180`, `internal/client/write.go:220`; web
+   `web/src/write.ts:90-96`.)
 2. **Ambiguous.** A write's outcome is unknown when the connection fails after any byte of the
    request was sent, when no complete response arrives (also when item 8's bound ends the
    attempt) unless its status is a `4xx` (item 8), on `500`, or on a `5xx` that is not a
@@ -767,6 +972,22 @@ contract's, and this specification does not close it.
    fragment write replays recorded refusals, `internal/api/fragments.go:291-296`,
    `internal/api/idempotency.go:80-91`); a
    `422` to a repeat on a keyed route is reported as an unknown outcome ([§8.2](#82-errors)).
+   Built in both clients: what makes an outcome unknown, CLI `internal/client/write.go:397`,
+   `internal/client/write.go:638`, `internal/client/write.go:685-688`, web `web/src/write.ts:417-421`,
+   `web/src/write.ts:502-505`, `web/src/request.ts:316`; the repeats and backoff, CLI
+   `internal/client/write.go:185`, `internal/client/write.go:298`, web `web/src/write.ts:80`,
+   `web/src/write.ts:376-389`; the repeated `503`, CLI `internal/client/write.go:399`, web
+   `web/src/write.ts:78`, `web/src/write.ts:496-501`; the in-progress `409`, CLI
+   `internal/client/write.go:394-418`, web `web/src/write.ts:476-490`; the recorded refusal with both
+   members, CLI `internal/client/write.go:445-448`, web `web/src/write.ts:476`, `web/src/write.ts:513`;
+   the bound at least the served lease, CLI `internal/client/write.go:230-236`, web
+   `web/src/write.ts:548-550`; the replay text, CLI `internal/client/write.go:363-365`, web
+   `web/src/write.ts:423`, `web/src/states.tsx:19`; a replayed problem as the earlier refusal, CLI
+   `internal/client/write.go:394-396`, web `web/src/write.ts:435`, `web/src/states.tsx:111-112`; the
+   keyed `422`, CLI `internal/client/write.go:425-427`, web `web/src/write.ts:495`. **Proposed:** a
+   configurable bound for the in-progress wait in the web client. The CLI has it
+   (`cmd/bronzewardctl/fragments.go:58`, `internal/client/write.go:414-415`); the web client's is the
+   constant `INGEST_WAIT` (`web/src/write.ts:83`) and no setting reads it.
 3. **Same principal and epoch only.** Before any repeat the client checks that its credential
    still names the same principal: for OIDC, the same `iss` and `sub` in the renewed token; for
    automation, the same service identity, compared by the `principal` the identity read serves
@@ -822,6 +1043,27 @@ contract's, and this specification does not close it.
    `internal/api/recovery_entries.go:133-135`). That is accepted with the exception, like the
    residual of AMB-10, and A6 does not close it. The entry's answer is then handled as in
    [§8.5](#85-epoch-changes), without setting the entry itself aside (REC-04).
+   Built in both clients: the principal check before a repeat, CLI `internal/client/write.go:304-310`,
+   `internal/client/write.go:573-602`, web `web/src/write.ts:521-533`, `web/src/write.ts:556`,
+   `web/src/app.tsx:123`; the automation identity read once and refused when unreadable, CLI
+   `internal/client/write.go:216-219`, `internal/client/write.go:588-596` (the web client has no
+   automation credential); the reference epoch on every write, CLI `internal/client/write.go:258`,
+   `internal/client/write.go:662-664`, web `web/src/write.ts:340`, `web/src/write.ts:349`; the caller's
+   epoch, web `web/src/write.ts:340`, `web/src/handover.tsx:81`, `web/src/handover.tsx:109`,
+   `web/src/onboard.ts:392-398` (the CLI sends no caller's epoch: it refuses a first send when the
+   epoch moved since the reads that built it, `internal/client/write.go:259-266`); revision 2 as the
+   minimum, CLI `internal/client/client.go:19`, web `web/src/shell.tsx:33`; the one `GET /recovery`
+   before the first send, CLI `internal/client/write.go:268-273`, web `web/src/write.ts:340`,
+   `web/src/write.ts:563-565`; the confirming read before a repeat, CLI
+   `internal/client/write.go:311-314`, `internal/client/write.go:604-614`, web
+   `web/src/write.ts:525`, `web/src/write.ts:532`; setting the write aside, CLI
+   `internal/client/write.go:304-314`, `internal/client/write.go:419-424`, `internal/client/write.go:518`,
+   web `web/src/write.ts:302`, `web/src/write.ts:393-394`, `web/src/write.ts:468-471`,
+   `web/src/write.ts:531-532`; the recovery entry's exception, CLI `internal/client/write.go:101-105`,
+   `internal/client/write.go:311`, `internal/client/write.go:662`, `cmd/bronzewardctl/recovery.go:249-266`,
+   web `web/src/write.ts:333`, `web/src/write.ts:337`, `web/src/write.ts:349`, `web/src/write.ts:524`; the
+   entry's answer handled without setting it aside, CLI `internal/client/write.go:349-361`, web
+   `web/src/write.ts:306`.
 4. **After the process ends.** The CLI stores no request body, hash of a body, or key journal.
    When it gives up with the outcome unknown, it prints, on standard error, the key, method,
    route, context, principal (issuer and subject, or the service identity's `principal` from
@@ -847,7 +1089,12 @@ contract's, and this specification does not close it.
    input stops and reconciles from the resource instead of repeating. This is option (a) of
    decision D9, for the journeys' open question on key metadata across a restart, as decided in
    [§13](#13-alternatives-and-open-choices); option (b), a local journal, would replay without
-   that reconstruction.
+   that reconstruction. Built in the CLI: no body, hash or journal is stored (`internal/client/state.go:15-26`
+   holds ETags and the started ingestions only); the block printed on standard error,
+   `internal/client/write.go:143-166`, `cmd/bronzewardctl/main.go:256-258`; the repeat flags,
+   `cmd/bronzewardctl/writes.go:33-37`, `cmd/bronzewardctl/writes.go:58-79`; the entry's block without
+   an epoch, `internal/client/write.go:151-153`, `cmd/bronzewardctl/recovery.go:249-266`. **Proposed:**
+   the refusals when a flag is missing or the principal or epoch differs; those were not read.
 5. **Browser.** The page holds pending writes in memory only. Leaving or reloading the page drops
    them; the outcome-unknown notice shows the key and the resource to read, and no repeat is
    offered afterwards.
@@ -1053,7 +1300,8 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    its status. This is the behavior of the web reader, not a rule for every client. The CLI
    renews an eligible `401` of the stream itself and opens the stream again, reports another
    client refusal as the server sent it, and rejects a redirect ([§9.5](#95-renewal),
-   `internal/client/watch.go:268-289`).
+   `internal/client/watch.go:326-330`, `internal/client/watch.go:422-424`,
+   `internal/client/watch.go:435-437`).
 6. The machine timeline has no stream (G9). A client reads its newest page with `order=newest`
    and keeps that answer's `tail`; "Load older" follows `next` with `order=newest`. While the
    timeline is on screen the client polls forward from `tail` (from the start while there is
@@ -1070,39 +1318,39 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    observations fails ([#442](https://github.com/ginsys/bronzeward/issues/442)):
    - A failure the server answers keeps what the view last read and shows the failure above it.
      These failures are a refusal the page shows, a `503` after its retries, and `epoch-superseded`,
-     which the client reads as unavailable (`web/src/request.ts:149`;
-     `web/src/machine.test.ts:217`, `web/src/machine.test.ts:231`, `web/src/machine.test.ts:333`).
+     which the client reads as unavailable (`web/src/request.ts:254`;
+     `web/src/machine.test.ts:226`, `web/src/machine.test.ts:240`, `web/src/machine.test.ts:395`).
    - A read that gets no answer while the view still shows data reports it only through the
      offline banner ([W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)).
      The data stays, with no failure of its own above it, also after a failure the server answered
-     (`web/src/shell.test.ts:88`, `web/src/machine.test.ts:369`). A read with nothing to show
+     (`web/src/shell.test.ts:195`, `web/src/machine.test.ts:431`). A read with nothing to show
      shows the disconnected state in place. When the banner ends because a read answered, W3 reads
      the machine and its observations again once, as for a timeline poll with new entries: one
      read again at a time. Until they answer, W3 shows what it keeps, as during any read again.
      After that, no data older than a failed read stays shown without a sign
-     (`web/src/shell.test.ts:106`, `web/src/machine.test.ts:392`,
-     `web/e2e/auth/inventory.e2e.ts:350`). A transport failure answers at once, so this read again
+     (`web/src/shell.test.ts:213`, `web/src/machine.test.ts:463`,
+     `web/e2e/auth/inventory.e2e.ts:366`). A transport failure answers at once, so this read again
      runs at most once per poll interval, counted from when the last one started. A resource that
      keeps getting no answer is not read again at network speed, also when a slow read holds the
-     read again (`web/src/machine.test.ts:409`, `web/src/machine.test.ts:436`,
-     `web/src/machine.test.ts:466`). A read again that the old view asked for does not run in a
-     new view (`web/src/machine.test.ts:466`).
+     read again (`web/src/machine.test.ts:480`, `web/src/machine.test.ts:507`,
+     `web/src/machine.test.ts:537`). A read again that the old view asked for does not run in a
+     new view (`web/src/machine.test.ts:537`).
    - A refusal of the credentials (`401` after renewal, `403 identity-revoked`) ends the page
-     ([§9.6](#96-failure-cases)), and nothing stays (`web/src/request.test.ts:96`,
-     `web/src/request.test.ts:115`, `web/src/shell.test.ts:181`).
+     ([§9.6](#96-failure-cases)), and nothing stays (`web/src/request.test.ts:119`,
+     `web/src/request.test.ts:149`, `web/src/shell.test.ts:348`).
    - A new epoch and the process's recovery refusal end the page ([§8.5](#85-epoch-changes)), and
-     nothing stays (`web/src/shell.test.ts:152`, `web/src/shell.test.ts:166`).
+     nothing stays (`web/src/shell.test.ts:302`, `web/src/shell.test.ts:316`).
    - An observations read that restarted after a refused cursor and then failed keeps nothing: the
      list goes with its cursor ([§8.2](#82-errors)). W3 still shows the machine's own rows with
      the observations' failure; only the latest read's line needs the observations. If the machine
-     read also failed, its failure is still shown (`web/src/machine.test.ts:231`,
-     `web/src/machine.test.ts:323`, `web/src/machine.test.ts:514`).
+     read also failed, its failure is still shown (`web/src/machine.test.ts:240`,
+     `web/src/machine.test.ts:385`, `web/src/machine.test.ts:585`).
    - A new view keeps nothing of the old view. When the view changes, the old view's answer still
      shows at first. A later failure does not keep it, a read without answer included, and the
-     restart flag does not carry over (`web/src/machine.test.ts:204`, `web/src/machine.test.ts:231`,
-     `web/src/machine.test.ts:381`).
+     restart flag does not carry over (`web/src/machine.test.ts:213`, `web/src/machine.test.ts:240`,
+     `web/src/machine.test.ts:452`).
    - The observations' restart notice stays through the reads again after it within the view
-     (`web/src/machine.test.ts:204`, `web/src/machine.test.ts:245`).
+     (`web/src/machine.test.ts:213`, `web/src/machine.test.ts:254`).
 7. The operation page ([W8](operator-experience-wireframes.md#w8-operation-timeline)) shows a time on
    each event row. The stream carries no event time (the server sends `at` only in the JSON form,
    as `api/openapi.yaml` says of the events route), so while the watch runs each row shows the browser's clock at the
@@ -2213,7 +2461,7 @@ not part of this rule.
    refused `409 name-in-use`, naming that machine; the machine's own current name is `409
    conflict`, and `machine` names the machine itself; a `400 invalid-request` names the grammar.
    `cluster onboard` adopts the machine a `409 conflict` on `POST /machines` names, as an existing
-   node (`cmd/bronzewardctl/onboard.go:372-376`, [operator experience §5.2](operator-experience.md#52-inventory)):
+   node (`cmd/bronzewardctl/onboard.go:441`, [operator experience §5.2](operator-experience.md#52-inventory)):
    it must not read `name-in-use` that way, and a client that sends a name tells the two by the
    code. A client that names machines as it records them (`cluster onboard` and the onboarding page)
    takes a `name-in-use` or a `400 invalid-request` on a name it sent as the refusal of the name, never
