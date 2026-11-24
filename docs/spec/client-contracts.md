@@ -758,15 +758,15 @@ sentence, `web/src/states.tsx:180`; the import page's sentences, `web/src/import
 | an unknown code | treat by status class: 4xx as a refusal, 5xx as an unknown outcome for a write |
 | a 5xx that is not a Bronzeward problem | an answer that is not `application/problem+json`, or whose `type` does not start `urn:bronzeward:problem:`, for example a `502`, `503` or `504` from the component in front of the server, may come after the server committed: for a write it is an ambiguous outcome as in [§8.4](#84-idempotency-and-ambiguous-responses) item 2, never **not done**; reads retry as for the `503` row |
 
-**Where each row is built**, CLI then web client. `400`s: `internal/client/client.go:305-307`,
+**Where each row is built**, CLI then web client. `400`s: `internal/client/client.go:311-313`,
 `internal/client/list.go:29-33`, `internal/client/list.go:75-92`; `web/src/request.ts:270-271`,
 `web/src/machine.tsx:128`; the epoch-change handling only on a changed header,
 `internal/client/client.go:196`, `internal/client/client.go:347-356`, `web/src/request.ts:453-471`.
-`401`: `internal/client/client.go:236-244`, `internal/client/write.go:400-405`,
+`401`: `internal/client/client.go:242-250`, `internal/client/write.go:403-408`,
 `internal/client/problem.go:38-43`, `internal/client/credentials.go:493-512`;
 `web/src/request.ts:253-268`, `web/src/write.ts:440-456`, `web/src/app.tsx:165-170`. `403
-forbidden`: `internal/client/problem.go:51-62`, `internal/client/write.go:428-432`;
-`web/src/states.tsx:112-121`, `web/src/problems.tsx:70-73`, `web/src/write.ts:459-461`. `403
+forbidden`: `internal/client/problem.go:51-62`, `internal/client/write.go:431-435`;
+`web/src/states.tsx:112-121`, `web/src/problems.tsx:70-73`, `web/src/write.ts:463-465`. `403
 identity-revoked`: `internal/client/credentials.go:524-538`, `internal/client/problem.go:44-50`;
 `web/src/request.ts:244-247`, `web/src/app.tsx:157-173`, `web/src/write.ts:457-462`,
 `web/src/auth.ts:377-381`. `409`:
@@ -775,16 +775,16 @@ identity-revoked`: `internal/client/credentials.go:524-538`, `internal/client/pr
 `web/src/request.ts:60-64`, `web/src/write.ts:472-494`, `web/src/drafts.tsx:885`. `412
 precondition-failed`: `internal/client/write.go:443-447`, `internal/client/write.go:540-550`;
 `web/src/publish.tsx:185-186`, `web/src/problems.tsx:38`. `412 epoch-mismatch`, set aside and never
-repeated: `internal/client/write.go:422-424`; `web/src/write.ts:494`. `422`: `internal/client/problem.go:70-86`,
-`internal/client/write.go:425-427`; `web/src/problems.tsx:92`, `web/src/write.ts:495`.
-`428`: the default case of `internal/client/write.go:445-448`; `web/src/problems.tsx:19`,
-`web/src/problems.tsx:36-37`. `500`: `internal/client/write.go:397`; `web/src/write.ts:502-506`. `503`:
-reads `internal/client/client.go:175`, `internal/client/client.go:229-268`,
+repeated: `internal/client/write.go:425-427`; `web/src/write.ts:498`. `422`: `internal/client/problem.go:70-86`,
+`internal/client/write.go:428-430`; `web/src/problems.tsx:92`, `web/src/write.ts:499`.
+`428`: the default case of `internal/client/write.go:448-451`; `web/src/problems.tsx:19`,
+`web/src/problems.tsx:36-37`. `500`: `internal/client/write.go:400`; `web/src/write.ts:506-510`. `503`:
+reads `internal/client/client.go:181`, `internal/client/client.go:235-274`,
 `internal/client/client.go:336-340`, `web/src/request.ts:92-107`, `web/src/request.ts:244-285`; writes
-`internal/client/write.go:182-185`, `internal/client/write.go:451-454`, `web/src/write.ts:77-78`,
-`web/src/write.ts:496-501`, `web/src/write.ts:515`; the principal-name read that tries once,
-`internal/client/client.go:173`, `cmd/bronzewardctl/names.go:39`. An unknown code and a `5xx` that
-is no Bronzeward problem: `internal/client/write.go:397`, `internal/client/client.go:307-318`;
+`internal/client/write.go:182-185`, `internal/client/write.go:454-457`, `web/src/write.ts:77-78`,
+`web/src/write.ts:500-505`, `web/src/write.ts:519`; the principal-name read that tries once,
+`internal/client/client.go:179`, `cmd/bronzewardctl/names.go:39`. An unknown code and a `5xx` that
+is no Bronzeward problem: `internal/client/write.go:400`, `internal/client/client.go:313-324`;
 `web/src/request.ts:272-288`, `web/src/write.ts:506-510`. Neither
 client reads `Retry-After` (`rg 'Retry-After' web/src internal/client cmd` finds nothing; control:
 `rg 'Idempotency-Key'` finds `internal/client/write.go:664`). `404`, the server's meaning of
@@ -797,7 +797,7 @@ treats every `403 forbidden` as decided before the lookup and keeps an ambiguous
 (`internal/client/write.go:431-435`). (b) `412 epoch-mismatch`: handle the epoch change with the `epoch`
 member. Neither client reads the member to adopt the epoch; both adopt it from the
 `Bronzeward-Epoch` header (`internal/client/client.go:347-356`, `web/src/request.ts:453-471`), and the
-CLI only prints the member (`internal/client/write.go:423`). (c) `422 validation-failed` for marks:
+CLI only prints the member (`internal/client/write.go:426`). (c) `422 validation-failed` for marks:
 the position only, never a path. The web client does so (`web/src/problems.tsx:92-96`) and the CLI
 does for a mark refusal that arrives as an event (`cmd/bronzewardctl/review.go:369-381`), but a
 `422` answer to a mark write prints `detail`, `path` and `paths` (`internal/client/problem.go:33-34`,
@@ -1003,19 +1003,19 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    fragment write replays recorded refusals, `internal/api/fragments.go:291-296`,
    `internal/api/idempotency.go:80-91`); a
    `422` to a repeat on a keyed route is reported as an unknown outcome ([§8.2](#82-errors)).
-   Built in both clients: what makes an outcome unknown, CLI `internal/client/write.go:397`,
-   `internal/client/write.go:638`, `internal/client/write.go:685-688`, web `web/src/write.ts:417-421`,
+   Built in both clients: what makes an outcome unknown, CLI `internal/client/write.go:400`,
+   `internal/client/write.go:641`, `internal/client/write.go:688-691`, web `web/src/write.ts:421-425`,
    `web/src/write.ts:506-509`, `web/src/request.ts:338`; the repeats and backoff, CLI
-   `internal/client/write.go:185`, `internal/client/write.go:298`, web `web/src/write.ts:80`,
-   `web/src/write.ts:376-389`; the repeated `503`, CLI `internal/client/write.go:399`, web
-   `web/src/write.ts:78`, `web/src/write.ts:496-501`; the in-progress `409`, CLI
-   `internal/client/write.go:394-418`, web `web/src/write.ts:476-490`; the recorded refusal with both
-   members, CLI `internal/client/write.go:445-448`, web `web/src/write.ts:476`, `web/src/write.ts:513`;
-   the bound at least the served lease, CLI `internal/client/write.go:230-236`, web
-   `web/src/write.ts:554`; the replay text, CLI `internal/client/write.go:363-365`, web
-   `web/src/write.ts:423`, `web/src/states.tsx:19`; a replayed problem as the earlier refusal in the
-   CLI, `internal/client/write.go:394-396`; the keyed `422`, CLI `internal/client/write.go:425-427`, web
-   `web/src/write.ts:495`. The bound is configurable in both clients: the CLI's `--ingest-wait`
+   `internal/client/write.go:185`, `internal/client/write.go:301`, web `web/src/write.ts:80`,
+   `web/src/write.ts:380-393`; the repeated `503`, CLI `internal/client/write.go:402`, web
+   `web/src/write.ts:78`, `web/src/write.ts:500-505`; the in-progress `409`, CLI
+   `internal/client/write.go:397-421`, web `web/src/write.ts:480-494`; the recorded refusal with both
+   members, CLI `internal/client/write.go:448-451`, web `web/src/write.ts:480`, `web/src/write.ts:517`;
+   the bound at least the served lease, CLI `internal/client/write.go:233-239`, web
+   `web/src/write.ts:554`; the replay text, CLI `internal/client/write.go:366-368`, web
+   `web/src/write.ts:427`, `web/src/states.tsx:19`; a replayed problem as the earlier refusal in the
+   CLI, `internal/client/write.go:397-399`; the keyed `422`, CLI `internal/client/write.go:428-430`, web
+   `web/src/write.ts:499`. The bound is configurable in both clients: the CLI's `--ingest-wait`
    (`cmd/bronzewardctl/fragments.go:58`, `internal/client/write.go:417-418`) and the web client's
    `ingestWaitSeconds` member of `bronzeward-client.json` (§5 item 4; `web/src/config.ts:43-47`,
    `web/src/app.tsx:202`, `web/src/write.ts:152`, `web/src/write.ts:554`), which `INGEST_WAIT`
@@ -1295,7 +1295,7 @@ makes it `400 cursor-invalid`.
 An epoch is never ordered or parsed: both clients compare it by equality, and split only an event
 ID at its first colon to compare the part before it (`internal/client/watch.go:573-577`,
 `web/src/progress.ts:105`). A missing `Bronzeward-Epoch` on an authenticated success is a defect
-the client reports (CLI: `internal/client/client.go:298-301`, `internal/client/write.go:690-693`,
+the client reports (CLI: `internal/client/client.go:304-307`, `internal/client/write.go:693-696`,
 `internal/client/watch.go:459-463`; web: `web/src/request.ts:481-485`, `web/src/write.ts:432-433`,
 `web/src/progress.ts:379-380`).
 
