@@ -81,16 +81,19 @@ afterEach(async () => {
 // machine's page says who prepared it and when, from the plan's own read (ginsys/bronzeward#1159, item 2).
 describe("the machine page says who prepared the position's plan", () => {
   const by = () => box.querySelector('[data-testid="next-step-by"]')?.textContent ?? null;
-  test("a waiting plan shows its preparer and time; a plan read that fails draws nothing", async () => {
+  test("a waiting plan shows its preparer and time", async () => {
     answer = ok({ ...position, step: "awaiting-approval" });
-    planRead = ok(prepared);
     await mount(0);
     await settled();
     expect(by()).toMatch(/^Prepared by .+ on .+\./);
+  });
+  test("a plan read that fails draws nothing, and the line of the position is still there", async () => {
+    answer = ok({ ...position, step: "awaiting-approval" });
     planRead = { kind: "transport" };
-    await mount(1);
+    await mount(0);
     await settled();
     expect(by()).toBeNull();
+    expect(line()).toContain("A plan waits for approval.");
   });
   test("a position with no plan, or an operation in flight, shows none", async () => {
     planRead = ok(prepared);
