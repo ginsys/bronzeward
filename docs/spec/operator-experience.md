@@ -975,7 +975,7 @@ shown only where the read has one) and the profiles of its assignment revision a
 stored change on request, the change a person reads being the change of the plan approved. **Apply** records
 one approval for each plan shown (an approver), carries on past a machine the server refuses, and says so in
 that machine's line. Each line says where the machine stands for this release, read from the machine's
-position and no other source (`web/src/apply.ts:60-76`, drawn at `web/src/apply.tsx:39-40`): not applied, a plan
+position and no other source (`web/src/apply.ts:60-76`, drawn at `web/src/apply.tsx:46-47`): not applied, a plan
 ready, waiting behind another machine's apply (the controller applies one machine of a cluster at a time),
 applying, applied, or stopped, with the reason. What a step of the page says while it runs, and the answer of a write
 that was refused or has an unknown outcome, is a note about the press, drawn after the line in the same row until the
@@ -985,9 +985,9 @@ plans can apply plans a publisher prepared. A plan the page made and the person 
 when its machine is no longer chosen and when the page is left, including a plan whose creation is answered
 after that; the choice cannot change while the page works, and a plan Apply was pressed for is never
 cancelled. One the page loses (the tab is closed) expires with the plan default; a creation whose outcome is
-unknown leaves a plan the page has no ID for (`web/src/apply.ts:100`, `web/src/apply.ts:128-131`).
+unknown leaves a plan the page has no ID for (`web/src/apply.ts:104`, `web/src/apply.ts:128-132`).
 The machine's page shows the plan its position names, which is that plan whenever it is the newest plan of the machine,
-with who prepared it and when, read once from the plan (`web/src/nextstep.tsx:112-119`, `web/src/machine.tsx:465`); an
+with who prepared it and when, read from the plan (`web/src/nextstep.tsx:113-121`, `web/src/machine.tsx:465`); an
 older plan stays reachable through the page's list of the machine's plans. No route returns a change before a plan
 exists, so showing it means making the plan.
 **Apply** stays off while any plan's change is unread, bound to a drift record (it overwrites a configuration no reviewer has seen), or withheld by the server (a configuration that could not be
@@ -998,10 +998,12 @@ handed to the person as its line is drawn: leaving the page, by any route, does 
 its own creation included), and the line says it stays and can be cancelled on its own page. Show apply and Apply send nothing new while a write of the page is
 open, with an unknown outcome, until the person repeats it or dismisses its notice (the rule of every form of the
 console, `startsNew`); that holds for the next request of a running batch too, so one check decides every send
-(`web/src/apply.tsx:100`, `web/src/apply.tsx:234`, `web/src/apply.tsx:244`). After a press of either button, Show apply
-or Apply, the rows are read again five seconds after the last read answered, so a slow read is never dropped by the next
-one, for ten minutes and only while a machine waits or applies: each round of reads, once drawn, decides whether
-another follows (`web/src/apply.tsx:26`, `web/src/apply.tsx:160-180`, `web/src/apply.tsx:219`, `web/src/apply.tsx:225`).
+(`openWrite` at `web/src/apply.tsx:102`, the batch's `canSend` at `web/src/apply.tsx:121`, the two buttons at
+`web/src/apply.tsx:246` and `web/src/apply.tsx:256`). After a press of either button, Show apply or Apply, the rows
+are read again five seconds after the last read answered, so a slow read is never dropped by the next one, for ten
+minutes from the press and only while a machine waits or applies: each round of reads, once drawn, decides whether
+another follows, and no read starts after the ten minutes (`web/src/apply.tsx:26`, `web/src/apply.tsx:165-182`,
+`web/src/apply.tsx:217-231`).
 A control plane may be chosen: the server does not refuse it and the acceptance tests do not cover it, so the
 page says that, and the operator limits say it too. Alternatives: one page per machine and plan (the
 repetition above); approving without showing the change (the person approves what they never read); a new

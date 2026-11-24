@@ -167,13 +167,15 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   const round = useRef({ answered: 0, reads: 0 });
   round.current.reads = 2 * r.machines.length;
   const [rounds, setRounds] = useState(0);
-  const timer = useMemo(() => poll(() => setN((x) => x + 1), POLL_MS), []);
+  // The ten minutes run from the press, and no read starts after them; a press's own batch is not a round to watch.
+  const batch = useRef(false);
+  const timer = useMemo(() => poll(() => Date.now() < until.current && setN((x) => x + 1), POLL_MS), []);
   const rowSettled = useCallback(() => {
     round.current.answered++;
     if (round.current.answered >= round.current.reads && Date.now() < until.current) setRounds((x) => x + 1);
   }, []);
   useEffect(() => {
-    if (rounds > 0 && Date.now() < until.current && Object.values(latest.current).some((s) => s.position !== undefined && ["waiting", "running"].includes(rowOf(s.position, release).state))) timer.settled();
+    if (rounds > 0 && !batch.current && Date.now() < until.current && Object.values(latest.current).some((s) => s.position !== undefined && ["waiting", "running"].includes(rowOf(s.position, release).state))) timer.settled();
   }, [rounds]);
   // A new round of reads (the page's own, or the shell's refresh or view change) starts the count again and drops a
   // pending wait: the rows' effects run before this one, and their answers come after it.
@@ -215,14 +217,18 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   const show = async () => {
     setBusy(true);
     setLines({});
+    (batch.current = true), (until.current = Date.now() + POLL_FOR_MS);
     await showApply(release, picked, io(), made.current);
-    if (live.current) (setBusy(false), (until.current = Date.now() + POLL_FOR_MS), setN((x) => x + 1));
+    batch.current = false;
+    if (live.current) (setBusy(false), setN((x) => x + 1));
   };
   const apply = async () => {
     setBusy(true);
     for (const id of plans.values()) pressed.current.add(id);
+    (batch.current = true), (until.current = Date.now() + POLL_FOR_MS);
     await applyPlans(plans, io());
-    if (live.current) (setBusy(false), (until.current = Date.now() + POLL_FOR_MS), setN((x) => x + 1));
+    batch.current = false;
+    if (live.current) (setBusy(false), setN((x) => x + 1));
   };
   const handOff = useCallback((id: string) => void pressed.current.add(id), []);
   const markRead = useCallback((id: string, s: Seeing) => setReadable((was) => (was[id] === s ? was : { ...was, [id]: s })), []);
