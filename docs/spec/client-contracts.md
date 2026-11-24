@@ -918,7 +918,7 @@ and shows no state: the operator has to press "Read the draft again" first
 ### 8.4 Idempotency and ambiguous responses
 
 Facts: a key is scoped to the authenticated principal, a human's being its issuer and subject
-(`internal/auth/auth.go:190-192`, `internal/api/idempotency.go:41-43`); the fingerprint covers
+(`internal/auth/auth.go:185-188`, `internal/api/idempotency.go:41-43`); the fingerprint covers
 method, route, path parameters, `If-Match` and the canonical body, keyed with the provider's
 digest key on keyed routes (`internal/api/body.go:165-185`); where the key has a record, the same
 request under it replays, another is `422`, an earlier epoch's record is `409`
@@ -1066,7 +1066,7 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    restore removed it, and a later recovery start is waiting for its entry, the repeat becomes
    that start's entry, with the earlier body's restored backups, stop time and reason, and is
    reported as this send's own `201` (`internal/api/tx.go:198-202`,
-   `internal/api/recovery_entries.go:133-135`). That is accepted with the exception, like the
+   `internal/api/recovery_entries.go:256`). That is accepted with the exception, like the
    residual of AMB-10, and A6 does not close it. The entry's answer is then handled as in
    [§8.5](#85-epoch-changes), without setting the entry itself aside (REC-04).
    Built in both clients: the principal check before a repeat, CLI `internal/client/write.go:304-310`,
@@ -2441,7 +2441,7 @@ the paragraph after item 7. Sources follow each item.
    **Proposed** (d) below.)
 7. **Clipboard and export.** No copy, download, save, print or share action on the review, on a
    document being submitted, or on marks. (Built: web, `CopyButton` is used only for identifiers and
-   problem references, `web/src/list.tsx:250`, `web/src/problems.tsx:184`; CLI,
+   problem references, `web/src/list.tsx:248`, `web/src/problems.tsx:184`; CLI,
    `cmd/bronzewardctl/review.go:44-51` refuses `-o` and a non-terminal and no save or export flag
    exists.)
 
@@ -2652,8 +2652,8 @@ them as the fixtures already do for evidence
 `argv`, standard output and standard error, `internal/clitest/cli_test.go:405-416`; the pseudo-terminal
 start with the same `argv` scan, `internal/clitest/protected_test.go:83-89`, and the scan of the
 retained files, `internal/clitest/protected_test.go:520-535`, case `internal/clitest/testdata/protected-cases.yaml:15`.
-Web: `web/e2e/scan.ts` (the retained files, with a planted control), `web/e2e/retention.test.ts:234-256`
-(no trace, HAR, video or screenshot call, with the transitive-import positive control at `:234-242`),
+Web: `web/e2e/scan.ts` (the retained files, with a planted control), `web/e2e/retention.test.ts:231-256`
+(no trace, HAR, video or screenshot call, with the transitive-import positive control at `:231-243`),
 `web/e2e/auth/helpers.ts:229-310` (the storage and cache checks with their controls),
 `web/e2e/auth/protected.e2e.ts:149-154` (after each protected case), and the CI jobs `browser` and
 `browser-auth` that run them (`mise.toml:442-505`). The storage check asserts emptiness, which is
