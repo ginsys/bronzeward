@@ -646,7 +646,8 @@ describe("the operation progress reader (§8.6)", () => {
     const out = await watch(reader(s, eventsPath, "before"), OP, r.w, r.pace);
     expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
     expect(r.log).toEqual(["show e1:1", `clear: ${RESTORED}`, "show e2:1", "show e2:2", "show e2:3"]);
-    expect(r.sleeps).toEqual([1000]);
+    // The delay is waited in steps of 250 ms that ask until (§8.6 item 2).
+    expect(r.sleeps).toEqual([250, 250, 250, 250]);
   });
 
   test("R1-2: a clear asks until again: the replay of a restored installation is shown past its first event", async () => {
@@ -848,7 +849,7 @@ describe("the operation progress reader (§8.6)", () => {
     const out = await watch(reader(s, eventsPath, "before"), OP, r.w, r.pace);
     expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
     expect(r.log).toEqual(["show e1:1", `clear: ${RESTORED}`]);
-    expect(r.sleeps).toEqual([1000]);
+    expect(r.sleeps).toEqual([250, 250, 250, 250]);
   });
 
   test("R3-1b: an empty drain under another epoch than the terminal read does not end the watch when nothing was shown", async () => {
@@ -862,7 +863,7 @@ describe("the operation progress reader (§8.6)", () => {
     const out = await watch(reader(s, eventsPath, "before"), OP, r.w, r.pace);
     expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
     expect(r.log).toEqual([]);
-    expect(r.sleeps).toEqual([1000]);
+    expect(r.sleeps).toEqual([250, 250, 250, 250]);
   });
 
   // The page leaves while the operation read is pending: the reader's read resolves after the abort.
