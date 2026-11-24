@@ -176,7 +176,7 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   }, []);
   useEffect(() => {
     if (rounds > 0 && !batch.current && Date.now() < until.current && Object.values(latest.current).some((s) => s.position !== undefined && ["waiting", "running"].includes(rowOf(s.position, release).state))) timer.settled();
-  }, [rounds]);
+  }, [rounds, timer, release]);
   // A new round of reads (the page's own, or the shell's refresh or view change) starts the count again and drops a
   // pending wait: the rows' effects run before this one, and their answers come after it.
   useEffect(() => {
