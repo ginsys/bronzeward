@@ -1119,8 +1119,14 @@ to 8 stay **Proposed** here: their code was not read for this change.
    the refusals when a flag is missing or the principal or epoch differs; those were not read.
 5. **Browser.** The page holds pending writes in memory only. Leaving or reloading the page drops
    them; the outcome-unknown notice shows the key and the resource to read, and no repeat is
-   offered afterwards.
-6. A client never generates a fresh key for a write it has already sent.
+   offered afterwards. (Built in the web client, the only client the item names: the page's writes
+   are held in one in-memory set and nowhere else, `web/src/write.ts:149`, and the notice names the
+   key, the route and the resource to read, `web/src/forms.tsx:35`, `web/src/forms.tsx:74-75`,
+   `web/src/states.tsx:184-188`.)
+6. A client never generates a fresh key for a write it has already sent. (Built in both clients: the
+   CLI draws a key once per send and an operator's repeat takes the printed one,
+   `internal/client/write.go:220-223`; the web client's key is fixed when its write is made,
+   `web/src/write.ts:96`.)
 7. **Deliberate departure from the contract's advice.** For an earlier-epoch record (`409`) and
    for a keyed `422` it cannot compare, the contract and the server's `detail` tell the client to
    retry under a new key ([persistence and API §7.2](persistence-api.md#72-behavior),
@@ -1132,7 +1138,12 @@ to 8 stay **Proposed** here: their code was not read for this change.
    repeats it ([persistence and API §7.2](persistence-api.md#72-behavior)); whether that repeat
    is wanted depends on the route and the state, which a client cannot judge. The
    client reads the resource, reports what it shows, and lets the operator send the write again as
-   a new one if it is still wanted.
+   a new one if it is still wanted. (Built in both clients, for the first part: neither sends a
+   new key itself, CLI `internal/client/write.go:419-427`, web `web/src/write.ts:468-495`. Built in
+   the CLI, for the read: where the command gives it a read of the resource it prints what it shows,
+   `internal/client/write.go:524-535`. **Proposed** for the web client: it reads the resource only
+   when the operator presses "Show current state", `web/src/forms.tsx:39`,
+   `web/src/forms.tsx:75`.)
 8. **Attempt bound.** Every request that a client sends to the Bronzeward API has its own bound,
    except the event stream of [§8.6](#86-event-resumption). This item does not cover a request to
    the identity provider: the refresh-token request, for example, keeps the rule of
@@ -1148,15 +1159,14 @@ to 8 stay **Proposed** here: their code was not read for this change.
    - A write is ambiguous under item 2 if a byte of the request possibly left. The web client
      cannot see whether one did, so a write attempt that the bound ends is always ambiguous there,
      never **not done**. The CLI counts an attempt as sent once it has a connection
-     (`internal/client/write.go:455-467`). A bound that fires before that is a failure with
+     (`internal/client/write.go:466`, `internal/client/write.go:638`). A bound that fires before that is a failure with
      nothing sent (AMB-01), and a bound that fires after it is ambiguous.
    - One exception: if a write's headers carried a `4xx` status and the bound fires during its
      body, the server refused that attempt, so it is not ambiguous. The client reports the status
      as a refusal, says that the answer was cut off, and does not repeat. After an earlier
      ambiguous attempt, that refusal says nothing about the earlier attempt, so the outcome stays
      unknown (item 4). This is also what the CLI does when the network cuts such a body
-     (`internal/client/write.go:497-503`, `internal/client/write.go:303-307`,
-     `internal/client/write.go:331-342`).
+     (`internal/client/write.go:683-689`).
    - An ambiguous write then takes the repeat path of item 2: the same key, at most 3 repeats,
      then the outcome-unknown report of items 4 and 5.
 
@@ -1170,7 +1180,11 @@ to 8 stay **Proposed** here: their code was not read for this change.
    also bounds the TLS handshake to 10 s, which a browser does itself. The web client applies the
    bound in its request layer, with one abort signal per attempt that covers the `fetch` and the
    body read ([#487](https://github.com/ginsys/bronzeward/issues/487)). The alternatives are D12
-   in [§13](#13-alternatives-and-open-choices).
+   in [§13](#13-alternatives-and-open-choices). (Built in both clients: the CLI's values,
+   `internal/client/transport.go:91-95`; the web client's two bounds and their one signal per
+   attempt, `web/src/request.ts:97-110`, `web/src/request.ts:347-352`, with the event stream
+   exempt, `web/src/request.ts:263-271`; the web refusal whose answer was cut off,
+   `web/src/write.ts:435`, `web/src/states.tsx:21`, `web/src/states.tsx:143`.)
 
 ### 8.5 Epoch changes
 
