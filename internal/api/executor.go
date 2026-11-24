@@ -260,8 +260,12 @@ func (a *API) heldOperations(ctx context.Context) ([]heldOperation, error) {
 
 // dispatchCandidates are the apply-config plans the loop may commit now, read at the database's
 // current time: approved in the current epoch and unexpired, the approval and its approver not
-// revoked, the machine's scope open and no operation holding it or the cluster's rollout scope,
-// which the loop waits for rather than have refused. A plan names the one candidate to read again
+// revoked, the machine's scope open and no operation holding it or the cluster's rollout scope, and
+// the hostname gate open (comparison 6a, by the rule the commitment reads, as a subquery), which the
+// loop waits for rather than have refused: a plan behind a frozen scope, a held rollout scope or a
+// closed gate writes no refusal entry per lease. The read takes no lock, so the commitment stays the
+// authority: a gate that closes between this read and the commitment is refused there. A plan names
+// the one candidate to read again
 // immediately before its dispatch: an earlier dispatch in the pass, or a revocation, may have
 // closed it since the list was read.
 func (a *API) dispatchCandidates(ctx context.Context, plan string) ([]dispatchCandidate, error) {
@@ -278,6 +282,7 @@ func (a *API) dispatchCandidates(ctx context.Context, plan string) ([]dispatchCa
 			AND m.scope_state IN ('normal', 'released') AND NOT m.frozen AND NOT (i.recovery_mode AND m.scope_state <> 'released')
 			AND NOT EXISTS (SELECT FROM operation o WHERE o.kind = 'apply-config'
 				AND o.state IN ('committed', 'sending', 'verifying', 'unresolved') AND (o.machine = p.machine OR o.cluster = p.cluster))
+			AND NOT EXISTS (`+hostnameHolderQuery("p.machine", "p.release")+`)
 			AND ($2 = '' OR p.id = $2)
 		ORDER BY p.id`, current, plan)
 	if err != nil {

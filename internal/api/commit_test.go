@@ -148,15 +148,15 @@ func (ce *commitEnv) ready(t *testing.T) string {
 	return ce.evidence(t, ce.pid, nil)
 }
 
-var allComparisons = []string{"0", "1", "2", "3", "4", "5", "6"}
+var allComparisons = []string{"0", "1", "2", "3", "4", "5", "6", "6a"}
 
 // T6's commitment (persistence-api.md §5; execution-recovery.md §3.2): an approved apply-config plan
 // whose evidence, recorded for it by this controller after the approval and within the plan's age,
 // shows the machine's identity, the plan's expected digest and the release's contract minor is
 // committed: one apply-config operation in committed, owned by the controller at generation 1 in
 // the current epoch; the plan committed to it; and one commitment entry naming the plan, the
-// operation, the approval, the evidence observation, the controller, the generation and the seven
-// comparisons. Nothing else is written: no refusal, no machine state change.
+// operation, the approval, the evidence observation, the controller, the generation and the
+// comparisons 0 to 6a. Nothing else is written: no refusal, no machine state change.
 func TestCommitment(t *testing.T) {
 	t.Parallel()
 	ce := newCommitEnv(t, "")
@@ -490,7 +490,7 @@ func TestCommitmentSecond(t *testing.T) {
 					_, err := a.commitPlan(context.Background(), ce.pid)
 					second <- err
 				}()
-				waited <- queryWaits(ce.db, `SELECT scope_state, frozen FROM machine WHERE id = $1 FOR UPDATE`)
+				waited <- queryWaits(ce.db, `SELECT FROM machine WHERE id = $1 FOR UPDATE`)
 			}
 			return tx.Commit()
 		}})
@@ -922,7 +922,9 @@ func TestCommitmentReadLockControls(t *testing.T) {
 
 // The control of TestCommitmentRolloutWaitPrecedesTime (choice §10.29): without the rollout lock,
 // the commitment reads its time before it waits, at the rollout scope's index, for the other
-// machine's commitment, and commits a plan that expired during that wait.
+// machine's commitment, and commits a plan that expired during that wait. The control also drops
+// the machine pass's share locks on the other machines, which wait for the same commitment before
+// the time is read and so order the pair without the rollout lock.
 func TestCommitmentRolloutLockControl(t *testing.T) {
 	t.Parallel()
 	ce := newCommitEnv(t, "")
@@ -931,7 +933,9 @@ func TestCommitmentRolloutLockControl(t *testing.T) {
 	ce.a = observer(t, ce.env, &fakeExecutor{}, options{noReadLock: "rollout"})
 	ce.evidence(t, ce.pid, nil)
 	done := make(chan error, 1)
-	first := observer(t, ce.env, &fakeExecutor{}, options{commit: func(tx *sql.Tx) error {
+	// The other commitment holds no share lock on this machine's row either, so the pass does not
+	// make the control wait for it.
+	first := observer(t, ce.env, &fakeExecutor{}, options{noReadLock: "other machines", commit: func(tx *sql.Tx) error {
 		go func() {
 			_, err := ce.a.commitPlan(context.Background(), ce.pid)
 			done <- err

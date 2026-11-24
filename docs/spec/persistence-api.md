@@ -1022,9 +1022,10 @@ Rules for every transaction:
    last wait (rule 5).
 5. **Lock order.** The request's idempotency-key lock (§7.2), installation
    state, machine rows by id (each with its MachineState; T1 takes one `FOR SHARE`
-   to read a name, choice §17.45; a commitment takes the cluster's rows in one
-   pass, its own `FOR UPDATE` at its own place in the order and the others `FOR
-   SHARE`, execution and recovery §3.2 comparison 6a), heads by id, the
+   to read a name, choice §17.45; a commitment of an `apply-config` plan takes
+   the cluster's rows in one pass, its own `FOR UPDATE` at its own place in the
+   order and the others `FOR SHARE`, execution and recovery §3.2 comparison 6a),
+   heads by id, the
    draft, principals by id, approvals by id, plan states by id, then operations
    by id. A commitment then takes its cluster's rollout lock, which only
    commitments take (execution and recovery choice §10.29). The act-order lock comes last, just before the act is written, and is
