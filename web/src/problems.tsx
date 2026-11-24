@@ -86,6 +86,14 @@ export function refusalWords(r: { code?: string | undefined; rule?: string | und
   return `${w === undefined ? NO_WORDS : w.what}${at}`;
 }
 
+// A failed operation's error in words (§8.2, Failed operations): the row's `what`, `more` (a detail of the same
+// sentence), then the row's `next`, unless the step points at a server explanation the page does not show.
+export function operationWords(r: { code?: string | undefined; rule?: string | undefined }, more = ""): string {
+  const w = r.code === undefined ? undefined : wordsOfCode(r.code, r.rule);
+  if (w === undefined) return `${NO_WORDS}${more}`;
+  return `${w.what}${more}${w.explains === true ? "" : ` ${w.next}`}`;
+}
+
 // A problem's `position` member when it is a whole number (a mark refused by its index).
 const positionOf = (p: Problem): number | undefined => {
   const n = p["position"];
