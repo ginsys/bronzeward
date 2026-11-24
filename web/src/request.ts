@@ -192,13 +192,15 @@ export class Client {
   // response can record a new epoch before the caller resumes. Undefined when the read gave no
   // response that was used, or the response named no epoch. `moves` is the client's count after that
   // response was recorded, taken in the same step.
-  async readWithEpoch<T>(path: string): Promise<{ result: ReadResult<T>; epoch: string | undefined; moves: number }> {
+  // `tries` bounds the sends of a retried failure, the first included (MAX_TRIES by default): the
+  // operation read of a watch passes 1 and waits itself, so its waits end with the watch (§8.6 item 2).
+  async readWithEpoch<T>(path: string, tries = MAX_TRIES): Promise<{ result: ReadResult<T>; epoch: string | undefined; moves: number }> {
     const seen: Seen = { epoch: undefined, moves: 0 };
-    const result = await this.readFrom<T>(path, seen);
+    const result = await this.readFrom<T>(path, seen, tries);
     return { result, epoch: seen.epoch, moves: seen.moves };
   }
 
-  private async readFrom<T>(path: string, seen: Seen): Promise<ReadResult<T>> {
+  private async readFrom<T>(path: string, seen: Seen, tries = MAX_TRIES): Promise<ReadResult<T>> {
     const sent = this.generation;
     const drops = this.drops;
     const principal = this.view.principal;
@@ -268,7 +270,7 @@ export class Client {
       // other Bronzeward code is a refusal by its status class.
       const retried = problem === null || code === "internal-error" || (res.status === 503 && RETRIED_503.has(code ?? ""));
       if (!retried) return { kind: code === "epoch-superseded" ? "unavailable" : "refused", status: res.status, problem };
-      if (attempt + 1 >= MAX_TRIES) return { kind: "unavailable", status: res.status, problem };
+      if (attempt + 1 >= tries) return { kind: "unavailable", status: res.status, problem };
       await (this.opts.sleep ?? delay)(backoff(attempt));
       if (sent !== this.generation) return { kind: "discarded" };
     }
