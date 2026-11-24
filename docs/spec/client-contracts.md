@@ -754,21 +754,21 @@ sentence, `web/src/states.tsx:180`; the import page's sentences, `web/src/import
 | 428 `precondition-required`, `idempotency-key-required` | a client defect; show and stop |
 | 500 `internal-error` | the outcome may be unknown: repeat the identical request with the same key ([§8.4](#84-idempotency-and-ambiguous-responses)) |
 | 501 `not-implemented` | not served by this server; no route answers it today |
-| 503 `dependency-unavailable`, `talos-access-unavailable`, `transient-conflict` | reads: retry with backoff (1 s doubling to 30 s, at most 5 tries, then stop; the one exception is the operation read of a watch after a stream that ended or a refused drain, [§8.6](#86-event-resumption) item 2, and the CLI's read of principal names under A7, which tries once, because a failed read shows the identifiers and is not worth a wait; the web client's read keeps the bound behind the identifiers it already shows, since nothing waits on it; every other read keeps the bound). Writes: repeat with the same key at most 3 times. If every attempt of the write was answered `503`, report **not done**: each such `503` states that its attempt's own transaction committed nothing, so no act or idempotency record exists for it; a fragment write's claim, a scope mark's observation or its start, or a principal row, taken before it stays ([persistence and API §9.4](persistence-api.md#94-errors)). If any earlier attempt was ambiguous ([§8.4](#84-idempotency-and-ambiguous-responses) item 2), a `503` to the repeat says nothing about that attempt: report the outcome as unknown, as in [§8.4](#84-idempotency-and-ambiguous-responses) item 4. A `503` `epoch-superseded` is not in this row: it is not repeated, by a read or a write, against the same server process, because that process started before the current epoch and cannot succeed until restarted (the CLI names the three codes above only: `internal/client/client.go:330-334`, and its write ends at `internal/client/write.go:428`; the web client's read returns it at once as unavailable, `web/src/request.ts:272-276`, and its write stops at `web/src/write.ts:496-499`). The server sends no `Retry-After` (G20), except `Retry-After: 1` on the `talos-access-unavailable` of `GET /clusters/{id}/talos-access` when a deletion time cannot be decided; the backoff above is not changed by it |
+| 503 `dependency-unavailable`, `talos-access-unavailable`, `transient-conflict` | reads: retry with backoff (1 s doubling to 30 s, at most 5 tries, then stop; the one exception is the operation read of a watch after a stream that ended or a refused drain, [§8.6](#86-event-resumption) item 2, and the CLI's read of principal names under A7, which tries once, because a failed read shows the identifiers and is not worth a wait; the web client's read keeps the bound behind the identifiers it already shows, since nothing waits on it; every other read keeps the bound). Writes: repeat with the same key at most 3 times. If every attempt of the write was answered `503`, report **not done**: each such `503` states that its attempt's own transaction committed nothing, so no act or idempotency record exists for it; a fragment write's claim, a scope mark's observation or its start, or a principal row, taken before it stays ([persistence and API §9.4](persistence-api.md#94-errors)). If any earlier attempt was ambiguous ([§8.4](#84-idempotency-and-ambiguous-responses) item 2), a `503` to the repeat says nothing about that attempt: report the outcome as unknown, as in [§8.4](#84-idempotency-and-ambiguous-responses) item 4. A `503` `epoch-superseded` is not in this row: it is not repeated, by a read or a write, against the same server process, because that process started before the current epoch and cannot succeed until restarted (the CLI names the three codes above only: `internal/client/client.go:336-340`, and its write ends at `internal/client/write.go:431`; the web client's read returns it at once as unavailable, `web/src/request.ts:272-276`, and its write stops at `web/src/write.ts:500-503`). The server sends no `Retry-After` (G20), except `Retry-After: 1` on the `talos-access-unavailable` of `GET /clusters/{id}/talos-access` when a deletion time cannot be decided; the backoff above is not changed by it |
 | an unknown code | treat by status class: 4xx as a refusal, 5xx as an unknown outcome for a write |
 | a 5xx that is not a Bronzeward problem | an answer that is not `application/problem+json`, or whose `type` does not start `urn:bronzeward:problem:`, for example a `502`, `503` or `504` from the component in front of the server, may come after the server committed: for a write it is an ambiguous outcome as in [§8.4](#84-idempotency-and-ambiguous-responses) item 2, never **not done**; reads retry as for the `503` row |
 
 **Where each row is built**, CLI then web client. `400`s: `internal/client/client.go:305-307`,
-`internal/client/list.go:35-39`, `internal/client/list.go:81-98`; `web/src/request.ts:270-271`,
+`internal/client/list.go:29-33`, `internal/client/list.go:75-92`; `web/src/request.ts:270-271`,
 `web/src/machine.tsx:128`; the epoch-change handling only on a changed header,
-`internal/client/client.go:190`, `internal/client/client.go:341-350`, `web/src/request.ts:453-471`.
+`internal/client/client.go:196`, `internal/client/client.go:347-356`, `web/src/request.ts:453-471`.
 `401`: `internal/client/client.go:236-244`, `internal/client/write.go:400-405`,
 `internal/client/problem.go:38-43`, `internal/client/credentials.go:493-512`;
-`web/src/request.ts:253-268`, `web/src/write.ts:436-452`, `web/src/app.tsx:165-170`. `403
+`web/src/request.ts:253-268`, `web/src/write.ts:440-456`, `web/src/app.tsx:165-170`. `403
 forbidden`: `internal/client/problem.go:51-62`, `internal/client/write.go:428-432`;
 `web/src/states.tsx:112-121`, `web/src/problems.tsx:70-73`, `web/src/write.ts:459-461`. `403
 identity-revoked`: `internal/client/credentials.go:524-538`, `internal/client/problem.go:44-50`;
-`web/src/request.ts:244-247`, `web/src/app.tsx:157-173`, `web/src/write.ts:453-458`,
+`web/src/request.ts:244-247`, `web/src/app.tsx:157-173`, `web/src/write.ts:457-462`,
 `web/src/auth.ts:377-381`. `409`:
 `internal/client/write.go:397-399`, `internal/client/write.go:409-424`,
 `internal/client/client.go:328-332`, `cmd/bronzewardctl/fragments.go:78`;
@@ -780,12 +780,12 @@ repeated: `internal/client/write.go:422-424`; `web/src/write.ts:494`. `422`: `in
 `428`: the default case of `internal/client/write.go:445-448`; `web/src/problems.tsx:19`,
 `web/src/problems.tsx:36-37`. `500`: `internal/client/write.go:397`; `web/src/write.ts:502-506`. `503`:
 reads `internal/client/client.go:175`, `internal/client/client.go:229-268`,
-`internal/client/client.go:330-334`, `web/src/request.ts:92-107`, `web/src/request.ts:244-285`; writes
+`internal/client/client.go:336-340`, `web/src/request.ts:92-107`, `web/src/request.ts:244-285`; writes
 `internal/client/write.go:182-185`, `internal/client/write.go:451-454`, `web/src/write.ts:77-78`,
 `web/src/write.ts:496-501`, `web/src/write.ts:515`; the principal-name read that tries once,
 `internal/client/client.go:173`, `cmd/bronzewardctl/names.go:39`. An unknown code and a `5xx` that
 is no Bronzeward problem: `internal/client/write.go:397`, `internal/client/client.go:307-318`;
-`web/src/request.ts:272-288`, `web/src/write.ts:502-506`. Neither
+`web/src/request.ts:272-288`, `web/src/write.ts:506-510`. Neither
 client reads `Retry-After` (`rg 'Retry-After' web/src internal/client cmd` finds nothing; control:
 `rg 'Idempotency-Key'` finds `internal/client/write.go:664`). `404`, the server's meaning of
 `epoch-mismatch` after an ambiguous attempt, and the server's behaviour for an unfinished first
@@ -796,7 +796,7 @@ the lookup and is a known refusal. The web client treats it so (`web/src/write.t
 treats every `403 forbidden` as decided before the lookup and keeps an ambiguous outcome unknown
 (`internal/client/write.go:431-435`). (b) `412 epoch-mismatch`: handle the epoch change with the `epoch`
 member. Neither client reads the member to adopt the epoch; both adopt it from the
-`Bronzeward-Epoch` header (`internal/client/client.go:341-350`, `web/src/request.ts:453-471`), and the
+`Bronzeward-Epoch` header (`internal/client/client.go:347-356`, `web/src/request.ts:453-471`), and the
 CLI only prints the member (`internal/client/write.go:423`). (c) `422 validation-failed` for marks:
 the position only, never a path. The web client does so (`web/src/problems.tsx:92-96`) and the CLI
 does for a mark refusal that arrives as an event (`cmd/bronzewardctl/review.go:369-381`), but a
@@ -1005,7 +1005,7 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    `422` to a repeat on a keyed route is reported as an unknown outcome ([§8.2](#82-errors)).
    Built in both clients: what makes an outcome unknown, CLI `internal/client/write.go:397`,
    `internal/client/write.go:638`, `internal/client/write.go:685-688`, web `web/src/write.ts:417-421`,
-   `web/src/write.ts:502-505`, `web/src/request.ts:338`; the repeats and backoff, CLI
+   `web/src/write.ts:506-509`, `web/src/request.ts:338`; the repeats and backoff, CLI
    `internal/client/write.go:185`, `internal/client/write.go:298`, web `web/src/write.ts:80`,
    `web/src/write.ts:376-389`; the repeated `503`, CLI `internal/client/write.go:399`, web
    `web/src/write.ts:78`, `web/src/write.ts:496-501`; the in-progress `409`, CLI
@@ -1208,7 +1208,7 @@ compared by equality only
 tokens `401`, and streams `reset` ([§2](#2-the-api-a-client-meets)).
 
 **Current.** Both clients compare `Bronzeward-Epoch` on every response with the last they saw for
-the context (CLI: `internal/client/client.go:339-351`; web: `web/src/request.ts:225-234`,
+the context (CLI: `internal/client/client.go:345-357`; web: `web/src/request.ts:225-234`,
 `web/src/request.ts:453-472`). The web client drops an answer of another epoch than one it recorded
 after the send, and reads again to learn the current one (`web/src/request.ts:226-230`). On a
 change each:
@@ -1238,7 +1238,7 @@ change each:
    recovery banner (journeys §8): the CLI once per command (`internal/client/client.go:364-370`),
    the web client in the page header (`web/src/shell.tsx:539`);
 4. records the new epoch. A context's first epoch is recorded without a notice
-   (`internal/client/client.go:341-345`, `web/src/request.ts:463-471`).
+   (`internal/client/client.go:347-351`, `web/src/request.ts:463-471`).
 
 **Current** for the web client, with one exception to item 1's discard of every cached page: the
 page holding unsaved text stays shown, with its actions disabled and a notice to copy the text, and
@@ -1296,7 +1296,7 @@ An epoch is never ordered or parsed: both clients compare it by equality, and sp
 ID at its first colon to compare the part before it (`internal/client/watch.go:573-577`,
 `web/src/progress.ts:105`). A missing `Bronzeward-Epoch` on an authenticated success is a defect
 the client reports (CLI: `internal/client/client.go:298-301`, `internal/client/write.go:690-693`,
-`internal/client/watch.go:459-463`; web: `web/src/request.ts:481-485`, `web/src/write.ts:428-429`,
+`internal/client/watch.go:459-463`; web: `web/src/request.ts:481-485`, `web/src/write.ts:432-433`,
 `web/src/progress.ts:379-380`).
 
 **Start mode** (G22). Neither the headers nor `GET /recovery` say whether the process was started
@@ -1435,9 +1435,9 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    that [§8.2](#82-errors) retries is repeated with the backoff above until the watch ends, by its
    `until` or the page leaving (`web/src/request.ts:99-104`, `web/src/progress.ts:303-321`). A `500
    internal-error` and `epoch-superseded` are not repeated, as in the CLI, whose retry flag names
-   the three `503` codes only (`internal/client/client.go:305`, `internal/client/client.go:330-334`).
+   the three `503` codes only (`internal/client/client.go:311`, `internal/client/client.go:336-340`).
    The operation read of a watch is sent once and the watch waits between the sends, as the CLI's
-   read with a stop does (`internal/client/client.go:245-267`): the web client's own five tries
+   read with a stop does (`internal/client/client.go:251-273`): the web client's own five tries
    and their waits are not used, neither for a failure nor for an answer under another epoch than
    one recorded after its send, so a `500` is one fetch and every wait asks `until`
    (`web/src/progress.ts:240`, `web/src/request.ts:197-208`, `web/src/request.ts:226-230`,
@@ -1452,8 +1452,8 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    renewal: one `401` is renewed for the whole phase, not for each send. Both start again with the
    first answer that is no outage, and the delay of the attempts is left alone
    (`web/src/progress.ts:212-213`, `web/src/progress.ts:244-248`, `web/src/progress.ts:315-317`,
-   `web/src/request.ts:254-255`; the CLI: `internal/client/client.go:229`,
-   `internal/client/client.go:236-244`, `internal/client/client.go:268`). The drain of a terminal state that is refused or stays unavailable
+   `web/src/request.ts:254-255`; the CLI: `internal/client/client.go:235`,
+   `internal/client/client.go:242-250`, `internal/client/client.go:274`). The drain of a terminal state that is refused or stays unavailable
    is followed at once by a read of the operation in that phase (`web/src/progress.ts:287`): a
    read of the same epoch that is terminal reports the failure of that drain, with no second
    drain; a terminal read of another epoch is void, and the watch goes on after the delay, which is that wait; any
@@ -1479,7 +1479,7 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    end within 250 ms of `until`; the web's backoff between the attempts of a stream or of the JSON
    pages ends on the abort only, not within 250 ms of `until` (`web/src/progress.ts:319`;
    ginsys/bronzeward#1175). CLI: a TLS trust refusal is a transport failure the CLI does not
-   repeat (`internal/client/client.go:284`).
+   repeat (`internal/client/client.go:290`).
 3. A `reset` event clears what the watch showed, prints that the installation was restored or
    entered recovery mode, and shows the replay from the start. The epoch change is handled as in
    [§8.5](#85-epoch-changes). The server sends `reset` only when a stream opens
