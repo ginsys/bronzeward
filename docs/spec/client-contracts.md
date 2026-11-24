@@ -26,7 +26,8 @@ means that file and line; a line citation into client code, `cmd/bronzewardctl/`
 `internal/client/` or `web/`, means that line at revision `36f3bae2`, where the clients were read
 when [#262](https://github.com/ginsys/bronzeward/issues/262) moved statements from Proposed to
 current; a later change that cites client code at its own head adds one more exception of the form
-below, "read at the revision that lands" its pull request, and does not re-pin this revision),
+below, naming the sections whose client citations it covers and "read at the revision that lands"
+its pull request, and does not re-pin this revision),
 except the code [#277](https://github.com/ginsys/bronzeward/issues/277) adds or changes, the identity read
 (`internal/api/identity.go`, `internal/api/routes.go:97`, `internal/api/api.go:339`), which is
 read with it applied, and the expected-epoch check
