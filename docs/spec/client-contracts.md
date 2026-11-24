@@ -875,16 +875,17 @@ what the operator may do next, and never repeats the request that started the op
 rule from the same tables (`web/src/problems.tsx:83-87`, `web/src/imports.tsx:127-133`), and in
 neither client does anything repeat the request. Built for the next step, at the revision that lands
 ginsys/bronzeward#1176: the web client words a failed operation by the row's `what` and its `next`, and
-leaves out a `next` that points at a server explanation the page does not show
-(`web/src/problems.tsx:91-95`, `web/src/imports.tsx:132`), with "Import again" beside it
-(`web/src/imports.tsx:133`), and the publication page words a failed publication by the same `next`
-after its own sentence, which includes `recovery-mode-entered` (`web/src/publish.tsx:44-49`); the CLI
+leaves out a `next` that points at a server explanation or at a reference block the text does not show
+(the rows marked `explains` and `refers`: `web/src/problems.tsx:93-101`, `web/src/imports.tsx:132`), with
+"Import again" beside it (`web/src/imports.tsx:133`), and the publication page words a failed publication
+by the same `next` after its own sentence, which includes `recovery-mode-entered`
+(`web/src/publish.tsx:44-48`); the CLI
 shows the operation's identifier and state with the raw error and
 names the row's next step, for a failed import, for `precondition-failed`, `ingestion-abandoned`,
 `machine-identity-mismatch` and `talos-access-unavailable` (`cmd/bronzewardctl/imports.go:592-615`), and,
 for a failed publication, for `recovery-mode-entered`, the code that recovery-mode entry gives a publish
 job and no import (`cmd/bronzewardctl/publish.go:117`, `cmd/bronzewardctl/publish.go:133-142`). The
-next-step words exist in two places, the web table (`web/src/problems.tsx:23-48`) and the CLI's cases
+next-step words exist in two places, the web table (`web/src/problems.tsx:25-51`) and the CLI's cases
 (`cmd/bronzewardctl/imports.go:602-613`, `cmd/bronzewardctl/publish.go:138-139`), because the two clients
 cannot share one file; a change to a row's `next` changes both. For `talos-access-unavailable`, whose
 web `next` is "The server's explanation follows", the CLI says "The server's explanation is in the error
@@ -943,13 +944,13 @@ Built, on a `412`, where the clause says the client "shows the current state": t
 revision the draft has now and the command that reads it (`internal/client/write.go:560-570`). At the
 revision that lands ginsys/bronzeward#1176 the web publication page does too: it reads the draft once,
 with a plain read that sends no `If-Match`, and says its revision and state under the refusal, which
-stays shown whatever the read answers (`web/src/publish.tsx:194-199`, `web/src/publish.tsx:208-212`,
-`web/src/publish.tsx:229`); a read answered after a newer press or re-read, or after the page is gone,
+stays shown whatever the read answers (`web/src/publish.tsx:193-198`, `web/src/publish.tsx:207-211`,
+`web/src/publish.tsx:228`); a read answered after a newer press or re-read, or after the page is gone,
 is not live, so the shell does not settle it and the page does not show it, and a refusal that answers
-after that starts no read (`web/src/publish.tsx:180-185`, `web/src/publish.tsx:195-200`,
-`web/src/publish.tsx:202`, `web/src/publish.tsx:211`). That read keeps no ETag: Publish still
-sends nothing until the operator presses "Read the draft again" (`web/src/publish.tsx:165-166`,
-`web/src/publish.tsx:183-189`).
+after that starts no read (`web/src/publish.tsx:179-184`, `web/src/publish.tsx:194-199`,
+`web/src/publish.tsx:201`, `web/src/publish.tsx:210`). That read keeps no ETag: Publish still
+sends nothing until the operator presses "Read the draft again" (`web/src/publish.tsx:164-165`,
+`web/src/publish.tsx:182-188`).
 
 ### 8.4 Idempotency and ambiguous responses
 

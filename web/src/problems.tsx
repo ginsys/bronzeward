@@ -11,16 +11,19 @@ export interface Words {
   next: string;
   // The next step points at the server's own detail, so it is shown only where a detail is.
   explains?: true;
+  // The next step points at a reference block a request's refusal shows and an operation's text does not.
+  refers?: true;
 }
 
 const PREFIX = "urn:bronzeward:problem:";
 export const codeOf = (p: Problem) => (p.type.startsWith(PREFIX) ? p.type.slice(PREFIX.length) : p.type);
 
 const REPORT = "Report it with the reference below.";
+const REFERS = { refers: true } as const;
 const FAULT = "This page left out something the server requires. That is a fault in the page, not in what you entered.";
 
 export const PROBLEM_WORDS: Readonly<Record<string, Words>> = {
-  "invalid-request": { what: "The request was malformed, so the server did not act on it.", next: "Check what you entered and change it before sending again. If nothing looks wrong, report it with the reference below." },
+  "invalid-request": { what: "The request was malformed, so the server did not act on it.", next: "Check what you entered and change it before sending again. If nothing looks wrong, report it with the reference below.", ...REFERS },
   "cursor-invalid": { what: "The list position this page asked for is no longer valid.", next: "Reload the list from the start." },
   unauthenticated: { what: "The server did not accept your sign-in.", next: "Sign in again." },
   forbidden: { what: "Your account is not allowed to do this.", next: "Ask someone who has the right role." },
@@ -33,13 +36,13 @@ export const PROBLEM_WORDS: Readonly<Record<string, Words>> = {
   "ingestion-abandoned": { what: "The import was abandoned before it finished, and nothing it read was kept.", next: "Start the import again." },
   "recovery-mode-entered": { what: "The server went into recovery while this was publishing, so nothing was published.", next: "Wait for the recovery to finish, then publish again." },
   "idempotency-key-reused": { what: "The server could not match this to the earlier request sent under the same key.", next: "Reload and check whether it was saved before you do it again." },
-  "idempotency-key-required": { what: FAULT, next: REPORT },
-  "precondition-required": { what: FAULT, next: REPORT },
+  "idempotency-key-required": { what: FAULT, next: REPORT, ...REFERS },
+  "precondition-required": { what: FAULT, next: REPORT, ...REFERS },
   "precondition-failed": { what: "Someone else saved a newer version first.", next: "Reload, read the newer version, then decide." },
   "epoch-mismatch": { what: "The installation's recovery state changed since this page loaded.", next: "Reload the page, read what the server holds now, then decide." },
   "validation-failed": { what: "The server checked this and found it not valid.", next: "Change what it points at; the server's explanation follows.", explains: true },
   "epoch-superseded": { what: "This server process is out of date with the installation's recovery state, so it may not change anything.", next: "Ask an administrator to restart the server." },
-  "internal-error": { what: "The server failed while handling the request.", next: REPORT },
+  "internal-error": { what: "The server failed while handling the request.", next: REPORT, ...REFERS },
   "not-implemented": { what: "The server does not offer this yet.", next: "Nothing can be done from this page." },
   "transient-conflict": { what: "The server gave up for now because of a clashing change.", next: "Try again in a moment." },
   "dependency-unavailable": { what: "Something the server depends on is not available or not set up.", next: "Try again in a moment; if it keeps happening, ask an administrator." },
@@ -86,12 +89,15 @@ export function refusalWords(r: { code?: string | undefined; rule?: string | und
   return `${w === undefined ? NO_WORDS : w.what}${at}`;
 }
 
-// A failed operation's error in words (§8.2, Failed operations): the row's `what`, `more` (a detail of the same
-// sentence), then the row's `next`, unless the step points at a server explanation the page does not show.
+// A failed operation's next step (§8.2, Failed operations): the row's `next`, led by a space, unless the step points at
+// a server explanation or a reference block that an operation's text does not show.
+export const operationNext = (w: Words | undefined): string => (w === undefined || w.explains === true || w.refers === true ? "" : ` ${w.next}`);
+
+// A failed operation's error in words: the row's `what`, `more` (a detail of the same sentence), then its next step.
 export function operationWords(r: { code?: string | undefined; rule?: string | undefined }, more = ""): string {
   const w = r.code === undefined ? undefined : wordsOfCode(r.code, r.rule);
   if (w === undefined) return `${NO_WORDS}${more}`;
-  return `${w.what}${more}${w.explains === true ? "" : ` ${w.next}`}`;
+  return `${w.what}${more}${operationNext(w)}`;
 }
 
 // A problem's `position` member when it is a whole number (a mark refused by its index).

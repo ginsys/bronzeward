@@ -51,6 +51,13 @@ describe("the publication page (ginsys/bronzeward#342, journeys §5.5)", () => {
     expect((publishEnd(op("failed", null, { type: "urn:bronzeward:problem:talos-access-unavailable", status: 503 })) as { text: string }).text).toBe(`The publication failed: talos-access-unavailable. ${SENT_NOTHING}`);
   });
 
+  // A step that says to report "with the reference below" points at a block this text does not carry: it is left out.
+  test("a publication that fails on a code whose next step points at a reference block adds no step", () => {
+    for (const code of ["internal-error", "invalid-request", "idempotency-key-required", "precondition-required"]) {
+      expect(publishEnd(op("failed", null, { type: `urn:bronzeward:problem:${code}`, status: 500 })), code).toEqual({ text: `The publication failed: ${code}. ${SENT_NOTHING}` });
+    }
+  });
+
   // ginsys/bronzeward#1055 part 9b: the rule `invalid` is Talos's validation of the machine's whole configuration, and
   // the bare word said nothing a person could act on.
   test("the rule invalid says what it means, and the other rules keep their name", () => {
