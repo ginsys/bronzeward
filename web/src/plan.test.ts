@@ -48,7 +48,7 @@ describe("plan creation (ginsys/bronzeward#357, B19, T19)", () => {
     expect(none).toContain("create an adopt plan");
     expect(none).toContain("operation=adopt");
     expect(html(nextAfter(problem("the machine's assignment has moved since the release was compiled"), "rel_a", "mch_b"))).toContain("publish it, so a release is compiled");
-    expect(html(nextAfter(problem("the machine has no assignment: the release was published with the machine's import base alone. Add an assignment"), "rel_a", "mch_b"))).toContain("one that selects nothing is enough");
+    expect(html(nextAfter(problem("the machine has no assignment: the release was published with the machine's import base. Add an assignment"), "rel_a", "mch_b"))).toContain("one that selects nothing is enough");
     expect(html(nextAfter(problem("the machine has an Applied configuration and no open drift record; adopt only a drifted machine or one with none"), "rel_a", "mch_b"))).toContain("nothing to adopt");
     expect(nextAfter(problem("something else"), "rel_a", "mch_b")).toBeNull();
     expect(nextAfter(null, "rel_a", "mch_b")).toBeNull();

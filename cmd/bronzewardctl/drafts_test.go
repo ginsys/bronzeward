@@ -376,7 +376,7 @@ func TestDraftEditing(t *testing.T) {
 	step("--if-match gives the ETag", []string{"assignment", "rm", "mch_BWSYNTH", "--draft", "drf_BWSYNTH", `--if-match="9-BWSYNTH"`}, 0,
 		"Assignment mch_BWSYNTH removed from draft drf_BWSYNTH (draft revision 10).", "",
 		`DELETE /drafts/drf_BWSYNTH/assignments/mch_BWSYNTH if-match="9-BWSYNTH" type= body=`)
-	// --none sends an assignment that selects nothing: the machine's configuration is its import base alone.
+	// --none sends an assignment that selects nothing: the machine's configuration is its import base, with its own name as its hostname where the base sets none (compilation §6.1 decision 2).
 	step("assignment set --none", []string{"assignment", "set", "mch_BWSYNTH", "--draft", "drf_BWSYNTH", "--none"}, 0,
 		"Assignment saved (draft revision 11).", "",
 		`PUT /drafts/drf_BWSYNTH/assignments/mch_BWSYNTH if-match="10-BWSYNTH" type=`+ctype+` body={}`)

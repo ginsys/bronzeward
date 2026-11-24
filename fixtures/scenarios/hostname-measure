@@ -10,7 +10,7 @@
 # hostname, as onboarding does. Every release of a row is made as scenarios/s2 makes its
 # publications: a new draft, the worker imported into it with its file content marked, published.
 # Step 3 is the Talos-default case, step 4 the commonest case (an import of a configuration that holds
-# the hostname document), steps 5 and 6 renames. Writes $STATE/evidence/hostname-measure-<time>/, not
+# the hostname document), steps 5 and 6 renames, step 7 a rename released with no re-import. Writes $STATE/evidence/hostname-measure-<time>/, not
 # committed as it is: the committed record is hand-written from it, after bin/evidence's leak scan.
 #
 # Talos is touched by reads (get nodename, get hostnamestatus) and by the one
@@ -98,6 +98,27 @@ apply_as_product() {
   read_node "$n-before" || return 1
   draft_by h-author "$n" || return 1
   import_worker "$n" || return 1
+  publish_by h-publisher "$n" || return 1
+  release_hostname "$n" || return 1
+  keep_body "review-$n" "/api/v1/releases/$new_release/machines/$machine_w/review" || return 1
+  plan_by h-publisher "$n" || return 1
+  plan=$plan_id
+  keep_body "plan-$n" "/api/v1/plans/$plan" || return 1
+  approve_by h-approver "$plan" "$n" || return 1
+  within 300 completed || return 1
+  read_node "$n-after"
+}
+# apply_stored <name>: as apply_as_product, with no import: the draft holds an assignment that selects nothing
+# for the worker (PUT /drafts/{id}/assignments/{machine}), so the release is compiled from the import base the
+# worker already has. Reads and keeps as apply_as_product does.
+apply_stored() {
+  local n=$1
+  read_node "$n-before" || return 1
+  draft_by h-author "$n" || return 1
+  fresh h-author
+  answers 200 - PUT "/api/v1/drafts/$draft/assignments/$machine_w" "$tok" '{"profiles": [], "fragments": {}}' "$(key "assignment-$n")" "$etag" || return 1
+  differ "$(etag_of_last)" "$etag" || return 1
+  etag=$(etag_of_last)
   publish_by h-publisher "$n" || return 1
   release_hostname "$n" || return 1
   keep_body "review-$n" "/api/v1/releases/$new_release/machines/$machine_w/review" || return 1
@@ -259,6 +280,22 @@ elif ! row_back; then
   skip_row back 'a step of the row failed; its reads are void'
 fi
 
+# Step 7, with no re-import: a rename, then a release made from the import base the worker already has, with the
+# worker's assignment emptied in the draft and nothing imported. The reads answer whether the new name
+# reaches the node this way, and whether the nodename follows. No restart is read.
+row_stored() {
+  rowstep "$ref step 7 stored" 'the worker is renamed by an author' name_as h-author hm-stored.fixture.test &&
+    rowstep "$ref step 7 stored" 'the worker holds that name' name_is hm-stored.fixture.test &&
+    rowstep "$ref step 7 stored" 'a release made from the stored import base, applied through the product: the operation completes' apply_stored stored &&
+    rowstep "$ref step 7 stored" 'the worker'"'"'s Applied is its Desired after it' applied &&
+    row stored
+}
+if [ "$rename_ok" -ne 1 ]; then
+  skip_row stored 'row rename did not complete, so the worker is not in the state the row starts from'
+elif ! row_stored; then
+  skip_row stored 'a step of the row failed; its reads are void'
+fi
+
 # registerWithFQDN set against unset is not measured here: it needs a kubelet fragment the fixture
 # has no scenario for. Recorded as a limit, not as a row.
 # The configuration file of step 2 is gone on every path: removed here, and by the trap on a failed step.
@@ -279,7 +316,7 @@ derive() {
     cat -- "$EV/table.tsv"
     echo '## equivalence output (counts and booleans only)'
     cat -- "$EV/equivalence-output.txt"
-    for n in default explicit rename back; do
+    for n in default explicit rename back stored; do
       [ -f "$EV/review-$n.json" ] || continue
       # a row that failed at its plan step kept a review and no plan: say so, never print an empty reading
       if [ ! -f "$EV/plan-$n.json" ] || [ ! -f "$EV/release-$n.json" ]; then

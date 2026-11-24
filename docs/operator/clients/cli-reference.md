@@ -808,7 +808,7 @@ assign configuration to a machine in a draft.
 
 <machine> is a machine's name or its ID (mch_...). A name that two clusters hold needs --cluster, a cluster's name or ID, or the ID.
 the layer is global, site, cluster, role, workload or override. --none instead selects nothing, so the machine's
-configuration is its import base alone.
+configuration is its import base, with its own name as its hostname where the base sets none (compilation §6.1 decision 2).
 A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
 changed since, it saves nothing and says so. Draft writes take author; repeat one with the outcome-unknown block's flags,
 --if-match included.

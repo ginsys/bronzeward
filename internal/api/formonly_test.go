@@ -11,7 +11,7 @@ import (
 )
 
 // emptyAssignment gives the machine's assignment in the draft a new revision that selects nothing,
-// as Connect's adoption does, so the release compiles the import base alone.
+// as Connect's adoption does, so the release compiles the import base with the machine's name as its hostname where the base sets none.
 func (b *buildEnv) emptyAssignment() {
 	b.t.Helper()
 	asr := id.New(id.AssignmentRevision)

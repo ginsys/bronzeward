@@ -469,7 +469,7 @@ func TestAssignmentUpdate(t *testing.T) {
 }
 
 // An assignment may select nothing (0 to 256 names in all): the machine's configuration is then its
-// import base alone. The revision is stored with no selection rows, and a second such write replaces the
+// its import base, with its own name as its hostname where the base sets none (compilation §6.1 decision 2). The revision is stored with no selection rows, and a second such write replaces the
 // first as any update does.
 func TestAssignmentSelectingNothing(t *testing.T) {
 	d := newDraftEnv(t)

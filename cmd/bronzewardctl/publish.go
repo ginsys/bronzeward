@@ -218,6 +218,7 @@ func (e *env) releaseReview(verb string, args []string) error {
 		return err
 	}
 	at := machinePath(pos[1], cluster, "/review")
+	var hostLines []string // table output only: -o json and yaml print the review unchanged and read nothing more
 	return showThenAt(e, func(c *client.Client) (string, error) {
 		path, err := at(c)
 		if err != nil {
@@ -228,6 +229,9 @@ func (e *env) releaseReview(verb string, args []string) error {
 	}, func(c *client.Client, _ *client.Response, r *apitypes.ReviewBody) error {
 		if verb != "provenance" {
 			e.titleRef(c, "release", r.Release)
+		}
+		if verb == "review" && e.output != "json" && e.output != "yaml" {
+			hostLines = reviewHostname(c, r)
 		}
 		return nil
 	}, func(w *tabwriter.Writer, r *apitypes.ReviewBody) {
@@ -247,6 +251,9 @@ func (e *env) releaseReview(verb string, args []string) error {
 			return
 		}
 		fmt.Fprintf(w, "Release %s, machine %s, validated: %s\n", pr(e.ref("release", r.Release)), pr(r.Machine), pr(r.Mode))
+		for _, l := range hostLines {
+			fmt.Fprintln(w, l)
+		}
 		if r.Configuration == nil {
 			fmt.Fprintln(w, "Configuration not shown: it could not be redacted.")
 			if r.Notice != nil && *r.Notice != "" {

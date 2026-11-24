@@ -1251,7 +1251,7 @@ the draft at the revision its operation is bound to (a draft no longer open,
 or moved, is `409 conflict`, as T3 would refuse it), the cluster's contract
 and the release's coverage: every machine of the cluster with an import base
 after the draft (its entry, else its `Applied` release's, §3.2), each with its
-assignment after the draft, or with none, compiling on its base alone
+assignment after the draft, or with none, compiling on its base, with its own name as its hostname where the base sets none (§6.1 decision 2)
 **(choice §17.33)**, and each covered machine's name, or none, as stored
 **(choice §17.45)**: T3 compares against these names. For the hostname swap
 check (compilation §6.1 item 6) it also reads, for each covered machine, the
@@ -1275,7 +1275,7 @@ heads the release uses without a draft entry, which T3 holds unchanged
 included), its selected profiles, and the selected and pinned fragments. A
 machine never assigned has no assignment head for T3 to hold, so an
 assignment first created for it after the snapshot is not detected as stale
-input; the release commits with the machine compiled on its base alone.
+input; the release commits with the machine compiled on its base, with its own name as its hostname where the base sets none (§6.1 decision 2).
 
 **Steps 2 and 3, the pins.** Each pinned KV version is classified once and
 read once, however many sources pin it, and every pin is classified before
@@ -4861,7 +4861,7 @@ design and evidence do not settle the question. Each is marked in place as
     cannot use; a default, which records a guess as a fact.
 33. **A release covers every machine of its cluster that has an import
     base** (§6.1), each with its assignment after the draft, or with none,
-    compiling on its base alone. Design §11.2 makes a release the cluster's
+    compiling on its base, with its own name as its hostname where the base sets none (§6.1 decision 2). Design §11.2 makes a release the cluster's
     desired state, and a library fragment's new head reaches machines no
     draft entry names (choice 28). Alternatives: only the machines a draft
     entry touches, which leaves a changed fragment's other users on their old
@@ -5192,7 +5192,7 @@ design and evidence do not settle the question. Each is marked in place as
     The update therefore accepts a body that selects nothing. Compilation reads
     the selections only, so the machine's configuration digest is the same
     with such an assignment as with none (a machine never assigned compiles on
-    its base alone, §6.1), and the release digest differs, since it includes the
+    its base, with its own name as its hostname where the base sets none, §6.1), and the release digest differs, since it includes the
     revision. The API revision does not change: the widening adds no field,
     route or problem code (§9.1, the same reading as the name grammar widened
     in §3.5, choice §17.43). A plan for a release that holds no assignment revision for a
