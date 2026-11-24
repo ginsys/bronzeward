@@ -138,6 +138,15 @@ you approve overwriting it. The last line appears only while the machine is froz
 A control you may not use is shown off with the reason beside it. The server's answer stays the
 authority: a refusal is shown in place.
 
+![The page "Change on the machine: Machine 10.55.0.3" in the web client, signed in with the author,
+publisher and approver roles. A notice reads "No change made on the machine is open." Below it the
+section "Freeze" explains the freeze, with an empty "Reason" field and a **Freeze** button. Nothing
+was typed or pressed. Taken on the participant fixture at revision 454b5609, with synthetic
+names.](images/drift-1.png)
+
+This screenshot shows the page with no open change, which offers only **Freeze**. It does not show
+an open change, **Start adoption** or **Plan revert**: no screenshot of an open change was taken.
+
 ## What can go wrong
 
 | What you see | Why, and what to do |

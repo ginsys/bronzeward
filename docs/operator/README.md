@@ -25,8 +25,8 @@ The guide has three parts:
   [recover after a restore](clients/recovery-after-restore.md). When a client cannot reach or use the
   server, see [client troubleshooting](clients/client-troubleshooting.md). The
   [command reference](clients/cli-reference.md) of `bronzewardctl` is generated from its command
-  table. The screenshots are still to come
-  ([ginsys/bronzeward#404](https://github.com/ginsys/bronzeward/issues/404)).
+  table. Six of the journey pages carry a screenshot taken on the participant fixture; each page
+  says which state it shows and which it does not.
 - **Deployment**: [hosting](deployment/hosting.md) (TLS, routing, the web files and the
   client-configuration file), the [identity provider](deployment/identity-provider.md) (Zitadel),
   and [upgrade and rollback](deployment/upgrade.md).

@@ -116,4 +116,8 @@ change the node.
 - An automation token is refused: "This needs a person signed in, not an automation token."
 - A name another machine holds is refused as `name-in-use`; the line names the machine that holds it.
 
+This page has no screenshot of its own. The Machines list as a viewer sees it, with two machines
+and no drift flag, is in the [web quick start](quick-start-web.md). A list with a changed-on-the-machine
+flag, and the Clusters list with a cluster in it, were not captured.
+
 Next: [edit fragments, profiles and assignments](editing.md).

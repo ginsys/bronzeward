@@ -112,6 +112,9 @@ On the web, **Plan adopt** on the release's rendered review opens the plan's cre
   apply plan shows when they differ is part of [plans and approval](plan-and-approval.md), not this page.
 - Nothing here shows the review text was not captured outside the client.
 
+This page has no screenshot: a protected review shows configuration, and no screenshot of one is
+kept in this documentation.
+
 Next: [publication](publication.md) makes a release of the draft. Back to [the inventory](inventory.md),
 where the machine shows an applied release once the controller has recorded the adoption. To send a
 later change to the machine, [plans and approval](plan-and-approval.md) is the page after

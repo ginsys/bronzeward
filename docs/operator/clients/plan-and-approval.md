@@ -169,6 +169,16 @@ their own steps." If the draft editor holds text you have not saved, the press s
 says so. A second press after a closed page continues from the recorded state and repeats no step.
 The import journey that leads to it is in [import and adopt](protected-import.md).
 
+**The plan list.** The page **Plans** lists plans with their state, machine, operation and release.
+
+![The Plans page of the web client, signed in with the author, publisher and approver roles. The
+table lists two plans, "Adopt of 10.55.0.2 to S1 import" and "Adopt of 10.55.0.3 to S1 import", each
+in state "committed", with operation "adopt", created 24 Nov 2026, 06:40 and expiring 25 Nov 2026,
+06:40. Taken on the participant fixture at revision 454b5609, with synthetic names.](images/plan-and-approval-1.png)
+
+This screenshot shows the list with two committed adopt plans. It does not show a plan that waits
+for approval, the **Approve** button or a diff: no screenshot of those states was taken.
+
 ## What can go wrong
 
 | What you see | Why, and what to do |
