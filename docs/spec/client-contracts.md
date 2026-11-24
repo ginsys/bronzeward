@@ -617,8 +617,9 @@ process's version, its API revision, a whole number raised by one with each addi
 entry commits the read is refused with `409 recovery-mode-active`, as every request but the entry
 is.
 
-Built in both clients, except the part of items 1 and 3 that the CLI does not meet, marked
-**Proposed** there. Sources are given per item.
+Built in both clients, except the part of item 1 that the CLI does not meet and the part of item 2
+that the web client does not meet, marked **Proposed** there; item 2's rule over every other
+enumeration was not traced. Sources are given per item.
 
 1. A client sends only fields the server it talks to is known to accept. Because the server
    refuses unknown request fields, a newer client sending a field an older server lacks fails with
