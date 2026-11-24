@@ -1042,21 +1042,48 @@ func TestInProgress(t *testing.T) {
 }
 
 // TestInteractiveWriteNamesTheContextBeforeItSends: a write in an interactive session prints the
-// context before it sends (client-contracts.md §5 item 2); a script's write adds no line, and a
-// repeat of the same write prints none either.
+// context once before it sends (client-contracts.md §5 item 2), the repeat a person types of an
+// unknown write included; a script's write adds no line, and the later attempts of one send add none.
 func TestInteractiveWriteNamesTheContextBeforeItSends(t *testing.T) {
-	for _, interactive := range []bool{true, false} {
-		f := &fake{epoch: "ep_BWSYNTH-1", post: func(_ int, w http.ResponseWriter, _ *http.Request) { created(w) }}
-		c, notices, _ := writeClient(t, f, "ep_BWSYNTH-1")
-		c.Interactive = interactive
-		w := &Write{Method: http.MethodPost, Path: "/clusters", Body: []byte(`{"name":"lab-a"}`),
-			Check: "cluster list", Read: func(*Client) (string, error) { return "BWSYNTH shows", nil }}
-		if _, err := c.Send(w); err != nil {
-			t.Fatal(err)
+	retried := func(n int, w http.ResponseWriter, _ *http.Request) {
+		if n == 1 {
+			problemAnswer(w, http.StatusServiceUnavailable, "dependency-unavailable", "")
+			return
 		}
-		line := "lab (" + c.Context.Server + "): sending POST /api/v1/clusters.\n"
-		if got := strings.Count(notices.String(), line); got != map[bool]int{true: 1, false: 0}[interactive] {
-			t.Errorf("interactive=%v: the context line appeared %d times in %q", interactive, got, notices.String())
-		}
+		created(w)
+	}
+	for _, tc := range []struct {
+		name        string
+		interactive bool
+		repeat      bool
+		post        func(n int, w http.ResponseWriter, r *http.Request)
+		lines       int
+	}{
+		{"interactive", true, false, nil, 1},
+		{"script", false, false, nil, 0},
+		{"a repeat the person types", true, true, nil, 1},
+		{"a script's repeat", false, true, nil, 0},
+		{"an attempt retried after a 503", true, false, retried, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			post := tc.post
+			if post == nil {
+				post = func(_ int, w http.ResponseWriter, _ *http.Request) { created(w) }
+			}
+			f := &fake{epoch: "ep_BWSYNTH-1", post: post}
+			c, notices, _ := writeClient(t, f, "ep_BWSYNTH-1")
+			c.Interactive = tc.interactive
+			w := clusterWrite()
+			if tc.repeat {
+				w.Repeat = &Repeat{Key: "BWSYNTH-aaaaaaaaaaaaaaa", Epoch: "ep_BWSYNTH-1", Principal: "svc_BWSYNTH"}
+			}
+			if _, err := c.Send(w); err != nil {
+				t.Fatal(err)
+			}
+			line := "lab (" + c.Context.Server + "): sending POST /api/v1/clusters.\n"
+			if got := strings.Count(notices.String(), line); got != tc.lines {
+				t.Errorf("the context line appeared %d times, want %d, in %q", got, tc.lines, notices.String())
+			}
+		})
 	}
 }
