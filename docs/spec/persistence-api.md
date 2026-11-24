@@ -235,7 +235,7 @@ statement.
 | FragmentRevision | immutable | sanitized YAML text, canonical parsed form, declarations, reference rows, author | compilation §2, §5 |
 | Profile / ProfileRevision | mutable head / immutable | ordered fragment revision ids | this contract |
 | Assignment / AssignmentRevision | mutable head / immutable | per machine: selected profiles and fragments per layer | this contract |
-| ImportBaseRevision | immutable | a machine's sanitized imported document with references and the embedded documents the import identified (publication rebuilds the base with them, §6.1), baseline ciphertext, its keyed digest and its configuration digest, and where step 2a removed a `HostnameConfig`, the machine name it compared and whether that document was exactly the fill's own, and, for a revision the thinner-base route wrote, the revision it derives from (§3.2) | compilation §2.3, §6 |
+| ImportBaseRevision | immutable | a machine's sanitized imported document with references and the embedded documents the import identified (publication rebuilds the base with them, §6.1), baseline ciphertext, its keyed digest and its configuration digest, and where step 2a removed a `HostnameConfig`, the machine name it compared and whether that document was exactly the fill's own | compilation §2.3, §6 |
 | Draft | mutable, revisioned | change set: entries and their base head revisions | this contract |
 | Release, ReleaseMachine | immutable | the compilation §11 unit, with each machine's configuration digest (§1.1) and the name of the Transit key its artifact was encrypted under; the release covers one cluster and a set of its machines | compilation §11; this contract |
 | Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity: the machine's key at its ciphertext's key version. Each effective dependency has a reproduction dependency of its machine at the same version and creation time, whose source is in the machine's composition and declares it at that version and generation; indexed by its DependencyStatus identity (dependency monitor §6.1) | compilation §9 |
@@ -342,176 +342,13 @@ summary does not name one. The document itself is read with
 `GET /import-base-revisions/{id}/document` (§9.2): to any `author` for an import
 read from a node, and to the author who made the import from a file they
 provided, only when that author continued its operator review (choice §17.41).
-A revision the thinner-base route wrote has no ingestion of its own. It records
-the revision it derives from, and its document is read like the root of that
-chain, the first revision an ingestion wrote. The route writes only over a root
-from a node (below), so any `author` reads it **(choice §17.54)**. The record is
-kept and never served.
 
 A draft built from an import or an adoption carries its new import base
 revision as an entry, so the release published from it compiles on the new
 base at once: this is execution and recovery's "the sanitized document becomes
 the machine's new import base, and a release compiled from it is published"
 (adopt, step 2). A machine with no `Applied` has no import base; the only draft
-that can cover it is one carrying an import base revision. A draft entry may
-also carry a thinner import base for a machine that already has an `Applied`
-release, written by the route of the next paragraph.
-
-**A thinner import base is a later write, as a draft entry (choice §17.50).**
-A refactoring replaces a machine's import base by a thinner one and fragments
-that hold what the base gave up (design §9.1 step 5). Ingestion is no route for
-the split: it holds no author's intent, so a split there is the automatic split
-the owner excluded. Ingestion can also store a new import base for a machine
-that already has an `Applied` release: `startIngestion` in
-`internal/api/ingestions.go` makes no check on the machine's `Applied` release
-(it checks the machine, the draft and its cluster, an open drift record for a
-drift adoption, and a running ingest), and source `document` is open to
-`import` (§9.3). That stays as it is. Such an import is an ordinary change
-under the ordinary review and stale-input rules, not under the check, and its
-release records `equivalence` null: the candidate is file-imported text that
-only its importer may read, and the check's result would disclose it. One
-residual follows and is named here: an unchecked `document` re-import of any
-base can drop a reference node and reproduce it in a fragment, which loses the
-base-override protection of compilation §6 step 7. That is today's behaviour
-and the approver sees the change in the ordinary diff; the references rule
-below covers the route only.
-
-The route is `PUT /drafts/{id}/import-bases/{machine}` (§9.2): it stores a new
-import base revision for a machine that has an `Applied` release, as that
-machine's entry in the draft, under the draft's `If-Match`, for an `author`,
-human only, as ingestion is. The body is the proposed sanitized document, which
-must satisfy the rules below. The route writes only where the root ingestion of
-the `Applied` import base has source `machine` (a base read from the node, which
-any `author` reads, §9.2) **(choice §17.57)**. The typed equivalence check
-therefore sees only text every `author` can read: the `Applied` side is a node
-read, the body is a subset of it, and a route revision reads like its root, so
-no `not-equal` path and no `equal` or `byteIdentical` value discloses anything
-a caller may not read. That rests on two premises, stated so a reader can test
-them: fragments in a draft and in an `Applied` release are readable by any
-`author`, and a secret in the composition is a reference, never a value
-(references rule below). Where the root has source `document`, the route is
-`422 validation-failed`, rule `import-base`, kind `root` (the `Applied` import
-base is a file import, which the route does not read), naming the machine and
-no path, before any other rule; the person imports from the node (source
-`machine`), or edits fragments and drafts. The split does not happen at
-ingestion, and one contract serves both the write and its check.
-
-**The references rule (choice §17.55).** The new document drops no reference
-node of the `Applied` import base and no document or key that holds one, and
-its reference rows are the base's with the same names and versions. The
-protection against a fragment overriding or deleting a reference (compilation
-§6 step 7) covers only references still in the import base, and a later
-fragment-only publication runs no equivalence check. A document that breaks the
-rule is `422 validation-failed`, rule `import-base`, kind `reference`, naming no
-path.
-
-**The entry records its base.** The route's entry records the `Applied` import
-base revision it derives from. The stale check of §4.2 compares it.
-
-**The subset rule.** After the root and references rules, the stored document
-is a subset of the import base of the machine's `Applied` release, the base this
-section defines as the machine's current one. It holds no leaf, no value and no
-reference that base does not hold: a document or a key may be dropped, never
-added, renamed or moved to another path; a document the split empties may stay
-as its identity alone; and a list is kept whole or dropped whole. So the route
-mints no generation, writes no provider object, reads no secret value and moves
-no secret. The rule is checked on stored source text in the draft transaction
-(T1), with no provider read. A document that breaks it is `422
-validation-failed` with rule `import-base`, naming the machine and one kind of
-violation and no path, key or name from the body. The kinds are `added` (a
-document, key, leaf or value the base does not hold, which covers a key renamed
-or moved to another path), `list` (a list neither kept whole nor dropped
-whole), `reference` (the references rule), `root` (above) and `no-base` (the
-machine has no `Applied` release, so it has no base to thin and its import comes
-by ingestion). The refusal names no path because this check resolves no secret,
-so it cannot tell whether an added key or document name is an earlier extracted
-value, and compilation §3.6 withholds paths for the same reason. The stored
-revision carries the step 2a record of the `Applied`
-import base (the name and whether the removed document was the fill's own)
-unchanged: the route removes no hostname document and compares no name.
-
-**What gates the write: the typed equivalence check, at publication.** The
-draft transaction proves that nothing was added, and nothing more. Whether the
-composition still equals what the machine has is compilation §6.2's check, and
-it needs both plaintexts, so it runs in the publish operation (§6.1) for each
-machine whose entry this route wrote; an import (from the node or from a file)
-and a drift adoption are not checked. A refusal is `422
-validation-failed` with rule `equivalence` and reason `not-equal` or
-`cannot-decide` (compilation §13), commits no release and moves no head, and the
-draft stays open for another edit. Where the conditions of compilation §6.2 and
-choice §16.41 do not hold, the entry is refused with reason `cannot-decide`; it
-is never published unchecked. An author withdraws an entry with `DELETE
-/drafts/{id}/import-bases/{machine}` (§9.2), which drops the draft entry only:
-the machine keeps its `Applied` import base, and the rules of this section and
-the check do not apply to it. Publication also
-refuses `409 stale-input`, naming the machine with the expected and the actual
-import base revision, when the machine's `Applied` release no longer has the
-import base the entry was written from (the root can have changed with it); it
-is §4.2's third form, extended to an entry that carries one, and it is made at
-the start of the publish operation, before the composition and so before any
-comparison. The check also refuses `cannot-decide`, naming no path and
-reporting no boolean, where the two compositions do not hold the same set of
-(path, reference) pairs at the same pinned versions (compilation §6.2, choice
-§17.57): the refusal depends only on where references sit in the composed text
-and which pin each side records, and the release review shows both to any
-`author` (§9.3), so it discloses nothing a caller may not read. The check's result
-is also bound to the state it read:
-the publish operation's commit transaction (T3) compares, under the machine's
-`MachineState` lock, the `Applied` release and the not-pending condition the
-check used with the current ones, so an apply that completed while the
-compilation ran cannot leave a result for a configuration the machine no longer
-holds. A difference is `409 stale-input` naming the machine, with the expected
-and the actual `Applied` release identifier (the same identifier on both sides
-where only the condition moved), §4.2's third form extended again. The PoC has no preview of
-the check before publication (choice §17.52).
-
-**How the thinner base takes effect.** Storing the revision is half of the
-route: the import base is the import base revision of the `Applied` release and
-changes only when a release carrying a new base becomes `Applied`. The release
-the publication commits goes to the node by the ordinary `apply-config` plan,
-approval and apply; no new plan kind exists. Because the check passed against
-the `Applied` composition, the plan sends a configuration equal to it, in the
-typed sense of compilation §6.2; whether the node still holds it is the plan's
-own pre-dispatch comparison's to say (execution and recovery §3). When the check found the bytes
-equal (`byteIdentical`), the release's artifact has the `Applied` digest, so a
-comparison of digests alone would leave the machine not pending, offer no plan
-and never advance `Applied`. A machine is therefore also pending convergence
-(§9.3) while its `Desired` release's import base revision for it is not the
-`Applied` release's, which makes the ordinary plan exist, with no change to the
-clients' offer and no plan kind; Bronzeward does not advance `Applied` without
-the node, which would record a node state with no evidence from the node
-**(choice §17.53)**. When that operation completes,
-`Applied` is the new release and its import base, the thinner revision. What an
-approver sees: §9.3 changes in one sentence, driven by a fact of the plan and
-not by the check's result. An `apply-config` plan carries `importBaseOnly`,
-true exactly when its release's artifact digest for the machine is the
-`Applied` digest and the plan exists only because the release's import base
-revision is not the `Applied` release's, whatever the source of that base: an
-import read from a node, a drift adoption or a document import included. It is
-read from the state at plan creation and never from the check's recorded
-result, so it is false on a revert, whose pre-dispatch digest is the drifted
-one. A plan made after another release became `Applied` has it true or false by
-the same predicate against that release, while its `equivalence` is null
-(that result describes a change from what the check compared), so the two are
-independent. Where it is true the plan's review
-says that the configuration sent is unchanged and that only the recorded import
-base moves (operator experience §2.3), so an empty diff does not read as a
-fault **(choice §17.56)**. The check ran only where the
-machine holds its `Applied` release's artifact, so the plan's diff is the ordinary one,
-from the redacted whole configuration of the `Applied` release to that of the
-plan's release, and it is withheld only where §9.3 already withholds it. The
-form-only verdict (compilation §6) reads false for a thinner base, but it
-governs the diff of a machine that holds the import base's bytes, the case the
-check's condition excludes (choice §17.51). Beside the diff, the evidence is the
-release's recorded result of the check, served per machine on the release read
-and its review as `equivalence` (`equal`, `byteIdentical`, never a path or a
-value, null where no check ran) and on the plan body of an `apply-config` plan
-for that release.
-
-**Audit.** The revision records its author, as every import base revision does,
-and the write is an act (§10.5). The release records the check's result with
-the machine's other release facts (§6.2), and the `Applied` release the check
-read, which is never served and which plan creation compares (§9.3).
+that can cover it is one carrying an import base revision.
 
 **A filled hostname is released at import and adoption (choice §17.45).** Where
 ingestion removed a `HostnameConfig` whose hostname equals the machine's name,
@@ -1135,14 +972,7 @@ actual revision (the fourth, a name, with the names):
   (compilation §6 step 1);
 - a covered machine's import base (§3.2), where the draft carries none for it,
   is no longer the import base revision the snapshot read: an adoption record
-  or a completed operation changed its `Applied` in between; an entry that
-  carries an import base under the typed equivalence check (§3.2, compilation
-  §6.2) is held to the revision it was written from in the same way, naming
-  the machine and both revisions, and to the root source of that base, both
-  read at the start of the publish operation, before any composition, so a
-  changed derivation never reaches the check; and to the `Applied` release and
-  the not-pending condition its check used, which T3 compares under the
-  machine's lock (§3.2), naming the machine and both release identifiers;
+  or a completed operation changed its `Applied` in between;
 - a covered machine's name (§3.5), which compilation may have filled into the
   hostname (compilation §6.1), is no longer the name the snapshot read: a rename
   committed in between **(choice §17.45)**. The check holds for every covered
@@ -1480,11 +1310,7 @@ other machine's `Applied` release has no `nodeName` recorded and its source is
 `machine-name`, its recorded `name` is compared as it was before the revision,
 so a release made before it keeps the protection it had)
 (compilation §6.1 item 6; the release covers every machine of the cluster with
-an import base, choice §17.33, so one release holds every such pair). A machine
-whose draft entry carries an import base under the typed equivalence check
-(§3.2, compilation §6.2) that the check finds different, or cannot decide, is `422` with rule
-`equivalence`, reason `not-equal` or `cannot-decide`, naming the machine and,
-for `not-equal`, its paths and never a value (compilation §6.2, §13). A dependency
+an import base, choice §17.33, so one release holds every such pair). A dependency
 classified `blocked` or `lost`, or whose identity changed (a creation time
 other than the recorded one, the first read's, or none), is
 `422 validation-failed` naming its provider, object, version and reference.
@@ -2358,8 +2184,7 @@ Design: [§11](../design/Talos_Configuration_and_Machine_Management_Design.md#11
   reviewing it (§9.3, compilation §3.6), and
   `GET /import-base-revisions/{id}/document` answers the stored one to any
   `author` for an import read from a node, and to the author who made the
-  import from a file they provided and continued its review (choice §17.41);
-  a thinner revision follows the root it derives from (§3.2, choice §17.54).
+  import from a file they provided and continued its review (choice §17.41).
   **One read is an accepted limit:** `GET /fragment-revisions/{id}`
   answers a fragment's sanitized text to every role, and that text can hold a
   value no one has marked, because a fragment update ingests under a transient
@@ -2437,8 +2262,6 @@ API revisions:
 | 16 | the `hostname` rule of `422 validation-failed` on publication, with a release compiling a machine's name as its hostname where nothing sets one (§9.2, §3.5, compilation §6.1 item 6) |
 | 17 | the name form of `409 stale-input` from the `ingest` draft transaction, with `expected` and `actual` as machine names, each a string or `null`, and `formOnly` true for a machine whose import removed the fill's own `HostnameConfig` while its name is unchanged (§4.2, choice §17.45, compilation §2.3 step 2a, §6.1 item 5) |
 
-One further part is specified and not yet served, taking the next revision in the change that serves it: the thinner import base, with `PUT` and `DELETE /drafts/{id}/import-bases/{machine}`, the `import-base` and `equivalence` rules of `422 validation-failed`, and the `equivalence` member of a release machine and of an `apply-config` plan, with that plan's `importBaseOnly` member (§3.2, §9.2, choices §17.50, §17.56; ginsys/bronzeward#918 specifies it, an implementation issue serves it).
-
 ### 9.2 Resources and routes
 
 "Any role" means any authenticated principal holding at least one role: every
@@ -2461,10 +2284,10 @@ idempotency and conflict behavior.
 | `GET /server` (the version, API revision, features and start mode of the process that answered, and the read-only settings a client shows) | 200 | any role |
 | `POST /clusters/{id}/first-keys` (supply or replace a cluster's first key, §3.4); synchronous, no operation | 200 with `cluster`, `kind`, `caKeyVersion` (`version` and `createdTime`), `replaced`; an act (§10.5); `409 conflict` when the stored key changed while the supply ran (§3.4) | `author`, human only (§10.3) |
 | `GET /clusters/{id}/talos-access` (whether Bronzeward holds the cluster's Talos CA key, §3.3 "Presence"; no query, no ETag; API revision 12): `present`, and `version` and `createdTime` when present, `reason` when not; never a key, a path or a policy | 200, `Cache-Control: no-store`; `404 not-found` for no such cluster | `author`, human only (§10.3) |
-| `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds; an import for a machine with an `Applied` release is not under the check (§3.2) | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
+| `POST /ingestions` (import or drift adoption of a machine's configuration), with `If-Match` carrying the named draft's ETag, which the operation binds | 202, `ingest`, created `running` with its staging claim (§5.1) | `author`, human only (§10.3) |
 | `GET /ingestions/{id}/review` (the staged change of a paused ingestion, compilation §3.6) | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
 | `GET /import-base-revisions/{id}` (the summary of an import base revision, §3.2; no query, no ETag): `id`; `machine`; `author`, the principal that wrote it; `createdAt`; `documentBytes`, the size of its sanitized document; `references`, how many reference rows it holds; `embedded`, how many embedded entries it holds. No document text, no digest, no reference name and no generation path **(choice §17.38)**; the read records no act | 200, `Cache-Control: no-store` | `author`, human only (§10.3) |
-| `GET /import-base-revisions/{id}/document` (the sanitized document of an import base revision, §3.2; no query, no ETag; API revision 7): `id`; `machine`; `document`, the stored text. Nothing else: no declarations, digest, baseline or generation path. Where the claim recorded the source `machine` (an import read from a node, a drift adoption included), any `author` reads it, with or without a review and whoever started or continued it: the author role may read a node's configuration. Where the source is `document` (a file a person provided), the caller must be the revision's `author` and must have continued the import after an operator review, so a second `author`, an import made without review and one continued by another author read nothing; a claim with no recorded source reads nothing for anyone (the check fails closed). A revision the thinner-base route wrote (§3.2) has no claim of its own: the read follows its recorded derivation to the first revision an ingestion wrote and applies these rules to that root's claim, so the revision's own `author` has no right the root does not give (choice §17.54). The document can still hold a value no one has marked. The read records no act and the server stores and logs nothing of the answer **(choice §17.41)** | 200, `Cache-Control: no-store`, also on every refusal; `403 forbidden` with `rule: not-the-importer` for another author of a file import or of a claim with no recorded source, whatever the review state; `409 conflict` with `rule: import-not-reviewed` for the importer when the record does not show a file import they continued themselves; `404 not-found` | `author`, human only (§10.3) |
+| `GET /import-base-revisions/{id}/document` (the sanitized document of an import base revision, §3.2; no query, no ETag; API revision 7): `id`; `machine`; `document`, the stored text. Nothing else: no declarations, digest, baseline or generation path. Where the claim recorded the source `machine` (an import read from a node, a drift adoption included), any `author` reads it, with or without a review and whoever started or continued it: the author role may read a node's configuration. Where the source is `document` (a file a person provided), the caller must be the revision's `author` and must have continued the import after an operator review, so a second `author`, an import made without review and one continued by another author read nothing; a claim with no recorded source reads nothing for anyone (the check fails closed). The document can still hold a value no one has marked. The read records no act and the server stores and logs nothing of the answer **(choice §17.41)** | 200, `Cache-Control: no-store`, also on every refusal; `403 forbidden` with `rule: not-the-importer` for another author of a file import or of a claim with no recorded source, whatever the review state; `409 conflict` with `rule: import-not-reviewed` for the importer when the record does not show a file import they continued themselves; `404 not-found` | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/marks`, `/continuations`, `/takeovers` (a further mark on a paused ingestion and its continuation into the draft transaction, compilation §3.6; compilation's explicit operator recovery request, §3.4 there) | 202, the ingestion's `ingest` operation; a mark's also the owner generation it took (§9.3) | `author`, human only (§10.3) |
 | `POST /ingestions/{id}/abandonments` (an operator's abandonment, compilation §3.2, a paused ingestion's included), which fails the ingestion's `ingest` operation (§8.2) | 200 | `author`, human only (§10.3) |
 | `POST /clusters`, `POST /machines` (inventory for an existing cluster; a machine with its Talos endpoint, §3.3, and its `platform`, §3, and an optional `name`, §3.5) | 201 | `author`, human only (§10.3) |
@@ -2473,7 +2296,6 @@ idempotency and conflict behavior.
 | `POST /discoveries` (find a cluster's identity and members from a first key, as `bronzewardctl cluster discover` does from a talosconfig; API revision 11). The body is a first key's (§3.4): `kind`, `document`, `endpoint`, where `endpoint` is an IP literal or a DNS name with an optional port: the server resolves a name once, under the call's deadline, and the key read, the signing and the first reads of the cluster (identity, version and member list) all go to that address, the walk then dialling each member at an address the member list gives; the node's certificate is checked against the name for those first connections, and a typed address against itself (§3.3, **choice §17.46**); the document is never stored, logged or returned, and there is no Talos context member, because a talosconfig is read at its current context. The server extracts the CA key, signs an `os:reader` certificate valid for the deadline below plus the two seconds of the signer's rounding slack (never above `talos.maxCertLifetime` less two seconds: a deployment whose maximum is shorter answers `503 dependency-unavailable`), reads the cluster with it, and drops the key, the certificate and the document with the request. It reads and writes no provider path, so it works with no signer identity configured. **It records no act, no idempotency record and no first-key row, and has no replay**: it is the one `POST` that only reads, so it takes no `Idempotency-Key`, no `Bronzeward-Expected-Epoch` and no query (a query is `400 invalid-request`), because a stored act or record would keep what the route promises not to and would replay a stale member list. The server's request log line (request identifier, method, path, principal, outcome, member count) is the only trace of a call and holds no key, document, endpoint or member address. **Bounds:** the whole call has a deadline of 60 s from the start of its handler, so reading the request body and, for a talosconfig, reading its endpoint for the key are inside it, and a cluster that lists more than 128 members is refused before any member is dialled; the server already dials the endpoints an author supplies (§3.4, ingestion), and whether it should restrict the addresses it dials is open at [ginsys/bronzeward#1009](https://github.com/ginsys/bronzeward/issues/1009) | 200, `Cache-Control: no-store`, `clusterId`, `version`, `contract`, `supported`, `endpoint` (the address dialled), `kubernetesEndpoint` (the cluster's own control-plane endpoint: `https://` and the first entry of each control-plane member's `KubePrismEndpoints` resource, when at least one control-plane member answered, every one that answered has a value and all the values are equal; a member's value is an entry whose host is an IP literal with no zone that is not the unspecified address, or a DNS name of letters, digits and hyphens with no trailing dot and a last label that is not all digits (a subset of the host grammar `POST /clusters` takes for its `endpoint`, which also takes such a label), not `localhost`, with a port from 1 to 65535, and anything else is no value, a read that fails leaving the member answered; in every other case a proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member), `members` (`nodeId`, `hostname`, `address`, `role`, `smbiosUuid`, `platform`, `answered`, the last three empty or false for a member that did not answer) and `complete`. At the deadline the members read so far are answered and the rest listed `answered: false`, with `complete: false`, so a client does not read an unread member as down; only a cluster identity that was not read fails the call. `422 validation-failed` with the signer's `rule` for an unusable document, no CA key in it, or a talosconfig whose role cannot read the machine configuration (§3.4), and with `rule: too-many-members` and `limit: 128`; `503 talos-access-unavailable` for an endpoint that did not resolve (a name with no address a node can have), did not answer, did not accept the key or, for a name, did not hold the name among its certificate names, or gave no cluster identity (a refused key or name is not told apart from an unreachable endpoint) | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
-| `PUT` or `DELETE /drafts/{id}/import-bases/{machine}` (`PUT` stores a thinner import base for a machine that has an `Applied` release, as its entry in the draft, §3.2, recording the `Applied` import base revision it derives from; the body is the proposed sanitized document, which must be a subset of the import base of the machine's `Applied` release; the route writes only over a base whose root is a node read (kind `root` otherwise, choice §17.57), and the base's references stay (choice §17.55); `422 validation-failed` with rule `import-base` otherwise. `DELETE` drops only that draft entry: the machine keeps its `Applied` import base, the `import-base` rule does not apply, and no import base revision is removed) | 200, ETag | `author`, human only (§10.3); `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
 | `POST /drafts/{id}/publications` | 202, `publish`, created `queued` (§5.1), or the one already queued or running for the draft revision (§7.3); the body is the operation resource, with its `Location`. `503 dependency-unavailable` from a process without a provider | `publisher`; `If-Match` |
 | `POST /plans` with `operation: apply-config` | 201 | `publisher` (EaR) |
@@ -2758,16 +2580,7 @@ recovery, plan binding), which every plan body carries:
   plan, `baseline`, the `importBaseRevision` the release was compiled from,
   `pendingConvergence`, whether the release's artifact differs from it, which
   leaves the machine pending convergence (execution and recovery §6.3), and
-  `formOnly` (choice §17.48), and for an `apply-config` plan whose release
-  carries the result for the machine, `equivalence`, the same two booleans the
-  release read serves (§3.2, choice §17.50), and null where the plan does not
-  describe a change from what the check compared: a revert, which overwrites a
-  drifted configuration (execution and recovery §6.4), and a plan made while
-  the machine's `Applied` release is no longer the one the check read (an
-  `adopt` plan carries `baseline` and no `equivalence`), and `importBaseOnly`,
-  a boolean, true exactly when the artifact digest equals the `Applied` digest
-  and the plan exists only because the import base revision differs (§3.2,
-  choice §17.56)
+  `formOnly` (choice §17.48)
   **(choice §17.38)**; for both, `validation`, the release's validation at
   publication (`result`, `at`, `contract`, `kubernetesVersion`,
   `machineryVersion`, `platformMode`), and `dryRun`, `{"available": false}`
@@ -3042,11 +2855,8 @@ HTTP/1.1 200 OK
 
 A machine's `pendingConvergence` is `true` exactly when it has a `Desired`
 release whose artifact's configuration digest differs from its `Applied`
-digest, or a `Desired` release and no `Applied`, or a `Desired` release whose
-import base revision for the machine is not the `Applied` release's (a thinner
-import base whose release renders the same bytes, §3.2, choice §17.53); with no
-`Desired` it is `false`. It compares digests and import base revisions, never
-release identifiers: after an adoption the
+digest, or a `Desired` release and no `Applied`; with no `Desired` it is
+`false`. It compares digests, never release identifiers: after an adoption the
 `Applied` digest is the import base's (execution-recovery.md §6.3), so an
 adopted machine whose release compiled other bytes is pending although
 `desired` and `applied.release` name the same release. Neither digest is
@@ -3325,11 +3135,7 @@ a path that is neither a compilation §2.2 path nor `<redacted>` whole (§8.3)
 is never forwarded: the read is `500 internal-error`. A configuration that could not be redacted is `null`, with a
 `notice` saying so. No release read carries a ciphertext, an artifact or
 configuration digest or the release digest; a release that does not cover
-the machine is `404 not-found`. Each machine of a release, on the item read and
-on the review, also carries `equivalence`: the result of the typed equivalence
-check of compilation §6.2 as `{"equal": true, "byteIdentical": false}`, two
-booleans and nothing else, or `null` where no check ran for that machine in
-that release (§3.2, choice §17.50). It holds no path and no value.
+the machine is `404 not-found`.
 
 Entering recovery mode, which names the restored backups (§12.2):
 
@@ -4317,10 +4123,6 @@ or Desired change; it does not erase earlier evidence.
 | Draft | Database fails inside T1 | `503`; claim unreleased | claim row; orphans |
 | Draft | The machine's name is not the one ingestion used when it removed a filled hostname (§3.2, compilation §2.3 step 2a) | `409 stale-input` naming the machine, expected and actual name; claim abandoned | claim row; orphans |
 | Publish | A covered machine's name changed since the snapshot (§4.2) | operation `failed`, `409 stale-input` | operation, act |
-| Draft update | A thinner import base that breaks a rule of §3.2 (every kind it lists: `added`, `list`, `reference`, `root` for a base read from a file, `no-base` for a machine with no `Applied` release) | `422 validation-failed`, rule `import-base`, naming the machine and the kind of violation, never a path from the body | nothing |
-| Publish | A machine whose entry the thinner-base route wrote (§3.2, compilation §6.2): the typed equivalence check finds it different (`not-equal`) or cannot decide, a pending machine or one holding an adopted baseline its `Applied` release did not compose included (`cannot-decide`), or the two compositions hold different references or pins (`cannot-decide`, no path, no boolean) (compilation §6.2) | operation `failed`, `422 validation-failed`, rule `equivalence`, naming the machine and, for `not-equal`, the paths | operation, act |
-| Publish | The `Applied` import base of a machine with a thinner-base entry (§4.2, compilation §6.2) is no longer the one the entry was written from (§4.2), read at the start of the operation, before composition | operation `failed`, `409 stale-input` naming the machine and both revisions | operation, act |
-| Publish | T3 finds, under the machine's `MachineState` lock, that the `Applied` release or the not-pending condition the check used is no longer current, as an apply that completed during the compilation (§3.2, §4.2) | operation `failed`, `409 stale-input` naming the machine, with the expected and the actual `Applied` release identifier | operation, act |
 | Publish | A hostname filled from a machine's name that another machine holds explicitly (compilation §6.1 item 6) | operation `failed`, `422 validation-failed`, rule `hostname`, naming both machines | operation, act |
 | Publish | Moved head, a covered machine's import base changed (§4.2), a machine of the cluster covered since the snapshot (§6.2, expected "absent"), or T3 finds missing, misbound or superseded publication evidence (§6.1.1) | operation `failed`, `409 stale-input` | operation, act |
 | Publish | A name the draft introduces was introduced by another publication first | operation `failed`, `409 stale-input` (expected "absent") | operation, act |
@@ -5471,129 +5273,37 @@ design and evidence do not settle the question. Each is marked in place as
     and cannot see an older import; a field on the machine row, which a second
     import of a machine whose type changed would have to update, and the import base
     already keeps one value per import.
-50. **A thinner import base is a later write, as a draft entry that is a subset
-    of the current base, gated at publication by the typed equivalence check**
-    (§3.2, §9.2; compilation §6.2 and choice §16.40). The owner's words on
-    ginsys/bronzeward#861 (2026-11-19) fix the order, check first, then an
-    assisted proposal, no automatic split. The route, the place of the split and
-    the subset rule are this specification's choices, and the owner may overrule
-    them. Alternatives: the split at ingestion, where no author's intent exists
-    and the tool decides the split, which is the automatic split; both at ingestion and later, which needs two routes with one
-    contract; a route that takes the fragments and the base together, which
-    leaves the subset rule nothing to check on source text and lets one request
-    mint a value; no rule on the document, relying on the check alone, which
-    would let an author write a new leaf or reference into the base and rely on
-    a comparison to catch it, after a provider read. The cost is two steps for
-    the author, the entry and the publication, and a refusal that arrives at
-    publication and not at the write. An ingestion from source `document` for a
-    machine with an `Applied` release stays an ordinary content change, as it is
-    today, and is not checked (choice §17.57). Alternative: check it as well,
-    rejected because the check's result would disclose a candidate that only
-    its importer may read, and a thinning through an import then escapes the
-    proof, which the approver replaces by reading the ordinary diff.
-51. **An approver of a refactoring release sees the ordinary diff and the
-    recorded `equivalence`, and no diff rule changes** (§3.2). The check runs
-    only where the machine holds its `Applied` release's artifact (compilation
-    choice §16.41), so §9.3 already serves that release's redacted whole
-    configuration and the plan's diff from it; the form-only verdict
-    (choice §17.48) governs only a machine that holds the import base's bytes.
-    Alternative: extend the form-only rule to show a diff when the check found
-    the release equal to `Applied`. It is rejected because the rule it would
-    extend is not the one that withholds this diff, so no owner decision is
-    left in it.
-52. **No read-only preview of the check in the PoC** (§3.2). Publication runs
-    the check, and a refusal names the paths that differ, which is enough to
-    iterate on a draft. Alternative: a preview route on the draft that runs the
-    compilation of §6.1 steps 2 and 3 and reports the check's result per
-    machine. It is rejected for the PoC because the check needs the provider's
-    pinned values, so a preview is a compilation that publishes nothing and
-    spends the provider reads and the publish worker, for a result the
-    publication gives anyway. A preview is a later change if a person asks for
-    one.
-53. **A release that changes only a machine's import base revision leaves the
-    machine pending convergence, so the ordinary plan applies it** (§3.2, §9.3;
-    execution and recovery §1). Decided by the lead of the Bronzeward campaign
-    on 24 November 2026 after a hosted review found that a refactoring which
-    renders the same bytes (`byteIdentical`) left the machine not pending,
-    offered no plan in the clients and so never advanced `Applied`, which is the
-    only way the import base changes; the owner may reverse it. The plan's
-    review says that the configuration sent is unchanged and only the recorded
-    import base moves (operator experience §2.3). Alternatives: advance
-    `Applied` to the new release without the node, rejected because it would
-    record a node state with no evidence from the node, when `Applied` changes
-    only through a completed operation or an adoption record (§3.2); a new plan kind for a record-only
-    change, rejected for the second state machine and the client work it adds,
-    where one more clause in a definition both clients already read does the
-    same. The cost is a plan, an approval and an apply for a change that sends
-    what the node already holds, the price of the node's own confirmation. The
-    publish operation's own read of the check is bound to the `Applied` release
-    it used (§3.2, §4.2) for the same reason: `Applied` can move while a
-    compilation runs.
-54. **A thinner import base is read like the import it derives from** (§3.2,
-    choice §17.41). Decided by the lead of the Bronzeward campaign on 24
-    November 2026 after the same review found that a revision with no ingestion
-    read as unsourced and failed closed, so even its writer could not read it
-    and a later refactoring could not fetch the base it thins; the owner may
-    reverse it. Alternative: let the route's author always read what they
-    wrote, rejected because it would let a person who is not the importer read
-    the text of a file import by thinning it, widening the restriction that
-    choice §17.41 gives file-imported source text. The route writes only over
-    a root from a node (choice §17.57), so the revision reads to any `author`.
-55. **A reference node of the import base stays in the thinner base** (§3.2).
-    Decided by the lead of the Bronzeward campaign on 24 November 2026 after a
-    hosted review found that the protection against a fragment overriding or
-    deleting an imported secret (compilation §6 step 7, choice §16.20) covers
-    only references still in the import base, so a reference moved into a
-    fragment would lose it at a later fragment-only publication, which runs no
-    equivalence check; the owner may reverse it. The route therefore drops no
-    reference node and no document or key that holds one (§3.2). An unchecked
-    `document` re-import keeps this gap, as today, and the approver sees it in
-    the ordinary diff. The cost:
-    a refactoring cannot move a reference-bearing value into a shared fragment.
-    Alternative: make the protection follow a relocated reference, through
-    provenance recorded on the fragment revision and a change of the compiler's
-    rule, rejected because it adds a mechanism and a compiler change for a
-    value that is machine-intrinsic and that the protection exists to keep out
-    of shared sources.
-56. **A fact of the plan, `importBaseOnly`, drives the review sentence, and the
-    check's result stays evidence** (§3.2, §9.3; operator experience §2.3).
-    Decided by the lead of the Bronzeward campaign on 24 November 2026 after
-    hosted and local reviews found the sentence "the configuration sent is
-    unchanged" tied to the check's recorded result, which a revert and an import
-    of unchanged bytes read from a node (an unchecked source) each break, and
-    that a plan made after another release became `Applied` reads null although
-    its predicate may hold; the owner may reverse it. The member is derived at plan creation by the canonical predicate of §3.2
-    (the digests equal, and the plan exists only because the import base
-    revision differs, which excludes a revert).
-    Alternative: limit the pending rule of choice §17.53 to the route's
-    entries, rejected because pending would then depend on the entry's source
-    and an unchanged import read from a node could never be recorded as
-    `Applied`.
-57. **The check runs only on the thinner-base route, over a base read from the
-    node, and no import is checked** (§3.2). Decided by the lead of the
-    Bronzeward campaign on 24 November 2026 after reviews kept finding one more
-    principal or moment that learns whether a guessed value equals text it may
-    not read (the writer, the route, the publisher, a historical reader, a
-    document import's own candidate); the owner may reverse it. Every input of
-    the check is then readable by any `author`, so its paths and its `equal`
-    and `byteIdentical` values disclose nothing unreadable, by construction.
-    This withdraws the earlier decision that a `document` import is also
-    checked (choice §17.50): such an import stays an ordinary change under the
-    ordinary review, with `equivalence` null, as today. The check also decides only where both
-    compositions hold the same references at the same pins, since a resolved
-    reference is a secret some `author` may not read (a fragment can reuse a
-    reference extracted from another author's private import, on the old side
-    as well as the new one); otherwise it refuses `cannot-decide` with no path
-    and no boolean, and a stale derivation is refused before the comparison.
-    Cost: on a base read from a file the route refuses with kind `root` and the
-    person imports from the node first; a thinning through a file import has no
-    proof, only the ordinary diff; a draft that drops, moves or adds a
-    reference, or publishes while a referenced secret has a newer pin, goes by
-    an ordinary change, and a rotated secret behind a reference reads
-    `cannot-decide`, never a reported difference. Alternatives: a read-authorization rule per principal and per route,
-    rejected because each round found another hop; hiding the paths and the
-    booleans from a caller who fails the read, rejected because success
-    against refusal still tells the caller whether a guess matches.
+50. **Refactoring an imported configuration is proved by the ordinary diff and
+    the approver; a typed equivalence check and a thinner-base route are not
+    specified yet** (design §9.1 step 5; ginsys/bronzeward#918). Decided by the
+    lead of the Bronzeward campaign on 24 November 2026, after specification
+    reviews could not make the check disclosure-free; the owner may reverse it.
+    The owner's order of 19 November 2026 (ginsys/bronzeward#861) stands: the
+    check first, then an assisted proposal, and no automatic split; this choice
+    defers the first step, it does not reorder them. **The rejected design:** a
+    check, run in the publish operation on plaintext, that compares the typed
+    documents of the `Applied` composition and the draft's, with a draft route
+    that stores a thinner import base as a subset of the current one; narrowed
+    to entries the route wrote over a base read from the node, and to
+    compositions that hold the same references at the same pins. **The reason:**
+    the check's result, a boolean, a refusal kind or a path, is a function of
+    the resolved secrets of both compositions, and no principal in this
+    specification is entitled to a secret, so each wording closed one reader and
+    exposed the next. The cases that remained: a mapping reference merged with a
+    fragment's mapping, where the merge happens after resolution and a private
+    key's presence decides equal or not; and the redaction of a difference
+    path, which prints a placeholder exactly when a short guessed key matches a
+    referenced secret. Earlier ones: a second author who edits fragments and
+    publishes, a reader of an old failure after the `Applied` root changed, and
+    a fragment that reuses a reference extracted from another author's private
+    import. **What a later design starts from:** an operator role that may
+    read secrets, a result served only to it, and a comparison made before
+    resolution or on resolved values the reader is entitled to. Until then a
+    person who refactors an imported configuration writes the fragments and a
+    new import by hand, and the approver reads the ordinary diff and plan.
+    Alternative: accept the leak as a residual of a single-operator PoC,
+    rejected because accepting a disclosure in a specification is the owner's
+    decision to make and not an editor's.
 
 ## 18. Traceability
 
@@ -5602,7 +5312,6 @@ design and evidence do not settle the question. Each is marked in place as
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
 | §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31, §17.32, §17.47 |
-| §3.2 thinner import base, typed equivalence check | §9.1 step 5, §20.7 | [the 20261118 research note](../design/research/20261118-import-analysis-and-equivalence.md) §3, §5, §6, §7; choices §17.50 to §17.57; compilation §6.2 |
 | §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.14.5, the same result as on v1.13.6); signing from a control plane configuration or a secrets bundle, a key read through an `os:admin` talosconfig, and a node accepting the signed certificate: [signing locally](../design/research/20261118-local-talos-signing.md) and [the extraction](../design/research/20261118-local-talos-signing-extract.md), Talos v1.14.5 only; revocation, CA rotation and a held connection across a CA replacement not measured; the provider grants on `secret/data/access/talos-ca/*` not measured (choice §17.29); the presence read's answers for a never-written path and a path whose metadata was deleted (HTTP 404, no tombstone) and for a soft-deleted and a destroyed latest version are [RC §4.1](../design/research/20260924-retention-metadata-classification.md#41-openbao) rows 010, 024, 021 and 022 on OpenBao 2.6.1; the access-presence identity's policy (exactly `read` on the metadata path), its refusal of a data read, a list, a delete, a generation read and the Transit calls beside the same request with the grant added, and the classification of its read for a stored, a soft-deleted, an undeleted and a destroyed latest version are measured by `TestLivePresencePolicyExact` and `TestLivePresenceIdentity` against the fixture's OpenBao (choice §17.42); §16 names what they leave unmeasured |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7; bodies and bindings: choice §17.35 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011; none for the name check: choice §17.45 |

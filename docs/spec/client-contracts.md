@@ -150,7 +150,7 @@ no role included (`internal/api/api.go:339`).
 | import list / status | `GET /ingestions`, `/ingestions/{id}` | list | no | filters `state`, `machine` (`internal/api/ingestions.go:280-299`) |
 | import review | `GET /ingestions/{id}/review` | no | no | `author`, human; `no-store`; only while `paused` (`internal/api/review.go:30-52`) |
 | import base summary | `GET /import-base-revisions/{id}` | no | no | `author`, human; `no-store`; size and counts only, no text, no digest (choice §17.38) |
-| import base text | `GET /import-base-revisions/{id}/document` | no | no | `author`, human; for an import read from a node any `author`, for a file import only its importer who continued the review; a thinner revision follows the import it derives from; `no-store` also on refusals (choices §17.41, §17.54) |
+| import base text | `GET /import-base-revisions/{id}/document` | no | no | `author`, human; for an import read from a node any `author`, for a file import only its importer who continued the review; `no-store` also on refusals (choice §17.41) |
 | release list / show | `GET /releases`, `/releases/{id}` | list | no | |
 | release review, provenance | `GET /releases/{id}/machines/{m}/review` | no | no | redacted |
 | plan list / show | `GET /plans`, `/plans/{id}` | list | no | filters `state`, `machine` (`internal/api/plans.go:429-451`) |
@@ -1822,7 +1822,7 @@ the text. The requirement is proposed with that limit stated.
 standard input and output are a terminal, through the same in-process pager, after the item 2
 notice, with no `-o json`, `-o yaml`, save or export form, no override, and no marks prompt, since
 a stored document is not marked. The server answers any `author` for an import read from a node, and for a
-file import only the author who made it from a file they provided and continued its review (a thinner revision of either follows the import it derives from, persistence and API choice §17.54); the command shows its refusal (`403 forbidden` with `not-the-importer`, or
+file import only the author who made it from a file they provided and continued its review; the command shows its refusal (`403 forbidden` with `not-the-importer`, or
 `409 conflict` with `import-not-reviewed`) as it comes and prints no body.
 
 ### 11.4 Web review and document input
