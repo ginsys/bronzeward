@@ -1362,6 +1362,26 @@ identity (§2.3). Where the machine holds what its `Applied` release composed
 provider's versions the release pinned, as in the form-only verdict (§6), and the
 check does not prove those values are the node's.
 
+**It runs only where the two sides hold the same references (persistence and
+API choice §17.57).** The check reads plaintext after the references resolve,
+and a resolved reference is a secret that some `author` may not read, so an
+answer about it would answer a question about that secret. Before any value is
+resolved, the publish operation reads from the composed text of each side the
+set of (path, reference) pairs and the version each is pinned at. Where the two
+sets differ (a reference on one side only, the same reference at another path,
+or another pinned version) the check refuses `cannot-decide`, names no path,
+reports no boolean, and the release records `equivalence` null. Where they
+agree, every reference resolves to the same secret version at the same path on
+both sides, so it is equal by construction, and every other leaf is base text
+(a node read) or fragment source text, which any `author` reads. The refusal
+depends only on where references sit in the composed text and which version
+each side pins, and the release review shows both ([persistence and API
+§9.3](persistence-api.md#93-examples), the reference name and version), so it
+leaks no value. The cost: a draft that drops, moves or adds a reference, or
+publishes while a referenced secret has a newer pin, is not provable and goes
+by an ordinary change; a secret changed behind an unchanged reference is not
+reported as a difference, because the refusal comes first.
+
 **It runs only where the machine holds what its `Applied` release composed
 (choice §16.41).** Two conditions hold. The machine is not pending
 convergence: it has no `Desired` release, or its `Desired` digest equals its
@@ -1423,7 +1443,7 @@ naming the machine, and it commits no release.
 | Reason | When | Reports |
 | --- | --- | --- |
 | `not-equal` | The sides differ | The paths, and the sentence "the typed equivalence check can refuse a change that is equivalent in behaviour; it compares typed values and applies no defaults" |
-| `cannot-decide` | The machine is pending convergence, or its `Applied` digest is not its `Applied` release's artifact digest (an adopted baseline not yet replaced), or the comparison cannot decide a case | The reason in words, the failed condition's own; no paths |
+| `cannot-decide` | The machine is pending convergence, or its `Applied` digest is not its `Applied` release's artifact digest (an adopted baseline not yet replaced), or the two sides do not hold the same (path, reference, pin) set, or the comparison cannot decide a case | The reason in words, the failed condition's own; no paths, no boolean |
 
 The check fails closed: it never reads "equal" for a case it could not decide.
 A refusal of the composition itself (a dependency, a validation, the contract)
@@ -1432,13 +1452,14 @@ exists in the PoC; a refused equivalent change is repaired by keeping more in
 the base.
 
 **Values redaction does not cover (§8.4).** The check reads plaintext after the
-references resolve (§6 step 4), so a value that changes behind an unchanged
-reference name changes the compared tree and shows. The compositions never
-leave the compiler, and the result holds paths and booleans only. Three limits
-follow from §8.4. The research note measured a changed value behind a
-reference only for the render's digest and for a redacted form, and the redacted
-form missed it, so the typed comparison's detection rests on its construction,
-and the required check below is what turns it into a measurement. A secret in a field the
+references resolve (§6 step 4), but only where both sides hold the same
+references at the same pins (above), so a value that changes behind an
+unchanged reference name is refused `cannot-decide` and never compared. The
+compositions never leave the compiler, and the result holds paths and booleans
+only. Three limits follow from §8.4. The research note measured a changed value
+behind a reference only for the render's digest and for a redacted form, and
+the redacted form missed it; the typed comparison does not report it either,
+it refuses to decide (N4 below). A secret in a field the
 schema does not mark and nothing references is an ordinary leaf to the check:
 a change shows, as a path that carries the key names, and nothing marks the leaf
 secret. A secret that was never marked stays unknown to every means. A
@@ -1456,11 +1477,11 @@ can fail (§15):
   value in a shared fragment). `equal` is false and the path is named.
 - **N2, a dropped key:** the new side omits one key the old side holds. `equal`
   is false and the path is named.
-- **N4, a changed secret behind an unchanged reference:** the two sides resolve
-  one reference name to different values. `equal` is false, the result names
-  the path of the leaf and holds no value, and a comparison of the redacted
-  forms of the same two sides reads equal, which is the control that the check
-  does what that comparison cannot.
+- **N4, a rotated secret behind an unchanged reference:** the two sides pin
+  one reference name at different versions. The check refuses `cannot-decide`,
+  names no path and reports no boolean, where a comparison of the redacted
+  forms of the same two sides reads equal: the control that the check does not
+  say "equal" for it.
 
 **Limits that stay open.** The check can refuse a refactoring that is equivalent
 in behaviour (a default written against omitted). Typed defaults are not
@@ -2145,7 +2166,7 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Compilation | A hostname filled from a machine's name that another machine of the cluster holds explicitly, or a node name that another machine's applied release holds (§6.1 item 6) | Publication refused, rule `hostname`, naming both machines | Nothing |
 | Ingestion | The machine's name changed between the removal of a filled hostname (§2.3 step 2a) and the draft transaction | The draft transaction is refused `409 stale-input`; re-ingest | Claim row, no payload |
 | Compilation | A machine whose draft entry carries an import base under the check (§6.2): the typed equivalence check finds the two compositions different (§6.2) | Publication refused, rule `equivalence`, reason `not-equal`, naming the machine and the paths | Nothing |
-| Compilation | The same machine is pending convergence, or its `Applied` digest is not its `Applied` release's artifact digest (an adopted baseline not yet replaced), or the check cannot decide a case (§6.2) | Publication refused, rule `equivalence`, reason `cannot-decide` | Nothing |
+| Compilation | The same machine is pending convergence, or its `Applied` digest is not its `Applied` release's artifact digest (an adopted baseline not yet replaced), or the two sides do not hold the same references at the same pins, or the check cannot decide a case (§6.2) | Publication refused, rule `equivalence`, reason `cannot-decide` | Nothing |
 | Compilation | Trace or flip fragment missing, shape differs, or passes disagree | Publication refused (§8.1) | Nothing |
 | Compilation | Reserved text or an unattributed exact copy in the output | Publication refused, naming paths | Nothing |
 | Compilation | Encryption fails, or persistence rejects a stale input | Publication refused | Nothing of the release |
@@ -2217,9 +2238,10 @@ each:
 - a fidelity check that fires on an injected structural change (§8.1);
 - the typed equivalence check of §6.2 through the compiler's own composition
   path, with its three required rejection checks, each of which must fail
-  without the check: N1 (a changed value), N2 (a dropped key) and N4 (a changed
-  secret behind an unchanged reference, with a comparison of the redacted
-  forms as the control that reads it equal), and a pass for a moved document
+  without the check: N1 (a changed value), N2 (a dropped key) and N4 (a rotated
+  secret behind an unchanged reference, refused `cannot-decide`, with a
+  comparison of the redacted forms as the control that reads it equal), and a
+  pass for a moved document
   that a digest of the render refuses;
 - every refusal in §13.
 
@@ -2354,10 +2376,9 @@ acceptance.
   ingestion and compilation packages as a library
   ([research note §4, §9](../design/research/20261118-import-analysis-and-equivalence.md)).
   A changed value (N1) and a dropped key (N2) were detected on two machines. A
-  changed secret behind an unchanged reference (N4) was measured only for the
-  digest of the render and for a redacted form; the typed comparison's detection
-  of it rests on its construction, and the required check of §6.2 is what
-  measures it. It can refuse an equivalent change (a default written against
+  rotated secret behind an unchanged reference (N4) was measured only for the
+  digest of the render and for a redacted form; the typed comparison refuses to
+  decide it, and the required check of §6.2 is what measures that. It can refuse an equivalent change (a default written against
   omitted), applies no typed defaults, counts list order, and was not run on a
   group whose machines classify differently. No real node, no comments served by
   a real node, and no cluster was involved.
@@ -2658,7 +2679,7 @@ in place as
     (research note §5.1, §5.3); a comparison after a typed re-encoding, which
     still counts document order; a comparison of parsed trees, which leaves the
     typed form's normalisation to the reader; a comparison of redacted forms,
-    which cannot see a changed secret behind a reference (N4). The cost is a
+    which cannot see a changed secret behind a reference, which the typed check also does not report but refuses to decide (N4). The cost is a
     check that can refuse an equivalent change and applies no typed defaults.
 41. **The check runs only where the machine holds what its `Applied` release
     composed, and refuses otherwise** (§6.2): not pending convergence, and an
