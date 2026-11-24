@@ -321,6 +321,27 @@ describe("ginsys/bronzeward#987: a machine", () => {
     expect(box.querySelector("a")?.getAttribute("title")).toBe(MCH);
   });
 
+  // ginsys/bronzeward#1121: the link is one element before and after its title answers. A link that React replaces
+  // loses the keyboard focus a person had on it (the focus falls to the body) and the marks a keyboard test put on it.
+  test("keeps the same link, and the focus on it, when the machine's read answers", async () => {
+    let answer: (r: ReadResult<unknown>) => void = () => {};
+    const gate = new Promise<ReadResult<unknown>>((r) => { answer = r; });
+    const held: Reads = {
+      ...reads,
+      client: { read: async <T,>(path: string) => (path === `/machines/${MCH}` ? await gate : (answers[path] ?? missing)) as ReadResult<T> },
+    };
+    await mount(h(MachineById, { id: MCH }), held);
+    const before = box.querySelector("a");
+    expect(before?.textContent).toBe("mch_k2pq…cdef");
+    before?.focus();
+    expect(document.activeElement).toBe(before);
+    await act(async () => answer(ok({ id: MCH, name: "worker-1" })));
+    await settled();
+    expect(text()).toBe("worker-1");
+    expect(box.querySelector("a")).toBe(before);
+    expect(document.activeElement).toBe(before);
+  });
+
   test("shows the shortened identifier when its read fails, and reads an identifier of another shape never", async () => {
     answers[`/machines/${MCH}`] = missing;
     await mount(h(MachineById, { id: MCH }));
