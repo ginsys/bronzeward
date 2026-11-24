@@ -106,7 +106,7 @@ describe("what a release review says of a machine's hostname (client contracts A
 describe("what a release review says where no node-name clash was checked (client contracts A9 item 8)", () => {
   // The contract's sentences, written out here: a row that took them from words.ts would pass with the two swapped.
   const hidden = "Not checked: the review hides an input to this machine's Kubernetes node name, so a clash with another machine's node name cannot be checked.";
-  const old = "Not checked: this release was made before hostname clashes were recorded, so a clash with another machine's hostname cannot be checked.";
+  const old = "Not checked: this release was made before Kubernetes node names were recorded, so a clash with another machine's node name cannot be checked.";
   const configuration = "Hostname: set in the configuration. The machine's name does not change it.";
   const noneLine = "Hostname: not set in the configuration; the node chooses its own.";
   const legacy = "Hostname: the configuration holds the legacy stable-hostname setting, so the machine's name is not used. Remove that setting to use the name.";

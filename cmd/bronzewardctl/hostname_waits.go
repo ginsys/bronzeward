@@ -15,7 +15,7 @@ const (
 	// race between the two reads reaches it: it takes no "Not checked" notice.
 	hostWaitsUnread      = "This plan waits for another machine's hostname."
 	nodeNotCheckedHidden = "Not checked: the review hides an input to this machine's Kubernetes node name, so a clash with another machine's node name cannot be checked."
-	nodeNotCheckedOld    = "Not checked: this release was made before hostname clashes were recorded, so a clash with another machine's hostname cannot be checked."
+	nodeNotCheckedOld    = "Not checked: this release was made before Kubernetes node names were recorded, so a clash with another machine's node name cannot be checked."
 )
 
 // hostWaits is the sentence of a plan that waits for another machine's hostname: holder is the machine whose last

@@ -65,7 +65,10 @@ bronzewardctl release provenance <release> <machine>
 - `release review` prints the rendered configuration of one machine, as the server redacted it. A
   redacted value shows as a token, so an empty field was empty and not redacted. If the server
   could not redact the configuration, the command prints "Configuration not shown: it could not
-  be redacted." and the server's notice, and no document.
+  be redacted." and the server's notice, and no document. Under its first line it says where the
+  release's hostname came from. It ends those lines with "Not checked: ..." where a clash with
+  another machine's Kubernetes node name could not be checked: the review hides an input to the
+  node name, or the release was made before node names were recorded.
 - `release provenance` lists, for that machine, each secret reference, its version, the source
   revision and path it came from, and where it was rendered. It ends with "Provenance covers
   secret references only; other fields are not traced." It never shows a
@@ -87,7 +90,7 @@ bronzewardctl release provenance <release> <machine>
    machines covered, and for each a link **Rendered configuration of <machine>**.
 4. Open a machine's rendered configuration. The page shows the document, the note "A field that
    shows as empty is empty in the rendered review. A redacted field shows as a badge, so an empty
-   one was not redacted.", where the release's hostname came from (taken from the machine's name, set in the configuration, left to the node, the legacy stable-hostname setting, or not recorded) and, for a name taken from the machine's name, how it differs from the release last applied to the machine and from the machine's current name, a line "Not checked: ..." where a clash with another machine's node name could not be checked (the review hides an input to the node name, or the release was made before clashes were recorded), and a table "Provenance (secret references only)" with the
+   one was not redacted.", where the release's hostname came from (taken from the machine's name, set in the configuration, left to the node, the legacy stable-hostname setting, or not recorded) and, for a name taken from the machine's name, how it differs from the release last applied to the machine and from the machine's current name, a line "Not checked: ..." where a clash with another machine's node name could not be checked (the review hides an input to the node name, or the release was made before node names were recorded), and a table "Provenance (secret references only)" with the
    same records as the command, with the source revision and its path in separate columns. Under "Next step" it offers **Plan adopt** or **Plan apply** for a
    machine that needs one. Pressing it opens the plan page and sends nothing.
 

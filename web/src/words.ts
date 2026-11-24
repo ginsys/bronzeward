@@ -126,7 +126,7 @@ export const HOSTNAME_LEFT_TO_NODE = "The last release applied to it left the ho
 export const HOSTNAME_UNREAD = "The comparison with the release last applied to this machine could not be read.";
 // A9 item 8: where no node-name clash was checked. Neither names a cause or a value.
 export const NODE_NOT_CHECKED_HIDDEN = "Not checked: the review hides an input to this machine's Kubernetes node name, so a clash with another machine's node name cannot be checked.";
-export const NODE_NOT_CHECKED_OLD = "Not checked: this release was made before hostname clashes were recorded, so a clash with another machine's hostname cannot be checked.";
+export const NODE_NOT_CHECKED_OLD = "Not checked: this release was made before Kubernetes node names were recorded, so a clash with another machine's node name cannot be checked.";
 // A9 item 8: an approved plan waits for another machine's hostname. It says "waits", never "refused" or "failed": the plan stays approved and nothing was sent.
 export const HOST_WAITS_SHORT = "This plan waits for another machine's hostname.";
 export const hostWaits = (holder: string, node: string, mine: string) =>

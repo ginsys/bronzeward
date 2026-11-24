@@ -42,6 +42,13 @@ lines marked. A new plan reads "It is not approved and nothing runs until an app
 Read it with `plan show <plan>`, list plans with `plan list`, and stop an unwanted one with
 `plan cancel <plan> --reason "<why>"`.
 
+An approved plan can wait for another machine's hostname: the last release applied to that
+machine records the Kubernetes node name this plan's release gives its own machine. `plan show`
+and the machine's page then say "This plan waits." and name both machines, the node name and
+what to do: apply the release for the other machine first, or give this machine another hostname.
+The plan stays approved and nothing was sent. Where the page cannot show the node name it says
+"This plan waits for another machine's hostname."
+
 ```bash
 bronzewardctl plan show <plan>
 bronzewardctl approve <plan>
@@ -102,6 +109,7 @@ The command leaves a machine out, with its reason, and never approves it unseen:
 |---|---|
 | "applied: this release is what the machine runs" | Nothing to do. |
 | "approved already: the controller sends it when its gates allow" | Wait; follow it in [operation tracking](operation-tracking.md). |
+| "This plan waits. The last release applied to machine <a> records the Kubernetes node name <n>, and this release gives the same name to machine <b>. ..." | Nothing was sent. Apply the release for machine <a> first, or give machine <b> another hostname. |
 | "applying: its operation is in progress" | Wait. |
 | "stopped: the machine is frozen; an approver can unfreeze it" | An approver unfreezes the machine first. |
 | "stopped: the machine changed since Bronzeward last verified it; decide on the drift first" | Decide on it in [the drift journey](drift.md). |
@@ -138,7 +146,8 @@ sends nothing.
 
 1. Tick the machines to change. None is chosen for you. Each line shows the machine's name, its
    role and its profiles, and where it stands for this release: "Not applied yet.", "A plan is
-   ready. It is not approved.", "Approved. It waits behind another machine's apply", "Applying:
+   ready. It is not approved.", "Approved. It waits behind another machine's apply", "This plan waits for another machine's
+   hostname.", "Applying:
    the operation is in progress.", "Applied: this release is what the machine runs." or a
    "Stopped:" line with its reason.
 2. Press **Show apply**. It needs `publisher` and makes one plan for each machine you ticked. The
