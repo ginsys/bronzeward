@@ -1147,8 +1147,8 @@ state is being accepted (design §12.1).
    equals it, ingestion removes that document from the sanitized document, as an
    import does (compilation contract §2.3 step 2a, §6.1), and a legacy
    `machine.network.hostname` equal to it goes as a key alone, where no such
-   document is present and `machine.features.stableHostname` is neither `true`
-   nor a reference (otherwise the key stays): the hostname is then
+   document is present and the stable-hostname guard of that step holds
+   (otherwise the key stays): the hostname is then
    filled from the name again, and a rename reaches the machine through a release,
    except after a rename whose release is not yet applied: a hostname equal to
    the previous name stays explicit (compilation contract §6.1 item 5).
