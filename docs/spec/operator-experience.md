@@ -20,7 +20,9 @@ usability or accessibility measurement: the tasks of
 
 **Facts and proposals are kept apart.** A statement about existing behaviour cites the contract
 section or the source line it comes from (`internal/api/routes.go:98` means that file and line at
-revision `e1c8cb3`). The expected-epoch check that
+revision `e1c8cb3`; a line citation into client code, `cmd/bronzewardctl/`, `internal/client/` or
+`web/src/`, means that line at revision `5322ac7f`, where the clients were read when ginsys/bronzeward#262
+moved statements from Proposed to current). The expected-epoch check that
 [#293](https://github.com/ginsys/bronzeward/issues/293) added did not exist there, so the
 citations in [§8](#8-states-every-view-must-handle) are read at the revision that lands
 [#309](https://github.com/ginsys/bronzeward/issues/309), with that check applied. Client behaviour this document proposes is
@@ -1098,7 +1100,7 @@ Overwrites    the drifted configuration of drift record 12, which no reviewer ha
 
 The line names the plan's `driftRecord`, not the time the drift opened. The API serves no such
 time: an open drift carries its revision and observations only
-(`internal/client/apitypes/apitypes.gen.go:1363-1368`).
+(`internal/client/apitypes/apitypes.gen.go:1779-1785`).
 
 ### 5.7 Operation tracking
 
