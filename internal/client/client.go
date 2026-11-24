@@ -54,6 +54,34 @@ type Client struct {
 	// included, and the events in an open stream that showed another epoch than the stream, so a change
 	// that a later answer set back is still seen (§8.5, §8.6 item 3). EpochHolds reads it.
 	moves int
+
+	// watchRefusal is live only while WatchBody runs: the refusal it ends with, if one was met (§8.6 item 2).
+	// Every read passes the choke points that write it, an Until that reads the server included: it is the same
+	// server. Outside a watch it is nil and nothing is kept. It is used from the watch's goroutine only.
+	watchRefusal *refusalNote
+}
+
+// refusalNote is the refusal a watch met and has not yet seen a read of the operation supersede.
+type refusalNote struct{ err error }
+
+// noteRefusal keeps a refused server certificate, or a scope-less 409 recovery-mode-active, met by any read while
+// a watch runs. A refused certificate wins over a recovery refusal, because a certificate the client does not
+// trust makes everything else the server said unreliable; a later refusal of the same kind replaces the
+// earlier one. A successful read of the operation clears it (WatchBody).
+func (c *Client) noteRefusal(err error) {
+	n := c.watchRefusal
+	if n == nil {
+		return
+	}
+	var t *trust
+	var p *Problem
+	switch {
+	case errors.As(err, &t):
+		n.err = t
+	case errors.As(n.err, new(*trust)):
+	case processRefusal(err) && errors.As(err, &p):
+		n.err = p
+	}
 }
 
 // EpochMoves is the number of times an answer showed another epoch than the one before. A command
@@ -233,7 +261,6 @@ func (c *Client) retryUntil(path string, stop func() bool, tries int) (*Response
 // renew is not cancelled: a refresh the identity provider already answered must be kept (§9.5).
 func (c *Client) retryIn(ctx context.Context, path string, stop func() bool, tries int) (*Response, error) {
 	delay, renewed := time.Second, false
-	var refused error // the last refused certificate this read met: a later failure does not erase it
 	for try := 1; ; try++ {
 		r, retry, err := c.once(ctx, path)
 		if ctx.Err() != nil {
@@ -253,7 +280,7 @@ func (c *Client) retryIn(ctx context.Context, path string, stop func() bool, tri
 		// until the watch ends asks again, with the refusal as the notice of each try: a server that restarts
 		// behind a proxy can present another certificate for a while, and the client accepts none (§8.6 item 2).
 		if !retry && stop != nil && errors.As(err, new(*trust)) {
-			retry, refused = true, err
+			retry = true
 		}
 		if !retry || stop == nil && try == tries {
 			return r, err
@@ -274,9 +301,6 @@ func (c *Client) retryIn(ctx context.Context, path string, stop func() bool, tri
 					return nil, werr
 				}
 				if left -= step; stop() {
-					if refused != nil && !errors.As(err, new(*trust)) {
-						err = errors.Join(refused, err)
-					}
 					return r, errors.Join(err, ErrWatchEnded)
 				}
 			}
@@ -296,6 +320,7 @@ func (c *Client) once(ctx context.Context, path string) (*Response, bool, error)
 	r, err := c.hc.Do(q)
 	if err != nil {
 		err = transportError(c.Context, c.Context.Host(), err)
+		c.noteRefusal(err)
 		var t *trust
 		return nil, !errors.As(err, &t), c.Context.fail(fmt.Errorf("%s: %w", route, err))
 	}
@@ -339,6 +364,7 @@ func (c *Client) problem(route string, r *http.Response, body []byte) *Problem {
 	// entry (§8.5 item 1).
 	if p.Code() == "recovery-mode-active" && p.Doc["scope"] == nil {
 		c.setStartMode("recovery")
+		c.noteRefusal(p)
 	}
 	return p
 }
