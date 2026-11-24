@@ -166,7 +166,8 @@ export async function follow(reading: Reader, id: string, f: Follow): Promise<vo
       signal: f.signal,
     });
     if (r.kind === "stopped" || f.signal.aborted) return;
-    if (r.kind === "failed") return f.dispatch({ type: "end", text: f.failure(r.res) });
+    // A failed watch shows the failure and reads no pages, so the times shown are the browser's, and it says so.
+    if (r.kind === "failed") return f.dispatch({ type: "end", text: <>{f.failure(r.res)} {SERVER_TIMES_UNREAD}</> });
     f.again();
     const read = await readPages<EventBody>(reading, `/operations/${encodeURIComponent(id)}/events`, "", { items: [], next: undefined, restarted: false }, true, () => !f.signal.aborted);
     if (f.signal.aborted) return;

@@ -5,7 +5,7 @@
 
 import type { components } from "./api/v1";
 import { type Failed, readPages } from "./list.tsx";
-import { type Client, NOT_SENT } from "./request.ts";
+import { type Client, NOT_SENT, outage } from "./request.ts";
 
 export type Operation = components["schemas"]["OperationBody"];
 
@@ -43,6 +43,8 @@ export function eventLine(e: OpEvent): string {
 export const RESTORED ="The installation was restored or entered recovery mode, so the operation's events are shown again from the start.";
 export const RESTORED_WHILE_READ =
   "The installation entered recovery mode or was restored while the events were read, so the operation's events are shown again from the start.";
+// What a watch that ended in an outage reports when the operation it read is of an installation restored since (§8.6 item 2).
+const NO_READ: Failed = { kind: "defect", message: "The installation was restored or entered recovery mode after the operation was read, so no read of it stands." };
 
 // How a watch shows what it reads. `show` gets each event once, in order. `clear` says that what was
 // shown no longer holds, before the events are shown again from the start. `until`, when set, ends
@@ -65,7 +67,9 @@ export type Watched =
   // the time the caller looks: the caller keeps what it derives from the operation under it.
   | { kind: "ended"; operation: Operation; epoch: string | undefined }
   | { kind: "stopped" }
-  // A refusal or a defect of the operation's read, its events' read or its stream.
+  // A refusal or a defect of the operation's read, its events' read or its stream. A watch that ended in
+  // an outage with no read of the operation to report carries the outage's own result, and one whose
+  // last read no longer stands a defect that says so (§8.6 item 2).
   | { kind: "failed"; res: Failed };
 
 export interface Pace {
@@ -101,7 +105,7 @@ export const terminal = (state: string) => ["succeeded", "failed", "completed", 
 const epochOf = (id: string) => id.split(":", 1)[0]!;
 const numberOf = (id: string) => Number(id.slice(id.indexOf(":") + 1));
 
-type Reader = Pick<Client, "read" | "readWithEpoch" | "open" | "writesEnded">;
+type Reader = Pick<Client, "read" | "readWithEpoch" | "open" | "writesEnded" | "moves">;
 
 // What one watch shares between its stream, its pages and its loop.
 class Run {
@@ -115,6 +119,9 @@ class Run {
   // The epoch the last drain's pages came under, from their own responses: undefined when a page named
   // none, or before a drain read.
   pagesEpoch: string | undefined = undefined;
+  // The events of another epoch than their own stream's, which the client's count of epoch records does
+  // not see: each is a sign that the installation moved (§8.6 item 2).
+  signs = 0;
   constructor(readonly w: Watch) {}
 
   // After the watch was aborted `until` is not asked: a callback that aborts its own watch ends the
@@ -162,13 +169,41 @@ class Run {
 // Follows the operation `op` until its state is terminal and every event before it was shown. An
 // attempt that showed nothing (a stream that failed to open, or ended with no event, or only events
 // that were cleared at once) is retried after 1 s, doubling to 30 s, which starts again at 1 s once an
-// attempt shows something or a stream stayed open for 30 s; JSON pages are read again at the same pace. Renewal is the page's renewer's: the
+// attempt shows something or a stream stayed open for 30 s; JSON pages are read again at the same pace.
+// An operation read that finds no answer because the server is out of reach is read again at that pace
+// until the watch ends, and a terminal state whose events cannot be read reads the operation again
+// (§8.6 item 2). Renewal is the page's renewer's: the
 // reads renew a refused token, and each stream is opened with the token current at that moment.
 export async function watch(client: Reader, op: string, w: Watch, pace: Pace = PACE): Promise<Watched> {
   const run = new Run(w);
   const path = `/operations/${encodeURIComponent(op)}`;
   let pages = false;
   let delay = 1000;
+  // What a watch that ends in an outage reports (§8.6 item 2, the CLI's WatchBody): the last read of the
+  // operation, which settles nothing yet. It is a read that was not terminal, or a terminal one whose events
+  // could not be read (`drain` is that failure). `moves` is the count of signs that the installation moved,
+  // at that read; a terminal read stands only while the count is the same. A terminal read judged to be of
+  // an installation restored since is voided, and no read stands.
+  let last: { operation: Operation; epoch: string | undefined; moves: number; drain?: Failed } | undefined;
+  let voided = false;
+  const moves = () => client.moves + run.signs;
+  const endedIn = (down: Failed): Watched => {
+    if (last === undefined) return { kind: "failed", res: voided ? NO_READ : down };
+    if (last.drain === undefined) return { kind: "ended", operation: last.operation, epoch: last.epoch };
+    return { kind: "failed", res: last.moves === moves() ? last.drain : NO_READ };
+  };
+  // The wait of an outage is in steps of 250 ms, each asking `until`, so a watch that ends is left within
+  // 250 ms (§8.6 item 2; the CLI's retryIn). The page leaving ends it at once.
+  const outageWait = async (ms: number): Promise<boolean> => {
+    for (let left = ms; left > 0; ) {
+      const step = Math.min(left, 250);
+      await pace.sleep(step, w.signal);
+      left -= step;
+      if (w.signal.aborted) return false;
+      if (await run.stop()) return true;
+    }
+    return false;
+  };
   for (;;) {
     // The sign-in ended: nothing more is sent. The JSON pages never reach the stream's check for it.
     if (w.signal.aborted || client.writesEnded) return { kind: "stopped" };
@@ -194,12 +229,16 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     if (w.signal.aborted) return { kind: "stopped" };
     // The epoch comes from the response the result comes from: the client's epoch can be a newer one
     // by the time this continues.
-    const { result: res, epoch } = await client.readWithEpoch<Operation>(path);
+    const { result: res, epoch, moves: records } = await client.readWithEpoch<Operation>(path);
     // The page left while the read was pending: its answer is not acted on, and nothing more is sent.
     if (w.signal.aborted) return { kind: "stopped" };
+    const at = records + run.signs;
     // Events cleared at once, because the operation read names another epoch, are not progress.
     let stale = false;
     if (res.kind === "ok" && terminal(res.data.state)) {
+      // The events of an earlier terminal read of this epoch could not be read, and the operation read again
+      // is terminal under that epoch still: the failure of that drain stands (the CLI's WatchBody).
+      if (last?.drain !== undefined && last.epoch === epoch) return { kind: "failed", res: last.drain };
       // A terminal state settles the watch, so the last events are all shown, until or not.
       run.halted = false;
       const drained = await drain(client, path, run, false);
@@ -211,12 +250,22 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
         // Events, or pages with none, of another epoch than the operation read's are of a restored
         // installation, where the operation can be in another state: it is read again, after the delay
         // so a server whose events never match is not asked again without a pause (the CLI's watch.go).
+        last = undefined;
+        voided = true;
         await pace.sleep(delay, w.signal);
         delay = Math.min(2 * delay, 30_000);
         continue;
       }
-      if (drained !== "discarded") return { kind: "failed", res: drained };
+      if (drained !== "discarded") {
+        // The events cannot be read: the operation is read again before the watch ends, and its state
+        // stands only while it is terminal under the same epoch (the CLI's WatchBody).
+        last = { operation: res.data, epoch, moves: at, drain: drained };
+        voided = false;
+        continue;
+      }
     } else if (res.kind === "ok") {
+      last = { operation: res.data, epoch, moves: at };
+      voided = false;
       // Events of another epoch than the operation read's are of a restored installation, and the
       // operation can have no event to replace them: they are cleared even when `until` does not
       // stop, so what `until` kept from them does not hold the watch (§8.5; the CLI's watch.go).
@@ -227,17 +276,23 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
       // A `clear` or an `until` that aborted the watch ends it as stopped, not as ended.
       if (w.signal.aborted) return { kind: "stopped" };
       if (await run.stop()) return w.signal.aborted ? { kind: "stopped" } : { kind: "ended", operation: res.data, epoch };
-    } else if (res.kind !== "discarded" && res.kind !== "transport") {
+    } else if (res.kind !== "discarded" && !outage(res)) {
       return { kind: "failed", res };
     }
     // A read discarded for a new epoch, or with no answer, is read again: the stream that follows
     // starts from the reset. An attempt that showed nothing waits the delay, which doubles until an
     // attempt shows something or a stream stays open for 30 s. JSON pages are read again after the
-    // delay (the CLI's watch.go).
+    // delay (the CLI's watch.go). A read with no answer for an outage of the server (a transport failure,
+    // a 5xx that is not a Bronzeward problem, a 503 that §8.2 retries) is read again the same way until
+    // the watch ends, which `until` or the page leaving does (§8.6 item 2).
     const progress = run.fresh > 0 && !stale;
     if (progress || (opened && !pages && took >= 30_000)) delay = 1000;
     if (pages || res.kind !== "ok" || !progress) {
-      await pace.sleep(delay, w.signal);
+      if (outage(res)) {
+        if (await outageWait(delay)) return endedIn(res);
+      } else {
+        await pace.sleep(delay, w.signal);
+      }
       if (!progress) delay = Math.min(2 * delay, 30_000);
     }
   }
@@ -335,6 +390,7 @@ async function stream(client: Reader, path: string, run: Run, pace: Pace): Promi
         } else if (ev.id !== "" && epochOf(ev.id) !== epoch) {
           // The installation entered recovery mode while the stream stayed open (§8.6 item 3): the
           // operation read that follows applies §8.5, and the stream reopens from the start.
+          run.signs++;
           run.clear(RESTORED_WHILE_READ);
           return "ended";
         } else if (ev.id !== "") {
