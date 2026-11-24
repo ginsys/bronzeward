@@ -2232,7 +2232,7 @@ item 7. Sources follow each item.
    live until the process ends, so only that part of the item is read as built.)
 7. **Clipboard and export.** No copy, download, save, print or share action on the review, on a
    document being submitted, or on marks. (Built: web, `CopyButton` is used only for identifiers and
-   problem references, `web/src/list.tsx:248`, `web/src/problems.tsx:184`; CLI,
+   problem references, `web/src/list.tsx:250`, `web/src/problems.tsx:184`; CLI,
    `cmd/bronzewardctl/review.go:44-51` refuses `-o` and a non-terminal and no save or export flag
    exists.)
 
