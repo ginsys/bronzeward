@@ -2390,7 +2390,8 @@ item 7. Sources follow each item.
    not a guarantee. (Built, web: `web/src/write.ts:184-189`, `:206-214`, `:278`, `:297`, `:302-319`,
    `web/src/app.tsx:81-93`. CLI: the review and the import base body are cleared after decoding,
    `cmd/bronzewardctl/review.go:71` and `cmd/bronzewardctl/importbase.go:69`; other request bodies
-   live until the process ends, so only that part of the item is read as built.)
+   live until the process ends, so only that part of the item is read as built; the rest is
+   **Proposed** (d) below.)
 7. **Clipboard and export.** No copy, download, save, print or share action on the review, on a
    document being submitted, or on marks. (Built: web, `CopyButton` is used only for identifiers and
    problem references, `web/src/list.tsx:250`, `web/src/problems.tsx:184`; CLI,
@@ -2405,7 +2406,9 @@ through (`cmd/bronzewardctl/commandtable.go:291`) and its only writer prints tha
 (`internal/client/transport.go:48-49`), so no method, path, status, `instance` or timing is printed;
 the clause that it never prints `Authorization`, a body or marks therefore holds without effect.
 (c) Item 4: no documentation says that editors keep swap and backup files (a search for `swap` and
-`backup file` in `docs/operator` and `cmd` finds none).
+`backup file` in `docs/operator` and `cmd` finds none). (d) Item 6 for the CLI: only the review and
+the import base body are cleared after decoding; the item's own text says other request bodies live
+until the process ends, which the clause "held no longer than the request needs" does not allow.
 
 ### 11.3 CLI review
 
