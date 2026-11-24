@@ -124,6 +124,9 @@ export const HOSTNAME_BY_SOURCE = {
 export const HOSTNAME_NODE_NAME = "The machine's Kubernetes node name normally follows the hostname, so it may change too.";
 export const HOSTNAME_LEFT_TO_NODE = "The last release applied to it left the hostname to the node.";
 export const HOSTNAME_UNREAD = "The comparison with the release last applied to this machine could not be read.";
+// A9 item 8: where no node-name clash was checked. Neither names a cause or a value.
+export const NODE_NOT_CHECKED_HIDDEN = "Not checked: the review hides an input to this machine's Kubernetes node name, so a clash with another machine's node name cannot be checked.";
+export const NODE_NOT_CHECKED_OLD = "Not checked: this release was made before hostname clashes were recorded, so a clash with another machine's hostname cannot be checked.";
 export const hostnameTaken = (name: string) => `Hostname: ${name}, taken from the machine's name.`;
 export const hostnameSets = (name: string) => `This release sets the machine's hostname to ${name}, taken from its name.`;
 export const hostnameNowFromName = (name: string) => `This release now takes the machine's hostname from its name, ${name}, in place of the setting it had before.`;
