@@ -1704,8 +1704,8 @@ memory, `internal/client/store.go:25-27`, `internal/client/store.go:166-168`; a 
 `internal/client/client.go:86-90`; the token file, `cmd/bronzewardctl/commands.go:111`,
 `internal/client/credentials.go:37-65`, `internal/client/credentials.go:94-176`,
 `internal/client/login.go:324-388`, `internal/client/token.go:67`. Item 4: `Setenv` appears nowhere in
-`cmd/bronzewardctl` or `internal/client`, `os.Environ` only in the re-execution that sets
-`GOTRACEBACK=none` (`cmd/bronzewardctl/main.go:118`), and `exec` is used only to open the authorization URL
+`cmd/bronzewardctl` or `internal/client` outside tests, `os.Environ` only in the re-execution that sets
+`GOTRACEBACK=none` (`cmd/bronzewardctl/main.go:118`), and `exec` is used outside tests only to open the authorization URL
 (`internal/client/login.go:299`, the control of that search) and to run `security` with the secret
 on its standard input (`internal/client/store_security.go:27-28`); the token's claims are the only
 output of a token (`cmd/bronzewardctl/commands.go:278-279`). That is a search of those two
@@ -1947,8 +1947,8 @@ Built, except the parts marked **Proposed** below. Sources follow each item.
    (`--token-stdin`). It never accepts the token as an argument value, nor the token itself in an
    environment variable (decision D6 (a)): `BRONZEWARD_TOKEN_FILE` holds a path, never a secret.
    (Built: `internal/client/token.go:23-40`, `cmd/bronzewardctl/main.go:337-342`; no token flag and
-   no other `BRONZEWARD_` variable in `cmd/bronzewardctl` or `internal/client`, whose reads are
-   `BRONZEWARD_TOKEN_FILE` and `BRONZEWARD_CONTEXT`.)
+   no other `BRONZEWARD_` variable in `cmd/bronzewardctl` or `internal/client` outside tests, whose
+   reads are `BRONZEWARD_TOKEN_FILE` and `BRONZEWARD_CONTEXT`.)
 2. A token file must be a regular file readable only by its owner; otherwise the CLI refuses it
    and says why. (Built: `internal/client/token.go:54-70`; the file's owner is not checked.)
 3. The CLI recognises an automation context by the `bwt_` prefix and says so before sending a
@@ -2049,7 +2049,7 @@ nowhere in `web/src` outside tests). (c) "No role for the action": the web text 
 says (`web/src/shell.tsx:106`); the CLI says "Needs one of the roles [...]. You are signed in as `<sub>`."
 (`internal/client/problem.go:56-60`). (d) The publisher cancelling a plan it did not create: the web
 text is as the table says (`web/src/shell.tsx:104`); the CLI shows the detail in its head line and
-"You are signed in as `<sub>`." on its own line (`internal/client/problem.go:33-35`,
+"You are signed in as `<sub>`." after it on the same line (`internal/client/problem.go:33-35`,
 `internal/client/problem.go:56-61`). (e) "Human-only route with an automation token": the CLI's text is
 as the table says (`internal/client/problem.go:53`); the web client's is "This action needs a person
 signed in; automation tokens cannot approve." (`web/src/states.tsx:22`). (f) "Provider unreachable
@@ -2156,7 +2156,8 @@ as text, never as HTML; a YAML or diff view that highlights syntax builds its no
 text. These limit, but cannot remove, the risk that an injected script uses the in-memory token:
 any script running in the page can call the API as the operator. (Built in the web client:
 `web/index.html:8` loads only `/src/main.tsx`; a search of `web/src` and `web/index.html` outside
-tests for `https?://` finds a documentation link (`web/src/recovery.tsx:91`) and URL-shape strings,
+tests for `https?://` finds a documentation link (`web/src/recovery.tsx:91`), the icon attribution comment
+(`web/src/icons.tsx:1`) and URL-shape strings,
 and a search for `sentry|analytics|telemetry|onerror|unhandledrejection|sendBeacon|EventSource|WebSocket`
 finds nothing; the network calls are `web/src/request.ts:356`, `web/src/auth.ts:60` (discovery),
 `web/src/auth.ts:430` (revocation), `web/src/auth.ts:448` (token), `web/src/config.ts:27` and
@@ -2182,7 +2183,7 @@ which stays **Proposed**; item 1's server half is a server fact. Sources follow 
    `Cache-Control: no-store` on every API answer ([§2](#2-the-api-a-client-meets) caching row,
    served by A3 for G13), so a browser or an intermediary keeps nothing even from another client.
    (Built: `web/src/request.ts:356-363`, `cache: "no-store"` at `:360`, the one call for reads,
-   writes and streams; `web/src/claim.tsx:148-151` and `:198` go through it.)
+   writes and streams; `web/src/claim.tsx:141-142` and `:207-208` go through it.)
 2. The application uses no service worker. (Built: `serviceWorker` appears nowhere in `web/src` or
    `web/index.html`.)
 3. On `pagehide` and on sign-out, the application clears its in-memory state and every form field
@@ -2372,9 +2373,9 @@ the paragraph after item 7. Sources follow each item.
    finds `xdg-open` with a URL only (`internal/client/login.go:299`), the `security` tool on macOS,
    which takes the secret on its standard input (`internal/client/store_security.go:27-28`), a temporary file for the
    context file (`internal/client/config.go:126`) and one for the token file
-   (`internal/client/credentials.go:138`, written and renamed; tokens are in the table above and
-   the clause names protected input and the review, which that file is not); the web client has no
-   `Blob`, `createObjectURL` or save picker. The documentation sentence is **Proposed**.)
+   (`internal/client/credentials.go:138`, written and renamed: tokens are protected input in the table
+   above, so this part is **Proposed**, see (e) below); the web client has no `Blob`,
+   `createObjectURL` or save picker. The documentation sentence is **Proposed**.)
 5. **Core dumps.** The CLI disables core dumps for its own process before it reads protected input
    (on Linux, `RLIMIT_CORE` 0 and not dumpable). A panic handler prints a fixed message and no
    stack values. (Built: `cmd/bronzewardctl/main.go:77`, `cmd/bronzewardctl/main.go:81-86`,
@@ -2414,6 +2415,9 @@ the clause that it never prints `Authorization`, a body or marks therefore holds
 `backup file` in `docs/operator` and `cmd` finds none). (d) Item 6 for the CLI: only the review and
 the import base body are cleared after decoding; the built note on the item records that other request
 bodies live until the process ends, which the clause "held no longer than the request needs" does not allow.
+(e) Item 4 for the CLI: the token file is written through a temporary file in its own directory
+(`internal/client/credentials.go:138-143`) and tokens are protected input in section 11.1, so the clause
+"never writes protected input to a temporary file" is not met for tokens.
 
 ### 11.3 CLI review
 
@@ -2568,8 +2572,8 @@ Sources follow each item.
    offer the action to any `author` and show the server's refusal in words, as the table of §8.2 says it.
    Beside the opened text the page says that a value found there that should be hidden cannot be
    marked on this import, links the page where the machine is imported again (where Marks is
-   filled in), and says the copy read stays stored as it is. (Built: `web/src/claim.tsx:148-151`,
-   `:198` through `web/src/request.ts:360`; the read-only element, `web/src/claim.tsx:257`; the
+   filled in), and says the copy read stays stored as it is. (Built: `web/src/claim.tsx:141-142`,
+   `:207-208` through `web/src/request.ts:360`; the read-only element, `web/src/claim.tsx:257`; the
    discard, `web/src/claim.tsx:116-122`, `:172`, `:222`; the action for any `author` and the refusal in
    words, `web/src/claim.tsx:190`, `:195`, `:235`, `:240`; the note and the link, `web/src/claim.tsx:258-259`,
    shown on the import base view and not on the review view, where the marks panel stands.)
@@ -2606,8 +2610,8 @@ them as the fixtures already do for evidence
 **Built, by item.** CLI: the positive control, `internal/clitest/core_test.go:88-93`; the scan of
 `argv`, standard output and standard error, `internal/clitest/cli_test.go:405-416`; the pseudo-terminal
 exception, `internal/clitest/protected_test.go:70-100`, case `internal/clitest/testdata/protected-cases.yaml:15`.
-Web: `web/e2e/scan.ts` (the retained files, with a planted control), `web/e2e/retention.test.ts:1-40`
-(no trace, HAR, video or screenshot call, with positive controls),
+Web: `web/e2e/scan.ts` (the retained files, with a planted control), `web/e2e/retention.test.ts:234-256`
+(no trace, HAR, video or screenshot call, with the transitive-import positive control at `:234-242`),
 `web/e2e/auth/helpers.ts:229-310` (the storage and cache checks with their controls),
 `web/e2e/auth/protected.e2e.ts:149-154` (after each protected case), and the CI jobs `browser` and
 `browser-auth` that run them (`mise.toml:442-505`). The storage check asserts emptiness, which is
