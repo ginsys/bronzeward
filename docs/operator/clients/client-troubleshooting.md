@@ -135,8 +135,9 @@ once per page load. A request that fails at the network, or that the server answ
 (which the page refuses), shows one sentence for both: "The server could not be reached. The
 network may be down, or the server answered with a redirect, which this page refuses." A write says
 "the connection failed. The network may be down, or the server answered with a redirect, which this
-page refuses" and its outcome is unknown. The page cannot tell the two causes apart. The header
-shows "Server <version>, API revision <n>" while the server answers.
+page refuses" and its outcome is unknown. The page cannot tell the two causes apart. The footer
+shows "Server <version>, API revision <n>" while the server answers, and "Server unknown" when it
+does not.
 
 ![The web client after the server stopped answering. The header shows the name Bronzeward and a
 **Sign out** button, with no navigation. A notice reads "The server could not be reached. The
