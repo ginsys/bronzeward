@@ -241,7 +241,7 @@ func (e *env) assignmentSet(args []string) error {
 	}
 	selects := profiles != "" || len(fragments) > 0
 	if draft == "" || selects == none {
-		return usageError{errors.New("assignment set needs --draft and one of --profiles or --fragment, or --none to select nothing (the machine's configuration is then its import base, with its own name as its hostname where the base sets none (compilation §6.1 decision 2))")}
+		return usageError{errors.New("assignment set needs --draft and one of --profiles or --fragment, or --none to select nothing (the machine's configuration is then its import base, with its own name as its hostname where the base sets none)")}
 	}
 	rp, err := rf.repeat(true)
 	if err != nil {

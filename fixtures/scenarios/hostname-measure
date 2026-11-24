@@ -274,10 +274,13 @@ row_back() {
     rowstep "$ref step 6 rename-back" 'the worker'"'"'s Applied is its Desired after it' applied &&
     row back
 }
+back_ok=0
 if [ "$rename_ok" -ne 1 ]; then
   skip_row back 'row rename did not complete, so there is no rename to undo'
 elif ! row_back; then
   skip_row back 'a step of the row failed; its reads are void'
+else
+  back_ok=1
 fi
 
 # Step 7, with no re-import: a rename, then a release made from the import base the worker already has, with the
@@ -290,8 +293,8 @@ row_stored() {
     rowstep "$ref step 7 stored" 'the worker'"'"'s Applied is its Desired after it' applied &&
     row stored
 }
-if [ "$rename_ok" -ne 1 ]; then
-  skip_row stored 'row rename did not complete, so the worker is not in the state the row starts from'
+if [ "$back_ok" -ne 1 ]; then
+  skip_row stored 'row back did not complete, so the worker is not in the state the row starts from'
 elif ! row_stored; then
   skip_row stored 'a step of the row failed; its reads are void'
 fi
