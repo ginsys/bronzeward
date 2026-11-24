@@ -234,7 +234,9 @@ files.](images/recovery-after-restore-1.png)
 
 This screenshot shows the top of the page in steps 2 and 3. It does not show the rest of the form
 **Record accounting**, **Mark**, **Release**, **Exit recovery** or **Revoke identity**, which lie
-below it: nothing on the page was filled in or pressed.
+below it. The fixture's own setup had recorded the entry and brought one scope to "released" before
+the capture; the capture only read the page, and nothing on it was filled in or pressed. Step 1, the
+press of **Enter recovery**, is not shown.
 
 ## What can go wrong
 
