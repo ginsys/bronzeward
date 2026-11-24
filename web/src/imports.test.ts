@@ -157,9 +157,23 @@ describe("a watch's end", () => {
     const c = reading({ kind: "transport" }).client;
     const failed = (cause: string) => op({ state: "failed", error: { type: "urn:bronzeward:problem:machine-identity-mismatch", title: "mismatch", status: 409, instance: "req_1", machine: "mch_1", cause } });
     for (const field of ["smbios-uuid", "node-id", "cluster-id"]) {
-      expect(text(await ended(c, ing(), failed(field), "failed", NOW, "e1"))).toBe(`This import failed. The machine at that address could not be confirmed as the one on record. The node's ${field} is not the recorded one. Import again`);
+      expect(text(await ended(c, ing(), failed(field), "failed", NOW, "e1"))).toBe(
+        `This import failed. The machine at that address could not be confirmed as the one on record. The node's ${field} is not the recorded one. Check which machine answers at that address; nothing it read was kept. Import again`,
+      );
     }
-    expect(text(await ended(c, ing(), failed("provider said: secret-value"), "failed", NOW, "e1"))).toBe("This import failed. The machine at that address could not be confirmed as the one on record. Import again");
+    expect(text(await ended(c, ing(), failed("provider said: secret-value"), "failed", NOW, "e1"))).toBe(
+      "This import failed. The machine at that address could not be confirmed as the one on record. Check which machine answers at that address; nothing it read was kept. Import again",
+    );
+  });
+  // §8.2: a failed operation is worded by the row's `what` and its `next` (not `what` alone), except where the next step
+  // points at a detail this text does not show.
+  test("a failed operation shows the table row's next step, and none that points at a detail it does not show", async () => {
+    const c = reading({ kind: "transport" }).client;
+    const failed = (code: string) => op({ state: "failed", error: { type: `urn:bronzeward:problem:${code}`, title: code, status: 409, instance: "req_1" } });
+    expect(text(await ended(c, ing(), failed("recovery-mode-entered"), "failed", NOW, "e1"))).toBe(
+      "This import failed. The server went into recovery while this was publishing, so nothing was published. Wait for the recovery to finish, then publish again. Import again",
+    );
+    expect(text(await ended(c, ing(), failed("talos-access-unavailable"), "failed", NOW, "e1"))).toBe("This import failed. The server could not work with Talos for this machine or cluster. Import again");
   });
   test("a pause, a resume-failed and a lapsed lease end the watch on a running operation, the last of unknown outcome", async () => {
     const c = reading({ kind: "transport" }).client;

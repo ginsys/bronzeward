@@ -94,6 +94,19 @@ describe("each send (§8.4 item 3)", () => {
     expect(sent[1]!.body).toBe('{"name":"lab"}');
   });
 
+  // §8.1: a request without a body names no content type, so a DELETE sends neither; a request with a body keeps both.
+  test("a DELETE sends neither a body nor a Content-Type, and a POST keeps both", async () => {
+    const { writes, writesSent } = page([new Response(null, { status: 204, headers: { "Bronzeward-Epoch": EPOCH } }), created({ id: "c1" })]);
+    await writes.submit(new Write({ method: "DELETE", path: "/clusters/c1", body: undefined, ifMatch: '"v1"', resource: "/clusters/c1" }));
+    await writes.submit(spec());
+    const [del, post] = writesSent();
+    expect(del!.method).toBe("DELETE");
+    expect(del!.body).toBeUndefined();
+    expect(del!.headers).not.toHaveProperty("Content-Type");
+    expect(post!.headers["Content-Type"]).toBe("application/json");
+    expect(post!.body).toBe('{"name":"lab"}');
+  });
+
   test("a spec that names its epoch sends that one, though the client has seen a later one, and reads none", async () => {
     const { client, writes, sent } = page([problem(412, "epoch-mismatch", {}, "e2")], []);
     await client.attempt("GET", "/recovery");
