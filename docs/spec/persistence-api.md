@@ -452,7 +452,7 @@ the node, which would record a node state with no evidence from the node
 **(choice §17.53)**. When that operation completes,
 `Applied` is the new release and its import base, the thinner revision. What an
 approver sees: §9.3 changes in one sentence. Where the plan's `equivalence`
-reads `byteIdentical` (never on a revert, whose `equivalence` is null), the plan's review says that the configuration sent is
+reads `byteIdentical` (never where it is null, §9.3), the plan's review says that the configuration sent is
 unchanged and that only the recorded import base moves (operator experience
 §2.3), so an empty diff does not read as a fault. The check ran only where the
 machine holds its `Applied` release's artifact, so the plan's diff is the ordinary one,
@@ -468,7 +468,8 @@ for that release.
 
 **Audit.** The revision records its author, as every import base revision does,
 and the write is an act (§10.5). The release records the check's result with
-the machine's other release facts (§6.2).
+the machine's other release facts (§6.2), and the `Applied` release the check
+read, which is never served and which plan creation compares (§9.3).
 
 **A filled hostname is released at import and adoption (choice §17.45).** Where
 ingestion removed a `HostnameConfig` whose hostname equals the machine's name,
@@ -2715,9 +2716,11 @@ recovery, plan binding), which every plan body carries:
   leaves the machine pending convergence (execution and recovery §6.3), and
   `formOnly` (choice §17.48), and for an `apply-config` plan whose release
   carries the result for the machine, `equivalence`, the same two booleans the
-  release read serves (§3.2, choice §17.50), and null on a revert, which
-  overwrites a drifted configuration the check never compared (execution and
-  recovery §6.4)
+  release read serves (§3.2, choice §17.50), and null where the plan does not
+  describe a change from what the check compared: a revert, which overwrites a
+  drifted configuration (execution and recovery §6.4), and a plan made while
+  the machine's `Applied` release is no longer the one the check read (an
+  `adopt` plan carries `baseline` and no `equivalence`)
   **(choice §17.38)**; for both, `validation`, the release's validation at
   publication (`result`, `at`, `contract`, `kubernetesVersion`,
   `machineryVersion`, `platformMode`), and `dryRun`, `{"available": false}`
