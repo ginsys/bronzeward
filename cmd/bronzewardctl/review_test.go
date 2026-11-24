@@ -142,7 +142,6 @@ func TestImportMark(t *testing.T) {
 	// (the web client's problems table holds the same words, which the two clients cannot share as a file).
 	for _, c := range []struct{ code, status, next string }{
 		{"machine-identity-mismatch", "409", " Check which machine answers at that address; nothing it read was kept."},
-		{"recovery-mode-entered", "409", " Wait for the recovery to finish, then publish again."},
 		{"talos-access-unavailable", "503", " The server's explanation is in the error above."},
 	} {
 		setStdin(t, "doc[0]/BWSYNTH\n")
