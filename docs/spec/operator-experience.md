@@ -523,7 +523,7 @@ compilation §6.1 item 2), the import removes that document from the stored base
 the name (compilation §2.3 step 2a), so a later rename reaches the machine through a new release and
 an approved plan, and the clients say so where they offer the rename (client contracts A9 item 6). The same
 holds for the legacy `machine.network.hostname` key where it equals the name and the configuration holds no
-`HostnameConfig` and does not set `stableHostname` to `true` or a reference: the import removes the key alone. A hostname equal to the
+`HostnameConfig` and the stable-hostname guard of compilation §2.3 step 2a holds: the import removes the key alone. A hostname equal to the
 machine's previous name is not released: after a rename and before the next release is applied, an import,
 onboarding again or a drift adoption keeps it as an explicit hostname, the review says "set in the configuration", and the rename
 does not reach the machine until a `HostnameConfig` document is deleted with a fragment; for a legacy key no

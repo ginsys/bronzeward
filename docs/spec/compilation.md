@@ -188,7 +188,10 @@ give a node a path that reads as an embedded document's.
    that kept `auto: off` would stop the fill (§6.1). **A legacy hostname is
    released the same way, as a key**: where the stream holds no `HostnameConfig`
    document (Talos refuses both) and its v1alpha1 document does not set
-   `machine.features.stableHostname` to `true` or to a reference, a
+   `machine.features.stableHostname` to `true` or to a reference and no
+   operator mark (step 3) addresses that field or a mapping that holds it
+   (the stable-hostname guard: step 5a would then suppress the fill and the
+   hostname would be lost), a
    `machine.network.hostname` that is a plain string equal to the name exactly
    is removed from that document, the key alone: its parent mapping stays,
    even left empty. The key goes because the filled document cannot stand
@@ -1124,8 +1127,7 @@ unmeasured.
    `HostnameConfig` whose hostname equals the machine's name is removed from
    the stored base and recorded as filled, and so is a legacy
    `machine.network.hostname` that equals it where no such document is present
-   and `stableHostname` is not `true` or a reference (step 2a: the key alone
-   goes). Why: an onboarded machine takes its
+   and the stable-hostname guard of step 2a holds (the key alone goes). Why: an onboarded machine takes its
    name from its own hostname
    ([operator experience §5.2](operator-experience.md)), so its import base
    holds that hostname explicitly, and without the rule a rename would never
@@ -2448,8 +2450,8 @@ in place as
     that is not a secret, an amendment of the import-equivalence check, and a
     release that can read as pending convergence against the baseline.
     **Extended to the legacy key** (ginsys/bronzeward#1054): a `machine.network.hostname` equal to the name is
-    removed as a key, where no `HostnameConfig` is present and `stableHostname`
-    is not `true` or a reference, for the same reason: the onboarded machine is named from its own
+    removed as a key, where no `HostnameConfig` is present and the
+    stable-hostname guard of step 2a holds, for the same reason: the onboarded machine is named from its own
     hostname whichever field holds it, and no hand-over is measured for a key.
     Alternative: limit the claim to a document and let the review say "set in the
     configuration" for a key (client contracts A9 item 7), which is documentation
