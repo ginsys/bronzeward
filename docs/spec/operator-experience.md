@@ -866,7 +866,7 @@ sent, and a repeat takes only those IDs and resolves nothing. The draft's ETag c
 (`internal/api/drafts.go:174-180`). The
 CLI remembers the last ETag it saw for each draft in the context, sends it as `If-Match`, and
 stores the new one from each response (`internal/client/state.go:80-104`,
-`internal/client/write.go:583`, `internal/client/write.go:686`). If another author changed the draft:
+`internal/client/write.go:600`, `internal/client/write.go:703`). If another author changed the draft:
 
 ```text
 $ bronzewardctl fragment set worker-labels --draft drf_8kdq…z6pa --file worker-labels.yaml
@@ -1618,7 +1618,7 @@ committed, and recovery mode continues
 recovery (`cmd/bronzeward/main.go:132-134`). Both clients show which restriction
 applies to an action, the scope's or the process's, and say so when entry is
 refused. The CLI names the scope or the process in a refusal (`internal/client/problem.go:88-95`) and
-says that a server started normally takes no entry (`internal/client/write.go:367`). The web client
+says that a server started normally takes no entry (`internal/client/write.go:380`). The web client
 does the same for a scope (`web/src/states.tsx:123-129`) and for the process
 (`web/src/recovery.tsx:28-43`, `web/src/recovery.tsx:64`), and says that a server started normally
 takes no entry (`web/src/recovery.tsx:111`, `web/src/recovery.tsx:133`).
