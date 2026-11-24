@@ -107,11 +107,12 @@ export const NextStep = ({ position, recovery = false }: { position: Position | 
   <NextStepLine step={position === undefined ? undefined : nextStep(position, recovery)} />;
 
 // Who prepared the plan the position names, and when (ginsys/bronzeward#1159): the position carries the plan's identifier
-// and not its creator, so the plan is read once. It is the machine page's answer for a plan nobody here can name the
-// identifier of (a creation whose outcome was unknown); a read that fails draws nothing.
+// and not its creator, so the plan is read. It is the machine page's answer for a plan nobody here can name the
+// identifier of (a creation whose outcome was unknown); a plan whose read never answered draws nothing. The component
+// is keyed by the plan, so a position that moves to another plan never shows the first plan's preparer.
 export function PlanPreparedBy({ position }: { position: Position | undefined }) {
   const waiting = position?.plan != null && (position.step === "awaiting-approval" || position.step === "awaiting-dispatch");
-  return waiting ? <PreparedBy id={position.plan!.id} /> : null;
+  return waiting ? <PreparedBy key={position.plan!.id} id={position.plan!.id} /> : null;
 }
 function PreparedBy({ id }: { id: string }) {
   const p = useItem<components["schemas"]["PlanBody"]>(`/plans/${encodeURIComponent(id)}`);
