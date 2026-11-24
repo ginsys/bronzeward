@@ -96,9 +96,10 @@ describe("the timeline (ginsys/bronzeward#359, W8)", () => {
     expect(view.done).toBe(true);
   });
 
-  test("a read of the operation that fails ends the watch with the failure and no server times", async () => {
+  // §8.6 item 6: the page reads no pages after a failed watch, so the times it shows are the browser's, and it says so.
+  test("a read of the operation that fails ends the watch with the failure and the line that the server's times were not read", async () => {
     const { view } = await run("unreadable", 3);
-    expect(view.end).toBe("not read");
+    expect(text(view.end)).toBe(`not read ${SERVER_TIMES_UNREAD}`);
     expect(view.rows.every((r) => !r.server)).toBe(true);
   });
 
