@@ -36,6 +36,7 @@ describe("a publication refused 412", () => {
     const draft = { revision: 3, etag: '"1"' };
     const held: { release?: () => void; next: boolean } = { next: false };
     let draftReads = 0;
+    const lives: boolean[] = [];
     const reads = {
       client: {
         read: vi.fn(async (path: string) => {
@@ -48,7 +49,8 @@ describe("a publication refused 412", () => {
           return answer;
         }),
       },
-      settle: (res: unknown, set: (r: unknown) => void, live: () => boolean) => (live() && set(res), true),
+      // What the shell is told of each read: the real one acts on a read (the offline banner) only while it is live.
+      settle: (res: unknown, set: (r: unknown) => void, live: () => boolean) => (lives.push(live()), live() && set(res), true),
       undropped: () => () => true,
       view: "", again: 0, regained: 0, go: () => {}, failure: () => null,
     } as unknown as Reads;
@@ -67,7 +69,7 @@ describe("a publication refused 412", () => {
       root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(PublishDraft, { query: `draft=${DRF}` }))))),
     );
     await settle();
-    return { draft, held, sent, settle, click, reads: () => draftReads };
+    return { draft, held, sent, settle, click, lives, reads: () => draftReads };
   };
 
   test("shows the draft's revision and state without a press, keeps the refusal and no ETag, and Publish then sends nothing", async () => {
@@ -115,5 +117,20 @@ describe("a publication refused 412", () => {
     await p.settle();
     expect(box.textContent).toContain("The draft is now at revision 7, state open.");
     expect(box.textContent).not.toContain("revision 5");
+    // The shell was told the slow read is not live, so it cannot touch the connection state either.
+    expect(p.lives.at(-1)).toBe(false);
+  });
+
+  test("a read answered after the page is gone is not live", async () => {
+    const p = await mount();
+    p.held.next = true;
+    await p.click("Publish");
+    await p.settle();
+    const before = p.lives.length;
+    await act(async () => root.unmount());
+    await act(async () => p.held.release!());
+    await p.settle();
+    expect(p.lives.slice(before)).toEqual([false]);
+    root = createRoot(box);
   });
 });
