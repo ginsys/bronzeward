@@ -7,6 +7,7 @@
 import type { Load } from "./list.tsx";
 import type { Position } from "./nextstep.tsx";
 import { planBody } from "./plan.tsx";
+import { HOST_WAITS_SHORT } from "./words.ts";
 import type { Write, WriteSpec } from "./write.ts";
 
 const enc = encodeURIComponent;
@@ -34,6 +35,7 @@ export const LINES = {
   ready: "A plan is ready. It is not approved.",
   approved: "Approved. The controller sends it when its gates allow.",
   behind: "Approved. It waits behind another machine's apply: the controller applies one machine of a cluster at a time.",
+  hostWaits: HOST_WAITS_SHORT,
   running: "Applying: the operation is in progress.",
   applied: "Applied: this release is what the machine runs.",
   unresolved: "Stopped: an operation on this machine is unresolved. The controller keeps examining it; open the machine to see it.",
@@ -67,7 +69,10 @@ export function rowOf(p: Position, release: string): Row {
   if (p.plan !== null && !mine && (p.step === "awaiting-approval" || p.step === "awaiting-dispatch")) return { state: "stopped", text: p.plan.release === release ? LINES.otherPlan : LINES.otherRelease };
   if (p.step === "operation-unresolved") return { state: "stopped", text: LINES.unresolved };
   if (p.step === "operation-in-flight") return { state: "running", text: LINES.running };
-  if (p.step === "awaiting-dispatch" && mine) return p.rolloutHeldBy === null ? { state: "waiting", text: LINES.approved } : { state: "waiting", text: LINES.behind };
+  if (p.step === "awaiting-dispatch" && mine) {
+    if (p.hostnameHeldBy != null) return { state: "waiting", text: LINES.hostWaits };
+    return p.rolloutHeldBy === null ? { state: "waiting", text: LINES.approved } : { state: "waiting", text: LINES.behind };
+  }
   if (m.openDrift != null) return { state: "stopped", text: LINES.drift };
   if (m.frozen) return { state: "stopped", text: LINES.frozen };
   if (p.step === "awaiting-approval" && mine) return { state: "ready", text: LINES.ready };

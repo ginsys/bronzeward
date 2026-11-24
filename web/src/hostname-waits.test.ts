@@ -6,7 +6,8 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { LINES, rowOf } from "./apply.ts";
-import { HostWaitsLine, hostWaitsText, type Position } from "./nextstep.tsx";
+import { HostWaitsLine, hostWaitsText } from "./host-waits.tsx";
+import type { Position } from "./nextstep.tsx";
 import { HOST_WAITS_SHORT, hostWaits } from "./words.ts";
 
 type Plan = NonNullable<Position["plan"]>;
