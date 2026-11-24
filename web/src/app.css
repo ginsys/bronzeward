@@ -64,6 +64,7 @@ nav a, button, select { min-height: 24px; min-width: 24px; }
 p, dd, li, h2, h3 { overflow-wrap: anywhere; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .exact { white-space: pre-wrap; overflow-wrap: anywhere; }
+.hostname { margin: 0 0 var(--s5); }
 dt { font-weight: bold; color: var(--muted-foreground); }
 dd { margin: 0; }
 dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--s2) var(--s5); margin: 0 0 var(--s4); padding: var(--s4); background-color: var(--card); border: 1px solid var(--border); border-radius: 0.375rem; }

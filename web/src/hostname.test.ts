@@ -93,7 +93,8 @@ const review = (hostname: Hostname | undefined): Review =>
 describe("the review page shows the hostname lines after its heading facts", () => {
   test("the lines are on the page in order, in their own block", () => {
     const page = html(h(ReviewBody, { r: review(hb("machine-name", "node-a")), machine: { id: "mch_BWSYNTH-b3caa2q", name: "node-b" }, applied: was(hb("none")) }));
-    const block = /<div data-testid="hostname">(.*?)<\/div>/.exec(page)?.[1] ?? "";
+    const block = /<div class="hostname" data-testid="hostname">(.*?)<\/div>/.exec(page)?.[1] ?? "";
+    expect(block.startsWith("<h3>Hostname</h3>")).toBe(true);
     expect([...block.matchAll(/<p>(.*?)<\/p>/g)].map((m) => m[1]!.replaceAll("&#x27;", "'"))).toEqual(
       hostnameLines(hb("machine-name", "node-a"), was(hb("none")), "node-b"),
     );
