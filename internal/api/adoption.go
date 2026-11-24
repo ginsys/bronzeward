@@ -339,7 +339,7 @@ func (a *API) adoptionTx(ctx context.Context, tx *sql.Tx, plan string) (adopted,
 // the refused transaction rolled back. An adoption's refusal is the plan's outcome, so it is recorded
 // once, by whichever attempt locks first (choice §10.27).
 func (a *API) recordRefusal(ctx context.Context, machine, plan string, refused *adoptionRefused) error {
-	return a.recordRefusalEntry(ctx, machine, plan, "adoption", refused.Comparison, refused.Cause, "",
+	return a.recordRefusalEntry(ctx, machine, plan, "adoption", refused.Comparison, refused.Cause, "", "", "",
 		errAlreadyAdopted, true, false)
 }
 
@@ -348,7 +348,7 @@ func (a *API) recordRefusal(ctx context.Context, machine, plan string, refused *
 // the comparison, its cause, this controller and, when one showed it, the observation. A plan given
 // its operation since answers already; once records at most one refusal entry for the plan; drift
 // applies §6.1 and §6.5 to the observation after the entry (execution-recovery.md §3.2).
-func (a *API) recordRefusalEntry(ctx context.Context, machine, plan, what, comparison, cause, observation string,
+func (a *API) recordRefusalEntry(ctx context.Context, machine, plan, what, comparison, cause, observation, holder, nodeName string,
 	already error, once, drift bool) error {
 	return a.inTx(ctx, func(tx *sql.Tx) error {
 		var current string
@@ -383,8 +383,9 @@ func (a *API) recordRefusalEntry(ctx context.Context, machine, plan, what, compa
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO machine_event (machine, revision, epoch, kind, entry, at)
 			VALUES ($1, $2, $3, 'refusal', jsonb_strip_nulls(jsonb_build_object('transaction', 'T6', 'comparison', $4::text,
-				'plan', $5::text, 'cause', $6::text, 'controller', $7::text, 'observation', NULLIF($8::text, ''))), $9)`,
-			machine, rev, current, comparison, plan, cause, a.d.owner.ID, observation, at)
+				'plan', $5::text, 'cause', $6::text, 'controller', $7::text, 'observation', NULLIF($8::text, ''),
+				'holder', NULLIF($10::text, ''), 'nodeName', NULLIF($11::text, ''))), $9)`,
+			machine, rev, current, comparison, plan, cause, a.d.owner.ID, observation, at, holder, nodeName)
 		if err != nil || !drift {
 			return err
 		}

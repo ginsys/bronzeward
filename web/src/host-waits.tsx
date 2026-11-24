@@ -3,11 +3,13 @@
 // the name is the `nodeName` of the plan's release for the machine, which the release's review carries.
 
 import type { components } from "./api/v1";
+import type { ReactNode } from "react";
 import { useItem } from "./list.tsx";
 import { machineText } from "./machines.tsx";
 import type { Position } from "./nextstep.tsx";
 import { safeText } from "./safe.ts";
-import { HOST_WAITS_SHORT, hostWaits } from "./words.ts";
+import { MachineById } from "./titles.tsx";
+import { HOST_REFUSAL_BEFORE, HOST_WAITS_SHORT, hostRefusalAfter, hostWaits } from "./words.ts";
 
 type Review = components["schemas"]["ReviewBody"];
 
@@ -27,6 +29,16 @@ export function hostWaitsText(p: Position, node: string | undefined): string | u
 export function HostWaitsLine({ position, node }: { position: Position; node: string | undefined }) {
   const text = hostWaitsText(position, node);
   return text === undefined ? null : <p data-testid="host-waits">{text}</p>;
+}
+
+// The machine timeline's refusal entry of comparison 6a, in the contract's sentence (A9 item 8), or undefined where the entry
+// is not that or lacks either member (an entry written before them stays as it is). The holder is named at read time as
+// A8 rule 1 names a machine, so a rename leaves no stale name; the node name shows only where it is safe text.
+export function hostRefusalNode(kind: string, r: Record<string, unknown>): ReactNode | undefined {
+  const holder = r["holder"];
+  const node = typeof r["nodeName"] === "string" ? safeText(r["nodeName"]) : undefined;
+  if (kind !== "refusal" || r["comparison"] !== "6a" || typeof holder !== "string" || !/^[a-z]+_[a-z2-7]{26}$/.test(holder) || node === undefined || node === "") return undefined;
+  return <>{HOST_REFUSAL_BEFORE}<MachineById id={holder} />{hostRefusalAfter(node)}</>;
 }
 
 // The line for a position the page already holds. The review is read only where the position names a holder, and the line

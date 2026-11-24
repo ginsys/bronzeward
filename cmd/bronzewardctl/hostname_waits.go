@@ -105,3 +105,15 @@ func withNodeNotice(lines []string, h apitypes.HostnameBody, kind nodeNameKind) 
 	}
 	return lines
 }
+
+// hostRefusalText is the sentence of a timeline entry for a commitment the hostname gate refused (comparison 6a), from the
+// entry's holder and node name, or "" where the entry lacks either member (one written before them) or is another
+// comparison's. The holder is named by its whole identifier: the text path reads no machine.
+func hostRefusalText(d map[string]any) string {
+	holder, _ := d["holder"].(string)
+	node, _ := d["nodeName"].(string)
+	if d["comparison"] != "6a" || holder == "" || node == "" {
+		return ""
+	}
+	return "The plan could not start yet: the last release applied to machine " + pr(holder) + " records the Kubernetes node name " + pr(node) + "."
+}

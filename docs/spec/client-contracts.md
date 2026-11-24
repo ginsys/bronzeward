@@ -2545,7 +2545,9 @@ not part of this rule.
    which is never a secret; each machine is named as A8 rule 1 names it: by its name where it has one, else in the web
    client by its address or "an unnamed machine", in the CLI by its whole identifier. The sentence says "waits", never "refused" or "failed": the plan stays approved and nothing was
    sent. Where a commitment was refused on this ground, the timeline's refusal entry is shown as: "The plan could
-   not start yet: the last release applied to machine node-a records the Kubernetes node name node-a." with no hostname value beyond that name. No sentence of this item says what a node runs or has: each says what a recorded release holds.
+   not start yet: the last release applied to machine node-a records the Kubernetes node name node-a." with no hostname value beyond that name. The entry holds the other machine's identifier (`holder`) and the node name (`nodeName`), and a client words it
+   from them: the web client names the machine as above when it reads the entry, so a rename leaves no stale name, and the CLI's timeline text reads no machine and
+   so names it by its whole identifier. An entry written before these members shows the server's own cause. No sentence of this item says what a node runs or has: each says what a recorded release holds.
    For a machine whose release records `nodeName` `null` (not compared) for any cause of persistence and API §9.3
    that the review hides (an input to the hostname is a secret reference or a value the review redacts, or the review
    of the release is withheld in whole, a literal hostname included), the release review adds: "Not checked: the
