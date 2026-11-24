@@ -190,8 +190,11 @@ function Publish({ id }: { id: string }) {
   const read = useSettled();
   const showNow = () => {
     const mine = ++newest.current;
-    void read<Draft>(`/drafts/${enc(id)}`).then((r) => mine === newest.current && r?.kind === "ok" && setNow({ revision: r.data.revision, state: r.data.state }));
+    // The read is live only while it is the newest: the shell settles every read before it answers, so a superseded or
+    // unmounted page's read must not reach it (it would restore or raise the offline banner).
+    void read<Draft>(`/drafts/${enc(id)}`, () => mine === newest.current).then((r) => r?.kind === "ok" && setNow({ revision: r.data.revision, state: r.data.state }));
   };
+  useEffect(() => () => void newest.current++, []);
   const publish = () => {
     newest.current++;
     const ifMatch = keptETag(id, epoch);
