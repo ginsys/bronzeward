@@ -227,7 +227,9 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
   for (;;) {
     // The sign-in ended: nothing more is sent. The JSON pages never reach the stream's check for it.
     if (w.signal.aborted || client.writesEnded) return { kind: "stopped" };
-    run.fresh = 0;
+    // A pass that only reads the operation again (after an outage, or a terminal read whose events could not be
+    // read) adds to the attempt it follows, whose events are its progress still.
+    if (!reread) run.fresh = 0;
     const began = pace.now();
     const s: Streamed = reread ? "unopened" : pages ? "pages" : await stream(client, path, run, pace);
     // The page left while the stream was opening or read: its answer is not acted on, and the JSON
@@ -242,7 +244,9 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     // other refusal by its status.
     if (!reread && (s === "pages" || s === "refused")) {
       const drained = await drain(client, path, run, true);
-      if (typeof drained === "object") return { kind: "failed", res: drained };
+      // A dropped connection shows nothing and fails nothing: the operation is read next, and the loop reads
+      // the pages again.
+      if (typeof drained === "object" && drained.kind !== "transport") return { kind: "failed", res: drained };
     }
     // The attempt's own time: a slow operation read does not skip the backoff.
     const took = pace.now() - began;
@@ -264,8 +268,9 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     let stale = false;
     if (res.kind === "ok" && terminal(res.data.state)) {
       // The events of an earlier terminal read of this epoch could not be read, and the operation read again
-      // is terminal under that epoch still: the failure of that drain stands (the CLI's WatchBody).
-      if (last?.drain !== undefined) {
+      // is terminal under that epoch still: the failure of that drain stands (the CLI's WatchBody). A dropped
+      // connection is no such failure: the CLI's drain sends five times, so this one reads them again, below.
+      if (last?.drain !== undefined && last.drain.kind !== "transport") {
         if (last.epoch === epoch) return { kind: "failed", res: last.drain };
         // Under another epoch it is of a restored installation: the read is void, and the watch goes on after
         // the delay, with no second drain of it (the CLI's watch.go).
@@ -297,8 +302,12 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
         // stands only while it is terminal under the same epoch (the CLI's WatchBody).
         last = { operation: res.data, epoch, moves: at, drain: drained };
         voided = false;
-        reread = true;
-        continue;
+        // A watch that ends before the pages are read again reports the dropped connection, but the loop goes
+        // round with no reread: the pages are drained again, whatever epoch the next read names.
+        if (drained.kind !== "transport") {
+          reread = true;
+          continue;
+        }
       }
     } else if (res.kind === "ok") {
       last = { operation: res.data, epoch, moves: at };
@@ -341,8 +350,9 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
 // item 2). Events of another epoch than the last one shown are read after a restore or a recovery
 // entry: what was shown is cleared and every event shown again, and so are the events shown before
 // an empty list that came under another epoch. The epoch of the pages is that of their own
-// responses (`run.pagesEpoch`), not the client's at a later time. A read discarded for a new epoch,
-// or with no answer, shows nothing: the loop reads again.
+// responses (`run.pagesEpoch`), not the client's at a later time. A read discarded for a new epoch
+// shows nothing: the loop reads again. A dropped connection (`transport`) is returned as the failure it
+// is, for the caller to keep and to read the pages again.
 async function drain(client: Reader, path: string, run: Run, stoppable: boolean): Promise<"read" | "discarded" | Failed> {
   run.pagesEpoch = undefined;
   const pageReads: Pick<Client, "read"> = {
@@ -357,7 +367,7 @@ async function drain(client: Reader, path: string, run: Run, stoppable: boolean)
   const res = read.kind === "dropped" ? read.failed : read;
   // The page that was pending when the watch ended is not delivered.
   if (run.w.signal.aborted) return "discarded";
-  if (res.kind === "discarded" || res.kind === "transport") return "discarded";
+  if (res.kind === "discarded") return "discarded";
   if (res.kind !== "ok") return res;
   // An empty list under another epoch has no event to show the change: the events shown are cleared.
   if (res.data.items.length === 0 && run.last !== "" && run.pagesEpoch !== undefined && run.pagesEpoch !== epochOf(run.last)) run.clear(RESTORED);
