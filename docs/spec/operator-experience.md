@@ -204,10 +204,14 @@ document, key or value of what Bronzeward adopted (a later release can change th
 person who approves that plan sees it say so. The verdict is true only
 when every document, key and value is equal, secrets included, compared as plaintext on the
 server; whatever it cannot decide, and a machine with an identified embedded document, reads
-"differs". So does a machine whose import removed a hostname document equal to its name and
-whose release writes one back ([ginsys/bronzeward#1040](https://github.com/ginsys/bronzeward/issues/1040)),
-although nothing changes on the node: whether that counts as form is the fill's change to
-decide. A machine with an open drift never reads form only, and its adopt plan does not say it.
+"differs". A machine whose import removed a hostname document that was exactly what the fill
+writes (`auto: off` and the hostname, nothing else) reads form only while its name is the one
+recorded at import, and "differs" after a rename (compilation §6, choice §16.39). So does a
+machine whose import removed a document that held more, and one whose import removed a legacy
+`machine.network.hostname` key equal to its name (compilation §2.3 step 2a): the node holds a key
+and the release sends a document, and whether that is no change on the node is unmeasured
+([ginsys/bronzeward#1040](https://github.com/ginsys/bronzeward/issues/1040)). A machine with an open
+drift never reads form only, and its adopt plan does not say it.
 
 **Proposed: "where you are, what next" on the machine page.** Under the status sentences
 ([§2.4](#24-desired-applied-and-observed)) the page shows at most one line, drawn from one answer and from nothing
@@ -516,7 +520,12 @@ explicit hostname (compilation §2.3 step 2a). Where the node's configuration ho
 `hostname` equals the name (a hostname a DHCP lease gave, with `auto: off` alone, is not one, and nothing is filled for it,
 compilation §6.1 item 2), the import removes that document from the stored base and records the hostname as filled from
 the name (compilation §2.3 step 2a), so a later rename reaches the machine through a new release and
-an approved plan, and the clients say so where they offer the rename (client contracts A9 item 6).
+an approved plan, and the clients say so where they offer the rename (client contracts A9 item 6). The same
+holds for the legacy `machine.network.hostname` key where it equals the name and the configuration holds no
+`HostnameConfig` and does not set `stableHostname`: the import removes the key alone. A hostname equal to the
+machine's previous name is not released: after a rename and before the next release is applied, an import or
+onboarding again keeps it as an explicit hostname, the review says "set in the configuration", and the rename
+does not reach the machine until the document is deleted with a fragment (compilation §6.1 item 5).
 
 `cluster discover` reads that identity for a whole cluster with the operator's own talosconfig and
 prints the commands that record it. It calls no Bronzeward route, writes nothing and runs none of

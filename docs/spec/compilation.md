@@ -185,22 +185,33 @@ give a node a path that reads as an embedded document's.
    one inside the removed document is dropped with it. The document is recorded as
    filled from the name, not kept as an explicit hostname. Talos's document
    holds only `auto` and `hostname`, so nothing else is lost, and a document
-   that kept `auto: off` would stop the fill (§6.1). Only that document is
-   removed. A hostname that differs from the name (a different case
-   included; a full hostname equal to a full name is removed like any other, and
-   `auto: null` counts as no `auto`), a
-   machine with no name, and a configuration without a `HostnameConfig` stay as
-   they are. The removal comes first so that nothing is minted for a value
-   that is then dropped: an operator mark that addresses a node of the removed
-   document refuses the input, as a mark that addresses no node does (step 3).
+   that kept `auto: off` would stop the fill (§6.1). **A legacy hostname is
+   released the same way, as a key**: where the stream holds no `HostnameConfig`
+   document (Talos refuses both) and its v1alpha1 document does not set
+   `machine.features.stableHostname` to `true` or to a reference, a
+   `machine.network.hostname` that is a plain string equal to the name exactly
+   is removed from that document, the key alone: its parent mapping stays,
+   even left empty. The key goes because the filled document cannot stand
+   beside it (§6.1), and nothing else is lost. It is recorded as filled from
+   the name, with "exactly the fill's own document" **false**: the node holds
+   the hostname as a v1alpha1 key and the release sends a document, which is
+   not a difference of form, so the form-only verdict of §6 step 8 reads false
+   for it (§6.1 item 5). No document is removed, so no position changes. Only
+   that document or that key is removed. A hostname that differs from the name
+   (a different case included; a full hostname equal to a full name is removed
+   like any other, and `auto: null` counts as no `auto`), a machine with no
+   name, and a configuration with neither stay as they are. The removal comes
+   first so that nothing is minted for a value that is then dropped: an
+   operator mark that addresses a node of the removed document or the removed
+   key refuses the input, as a mark that addresses no node does (step 3).
    The decision and the name it used are kept beside the sanitized document, in
    the claim's staged payload, and carried unchanged through a mark, a
    continuation and a takeover, so that a recovered run still holds the name it
    compared; the draft transaction refuses when the machine's name is no
    longer that one
    ([persistence and API §3.2](persistence-api.md), choice §17.45 there). The
-   name and whether the removed document was exactly the fill's own are stored
-   with the import base revision (§6.1 item 5). It is
+   name and whether the removed document was exactly the fill's own (a removed
+   key never is) are stored with the import base revision (§6.1 item 5). It is
    the one value ingestion removes that is not a secret, and the baseline of
    step 8 stays the exact input.
 3. **Identify** the values to extract: every field the pinned Talos machinery
@@ -1010,7 +1021,9 @@ removed a `HostnameConfig` that was exactly the fill's own (§2.3 step 2a: `apiV
 the name is the one recorded at import, the composition's own fill is set aside and every
 other document is compared as above, so the machine reads true at its first apply. After a rename
 the verdict is false and what differs is the hostname; a removed document that held more than the fill writes,
-or any document the composition changes besides it, keeps the verdict false.
+or any document the composition changes besides it, keeps the verdict false. So does a removed legacy
+`machine.network.hostname` (§2.3 step 2a): it is recorded as not the fill's own, because the key becomes a document
+and equal behaviour across that move is unmeasured, so no fill is set aside for it and its machine reads false at the first apply.
 A base that omits a
 key the composition writes with an empty value (a configuration not written by
 `talosctl` can be in that case) also reads false: the release then holds a key the base lacks, and the first apply's diff is withheld. The comparison does not treat an empty
@@ -1109,7 +1122,9 @@ unmeasured.
 5. **Import, adoption and drift (choice §16.37).** The equality rule of
    §2.3 step 2a: at import (onboarding included) and at drift adoption, a
    `HostnameConfig` whose hostname equals the machine's name is removed from
-   the stored base and recorded as filled. Why: an onboarded machine takes its
+   the stored base and recorded as filled, and so is a legacy
+   `machine.network.hostname` that equals it where no such document is present
+   and `stableHostname` is not set (step 2a: the key alone goes). Why: an onboarded machine takes its
    name from its own hostname
    ([operator experience §5.2](operator-experience.md)), so its import base
    holds that hostname explicitly, and without the rule a rename would never
@@ -1124,7 +1139,21 @@ unmeasured.
    covers. The record of step 2a (the name and whether the removed document was
    the fill's own) is stored with the import base revision, and the form-only
    verdict (§6, step 8) sets that one document aside while the name is the
-   recorded one. Drift is otherwise ordinary: a hostname changed on the node by hand
+   recorded one. **A removed legacy key is recorded as not the fill's own, so
+   its machine's verdict reads false at the first apply**: the node holds the
+   key and the release sends a document, and whether Talos treats that move as
+   no change on the node is unmeasured here. **A hostname equal to the
+   machine's previous name is not released (choice §16.37, option A rejected
+   for now).** After a rename and before the next release is applied, an import
+   or onboarding again reads a node whose document or key still holds the
+   previous name. It differs from the current name, so it stays explicit: the
+   release records the source `configuration` (persistence and API §9.2) and
+   the rename does not reach the node. The import knows the current name only,
+   and cannot tell the fill's earlier write from an operator's hostname that
+   happens to equal an old name. The normal path (item 3: rename, release,
+   plan) never imports in that window and is not affected. The way out for a
+   document is the `$patch: delete` fragment below; **for a legacy key no such
+   fragment is measured**. Drift is otherwise ordinary: a hostname changed on the node by hand
    is a configuration edit and a digest mismatch; a hostname from DHCP, cloud
    or `auto: stable` is not in the configuration and is not drift. A machine
    with no name at import keeps its hostname explicit when it is named later;
@@ -2417,6 +2446,25 @@ in place as
     cannot tell filled from explicit. The cost is one value ingestion changes
     that is not a secret, an amendment of the import-equivalence check, and a
     release that can read as pending convergence against the baseline.
+    **Extended to the legacy key** (ginsys/bronzeward#1054): a `machine.network.hostname` equal to the name is
+    removed as a key, where no `HostnameConfig` is present and `stableHostname`
+    is not set, for the same reason: the onboarded machine is named from its own
+    hostname whichever field holds it, and no hand-over is measured for a key.
+    Alternative: limit the claim to a document and let the review say "set in the
+    configuration" for a key (client contracts A9 item 7), which is documentation
+    only and leaves a renamed machine never following its name. Its removal is
+    recorded as not the fill's own, so its verdict reads false at the first
+    apply. **A hostname equal to the previous name is not released.**
+    Alternatives: option A, compare the name the machine's last applied
+    `machine-name` release used, read with the request and kept in the staged
+    payload, with the stale check widened to it, the removed hostname stored
+    beside the current name and the verdict true only where they are equal: the
+    right fix and the larger change (a second compared value and a wider stale
+    check), for a window measured once, in a fixture, and not yet outside one;
+    option B, every name in the machine's `name-change` history, which removes
+    an operator's hostname that merely equals an old name, with nothing showing
+    the document was the fill's. Cost of the choice: after a rename and before
+    its apply, a re-import keeps the previous name explicit (§6.1 item 5).
 38. **Publication refuses a filled hostname another machine holds
     explicitly** (§6.1 item 6). Alternative: a review warning only. The failure
     lands on a live cluster and is not cheap to undo, so a refusal is chosen
