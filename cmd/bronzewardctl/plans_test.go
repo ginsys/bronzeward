@@ -28,6 +28,7 @@ type planFake struct {
 	desired, assignment, open string
 	drift                     string // the plan's drift record, "" for none
 	noApplied                 bool   // the machine has no Applied configuration
+	held                      string // another machine's Applied release holds this plan's node name: "" none, "-" the review records no node name, else the name
 	expiresIn                 time.Duration
 	now                       time.Time // the expiry's clock when set, so two renders are equal
 	raw, fail                 map[string]string
@@ -142,6 +143,18 @@ func (f *planFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			applied = "null"
 		}
 		fmt.Fprintf(w, `{"id":"mch_a","cluster":"cl_BWSYNTH","talosEndpoint":"10.5.0.5:50000","desired":%q,"applied":%s,"openDrift":%s}`, f.desired, applied, drift)
+	case "/machines/mch_a/position":
+		holder := "null"
+		if f.held != "" {
+			holder = `{"id":"mch_b","name":"beta"}`
+		}
+		fmt.Fprintf(w, `{"machine":{"id":"mch_a","name":"alpha"},"hostnameHeldBy":%s,"step":"awaiting-dispatch","plan":{"id":"pln_BWSYNTH","release":"rel_BWSYNTH","operation":"apply-config","state":"approved"}}`, holder)
+	case "/releases/rel_BWSYNTH/machines/mch_a/review":
+		node := `,"nodeName":"` + f.held + `"`
+		if f.held == "-" {
+			node = ""
+		}
+		fmt.Fprint(w, `{"release":"rel_BWSYNTH","machine":"mch_a","mode":"metal","configuration":null,"provenance":[],"hostname":{"source":"machine-name","name":"alpha"`+node+`}}`)
 	case "/clusters/cl_BWSYNTH":
 		fmt.Fprint(w, `{"id":"cl_BWSYNTH","name":"lab-a"}`)
 	case "/approvals/apr_BWSYNTH":

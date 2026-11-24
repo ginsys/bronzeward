@@ -89,6 +89,7 @@ type applyFake struct {
 	withheld              string // the plan whose change the server withholds
 	drift                 string // the plan that carries a drift record
 	lockAt                string // a POST to this path answers another epoch and makes the configuration directory read-only
+	held                  string // alpha's plan is approved and waits for beta's hostname: "" none, "-" its node name is not recorded, else that name
 	lock                  func()
 }
 
@@ -126,12 +127,18 @@ func (f *applyFake) position(machine string) string {
 		}
 		plan = `{"id":"pln_prepared","state":"proposed","operation":"` + op + `","release":"` + rel + `","approvalCurrent":null,"createdAt":"2026-11-22T08:00:00Z","expiresAt":"2026-11-23T08:00:00Z"}`
 	}
+	holder := "null"
+	if machine == "mch_alpha" && f.held != "" {
+		step = "awaiting-dispatch"
+		plan = strings.Replace(plan, `"state":"proposed"`, `"state":"approved"`, 1)
+		holder = `{"id":"mch_beta","name":"beta"}`
+	}
 	pending := "true"
 	if machine == "mch_beta" && f.applied {
 		step, applied, pending = "no-step", `{"release":"rel_BWSYNTH","source":"operation"}`, "false"
 	}
 	return fmt.Sprintf(`{"machine":{"id":%q,"name":%q,"role":%q,"cluster":"cl_BWSYNTH","desired":"rel_BWSYNTH","applied":%s,"pendingConvergence":%s,"formOnly":false,"frozen":false,"openDrift":null},`+
-		`"ingestion":null,"draft":null,"operation":null,"rolloutHeldBy":null,"step":%q,"plan":%s}`, machine, name, role, applied, pending, step, plan)
+		`"ingestion":null,"draft":null,"operation":null,"rolloutHeldBy":null,"hostnameHeldBy":%s,"step":%q,"plan":%s}`, machine, name, role, applied, pending, holder, step, plan)
 }
 
 func (f *applyFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +205,12 @@ func (f *applyFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"id":"asr_a","cluster":"cl_BWSYNTH","machine":"mch_alpha","profiles":["cp-base"],"fragments":{},"author":"svc_BWSYNTH","createdAt":"2026-11-22T08:00:00Z"}`)
 	case "/assignment-revisions/asr_b":
 		fmt.Fprint(w, `{"id":"asr_b","cluster":"cl_BWSYNTH","machine":"mch_beta","profiles":["worker-base","storage"],"fragments":{},"author":"svc_BWSYNTH","createdAt":"2026-11-22T08:00:00Z"}`)
+	case "/releases/rel_BWSYNTH/machines/mch_alpha/review":
+		node := `,"nodeName":"` + f.held + `"`
+		if f.held == "-" {
+			node = ""
+		}
+		fmt.Fprint(w, `{"release":"rel_BWSYNTH","machine":"mch_alpha","mode":"metal","configuration":null,"provenance":[],"hostname":{"source":"machine-name","name":"alpha"`+node+`}}`)
 	case "/machines/mch_alpha/position":
 		fmt.Fprint(w, f.position("mch_alpha"))
 	case "/machines/mch_beta/position":
