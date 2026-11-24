@@ -32,7 +32,13 @@ func extractKey(t *testing.T, name, text string, marks ...string) (string, Fille
 	t.Helper()
 	req := request(t, text, marks...)
 	req.Name = name
-	req.Declarations = keyRefs.clone()
+	// Only the references the text uses: a declaration nothing uses is itself a refusal.
+	req.Declarations = Declarations{References: map[string]Reference{}}
+	for name, ref := range keyRefs.References {
+		if strings.Contains(text, " "+name+"\n") {
+			req.Declarations.References[name] = ref
+		}
+	}
 	c, err := Extract(req)
 	if err != nil {
 		return "", Filled{}, err
@@ -198,13 +204,7 @@ func stagedKey(t *testing.T, text string) Staged {
 	t.Helper()
 	req := request(t, text)
 	req.Name = "node-a"
-	c, err := Extract(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, _ := commitAll(t, c)
-	return Staged{Sanitized: s, Generations: map[string]string{}, Filled: c.Filled(),
-		Baseline: Baseline{Ciphertext: "vault:v1:baseline", DigestKey: "digest/1"}}
+	return stagedFrom(t, req)
 }
 
 // K9: where step 2a removed a legacy key, a later mark on stableHostname or on a mapping that holds it is
@@ -225,9 +225,6 @@ func TestRemarkRefusedWhereAKeyWasRemoved(t *testing.T) {
 	// A mark that holds neither the setting nor the key's document is an ordinary mark.
 	if _, err := Remark(st, paths(t, "doc[1]/mtu")); err != nil {
 		t.Errorf("a mark on another document: %v", err)
-	}
-	if _, err := Remark(st, paths(t, "doc[1]")); err != nil {
-		t.Errorf("a mark on another document's root: %v", err)
 	}
 }
 

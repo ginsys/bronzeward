@@ -50,9 +50,32 @@ func TestLegacyKeyIsAnExplicitHostname(t *testing.T) {
 	}
 }
 
-// K6: deleting the HostnameConfig a fragment or the base wrote hands the hostname to the fill. There was
-// no test for the delete.
+// K6, at the machinery: deleting the HostnameConfig an explicit hostname lives in hands the hostname to the
+// fill. This applies the delete with the patcher and compiles the result, because the fragment itself is
+// refused at ingest today (a directive mapping that holds apiVersion and kind: plainDeletes).
 func TestPatchDeleteOfAHostnameDocumentHandsItToTheFill(t *testing.T) {
+	base := baseText(t)
+	explicit := patched(t, base, hostDocExplicit)
+	for _, tc := range []struct {
+		label string
+		text  []byte
+		want  Hostname
+		host  string
+	}{
+		{"control: the explicit document wins", explicit, Hostname{HostnameConfiguration, ""}, hostExplicit},
+		{"the document deleted: the fill takes over", patched(t, explicit, hostDelete), Hostname{HostnameMachineName, hostMachine}, hostMachine},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			c := compiled(t, hostIn(source(t, string(tc.text), ingest.Declarations{}, nil), hostMachine, ModeMetal))
+			wantHost(t, c, 0, tc.want, tc.host)
+		})
+	}
+}
+
+// K6, end to end: the delete selector is accepted as a fragment (compilation §2.3 step 3), and the compile,
+// which applies it with the machinery's patcher, hands the hostname to the fill. A fragment that writes the
+// explicit hostname and a later one that deletes the document leave the fill's own.
+func TestFragmentDeleteOfAHostnameDocumentHandsItToTheFill(t *testing.T) {
 	in := hostIn(hostBase(t), hostMachine, ModeMetal, frag(t, hostDocExplicit), frag(t, hostDelete))
 	wantHost(t, compiled(t, in), 2, Hostname{HostnameMachineName, hostMachine}, hostMachine)
 	// Control: without the delete the explicit document wins.
@@ -60,9 +83,8 @@ func TestPatchDeleteOfAHostnameDocumentHandsItToTheFill(t *testing.T) {
 	wantHost(t, compiled(t, in), 1, Hostname{HostnameConfiguration, ""}, hostExplicit)
 }
 
-// withKey is the hostBase text with machine.network.hostname set to host: the base an import leaves when it
-// keeps the key.
-func withKey(t *testing.T, host string) []byte {
+// baseText is the plaintext of hostBase.
+func baseText(t *testing.T) []byte {
 	t.Helper()
 	base := hostBase(t)
 	r, err := ingest.Resolve(base.Text, base.Values)
@@ -73,7 +95,14 @@ func withKey(t *testing.T, host string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return patched(t, text, "machine:\n  network:\n    hostname: "+host+"\n")
+	return text
+}
+
+// withKey is the hostBase text with machine.network.hostname set to host: the base an import leaves when it
+// keeps the key.
+func withKey(t *testing.T, host string) []byte {
+	t.Helper()
+	return patched(t, baseText(t), "machine:\n  network:\n    hostname: "+host+"\n")
 }
 
 // patched applies patch to text with the machinery's patcher at the pinned version, as composition does.

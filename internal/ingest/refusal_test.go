@@ -54,6 +54,7 @@ func TestRefusalSweep(t *testing.T) {
 		decl   Declarations
 		secret string // what must not appear; secretText when empty
 		remark string // "author" or "widened": the text is staged unmarked (re-indented when widened) and the marks re-mark it
+		name   string // the machine's name for step 2a, when the case needs a removal recorded
 	}{
 		{rule: RuleParse, text: "machine:\n  token: *" + s + "\n"},
 		{rule: RuleSchemaUnloadable, text: "apiVersion: v1alpha1\nkind: Nope\nx: " + s + "\n"},
@@ -106,6 +107,10 @@ func TestRefusalSweep(t *testing.T) {
 		// The refusal names the first mark, whose key is a value the second extracts.
 		{rule: RuleMarkRewritesText, remark: "widened", text: "machine:\n  nodeLabels:\n    a: " + s + "\n    " + s + ": x\n",
 			marks: []string{"doc[0]/machine/nodeLabels/" + s, "doc[0]/machine/nodeLabels/a"}},
+		// Step 2a removed the legacy key when the claim was staged, and the later mark is on stableHostname.
+		{rule: RuleMarkOnReleasedHostname, remark: "released", name: "node-a",
+			text:  "machine:\n  token: " + s + "\n  features:\n    stableHostname: false\n  network:\n    hostname: node-a\n",
+			marks: []string{"doc[0]/machine/features/stableHostname"}},
 		{rule: RuleEmbedded, text: "machine:\n  nodeLabels:\n    k: " + s + "\n",
 			decl: Declarations{Embedded: []Embedded{{Path: "doc[0]/machine/nodeLabels", Format: "yaml"}}}},
 	}
@@ -127,7 +132,7 @@ func TestRefusalSweep(t *testing.T) {
 			if tc.remark == "" {
 				c, err = Extract(req)
 			} else {
-				st := stagedFrom(t, Request{Input: req.Input, Declarations: tc.decl})
+				st := stagedFrom(t, Request{Input: req.Input, Declarations: tc.decl, Name: tc.name})
 				if tc.remark == "widened" {
 					wide := strings.ReplaceAll(string(st.Sanitized.Documents()), "\n  ", "\n    ")
 					st.Sanitized = newSanitized([]byte(wide), st.Sanitized.Declarations())
