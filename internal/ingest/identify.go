@@ -195,6 +195,31 @@ func plainDeletes(n *yaml.Node) bool {
 	return true
 }
 
+// documentSelector reports whether the root of a document is a delete selector for a whole typed document:
+// exactly `$patch: delete`, `apiVersion` and `kind`, each a plain string with no tag, anchor or alias. The
+// machinery reads apiVersion and kind to choose the document it deletes (and loads nothing else of it), so the
+// reason plainDeletes refuses members beside a directive, that they would be stored without ever being
+// loaded, does not apply: the loader refuses a pair it does not know. A selector with `name`, any other
+// member, a nested one or a list entry's stays refused (compilation.md §2.3 step 3).
+func documentSelector(n *yaml.Node) bool {
+	if n.Kind != yaml.MappingNode || len(n.Content) != 6 {
+		return false
+	}
+	seen := map[string]string{}
+	for i := 0; i < 6; i += 2 {
+		k, v := n.Content[i], n.Content[i+1]
+		for _, s := range []*yaml.Node{k, v} {
+			if s.Kind != yaml.ScalarNode || s.Tag != "!!str" || s.Anchor != "" {
+				return false
+			}
+		}
+		seen[k.Value] = v.Value
+	}
+	_, hasAPI := seen["apiVersion"]
+	_, hasKind := seen["kind"]
+	return len(seen) == 3 && hasAPI && hasKind && seen["$patch"] == "delete"
+}
+
 // directive reports whether n is a mapping holding a delete directive.
 func directive(n *yaml.Node) bool {
 	if n.Kind != yaml.MappingNode {
@@ -228,7 +253,7 @@ func schemaPointers(doc *yaml.Node, i int, nulled map[*yaml.Node]bool) ([]schema
 	if top == nil || top.Kind == yaml.ScalarNode && top.Tag == "!!null" {
 		return nil, nil
 	}
-	if !plainDeletes(top) {
+	if !plainDeletes(top) && !documentSelector(top) {
 		return nil, unloadable
 	}
 	if machineryLoaded != nil {
