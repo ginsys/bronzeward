@@ -34,7 +34,7 @@ const reading = (res: ReadResult<unknown>, epoch: string | undefined = "e1") => 
     paths,
     client: {
       read: async <T,>(p: string) => (paths.push(p), res as ReadResult<T>),
-      readWithEpoch: async <T,>(p: string) => (paths.push(p), { result: res as ReadResult<T>, epoch }),
+      readWithEpoch: async <T,>(p: string) => (paths.push(p), { result: res as ReadResult<T>, epoch, moves: 0 }),
     },
   };
 };
@@ -593,9 +593,10 @@ describe("the reads of the watch and of its end go through the page's settle (gi
   // A reader whose reads answer from `by`; `open` answers JSON, so the watch reads the pages.
   const scripted = (by: (path: string) => ReadResult<unknown>) => ({
     read: async <T,>(p: string) => by(p) as ReadResult<T>,
-    readWithEpoch: async <T,>(p: string) => ({ result: by(p) as ReadResult<T>, epoch: "e1" }),
+    readWithEpoch: async <T,>(p: string) => ({ result: by(p) as ReadResult<T>, epoch: "e1", moves: 0 }),
     open: async () => answer({}),
     writesEnded: false,
+    moves: 0,
   });
   const settling = () => {
     const settled: ReadResult<unknown>[] = [];
@@ -718,7 +719,7 @@ describe("a lapsed lease decides only after the operation's newest event was sho
         readWithEpoch: async <T,>(p: string) => {
           paths.push(p);
           if (leave) abort.abort();
-          return { result: (p.startsWith("/ingestions/") ? claim : operation) as ReadResult<T>, epoch: "e1" };
+          return { result: (p.startsWith("/ingestions/") ? claim : operation) as ReadResult<T>, epoch: "e1", moves: 0 };
         },
       };
       const f = followRun({
@@ -745,7 +746,7 @@ describe("a lapsed lease decides only after the operation's newest event was sho
     });
     test("a clear takes back a refusal recorded before it: the reset watch is not ended by it", async () => {
       let claim: ReadResult<unknown> = refused;
-      const client = { readWithEpoch: async <T,>(p: string) => ({ result: (p.startsWith("/ingestions/") ? claim : okOp) as ReadResult<T>, epoch: "e1" }) };
+      const client = { readWithEpoch: async <T,>(p: string) => ({ result: (p.startsWith("/ingestions/") ? claim : okOp) as ReadResult<T>, epoch: "e1", moves: 0 }) };
       const f = followRun({
         client, ingestion: b.id, op: OPID, generation: 2, signal: new AbortController().signal,
         latest: () => ({ b, at: at("07:05:15") }), abandonedAt: () => undefined, now: () => at("07:05:20"), view: () => {},
@@ -814,10 +815,10 @@ describe("a renewed lease reaches the page, and a confirmation belongs to the sn
         // With a `refusal`, the claim read ends in a refusal for good once the promise is released.
         if (refusal && p.startsWith("/ingestions/")) {
           await refusal;
-          return { result: { kind: "refused", status: 403, problem: null } as unknown as ReadResult<T>, epoch: "e1" };
+          return { result: { kind: "refused", status: 403, problem: null } as unknown as ReadResult<T>, epoch: "e1", moves: 0 };
         }
         const data = p.startsWith("/ingestions/") ? await (served ?? (async () => claim))() : op({ lastEvent: 1 });
-        return { result: { kind: "ok", data } as unknown as ReadResult<T>, epoch: "e1" };
+        return { result: { kind: "ok", data } as unknown as ReadResult<T>, epoch: "e1", moves: 0 };
       },
     };
     const f = followRun({

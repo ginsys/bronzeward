@@ -264,7 +264,7 @@ export function caughtUp(shown: Seen | undefined, claimEpoch: string | undefined
 // the list and item reads' answers do, so an unresolved 401 or a revocation reaches the shell (sign-in,
 // revocation) and a transport failure its offline banner, and nothing is rendered once the watch left.
 // `undropped` is taken per read: the shell can invalidate reads in flight between two of them.
-export function settledReads(client: Pick<Client, "read" | "readWithEpoch" | "open" | "writesEnded">, reads: Pick<Reads, "settle" | "undropped">, live: () => boolean): Pick<Client, "read" | "readWithEpoch" | "open" | "writesEnded"> {
+export function settledReads(client: Pick<Client, "read" | "readWithEpoch" | "open" | "writesEnded" | "moves">, reads: Pick<Reads, "settle" | "undropped">, live: () => boolean): Pick<Client, "read" | "readWithEpoch" | "open" | "writesEnded" | "moves"> {
   // The answer is settled, and handed on only while it is still current: one the shell invalidated, or
   // read after the watch left, is discarded and never reaches the watch.
   const settle = <T,>(res: ReadResult<T>, ok: () => boolean): ReadResult<T> => {
@@ -284,6 +284,7 @@ export function settledReads(client: Pick<Client, "read" | "readWithEpoch" | "op
     },
     open: (path, headers, signal) => client.open(path, headers, signal),
     get writesEnded() { return client.writesEnded; },
+    get moves() { return client.moves; },
   };
 }
 

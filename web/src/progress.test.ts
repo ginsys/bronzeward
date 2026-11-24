@@ -729,6 +729,7 @@ describe("the operation progress reader (§8.6)", () => {
     open: (...a: Parameters<typeof s.client.open>) => s.client.open(...a),
     get currentEpoch() { return s.client.currentEpoch; },
     get writesEnded() { return s.client.writesEnded; },
+    get moves() { return s.client.moves; },
   });
 
   test("R3-2: a running operation read that resolves after the watch was aborted does not ask until or end the watch", async () => {
@@ -799,6 +800,7 @@ describe("the operation progress reader (§8.6)", () => {
     }) as typeof s.client.open,
     get currentEpoch() { return s.client.currentEpoch; },
     get writesEnded() { return s.client.writesEnded; },
+    get moves() { return s.client.moves; },
   });
 
   test("R5-2: a stream answered with JSON after the watch was aborted sends no events read", async () => {
