@@ -52,7 +52,7 @@ describe("a publication refused 412", () => {
     vi.spyOn(writes, "submit").mockImplementation(async (w) => {
       sent.push(w.spec.ifMatch);
       w.outcome = { kind: "refused", status: 412, problem: null, replayed: false };
-      w.spec.settled?.(w.outcome);
+      w.spec.settled?.(w.outcome, w);
       return w.outcome;
     });
     const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 40))));
