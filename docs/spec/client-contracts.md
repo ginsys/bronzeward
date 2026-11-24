@@ -886,8 +886,11 @@ next-step words exist in two places, the web table (`web/src/problems.tsx:23-48`
 (`cmd/bronzewardctl/imports.go:602-613`, `cmd/bronzewardctl/publish.go:138-139`), because the two clients
 cannot share one file; a change to a row's `next` changes both. For `talos-access-unavailable`, whose
 web `next` is "The server's explanation follows", the CLI says "The server's explanation is in the error
-above", because it prints the raw error before the step. Another code a failed operation carries has no
-CLI next step, and neither has a failed operation any other CLI command shows.
+above", because it prints the raw error before the step. Every command that publishes through
+`publishDraftOn` (`publish`, and `drift adopt` in place of it, `cmd/bronzewardctl/drift.go:515`) words the
+`recovery-mode-entered` step; `operation show` and `operation watch` word a failed publication by its
+kind alone, "Fix the cause named above and publish again" (`cmd/bronzewardctl/operation_words.go:26`),
+for every code. Another code a failed operation carries has no CLI next step by code.
 
 ### 8.3 ETags
 
@@ -938,9 +941,10 @@ Built, on a `412`, where the clause says the client "shows the current state": t
 revision the draft has now and the command that reads it (`internal/client/write.go:560-570`). At the
 revision that lands ginsys/bronzeward#1176 the web publication page does too: it reads the draft once,
 with a plain read that sends no `If-Match`, and says its revision and state under the refusal, which
-stays shown whatever the read answers (`web/src/publish.tsx:191-194`, `web/src/publish.tsx:201-205`,
-`web/src/publish.tsx:222`); a read answered after a newer press or re-read is dropped
-(`web/src/publish.tsx:177-182`, `web/src/publish.tsx:192-193`). That read keeps no ETag: Publish still
+stays shown whatever the read answers (`web/src/publish.tsx:191-196`, `web/src/publish.tsx:204-208`,
+`web/src/publish.tsx:225`); a read answered after a newer press or re-read, or after the page is gone,
+is not live, so the shell does not settle it and the page does not show it
+(`web/src/publish.tsx:177-182`, `web/src/publish.tsx:192-197`). That read keeps no ETag: Publish still
 sends nothing until the operator presses "Read the draft again" (`web/src/publish.tsx:162-163`,
 `web/src/publish.tsx:180-186`).
 
