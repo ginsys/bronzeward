@@ -1036,10 +1036,7 @@ A base that omits a
 key the composition writes with an empty value (a configuration not written by
 `talosctl` can be in that case) also reads false: the release then holds a key the base lacks, and the first apply's diff is withheld. The comparison does not treat an empty
 default as absent; that would change what the verdict means. The compilation's
-own transformations, the digest and the artifact are unchanged. A thinner import
-base always reads false here, because the composition holds the content the base
-gave up. For that case the evidence is the typed equivalence check of §6.2, not
-this verdict.
+own transformations, the digest and the artifact are unchanged.
 
 The compiler's only transformations of native YAML are step 4's replacement of
 tagged nodes and re-serialization of identified embedded documents, and the
@@ -1298,199 +1295,7 @@ off` with `hostname`, a form that differs from the original document at every
 level that reads it, so the check must treat a filled hostname as equal to
 the original where the hostname equals the name. The fill is implemented by
 ginsys/bronzeward#1040, the API record by ginsys/bronzeward#1041, and the
-client words by ginsys/bronzeward#1042 and ginsys/bronzeward#1043. The typed
-equivalence check of §6.2 makes that amendment: both of its compositions carry
-the fill.
-
-### 6.2 The typed equivalence check
-
-Design: [§9.1](../design/Talos_Configuration_and_Machine_Management_Design.md#91-adopt-an-existing-configured-cluster)
-step 5, [§20.7](../design/Talos_Configuration_and_Machine_Management_Design.md#207-existing-cluster-adoption).
-Evidence: [the 20261118 research note](../design/research/20261118-import-analysis-and-equivalence.md)
-§3, §5 and §7.
-
-A refactoring replaces a machine's import base by a thinner import base and
-fragments that hold what the base gave up
-([persistence and API §3.2](persistence-api.md#32-the-import-base)). The design
-says such a change "must prove equivalent output". This section is that proof,
-called the **typed equivalence check**. It answers one question for one
-machine: does the draft's composition equal the composition the machine has
-now. It is evidence for an approver and never an approval: publication never
-authorizes dispatch (§11), and a pass changes no hold, no plan and no approval
-rule.
-
-**Where it runs and for whom.** In the publish operation, in the compiler's
-process, from plaintext, before the release commits (persistence and API
-[§6.1](persistence-api.md#61-steps)). It runs for each machine whose draft
-entry carries an **import base under the check**, and for nothing else: a
-thinner import base written by the route of persistence and API §3.2, which
-writes only over an `Applied` import base read from the node. Every input of
-the check is then readable by any `author`, so the paths below and the
-recorded `equal` and `byteIdentical` disclose nothing a caller may not read. An
-import of any source, including a `document` import for a machine that already
-has an `Applied` release, and a drift adoption are not checked: an import base
-read from the node and a drift adoption accept what the node runs, a machine
-with no `Applied` release has no old composition, and a `document` import is an
-ordinary change under the ordinary review, as today (`startIngestion` in
-`internal/api/ingestions.go`; persistence and API choice §17.57). A machine
-the draft covers only through a changed fragment or assignment publishes under
-the ordinary rules. For a machine under
-the check, a change to its configuration beyond the move reads as not equal, so
-the draft carries no other change for that machine. A new fragment, or a new
-selection of it, that leaves the machine's composition equal is the refactoring
-itself and passes. A shared fragment that the split creates or edits also
-changes the composition of every other machine that selects it. Those machines
-are checked only if they carry a new import base revision themselves; otherwise
-the ordinary rules decide, and no check says the split is consistent across a
-group (a limit, below).
-
-**What is compared.** Two compositions of the machine, each made by steps 4 to
-5a of §6 with the pinned renderer:
-
-- the **old side** is the composition of the machine's `Applied` release: its
-  import base revision, the fragments it selected, the pins it recorded and the
-  hostname fill (§6.1). It is composed again at publication from the immutable
-  revisions the release names;
-- the **new side** is the composition of this draft, with the thinner import
-  base and the same fill.
-
-Both are compositions, never a base alone, so a machine whose release already
-selects fragments is not refused before any refactoring. The check does not
-compare with the node's own bytes: the baseline cannot be decrypted by any
-identity (§2.3). Where the machine holds what its `Applied` release composed
-(next paragraph), the old side is what the node already holds. Its secrets are the
-provider's versions the release pinned, as in the form-only verdict (§6), and the
-check does not prove those values are the node's.
-
-**It runs only where the two sides hold the same references (persistence and
-API choice §17.57).** The check reads plaintext after the references resolve,
-and a resolved reference is a secret that some `author` may not read, so an
-answer about it would answer a question about that secret. Before any value is
-resolved, the publish operation reads from the composed text of each side the
-set of (path, reference) pairs and the version each is pinned at. Where the two
-sets differ (a reference on one side only, the same reference at another path,
-or another pinned version) the check refuses `cannot-decide`, names no path,
-reports no boolean, and the release records `equivalence` null. Where they
-agree, every reference resolves to the same secret version at the same path on
-both sides, so it is equal by construction, and every other leaf is base text
-(a node read) or fragment source text, which any `author` reads. The refusal
-depends only on where references sit in the composed text and which version
-each side pins, and the release review shows both ([persistence and API
-§9.3](persistence-api.md#93-examples), the reference name and version), so it
-leaks no value. The cost: a draft that drops, moves or adds a reference, or
-publishes while a referenced secret has a newer pin, is not provable and goes
-by an ordinary change; a secret changed behind an unchanged reference is not
-reported as a difference, because the refusal comes first.
-
-**It runs only where the machine holds what its `Applied` release composed
-(choice §16.41).** Two conditions hold. The machine is not pending
-convergence: it has no `Desired` release, or its `Desired` digest equals its
-`Applied` digest and its `Desired` release records the `Applied` release's
-import base ([persistence and API
-§9.3](persistence-api.md#93-examples), the machine's `pendingConvergence`,
-which the API serves; the digests behind it stay unserved; a release that
-thinned the base and renders the same bytes is pending until it is applied,
-persistence and API choice §17.53). And its `Applied`
-digest equals the configuration digest of its `Applied` release's own
-artifact, read from the machine's records by the publish operation and never
-served. The second condition is not implied by the first: after an adoption the `Applied`
-digest is the import base's (§9.3), so an adopted machine whose release `R0`
-composed other bytes holds the base, not `R0`, and a later release that renders
-the base's bytes clears `pendingConvergence` while the `Applied` release is
-still `R0`. Where a condition fails the check refuses `cannot-decide`, with the
-words of the condition that failed, and where both fail the first applies.
-When the machine is pending: "a release is pending for this machine: apply it,
-then publish the refactoring". A pending machine may hold its `Applied` release
-exactly; the check still waits, because the plan that applies the thinner
-release would also carry the pending change to the node. When it is not
-pending and its `Applied` digest is not its release's artifact digest: "the
-machine holds an adopted baseline its Applied release did not compose: apply a
-release, then publish the refactoring". The old side is the composition of the
-`Applied` release, so it describes the node only when the node holds that
-release's bytes. An adopted machine whose release differs from its import base
-bytes (comments, a filled hostname the base does not hold, a moved document) therefore
-waits until a release is applied. The alternative, comparing with the pending
-`Desired` release and saying so in the evidence, is rejected: it leaves the
-approver without a statement about the change from what the node holds.
-
-**What counts as equal (choice §16.40).** The documents of each side, loaded
-as typed documents of the pinned renderer and matched by kind and name (level
-E3 of the research note), are equal when no document stands on one side only
-and each matched pair is equal as typed values. It ignores comments, key order,
-document order, formatting and whatever the typed form normalises itself. It
-does not ignore the order of a list, which counts: whether a given Talos list is
-ordered was not tested field by field. Typed defaults are not applied, so a
-field written with its default and the same field omitted read as different
-(measured: `defaultRuntimeSeccompProfileEnabled` explicit false against
-omitted). Embedded text is one leaf: equal or not equal, never partly (§5.4).
-
-**The result.** Per machine, the check records `equal`, true or false, and
-`byteIdentical`, whether the two renders are the same bytes: the boolean
-outcome of a byte comparison, reported beside the result and never the gate.
-No digest of either render is recorded or served with it. With a
-false `equal` it also records the paths that differ and, for each, whether it
-stands on one side only or holds a different value, never the value. A path is
-written by the path means of §8.3. The result is recorded with the release
-([persistence and API §3.2](persistence-api.md#32-the-import-base)). **A digest
-of the render alone never approves a refactoring:** a moved document or a
-comment changes the bytes of a configuration that is equal in every typed
-value, so such a digest refuses exactly the change the check exists to approve
-(research note §5.1, §5.3).
-
-**Refusals.** A refusal is `422 validation-failed` with rule `equivalence`,
-naming the machine, and it commits no release.
-
-| Reason | When | Reports |
-| --- | --- | --- |
-| `not-equal` | The sides differ | The paths, and the sentence "the typed equivalence check can refuse a change that is equivalent in behaviour; it compares typed values and applies no defaults" |
-| `cannot-decide` | The machine is pending convergence, or its `Applied` digest is not its `Applied` release's artifact digest (an adopted baseline not yet replaced), or the two sides do not hold the same (path, reference, pin) set, or the comparison cannot decide a case | The reason in words, the failed condition's own; no paths, no boolean |
-
-The check fails closed: it never reads "equal" for a case it could not decide.
-A refusal of the composition itself (a dependency, a validation, the contract)
-keeps the reasons of §13, and a refusal never quotes a value. No override
-exists in the PoC; a refused equivalent change is repaired by keeping more in
-the base.
-
-**Values redaction does not cover (§8.4).** The check reads plaintext after the
-references resolve (§6 step 4), but only where both sides hold the same
-references at the same pins (above), so a value that changes behind an
-unchanged reference name is refused `cannot-decide` and never compared. The
-compositions never leave the compiler, and the result holds paths and booleans
-only. Three limits follow from §8.4. The research note measured a changed value
-behind a reference only for the render's digest and for a redacted form, and
-the redacted form missed it; the typed comparison does not report it either,
-it refuses to decide (N4 below). A secret in a field the
-schema does not mark and nothing references is an ordinary leaf to the check:
-a change shows, as a path that carries the key names, and nothing marks the leaf
-secret. A secret that was never marked stays unknown to every means. A
-thinner base must also add none: the stored document is a subset of the
-current one ([persistence and API §3.2](persistence-api.md#32-the-import-base)),
-so the check never has to read a value the source does not already hold. It
-also drops no reference node, so step 7's protection of the base's references
-(§6) stays on every one of them after a refactoring (persistence and API choice
-§17.55).
-
-**Required rejection checks.** An implementation shows each with a control that
-can fail (§15):
-
-- **N1, a changed value:** the new side differs from the old at one leaf (a
-  value in a shared fragment). `equal` is false and the path is named.
-- **N2, a dropped key:** the new side omits one key the old side holds. `equal`
-  is false and the path is named.
-- **N4, a rotated secret behind an unchanged reference:** the two sides pin
-  one reference name at different versions. The check refuses `cannot-decide`,
-  names no path and reports no boolean, where a comparison of the redacted
-  forms of the same two sides reads equal: the control that the check does not
-  say "equal" for it.
-
-**Limits that stay open.** The check can refuse a refactoring that is equivalent
-in behaviour (a default written against omitted). Typed defaults are not
-applied, and a level that applies them was not built. List order counts. The
-split was shown consistent on six synthetic machines that classify alike, not
-across a group whose machines classify differently, so no check says that a
-shared fragment is right for every machine that selects it. Whether an
-identity-only document is valid for every document kind was measured on those
-six machines only. Nothing here was applied to a node.
+client words by ginsys/bronzeward#1042 and ginsys/bronzeward#1043.
 
 ## 7. Validation stages
 
@@ -2165,8 +1970,6 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Compilation | Native composition or validation rejects | Publication refused; message redacted or withheld (§8.3) | Nothing |
 | Compilation | A hostname filled from a machine's name that another machine of the cluster holds explicitly, or a node name that another machine's applied release holds (§6.1 item 6) | Publication refused, rule `hostname`, naming both machines | Nothing |
 | Ingestion | The machine's name changed between the removal of a filled hostname (§2.3 step 2a) and the draft transaction | The draft transaction is refused `409 stale-input`; re-ingest | Claim row, no payload |
-| Compilation | A machine whose draft entry carries an import base under the check (§6.2): the typed equivalence check finds the two compositions different (§6.2) | Publication refused, rule `equivalence`, reason `not-equal`, naming the machine and the paths | Nothing |
-| Compilation | The same machine is pending convergence, or its `Applied` digest is not its `Applied` release's artifact digest (an adopted baseline not yet replaced), or the two sides do not hold the same references at the same pins, or the check cannot decide a case (§6.2) | Publication refused, rule `equivalence`, reason `cannot-decide` | Nothing |
 | Compilation | Trace or flip fragment missing, shape differs, or passes disagree | Publication refused (§8.1) | Nothing |
 | Compilation | Reserved text or an unattributed exact copy in the output | Publication refused, naming paths | Nothing |
 | Compilation | Encryption fails, or persistence rejects a stale input | Publication refused | Nothing of the release |
@@ -2202,10 +2005,6 @@ check.
    ciphertext digest (§11) is over ciphertext.
 9. **Renderer minor equals the node's minor and is at least the target
    contract's**; Kubernetes is inside the window.
-10. **An import base under the check is published only with its typed
-    equivalence recorded.** A release whose machine carries one (§6.2) commits
-    only after the check of §6.2 found the machine equal, and no digest of the
-    render stands in for it.
 
 ## 15. Verification and evidence limits
 
@@ -2236,13 +2035,6 @@ each:
   with references in the import base as well as in fragments, and SP's oracle
   over the PoC's own log and support formats (§8.4);
 - a fidelity check that fires on an injected structural change (§8.1);
-- the typed equivalence check of §6.2 through the compiler's own composition
-  path, with its three required rejection checks, each of which must fail
-  without the check: N1 (a changed value), N2 (a dropped key) and N4 (a rotated
-  secret behind an unchanged reference, refused `cannot-decide`, with a
-  comparison of the redacted forms as the control that reads it equal), and a
-  pass for a moved document
-  that a digest of the render refuses;
 - every refusal in §13.
 
 Evidence gaps this contract carries rather than closes:
@@ -2371,17 +2163,6 @@ acceptance.
   fidelity failure (§8.1), so a short value can block a publication that would
   otherwise be correct; no case measured how often.
 - **Embedded formatting**: an author's formatting is not preserved (§5.4).
-- **The typed equivalence check** (§6.2): measured on a synthetic cluster of
-  six machines from one generated configuration, in a program that calls the
-  ingestion and compilation packages as a library
-  ([research note §4, §9](../design/research/20261118-import-analysis-and-equivalence.md)).
-  A changed value (N1) and a dropped key (N2) were detected on two machines. A
-  rotated secret behind an unchanged reference (N4) was measured only for the
-  digest of the render and for a redacted form; the typed comparison refuses to
-  decide it, and the required check of §6.2 is what measures that. It can refuse an equivalent change (a default written against
-  omitted), applies no typed defaults, counts list order, and was not run on a
-  group whose machines classify differently. No real node, no comments served by
-  a real node, and no cluster was involved.
 
 **Dependencies**
 
@@ -2667,31 +2448,6 @@ in place as
     added, which one later fragment defeats and which drops a normalisation the
     compilation states on purpose; a normalised form in every comparison, which
     makes Applied and drift stop meaning the bytes on the node.
-40. **The typed equivalence check is the proof that a refactoring does not
-    change a machine's configuration** (§6.2; persistence and API choice
-    §17.50). The owner's words on ginsys/bronzeward#861 (2026-11-19) are that
-    the check comes first, then an assisted proposal, with no automatic split:
-    the order is his. The level of the check is this specification's choice,
-    following the research note's recommendation, and he may overrule it. The
-    check compares the typed documents of two compositions, matched by kind and
-    name, on plaintext, inside the compiler, and reports paths. Alternatives: a
-    digest of the render, which refuses a moved document and a comment
-    (research note §5.1, §5.3); a comparison after a typed re-encoding, which
-    still counts document order; a comparison of parsed trees, which leaves the
-    typed form's normalisation to the reader; a comparison of redacted forms,
-    which cannot see a changed secret behind a reference, which the typed check also does not report but refuses to decide (N4). The cost is a
-    check that can refuse an equivalent change and applies no typed defaults.
-41. **The check runs only where the machine holds what its `Applied` release
-    composed, and refuses otherwise** (§6.2): not pending convergence, and an
-    `Applied` digest equal to its release's own artifact digest. Alternative:
-    compare with the pending `Desired` release and say so in the evidence. The
-    refusal is chosen for two separate reasons. A pending machine may hold its
-    `Applied` release exactly, but the plan that applies the thinner release
-    then carries the pending change to the node too. A machine holding an
-    adopted baseline its `Applied` release did not compose is not described by
-    that release's composition at all, so "equivalent" would compare with
-    something the node does not hold. The cost is that a machine in either state
-    waits to be refactored until a release is applied.
 
 ## 17. Traceability
 
@@ -2718,7 +2474,6 @@ in place as
 | §6 early resolution, superset | §6.2, §6.9, §7.4 | SR §4, §5, [SR §6.2](../design/research/20260924-structural-reference-composition.md#62-criterion-2-effective-and-superset-dependencies), §6.4, §9 |
 | §2.3 step 2a, §6 step 5a, §6.1 hostname | none | Talos machinery v1.14.5 `config/types/network/hostname.go`, `config/generate/network.go`, `config/container/container.go`, the Talos 1.14 "Hostname" page; a scratch probe on the generated base, not kept (§6.1); none for `container` and `cloud`: choices §16.36 to §16.38 |
 | §6 step 7 literal copies | §6.9 | [SP §6.3](../design/research/20260925-sensitivity-provenance.md#63-criterion-3-remaining-leakage-risks-and-dependency-records), [SP §10](../design/research/20260925-sensitivity-provenance.md#10-hand-off) |
-| §6.2 typed equivalence check | §9.1 step 5, §20.7 | [the 20261118 research note](../design/research/20261118-import-analysis-and-equivalence.md) §3, §5, §7; choices §16.40 and §16.41; [persistence and API](persistence-api.md#17-choices-for-owner-review) choice §17.50 |
 | §7 validation stages | §6.9 | [SR §6.3](../design/research/20260924-structural-reference-composition.md#63-criterion-3-parity-validation-collisions-and-rejections) |
 | §8.1 tracer, fidelity | §6.9 | [SP §6.1](../design/research/20260925-sensitivity-provenance.md#61-criterion-1-sensitivity-through-each-transformation), [SP §8](../design/research/20260925-sensitivity-provenance.md#8-limits), [SP §9](../design/research/20260925-sensitivity-provenance.md#9-alternatives-and-decision-enabled) |
 | §8.2 provenance record | §6.9 | SP §6.3; [SP §4.4](../design/research/20260925-sensitivity-provenance.md#44-controls) |
