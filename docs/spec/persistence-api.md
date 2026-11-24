@@ -376,7 +376,12 @@ therefore faces the same check as a thinner base (below, and compilation
 /drafts/{id}/import-bases/{machine}` (§9.2): it stores a new import base
 revision for a machine that has an `Applied` release, as that machine's entry
 in the draft, under the draft's `If-Match`, for an `author`, human only, as
-ingestion is. The body is the proposed sanitized document. The split does not
+ingestion is. The body is the proposed sanitized document. The route first
+applies the document-read authorization of the revision's root (the next
+paragraph but one and §9.2): a caller who may not read the `Applied` import
+base's document gets that read's own refusal, before the subset rule looks at
+the body, so no answer of the route (the `200`, the `422` and its kind) lets a
+caller test a value of a document it cannot read **(choice §17.54)**. The split does not
 happen at ingestion: it holds no author's intent, so a split there is the
 automatic split the owner excluded, and one contract serves both the write and
 its check.
@@ -385,19 +390,23 @@ its check.
 machine's `Applied` release, the base this section defines as the machine's
 current one. It holds no leaf, no value and no reference that base does not
 hold: a document or a key may be dropped, never added, renamed or moved to
-another path; a document the split empties may stay as its identity alone; a
-list is kept whole or dropped whole; and the revision's reference rows are a
-subset of that base's, with the same names and versions. So the route mints no
-generation, writes no provider object, reads no secret value and moves no
-secret: a value the base held as a reference stays a reference in the base or
-in the fragment that took it, which is source text like any other. The rule is
+another path, and nothing that is or holds a reference node is dropped; a
+document the split empties may stay as its identity alone, which it cannot do
+where it holds a reference node; a list is kept whole or dropped whole; and the
+revision's reference rows are the base's, with the same names and versions. So
+the route mints no generation, writes no provider object, reads no secret value
+and moves no secret: a value the base held as a reference stays a reference in
+the base, because the protection against a fragment overriding or deleting it
+(compilation §6 step 7) covers only references still in the import base, and a
+later fragment-only publication runs no equivalence check **(choice §17.55)**. The rule is
 checked on stored source text in the draft transaction (T1), with no provider
 read. A document that breaks it is `422 validation-failed` with rule
 `import-base`, naming the machine and one kind of violation and no path, key or
 name from the body. The kinds are `added` (a document, key, leaf or value the
 base does not hold, which covers a key renamed or moved to another path),
 `list` (a list neither kept whole nor dropped whole) and `reference` (a
-reference row the base does not hold, or one with another name or version). The
+reference node or row of the base dropped, moved, or given another name or
+version). The
 refusal names no path because this check resolves no secret, so it cannot tell
 whether an added key or document name is an earlier extracted value, and
 compilation §3.6 withholds paths for the same reason. A machine with no
@@ -425,7 +434,10 @@ the check do not apply to it. Publication also
 refuses `409 stale-input`, naming the machine with the expected and the actual
 import base revision, when the machine's `Applied` release no longer has the
 import base the entry was written from; it is §4.2's third form, extended to an
-entry that carries one. The check's result is also bound to the state it read:
+entry that carries one. Every entry under the check records the `Applied`
+import base revision it was written against: the draft's own base revision for
+an entry an ingestion wrote, and, for an entry the route wrote, the same
+revision as the one it derives from. The check's result is also bound to the state it read:
 the publish operation's commit transaction (T3) compares, under the machine's
 `MachineState` lock, the `Applied` release and the not-pending condition the
 check used with the current ones, so an apply that completed while the
@@ -440,8 +452,9 @@ route: the import base is the import base revision of the `Applied` release and
 changes only when a release carrying a new base becomes `Applied`. The release
 the publication commits goes to the node by the ordinary `apply-config` plan,
 approval and apply; no new plan kind exists. Because the check passed against
-the `Applied` composition, the plan sends the configuration the node already
-holds, in the typed sense of compilation §6.2. When the check found the bytes
+the `Applied` composition, the plan sends a configuration equal to it, in the
+typed sense of compilation §6.2; whether the node still holds it is the plan's
+own pre-dispatch comparison's to say (execution and recovery §3). When the check found the bytes
 equal (`byteIdentical`), the release's artifact has the `Applied` digest, so a
 comparison of digests alone would leave the machine not pending, offer no plan
 and never advance `Applied`. A machine is therefore also pending convergence
@@ -451,10 +464,17 @@ clients' offer and no plan kind; Bronzeward does not advance `Applied` without
 the node, which would record a node state with no evidence from the node
 **(choice §17.53)**. When that operation completes,
 `Applied` is the new release and its import base, the thinner revision. What an
-approver sees: §9.3 changes in one sentence. Where the plan's `equivalence`
-reads `byteIdentical` (never where it is null, §9.3), the plan's review says that the configuration sent is
-unchanged and that only the recorded import base moves (operator experience
-§2.3), so an empty diff does not read as a fault. The check ran only where the
+approver sees: §9.3 changes in one sentence, driven by a fact of the plan and
+not by the check's result. An `apply-config` plan carries `importBaseOnly`,
+true exactly when its release's artifact digest for the machine is the
+`Applied` digest and the plan exists only because the release's import base
+revision is not the `Applied` release's, whatever the source of that base: an
+import read from a node, a drift adoption or a document import included. It is
+false on a revert, whose pre-dispatch digest is the drifted one, and on a plan
+made after another release became `Applied`. Where it is true the plan's review
+says that the configuration sent is unchanged and that only the recorded import
+base moves (operator experience §2.3), so an empty diff does not read as a
+fault **(choice §17.56)**. The check ran only where the
 machine holds its `Applied` release's artifact, so the plan's diff is the ordinary one,
 from the redacted whole configuration of the `Applied` release to that of the
 plan's release, and it is withheld only where §9.3 already withholds it. The
@@ -2393,7 +2413,7 @@ API revisions:
 | 16 | the `hostname` rule of `422 validation-failed` on publication, with a release compiling a machine's name as its hostname where nothing sets one (§9.2, §3.5, compilation §6.1 item 6) |
 | 17 | the name form of `409 stale-input` from the `ingest` draft transaction, with `expected` and `actual` as machine names, each a string or `null`, and `formOnly` true for a machine whose import removed the fill's own `HostnameConfig` while its name is unchanged (§4.2, choice §17.45, compilation §2.3 step 2a, §6.1 item 5) |
 
-One further part is specified and not yet served, taking the next revision in the change that serves it: the thinner import base, with `PUT` and `DELETE /drafts/{id}/import-bases/{machine}`, the `import-base` and `equivalence` rules of `422 validation-failed`, and the `equivalence` member of a release machine and of an `apply-config` plan (§3.2, §9.2, choice §17.50; ginsys/bronzeward#918 specifies it, an implementation issue serves it).
+One further part is specified and not yet served, taking the next revision in the change that serves it: the thinner import base, with `PUT` and `DELETE /drafts/{id}/import-bases/{machine}`, the `import-base` and `equivalence` rules of `422 validation-failed`, and the `equivalence` member of a release machine and of an `apply-config` plan, with that plan's `importBaseOnly` member (§3.2, §9.2, choices §17.50, §17.56; ginsys/bronzeward#918 specifies it, an implementation issue serves it).
 
 ### 9.2 Resources and routes
 
@@ -2429,7 +2449,7 @@ idempotency and conflict behavior.
 | `POST /discoveries` (find a cluster's identity and members from a first key, as `bronzewardctl cluster discover` does from a talosconfig; API revision 11). The body is a first key's (§3.4): `kind`, `document`, `endpoint`, where `endpoint` is an IP literal or a DNS name with an optional port: the server resolves a name once, under the call's deadline, and the key read, the signing and the first reads of the cluster (identity, version and member list) all go to that address, the walk then dialling each member at an address the member list gives; the node's certificate is checked against the name for those first connections, and a typed address against itself (§3.3, **choice §17.46**); the document is never stored, logged or returned, and there is no Talos context member, because a talosconfig is read at its current context. The server extracts the CA key, signs an `os:reader` certificate valid for the deadline below plus the two seconds of the signer's rounding slack (never above `talos.maxCertLifetime` less two seconds: a deployment whose maximum is shorter answers `503 dependency-unavailable`), reads the cluster with it, and drops the key, the certificate and the document with the request. It reads and writes no provider path, so it works with no signer identity configured. **It records no act, no idempotency record and no first-key row, and has no replay**: it is the one `POST` that only reads, so it takes no `Idempotency-Key`, no `Bronzeward-Expected-Epoch` and no query (a query is `400 invalid-request`), because a stored act or record would keep what the route promises not to and would replay a stale member list. The server's request log line (request identifier, method, path, principal, outcome, member count) is the only trace of a call and holds no key, document, endpoint or member address. **Bounds:** the whole call has a deadline of 60 s from the start of its handler, so reading the request body and, for a talosconfig, reading its endpoint for the key are inside it, and a cluster that lists more than 128 members is refused before any member is dialled; the server already dials the endpoints an author supplies (§3.4, ingestion), and whether it should restrict the addresses it dials is open at [ginsys/bronzeward#1009](https://github.com/ginsys/bronzeward/issues/1009) | 200, `Cache-Control: no-store`, `clusterId`, `version`, `contract`, `supported`, `endpoint` (the address dialled), `kubernetesEndpoint` (the cluster's own control-plane endpoint: `https://` and the first entry of each control-plane member's `KubePrismEndpoints` resource, when at least one control-plane member answered, every one that answered has a value and all the values are equal; a member's value is an entry whose host is an IP literal with no zone that is not the unspecified address, or a DNS name of letters, digits and hyphens with no trailing dot and a last label that is not all digits (a subset of the host grammar `POST /clusters` takes for its `endpoint`, which also takes such a label), not `localhost`, with a port from 1 to 65535, and anything else is no value, a read that fails leaving the member answered; in every other case a proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member), `members` (`nodeId`, `hostname`, `address`, `role`, `smbiosUuid`, `platform`, `answered`, the last three empty or false for a member that did not answer) and `complete`. At the deadline the members read so far are answered and the rest listed `answered: false`, with `complete: false`, so a client does not read an unread member as down; only a cluster identity that was not read fails the call. `422 validation-failed` with the signer's `rule` for an unusable document, no CA key in it, or a talosconfig whose role cannot read the machine configuration (§3.4), and with `rule: too-many-members` and `limit: 128`; `503 talos-access-unavailable` for an endpoint that did not resolve (a name with no address a node can have), did not answer, did not accept the key or, for a name, did not hold the name among its certificate names, or gave no cluster identity (a refused key or name is not told apart from an unreachable endpoint) | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}` | 200, ETag | `author`; `If-Match` |
-| `PUT` or `DELETE /drafts/{id}/import-bases/{machine}` (`PUT` stores a thinner import base for a machine that has an `Applied` release, as its entry in the draft, §3.2, recording the `Applied` import base revision it derives from; the body is the proposed sanitized document, which must be a subset of the import base of the machine's `Applied` release; `422 validation-failed` with rule `import-base` otherwise. `DELETE` drops only that draft entry: the machine keeps its `Applied` import base, the `import-base` rule does not apply, and no import base revision is removed) | 200, ETag | `author`, human only (§10.3); `If-Match` |
+| `PUT` or `DELETE /drafts/{id}/import-bases/{machine}` (`PUT` stores a thinner import base for a machine that has an `Applied` release, as its entry in the draft, §3.2, recording the `Applied` import base revision it derives from; the body is the proposed sanitized document, which must be a subset of the import base of the machine's `Applied` release; before the body is read against that document, the caller must pass the document read's authorization for the revision's root, otherwise that read's `403` or `409` (choice §17.54); `422 validation-failed` with rule `import-base` otherwise. `DELETE` drops only that draft entry: the machine keeps its `Applied` import base, the `import-base` rule does not apply, and no import base revision is removed) | 200, ETag | `author`, human only (§10.3); `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
 | `POST /drafts/{id}/publications` | 202, `publish`, created `queued` (§5.1), or the one already queued or running for the draft revision (§7.3); the body is the operation resource, with its `Location`. `503 dependency-unavailable` from a process without a provider | `publisher`; `If-Match` |
 | `POST /plans` with `operation: apply-config` | 201 | `publisher` (EaR) |
@@ -2720,7 +2740,10 @@ recovery, plan binding), which every plan body carries:
   describe a change from what the check compared: a revert, which overwrites a
   drifted configuration (execution and recovery §6.4), and a plan made while
   the machine's `Applied` release is no longer the one the check read (an
-  `adopt` plan carries `baseline` and no `equivalence`)
+  `adopt` plan carries `baseline` and no `equivalence`), and `importBaseOnly`,
+  a boolean, true exactly when the artifact digest equals the `Applied` digest
+  and the plan exists only because the import base revision differs (§3.2,
+  choice §17.56)
   **(choice §17.38)**; for both, `validation`, the release's validation at
   publication (`result`, `at`, `contract`, `kubernetesVersion`,
   `machineryVersion`, `platformMode`), and `dryRun`, `{"available": false}`
@@ -5493,7 +5516,41 @@ design and evidence do not settle the question. Each is marked in place as
     not the importer read the text of a file import by thinning it, widening
     the restriction that choice §17.41 gives file-imported source text. The
     cost is that a person who thins a file import they did not make cannot read
-    the result, as they could not read its root.
+    the result, as they could not read its root. The thinner-base route itself
+    applies that authorization first (§3.2): the route compares the caller's
+    values with the base's document, so a `200` against a `422` would
+    otherwise tell a caller whether a guessed value is in a document it may
+    not read. Alternative: leave the route open to every `author`, rejected as
+    an oracle for exactly the text the read restriction protects. Every other
+    answer of the route (the `404`, the `409 stale-input` and the `DELETE`)
+    carries an identifier or none and no value of a document.
+55. **A reference node of the import base stays in the thinner base** (§3.2).
+    Decided by the lead of the Bronzeward campaign on 24 November 2026 after a
+    hosted review found that the protection against a fragment overriding or
+    deleting an imported secret (compilation §6 step 7, choice §16.20) covers
+    only references still in the import base, so a reference moved into a
+    fragment would lose it at a later fragment-only publication, which runs no
+    equivalence check; the owner may reverse it. The subset rule therefore
+    drops no reference node and no document or key that holds one. The cost:
+    a refactoring cannot move a reference-bearing value into a shared fragment.
+    Alternative: make the protection follow a relocated reference, through
+    provenance recorded on the fragment revision and a change of the compiler's
+    rule, rejected because it adds a mechanism and a compiler change for a
+    value that is machine-intrinsic and that the protection exists to keep out
+    of shared sources.
+56. **A fact of the plan, `importBaseOnly`, drives the review sentence, and the
+    check's result stays evidence** (§3.2, §9.3; operator experience §2.3).
+    Decided by the lead of the Bronzeward campaign on 24 November 2026 after
+    hosted and local reviews found the sentence "the configuration sent is
+    unchanged" tied to the check's recorded result, which a revert, a plan made
+    after another release became `Applied`, and an import of unchanged bytes
+    read from a node (an unchecked source) each break; the owner may reverse
+    it. The member is derived from digests at plan creation: the artifact
+    digest equals the `Applied` digest and the import base revision differs.
+    Alternative: limit the pending rule of choice §17.53 to entries under the
+    check, rejected because pending would then depend on the entry's source
+    and an unchanged import read from a node could never be recorded as
+    `Applied`.
 
 ## 18. Traceability
 
@@ -5502,7 +5559,7 @@ design and evidence do not settle the question. Each is marked in place as
 | §1 scope, interfaces | §7.2, §11, §13.7 | [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) (Persistence) |
 | §2 identifiers | §4.4, §7.7 | [DB §4.7](../design/research/20260924-database-semantics.md#47-s7-restored-state) row 027; [DB §9](../design/research/20260924-database-semantics.md#9-hand-off) |
 | §3 entities, immutability | §4.4, §6.2, §7.2, §7.8, §11.2 | none: choices §17.3, §17.5, §17.28, §17.31, §17.32, §17.47 |
-| §3.2 thinner import base, typed equivalence check | §9.1 step 5, §20.7 | [the 20261118 research note](../design/research/20261118-import-analysis-and-equivalence.md) §3, §5, §6, §7; choices §17.50 to §17.54; compilation §6.2 |
+| §3.2 thinner import base, typed equivalence check | §9.1 step 5, §20.7 | [the 20261118 research note](../design/research/20261118-import-analysis-and-equivalence.md) §3, §5, §6, §7; choices §17.50 to §17.56; compilation §6.2 |
 | §3.3 Talos access | §7.1, §13.1, §13.2 | `os:admin` needed to read the machine configuration: the fixture's `internal/talos` `TestLiveRoleProbe` (Talos v1.14.5, the same result as on v1.13.6); signing from a control plane configuration or a secrets bundle, a key read through an `os:admin` talosconfig, and a node accepting the signed certificate: [signing locally](../design/research/20261118-local-talos-signing.md) and [the extraction](../design/research/20261118-local-talos-signing-extract.md), Talos v1.14.5 only; revocation, CA rotation and a held connection across a CA replacement not measured; the provider grants on `secret/data/access/talos-ca/*` not measured (choice §17.29); the presence read's answers for a never-written path and a path whose metadata was deleted (HTTP 404, no tombstone) and for a soft-deleted and a destroyed latest version are [RC §4.1](../design/research/20260924-retention-metadata-classification.md#41-openbao) rows 010, 024, 021 and 022 on OpenBao 2.6.1; the access-presence identity's policy (exactly `read` on the metadata path), its refusal of a data read, a list, a delete, a generation read and the Transit calls beside the same request with the grant added, and the classification of its read for a stored, a soft-deleted, an undeleted and a destroyed latest version are measured by `TestLivePresencePolicyExact` and `TestLivePresenceIdentity` against the fixture's OpenBao (choice §17.42); §16 names what they leave unmeasured |
 | §4 revisions, ETags | §7.2, §11.1 | [DB §4.1](../design/research/20260924-database-semantics.md#41-s1-stale-revision-rejection) rows 001–003; DB §4.7; bodies and bindings: choice §17.35 |
 | §4.2 stale input | §7.4 step 4 | [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) rows 010, 011; none for the name check: choice §17.45 |
