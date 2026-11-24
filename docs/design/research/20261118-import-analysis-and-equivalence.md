@@ -327,7 +327,9 @@ Result (`output.txt`, last section): the document is removed and recorded in eve
 recorded as exactly the fill's own only for `auto: off`; compiled again, the digest differs from
 the node's in every case; and the form-only verdict is true only for `auto: off`. With no name
 or another name the document stays and nothing is removed. The measurement stops with an error
-unless these hold, so it cannot pass with no machine removed.
+when the compiler refuses a case, when a no-name or other-name control fails on any row, or when no
+machine with `auto: off` was removed, equal and form-only, so it cannot pass with no machine
+removed. The other results above are recorded in `output.txt`, not asserted.
 
 The rest of `output.txt` is the run of §5, unchanged: a rerun on 24 November 2026 with the
 fixture's pinned `talosctl` gave the same booleans, leaf counts and refusals, and differed in the
