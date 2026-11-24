@@ -41,5 +41,5 @@ export function hostnameLines(h: Hostname | undefined, applied: Applied, current
 export function HostnameLines({ hostname, applied, current }: { hostname: Hostname | undefined; applied: Applied; current: string | null | undefined }) {
   const lines = hostnameLines(hostname, applied, current);
   if (lines.length === 0) return null;
-  return <div data-testid="hostname">{lines.map((l) => <p key={l}>{l}</p>)}</div>;
+  return <div className="hostname" data-testid="hostname"><h3>Hostname</h3>{lines.map((l) => <p key={l}>{l}</p>)}</div>;
 }
