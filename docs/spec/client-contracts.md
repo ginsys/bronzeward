@@ -1751,10 +1751,10 @@ memory, `internal/client/store.go:25-27`, `internal/client/store.go:166-168`; a 
 `internal/client/store.go:110-153`; the notice of a renewal that fails,
 `internal/client/client.go:92-96`; the token file, `cmd/bronzewardctl/commands.go:111`,
 `internal/client/credentials.go:37-65`, `internal/client/credentials.go:94-176`,
-`internal/client/login.go:324-388`, `internal/client/token.go:67`. Item 4: `Setenv` appears nowhere in
+`internal/client/login.go:322-386`, `internal/client/token.go:67`. Item 4: `Setenv` appears nowhere in
 `cmd/bronzewardctl` or `internal/client` outside tests, `os.Environ` only in the re-execution that sets
-`GOTRACEBACK=none` (`cmd/bronzewardctl/main.go:118`), and `exec` is used outside tests only to open the authorization URL
-(`internal/client/login.go:299`, the control of that search) and to run `security` with the secret
+`GOTRACEBACK=none` (`cmd/bronzewardctl/main.go:120`), and `exec` is used outside tests only to open the authorization URL
+(`internal/client/login.go:297`, the control of that search) and to run `security` with the secret
 on its standard input (`internal/client/store_security.go:27-28`); the token's claims are the only
 output of a token (`cmd/bronzewardctl/commands.go:281-282`). That is a search of those two
 directories for those names, not a trace of every output. Item 5: `cmd/bronzewardctl/commands.go:235-259`,
@@ -1994,7 +1994,7 @@ Built, except the parts marked **Proposed** below. Sources follow each item.
    from standard input
    (`--token-stdin`). It never accepts the token as an argument value, nor the token itself in an
    environment variable (decision D6 (a)): `BRONZEWARD_TOKEN_FILE` holds a path, never a secret.
-   (Built: `internal/client/token.go:23-40`, `cmd/bronzewardctl/main.go:337-342`; no token flag and
+   (Built: `internal/client/token.go:23-40`, `cmd/bronzewardctl/main.go:339-344`; no token flag and
    no other `BRONZEWARD_` variable in `cmd/bronzewardctl` or `internal/client` outside tests, whose
    reads are `BRONZEWARD_TOKEN_FILE` and `BRONZEWARD_CONTEXT`.)
 2. A token file must be a regular file readable only by its owner; otherwise the CLI refuses it
@@ -2204,7 +2204,7 @@ as text, never as HTML; a YAML or diff view that highlights syntax builds its no
 text. These limit, but cannot remove, the risk that an injected script uses the in-memory token:
 any script running in the page can call the API as the operator. (Built in the web client:
 `web/index.html:8` loads only `/src/main.tsx`; a search of `web/src` and `web/index.html` outside
-tests for `https?://` finds a documentation link (`web/src/recovery.tsx:91`), the icon attribution comment
+tests for `https?://` finds a documentation link (`web/src/recovery.tsx:95`), the icon attribution comment
 (`web/src/icons.tsx:1`) and URL-shape strings,
 and a search for `sentry|analytics|telemetry|onerror|unhandledrejection|sendBeacon|EventSource|WebSocket`
 finds nothing; the network calls are `web/src/request.ts:356`, `web/src/auth.ts:60` (discovery),
@@ -2745,7 +2745,7 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 
 **Built.** The web client's records are the 40 files of `conformance/cases/` and their browser
 files under `web/e2e/` (run by `mise run browser-auth` and `mise run browser`); the CLI's are the
-45 case ids of `internal/clitest/testdata/*.yaml`, run by `internal/clitest/cli_test.go:726` for
+45 case ids of `internal/clitest/testdata/*.yaml`, run by `internal/clitest/cli_test.go:729` for
 `testdata/cases.yaml` and by `internal/clitest/protected_test.go:322-323` for the protected cases, with
 an in-process TLS injector and `interruptServer` (`internal/clitest/cli_test.go:68`) and the dev
 issuer for the sign-in cases (`internal/clitest/login_idp_test.go`). A row marked built has a record
