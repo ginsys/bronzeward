@@ -393,7 +393,7 @@ func TestOperationWatchFailedDrainReread(t *testing.T) {
 	t.Run("the pages of the end show the read's own epoch: the outcome stands (control)", func(t *testing.T) {
 		code, out, errOut := run(t, "")
 		if code != 0 || !strings.Contains(out, "Succeeded") || !strings.Contains(errOut, "the operation's last events were not shown") ||
-			!strings.Contains(errOut, "events answered 404") || strings.Contains(errOut, "502") {
+			!strings.Contains(errOut, "events answered 404") || strings.Contains(errOut, "answered 502") { // never a bare 502: the server's port is random and the message names it
 			t.Errorf("exit %d, stdout %q, stderr %q; want 0, the completion line, the failed drain reported and no outage", code, out, errOut)
 		}
 	})
