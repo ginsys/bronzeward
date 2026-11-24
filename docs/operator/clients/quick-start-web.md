@@ -51,9 +51,11 @@ The steps are numbered. Each one names what you do and what you should see.
 ## What you did, and what you did not
 
 This page is written from the web client's source and its specification. One part was run in a
-browser: a sign-in on the participant fixture at revision 454b5609, then a read of Machines, which
-gave the screenshot in step 4. No other step was run in a browser, and neither was any failure case
-below. You signed in and read the pages you opened. You asked for no change on the
+browser: a sign-in on the participant fixture at revision 454b5609, then a read of Machines. The
+screenshot in step 4 shows the result: the header after sign-in (step 3), the Machines table, the
+navigation (step 5) and the footer (step 6). It does not show a sign-in failure, the too-old
+message of step 6 or the sign-out of step 7: none of those was run in a browser, nor was either
+failure case below. You signed in and read the pages you opened. You asked for no change on the
 server or on any machine. A list that shows a machine does not show that the machine runs what it
 should: the drift page does that, in the journey pages.
 
