@@ -39,6 +39,18 @@ describe("the publication page (ginsys/bronzeward#342, journeys §5.5)", () => {
     });
   });
 
+  // §8.2, Failed operations: the publication page words a failure by the table row's next step too, except where the
+  // step points at the server's explanation that the text already shows. recovery-mode-entered is a publication's own code.
+  test("a publication ended by recovery-mode entry names its next step, and a code that explains itself adds none", () => {
+    expect(publishEnd(op("failed", null, { type: "urn:bronzeward:problem:recovery-mode-entered", status: 409 }))).toEqual({
+      text: `The publication failed: recovery-mode-entered. ${SENT_NOTHING} Wait for the recovery to finish, then publish again.`,
+    });
+    expect(publishEnd(op("failed", null, { type: "urn:bronzeward:problem:precondition-failed", status: 412 }))).toEqual({
+      text: `The publication failed: precondition-failed. ${SENT_NOTHING} Reload, read the newer version, then decide.`,
+    });
+    expect((publishEnd(op("failed", null, { type: "urn:bronzeward:problem:talos-access-unavailable", status: 503 })) as { text: string }).text).toBe(`The publication failed: talos-access-unavailable. ${SENT_NOTHING}`);
+  });
+
   // ginsys/bronzeward#1055 part 9b: the rule `invalid` is Talos's validation of the machine's whole configuration, and
   // the bare word said nothing a person could act on.
   test("the rule invalid says what it means, and the other rules keep their name", () => {
