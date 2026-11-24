@@ -307,6 +307,33 @@ func TestWatchEndedAfterARecoveryRefusedDrain(t *testing.T) {
 	}
 }
 
+// TestWatchOperationReadRefusedByARecoveryStart checks that a scope-less recovery refusal that the read of the
+// operation itself returns, after an earlier read of it succeeded, ends the watch with that refusal and not with the
+// earlier read: a refusal a read returns directly is its result, not one kept for the end of the watch.
+func TestWatchOperationReadRefusedByARecoveryStart(t *testing.T) {
+	const e1 = "ep_BWSYNTH1"
+	o := &opServer{streams: []func(http.ResponseWriter, *http.Request){sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"running"}}
+	reads := 0
+	f := &fake{epoch: e1, post: func(_ int, w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/operations/op_BWSYNTH" {
+			if reads++; reads > 1 {
+				problemAnswer(w, http.StatusConflict, "recovery-mode-active", "")
+				return
+			}
+		}
+		o.serve(w, r)
+	}}
+	c, _, _ := writeClient(t, f, e1)
+	var waits []time.Duration
+	waitFor = func(ctx context.Context, d time.Duration) error { waits = append(waits, d); return ctx.Err() }
+	t.Cleanup(func() { waitFor = defaultWait })
+	op, _, err := c.Watch("op_BWSYNTH", Watch{Show: func(Event) {}, Until: func() (bool, error) { return sumWaits(waits) >= 3*time.Second, nil }})
+	var p *Problem
+	if reads != 2 || op != nil || errors.Is(err, ErrWatchEnded) || !errors.As(err, &p) || p.Code() != "recovery-mode-active" {
+		t.Errorf("watch: %v, %v after %d reads of the operation; want no operation and the recovery start's refusal, not the first read", op, err, reads)
+	}
+}
+
 // hookWriter is a Notices writer that runs on, once its text appears.
 type hookWriter struct {
 	buf  bytes.Buffer
