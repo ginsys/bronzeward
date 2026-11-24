@@ -55,7 +55,7 @@ function server(o: {
   streams: (Stream | Error)[]; states: string[]; pages?: OpEvent[]; pageRefusals?: number[]; epoch?: string;
   pagesEpoch?: string; probeEpoch?: string; clock?: { t: number }; readTime?: number; streamTime?: number; pagesGate?: Promise<void>;
   pagesUnavailable?: boolean; opFetches?: Fetch[]; pagesDown?: number; pagesOk?: number; renew?: () => Promise<boolean>;
-  duringOp?: () => Promise<unknown>;
+  duringOp?: (() => Promise<unknown>) | undefined;
 }) {
   const opened: Record<string, string>[] = [];
   const urls: string[] = [];
