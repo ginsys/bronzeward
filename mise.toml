@@ -41,6 +41,8 @@ run = "bash scripts/test/completion-shells-test.sh"
 description = "Build the release archives at BW_VERSION into dist/ (ginsys/bronzeward#262 P3, P6): the web tarball and notices, then GoReleaser in snapshot mode; publishes nothing"
 run = """
 : "${BW_VERSION:?set BW_VERSION, e.g. v0.0.0-dev}"
+# .goreleaser.yaml reads the shared Go build workflow's name for the version.
+export RELEASE_VERSION=$BW_VERSION
 bash scripts/release/web-package.sh
 goreleaser release --snapshot --clean
 cp build/bronzeward-web_*.tar.gz dist/

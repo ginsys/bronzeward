@@ -12,7 +12,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/release.yml"
-      - ".github/workflows/release-build.yml"
+      - ".github/workflows/release-sbom.yml"
       - ".github/workflows/release-dry-run.yml"
       - ".goreleaser.yaml"
       - "mise.toml"
@@ -45,28 +45,43 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
-    uses: ginsys/.github/.github/workflows/release.yml@0baa5b46e705654542af90d2af0ebaea32d03ee1 # 2026-11-24
+    uses: ginsys/.github/.github/workflows/release.yml@dc021bb4fc862447e0810d095dd28ece7507ad8e # 2026-11-24
     with:
       action: release
       dry_run: true
 
+  # The build and the SBOMs are the ones release.yml runs, with the same inputs.
   build:
     needs: release
     if: ${{ needs.release.outputs.tag != '' }}
     permissions:
       contents: read
-    uses: ./.github/workflows/release-build.yml
+    uses: ginsys/.github/.github/workflows/build-go.yml@dc021bb4fc862447e0810d095dd28ece7507ad8e # 2026-11-24
     with:
       tag: ${{ needs.release.outputs.tag }}
       sha: ${{ needs.release.outputs.sha }}
+      node-version-file: mise.toml
+      pre-build: BW_VERSION="$RELEASE_VERSION" bash scripts/release/web-package.sh
+      post-build: |
+        cp build/bronzeward-web_*.tar.gz dist/
+        BW_VERSION="$RELEASE_VERSION" EXPECT_REVISION="$RELEASE_SHA" scripts/release/check-build.sh dist
+
+  sbom:
+    needs: [release, build]
+    if: ${{ needs.release.outputs.tag != '' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-sbom.yml
+    with:
+      sha: ${{ needs.release.outputs.sha }}
 
   publish:
-    needs: [release, build]
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    needs: [release, build, sbom]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.sbom.result == 'success' }}
     # A dry run reads and previews only, so it needs no write grant.
     permissions:
       contents: read
-    uses: ginsys/.github/.github/workflows/publish-github.yml@0baa5b46e705654542af90d2af0ebaea32d03ee1 # 2026-11-24
+    uses: ginsys/.github/.github/workflows/publish-github.yml@dc021bb4fc862447e0810d095dd28ece7507ad8e # 2026-11-24
     with:
       tag: ${{ needs.release.outputs.tag }}
       sha: ${{ needs.release.outputs.sha }}

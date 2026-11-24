@@ -1,0 +1,58 @@
+name: Release SBOM
+
+# Called by release.yml and release-dry-run.yml only (ginsys/bronzeward#262); it has no trigger of
+# its own. The archives are built by the shared Go build workflow, which uploads archives and
+# nothing else, so the SBOMs are this job: it downloads those archives (the artifact release-go),
+# writes an SPDX SBOM per archive and uploads them as the artifact release-sbom. The shared publish
+# workflow collects every release-* artifact and writes SHA256SUMS over all of it.
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: "The commit the tag names, from the shared release workflow's output"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # The commit is checked out for web/package-lock.json, which the web bundle's SBOM lists.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-go
+          path: dist
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+        with:
+          syft-version: v1.55.0
+      - name: Write an SPDX SBOM per archive
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        # A binary's SBOM lists the modules of its build information. The web bundle carries no
+        # package metadata, so its SBOM lists the lockfile's production packages; the bundlers'
+        # injected helpers are in its notices only.
+        run: |
+          for a in dist/*.tar.gz; do
+            src=file:$a
+            case $a in dist/bronzeward-web_*) src=file:web/package-lock.json ;; esac
+            "$SYFT" scan "$src" -o "spdx-json=$a.spdx.json"
+          done
+
+      # Two release-* artifacts holding a file of the same name overwrite each other without a
+      # message; release-go holds the archives and this one only the SBOMs.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-sbom
+          path: dist/*.spdx.json
+          retention-days: 14
+          if-no-files-found: error

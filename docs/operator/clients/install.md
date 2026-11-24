@@ -26,8 +26,9 @@ A release is one set of seven archives and a checksum file. The names come from
 | `SHA256SUMS` | one checksum for each file of the release: the archives above and the bill of materials files below | everyone who verifies |
 
 Each client and server archive also holds `LICENSE-STATUS.md` and `THIRD_PARTY_NOTICES.txt`.
-The release workflow (`.github/workflows/release.yml`) adds a software bill of materials file for
-each archive (`<archive>.spdx.json`) in `.github/workflows/release-build.yml`. The shared publish
+The release workflow (`.github/workflows/release.yml`) builds the archives with the shared Go build
+workflow of ginsys/.github (`build-go.yml`) and adds a software bill of materials file for each
+archive (`<archive>.spdx.json`) in `.github/workflows/release-sbom.yml`. The shared publish
 workflow of ginsys/.github (`publish-github.yml`) adds a signature bundle for `SHA256SUMS`
 (`SHA256SUMS.sigstore.json`) and a build attestation (a signed statement of how the file was built)
 for each file `SHA256SUMS` lists. It publishes them as a pre-release that is never marked as the

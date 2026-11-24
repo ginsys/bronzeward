@@ -25,4 +25,4 @@ jobs:
   changelog-fragment:
     permissions:
       contents: read
-    uses: ginsys/.github/.github/workflows/changelog-fragment.yml@0baa5b46e705654542af90d2af0ebaea32d03ee1 # 2026-11-24
+    uses: ginsys/.github/.github/workflows/changelog-fragment.yml@dc021bb4fc862447e0810d095dd28ece7507ad8e # 2026-11-24

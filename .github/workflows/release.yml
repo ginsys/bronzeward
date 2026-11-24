@@ -56,30 +56,47 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
-    uses: ginsys/.github/.github/workflows/release.yml@0baa5b46e705654542af90d2af0ebaea32d03ee1 # 2026-11-24
+    uses: ginsys/.github/.github/workflows/release.yml@dc021bb4fc862447e0810d095dd28ece7507ad8e # 2026-11-24
     with:
       action: ${{ inputs.action }}
       dry_run: ${{ inputs.dry_run }}
 
-  # The two jobs below run only for an action that makes a tag: the others leave `tag` empty.
+  # The three jobs below run only for an action that makes a tag: the others leave `tag` empty.
   build:
     needs: release
     if: ${{ needs.release.outputs.tag != '' }}
     permissions:
       contents: read
-    uses: ./.github/workflows/release-build.yml
+    uses: ginsys/.github/.github/workflows/build-go.yml@dc021bb4fc862447e0810d095dd28ece7507ad8e # 2026-11-24
     with:
       tag: ${{ needs.release.outputs.tag }}
       sha: ${{ needs.release.outputs.sha }}
+      node-version-file: mise.toml
+      # The web bundle and the notices go first (GoReleaser reads the notices, and the web tarball is
+      # one of the archives); the checks then read the archives as GoReleaser left them.
+      pre-build: BW_VERSION="$RELEASE_VERSION" bash scripts/release/web-package.sh
+      post-build: |
+        cp build/bronzeward-web_*.tar.gz dist/
+        BW_VERSION="$RELEASE_VERSION" EXPECT_REVISION="$RELEASE_SHA" scripts/release/check-build.sh dist
+
+  # The shared build uploads archives only: the SBOMs are this repository's own job.
+  sbom:
+    needs: [release, build]
+    if: ${{ needs.release.outputs.tag != '' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-sbom.yml
+    with:
+      sha: ${{ needs.release.outputs.sha }}
 
   publish:
-    needs: [release, build]
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    needs: [release, build, sbom]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.sbom.result == 'success' }}
     permissions:
       contents: write
       id-token: write
       attestations: write
-    uses: ginsys/.github/.github/workflows/publish-github.yml@0baa5b46e705654542af90d2af0ebaea32d03ee1 # 2026-11-24
+    uses: ginsys/.github/.github/workflows/publish-github.yml@dc021bb4fc862447e0810d095dd28ece7507ad8e # 2026-11-24
     with:
       tag: ${{ needs.release.outputs.tag }}
       sha: ${{ needs.release.outputs.sha }}

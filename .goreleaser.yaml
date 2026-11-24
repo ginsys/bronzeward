@@ -1,8 +1,9 @@
 # The release archives of ginsys/bronzeward#262 (P3, P6): bronzewardctl for the four decided
 # targets, the Linux server binary, and SHA256SUMS over them and the web tarball that
-# scripts/release/web-package.sh writes to build/ first. `mise run package` runs this in snapshot
-# mode; nothing here publishes (release.disable). Every input of an archive is fixed by the commit:
-# the version comes from BW_VERSION, every time from the commit time.
+# scripts/release/web-package.sh writes to build/ first. `mise run package` and the shared Go build
+# workflow run this in snapshot mode; nothing here publishes (release.disable). Every input of an
+# archive is fixed by the commit: the version comes from RELEASE_VERSION (the shared workflow's
+# name for the tag; `mise run package` sets it from BW_VERSION), every time from the commit time.
 version: 2
 project_name: bronzeward
 
@@ -16,7 +17,7 @@ builds:
     goos: [linux, darwin]
     goarch: [amd64, arm64]
     flags: [-trimpath, -buildvcs=true]
-    ldflags: ["-s -w -X main.version={{ .Env.BW_VERSION }}"]
+    ldflags: ["-s -w -X main.version={{ .Env.RELEASE_VERSION }}"]
     mod_timestamp: "{{ .CommitTimestamp }}"
   - id: bronzeward
     main: ./cmd/bronzeward
@@ -24,7 +25,7 @@ builds:
     goos: [linux]
     goarch: [amd64, arm64]
     flags: [-trimpath, -buildvcs=true]
-    ldflags: ["-s -w -X github.com/ginsys/bronzeward/internal/api.version={{ .Env.BW_VERSION }}"]
+    ldflags: ["-s -w -X github.com/ginsys/bronzeward/internal/api.version={{ .Env.RELEASE_VERSION }}"]
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 # Entry owner, mode and time fixed, so the archive bytes depend on the commit alone.
@@ -32,7 +33,7 @@ archives:
   - id: bronzewardctl
     ids: [bronzewardctl]
     formats: [tar.gz]
-    name_template: 'bronzewardctl_{{ trimprefix .Env.BW_VERSION "v" }}_{{ .Os }}_{{ .Arch }}'
+    name_template: 'bronzewardctl_{{ trimprefix .Env.RELEASE_VERSION "v" }}_{{ .Os }}_{{ .Arch }}'
     builds_info: {owner: root, group: root, mtime: "{{ .CommitDate }}"}
     files:
       - {src: LICENSE-STATUS.md, info: &file_info {owner: root, group: root, mode: 0644, mtime: "{{ .CommitDate }}"}}
@@ -40,7 +41,7 @@ archives:
   - id: bronzeward
     ids: [bronzeward]
     formats: [tar.gz]
-    name_template: 'bronzeward_{{ trimprefix .Env.BW_VERSION "v" }}_{{ .Os }}_{{ .Arch }}'
+    name_template: 'bronzeward_{{ trimprefix .Env.RELEASE_VERSION "v" }}_{{ .Os }}_{{ .Arch }}'
     builds_info: {owner: root, group: root, mtime: "{{ .CommitDate }}"}
     files:
       - {src: LICENSE-STATUS.md, info: *file_info}
@@ -53,13 +54,13 @@ checksum:
     - glob: build/bronzeward-web_*.tar.gz
 
 snapshot:
-  version_template: '{{ trimprefix .Env.BW_VERSION "v" }}'
+  version_template: '{{ trimprefix .Env.RELEASE_VERSION "v" }}'
 
 changelog:
   disable: true
 
 # GoReleaser only builds. The release workflow (.github/workflows/release.yml) builds these snapshot
-# archives, adds their SBOMs, and has the shared publish workflow sign and publish them; it stops
-# at the licence (#16).
+# archives through the shared Go build workflow, adds their SBOMs, and has the shared publish
+# workflow sign and publish them; it stops at the licence (#16).
 release:
   disable: true
