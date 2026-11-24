@@ -206,9 +206,9 @@ when every document, key and value is equal, secrets included, compared as plain
 server; whatever it cannot decide, and a machine with an identified embedded document, reads
 "differs". A machine whose import removed a hostname document that was exactly what the fill
 writes (`auto: off` and the hostname, nothing else) reads form only while its name is the one
-recorded at import, and "differs" after a rename (compilation §6, choice §16.39). So does a
-machine whose import removed a document that held more, and one whose import removed a legacy
-`machine.network.hostname` key equal to its name (compilation §2.3 step 2a): the node holds a key
+recorded at import, and "differs" after a rename (compilation §6, choice §16.39). A machine whose
+import removed a document that held more, or a legacy `machine.network.hostname` key equal to its
+name (compilation §2.3 step 2a), reads "differs": the node holds a key
 and the release sends a document, and whether that is no change on the node is unmeasured
 ([ginsys/bronzeward#1040](https://github.com/ginsys/bronzeward/issues/1040)). A machine with an open
 drift never reads form only, and its adopt plan does not say it.
@@ -522,9 +522,9 @@ compilation §6.1 item 2), the import removes that document from the stored base
 the name (compilation §2.3 step 2a), so a later rename reaches the machine through a new release and
 an approved plan, and the clients say so where they offer the rename (client contracts A9 item 6). The same
 holds for the legacy `machine.network.hostname` key where it equals the name and the configuration holds no
-`HostnameConfig` and does not set `stableHostname`: the import removes the key alone. A hostname equal to the
-machine's previous name is not released: after a rename and before the next release is applied, an import or
-onboarding again keeps it as an explicit hostname, the review says "set in the configuration", and the rename
+`HostnameConfig` and does not set `stableHostname` to `true` or a reference: the import removes the key alone. A hostname equal to the
+machine's previous name is not released: after a rename and before the next release is applied, an import,
+onboarding again or a drift adoption keeps it as an explicit hostname, the review says "set in the configuration", and the rename
 does not reach the machine until a `HostnameConfig` document is deleted with a fragment; for a legacy key no
 such hand-over is measured (compilation §6.1 item 5).
 

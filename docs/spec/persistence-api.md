@@ -5226,11 +5226,11 @@ design and evidence do not settle the question. Each is marked in place as
     back in its own encoding, so its value is not the node's. A machine whose
     import removed a hostname document that was exactly what the fill writes
     reads true while its name is the one recorded at import, and "differs" after
-    a rename (compilation §6, choice §16.39). So does a machine whose import
-    removed a document that held more, or a legacy `machine.network.hostname`
-    key equal to its name (compilation §2.3 step 2a): the node holds a key and
-    the release sends a document, and whether that changes nothing on the node
-    is unmeasured (ginsys/bronzeward#1040). The verdict is read in three places, each with its own condition:
+    a rename (compilation §6, choice §16.39). A machine whose import removed a
+    document that held more, or a legacy `machine.network.hostname` key equal
+    to its name (compilation §2.3 step 2a), reads "differs": the node holds a
+    key and the release sends a document, and whether that changes nothing on
+    the node is unmeasured (ginsys/bronzeward#1040). The verdict is read in three places, each with its own condition:
     the machine's `formOnly`, true while its Desired release is pending, no
     drift is open and Applied's digest is the import base's; an adopt plan's
     `baseline.formOnly`, true for a first adoption whose release is pending,

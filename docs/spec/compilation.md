@@ -1124,7 +1124,8 @@ unmeasured.
    `HostnameConfig` whose hostname equals the machine's name is removed from
    the stored base and recorded as filled, and so is a legacy
    `machine.network.hostname` that equals it where no such document is present
-   and `stableHostname` is not set (step 2a: the key alone goes). Why: an onboarded machine takes its
+   and `stableHostname` is not `true` or a reference (step 2a: the key alone
+   goes). Why: an onboarded machine takes its
    name from its own hostname
    ([operator experience §5.2](operator-experience.md)), so its import base
    holds that hostname explicitly, and without the rule a rename would never
@@ -1144,9 +1145,9 @@ unmeasured.
    key and the release sends a document, and whether Talos treats that move as
    no change on the node is unmeasured here. **A hostname equal to the
    machine's previous name is not released (choice §16.37, option A rejected
-   for now).** After a rename and before the next release is applied, an import
-   or onboarding again reads a node whose document or key still holds the
-   previous name. It differs from the current name, so it stays explicit: the
+   for now).** After a rename and before the next release is applied, an import,
+   onboarding again or a drift adoption (which runs step 2a too) reads a node
+   whose document or key still holds the previous name. It differs from the current name, so it stays explicit: the
    release records the source `configuration` (persistence and API §9.2) and
    the rename does not reach the node. The import knows the current name only,
    and cannot tell the fill's earlier write from an operator's hostname that
@@ -2448,7 +2449,7 @@ in place as
     release that can read as pending convergence against the baseline.
     **Extended to the legacy key** (ginsys/bronzeward#1054): a `machine.network.hostname` equal to the name is
     removed as a key, where no `HostnameConfig` is present and `stableHostname`
-    is not set, for the same reason: the onboarded machine is named from its own
+    is not `true` or a reference, for the same reason: the onboarded machine is named from its own
     hostname whichever field holds it, and no hand-over is measured for a key.
     Alternative: limit the claim to a document and let the review say "set in the
     configuration" for a key (client contracts A9 item 7), which is documentation
