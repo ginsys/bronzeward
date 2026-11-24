@@ -106,11 +106,11 @@ func (d *draftEnv) release(draft string, revision int, provenance string) releas
 		}
 		mustExec(t, tx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision, assignment_revision, mode,
 				ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation,
-				hostname_source, hostname_name)
-			VALUES ($1, $2, $3, $4, $9, 'container', $5, $6, $10, $7, $8::jsonb, 'bw-artifact', $11, $12, $13)`,
+				hostname_source, hostname_name, node_name_recorded, node_name)
+			VALUES ($1, $2, $3, $4, $9, 'container', $5, $6, $10, $7, $8::jsonb, 'bw-artifact', $11, $12, $13, $14, $15)`,
 			s.rel, d.cluster, m.machine, m.ibr, releaseCipher, make([]byte, 32), m.redacted,
 			strings.NewReplacer("{ibr}", m.ibr, "{ibr2}", ibr2, "{frv}", s.frv).Replace(provenance), asr, artifact, dbtest.PublicationObservation(t, tx, m.machine, s.op),
-			host.source, host.name)
+			host.source, host.name, d.nodeNames[i].recorded, d.nodeNames[i].name)
 		if d.assigned {
 			mustExec(t, tx, `INSERT INTO release_source (release, cluster, kind, assignment, machine, assignment_revision, head_revision)
 				VALUES ($1, $2, 'assignment', $3, $4, $5, 1)`, s.rel, d.cluster, heads[i][0], m.machine, heads[i][1])

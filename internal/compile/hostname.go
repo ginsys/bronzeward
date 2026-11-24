@@ -2,6 +2,7 @@ package compile
 
 import (
 	"errors"
+	"maps"
 	"strings"
 
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
@@ -53,6 +54,38 @@ func (c Compiled) NodeName() (string, bool, error) {
 	}
 	node := nodeName(host, fqdn)
 	return node, node != "", nil
+}
+
+// RecordedNodeName is the node name a release records for this machine (persistence-api.md §9.3), and
+// whether one is recorded. It is NodeName's answer, kept only where the review shows every input to the
+// name as the literal it is: where the review is withheld in whole (redacted is nil), or redacts the
+// hostname or registerWithFQDN by value, so that the review's leaves differ from the composition's or
+// cannot be read, the record is "not compared", never more than the review shows.
+func (c Compiled) RecordedNodeName(redacted *string) (string, bool, error) {
+	node, known, err := c.NodeName()
+	if err != nil || !known || redacted == nil {
+		return "", false, err
+	}
+	have, okHave := nodeLeafValues(c.m.bytes())
+	seen, okSeen := nodeLeafValues([]byte(*redacted))
+	if !okHave || !okSeen || !maps.Equal(have, seen) {
+		return "", false, nil
+	}
+	return node, true, nil
+}
+
+// nodeLeafValues are the scalar texts at the four leaves the node name derives from, by path. The review
+// is not a configuration the loader accepts (its placeholders fill typed fields), so the leaves are read
+// as text; a stream that cannot be walked answers false.
+func nodeLeafValues(b []byte) (map[string]string, bool) {
+	values := map[string]string{}
+	err := ingest.WalkLeaves(b, nil, func(p ingest.Path, n *yaml.Node) error {
+		if p.Format == "" && nodeLeafPointer(p.Pointer) {
+			values[p.String()] = n.Value
+		}
+		return nil
+	})
+	return values, err == nil
 }
 
 // holdsNodeLeaf reports whether a secret reference's value reached one of the four leaves the node name

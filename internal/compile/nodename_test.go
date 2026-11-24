@@ -140,3 +140,43 @@ func TestNodeNameShowsNoValue(t *testing.T) {
 		t.Errorf("NodeName() = %q, %v: it shows the held value", node, err)
 	}
 }
+
+// TestRecordedNodeName: the node name a release records is NodeName's, kept only where the review shows
+// every input to it as the literal it is (persistence-api.md §9.3). A secret reference that happens to
+// resolve to the filled name elsewhere in the composition is compared by NodeName but redacted by value
+// at the hostname leaf in the review, so the record is "not compared"; a withheld review (nil) is too.
+func TestRecordedNodeName(t *testing.T) {
+	label := func(v string) Source {
+		return source(t, "machine:\n  nodeLabels:\n    s: !bwref app/short\n", strRef("app/short"),
+			map[string]provider.Value{"app/short": value(t, provider.KindString, v)})
+	}
+	review := func(c Compiled) *string {
+		r, err := c.Redacted()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &r
+	}
+	for _, tc := range []struct {
+		name  string
+		c     Compiled
+		nilR  bool // the review is withheld
+		node  string
+		known bool
+	}{
+		{"a filled name, the review shows it", compiled(t, hostIn(generated(t), "abc", ModeMetal, label("another-value"))), false, "abc", true},
+		{"an explicit hostname, the review shows it", compiled(t, hostIn(generated(t), hostMachine, ModeMetal, frag(t, hostDoc("node-a.example.org")))), false, "node-a", true},
+		{"a secret elsewhere resolves to the filled name: the review redacts it by value", compiled(t, hostIn(generated(t), "abc", ModeMetal, label("abc"))), false, "", false},
+		{"the review is withheld in whole", compiled(t, hostIn(generated(t), "abc", ModeMetal, label("another-value"))), true, "", false},
+		{"no hostname is set", compiled(t, hostIn(generated(t), "", ModeMetal)), false, "", false},
+	} {
+		var r *string
+		if !tc.nilR {
+			r = review(tc.c)
+		}
+		node, known, err := tc.c.RecordedNodeName(r)
+		if err != nil || known != tc.known || node != tc.node {
+			t.Errorf("%s: RecordedNodeName = %q, %v, %v; want %q, %v, nil", tc.name, node, known, err, tc.node, tc.known)
+		}
+	}
+}

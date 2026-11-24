@@ -158,6 +158,13 @@ func machineRecords(m snapshotMachine, c compile.Compiled, s snapshot, pins pinn
 	if r, err := c.Redacted(); err == nil {
 		um.redacted = &r
 	}
+	node, known, err := c.RecordedNodeName(um.redacted)
+	if err != nil {
+		return unitMachine{}, err
+	}
+	if known {
+		um.nodeName = &node
+	}
 	declared := func(rev, reference string, version int64) (unitDependency, error) {
 		obj, ok := s.sources[rev].generations[reference]
 		if !ok {

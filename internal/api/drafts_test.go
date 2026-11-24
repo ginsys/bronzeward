@@ -27,6 +27,14 @@ type draftEnv struct {
 	artifact                            []byte               // d.release's artifact configuration digest, when set
 	heads                               map[string][2]string // a machine's assignment and its head revision, by d.assignment
 	hostnames                           [2]hostRecord        // d.release's hostname record of d.machine and of the second machine; none for the zero value
+	nodeNames                           [2]nodeRecord        // d.release's node name record of the same two machines; not recorded for the zero value
+}
+
+// nodeRecord is a seeded release machine's node name record: whether it was recorded (a release made
+// after revision 18), and the name, nil for a recorded null (not compared).
+type nodeRecord struct {
+	recorded bool
+	name     *string
 }
 
 // hostRecord is a seeded release machine's hostname source and name column.

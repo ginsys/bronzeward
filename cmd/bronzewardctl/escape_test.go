@@ -92,7 +92,7 @@ func (f *filler) raw() json.RawMessage {
 const notShown = "AccessVersionBody.Created AccessVersionBody.NotAfter AccessVersionBody.Path AccessVersionBody.Serial ActItem.Epoch ActItem.IdempotencyKey ActItem.RequestId " +
 	"Applied.ImportBase AttemptAccounting.Basis AttemptBody.Observation AttemptResponse.Class " +
 	"Embedded.Format Embedded.Path EndpointChangeBody.Act EndpointChangeBody.ChangedBy EndpointChangeBody.Epoch " +
-	"EndpointChangeBody.Role Hardware.Serial HostnameBody.Name HostnameBody.Source IdentityBody.Issuer IdentityBody.Subject NameChangeBody.Act NameChangeBody.ChangedBy NameChangeBody.Epoch NameChangeBody.Role " +
+	"EndpointChangeBody.Role Hardware.Serial HostnameBody.Name HostnameBody.NodeName HostnameBody.Source IdentityBody.Issuer IdentityBody.Subject NameChangeBody.Act NameChangeBody.ChangedBy NameChangeBody.Epoch NameChangeBody.Role " +
 	"ObservationBody.AssignmentEvidence ObservationBody.Controller ObservationBody.Health ObservationBody.Machine " +
 	"ObservationBody.Operation ObservationBody.Plan ObservationBody.ResourceVersion ObservationBody.RunningVersion " +
 	"ObservationBody.SmbiosUuid ObservationBody.TalosClusterId ObservationBody.TalosNodeId " +

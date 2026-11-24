@@ -66,6 +66,7 @@ type unitMachine struct {
 	formOnly                              bool             // the compiled configuration differs from the import base in form only
 	name                                  string           // the machine's name at the snapshot, "" for none (§3.5)
 	hostname                              compile.Hostname // where its hostname came from (compilation §6.1)
+	nodeName                              *string          // the node name it records; nil: not compared (persistence-api.md §9.3)
 }
 
 // unitDependency is one dependency record: a KV generation path or the Transit key name, its
@@ -735,11 +736,11 @@ func insertReleaseMachine(ctx context.Context, tx *sql.Tx, rel, cluster string, 
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO release_machine (release, cluster, machine, import_base_revision,
 		assignment_revision, mode, ciphertext, ciphertext_digest, configuration_digest, redacted, provenance, key_name, publication_observation,
-		form_only, hostname_source, hostname_name)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`, rel, cluster, m.machine, m.importBase,
+		form_only, hostname_source, hostname_name, node_name_recorded, node_name)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, true, $17)`, rel, cluster, m.machine, m.importBase,
 		sql.NullString{String: m.assignment, Valid: m.assignment != ""}, m.mode, string(m.ciphertext), cipherDigest[:],
 		m.configuration[:], redacted, string(provenance), m.encryption.object, m.observation, m.formOnly,
-		string(m.hostname.Source), sql.NullString{String: m.hostname.Name, Valid: m.hostname.Name != ""})
+		string(m.hostname.Source), sql.NullString{String: m.hostname.Name, Valid: m.hostname.Name != ""}, m.nodeName)
 	return err
 }
 
