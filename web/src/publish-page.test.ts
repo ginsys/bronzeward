@@ -57,8 +57,13 @@ describe("a publication refused 412", () => {
     const writes = new Writes(() => "p");
     writes.client = { currentEpoch: "e0" } as unknown as Writes["client"];
     const sent: (string | undefined)[] = [];
+    const post: { release?: () => void; next: boolean } = { next: false };
     vi.spyOn(writes, "submit").mockImplementation(async (w) => {
       sent.push(w.spec.ifMatch);
+      if (post.next) {
+        post.next = false;
+        await new Promise<void>((r) => (post.release = r));
+      }
       w.outcome = { kind: "refused", status: 412, problem: null, replayed: false };
       w.spec.settled?.(w.outcome, w);
       return w.outcome;
@@ -69,7 +74,7 @@ describe("a publication refused 412", () => {
       root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author", "publisher", "approver"], offline: false } }, h(ReadsProvider, { value: reads }, h(PublishDraft, { query: `draft=${DRF}` }))))),
     );
     await settle();
-    return { draft, held, sent, settle, click, lives, reads: () => draftReads };
+    return { draft, held, post, sent, settle, click, lives, reads: () => draftReads };
   };
 
   test("shows the draft's revision and state without a press, keeps the refusal and no ETag, and Publish then sends nothing", async () => {
@@ -131,6 +136,21 @@ describe("a publication refused 412", () => {
     await act(async () => p.held.release!());
     await p.settle();
     expect(p.lives.slice(before)).toEqual([false]);
+    root = createRoot(box);
+  });
+
+  test("a 412 answered after the page is gone starts no read", async () => {
+    const p = await mount();
+    p.post.next = true;
+    await p.click("Publish");
+    await p.settle();
+    const reads = p.reads();
+    const before = p.lives.length;
+    await act(async () => root.unmount());
+    await act(async () => p.post.release!());
+    await p.settle();
+    expect(p.reads()).toBe(reads);
+    expect(p.lives.length).toBe(before);
     root = createRoot(box);
   });
 });

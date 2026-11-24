@@ -196,15 +196,16 @@ function Publish({ id }: { id: string }) {
   };
   useEffect(() => () => void newest.current++, []);
   const publish = () => {
-    newest.current++;
+    const mine = ++newest.current;
     const ifMatch = keptETag(id, epoch);
     setNote(ifMatch === undefined ? NO_ETAG : undefined);
     setNow(undefined);
     // A 412 says the kept ETag is stale: it is forgotten, so Publish sends nothing until the draft is read again.
+    // The refusal may answer after this press was overtaken or the page left: it then starts no read.
     const settled = (s: Outcome) => {
       if (s.kind !== "refused" || s.status !== 412) return;
       forgetETag(id);
-      showNow();
+      if (mine === newest.current) showNow();
     };
     if (ifMatch !== undefined) send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, ifMatch, resource: `/drafts/${id}`, settled });
   };
