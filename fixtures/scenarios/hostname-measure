@@ -140,7 +140,7 @@ skip_row() { printf 'SKIP\t%s\t%s\n' "$1" "$2" | tee -a "$EV/table.tsv"; }
 
 # Step 0: the equivalence measurements of docs/design/research/20261118-import-analysis-and-equivalence.md
 # rerun with the fixture's own pinned talosctl (the manifest pins the version the note names). Before
-# any release is made, so a failure costs no release; its wall time is the record's, since the note holds none. gen.sh
+# any release is made; its wall time is the record's, since the note holds none. gen.sh
 # finds its talosctl beside itself, so it runs from a copy in $STATE with a link to the verified binary; the
 # synthetic cluster it makes is under $STATE too and holds no credential of a real host.
 equivalence() {
