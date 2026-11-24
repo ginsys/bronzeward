@@ -120,8 +120,8 @@ function server(o: {
 function recorder(until?: (shown: OpEvent[]) => boolean | Promise<boolean>, clock = { t: 0 }) {
   const shown: OpEvent[] = [];
   const log: string[] = [];
-  // One entry for each wait of the watch, however many steps it takes; `steps` holds the steps of the
-  // waits that ask `until` (§8.6 item 2), in ms.
+  // One entry for each wait of the watch, however many steps it takes; `steps` holds the steps of those
+  // waits, each asking `until` (§8.6 item 2), in ms.
   const sleeps: number[] = [];
   const steps: number[] = [];
   const abort = new AbortController();
@@ -130,9 +130,9 @@ function recorder(until?: (shown: OpEvent[]) => boolean | Promise<boolean>, cloc
     onWait?.();
     return stepWait(async (step) => { steps.push(step); }, ms, signal, stop);
   };
-  const pace: Pace = { sleep: async (ms) => { sleeps.push(ms); }, wait: wait(), now: () => clock.t, idle: 20 };
-  // The same pace, with `onWait` called at the start of each wait, the ones that step included.
-  const paced = (onWait: () => void): Pace => ({ ...pace, sleep: async (ms) => { sleeps.push(ms); onWait(); }, wait: wait(onWait) });
+  const pace: Pace = { wait: wait(), now: () => clock.t, idle: 20 };
+  // The same pace, with `onWait` called at the start of each wait.
+  const paced = (onWait: () => void): Pace => ({ ...pace, wait: wait(onWait) });
   return {
     shown, log, sleeps, steps, abort, pace, paced, clock,
     w: {
@@ -376,12 +376,13 @@ describe("the operation progress reader (§8.6)", () => {
     test("the wait is in steps of 250 ms, each asking until, and an until that answers true ends the watch with the last read", async () => {
       const s = server({ streams: quiet(3), states: ["running"], opFetches: ["running", ...down("503")] });
       let asked = 0;
-      const r = recorder(() => ++asked >= 3);
+      // Counted from the outage on: the ordinary wait after the running read asks until too.
+      const r = recorder(() => opReads(s) >= 2 && ++asked >= 3);
       const out = await watch(s.client, OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "ended", operation: { state: "running" }, epoch: "e1" });
-      // The first wait is the ordinary one after a running read; the waits of the outage are steps.
+      // The first wait is the ordinary one after a running read (four steps); the outage's is stopped at its third.
       expect(r.sleeps).toEqual([1000, 1000]);
-      expect(r.steps).toEqual([250, 250]);
+      expect(r.steps).toEqual(Array(7).fill(250));
       expect(asked).toBe(3);
     });
 
@@ -497,7 +498,7 @@ describe("the operation progress reader (§8.6)", () => {
       expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
       // The ordinary wait after the running read, then the two waits of the outage, each in steps of 250 ms.
       expect(r.sleeps).toEqual([1000, 1000, 2000]);
-      expect(r.steps).toEqual(Array(12).fill(250));
+      expect(r.steps).toEqual(Array(16).fill(250));
     });
 
     // A 401 is renewed once for all the sends of a phase (the CLI's retryIn keeps `renewed`), so the second
@@ -560,9 +561,42 @@ describe("the operation progress reader (§8.6)", () => {
       // The reread is answered with nothing, so the next pass opens the second stream; its event is of another
       // epoch than its stream, and the outage that follows ends the watch.
       const s = server({ streams: [{ chunks: [] }, { chunks: [frame(ev("e2:1"))] }, ...quiet(2)], states: ["succeeded"], pageRefusals: [403], opFetches: ["succeeded", "503"] });
-      const r = recorder(() => true);
+      // Until answers true from the outage on (the second fetch of the operation: the discarded reread is never
+      // sent): the wait after that reread asks it too, and an answer there would end the watch with the refused
+      // drain's failure before the second stream is opened.
+      const r = recorder(() => opReads(s) >= 2);
       const out = await watch(discarding(s, 2) as unknown as Parameters<typeof watch>[0], OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "failed", res: { kind: "defect", message: expect.stringContaining("restored") } });
+    });
+  });
+
+  // §8.6 item 2: the wait between two attempts is in steps that ask until, as the outage's wait is, so a watch
+  // that ends is left within one step and not after the whole backoff (ginsys/bronzeward#1175).
+  describe("the wait between two attempts (ginsys/bronzeward#1175)", () => {
+    test("an until that answers true during it ends the watch within one step, with the last read", async () => {
+      const s = server({ streams: quiet(3), states: ["running"] });
+      let asked = 0;
+      // The first answer is the one after the running read; the next is the first step of the wait.
+      const r = recorder(() => ++asked >= 2);
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "ended", operation: { state: "running" }, epoch: "e1" });
+      expect(r.sleeps).toEqual([1000]);
+      expect(r.steps).toEqual([250]);
+      expect(opReads(s)).toBe(1);
+    });
+
+    // A read discarded for any reason leaves no read to report (a restore, a view dropped by the shell, a
+    // stale answer): the text says no read stood, and never that the installation was restored.
+    test("an until that answers true during it after a discarded first read fails the watch with no read having stood", async () => {
+      let probe = async (): Promise<unknown> => undefined;
+      const s = server({ streams: quiet(3), states: ["running"], probeEpoch: "e2", duringOp: (n) => (n === 1 ? probe() : Promise.resolve()) });
+      probe = () => s.client.read("/probe");
+      const r = recorder(() => true);
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "failed", res: { kind: "defect", message: expect.stringContaining("before any read") } });
+      expect(out).not.toMatchObject({ res: { message: expect.stringContaining("restored") } });
+      expect(r.steps).toEqual([250]);
+      expect(opReads(s)).toBe(1);
     });
   });
 
@@ -670,19 +704,24 @@ describe("the operation progress reader (§8.6)", () => {
     });
     // The old paused event stops the watch; after the clear only the replay's own paused event does.
     const r = recorder((shown) => shown.some((e) => e.type === "paused"));
-    const out = await watch(s.client, OP, r.w, r.pace);
+    // Another response records the new epoch before the operation read is sent, so that read is not discarded
+    // for it: the clear is made at that read. (A read discarded for the new epoch leaves the halted `until` to
+    // end the watch in the wait after it, as the CLI's pause does: no read stands then.)
+    const out = await watch(reader(s, operationPath, "before"), OP, r.w, r.pace);
     expect(out).toMatchObject({ kind: "ended", operation: { state: "running" } });
-    expect(r.log).toEqual(["show e1:1", "show e1:2", `clear: ${RESTORED}`, "show e2:1", "show e2:2", "show e2:3"]);
+    // The clear at the read, then the replay's own reset.
+    expect(r.log).toEqual(["show e1:1", "show e1:2", `clear: ${RESTORED}`, `clear: ${RESTORED}`, "show e2:1", "show e2:2", "show e2:3"]);
   });
 
   test("R1-4: the JSON pages stop the watch once the sign-in ended, and no further read is sent", async () => {
     const s = server({ streams: [{ chunks: ["{}"], type: "application/json" }], states: ["running"], pages: [ev("e1:1")] });
     const r = recorder();
-    // A sleep that lets the timers run, and ends a watch that never stops by itself.
-    r.pace.sleep = async (ms) => {
+    // A wait that lets the timers run, and ends a watch that never stops by itself.
+    r.pace.wait = async (ms) => {
       r.sleeps.push(ms);
       await new Promise((done) => setTimeout(done, 0));
       if (r.sleeps.length >= 20) r.abort.abort();
+      return false;
     };
     const show = r.w.show;
     r.w.show = (e) => { show(e); s.client.endWrites(); };
