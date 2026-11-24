@@ -175,14 +175,19 @@ check "$ref step 1" 'the worker'"'"'s nodename, hostname status and uptime are r
 
 # Step 2: the dry run of the filled document (the A2 proof for the steps that mutate). The machine
 # configuration is written to a 0600 file under $STATE and removed at exit; it is never kept.
-# strip_hostname: stdin's documents without any HostnameConfig; on stderr, how many it dropped. The node holds
-# its own HostnameConfig, and apply-config refuses two ("duplicate document v1alpha1/HostnameConfig/", the
-# first slot's step 2): the product replaces the node's document with the filled one, so the dry run does too.
+# strip_hostname: stdin's documents without any HostnameConfig; on stderr, how many it dropped and the top-level
+# key names (never a value) of what it dropped. The node holds its own HostnameConfig, and apply-config refuses
+# two ("duplicate document v1alpha1/HostnameConfig/", the first slot's step 2). The product sends one: the
+# compiler composes the filled document last as a patch (internal/compile/hostname.go hostnamePatch, applied at
+# compiler.go:127), which merges into the composition's HostnameConfig by key, so the result is one document with
+# auto off and the name. Dropping the node's document and appending the filled one is the same result exactly
+# where the dropped document has no key beyond apiVersion, kind, auto and hostname: the key names say whether it
+# did.
 strip_hostname() {
-  awk 'function flush() { if (n > 0) { if (hc) dropped++; else { if (out++) print "---"; printf "%s", doc } } doc = ""; n = 0; hc = 0 }
+  awk 'function flush() { if (n > 0) { if (hc) { dropped++; allkeys = allkeys " " keys } else { if (out++) print "---"; printf "%s", doc } } doc = ""; keys = ""; n = 0; hc = 0 }
     /^---[ \t]*$/ { flush(); next }
-    { doc = doc $0 "\n"; n++; if ($0 ~ /^kind:[ \t]*HostnameConfig[ \t]*$/) hc = 1 }
-    END { flush(); print dropped + 0 > "/dev/stderr" }'
+    { doc = doc $0 "\n"; n++; if ($0 ~ /^kind:[ \t]*HostnameConfig[ \t]*$/) hc = 1; if ($0 ~ /^[A-Za-z][A-Za-z0-9]*:/) { k = $0; sub(/:.*/, "", k); keys = keys (keys == "" ? "" : ",") k } }
+    END { flush(); print dropped + 0 " keys:" allkeys > "/dev/stderr" }'
 }
 dry_run() {
   local ps
