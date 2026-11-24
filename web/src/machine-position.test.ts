@@ -107,6 +107,15 @@ describe("the machine page says who prepared the position's plan", () => {
     expect(by()).toBeNull();
     expect(line()).toContain("A plan waits for approval.");
   });
+  test("a refresh that fails keeps what the plan's read last answered, as every read of the page does", async () => {
+    answer = ok({ ...position, step: "awaiting-approval" });
+    await mount(0);
+    await settled();
+    planRead = { kind: "transport" };
+    await mount(1);
+    await settled();
+    expect(by()).toMatch(/^Prepared by /);
+  });
   test("a position with no plan, or an operation in flight, shows none", async () => {
     planRead = ok(prepared);
     answer = ok({ ...position, step: "operation-in-flight", plan: null, operation: { id: "op_1", kind: "apply-config", state: "sending", plan: "pln_1", createdAt: "2026-10-26T09:46:00Z" } });
