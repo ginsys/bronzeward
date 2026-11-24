@@ -327,9 +327,13 @@ describe("the form's result", () => {
     expect(form()).toContain(`Unknown whether this was saved, and its notice was dismissed. Key ${w.key}, POST /api/v1/clusters. To learn the outcome, read /clusters.`);
   });
 
-  test("a replayed refusal is the earlier attempt's, and says so", () => {
-    expect(result({ kind: "refused", status: 409, problem: null, replayed: true })).toContain(`${REPLAYED} Not saved: the server answered 409.`);
+  // §8.4 item 2: a replayed refusal is the earlier attempt's refusal alone, never headed by the success text.
+  test("a replayed refusal shows the refusal alone, and a replayed success keeps its text", () => {
+    const refusal = result({ kind: "refused", status: 409, problem: null, replayed: true });
+    expect(refusal).toContain(">Not saved: the server answered 409.</p>");
+    expect(refusal).not.toContain(REPLAYED);
     expect(result({ kind: "refused", status: 409, problem: null, replayed: false })).toContain(">Not saved: the server answered 409.</p>");
+    expect(result({ kind: "done", status: 201, data: "text", replayed: true })).toContain(`${REPLAYED} Saved (the server answered 201)`);
   });
 
   test("§8.4 item 8: a refusal whose answer was cut off says so, in the form and in a settled notice", () => {

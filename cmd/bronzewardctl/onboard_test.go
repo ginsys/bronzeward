@@ -410,6 +410,9 @@ func TestNameRefusal(t *testing.T) {
 	}{
 		{"a name another machine holds", problem("name-in-use"), "cp-1", `no name: the name "cp-1" is already held by another machine of the cluster; rename that machine, then name this one`, "mch_HOLDER"},
 		{"a grammar the server does not take", problem("invalid-request"), "a.b", `no name: the server refused the hostname "a.b" as a name`, ""},
+		// §6 item 8: a name that holds a quote, a tab and ESC cannot close its quotes or reach the terminal as itself.
+		{"a held name with a quote, tab and ESC", problem("name-in-use"), "a\"b\tc\x1b", `no name: the name "a\x22b\x09c\x1b" is already held by another machine of the cluster; rename that machine, then name this one`, "mch_HOLDER"},
+		{"a refused name with a quote, tab and ESC", problem("invalid-request"), "a\"b\tc\x1b", `no name: the server refused the hostname "a\x22b\x09c\x1b" as a name`, ""},
 		{"another refusal", problem("forbidden"), "cp-1", "", ""},
 		{"no refusal", nil, "cp-1", "", ""},
 		{"a refusal when no name was sent", problem("invalid-request"), "", "", ""},

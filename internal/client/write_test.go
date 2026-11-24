@@ -418,6 +418,16 @@ func TestOutcomes(t *testing.T) {
 				}
 				problemAnswer(w, http.StatusForbidden, "forbidden", `,"roles":["author"]`)
 			}},
+		// §8.2: the plan cancellation's creator check is decided after the idempotency lookup, which found no record
+		// of the key: the refusal is this send's own, known, whatever the earlier attempt did.
+		{name: "a 403 with a plan member after a dropped attempt is a known refusal", posts: 2, says: "403 BWSYNTH (forbidden)",
+			post: func(n int, w http.ResponseWriter, _ *http.Request) {
+				if n == 1 {
+					drop(w)
+					return
+				}
+				problemAnswer(w, http.StatusForbidden, "forbidden", `,"plan":"pln_BWSYNTH","detail":"only the plan's creator cancels it","roles":["author","publisher"]`)
+			}},
 		{name: "identity-revoked after a dropped attempt says nothing of it", posts: 2, unknown: true, says: "403 BWSYNTH (identity-revoked)",
 			post: func(n int, w http.ResponseWriter, _ *http.Request) {
 				if n == 1 {

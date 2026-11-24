@@ -138,6 +138,19 @@ func TestImportMark(t *testing.T) {
 		marked, ev("failed", `{"type":"failed","code":"validation-failed"}`))
 	step("a failed operation exits 4", mark, 4, "", "(operation op_BWSYNTH-ing) failed", sent)
 
+	// §8.2: a failed operation names the table row's next step for each of its codes, not for two alone
+	// (the web client's problems table holds the same words, which the two clients cannot share as a file).
+	for _, c := range []struct{ code, status, next string }{
+		{"machine-identity-mismatch", "409", " Check which machine answers at that address; nothing it read was kept."},
+		{"recovery-mode-entered", "409", " Wait for the recovery to finish, then publish again."},
+		{"talos-access-unavailable", "503", " The server's explanation is in the error above."},
+	} {
+		setStdin(t, "doc[0]/BWSYNTH\n")
+		f.set("abandoned", 2, time.Hour, "failed", "", `{"type":"urn:bronzeward:problem:`+c.code+`","title":"BWSYNTH","status":`+c.status+`}`,
+			marked, ev("failed", `{"type":"failed","code":"`+c.code+`"}`))
+		step("a failed operation of "+c.code+" names its next step", mark, 4, "", c.next, sent)
+	}
+
 	setStdin(t, "doc[0]/BWSYNTH\n")
 	f.set("held", 2, -time.Minute, "running", "", "", earlier, marked)
 	// The outcome is unknown, so standard output stays empty (#256's output rule).
