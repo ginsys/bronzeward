@@ -55,10 +55,11 @@ function server(o: {
   streams: (Stream | Error)[]; states: string[]; pages?: OpEvent[]; pageRefusals?: number[]; epoch?: string;
   pagesEpoch?: string; probeEpoch?: string; clock?: { t: number }; readTime?: number; streamTime?: number; pagesGate?: Promise<void>;
   pagesUnavailable?: boolean; opFetches?: Fetch[]; pagesDown?: number; pagesOk?: number; renew?: () => Promise<boolean>;
-  duringOp?: (() => Promise<unknown>) | undefined;
+  duringOp?: (nth: number) => Promise<unknown>;
 }) {
   const opened: Record<string, string>[] = [];
   const urls: string[] = [];
+  let opFetched = 0;
   const fetch = async (url: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const u = String(url);
     urls.push(u);
@@ -101,10 +102,8 @@ function server(o: {
       return json({ items: (o.pages ?? []).map((e) => ({ ...e, at: "2026-11-01T06:00:00Z" })) }, o.pagesEpoch ?? o.epoch);
     }
     if (u === `${API_BASE}/operations/${OP}`) {
-      // Held once, while another answer is recorded: `duringOp` is what that answer does.
-      const during = o.duringOp;
-      o.duringOp = undefined;
-      await during?.();
+      // Held while another answer is recorded: `duringOp` is told which operation fetch this is.
+      await o.duringOp?.(++opFetched);
       const next = o.opFetches?.shift();
       if (next !== undefined) return scripted(next, o.epoch);
       const [state, epoch] = (o.states.length > 1 ? o.states.shift()! : o.states[0]!).split("@");
@@ -423,7 +422,7 @@ describe("the operation progress reader (§8.6)", () => {
     // client, decides when the operation is read again.
     test("a read answered under another epoch than one recorded after its send is not sent again by the client", async () => {
       let probe = async (): Promise<unknown> => undefined;
-      const s = server({ streams: quiet(3), states: ["running"], probeEpoch: "e2", duringOp: () => probe() });
+      const s = server({ streams: quiet(3), states: ["running"], probeEpoch: "e2", duringOp: (n) => (n === 1 ? probe() : Promise.resolve()) });
       probe = () => s.client.read("/probe");
       const r = recorder();
       const out = await watch(s.client, OP, r.w, bounded(r, 1));
@@ -446,9 +445,17 @@ describe("the operation progress reader (§8.6)", () => {
     });
 
     // After a failed drain, a terminal reread under another epoch is of a restored installation: it is void, and
-    // the watch goes on after the delay, as the CLI's does (watch.go), with no second drain of it.
+    // the watch goes on after the delay, as the CLI's does (watch.go), with no second drain of it. The client
+    // knows the new epoch from another answer before the reread (an answer that brings a new epoch is itself
+    // discarded, §8.5), and the streams that follow are of that epoch.
     test("a terminal reread under another epoch than the read whose drain failed is void and is not drained", async () => {
-      const s = server({ streams: quiet(4), states: ["succeeded", "succeeded@e2", "running@e2"], pageRefusals: [403] });
+      let probe = async (): Promise<unknown> => undefined;
+      const later = (): Stream[] => Array.from({ length: 3 }, () => ({ chunks: [], epoch: "e2" }));
+      const s = server({
+        streams: [{ chunks: [] }, ...later()], states: ["succeeded", "succeeded@e2", "running@e2"], pageRefusals: [403], probeEpoch: "e2",
+        duringOp: (n) => (n === 2 ? probe() : Promise.resolve()),
+      });
+      probe = () => s.client.read("/probe");
       const r = recorder(() => true);
       const out = await watch(s.client, OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "ended", operation: { state: "running" }, epoch: "e2" });
