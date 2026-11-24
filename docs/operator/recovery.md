@@ -12,7 +12,8 @@ Every write here is `recovery-admin`, human-only, and needs an `Idempotency-Key`
 characters of `[A-Za-z0-9_-]`; a shorter key gets `400 invalid-request`. The reads accept any role
 and need no key. The full contracts
 are [execution and recovery](../spec/execution-recovery.md) and
-[persistence and API §12](../spec/persistence-api.md).
+[persistence and API §12](../spec/persistence-api.md). The same journey as an operator reads it in
+the clients, step by step, is [recover after a restore](clients/recovery-after-restore.md).
 
 ## Before you need it
 

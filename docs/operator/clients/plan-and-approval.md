@@ -104,12 +104,12 @@ The command leaves a machine out, with its reason, and never approves it unseen:
 | "approved already: the controller sends it when its gates allow" | Wait; follow it in [operation tracking](operation-tracking.md). |
 | "applying: its operation is in progress" | Wait. |
 | "stopped: the machine is frozen; an approver can unfreeze it" | An approver unfreezes the machine first. |
-| "stopped: the machine changed since Bronzeward last verified it; decide on the drift first" | Drift is its own journey, not written here yet. |
-| "stopped: an operation on this machine is unresolved; open it with operation list" | Read the operation. Recovery is its own journey, not written here yet. |
+| "stopped: the machine changed since Bronzeward last verified it; decide on the drift first" | Decide on it in [the drift journey](drift.md). |
+| "stopped: an operation on this machine is unresolved; open it with operation list" | Read the operation. After a restore, [recovery](recovery-after-restore.md) settles it. |
 | "stopped: the plan waiting for this machine is not an apply plan; open it with plan show <plan>" | Decide that plan on its own. |
 | "stopped: the change of its plan cannot be shown ... it is left out" | The configuration could not be redacted, or the machine holds a configuration other than the one Bronzeward last applied. A plan somebody else prepared stays: read it with `plan show` and approve it alone with `approve`, or leave the machine out. A plan this command made is cancelled: make a new one with `plan create` and approve that, or leave the machine out. |
 | "stopped: the change of its plan could not be read (<reason>), so it is left out" | Try again; read the plan with `plan show`. |
-| "stopped: its plan overwrites the drifted configuration of drift record <n>, which no reviewer has seen; it is left out." | The plan is bound to a drift record. A plan somebody else prepared stays: approve it alone with `approve`, or leave the machine out. A plan this command made is cancelled: make a new one with `plan create`, or leave the machine out. Drift is its own journey, not written here yet. |
+| "stopped: its plan overwrites the drifted configuration of drift record <n>, which no reviewer has seen; it is left out." | The plan is bound to a drift record. A plan somebody else prepared stays: approve it alone with `approve`, or leave the machine out. A plan this command made is cancelled: make a new one with `plan create`, or leave the machine out. The drift record is in [the drift journey](drift.md). |
 | "not a machine of release <release>: <names>; nothing was sent" | A name you gave is not covered by this release. |
 
 If you choose a control plane machine, the command says: "A control plane machine is chosen.
@@ -198,8 +198,7 @@ The import journey that leads to it is in [import and adopt](protected-import.md
   that is not applied expires at the time shown. Whether it was applied is read in
   [operation tracking](operation-tracking.md).
 - The revert of a drifted configuration has an extra approval line that says the approver
-  approves overwriting a configuration nobody reviewed. That belongs to the drift journey and is
-  not written here yet.
+  approves overwriting a configuration nobody reviewed. That belongs to [the drift journey](drift.md).
 
 Next: [follow the operation the controller makes from the approved plan](operation-tracking.md). A release you still
 need to make is in [publication](publication.md).

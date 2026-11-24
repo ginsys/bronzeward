@@ -1,7 +1,9 @@
 # Troubleshooting
 
 Start from the refusal, then read the machine's timeline. The commands use the
-[walkthrough's setup](walkthrough.md#setup-for-the-commands-below).
+[walkthrough's setup](walkthrough.md#setup-for-the-commands-below). A client that cannot reach the
+server, does not trust its certificate or is refused as too old is in [client
+troubleshooting](clients/client-troubleshooting.md).
 
 ## Reading a refusal
 

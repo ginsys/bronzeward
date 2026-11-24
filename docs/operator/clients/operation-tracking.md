@@ -67,9 +67,9 @@ line shows the time the server recorded the end.
 **`unresolved` is not the end.** The watch goes on past it. If the time given by `--timeout`
 (default `30m`) passes, the watch ends with exit 5 and prints: "Still unresolved after --timeout
 30m0s. Unresolved: completion and retry safety are unknown. A recovery administrator must account
-for attempt 1. No conflicting work on this machine proceeds until then." Recovery is its own
-journey and is not written here yet. The watch never changes the operation, and ending it does not
-stop the operation.
+for attempt 1. No conflicting work on this machine proceeds until then." Accounting for an attempt
+is in [recovery after a restore](recovery-after-restore.md). The watch never changes the operation,
+and ending it does not stop the operation.
 
 **Ending the watch.** A `failed`, `rejected` or `cancelled` operation ends the watch with exit 4,
 naming the cause and the next safe step. Ctrl-C stops only the watch, with exit 130, and prints
