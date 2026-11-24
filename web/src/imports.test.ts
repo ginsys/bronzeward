@@ -606,7 +606,7 @@ describe("the reads of the watch and of its end go through the page's settle (gi
   const watched = async (by: (path: string) => ReadResult<unknown>) => {
     const { settled, reads } = settling();
     const client = settledReads(scripted(by), reads, () => true);
-    const r = await watch(client, OPID, { show: () => {}, clear: () => {}, signal: new AbortController().signal }, { sleep: async () => {}, now: () => 0, idle: 20 });
+    const r = await watch(client, OPID, { show: () => {}, clear: () => {}, signal: new AbortController().signal }, { sleep: async () => {}, wait: async () => false, now: () => 0, idle: 20 });
     return { r, settled };
   };
   test("an unresolved 401 on the operation read reaches the shell", async () => {
@@ -695,7 +695,7 @@ describe("a lapsed lease decides only after the operation's newest event was sho
       latest: () => ({ b, at: at("07:05:15") }), abandonedAt: () => undefined, now: () => at("07:05:20"),
       view: (a) => { if (a.type === "show") lines.push(a.line); },
     });
-    const r = await watch(client, OPID, f.w, { sleep: async () => {}, now: () => 0, idle: 20 });
+    const r = await watch(client, OPID, f.w, { sleep: async () => {}, wait: async () => false, now: () => 0, idle: 20 });
     expect(lines).toEqual(["started", "paused (generation 1)", "continued (generation 2)", "resume-failed: decrypt-failed"]);
     expect(f.settled()).toBe("resume-failed");
     if (r.kind !== "ended") throw new Error(`the watch did not end: ${r.kind}`);
