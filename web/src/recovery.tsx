@@ -244,7 +244,7 @@ export function EnterRecovery({ onRead }: { onRead?: () => void }) {
       {bad !== undefined && <p role="alert" data-testid="entry-input">{bad}</p>}
       {p === undefined || o?.kind !== "refused" ? <Result w={w} done={() => "Recovery mode entered."} /> : (
         <>
-          <Refused testid="write-result" problem={p} status={o.status} verb="saved" replayed={o.replayed} />
+          <Refused testid="write-result" problem={p} status={o.status} verb="saved" />
           <Status testid="write-reading" role="alert">{reading(p)}</Status>
         </>
       )}

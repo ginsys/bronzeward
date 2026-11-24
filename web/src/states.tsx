@@ -108,8 +108,8 @@ export const Unread = ({ at, causes }: { at: Date; causes: string[] }) => (
 );
 
 // A Bronzeward problem: a sentence per code, its detail, and its code, rule, scope and instance in a reference
-// block (client contracts §8.2), never a request body. Any other answer is named by its status alone. A replayed refusal is the earlier
-// attempt's, and says so (§8.4 item 2).
+// block (client contracts §8.2), never a request body. Any other answer is named by its status alone. A replayed refusal is the
+// earlier attempt's refusal alone, with no success text before it (§8.4 item 2).
 // A 403 forbidden names what the route accepts (§8.2 403 row): "humans only" when `humanOnly` is
 // true, else its `roles`. The plan cancellation's creator check, which carries `plan`, says it in
 // its `detail` instead.
@@ -138,12 +138,11 @@ export function problemSentences(p: Problem, status: number, next = true): strin
   return `${sentence(p, next)}${refusedAt(p)}${needs(status, p)}${scopeRefusal(codeOf(p), p)}${said}`;
 }
 
-export function Refused({ problem, status, verb, testid, replayed = false, cut = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; replayed?: boolean; cut?: boolean }) {
-  const earlier = replayed && `${REPLAYED} `;
-  if (problem === null) return <Status testid={testid} role="alert">{earlier}Not {verb}: the server answered {status}.{cut && ` ${CUT_OFF}`}</Status>;
+export function Refused({ problem, status, verb, testid, cut = false }: { problem: Problem | null; status: number; verb: "read" | "saved"; testid?: string; cut?: boolean }) {
+  if (problem === null) return <Status testid={testid} role="alert">Not {verb}: the server answered {status}.{cut && ` ${CUT_OFF}`}</Status>;
   return (
     <Status testid={testid} role="alert" reference={<RequestRef problem={problem} status={status} />}>
-      {earlier}Not {verb}. {problemSentences(problem, status)}
+      Not {verb}. {problemSentences(problem, status)}
     </Status>
   );
 }

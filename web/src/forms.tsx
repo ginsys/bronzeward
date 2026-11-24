@@ -56,7 +56,7 @@ function settled(o: Outcome): { line: string; problem: Problem | null } {
     case "done":
       return { line: `${earlier}Saved (the server answered ${o.status}).${o.defect !== undefined ? ` ${o.defect}` : ""}`, problem };
     case "refused":
-      return { line: `${earlier}Not saved${problem === null ? `: the server answered ${o.status}.` : "."}${o.cut ? ` ${CUT_OFF}` : ""}${words}`, problem };
+      return { line: `Not saved${problem === null ? `: the server answered ${o.status}.` : "."}${o.cut ? ` ${CUT_OFF}` : ""}${words}`, problem };
     default:
       return { line: `${doubt ? unknown(o.why) : `Not saved: ${o.why}.`}${doubt ? ` ${CHECK_STATE}` : ""}${words}`, problem };
   }
@@ -210,7 +210,7 @@ export function Result({ w, done }: { w: Write | undefined; done: (data: unknown
       const named = existing(o.status, o.problem, w.spec.resource);
       return (
         <>
-          <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" replayed={o.replayed} cut={o.cut === true} />
+          <Refused testid="write-result" problem={o.problem} status={o.status} verb="saved" cut={o.cut === true} />
           {named !== undefined && <Status testid="write-existing" role="alert">The {named.kind} already recorded: <Ref to={named.to} id={named.id}>{named.id}</Ref>.</Status>}
         </>
       );
