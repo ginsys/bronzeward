@@ -6,6 +6,8 @@
 #   2. no fixture state: the script exits non-zero and the recorder holds zero calls.
 #   3. a caller's foreign TALOSCONFIG, as well: the same, and lib.sh sets TALOSCONFIG to the copy's own
 #      state, never the caller's.
+#   4. a worker address outside the fixture subnet: refused, with the subnet sentence (so the guard was
+#      reached, not the no-state one) and zero calls.
 set -euo pipefail
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 fix=$(CDPATH='' cd -- "$here/.." && pwd)
@@ -42,6 +44,17 @@ verdict "no fixture state: exit $rc, $(calls) recorded calls" refused "$rc" "$(c
 rc=0
 TALOSCONFIG=/nonexistent/foreign-talosconfig PATH=$tmp/path:$PATH "$copy/scenarios/hostname-measure" >"$tmp/out2" 2>&1 || rc=$?
 verdict "a foreign TALOSCONFIG, no fixture state: exit $rc, $(calls) recorded calls" refused "$rc" "$(calls)"
+
+# The subnet refusal: a copy whose versions.env puts the worker outside the fixture subnet. The refusal must
+# name the subnet (so it is this guard and not "no running fixture") and record no call; the copy of the
+# unchanged versions.env, run just before as control 2, refuses with the other sentence.
+sed -i 's/^TALOS_WORKER_IP=.*/TALOS_WORKER_IP=192.0.2.10/' "$copy/versions.env"
+rc=0
+PATH=$tmp/path:$PATH "$copy/scenarios/hostname-measure" >"$tmp/out4" 2>&1 || rc=$?
+verdict "a worker address outside the fixture subnet: exit $rc, $(calls) recorded calls" refused "$rc" "$(calls)"
+verdict 'that refusal names the subnet, so the guard was reached' grep -q 'is not inside the fixture subnet' "$tmp/out4"
+lacks() { ! grep -q -- "$1" "$2"; }
+verdict 'the no-state refusal of control 2 does not' lacks 'is not inside the fixture subnet' "$tmp/out1"
 
 # lib.sh hashes the command that loaded it, so the probe is a file in the copy, not bash -c.
 # shellcheck disable=SC2016 # the probe's own expansions, written literally
