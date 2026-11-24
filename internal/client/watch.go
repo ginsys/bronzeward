@@ -135,11 +135,12 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 			if w.halt.err != nil { // Until failed: its error stands, as at the stop below
 				return nil, OperationRead{}, w.halt.err
 			}
-			// A watch that ended while the server's certificate was refused returns the refusal, which no
-			// earlier read of the operation hides: the operator asked what the server shows, and it is not
-			// trusted (§8.6 item 2).
-			if errors.As(err, new(*trust)) {
-				return nil, OperationRead{}, err
+			// A watch that ended while the server's certificate was refused returns the refusal itself, which
+			// no earlier read of the operation hides: the operator asked what the server shows, and it is
+			// not trusted. It is returned without ErrWatchEnded, because a caller that reads that error as
+			// "the first read stands" would hide it again (§8.6 item 2).
+			if t := trustRefusal(err); t != nil {
+				return nil, OperationRead{}, t
 			}
 			if lastOp != nil && (!Terminal(lastOp.State) || c.EpochHolds(lastRead)) {
 				return lastOp, lastRead, nil
@@ -198,6 +199,11 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 					// read: no read stands then.
 					if w.halt.err != nil { // Until failed: its error stands too, as at the stop below
 						return nil, OperationRead{}, errors.Join(derr, w.halt.err)
+					}
+					// A refused certificate ends the watch with the refusal, as in stopped: the terminal read
+					// before it is of a server the client no longer trusts.
+					if t := trustRefusal(err); t != nil {
+						return nil, OperationRead{}, errors.Join(derr, t)
 					}
 					if !c.EpochHolds(rd) {
 						return nil, OperationRead{}, errors.Join(derr, err, ErrWatchRestored)
@@ -313,6 +319,15 @@ func (c *Client) renewSoon() {
 // eventsRoute is the route of an operation's event stream, as a stop line names it.
 func eventsRoute(op string) string {
 	return "GET /api/v1/operations/" + url.PathEscape(op) + "/events"
+}
+
+// trustRefusal is the refused server certificate in err, or nil.
+func trustRefusal(err error) error {
+	var t *trust
+	if errors.As(err, &t) {
+		return t
+	}
+	return nil
 }
 
 // pause waits d before the watch's next attempt. A Ctrl-C ends the wait and the watch, as it ends the
