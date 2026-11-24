@@ -40,6 +40,10 @@ env:
   # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
   # not stop a task run from installing. Tools come from jdx/mise-action's install step only.
   MISE_TASK_RUN_AUTO_INSTALL: "false"
+  # `|`, unlike `,`, makes go fetch from the module's own repository after any proxy error, not only
+  # a 404 or 410: a proxy stream error failed a job four times (ginsys/bronzeward#1121, group H).
+  # go.sum still checks every module fetched that way.
+  GOPROXY: "https://proxy.golang.org|direct"
 
 # Every jdx/mise-action step that uses the cache sets `cache_save` to main only: a pull_request or
 # merge_group run's cache is scoped to a ref nothing else can restore from, so saving there only
