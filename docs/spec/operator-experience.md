@@ -196,8 +196,8 @@ from matching release IDs, names or sources.
 [persistence and API](persistence-api.md) §3.2, choice §17.53).** A release that thins a
 machine's import base and renders the same bytes leaves the machine pending, because its
 recorded import base differs, so the ordinary `apply-config` plan exists. Its diff shows no
-difference, and where the plan's `equivalence` reads `byteIdentical` the plan view and
-`plan show` add: "The configuration sent is unchanged; only the recorded import base moves."
+difference, and where the plan's `equivalence` reads `byteIdentical` (a revert serves none,
+and says what it overwrites instead, §5.8) the plan view and `plan show` add: "The configuration sent is unchanged; only the recorded import base moves."
 Without that sentence an empty diff on a plan that needs approval reads as a fault.
 
 **Form only (API revision 13, [persistence and API](persistence-api.md) choice §17.48).** A

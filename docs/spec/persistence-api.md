@@ -452,7 +452,7 @@ the node, which would record a node state with no evidence from the node
 **(choice §17.53)**. When that operation completes,
 `Applied` is the new release and its import base, the thinner revision. What an
 approver sees: §9.3 changes in one sentence. Where the plan's `equivalence`
-reads `byteIdentical`, the plan's review says that the configuration sent is
+reads `byteIdentical` (never on a revert, whose `equivalence` is null), the plan's review says that the configuration sent is
 unchanged and that only the recorded import base moves (operator experience
 §2.3), so an empty diff does not read as a fault. The check ran only where the
 machine holds its `Applied` release's artifact, so the plan's diff is the ordinary one,
@@ -2715,7 +2715,9 @@ recovery, plan binding), which every plan body carries:
   leaves the machine pending convergence (execution and recovery §6.3), and
   `formOnly` (choice §17.48), and for an `apply-config` plan whose release
   carries the result for the machine, `equivalence`, the same two booleans the
-  release read serves (§3.2, choice §17.50)
+  release read serves (§3.2, choice §17.50), and null on a revert, which
+  overwrites a drifted configuration the check never compared (execution and
+  recovery §6.4)
   **(choice §17.38)**; for both, `validation`, the release's validation at
   publication (`result`, `at`, `contract`, `kubernetesVersion`,
   `machineryVersion`, `platformMode`), and `dryRun`, `{"available": false}`
