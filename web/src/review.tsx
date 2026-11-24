@@ -12,7 +12,8 @@ import { planFor, planPath } from "./plan.tsx";
 import { Action } from "./shell.tsx";
 import { MachineRef, type MachineLike, machineText } from "./machines.tsx";
 import { Withheld } from "./states.tsx";
-import { Named, useReleaseNames, useReleaseTitle } from "./titles.tsx";
+import { Named, useBody, useReleaseNames, useReleaseTitle } from "./titles.tsx";
+import { type Applied, HostnameLines } from "./hostname.tsx";
 import { safeWord } from "./safe.ts";
 import { PageNote } from "./page-note.tsx";
 import { DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, REVIEW_NOTE, THE_MACHINE } from "./words.ts";
@@ -159,8 +160,21 @@ export function Document({ configuration }: { configuration: string }) {
   );
 }
 
+// What the machine's last applied release recorded for its hostname, from the position and that release's read. Only a
+// hostname taken from the machine's name is compared, so any other source reads nothing: a position not read yet is
+// pending, and one that failed, or a release that gave no body or no entry for the machine, is unread.
+export function appliedHostname(pos: Load<Position>, release: S["ReleaseBody"] | null | undefined, machine: string): Applied {
+  if (pos.kind === "loading" || pos.kind === "discarded") return { state: "pending" };
+  if (pos.kind !== "ok") return { state: "unread" };
+  if (pos.data.machine.applied == null) return { state: "none" };
+  if (release === undefined) return { state: "pending" };
+  if (release === null) return { state: "unread" };
+  const entry = release.machines.find((x) => x.machine === machine);
+  return entry === undefined ? { state: "unread" } : { state: "known", hostname: entry.hostname };
+}
+
 // What the review says, from a body as the server serves it.
-export function ReviewBody({ r, machine }: { r: Review; machine?: MachineLike }) {
+export function ReviewBody({ r, machine, applied = { state: "pending" } }: { r: Review; machine?: MachineLike; applied?: Applied }) {
   return (
     <>
       {r.configuration !== null && <PageNote parts={[REVIEW_NOTE]} />}
@@ -169,6 +183,7 @@ export function ReviewBody({ r, machine }: { r: Review; machine?: MachineLike })
         <dt>Machine</dt><dd>{machine === undefined ? <Id id={r.machine} /> : <MachineRef machine={machine} />}</dd>
         <dt>Validated in mode</dt><dd>{safeWord(r.mode)}</dd>
       </dl>
+      <HostnameLines hostname={r.hostname} applied={applied} current={machine?.name === undefined ? undefined : typeof machine.name === "string" ? machine.name : null} />
       {r.configuration === null ? <Withheld /> : <><Document configuration={r.configuration} /><p>{EMPTY_NOTE}</p></>}
       <Provenance records={r.provenance} />
     </>
@@ -212,11 +227,16 @@ export function ReviewItem({ release, machine }: { release: string; machine: str
   // The position holds the machine record, so the page's name and address cost no further read.
   const pos = useItem<Position>(`/machines/${enc(machine)}/position`, NO_KEEP, n);
   const held = pos.kind === "ok" ? pos.data.machine : undefined;
+  // Only a hostname taken from the machine's name is compared with the release last applied to the machine.
+  const named = review.kind === "ok" && review.data.hostname?.source === "machine-name";
+  const last = named ? held?.applied?.release : undefined;
+  const was = useBody<S["ReleaseBody"]>(last === undefined ? undefined : `/releases/${enc(last)}`);
+  const applied = named ? appliedHostname(pos, was, machine) : undefined;
   return (
     <>
       <h2>Rendered configuration of {held === undefined ? THE_MACHINE : machineText(held)} in release {releaseTitle}</h2>
       <p><Ref to={`/releases/${enc(release)}`} id={release}>Back to the release</Ref></p>
-      {review.kind === "ok" ? <ReviewBody r={review.data} {...(held !== undefined && { machine: held })} /> : pending}
+      {review.kind === "ok" ? <ReviewBody r={review.data} {...(held !== undefined && { machine: held })} {...(applied !== undefined && { applied })} /> : pending}
       <h3>Next step</h3>
       <NextStepSection release={release} machine={machine} pos={pos} readAgain={() => readAgain((x) => x + 1)} />
     </>

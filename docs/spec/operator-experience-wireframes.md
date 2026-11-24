@@ -453,6 +453,7 @@ Renderer: contract v1.14 · machinery v1.14.5 · Kubernetes v1.36.2
 +-------------------------------------------------------------------------------------------+
 
 Rendered configuration: mch_b3c…aa2q in rel_h7rt…2bd (redacted)
+  Hostname: node-a, taken from the machine's name.          <- A9 item 7: the sentence of the release's hostname source
   machine:
     registries: … auth:
       username: ci-pull

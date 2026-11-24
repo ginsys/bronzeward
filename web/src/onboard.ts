@@ -523,8 +523,8 @@ async function draft(env: Env, p: Plan, set: Set, fail: Fail, list: List): Promi
 }
 
 // Each machine whose import was released gets an assignment that selects nothing, so its release holds an
-// assignment revision and a plan can bind it (ginsys/bronzeward#1068): the machine's configuration is its import
-// base alone. A machine that already holds an assignment head, or has an assignment entry in the draft (a removal
+// assignment revision and a plan can bind it (ginsys/bronzeward#1068): the machine's configuration is its import base,
+// with its own name as its hostname where the base sets none. A machine that already holds an assignment head, or has an assignment entry in the draft (a removal
 // is a person's choice too), is left as it is. The draft is read again before each write for its ETag and entries.
 async function assignments(env: Env, p: Plan, set: Set, fail: Fail, list: List): Promise<boolean> {
   const heads = await list<{ machine: string }>("/assignments", "");
@@ -542,7 +542,7 @@ async function assignments(env: Env, p: Plan, set: Set, fail: Fail, list: List):
       if (o.kind !== "done") return fail(key, label, o);
     }
     p.assigned[m.nodeId] = p.draft!;
-    set({ key, label, state: held ? "existing" : "done", to: `/drafts/${p.draft}`, detail: held ? "an assignment exists: left as it is" : "selects nothing: its configuration is its import base alone" });
+    set({ key, label, state: held ? "existing" : "done", to: `/drafts/${p.draft}`, detail: held ? "an assignment exists: left as it is" : "selects nothing: its configuration is its import base, with its own name as its hostname where the base sets none" });
   }
   return true;
 }

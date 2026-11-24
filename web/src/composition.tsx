@@ -345,7 +345,7 @@ export const assignmentBody = (l: Lists) => ({
 });
 
 // What an empty list means, shown where it is empty: an assignment that selects nothing is valid.
-export const EMPTY_ASSIGNMENT = "Nothing is selected: the machine's configuration is its import base alone. If the machine already has selections, Save removes them from its next release.";
+export const EMPTY_ASSIGNMENT = "Nothing is selected: the machine's configuration is its import base, with its own name as its hostname where the base sets none. If the machine already has selections, Save removes them from its next release.";
 
 // Why Save sends nothing for this list, if it does not (api: updateAssignment). An empty list is sent.
 export function assignmentRefusal(l: Lists): string | undefined {

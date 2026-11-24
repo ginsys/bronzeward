@@ -180,6 +180,8 @@ describe("a repeated Show keeps what it showed when a read had no answer", () =>
   });
 });
 
+const shown = EMPTY_ASSIGNMENT.replaceAll("'", "&#x27;");
+
 describe("an assignment's lists, as the editor's text (W4)", () => {
   const lists = { ...noLists(), profile: ["p1", "p2"], role: ["r1"], global: ["g1", "g2"] };
   test("profiles come first, then the layers in composition order, one line per member", () => {
@@ -398,13 +400,13 @@ describe("the assignment entry (W4)", () => {
     expect(out).toContain("Show composition and references");
   });
   test("an empty list says what it means in an open draft, and nothing otherwise", () => {
-    expect(pane()).toContain(EMPTY_ASSIGNMENT.replace("'", "&#x27;"));
-    expect(pane("discarded")).not.toContain("import base alone");
+    expect(pane()).toContain(shown);
+    expect(pane("discarded")).not.toContain(shown);
   });
   test("the empty-list sentence waits for the entry's text, and is left out for an entry the draft removes", () => {
     const entry = (revision: string | null) => ({ kind: "assignment", machine: "mch_1", head: "asg_1", base: 1, revision });
-    expect(pane("open", entry("asr_1"))).not.toContain("import base alone"); // the text is not read yet: the lists are empty
-    expect(pane("open", entry(null))).not.toContain("import base alone");
+    expect(pane("open", entry("asr_1"))).not.toContain(shown); // the text is not read yet: the lists are empty
+    expect(pane("open", entry(null))).not.toContain(shown);
   });
   test("a draft that is not open takes no write", () => {
     const out = pane("discarded");
