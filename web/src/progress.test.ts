@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { eventLine, type OpEvent, type Pace, RESTORED, RESTORED_WHILE_READ, sleep, terminal, watch } from "./progress.ts";
-import { API_BASE, Client } from "./request.ts";
+import { API_BASE, Client, type Phase } from "./request.ts";
 import { noHeaders } from "./test-stalls.ts";
 
 const OP = "op_1";
@@ -151,9 +151,9 @@ function reader(s: ReturnType<typeof server>, where: (path: string) => boolean, 
       if (when === "after") await probe(path);
       return result;
     }) as typeof s.client.read,
-    readWithEpoch: (async (path: string, tries?: number) => {
+    readWithEpoch: (async (path: string, tries?: number, phase?: Phase) => {
       if (when === "before") await probe(path);
-      const result = await s.client.readWithEpoch(path, tries);
+      const result = await s.client.readWithEpoch(path, tries, phase);
       if (when === "after") await probe(path);
       return result;
     }) as typeof s.client.readWithEpoch,
@@ -170,9 +170,9 @@ function discarding(s: ReturnType<typeof server>, nth: number) {
   let n = 0;
   return {
     read: s.client.read.bind(s.client),
-    readWithEpoch: (async (path: string, tries?: number) => {
+    readWithEpoch: (async (path: string, tries?: number, phase?: Phase) => {
       if (path === `/operations/${OP}` && ++n === nth) return { result: { kind: "discarded" }, epoch: undefined, moves: s.client.moves };
-      return s.client.readWithEpoch(path, tries);
+      return s.client.readWithEpoch(path, tries, phase);
     }) as typeof s.client.readWithEpoch,
     open: (...a: Parameters<typeof s.client.open>) => s.client.open(...a),
     get writesEnded() { return s.client.writesEnded; },
@@ -446,21 +446,45 @@ describe("the operation progress reader (§8.6)", () => {
 
     // After a failed drain, a terminal reread under another epoch is of a restored installation: it is void, and
     // the watch goes on after the delay, as the CLI's does (watch.go), with no second drain of it. The client
-    // knows the new epoch from another answer before the reread (an answer that brings a new epoch is itself
-    // discarded, §8.5), and the streams that follow are of that epoch.
+    // knows the new epoch from another answer recorded BEFORE the reread is sent (an answer recorded while it
+    // is pending discards it, §8.5), and the streams and pages that follow are of that epoch: a watch that
+    // drained the reread would find the events of its epoch and end with the terminal state.
     test("a terminal reread under another epoch than the read whose drain failed is void and is not drained", async () => {
-      let probe = async (): Promise<unknown> => undefined;
       const later = (): Stream[] => Array.from({ length: 3 }, () => ({ chunks: [], epoch: "e2" }));
       const s = server({
-        streams: [{ chunks: [] }, ...later()], states: ["succeeded", "succeeded@e2", "running@e2"], pageRefusals: [403], probeEpoch: "e2",
-        duringOp: (n) => (n === 2 ? probe() : Promise.resolve()),
+        streams: [{ chunks: [] }, ...later()], states: ["succeeded", "succeeded@e2", "running@e2"], pageRefusals: [403], pagesEpoch: "e2", probeEpoch: "e2",
       });
-      probe = () => s.client.read("/probe");
+      let ops = 0;
       const r = recorder(() => true);
-      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      const out = await watch(reader(s, (p) => operationPath(p) && ++ops === 2, "before"), OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "ended", operation: { state: "running" }, epoch: "e2" });
       expect(r.sleeps).toEqual([1000]);
       expect(s.urls.filter((u) => u.startsWith(EVENTS)).length - s.opened.length).toBe(1);
+    });
+
+    // The retry phase of the operation read has its own backoff, from 1 s at each phase (the CLI's retryIn),
+    // and the delay of the attempts before it does not carry into it.
+    test("an outage after a running read waits 1 s, then 2 s: the backoff of the attempts is not the outage's", async () => {
+      const s = server({ streams: quiet(3), states: ["succeeded"], opFetches: ["running", ...down("503", 2)] });
+      const r = recorder();
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+      // The ordinary wait after the running read, then the two waits of the outage in steps of 250 ms.
+      expect(r.sleeps[0]).toBe(1000);
+      expect(sum(r.sleeps.slice(1, 5))).toBe(1000);
+      expect(sum(r.sleeps.slice(5))).toBe(2000);
+    });
+
+    // A 401 is renewed once for all the sends of a phase (the CLI's retryIn keeps `renewed`), so the second
+    // 401 of an outage ends the watch.
+    test("a refused token is renewed once for the whole outage: the second refusal fails the watch", async () => {
+      let renewed = 0;
+      const s = server({ streams: quiet(3), states: ["succeeded"], opFetches: ["401", "503", "401", "503"], renew: async () => (renewed++, true) });
+      const r = recorder();
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "failed", res: { kind: "unauthenticated" } });
+      expect(renewed).toBe(1);
+      expect(opReads(s)).toBe(3);
     });
 
     // The CLI reads the operation straight after a failed drain (internal/client/watch.go): no stream is
@@ -827,8 +851,8 @@ describe("the operation progress reader (§8.6)", () => {
   // The page leaves while the operation read is pending: the reader's read resolves after the abort.
   const leavingAtRead = (s: ReturnType<typeof server>, abort: AbortController) => ({
     read: ((path: string) => s.client.read(path)) as typeof s.client.read,
-    readWithEpoch: (async (path: string, tries?: number) => {
-      const out = await s.client.readWithEpoch(path, tries);
+    readWithEpoch: (async (path: string, tries?: number, phase?: Phase) => {
+      const out = await s.client.readWithEpoch(path, tries, phase);
       if (operationPath(path)) abort.abort();
       return out;
     }) as typeof s.client.readWithEpoch,
@@ -898,7 +922,7 @@ describe("the operation progress reader (§8.6)", () => {
   // The page leaves while the stream opens: the answer arrives after the abort.
   const leavingAtOpen = (s: ReturnType<typeof server>, abort: AbortController) => ({
     read: ((path: string) => s.client.read(path)) as typeof s.client.read,
-    readWithEpoch: ((path: string, tries?: number) => s.client.readWithEpoch(path, tries)) as typeof s.client.readWithEpoch,
+    readWithEpoch: ((path: string, tries?: number, phase?: Phase) => s.client.readWithEpoch(path, tries, phase)) as typeof s.client.readWithEpoch,
     open: (async (...a: Parameters<typeof s.client.open>) => {
       const out = await s.client.open(...a);
       abort.abort();

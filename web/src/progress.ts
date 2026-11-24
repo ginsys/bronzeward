@@ -5,7 +5,7 @@
 
 import type { components } from "./api/v1";
 import { type Failed, readPages } from "./list.tsx";
-import { type Client, NOT_SENT, outage } from "./request.ts";
+import { type Client, NOT_SENT, outage, type Phase } from "./request.ts";
 
 export type Operation = components["schemas"]["OperationBody"];
 
@@ -208,6 +208,8 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
   // not be read, and for as long as the operation read is an outage. That is the CLI's operationReadUntil,
   // which keeps the read inside its own retry phase, so no event read comes between two attempts of it.
   let reread = false;
+  let outageDelay = 1000;
+  let phase: Phase = { renewed: false };
   for (;;) {
     // The sign-in ended: nothing more is sent. The JSON pages never reach the stream's check for it.
     if (w.signal.aborted || client.writesEnded) return { kind: "stopped" };
@@ -234,10 +236,15 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     // The epoch comes from the response the result comes from: the client's epoch can be a newer one
     // by the time this continues.
     // One send: the waits between the sends are this loop's, so they end with the watch (§8.6 item 2).
-    const { result: res, epoch, moves: records } = await client.readWithEpoch<Operation>(path, 1);
+    const { result: res, epoch, moves: records } = await client.readWithEpoch<Operation>(path, 1, phase);
     // The page left while the read was pending: its answer is not acted on, and nothing more is sent.
     if (w.signal.aborted) return { kind: "stopped" };
     reread = outage(res);
+    // A phase ends with an answer that is no outage: its backoff and its one renewal start again.
+    if (!reread) {
+      outageDelay = 1000;
+      phase = { renewed: false };
+    }
     const at = records + run.signs;
     // Events cleared at once, because the operation read names another epoch, are not progress.
     let stale = false;
@@ -300,15 +307,15 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     // attempt shows something or a stream stays open for 30 s. JSON pages are read again after the
     // delay (the CLI's watch.go). A read with no answer for an outage of the server (a transport failure,
     // a 5xx that is not a Bronzeward problem, a 503 that §8.2 retries) is read again the same way until
-    // the watch ends, which `until` or the page leaving does (§8.6 item 2).
+    // the watch ends, which `until` or the page leaving does (§8.6 item 2). The outage has its own backoff,
+    // which starts at 1 s with each phase (the CLI's retryIn), and leaves the delay of the attempts alone.
     const progress = run.fresh > 0 && !stale;
     if (progress || (opened && !pages && took >= 30_000)) delay = 1000;
-    if (pages || res.kind !== "ok" || !progress) {
-      if (outage(res)) {
-        if (await outageWait(delay)) return endedIn(res);
-      } else {
-        await pace.sleep(delay, w.signal);
-      }
+    if (outage(res)) {
+      if (await outageWait(outageDelay)) return endedIn(res);
+      outageDelay = Math.min(2 * outageDelay, 30_000);
+    } else if (pages || res.kind !== "ok" || !progress) {
+      await pace.sleep(delay, w.signal);
       if (!progress) delay = Math.min(2 * delay, 30_000);
     }
   }

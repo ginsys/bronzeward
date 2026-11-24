@@ -644,14 +644,16 @@ describe("the reads of the watch and of its end go through the page's settle (gi
     live = false;
     expect((await wrapped.read("/x")).kind).toBe("discarded");
   });
-  test("the bound on the sends of a read passes through to the client", async () => {
+  test("the bound on the sends of a read and its retry phase pass through to the client", async () => {
     const { reads } = settling();
-    const tries: (number | undefined)[] = [];
-    const client = { ...scripted(() => ({ kind: "ok", data: {} })), readWithEpoch: async <T,>(_p: string, n?: number) => (tries.push(n), { result: { kind: "ok", data: {} } as ReadResult<T>, epoch: "e1", moves: 0 }) };
+    const seen: unknown[] = [];
+    const client = { ...scripted(() => ({ kind: "ok", data: {} })), readWithEpoch: async <T,>(_p: string, n?: number, ph?: unknown) => (seen.push([n, ph]), { result: { kind: "ok", data: {} } as ReadResult<T>, epoch: "e1", moves: 0 }) };
     const wrapped = settledReads(client, reads, () => true);
-    await wrapped.readWithEpoch("/x", 1);
+    const phase = { renewed: false };
+    await wrapped.readWithEpoch("/x", 1, phase);
     await wrapped.readWithEpoch("/x");
-    expect(tries).toEqual([1, undefined]);
+    expect(seen).toEqual([[1, phase], [undefined, undefined]]);
+    expect((seen[0] as unknown[])[1]).toBe(phase);
   });
   test("a read made after the watch left is not rendered, and open and writesEnded pass through", async () => {
     const { reads } = settling();

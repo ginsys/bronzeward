@@ -93,6 +93,8 @@ const RETRIED_503 = new Set(["dependency-unavailable", "talos-access-unavailable
 
 // What `readWithEpoch` reports of a response beside its result: the epoch it named and the client's count of epoch records after it.
 interface Seen { epoch: string | undefined; moves: number }
+// Whether a 401 was renewed already, for all the reads of one retry phase (§8.6 item 2).
+export interface Phase { renewed: boolean }
 
 // §8.6 item 2: the operation read of a watch that found no answer, which the watch reads again until it ends: a
 // transport failure, a 5xx that is not a Bronzeward problem, or one of the three 503s that §8.2 retries. A 500
@@ -195,17 +197,18 @@ export class Client {
   // `tries` bounds the sends of a retried failure or of a read answered under another epoch than one
   // recorded after its send, the first included (MAX_TRIES by default; a renewed 401 is no try): the
   // operation read of a watch passes 1 and waits itself, so its waits end with the watch (§8.6 item 2).
-  async readWithEpoch<T>(path: string, tries = MAX_TRIES): Promise<{ result: ReadResult<T>; epoch: string | undefined; moves: number }> {
+  // `phase` carries the renewal allowance across such reads: a 401 is renewed once for all the sends of
+  // one retry phase, as the CLI's retryIn keeps `renewed` for its whole loop.
+  async readWithEpoch<T>(path: string, tries = MAX_TRIES, phase: Phase = { renewed: false }): Promise<{ result: ReadResult<T>; epoch: string | undefined; moves: number }> {
     const seen: Seen = { epoch: undefined, moves: 0 };
-    const result = await this.readFrom<T>(path, seen, tries);
+    const result = await this.readFrom<T>(path, seen, tries, phase);
     return { result, epoch: seen.epoch, moves: seen.moves };
   }
 
-  private async readFrom<T>(path: string, seen: Seen, tries = MAX_TRIES): Promise<ReadResult<T>> {
+  private async readFrom<T>(path: string, seen: Seen, tries = MAX_TRIES, phase: Phase = { renewed: false }): Promise<ReadResult<T>> {
     const sent = this.generation;
     const drops = this.drops;
     const principal = this.view.principal;
-    let renewed = false;
     for (let attempt = 0; ; attempt++) {
       const records = this.epochRecords;
       const res = await this.send(path);
@@ -248,8 +251,8 @@ export class Client {
       if (body === NOT_JSON && res.status < 500) return { kind: "defect", message: "the problem body is not JSON" };
       // Any other 401 code is a refusal by its status class (§8.2's unknown-code row).
       if (res.status === 401 && code === "unauthenticated") {
-        if (!renewed && this.opts.renew !== undefined) {
-          renewed = true;
+        if (!phase.renewed && this.opts.renew !== undefined) {
+          phase.renewed = true;
           // A renewal that throws is a failed one: the 401 settles as unauthenticated below, and the
           // exception does not leave the read with no result for the page to show.
           let again = false;
