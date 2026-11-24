@@ -53,7 +53,8 @@ async function paneTraceStart(entry: string) {
       const now: Sample = {
         ms: Math.round(performance.now() - t0),
         field: label !== null,
-        which: (label?.firstChild?.textContent ?? "").slice(0, 16),
+        // Only a text node's words, a label's UI wording: an element first (a textarea) holds a document, which never crosses WebDriver.
+        which: label === null ? "" : label.firstChild?.nodeType === Node.TEXT_NODE ? (label.firstChild.textContent ?? "").slice(0, 16) : "(element)",
         remove: s !== null && [...s.querySelectorAll("button")].some((b) => b.textContent === "Remove"),
         listed: (document.querySelector('main ul[aria-label="Entries"]')?.textContent ?? "").includes(`fragment ${entryName}`),
         sections: all.length,
@@ -78,7 +79,7 @@ const paneSamples = () => browser.execute(() => {
   return p?.samples ?? [];
 });
 const paneTraceStop = () => browser.execute(() => (window as unknown as { __pane?: PaneTrace }).__pane?.stop());
-const result =(b: B = browser) => pane(b).$('[data-testid="write-result"]');
+const result = (b: B = browser) => pane(b).$('[data-testid="write-result"]');
 const notice = () => $('[data-testid="write-notice"]');
 const profilePane = (b: B = browser) => b.$('main section[aria-label^="Profile"]');
 
