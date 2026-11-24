@@ -6,6 +6,7 @@
 // "nothing to do" nor "unchanged" (§2.3).
 
 import type { components } from "./api/v1";
+import { LINES } from "./apply.ts";
 import { Ref, useItem } from "./list.tsx";
 import { driftPath, planFor, planPath } from "./plan.tsx";
 import { Who } from "./principals.tsx";
@@ -116,5 +117,5 @@ export function PlanPreparedBy({ position }: { position: Position | undefined })
 function PreparedBy({ id }: { id: string }) {
   const p = useItem<components["schemas"]["PlanBody"]>(`/plans/${encodeURIComponent(id)}`);
   if (p.kind !== "ok" || p.data.createdBy == null) return null;
-  return <p data-testid="next-step-by">Prepared by <Who id={p.data.createdBy.principal} /> on {when(p.data.createdAt)}.</p>;
+  return <p data-testid="next-step-by">{LINES.preparedBy} <Who id={p.data.createdBy.principal} /> on {when(p.data.createdAt)}.</p>;
 }

@@ -25,7 +25,9 @@ revision `e1c8cb3`; a line citation into client code, `cmd/bronzewardctl/`, `int
 moved statements from Proposed to current). The expected-epoch check that
 [#293](https://github.com/ginsys/bronzeward/issues/293) added did not exist there, so the
 citations in [§8](#8-states-every-view-must-handle) are read at the revision that lands
-[#309](https://github.com/ginsys/bronzeward/issues/309), with that check applied. Client behaviour this document proposes is
+[#309](https://github.com/ginsys/bronzeward/issues/309), with that check applied, and the client citations of
+the apply paragraphs of journey 5.6 are read at the revision that lands
+[#1159](https://github.com/ginsys/bronzeward/issues/1159). Client behaviour this document proposes is
 marked **Proposed**; with the acceptance above, the marker separates accepted client behaviour
 from existing behaviour, and in §13 it keeps its meaning of a target for the owner to set. A
 behaviour the API does not support today is listed in
@@ -988,7 +990,7 @@ cancelled. One the page loses (the tab is closed) expires with the plan default;
 unknown leaves a plan the page has no ID for (`web/src/apply.ts:104`, `web/src/apply.ts:128-132`).
 The machine's page shows the plan its position names, which is the newest plan of the machine that the position
 counts (one that has expired, was cancelled or was committed, or an adopt plan a refusal names, is not named), with who prepared it and
-when, read from the plan (`web/src/nextstep.tsx:113-121`, `web/src/machine.tsx:465`); any other plan stays reachable
+when, read from the plan (`web/src/nextstep.tsx:114-122`, `web/src/machine.tsx:465`); any other plan stays reachable
 through the page's list of the machine's plans. No route returns a change before a plan
 exists, so showing it means making the plan.
 **Apply** stays off while any plan's change is unread, bound to a drift record (it overwrites a configuration no reviewer has seen), or withheld by the server (a configuration that could not be
