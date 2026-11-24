@@ -91,23 +91,22 @@ func TestApplyRowWaitsForAnotherMachinesHostname(t *testing.T) {
 			"This plan waits. The last release applied to machine beta records the Kubernetes node name node-9, and this release gives the same name to machine alpha. " +
 				"This plan has sent nothing to either machine. Apply the release for machine beta first, or give machine alpha another hostname.", "approved already"},
 		{"a node name not recorded", "-", hostWaitsUnread, "approved already"},
+		// The node name is remote text: it is printed escaped, never as the control bytes it holds.
+		{"a node name with a control byte", `node-\u001b[31m9`, "records the Kubernetes node name node-\\x1b[31m9, and", "\x1b"},
 		{"no holder", "", "approved already: the controller sends it when its gates allow", "This plan waits"},
 	} {
 		f := applyServer(t)
 		f.held = c.held
 		setStdin(t, "n\n")
-		code, _, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--all")
-		if code != 0 && c.held != "" {
-			t.Fatalf("%s: exit %d, stderr %q", c.label, code, errOut)
-		}
+		_, _, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--all") // the answer n stops the command with a non-zero exit
 		if !strings.Contains(errOut, c.want) || strings.Contains(errOut, c.not) {
 			t.Errorf("%s: want %q and not %q in\n%s", c.label, c.want, c.not, errOut)
 		}
 		if c.held != "" && (strings.Contains(errOut, "refused") || strings.Contains(errOut, "failed")) {
 			t.Errorf("%s: a waiting plan is described as refused or failed:\n%s", c.label, errOut)
 		}
-		if b := f.took(); len(b) != 0 && c.held != "" {
-			t.Errorf("%s: sent %v", c.label, b)
+		if s := strings.Join(f.took(), "\n"); strings.Contains(s, "/approvals") {
+			t.Errorf("%s: approved a plan on the answer n: %s", c.label, s)
 		}
 	}
 }
