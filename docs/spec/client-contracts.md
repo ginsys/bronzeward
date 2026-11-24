@@ -341,7 +341,8 @@ file's `audience` (`cmd/bronzewardctl/commands.go:144-148`, `cmd/bronzewardctl/c
    `internal/client/client.go:107`, `internal/client/client.go:248-260`). A
    write in an interactive session always prints the context before it sends: `Send` prints
    `<context> (<server>): sending <route>.` to standard error before its first attempt, and none
-   before a repeat (`internal/client/write.go:210-212`). A session is interactive when standard
+   before a later attempt of the same write; a person's repeat of an unknown write is a new
+   command and prints it (`internal/client/write.go:210-212`). A session is interactive when standard
    input and standard error are terminals and neither `--no-input` nor `--token-stdin` is given
    (`cmd/bronzewardctl/main.go:404`), so a script's or a pipe's output gains no line. Several
    writes of one command each print the line.
