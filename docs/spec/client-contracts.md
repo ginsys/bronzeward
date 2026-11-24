@@ -329,7 +329,7 @@ client ID (`internal/client/config.go:178-181`), so an empty audience skips the 
    `internal/client/client.go:101`, `internal/client/client.go:289`). **Proposed:** a
    write in an interactive session prints the context before it sends. Today no write does:
    `writeWith` and `Send` print nothing before the request (`cmd/bronzewardctl/writes.go:112`,
-   `internal/client/write.go:182`), and only some recovery commands name the context in their own
+   `internal/client/write.go:197`), and only some recovery commands name the context in their own
    confirmation lines.
 3. The web interface serves exactly one installation, the one at its own origin
    ([§10.1](#101-hosting-and-origin)). Switching installations is navigating to another origin,
@@ -630,9 +630,10 @@ Built in both clients, except the part of items 1 and 3 that the CLI does not me
 2. A client ignores unknown response fields, and never maps an unknown enumeration value to a
    known state or to success. It shows a start mode as `unknown` ([§6](#6-tls-trust) item 4) and
    any other such value as the text it received. In the CLI's human output, [§6](#6-tls-trust)
-   item 8 escapes that text. (Built, for the start mode: the CLI, `internal/client/printable.go:104-110`;
-   the web client, `web/src/recovery.tsx:41-42`, which reads any value but `normal` and `recovery`
-   as no start mode. For an operation's state the CLI treats only the five listed states as
+   item 8 escapes that text. (Built, for the start mode: the CLI, `internal/client/printable.go:104-110`.
+   **Proposed** for the web client: it reads any value but `normal` and `recovery` as no start mode
+   (`web/src/recovery.tsx:41-42`) and then keeps the mode it showed before
+   (`web/src/shell.tsx:467-468`), where the clause asks for `unknown`. For an operation's state the CLI treats only the five listed states as
    terminal, `internal/client/watch.go:61-67`. The rest of the item, over every enumeration both
    clients read, was not traced and stays **Proposed**.)
 3. A client declares the minimum API revision it needs. It reads `GET /server` on context use and
@@ -813,7 +814,7 @@ line, `internal/client/client.go:217-224`, `internal/client/client.go:245-267`,
 `cmd/bronzewardctl/interrupt.go:22-25`, `internal/client/interrupt.go:23-41`,
 `cmd/bronzewardctl/main.go:243-252`; reads only, not writes, `internal/client/interrupt.go:23-26`; the
 `cluster first-key` exception, `internal/client/write.go:324-329`, `cmd/bronzewardctl/main.go:182-191`,
-`cmd/bronzewardctl/main.go:262-266`; the renewal that runs to its end, `internal/client/client.go:226-227`
+`cmd/bronzewardctl/main.go:258-259`; the renewal that runs to its end, `internal/client/client.go:226-227`
 (a comment) and `internal/client/credentials.go:264` (`renew` takes no context); no notice after the
 first Ctrl-C, `internal/client/watch.go:339-353`; no further read, `cmd/bronzewardctl/main.go:179-193`;
 a write not yet started is not sent, `internal/client/write.go:199-203`; the error beside the stop,
@@ -844,8 +845,10 @@ identifier, not a request's ([persistence and API §9.4](persistence-api.md#94-e
 shows such a problem with the operation's identifier and final state, applies the row above for
 what the operator may do next, and never repeats the request that started the operation: the
 `202` was already a success. Built in the web client, which words a failed operation by code and
-rule from the same tables (`web/src/problems.tsx:83`, `web/src/imports.tsx:127-133`), and in
-neither client does anything repeat the request. **Proposed** for the CLI's next step: it shows the
+rule from the same tables (`web/src/problems.tsx:83-87`, `web/src/imports.tsx:127-133`), and in
+neither client does anything repeat the request. **Proposed** for the web client's next step: it
+words the operation by `what` only, not the row's `next` (`web/src/problems.tsx:86`), and offers
+"Import again" beside it (`web/src/imports.tsx:133`). **Proposed** for the CLI's next step: it shows the
 operation's identifier and state with the raw error (`cmd/bronzewardctl/imports.go:592-609`) and
 applies the row's next step only for `precondition-failed` and `ingestion-abandoned`
 (`cmd/bronzewardctl/imports.go:601-608`); that function names no other code.
