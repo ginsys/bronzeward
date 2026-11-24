@@ -130,6 +130,7 @@ function mount(served: Record<string, unknown>, answer: (path: string) => unknow
   document.body.append(box);
   const root = createRoot(box);
   const slow = { ms: 0 };
+  const slowWrite = { ms: 0 };
   const calls: Record<string, number> = {};
   const reads = {
     client: { read: vi.fn(async (path: string) => {
@@ -147,6 +148,7 @@ function mount(served: Record<string, unknown>, answer: (path: string) => unknow
   const closed = new Set<Write>();
   const wire = (x: Writes) => {
     vi.spyOn(x, "submit").mockImplementation(async (w) => {
+      if (slowWrite.ms > 0) await new Promise((r) => setTimeout(r, slowWrite.ms));
       sent.push(w.spec.path);
       all.push(w);
       w.outcome = answer(w.spec.path) as never;
@@ -181,7 +183,7 @@ function mount(served: Record<string, unknown>, answer: (path: string) => unknow
     box.remove();
   };
   const start = () => render(writes);
-  return { sent, row, button, off, start, render, writes, choose, press, stop, settled, elapse, slow, calls, dismiss, box, all };
+  return { sent, row, button, off, start, render, writes, choose, press, stop, settled, elapse, slow, slowWrite, calls, dismiss, box, all };
 }
 const done = (data: unknown) => ({ kind: "done", status: 201, data, replayed: false });
 const served2 = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -371,7 +373,33 @@ describe("the apply page's plans and approvals", () => {
         expect(p.calls[path]).toBe(first + 1);
         await p.elapse(5000);
         expect(p.calls[path]).toBe(first + 2);
-        await p.elapse(10 * 60 * 1000);
+        // Still reading near the end of the ten minutes, and silent after it.
+        await p.elapse(9 * 60 * 1000 + 30 * 1000);
+        const near = p.calls[path]!;
+        await p.elapse(15 * 1000);
+        expect(p.calls[path]).toBeGreaterThan(near);
+        await p.elapse(60 * 1000);
+        const last = p.calls[path]!;
+        await p.elapse(60 * 1000);
+        expect(p.calls[path]).toBe(last);
+        await p.stop();
+      }));
+    test("the ten minutes run from the press, not from the end of a slow batch", () =>
+      withTimers(async () => {
+        const served = served2();
+        const p = mount(served, afterApproval(served), true);
+        await p.start();
+        await p.choose(A);
+        p.slowWrite.ms = 3 * 60 * 1000;
+        await p.press("Apply");
+        await p.elapse(3 * 60 * 1000);
+        // 3 min in: the batch is over and the page is reading. 9 min 40 s in: still reading.
+        await p.elapse(6 * 60 * 1000 + 40 * 1000);
+        const near = p.calls[path]!;
+        await p.elapse(15 * 1000);
+        expect(p.calls[path]).toBeGreaterThan(near);
+        // Past 10 min from the press (not from the batch's end, 13 min): the last read has been made.
+        await p.elapse(60 * 1000);
         const last = p.calls[path]!;
         await p.elapse(60 * 1000);
         expect(p.calls[path]).toBe(last);
