@@ -218,3 +218,35 @@ func TestWatchEndedInTrustRefusalAfterAFailedDrain(t *testing.T) {
 		t.Errorf("watch: %v, %v; want no operation and the refused drain with the trust refusal, not ErrWatchEnded", op, err)
 	}
 }
+
+// TestWatchEndedAfterATrustRefusedDrain checks that a terminal read whose drain was refused for its certificate, and
+// whose read of the operation after it met connection failures until the watch ended, returns the refusal and not the
+// terminal read: the refusal is in the drain's error, not in the last read's (§8.6 item 2).
+func TestWatchEndedAfterATrustRefusedDrain(t *testing.T) {
+	const e1 = "ep_BWSYNTH1"
+	untrusted := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(untrusted.Close)
+	gone := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	gone.Close() // nothing listens: connections are refused
+	o := &opServer{streams: []func(http.ResponseWriter, *http.Request){sse(ev(e1+":1", "queued"))}, epochs: []string{e1}, states: []string{"failed"}}
+	var c *Client
+	f := &fake{epoch: e1, post: func(_ int, w http.ResponseWriter, r *http.Request) {
+		o.serve(w, r)
+		if r.URL.Path == "/api/v1/operations/op_BWSYNTH" {
+			c.Context.Server = untrusted.URL // the terminal read was answered; the server then presents a refused certificate
+		}
+	}}
+	c, _, _ = writeClient(t, f, e1)
+	var waits []time.Duration
+	waitFor = func(ctx context.Context, d time.Duration) error {
+		if waits = append(waits, d); len(waits) == 1 {
+			c.Context.Server = gone.URL // and then nothing answers at all
+		}
+		return ctx.Err()
+	}
+	t.Cleanup(func() { waitFor = defaultWait })
+	op, _, err := c.Watch("op_BWSYNTH", Watch{Show: func(Event) {}, Until: func() (bool, error) { return sumWaits(waits) >= 3*time.Second, nil }})
+	if op != nil || !errors.As(err, new(*trust)) {
+		t.Errorf("watch: %v, %v; want no operation and the trust refusal of the drain", op, err)
+	}
+}

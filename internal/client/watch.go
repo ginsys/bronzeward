@@ -202,6 +202,9 @@ func (c *Client) WatchBody(op string, w Watch) (*apitypes.OperationBody, Operati
 					}
 					// A refused certificate ends the watch with the refusal, as in stopped: the terminal read
 					// before it is of a server the client no longer trusts.
+					if trustRefusal(derr) != nil { // the drain's own refusal, whatever the second read met after it
+						return nil, OperationRead{}, derr
+					}
 					if t := trustRefusal(err); t != nil {
 						return nil, OperationRead{}, errors.Join(derr, t)
 					}
