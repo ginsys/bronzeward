@@ -32,7 +32,10 @@ except the code [#277](https://github.com/ginsys/bronzeward/issues/277) adds or 
 (`internal/api/identity.go`, `internal/api/routes.go:97`, `internal/api/api.go:339`), which is
 read with it applied, and the expected-epoch check
 [#293](https://github.com/ginsys/bronzeward/issues/293) added, cited in G21's disposition, §8.4
-item 3, D10 and A6, which is read with that change applied. A requirement this document proposes is
+item 3, D10 and A6, which is read with that change applied. A line citation into client code in
+[§8.5](#85-epoch-changes) and [§8.6](#86-event-resumption) is read at the revision that lands the
+change that moved those sections' statements from Proposed to current, and not at `36f3bae2`. A
+requirement this document proposes is
 marked **Proposed**; *must*
 in a Proposed item is a requirement on the clients once the proposal is accepted, not a claim
 about code that exists. A behaviour the API does not support today is listed in
@@ -1181,40 +1184,87 @@ compared by equality only
 `Bronzeward-Expected-Epoch` names the earlier epoch `412 epoch-mismatch`, earlier automation
 tokens `401`, and streams `reset` ([§2](#2-the-api-a-client-meets)).
 
-**Proposed.** The client compares `Bronzeward-Epoch` on every response with the last it saw for
-the context. On a change it:
+**Current.** Both clients compare `Bronzeward-Epoch` on every response with the last they saw for
+the context (CLI: `internal/client/client.go:339-351`; web: `web/src/request.ts:204-213`,
+`web/src/request.ts:431-450`). The web client drops an answer of another epoch than one it recorded
+after the send, and reads again to learn the current one (`web/src/request.ts:205-209`). On a
+change each:
 
-1. discards every cursor, cached page, ETag and stream position for the context;
-2. sets aside every pending write as in [§8.4](#84-idempotency-and-ambiguous-responses) item 3,
-   except a recovery entry, which that item repeats under its key;
+1. discards what it kept for the context. The CLI keeps no cursor or page between commands, drops
+   the ETags kept at an earlier epoch (`internal/client/client.go:382-386`,
+   `internal/client/state.go:129-133`) and clears the events a watch showed
+   (`internal/client/watch.go:234-237`). Within one list read it keeps the `next` cursor across
+   pages and compares no epoch between them: it relies on the server, which binds a cursor to its
+   epoch ([persistence and API §12.1](persistence-api.md#121-the-epoch)) and refuses another
+   epoch's as `400 cursor-invalid`, after which the CLI reads the list again from its start with
+   the items dropped, at most three times (`internal/client/list.go:87-102`). The web client
+   replaces the page by the wait for the server, the identity and the recovery state, which it
+   reads again
+   (`web/src/shell.tsx:398-406`, `web/src/shell.tsx:516-517`), keeps an ETag only for the epoch it
+   was seen in (`web/src/drafts.tsx:44-52`) and reads a list again from its start
+   (`web/src/list.tsx:149-158`);
+2. sets aside the writes still pending, as in [§8.4](#84-idempotency-and-ambiguous-responses)
+   item 3, except a recovery entry, which that item repeats under its key. The CLI sets aside the
+   write it has in flight (`internal/client/write.go:311-314`, `internal/client/write.go:420-424`;
+   the entry's exception is the `!w.Entry` of `internal/client/write.go:311`); the web client sets
+   every open write aside (`web/src/write.ts:302-314`, the entry's exception at
+   `web/src/write.ts:306`);
 3. tells the operator "The installation entered recovery mode or was restored; what was read
-   before may no longer hold", and, while `Bronzeward-Recovery-Mode: true` is present, shows the
-   recovery banner (journeys §8);
-4. records the new epoch. A context's first epoch is recorded without a notice.
+   before may no longer hold" (`internal/client/client.go:342-343`, `web/src/request.ts:16-17`,
+   `web/src/shell.tsx:542`), and, while `Bronzeward-Recovery-Mode: true` is present, shows the
+   recovery banner (journeys §8): the CLI once per command (`internal/client/client.go:358-364`),
+   the web client in the page header (`web/src/shell.tsx:539`);
+4. records the new epoch. A context's first epoch is recorded without a notice
+   (`internal/client/client.go:341-345`, `web/src/request.ts:441-449`).
+
+**Proposed, not built by every client.** Item 1 asks the web client to discard every cached page.
+It keeps one: the page holding unsaved text stays shown, and sends nothing, while the new epoch's
+server and identity reads are pending, and through a failure a later read can mend (no answer, a
+`503` after its retries); it ends once both reads answer for an accepted server, and on a refusal, a
+`403` or an incompatible server (`web/src/shell.test.ts:248`, `web/src/shell.test.ts:273`). Those
+tests pin it as intended (H10 of [#517](https://github.com/ginsys/bronzeward/issues/517)), so this
+text and the code disagree until the owner decides which stands.
 
 A command that shows one snapshot built from several reads (`status`, `recovery status`, the
 table of `machine show`) shows nothing when an epoch change falls between the first and the last
 answer it shows, in every output form, because the earlier answers, with the facts they carry, no
 longer hold. `machine show -o json` and `-o yaml` print the machine answer alone, so they have no
 second read to compare. After reads that all succeed, it says so and names the command that reads
-again. A failed read that the command needs ends it with that read's own error.
+again. A failed read that the command needs ends it with that read's own error. **Current** for
+the CLI: `status` (`cmd/bronzewardctl/reads.go:435`, `cmd/bronzewardctl/reads.go:466-477`),
+`recovery status` (`cmd/bronzewardctl/recovery.go:72-78`, before it prints in any form) and
+`machine show` (`cmd/bronzewardctl/reads.go:312-337`). The web client has no command of this shape.
 
 Three more commands read twice, and each compares the epoch of the answers themselves. After
 `publish` succeeds, it shows no next step for the machines when a machine answer has another epoch
 than the release answer, or when any answer showed another epoch than the one before while the
 machines were read, even if a later answer set it back. It still reports the publication, which is
-done, and names `release show`.
+done, and names `release show` (it also prints its `release review` line;
+`cmd/bronzewardctl/publish.go:150-183`). `-o json` and `-o yaml` print no next steps
+(`cmd/bronzewardctl/publish.go:43-47`).
 `profile set` sends nothing when the draft answer and the fragment list have different epochs, or
-when the epoch changes before the send. It says that nothing was sent and names `draft show`.
-`machine add` names the cluster only when the cluster answer has the epoch of the write's answer.
+when the epoch changes before the send. It says that nothing was sent and names `draft show`
+(`cmd/bronzewardctl/drafts.go:176-179`, `internal/client/write.go:259-266`).
+`machine add` names the cluster only when the cluster answer has the epoch of the write's answer
+(`cmd/bronzewardctl/writes.go:295-303`). These three are **current** for the CLI.
 The wait of `import` does not end on a lapsed lease when the claim or operation answer has another
-epoch than the events shown. It reads both again. The watch clears the events shown when the
-operation it reads has another epoch, even if the operation has no event to replace them. Every
+epoch than the events shown. It reads both again (CLI: `cmd/bronzewardctl/imports.go:499-508`; web:
+`web/src/imports.tsx:254-261`). The watch clears the events shown when the
+operation it reads has another epoch, even if the operation has no event to replace them, **when
+the operation is not terminal** (CLI: `internal/client/watch.go:234-237`; web:
+`web/src/progress.ts:223-226`). A terminal read of another epoch than the kept events is read again
+after the backoff, and clears only through the pages it drains (CLI:
+`internal/client/watch.go:204-216`; web: `web/src/progress.ts:208-216`,
+`web/src/progress.ts:268-275`). Every
 other multi-page read needs no such comparison, because a cursor carries its epoch and a change
 makes it `400 cursor-invalid`.
 
-An epoch is never ordered or parsed. A missing `Bronzeward-Epoch` on an authenticated success is
-a defect the client reports.
+An epoch is never ordered or parsed: both clients compare it by equality, and split only an event
+ID at its first colon to compare the part before it (`internal/client/watch.go:573-577`,
+`web/src/progress.ts:101`). A missing `Bronzeward-Epoch` on an authenticated success is a defect
+the client reports (CLI: `internal/client/client.go:298-301`, `internal/client/write.go:690-693`,
+`internal/client/watch.go:459-463`; web: `web/src/request.ts:459-463`, `web/src/write.ts:428-429`,
+`web/src/progress.ts:300-301`).
 
 **Start mode** (G22). Neither the headers nor `GET /recovery` say whether the process was started
 for recovery, which decides whether plan creation, approval and unfreeze can succeed (journeys
@@ -1223,7 +1273,14 @@ for recovery, which decides whether plan creation, approval and unfreeze can suc
 recovery start refuses that read until its entry commits. The client keeps the last mode a
 `GET /server` answer or one of the answers below showed, per context, and reads `GET /server`
 again on context use and after a new epoch. A restart changes the mode without any signal, so the
-kept mode is only the last one shown:
+kept mode is only the last one shown. **Current:** both clients keep the last mode shown, per
+context (CLI: `internal/client/client.go:161-165`, saved at `internal/client/client.go:375`; web: the
+shell's `mode`, `web/src/shell.tsx:382`) and read `GET /server` on context use (CLI:
+`internal/client/client.go:140-158`; web: `web/src/shell.tsx:458-472`). After a new epoch the web
+client reads it again every time (`web/src/shell.tsx:398-406`). The CLI does after a read whose
+answer shows the new epoch (`internal/client/client.go:190-194`); **Proposed:** a write answer that
+shows a new epoch is not followed by that read, which waits for the next read of the command
+(`internal/client/client.go:142`, `internal/client/client.go:345`).
 
 1. **Recovery start:** `GET /server` answering `"startMode": "recovery"`, which a recovery start
    serves only after its entry; a `409 recovery-mode-active` without a `scope` member; or any answer of
@@ -1236,13 +1293,35 @@ kept mode is only the last one shown:
    except a `401` or a `403 identity-revoked` found there, which drops it
    (`internal/api/problem.go:63-71`). A
    `recovery-mode-active` with a `scope` member is a scope's refusal and says nothing about the
-   start mode.
+   start mode. **Current.** The CLI takes the mode from all three shapes: `GET /server`
+   (`internal/client/client.go:151`), a scope-less `recovery-mode-active`
+   (`internal/client/client.go:322-326`) and an entry answer after the role check that carries
+   `Bronzeward-Epoch`, other than a `401`, a `403` or the item 2 refusal
+   (`internal/client/write.go:334-341`). The web client takes it from `GET /server` and from the
+   scope-less `recovery-mode-active` (`web/src/recovery.tsx:33-44`, `web/src/shell.tsx:269`,
+   `web/src/shell.tsx:300`, `web/src/shell.tsx:466-468`); it takes none from an entry answer
+   itself. The entry's `201` carries the new epoch, which makes the shell read `GET /server`
+   again (`web/src/request.ts:441-449`, `web/src/shell.tsx:398-406`); a `409 conflict` with
+   `epoch` leaves the page on the mode it already showed.
 2. **Normal start:** `GET /server` answering `"startMode": "normal"`, or the entry's
    not-a-recovery-start refusal, a `409 conflict` with neither
    an `epoch` nor a `request` member, whose detail says only a recovery start serves the entry. A
    `409 conflict` to the entry is never read as a normal start by its status and code alone.
+   **Current.** Both clients take it from `GET /server` (`internal/client/client.go:151`,
+   `web/src/recovery.tsx:41-42`, `web/src/shell.tsx:466-468`). The CLI also takes it from the
+   entry's refusal, which it identifies by its missing `epoch` and `request` members and by
+   `Bronzeward-Epoch` on the answer (`internal/client/write.go:335`,
+   `internal/client/write.go:343-345`). The web client reaches the same mode another way: it
+   notes the refusal and the shell reads `GET /server` again, which answers `normal`
+   (`web/src/recovery.tsx:208-216`); it sets no mode from the refusal itself
+   (`web/src/write.ts:510`). Neither client reads the refusal's `detail`.
 3. **Unknown** before any such answer. The client then disables no action beforehand, and the
    recovery banner states the mode as unknown or as last shown, until the next such answer.
+   **Current** for both: the CLI prints `unknown` for a mode never shown
+   (`internal/client/printable.go:104-109`) and its banner names the mode last shown
+   (`internal/client/client.go:358-364`); the web client starts at `unknown`
+   (`web/src/shell.tsx:382`), says so in its banner (`web/src/recovery.tsx:31`,
+   `web/src/recovery.tsx:59-67`), and the banner disables nothing (`web/src/recovery.tsx:57-58`).
 
 Evidence for each refusal and entry answer is in the G22 row of [§4](#4-api-gap-audit). Item 1 relies on the
 absent `scope` member: [persistence and API §9.4](persistence-api.md#94-errors) gives one only to a
@@ -1256,10 +1335,12 @@ frames it writes (`internal/api/operations.go:295-353`); between events it polls
 (`internal/api/operations.go:210-212`); after 15 s with nothing sent it sends a `: keep-alive`
 comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)).
 
-**Proposed.**
+**Current and Proposed.** After each item, **Current** says what the clients do, with the line
+that shows it, and **Proposed** says what a client does not do yet, one sentence per client.
 
 1. A client follows an operation with the stream when it can and with JSON pages otherwise; both
-   are complete. It remembers the last event ID it showed.
+   are complete. It remembers the last event ID it showed. **Current** for both
+   (`internal/client/watch.go:122-143`, `web/src/progress.ts:167-197`).
 2. When the stream ends it reads `GET /operations/{id}`. A terminal state does not show that the
    last events arrived: the stream may have been cut after the state was written and before its
    last events were (the server writes the state after the last entry and ends the stream only
@@ -1297,6 +1378,33 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    by an event of another epoch, or by an operation read that names another epoch, is not
    progress. A client that gets one event and then an event of another epoch on every attempt
    therefore waits between attempts. The CLI and the web reader both count this way.
+
+   **Current** for both: the drain of a terminal state and the read again after the backoff when
+   its pages name another epoch (`internal/client/watch.go:172-216`,
+   `web/src/progress.ts:202-217`); the reconnect with `Last-Event-ID` and the backoff from 1 s to
+   30 s (`internal/client/watch.go:250-266`, `web/src/progress.ts:233-242`); the attempt that
+   showed nothing and what counts as progress (`internal/client/watch.go:255-258`,
+   `web/src/progress.ts:237-238`).
+
+   **Current** for the CLI: the operation read after a stream that ended, and after a refused
+   drain, is repeated until the watch ends (`internal/client/watch.go:150-151`,
+   `internal/client/watch.go:182`); a watch that ends in an outage reports the last read as it
+   showed it, unless a terminal read is of an installation restored since
+   (`internal/client/watch.go:158-167`, `internal/client/watch.go:191-193`,
+   `internal/client/watch.go:220-222`); the count of signs and the exit 3 are checked after the
+   pages of the end are read (`cmd/bronzewardctl/opwatch.go:352-361`).
+
+   **Proposed, not built by every client.** Web: an operation read that stays unavailable (a `503`
+   or a 5xx once the client's tries ran out) ends the watch as failed, so it is not repeated until
+   the watch ends, and the web keeps no terminal read across an outage, so it has no count of signs:
+   it takes the epoch of the pages last-wins (`web/src/progress.ts:208-210`,
+   `web/src/progress.ts:230-231`, `web/src/progress.ts:253-257`).
+   `web/src/progress.test.ts:283-288` pins the failed watch as intended, and its comment says the
+   CLI's watch does the same, which it does not (`internal/client/watch.go:150-151`). CLI: the wait
+   between two attempts ends on Ctrl-C only (`internal/client/watch.go:310-321`), so a watch that
+   ends through its timeout waits the pause out, not within 250 ms; the web client's waits end at
+   once on the watch's abort (`web/src/progress.ts:83-90`). CLI: a TLS trust refusal is a transport
+   failure the CLI does not repeat (`internal/client/client.go:284`).
 3. A `reset` event clears what the watch showed, prints that the installation was restored or
    entered recovery mode, and shows the replay from the start. The epoch change is handled as in
    [§8.5](#85-epoch-changes). The server sends `reset` only when a stream opens
@@ -1304,12 +1412,21 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    on with event IDs carrying the new epoch (`internal/api/operations.go:278`). So the client
    compares the epoch part of every event ID (before the `:`) with the stream's
    `Bronzeward-Epoch`; on a difference it ends the stream, applies [§8.5](#85-epoch-changes), clears
-   what the watch showed and reopens the stream without `Last-Event-ID` (EVT-05).
+   what the watch showed and reopens the stream without `Last-Event-ID` (EVT-05). **Current** for
+   both: the `reset` and the comparison of the event ID's epoch part with the stream's
+   (`internal/client/watch.go:505-516`, `web/src/progress.ts:332-339`); each clears what was shown
+   and ends the stream, and the next attempt reopens it without `Last-Event-ID` after the
+   operation read and the backoff.
 4. The browser cannot send `Authorization` with `EventSource`, so the web client reads the stream
    with `fetch` and a streamed response body, sending `Authorization`, `Accept` and
    `Last-Event-ID` itself (assumption S1). No token is ever put in a URL. The stream request has
    neither the headers bound nor the attempt bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 8. A
    client whose sign-in ended ([§9.6](#96-failure-cases)) sends no stream request and stops the watch.
+   **Current** for the web, the only client this item names: the stream goes through `fetch` with
+   `Accept` and `Last-Event-ID` and no bound (`web/src/progress.ts:293-297`,
+   `web/src/request.ts:271-279`, whose `send` takes `bounded` false, against its default of true at
+   `web/src/request.ts:342`); a sign-in that ended stops the watch (`web/src/progress.ts:174`,
+   `web/src/progress.ts:296`).
 5. The keep-alive comment keeps an intermediary with an idle timeout above 15 s from cutting a
    quiet stream; a client ignores comment lines and keeps its last event ID. A connection still
    cut without the operation having ended is covered by item 2. A client takes a stream that
@@ -1323,7 +1440,10 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    renews an eligible `401` of the stream itself and opens the stream again, reports another
    client refusal as the server sent it, and rejects a redirect ([§9.5](#95-renewal),
    `internal/client/watch.go:326-330`, `internal/client/watch.go:422-424`,
-   `internal/client/watch.go:435-437`).
+   `internal/client/watch.go:435-437`). **Current** for both: the comment lines and the 45 s
+   (`internal/client/watch.go:478-486`, `web/src/progress.ts:95`, `web/src/progress.ts:315-322`),
+   and the web's refused stream read as pages (`web/src/progress.ts:188-191`,
+   `web/src/progress.ts:298-299`).
 6. The machine timeline has no stream (G9). A client reads its newest page with `order=newest`
    and keeps that answer's `tail`; "Load older" follows `next` with `order=newest`. While the
    timeline is on screen the client polls forward from `tail` (from the start while there is
@@ -1336,12 +1456,22 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    observation or an applied release that the first machine read predates. Only one such read
    again is in flight. A poll with new entries during it does not abandon it: the client reads
    both once more after both answer, so polls that come faster than a read do not stop every read.
-   A view is one path and query. What W3 keeps when a read again of the machine or its
-   observations fails ([#442](https://github.com/ginsys/bronzeward/issues/442)):
+   A view is one path and query. **Current** for the web: the newest page, "Load older", the poll
+   from `tail` in oldest order every 5 s, and the one read again at a time of the machine and its
+   observations (`web/src/machine.tsx:96-132`, `web/src/machine.tsx:160-172`,
+   `web/src/machine.tsx:292-312`, `web/src/machine.tsx:355-372`); the web declares API revision 12
+   as its minimum, which includes revision 3 (`web/src/shell.tsx:33`). **Current** for the CLI,
+   which has no view that shows the machine: `machine timeline --follow` reads the newest page,
+   then polls forward from `tail` every 5 s and refuses a server below revision 3
+   (`cmd/bronzewardctl/timeline.go:23-27`, `cmd/bronzewardctl/timeline.go:65-71`,
+   `cmd/bronzewardctl/timeline.go:131-161`); its plain read sends neither `order` nor `tail`, so it
+   works on any revision the client does. What W3 keeps when a read again of the machine or its
+   observations fails ([#442](https://github.com/ginsys/bronzeward/issues/442)); each test citation
+   asserts the rule it follows:
    - A failure the server answers keeps what the view last read and shows the failure above it.
      These failures are a refusal the page shows, a `503` after its retries, and `epoch-superseded`,
      which the client reads as unavailable (`web/src/request.ts:254`;
-     `web/src/machine.test.ts:226`, `web/src/machine.test.ts:240`, `web/src/machine.test.ts:395`).
+     `web/src/request.test.ts:211`, `web/src/machine.test.ts:226`, `web/src/machine.test.ts:240`, `web/src/machine.test.ts:395`).
    - A read that gets no answer while the view still shows data reports it only through the
      offline banner ([W11](operator-experience-wireframes.md#w11-empty-withheld-error-and-offline-states)).
      The data stays, with no failure of its own above it, also after a failure the server answered
@@ -1361,7 +1491,9 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
      ([§9.6](#96-failure-cases)), and nothing stays (`web/src/request.test.ts:119`,
      `web/src/request.test.ts:149`, `web/src/shell.test.ts:348`).
    - A new epoch and the process's recovery refusal end the page ([§8.5](#85-epoch-changes)), and
-     nothing stays (`web/src/shell.test.ts:302`, `web/src/shell.test.ts:316`).
+     nothing stays, once the new epoch's server and identity reads answer; until then a page
+     holding unsaved text stays shown and sends nothing (`web/src/shell.test.ts:302`,
+     `web/src/shell.test.ts:316`, `web/src/shell.test.ts:248`, `web/src/shell.test.ts:273`).
    - An observations read that restarted after a refused cursor and then failed keeps nothing: the
      list goes with its cursor ([§8.2](#82-errors)). W3 still shows the machine's own rows with
      the observations' failure; only the latest read's line needs the observations. If the machine
@@ -1380,7 +1512,11 @@ comment line ([persistence and API §8.3](persistence-api.md#83-the-resource-and
    watch ends, and each time the page opens an operation again, the page reads the JSON event pages
    once and replaces every row's time with the server's `at`, without the mark. A page that cannot
    read the pages keeps the received times and says that the server's were not read. The CLI's watch
-   has its own rule ([operator experience §5.7](operator-experience.md)).
+   has its own rule ([operator experience §5.7](operator-experience.md)). **Current** for the web
+   (`web/src/operation.tsx:153-181`, the "received" mark at `web/src/operation.tsx:187`, the notice
+   at `web/src/operation.tsx:26`). **Proposed:** after a watch that failed, the page shows the
+   failure, reads no pages and shows no line that the server's times were not read
+   (`web/src/operation.tsx:169`).
 
 ## 9. Authentication
 
