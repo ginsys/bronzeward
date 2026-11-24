@@ -25,11 +25,11 @@ import (
 
 // maxBody is the server's request body limit (internal/api/body.go maxBody, client-contracts.md
 // §8.1): a larger body is refused before it is sent.
-const maxBody = 1 << 20
+const maxBody = client.MaxBody
 
 // overBodyLimit is the refusal of an input that holds more than maxBody bytes. Every reader stops
 // there before it reads further: the document, the declarations and the marks.
-const overBodyLimit = "over the server's 1 MiB body limit"
+const overBodyLimit = client.OverBodyLimit
 
 // stdin is the process's standard input, which tests replace.
 var stdin = os.Stdin
