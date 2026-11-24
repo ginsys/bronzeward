@@ -1068,12 +1068,17 @@ func TestInteractiveWriteNamesTheContextBeforeItSends(t *testing.T) {
 		repeat      bool
 		post        func(n int, w http.ResponseWriter, r *http.Request)
 		lines       int
+		refuse      func(w *Write) // makes the write end before any attempt, so nothing is sent
 	}{
-		{"interactive", true, false, nil, 1},
-		{"script", false, false, nil, 0},
-		{"a repeat the person types", true, true, nil, 1},
-		{"a script's repeat", false, true, nil, 0},
-		{"an attempt retried after a 503", true, false, retried, 1},
+		{"interactive", true, false, nil, 1, nil},
+		{"script", false, false, nil, 0, nil},
+		{"a repeat the person types", true, true, nil, 1, nil},
+		{"a script's repeat", false, true, nil, 0, nil},
+		{"an attempt retried after a 503", true, false, retried, 1, nil},
+		{"a repeat refused for another principal sends nothing and says nothing of sending", true, true, nil, 0,
+			func(w *Write) { w.Repeat.Principal = "svc_other" }},
+		{"a write refused because its reads are of another epoch says nothing of sending", true, false, nil, 0,
+			func(w *Write) { w.Reads = "ep_BWSYNTH-0" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			post := tc.post
@@ -1087,8 +1092,11 @@ func TestInteractiveWriteNamesTheContextBeforeItSends(t *testing.T) {
 			if tc.repeat {
 				w.Repeat = &Repeat{Key: "BWSYNTH-aaaaaaaaaaaaaaa", Epoch: "ep_BWSYNTH-1", Principal: "svc_BWSYNTH"}
 			}
-			if _, err := c.Send(w); err != nil {
-				t.Fatal(err)
+			if tc.refuse != nil {
+				tc.refuse(w)
+			}
+			if _, err := c.Send(w); (err != nil) != (tc.refuse != nil) {
+				t.Fatalf("Send: %v (refused case: %v)", err, tc.refuse != nil)
 			}
 			line := "lab (" + c.Context.Server + "): sending POST /api/v1/clusters.\n"
 			if got := strings.Count(notices.String(), line); got != tc.lines {
