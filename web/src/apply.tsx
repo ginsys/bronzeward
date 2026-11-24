@@ -33,15 +33,18 @@ function Row({ release, machine, chosen, choose, locked, line, n, profiles, seen
   const role = m.kind === "ok" ? m.data.role : undefined;
   const position = p.kind === "ok" ? p.data : undefined;
   useEffect(() => seen(machine, { position, role }), [seen, machine, position, role]);
-  // A stop line whose write has since succeeded (the person repeated it) is stale: the machine's own position speaks.
-  const settledLine = line?.write?.outcome?.kind === "done" ? undefined : line;
-  const shown = settledLine ?? (position === undefined ? undefined : { ...rowOf(position, release), write: undefined });
+  // The machine's line is read from its position and no other source (ginsys/bronzeward#1159). What a step of this page
+  // says, and the answer of a write, is a note about the press, drawn after the line: a note whose write has since
+  // succeeded (the person repeated it) is stale and goes.
+  const note = line?.write?.outcome?.kind === "done" ? undefined : line;
+  const shown = position === undefined ? undefined : rowOf(position, release);
   return (
     <li data-testid="apply-row" data-machine={machine} data-state={shown?.state}>
       <label><input type="checkbox" checked={chosen} disabled={locked} onChange={(e) => choose(e.target.checked)} /> <MachineById id={machine} /></label>
       {role != null && <> <span data-testid="apply-role">{safeWord(roleWords(role))}</span></>}
       {profiles?.map((x) => <span key={x} className="label" data-testid="apply-profile"> {safeWord(x)}</span>)}
-      {shown !== undefined && <>: {STATES[shown.state]}. {shown.write === undefined ? shown.text : <><Result w={shown.write} done={() => null} />{shown.write.outcome?.kind === "refused" && <> {LINES.afterRefusal}</>}</>}</>}
+      {shown !== undefined && <>: {STATES[shown.state]}. {shown.text}</>}
+      {note !== undefined && <span data-testid="apply-note"> {note.write === undefined ? note.text : <><Result w={note.write} done={() => null} />{note.write.outcome?.kind === "refused" && <> {LINES.afterRefusal}</>}</>}</span>}
       {" "}<Ref to={`/machines/${enc(machine)}`} id={machine}>Open the machine</Ref>
     </li>
   );
@@ -87,7 +90,6 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   const [profiles, setProfiles] = useState<Readonly<Record<string, readonly string[]>>>({});
   const [busy, setBusy] = useState(false);
   const [n, setN] = useState(0);
-  const [watching, setWatching] = useState(false);
   // The plans this page made, each with its machine, and those Apply was pressed for, which the page never cancels.
   const made = useRef(new Map<string, string>());
   const pressed = useRef(new Set<string>());
@@ -155,18 +157,24 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
     return () => void (on = false);
   }, [r.sources, read]);
 
-  // While machines wait or apply, the rows are read again, for ten minutes after the press: five seconds after the last
-  // read settled, never on a clock, so a slow read is not dropped by the next one (list.tsx drops a read whose effect re-ran).
-  // Each row reads its machine and its position, so a round is over when 2 x the machines' reads have answered.
-  const watch = useRef(false);
-  watch.current = watching;
+  // The rows are read again for ten minutes after a press of either button, and only while a machine waits or applies:
+  // five seconds after the last read settled, never on a clock, so a slow read is not dropped by the next one (list.tsx
+  // drops a read whose effect re-ran). Each row reads its machine and its position, so a round is over when 2 x the
+  // machines' reads have answered. A round is judged once it is drawn (the effect on `rounds` runs after the rows'
+  // effects have handed their positions to `latest`), so it is the answered round that says whether another follows.
+  const until = useRef(0);
+  const latest = useRef<Record<string, Seen>>({});
   const round = useRef({ answered: 0, reads: 0 });
   round.current.reads = 2 * r.machines.length;
+  const [rounds, setRounds] = useState(0);
   const timer = useMemo(() => poll(() => setN((x) => x + 1), POLL_MS), []);
   const rowSettled = useCallback(() => {
     round.current.answered++;
-    if (watch.current && round.current.answered >= round.current.reads) timer.settled();
-  }, [timer]);
+    if (round.current.answered >= round.current.reads && Date.now() < until.current) setRounds((x) => x + 1);
+  }, []);
+  useEffect(() => {
+    if (rounds > 0 && Date.now() < until.current && Object.values(latest.current).some((s) => s.position !== undefined && ["waiting", "running"].includes(rowOf(s.position, release).state))) timer.settled();
+  }, [rounds]);
   // A new round of reads (the page's own, or the shell's refresh or view change) starts the count again and drops a
   // pending wait: the rows' effects run before this one, and their answers come after it.
   useEffect(() => {
@@ -174,13 +182,11 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
     timer.stop();
   }, [timer, n, reads.again, reads.view]);
   useEffect(() => timer.stop, [timer]);
-  useEffect(() => {
-    if (!watching) return;
-    const stop = setTimeout(() => (setWatching(false), timer.stop()), POLL_FOR_MS);
-    return () => clearTimeout(stop);
-  }, [watching, timer]);
 
-  const see = useCallback((m: string, s: Seen) => setSeen((was) => (was[m]?.position === s.position && was[m]?.role === s.role ? was : { ...was, [m]: s })), []);
+  const see = useCallback((m: string, s: Seen) => {
+    latest.current[m] = s;
+    setSeen((was) => (was[m]?.position === s.position && was[m]?.role === s.role ? was : { ...was, [m]: s }));
+  }, []);
   const machines = r.machines.map((x) => x.machine);
   const picked = machines.filter((m) => chosen.has(m));
   // The plans of the chosen machines as the server holds them now: the ones just made and those a publisher prepared.
@@ -210,13 +216,13 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
     setBusy(true);
     setLines({});
     await showApply(release, picked, io(), made.current);
-    if (live.current) (setBusy(false), setN((x) => x + 1));
+    if (live.current) (setBusy(false), (until.current = Date.now() + POLL_FOR_MS), setN((x) => x + 1));
   };
   const apply = async () => {
     setBusy(true);
     for (const id of plans.values()) pressed.current.add(id);
     await applyPlans(plans, io());
-    if (live.current) (setBusy(false), setN((x) => x + 1), setWatching(true));
+    if (live.current) (setBusy(false), (until.current = Date.now() + POLL_FOR_MS), setN((x) => x + 1));
   };
   const handOff = useCallback((id: string) => void pressed.current.add(id), []);
   const markRead = useCallback((id: string, s: Seeing) => setReadable((was) => (was[id] === s ? was : { ...was, [id]: s })), []);
