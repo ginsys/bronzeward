@@ -2609,7 +2609,8 @@ them as the fixtures already do for evidence
 
 **Built, by item.** CLI: the positive control, `internal/clitest/core_test.go:88-93`; the scan of
 `argv`, standard output and standard error, `internal/clitest/cli_test.go:405-416`; the pseudo-terminal
-exception, `internal/clitest/protected_test.go:70-100`, case `internal/clitest/testdata/protected-cases.yaml:15`.
+start with the same `argv` scan, `internal/clitest/protected_test.go:83-89`, and the scan of the
+retained files, `internal/clitest/protected_test.go:520-535`, case `internal/clitest/testdata/protected-cases.yaml:15`.
 Web: `web/e2e/scan.ts` (the retained files, with a planted control), `web/e2e/retention.test.ts:234-256`
 (no trace, HAR, video or screenshot call, with the transitive-import positive control at `:234-242`),
 `web/e2e/auth/helpers.ts:229-310` (the storage and cache checks with their controls),
@@ -2696,7 +2697,8 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 
 **Built.** The web client's records are the 40 files of `conformance/cases/` and their browser
 files under `web/e2e/` (run by `mise run browser-auth` and `mise run browser`); the CLI's are the
-45 case ids of `internal/clitest/testdata/*.yaml`, run by `internal/clitest/cli_test.go:726`, with
+45 case ids of `internal/clitest/testdata/*.yaml`, run by `internal/clitest/cli_test.go:726` for
+`testdata/cases.yaml` and by `internal/clitest/protected_test.go:322-323` for the protected cases, with
 an in-process TLS injector and `interruptServer` (`internal/clitest/cli_test.go:68`) and the dev
 issuer for the sign-in cases (`internal/clitest/login_idp_test.go`). A row marked built has a record
 or a named test in every client it names; the CLI-only rows (AUTH-04, AUTH-09, PROT-02, AMB-04,
