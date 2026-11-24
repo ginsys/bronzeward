@@ -248,13 +248,14 @@ give a node a path that reads as an embedded document's.
    without ever being loaded. A directive in a list entry refuses the input
    too, since the member that selects the entry is dropped unloaded and could
    hold a schema secret; list-element overrides by selector are not run (§15).
-   One document is accepted whole: a delete selector for a typed document, whose
-   root holds exactly `$patch: delete`, `apiVersion` and `kind`, each a plain
-   string (the form `HostnameConfig` is deleted with, §6.1 item 5). The
-   machinery reads both values to choose the document it deletes, so nothing in
-   it is stored unloaded, and it refuses a pair it does not know. A selector
-   with any other member, a `name` included, or one that is not a document root
-   stays refused.
+   One document is accepted whole: the delete selector for a `HostnameConfig`,
+   whose root holds exactly `$patch: delete`, `apiVersion: v1alpha1` and
+   `kind: HostnameConfig`, each a plain string (the form §6.1 item 5 deletes the
+   document with). The machinery reads both values to choose the document, so
+   nothing in it is stored unloaded; it does not check the pair (measured: an
+   unknown kind loads as a selector too), so the pair is fixed here and no
+   free text is stored. A selector with any other member, a `name` included,
+   another kind or apiVersion, or one that is not a document root stays refused.
 4. **Substitute** each identified value by a reference (§5) under a newly
    minted logical name at version 1, with its declaration (§5.2), producing the
    candidate sanitized document. Names are minted as §5.1 states. The
