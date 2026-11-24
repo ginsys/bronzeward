@@ -45,6 +45,9 @@ export const RESTORED_WHILE_READ =
   "The installation entered recovery mode or was restored while the events were read, so the operation's events are shown again from the start.";
 // What a watch that ended in an outage reports when the operation it read is of an installation restored since (§8.6 item 2).
 const NO_READ: Failed = { kind: "defect", message: "The installation was restored or entered recovery mode after the operation was read, so no read of it stands." };
+// What it reports when it ended between two attempts with no read of the operation kept: every read so far was
+// discarded (a new epoch, the shell dropping its reads, a stale answer), which says nothing of a restore.
+const NOT_READ: Failed = { kind: "defect", message: "The watch ended before any read of the operation stood." };
 
 // How a watch shows what it reads. `show` gets each event once, in order. `clear` says that what was
 // shown no longer holds, before the events are shown again from the start. `until`, when set, ends
@@ -73,10 +76,9 @@ export type Watched =
   | { kind: "failed"; res: Failed };
 
 export interface Pace {
-  sleep: (ms: number, signal: AbortSignal) => Promise<void>;
-  // Waits `ms` in steps of at most 250 ms, each asking `stop`, so a watch that ends is left within one step
-  // (§8.6 item 2; the CLI's retryIn). True when `stop` answered true, false when the wait ran out or `signal`
-  // was aborted. A fake records one wait, however many steps it takes.
+  // Every wait of the watch: `ms` in steps of at most 250 ms, each asking `stop`, so a watch that ends is
+  // left within one step (§8.6 item 2; the CLI's retryIn and pause). True when `stop` answered true, false
+  // when the wait ran out or `signal` was aborted. A fake records one wait, however many steps it takes.
   wait: (ms: number, signal: AbortSignal, stop: () => Promise<boolean>) => Promise<boolean>;
   now: () => number;
   // A stream that sends nothing, not even its keep-alive comment every 15 s, for this long is taken
@@ -102,7 +104,7 @@ const STEP = 250;
 
 // The one stepping loop of the watch's waits: `sleep` for each step, then `stop` is asked, so the real wait
 // and a fake that records logical waits step in the same way.
-export async function stepWait(sleepFor: Pace["sleep"], ms: number, signal: AbortSignal, stop: () => Promise<boolean>): Promise<boolean> {
+export async function stepWait(sleepFor: (ms: number, signal: AbortSignal) => Promise<void>, ms: number, signal: AbortSignal, stop: () => Promise<boolean>): Promise<boolean> {
   for (let left = ms; left > 0; ) {
     const step = Math.min(left, STEP);
     await sleepFor(step, signal);
@@ -114,7 +116,6 @@ export async function stepWait(sleepFor: Pace["sleep"], ms: number, signal: Abor
 }
 
 const PACE: Pace = {
-  sleep,
   wait: (ms, signal, stop) => stepWait(sleep, ms, signal, stop),
   now: () => Date.now(),
   idle: 45_000,
@@ -213,10 +214,10 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     if (last.drain === undefined) return { kind: "ended", operation: last.operation, epoch: last.epoch };
     return { kind: "failed", res: last.moves === moves() ? last.drain : NO_READ };
   };
-  // The wait of an outage and the wait after a void terminal read are in steps of 250 ms, each asking
-  // `until`, so a watch that ends is left within 250 ms (§8.6 item 2; the CLI's retryIn). The page leaving
-  // ends it at once.
-  const outageWait = (ms: number): Promise<boolean> => pace.wait(ms, w.signal, () => run.stop());
+  // Every wait of the watch (an outage's, the one after a void terminal read, the backoff between two attempts)
+  // is in steps of 250 ms, each asking `until`, so a watch that ends is left within 250 ms (§8.6 item 2; the
+  // CLI's retryIn and pause). The page leaving ends it at once.
+  const pause = (ms: number): Promise<boolean> => pace.wait(ms, w.signal, () => run.stop());
   // The operation is read again with no stream or page read first: after a terminal read whose events could
   // not be read, and for as long as the operation read is an outage. That is the CLI's operationReadUntil,
   // which keeps the read inside its own retry phase, so no event read comes between two attempts of it.
@@ -270,7 +271,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
         // the delay, with no second drain of it (the CLI's watch.go).
         last = undefined;
         voided = true;
-        if (await outageWait(delay)) return endedIn(NO_READ);
+        if (await pause(delay)) return endedIn(NO_READ);
         delay = Math.min(2 * delay, 30_000);
         continue;
       }
@@ -287,7 +288,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
         // so a server whose events never match is not asked again without a pause (the CLI's watch.go).
         last = undefined;
         voided = true;
-        if (await outageWait(delay)) return endedIn(NO_READ);
+        if (await pause(delay)) return endedIn(NO_READ);
         delay = Math.min(2 * delay, 30_000);
         continue;
       }
@@ -325,10 +326,12 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     const progress = run.fresh > 0 && !stale;
     if (progress || (opened && !pages && took >= 30_000)) delay = 1000;
     if (outage(res)) {
-      if (await outageWait(outageDelay)) return endedIn(res);
+      if (await pause(outageDelay)) return endedIn(res);
       outageDelay = Math.min(2 * outageDelay, 30_000);
     } else if (pages || res.kind !== "ok" || !progress) {
-      await pace.sleep(delay, w.signal);
+      // The backoff between two attempts is in steps that ask `until` too, so a watch that ends is left
+      // within one step (§8.6 item 2; the CLI's pause). With no read kept, no read of the operation stood.
+      if (await pause(delay)) return endedIn(NOT_READ);
       if (!progress) delay = Math.min(2 * delay, 30_000);
     }
   }
