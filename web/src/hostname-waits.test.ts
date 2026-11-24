@@ -50,9 +50,9 @@ describe("hostWaitsText: the sentence of a position, machines named as A8 rule 1
   test("names both machines by name, with the node name from the release's review", () => {
     expect(hostWaitsText(held(), "node-a")).toBe(hostWaits("node-a", "node-a", "node-b"));
   });
-  test("a machine with no name is 'an unnamed machine', never its identifier", () => {
+  test("a machine with no name is named by its address, a holder with none is 'an unnamed machine', never an identifier", () => {
     const s = hostWaitsText(held({ hostnameHeldBy: { id: "mch_a", name: null }, machine: machine(null) }), "node-a") ?? "";
-    expect(s).toBe(hostWaits("an unnamed machine", "node-a", "an unnamed machine"));
+    expect(s).toBe(hostWaits("an unnamed machine", "node-a", "10.0.0.2")); // the holder has no address in the position; this machine is named by its address (A8 rule 1)
     expect(s).not.toContain("mch_");
   });
   test("a node name that could not be read gives the short sentence, and no more", () => {
