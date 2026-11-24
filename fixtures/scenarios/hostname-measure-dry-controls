@@ -28,7 +28,7 @@ cp -- "$tmp/path/talosctl" "$copy/.cache/talosctl"
 dlog=$tmp/docker-calls
 : >"$dlog"
 # shellcheck disable=SC2016 # the stub's own expansions, written literally
-printf '#!/bin/sh\nif [ "$1 $2" = "context show" ]; then echo default; exit 0; fi\nprintf "%%s\\n" "$*" >>"%s"\n' "$dlog" >"$tmp/path/docker"
+printf '#!/bin/sh\nif [ "$#" = 2 ] && [ "$1" = context ] && [ "$2" = show ]; then echo default; exit 0; fi\nprintf "%%s\\n" "$*" >>"%s"\n' "$dlog" >"$tmp/path/docker"
 chmod +x -- "$tmp/path/docker"
 failed=0
 # verdict <what> <command...>: PASS when the command succeeds.
@@ -75,4 +75,7 @@ verdict "lib.sh overrides a foreign TALOSCONFIG with the copy's own: ${seen:-<em
 verdict 'no run above made a Docker call past the context read' test "$(wc -l <"$dlog" | tr -d ' ')" = 0
 PATH=$tmp/path:$PATH docker ps
 verdict 'control: the docker recorder holds one line after one call' test "$(wc -l <"$dlog" | tr -d ' ')" = 1
+# The one exception is exactly two arguments: `context show` with a third is recorded, not answered.
+PATH=$tmp/path:$PATH docker context show --help >/dev/null
+verdict 'a context read with an extra argument is recorded' test "$(wc -l <"$dlog" | tr -d ' ')" = 2
 [ "$failed" -eq 0 ]
