@@ -201,8 +201,9 @@ export class Client {
   // operation read of a watch passes 1 and waits itself, so its waits end with the watch (§8.6 item 2).
   // `phase` carries the renewal allowance across such reads: a 401 is renewed once for all the sends of
   // one retry phase, as the CLI's retryIn keeps `renewed` for its whole loop.
-  // `signal` is the caller's end: once it is aborted nothing more is sent, and a retry wait ends at once; the
-  // read is then discarded (§8.6 item 2). A request already sent is not cancelled (§8.4 item 8).
+  // `signal` is the caller's end: once it is aborted nothing more is sent (a retry, a renewal or its resend), and
+  // a retry wait ends at once; the read is then discarded (§8.6 item 2). A request already sent is not
+  // cancelled, and an answer that had arrived is returned: the caller looks at its signal again (§8.4 item 8).
   async readWithEpoch<T>(path: string, tries = MAX_TRIES, phase: Phase = { renewed: false }, signal?: AbortSignal): Promise<{ result: ReadResult<T>; epoch: string | undefined; moves: number }> {
     const seen: Seen = { epoch: undefined, moves: 0 };
     const result = await this.readFrom<T>(path, seen, tries, phase, signal);
@@ -257,6 +258,8 @@ export class Client {
       // Any other 401 code is a refusal by its status class (§8.2's unknown-code row).
       if (res.status === 401 && code === "unauthenticated") {
         if (!phase.renewed && this.opts.renew !== undefined) {
+          // The caller left while the answer was on its way: no renewal is started for it, and nothing is sent.
+          if (signal?.aborted) return { kind: "discarded" };
           phase.renewed = true;
           // A renewal that throws is a failed one: the 401 settles as unauthenticated below, and the
           // exception does not leave the read with no result for the page to show.

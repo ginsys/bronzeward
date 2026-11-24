@@ -652,6 +652,16 @@ describe("the operation progress reader (§8.6)", () => {
     });
   });
 
+  // The operation read of the watch is one send, but a refused token is renewed and the read sent again: that send
+  // does not follow an abort either.
+  test("a watch that ends while a refused token is renewed does not send the operation read again", async () => {
+    const r = recorder();
+    const s = server({ streams: quiet(3), states: ["running"], opFetches: ["401"], renew: async () => (r.abort.abort(), true) });
+    const out = await watch(s.client, OP, r.w, bounded(r, 100));
+    expect(out).toEqual({ kind: "stopped" });
+    expect(opReads(s)).toBe(1);
+  });
+
   // The retry wait of an events page read is the client's, and the watch's abort reaches it: a page that left
   // does not wait out the backoff of its reads (1 + 2 + 4 + 8 s) and does not send them (ginsys/bronzeward#1175).
   test("a watch that ends during the retry wait of an events page read sends no further page request", async () => {
