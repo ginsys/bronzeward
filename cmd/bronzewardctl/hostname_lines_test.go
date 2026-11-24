@@ -100,7 +100,7 @@ func TestHostnameLines(t *testing.T) {
 	}
 }
 
-const reviewBody = `{"release":"rel_a","machine":"mch_a","mode":"metal","configuration":"machine:\n  type: worker\n","provenance":[],"hostname":{"source":"machine-name","name":"node-a"}}`
+const reviewBody = `{"release":"rel_a","machine":"mch_a","mode":"metal","configuration":"machine:\n  type: worker\n","provenance":[],"hostname":{"source":"machine-name","name":"node-a","nodeName":"node-a"}}`
 
 func reviewRun(t *testing.T, answers map[string]string, extra ...string) (string, string) {
 	t.Helper()
