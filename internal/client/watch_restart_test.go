@@ -170,3 +170,26 @@ func TestWatchTrustRefusalIsRepeated(t *testing.T) {
 		}
 	})
 }
+
+// TestWatchEndedInTrustRefusalAfterARead checks that a watch that read the operation, and then met a server whose
+// certificate is refused until the watch ended, returns the refusal and not the earlier read (§8.6 item 2).
+func TestWatchEndedInTrustRefusalAfterARead(t *testing.T) {
+	const e1 = "ep_BWSYNTH1"
+	untrusted := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(untrusted.Close)
+	o := &opServer{streams: []func(http.ResponseWriter, *http.Request){sse()}, epochs: []string{e1}, states: []string{"running"}}
+	f := &fake{epoch: e1, post: func(_ int, w http.ResponseWriter, r *http.Request) { o.serve(w, r) }}
+	c, _, _ := writeClient(t, f, e1)
+	var waits []time.Duration
+	waitFor = func(ctx context.Context, d time.Duration) error {
+		if waits = append(waits, d); len(waits) == 1 {
+			c.Context.Server = untrusted.URL // the server restarts behind a certificate the client refuses
+		}
+		return ctx.Err()
+	}
+	t.Cleanup(func() { waitFor = defaultWait })
+	op, _, err := c.Watch("op_BWSYNTH", Watch{Show: func(Event) {}, Until: func() (bool, error) { return sumWaits(waits) >= 3*time.Second, nil }})
+	if op != nil || !errors.Is(err, ErrWatchEnded) || !errors.As(err, new(*trust)) {
+		t.Errorf("watch: %v, %v; want no operation and an error that is ErrWatchEnded and the trust refusal", op, err)
+	}
+}

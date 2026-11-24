@@ -2,6 +2,7 @@ package client
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -59,6 +60,52 @@ func TestWriteAnswerOfNewEpochReadsServer(t *testing.T) {
 		}
 		if n := serverReadsAfterPost(f); n != 0 || strings.Contains(notices.String(), "could not be read again") {
 			t.Errorf("%d reads of GET /server after the refusal, notices %q; want none, and no notice", n, notices)
+		}
+	})
+	t.Run("a read between two sends that shows the new epoch is no answer of the write", func(t *testing.T) {
+		// The first POST is refused as unavailable, at the epoch known; the confirming GET /recovery before the
+		// repeat shows e2 and stops the write. The POST itself showed nothing new, so nothing reads GET /server.
+		f := &fake{epoch: e1, recovery: func(int) string { return e2 },
+			post: func(_ int, w http.ResponseWriter, _ *http.Request) {
+				problemAnswer(w, http.StatusServiceUnavailable, "dependency-unavailable", "")
+			}}
+		c, notices, _ := writeClient(t, f, e1)
+		if _, err := c.Send(clusterWrite()); err == nil {
+			t.Fatal("send succeeded; want the stop at the confirming read")
+		}
+		if n := serverReadsAfterPost(f); n != 0 || !slices.Contains(f.requests(), "GET /api/v1/recovery") {
+			t.Errorf("%d reads of GET /server after the write, requests %q, notices %q; want none after a confirming read that showed e2", n, f.requests(), notices)
+		}
+	})
+	t.Run("a complete answer that is no problem document, and shows a new epoch, is followed by the read", func(t *testing.T) {
+		f := &fake{epoch: e1, pathEpoch: map[string]string{"/api/v1/clusters": e2},
+			post: func(_ int, w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte("bad gateway"))
+			}}
+		c, notices, _ := writeClient(t, f, e1)
+		if _, err := c.Send(clusterWrite()); err == nil {
+			t.Fatal("send succeeded; want the refusal")
+		}
+		if n := serverReadsAfterPost(f); n != 1 {
+			t.Errorf("%d reads of GET /server after the write, notices %q; want one", n, notices)
+		}
+	})
+	t.Run("a recovery start's refusal of an operator's repeat reads nothing either", func(t *testing.T) {
+		// A repeat that is refused is reported as an unknown outcome, which keeps the problem out of the error chain.
+		f := &fake{epoch: e1, pathEpoch: map[string]string{"/api/v1/clusters": e2},
+			post: func(_ int, w http.ResponseWriter, _ *http.Request) {
+				problemAnswer(w, http.StatusConflict, "recovery-mode-active", "")
+			}}
+		c, notices, _ := writeClient(t, f, e1)
+		w := clusterWrite()
+		w.Repeat = &Repeat{Key: "BWSYNTH-aaaaaaaaaaaaaaa", Epoch: e1, Principal: "svc_BWSYNTH"}
+		_, err := c.Send(w)
+		if err == nil {
+			t.Fatal("send succeeded; want the refusal")
+		}
+		if n := serverReadsAfterPost(f); n != 0 || strings.Contains(notices.String(), "could not be read again") || !slices.Contains(f.requests(), "POST /api/v1/clusters") {
+			t.Errorf("%d reads of GET /server after the refusal, requests %q, notices %q; want none after a POST that was sent, and no notice", n, f.requests(), notices)
 		}
 	})
 	t.Run("an answer of the epoch already known reads nothing", func(t *testing.T) {
