@@ -1421,7 +1421,9 @@ current token expires
 
 ### 9.2 CLI sign-in
 
-**Proposed.**
+Built in the CLI, which is the only client this section names, except the parts marked **Proposed**
+in the paragraph "Built, by item" at the end of the section. That paragraph holds the code
+sites for each item, and what today does where it differs.
 
 1. `bronzewardctl login` runs the authorization-code grant with PKCE `S256`, `state` and `nonce`,
    using a loopback redirect on `127.0.0.1` with a port the operating system chooses, and opens
@@ -1464,7 +1466,7 @@ current token expires
    cannot tell whose it is. Under the
    lock the keychain is asked whether it is locked before each call, including a write and a
    removal. A locked keychain gives no answer, and no answer counts as locked. Each call is then
-   refused within about 15 seconds (`securityHeldBound`, `internal/client/store_darwin.go:48`), as
+   refused within about 15 seconds (`securityHeldBound`, `internal/client/store_darwin.go:47`), as
    a locked store refuses a command, and nothing is written or removed. On a desktop, the tool can
    show its unlock dialog during that wait. The question and the call after it share one bound of a minute, and the
    tool is stopped when it passes. A keychain can lock between the question and the call. The call
@@ -1518,9 +1520,49 @@ current token expires
    labelled as the client's reading, and the expiry. Roles come from A1 (`GET /identity`,
    `internal/api/identity.go:39`).
 
+**Built, by item.** Item 1: the grant, PKCE, `state` and `nonce`, `internal/client/login.go:191-229`,
+`internal/client/login.go:277`; the printed URL, `internal/client/login.go:201-206`. Item 2: the
+device grant, `internal/client/login.go:97-124`, `cmd/bronzewardctl/commands.go:263-273`, and a
+self-started sign-in on a host without a desktop, `internal/client/credentials.go:245-246`. Item
+3, the store: Linux, `internal/client/store.go:174`, `internal/client/store_linux.go:24-50`,
+`internal/client/store_linux.go:94-246`; macOS, `internal/client/store_darwin.go:44-76`,
+`internal/client/store_darwin.go:147-329`, `internal/client/store_security.go:19-50`; no store, in
+memory, `internal/client/store.go:25-27`, `internal/client/store.go:166-168`; a failing store refuses
+`login`, `internal/client/login.go:327-331`; `logout` and context removal,
+`internal/client/store.go:128-130`, `internal/client/store.go:195-215`,
+`internal/client/store.go:267-315`; a sign-in whose context changed meanwhile,
+`internal/client/login.go:351-375`; the lock and the renewal under it,
+`internal/client/credentials.go:264-302`, `internal/client/credentials.go:327-356`,
+`internal/client/store.go:110-153`; the notice of a renewal that fails,
+`internal/client/client.go:86-90`; the token file, `cmd/bronzewardctl/commands.go:111`,
+`internal/client/credentials.go:37-65`, `internal/client/credentials.go:94-176`,
+`internal/client/login.go:324-388`, `internal/client/token.go:67`. Item 4: `Setenv` and `os.Environ` appear nowhere in
+`cmd/bronzewardctl` or `internal/client`, and `exec` is used only to open the authorization URL
+(`internal/client/login.go:299`, the control of that search) and to run `security` with the secret
+on its standard input (`internal/client/store_security.go:27`); the token's claims are the only
+output of a token (`cmd/bronzewardctl/commands.go:278-279`). That is a search of those two
+directories for those names, not a trace of every output. Item 5: `cmd/bronzewardctl/commands.go:232-256`,
+`internal/client/credentials.go:208-219`.
+
+**Proposed**, where today differs: (a) opening the system browser works on Linux with a desktop
+only (`internal/client/login.go:289-305`, `xdg-open`); on macOS the URL is printed and no browser
+opens. (b) The credential store is built for Linux and macOS only: other systems report that the
+store is not supported (`internal/client/store_other.go`), and the release builds only those two
+(`.goreleaser.yaml:15-17`). (c) The entry that is not valid is replaced by the next login and removed
+by `logout` on macOS only (`internal/client/store_darwin.go:65`, `internal/client/store_darwin.go:243-251`);
+on Linux a malformed entry reads as none (`internal/client/store.go:91`). (d) The token file is
+"offered only for a provider that rotates": `context add --oidc-token-file` takes it for any
+provider (`cmd/bronzewardctl/commands.go:111`); the unrotated refresh token is dropped later
+(`internal/client/credentials.go:295-299`). The sentence that the file may be a "refresh-only one" is
+read as "a document with only a refresh token is the CLI's own" (`internal/client/credentials.go:97-99`,
+`internal/client/credentials.go:172-175`).
+
 ### 9.3 Browser sign-in
 
-**Proposed.**
+Built in the web client, the only client this section names, except the parts marked **Proposed** in
+the paragraph "Built, by item" at the end of the section. Provider behaviour (the provider answers
+a redirect from its own session, rotation, the server's `displayClaim`) and the rejected options are
+not claims about client code.
 
 1. The web interface is a public client using the authorization-code grant with PKCE `S256`,
    `state` and `nonce`, with a full-page redirect to the provider. The PKCE verifier, `state`,
@@ -1686,6 +1728,40 @@ current token expires
    the automation <service>". The header shows no epoch: the recovery banner names it where it
    matters.
 
+**Built, by item.** Item 1: the grant, PKCE, `state`, `nonce`, the full-page redirect and the callback
+checks, `web/src/auth.ts:113-129`, `web/src/auth.ts:157-183`, `web/src/app.tsx:104`; the pending entry
+in `sessionStorage`, `web/src/auth.ts:113-116`, `web/src/auth.ts:157-158`, `web/src/app.tsx:192`, the
+only storage use in `web/src` outside tests (`web/src/app.tsx:192`,
+`web/src/app.tsx:213-214`), found by a search for `sessionStorage`, `localStorage`, `indexedDB`,
+`caches.`, `serviceWorker` and `document.cookie`; the return path, `web/src/auth.ts:95-99`. Item 2:
+`web/src/auth.ts:206-207`, and the pairs that travel on a `BroadcastChannel`, not in storage,
+`web/src/renewer.ts:104`. Item 3: silent renewal, `web/src/auth.ts:302-375`; the holder and the tab
+locks, the acknowledgements and the steal, `web/src/renewer.ts:13-21`, `web/src/renewer.ts:102-118`,
+`web/src/renewer.ts:133-172`, `web/src/renewer.ts:186-354`, `web/src/auth.ts:255-296`,
+`web/src/auth.ts:321-347`; the 15 s bound and the late answer, `web/src/auth.ts:16`,
+`web/src/auth.ts:324-355`; the sign-out wait of 5 s, `web/src/auth.ts:14`, `web/src/auth.ts:409-418`; no
+abort signal, `web/src/auth.ts:445-461`; the redirect and its thresholds, `web/src/page.ts:22-91`,
+`web/src/app.tsx:104-131`, `web/src/app.tsx:207-218`; the page restored from the back-forward cache,
+`web/src/app.tsx:89-96`; a pair taken when newer and another account as a new sign-in,
+`web/src/auth.ts:268-278`, `web/src/app.tsx:57-61`; the failed renewal and the `401`,
+`web/src/auth.ts:285`, `web/src/auth.ts:346`, `web/src/app.tsx:144-170`; the limits,
+`web/src/renewer.ts:155`, `web/src/renewer.ts:215`, `web/src/renewer.ts:289-292`; no rotation,
+`web/src/auth.ts:232`, `web/src/auth.ts:276`, `web/src/auth.ts:370-371`. Item 4: neither `iframe` nor
+`prompt=none` appears in `web/src` outside tests. Item 5: `web/src/request.ts:4`,
+`web/src/request.ts:356`, with the other fetches at `web/src/auth.ts:430`, `web/src/auth.ts:448`,
+`web/src/userinfo.ts:31` and `web/src/config.ts:27`; the page also fetches the provider's discovery
+document (`web/src/auth.ts:60`), which the sentence does not list. Item 6: `profile`,
+`web/src/auth.ts:84-86`, `web/src/auth.ts:123`; the `userinfo` read and the name,
+`web/src/userinfo.ts:11-48`, `web/src/app.tsx:164`, `web/src/shell.tsx:363-368`,
+`web/src/shell.tsx:534`; `invalid_scope`, `web/src/auth.ts:107`, `web/src/auth.ts:113`,
+`web/src/auth.ts:136-146`, `web/src/app.tsx:210-216`; the automation line and no epoch,
+`web/src/userinfo.ts:46`, `web/src/shell.tsx:530-536`.
+
+**Proposed**, where today differs: after an end or another account, "the pair it brings is revoked".
+The web client does so after an end and when another tab's pair makes the page change account
+(`web/src/auth.ts:338-355`), but a renewal that itself answers another account is adopted and then
+dropped without revoking its pair (`web/src/auth.ts:366-381`, `web/src/app.tsx:114-120`).
+
 ### 9.4 Automation token input
 
 Facts: an automation token is `bwt_<token id>.<secret>`, printed once by the server-side command
@@ -1693,35 +1769,61 @@ Facts: an automation token is `bwt_<token id>.<secret>`, printed once by the ser
 valid at most 90 days (`internal/auth/tokens.go:25`) and refused when revoked, expired or from
 an earlier epoch (`internal/auth/automation.go:47-52`).
 
-**Proposed.**
+Built, except the parts marked **Proposed** below. Sources follow each item.
 
 1. The CLI reads an automation token from a file (`--token-file` or the context's
    `automation.tokenFile`, or, in an automation context, a path in `BRONZEWARD_TOKEN_FILE`) or
    from standard input
    (`--token-stdin`). It never accepts the token as an argument value, nor the token itself in an
    environment variable (decision D6 (a)): `BRONZEWARD_TOKEN_FILE` holds a path, never a secret.
+   (Built: `internal/client/token.go:23-40`, `cmd/bronzewardctl/main.go:337-342`; no token flag and
+   no other `BRONZEWARD_` variable in `cmd/bronzewardctl` or `internal/client`, whose reads are
+   `BRONZEWARD_TOKEN_FILE` and `BRONZEWARD_CONTEXT`.)
 2. A token file must be a regular file readable only by its owner; otherwise the CLI refuses it
-   and says why.
+   and says why. (Built: `internal/client/token.go:54-70`; the file's owner is not checked.)
 3. The CLI recognises an automation context by the `bwt_` prefix and says so before sending a
-   request to a human-only route; the server's `403` stays authoritative.
-4. The web interface accepts no automation token.
+   request to a human-only route; the server's `403` stays authoritative. (**Proposed**: today the
+   CLI knows an automation context from `credential: automation`, `internal/client/client.go:78`,
+   `internal/client/config.go:174`, and checks the prefix only when it reads the token,
+   `internal/client/token.go:46`. It says so before a write marked human-only,
+   `internal/client/write.go:207-209`, but not before a human-only read such as `import review`,
+   `cmd/bronzewardctl/review.go:28`.)
+4. The web interface accepts no automation token. (Built: `bwt_` appears in `web/src` outside tests
+   only in the `403` text of `web/src/states.tsx:22`.)
 5. After a restore, automation tokens from the earlier epoch answer `401`; the CLI's message says
    the token must be reissued by the operator with the server-side command
    ([persistence and API §12.3](persistence-api.md#123-what-a-restored-state-means-record-by-record)).
+   (Built: `internal/client/problem.go:42`; the `401` itself is a server fact.)
 
 ### 9.5 Renewal
 
-**Proposed.**
+Built in the clients each item names, except the part marked **Proposed**.
 
 1. A client renews an access token when less than 60 s of its lifetime remains, by its own clock,
    and once after a `401` on a token it believed valid. It never retries a `401` more than once
-   per request.
+   per request. (Built: CLI `internal/client/credentials.go:33`, `internal/client/credentials.go:255-258`,
+   `internal/client/client.go:86`, `internal/client/client.go:236-243`, `internal/client/write.go:400-401`,
+   `internal/client/watch.go:392`, `internal/client/watch.go:435`; web `web/src/auth.ts:12`,
+   `web/src/auth.ts:20-23`, `web/src/page.ts:88`, `web/src/request.ts:190`,
+   `web/src/request.ts:231-238`, `web/src/request.ts:383-417`, `web/src/write.ts:362`,
+   `web/src/write.ts:440`. The web client renews at `max(left - 60 s, left / 2)`, which is 60 s
+   for a lifetime of 120 s or more.)
 2. A renewal that returns a different `sub` or `iss` is a new sign-in: pending writes are set
-   aside ([§8.4](#84-idempotency-and-ambiguous-responses) item 3) and the change is shown.
+   aside ([§8.4](#84-idempotency-and-ambiguous-responses) item 3) and the change is shown. (Built:
+   CLI `internal/client/credentials.go:308-312`, `internal/client/write.go:304-308`; web
+   `web/src/app.tsx:114-120`, `web/src/auth.ts:361-373`, `web/src/write.ts:302`.)
 3. A failed renewal (refresh token rejected or expired, provider unreachable) leaves the current
    token in use until the server refuses it, then asks the operator to sign in again. The CLI in
-   `--no-input` mode exits with the authentication-refused message instead of prompting.
-4. Long waits (`operation watch`, `publish` waiting for its operation) renew in-process.
+   `--no-input` mode exits with the authentication-refused message instead of prompting. (Built:
+   CLI `internal/client/client.go:86-90`, `internal/client/client.go:238-243`,
+   `internal/client/credentials.go:501`, `internal/client/credentials.go:511`; web
+   `web/src/auth.ts:338-347`, `web/src/app.tsx:165-170`. **Proposed:** the CLI's `--no-input`
+   sentence: the spec names no "authentication-refused message", and the CLI never prompts on a
+   failed renewal; with no store `--no-input` refuses at `internal/client/credentials.go:243-244` and
+   a refused `401` exits 1 at `cmd/bronzewardctl/main.go:267-268`.)
+4. Long waits (`operation watch`, `publish` waiting for its operation) renew in-process. (Built:
+   `internal/client/watch.go:131`, `internal/client/watch.go:290-299`,
+   `cmd/bronzewardctl/publish.go:100`.)
 
 ### 9.6 Failure cases
 
@@ -1734,7 +1836,7 @@ a `401` with another body follows [§8.2](#82-errors)'s rows. The texts below th
 and the expired-token text, are the CLI's
 (lead decision on consistency, 26 October 2026, under the owner's 2026-10-07 grant).
 
-| Case | What the server does | Client behaviour (**Proposed**) |
+| Case | What the server does | Client behaviour |
 | --- | --- | --- |
 | Token expired | `401` (`internal/auth/auth.go:165-166`) | renew ([§9.5](#95-renewal)); if the provider refuses, the CLI says "Your sign-in expired: sign in again" |
 | Wrong issuer | `401` | if the token's `iss` differs from `oidc.issuer`: "The token is from `<iss>`; this context expects `<issuer>`. Check the context or the server's configuration." |
@@ -1752,6 +1854,39 @@ and the expired-token text, are the CLI's
 | Provider or database unreachable from the server | `503 dependency-unavailable`, nothing committed | retry as [§8.2](#82-errors) |
 | Provider unreachable from the client | no request reaches the server | keep using the current token until it is refused; then "Cannot reach the identity provider `<issuer>`", with the cause by its type ([§6](#6-tls-trust) item 4) |
 
+Built, row by row, except the parts marked **Proposed** after the list. The CLI's texts:
+`internal/client/credentials.go:493-512`, `internal/client/problem.go:42-61`; the web client's local
+reading and texts: `web/src/auth.ts:480-490`, `web/src/states.tsx:22-23`, `web/src/shell.tsx:104-106`.
+Expired token, wrong issuer, wrong audience and a malformed groups claim: CLI
+`internal/client/credentials.go:500-505`, `internal/client/credentials.go:511`, web `web/src/page.ts:88`,
+`web/src/auth.ts:483-488`, `web/src/states.tsx:23`. Identity revoked: CLI `internal/client/problem.go:44-50`,
+`internal/client/credentials.go:524-538`, web `web/src/app.tsx:19`, `web/src/app.tsx:157-160`,
+`web/src/app.tsx:171-173`, `web/src/app.tsx:251-253`. Automation token not accepted: CLI
+`internal/client/problem.go:42`. Account disabled: the failed renewal of [§9.5](#95-renewal) item 3.
+The `503` row: CLI `internal/client/client.go:245-249`, `internal/client/client.go:331-334`, web
+`web/src/request.ts:92-93`, `web/src/request.ts:250-253`. Group removed at the provider is a
+provider fact, and the client does nothing before the next refusal.
+
+**Proposed**, where today differs: (a) "Lifetime over the maximum": the CLI reads the last
+`maxTokenLifetimeSeconds` only to form its reading after a `401` (`internal/client/client.go:152`,
+`internal/client/client.go:375-376`, `internal/client/credentials.go:493-512`), not before it sends;
+the web client has no such check (`maxTokenLifetime` appears nowhere in `web/src` outside tests,
+whereas `localReading` is at `web/src/auth.ts:480`). (b) "An ID token, or no `jti`": the CLI reads it
+(`internal/client/credentials.go:508-509`); the web client does not (`at_hash` and `jti` appear
+nowhere in `web/src` outside tests). (c) "No role for the action": the web text is as the table
+says (`web/src/shell.tsx:106`); the CLI says "Needs one of the roles [...]. You are signed in as `<sub>`."
+(`internal/client/problem.go:56-60`). (d) The publisher cancelling a plan it did not create: the web
+text is as the table says (`web/src/shell.tsx:104`); the CLI shows the detail in its head line and
+"You are signed in as `<sub>`." on its own line (`internal/client/problem.go:33-35`,
+`internal/client/problem.go:56-61`). (e) "Human-only route with an automation token": the CLI's text is
+as the table says (`internal/client/problem.go:53`); the web client's is "This action needs a person
+signed in; automation tokens cannot approve." (`web/src/states.tsx:22`). (f) "Provider unreachable
+from the client": the CLI prints "cannot reach the identity provider `<issuer>`" with the cause, in
+lower case, as a notice at the failed renewal rather than after the refusal
+(`internal/client/credentials.go:393`, `internal/client/client.go:88`); the web client keeps the token
+and has no such text (`web/src/auth.ts:449-451`). The server's `401`, `403` and `503` answers and
+the group and account behaviour at the provider are server or provider facts.
+
 ### 9.7 Sign-out and cache clearing
 
 Facts: the server keeps no session, so it cannot end one; an access token stays valid until its
@@ -1759,7 +1894,8 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
 (`internal/auth/auth.go:95`, `internal/auth/auth.go:165`); an identity revocation is permanent and is not a sign-out
 (`internal/api/revocations.go:122`).
 
-**Proposed.**
+Built, except the page header of item 3, which stays **Proposed** (hosting and packaging, as
+[§10.2](#102-script-and-content-policy)). Sources follow each item.
 
 1. `bronzewardctl logout` deletes the context's tokens from the store and from its D2 (b) token
    file, if it has one, revokes the refresh token
@@ -1769,7 +1905,11 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    client). The revocation request follows no redirect, so a 3xx answer is a refused revocation.
    A refusal shows the status and a standard error code only ([§6](#6-tls-trust) item 4).
    Without a `revocation_endpoint`, logout says the refresh token is not revoked; a refused or failed
-   revocation still deletes the tokens, says the refresh token is not revoked and exits 1.
+   revocation still deletes the tokens, says the refresh token is not revoked and exits 1. (Built:
+   `internal/client/login.go:424-452`, `internal/client/login.go:434-441`, `internal/client/store.go:180-215`,
+   `internal/client/credentials.go:155-176`, `internal/client/credentials.go:411-449`,
+   `internal/client/remote.go:39-45`, `cmd/bronzewardctl/commands.go:303-308`,
+   `cmd/bronzewardctl/main.go:272`.)
 2. The web sign-out discards the in-memory tokens and every cached response, revokes the last
    refresh token the tab held if the provider allows it, even one it no longer sends for renewal
    (after a failed or unrotated renewal, or one another tab may have spent), or else the refresh
@@ -1790,11 +1930,19 @@ expiry, at most `maxTokenLifetime` after issue, plus the server's 60 s leeway
    later finds no page. A told tab then shows the signed-out page,
    which holds no lock and records no other tab's refresh token. A tab acts on one sign-out only:
    a second tab's, or one after its own, would cut that wait short
-   ([#388](https://github.com/ginsys/bronzeward/issues/388)).
+   ([#388](https://github.com/ginsys/bronzeward/issues/388)). (Built: `web/src/app.tsx:62-68`,
+   `web/src/app.tsx:81-86`, `web/src/app.tsx:134-141`, `web/src/app.tsx:183-186`,
+   `web/src/app.tsx:244-249`, `web/src/auth.ts:14`, `web/src/auth.ts:330-335`,
+   `web/src/auth.ts:349-355`, `web/src/auth.ts:388-418`, `web/src/renewer.ts:73`,
+   `web/src/renewer.ts:126-129`, `web/src/renewer.ts:165-172`, `web/src/renewer.ts:203-208`,
+   `web/src/shell.tsx:275-278`, `web/src/shell.tsx:452`.)
 3. After sign-out, the browser's back button shows no data from before: the web pages are served
    `Cache-Control: no-store`, the application clears its state on `pagehide` and on a page
    restored from the back-forward cache ([§10.3](#103-caches-and-back-navigation) items 3-4,
-   assumption S8), and it renders nothing without a token.
+   assumption S8), and it renders nothing without a token. (Built: the application's part,
+   `web/src/app.tsx:89-96` and `web/src/app.tsx:92`, `web/src/app.tsx:235-270`. **Proposed:** the
+   header: `web/headers.json:6` declares `Cache-Control: no-store`, and only the test host
+   `fixtures/webhost/main.go` applies it in this tree.)
 
 ## 10. Browser security
 
@@ -1815,7 +1963,11 @@ package ships the static files and the response headers the static host must sen
 
 ### 10.2 Script and content policy
 
-**Proposed.** The static host sends, on every page:
+The two header lists below stay **Proposed**: they bind the static host of D1 (a), which is
+packaging, and this tree only ships their values (`web/headers.json:2-6`, rendered by
+`scripts/release/web-package.sh:20`) and sends them from its test host
+(`fixtures/webhost/main.go:116-118`). The rest of this section is built in the web client, with
+sources after each paragraph. The static host sends, on every page:
 
 - `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self';
   connect-src 'self' <provider origins>; form-action <issuer origin>; frame-ancestors 'none';
@@ -1830,30 +1982,49 @@ The application loads no third-party script, font or analytics, and includes no 
 remote error reporting. Every value from the API, configuration documents included, is inserted
 as text, never as HTML; a YAML or diff view that highlights syntax builds its nodes from escaped
 text. These limit, but cannot remove, the risk that an injected script uses the in-memory token:
-any script running in the page can call the API as the operator.
+any script running in the page can call the API as the operator. (Built in the web client:
+`web/index.html:8` loads only `/src/main.tsx`; a search of `web/src` and `web/index.html` outside
+tests for `https?://` finds a documentation link (`web/src/recovery.tsx:91`) and URL-shape strings,
+and a search for `sentry|analytics|telemetry|onerror|unhandledrejection|sendBeacon|EventSource|WebSocket`
+finds nothing; the network calls are `web/src/request.ts:356`, `web/src/auth.ts:430`,
+`web/src/config.ts:27` and `web/src/userinfo.ts:31`. No `dangerouslySetInnerHTML`, `innerHTML`,
+`outerHTML`, `insertAdjacentHTML` or `document.write` appears in `web/src` outside tests. There is no
+syntax highlighting: `yaml` is used only to parse (`web/src/position.ts:7`, `web/src/marks.tsx:9`,
+`web/src/onboard.ts:9`) and a diff is plain text (`web/src/app.css:134`).)
 
 **CSRF.** The API authenticates only by the `Authorization` header and never by a cookie, so a
 cross-site request carries no credential. This holds only while no cookie authentication is
-added; any future cookie needs its own CSRF design.
+added; any future cookie needs its own CSRF design. (The server's part is a server fact. Built in
+both clients: the web client sends `credentials: "omit"`, `web/src/request.ts:362`,
+`web/src/auth.ts:25`, `web/src/userinfo.ts:31`; the CLI's `http.Client` has no cookie jar,
+`internal/client/transport.go:89-96`, and `Jar` and `CookieJar` appear nowhere in `internal/client`.)
 
 ### 10.3 Caches and back navigation
 
-**Proposed.**
+Built in the web client, except the page header of item 4 (packaging, as [§10.2](#102-script-and-content-policy)),
+which stays **Proposed**; item 1's server half is a server fact. Sources follow each item.
 
 1. Every API read from the web client uses `fetch` with `cache: 'no-store'`. The server sends
    `Cache-Control: no-store` on every API answer ([§2](#2-the-api-a-client-meets) caching row,
    served by A3 for G13), so a browser or an intermediary keeps nothing even from another client.
-2. The application uses no service worker.
+   (Built: `web/src/request.ts:356-363`, `cache: "no-store"` at `:360`, the one call for reads,
+   writes and streams; `web/src/claim.tsx:148-151` and `:198` go through it.)
+2. The application uses no service worker. (Built: `serviceWorker` appears nowhere in `web/src` or
+   `web/index.html`.)
 3. On `pagehide` and on sign-out, the application clears its in-memory state and every form field
-   that holds a document or marks.
+   that holds a document or marks. (Built: `web/src/app.tsx:81-86`, `web/src/app.tsx:89-93`,
+   `web/src/claim.tsx:116-122`.)
 4. Pages are served `no-store`, so a page reloaded from history renders nothing until signed in
    again. A browser may still keep a `no-store` page in its back-forward cache (assumption S8);
    on a `pageshow` with `persisted` true the application discards any state and renders nothing
    until signed in again, so the guarantee rests on items 3 and 4, not on the header alone.
+   (Built in the client: `web/src/app.tsx:94-96` reloads on a persisted `pageshow`, and the page
+   renders nothing without a token, `web/src/app.tsx:26-28`. **Proposed:** the header, see above.)
 
 ### 10.4 Styling and the content policy
 
-**Proposed.** The web client is styled with Oat (`@knadh/oat`, MIT, pinned to one exact version),
+Built in the web client, except the parts marked **Proposed** in the paragraphs after item 7.
+The web client is styled with Oat (`@knadh/oat`, MIT, pinned to one exact version),
 dark first with no light theme (D13). The bundle contains only the Oat files the client uses:
 the base, theme, form, button, table and animation files, with the base file first because it
 declares the cascade layers. Oat's rules are in layers and the client's own stylesheet is not, so
@@ -1920,6 +2091,43 @@ A browser case on the signed-out page fails if Oat's focus rule wins over the cl
 `data:` image is requested (it is checked with a positive control, a `data:` image that must be
 reported), if a control is not native, or if a hover colour is not an opaque `rgb()`.
 
+**Built, by item.** Oat pinned to one exact version, `web/package.json`; dark only, `web/src/app.css:13`
+and no `prefers-color-scheme` rule; the bundle's six files in order, `web/src/main.tsx:4-9`; no `@layer`
+in `web/src/app.css`. Item 1: `web/src/app.css:13-27`, `web/index.html:6`; the 4.5:1 text pairs are
+measured by `measure()` in `web/e2e/auth/helpers.ts:372` and asserted at
+`web/e2e/auth/recovery-accounting.e2e.ts:335`, `web/e2e/auth/publish.e2e.ts:177` and
+`web/e2e/auth/operation.e2e.ts:332`. Item 2: `web/src/app.css:29`, `web/src/app.css:44`,
+`web/src/app.css:48`, case `web/e2e/styling.e2e.ts:110-120` and `:170-176`. Item 3:
+`web/src/app.css:45-47`, `web/src/app.css:86-88`, case `web/e2e/styling.e2e.ts:178-196`. Item 4:
+`web/src/app.css:54-58`, case `web/e2e/styling.e2e.ts:122-146` (the positive control at `:137-145`).
+Item 5: the only positions in `web/src/app.css` are `.skip` and `.sr-only` (`:31-33`) and the
+navigation track (`:77`). Item 6: the top bar, `web/src/shell.tsx:530-545`; the navigation and its
+groups, `web/src/shell.tsx:548-557`, `web/src/router.ts:22-26`, `web/src/layout.test.ts:9-17`, with no
+`<aside` in `web/src`; the column and the stacking, `web/src/app.css:89-95`; the alert box and the
+detail grid, `web/src/states.tsx:85`, `web/src/app.css:70` and `:102`; the words,
+`web/src/words.ts:92-104`, `web/src/machines.tsx:25-40`, `web/src/drift.tsx:64`; the row titles,
+`web/src/titles.ts:29`, `:35`, `:58`; the page notes, `web/src/page-note.tsx`,
+`web/src/page-notes.test.ts`; the CLI's state words and §2.4 sentences,
+`cmd/bronzewardctl/reads.go:278-296` and `:352` (the sentences were not compared word for word
+against operator experience §2.4). Item 7: `web/src/icons.tsx:1-45`, `web/src/layout.test.ts:21-29`,
+and no `style=` in `web/src` outside tests.
+
+**Proposed**, where today differs: (a) item 1: the 3:1 pairs for borders, rules and the focus ring
+are quoted in the header comment of `web/src/app.css:18-24` and no case measures them (the only
+related check is the ring colour at `web/e2e/styling.e2e.ts:115`). (b) Item 6: the spacing scale is
+`web/src/app.css:75`, but `.alert .icon` takes an off-scale margin (`web/src/app.css:105`), so the
+scale is not yet the only source in the shell rules. (c) Item 6: the bordered panel (`web/src/app.css:120`)
+holds a section only on `web/src/operation.tsx:241` and `web/src/machines.tsx:334` and `:358`, and the
+`toolbar` row (`web/src/app.css:111`) only on the machine and cluster lists
+(`web/src/machines.tsx:237`, `:274`); the filters of the other lists are bare `<Filter>` elements
+(`web/src/resources.tsx:221`, `:411`, `:516`, `:593`, `:594`). (d) Item 2: a disabled field's muted
+background is Oat's own rule, relied on by the comment at `web/src/app.css:36-38` and not opened
+here; Oat's layering was not opened either (Oat is not installed in this tree). (e) The note
+sentence "holds no identifier and no role word" is asserted by `web/src/page-notes.test.ts`, which
+this change did not run, and not every titled page was checked against `PageNote`. (f) A button wrap
+at 320 CSS pixels (`web/src/app.css:47`) and the reflow below 68 rem (`web/src/app.css:91-95`) have no
+browser case read here. The browser case's green run is a CI fact.
+
 ## 11. Protected input
 
 ### 11.1 What is protected
@@ -1958,27 +2166,45 @@ review, and a client offers the action to any `author` and shows the refusal.
 
 ### 11.2 Rules for both clients
 
-**Proposed.**
+Built in the clients each item names, except the parts marked **Proposed** in the paragraph after
+item 7. Sources follow each item.
 
 1. **Argv and history.** No flag takes a protected value. Documents come from a file, standard
    input or a prompt; marks only from a prompt or standard input ([§11.3](#113-cli-review) item
    3); tokens from [§9.4](#94-automation-token-input). The documentation
    says that a shell here-document is saved in the shell's history like any command, so a document
-   goes in a file.
+   goes in a file. (Built, CLI: `--file` takes a path, `cmd/bronzewardctl/imports.go:137`,
+   `cmd/bronzewardctl/fragments.go:55`; `--marks` is a switch, `cmd/bronzewardctl/imports.go:146`,
+   `cmd/bronzewardctl/fragments.go:57`; marks are read from standard input or a terminal only,
+   `cmd/bronzewardctl/fragments.go:235-254`; the other file flags are paths,
+   `cmd/bronzewardctl/onboard.go:368`, `cmd/bronzewardctl/firstkey.go:52`.)
 2. **Logs and diagnostics.** Debug output (`-v`) prints method, path, status, `instance` and
    timing. It never prints `Authorization`, a request body of a keyed route, the review body, or
    marks. Error output repeats the server's problem document, which redacts a message by template and searches it for exact copies of resolved string values of
    six bytes or more; a shorter copy, or a copy of an integer or boolean, inside an authored literal is not detected, and
    a path or message may quote that literal
    ([persistence and API §9.4](persistence-api.md#94-errors), compilation §8.4). It never repeats the request.
+   (Built for the last sentence in both clients: CLI `internal/client/problem.go:26-33`, web
+   `web/src/states.tsx:152-164`. The `-v` clause is **Proposed**, see below.)
 3. **No telemetry** in either client, and no crash reporter that sends memory or arguments.
+   (Built: CLI, no `sentry|telemetry|analytics|crashreport|bugsnag` in `cmd` or `internal/client`
+   outside tests, panic handler `cmd/bronzewardctl/main.go:81-86`; web, [§10.2](#102-script-and-content-policy).)
 4. **No temporary files and no editor.** A client never writes protected input or the review to a
    temporary file and never opens `$EDITOR` on it. A document the operator edits in their own
    editor is the operator's file; the documentation says that editors keep swap and backup files
-   the client cannot control.
+   the client cannot control. (Built for the first sentence: a search of `cmd/bronzewardctl` and
+   `internal/client` outside tests for `CreateTemp|MkdirTemp|TempDir|EDITOR|VISUAL|exec.Command`
+   finds `xdg-open` with a URL only (`internal/client/login.go:299`), a temporary file for the
+   context file (`internal/client/config.go:126`) and one for the token file
+   (`internal/client/credentials.go:138`, written and renamed; tokens are in the table above and
+   the clause names protected input and the review, which that file is not); the web client has no
+   `Blob`, `createObjectURL` or save picker. The documentation sentence is **Proposed**.)
 5. **Core dumps.** The CLI disables core dumps for its own process before it reads protected input
    (on Linux, `RLIMIT_CORE` 0 and not dumpable). A panic handler prints a fixed message and no
-   stack values.
+   stack values. (Built: `cmd/bronzewardctl/main.go:77`, `cmd/bronzewardctl/main.go:81-86`,
+   `cmd/bronzewardctl/main.go:113-118`, `cmd/bronzewardctl/main.go:124`,
+   `cmd/bronzewardctl/coredump_linux.go:10-20`; protected input is refused off Linux,
+   `cmd/bronzewardctl/fragments.go:93`.)
 6. **Memory.** Protected input is held no longer than the request needs. A write keeps its body
    only while it can be repeated. When it can no longer be repeated, the page releases the body
    and anything its owner holds for it, and offers no repeat of it, also under a later sign-in of
@@ -1986,14 +2212,31 @@ review, and a client offers the action to any `author` and shows the refusal.
    an epoch change or another sign-in sets it aside, when the sign-in it was sent under ends
    (sign-out, refusal or revocation, also after the page disconnected the client), and when the
    page is hidden. A garbage-collected runtime cannot guarantee erasure; this is a stated limit,
-   not a guarantee.
+   not a guarantee. (Built, web: `web/src/write.ts:184-189`, `:206-214`, `:278`, `:297`, `:302-319`,
+   `web/src/app.tsx:81-93`. CLI: the review and the import base body are cleared after decoding,
+   `cmd/bronzewardctl/review.go:71` and `cmd/bronzewardctl/importbase.go:69`; other request bodies
+   live until the process ends, so only that part of the item is read as built.)
 7. **Clipboard and export.** No copy, download, save, print or share action on the review, on a
-   document being submitted, or on marks.
+   document being submitted, or on marks. (Built: web, `CopyButton` is used only for identifiers and
+   problem references, `web/src/list.tsx:248`, `web/src/problems.tsx:184`; CLI,
+   `cmd/bronzewardctl/review.go:44-51` refuses `-o` and a non-terminal and no save or export flag
+   exists.)
+
+**Proposed**, where today differs: (a) item 1: no operator documentation says that a shell
+here-document is saved in history (a search for `here-document`, `heredoc` and `shell history` in
+`docs/operator`, `README.md`, the command table `cmd/bronzewardctl/commandtable.go` and
+`internal/client` finds none). (b) Item 2: `-v` is documented as naming a proxy a request goes
+through (`cmd/bronzewardctl/commandtable.go:291`) and its only writer prints that proxy line
+(`internal/client/transport.go:48-49`), so no method, path, status, `instance` or timing is printed;
+the clause that it never prints `Authorization`, a body or marks therefore holds without effect.
+(c) Item 4: no documentation says that editors keep swap and backup files (a search for `swap` and
+`backup file` in `docs/operator` and `cmd` finds none).
 
 ### 11.3 CLI review
 
-**Proposed**, qualifying the journeys' candidate C4 against
-[compilation §3.6](compilation.md#36-operator-review):
+Built in the CLI (the web interface's part is the last sentence of item 3 and
+[§11.4](#114-web-review-and-document-input)), with the sources in the paragraph after item 3. This
+qualifies the journeys' candidate C4 against [compilation §3.6](compilation.md#36-operator-review):
 
 1. `import review` shows the review only when standard output is a terminal, through an
    in-process pager that writes nothing to disk. It is refused, with no override, when standard
@@ -2082,6 +2325,40 @@ review, and a client offers the action to any `author` and shows the refusal.
    internal-error`, `internal/api/runner.go:328-338`) is shown by its code as a mark that was not
    applied. The web interface does the same.
 
+**Built, by clause.** Item 1: the terminal checks and the refusal of `-o` and a non-terminal,
+`cmd/bronzewardctl/review.go:44-52`; the pager writes only to its writer, `cmd/bronzewardctl/pager.go`;
+the signals are taken before the terminal goes raw and an inherited-ignored one is skipped,
+`cmd/bronzewardctl/review.go:131-150`, with the restore and the end by the signal,
+`cmd/bronzewardctl/review.go:152-186` and `cmd/bronzewardctl/main.go:94-104`, and no marks prompt
+after an error, `cmd/bronzewardctl/review.go:80-83`; a terminal that takes no output,
+`cmd/bronzewardctl/pagerout.go:33-66`, and the failed leave, `cmd/bronzewardctl/review.go:160-165`;
+the resize, the small window, the cells and the wrap, `cmd/bronzewardctl/pager.go:20-29`,
+`cmd/bronzewardctl/pager.go:85-107`, `cmd/bronzewardctl/pager.go:132-148`,
+`cmd/bronzewardctl/pager.go:182-232`; the case `internal/clitest/testdata/protected-cases.yaml:37`.
+Item 2: `cmd/bronzewardctl/review.go:22-24` and `:78`. Item 3: marks, `cmd/bronzewardctl/fragments.go:235-254`,
+`cmd/bronzewardctl/fragments.go:361-368`, `cmd/bronzewardctl/fragments.go:437-446`;
+the refusal by position, `internal/client/problem.go` and `cmd/bronzewardctl/review.go:372-386`; the
+follow after the `marked` event at the `202`'s generation and the settlement events,
+`cmd/bronzewardctl/imports.go:405-470`; `resume-failed` and the offers,
+`cmd/bronzewardctl/imports.go:540-545`, `cmd/bronzewardctl/imports.go:546-552`; the lease margin and
+the re-read, `cmd/bronzewardctl/imports.go:47-49`, `:422` and the `Until` function at `:476-505`,
+which the watch asks after each event shown, at each keep-alive and after each read of the
+operation (`internal/client/watch.go:28-50`, `:238`, `:548`), the 15 s keep-alive and the poll
+delay doubling to 30 s (`internal/client/watch.go:55-57`, `:228`, `:264`); the lapsed outcome as
+unknown, exit 3, `cmd/bronzewardctl/imports.go:546-552`, `cmd/bronzewardctl/review.go:312-366`; a
+mark's outcome without a pause at its generation is not applied, `cmd/bronzewardctl/review.go:343-347`;
+the continuation and the takeover, `cmd/bronzewardctl/imports.go:240-266`. Web: `web/src/imports.tsx:38`,
+`web/src/imports.tsx:50`, `web/src/imports.tsx:210-245`, `web/src/progress.ts:16-39`. The
+`import-base document` paragraph: `cmd/bronzewardctl/importbase.go:27-76` (the terminal check, the
+refusal of `-o`, the notice and the pager, and no marks prompt) and the refusal shown as it comes,
+`cmd/bronzewardctl/importbase.go:63`.
+
+**Proposed**, where today differs: the takeover `409` text "the ingestion has ended" was not searched
+for in the CLI, and the order of the lease read against the stream was read only through the code
+above and `internal/client/watch_test.go:377-480`, which this change did not run. No shared case
+record runs the two `import-base document` refusals against a server in the CLI (see PROT-07 in
+[§12](#12-shared-conformance-cases)).
+
 The qualification: the server's `no-store` and the client's refusal to persist limit what the
 client keeps. They do not stop the operator, the terminal, a recording or the host from keeping
 the text. The requirement is proposed with that limit stated.
@@ -2097,7 +2374,8 @@ file import only the author who made it from a file they provided and continued 
 
 ### 11.4 Web review and document input
 
-**Proposed.**
+Built in the web client, except the documentation sentence of item 4, which stays **Proposed**.
+Sources follow each item.
 
 1. The review, and an import base's text (Show imported configuration on the import base page and
    on each import entry of the draft page), is fetched with
@@ -2106,16 +2384,26 @@ file import only the author who made it from a file they provided and continued 
    offer the action to any `author` and show the server's refusal in words, as the table of §8.2 says it.
    Beside the opened text the page says that a value found there that should be hidden cannot be
    marked on this import, links the page where the machine is imported again (where Marks is
-   filled in), and says the copy read stays stored as it is.
+   filled in), and says the copy read stays stored as it is. (Built: `web/src/claim.tsx:148-151`,
+   `:198` through `web/src/request.ts:360`; the read-only element, `web/src/claim.tsx:257`; the
+   discard, `web/src/claim.tsx:116-122`, `:172`, `:222`; the action for any `author` and the refusal in
+   words, `web/src/claim.tsx:190`, `:195`, `:235`, `:240`; the note and the link, `web/src/claim.tsx:258-259`,
+   shown on the import base view and not on the review view, where the marks panel stands.)
 2. Document and marks fields set `autocomplete="off"`, `spellcheck="false"`, `autocorrect="off"` and
    `autocapitalize="off"`, so browser spelling services do not receive their text (assumption S5).
-3. No draft of a document or of marks is kept between page loads.
+   (Built: `web/src/forms.tsx:93`, used by `web/src/imports.tsx:719`, `:733`,
+   `web/src/drafts.tsx:935-936`, `:967-968`, `web/src/marks.tsx:103` and `web/src/claim.tsx:257`.)
+3. No draft of a document or of marks is kept between page loads. (Built: no `localStorage`,
+   `indexedDB` or `caches.` in `web/src` outside tests; `sessionStorage` holds only the sign-in
+   state, `web/src/app.tsx:192`, `:213-214`.)
 4. Browser extensions can read the page; the interface cannot prevent this and says so in its
-   documentation.
+   documentation. (Built: the page says so, `web/src/claim.tsx:256`. **Proposed:** the documentation
+   sentence: a search for `extension` in `docs/operator` finds none.)
 
 ### 11.5 Test artifacts
 
-**Proposed.** Client tests use synthetic values only, and every retained artifact is scanned for
+Built in both clients, with the sources after item 3; whether each scan passes is a CI fact this
+change did not read. Client tests use synthetic values only, and every retained artifact is scanned for
 them as the fixtures already do for evidence
 ([fixtures, synthetic secrets](../../fixtures/README.md#synthetic-secrets);
 [acceptance plan](acceptance-plan.md) line 50 describes the scan with a positive control):
@@ -2131,10 +2419,21 @@ them as the fixtures already do for evidence
 3. Tests also check that browser storage (local, session except during the redirect, IndexedDB,
    Cache API) and the HTTP cache hold no synthetic value after each protected journey.
 
+**Built, by item.** CLI: the positive control, `internal/clitest/core_test.go:88-93`; the scan of
+`argv`, standard output and standard error, `internal/clitest/cli_test.go:405-416`; the pseudo-terminal
+exception, `internal/clitest/protected_test.go:70-100`, case `internal/clitest/testdata/protected-cases.yaml:15`.
+Web: `web/e2e/scan.ts` (the retained files, with a planted control), `web/e2e/retention.test.ts:1-40`
+(no trace, HAR, video or screenshot call, with positive controls),
+`web/e2e/auth/helpers.ts:229-310` (the storage and cache checks with their controls),
+`web/e2e/auth/protected.e2e.ts:149-154` (after each protected case), and the CI jobs `browser` and
+`browser-auth` that run them (`mise.toml:442-505`). The storage check asserts emptiness, which is
+stronger than "no synthetic value".
+
 ## 12. Shared conformance cases
 
-**Proposed.** One set of cases both clients run, so their behaviour cannot drift apart. Each case
-is a language-neutral record:
+One set of cases both clients run, so their behaviour cannot drift apart. Each case
+is a language-neutral record (built, with the exceptions in the **Proposed** paragraph after the
+list of cases):
 
 ```yaml
 id: AMB-02
@@ -2206,6 +2505,27 @@ server for faults. Interactive sign-in cases need an issuer with authorization e
 | TLS-02 | refusal | API answers a `3xx` to another origin, to the CLI and to the web client; harness check | the injector sees no request to the target and nothing resent by either client; the CLI names the target |
 | TLS-03 | refusal | as TLS-02, to the web client, for a read and for a write; browser message check | the page shows the generic transport-failure message naming a refused redirect as a possible cause and no target; the write is repeated with the same key as in §8.4 item 2 and, when every repeat meets the same redirect, reported as an unknown outcome with its key and the resource to read, never as not done |
 | TLS-01 | refusal | certificate from an untrusted CA | nothing sent; host and trust source named |
+
+**Built.** The web client's records are the 40 files of `conformance/cases/` and their browser
+files under `web/e2e/` (run by `mise run browser-auth` and `mise run browser`); the CLI's are the
+45 case ids of `internal/clitest/testdata/*.yaml`, run by `internal/clitest/cli_test.go:726`, with
+an in-process TLS injector and `interruptServer` (`internal/clitest/cli_test.go:68`) and the dev
+issuer for the sign-in cases (`internal/clitest/login_idp_test.go`). A row marked built has a record
+or a named test in every client it names; the CLI-only rows (AUTH-04, AUTH-09, PROT-02, AMB-04,
+AMB-10, AMB-11, AMB-13, TLS-01) and the web-only rows (AUTH-08, AUTH-11, TLS-03) are built in that
+one client by nature. Whether a case passes is a CI fact this change did not read.
+
+**Proposed**, where today differs: (a) AMB-14 has no case record in either client: its
+behaviour exists in both (web `web/src/request.ts:103-104`, CLI `internal/client/transport.go:93-95`,
+with unit tests only) and `AMB-14` appears in `conformance/` only inside the text of `PROT-06.yaml`.
+(b) PROT-07 has a web record in `web/e2e/auth/protected.e2e.ts:265` and no `conformance/cases/PROT-07.yaml`;
+the CLI's behaviour exists (`cmd/bronzewardctl/importbase.go:27-76`) and is tested only by pty unit
+tests (`cmd/bronzewardctl/importbase_linux_test.go:40`), with no case against a server in
+`internal/clitest`. (c) AMB-12 runs in the web client only as the never-committed variant
+(`conformance/cases/AMB-12.yaml`); the removed-by-restore variant is not run there. (d) The AUTH-06
+web record covers the stream half only, and the AUTH-02 CLI case runs with no refresh token, so no
+renewal attempt is exercised (`internal/clitest/testdata/cases.yaml:110`). (e) AUTH-09's
+credential-store half skips without the dbus tools (`internal/clitest/testdata/cases.yaml:202`).
 
 ## 13. Alternatives and open choices
 
