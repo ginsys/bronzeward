@@ -531,8 +531,8 @@ holds for the legacy `machine.network.hostname` key where it equals the name and
 `HostnameConfig` and the stable-hostname guard of compilation §2.3 step 2a holds: the import removes the key alone. A hostname equal to the
 machine's previous name is not released: after a rename and before the next release is applied, an import,
 onboarding again or a drift adoption keeps it as an explicit hostname, the review says "set in the configuration", and the rename
-does not reach the machine until a `HostnameConfig` document is deleted with a fragment; for a legacy key no
-such hand-over is measured (compilation §6.1 item 5).
+does not reach the machine until a `HostnameConfig` document is deleted with a fragment, or the legacy key with a
+fragment `$patch: delete` of `machine.network.hostname` (compilation §6.1 item 5).
 
 `cluster discover` reads that identity for a whole cluster with the operator's own talosconfig and
 prints the commands that record it. It calls no Bronzeward route, writes nothing and runs none of

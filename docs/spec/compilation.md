@@ -209,7 +209,14 @@ give a node a path that reads as an embedded document's.
    does a mark made later, in review (§3.6), on `machine.features.stableHostname`
    or a mapping that holds it where this step removed a legacy key: the value
    would become a reference, step 5a would suppress the fill and the hostname
-   would be lost. The person imports again with that mark supplied at the start.
+   would be lost (the rule `mark-on-released-hostname`, §3.6 item 3). The person
+   imports again with that mark supplied at the start. A mark of step 3 on any
+   mapping that holds the key (`machine.network`, `machine` or the document)
+   keeps the key, as one on a mapping that holds `stableHostname` does: a
+   reference or a changed mapping there would leave a hostname nobody can read
+   back, and the cost of keeping is an unreleased hostname, never a lost one.
+   Only a mark on the key itself refuses. `machine.features` that is present
+   and not a mapping keeps the key too.
    The decision and the name it used are kept beside the sanitized document, in
    the claim's staged payload, and carried unchanged through a mark, a
    continuation and a takeover, so that a recovered run still holds the name it
@@ -561,7 +568,12 @@ and mark a value the schema list missed (§2.4) **(choice §16.35)**.
    read, so it could be neither extracted nor kept. A mark on a `!bwref` node
    itself is excluded as step 3 states. A mark on `machine.features.stableHostname`
    or a mapping that holds it refuses where step 2a removed a legacy hostname key
-   (step 2a).
+   (`mark-on-released-hostname`, step 2a): the claim returns to `paused` as for
+   any refused mark, and the remedy is to abandon and ingest again with the mark
+   at the start. It is its own rule, since `mark-rewrites-text` names another
+   cause. The staged payload records that a key was removed (`filledKey`); a
+   payload staged before the field opens as a document or nothing, and a binary
+   from before it refuses one that carries it.
    Step 5's guard searches for the
    values this mark extracts. The earlier values are in the provider, which the
    ingestion identity cannot read, so the guard cannot search for them; they
@@ -1160,8 +1172,12 @@ unmeasured.
    and cannot tell the fill's earlier write from an operator's hostname that
    happens to equal an old name. The normal path (item 3: rename, release,
    plan) never imports in that window and is not affected. The way out for a
-   document is the `$patch: delete` fragment below; **for a legacy key no such
-   fragment is measured**. Drift is otherwise ordinary: a hostname changed on the node by hand
+   document is the `$patch: delete` fragment below; **for a legacy key it is a
+   `$patch: delete` of the key** (`machine.network.hostname`, measured at
+   machinery v1.14.5 on a base that holds it: the key leaves the composition and
+   the fill writes the document). Deleting the mapping that holds it, `machine.network`,
+   does the same and drops every other `machine.network` member with it; an empty
+   string or a null changes nothing, and the key stays explicit. Drift is otherwise ordinary: a hostname changed on the node by hand
    is a configuration edit and a digest mismatch; a hostname from DHCP, cloud
    or `auto: stable` is not in the configuration and is not drift. A machine
    with no name at import keeps its hostname explicit when it is named later;
@@ -2459,7 +2475,7 @@ in place as
     **Extended to the legacy key** (ginsys/bronzeward#1054): a `machine.network.hostname` equal to the name is
     removed as a key, where no `HostnameConfig` is present and the
     stable-hostname guard of step 2a holds, for the same reason: the onboarded machine is named from its own
-    hostname whichever field holds it, and no hand-over is measured for a key.
+    hostname whichever field holds it, and a `$patch: delete` of the key hands a renamed key to the fill (§6.1 item 5).
     Alternative: limit the claim to a document and let the review say "set in the
     configuration" for a key (client contracts A9 item 7), which is documentation
     only and leaves a renamed machine never following its name. Its removal is
