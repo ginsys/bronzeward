@@ -314,3 +314,23 @@ compiler already produces both (B1, `control=true`).
    (b) with the check; (a) as the fallback with the same check; no (c).
 3. Does a thinner import base get a write route, or is the split done at ingestion? Not
    recommended without a specification first; this note found no route.
+
+## 11. Amendment of 24 November 2026: a filled hostname (ginsys/bronzeward#1040)
+
+The compiler now fills `auto: off` and the machine's name as a hostname document
+([compilation §6.1](../../spec/compilation.md)), and an import removes the node's document where its
+hostname equals the machine's name. A thinner base that is then compiled holds a different
+document from the node's, so the comparison of §3 had to treat that one document as equal. `measure.go`
+has a `hostname` measurement (B3) for it. It imports each of the six machines' own document twice,
+as written and with `auto: off`, with the machine's name, with no name and with another name.
+Result (`output.txt`, last section): the document is removed and recorded in every case; it is
+recorded as exactly the fill's own only for `auto: off`; compiled again, the digest differs from
+the node's in every case; and the form-only verdict is true only for `auto: off`. With no name
+or another name the document stays and nothing is removed. The measurement stops with an error
+unless these hold, so it cannot pass with no machine removed.
+
+The rest of `output.txt` is the run of §5, unchanged: a rerun on 24 November 2026 with the
+fixture's pinned `talosctl` gave the same booleans, leaf counts and refusals, and differed in the
+byte counts (four bytes) and the random reference names only, as the reproduction note of §4 says it
+may. Only the new section is appended, so every figure this note quotes still reads from the run it
+quotes.
