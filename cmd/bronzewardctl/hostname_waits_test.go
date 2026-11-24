@@ -54,15 +54,15 @@ func TestHostWaits(t *testing.T) {
 	}
 }
 
-// TestMachineLabel: a machine is named by its name where it has one, else by its whole identifier (A8 rule 1, CLI).
-func TestMachineLabel(t *testing.T) {
+// TestWaitsMachine: a machine is named by its name where it has one, else by its whole identifier (A8 rule 1, CLI).
+func TestWaitsMachine(t *testing.T) {
 	name, empty := "node-a", ""
 	for _, c := range []struct {
 		label string
 		name  *string
 		want  string
 	}{{"a name", &name, "node-a"}, {"no name", nil, "mch_k2pq3rstuvwxyz234567abcdef"}, {"an empty name", &empty, "mch_k2pq3rstuvwxyz234567abcdef"}} {
-		if got := machineLabel("mch_k2pq3rstuvwxyz234567abcdef", c.name); got != c.want {
+		if got := waitsMachine("mch_k2pq3rstuvwxyz234567abcdef", c.name); got != c.want {
 			t.Errorf("%s: %q, want %q", c.label, got, c.want)
 		}
 	}

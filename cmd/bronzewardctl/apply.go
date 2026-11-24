@@ -173,6 +173,12 @@ func (e *env) applyRows(c *client.Client, rel *apitypes.ReleaseBody, chosen stri
 		delete(want, r.id)
 		delete(want, r.name)
 		r.plan, r.line = applyStanding(&pos, rel.Id)
+		// An approved plan that waits for another machine's hostname says so in A9 item 8's words, not "approved already".
+		if r.line == approvedAlready && pos.Plan != nil {
+			if w := hostnameWaits(c, &pos, pos.Plan.Id); w != "" {
+				r.line = w
+			}
+		}
 		rows = append(rows, r)
 	}
 	if len(want) > 0 {
@@ -184,6 +190,8 @@ func (e *env) applyRows(c *client.Client, rel *apitypes.ReleaseBody, chosen stri
 	}
 	return rows, nil
 }
+
+const approvedAlready = "approved already: the controller sends it when its gates allow"
 
 // applyStanding says where a machine stands for the release: the plan to approve where one is ready
 // (somebody prepared it), the reason there is nothing to do, or neither, which means a plan is to be made.
@@ -206,7 +214,7 @@ func applyStanding(p *apitypes.PositionBody, release string) (plan, line string)
 		}
 		return "", "stopped: the plan waiting for this machine is not an apply plan; open it with plan show " + client.ShellWord(p.Plan.Id)
 	case p.Step == apitypes.PositionBodyStepAwaitingDispatch && mine:
-		return "", "approved already: the controller sends it when its gates allow"
+		return "", approvedAlready
 	case m.OpenDrift != nil:
 		return "", "stopped: the machine changed since Bronzeward last verified it; decide on the drift first"
 	case m.Frozen:
