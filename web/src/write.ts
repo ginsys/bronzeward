@@ -349,7 +349,9 @@ export class Writes {
         if (w.epoch === undefined) return { kind: "not-done", why: NO_EPOCH, problem: null };
       }
     }
-    const headers: Record<string, string> = { "Content-Type": "application/json", "Idempotency-Key": w.key };
+    // A request with no body (a DELETE) names no content type (§8.1).
+    const headers: Record<string, string> = { "Idempotency-Key": w.key };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
     if (!entry) headers["Bronzeward-Expected-Epoch"] = w.epoch!;
     if (w.spec.ifMatch !== undefined) headers["If-Match"] = w.spec.ifMatch;
     // The last answer's status, and its problem (whose code the notice's reference carries); undefined and null

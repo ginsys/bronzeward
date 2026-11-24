@@ -187,6 +187,13 @@ var (
 	clock   = time.Now
 )
 
+// MaxBody is the server's request body limit (internal/api/body.go maxBody, client-contracts.md §8.1) and
+// OverBodyLimit is what a refusal says of a body larger than it.
+const (
+	MaxBody       = 1 << 20
+	OverBodyLimit = "over the server's 1 MiB body limit"
+)
+
 // Send sends w (T9). Before the first send it reads the principal it compares before every repeat
 // and takes the reference epoch every send carries. It repeats the identical request with the
 // same key, at most three times, after an ambiguous outcome, a 503 a write repeats, and a 401 it
@@ -196,6 +203,10 @@ var (
 // (§8.5 item 1, 2).
 func (c *Client) Send(w *Write) (r *Response, err error) {
 	route := w.Method + " /api/v1" + w.Path
+	// A body over the server's limit is refused before anything is sent, whatever input built it (§8.1).
+	if len(w.Body) > MaxBody {
+		return nil, fmt.Errorf("%s: the request body is %d bytes, %s; nothing was sent", route, len(w.Body), OverBodyLimit)
+	}
 	if c.Cut != nil { // a Ctrl-C the user already gave starts no new write; one in flight keeps its outcome
 		if e := c.Cut(nil); e != nil {
 			return nil, e
