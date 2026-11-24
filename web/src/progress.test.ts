@@ -22,7 +22,8 @@ function json(body: unknown, epoch = "e1", status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers });
 }
 
-// The client reads a 5xx up to this many times before it reports the read unavailable (request.ts).
+// The client reads a 5xx up to this many times before it reports the read unavailable (request.ts); the
+// operation read of a watch sends once, and the watch waits itself.
 const TRIES = 5;
 // What one operation fetch answers in `opFetches`: "503" is a dependency-unavailable problem, "502" an
 // answer that is not a Bronzeward problem, "superseded" a 503 epoch-superseded, "500" an internal-error
@@ -37,8 +38,8 @@ const scripted = (f: Fetch, epoch = "e1"): Response => {
   const [state, e] = f.split("@");
   return json({ id: OP, kind: "ingest", state }, e ?? epoch);
 };
-// `reads` watch reads of the operation that stay unavailable: the client reads each TRIES times.
-const down = (kind: "503" | "502" | "superseded" | "500", reads = 1): Fetch[] => Array<Fetch>(TRIES * reads).fill(kind);
+// `reads` watch reads of the operation that stay unavailable: each is one fetch.
+const down = (kind: "503" | "502" | "superseded" | "500", reads = 1): Fetch[] => Array<Fetch>(reads).fill(kind);
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 
 // A fake server. Each stream request takes the next of `streams` (an Error is a transport
@@ -47,12 +48,12 @@ const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 // the pages are read under `pagesEpoch`, and a read of `/probe` is answered under it too. Each operation
 // read takes `readTime` ms of the `clock`, and each stream request `streamTime` ms. The pages are
 // answered when `pagesGate` is open. `opFetches` answers the first operation fetches one by one (each
-// watch read of an unavailable operation is TRIES fetches), and `pagesDown` the first events fetches
-// with a 503.
+// watch read of an operation is one fetch), and `pagesDown` the first events fetches with a 503, after
+// the first `pagesOk` of them were answered as usual.
 function server(o: {
   streams: (Stream | Error)[]; states: string[]; pages?: OpEvent[]; pageRefusals?: number[]; epoch?: string;
   pagesEpoch?: string; probeEpoch?: string; clock?: { t: number }; readTime?: number; streamTime?: number; pagesGate?: Promise<void>;
-  pagesUnavailable?: boolean; opFetches?: Fetch[]; pagesDown?: number;
+  pagesUnavailable?: boolean; opFetches?: Fetch[]; pagesDown?: number; pagesOk?: number;
 }) {
   const opened: Record<string, string>[] = [];
   const urls: string[] = [];
@@ -84,11 +85,15 @@ function server(o: {
     }
     if (u.startsWith(EVENTS)) {
       await o.pagesGate;
-      if (o.pagesDown !== undefined && o.pagesDown > 0) {
-        o.pagesDown--;
-        return json(DEPENDENCY_UNAVAILABLE, o.epoch, 503);
+      if (o.pagesOk !== undefined && o.pagesOk > 0) {
+        o.pagesOk--;
+      } else {
+        if (o.pagesDown !== undefined && o.pagesDown > 0) {
+          o.pagesDown--;
+          return json(DEPENDENCY_UNAVAILABLE, o.epoch, 503);
+        }
+        if (o.pagesUnavailable === true) return json(DEPENDENCY_UNAVAILABLE, o.epoch, 503);
       }
-      if (o.pagesUnavailable === true) return json(DEPENDENCY_UNAVAILABLE, o.epoch, 503);
       const refusal = o.pageRefusals?.shift();
       if (refusal !== undefined) return json({ type: "urn:bronzeward:problem:forbidden", title: "forbidden", status: refusal }, o.epoch, refusal);
       return json({ items: (o.pages ?? []).map((e) => ({ ...e, at: "2026-11-01T06:00:00Z" })) }, o.pagesEpoch ?? o.epoch);
@@ -317,6 +322,8 @@ describe("the operation progress reader (§8.6)", () => {
       const out = await watch(s.client, OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
       expect(sum(r.sleeps)).toBe(3000);
+      // One fetch for each read: the waits between them are the watch's, not the client's.
+      expect(opReads(s)).toBe(3);
     });
 
     test("a 5xx that is not a Bronzeward problem is read again too", async () => {
@@ -325,6 +332,7 @@ describe("the operation progress reader (§8.6)", () => {
       const out = await watch(s.client, OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
       expect(sum(r.sleeps)).toBe(1000);
+      expect(opReads(s)).toBe(2);
     });
 
     // The CLI does not repeat these (internal/client/client.go: Problem.unavailable names three 503 codes).
@@ -334,7 +342,7 @@ describe("the operation progress reader (§8.6)", () => {
         const r = recorder();
         const out = await watch(s.client, OP, r.w, bounded(r, 100));
         expect(out, kind).toMatchObject({ kind: "failed", res: { kind: "unavailable" } });
-        expect(opReads(s), kind).toBeLessThanOrEqual(TRIES);
+        expect(opReads(s), kind).toBe(1);
       }
     });
 
@@ -373,6 +381,23 @@ describe("the operation progress reader (§8.6)", () => {
       const out = await watch(s.client, OP, r.w, bounded(r, 100));
       expect(out).toMatchObject({ kind: "ended", operation: { state: "running" } });
       expect(opReads(s)).toBe(2);
+    });
+
+    // The CLI reads the operation straight after a failed drain (internal/client/watch.go): no stream is
+    // opened and no page read in between, whether the events came as pages or as a stream.
+    test("a failed terminal drain is followed by the operation read, before any stream or page read", async () => {
+      const modes: Stream[] = [{ chunks: ["{}"], type: "application/json" }, { chunks: [] }];
+      for (const [i, first] of modes.entries()) {
+        const s = server({ streams: [first, ...quiet(3)], states: ["succeeded", "running"], pagesOk: i === 0 ? 1 : 0, pagesUnavailable: true });
+        const r = recorder(() => true);
+        const out = await watch(s.client, OP, r.w, bounded(r, 100));
+        expect(out, `mode ${i}`).toMatchObject({ kind: "ended", operation: { state: "running" } });
+        const reads = s.urls.flatMap((u, at) => (u === `${API_BASE}/operations/${OP}` ? [at] : []));
+        expect(reads.length, `mode ${i}`).toBe(2);
+        const between = s.urls.slice(reads[0]! + 1, reads[1]);
+        expect(between.length, `mode ${i}`).toBe(TRIES);
+        expect(between.every((u) => u !== EVENTS), `mode ${i}`).toBe(true);
+      }
     });
 
     test("a terminal drain that is refused reads the operation again, and a terminal read of the same epoch fails with the refusal, with no second drain", async () => {

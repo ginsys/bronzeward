@@ -204,12 +204,15 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     }
     return false;
   };
+  // A terminal read whose events could not be read: the operation is read again at once, with no stream
+  // or page read first (the CLI's WatchBody).
+  let reread = false;
   for (;;) {
     // The sign-in ended: nothing more is sent. The JSON pages never reach the stream's check for it.
     if (w.signal.aborted || client.writesEnded) return { kind: "stopped" };
     run.fresh = 0;
     const began = pace.now();
-    const s: Streamed = pages ? "pages" : await stream(client, path, run, pace);
+    const s: Streamed = reread ? "unopened" : pages ? "pages" : await stream(client, path, run, pace);
     // The page left while the stream was opening or read: its answer is not acted on, and the JSON
     // fallback below sends nothing.
     if (w.signal.aborted) return { kind: "stopped" };
@@ -217,19 +220,21 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     if (s === "signed-out") return { kind: "stopped" };
     if (typeof s === "object") return { kind: "failed", res: s };
     const opened = s !== "unopened";
-    pages = s === "pages";
+    if (!reread) pages = s === "pages";
     // A refusal of the stream is read as a page: its read renews a refused token, and reports any
     // other refusal by its status.
-    if (s === "pages" || s === "refused") {
+    if (!reread && (s === "pages" || s === "refused")) {
       const drained = await drain(client, path, run, true);
       if (typeof drained === "object") return { kind: "failed", res: drained };
     }
+    reread = false;
     // The attempt's own time: a slow operation read does not skip the backoff.
     const took = pace.now() - began;
     if (w.signal.aborted) return { kind: "stopped" };
     // The epoch comes from the response the result comes from: the client's epoch can be a newer one
     // by the time this continues.
-    const { result: res, epoch, moves: records } = await client.readWithEpoch<Operation>(path);
+    // One send: the waits between the sends are this loop's, so they end with the watch (§8.6 item 2).
+    const { result: res, epoch, moves: records } = await client.readWithEpoch<Operation>(path, 1);
     // The page left while the read was pending: its answer is not acted on, and nothing more is sent.
     if (w.signal.aborted) return { kind: "stopped" };
     const at = records + run.signs;
@@ -261,6 +266,7 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
         // stands only while it is terminal under the same epoch (the CLI's WatchBody).
         last = { operation: res.data, epoch, moves: at, drain: drained };
         voided = false;
+        reread = true;
         continue;
       }
     } else if (res.kind === "ok") {

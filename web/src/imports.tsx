@@ -277,9 +277,9 @@ export function settledReads(client: Pick<Client, "read" | "readWithEpoch" | "op
       const ok = reads.undropped();
       return settle(await client.read<T>(path), ok);
     },
-    readWithEpoch: async <T,>(path: string) => {
+    readWithEpoch: async <T,>(path: string, tries?: number) => {
       const ok = reads.undropped();
-      const got = await client.readWithEpoch<T>(path);
+      const got = await client.readWithEpoch<T>(path, tries);
       return { ...got, result: settle(got.result, ok) };
     },
     open: (path, headers, signal) => client.open(path, headers, signal),
