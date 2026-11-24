@@ -56,6 +56,8 @@ function server(o: {
   pagesEpoch?: string; probeEpoch?: string; clock?: { t: number }; readTime?: number; streamTime?: number; pagesGate?: Promise<void>;
   pagesUnavailable?: boolean; opFetches?: Fetch[]; pagesDown?: number; pagesOk?: number; renew?: () => Promise<boolean>;
   duringOp?: (nth: number) => Promise<unknown>; clientSleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  // The first events fetches (JSON pages) fail with a transport failure, before any are answered.
+  pagesThrow?: number;
 }) {
   const opened: Record<string, string>[] = [];
   const urls: string[] = [];
@@ -88,6 +90,10 @@ function server(o: {
     }
     if (u.startsWith(EVENTS)) {
       await o.pagesGate;
+      if (o.pagesThrow !== undefined && o.pagesThrow > 0) {
+        o.pagesThrow--;
+        throw new TypeError("Failed to fetch");
+      }
       if (o.pagesOk !== undefined && o.pagesOk > 0) {
         o.pagesOk--;
       } else {
@@ -597,6 +603,52 @@ describe("the operation progress reader (§8.6)", () => {
       expect(out).not.toMatchObject({ res: { message: expect.stringContaining("restored") } });
       expect(r.steps).toEqual([250]);
       expect(opReads(s)).toBe(1);
+    });
+
+    // R7-1: the events the attempt showed before the outage are its progress still, so the read that recovers is
+    // not followed by a backoff of its own.
+    test("an attempt that showed events and then met an outage is not waited out again once the read recovers", async () => {
+      const s = server({ streams: [{ chunks: [frame(ev("e1:1"))] }, ...quiet(2)], states: ["succeeded"], opFetches: [...down("503"), "running"] });
+      const r = recorder();
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+      // The wait of the outage only.
+      expect(r.sleeps).toEqual([1000]);
+    });
+  });
+
+  // R7-2: a transport failure of the last events' pages is not the server's answer. The watch goes round and reads
+  // them again, as the CLI's drain does (it sends five times); one that ends before they are read reports it.
+  describe("a dropped connection on the events pages after a terminal read (ginsys/bronzeward#1175)", () => {
+    const pageRequests = (s: ReturnType<typeof server>) => s.urls.filter((u) => u.startsWith(EVENTS)).length - s.opened.length;
+
+    test("is read again after the wait and the watch ends with the terminal read", async () => {
+      const s = server({ streams: quiet(3), states: ["succeeded"], pagesThrow: 1 });
+      const r = recorder();
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+      expect(r.sleeps).toEqual([1000]);
+      expect(pageRequests(s)).toBe(2);
+    });
+
+    test("is read again when the next terminal read is of another epoch: it is not void", async () => {
+      const later = (): Stream[] => Array.from({ length: 3 }, () => ({ chunks: [], epoch: "e2" }));
+      const s = server({ streams: [{ chunks: [] }, ...later()], states: ["succeeded", "succeeded@e2"], pagesThrow: 1, pagesEpoch: "e2", probeEpoch: "e2" });
+      let ops = 0;
+      const r = recorder();
+      const out = await watch(reader(s, (p) => operationPath(p) && ++ops === 2, "before"), OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" }, epoch: "e2" });
+      expect(r.sleeps).toEqual([1000]);
+      expect(pageRequests(s)).toBe(2);
+    });
+
+    test("is what the watch reports when it ends before the pages are read again", async () => {
+      const s = server({ streams: quiet(3), states: ["succeeded"], pagesThrow: 1 });
+      const r = recorder(() => true);
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toEqual({ kind: "failed", res: { kind: "transport" } });
+      expect(r.steps).toEqual([250]);
+      expect(pageRequests(s)).toBe(1);
     });
   });
 
