@@ -1,9 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"net/url"
-
 	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/client/apitypes"
 )
@@ -56,7 +53,7 @@ func hostnameLines(h apitypes.HostnameBody, applied hostnameApplied, current *st
 	restart := renameReaches[1]
 	switch {
 	case applied.unread:
-		lines = append(lines, hostUnread)
+		return append(lines, hostUnread)
 	case applied.none:
 	case applied.h.Source == apitypes.HostnameBodySourceNone || applied.h.Source == apitypes.HostnameBodySourceLegacyStable:
 		lines = append(lines, "This release sets the machine's hostname to "+name+", taken from its name. The last release applied to it left the hostname to the node. "+hostNodeName, restart)
@@ -73,28 +70,24 @@ func hostnameLines(h apitypes.HostnameBody, applied hostnameApplied, current *st
 	return lines
 }
 
-// reviewHostname reads what hostnameLines compares a release's hostname with, once: the machine (its current name
-// and the release last applied to it), then that release's record for the machine. Only a review whose hostname
+// reviewHostname reads what hostnameLines compares a release's hostname with: the machine (its current name
+// and the release last applied to it), then that release's record for the machine. Each is read once for the
+// command, by one try, through the bodies the run already holds (titles.go). Only a review whose hostname
 // comes from the machine's name compares anything, so any other source reads nothing. A read that fails is not
 // guessed: the lines say so.
-func reviewHostname(c *client.Client, r *apitypes.ReviewBody) []string {
+func (e *env) reviewHostname(c *client.Client, r *apitypes.ReviewBody) []string {
 	if r.Hostname.Source != apitypes.HostnameBodySourceMachineName || r.Hostname.Name == nil {
 		return hostnameLines(r.Hostname, hostnameApplied{none: true}, nil)
 	}
-	m, err := c.Get("/machines/" + url.PathEscape(r.Machine))
-	if err != nil {
-		return hostnameLines(r.Hostname, hostnameApplied{unread: true}, nil)
-	}
-	var mb apitypes.MachineBody
-	if json.Unmarshal(m.Body, &mb) != nil {
+	mb := titleBody[apitypes.MachineBody](e, c, titlePath("machines", r.Machine))
+	if mb == nil {
 		return hostnameLines(r.Hostname, hostnameApplied{unread: true}, nil)
 	}
 	if mb.Applied == nil {
 		return hostnameLines(r.Hostname, hostnameApplied{none: true}, mb.Name)
 	}
-	rel, err := c.Get("/releases/" + url.PathEscape(mb.Applied.Release))
-	var rb apitypes.ReleaseBody
-	if err != nil || json.Unmarshal(rel.Body, &rb) != nil {
+	rb := titleBody[apitypes.ReleaseBody](e, c, titlePath("releases", mb.Applied.Release))
+	if rb == nil {
 		return hostnameLines(r.Hostname, hostnameApplied{unread: true}, mb.Name)
 	}
 	for _, x := range rb.Machines {

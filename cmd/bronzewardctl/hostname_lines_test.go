@@ -71,6 +71,8 @@ func TestHostnameLines(t *testing.T) {
 			[]string{taken, "This release used the earlier name node-a. While its hostname comes from the machine's name, the next release will use node-b."}},
 		{"the comparison could not be read", hb("machine-name", "node-a"), hostnameApplied{unread: true}, nil,
 			[]string{taken, hostUnread}},
+		{"the comparison could not be read, and the machine was renamed", hb("machine-name", "node-a"), hostnameApplied{unread: true}, hostStr("node-b"),
+			[]string{taken, hostUnread}},
 		{"configuration", hb("configuration", ""), hostnameApplied{none: true}, nil, []string{"Hostname: set in the configuration. The machine's name does not change it."}},
 		{"none", hb("none", ""), hostnameApplied{none: true}, nil, []string{"Hostname: not set in the configuration; the node chooses its own."}},
 		{"legacy-stable", hb("legacy-stable", ""), hostnameApplied{none: true}, nil, []string{
@@ -146,6 +148,18 @@ func TestReleaseReviewHostname(t *testing.T) {
 	if !strings.Contains(out, want) || strings.Contains(out, "left the hostname to the node") || strings.Contains(out, renameReaches[1]) {
 		t.Errorf("review with the applied release unread = %q; want %q and no guessed comparison", out, want)
 	}
+
+	// The release last applied is the one under review: the run already holds its body, so it is read once.
+	answers["GET /api/v1/machines/mch_a"] = `{"id":"mch_a","name":"node-a","applied":{"release":"rel_a","source":"operation"}}`
+	answers["GET /api/v1/releases/rel_a"] = `{"id":"rel_a","machines":[{"machine":"mch_a","hostname":{"source":"machine-name","name":"node-a"}}]}`
+	out, seen = reviewRun(t, answers)
+	if n := lineCount(seen, "GET /api/v1/releases/rel_a"); n != 1 {
+		t.Errorf("the release under review, also the one last applied, was read %d times; want once: %q", n, seen)
+	}
+	if !strings.Contains(out, "Hostname: node-a, taken from the machine's name.\nmachine:\n") {
+		t.Errorf("review with the same name applied = %q; want the source sentence and no comparison", out)
+	}
+	answers["GET /api/v1/machines/mch_a"] = `{"id":"mch_a","name":"node-a","applied":{"release":"rel_old","source":"operation"}}`
 
 	out, seen = reviewRun(t, answers, "-o", "json")
 	if strings.Contains(out, "Hostname:") || strings.Contains(out, hostUnread) || !strings.Contains(out, `"source": "machine-name"`) && !strings.Contains(out, `"source":"machine-name"`) {

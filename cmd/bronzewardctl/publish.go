@@ -231,7 +231,7 @@ func (e *env) releaseReview(verb string, args []string) error {
 			e.titleRef(c, "release", r.Release)
 		}
 		if verb == "review" && e.output != "json" && e.output != "yaml" {
-			hostLines = reviewHostname(c, r)
+			hostLines = e.reviewHostname(c, r)
 		}
 		return nil
 	}, func(w *tabwriter.Writer, r *apitypes.ReviewBody) {
