@@ -310,7 +310,7 @@ it. It holds no secret. The CLI holds contexts as the table says (`internal/clie
 `internal/client/config.go:166-231`); the web client has none (item 3). `oidc.scopes`
 and `oidc.audience` are required with `oidc`: `Context.Check` refuses a context that lacks either,
 naming each missing field and what to add, and `Open` and the sign-in run it before any request
-(`internal/client/config.go:166-203`, `internal/client/client.go:76`, `internal/client/login.go:312`,
+(`internal/client/config.go:166-203`, `internal/client/client.go:104`, `internal/client/login.go:312`,
 `cmd/bronzewardctl/commands.go:164`). A contexts file written
 before the rule still loads, and `context list`, `use` and `remove` work on it; only a command that
 opens the context refuses. `context add` stores `openid offline_access` when no `--scopes` is given
@@ -338,15 +338,14 @@ file's `audience` (`cmd/bronzewardctl/commands.go:144-148`, `cmd/bronzewardctl/c
    [§9.2](#92-cli-sign-in). (Built: `internal/client/config.go:58`, `internal/client/config.go:148-162`.)
 2. Every command that talks to a server shows the context's name and server in its error and
    wait output, so an operator with two installations never acts on the wrong one unseen (built:
-   `internal/client/client.go:129`, `internal/client/client.go:324`). **Proposed:** a
-   write in an interactive session always prints the context before it sends. Today a write names the
-   context only when a notice happens to carry it, for example the warning of a human-only write
-   sent with an automation credential (`internal/client/write.go:222-224`), the recovery banner
-   (`internal/client/client.go:394-400`), or a retry or deprecation notice of the preliminary server
-   read (`internal/client/client.go:283`, `internal/client/client.go:390`). `writeWith` and `Send`
-   print no line of their own for the context (`cmd/bronzewardctl/writes.go:112`,
-   `internal/client/write.go:197`), so an ordinary write with no such notice names none, and only
-   some recovery commands name it in their own confirmation lines.
+   `internal/client/client.go:135`, `internal/client/client.go:276-294`). A
+   write in an interactive session always prints the context before it sends: `Send` prints
+   `<context> (<server>): sending <route>.` to standard error before its first attempt, and none
+   before a later attempt of the same write; a person's repeat of an unknown write is a new
+   command and prints it (`internal/client/write.go:225-227`). A session is interactive when standard
+   input and standard error are terminals and neither `--no-input` nor `--token-stdin` is given
+   (`cmd/bronzewardctl/main.go:404`), so a script's or a pipe's output gains no line. Several
+   writes of one command each print the line.
 3. The web interface serves exactly one installation, the one at its own origin
    ([§10.1](#101-hosting-and-origin)). Switching installations is navigating to another origin,
    which starts with an empty state; nothing read under one origin is shown under another. (Built:
@@ -384,8 +383,8 @@ file's `audience` (`cmd/bronzewardctl/commands.go:144-148`, `cmd/bronzewardctl/c
    `cmd/bronzewardctl/commands.go:106-118`, `cmd/bronzewardctl/commands.go:150-163`).
 5. A context's `server` is checked once when it is added: `GET /livez` must answer `204`
    (`internal/server/server.go:19-21`), which shows only that something answers; it proves
-   neither the API nor its version. (Built: `internal/client/client.go:138-161`,
-   `cmd/bronzewardctl/commands.go:164-169`.)
+   neither the API nor its version. (Built: `internal/client/client.go:144-167`,
+   `cmd/bronzewardctl/commands.go:167-172`.)
 
 ## 6. TLS trust
 
@@ -400,9 +399,9 @@ say that such a test exists.
    hosts the deployment lists (`internal/config/config.go:386-402`); a client has no such list,
    because it cannot know which network protects a host. The development setup
    (`examples/bronzeward.yaml:7`, `examples/bronzeward.yaml:14`) works and nothing else does.
-   (Built in the CLI: `internal/client/config.go:166-231`, run by `internal/client/client.go:98` and
-   `cmd/bronzewardctl/commands.go:161`. Built in the web client: `web/src/config.ts:41`,
-   `web/src/config.ts:57-65` for the issuer and `web/src/auth.ts:73` for the endpoints it reads
+   (Built in the CLI: `internal/client/config.go:166-252`, run by `internal/client/client.go:104` and
+   `cmd/bronzewardctl/commands.go:164`. Built in the web client: `web/src/config.ts:48`,
+   `web/src/config.ts:64-72` for the issuer and `web/src/auth.ts:73` for the endpoints it reads
    from discovery.)
 2. Certificates are verified against the system trust store, or against the context's
    `certificateAuthority` bundle, which then replaces it for that host. Host name verification is
@@ -443,16 +442,16 @@ say that such a test exists.
    lists its names, or a fixed text (`internal/client/remote.go`). The standard library's log, which net/http writes a peer's text
    to, is discarded. The server's own text keeps the rule above. (Built in the CLI, by clause: the
    trust refusal and the nothing-sent text, `internal/client/transport.go:105-123`, reached from the
-   read path `internal/client/client.go:316`, the write path `internal/client/write.go:690`, the
-   event stream `internal/client/watch.go:462`, the liveness check `internal/client/client.go:152`
+   read path `internal/client/client.go:322`, the write path `internal/client/write.go:693`, the
+   event stream `internal/client/watch.go:462`, the liveness check `internal/client/client.go:158`
    and `--from` `internal/client/discovery.go:89`; text the identity provider and the `--from`
    host send, shown by its cause and never by its own words, `internal/client/remote.go:62-78`,
    `internal/client/discovery.go:92`, `internal/client/login.go:76`,
    `internal/client/credentials.go:393`, `internal/client/credentials.go:439`; the https proxy's
    certificate, `internal/client/transport.go:77`; URLs refused before use,
-   `internal/client/config.go:193-231`; the log, `cmd/bronzewardctl/main.go:123`; a `Deprecation`
-   header, `internal/client/client.go:390`; the signed-in subject and issuer,
-   `cmd/bronzewardctl/commands.go:279`; the escaping place for errors,
+   `internal/client/config.go:214-252`; the log, `cmd/bronzewardctl/main.go:125`; a `Deprecation`
+   header, `internal/client/client.go:396`; the signed-in subject and issuer,
+   `cmd/bronzewardctl/commands.go:282`; the escaping place for errors,
    `internal/client/shown.go:30`.) **Proposed:** the `%q` in an error that shows a redirect's
    `Location` (`internal/client/watch.go:470`) is the Go form, not `\x22`; item 8 states the rule.
 5. Certificate pinning is not offered: a bundle per context limits trust enough for this
@@ -476,7 +475,7 @@ say that such a test exists.
    tunnel. The server's own issuer fetches follow a comparable rule
    ([persistence and API §10.1](persistence-api.md#101-humans-oidc)). (Built in the CLI: no
    redirect followed, `internal/client/transport.go:94`; a `3xx` reported with its target,
-   `internal/client/client.go:323-324`; the identity provider's redirects limited to `https` or
+   `internal/client/client.go:329-330`; the identity provider's redirects limited to `https` or
    loopback, `internal/client/credentials.go:476-485`, and none on a revocation,
    `internal/client/credentials.go:436`; the proxy variables and the verbose line,
    `internal/client/transport.go:24`, `internal/client/transport.go:48-50`; an https proxy dialled
@@ -643,7 +642,7 @@ Built in both clients; item 2's rule over every other enumeration was not traced
    `GET /principals` (4), `GET /machines/{id}/position` (6),
    `GET /import-base-revisions/{id}/document` (7) and `POST /clusters/{id}/first-keys` (8). A server
    below 10 is refused once, with both revisions named, before any command's own request
-   (`internal/client/client.go:161-163`), so the CLI carries no per-command gate. The clause covers
+   (`internal/client/client.go:189-191`), so the CLI carries no per-command gate. The clause covers
    request fields and routes: the CLI also reads response members added at revisions 13 to 18 (a
    machine's `role` and `formOnly`, a release's `hostname`), which a server below them omits, and it
    shows nothing for an absent member (`cmd/bronzewardctl/hostname_lines.go:33-35`,
@@ -663,16 +662,15 @@ Built in both clients; item 2's rule over every other enumeration was not traced
    allows only the entry, whose request it already
    knows from revision 1, and reads the revision once the entry has committed. The revision
    describes the process that answered; another instance behind the same endpoint may differ, so
-   a refusal names the revision that answer served. The web client's minimum is the highest
-   revision of any route it calls, raised in the pull request that adds such a call; it is 12.
-   (Built in the CLI: the declared minimum, the read on context use and the refusal naming both
-   revisions, `internal/client/client.go:19`, `internal/client/client.go:167-186`; before a write,
-   `internal/client/write.go:241-243`; the recovery-start exception, `internal/client/write.go:242`.
-   Built in the web client: `web/src/shell.tsx:33-40`, `web/src/shell.tsx:476`, the recovery-start
-   refusal read at `web/src/shell.tsx:519`. The CLI's declared minimum is not the highest revision
-   of every route it calls: see item 1.)
+   a refusal names the revision that answer served. A client's minimum is the highest revision of
+   any route it calls, raised in the pull request that adds such a call; the web client's is 12 and
+   the CLI's is 10. (Built in the CLI: the declared minimum, the read on context use and the refusal
+   naming both revisions, `internal/client/client.go:19-21`, `internal/client/client.go:173-193`;
+   before a write, `internal/client/write.go:244-245`; the recovery-start exception,
+   `internal/client/write.go:245`. Built in the web client: `web/src/shell.tsx:33-40`,
+   `web/src/shell.tsx:476`, the recovery-start refusal read at `web/src/shell.tsx:519`.)
 4. A `Deprecation` header on any response is shown once per command or page load, naming the
-   route. (Built: CLI `internal/client/client.go:388-391`; web client `web/src/shell.tsx:40`,
+   route. (Built: CLI `internal/client/client.go:394-397`; web client `web/src/shell.tsx:40`,
    `web/src/shell.tsx:213`.)
 5. Each client prints its own version and the server's, with its API revision, in
    `bronzewardctl version` and in the web footer; the server's as "unknown" while the read is
@@ -690,12 +688,12 @@ sends exactly one `Idempotency-Key` ([§8.4](#84-idempotency-and-ambiguous-respo
 [§3.2](#32-writes) lists it, exactly one `If-Match`; every write but the recovery entry also sends
 exactly one `Bronzeward-Expected-Epoch` ([§8.4](#84-idempotency-and-ambiguous-responses) item 3). A body is at most 1 MiB
 (`internal/api/body.go:36`); a client refuses a larger input before sending and says so, rather
-than relying on the server's `400`. Built in the CLI: the headers, `internal/client/client.go:312`,
-`internal/client/write.go:676-686`, including no body and no `Content-Type` on a `DELETE`
-(`internal/client/write.go:671-675`, `internal/client/write.go:678-680`); the keyed headers,
-`internal/client/write.go:681-686`. Built in the web client: the one-megabyte refusal before any
-send, `web/src/write.ts:70`, `web/src/write.ts:327-329`, and the keyed headers,
-`web/src/write.ts:348-350`. **Proposed:**
+than relying on the server's `400`. Built in the CLI: the headers, `internal/client/client.go:318`,
+`internal/client/write.go:679-689`, including no body and no `Content-Type` on a `DELETE`
+(`internal/client/write.go:674-678`, `internal/client/write.go:681-683`); the keyed headers,
+`internal/client/write.go:684-689`. Built in the web client: the one-megabyte refusal before any
+send, `web/src/write.ts:70`, `web/src/write.ts:331-333`, and the keyed headers,
+`web/src/write.ts:352-354`. **Proposed:**
 for the web client, a `DELETE` sends neither: its writes always set `Content-Type: application/json`
 (`web/src/write.ts:352`). For the CLI, the refusal of a larger body: it checks each document, file
 and mark input (`cmd/bronzewardctl/fragments.go:28`, `cmd/bronzewardctl/fragments.go:160`,
@@ -756,56 +754,56 @@ sentence, `web/src/states.tsx:180`; the import page's sentences, `web/src/import
 | 428 `precondition-required`, `idempotency-key-required` | a client defect; show and stop |
 | 500 `internal-error` | the outcome may be unknown: repeat the identical request with the same key ([§8.4](#84-idempotency-and-ambiguous-responses)) |
 | 501 `not-implemented` | not served by this server; no route answers it today |
-| 503 `dependency-unavailable`, `talos-access-unavailable`, `transient-conflict` | reads: retry with backoff (1 s doubling to 30 s, at most 5 tries, then stop; the one exception is the operation read of a watch after a stream that ended or a refused drain, [§8.6](#86-event-resumption) item 2, and the CLI's read of principal names under A7, which tries once, because a failed read shows the identifiers and is not worth a wait; the web client's read keeps the bound behind the identifiers it already shows, since nothing waits on it; every other read keeps the bound). Writes: repeat with the same key at most 3 times. If every attempt of the write was answered `503`, report **not done**: each such `503` states that its attempt's own transaction committed nothing, so no act or idempotency record exists for it; a fragment write's claim, a scope mark's observation or its start, or a principal row, taken before it stays ([persistence and API §9.4](persistence-api.md#94-errors)). If any earlier attempt was ambiguous ([§8.4](#84-idempotency-and-ambiguous-responses) item 2), a `503` to the repeat says nothing about that attempt: report the outcome as unknown, as in [§8.4](#84-idempotency-and-ambiguous-responses) item 4. A `503` `epoch-superseded` is not in this row: it is not repeated, by a read or a write, against the same server process, because that process started before the current epoch and cannot succeed until restarted (the CLI names the three codes above only: `internal/client/client.go:366-370`, and its write ends at `internal/client/write.go:448`; the web client's read returns it at once as unavailable, `web/src/request.ts:272-276`, and its write stops at `web/src/write.ts:496-499`). The server sends no `Retry-After` (G20), except `Retry-After: 1` on the `talos-access-unavailable` of `GET /clusters/{id}/talos-access` when a deletion time cannot be decided; the backoff above is not changed by it |
+| 503 `dependency-unavailable`, `talos-access-unavailable`, `transient-conflict` | reads: retry with backoff (1 s doubling to 30 s, at most 5 tries, then stop; the one exception is the operation read of a watch after a stream that ended or a refused drain, [§8.6](#86-event-resumption) item 2, and the CLI's read of principal names under A7, which tries once, because a failed read shows the identifiers and is not worth a wait; the web client's read keeps the bound behind the identifiers it already shows, since nothing waits on it; every other read keeps the bound). Writes: repeat with the same key at most 3 times. If every attempt of the write was answered `503`, report **not done**: each such `503` states that its attempt's own transaction committed nothing, so no act or idempotency record exists for it; a fragment write's claim, a scope mark's observation or its start, or a principal row, taken before it stays ([persistence and API §9.4](persistence-api.md#94-errors)). If any earlier attempt was ambiguous ([§8.4](#84-idempotency-and-ambiguous-responses) item 2), a `503` to the repeat says nothing about that attempt: report the outcome as unknown, as in [§8.4](#84-idempotency-and-ambiguous-responses) item 4. A `503` `epoch-superseded` is not in this row: it is not repeated, by a read or a write, against the same server process, because that process started before the current epoch and cannot succeed until restarted (the CLI names the three codes above only: `internal/client/client.go:372-376`, and its write ends at `internal/client/write.go:451`; the web client's read returns it at once as unavailable, `web/src/request.ts:272-276`, and its write stops at `web/src/write.ts:500-503`). The server sends no `Retry-After` (G20), except `Retry-After: 1` on the `talos-access-unavailable` of `GET /clusters/{id}/talos-access` when a deletion time cannot be decided; the backoff above is not changed by it |
 | an unknown code | treat by status class: 4xx as a refusal, 5xx as an unknown outcome for a write |
 | a 5xx that is not a Bronzeward problem | an answer that is not `application/problem+json`, or whose `type` does not start `urn:bronzeward:problem:`, for example a `502`, `503` or `504` from the component in front of the server, may come after the server committed: for a write it is an ambiguous outcome as in [§8.4](#84-idempotency-and-ambiguous-responses) item 2, never **not done**; reads retry as for the `503` row |
 
-**Where each row is built**, CLI then web client. `400`s: `internal/client/client.go:340-342`,
-`internal/client/list.go:35-39`, `internal/client/list.go:81-98`; `web/src/request.ts:270-271`,
+**Where each row is built**, CLI then web client. `400`s: `internal/client/client.go:346-348`,
+`internal/client/list.go:29-33`, `internal/client/list.go:75-92`; `web/src/request.ts:270-271`,
 `web/src/machine.tsx:128`; the epoch-change handling only on a changed header,
-`internal/client/client.go:218`, `internal/client/client.go:377-386`, `web/src/request.ts:453-471`.
-`401`: `internal/client/client.go:264-272`, `internal/client/write.go:420-425`,
+`internal/client/client.go:224`, `internal/client/client.go:383-392`, `web/src/request.ts:453-471`.
+`401`: `internal/client/client.go:270-278`, `internal/client/write.go:423-428`,
 `internal/client/problem.go:38-43`, `internal/client/credentials.go:493-512`;
-`web/src/request.ts:253-268`, `web/src/write.ts:436-452`, `web/src/app.tsx:165-170`. `403
-forbidden`: `internal/client/problem.go:51-62`, `internal/client/write.go:448-452`;
-`web/src/states.tsx:112-121`, `web/src/problems.tsx:70-73`, `web/src/write.ts:459-461`. `403
+`web/src/request.ts:253-268`, `web/src/write.ts:440-456`, `web/src/app.tsx:165-170`. `403
+forbidden`: `internal/client/problem.go:51-62`, `internal/client/write.go:451-455`;
+`web/src/states.tsx:112-121`, `web/src/problems.tsx:70-73`, `web/src/write.ts:463-465`. `403
 identity-revoked`: `internal/client/credentials.go:524-538`, `internal/client/problem.go:44-50`;
 `web/src/request.ts:244-247`, `web/src/app.tsx:157-173`, `web/src/write.ts:457-462`,
 `web/src/auth.ts:377-381`. `409`:
-`internal/client/write.go:414-416`, `internal/client/write.go:426-441`,
-`internal/client/client.go:357-362`, `cmd/bronzewardctl/fragments.go:78`;
-`web/src/request.ts:60-64`, `web/src/write.ts:468-490`, `web/src/drafts.tsx:885`. `412
-precondition-failed`: `internal/client/write.go:460-464`, `internal/client/write.go:557-567`;
+`internal/client/write.go:417-419`, `internal/client/write.go:429-444`,
+`internal/client/client.go:363-368`, `cmd/bronzewardctl/fragments.go:78`;
+`web/src/request.ts:60-64`, `web/src/write.ts:472-494`, `web/src/drafts.tsx:885`. `412
+precondition-failed`: `internal/client/write.go:463-467`, `internal/client/write.go:560-570`;
 `web/src/publish.tsx:185-186`, `web/src/problems.tsx:38`. `412 epoch-mismatch`, set aside and never
-repeated: `internal/client/write.go:442-444`; `web/src/write.ts:494`. `422`: `internal/client/problem.go:70-86`,
-`internal/client/write.go:445-447`; `web/src/problems.tsx:92`, `web/src/write.ts:495`.
-`428`: the default case of `internal/client/write.go:465-468`; `web/src/problems.tsx:19`,
-`web/src/problems.tsx:36-37`. `500`: `internal/client/write.go:417`; `web/src/write.ts:502-506`. `503`:
-reads `internal/client/client.go:203`, `internal/client/client.go:257-302`,
-`internal/client/client.go:366-370`, `web/src/request.ts:92-107`, `web/src/request.ts:244-285`; writes
-`internal/client/write.go:182-185`, `internal/client/write.go:471-474`, `web/src/write.ts:77-78`,
-`web/src/write.ts:496-501`, `web/src/write.ts:515`; the principal-name read that tries once,
-`internal/client/client.go:201`, `cmd/bronzewardctl/names.go:39`. An unknown code and a `5xx` that
-is no Bronzeward problem: `internal/client/write.go:417`, `internal/client/client.go:342-353`;
-`web/src/request.ts:272-288`, `web/src/write.ts:502-506`. Neither
+repeated: `internal/client/write.go:445-447`; `web/src/write.ts:498`. `422`: `internal/client/problem.go:70-86`,
+`internal/client/write.go:448-450`; `web/src/problems.tsx:92`, `web/src/write.ts:499`.
+`428`: the default case of `internal/client/write.go:468-471`; `web/src/problems.tsx:19`,
+`web/src/problems.tsx:36-37`. `500`: `internal/client/write.go:420`; `web/src/write.ts:506-510`. `503`:
+reads `internal/client/client.go:209`, `internal/client/client.go:263-308`,
+`internal/client/client.go:372-376`, `web/src/request.ts:92-107`, `web/src/request.ts:244-285`; writes
+`internal/client/write.go:182-185`, `internal/client/write.go:474-477`, `web/src/write.ts:77-78`,
+`web/src/write.ts:500-505`, `web/src/write.ts:519`; the principal-name read that tries once,
+`internal/client/client.go:207`, `cmd/bronzewardctl/names.go:39`. An unknown code and a `5xx` that
+is no Bronzeward problem: `internal/client/write.go:420`, `internal/client/client.go:348-359`;
+`web/src/request.ts:272-288`, `web/src/write.ts:506-510`. Neither
 client reads `Retry-After` (`rg 'Retry-After' web/src internal/client cmd` finds nothing; control:
-`rg 'Idempotency-Key'` finds `internal/client/write.go:681`). `404`, the server's meaning of
+`rg 'Idempotency-Key'` finds `internal/client/write.go:684`). `404`, the server's meaning of
 `epoch-mismatch` after an ambiguous attempt, and the server's behaviour for an unfinished first
 request stay as server facts.
 
 **Proposed**, where today differs: (a) a `403 forbidden` that carries a `plan` member refuses after
 the lookup and is a known refusal. The web client treats it so (`web/src/write.ts:465`); the CLI
 treats every `403 forbidden` as decided before the lookup and keeps an ambiguous outcome unknown
-(`internal/client/write.go:448-452`). (b) `412 epoch-mismatch`: handle the epoch change with the `epoch`
+(`internal/client/write.go:451-455`). (b) `412 epoch-mismatch`: handle the epoch change with the `epoch`
 member. Neither client reads the member to adopt the epoch; both adopt it from the
-`Bronzeward-Epoch` header (`internal/client/client.go:377-386`, `web/src/request.ts:453-471`), and the
-CLI only prints the member (`internal/client/write.go:443`). (c) `422 validation-failed` for marks:
+`Bronzeward-Epoch` header (`internal/client/client.go:383-392`, `web/src/request.ts:453-471`), and the
+CLI only prints the member (`internal/client/write.go:446`). (c) `422 validation-failed` for marks:
 the position only, never a path. The web client does so (`web/src/problems.tsx:92-96`) and the CLI
 does for a mark refusal that arrives as an event (`cmd/bronzewardctl/review.go:369-381`), but a
 `422` answer to a mark write prints `detail`, `path` and `paths` (`internal/client/problem.go:33-34`,
 `internal/client/problem.go:75-81`, `cmd/bronzewardctl/review.go:282`). (d) `501 not-implemented` is a
-known refusal. The web client excludes it from the unknown-outcome path (`web/src/write.ts:502`); the
-CLI treats a `501` problem as ambiguous and repeats it (`internal/client/write.go:417`).
+known refusal. The web client excludes it from the unknown-outcome path (`web/src/write.ts:506`); the
+CLI treats a `501` problem as ambiguous and repeats it (`internal/client/write.go:420`).
 
 A Ctrl-C ends a read at once: a request in flight and a wait before a retry stop, the command prints
 one line that names the request and exits 130. It does not change the retry rules above. The Ctrl-C
@@ -830,21 +828,21 @@ state before it exits 130. The stream still has no attempt bound ([§8.4](#84-id
 item 8). `operation watch` keeps its own handler of the Ctrl-C and does not use this one.
 
 Built in the CLI, which is the only client these two paragraphs name: the stop on a read and its
-line, `internal/client/client.go:245-252`, `internal/client/client.go:279-301`,
+line, `internal/client/client.go:251-258`, `internal/client/client.go:285-307`,
 `cmd/bronzewardctl/interrupt.go:22-25`, `internal/client/interrupt.go:23-41`,
-`cmd/bronzewardctl/main.go:243-252`; reads only, not writes, `internal/client/interrupt.go:23-26`; the
-`cluster first-key` exception, `internal/client/write.go:339-349`, `cmd/bronzewardctl/main.go:182-191`,
-`cmd/bronzewardctl/main.go:258-259`; the renewal that runs to its end, `internal/client/client.go:254-255`
+`cmd/bronzewardctl/main.go:245-254`; reads only, not writes, `internal/client/interrupt.go:23-26`; the
+`cluster first-key` exception, `internal/client/write.go:342-352`, `cmd/bronzewardctl/main.go:184-193`,
+`cmd/bronzewardctl/main.go:260-261`; the renewal that runs to its end, `internal/client/client.go:260-261`
 (a comment) and `internal/client/credentials.go:264` (`renew` takes no context); no notice after the
-first Ctrl-C, `internal/client/watch.go:387-401`; no further read, `cmd/bronzewardctl/main.go:179-193`;
+first Ctrl-C, `internal/client/watch.go:387-401`; no further read, `cmd/bronzewardctl/main.go:181-195`;
 a write not yet started is not sent, `internal/client/write.go:199-203`; the error beside the stop,
-`cmd/bronzewardctl/main.go:245-252`, `cmd/bronzewardctl/main.go:278-300`; the stream of the import
+`cmd/bronzewardctl/main.go:247-254`, `cmd/bronzewardctl/main.go:280-302`; the stream of the import
 follow, `internal/client/watch.go:345-383`, `cmd/bronzewardctl/imports.go:405-430`, its save,
 `cmd/bronzewardctl/imports.go:409`, the stream loop without an attempt count,
 `internal/client/watch.go:104-184`, and `operation watch`'s own handler,
 `cmd/bronzewardctl/opwatch.go:184-191`; `publish` saves in a deferred call and follows with the
 same `Watch` (`cmd/bronzewardctl/publish.go:38`, `cmd/bronzewardctl/publish.go:100`). The `503` paragraph is built as the
-`503` row is (`internal/client/client.go:366-370`, `web/src/write.ts:78`); the server's own lines
+`503` row is (`internal/client/client.go:372-376`, `web/src/write.ts:78`); the server's own lines
 in it are server facts.
 
 The `503` row applies only to a Bronzeward problem with one of its four codes. The write `503`s
@@ -904,23 +902,23 @@ matches, but the client cannot tell which ETags were issued after *T*. The inges
 `If-Match` is the target draft's ETag.
 
 Built in both clients, by clause. The ETag sent and the one each write answers: CLI
-`internal/client/state.go:83`, `internal/client/write.go:582`, `cmd/bronzewardctl/imports.go:178`; web `web/src/composition.tsx:192`,
-`web/src/drafts.tsx:58-62`, `web/src/write.ts:426-427`. A `412` stops and nothing is resent by
-itself: CLI `internal/client/write.go:460-464`, `internal/client/write.go:555-567`; web
+`internal/client/state.go:83`, `internal/client/write.go:585`, `cmd/bronzewardctl/imports.go:178`; web `web/src/composition.tsx:192`,
+`web/src/drafts.tsx:58-62`, `web/src/write.ts:430-431`. A `412` stops and nothing is resent by
+itself: CLI `internal/client/write.go:463-467`, `internal/client/write.go:558-570`; web
 `web/src/publish.tsx:185-186`. The re-read after an import that reaches `succeeded`: CLI
 `cmd/bronzewardctl/imports.go:629-637`; web `web/src/imports.tsx:115-125`. The CLI's record of its own
 ingestions, its end and its drop at an epoch change: `cmd/bronzewardctl/imports.go:570-576`,
-`internal/client/client.go:418`, `internal/client/state.go:107-123`,
+`internal/client/client.go:424`, `internal/client/state.go:107-123`,
 `internal/client/state.go:131-135`; the web client's own-start map, `web/src/imports.tsx:115`.
 ETags per context and draft: CLI `internal/client/state.go:15-26`, `internal/client/state.go:83-105`;
 web `web/src/drafts.tsx:44-52`, in page memory. An ETag kept under another epoch is never sent: CLI
-`internal/client/client.go:418`, `internal/client/state.go:131`; web `web/src/drafts.tsx:48-51` and
+`internal/client/client.go:424`, `internal/client/state.go:131`; web `web/src/drafts.tsx:48-51` and
 `:58-62`. The ingestion start's `If-Match`: CLI `cmd/bronzewardctl/imports.go:178`; web
 `web/src/imports.tsx:566`.
 
 **Proposed**, where today differs: on a `412` the clause says the client "shows the current state".
 The CLI prints the revision the draft has now and the command that reads it
-(`internal/client/write.go:557-567`). The web publication page says that someone changed the draft
+(`internal/client/write.go:560-570`). The web publication page says that someone changed the draft
 and shows no state: the operator has to press "Read the draft again" first
 (`web/src/publish.tsx:177-181`, `web/src/publish.tsx:203`).
 
@@ -975,8 +973,8 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
 1. **Key.** One key per logical write, 128 bits from the operating system's random source,
    base64url without padding (22 characters, within `internal/api/api.go:394`). Never derived from
    the request content, so a key reveals nothing about a document. (Built: CLI
-   `internal/client/write.go:176-180`, `internal/client/write.go:235`; web
-   `web/src/write.ts:90-96`.)
+   `internal/client/write.go:176-180`, `internal/client/write.go:238`; web
+   `web/src/write.ts:91-97`.)
 2. **Ambiguous.** A write's outcome is unknown when the connection fails after any byte of the
    request was sent, when no complete response arrives (also when item 8's bound ends the
    attempt) unless its status is a `4xx` (item 8), on `500`, or on a `5xx` that is not a
@@ -1005,22 +1003,23 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    fragment write replays recorded refusals, `internal/api/fragments.go:291-296`,
    `internal/api/idempotency.go:80-91`); a
    `422` to a repeat on a keyed route is reported as an unknown outcome ([§8.2](#82-errors)).
-   Built in both clients: what makes an outcome unknown, CLI `internal/client/write.go:417`,
-   `internal/client/write.go:658`, `internal/client/write.go:705-708`, web `web/src/write.ts:417-421`,
-   `web/src/write.ts:502-505`, `web/src/request.ts:338`; the repeats and backoff, CLI
-   `internal/client/write.go:185`, `internal/client/write.go:313`, web `web/src/write.ts:80`,
-   `web/src/write.ts:376-389`; the repeated `503`, CLI `internal/client/write.go:419`, web
-   `web/src/write.ts:78`, `web/src/write.ts:496-501`; the in-progress `409`, CLI
-   `internal/client/write.go:414-438`, web `web/src/write.ts:476-490`; the recorded refusal with both
-   members, CLI `internal/client/write.go:465-468`, web `web/src/write.ts:476`, `web/src/write.ts:513`;
-   the bound at least the served lease, CLI `internal/client/write.go:245-251`, web
-   `web/src/write.ts:548-550`; the replay text, CLI `internal/client/write.go:383-385`, web
-   `web/src/write.ts:423`, `web/src/states.tsx:19`; a replayed problem as the earlier refusal in the
-   CLI, `internal/client/write.go:414-416`; the keyed `422`, CLI `internal/client/write.go:445-447`, web
-   `web/src/write.ts:495`. **Proposed:** (a) a configurable bound for the in-progress wait in the
-   web client. The CLI has it (`cmd/bronzewardctl/fragments.go:58`, `internal/client/write.go:434-435`);
-   the web client's is the constant `INGEST_WAIT` (`web/src/write.ts:83`) and no setting reads it.
-   (b) A replayed refusal in the web client: it carries the success replay text "Already done earlier;
+   Built in both clients: what makes an outcome unknown, CLI `internal/client/write.go:420`,
+   `internal/client/write.go:661`, `internal/client/write.go:708-711`, web `web/src/write.ts:421-425`,
+   `web/src/write.ts:506-509`, `web/src/request.ts:338`; the repeats and backoff, CLI
+   `internal/client/write.go:185`, `internal/client/write.go:316`, web `web/src/write.ts:80`,
+   `web/src/write.ts:380-393`; the repeated `503`, CLI `internal/client/write.go:422`, web
+   `web/src/write.ts:78`, `web/src/write.ts:500-505`; the in-progress `409`, CLI
+   `internal/client/write.go:417-441`, web `web/src/write.ts:480-494`; the recorded refusal with both
+   members, CLI `internal/client/write.go:468-471`, web `web/src/write.ts:480`, `web/src/write.ts:517`;
+   the bound at least the served lease, CLI `internal/client/write.go:248-254`, web
+   `web/src/write.ts:554`; the replay text, CLI `internal/client/write.go:386-388`, web
+   `web/src/write.ts:427`, `web/src/states.tsx:19`; a replayed problem as the earlier refusal in the
+   CLI, `internal/client/write.go:417-419`; the keyed `422`, CLI `internal/client/write.go:448-450`, web
+   `web/src/write.ts:499`. The bound is configurable in both clients: the CLI's `--ingest-wait`
+   (`cmd/bronzewardctl/fragments.go:58`, `internal/client/write.go:437-438`) and the web client's
+   `ingestWaitSeconds` member of `bronzeward-client.json` (§5 item 4; `web/src/config.ts:43-47`,
+   `web/src/app.tsx:202`, `web/src/write.ts:152`, `web/src/write.ts:554`), which `INGEST_WAIT`
+   (`web/src/write.ts:84`) defaults. **Proposed:** a replayed refusal in the web client: it carries the success replay text "Already done earlier;
    showing that result." before the refusal (`web/src/states.tsx:19`, `web/src/states.tsx:142-146`),
    where the clause asks for the earlier attempt's refusal alone.
 3. **Same principal and epoch only.** Before any repeat the client checks that its credential
@@ -1078,27 +1077,27 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    `internal/api/recovery_entries.go:256`). That is accepted with the exception, like the
    residual of AMB-10, and A6 does not close it. The entry's answer is then handled as in
    [§8.5](#85-epoch-changes), without setting the entry itself aside (REC-04).
-   Built in both clients: the principal check before a repeat, CLI `internal/client/write.go:319-325`,
-   `internal/client/write.go:593-622`, web `web/src/write.ts:521-533`, `web/src/write.ts:556`,
+   Built in both clients: the principal check before a repeat, CLI `internal/client/write.go:322-328`,
+   `internal/client/write.go:596-625`, web `web/src/write.ts:525-537`, `web/src/write.ts:560`,
    `web/src/app.tsx:123`; the automation identity read once and refused when unreadable, CLI
-   `internal/client/write.go:231-234`, `internal/client/write.go:608-616` (the web client has no
-   automation credential); the reference epoch on every write, CLI `internal/client/write.go:273`,
-   `internal/client/write.go:682-684`, web `web/src/write.ts:340`, `web/src/write.ts:349`; the caller's
-   epoch, web `web/src/write.ts:340`, `web/src/handover.tsx:81`, `web/src/handover.tsx:109`,
+   `internal/client/write.go:234-237`, `internal/client/write.go:611-619` (the web client has no
+   automation credential); the reference epoch on every write, CLI `internal/client/write.go:276`,
+   `internal/client/write.go:685-687`, web `web/src/write.ts:344`, `web/src/write.ts:353`; the caller's
+   epoch, web `web/src/write.ts:344`, `web/src/handover.tsx:81`, `web/src/handover.tsx:109`,
    `web/src/onboard.ts:392-398` (the CLI sends no caller's epoch: it refuses a first send when the
-   epoch moved since the reads that built it, `internal/client/write.go:274-281`); a minimum
-   revision of at least 2, CLI `internal/client/client.go:19` (2), web `web/src/shell.tsx:33` (12); the one `GET /recovery`
-   before the first send, CLI `internal/client/write.go:283-288`, web `web/src/write.ts:340`,
-   `web/src/write.ts:563-565`; the confirming read before a repeat, CLI
-   `internal/client/write.go:326-329`, `internal/client/write.go:624-634`, web
-   `web/src/write.ts:525`, `web/src/write.ts:532`; setting the write aside, CLI
-   `internal/client/write.go:319-329`, `internal/client/write.go:439-444`, `internal/client/write.go:538`,
-   web `web/src/write.ts:302`, `web/src/write.ts:393-394`, `web/src/write.ts:468-471`,
-   `web/src/write.ts:531-532`; the recovery entry's exception, CLI `internal/client/write.go:101-105`,
-   `internal/client/write.go:326`, `internal/client/write.go:682`, `cmd/bronzewardctl/recovery.go:249-266`,
-   web `web/src/write.ts:333`, `web/src/write.ts:337`, `web/src/write.ts:349`, `web/src/write.ts:524`; the
-   entry's answer handled without setting it aside, CLI `internal/client/write.go:369-381`, web
-   `web/src/write.ts:306`.
+   epoch moved since the reads that built it, `internal/client/write.go:277-284`); a minimum
+   revision of at least 2, CLI `internal/client/client.go:19-21` (10), web `web/src/shell.tsx:33` (12); the one `GET /recovery`
+   before the first send, CLI `internal/client/write.go:286-291`, web `web/src/write.ts:344`,
+   `web/src/write.ts:567-569`; the confirming read before a repeat, CLI
+   `internal/client/write.go:329-332`, `internal/client/write.go:627-637`, web
+   `web/src/write.ts:529`, `web/src/write.ts:536`; setting the write aside, CLI
+   `internal/client/write.go:322-332`, `internal/client/write.go:442-447`, `internal/client/write.go:541`,
+   web `web/src/write.ts:306`, `web/src/write.ts:397-398`, `web/src/write.ts:472-475`,
+   `web/src/write.ts:535-536`; the recovery entry's exception, CLI `internal/client/write.go:101-105`,
+   `internal/client/write.go:329`, `internal/client/write.go:685`, `cmd/bronzewardctl/recovery.go:243-260`,
+   web `web/src/write.ts:337`, `web/src/write.ts:341`, `web/src/write.ts:353`, `web/src/write.ts:528`; the
+   entry's answer handled without setting it aside, CLI `internal/client/write.go:372-384`, web
+   `web/src/write.ts:310`.
 4. **After the process ends.** The CLI stores no request body, hash of a body, or key journal.
    When it gives up with the outcome unknown, it prints, on standard error, the key, method,
    route, context, principal (issuer and subject, or the service identity's `principal` from
@@ -1138,8 +1137,8 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    `web/src/states.tsx:184-188`.)
 6. A client never generates a fresh key for a write it has already sent. (Built in both clients: the
    CLI draws a key once per send and an operator's repeat takes the printed one,
-   `internal/client/write.go:235-238`; the web client's key is fixed when its write is made,
-   `web/src/write.ts:96`.)
+   `internal/client/write.go:238-241`; the web client's key is fixed when its write is made,
+   `web/src/write.ts:97`.)
 7. **Deliberate departure from the contract's advice.** For an earlier-epoch record (`409`) and
    for a keyed `422` it cannot compare, the contract and the server's `detail` tell the client to
    retry under a new key ([persistence and API §7.2](persistence-api.md#72-behavior),
@@ -1152,9 +1151,9 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    is wanted depends on the route and the state, which a client cannot judge. The
    client reads the resource, reports what it shows, and lets the operator send the write again as
    a new one if it is still wanted. (Built in both clients, for the first part: neither sends a
-   new key itself, CLI `internal/client/write.go:439-447`, web `web/src/write.ts:468-495`. Built in
+   new key itself, CLI `internal/client/write.go:442-450`, web `web/src/write.ts:472-499`. Built in
    the CLI, for the read: where the command gives it a read of the resource it prints what it shows,
-   `internal/client/write.go:544-555`. **Proposed** for the web client: it reads the resource only
+   `internal/client/write.go:547-558`. **Proposed** for the web client: it reads the resource only
    when the operator presses "Show current state", `web/src/forms.tsx:39`,
    `web/src/forms.tsx:75`.)
 8. **Attempt bound.** Every request that a client sends to the Bronzeward API has its own bound,
@@ -1172,14 +1171,14 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    - A write is ambiguous under item 2 if a byte of the request possibly left. The web client
      cannot see whether one did, so a write attempt that the bound ends is always ambiguous there,
      never **not done**. The CLI counts an attempt as sent once it has a connection
-     (`internal/client/write.go:486`, `internal/client/write.go:658`). A bound that fires before that is a failure with
+     (`internal/client/write.go:489`, `internal/client/write.go:661`). A bound that fires before that is a failure with
      nothing sent (AMB-01), and a bound that fires after it is ambiguous.
    - One exception: if a write's headers carried a `4xx` status and the bound fires during its
      body, the server refused that attempt, so it is not ambiguous. The client reports the status
      as a refusal, says that the answer was cut off, and does not repeat. After an earlier
      ambiguous attempt, that refusal says nothing about the earlier attempt, so the outcome stays
      unknown (item 4). This is also what the CLI does when the network cuts such a body
-     (`internal/client/write.go:703-709`).
+     (`internal/client/write.go:706-712`).
    - An ambiguous write then takes the repeat path of item 2: the same key, at most 3 repeats,
      then the outcome-unknown report of items 4 and 5.
 
@@ -1209,13 +1208,13 @@ compared by equality only
 tokens `401`, and streams `reset` ([§2](#2-the-api-a-client-meets)).
 
 **Current.** Both clients compare `Bronzeward-Epoch` on every response with the last they saw for
-the context (CLI: `internal/client/client.go:375-387`; web: `web/src/request.ts:225-234`,
+the context (CLI: `internal/client/client.go:381-393`; web: `web/src/request.ts:225-234`,
 `web/src/request.ts:453-472`). The web client drops an answer of another epoch than one it recorded
 after the send, and reads again to learn the current one (`web/src/request.ts:226-230`). On a
 change each:
 
 1. discards what it kept for the context. The CLI keeps no cursor or page between commands, drops
-   the ETags kept at an earlier epoch (`internal/client/client.go:418-422`,
+   the ETags kept at an earlier epoch (`internal/client/client.go:424-428`,
    `internal/client/state.go:129-133`) and clears the events a watch showed
    (`internal/client/watch.go:267-270`). Within one list read it keeps the `next` cursor across
    pages and compares no epoch between them: it relies on the server, which binds a cursor to its
@@ -1229,17 +1228,17 @@ change each:
    (`web/src/list.tsx:149-158`);
 2. sets aside the writes still pending, as in [§8.4](#84-idempotency-and-ambiguous-responses)
    item 3, except a recovery entry, which that item repeats under its key. The CLI sets aside the
-   write it has in flight (`internal/client/write.go:326-329`, `internal/client/write.go:440-444`;
-   the entry's exception is the `!w.Entry` of `internal/client/write.go:326`); the web client sets
-   every open write aside (`web/src/write.ts:302-314`, the entry's exception at
-   `web/src/write.ts:306`);
+   write it has in flight (`internal/client/write.go:329-332`, `internal/client/write.go:443-447`;
+   the entry's exception is the `!w.Entry` of `internal/client/write.go:329`); the web client sets
+   every open write aside (`web/src/write.ts:306-318`, the entry's exception at
+   `web/src/write.ts:310`);
 3. tells the operator "The installation entered recovery mode or was restored; what was read
-   before may no longer hold" (`internal/client/client.go:378-379`, `web/src/request.ts:16-17`,
+   before may no longer hold" (`internal/client/client.go:384-385`, `web/src/request.ts:16-17`,
    `web/src/shell.tsx:542`), and, while `Bronzeward-Recovery-Mode: true` is present, shows the
-   recovery banner (journeys §8): the CLI once per command (`internal/client/client.go:394-400`),
+   recovery banner (journeys §8): the CLI once per command (`internal/client/client.go:400-406`),
    the web client in the page header (`web/src/shell.tsx:539`);
 4. records the new epoch. A context's first epoch is recorded without a notice
-   (`internal/client/client.go:377-381`, `web/src/request.ts:463-471`).
+   (`internal/client/client.go:383-387`, `web/src/request.ts:463-471`).
 
 **Current** for the web client, with one exception to item 1's discard of every cached page: the
 page holding unsaved text stays shown, with its actions disabled and a notice to copy the text, and
@@ -1274,7 +1273,7 @@ done, and names `release show` (it also prints its `release review` line;
 (`cmd/bronzewardctl/publish.go:43-47`).
 `profile set` sends nothing when the draft answer and the fragment list have different epochs, or
 when the epoch changes before the send. It says that nothing was sent and names `draft show`
-(`cmd/bronzewardctl/drafts.go:176-179`, `internal/client/write.go:274-281`).
+(`cmd/bronzewardctl/drafts.go:176-179`, `internal/client/write.go:277-284`).
 `machine add` names the cluster only when the cluster answer has the epoch of the write's answer
 (`cmd/bronzewardctl/writes.go:294-302`). These three are **current** for the CLI.
 The wait of `import` does not end on a lapsed lease when the claim or operation answer has another
@@ -1295,8 +1294,8 @@ makes it `400 cursor-invalid`.
 An epoch is never ordered or parsed: both clients compare it by equality, and split only an event
 ID at its first colon to compare the part before it (`internal/client/watch.go:627-631`,
 `web/src/progress.ts:105`). A missing `Bronzeward-Epoch` on an authenticated success is a defect
-the client reports (CLI: `internal/client/client.go:333-336`, `internal/client/write.go:710-713`,
-`internal/client/watch.go:506-510`; web: `web/src/request.ts:481-485`, `web/src/write.ts:428-429`,
+the client reports (CLI: `internal/client/client.go:339-342`, `internal/client/write.go:713-716`,
+`internal/client/watch.go:506-510`; web: `web/src/request.ts:481-485`, `web/src/write.ts:432-433`,
 `web/src/progress.ts:379-380`).
 
 **Start mode** (G22). Neither the headers nor `GET /recovery` say whether the process was started
@@ -1307,18 +1306,18 @@ recovery start refuses that read until its entry commits. The client keeps the l
 `GET /server` answer or one of the answers below showed, per context, and reads `GET /server`
 again on context use and after a new epoch. A restart changes the mode without any signal, so the
 kept mode is only the last one shown. **Current:** both clients keep the last mode shown, per
-context (CLI: `internal/client/client.go:189-193`, saved at `internal/client/client.go:411`; web: the
+context (CLI: `internal/client/client.go:195-199`, saved at `internal/client/client.go:417`; web: the
 shell's `mode`, `web/src/shell.tsx:382`) and read `GET /server` on context use (CLI:
-`internal/client/client.go:168-186`; web: `web/src/shell.tsx:458-472`). After a new epoch the web
+`internal/client/client.go:174-192`; web: `web/src/shell.tsx:458-472`). After a new epoch the web
 client reads it again every time (`web/src/shell.tsx:398-406`). The CLI does after a read whose
-answer shows the new epoch (`internal/client/client.go:218-222`), and after the recovery entry
-commits (`internal/client/write.go:387-393`). **Current** in the CLI: any other write answer that
+answer shows the new epoch (`internal/client/client.go:224-228`), and after the recovery entry
+commits (`internal/client/write.go:390-396`). **Current** in the CLI: any other write answer that
 itself shows a new epoch, whatever its status or body, is followed by that read; a read before or
 between the sends that shows one is no answer of the write. The write's own result stands whatever
 the read answers, and a failed read is said in a notice. A `409 recovery-mode-active` without a
 `scope` member is the exception, even for an operator's repeat: its refusal shows the start mode, and
 a recovery start refuses that read until its entry commits, so nothing reads `GET /server` after it,
-the outcome's own read of the resource included (`internal/client/write.go:205-218`, `internal/client/write.go:342-349`).
+the outcome's own read of the resource included (`internal/client/write.go:205-218`, `internal/client/write.go:345-352`).
 
 1. **Recovery start:** `GET /server` answering `"startMode": "recovery"`, which a recovery start
    serves only after its entry; a `409 recovery-mode-active` without a `scope` member; or any answer of
@@ -1332,11 +1331,11 @@ the outcome's own read of the resource included (`internal/client/write.go:205-2
    (`internal/api/problem.go:63-71`). A
    `recovery-mode-active` with a `scope` member is a scope's refusal and says nothing about the
    start mode. **Current.** The CLI takes the mode from all three shapes: `GET /server`
-   (`internal/client/client.go:179`), a scope-less `recovery-mode-active`
-   (`internal/client/client.go:357-362`) and an entry answer after the role check that carries
+   (`internal/client/client.go:185`), a scope-less `recovery-mode-active`
+   (`internal/client/client.go:363-368`) and an entry answer after the role check that carries
    `Bronzeward-Epoch`, other than a `401`, a `403` or the item 2 refusal
-   (`internal/client/write.go:354-361`). The web client takes it from `GET /server` and from the
-   scope-less `recovery-mode-active` (`web/src/recovery.tsx:33-44`, `web/src/shell.tsx:269`,
+   (`internal/client/write.go:357-364`). The web client takes it from `GET /server` and from the
+   scope-less `recovery-mode-active` (`web/src/recovery.tsx:33-48`, `web/src/shell.tsx:269`,
    `web/src/shell.tsx:300`, `web/src/shell.tsx:466-468`); it takes none from an entry answer
    itself. The entry's `201` carries the new epoch, which makes the shell read `GET /server`
    again (`web/src/request.ts:463-471`, `web/src/shell.tsx:398-406`); a `409 conflict` with
@@ -1345,11 +1344,11 @@ the outcome's own read of the resource included (`internal/client/write.go:205-2
    not-a-recovery-start refusal, a `409 conflict` with neither
    an `epoch` nor a `request` member, whose detail says only a recovery start serves the entry. A
    `409 conflict` to the entry is never read as a normal start by its status and code alone.
-   **Current.** Both clients take it from `GET /server` (`internal/client/client.go:179`,
-   `web/src/recovery.tsx:41-42`, `web/src/shell.tsx:466-468`). The CLI also takes it from the
+   **Current.** Both clients take it from `GET /server` (`internal/client/client.go:185`,
+   `web/src/recovery.tsx:42-48`, `web/src/shell.tsx:466-468`). The CLI also takes it from the
    entry's refusal, which it identifies by its missing `epoch` and `request` members and by
-   `Bronzeward-Epoch` on the answer (`internal/client/write.go:355`,
-   `internal/client/write.go:363-365`). The web client reaches the same mode another way: it
+   `Bronzeward-Epoch` on the answer (`internal/client/write.go:358`,
+   `internal/client/write.go:366-368`). The web client reaches the same mode another way: it
    notes the refusal and the shell reads `GET /server` again, which answers `normal`
    (`web/src/recovery.tsx:212-220`); it sets no mode from the refusal itself
    (`web/src/write.ts:514`). Neither client reads the refusal's `detail`.
@@ -1357,7 +1356,7 @@ the outcome's own read of the resource included (`internal/client/write.go:205-2
    recovery banner states the mode as unknown or as last shown, until the next such answer.
    **Current** for both: the CLI prints `unknown` for a mode never shown
    (`internal/client/printable.go:104-109`) and its banner names the mode last shown
-   (`internal/client/client.go:394-400`); the web client starts at `unknown`
+   (`internal/client/client.go:400-406`); the web client starts at `unknown`
    (`web/src/shell.tsx:382`), says so in its banner (`web/src/recovery.tsx:31`,
    `web/src/recovery.tsx:63-71`), and the banner disables nothing (`web/src/recovery.tsx:61-62`).
 
@@ -1442,13 +1441,13 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    (`internal/client/watch.go:345-369`, `internal/client/watch.go:259`, `internal/client/watch.go:294`).
    A TLS trust refusal is repeated in the two reads that run until the watch ends, the event
    stream's open and the operation read, each try giving a notice that names the refusal
-   (`internal/client/client.go:273-277`, `internal/client/watch.go:457-463`). An ordinary read is
-   refused at once, one try (`internal/client/client.go:273-277`).
+   (`internal/client/client.go:279-283`, `internal/client/watch.go:457-463`). An ordinary read is
+   refused at once, one try (`internal/client/client.go:279-283`).
    A watch keeps one refusal, of a refused certificate or of a recovery start (a `409
    recovery-mode-active` with no `scope` member), from any read it makes: the event stream's open,
    the operation read, the drain of a terminal state, or a read of the callback that decides when
-   the watch ends (`internal/client/client.go:58-78`, `internal/client/client.go:317`,
-   `internal/client/client.go:361`). A refused certificate wins over a recovery start's refusal in
+   the watch ends (`internal/client/client.go:64-84`, `internal/client/client.go:323`,
+   `internal/client/client.go:367`). A refused certificate wins over a recovery start's refusal in
    either order, and a later refusal of the same kind replaces the earlier. Later failures of any
    kind, such as a refused connection, do not erase it; only a successful read of the operation
    does (`internal/client/watch.go:131-137`). A watch that ends through an outage or its timeout
@@ -1463,9 +1462,9 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    that [§8.2](#82-errors) retries is repeated with the backoff above until the watch ends, by its
    `until` or the page leaving (`web/src/request.ts:99-104`, `web/src/progress.ts:303-321`). A `500
    internal-error` and `epoch-superseded` are not repeated, as in the CLI, whose retry flag names
-   the three `503` codes only (`internal/client/client.go:340`, `internal/client/client.go:366-370`).
+   the three `503` codes only (`internal/client/client.go:346`, `internal/client/client.go:372-376`).
    The operation read of a watch is sent once and the watch waits between the sends, as the CLI's
-   read with a stop does (`internal/client/client.go:279-301`): the web client's own five tries
+   read with a stop does (`internal/client/client.go:285-307`): the web client's own five tries
    and their waits are not used, neither for a failure nor for an answer under another epoch than
    one recorded after its send, so a `500` is one fetch and every wait asks `until`
    (`web/src/progress.ts:240`, `web/src/request.ts:197-208`, `web/src/request.ts:226-230`,
@@ -1480,8 +1479,8 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    renewal: one `401` is renewed for the whole phase, not for each send. Both start again with the
    first answer that is no outage, and the delay of the attempts is left alone
    (`web/src/progress.ts:212-213`, `web/src/progress.ts:244-248`, `web/src/progress.ts:315-317`,
-   `web/src/request.ts:254-255`; the CLI: `internal/client/client.go:257`,
-   `internal/client/client.go:264-272`, `internal/client/client.go:302`). The drain of a terminal state that is refused or stays unavailable
+   `web/src/request.ts:254-255`; the CLI: `internal/client/client.go:263`,
+   `internal/client/client.go:270-278`, `internal/client/client.go:308`). The drain of a terminal state that is refused or stays unavailable
    is followed at once by a read of the operation in that phase (`web/src/progress.ts:287`): a
    read of the same epoch that is terminal reports the failure of that drain, with no second
    drain; a terminal read of another epoch is void, and the watch goes on after the delay, which is that wait; any
@@ -1774,7 +1773,7 @@ memory, `internal/client/store.go:25-27`, `internal/client/store.go:166-168`; a 
 `internal/client/login.go:349-373`; the lock and the renewal under it,
 `internal/client/credentials.go:264-302`, `internal/client/credentials.go:327-356`,
 `internal/client/store.go:110-153`; the notice of a renewal that fails,
-`internal/client/client.go:114-118`; the token file, `cmd/bronzewardctl/commands.go:111`,
+`internal/client/client.go:120-124`; the token file, `cmd/bronzewardctl/commands.go:111`,
 `internal/client/credentials.go:37-65`, `internal/client/credentials.go:94-176`,
 `internal/client/login.go:322-386`, `internal/client/token.go:67`. Item 4: `Setenv` appears nowhere in
 `cmd/bronzewardctl` or `internal/client` outside tests, `os.Environ` only in the re-execution that sets
@@ -2026,7 +2025,7 @@ Built, except the parts marked **Proposed** below. Sources follow each item.
    and says why. (Built: `internal/client/token.go:54-70`; the file's owner is not checked.)
 3. The CLI recognises an automation context by the `bwt_` prefix and says so before sending a
    request to a human-only route; the server's `403` stays authoritative. (**Proposed**: today the
-   CLI knows an automation context from `credential: automation`, `internal/client/client.go:106`,
+   CLI knows an automation context from `credential: automation`, `internal/client/client.go:112`,
    `internal/client/config.go:174`, and checks the prefix only when it reads the token,
    `internal/client/token.go:46`. It says so before a write marked human-only,
    `internal/client/write.go:222-224`, but not before a human-only read such as `import review`,
@@ -2047,7 +2046,7 @@ Built in the clients each item names, except the part marked **Proposed**.
 1. A client renews an access token when less than 60 s of its lifetime remains, by its own clock,
    and once after a `401` on a token it believed valid. It never retries a `401` more than once
    per request. (Built: CLI `internal/client/credentials.go:33`, `internal/client/credentials.go:255-258`,
-   `internal/client/client.go:114`, `internal/client/client.go:264-271`, `internal/client/write.go:420-421`,
+   `internal/client/client.go:120`, `internal/client/client.go:270-277`, `internal/client/write.go:423-424`,
    `internal/client/watch.go:440`, `internal/client/watch.go:482`; web `web/src/auth.ts:12`,
    `web/src/auth.ts:20-23`, `web/src/page.ts:88`, `web/src/request.ts:190`,
    `web/src/request.ts:231-238`, `web/src/request.ts:383-417`, `web/src/write.ts:366`,
@@ -2055,12 +2054,12 @@ Built in the clients each item names, except the part marked **Proposed**.
    remaining lifetime: 60 s before expiry when `left` is 120 s or more, and halfway to expiry when it is shorter.)
 2. A renewal that returns a different `sub` or `iss` is a new sign-in: pending writes are set
    aside ([§8.4](#84-idempotency-and-ambiguous-responses) item 3) and the change is shown. (Built:
-   CLI `internal/client/credentials.go:308-312`, `internal/client/write.go:319-323`; web
-   `web/src/app.tsx:114-120`, `web/src/auth.ts:361-373`, `web/src/write.ts:302`.)
+   CLI `internal/client/credentials.go:308-312`, `internal/client/write.go:322-326`; web
+   `web/src/app.tsx:114-120`, `web/src/auth.ts:361-373`, `web/src/write.ts:306`.)
 3. A failed renewal (refresh token rejected or expired, provider unreachable) leaves the current
    token in use until the server refuses it, then asks the operator to sign in again. The CLI in
    `--no-input` mode exits with the authentication-refused message instead of prompting. (Built:
-   CLI `internal/client/client.go:114-118`, `internal/client/client.go:266-271`,
+   CLI `internal/client/client.go:120-124`, `internal/client/client.go:272-277`,
    `internal/client/credentials.go:501`, `internal/client/credentials.go:511`; web
    `web/src/auth.ts:338-347`, `web/src/app.tsx:165-170`. **Proposed:** the CLI's `--no-input`
    sentence: the spec names no "authentication-refused message", and the CLI never prompts on a
@@ -2108,13 +2107,13 @@ Expired token, wrong issuer, wrong audience and a malformed groups claim: CLI
 `internal/client/credentials.go:524-538`, web `web/src/app.tsx:19`, `web/src/app.tsx:157-160`,
 `web/src/app.tsx:171-173`, `web/src/app.tsx:252-254`. Automation token not accepted: CLI
 `internal/client/problem.go:42`. Account disabled: the failed renewal of [§9.5](#95-renewal) item 3.
-The `503` row: CLI `internal/client/client.go:279-283`, `internal/client/client.go:367-370`, web
+The `503` row: CLI `internal/client/client.go:285-289`, `internal/client/client.go:373-376`, web
 `web/src/request.ts:92-93`, `web/src/request.ts:250-253`. Group removed at the provider is a
 provider fact, and the client does nothing before the next refusal.
 
 **Proposed**, where today differs: (a) "Lifetime over the maximum": the CLI reads the last
-`maxTokenLifetimeSeconds` only to form its reading after a `401` (`internal/client/client.go:180`,
-`internal/client/client.go:411-412`, `internal/client/credentials.go:493-512`), not before it sends;
+`maxTokenLifetimeSeconds` only to form its reading after a `401` (`internal/client/client.go:186`,
+`internal/client/client.go:417-418`, `internal/client/credentials.go:493-512`), not before it sends;
 the web client has no such check (`maxTokenLifetime` appears nowhere in `web/src` outside tests,
 whereas `localReading` is at `web/src/auth.ts:480`). (b) "An ID token, or no `jti`": the CLI reads it
 (`internal/client/credentials.go:508-509`); the web client does not (`at_hash` and `jti` appear
@@ -2128,7 +2127,7 @@ as the table says (`internal/client/problem.go:53`); the web client's is "This a
 signed in; automation tokens cannot approve." (`web/src/states.tsx:22`). (f) "Provider unreachable
 from the client": the CLI prints "cannot reach the identity provider `<issuer>`" with the cause, in
 lower case, as a notice at the failed renewal rather than after the refusal
-(`internal/client/credentials.go:393`, `internal/client/client.go:116`); the web client keeps the token
+(`internal/client/credentials.go:393`, `internal/client/client.go:122`); the web client keeps the token
 and has no such text (`web/src/auth.ts:449-451`). The server's `401`, `403` and `503` answers and
 the group and account behaviour at the provider are server or provider facts.
 
