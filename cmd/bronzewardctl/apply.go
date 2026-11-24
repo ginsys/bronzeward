@@ -187,6 +187,7 @@ func (e *env) applyRows(c *client.Client, rel *apitypes.ReleaseBody, chosen stri
 
 // applyStanding says where a machine stands for the release: the plan to approve where one is ready
 // (somebody prepared it), the reason there is nothing to do, or neither, which means a plan is to be made.
+// The apply page's rowOf (web/src/apply.ts) decides the same cases the same way.
 func applyStanding(p *apitypes.PositionBody, release string) (plan, line string) {
 	m := p.Machine
 	ofRelease := p.Plan != nil && p.Plan.Release == release
@@ -197,7 +198,12 @@ func applyStanding(p *apitypes.PositionBody, release string) (plan, line string)
 		return "", "stopped: an operation on this machine is unresolved; open it with operation list"
 	case p.Step == apitypes.PositionBodyStepOperationInFlight:
 		return "", "applying: its operation is in progress"
-	case ofRelease && !mine && waiting:
+	case p.Plan != nil && waiting && !mine:
+		// Not this release's apply plan: another operation's (an adopt is decided on the machine's page) or another
+		// release's, which the server would refuse a plan for (409) since an apply-config plan is for the Desired release.
+		if !ofRelease {
+			return "", sf("stopped: the plan waiting for this machine is for another release (%s); open it with plan show %s", p.Plan.Release, client.ShellWord(p.Plan.Id))
+		}
 		return "", "stopped: the plan waiting for this machine is not an apply plan; open it with plan show " + client.ShellWord(p.Plan.Id)
 	case p.Step == apitypes.PositionBodyStepAwaitingDispatch && mine:
 		return "", "approved already: the controller sends it when its gates allow"

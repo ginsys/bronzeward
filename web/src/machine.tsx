@@ -12,7 +12,7 @@ import { ClusterRef, Named, useReleaseNames } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
 import { PageNote } from "./page-note.tsx";
 import { CHANGED_ON_THE_MACHINE, CREATE_A_DRAFT, DECIDE_ON_THE_CHANGE, DIFFERS_IN_FORM_ONLY, FORM_ONLY_NOTE, FREEZE_THIS_MACHINE, MACHINE_NOTE, RELEASE_NOT_APPLIED_YET, roleWords, UNFREEZE_OR_DECIDE, UNFREEZE_THE_MACHINE } from "./words.ts";
-import { NextStep, type Position } from "./nextstep.tsx";
+import { NextStep, PlanPreparedBy, type Position } from "./nextstep.tsx";
 import { driftPath } from "./plan.tsx";
 import { principalId } from "./principals.ts";
 import { Who } from "./principals.tsx";
@@ -462,6 +462,7 @@ export function MachineShown({ id, m, obs, km, ko, tl, kt, older, busy, changed,
       <ul aria-label="Status" data-testid="sentences">{sentences(d, list, name).map((s) => <li key={s}>{s}</li>)}</ul>
       <p data-testid="drift-link"><Ref to={driftPath(d.id)} id={d.id}>{driftLinkText(d)}</Ref></p>
       <NextStep position={position} recovery={recovery} />
+      <PlanPreparedBy position={position} />
       <dl>
         <dt>Desired</dt><dd>{release(d.desired)}</dd>
         <dt>Applied</dt><dd>{d.applied === null ? "none" : <>{release(d.applied.release)} by {safeWord(d.applied.source)}</>}</dd>

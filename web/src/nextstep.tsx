@@ -6,9 +6,11 @@
 // "nothing to do" nor "unchanged" (§2.3).
 
 import type { components } from "./api/v1";
-import { Ref } from "./list.tsx";
+import { Ref, useItem } from "./list.tsx";
 import { driftPath, planFor, planPath } from "./plan.tsx";
+import { Who } from "./principals.tsx";
 import { safeWord } from "./safe.ts";
+import { when } from "./states.tsx";
 import { DECIDE_ON_THE_CHANGE, NOT_MANAGED_YET } from "./words.ts";
 
 export type Position = components["schemas"]["PositionBody"];
@@ -103,3 +105,16 @@ export function NextStepLine({ step }: { step: Step | undefined }) {
 
 export const NextStep = ({ position, recovery = false }: { position: Position | undefined; recovery?: boolean | undefined }) =>
   <NextStepLine step={position === undefined ? undefined : nextStep(position, recovery)} />;
+
+// Who prepared the plan the position names, and when (ginsys/bronzeward#1159): the position carries the plan's identifier
+// and not its creator, so the plan is read once. It is the machine page's answer for a plan nobody here can name the
+// identifier of (a creation whose outcome was unknown); a read that fails draws nothing.
+export function PlanPreparedBy({ position }: { position: Position | undefined }) {
+  const waiting = position?.plan != null && (position.step === "awaiting-approval" || position.step === "awaiting-dispatch");
+  return waiting ? <PreparedBy id={position.plan!.id} /> : null;
+}
+function PreparedBy({ id }: { id: string }) {
+  const p = useItem<components["schemas"]["PlanBody"]>(`/plans/${encodeURIComponent(id)}`);
+  if (p.kind !== "ok" || p.data.createdBy == null) return null;
+  return <p data-testid="next-step-by">Prepared by <Who id={p.data.createdBy.principal} /> on {when(p.data.createdAt)}.</p>;
+}

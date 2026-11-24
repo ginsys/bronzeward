@@ -554,10 +554,10 @@ func TestApplyStandingLeavesOutAnotherWaitingPlan(t *testing.T) {
 		line string // a fragment of the reason, "" when it is not left out
 	}{
 		{"apply of this release, awaiting approval", waiting(rel, apitypes.PositionPlanOperationApplyConfig, apitypes.PositionBodyStepAwaitingApproval), "pln_w", ""},
-		{"adopt of this release", waiting(rel, apitypes.PositionPlanOperationAdopt, apitypes.PositionBodyStepAwaitingApproval), "", "is not an apply plan; open it with plan show pln_w"},
-		{"apply of another release, awaiting approval", waiting("rel_other", apitypes.PositionPlanOperationApplyConfig, apitypes.PositionBodyStepAwaitingApproval), "", "is for another release (rel_other); open it with plan show pln_w"},
-		{"apply of another release, awaiting dispatch", waiting("rel_other", apitypes.PositionPlanOperationApplyConfig, apitypes.PositionBodyStepAwaitingDispatch), "", "is for another release (rel_other); open it with plan show pln_w"},
-		{"adopt of another release", waiting("rel_other", apitypes.PositionPlanOperationAdopt, apitypes.PositionBodyStepAwaitingApproval), "", "is for another release (rel_other); open it with plan show pln_w"},
+		{"adopt of this release", waiting(rel, apitypes.PositionPlanOperationAdopt, apitypes.PositionBodyStepAwaitingApproval), "", "is not an apply plan; open it with plan show 'pln_w'"},
+		{"apply of another release, awaiting approval", waiting("rel_other", apitypes.PositionPlanOperationApplyConfig, apitypes.PositionBodyStepAwaitingApproval), "", "is for another release (rel_other); open it with plan show 'pln_w'"},
+		{"apply of another release, awaiting dispatch", waiting("rel_other", apitypes.PositionPlanOperationApplyConfig, apitypes.PositionBodyStepAwaitingDispatch), "", "is for another release (rel_other); open it with plan show 'pln_w'"},
+		{"adopt of another release", waiting("rel_other", apitypes.PositionPlanOperationAdopt, apitypes.PositionBodyStepAwaitingApproval), "", "is for another release (rel_other); open it with plan show 'pln_w'"},
 	} {
 		plan, line := applyStanding(c.p, rel)
 		if plan != c.plan || (c.line == "") != (line == "") || !strings.Contains(line, c.line) || (c.line != "" && !strings.HasPrefix(line, "stopped: the plan waiting for this machine ")) {
@@ -573,7 +573,7 @@ func TestApplyLeavesOutAnotherReleasesWaitingPlan(t *testing.T) {
 	f.planRelease = "rel_other"
 	setStdin(t, "y\n")
 	code, out, errOut := runCtl(t, "apply", "rel_BWSYNTH", "--all")
-	const reason = "alpha: stopped: the plan waiting for this machine is for another release (rel_other); open it with plan show pln_prepared"
+	const reason = "alpha: stopped: the plan waiting for this machine is for another release (rel_other); open it with plan show 'pln_prepared'"
 	if code != 0 || !strings.Contains(out, reason) || !strings.Contains(errOut, "alpha  controlplane  cp-base  stopped: the plan waiting for this machine is for another release (rel_other)") ||
 		strings.Contains(errOut, "not planned") || !strings.Contains(out, "beta: approved") {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, out, errOut)

@@ -196,14 +196,15 @@ describe("Show apply", () => {
     const { plans } = await showApply(REL, [A, B], w.io);
     expect(w.log).toEqual(["POST /plans"]);
     expect([...plans.keys()]).toEqual([B]);
-    expect(w.lines[A]).toEqual({ state: "stopped", text: LINES.otherRelease });
+    expect(w.lines[A]).toBeUndefined(); // its line is the position's (rowOf), drawn by the page
   });
   test("leaves out a machine that cannot be planned, in words, and goes on with the others", async () => {
     const w = world({ [A]: pos("needs-plan"), [B]: pos("operation-in-flight", { plan: plan("q") }), [C]: pos("needs-plan") }, { plan: [A] });
     const { plans } = await showApply(REL, [A, B, C], w.io);
     expect([...plans.keys()]).toEqual([C]);
     expect(w.lines[A]?.state).toBe("stopped");
-    expect(w.lines[B]).toEqual({ state: "running", text: LINES.running });
+    // The machine's line is its position's, which the page draws: the press says nothing about a machine it leaves out.
+    expect(w.lines[B]).toBeUndefined();
   });
 });
 
