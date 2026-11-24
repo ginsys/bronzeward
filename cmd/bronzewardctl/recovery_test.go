@@ -582,7 +582,9 @@ func TestStatusRefusesAStaleSnapshot(t *testing.T) {
 		t.Run(strings.Join(form, " ")+" epoch holds", func(t *testing.T) {
 			recoveryServer(t, answers, "")
 			var out, errb bytes.Buffer
-			if rc := run(form, &out, &errb); rc != 0 || !strings.Contains(out.String(), "3") {
+			// The snapshot shows the epoch it holds. (It once asserted "3", the revision the fake server
+			// served then; with revision 10 that matched only a port number with a 3 in it.)
+			if rc := run(form, &out, &errb); rc != 0 || !strings.Contains(out.String(), "ep_BWSYNTH-1") {
 				t.Errorf("rc %d, out %q, err %q; want the snapshot", rc, out.String(), errb.String())
 			}
 		})
