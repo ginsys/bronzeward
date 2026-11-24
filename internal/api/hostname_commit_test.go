@@ -81,16 +81,33 @@ func TestCommitmentHostnameGate(t *testing.T) {
 			if who == "" {
 				who = ce.target.machine2
 			}
-			ce.wantRefused(t, err, "6a", "the Applied release of machine "+who+clashCause, "")
+			// The entry names the other machine by its identifier alone, so a rename leaves no stale name in it, and
+			// the node name the release gives this machine, which is never a secret (client contracts A9 item 8).
+			ce.wantRefusedBy(t, err, "6a", "the Applied release of machine "+who+clashCause, "", ce.target.machine2, a)
 			ce.wantStillApproved(t, ce.pid)
 			var entry string
 			if err := ce.db.QueryRow(`SELECT entry::text FROM machine_event WHERE machine = $1 AND kind = 'refusal'`, ce.machine).Scan(&entry); err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(entry, a) || strings.Contains(entry, "hostname") {
-				t.Fatalf("the refusal entry holds a node name or a hostname: %s", entry)
+			if (c.name != "" && strings.Contains(entry, "\""+c.name+"\"")) || strings.Contains(entry, "hostname") {
+				t.Fatalf("the refusal entry holds the holder's name or a hostname member: %s", entry)
 			}
 		})
+	}
+}
+
+// Only comparison 6a's entry holds `holder` and `nodeName`: the other comparisons' entries are as they were, with the
+// members the entry always had and no more (wantRefused compares the whole entry, with neither member).
+func TestOtherRefusalEntriesHoldNoHolder(t *testing.T) {
+	t.Parallel()
+	ce := newCommitEnv(t, "")
+	ce.ready(t)
+	mustExec(t, ce.db, `UPDATE machine SET frozen = true WHERE id = $1`, ce.machine)
+	_, err := ce.a.commitPlan(context.Background(), ce.pid)
+	ce.wantRefused(t, err, "6", "the machine scope is frozen", "")
+	if n := count(t, ce.db, `SELECT count(*) FROM machine_event WHERE machine = $1 AND kind = 'refusal'
+		AND entry ?| array['holder', 'nodeName']`, ce.machine); n != 0 {
+		t.Fatalf("%d refusal entries of another comparison hold a holder or a node name", n)
 	}
 }
 

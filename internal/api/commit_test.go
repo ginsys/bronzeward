@@ -252,9 +252,18 @@ func TestCommitmentAccepts(t *testing.T) {
 // is not committed.
 func (ce *commitEnv) wantRefused(t *testing.T, err error, comparison, cause, observation string) {
 	t.Helper()
+	ce.wantRefusedBy(t, err, comparison, cause, observation, "", "")
+}
+
+// wantRefusedBy is wantRefused for a refusal that also names the other machine and the node name: comparison 6a's
+// entry holds `holder` (the machine's identifier, never its name) and `nodeName`, and no other comparison's holds
+// either, so the entry compared below is exactly the one wantRefused compares when both are empty.
+func (ce *commitEnv) wantRefusedBy(t *testing.T, err error, comparison, cause, observation, holder, nodeName string) {
+	t.Helper()
 	var refused *commitRefused
-	if !errors.As(err, &refused) || refused.Comparison != comparison || refused.Cause != cause || refused.Observation != observation {
-		t.Fatalf("got %v, want a refusal by comparison %s: %s (%q)", err, comparison, cause, observation)
+	if !errors.As(err, &refused) || refused.Comparison != comparison || refused.Cause != cause || refused.Observation != observation ||
+		refused.Holder != holder || refused.NodeName != nodeName {
+		t.Fatalf("got %v, want a refusal by comparison %s: %s (%q, holder %q, node name %q)", err, comparison, cause, observation, holder, nodeName)
 	}
 	var obs any
 	if observation != "" {
@@ -265,8 +274,8 @@ func (ce *commitEnv) wantRefused(t *testing.T, err error, comparison, cause, obs
 		WHERE e.machine = $1 AND e.kind = 'refusal' AND e.epoch = (SELECT epoch FROM installation_state)
 			AND e.revision = (SELECT max(revision) FROM machine_event WHERE machine = $1 AND kind <> 'drift')
 			AND e.entry = jsonb_strip_nulls(jsonb_build_object('transaction', 'T6', 'comparison', $2::text, 'plan', $3::text,
-				'cause', $4::text, 'controller', $5::text, 'observation', $6::text))`,
-		ce.machine, comparison, ce.pid, cause, ce.a.d.owner.ID, obs); n != 1 {
+				'cause', $4::text, 'controller', $5::text, 'observation', $6::text, 'holder', NULLIF($7::text, ''), 'nodeName', NULLIF($8::text, '')))`,
+		ce.machine, comparison, ce.pid, cause, ce.a.d.owner.ID, obs, holder, nodeName); n != 1 {
 		t.Fatal("the machine's last entry is not the refusal entry")
 	}
 	if n := count(t, ce.db, `SELECT count(*) FROM operation WHERE plan = $1`, ce.pid); n != 0 {
