@@ -38,6 +38,14 @@ func Remark(st Staged, marks []Path) (_ *Candidate, err error) {
 	if again, err := encodeStream(old); err != nil || !bytes.Equal(again, staged) {
 		return nil, refuse(RuleMarkRewritesText, marks[0].String())
 	}
+	// Step 2a removed a legacy hostname key from this stream: a reference at stableHostname, or at a mapping
+	// that holds it, would make step 5a suppress the fill and the hostname would be lost (§3.6 item 3). The
+	// remedy is the one of mark-rewrites-text: abandon and ingest again with the mark at the start.
+	if st.Filled.Key {
+		if m, bad := marksReleasedHostname(old, marks); bad {
+			return nil, refuseAt(RuleMarkOnReleasedHostname, []Path{m}, m.String())
+		}
+	}
 	holders := map[*yaml.Node]Path{}
 	for _, m := range marks {
 		if n, ok := resolve(old, m.Doc, m.Pointer); ok && m.Format != "" {

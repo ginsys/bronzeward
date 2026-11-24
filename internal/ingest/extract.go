@@ -99,6 +99,13 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 			return nil, refuseAt(RuleMarkUnaddressed, []Path{m}, m.String())
 		}
 	}
+	// A legacy hostname key is released the same way, as a key (releaseLegacyKey), where there is no such
+	// document. It drops no document, so it changes no position and is removed at once.
+	if dropAt < 0 {
+		if filled, err = releaseLegacyKey(docs, req.Name, outerMarks); err != nil {
+			return nil, err
+		}
+	}
 	targets, err := identify(docs, outerMarks)
 	if err != nil {
 		return nil, err
