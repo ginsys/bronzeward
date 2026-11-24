@@ -986,9 +986,10 @@ when its machine is no longer chosen and when the page is left, including a plan
 after that; the choice cannot change while the page works, and a plan Apply was pressed for is never
 cancelled. One the page loses (the tab is closed) expires with the plan default; a creation whose outcome is
 unknown leaves a plan the page has no ID for (`web/src/apply.ts:104`, `web/src/apply.ts:128-132`).
-The machine's page shows the plan its position names, which is that plan whenever it is the newest plan of the machine,
-with who prepared it and when, read from the plan (`web/src/nextstep.tsx:113-121`, `web/src/machine.tsx:465`); an
-older plan stays reachable through the page's list of the machine's plans. No route returns a change before a plan
+The machine's page shows the plan its position names, which is the newest plan of the machine that the position
+counts (one that has expired, was cancelled, was committed or was refused is not named), with who prepared it and
+when, read from the plan (`web/src/nextstep.tsx:113-121`, `web/src/machine.tsx:465`); any other plan stays reachable
+through the page's list of the machine's plans. No route returns a change before a plan
 exists, so showing it means making the plan.
 **Apply** stays off while any plan's change is unread, bound to a drift record (it overwrites a configuration no reviewer has seen), or withheld by the server (a configuration that could not be
 redacted, or a machine holding a configuration other than the one Bronzeward applied, so the two cannot be

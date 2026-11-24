@@ -111,8 +111,7 @@ export const NextStep = ({ position, recovery = false }: { position: Position | 
 // identifier of (a creation whose outcome was unknown); a plan whose read never answered draws nothing. The component
 // is keyed by the plan, so a position that moves to another plan never shows the first plan's preparer.
 export function PlanPreparedBy({ position }: { position: Position | undefined }) {
-  const waiting = position?.plan != null && (position.step === "awaiting-approval" || position.step === "awaiting-dispatch");
-  return waiting ? <PreparedBy key={position.plan!.id} id={position.plan!.id} /> : null;
+  return position?.plan != null ? <PreparedBy key={position.plan.id} id={position.plan.id} /> : null;
 }
 function PreparedBy({ id }: { id: string }) {
   const p = useItem<components["schemas"]["PlanBody"]>(`/plans/${encodeURIComponent(id)}`);
