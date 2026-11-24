@@ -1273,13 +1273,13 @@ epoch than the events shown. It reads both again (CLI: `cmd/bronzewardctl/import
 `web/src/imports.tsx:254-261`). The watch clears the events shown when the
 operation it reads has another epoch, even if the operation has no event to replace them, **when
 the operation is not terminal** (CLI: `internal/client/watch.go:234-237`; web:
-`web/src/progress.ts:295-298`). A terminal read of another epoch than the kept events clears them
+`web/src/progress.ts:296-299`). A terminal read of another epoch than the kept events clears them
 only through the pages it drains, and ends once the drained events hold the operation's epoch;
 where the pages show another epoch than the operation read's, it is read again after the backoff
-(CLI: `internal/client/watch.go:204-216`; web: `web/src/progress.ts:266-279`,
-`web/src/progress.ts:346-353`). **Proposed** for the CLI: an empty event list of the operation's
+(CLI: `internal/client/watch.go:204-216`; web: `web/src/progress.ts:267-280`,
+`web/src/progress.ts:347-354`). **Proposed** for the CLI: an empty event list of the operation's
 epoch also clears the events kept from another epoch, as the web does
-(`web/src/progress.ts:346`); the CLI keeps them and reads the operation again after the backoff
+(`web/src/progress.ts:347`); the CLI keeps them and reads the operation again after the backoff
 until an event replaces them (`internal/client/watch.go:533-552`, `internal/client/watch.go:204-215`). Every
 other multi-page read needs no such comparison, because a cursor carries its epoch and a change
 makes it `400 cursor-invalid`.
@@ -1289,7 +1289,7 @@ ID at its first colon to compare the part before it (`internal/client/watch.go:5
 `web/src/progress.ts:105`). A missing `Bronzeward-Epoch` on an authenticated success is a defect
 the client reports (CLI: `internal/client/client.go:298-301`, `internal/client/write.go:690-693`,
 `internal/client/watch.go:459-463`; web: `web/src/request.ts:481-485`, `web/src/write.ts:428-429`,
-`web/src/progress.ts:378-379`).
+`web/src/progress.ts:379-380`).
 
 **Start mode** (G22). Neither the headers nor `GET /recovery` say whether the process was started
 for recovery, which decides whether plan creation, approval and unfreeze can succeed (journeys
@@ -1366,7 +1366,7 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
 
 1. A client follows an operation with the stream when it can and with JSON pages otherwise; both
    are complete. It remembers the last event ID it showed. **Current** for both
-   (`internal/client/watch.go:122-143`, `web/src/progress.ts:177-239`).
+   (`internal/client/watch.go:122-143`, `web/src/progress.ts:177-240`).
 2. When the stream ends it reads `GET /operations/{id}`. A terminal state does not show that the
    last events arrived: the stream may have been cut after the state was written and before its
    last events were (the server writes the state after the last entry and ends the stream only
@@ -1407,11 +1407,11 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
 
    **Current** for both: the drain of a terminal state and the read again after the backoff when
    its pages name another epoch (`internal/client/watch.go:172-216`,
-   `web/src/progress.ts:251-279`); the reconnect with `Last-Event-ID` (`internal/client/watch.go:401-402`,
-   `web/src/progress.ts:371-373`) and the backoff from 1 s to 30 s
-   (`internal/client/watch.go:250-266`, `web/src/progress.ts:312-320`); the attempt that
+   `web/src/progress.ts:252-280`); the reconnect with `Last-Event-ID` (`internal/client/watch.go:401-402`,
+   `web/src/progress.ts:372-374`) and the backoff from 1 s to 30 s
+   (`internal/client/watch.go:250-266`, `web/src/progress.ts:313-321`); the attempt that
    showed nothing and what counts as progress (`internal/client/watch.go:255-258`,
-   `web/src/progress.ts:312-313`).
+   `web/src/progress.ts:313-314`).
 
    **Current** for the CLI: the operation read after a stream that ended, and after a refused
    drain, is repeated until the watch ends (`internal/client/watch.go:150-151`,
@@ -1425,31 +1425,31 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    where the CLI returns an operation and an error, the web returns the failure. An operation read
    that is a transport failure, a 5xx that is not a Bronzeward problem or one of the three `503`s
    that [§8.2](#82-errors) retries is repeated with the backoff above until the watch ends, by its
-   `until` or the page leaving (`web/src/request.ts:99-104`, `web/src/progress.ts:302-320`). A `500
+   `until` or the page leaving (`web/src/request.ts:99-104`, `web/src/progress.ts:303-321`). A `500
    internal-error` and `epoch-superseded` are not repeated, as in the CLI, whose retry flag names
    the three `503` codes only (`internal/client/client.go:305`, `internal/client/client.go:330-334`).
    The operation read of a watch is sent once and the watch waits between the sends, as the CLI's
    read with a stop does (`internal/client/client.go:245-267`): the web client's own five tries
    and their waits are not used, neither for a failure nor for an answer under another epoch than
    one recorded after its send, so a `500` is one fetch and every wait asks `until`
-   (`web/src/progress.ts:239`, `web/src/request.ts:197-208`, `web/src/request.ts:226-230`,
+   (`web/src/progress.ts:240`, `web/src/request.ts:197-208`, `web/src/request.ts:226-230`,
    `web/src/request.ts:277`; a `401` is renewed and sent again first, `web/src/request.ts:253-268`).
    The wait is in steps of 250 ms, each asking `until`, so a watch that ends is left within 250 ms,
    and the page leaving ends it at once (`web/src/progress.ts:195-207`). The wait after a void
    terminal read is the same wait, and a watch that ends in it fails with the defect that no read
    stands (`web/src/progress.ts:261`, `web/src/progress.ts:278`). While the operation read
    is an outage it is read again with no stream or page read between two attempts, as the CLI's
-   read keeps its own retry phase (`web/src/progress.ts:210`, `web/src/progress.ts:218`,
-   `web/src/progress.ts:242`). That phase has its own backoff, 1 s doubling to 30 s, and its own
+   read keeps its own retry phase (`web/src/progress.ts:211`, `web/src/progress.ts:219`,
+   `web/src/progress.ts:243`). That phase has its own backoff, 1 s doubling to 30 s, and its own
    renewal: one `401` is renewed for the whole phase, not for each send. Both start again with the
    first answer that is no outage, and the delay of the attempts is left alone
-   (`web/src/progress.ts:211-212`, `web/src/progress.ts:243-247`, `web/src/progress.ts:314-316`,
+   (`web/src/progress.ts:212-213`, `web/src/progress.ts:244-248`, `web/src/progress.ts:315-317`,
    `web/src/request.ts:254-255`; the CLI: `internal/client/client.go:229`,
    `internal/client/client.go:236-244`, `internal/client/client.go:268`). The drain of a terminal state that is refused or stays unavailable
-   is followed at once by a read of the operation in that phase (`web/src/progress.ts:286`): a
+   is followed at once by a read of the operation in that phase (`web/src/progress.ts:287`): a
    read of the same epoch that is terminal reports the failure of that drain, with no second
    drain; a terminal read of another epoch is void, and the watch goes on after the delay, which is that wait; any
-   other read goes on (`web/src/progress.ts:254-263`; the CLI: `internal/client/watch.go:181-203`,
+   other read goes on (`web/src/progress.ts:255-264`; the CLI: `internal/client/watch.go:181-203`,
    `internal/client/watch.go:218-229`). A watch that ends
    in an outage returns the last read of the operation as ended; a terminal read whose events could
    not be read, while the count of signs is the one its answer left, as a failed watch with the
@@ -1460,9 +1460,9 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    included, and `readWithEpoch` returns it with the epoch of the same response
    (`web/src/request.ts:184-186`, `web/src/request.ts:197-208`, `web/src/request.ts:235`). The watch
    adds each event of another epoch than its stream (`web/src/progress.ts:122-124`,
-   `web/src/progress.ts:416`), takes the sum at each read (`web/src/progress.ts:189`,
-   `web/src/progress.ts:248`, `web/src/progress.ts:284`, `web/src/progress.ts:290`) and compares it by equality
-   (`web/src/progress.ts:193`). The cases are `web/src/progress.test.ts:339-542`.
+   `web/src/progress.ts:417`), takes the sum at each read (`web/src/progress.ts:189`,
+   `web/src/progress.ts:249`, `web/src/progress.ts:285`, `web/src/progress.ts:291`) and compares it by equality
+   (`web/src/progress.ts:193`). The cases are `web/src/progress.test.ts:339-559`.
 
    **Proposed, not built by every client.** CLI: the wait between two attempts ends on Ctrl-C only
    (`internal/client/watch.go:310-321`), so a watch that ends through its timeout waits the pause
@@ -1478,9 +1478,9 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    `Bronzeward-Epoch`; on a difference it ends the stream, applies [§8.5](#85-epoch-changes), clears
    what the watch showed and reopens the stream without `Last-Event-ID` (EVT-05). **Current** for
    both: a `reset` clears what was shown and the stream goes on
-   (`internal/client/watch.go:505-507`, `web/src/progress.ts:410-412`); an event ID whose epoch
+   (`internal/client/watch.go:505-507`, `web/src/progress.ts:411-413`); an event ID whose epoch
    part differs from the stream's clears it too and ends the stream, the CLI counting the move
-   (`internal/client/watch.go:508-516`, `web/src/progress.ts:413-418`), and the next attempt
+   (`internal/client/watch.go:508-516`, `web/src/progress.ts:414-419`), and the next attempt
    reopens the stream without `Last-Event-ID` after the operation read and the backoff.
 4. The browser cannot send `Authorization` with `EventSource`, so the web client reads the stream
    with `fetch` and a streamed response body, sending `Authorization`, `Accept` and
@@ -1488,10 +1488,10 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    neither the headers bound nor the attempt bound of [§8.4](#84-idempotency-and-ambiguous-responses) item 8. A
    client whose sign-in ended ([§9.6](#96-failure-cases)) sends no stream request and stops the watch.
    **Current** for the web, the only client this item names: the stream goes through `fetch` with
-   `Accept` and `Last-Event-ID` and no bound (`web/src/progress.ts:371-375`,
+   `Accept` and `Last-Event-ID` and no bound (`web/src/progress.ts:372-376`,
    `web/src/request.ts:293-301`, whose `send` takes `bounded` false, against its default of true at
-   `web/src/request.ts:364`); a sign-in that ended stops the watch (`web/src/progress.ts:215`,
-   `web/src/progress.ts:374`).
+   `web/src/request.ts:364`); a sign-in that ended stops the watch (`web/src/progress.ts:216`,
+   `web/src/progress.ts:375`).
 5. The keep-alive comment keeps an intermediary with an idle timeout above 15 s from cutting a
    quiet stream; a client ignores comment lines and keeps its last event ID. A connection still
    cut without the operation having ended is covered by item 2. A client takes a stream that
@@ -1506,9 +1506,9 @@ that shows it, and **Proposed** says what a client does not do yet, one sentence
    client refusal as the server sent it, and rejects a redirect ([§9.5](#95-renewal),
    `internal/client/watch.go:326-330`, `internal/client/watch.go:422-424`,
    `internal/client/watch.go:435-437`). **Current** for both: the comment lines and the 45 s
-   (`internal/client/watch.go:478-486`, `web/src/progress.ts:99`, `web/src/progress.ts:393-400`),
-   and the web's refused stream read as pages (`web/src/progress.ts:229-232`,
-   `web/src/progress.ts:376-377`).
+   (`internal/client/watch.go:478-486`, `web/src/progress.ts:99`, `web/src/progress.ts:394-401`),
+   and the web's refused stream read as pages (`web/src/progress.ts:230-233`,
+   `web/src/progress.ts:377-378`).
 6. The machine timeline has no stream (G9). A client reads its newest page with `order=newest`
    and keeps that answer's `tail`; "Load older" follows `next` with `order=newest`. While the
    timeline is on screen the client polls forward from `tail` (from the start while there is
