@@ -1705,7 +1705,7 @@ memory, `internal/client/store.go:25-27`, `internal/client/store.go:166-168`; a 
 `cmd/bronzewardctl` or `internal/client`, `os.Environ` only in the re-execution that sets
 `GOTRACEBACK=none` (`cmd/bronzewardctl/main.go:118`), and `exec` is used only to open the authorization URL
 (`internal/client/login.go:299`, the control of that search) and to run `security` with the secret
-on its standard input (`internal/client/store_security.go:27`); the token's claims are the only
+on its standard input (`internal/client/store_security.go:27-28`); the token's claims are the only
 output of a token (`cmd/bronzewardctl/commands.go:278-279`). That is a search of those two
 directories for those names, not a trace of every output. Item 5: `cmd/bronzewardctl/commands.go:232-256`,
 `internal/client/credentials.go:208-219`.
@@ -1956,7 +1956,8 @@ Built, except the parts marked **Proposed** below. Sources follow each item.
    `internal/client/write.go:207-209`, but not before a human-only read such as `import review`,
    `cmd/bronzewardctl/review.go:28`.)
 4. The web interface accepts no automation token. (Built: `bwt_` appears nowhere in `web/src` outside tests, so the
-   page holds only a token its own sign-in obtained; the one place that names automation tokens is
+   page holds only a token its own sign-in or another tab's sign-in produced
+   (`web/src/app.tsx:207-210`); the one place that names automation tokens is
    the human-only refusal text, `web/src/states.tsx:22`, which has no prefix.)
 5. After a restore, automation tokens from the earlier epoch answer `401`; the CLI's message says
    the token must be reissued by the operator with the server-side command
@@ -2189,7 +2190,8 @@ which stays **Proposed**; item 1's server half is a server fact. Sources follow 
    on a `pageshow` with `persisted` true the application discards any state and renders nothing
    until signed in again, so the guarantee rests on items 3 and 4, not on the header alone.
    (Built in the client: `web/src/app.tsx:94-96` reloads on a persisted `pageshow`, and the page
-   renders nothing without a token, `web/src/app.tsx:26-28`, `web/src/app.tsx:237-238`. **Proposed:** the header, see above.)
+   renders nothing after `pagehide`, the `blank` view (`web/src/app.tsx:26-28`,
+   `web/src/app.tsx:237-238`); the loading and signed-out views carry no data. **Proposed:** the header, see above.)
 
 ### 10.4 Styling and the content policy
 
@@ -2278,7 +2280,7 @@ detail grid, `web/src/states.tsx:85`, `web/src/app.css:70` and `:102`; the words
 `web/src/words.ts:92-104`, `web/src/machines.tsx:25-40`, `web/src/drift.tsx:64`; the row titles,
 `web/src/titles.ts:29`, `:35`, `:58`; the page notes, `web/src/page-note.tsx`,
 `web/src/page-notes.test.ts`; the CLI's state words and §2.4 sentences,
-`cmd/bronzewardctl/reads.go:278-296` and `:353-355` (the sentences were not compared word for word
+`cmd/bronzewardctl/reads.go:278-296` and the function `sentences`, `:355-425` (the sentences were not compared word for word
 against operator experience §2.4). Item 7: `web/src/icons.tsx:1-49`, `web/src/layout.test.ts:21-29`,
 and no `style=` in `web/src` outside tests.
 
@@ -2365,7 +2367,7 @@ item 7. Sources follow each item.
    the client cannot control. (Built for the first sentence: a search of `cmd/bronzewardctl` and
    `internal/client` outside tests for `CreateTemp|MkdirTemp|TempDir|EDITOR|VISUAL|exec.Command`
    finds `xdg-open` with a URL only (`internal/client/login.go:299`), the `security` tool on macOS,
-   which takes the secret on its standard input (`internal/client/store_security.go:27`), a temporary file for the
+   which takes the secret on its standard input (`internal/client/store_security.go:27-28`), a temporary file for the
    context file (`internal/client/config.go:126`) and one for the token file
    (`internal/client/credentials.go:138`, written and renamed; tokens are in the table above and
    the clause names protected input and the review, which that file is not); the web client has no
