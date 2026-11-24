@@ -619,7 +619,7 @@ func TestPlanCreate(t *testing.T) {
 			"Plan the machine's Desired release instead: bronzewardctl plan create --release 'rel_BWSYNTH-new' --machine 'mch_a' --operation 'apply-config'"},
 		{"no Applied", `"detail":"the machine has no Applied configuration to plan an apply-config from; adopt it first","machine":"mch_a"`,
 			"Adopt the machine with an adopt plan, which records what the machine runs as its starting point and sends nothing: bronzewardctl plan create --release 'rel_BWSYNTH' --machine 'mch_a' --operation 'adopt'"},
-		{"no assignment", `"detail":"the machine has no assignment: the release was published with the machine's import base alone. Add an assignment","release":"rel_BWSYNTH","machine":"mch_a"`,
+		{"no assignment", `"detail":"the machine has no assignment: the release was published with the machine's import base. Add an assignment","release":"rel_BWSYNTH","machine":"mch_a"`,
 			"Add an assignment for the machine to a draft, one that selects nothing is enough: bronzewardctl assignment set 'mch_a' --draft <draft> --none. Publish that draft, then plan the release it makes."},
 		{"assignment moved", `"detail":"the machine's assignment has moved since the release was compiled","release":"rel_BWSYNTH","machine":"mch_a"`,
 			"Publish a release from the machine's current assignment, then plan that release. The assignment's history: bronzewardctl machine timeline 'mch_a'"},

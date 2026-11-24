@@ -341,7 +341,7 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 	// The release was compiled from the machine's assignment at one revision; a plan on a moved
 	// head would bind a configuration its assignment no longer selects. A release that holds no
 	// revision for a machine with no assignment at all was published with the machine's import base
-	// alone (an assignment is what a draft adds to say the machine is managed): the refusal says so.
+	// (an assignment is what a draft adds to say the machine is managed): the refusal says so.
 	var head sql.NullString
 	err = tx.QueryRowContext(ctx, `SELECT head_revision_id FROM assignment WHERE machine = $1 FOR SHARE`, in.Machine).Scan(&head)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -349,7 +349,7 @@ func createPlan(ctx context.Context, a *API, tx *sql.Tx, q *request) (result, er
 	}
 	if !asr.Valid && !head.Valid {
 		return result{}, refuse(http.StatusConflict, "conflict",
-			"the machine has no assignment: the release was published with the machine's import base alone. "+
+			"the machine has no assignment: the release was published with the machine's import base. "+
 				"Add an assignment for the machine to a draft (one that selects nothing is enough), publish that draft, then plan the new release.").
 			with("release", in.ReleaseID).with("machine", in.Machine)
 	}

@@ -153,7 +153,7 @@ as the first key with `bronzewardctl cluster first-key` (or let `cluster onboard
 Adoption makes the imported configuration the machine's `Applied` state without sending anything to
 the node. It needs a published release covering the machine and an assignment for the machine, which
 the plan binds. An assignment may select nothing, and then the machine's configuration is its import
-base alone. This walk selects one fragment, so the release carries something beyond the import.
+base, with its own name as its hostname where the base sets none (compilation §6.1 decision 2). This walk selects one fragment, so the release carries something beyond the import.
 
 **1. In the import draft**, as `h-author`, add a cluster fragment and assign it to both machines:
 

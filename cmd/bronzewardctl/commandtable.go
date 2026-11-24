@@ -155,7 +155,7 @@ var cmdTable = []cmdEntry{
 			"               [--fragment <layer>=<name>[,...]]...",
 		ifMatch: true,
 		notes: machineByNameNote + "\nthe layer is global, site, cluster, role, workload or override. --none instead selects nothing, so the machine's\n" +
-			"configuration is its import base alone.\n" + draftWrite},
+			"configuration is its import base, with its own name as its hostname where the base sets none (compilation §6.1 decision 2).\n" + draftWrite},
 	{path: "assignment rm", line: "remove a machine's assignment from a draft", synopsis: "assignment rm <machine> --draft <draft> [--cluster <cluster>]", roles: "author", ifMatch: true, notes: machineByNameNote + "\n" + draftWrite},
 
 	{path: "draft", line: "drafts: changes gathered before a publish"},
