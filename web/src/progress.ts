@@ -204,8 +204,9 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     }
     return false;
   };
-  // A terminal read whose events could not be read: the operation is read again at once, with no stream
-  // or page read first (the CLI's WatchBody).
+  // The operation is read again with no stream or page read first: after a terminal read whose events could
+  // not be read, and for as long as the operation read is an outage. That is the CLI's operationReadUntil,
+  // which keeps the read inside its own retry phase, so no event read comes between two attempts of it.
   let reread = false;
   for (;;) {
     // The sign-in ended: nothing more is sent. The JSON pages never reach the stream's check for it.
@@ -227,7 +228,6 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
       const drained = await drain(client, path, run, true);
       if (typeof drained === "object") return { kind: "failed", res: drained };
     }
-    reread = false;
     // The attempt's own time: a slow operation read does not skip the backoff.
     const took = pace.now() - began;
     if (w.signal.aborted) return { kind: "stopped" };
@@ -237,13 +237,23 @@ export async function watch(client: Reader, op: string, w: Watch, pace: Pace = P
     const { result: res, epoch, moves: records } = await client.readWithEpoch<Operation>(path, 1);
     // The page left while the read was pending: its answer is not acted on, and nothing more is sent.
     if (w.signal.aborted) return { kind: "stopped" };
+    reread = outage(res);
     const at = records + run.signs;
     // Events cleared at once, because the operation read names another epoch, are not progress.
     let stale = false;
     if (res.kind === "ok" && terminal(res.data.state)) {
       // The events of an earlier terminal read of this epoch could not be read, and the operation read again
       // is terminal under that epoch still: the failure of that drain stands (the CLI's WatchBody).
-      if (last?.drain !== undefined && last.epoch === epoch) return { kind: "failed", res: last.drain };
+      if (last?.drain !== undefined) {
+        if (last.epoch === epoch) return { kind: "failed", res: last.drain };
+        // Under another epoch it is of a restored installation: the read is void, and the watch goes on after
+        // the delay, with no second drain of it (the CLI's watch.go).
+        last = undefined;
+        voided = true;
+        await pace.sleep(delay, w.signal);
+        delay = Math.min(2 * delay, 30_000);
+        continue;
+      }
       // A terminal state settles the watch, so the last events are all shown, until or not.
       run.halted = false;
       const drained = await drain(client, path, run, false);

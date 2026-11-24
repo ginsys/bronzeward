@@ -192,7 +192,8 @@ export class Client {
   // response can record a new epoch before the caller resumes. Undefined when the read gave no
   // response that was used, or the response named no epoch. `moves` is the client's count after that
   // response was recorded, taken in the same step.
-  // `tries` bounds the sends of a retried failure, the first included (MAX_TRIES by default): the
+  // `tries` bounds the sends of a retried failure or of a read answered under another epoch than one
+  // recorded after its send, the first included (MAX_TRIES by default; a renewed 401 is no try): the
   // operation read of a watch passes 1 and waits itself, so its waits end with the watch (§8.6 item 2).
   async readWithEpoch<T>(path: string, tries = MAX_TRIES): Promise<{ result: ReadResult<T>; epoch: string | undefined; moves: number }> {
     const seen: Seen = { epoch: undefined, moves: 0 };
@@ -221,7 +222,7 @@ export class Client {
       const epoch = res.headers.get("Bronzeward-Epoch");
       if (epoch !== null && epoch !== this.epoch && records !== this.epochRecords) {
         drop(res);
-        if (attempt + 1 >= MAX_TRIES || drops !== this.drops) return { kind: "discarded" };
+        if (attempt + 1 >= tries || drops !== this.drops) return { kind: "discarded" };
         continue;
       }
       seen.epoch = epoch ?? undefined;
