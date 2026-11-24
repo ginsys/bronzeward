@@ -4,7 +4,7 @@
 
 import type { components } from "./api/v1";
 import type { ReactNode } from "react";
-import { useItem } from "./list.tsx";
+import { ReadsProvider, useItem, useReads } from "./list.tsx";
 import { machineText } from "./machines.tsx";
 import type { Position } from "./nextstep.tsx";
 import { safeText } from "./safe.ts";
@@ -48,14 +48,26 @@ export function HostWaits({ position }: { position: Position | undefined }) {
   return <HostWaitsRead position={position} />;
 }
 
+// The review is no part of the machine page's three counted reads (machine, observations, position): it settles through the
+// shell's own settle, or a fourth settle there would start the next generation before the observations answered.
 function HostWaitsRead({ position }: { position: Position }) {
+  const reads = useReads();
+  return (
+    <ReadsProvider value={{ ...reads, settle: reads.shell ?? reads.settle }}>
+      <HostWaitsReview position={position} />
+    </ReadsProvider>
+  );
+}
+
+function HostWaitsReview({ position }: { position: Position }) {
   const review = useItem<Review>(`/releases/${enc(position.plan!.release)}/machines/${enc(position.machine.id)}/review`);
   if (review.kind === "loading") return null;
   return <HostWaitsLine position={position} node={review.kind === "ok" && typeof review.data.hostname.nodeName === "string" ? review.data.hostname.nodeName : undefined} />;
 }
 
-// The plan page's line: the position of the plan's machine, read once, and only where it names this plan.
-export function PlanHostWaits({ plan, machine }: { plan: string; machine: string }) {
-  const pos = useItem<Position>(`/machines/${enc(machine)}/position`);
+// The plan page's line: the position of the plan's machine, read again at each answer of the plan's poll (`answers`), and
+// only where it names this plan.
+export function PlanHostWaits({ plan, machine, answers = 0 }: { plan: string; machine: string; answers?: number }) {
+  const pos = useItem<Position>(`/machines/${enc(machine)}/position`, undefined, answers);
   return <HostWaits position={pos.kind === "ok" && pos.data.plan?.id === plan ? pos.data : undefined} />;
 }

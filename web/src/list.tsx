@@ -22,6 +22,9 @@ export interface Reads {
   // the process's refusal); without an answer, what `held` says is shown stays under the banner,
   // and the result is true.
   settle: <T>(res: ReadResult<T>, set: (r: Load<T>) => void, live: () => boolean, held: () => boolean) => boolean;
+  // `settle` as it was before a page counted its reads through it: a read that is no part of the page's counted set
+  // settles here, so it is not taken for one of them.
+  shell?: Reads["settle"];
   // From now, true until the shell invalidates every read in flight: the process's refusal, a new
   // epoch, a revocation or sign-out.
   undropped: () => () => boolean;
