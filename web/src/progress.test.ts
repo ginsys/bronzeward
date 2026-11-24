@@ -650,6 +650,16 @@ describe("the operation progress reader (§8.6)", () => {
       expect(r.steps).toEqual([250]);
       expect(pageRequests(s)).toBe(1);
     });
+
+    // The pages read of an attempt whose stream was answered with JSON is no terminal read's drain: a dropped
+    // connection there fails nothing, the operation is read next and its drain reads the pages again.
+    test("on the pages read of an attempt fails nothing: the operation is read next", async () => {
+      const s = server({ streams: [{ chunks: ["{}"], type: "application/json" }], states: ["succeeded"], pagesThrow: 1 });
+      const r = recorder();
+      const out = await watch(s.client, OP, r.w, bounded(r, 100));
+      expect(out).toMatchObject({ kind: "ended", operation: { state: "succeeded" } });
+      expect(pageRequests(s)).toBe(2);
+    });
   });
 
   // The operation read of the watch is one send, but a refused token is renewed and the read sent again: that send
