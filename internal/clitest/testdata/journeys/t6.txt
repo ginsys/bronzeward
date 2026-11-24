@@ -34,6 +34,7 @@ Review a machine's rendered configuration: bronzewardctl release review rel_… 
 
 $ bronzewardctl --context human release review {release} {machine}
 Release rel_… (worker labels, published <local time>), machine mch_…, validated: container
+Hostname: not set in the configuration; the node chooses its own.
 version: v1alpha1
 debug: false
 persist: true
