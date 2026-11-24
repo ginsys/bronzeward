@@ -47,8 +47,41 @@ type releaseMachineBody struct {
 // for machine-name only, the name used. It is a fact about the release, never read again from the
 // machine, whose name may have changed since.
 type hostnameBody struct {
-	Source string `json:"source"`
-	Name   string `json:"name,omitempty"`
+	Source   string   `json:"source"`
+	Name     string   `json:"name,omitempty"`
+	NodeName nodeName `json:"nodeName,omitzero"`
+}
+
+// nodeName is a release machine's recorded Kubernetes node name (persistence-api.md §9.3), in the
+// three states the answer tells apart: absent (not recorded: a release made before the record), null
+// (recorded and not compared) and a string. It is comparable, so a body compares as a value.
+type nodeName struct {
+	state nodeNameState
+	value string
+}
+
+type nodeNameState uint8
+
+const (
+	nodeNameAbsent nodeNameState = iota // the zero value: omitted from the answer
+	nodeNameNull
+	nodeNameSet
+)
+
+func (n nodeName) MarshalJSON() ([]byte, error) {
+	if n.state == nodeNameSet {
+		return json.Marshal(n.value)
+	}
+	return []byte("null"), nil
+}
+
+func (n *nodeName) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		*n = nodeName{state: nodeNameNull}
+		return nil
+	}
+	*n = nodeName{state: nodeNameSet}
+	return json.Unmarshal(b, &n.value)
 }
 
 // releaseBody is PA §9.2's release resource, as its read example answers it. It holds no
@@ -116,15 +149,29 @@ var errProvenance = errors.New("a stored provenance record does not have the pro
 var errHostname = errors.New("a stored hostname record does not have the hostname record's shape")
 
 // projectHostname is a stored hostname record as the release and review answer it: a source of the
-// enumeration, and a name for machine-name alone. Anything else is errHostname, answered 500.
-func projectHostname(source string, name sql.NullString) (hostnameBody, error) {
+// enumeration, a name for machine-name alone, and the recorded node name: absent where it was not
+// recorded, null where it was recorded and is not compared. A node name with no record of it, or an
+// empty one, is errHostname too, answered 500.
+func projectHostname(source string, name sql.NullString, recorded bool, node sql.NullString) (hostnameBody, error) {
+	var body hostnameBody
 	switch {
 	case source == "machine-name" && name.Valid && name.String != "":
-		return hostnameBody{Source: source, Name: name.String}, nil
+		body = hostnameBody{Source: source, Name: name.String}
 	case !name.Valid && slices.Contains([]string{"configuration", "none", "legacy-stable", "unrecorded"}, source):
-		return hostnameBody{Source: source}, nil
+		body = hostnameBody{Source: source}
+	default:
+		return hostnameBody{}, errHostname
 	}
-	return hostnameBody{}, errHostname
+	switch {
+	case !recorded && !node.Valid:
+	case recorded && !node.Valid:
+		body.NodeName = nodeName{state: nodeNameNull}
+	case recorded && node.String != "":
+		body.NodeName = nodeName{state: nodeNameSet, value: node.String}
+	default:
+		return hostnameBody{}, errHostname
+	}
+	return body, nil
 }
 
 // projectProvenance decodes stored provenance into §8.2's fields alone and checks each record's
@@ -224,17 +271,19 @@ func withReleaseParts(ctx context.Context, tx *sql.Tx, rs []*releaseBody) error 
 	if err != nil {
 		return err
 	}
-	return eachRow(ctx, tx, `SELECT release, machine, mode, publication_observation, hostname_source, hostname_name FROM release_machine
+	return eachRow(ctx, tx, `SELECT release, machine, mode, publication_observation, hostname_source, hostname_name,
+			node_name_recorded, node_name FROM release_machine
 		WHERE release = ANY (string_to_array($1, ',')) ORDER BY release, machine`,
 		strings.Join(ids, ","), func(row *sql.Rows) error {
 			var rel, source string
-			var name sql.NullString
+			var name, node sql.NullString
+			var recorded bool
 			var m releaseMachineBody
-			if err := row.Scan(&rel, &m.Machine, &m.Mode, &m.PublicationObservation, &source, &name); err != nil {
+			if err := row.Scan(&rel, &m.Machine, &m.Mode, &m.PublicationObservation, &source, &name, &recorded, &node); err != nil {
 				return err
 			}
 			var err error
-			if m.Hostname, err = projectHostname(source, name); err != nil {
+			if m.Hostname, err = projectHostname(source, name, recorded, node); err != nil {
 				return err
 			}
 			m.Review = prefix + "/releases/" + rel + "/machines/" + m.Machine + "/review"
@@ -279,19 +328,21 @@ func getReview(a *API, w http.ResponseWriter, q *request) {
 		var b reviewBody
 		var provenance []byte
 		var importBase, fragments, source string
-		var hostname sql.NullString
+		var hostname, node sql.NullString
+		var recorded bool
 		err := tx.QueryRowContext(ctx, `SELECT release, machine, mode, redacted, provenance::text, import_base_revision,
 				COALESCE((SELECT string_agg(fragment_revision, ',') FROM release_source s
-					WHERE s.release = m.release AND fragment_revision IS NOT NULL), ''), hostname_source, hostname_name
+					WHERE s.release = m.release AND fragment_revision IS NOT NULL), ''), hostname_source, hostname_name,
+				node_name_recorded, node_name
 			FROM release_machine m WHERE release = $1 AND machine = $2`, rel, m).Scan(&b.Release, &b.Machine, &b.Mode,
-			&b.Configuration, &provenance, &importBase, &fragments, &source, &hostname)
+			&b.Configuration, &provenance, &importBase, &fragments, &source, &hostname, &recorded, &node)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil, refuse(http.StatusNotFound, "not-found", "no such resource")
 		}
 		if err != nil {
 			return "", nil, err
 		}
-		if b.Hostname, err = projectHostname(source, hostname); err != nil {
+		if b.Hostname, err = projectHostname(source, hostname, recorded, node); err != nil {
 			return "", nil, err
 		}
 		if b.Configuration == nil {

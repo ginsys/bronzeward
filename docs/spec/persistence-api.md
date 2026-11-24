@@ -2261,8 +2261,7 @@ API revisions:
 | 15 | `hostname` (`source`, and `name` for `machine-name`) on each machine of a release and its review, and the name form of `409 stale-input` of the publication check (§9.2, §3.5, §4.2, choices §17.44, §17.45) |
 | 16 | the `hostname` rule of `422 validation-failed` on publication, with a release compiling a machine's name as its hostname where nothing sets one (§9.2, §3.5, compilation §6.1 item 6) |
 | 17 | the name form of `409 stale-input` from the `ingest` draft transaction, with `expected` and `actual` as machine names, each a string or `null`, and `formOnly` true for a machine whose import removed the fill's own `HostnameConfig` while its name is unchanged (§4.2, choice §17.45, compilation §2.3 step 2a, §6.1 item 5) |
-
-One further part is specified and not yet served, taking the next revision in the change that serves it, so this table names no revision for it: `nodeName` on the `hostname` member of each machine of a release and its review (§9.3), the `hostnameHeldBy` member of `GET /machines/{id}/position` (§9.3) and the publication comparison reading `nodeName` (compilation §6.1 item 6), together in one revision (execution and recovery choice §10.39, ginsys/bronzeward#1052).
+| 18 | `nodeName` on the `hostname` member of each machine of a release and its review, the `hostnameHeldBy` member of `GET /machines/{id}/position` and the publication comparison reading `nodeName`, together (§9.3, compilation §6.1 item 6, execution and recovery choice §10.39) |
 
 ### 9.2 Resources and routes
 
@@ -3088,8 +3087,7 @@ the migration gives every such release that value by a column default, never
 an `UPDATE`, since `release_machine` is immutable), and,
 for `machine-name`, `name`, the name used **(choice §17.44, API revision 15)**.
 The member also answers `nodeName`, a string or `null` **(execution and recovery
-choice §10.39; the API revision is the one the note after the revision table
-names)**: the Kubernetes node name the release gives the machine, derived as
+choice §10.39, API revision 18)**: the Kubernetes node name the release gives the machine, derived as
 compilation §6.1 item 6 states it, for every `source` that sets a hostname
 (`machine-name`, `configuration`). On a release made after the revision it is
 `null` for a source that sets none (`none`, `legacy-stable`) and wherever any input to the name,
@@ -5137,8 +5135,8 @@ design and evidence do not settle the question. Each is marked in place as
     bronzeward lead on 2026-11-21 on the plan's decisions). Design choices,
     owned by the specification and open to review: a release machine records a
     `hostname` member (`source` and, for `machine-name`, the `name` used; the
-    derived `nodeName` joins it in the revision named after the revision table,
-    execution and recovery choice §10.39), a
+    derived `nodeName` joins it in revision 18, execution and recovery choice
+    §10.39), a
     source column added `NOT NULL DEFAULT 'unrecorded'` with the default then
     dropped, so that a new release must state it and every older row reads
     `unrecorded` with no `UPDATE` (the table is immutable), and a nullable name

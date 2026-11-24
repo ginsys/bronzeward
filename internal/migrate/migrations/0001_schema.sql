@@ -1067,6 +1067,14 @@ CREATE TABLE release_machine (
     CONSTRAINT release_machine_hostname_source CHECK (hostname_source IN ('machine-name', 'configuration', 'none', 'legacy-stable', 'unrecorded')),
   hostname_name        text CHECK (hostname_name <> ''),
   CONSTRAINT release_machine_hostname_name CHECK ((hostname_source = 'machine-name') = (hostname_name IS NOT NULL)),
+  -- The Kubernetes node name the release gives the machine (compilation §6.1 item 6, persistence-api.md
+  -- §9.3), and whether it was recorded: a release made before the record reads false, which the column
+  -- default gives and nothing updates (the table is immutable). A recorded NULL is "not compared" (a
+  -- secret or a redacted value is an input, the review is withheld in whole, or nothing sets a hostname);
+  -- a name implies recorded.
+  node_name_recorded   boolean NOT NULL DEFAULT false,
+  node_name            text CHECK (node_name <> ''),
+  CONSTRAINT release_machine_node_name CHECK (node_name IS NULL OR node_name_recorded),
   PRIMARY KEY (release, machine),
   UNIQUE (release, machine, import_base_revision),
   UNIQUE (release, machine, key_name, key_version),

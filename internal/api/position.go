@@ -58,7 +58,18 @@ type positionBody struct {
 	Plan          *positionPlan      `json:"plan"`
 	Operation     *positionOperation `json:"operation"`
 	RolloutHeldBy *positionHolder    `json:"rolloutHeldBy"`
-	Step          string             `json:"step"`
+	// HostnameHeldBy is the other machine whose Applied release holds the node name the plan's
+	// release gives this machine (execution-recovery.md §3.2 comparison 6a): why an approved plan
+	// has not been sent. It names no hostname.
+	HostnameHeldBy *positionNameHolder `json:"hostnameHeldBy"`
+	Step           string              `json:"step"`
+}
+
+// positionNameHolder is a machine as the position names it: its identifier and its name, null when
+// it has none.
+type positionNameHolder struct {
+	ID   string  `json:"id"`
+	Name *string `json:"name"`
 }
 
 // positionStep is the first row of §9.3's table whose facts hold in b.
@@ -123,6 +134,18 @@ func readPosition(ctx context.Context, tx *sql.Tx, machine string) (*positionBod
 	}
 	if b.Operation, b.RolloutHeldBy, err = positionScopes(ctx, tx, &b.Machine); err != nil {
 		return nil, err
+	}
+	if b.Plan != nil && b.Plan.Operation == "apply-config" {
+		holder, err := hostnameHeldBy(ctx, tx, machine, b.Plan.Release)
+		if err != nil {
+			return nil, err
+		}
+		if holder != nil {
+			b.HostnameHeldBy = &positionNameHolder{ID: holder.ID}
+			if holder.Name != "" {
+				b.HostnameHeldBy.Name = &holder.Name
+			}
+		}
 	}
 	b.Step = positionStep(b)
 	return b, nil

@@ -1548,8 +1548,11 @@ type Hardware struct {
 // HostnameBody Where a release machine's hostname came from, a fact about the release and never read again from the machine (persistence-api.md §9.2, choice §17.44).
 type HostnameBody struct {
 	// Name The name used; present for machine-name alone.
-	Name   *string            `json:"name,omitempty"`
-	Source HostnameBodySource `json:"source"`
+	Name *string `json:"name,omitempty"`
+
+	// NodeName The Kubernetes node name the release gives the machine (API revision 18, persistence-api.md §9.3). Null means not compared (a secret reference or a redacted value is an input, the review is withheld in whole, or nothing sets a hostname); absent means not recorded (a release made before the revision). Never a hostname.
+	NodeName *string            `json:"nodeName,omitempty"`
+	Source   HostnameBodySource `json:"source"`
 }
 
 // HostnameBodySource defines model for HostnameBody.Source.
@@ -1930,6 +1933,9 @@ type PositionBody struct {
 	// Draft The draft that ingestion names; null when ingestion is null.
 	Draft *PositionDraft `json:"draft"`
 
+	// HostnameHeldBy The other machine whose Applied release holds the Kubernetes node name the plan's release gives this machine and this machine's own Applied release does not (execution and recovery §3.2 comparison 6a); null unless the plan is an apply-config plan, and where either node name is not compared or not recorded. It names no hostname.
+	HostnameHeldBy *PositionNameHolder `json:"hostnameHeldBy"`
+
 	// Ingestion The machine's newest live ingestion, else its newest of any state; null when it has none.
 	Ingestion *PositionIngestion `json:"ingestion"`
 	Machine   MachineBody        `json:"machine"`
@@ -1971,6 +1977,14 @@ type PositionIngestion struct {
 	LeaseLapsed bool    `json:"leaseLapsed"`
 	Operation   *string `json:"operation"`
 	State       string  `json:"state"`
+}
+
+// PositionNameHolder defines model for PositionNameHolder.
+type PositionNameHolder struct {
+	Id string `json:"id"`
+
+	// Name The machine's name; null when it has none.
+	Name *string `json:"name"`
 }
 
 // PositionOperation defines model for PositionOperation.

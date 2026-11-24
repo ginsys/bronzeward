@@ -3329,6 +3329,11 @@ components:
         name:
           type: string
           description: The name used; present for machine-name alone.
+        nodeName:
+          type: [string, 'null']
+          description: The Kubernetes node name the release gives the machine (API revision 18, persistence-api.md §9.3). Null
+            means not compared (a secret reference or a redacted value is an input, the review is withheld in whole, or nothing
+            sets a hostname); absent means not recorded (a release made before the revision). Never a hostname.
       additionalProperties: false
     IngestResult:
       type: object
@@ -3777,7 +3782,7 @@ components:
       additionalProperties: false
     PositionBody:
       type: object
-      required: [machine, ingestion, draft, plan, operation, rolloutHeldBy, step]
+      required: [machine, ingestion, draft, plan, operation, rolloutHeldBy, hostnameHeldBy, step]
       properties:
         machine: {$ref: '#/components/schemas/MachineBody'}
         ingestion:
@@ -3805,6 +3810,13 @@ components:
           description: The operation that holds the machine's cluster rollout scope when it belongs to another machine.
           oneOf:
           - {$ref: '#/components/schemas/PositionRolloutHolder'}
+          - {type: 'null'}
+        hostnameHeldBy:
+          description: The other machine whose Applied release holds the Kubernetes node name the plan's release gives this
+            machine and this machine's own Applied release does not (execution and recovery §3.2 comparison 6a); null unless
+            the plan is an apply-config plan, and where either node name is not compared or not recorded. It names no hostname.
+          oneOf:
+          - {$ref: '#/components/schemas/PositionNameHolder'}
           - {type: 'null'}
         step:
           description: 'The first row of the position table whose facts hold. A client treats a value it does not know as
@@ -3866,6 +3878,13 @@ components:
       properties:
         id: {type: string}
         machine: {type: string}
+      additionalProperties: false
+    PositionNameHolder:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string}
+        name: {type: [string, 'null'], description: The machine's name; null when it has none.}
       additionalProperties: false
     PrincipalBody:
       description: What one principal identifier names (persistence and API §9.2). A member that does not apply to its kind is
