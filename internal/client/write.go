@@ -202,6 +202,21 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 		}
 	}
 	defer c.banner()
+	// An answer that showed a new epoch is followed by GET /server, as a read's is (§8.5, start mode): what the
+	// command prints next, the banner included, is of the new epoch. The write's own result stands whatever
+	// the read answers. A recovery start refuses GET /server the way it refuses this write, before its entry.
+	answered := false // the server answered the write itself: a read that confirms an epoch before a repeat is no answer
+	defer func() {
+		if !answered || !c.newEpoch {
+			return
+		}
+		if p := new(*Problem); errors.As(err, p) && (*p).Code() == "recovery-mode-active" && (*p).Doc["scope"] == nil {
+			return
+		}
+		if _, _, serr := c.Server(); serr != nil {
+			fmt.Fprintf(c.Notices, "%s: the write was answered, but GET /server could not be read again: %s.\n", c.Context.Where(), Shown(serr))
+		}
+	}()
 	c.sending = true // no read inside a write takes the Ctrl-C (interrupt.go)
 	defer func() { c.sending = false }()
 	if w.HumanOnly && c.signIn == nil {
@@ -328,6 +343,7 @@ func (c *Client) Send(w *Write) (r *Response, err error) {
 			sctx, disarm = c.Arm()
 		}
 		a := c.post(w, key, ref, sctx)
+		answered = answered || a.p != nil || a.r != nil
 		stopped := disarm()
 		p, code := a.p, ""
 		if p != nil {

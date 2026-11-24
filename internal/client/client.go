@@ -248,6 +248,12 @@ func (c *Client) retryIn(ctx context.Context, path string, stop func() bool, tri
 				fmt.Fprintf(c.Notices, "%s: %s.\n", c.Context.Where(), Shown(rerr))
 			}
 		}
+		// A refused server certificate sends nothing, and an ordinary read refuses at once. A read that runs
+		// until the watch ends asks again, with the refusal as the notice of each try: a server that restarts
+		// behind a proxy can present another certificate for a while, and the client accepts none (§8.6 item 2).
+		if !retry && stop != nil && errors.As(err, new(*trust)) {
+			retry = true
+		}
 		if !retry || stop == nil && try == tries {
 			return r, err
 		}
