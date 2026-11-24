@@ -1276,26 +1276,67 @@ unmeasured.
    that would take a name it does not hold now. Alternative: a review warning only, which leaves the failure on the
    live cluster to whoever approves the plan.
 
-**Left open.** Whether a live node applies a changed hostname without a reboot,
-what becomes of its Kubernetes node name, whether applying the rewritten
-document with an unchanged hostname needs a reboot (the commonest case: an
-onboarded machine whose hostname equals its name gets the document back as
-`auto: off` plus `hostname`, so the hostname is the same and the document can
-differ, which then reads as pending convergence where the configuration
-digests differ), and `container` and `cloud`
-modes are unmeasured; the compiler issue (ginsys/bronzeward#1040) measures them on
-the fixture, and the client sentences that mention a restart or the node name
-are conditional on that result (client contracts A9 items 6 and 7). A
-`cloud` node's own hostname is overridden by the static one (`hostname` has
-the highest priority, line 73), read and not measured. The import-equivalence
-check of
-[the 20261118 evidence](../design/research/20261118-import-analysis-and-equivalence.md)
-needs an amendment, with its measurement: a filled hostname composes `auto:
-off` with `hostname`, a form that differs from the original document at every
-level that reads it, so the check must treat a filled hostname as equal to
-the original where the hostname equals the name. The fill is implemented by
-ginsys/bronzeward#1040, the API record by ginsys/bronzeward#1041, and the
-client words by ginsys/bronzeward#1042 and ginsys/bronzeward#1043.
+**Measured on the fixture** (ginsys/bronzeward#1040, 24 November 2026; the
+scenario `hostname-measure` of the fixture, which a person can run again).
+After a rename, an import from the node keeps the old name as an explicit
+hostname, so the rename does not reach the node (the rename row below). The
+measured node is the fixture's worker, Talos v1.14.5 running as a container
+and named from its own hostname, taken through the product: draft, import,
+publish, plan, approval, operation. The fixture starts its nodes with
+`talosctl cluster create docker` (`fixtures/bin/up`), so a node is a Docker
+container. A container has no reboot (the fixture README, Known limits), and
+the uptime that `/proc/uptime` shows inside it is the host kernel's, so this
+record holds no restart reading of any kind, in a container, a virtual machine
+or hardware. "Node name" below is Talos's `nodename` resource
+(`talosctl get nodename`), the name Talos derives from the hostname for the
+Kubernetes Node; the Node object itself (`kubectl get nodes`) was not read,
+and the node's hostname after each row was read, but the record that was kept
+holds no node read, so the hostname after a row is not in it.
+
+| Row | What was applied | Result |
+|---|---|---|
+| default | the named worker's first release: the document `auto: off` plus its name, the node having an automatic hostname | completed; node name unchanged |
+| explicit | the worker imported again from the node, which now holds `auto: off` plus its name (the commonest case): the document removed at import and filled again | completed; node name unchanged |
+| rename | the worker renamed to a name with dots, imported again from the node, published and applied | the release records the source `configuration`, not `machine-name`: the node's old document is not equal to the new name, so it stays, and decision 2 lets an explicit hostname win; node name unchanged |
+| rename back | the worker renamed back to its first name, imported again, applied | source `machine-name`; node name unchanged |
+
+Every row sent the node a hostname equal to the one it already ran, so an
+unchanged node name is what the rows predict. What they show is that the
+rewritten document with an unchanged hostname (the commonest case) applies
+and completes through the product on the fixture's container node, and that
+the form of the document differs without the hostname doing so. They show
+nothing about a restart. The dry run of the same file (`apply-config --dry-run
+--mode no-reboot`, the node's own configuration with its `HostnameConfig`,
+which held the keys `apiVersion`, `kind` and `auto`, replaced by the filled
+one, which is the product's merge of decision 1) answered "Applied
+configuration without a reboot", with a diff of 5 lines added and 3 removed
+in two places. The import-equivalence measurement
+([the 20261118 evidence](../design/research/20261118-import-analysis-and-equivalence.md),
+section 11, `output.txt` last section) shows, for each of the six machines,
+that the node's own document is removed and recorded at import in every case,
+recorded as exactly the fill's own only where it is `auto: off` plus the name,
+and that the form-only verdict (step 8) is true only for that case.
+
+**Not shown**, each with its cause. (1) Whether a live node applies a *changed*
+hostname, whether it needs a restart to do so, and what becomes of its node
+name then: no row sent
+one, because the rename row's re-import (above) put the old hostname back. A row
+that renames and then assigns the machine's stored import base with no
+re-import is the case of item 3, and it is not yet run. (2) The node's
+hostname after the rename: read in the run, not kept in the record. (3) The form-only verdict of a plan: it is the
+evidence of an adopt plan, and no row adopted. (4) `container` and `cloud`
+modes, and `registerWithFQDN` set against unset: the fixture has no scenario
+for them, so they stay read and not measured, and so does a `cloud` node's own
+hostname being overridden by the static one (`hostname` has the highest
+priority, line 73). (5) A restart of any kind: the fixture's node is a
+container, which has no reboot, and its uptime is the host's, so whether the
+rewritten document, or a changed hostname, needs a restart stays unmeasured in
+a container, a virtual machine and hardware alike, until a run reads a start
+time of the node itself. The client sentences that
+mention a restart or the node name stay conditional on (1) (client contracts
+A9 items 6 and 7). The fill is implemented by ginsys/bronzeward#1040, the API
+record by ginsys/bronzeward#1041, and the client words by
+ginsys/bronzeward#1042 and ginsys/bronzeward#1043.
 
 ## 7. Validation stages
 
