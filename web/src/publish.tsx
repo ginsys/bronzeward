@@ -9,7 +9,7 @@ import type { components } from "./api/v1";
 import { EntryName, forgetETag, isSource, keepETag, keptETag, lastGood, NO_ETAG, WriteResult } from "./drafts.tsx";
 import { startsNew, useSend, useWrites } from "./forms.tsx";
 import { settledReads, watchView } from "./imports.tsx";
-import { Ref, short, useItem, usePending, useReads } from "./list.tsx";
+import { Ref, short, useItem, usePending, useReads, useSettled } from "./list.tsx";
 import { PageNote } from "./page-note.tsx";
 import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action, useFocusOn } from "./shell.tsx";
@@ -177,13 +177,24 @@ function Publish({ id }: { id: string }) {
   const readAgain = () => {
     keep.current = true;
     setNote(undefined);
+    setNow(undefined);
     reread((x) => x + 1);
   };
+  // The draft as one plain read answered after a 412 (§8.3): shown under the refusal. It is no re-read of the page
+  // (`keep` stays false), so it keeps no ETag and Publish sends nothing until the person reads the draft again.
+  const [now, setNow] = useState<{ revision: number; state: string }>();
+  const read = useSettled();
+  const showNow = () => void read<Draft>(`/drafts/${enc(id)}`).then((r) => r?.kind === "ok" && setNow({ revision: r.data.revision, state: r.data.state }));
   const publish = () => {
     const ifMatch = keptETag(id, epoch);
     setNote(ifMatch === undefined ? NO_ETAG : undefined);
+    setNow(undefined);
     // A 412 says the kept ETag is stale: it is forgotten, so Publish sends nothing until the draft is read again.
-    const settled = (s: Outcome) => void (s.kind === "refused" && s.status === 412 && forgetETag(id));
+    const settled = (s: Outcome) => {
+      if (s.kind !== "refused" || s.status !== 412) return;
+      forgetETag(id);
+      showNow();
+    };
     if (ifMatch !== undefined) send({ method: "POST", path: `/drafts/${enc(id)}/publications`, body: {}, ifMatch, resource: `/drafts/${id}`, settled });
   };
   const [failed, setFailed] = useState<string | undefined>();
@@ -200,7 +211,7 @@ function Publish({ id }: { id: string }) {
         <WriteResult
           w={w}
           done={(data): ReactNode => accepted(id, data)}
-          conflict={<Status testid="write-result" role="alert">Not published: someone changed this draft since this page read it. <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
+          conflict={<Status testid="write-result" role="alert">Not published: someone changed this draft since this page read it.{now !== undefined && ` The draft is now at revision ${now.revision}, state ${safeWord(now.state)}.`} <button type="button" onClick={readAgain}>Read the draft again</button></Status>}
         />
         {o?.kind === "done" && typeof o.data === "object" && op === undefined && <Status testid="no-operation">The publication was accepted without naming its operation. Find it in the operations list, kind publish.</Status>}
         {op !== undefined && <Progress key={op} op={op} draft={id} held={d} onFailed={setFailed} />}
