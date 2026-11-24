@@ -57,7 +57,8 @@ type legacyHost struct {
 func holdsKind(docs []*yaml.Node, kind string) bool {
 	for _, d := range docs {
 		if r := root(d); r != nil && r.Kind == yaml.MappingNode {
-			if k := mappingValue(r, "kind"); k != nil && k.Kind == yaml.ScalarNode && k.Value == kind {
+			// The machinery resolves an alias at kind, so this does too.
+			if k := deref(mappingValue(r, "kind")); k != nil && k.Kind == yaml.ScalarNode && k.Value == kind {
 				return true
 			}
 		}
@@ -134,6 +135,10 @@ func releaseLegacyKey(docs []*yaml.Node, name string, marks []Path) (Filled, err
 		return Filled{}, nil
 	}
 	if k := found.key; k.Kind != yaml.ScalarNode || k.Tag != "!!str" || k.Anchor != "" || k.Value != name {
+		return Filled{}, nil
+	}
+	// A mapping an alias can reach is shared: deleting the key would change what the alias reads as well.
+	if found.root.Anchor != "" || found.machine.Anchor != "" || found.network.Anchor != "" {
 		return Filled{}, nil
 	}
 	if f := mappingValue(found.machine, "features"); f != nil && found.features == nil {
