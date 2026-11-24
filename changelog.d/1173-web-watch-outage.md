@@ -1,0 +1,2 @@
+Fixed
+- The web console's progress watch no longer fails during a short server outage: it reads the operation again, with the same backoff as the command-line client, until the server answers or the watch ends, and a refused or unavailable read of the last events of a finished operation reads the operation again. A failed watch on the operation page now also says that the server's event times were not read. Fixes ginsys/bronzeward#1173.
