@@ -118,8 +118,8 @@ row() {
   printf '%s\tuptime %s -> %s s\tnodename %s -> %s\thostname %s -> %s\n' "$1" "$(uptime_of "$1-before")" "$(uptime_of "$1-after")" \
     "$(awk '/^## nodename/ {f=1} f && /nodename:/ {print $2; exit}' "$EV/node-$1-before.txt")" \
     "$(awk '/^## nodename/ {f=1} f && /nodename:/ {print $2; exit}' "$EV/node-$1-after.txt")" \
-    "$(awk '/^## hostnamestatus/ {f=1} f && /hostname:/ {print $2; exit}' "$EV/node-$1-before.txt")" \
-    "$(awk '/^## hostnamestatus/ {f=1} f && /hostname:/ {print $2; exit}' "$EV/node-$1-after.txt")" | tee -a "$EV/table.tsv"
+    "$(awk '/^## hostnamestatus/ {f=1} f && $1 == "hostname:" {print $2; exit}' "$EV/node-$1-before.txt")" \
+    "$(awk '/^## hostnamestatus/ {f=1} f && $1 == "hostname:" {print $2; exit}' "$EV/node-$1-after.txt")" | tee -a "$EV/table.tsv"
 }
 
 # rowstep <ref> <what> <command...>: check, and where it fails say why in the step's own words and return 1,

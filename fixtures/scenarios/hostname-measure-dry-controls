@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# The dry controls of scenarios/hostname-measure: no fixture, no Docker, no Talos. The script runs from a
+# The dry controls of scenarios/hostname-measure: no fixture, no Docker daemon, no Talos. The script runs from a
 # copy of the fixture directory, whose .state and .cache are empty, with a talosctl stub on PATH and
-# in the copy's cache that records each call. Prints PASS or FAIL per control; exit 1 on any FAIL.
+# in the copy's cache, and a docker stub, that record each call. lib.sh needs a `docker` command and asks it
+# for the current context when it is sourced, so the stub answers `context show` with `default` and records
+# every other call: the controls need no Docker installed, and a Docker call past that one is a failure.
+# Prints PASS or FAIL per control; exit 1 on any FAIL.
 #   1. positive control: the recorder records a call made to it (one line), so a zero below means none.
 #   2. no fixture state: the script exits non-zero and the recorder holds zero calls.
 #   3. a caller's foreign TALOSCONFIG, as well: the same, and lib.sh sets TALOSCONFIG to the copy's own
@@ -22,6 +25,11 @@ log=$tmp/calls
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s"\n' "$log" >"$tmp/path/talosctl"
 chmod +x -- "$tmp/path/talosctl"
 cp -- "$tmp/path/talosctl" "$copy/.cache/talosctl"
+dlog=$tmp/docker-calls
+: >"$dlog"
+# shellcheck disable=SC2016 # the stub's own expansions, written literally
+printf '#!/bin/sh\nif [ "$1 $2" = "context show" ]; then echo default; exit 0; fi\nprintf "%%s\\n" "$*" >>"%s"\n' "$dlog" >"$tmp/path/docker"
+chmod +x -- "$tmp/path/docker"
 failed=0
 # verdict <what> <command...>: PASS when the command succeeds.
 verdict() {
@@ -60,6 +68,11 @@ verdict 'the no-state refusal of control 2 does not' lacks 'is not inside the fi
 # shellcheck disable=SC2016 # the probe's own expansions, written literally
 printf '#!/usr/bin/env bash\n. "$(dirname "$0")/lib.sh"\nprintf %%s "$TALOSCONFIG"\n' >"$copy/probe"
 chmod +x -- "$copy/probe"
-seen=$(TALOSCONFIG=/nonexistent/foreign-talosconfig "$copy/probe" 2>"$tmp/out3") || seen=''
+seen=$(TALOSCONFIG=/nonexistent/foreign-talosconfig PATH=$tmp/path:$PATH "$copy/probe" 2>"$tmp/out3") || seen=''
 verdict "lib.sh overrides a foreign TALOSCONFIG with the copy's own: ${seen:-<empty>}" test "$seen" = "$copy/.state/talosconfig"
+
+# The docker stub: it records a call other than `context show` (positive control, then cleared), and no run above made one.
+verdict 'no run above made a Docker call past the context read' test "$(wc -l <"$dlog" | tr -d ' ')" = 0
+PATH=$tmp/path:$PATH docker ps
+verdict 'control: the docker recorder holds one line after one call' test "$(wc -l <"$dlog" | tr -d ' ')" = 1
 [ "$failed" -eq 0 ]
