@@ -34,6 +34,10 @@ type envelope struct {
 	// still opens as "nothing removed", the version staying 1.
 	FilledName  string `json:"filledName,omitempty"`
 	FilledEqual bool   `json:"filledEqual,omitempty"`
+	// FilledKey says step 2a removed a legacy hostname key, not a document: a later mark is read against it. An
+	// envelope without it opens as a document or nothing. The decoder refuses unknown fields, so a binary from
+	// before this field refuses an envelope that carries it.
+	FilledKey bool `json:"filledKey,omitempty"`
 }
 
 type envelopeBaseline struct {
@@ -77,6 +81,7 @@ func (s Staged) Seal() (plaintext []byte, sum [32]byte, err error) {
 		},
 		FilledName:  s.Filled.Name,
 		FilledEqual: s.Filled.Equal,
+		FilledKey:   s.Filled.Key,
 	})
 	if err != nil {
 		return nil, sum, errors.New("ingest: the envelope could not be encoded")
@@ -108,7 +113,7 @@ func Open(plaintext []byte, sum [32]byte) (Staged, error) {
 		return Staged{}, errEnvelope
 	}
 	if e.Version != 1 || e.Documents == "" || e.Baseline.Ciphertext == "" || e.Baseline.DigestKey == "" ||
-		(e.FilledEqual && e.FilledName == "") {
+		(e.FilledEqual && e.FilledName == "") || (e.FilledKey && (e.FilledName == "" || e.FilledEqual)) {
 		return Staged{}, errEnvelope
 	}
 	digest, err1 := digest32(e.Baseline.Digest)
@@ -136,7 +141,7 @@ func Open(plaintext []byte, sum [32]byte) (Staged, error) {
 		Generations: e.Generations,
 		Baseline: Baseline{Ciphertext: provider.Ciphertext(e.Baseline.Ciphertext), Digest: digest,
 			DigestKey: e.Baseline.DigestKey, Configuration: conf},
-		Filled: Filled{Name: e.FilledName, Equal: e.FilledEqual},
+		Filled: Filled{Name: e.FilledName, Equal: e.FilledEqual, Key: e.FilledKey},
 	}, nil
 }
 
