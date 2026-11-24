@@ -10,7 +10,7 @@ import { NO_KEEP, positionShown } from "./machine.tsx";
 import { NextStep, type Position } from "./nextstep.tsx";
 import { planFor, planPath } from "./plan.tsx";
 import { Action } from "./shell.tsx";
-import { MachineRef, type MachineLike, machineText } from "./machines.tsx";
+import { type MachineLike, machineText } from "./machines.tsx";
 import { Withheld } from "./states.tsx";
 import { Named, useBody, useReleaseNames, useReleaseTitle } from "./titles.tsx";
 import { type Applied, HostnameLines } from "./hostname.tsx";
@@ -180,7 +180,7 @@ export function ReviewBody({ r, machine, applied = { state: "pending" } }: { r: 
       {r.configuration !== null && <PageNote parts={[REVIEW_NOTE]} />}
       <dl>
         <dt>Release</dt><dd><Named id={r.release} /></dd>
-        <dt>Machine</dt><dd>{machine === undefined ? <Id id={r.machine} /> : <MachineRef machine={machine} />}</dd>
+        <dt>Machine</dt><dd>{viewOf(r.machine) !== "machines" ? <Id id={r.machine} /> : <Ref to={`/machines/${encodeURIComponent(r.machine)}`} id={r.machine}>{machine === undefined ? undefined : machineText(machine)}</Ref>}</dd>
         <dt>Validated in mode</dt><dd>{safeWord(r.mode)}</dd>
       </dl>
       <HostnameLines hostname={r.hostname} applied={applied} current={machine?.name === undefined ? undefined : typeof machine.name === "string" ? machine.name : null} />
