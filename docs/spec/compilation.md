@@ -277,8 +277,9 @@ give a node a path that reads as an embedded document's.
    because the ingestion identity cannot read the signer's path (§1). The signer
    reads the key version the cluster's latest first-key act names
    ([persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)),
-   decodes the configuration's base64 to the PEM text and compares it with the
-   stored PEM text, byte for byte and in constant time, with no byte ignored. The
+   decodes the configuration's base64 form to the PEM text (the forms of the CA
+   key, §5.2) and compares it with the stored PEM text, byte for byte and in
+   constant time, with no byte ignored. The
    same key written with other line wrapping, another PEM type, other spacing or
    another trailing newline is a `mismatch`: the rendered configuration carries the stored
    text, so a re-wrapped key would render differently from the import and show
@@ -783,8 +784,9 @@ both:
    Talos-marked secret field, an operator-marked path such as
    `machine.files[0].content`, or a scalar or key beneath a marked mapping)
    is no longer in what they read, and step 6 would write it as a generation.
-   Before step 6, every payload it would write is therefore compared with the
-   CA key of step 3a by value and as a substring, as checks 1 and 2 do. A hit
+   Before step 6, every payload it would write is therefore compared with each
+   form of the CA key (§5.2: the PEM text and its base64 encoding) by value and
+   as a substring, as checks 1 and 2 do. A hit
    refuses the input as any guard hit does, before any provider write, so no
    generation holds the CA key. The `machine.ca.key` node itself is no payload
    (step 4), and a node already under a `!bwref` tag is excluded at step 3, so
@@ -868,7 +870,10 @@ logical secret" and resolves "to an exact version"):
   record names that version by path, version and `created_time` (§9), so a
   release is reproduced from its recorded inputs. A regeneration reads the
   recorded version and never the latest act's, and a version that no longer
-  classifies `retained` refuses it as any lost dependency does (§6 step 3). A
+  classifies `retained` refuses it as any lost dependency does (§6 step 3).
+  **The provider's version limit on the signer's path is a stated residual**,
+  defined once in [persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)
+  ("Replacing a first key"; **choice §16.40**). A
   first key supplied between two compiles changes only what the next
   publication pins: the earlier release keeps its record, and the new one
   records the new version, so the plan shows the key as a changed dependency.
@@ -924,8 +929,13 @@ embedded:
   compilation and nothing is coerced. The one other kind is `talos-ca-key`
   (§5.1, **choice §16.40**): the import base's declaration of the cluster's CA
   key, written `talos/ca-key: {kind: talos-ca-key}`, with no `version` and no
-  `encoding`. It places the standard base64 encoding of the stored key's PEM
-  text, the form `machine.ca.key` holds, and has no stored `kind` to compare.
+  `encoding`. It has no stored `kind` to compare. **The forms of the CA key**
+  are two, defined here once and used wherever this specification looks for the
+  key: its PEM text, as the signer stores it, and the standard base64 encoding
+  of that text, which is what `machine.ca.key` holds and what the reference
+  places. The guard (§4.2 check 3), the match check (§2.3 step 3a), the output
+  check (§6 step 7) and every value redaction surface (§8.3) take both forms,
+  and no other.
 - `version` is the exact version the reference resolves to (§5.1); a
   `talos-ca-key` declaration has none.
 - `encoding` is optional and comes from a closed enum **(choice §16.17)**. The
@@ -1104,7 +1114,9 @@ For each machine:
 7. **Check the output**: no string scalar holds reserved text (§5.5), and no
    resolved `string` value's stored or placed form of six bytes or more (each
    form measured by its own length, so a short value's longer base64 placed
-   form counts) appears as an exact copy at an output leaf that provenance does not attribute
+   form counts), and neither form of the CA key (§5.2, which is the one
+   `talos-ca-key` reference's resolved value and counts like a `string` value),
+   appears as an exact copy at an output leaf that provenance does not attribute
    to its reference; and no ordinary fragment overrode a reference of the
    import base (choice §16.20). A copy is refused **(choice §16.21)** and
    reported by path only, as a source-side exposure: the value was already
@@ -1664,8 +1676,8 @@ with the stand-in format **(choice §16.22)**.
   reference's key, or a literal written as a key. Every path a compilation
   surface shows, in a refusal, a provenance record or a dependency record, has
   each token that equals a resolved `string` value, a mapping reference's key
-  or `string` member, the standard base64 encoding of one of them or its
-  canonical re-encoding (§6 step 7), or that
+  or `string` member, the standard base64 encoding of one of those or its
+  canonical re-encoding (§6 step 7), either form of the CA key (§5.2), or that
   contains one of them of six bytes or more, written `<redacted>`. Integer and
   boolean values are not looked for, as in the value means. The rendered path
   is checked too, as written and unescaped, for a value of six bytes or more
@@ -1712,7 +1724,8 @@ with the stand-in format **(choice §16.22)**.
   ingestion has already passed as not secret and that ordinary persistence
   holds in the fragment, so quoting it discloses nothing the fragment does not.
   The exception is a literal that copies a secret. The value means redacts an
-  exact copy of a resolved `string` value of six bytes or more in any message,
+  exact copy of a form of the CA key (§5.2), or of a resolved `string` value of
+  six bytes or more, in any message,
   and §6 step 7 refuses publication when such a copy stands at an output leaf. A
   copy that is shorter, or of an integer or boolean value, is not detected and
   is listed in §8.4 **(choice §16.23)**.
@@ -1732,8 +1745,9 @@ with the stand-in format **(choice §16.22)**.
   angle brackets written as JSON Unicode escapes, so a reader searching for the
   literal token prefix will not find it (SP §6.3).
 - **Value forms.** The value means looks for the forms §6 step 7 refuses: a
-  resolved `string` value, a mapping reference's key or `string` member, the
-  standard base64 encoding of one of them and its canonical re-encoding. In a
+  resolved `string` value, a mapping reference's key or `string` member, both
+  forms of the CA key (§5.2), the standard base64 encoding of one of the others
+  and its canonical re-encoding. In a
   message it replaces each run of text covered by copies of six bytes or more,
   copies that overlap or touch as one run, so no part of a copy is left. In the
   redacted configuration it also replaces a whole scalar or key equal to a form
