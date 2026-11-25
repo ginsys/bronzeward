@@ -80,15 +80,16 @@ sentence of it. Screen-reader coverage is the limit the owner accepted for
 
 ### Row 3: clean install and the documented workflows on the agreed matrix
 
-State: **not met.** One part is open, and it is not a rounding: the documented workflows are not run from
-the pages (last row of the table). The `darwin` part, which was open when this document was first
-written, has since run once (second row).
+State: **not met.** Two parts are open, and neither is a rounding: the Linux clean-install check lacks the
+steps the issue names after the install (first row), and the documented workflows are not run from the
+pages (last row). The `darwin` part, which was open when this document was first written, has since run
+once (second row).
 
 The agreed matrix is `linux/amd64` (CI, disposable fixture) and `darwin/arm64` (the macOS runner, Keychain).
 
 | Part of the row | State | Evidence |
 | --- | --- | --- |
-| Clean install on `linux/amd64` | met with a limit | Job `doc-blocks` (success): `scripts/release/run-doc-blocks.sh` builds at `v0.0.0-dev`, installs the archives in a clean container (curl, tar, CA certificates only) and runs the marked blocks against a disposable server, failing when a marked block did not run or another one did. Limit: the build there is not the `package` job's archive (its version carries the commit) |
+| Clean install on `linux/amd64` | met in part; **not met** for the steps after the install | Job `doc-blocks` (success): `scripts/release/run-doc-blocks.sh` builds at `v0.0.0-dev`, installs the archives in a clean container (curl, tar, CA certificates only) and runs the marked blocks against a disposable server, failing when a marked block did not run or another one did. What ran: the build, the checksum check, the unpack and install, `context list`, `cluster list` and `machine list` (empty: the fixture starts no secret provider), and `whoami` as a synthetic viewer, in a context that `run-doc-blocks.sh` adds with explicit flags and a pre-minted token file (`--oidc-token-file`). Not run, though the issue's check names them: `context add --from` the fixture's `bronzeward-client.json` with its CA, a sign-in through the test provider, T1 and T2 in scripted form (T2 needs a drifted machine, which the empty inventory cannot show), and the signature steps (no release exists). Limit: the build there is not the `package` job's archive (its version carries the commit) |
 | Clean install and Keychain on `darwin/arm64` | met with limits | Job `packaged-darwin` and `scripts/release/run-packaged-darwin.sh`, added by this change. First run: CI run 45708951483, job 139539603782, on a `macos-26-arm64` runner, 22:00:44 to 22:01:37 UTC on 25 November, at the first head of the pull request that added it (that run was later cancelled as a whole by the next push; this job had finished green). Its log shows the archive `OK` against `SHA256SUMS`, then "login stored the sign-in in the Keychain, logout read it back, revoked it and removed it", then the archive "is a Mach-O 64-bit executable arm64, and prints" the build's version "with the server gone". Limits: one run, on a pull request head, not on main; install, `version` and the Keychain only, with no live-server workflow (no Docker, the server is Linux only); a keychain made unlocked for the run; the archive is unpacked from a file the job downloaded. A run cancelled for want of a macOS runner would read "not run" |
 | Inaccessible and incompatible servers | met with limits | `packaged-cli` (success): TLS-01, TLS-02, COMP-01, COMP-02 and `TestPackagedVersion` on the packaged linux/amd64 binaries, with a wrong version planted to fail. `packaged-web` (success): TLS-02 and TLS-03's read case and the footer case in Chrome and Firefox on the Caddy-served bundle. Limits, from `CONTRIBUTING.md`: the web footer's server version, COMP and TLS-03's write case are not run on the bundle |
 | Version reporting | met with the same limits | CLI prints its own and the server's version on the packaged binaries; the web footer shows the bundle's version and `Server unknown` when the server cannot be read (`web/e2e/packaged.e2e.ts:15`) |
@@ -104,7 +105,7 @@ the owner's to say; this assessment does not decide it.
 | Check in the issue | State | Where |
 | --- | --- | --- |
 | Packaging: two builds equal, binaries report the tag and commit, rendered Caddy configuration serves exactly `web/headers.json` | met | `package`, `package-check`, `hosting` (all success) |
-| Clean install `linux/amd64` in a container with only curl, tar and CA certificates | met with a limit | `doc-blocks`; the signature steps are not run (§5) |
+| Clean install `linux/amd64` in a container with only curl, tar and CA certificates | met in part; not met after the install | `doc-blocks`; not run: `context add --from` with the fixture CA, the sign-in through the test provider, T1 and T2 scripted, and the signature steps (§2 row 3, §5) |
 | Workflow pages: each CLI page's marked blocks run; each web page has a browser case per numbered step | met for what is marked; not met for pages with no marked block | §2 row 3 |
 | `darwin/arm64`: install, `version` with the server unreachable, Keychain store and read, the inaccessible-server case | met with limits | `packaged-darwin`, run once (§2 row 3). The inaccessible-server case is the `version` check with the server gone; no other message on `darwin` is checked |
 | Negative cases on the packaged artifacts | met with limits | `packaged-cli`, `packaged-web`, §2 row 3 |
@@ -187,7 +188,9 @@ whose clause was not read.
 
 ## 8. Recommendation
 
-Do not close ginsys/bronzeward#262 on this assessment alone. Row 3 is not met: ten of the fourteen client
-pages that hold commands have none of them run from the page. That is a decision for the owner: accept
-the reading, or ask for marked blocks on more pages. The `darwin` part of the row has run once and passed
+Do not close ginsys/bronzeward#262 on this assessment alone. Row 3 is not met, for two reasons. The Linux
+clean-install check stops at the install and the reads: no `context add --from` with the fixture CA, no
+sign-in through the test provider, no scripted T1 and T2. And ten of the fourteen client pages that hold
+commands have none of them run from the page. Both are for the owner: accept the reading, or ask for the
+missing steps and for marked blocks on more pages. The `darwin` part of the row has run once and passed
 (§2 row 3); rows 1 and 2 are met with limits; the owner rows of §5 are open.

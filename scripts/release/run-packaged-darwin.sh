@@ -112,10 +112,15 @@ contexts='bw-version'
 # keychain made for the run, unlocked with a synthetic password, the default and the only one searched; the
 # runner's lists are put back.
 if [ "$target" = darwin_arm64 ]; then
-	old_default=$(security default-keychain -d user | sed -e 's/^[[:space:]]*"//' -e 's/"$//')
+	# Both are read into variables first, before anything is changed: a failing `security` stops the script here
+	# (a process substitution would hide it). The runner's list is never empty: refuse one that is.
+	old_default=$(security default-keychain -d user | sed -e 's/^[[:space:]]*"//' -e 's/"$//') || fail "security default-keychain failed, so nothing was changed"
+	listing=$(security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"$//') || fail "security list-keychains failed, so nothing was changed"
 	while IFS= read -r line; do
-		old_list+=("$line")
-	done < <(security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"$//')
+		[ -z "$line" ] || old_list+=("$line")
+	done <<<"$listing"
+	[ -n "$old_default" ] || fail "could not read the runner's default keychain, so nothing was changed"
+	[ "${#old_list[@]}" -gt 0 ] || fail "could not read the runner's keychain list, so nothing was changed"
 	keychain=$work/bwtest.keychain-db
 	security create-keychain -p BWSYNTH-keychain "$keychain"
 	security set-keychain-settings "$keychain"
