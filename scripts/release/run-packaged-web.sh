@@ -33,6 +33,9 @@ if BW_SPECS=packaged BW_EXPECT_VERSION=v0.0.0-planted mise run browser >"$work/p
 	cat "$work/planted" >&2
 	exit 1
 fi
-# It failed for the version, not for another cause: the failure names the version it was given.
-grep -q -e 'v0.0.0-planted' "$work/planted" || { echo "run-packaged-web: the planted run failed without naming its version:" >&2; cat "$work/planted" >&2; exit 1; }
+# It failed at the footer assertion, not for another cause: the runner prints the version in the case's title on any failure,
+# so the evidence is the assertion's own two footers, the one expected and the one the bundle's page showed.
+for footer in "Client v0.0.0-planted. Server unknown" "Client $BW_EXPECT_VERSION. Server unknown"; do
+	grep -qF -e "$footer" "$work/planted" || { echo "run-packaged-web: the planted run's output lacks the footer '$footer': it did not fail at the assertion:" >&2; cat "$work/planted" >&2; exit 1; }
+done
 echo "run-packaged-web: the cases passed on the packaged bundle, and a wrong version failed the footer case"
