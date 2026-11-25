@@ -571,10 +571,13 @@ They are held apart **(choice §17.29)**.
   a first key may arrive as (§3.4) is read once, for its own client certificate
   and CA certificate, and dials only the request's `endpoint`: its own endpoints
   are ignored. It is never a credential Bronzeward keeps.
-- **What is kept.** A Bronzeward identity holds the CA key in process memory
-  only: the signer while it signs, and the compiler while it renders a control
-  plane configuration (§3.3). The key is stored elsewhere in three places the
-  application does not hold in clear: the signer's path in the provider, the
+- **What is kept.** The CA key is in the memory of four kinds of process, each
+  while it uses it and none longer: the signer, while it signs and while it
+  makes the match check of an ingestion; the compiler, while it renders a
+  control plane configuration (§3.3); and the ingestion and the executor, in
+  the answer of an `os:admin` machine configuration read, which carries
+  `machine.ca.key` (above). It is stored in three places the application does
+  not hold in clear: the signer's path in the provider, the
   encrypted baseline of an imported configuration (compilation §2.3 step 8) and
   the rendered configuration and its encrypted artifact (compilation §11). The
   signed certificate and key live only in the memory of the process
