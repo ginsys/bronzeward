@@ -573,6 +573,8 @@ jobs:
             pull_request) files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename') || files= ;;
             push) files=$(gh api "repos/$REPO/compare/$BEFORE...$SHA" --jq '.files[].filename') || files= ;;
           esac
+          # The compare answer holds at most 300 files and its later pages carry none, so a full answer may be cut short.
+          [ "$(printf '%s\n' "$files" | grep -c .)" -lt 300 ] || files=
           echo "changed files read: $(printf '%s' "$files" | grep -c .)"
           if [ -z "$files" ] || grep -E -q '^((cmd/bronzewardctl|internal/client)/|(\.goreleaser\.yaml|go\.mod|go\.sum|scripts/release/(run-packaged-darwin\.sh|stub-idp\.py))$)' <<<"$files"; then
             echo "darwin=true" >>"$GITHUB_OUTPUT"
