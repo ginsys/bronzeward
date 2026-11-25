@@ -98,7 +98,7 @@ The client checks the server's certificate. By default it trusts your system's c
 Some installations use a certificate from a private authority. For that, give the client the
 authority's certificate:
 
-```bash
+```bash {.bw-run}
 bronzewardctl context add office --from https://bronzeward.example.com --certificate-authority ./office-ca.pem
 ```
 
@@ -150,6 +150,20 @@ In this order:
 
 With `--no-input` the client never opens a locked credential store's unlock prompt: a locked
 store is refused.
+
+On a computer with no browser and no credential store, add the context with a token file, sign in
+with the device flow and check who you are:
+
+```bash {.bw-run}
+bronzewardctl context add office-file --from https://bronzeward.example.com \
+  --certificate-authority ./office-ca.pem --oidc-token-file ~/.config/bronzeward-office.json
+bronzewardctl --context office-file login --device
+bronzewardctl --context office-file whoami
+```
+
+CI runs this block and the one under [TLS trust](#tls-trust) against a disposable server with a
+private certificate authority and a test issuer that approves the device sign-in by itself. It does
+not show that a real identity provider accepts the sign-in.
 
 ## Credentials for a script
 

@@ -4,9 +4,13 @@
 # A block that also carries .bw-host runs on the host from the repository root, where mise and the
 # toolchain are: the build and its checksum check. Every other marked block runs, in page order, in a
 # clean container (fixtures/versions.env CURL_IMAGE: curl, tar and CA certificates only) with the
-# build's dist/ copied in, against the disposable server of doc-blocks-fixture.sh. Fences are read
-# by text, as scripts/verify-docs.py does, with no Markdown parser. The run fails when a block fails,
-# when a marked block did not run, or when anything else ran.
+# build's dist/ copied in, against the disposable server of doc-blocks-fixture.sh. In a container
+# block one value is replaced and the record says so: the pages' server address,
+# https://bronzeward.example.com, becomes the fixture's https://localhost:8443, whose private CA
+# certificate is the pages' ./office-ca.pem. A block that also carries .bw-db is not this run's: it
+# needs a secret provider and a machine. Fences are read by text, as scripts/verify-docs.py does,
+# with no Markdown parser. The run fails when a block fails, when a marked block did not run, or when
+# anything else ran.
 #
 #   run-doc-blocks.sh run [page...]            the whole run (CI: mise run doc-blocks)
 #   run-doc-blocks.sh extract <dir> <page>...  write each marked block to <dir>, and <dir>/blocks.list
@@ -19,7 +23,11 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 default_pages=(docs/operator/clients/install.md docs/operator/clients/contexts.md
-	docs/operator/clients/inventory.md docs/operator/clients/sign-in-and-renewal.md)
+	docs/operator/clients/inventory.md docs/operator/clients/sign-in-and-renewal.md
+	docs/operator/clients/quick-start-cli.md docs/operator/clients/client-troubleshooting.md)
+# The server address the pages write, and the fixture's.
+page_server=https://bronzeward.example.com
+fixture_web=https://localhost:8443
 
 # extract <outdir> <page>...: <outdir>/<page name>-<n>.sh for each marked block, and
 # <outdir>/blocks.list, one "<id> <host|container>" line per block in page order. A marked fence the
@@ -35,6 +43,8 @@ extract() {
 		seen=$(grep -c ' container$' "$out/blocks.list" || true)
 		awk -v out="$out" -v name="$(basename "$page" .md)" -v page="$page" -v seen="$seen" '
 			function die(msg) { printf "run-doc-blocks: %s:%d: %s\n", page, NR, msg > "/dev/stderr"; failed = 1; exit 1 }
+			skip { if ($0 ~ /^```$/) skip = 0; next }
+			/^```[a-z]* [{][^}]*[.]bw-db[^}]*[}]$/ && !open { skip = 1; next }
 			/^```[a-z]* [{][^}]*[.]bw-run[^}]*[}]$/ && !open {
 				n++; open = 1; lines = 0
 				phase = ($0 ~ /[.]bw-host/) ? "host" : "container"
@@ -48,7 +58,7 @@ extract() {
 			open && /^```$/ { if (!lines) die("an empty marked block"); open = 0; close(file); next }
 			open { print > file; if ($0 !~ /^[ \t]*(#.*)?$/) lines++; next }
 			/bw-run/ { die("bw-run outside a fence opener at the start of a line") }
-			END { if (failed) exit 1; if (open) die("unterminated fence"); if (!n) die("no marked block on this page") }
+			END { if (failed) exit 1; if (open || skip) die("unterminated fence"); if (!n) die("no marked block on this page") }
 		' "$page" || return 1
 	done
 }
@@ -112,7 +122,13 @@ run() {
 		echo "version $BW_VERSION"
 		echo "image $image"
 		echo "host $(uname -sm)"
+		echo "substitution $page_server -> $fixture_web (container blocks)"
 	} >"$rec/doc-blocks.log"
+	while read -r id phase; do
+		[ "$phase" = container ] || continue
+		sed -i "s#$page_server#$fixture_web#g" "$rec/blocks/$id.sh"
+	done <"$rec/blocks/blocks.list"
+	export BW_DOC_WEB_URL=$fixture_web
 	: >"$rec/ran.list"
 	trap cleanup EXIT
 
@@ -148,6 +164,7 @@ run() {
 				--tmpfs "/home/bw:rw,exec,mode=0700,uid=$(id -u),gid=$(id -g)" -e HOME=/home/bw \
 				-e PATH=/home/bw/.local/bin:/usr/local/bin:/usr/bin:/bin \
 				-v "$state/dist-copy:/work/dist" -v "$rec/blocks:/blocks:ro" -v "$state/token.json:/run/bw-token.json:ro" \
+				-v "$state/office-ca.pem:/work/office-ca.pem:ro" \
 				-w /work --entrypoint sleep "$image" 3600 >/dev/null
 			container_up=1
 		fi

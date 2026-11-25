@@ -2,7 +2,9 @@ package issuer
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -116,6 +118,79 @@ func TestMintWithoutGroup(t *testing.T) {
 	}
 	if _, err := iss.MintWithoutGroup("h-nobody", "bw-approvers", now); err == nil {
 		t.Error("unknown human accepted")
+	}
+}
+
+// The device sign-in is off unless DeviceHuman names a human, and then it approves at once and
+// answers a token Mint would make for that human (the clean-install run, ginsys/bronzeward#405).
+func TestDeviceSignIn(t *testing.T) {
+	iss, key := testIssuer(t)
+	do := func(h http.Handler, method, path string, form url.Values) *httptest.ResponseRecorder {
+		q := httptest.NewRequest(method, path, strings.NewReader(form.Encode()))
+		if form != nil {
+			q.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, q)
+		return rec
+	}
+	off := iss.Handler()
+	if body := do(off, "GET", "/.well-known/openid-configuration", nil).Body.String(); strings.Contains(body, "device_authorization_endpoint") || strings.Contains(body, "token_endpoint") {
+		t.Fatalf("the device sign-in is offered without a human: %s", body)
+	}
+	for _, path := range []string{"/device", "/token"} {
+		if rec := do(off, "POST", path, url.Values{"client_id": {"c"}}); rec.Code != http.StatusNotFound {
+			t.Errorf("POST %s without a device human: %d, want 404", path, rec.Code)
+		}
+	}
+
+	iss.DeviceHuman = "h-viewer"
+	h := iss.Handler()
+	var doc struct {
+		Device string `json:"device_authorization_endpoint"`
+		Token  string `json:"token_endpoint"`
+	}
+	if err := json.Unmarshal(do(h, "GET", "/.well-known/openid-configuration", nil).Body.Bytes(), &doc); err != nil ||
+		doc.Device != "http://issuer.test/device" || doc.Token != "http://issuer.test/token" {
+		t.Fatalf("discovery: %+v, %v", doc, err)
+	}
+	var auth struct {
+		DeviceCode      string `json:"device_code"`
+		UserCode        string `json:"user_code"`
+		VerificationURI string `json:"verification_uri"`
+		ExpiresIn       int    `json:"expires_in"`
+		Interval        int    `json:"interval"`
+	}
+	if err := json.Unmarshal(do(h, "POST", "/device", url.Values{"client_id": {"c"}}).Body.Bytes(), &auth); err != nil ||
+		auth.DeviceCode == "" || auth.UserCode == "" || auth.VerificationURI == "" || auth.ExpiresIn <= 0 || auth.Interval != 1 {
+		t.Fatalf("device authorization: %+v, %v", auth, err)
+	}
+	grant := "urn:ietf:params:oauth:grant-type:device_code"
+	for name, form := range map[string]url.Values{
+		"another device code": {"grant_type": {grant}, "device_code": {"BWSYNTH-other"}},
+		"another grant":       {"grant_type": {"password"}, "device_code": {auth.DeviceCode}},
+	} {
+		if rec := do(h, "POST", "/token", form); rec.Code != http.StatusBadRequest || strings.Contains(rec.Body.String(), "access_token") {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	var answer struct {
+		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	rec := do(h, "POST", "/token", url.Values{"grant_type": {grant}, "device_code": {auth.DeviceCode}})
+	if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil || rec.Code != http.StatusOK ||
+		answer.TokenType != "Bearer" || answer.ExpiresIn != int(Lifetime.Seconds()) {
+		t.Fatalf("token: %d %s, %v", rec.Code, rec.Body, err)
+	}
+	tok, err := jwt.ParseSigned(answer.AccessToken, []jose.SignatureAlgorithm{jose.ES256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims jwt.Claims
+	if err := tok.Claims(key.Public(), &claims); err != nil || claims.Subject != "h-viewer" || !claims.Audience.Contains("bronzeward") {
+		t.Fatalf("claims: %+v, %v", claims, err)
 	}
 }
 

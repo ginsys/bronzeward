@@ -45,6 +45,18 @@ func TestKeygenMintDefects(t *testing.T) {
 	}
 }
 
+// serve refuses a device sign-in for a human it does not know, before it listens.
+func TestServeUnknownDeviceHuman(t *testing.T) {
+	key := filepath.Join(t.TempDir(), "key.json")
+	if err := run([]string{"keygen", "-out", key}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	err := run([]string{"serve", "-key", key, "-issuer", "http://issuer.test", "-device-human", "h-nobody"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "unknown human") {
+		t.Fatalf("serve -device-human h-nobody: %v", err)
+	}
+}
+
 // -age issues the token in the past, so its expiry comes sooner: the browser cases for a stream the
 // token's expiry ends need that without waiting the whole lifetime out.
 func TestMintAge(t *testing.T) {

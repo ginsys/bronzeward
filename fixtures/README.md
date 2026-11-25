@@ -111,7 +111,10 @@ that much free space beside the same amount under `.state/evidence`.
 [`oidc/`](oidc/) is a disposable OIDC issuer for Bronzeward's authentication tests
 (persistence-api.md §10.1). It serves a discovery document and a JWKS for one synthetic ES256
 key, and it mints access tokens for synthetic humans: valid ones, or ones carrying a single named
-defect. It is not an identity provider. It has no login, no clients and no refresh.
+defect. It is not an identity provider. It has no login, no clients and no refresh. The one
+exception is `serve -device-human <name>`: it then offers the device sign-in and approves it at once,
+with a token for that human and no refresh token. The clean-install run of the operator pages uses it
+(`mise run doc-blocks`); without the flag the issuer offers no sign-in.
 
 ```sh
 go run ./fixtures/oidc keygen -out fixtures/.state/oidc-key.json
