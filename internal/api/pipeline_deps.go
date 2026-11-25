@@ -69,8 +69,16 @@ func (a *API) readPinned(ctx context.Context, j publishJob, s snapshot, m compil
 		c, err := compile.CheckPinned(ctx, m, pins[i:i+1])
 		// The CA key's version is the act's only while its created_time is: otherwise the path was
 		// deleted and written again since the act (compilation.md §6 step 2).
-		if _, ca := p.Path.(provider.CAPath); ca && err == nil && !actsTime(c[0].Status.Created, s.caKey.created) {
-			err = &compile.DependencyError{Reference: p.Reference, Object: p.Path.String(), Version: p.Version, Reason: compile.ReasonVersionChanged}
+		if _, ca := p.Path.(provider.CAPath); ca {
+			var d *compile.DependencyError
+			switch {
+			case err == nil && !actsTime(c[0].Status.Created, s.caKey.created):
+				err = &compile.DependencyError{Reference: p.Reference, Object: p.Path.String(), Version: p.Version, Reason: compile.ReasonVersionChanged}
+			// An earlier publication recorded the act's identity, so the same rewrite is refused by that
+			// record first: it is the one reason either way.
+			case errors.As(err, &d) && d.Reason == string(classify.IdentityMismatch) && actsTime(p.Recorded, s.caKey.created):
+				d.Class, d.Reason = "", compile.ReasonVersionChanged
+			}
 		}
 		if ref, err := a.dependencyRefusal(j, p.Reference, "kv", p.Path.String(), p.Version, err); ref != nil || err != nil {
 			return pinned{}, ref, err
@@ -79,8 +87,13 @@ func (a *API) readPinned(ctx context.Context, j publishJob, s snapshot, m compil
 	}
 	values := make([]provider.Value, len(pins))
 	for i, p := range checked {
-		// §6 step 4: the latest act is read again before the signer's path is. A first key supplied
-		// since the pin refuses the publication; the next one pins afresh.
+		v, err := compile.ReadPinned(ctx, r, checked[i:i+1])
+		if ref, err := a.dependencyRefusal(j, p.Reference, "kv", p.Path.String(), p.Version, err); ref != nil || err != nil {
+			return pinned{}, ref, err
+		}
+		values[i] = v[0]
+		// §6 step 4: the latest act is read again once the signer's path has been. A first key
+		// supplied since the pin, the read included, refuses the publication; the next one pins afresh.
 		if _, ca := p.Path.(provider.CAPath); ca {
 			act, err := latestFirstKey(ctx, a.db, j.cluster)
 			if err != nil {
@@ -91,11 +104,6 @@ func (a *API) readPinned(ctx context.Context, j publishJob, s snapshot, m compil
 					"a first key was supplied while the publication compiled; publish again").with("cluster", j.cluster), nil
 			}
 		}
-		v, err := compile.ReadPinned(ctx, r, checked[i:i+1])
-		if ref, err := a.dependencyRefusal(j, p.Reference, "kv", p.Path.String(), p.Version, err); ref != nil || err != nil {
-			return pinned{}, ref, err
-		}
-		values[i] = v[0]
 	}
 	for _, p := range checked {
 		k := pinKey{p.Path.String(), p.Version}

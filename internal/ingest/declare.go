@@ -152,8 +152,13 @@ func validateRefs(docs []*yaml.Node, d Declarations, misplaced map[string]bool) 
 		if n.Kind == yaml.AliasNode {
 			// The anchored node was checked where it stands; an alias puts it in another
 			// position, which must be allowed too.
-			if t := deref(n); key && t != nil && t.Tag == refTag {
+			t := deref(n)
+			if key && t != nil && t.Tag == refTag {
 				return place(t.Value, p)
+			}
+			// An alias of a node that holds the CA key's reference places the key a second time.
+			if holdsCAKey(t, d) {
+				return place(CAKeyName, p)
 			}
 			return nil
 		}
@@ -215,6 +220,18 @@ func validateRefs(docs []*yaml.Node, d Declarations, misplaced map[string]bool) 
 		}
 	}
 	return nil
+}
+
+// holdsCAKey reports whether n or a node under it is the CA key's typed reference. An alias needs no
+// visit: its anchored node is walked, and checked, where it stands.
+func holdsCAKey(n *yaml.Node, d Declarations) bool {
+	if n == nil {
+		return false
+	}
+	if n.Tag == refTag {
+		return d.References[n.Value].Kind == provider.KindCAKey
+	}
+	return slices.ContainsFunc(n.Content, func(c *yaml.Node) bool { return holdsCAKey(c, d) })
 }
 
 // embeddedDocument parses an identified embedded document's text: one document, in YAML (an
