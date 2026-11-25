@@ -40,9 +40,19 @@ var (
 	buildErr  error
 )
 
-// binaries builds bronzeward and bronzewardctl once per test binary.
+// binaries builds bronzeward and bronzewardctl once per test binary. With BW_BIN_DIR set it takes the two from that
+// directory instead: the release archives' own, as the packaged-cli CI job runs them (ginsys/bronzeward#405). TestMain
+// removes only a directory this package built, so a directory handed in stays.
 func binaries(t *testing.T) string {
 	t.Helper()
+	if dir := os.Getenv("BW_BIN_DIR"); dir != "" {
+		for _, name := range []string{"bronzeward", "bronzewardctl"} {
+			if st, err := os.Stat(filepath.Join(dir, name)); err != nil || st.Mode()&0o111 == 0 {
+				t.Fatalf("BW_BIN_DIR %s holds no executable %s: %v", dir, name, err)
+			}
+		}
+		return dir
+	}
 	buildOnce.Do(func() {
 		if binDir, buildErr = os.MkdirTemp("", "bw-clitest-"); buildErr != nil {
 			return
