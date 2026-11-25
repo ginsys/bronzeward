@@ -68,9 +68,18 @@ export const lists = (page: string, markdown: string): { lists: List[]; problems
     marked.add(j);
     let n = 1;
     let blank = false;
+    let inFence = false;
     let k = j + 1;
     for (; k < lines.length; k++) {
       const next = lines[k]!;
+      if (/^\s*(```|~~~)/.test(next)) {
+        // An unindented fence after a blank line is a block of its own: the list ended. Any other fence is the text of an item.
+        if (!inFence && blank && !/^\s/.test(next)) break;
+        inFence = !inFence;
+        blank = false;
+        continue;
+      }
+      if (inFence) continue;
       if (next.trim() === "") { blank = true; continue; }
       const item = SIBLING.exec(next);
       if (item !== null) {
@@ -225,6 +234,13 @@ test("the positive control: an item with the wrong number is named with no blank
   expect(marked("1. One.", "3. Three.").problems).toEqual(["a:6: the list a has item 3 where 2 is next"]);
   expect(marked("1. One.", "  3. Three.").problems).toEqual(["a:6: the list a has item 3 where 2 is next"]);
   expect(marked("1. One.", " 2. Two.", "  3. Three.")).toEqual({ lists: [{ id: "a", steps: 3 }], problems: [] });
+});
+
+test("the positive control: numbered text inside a fence in a marked list is code and no step, and an unindented fence after a blank line ends the list", () => {
+  const marked = (...body: string[]) => lists("a", page("# A", "", "<!-- bw-web-steps: a -->", "", ...body));
+  expect(marked("1. One.", "```text", "  2. code only", "9. code", "```")).toEqual({ lists: [{ id: "a", steps: 1 }], problems: [] });
+  expect(marked("1. One.", "   ```text", "   2. code only", "   ```", "2. Two.")).toEqual({ lists: [{ id: "a", steps: 2 }], problems: [] });
+  expect(marked("1. One.", "", "```text", "2. code", "```")).toEqual({ lists: [{ id: "a", steps: 1 }], problems: [] });
 });
 
 test("the negative control: an item nested under a step, indented to its text, is that step's content and no step", () => {
