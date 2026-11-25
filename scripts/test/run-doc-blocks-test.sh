@@ -54,6 +54,10 @@ expect 1 "an unterminated marked fence" "unterminated fence" "$runner" extract "
 page late "${fence}bash {.bw-run}" "echo box" "$fence" "${fence}bash {.bw-run .bw-host}" "echo host" "$fence"
 expect 1 "a host block after a container block" "a .bw-host block after a container block" "$runner" extract "$work/o4" "$work/late.md"
 
+page first "${fence}bash {.bw-run}" "echo box" "$fence"
+page second "${fence}bash {.bw-run .bw-host}" "echo host" "$fence"
+expect 1 "a host block on a later page than a container block" "a .bw-host block after a container block" "$runner" extract "$work/o4b" "$work/first.md" "$work/second.md"
+
 page prose "The marker is bw-run and nothing else."
 expect 1 "a mention in prose" "bw-run outside a fence opener" "$runner" extract "$work/o5" "$work/prose.md"
 
@@ -87,6 +91,21 @@ page bad "${fence}bash {.bw-run}" "echo ok" "$fence" "${fence}bash {.bw-run}" "e
 export BW_DOC_EXEC=$work/stub-planted
 expect 1 "a planted failing block" "bad-2 (container) exited 3" "$runner" run "$work/bad.md"
 if [ "$(wc -l <"$work/state/record/ran.list")" -eq 2 ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: the run went on after the failing block" >&2; fi
+
+# The fixture's stop waits for each process: one that ends is gone and loses its pid file, one that
+# ignores SIGTERM fails the stop and keeps its pid file.
+fixture=$here/../release/doc-blocks-fixture.sh
+mkdir -p "$work/fx"
+sleep 300 &
+echo $! >"$work/fx/server.pid"
+(trap '' TERM; exec sleep 300) &
+stubborn=$!
+echo "$stubborn" >"$work/fx/issuer.pid"
+BW_DOC_STOP_TRIES=4 expect 1 "a process that ignores SIGTERM" "the issuer (pid $stubborn) is still running" "$fixture" stop "$work/fx"
+if [ ! -f "$work/fx/server.pid" ] && [ -f "$work/fx/issuer.pid" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: stop did not drop the ended server's pid file and keep the stubborn one's" >&2; fi
+kill -KILL "$stubborn" 2>/dev/null || true
+wait "$stubborn" 2>/dev/null || true
+expect 0 "a stop with the process gone" "" "$fixture" stop "$work/fx"
 
 echo "run-doc-blocks-test: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

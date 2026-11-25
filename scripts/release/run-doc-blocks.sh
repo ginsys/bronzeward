@@ -26,12 +26,14 @@ default_pages=(docs/operator/clients/install.md docs/operator/clients/contexts.m
 # reader cannot see (indented, unterminated) or a .bw-host block after a container block is refused:
 # a block that is skipped silently is the failure this script exists to catch.
 extract() {
-	local out=$1 page
+	local out=$1 page seen
 	shift
 	mkdir -p "$out"
 	: >"$out/blocks.list"
 	for page in "$@"; do
-		awk -v out="$out" -v name="$(basename "$page" .md)" -v page="$page" '
+		# seen: container blocks listed so far, over every earlier page, so the order rule spans pages.
+		seen=$(grep -c ' container$' "$out/blocks.list" || true)
+		awk -v out="$out" -v name="$(basename "$page" .md)" -v page="$page" -v seen="$seen" '
 			function die(msg) { printf "run-doc-blocks: %s:%d: %s\n", page, NR, msg > "/dev/stderr"; failed = 1; exit 1 }
 			/^```[a-z]* [{][^}]*[.]bw-run[^}]*[}]$/ && !open {
 				n++; open = 1
