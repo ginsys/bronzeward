@@ -403,17 +403,17 @@ cluster's existing adoption keeps compiling the revision it names.
 
 | Entry | Case | Records | T3 locks and compares | Refused |
 | --- | --- | --- | --- | --- |
-| library entry, edit | head present | `base`: the library head counter; `adoptionBase`: the draft cluster's adoption counter, or absent | the library head and the cluster's adoption row, written, in id order; each against its own base | `409 stale-input` naming the one that moved |
+| library entry, edit | head present | `base`: the library head counter; `adoptionBase`: the draft cluster's adoption counter, or absent | the library head and the cluster's adoption row, written, in id order; each against its own base | `409 stale-input` naming the one that moved; the `422` rules above (`library-reference`, `name-in-two-scopes`) |
 | library entry, edit | draft introduces the name | `base` and `adoptionBase` absent | inserts the head and the adoption; unique (kind, scope, name) and (cluster, kind, name) | `409 stale-input`, expected "absent" |
 | library entry, edit | head removed | as "head present": the counter the removal left | as "head present"; it brings the name back | as "head present" |
 | library entry, removal | head present | `base` only, no `adoptionBase` | the library head, written; no adoption is touched | `409 stale-input`; `404` when staged on a head with no revision |
 | library entry, removal | draft introduces the name | `base` absent | nothing | none: publication creates nothing (§3.1) |
-| adoption entry | library head holds a revision | `base`: the adoption counter, or absent when the cluster never had a row | the library head `FOR SHARE` in id order, rechecked to hold a revision; the adoption row, written; the counter against `base`. An existing adoption never reads the head again | `409 stale-input` (adoption moved); `422 library-removed` (head lost its revision since the draft) |
+| adoption entry | library head holds a revision | `base`: the adoption counter, or absent when the cluster never had a row | the library head `FOR SHARE` in id order, rechecked to hold a revision; the adoption row, written; the counter against `base`. An existing adoption never reads the head again | `409 stale-input` (adoption moved); `422 library-removed` (head lost its revision since the draft); the other `422` rules above (`library-reference`, `name-in-two-scopes`) |
 | adoption entry | head removed, absent or removed by this draft | none | none | `422 library-removed`, when staged and again at publication |
-| adoption removal | adoption holds a revision, any head state | `base`: the adoption counter | the adoption row, written (revision none, counter advanced); the library head is not locked | `409 stale-input`; `404` when staged on a row with no revision |
+| adoption removal | adoption holds a revision, any head state | `base`: the adoption counter | the adoption row, written (revision none, counter advanced); the library head is not locked | `409 stale-input`; `404` when staged on a row with no revision; `422` when, after the draft, the cluster's view of the name is none and a profile pin or selection needs it (rules above) |
 | adoption removal | adoption introduced by this draft, no row yet | none | none | none: the adoption entry is dropped and publication writes nothing |
 | detachment | adoption holds a revision, any head state | the adoption removal's `base` and a cluster-scope entry's own | the adoption row (as an adoption removal) and the cluster-scope head | `409 stale-input`; `422 detach-pin-not-in-view` |
-| detachment | adoption introduced by this draft | the cluster-scope entry's own | the cluster-scope head; the adoption entry is dropped | as the cluster-scope entry |
+| detachment | adoption introduced by this draft | the cluster-scope entry's own | the cluster-scope head; the adoption entry is dropped | `422 detach-pin-not-in-view` as in the row above, then as the cluster-scope entry |
 | library profile entry, pins | each pin a library fragment | none | each pinned fragment's library head, `FOR SHARE` in id order, rechecked to be the head or proposed by the draft | `422 validation-failed`, naming the body path |
 
 **Reach, before publishing.** `GET /drafts/{id}/impact` lists, for each changed
@@ -1422,8 +1422,11 @@ heads the release uses without a draft entry, which T3 holds unchanged
 (§6.2): each covered machine's assignment head (one with no revision
 included), its selected profiles, and the selected and pinned fragments. A
 library name is listed by the draft's cluster's adoption of it, with its
-counter, and not by the library head, except where the table in §3.1.1 says T3
-locks it (an adoption entry, a library profile entry's pins). The pins of an
+counter, and not by the library head. Where the table in §3.1.1 says T3 locks a
+library head (an adoption entry, a library profile entry's pins), it is a
+validation lock: `FOR SHARE`, checked to hold a revision or to be the pinned
+one, and no counter of it is compared with the snapshot, so it is not among the
+unchanged heads of the SQL below. The pins of an
 adopted library profile revision are the exception: they belong to that
 immutable revision, so the recheck skips them and the snapshot lists no head
 or adoption for the fragments they name (§3.1.1). A
