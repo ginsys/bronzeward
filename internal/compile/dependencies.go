@@ -13,13 +13,15 @@ import (
 // MetadataReader is the metadata identity (dependency-monitor.md §4): one answer by name, as the
 // provider gave it.
 type MetadataReader interface {
-	KV(ctx context.Context, p provider.GenerationPath) (classify.Answer, error)
+	KV(ctx context.Context, p provider.KVPath) (classify.Answer, error)
 	Transit(ctx context.Context, key string) (classify.Answer, error)
 }
 
-// PinnedReader is the compiler identity's read of one pinned KV version (compilation.md §1).
+// PinnedReader is the compiler identity's read of one pinned KV version (compilation.md §1): a
+// secret generation, or the cluster's CA key at the signer's path.
 type PinnedReader interface {
 	ReadGeneration(ctx context.Context, p provider.GenerationPath, version int64) (provider.Value, time.Time, error)
+	ReadCAKey(ctx context.Context, p provider.CAPath, version int64) (provider.Value, time.Time, error)
 }
 
 // ArtifactEncrypter is the compiler identity's encryption under the artifact key, which it names:
@@ -30,11 +32,11 @@ type ArtifactEncrypter interface {
 }
 
 // Pin is one declared reference at its pinned version (compilation.md §6 step 2): the reference
-// name, the generation path it names and the version. Recorded is the version's recorded
-// created_time, or zero when none is recorded yet; publication's own check takes the answer's.
+// name, the KV path it names and the version. Recorded is the version's recorded created_time, or
+// zero when none is recorded yet; publication's own check takes the answer's.
 type Pin struct {
 	Reference string
-	Path      provider.GenerationPath
+	Path      provider.KVPath
 	Version   int64
 	Recorded  time.Time
 }
@@ -51,6 +53,9 @@ type Pinned struct {
 const (
 	// ReasonCreatedChanged: the value read gave a created_time other than step 3's (§6 step 4).
 	ReasonCreatedChanged = "created-time-changed"
+	// ReasonVersionChanged: the CA key's pinned version was written again since the first-key act
+	// that names it (§6 step 2).
+	ReasonVersionChanged = "version-changed"
 	// ReasonNoDate: the artifact key's first read gave no readable Date (§11).
 	ReasonNoDate = "no-date"
 	// ReasonNotInFirstRead: the first read did not give the used key version's creation time (§11).
@@ -108,7 +113,17 @@ func CheckPinned(ctx context.Context, m MetadataReader, pins []Pin) ([]Pinned, e
 func ReadPinned(ctx context.Context, r PinnedReader, pins []Pinned) ([]provider.Value, error) {
 	out := make([]provider.Value, 0, len(pins))
 	for _, p := range pins {
-		v, created, err := r.ReadGeneration(ctx, p.Path, p.Version)
+		var v provider.Value
+		var created time.Time
+		var err error
+		switch path := p.Path.(type) {
+		case provider.GenerationPath:
+			v, created, err = r.ReadGeneration(ctx, path, p.Version)
+		case provider.CAPath:
+			v, created, err = r.ReadCAKey(ctx, path, p.Version)
+		default:
+			err = fmt.Errorf("an unknown path type %T", path)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("compile: reading reference %q (%s version %d): %w", p.Reference, p.Path, p.Version, err)
 		}

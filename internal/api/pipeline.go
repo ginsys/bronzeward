@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -19,13 +20,15 @@ import (
 // repeatable-read transaction read it: the cluster's contract; the covered machines, each with
 // its platform mode, import base, assignment revision ("" for none) and fragment revisions in
 // composition order; every composed source's stored text and declarations; the heads the release
-// uses unchanged; and each declared KV version's recorded created time (ruling R31).
+// uses unchanged; each declared KV version's recorded created time (ruling R31); and, where a
+// source holds the CA key's typed reference, the cluster's latest first-key act (§6 step 2).
 type snapshot struct {
 	contract  string
 	machines  []snapshotMachine // in machine order
 	sources   map[string]storedSource
 	unchanged []usedHead
 	recorded  map[pinKey]time.Time
+	caKey     *firstKeyAct
 }
 
 type snapshotMachine struct {
@@ -164,6 +167,9 @@ func (r *snapshotReader) read() (snapshot, *refusal, error) {
 	s.unchanged = r.unchanged(s.machines, sel)
 	if s.sources, err = r.readSources(s.machines); err != nil {
 		return s, nil, err
+	}
+	if s.caKey, ref, err = r.pinCAKey(s.sources); err != nil || ref != nil {
+		return s, ref, err
 	}
 	if s.recorded, err = r.readRecorded(s.sources); err != nil {
 		return s, nil, err
@@ -446,8 +452,12 @@ func (r *snapshotReader) readSources(machines []snapshotMachine) (map[string]sto
 	if len(out) != len(revisions) {
 		return nil, fmt.Errorf("%d of %d composed source revisions read", len(out), len(revisions))
 	}
-	err = r.query(`SELECT revision, name, kind, version, coalesce(encoding, ''), generation FROM import_base_reference
-			WHERE revision = ANY ($1)
+	// The typed CA-key reference has no version and no generation: its object is the signer's path
+	// of its machine's cluster, and pinCAKey gives it the version.
+	err = r.query(`SELECT c.revision, c.name, c.kind, coalesce(c.version, 0), coalesce(c.encoding, ''),
+				coalesce(c.generation, 'access/talos-ca/' || m.cluster)
+			FROM import_base_reference c JOIN import_base_revision b ON b.id = c.revision JOIN machine m ON m.id = b.machine
+			WHERE c.revision = ANY ($1)
 		UNION ALL SELECT revision, name, kind, version, coalesce(encoding, ''), generation FROM fragment_reference
 			WHERE revision = ANY ($1)`, func(row *sql.Rows) error {
 		var revision, name, kind, generation string
@@ -463,6 +473,36 @@ func (r *snapshotReader) readSources(machines []snapshotMachine) (map[string]sto
 	return out, err
 }
 
+// pinCAKey gives every typed CA-key reference of sources the version the cluster's latest
+// first-key act names, read with the snapshot (compilation.md §6 step 2), and returns that act;
+// nil where no source holds one. A cluster with no act refuses the publication.
+func (r *snapshotReader) pinCAKey(sources map[string]storedSource) (*firstKeyAct, *refusal, error) {
+	var act *firstKeyAct
+	for _, s := range sources {
+		for name, ref := range s.declarations.References {
+			if ref.Kind != provider.KindCAKey {
+				continue
+			}
+			if act == nil {
+				a, err := latestFirstKey(r.ctx, r.tx, r.j.cluster)
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil, refuse(http.StatusServiceUnavailable, "dependency-unavailable",
+						"Publication refused: no first-key act names the cluster's CA key; supply a first key with "+
+							"POST /clusters/{id}/first-keys; "+noRelease+".").
+						with("cluster", r.j.cluster), nil
+				}
+				if err != nil {
+					return nil, nil, err
+				}
+				act = &a
+			}
+			ref.Pinned = int64(act.version)
+			s.declarations.References[name] = ref
+		}
+	}
+	return act, nil, nil
+}
+
 // readRecorded reads each declared KV version's recorded created time, its status's: a KV version
 // holds one (dependency_status_kv_version). A version with none is absent.
 func (r *snapshotReader) readRecorded(sources map[string]storedSource) (map[pinKey]time.Time, error) {
@@ -471,7 +511,7 @@ func (r *snapshotReader) readRecorded(sources map[string]storedSource) (map[pinK
 	seen := map[pinKey]bool{}
 	for _, s := range sources {
 		for name, ref := range s.declarations.References {
-			k := pinKey{s.generations[name], ref.Version}
+			k := pinKey{s.generations[name], ref.PinnedVersion()}
 			if !seen[k] {
 				seen[k] = true
 				paths, versions = append(paths, k.path), append(versions, k.version)

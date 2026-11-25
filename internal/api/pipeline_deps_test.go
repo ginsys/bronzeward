@@ -39,7 +39,7 @@ type standInMeta struct {
 	calls *int
 }
 
-func (m standInMeta) KV(_ context.Context, p provider.GenerationPath) (classify.Answer, error) {
+func (m standInMeta) KV(_ context.Context, p provider.KVPath) (classify.Answer, error) {
 	*m.calls++
 	if m.err != nil {
 		return classify.Answer{}, m.err
@@ -58,7 +58,15 @@ type standInReader struct {
 	calls   *int
 }
 
+func (r standInReader) ReadCAKey(_ context.Context, p provider.CAPath, _ int64) (provider.Value, time.Time, error) {
+	return r.read(p)
+}
+
 func (r standInReader) ReadGeneration(_ context.Context, p provider.GenerationPath, _ int64) (provider.Value, time.Time, error) {
+	return r.read(p)
+}
+
+func (r standInReader) read(p provider.KVPath) (provider.Value, time.Time, error) {
 	*r.calls++
 	if r.err != nil {
 		return provider.Value{}, time.Time{}, r.err

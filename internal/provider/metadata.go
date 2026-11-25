@@ -10,7 +10,7 @@ import (
 )
 
 // Metadata is the metadata identity's provider client (dependency-monitor.md §4): one GET by name
-// of a KV generation's metadata or a Transit key's, returned as the provider answered for the
+// of a KV generation's or CA key path's metadata or a Transit key's, returned as the provider answered for the
 // classifier (§3), which alone decides what a status means. It has no LIST, no data read and no
 // Transit operation (TestMetadataMethodSet).
 type Metadata struct{ c *client }
@@ -24,11 +24,11 @@ func NewMetadata(addr string, tok Token) (*Metadata, error) {
 	return &Metadata{c: c}, nil
 }
 
-// KV asks for secret/metadata/<p>. The error is only a path NewGenerationPath did not make; no
-// request is then sent.
-func (m *Metadata) KV(ctx context.Context, p GenerationPath) (classify.Answer, error) {
-	if p.zero() {
-		return classify.Answer{}, errors.New("provider: a generation path made by NewGenerationPath is required")
+// KV asks for secret/metadata/<p>. The error is only a path NewGenerationPath or NewCAPath did
+// not make; no request is then sent.
+func (m *Metadata) KV(ctx context.Context, p KVPath) (classify.Answer, error) {
+	if p == nil || p.zero() {
+		return classify.Answer{}, errors.New("provider: a path made by NewGenerationPath or NewCAPath is required")
 	}
 	return m.c.get(ctx, "/v1/secret/metadata/"+p.String()), nil
 }

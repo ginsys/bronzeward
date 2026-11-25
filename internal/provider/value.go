@@ -20,6 +20,9 @@ const (
 	KindInteger Kind = "integer"
 	KindBoolean Kind = "boolean"
 	KindMapping Kind = "mapping" // an object whose members are of the three scalar kinds
+	// KindCAKey is no stored kind: it declares the typed reference to the cluster's CA key at the
+	// signer's path (compilation.md §5.2, choice §16.40). No Value has it.
+	KindCAKey Kind = "talos-ca-key"
 )
 
 // Value is a generation's content: its kind and the JSON value of that kind. A generation's KV v2

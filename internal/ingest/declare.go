@@ -20,11 +20,32 @@ type Declarations struct {
 }
 
 // Reference declares one logical secret name: its stored kind, the exact version it resolves to,
-// and an optional placement encoding.
+// and an optional placement encoding. The CA key's typed reference (CAKeyName, kind
+// provider.KindCAKey) declares neither version nor encoding.
 type Reference struct {
 	Kind     provider.Kind `json:"kind" yaml:"kind"`
-	Version  int64         `json:"version" yaml:"version"`
+	Version  int64         `json:"version,omitempty" yaml:"version,omitempty"`
 	Encoding string        `json:"encoding,omitempty" yaml:"encoding,omitempty"`
+	// Pinned is the version of the signer's path a publication resolves the typed reference to
+	// (compilation.md §6 step 2). The publication sets it; it is never stored or read from a request.
+	Pinned int64 `json:"-" yaml:"-"`
+}
+
+// PinnedVersion is the version the reference resolves to.
+func (r Reference) PinnedVersion() int64 {
+	if r.Kind == provider.KindCAKey {
+		return r.Pinned
+	}
+	return r.Version
+}
+
+// CAKeyName is the fixed logical name of the cluster's CA key (compilation.md §5.1, choice
+// §16.40).
+const CAKeyName = "talos/ca-key"
+
+// atCAKey reports whether p is machine.ca.key, the one place the typed reference stands.
+func atCAKey(p Path) bool {
+	return p.Format == "" && slices.Equal(p.Pointer, []string{"machine", "ca", "key"})
 }
 
 // Embedded identifies an embedded document: the path of the string scalar that holds it and its
@@ -64,6 +85,12 @@ func checkDeclarations(d Declarations) (map[string]string, error) {
 		}
 		switch r.Kind {
 		case provider.KindString, provider.KindInteger, provider.KindBoolean, provider.KindMapping:
+		case provider.KindCAKey:
+			// No version and no encoding, under the fixed name only (compilation.md §5.2).
+			if name != CAKeyName || r.Version != 0 || r.Encoding != "" {
+				return nil, refuse(RuleBadDeclaration, name)
+			}
+			continue
 		default:
 			return nil, refuse(RuleBadDeclaration, name)
 		}
@@ -139,8 +166,13 @@ func validateRefs(docs []*yaml.Node, d Declarations, misplaced map[string]bool) 
 			if !validName(n.Value) {
 				return refuse(RuleBadName, p.String())
 			}
-			if _, ok := d.References[n.Value]; !ok {
+			r, ok := d.References[n.Value]
+			if !ok {
 				return refuse(RuleUndeclaredName, p.String())
+			}
+			// An alias would put the key at a second place.
+			if r.Kind == provider.KindCAKey && (!atCAKey(p) || n.Anchor != "") {
+				return place(n.Value, p)
 			}
 			used[n.Value] = true
 			return nil

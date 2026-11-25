@@ -67,7 +67,7 @@ type fakeMeta struct {
 	calls   *[]string
 }
 
-func (f fakeMeta) KV(_ context.Context, p provider.GenerationPath) (classify.Answer, error) {
+func (f fakeMeta) KV(_ context.Context, p provider.KVPath) (classify.Answer, error) {
 	*f.calls = append(*f.calls, "kv "+p.String())
 	a, ok := f.kv[p.String()]
 	if !ok {
@@ -196,7 +196,15 @@ type fakeReader struct {
 	calls   *[]string
 }
 
+func (f fakeReader) ReadCAKey(_ context.Context, p provider.CAPath, version int64) (provider.Value, time.Time, error) {
+	return f.read(p, version)
+}
+
 func (f fakeReader) ReadGeneration(_ context.Context, p provider.GenerationPath, version int64) (provider.Value, time.Time, error) {
+	return f.read(p, version)
+}
+
+func (f fakeReader) read(p provider.KVPath, version int64) (provider.Value, time.Time, error) {
 	*f.calls = append(*f.calls, p.String()+"@"+strconv.FormatInt(version, 10))
 	if f.err != nil {
 		return provider.Value{}, time.Time{}, f.err

@@ -107,6 +107,8 @@ func TestSourcesConstraints(t *testing.T) {
 		{"fragment revision of no principal", insertFragmentRevision, []any{frv(), s.cluster, "dns", "site", doc, id.New(id.Principal)}, "23503"},
 		{"fragment reference of no revision", insertFragmentReference, []any{frv(), "registry/x", "string", 1, nil, generation(s.cluster, s.claim)}, "23503"},
 		{"second reference of one name", insertFragmentReference, []any{frvNew, "registry/example-pass", "string", 2, nil, generation(s.cluster, s.claim)}, "23505"},
+		// Only an import base holds the typed CA-key reference (compilation §5.1).
+		{"fragment reference of the CA key", insertFragmentReference, []any{frvNew, "talos/ca-key", "talos-ca-key", 1, nil, generation(s.cluster, s.claim)}, "23514"},
 		{"library fragment", insertFragment, []any{id.New(id.Fragment), s.cluster, "library", "site-dns", "site", s.frvSite, 1}, "23514"},
 		{"second fragment head of one name", insertFragment, []any{id.New(id.Fragment), s.cluster, "cluster", "registries", "override", s.frv2, 1}, "23505"},
 		{"fragment head at another name's revision", insertFragment, []any{id.New(id.Fragment), s.cluster, "cluster", "site-dns", "site", s.frv1, 1}, "23503"},

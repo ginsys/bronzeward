@@ -80,7 +80,12 @@ type scopeCountingProvider struct {
 	calls atomic.Int32
 }
 
-func (p *scopeCountingProvider) KV(ctx context.Context, path provider.GenerationPath) (classify.Answer, error) {
+func (p *scopeCountingProvider) ReadCAKey(ctx context.Context, path provider.CAPath, version int64) (provider.Value, time.Time, error) {
+	p.calls.Add(1)
+	return p.heldValues.ReadCAKey(ctx, path, version)
+}
+
+func (p *scopeCountingProvider) KV(ctx context.Context, path provider.KVPath) (classify.Answer, error) {
 	p.calls.Add(1)
 	return p.heldValues.KV(ctx, path)
 }

@@ -52,9 +52,12 @@ type heldValues struct {
 	slow       time.Duration
 }
 
-func (h heldValues) KV(_ context.Context, p provider.GenerationPath) (classify.Answer, error) {
+func (h heldValues) KV(_ context.Context, p provider.KVPath) (classify.Answer, error) {
 	if _, ok := h.values[p.String()]; !ok {
 		return classify.Answer{}, errors.New("stand-in: no such generation")
+	}
+	if _, ca := p.(provider.CAPath); ca {
+		return kvAnswer(nil, kvCreated, kvCreated), nil // two versions, for a replaced key
 	}
 	return kvAnswer(nil, kvCreated), nil
 }
@@ -71,7 +74,15 @@ func (h heldValues) Transit(context.Context, string) (classify.Answer, error) {
 	return a, nil
 }
 
+func (h heldValues) ReadCAKey(_ context.Context, p provider.CAPath, _ int64) (provider.Value, time.Time, error) {
+	return h.read(p)
+}
+
 func (h heldValues) ReadGeneration(_ context.Context, p provider.GenerationPath, _ int64) (provider.Value, time.Time, error) {
+	return h.read(p)
+}
+
+func (h heldValues) read(p provider.KVPath) (provider.Value, time.Time, error) {
 	if h.readErr != nil {
 		return provider.Value{}, time.Time{}, h.readErr
 	}

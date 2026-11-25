@@ -206,7 +206,7 @@ func newPausing(p *fake) *pausing {
 
 func (p *pausing) open() { p.opened.Do(func() { close(p.gate) }) }
 
-func (p *pausing) KV(ctx context.Context, path provider.GenerationPath) (classify.Answer, error) {
+func (p *pausing) KV(ctx context.Context, path provider.KVPath) (classify.Answer, error) {
 	a, err := p.fake.KV(ctx, path)
 	first := false
 	p.once.Do(func() { first = true })
