@@ -406,7 +406,11 @@ read the source graph: a draft has no rendered configuration before publication
 `POST /drafts/{id}/adoptions/{kind}/{name}/detachments` (§9.2) writes, in one
 draft transaction and under one `If-Match`, a cluster-scope fragment or profile
 of that name from the adopted revision's text and the removal of the adoption,
-so no intermediate draft state breaks a rule above. The copy carries no
+so no intermediate draft state breaks a rule above. Detaching a profile is
+refused `422 validation-failed` with rule `detach-pin-not-in-view`, naming the
+fragment, unless the cluster's view holds each fragment the adopted profile
+revision pins at the pinned revision (the cluster-scope copy is held to the
+pin rule above); the author adopts those revisions first. The copy carries no
 reference rows, like its source. From then on it is the cluster's own and no
 library revision reaches it.
 
@@ -2434,7 +2438,7 @@ idempotency and conflict behavior.
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}`. The body of a fragment or profile entry may carry `scope`: `cluster` (the default) or `library` (a library entry, §3.1.1; API revision 19); a library entry's `DELETE` is a removal of the library head | 200, ETag | `author`; `If-Match` |
 | `PUT` or `DELETE /drafts/{id}/adoptions/{kind}/{name}`, `kind` `fragments` or `profiles` (an adoption entry, §3.1.1; API revision 19): the `PUT` body names `revision`, any existing revision of that library name, and nothing else (the entry's `base` is recorded by the server, §3.1.1); `DELETE` removes the adoption, refused `422` when the cluster's view of the name is then none and a pin or selection needs it; a library revision with reference rows, or an entry that makes the name both adopted and cluster-scope, is `422 validation-failed` with rule `library-reference` or `name-in-two-scopes` | 200, ETag | `author`; `If-Match` |
-| `POST /drafts/{id}/adoptions/{kind}/{name}/detachments` (stop following a library name, §3.1.1; API revision 19; no body): in one draft transaction writes a cluster-scope entry of that name from the adopted revision's text and the removal of the adoption; `404 not-found` where the cluster has no adoption of the name | 200, ETag | `author`; `If-Match` |
+| `POST /drafts/{id}/adoptions/{kind}/{name}/detachments` (stop following a library name, §3.1.1; API revision 19; no body): in one draft transaction writes a cluster-scope entry of that name from the adopted revision's text and the removal of the adoption; `404 not-found` where the cluster has no adoption of the name; `422 validation-failed` with rule `detach-pin-not-in-view` for a profile whose pins the cluster's view does not hold | 200, ETag | `author`; `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
 | `POST /drafts/{id}/publications` | 202, `publish`, created `queued` (§5.1), or the one already queued or running for the draft revision (§7.3); the body is the operation resource, with its `Location`. `503 dependency-unavailable` from a process without a provider | `publisher`; `If-Match` |
 | `POST /plans` with `operation: apply-config` | 201 | `publisher` (EaR) |
