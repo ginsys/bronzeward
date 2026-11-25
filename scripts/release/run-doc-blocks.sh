@@ -36,7 +36,7 @@ extract() {
 		awk -v out="$out" -v name="$(basename "$page" .md)" -v page="$page" -v seen="$seen" '
 			function die(msg) { printf "run-doc-blocks: %s:%d: %s\n", page, NR, msg > "/dev/stderr"; failed = 1; exit 1 }
 			/^```[a-z]* [{][^}]*[.]bw-run[^}]*[}]$/ && !open {
-				n++; open = 1
+				n++; open = 1; lines = 0
 				phase = ($0 ~ /[.]bw-host/) ? "host" : "container"
 				if (phase == "host" && seen) die("a .bw-host block after a container block")
 				if (phase == "container") seen = 1
@@ -45,10 +45,10 @@ extract() {
 				printf "%s-%d %s\n", name, n, phase >> (out "/blocks.list")
 				next
 			}
-			open && /^```$/ { open = 0; close(file); next }
-			open { print > file; next }
+			open && /^```$/ { if (!lines) die("an empty marked block"); open = 0; close(file); next }
+			open { print > file; lines++; next }
 			/bw-run/ { die("bw-run outside a fence opener at the start of a line") }
-			END { if (open && !failed) die("unterminated fence") }
+			END { if (failed) exit 1; if (open) die("unterminated fence"); if (!n) die("no marked block on this page") }
 		' "$page" || return 1
 	done
 }
@@ -81,6 +81,10 @@ run() {
 	image=$(sed -n 's/^CURL_IMAGE=//p' fixtures/versions.env)
 	case $image in *@sha256:*) ;; *) echo "run-doc-blocks: CURL_IMAGE in fixtures/versions.env has no digest" >&2; return 1 ;; esac
 	extract "$rec/blocks" "${pages[@]}"
+	# A run with no host block or no container block would skip a whole phase and still end 0.
+	for id in host container; do
+		grep -q " $id\$" "$rec/blocks/blocks.list" || { echo "run-doc-blocks: no marked $id block: that phase would be skipped" >&2; return 1; }
+	done
 	{
 		echo "revision $(git rev-parse HEAD)"
 		echo "version $BW_VERSION"
@@ -95,12 +99,14 @@ run() {
 	# exec_block <id> <phase> <file>: run it, keep its output, note that it ran, stop on a failure.
 	exec_block() {
 		local started=$SECONDS status=0
-		if [ -n "${BW_DOC_EXEC:-}" ]; then
+		# A container block runs as a file, with stdin from /dev/null: a block that read stdin would
+		# otherwise eat the rest of its own script and still exit 0.
+		if [ "$2" = container ] && { [ -z "${BW_DOC_EXEC:-}" ] || [ -n "${BW_DOC_DOCKER:-}" ]; }; then
+			"${BW_DOC_DOCKER:-docker}" exec "$ctr" sh -e "/blocks/$1.sh" >"$rec/$1.out" 2>&1 </dev/null || status=$?
+		elif [ -n "${BW_DOC_EXEC:-}" ]; then
 			"$BW_DOC_EXEC" "$3" >"$rec/$1.out" 2>&1 </dev/null || status=$?
-		elif [ "$2" = host ]; then
-			bash -e "$3" >"$rec/$1.out" 2>&1 </dev/null || status=$?
 		else
-			docker exec -i "$ctr" sh -e <"$3" >"$rec/$1.out" 2>&1 || status=$?
+			bash -e "$3" >"$rec/$1.out" 2>&1 </dev/null || status=$?
 		fi
 		echo "$1" >>"$rec/ran.list"
 		printf '%s\t%s\texit %s\t%ss\n' "$1" "$2" "$status" "$((SECONDS - started))" >>"$rec/doc-blocks.log"
@@ -121,7 +127,7 @@ run() {
 			docker run -d --rm --name "$ctr" --network host --user "$(id -u):$(id -g)" \
 				--tmpfs "/home/bw:rw,exec,mode=0700,uid=$(id -u),gid=$(id -g)" -e HOME=/home/bw \
 				-e PATH=/home/bw/.local/bin:/usr/local/bin:/usr/bin:/bin \
-				-v "$state/dist-copy:/work/dist" -v "$state/token.json:/run/bw-token.json:ro" \
+				-v "$state/dist-copy:/work/dist" -v "$rec/blocks:/blocks:ro" -v "$state/token.json:/run/bw-token.json:ro" \
 				-w /work --entrypoint sleep "$image" 3600 >/dev/null
 			container_up=1
 		fi

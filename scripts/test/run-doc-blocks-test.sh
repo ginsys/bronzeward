@@ -58,6 +58,11 @@ page first "${fence}bash {.bw-run}" "echo box" "$fence"
 page second "${fence}bash {.bw-run .bw-host}" "echo host" "$fence"
 expect 1 "a host block on a later page than a container block" "a .bw-host block after a container block" "$runner" extract "$work/o4b" "$work/first.md" "$work/second.md"
 
+page none "No marked block on this page."
+expect 1 "a page with no marked block" "no marked block on this page" "$runner" extract "$work/o4c" "$work/none.md"
+page empty "${fence}bash {.bw-run}" "$fence"
+expect 1 "an empty marked block" "an empty marked block" "$runner" extract "$work/o4d" "$work/empty.md"
+
 page prose "The marker is bw-run and nothing else."
 expect 1 "a mention in prose" "bw-run outside a fence opener" "$runner" extract "$work/o5" "$work/prose.md"
 
@@ -87,10 +92,33 @@ export BW_DOC_STATE=$work/state
 export BW_DOC_EXEC=$work/stub-ok
 expect 0 "the real pages, every block exits 0" "" "$runner" run
 if grep -q 'sign-in-and-renewal-1.container.exit 0' "$work/state/record/doc-blocks.log"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: the record does not list the last block" >&2; fi
-page bad "${fence}bash {.bw-run}" "echo ok" "$fence" "${fence}bash {.bw-run}" "echo planted" "$fence" "${fence}bash {.bw-run}" "echo after" "$fence"
+page bad "${fence}bash {.bw-run .bw-host}" "echo built" "$fence" "${fence}bash {.bw-run}" "echo ok" "$fence" "${fence}bash {.bw-run}" "echo planted" "$fence" "${fence}bash {.bw-run}" "echo after" "$fence"
 export BW_DOC_EXEC=$work/stub-planted
-expect 1 "a planted failing block" "bad-2 (container) exited 3" "$runner" run "$work/bad.md"
-if [ "$(wc -l <"$work/state/record/ran.list")" -eq 2 ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: the run went on after the failing block" >&2; fi
+expect 1 "a planted failing block" "bad-3 (container) exited 3" "$runner" run "$work/bad.md"
+if [ "$(wc -l <"$work/state/record/ran.list")" -eq 3 ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: the run went on after the failing block" >&2; fi
+
+# A run with only container blocks, or only host blocks, would skip a whole phase.
+export BW_DOC_EXEC=$work/stub-ok
+page onlybox "${fence}bash {.bw-run}" "echo box" "$fence"
+expect 1 "no host block" "no marked host block" "$runner" run "$work/onlybox.md"
+page onlyhost "${fence}bash {.bw-run .bw-host}" "echo host" "$fence"
+expect 1 "no container block" "no marked container block" "$runner" run "$work/onlyhost.md"
+
+# A container block runs as a file with stdin from /dev/null: this block reads stdin and fails when it
+# gets anything. The fake docker only maps /blocks to the record directory, as the bind mount does, and
+# insists on the `exec <container> sh -e /blocks/<id>.sh` shape.
+cat >"$work/fake-docker" <<'EOF'
+#!/bin/sh
+[ "$1" = exec ] && [ "$3" = sh ] && [ "$4" = -e ] || exit 99
+exec sh -e "$BW_FAKE_BLOCKS/${5#/blocks/}"
+EOF
+chmod +x "$work/fake-docker"
+# shellcheck disable=SC2016 # the block's text is literal: its own shell expands $line
+page stdin "${fence}bash {.bw-run .bw-host}" "echo built" "$fence" "${fence}bash {.bw-run}" 'read -r line || line=' '[ -z "$line" ]' "$fence"
+export BW_DOC_DOCKER=$work/fake-docker BW_FAKE_BLOCKS=$work/state/record/blocks
+stdin_run() { printf 'poison\n' | "$runner" run "$work/stdin.md"; }
+expect 0 "a container block that reads stdin gets none" "" stdin_run
+unset BW_DOC_DOCKER BW_FAKE_BLOCKS
 
 # The fixture's stop waits for each process: one that ends is gone and loses its pid file, one that
 # ignores SIGTERM fails the stop and keeps its pid file.
