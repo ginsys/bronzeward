@@ -116,9 +116,10 @@ run() {
 		if [ "$phase" = container ] && [ -z "${container_up:-}" ] && [ -z "${BW_DOC_EXEC:-}" ]; then
 			"$root/scripts/release/doc-blocks-fixture.sh" start "$state" "$root/dist"
 			cp -a "$root/dist" "$state/dist-copy"
-			# dist/ is a copy: install.md unpacks into it. HOME is a tmpfs, as the install block writes ~/.local/bin.
+			# dist/ is a copy: install.md unpacks into it. HOME is a tmpfs, as the install block writes
+		# ~/.local/bin; "exec" because Docker mounts a tmpfs noexec and the client must run from it.
 			docker run -d --rm --name "$ctr" --network host --user "$(id -u):$(id -g)" \
-				--tmpfs "/home/bw:rw,mode=0700,uid=$(id -u),gid=$(id -g)" -e HOME=/home/bw \
+				--tmpfs "/home/bw:rw,exec,mode=0700,uid=$(id -u),gid=$(id -g)" -e HOME=/home/bw \
 				-e PATH=/home/bw/.local/bin:/usr/local/bin:/usr/bin:/bin \
 				-v "$state/dist-copy:/work/dist" -v "$state/token.json:/run/bw-token.json:ro" \
 				-w /work --entrypoint sleep "$image" 3600 >/dev/null
