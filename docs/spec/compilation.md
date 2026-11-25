@@ -109,9 +109,11 @@ This contract does not claim that no other copy exists. The encrypted baseline
 of §2.3 step 8 holds the imported value, and no identity decrypts it (choice
 §16.4); the node's own configuration holds it, and an `os:admin` read returns
 it; and the rendered artifact carries it, encrypted under the artifact key for
-the executor, which decrypts it to apply it. It claims one thing: Bronzeward
-stores no secret generation of the key, so the signer's path is the one stored
-source the compiler reads. A certificate the signer signs for a configuration read carries `os:admin`, the only role that reads a
+the executor, which decrypts it to apply it. It claims one thing: an import
+and the guard of §4.2 create no secret generation of the key, so the signer's
+path is the one stored source the compiler reads. Its limit is a copy an
+operator types into a draft update and marks: that run does not hold the key,
+so nothing compares the copy with it (§2.3 step 3a). A certificate the signer signs for a configuration read carries `os:admin`, the only role that reads a
 machine configuration, so the "no machine operation" above is the application's
 own bound, a read-only Talos client, not one the provider or Talos enforces.
 
@@ -799,7 +801,8 @@ substituted (E1 5.19). The value comparison does not skip them.
 v1 keeps both **(choice §16.11)**. A false refusal leaks nothing; a false pass
 persists plaintext (E1 5.19). The refusal names the matching paths and the rule, never the value.
 The remedy is to mark the containing scalar, which is then referenced whole, as
-design §6.9 requires for arbitrary text. The accepted cost: a very short marked
+design §6.9 requires for arbitrary text; for a copy of the CA key (§5.2) it is
+to remove the copy, since check 3 refuses a marked one as well. The accepted cost: a very short marked
 value can match unrelated scalars and refuse the input until the mark is
 removed or the containing scalars are marked.
 
@@ -850,7 +853,8 @@ logical secret" and resolves "to an exact version"):
   secrets that did not. Deduplicating by keyed digest (§4.1) is the
   alternative, deferred while comparing digests across a rotation of the
   digest key is undesigned **(choice §16.13)**.
-- **Versions.** The declaration (§5.2) names the exact version. The compiler
+- **Versions.** The declaration (§5.2) names the exact version, except the CA
+  key's typed reference, which names none (below). The compiler
   never selects a latest version; a different version is a new fragment
   revision, reviewed as a source change **(choice §16.14)**. In the PoC every
   secret ingestion creates is at version 1 (§2.3 step 4); a later version is
@@ -996,7 +1000,8 @@ and for embedded YAML only with the reference at the last key of its mapping
 (SR §6.4, §8).
 
 **Unidentified embedded text** is opaque: nothing resolves inside it, and a
-secret in it must be marked as the whole scalar (§4.2).
+secret in it must be marked as the whole scalar (§4.2); a copy of the CA key
+(§5.2) is removed, never marked.
 
 ### 5.5 Reserved text
 
@@ -1121,7 +1126,10 @@ For each machine:
    import base (choice §16.20). A copy is refused **(choice §16.21)** and
    reported by path only, as a source-side exposure: the value was already
    written in plaintext into a fragment, and its remedy is to mark that literal, which extracts it to a new
-   generation; whether to rotate the secret is the operator's decision. SP's
+   generation; whether to rotate the secret is the operator's decision. The
+   remedy for a copy of the CA key (§5.2) is the opposite: remove the literal,
+   because the typed reference at `machine.ca.key` is the key's one place and
+   marking the copy would extract a generation of it. SP's
    duplicate-literal case is the evidence that only value matching sees such a
    copy ([SP §6.3](../design/research/20260925-sensitivity-provenance.md#63-criterion-3-remaining-leakage-risks-and-dependency-records));
    the six-byte floor is SP's value matcher's (SP §2). A copy is a value
@@ -2444,7 +2452,8 @@ in place as
     (§4.1). The cluster's CA key is no longer one of these values: it is
     verified and referenced, never minted (choice §16.40).
 14. **Declarations name the exact version; no latest-version selection**
-    (§5.1, §5.2). Alternative: pin the latest `retained` version at
+    (§5.1, §5.2; the CA key's typed reference is the one exception, choice
+    §16.40). Alternative: pin the latest `retained` version at
     publication.
 15. **Tag syntax `!bwref <name>`** (§5.1). Alternatives: marked string,
     binding. All reach early parity; the tag has no opt-in, no collision and no
