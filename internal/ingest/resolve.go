@@ -159,16 +159,21 @@ func placed(name string, r Reference, values map[string]provider.Value) (*yaml.N
 	if !ok || v.Kind() == "" {
 		return nil, RuleUnresolved
 	}
-	if v.Kind() != r.Kind {
+	// The CA key is the signer's PEM text, placed in its base64 form (compilation.md §5.2).
+	stored, encoding := r.Kind, r.Encoding
+	if r.Kind == provider.KindCAKey {
+		stored, encoding = provider.KindString, "base64"
+	}
+	if v.Kind() != stored {
 		return nil, RuleKindMismatch
 	}
 	x, err := v.Decode()
 	if err != nil {
 		return nil, RuleUnresolved
 	}
-	if r.Kind != provider.KindMapping {
+	if stored != provider.KindMapping {
 		n := scalarNode(x)
-		if r.Encoding == "base64" {
+		if encoding == "base64" {
 			n.Value = base64.StdEncoding.EncodeToString([]byte(n.Value))
 		}
 		return n, ""

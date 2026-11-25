@@ -101,9 +101,10 @@ The access-presence identity reads only the path's metadata, for the presence
 answer (persistence and API §3.3). The compiler's grant PC measured, `read` on
 `secret/data/*`, would cover both paths; the compiler's grant is `read` on
 `secret/data/gen/*` and on `secret/data/access/talos-ca/*`. The fixture's
-compiler policy (`fixtures/openbao/policies/bw-compiler.hcl`) holds only the
-first until the change that implements this choice lands. No grant on the path
-was measured; persistence and API §16 requires each.
+compiler policy (`fixtures/openbao/policies/bw-compiler.hcl`) holds both;
+`TestLiveCompilerPolicyExact` and `TestLiveCompilerIdentity` measure the
+compiler's grant on the path and its refusals against a development-mode
+OpenBao. The other identities' grants persistence and API §16 requires.
 
 This contract does not claim that no other copy exists. The encrypted baseline
 of §2.3 step 8 holds the imported value, and no identity decrypts it (choice
@@ -1070,7 +1071,12 @@ For each machine:
    `talos-ca-key` reference (choice §16.40) declares none: it records the version
    the cluster's latest first-key act names, read with the snapshot of step 1,
    at the signer's path (a regeneration takes the version its release
-   recorded). This is
+   recorded). A publication refuses where that version's `created_time` at the
+   signer's path differs from the one the act records, compared to the
+   microsecond: the path was deleted and written again since the act (`422
+   validation-failed`, the dependency's reason `version-changed`). A cluster with
+   no first-key act refuses it `503 dependency-unavailable`, naming `POST
+   /clusters/{id}/first-keys`. This is
    the source superset; resolving early necessarily reads all of it (SR §6.2,
    §6.4).
 3. **Check dependencies**: every pinned secret version must classify `retained`
@@ -2168,7 +2174,9 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Ingestion | Absolute expiry, the operator's abandonment, or recovery-mode entry, a paused claim included | Claim abandoned; re-ingest | Claim row, payload cleared |
 | Authoring | Undeclared or unused name, other local tag, tag on a key or sequence, reserved text, bad path | Draft update refused | Nothing |
 | Compilation | Dependency not `retained`, or unreadable by the compiler (the signer's path included, when the compiler's grant on it is absent) | Publication refused | Nothing |
-| Compilation | A new publication whose cluster's latest first-key act names another version than the one step 2 pinned for the `talos-ca-key` reference (§5.1); a regeneration is not refused for it | Publication refused; the next publication pins afresh | Nothing |
+| Compilation | A new publication whose cluster's latest first-key act names another version than the one step 2 pinned for the `talos-ca-key` reference (§5.1); a regeneration is not refused for it | Publication refused, `409 conflict`; the next publication pins afresh | Nothing |
+| Compilation | The pinned version of the CA key was written again since its first-key act (§6 step 2) | Publication refused, `422 validation-failed`, the dependency's reason `version-changed` | Nothing |
+| Compilation | A `talos-ca-key` reference in a cluster with no first-key act (§6 step 2) | Publication refused, `503 dependency-unavailable`, naming `POST /clusters/{id}/first-keys` | Nothing |
 | Compilation | Kind mismatch, or `base64` on a non-string | Publication refused | Nothing |
 | Compilation | A reference to a secret of another cluster (§5.1) | Publication refused | Nothing |
 | Compilation | An ordinary fragment overrides or deletes an import-base reference (§6) | Publication refused, naming the fragment and path | Nothing |

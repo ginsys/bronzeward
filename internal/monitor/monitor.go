@@ -23,7 +23,7 @@ import (
 // Metadata is the metadata identity's by-name requests (§3 step 1). An error is only an object
 // the client cannot ask for; a request that fails is an answer the classifier judges.
 type Metadata interface {
-	KV(ctx context.Context, p provider.GenerationPath) (classify.Answer, error)
+	KV(ctx context.Context, p provider.KVPath) (classify.Answer, error)
 	Transit(ctx context.Context, key string) (classify.Answer, error)
 }
 
@@ -230,7 +230,7 @@ func (m *Monitor) classify(ctx context.Context, d dependency) (classify.Result, 
 	var a classify.Answer
 	switch dep.Provider {
 	case classify.KV:
-		p, err := generationPath(d.object)
+		p, err := provider.ParseKVPath(d.object) // a generation, or a cluster's CA key path
 		if err != nil {
 			return classify.Result{}, err
 		}
@@ -246,15 +246,6 @@ func (m *Monitor) classify(ctx context.Context, d dependency) (classify.Result, 
 		return classify.Result{}, errors.New("unknown provider")
 	}
 	return classify.Classify(dep, a), nil
-}
-
-// generationPath reads a KV dependency's object, gen/<cluster>/<claim>/<value>.
-func generationPath(object string) (provider.GenerationPath, error) {
-	parts := strings.Split(object, "/")
-	if len(parts) != 4 || parts[0] != "gen" {
-		return provider.GenerationPath{}, errors.New("a KV dependency's object is not a generation path")
-	}
-	return provider.NewGenerationPath(parts[1], parts[2], parts[3])
 }
 
 // record is §6.1 step 5: the class recorded under the row lock at clock_timestamp() read after it,

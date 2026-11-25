@@ -19,7 +19,7 @@ func CAKeyPath(cluster string) (string, error) {
 	if err := id.MustHave(cluster, id.Cluster); err != nil {
 		return "", fmt.Errorf("provider: ca key path cluster: %w", err)
 	}
-	return "access/talos-ca/" + cluster, nil
+	return caKeyPrefix + cluster, nil
 }
 
 // CAKeyVersion identifies one version of a cluster's CA key: its path, its KV version and that

@@ -286,16 +286,21 @@ CREATE TRIGGER writer BEFORE INSERT ON import_base_revision FOR EACH ROW EXECUTE
 
 -- The import base revision's reference rows: one declaration per name (compilation §5.1, §5.2)
 -- and the provider generation it resolves to, whose path is gen/<cluster>/<claim>/<value id>
--- (§6.4, choice §17.8). The orphan report reads which generations a committed row names.
+-- (§6.4, choice §17.8). The orphan report reads which generations a committed row names. The one
+-- talos-ca-key row, the typed reference to the signer's key (compilation §5.1, choice §16.40),
+-- has no version, generation or encoding; a fragment reference cannot be one.
 CREATE TABLE import_base_reference (
   revision   text NOT NULL REFERENCES import_base_revision (id),
   name       text NOT NULL CHECK (name ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(/[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$'
                AND octet_length(name) <= 256),
-  kind       text NOT NULL CHECK (kind IN ('string', 'integer', 'boolean', 'mapping')),
-  version    integer NOT NULL CHECK (version >= 1),
+  kind       text NOT NULL CHECK (kind IN ('string', 'integer', 'boolean', 'mapping', 'talos-ca-key')),
+  version    integer CHECK (version >= 1),
   encoding   text CHECK (encoding = 'base64'),
-  generation text NOT NULL CHECK (generation ~ '^gen/cl_[a-z2-7]{26}/ing_[a-z2-7]{26}/[A-Za-z0-9_-]{1,128}$'),
+  generation text CHECK (generation ~ '^gen/cl_[a-z2-7]{26}/ing_[a-z2-7]{26}/[A-Za-z0-9_-]{1,128}$'),
   PRIMARY KEY (revision, name),
+  CONSTRAINT import_base_reference_ca_key CHECK (CASE WHEN kind = 'talos-ca-key'
+    THEN name = 'talos/ca-key' AND version IS NULL AND generation IS NULL
+    ELSE version IS NOT NULL AND generation IS NOT NULL END),
   -- base64 places a string secret's UTF-8 bytes (compilation §5.2); no other kind takes it.
   CHECK (encoding IS NULL OR kind = 'string')
 );
@@ -1869,7 +1874,7 @@ CREATE TABLE dependency_status (
   -- Implications per provider, so a row of an unknown provider is refused by the provider check
   -- alone.
   CONSTRAINT dependency_status_object CHECK (
-    (provider <> 'kv' OR object ~ '^gen/cl_[a-z2-7]{26}/ing_[a-z2-7]{26}/[A-Za-z0-9_-]{1,128}$') AND
+    (provider <> 'kv' OR object ~ '^(gen/cl_[a-z2-7]{26}/ing_[a-z2-7]{26}/[A-Za-z0-9_-]{1,128}|access/talos-ca/cl_[a-z2-7]{26})$') AND
     (provider <> 'transit' OR (object NOT IN ('.', '..') AND octet_length(object) BETWEEN 1 AND 227
       AND object !~ '[/#?%\\[:space:][:cntrl:]]'))),
   -- A retained version's only reason is a KV version's deletion-scheduled, with the scheduled time
@@ -1962,7 +1967,11 @@ BEGIN
          AND o.reference = NEW.reference AND o.object = NEW.object AND o.version = NEW.version
          AND o.created = NEW.created
          AND (EXISTS (SELECT FROM import_base_reference d WHERE d.revision = o.source_import_base
-                        AND d.name = o.reference AND d.version = o.version AND d.generation = o.object)
+                        AND d.name = o.reference AND (d.version = o.version AND d.generation = o.object
+                          -- The typed CA-key reference declares neither: its object is the signer's
+                          -- path of the machine's cluster, and no other (compilation §5.1, §9).
+                          OR d.kind = 'talos-ca-key' AND o.object =
+                            'access/talos-ca/' || (SELECT c.cluster FROM machine c WHERE c.id = o.machine)))
            OR EXISTS (SELECT FROM fragment_reference d WHERE d.revision = o.source_fragment_revision
                         AND d.name = o.reference AND d.version = o.version AND d.generation = o.object)
               AND EXISTS (SELECT FROM release_machine m WHERE m.release = o.release AND m.machine = o.machine

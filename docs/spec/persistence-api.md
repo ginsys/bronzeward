@@ -2959,9 +2959,9 @@ declarations of the `!bwref` tags the document already carries, as
 [{"path", "format"}]}`. A marked value is extracted to a new generation under
 this update's claim; a carried reference resolves to the generation of a
 reference row of the draft's cluster, a fragment revision's or an import
-base's, with the same name, kind and version. The import base's one
-`talos-ca-key` reference has no version and no generation, so a carried
-`talos/ca-key` matches its row by name and kind alone (compilation §5.2). A carried name that matches no
+base's, with the same name, kind and version. A fragment update cannot carry the
+import base's `talos-ca-key` reference: a declaration of that kind is refused
+(compilation §5.1). A carried name that matches no
 such row, or rows with different generations, is `422 validation-failed` with
 `"rule": "unknown-reference"` and the `"reference"` name. The update ingests
 under a claim of kind `draft-update` that names the draft and stages

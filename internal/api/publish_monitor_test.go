@@ -21,7 +21,7 @@ import (
 // Transit key is unchanged.
 type lossMeta struct{}
 
-func (lossMeta) KV(context.Context, provider.GenerationPath) (classify.Answer, error) {
+func (lossMeta) KV(context.Context, provider.KVPath) (classify.Answer, error) {
 	return metaAnswer(map[string]any{"current_version": 1, "oldest_version": 0, "versions": map[string]any{
 		"1": map[string]any{"created_time": kvCreated.Format(time.RFC3339Nano), "deletion_time": "", "destroyed": true}}}), nil
 }
@@ -56,7 +56,7 @@ func lockWaiting(db *sql.DB) (int, error) {
 // KV version is unchanged.
 type trimMeta struct{}
 
-func (trimMeta) KV(context.Context, provider.GenerationPath) (classify.Answer, error) {
+func (trimMeta) KV(context.Context, provider.KVPath) (classify.Answer, error) {
 	return metaAnswer(map[string]any{"current_version": 1, "oldest_version": 0, "versions": map[string]any{
 		"1": map[string]any{"created_time": kvCreated.Format(time.RFC3339Nano), "deletion_time": "", "destroyed": false}}}), nil
 }

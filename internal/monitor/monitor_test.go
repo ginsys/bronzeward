@@ -27,7 +27,7 @@ type fake struct {
 	gate        chan struct{}
 }
 
-func (p *fake) KV(ctx context.Context, _ provider.GenerationPath) (classify.Answer, error) {
+func (p *fake) KV(ctx context.Context, _ provider.KVPath) (classify.Answer, error) {
 	return p.answer(ctx, true), nil
 }
 

@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"slices"
+
+	"github.com/ginsys/bronzeward/internal/provider"
 )
 
 // declaration is one reference row of a source revision (compilation §5.2): its kind, version,
@@ -81,8 +83,12 @@ func checkDeclarations(ctx context.Context, tx *sql.Tx, rel string, u releaseUni
 	if len(sources) != len(revisions) {
 		return "", fmt.Errorf("release %s: %d of %d composed source revisions read", rel, len(sources), len(revisions))
 	}
-	if err := eachQueried(ctx, tx, `SELECT revision, name, kind, version, coalesce(encoding, ''), generation
-			FROM import_base_reference WHERE revision = ANY ($1)
+	// The typed CA-key reference declares no version or generation (compilation §5.1): version 0
+	// here, and its object is the signer's path of its machine's cluster.
+	if err := eachQueried(ctx, tx, `SELECT c.revision, c.name, c.kind, coalesce(c.version, 0), coalesce(c.encoding, ''),
+				coalesce(c.generation, 'access/talos-ca/' || m.cluster)
+			FROM import_base_reference c JOIN import_base_revision b ON b.id = c.revision JOIN machine m ON m.id = b.machine
+			WHERE c.revision = ANY ($1)
 		UNION ALL SELECT revision, name, kind, version, coalesce(encoding, ''), generation
 			FROM fragment_reference WHERE revision = ANY ($1)
 		ORDER BY 1, 2`, revisions, func(row *sql.Rows) error {
@@ -126,12 +132,23 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 	reproduced, reproducedUses := map[occurrence]bool{}, map[use]bool{}
 	occurrences := map[string][]int{}
 	var order []string
+	// The typed CA-key reference declares no version: it is the one its dependency records name,
+	// the same in each (persistence-api §6.2).
+	pinned := map[use]int64{}
 	for _, d := range m.reproduction {
 		if _, ok := composition[d.source]; !ok {
 			return at("reproduction source outside the composition", d.source, d.reference)
 		}
 		s := sources[d.source]
 		decl, ok := s.declarations[d.reference]
+		if ok && decl.kind == string(provider.KindCAKey) {
+			u := use{d.source, d.reference}
+			if v, seen := pinned[u]; d.version < 1 || seen && v != d.version {
+				return at("reproduction version of the CA key differs", d.source, d.reference)
+			}
+			pinned[u] = d.version
+			decl.version = d.version
+		}
 		switch {
 		case !ok:
 			return at("reproduction names no declaration", d.source, d.reference)
@@ -175,6 +192,9 @@ func (m unitMachine) disagreement(composition map[string]bool, sources map[strin
 		}
 		s := sources[r.Source.Revision]
 		decl, ok := s.declarations[r.Reference]
+		if ok && decl.kind == string(provider.KindCAKey) {
+			decl.version = pinned[use{r.Source.Revision, r.Reference}]
+		}
 		switch {
 		case r.Source.Digest != hex.EncodeToString(s.digest[:]):
 			return at("provenance source digest differs", r.Source.Revision, r.Reference)

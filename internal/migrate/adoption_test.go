@@ -145,6 +145,15 @@ func TestAdoptionConstraints(t *testing.T) {
 		{"base64 mapping reference", insertReference, []any{ibrNew, "registry/b64-mapping", "mapping", 1, "base64", generation(a.cluster, a.claim)}, "23514"},
 		{"generation path of another shape", insertReference, []any{ibrNew, "registry/other", "string", 1, nil, "secret/registry"}, "23514"},
 		{"second declaration of a name", insertReference, []any{ibrNew, "registry/example-pass", "string", 1, nil, generation(a.cluster, a.claim)}, "23505"},
+		// The typed CA-key reference (compilation §5.1, §5.2) declares no version or generation, and
+		// stands under its fixed name only; every other reference declares both.
+		{"CA-key reference with a version", insertReference, []any{ibrNew, "talos/ca-key", "talos-ca-key", 1, nil, nil}, "23514"},
+		{"CA-key reference with a generation", insertReference, []any{ibrNew, "talos/ca-key", "talos-ca-key", nil, nil, generation(a.cluster, a.claim)}, "23514"},
+		{"CA-key reference under another name", insertReference, []any{ibrNew, "talos/other", "talos-ca-key", nil, nil, nil}, "23514"},
+		{"CA-key reference placed base64", insertReference, []any{ibrNew, "talos/ca-key", "talos-ca-key", nil, "base64", nil}, "23514"},
+		{"reference with no version", insertReference, []any{ibrNew, "registry/other", "string", nil, nil, generation(a.cluster, a.claim)}, "23514"},
+		{"reference with no generation", insertReference, []any{ibrNew, "registry/other", "string", 1, nil, nil}, "23514"},
+		{"control: the CA-key reference", insertReference, []any{ibrNew, "talos/ca-key", "talos-ca-key", nil, nil, nil}, ""},
 		{"draft state merged", insertDraft, []any{id.New(id.Draft), a.cluster, "x", "merged", "m3oxmlfh6phr7aigshdydcb4ji"}, "23514"},
 		{"draft ETag token of 25 characters", insertDraft, []any{id.New(id.Draft), a.cluster, "x", "open", "m3oxmlfh6phr7aigshdydcb4j"}, "23514"},
 		{"draft of no cluster", insertDraft, []any{id.New(id.Draft), id.New(id.Cluster), "x", "open", "m3oxmlfh6phr7aigshdydcb4ji"}, "23503"},

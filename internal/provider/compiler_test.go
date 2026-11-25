@@ -249,7 +249,7 @@ func (withArtifactDecrypt) DecryptArtifact(context.Context, Ciphertext) ([]byte,
 // The compiler identity's operations and nothing else (compilation.md §1): no decryption, no
 // secret creation, no other read, whatever the policy would allow.
 func TestCompilerMethodSet(t *testing.T) {
-	want := []string{"ArtifactKey", "EncryptArtifact", "ReadGeneration"}
+	want := []string{"ArtifactKey", "EncryptArtifact", "ReadCAKey", "ReadGeneration"}
 	if got := methodNames(reflect.TypeFor[*Compiler]()); !slices.Equal(got, want) {
 		t.Fatalf("*Compiler exports %q, want exactly %q", got, want)
 	}

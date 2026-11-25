@@ -11,8 +11,9 @@ import (
 )
 
 // Compiler is the compiler identity's provider client (compilation.md §1): it reads a pinned
-// version of a secret generation and encrypts under the artifact key. It has no decryption, no
-// secret creation and no other read (TestCompilerMethodSet).
+// version of a secret generation or of a cluster's CA key at the signer's path, and encrypts under
+// the artifact key. It has no decryption, no secret creation and no other read
+// (TestCompilerMethodSet).
 type Compiler struct {
 	c        *client
 	artifact string
@@ -116,6 +117,35 @@ func (c *Compiler) ReadGeneration(ctx context.Context, p GenerationPath, version
 		return Value{}, time.Time{}, r.bad("the value is not of a known kind, or not of its kind")
 	}
 	return v, created.UTC(), nil
+}
+
+// ReadCAKey reads version of the cluster's CA key at the signer's path (compilation.md §6 step 4,
+// choice §16.40): the PEM key as a string value, never the certificate, and the version's
+// created_time. A missing, deleted or destroyed version is ErrAbsent, a policy refusal ErrDenied.
+// No error quotes the key.
+func (c *Compiler) ReadCAKey(ctx context.Context, p CAPath, version int64) (Value, time.Time, error) {
+	if p.zero() {
+		return Value{}, time.Time{}, errors.New("provider: a ca key path made by NewCAPath is required")
+	}
+	if version < 1 {
+		return Value{}, time.Time{}, errors.New("provider: a ca key version is a positive integer")
+	}
+	l, err := readKV(ctx, c.c, p.String(), int(version))
+	if err != nil {
+		return Value{}, time.Time{}, err
+	}
+	if len(l.data) != 2 {
+		return Value{}, time.Time{}, l.r.bad("the data is not exactly a ca and a key")
+	}
+	key, err := l.stringMember("key")
+	if err != nil {
+		return Value{}, time.Time{}, err
+	}
+	v, err := NewValue(KindString, key)
+	if err != nil {
+		return Value{}, time.Time{}, l.r.bad("the key is not a string value")
+	}
+	return v, l.created.UTC(), nil
 }
 
 // ArtifactKey is the name of the Transit key EncryptArtifact encrypts under: the key §11's

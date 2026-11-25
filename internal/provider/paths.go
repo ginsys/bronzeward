@@ -54,6 +54,48 @@ func (p GenerationPath) String() string {
 
 func (p GenerationPath) zero() bool { return p == GenerationPath{} }
 
+// KVPath is a KV object a dependency names (compilation.md §9): a GenerationPath, or the CAPath of
+// the CA key's typed reference. Only this package implements it.
+type KVPath interface {
+	String() string
+	zero() bool
+}
+
+// CAPath is the signer's path of one cluster's CA key as a dependency, access/talos-ca/<cluster>.
+// No write takes one. The zero value addresses nothing.
+type CAPath struct{ cluster string }
+
+// NewCAPath refuses a cluster that is not a cl_ identifier.
+func NewCAPath(cluster string) (CAPath, error) {
+	if _, err := CAKeyPath(cluster); err != nil {
+		return CAPath{}, err
+	}
+	return CAPath{cluster}, nil
+}
+
+// String is the path below the KV mount.
+func (p CAPath) String() string { return caKeyPrefix + p.cluster }
+
+func (p CAPath) zero() bool { return p == CAPath{} }
+
+const caKeyPrefix = "access/talos-ca/"
+
+// ParseKVPath is the KVPath of a stored dependency object.
+func ParseKVPath(s string) (KVPath, error) {
+	if cluster, ok := strings.CutPrefix(s, caKeyPrefix); ok {
+		p, err := NewCAPath(cluster)
+		if err != nil {
+			return nil, err
+		}
+		return p, nil
+	}
+	p, err := ParseGenerationPath(s)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
 // kvDataPath is the request path of a generation's KV v2 data.
 func kvDataPath(p GenerationPath) string { return "/v1/secret/data/" + p.String() }
 

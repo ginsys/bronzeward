@@ -21,7 +21,8 @@ import (
 
 // compilerGrant and metadataGrant are the only stanzas each policy may hold.
 var (
-	compilerGrant = map[string][]string{"secret/data/gen/*": {"read"}, "transit/encrypt/bw-artifact": {"update"}}
+	compilerGrant = map[string][]string{"secret/data/gen/*": {"read"}, "secret/data/access/talos-ca/*": {"read"},
+		"transit/encrypt/bw-artifact": {"update"}}
 	metadataGrant = map[string][]string{"secret/metadata/*": {"read"}, "transit/keys/*": {"read"}}
 )
 
@@ -88,7 +89,8 @@ func policyExact(t *testing.T, b *baotest.Bao, name string, grant map[string][]s
 func TestLiveCompilerPolicyExact(t *testing.T) {
 	b := live(t)
 	policyExact(t, b, "bw-compiler", compilerGrant, []string{
-		decryptArtifact, genMetaRead, caKeyRead,
+		decryptArtifact, genMetaRead, caKeyList, caKeyMetaRead, caKeyDelete,
+		`path "secret/data/access/talos-ca/*" { capabilities = ["read", "update"] }`,
 		`path "secret/data/gen/*" { capabilities = ["read", "create"] }`,
 		`path "transit/encrypt/*" { capabilities = ["update"] }`,
 	})
@@ -142,6 +144,50 @@ func TestLiveCompilerIdentity(t *testing.T) {
 		t.Fatalf("control: the executor's decrypt of the compiler's artifact: %v", err)
 	}
 	t.Logf("the compiler read version 1 and encrypted an artifact the executor decrypted")
+
+	// The CA key at the signer's path (compilation.md §6 step 4, choice §16.40): the one version
+	// asked, its key alone; no list, metadata, write or delete.
+	signerGrants(b)
+	b.Policy("ca-key-write", `path "secret/data/access/talos-ca/*" { capabilities = ["create", "update"] }`)
+	signer, err := NewSigner(b.Addr, tokenOf(b.Token("bw-signer")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := NewCAPath(cl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeAtEnd(t, b, ca.String())
+	stored, err := signer.WriteCAKey(ctx, cl, NewCAKey([]byte(caText), []byte(keyText)), 0)
+	if err != nil {
+		t.Fatalf("control: the signer's create: %v", err)
+	}
+	if _, err := signer.WriteCAKey(ctx, cl, NewCAKey([]byte(caText), []byte(keyText+"2")), 1); err != nil {
+		t.Fatalf("control: the signer's second version: %v", err)
+	}
+	k, kcreated, err := c.ReadCAKey(ctx, ca, 1)
+	if err != nil {
+		t.Fatalf("reading the CA key's version 1: %v", err)
+	}
+	if d, err := k.Decode(); err != nil || d != keyText || k.Kind() != KindString || !kcreated.Equal(stored.CreatedTime) {
+		t.Fatalf("the CA key read: kind %s, %v, created %v", k.Kind(), err, kcreated)
+	}
+	dataPath := "/v1/secret/data/" + ca.String()
+	for what, grant := range map[string]struct{ policy, method, path string }{
+		"listing the CA key paths":    {"ca-key-list", "LIST", "/v1/secret/metadata/access/talos-ca"},
+		"reading a CA key's metadata": {"ca-key-meta-read", http.MethodGet, "/v1/secret/metadata/" + ca.String()},
+		"writing a CA key":            {"ca-key-write", http.MethodPost, dataPath},
+		"deleting a CA key's version": {"ca-key-delete", http.MethodDelete, dataPath},
+	} {
+		deniedWithout(t, b, "the compiler "+what, []string{"bw-compiler"}, grant.policy, func(tok string) error {
+			var in any
+			if grant.method == http.MethodPost {
+				in = map[string]any{"data": map[string]string{"ca": caText, "key": keyText}}
+			}
+			_, err := raw(t, b, tok, grant.method, grant.path, in)
+			return err
+		})
+	}
 
 	deniedWithout(t, b, "the compiler decrypting an artifact", []string{"bw-compiler"}, "decrypt-artifact", func(tok string) error {
 		_, err := decrypt(t, b, tok, "bw-artifact", ct)

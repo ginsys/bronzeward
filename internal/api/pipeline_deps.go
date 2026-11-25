@@ -36,17 +36,17 @@ func (a *API) readPinned(ctx context.Context, j publishJob, s snapshot, m compil
 	for _, rev := range revisions {
 		src := s.sources[rev]
 		for _, name := range slices.Sorted(maps.Keys(src.declarations.References)) {
-			k := pinKey{src.generations[name], src.declarations.References[name].Version}
+			k := pinKey{src.generations[name], src.declarations.References[name].PinnedVersion()}
 			if _, seen := index[k]; seen {
 				continue
 			}
-			path, err := provider.ParseGenerationPath(k.path)
+			path, err := provider.ParseKVPath(k.path)
 			if err != nil {
 				return pinned{}, nil, fmt.Errorf("source %s reference %q: %w", rev, name, err)
 			}
 			// C §5.1: validate scope before classifying or reading any pin, even if
 			// an inconsistent stored reference bypassed the authoring boundary.
-			if !strings.HasPrefix(path.String(), "gen/"+j.cluster+"/") {
+			if !inCluster(path, j.cluster) {
 				return pinned{}, refuse(http.StatusUnprocessableEntity, "validation-failed",
 					"Publication refused: a secret reference belongs to another cluster; "+noRelease+".").
 					with("source", rev).with("reference", name), nil
@@ -67,6 +67,11 @@ func (a *API) readPinned(ctx context.Context, j publishJob, s snapshot, m compil
 	checked := make([]compile.Pinned, len(pins))
 	for i, p := range pins {
 		c, err := compile.CheckPinned(ctx, m, pins[i:i+1])
+		// The CA key's version is the act's only while its created_time is: otherwise the path was
+		// deleted and written again since the act (compilation.md §6 step 2).
+		if _, ca := p.Path.(provider.CAPath); ca && err == nil && !actsTime(c[0].Status.Created, s.caKey.created) {
+			err = &compile.DependencyError{Reference: p.Reference, Object: p.Path.String(), Version: p.Version, Reason: compile.ReasonVersionChanged}
+		}
 		if ref, err := a.dependencyRefusal(j, p.Reference, "kv", p.Path.String(), p.Version, err); ref != nil || err != nil {
 			return pinned{}, ref, err
 		}
@@ -74,6 +79,18 @@ func (a *API) readPinned(ctx context.Context, j publishJob, s snapshot, m compil
 	}
 	values := make([]provider.Value, len(pins))
 	for i, p := range checked {
+		// §6 step 4: the latest act is read again before the signer's path is. A first key supplied
+		// since the pin refuses the publication; the next one pins afresh.
+		if _, ca := p.Path.(provider.CAPath); ca {
+			act, err := latestFirstKey(ctx, a.db, j.cluster)
+			if err != nil {
+				return pinned{}, nil, fmt.Errorf("reading the latest first-key act again: %w", err)
+			}
+			if act.version != s.caKey.version || !act.created.Equal(s.caKey.created) {
+				return pinned{}, refuse(http.StatusConflict, "conflict",
+					"a first key was supplied while the publication compiled; publish again").with("cluster", j.cluster), nil
+			}
+		}
 		v, err := compile.ReadPinned(ctx, r, checked[i:i+1])
 		if ref, err := a.dependencyRefusal(j, p.Reference, "kv", p.Path.String(), p.Version, err); ref != nil || err != nil {
 			return pinned{}, ref, err
@@ -91,10 +108,19 @@ func (a *API) readPinned(ctx context.Context, j publishJob, s snapshot, m compil
 			if out.values[rev] == nil {
 				out.values[rev] = map[string]provider.Value{}
 			}
-			out.values[rev][name] = values[index[pinKey{src.generations[name], ref.Version}]]
+			out.values[rev][name] = values[index[pinKey{src.generations[name], ref.PinnedVersion()}]]
 		}
 	}
 	return out, nil, nil
+}
+
+// inCluster reports whether a pinned object is cluster's: one of its generations, or its CA key.
+func inCluster(p provider.KVPath, cluster string) bool {
+	if _, ok := p.(provider.CAPath); ok {
+		ca, err := provider.NewCAPath(cluster)
+		return err == nil && p == provider.KVPath(ca)
+	}
+	return strings.HasPrefix(p.String(), "gen/"+cluster+"/")
 }
 
 // dependencyRefusal is ruling R33 for one dependency's failure (reference "" for the artifact

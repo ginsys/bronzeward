@@ -75,6 +75,13 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 			err = documentsOnly(err)
 		}
 	}()
+	// No request declares the CA key's typed reference (compilation.md §5.1): this is the one entry of
+	// every request, and only stored data may hold the kind.
+	for name, r := range req.Declarations.References {
+		if r.Kind == provider.KindCAKey {
+			return nil, refuse(RuleBadDeclaration, name)
+		}
+	}
 	if err := validate(docs, req.Declarations); err != nil {
 		return nil, err
 	}

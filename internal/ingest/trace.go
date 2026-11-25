@@ -391,7 +391,7 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 			if next > maxTracerID {
 				return nil, refuse(RuleTraceIndistinct, p.String())
 			}
-			t := &tracer{id: next, ref: name, version: ref.Version, encoding: ref.Encoding, declared: ref.Kind, member: -1,
+			t := &tracer{id: next, ref: name, version: ref.PinnedVersion(), encoding: ref.Encoding, declared: ref.Kind, member: -1,
 				at: &occurrence{keys[i], p}}
 			if n.Kind == yaml.MappingNode {
 				t.member, t.members = i, len(leaves)
@@ -406,7 +406,7 @@ func TraceKeeping(s Sanitized, values map[string]provider.Value, first, flip int
 					x.value = strconv.FormatBool(leaf.Value != "true")
 					flipped = true
 				}
-			case ref.Encoding == "base64" && n.Kind != yaml.MappingNode:
+			case (ref.Encoding == "base64" || ref.Kind == provider.KindCAKey) && n.Kind != yaml.MappingNode:
 				plain, err := base64.StdEncoding.DecodeString(leaf.Value)
 				if err != nil {
 					return nil, refuse(RuleUnresolved, p.String())
