@@ -99,7 +99,7 @@ cat >"$work/fake-docker" <<'EOF'
 #!/bin/sh
 case $1 in
 run | rm) exit 0 ;;
-inspect) exit "${BW_FAKE_INSPECT_RC:-1}" ;;
+ps) [ "$2 $3 $4" = '-aq --filter name=^bw-doc-blocks$' ] || exit 99; printf '%s' "${BW_FAKE_PS_OUT:-}"; exit "${BW_FAKE_PS_RC:-0}" ;;
 exec)
 	case $3 in
 	sh) [ "$4" = -e ] || exit 99; exec "$BW_DOC_EXEC" "$BW_FAKE_BLOCKS/${5#/blocks/}" ;;
@@ -150,7 +150,9 @@ BW_FAKE_VERSION_RC=1 expect 1 "bronzewardctl version fails" "bronzewardctl versi
 BW_FAKE_START_RC=1 expect 1 "the fixture does not start" "" "$runner" run
 # Cleanup failures turn a pass into a failure, and never hide an earlier failure.
 BW_FAKE_STOP_RC=1 expect 1 "the fixture does not stop" "stopping the fixture failed" "$runner" run
-BW_FAKE_INSPECT_RC=0 expect 1 "the container is still there" "is still there" "$runner" run
+BW_FAKE_PS_OUT=3f9a1c expect 1 "the container is still there" "is still there" "$runner" run
+# A listing that fails (Docker unreachable after the last block) is not an absence: the old check, a failed `docker inspect`, read it as one.
+BW_FAKE_PS_RC=1 expect 1 "docker cannot list the containers after the last block" "could not list containers" "$runner" run
 BW_DOC_EXEC=$work/stub-planted BW_FAKE_STOP_RC=1 expect 1 "a failing block and a failing stop" "bad-3 (container) exited 3" "$runner" run "$work/bad.md"
 
 # The fixture's stop waits for each process: one that ends is gone and loses its pid file, one that

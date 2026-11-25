@@ -54,6 +54,8 @@ the draft's ETag for later writes.
 
 Steps:
 
+<!-- bw-web-steps: protected-import -->
+
 1. Open the list of imports and press **Start import**. Choose the **Machine:** and the **Draft:**
    (**Create draft** is beside it if the cluster has none open). Under **Source**, choose **Read from
    the machine**. Under **Staging**, choose **Encrypted staging**, and tick the box that pauses for

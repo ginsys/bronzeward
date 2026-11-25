@@ -10,6 +10,8 @@ account at the identity provider. Use a current browser. The page needs JavaScri
 
 The steps are numbered. Each one names what you do and what you should see.
 
+<!-- bw-web-steps: quick-start-web -->
+
 1. **Open the address.** Type the web address in the browser. The page loads and shows "Loading"
    for a moment. With no sign-in open in another tab of this browser, the page then sends the
    browser to the identity provider by itself, with no button to press. If it shows a message

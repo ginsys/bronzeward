@@ -68,10 +68,16 @@ account() {
 # cleanup, the EXIT trap of run: remove the container and stop the fixture. A failure of either turns a
 # successful run into a failed one (a process left behind is not a pass) and never hides an earlier failure.
 cleanup() {
-	local rc=$?
+	local rc=$? left
 	"$dk" rm -f "$ctr" >/dev/null 2>&1 || true
-	if "$dk" inspect "$ctr" >/dev/null 2>&1; then
-		echo "run-doc-blocks: the container $ctr is still there after its removal" >&2
+	# The absence is read from a listing. A failed `inspect` would read as "gone" when Docker is unreachable.
+	if left=$("$dk" ps -aq --filter "name=^$ctr\$"); then
+		if [ -n "$left" ]; then
+			echo "run-doc-blocks: the container $ctr is still there after its removal" >&2
+			rc=1
+		fi
+	else
+		echo "run-doc-blocks: could not list containers to confirm that $ctr is gone" >&2
 		rc=1
 	fi
 	"$fx" stop "$state" || { echo "run-doc-blocks: stopping the fixture failed" >&2; rc=1; }

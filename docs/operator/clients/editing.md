@@ -59,6 +59,8 @@ render any machine's configuration: nothing is rendered until the draft is publi
 
 Steps:
 
+<!-- bw-web-steps: editing -->
+
 1. Open **Drafts and releases** in the navigation, and the **Create draft** form. Choose the
    **Cluster:**, fill in **Title:** and press the form's **Create draft** button. The form then
    says "Draft" and the draft's name as a link, "created", and its cluster. Press the draft's name

@@ -59,7 +59,7 @@ const statusIs = (text: string) =>
   browser.waitUntil(async () => (await browser.execute(() => document.querySelector('[data-testid="status"]')?.textContent ?? "")) === text, { timeout: 20_000, timeoutMsg: `the status did not show ${text}` });
 
 describe("the machines", () => {
-  it("empty: a deployment with no machine says so, as a status message", async () => {
+  it("empty: a deployment with no machine says so, as a status message [step quick-start-web.4]", async () => {
     const at = await disposable();
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
     await expect($('[data-testid="status"]')).toHaveText("No machines recorded yet.");
@@ -68,7 +68,7 @@ describe("the machines", () => {
     await expect($("main h2")).toHaveText("Machines");
   });
 
-  it("W2: endpoint, node ID and state per machine; the state filter in the browser, the cluster filter on the server, both in the query", async () => {
+  it("W2: endpoint, node ID and state per machine; the state filter in the browser, the cluster filter on the server, both in the query [step quick-start-web.4] [step inventory-1.1] [step inventory-1.2] [step inventory-1.4]", async () => {
     const at = await disposable();
     const [a, b] = [await cluster(at, "lab-a"), await cluster(at, "lab-b")];
     const ids = await machines(at, a.id, 3);
@@ -94,7 +94,7 @@ describe("the machines", () => {
     await expect($("main")).toHaveText(expect.stringContaining("Health is not checked."));
   });
 
-  it("links: a machine's path opens its item, in the page, after a reload and after sign-in in a new tab", async () => {
+  it("links: a machine's path opens its item, in the page, after a reload and after sign-in in a new tab [step inventory-1.3]", async () => {
     const at = await disposable();
     const cl = await cluster(at, "lab-a");
     const [id] = await machines(at, cl.id, 1);
@@ -129,6 +129,39 @@ describe("the machines", () => {
     await browser.url(`${FIXTURE_PAGE}/clusters/${cl.id}`);
     await expect($("main h2")).toHaveText("Cluster lab-a", { wait: 20_000 });
     expect(await where()).toBe(`${FIXTURE_PAGE}/clusters/${cl.id}`);
+  });
+
+  // inventory.md, the first web steps list, step 3: a person with the `author` role also sees the cluster's Talos access line.
+  // What the line says is the secret store's answer, which this deployment's store may refuse (the injector never replaces a
+  // refusal): the case reads that the line is there for an author, and that it is not for a viewer on the same page.
+  async function clusterPage(human: string) {
+    const at = await disposable();
+    const cl = await cluster(at, "lab-a");
+    expect(await fixtureSignIn(human, {}, { upstream: at })).toMatch(SERVER);
+    await nav("Clusters");
+    await $("a=lab-a").click();
+    await expect($("main h2")).toHaveText("Cluster lab-a");
+    await expect($("main").$("h3=Machines")).toBeDisplayed({ wait: 20_000 });
+  }
+
+  it("a cluster's page shows an author the Talos access line [step inventory-1.3]", async () => {
+    await clusterPage("h-author");
+    // Each sentence the line can say (web/src/talosaccess.tsx) names the key; the one for a read still under way does not.
+    await expect($('[data-testid="talos-access"]')).toHaveText(expect.stringMatching(/Talos access key (held|not supplied|was deleted)|Cannot tell whether the Talos access key/), { wait: 20_000 });
+  });
+
+  it("a cluster's page shows a viewer no Talos access line [step inventory-1.3]", async () => {
+    await clusterPage("h-viewer");
+    // The page is loaded (its Machines heading was awaited) and the author's case above shows the line on the same page.
+    await absent(() => $('[data-testid="talos-access"]').isExisting(), "the Talos access line for a viewer");
+  });
+
+  // inventory.md, the second web steps list, step 1: the button is off for a person without `author`, with the reason.
+  it("Add machine is off for a viewer, with its reason [step inventory-2.1]", async () => {
+    const at = await disposable();
+    expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
+    await expect($("main").$("button=Add machine")).toBeDisabled({ wait: 20_000 });
+    await expect($("main")).toHaveText(expect.stringContaining("Needs author"));
   });
 
   it("a delayed answer after a filter change is not rendered", async () => {
@@ -400,7 +433,7 @@ describe("the machine detail (W3)", () => {
     expect(await machineReads()).toBe(before + 1);
   });
 
-  it("#375: the timeline's newest page first, never the whole timeline; Load older appends the older page and is gone at its start", async function () {
+  it("#375: the timeline's newest page first, never the whole timeline; Load older appends the older page and is gone at its start [step operation-tracking.4]", async function () {
     this.timeout(120_000);
     const at = await disposable();
     const cl = await cluster(at, "lab-a");
@@ -679,7 +712,7 @@ describe("the read-only lists and items", () => {
     expect(seen.small).toBe(0);
   });
 
-  it("a release, a plan, its operations and a dependency, each from its link, with their records", async () => {
+  it("a release, a plan, its operations and a dependency, each from its link, with their records [step publication.3] [step operation-tracking.1]", async () => {
     const at = await disposable();
     const cl = await cluster(at, "lab-a");
     const [m] = await machines(at, cl.id, 1);
@@ -758,7 +791,7 @@ describe("the rendered review of a release's machine", () => {
     "machine:", "  registries:", "    config:", "      registry.example.test:", "        auth:", "          username: ci-pull",
     "          password: <redacted:registry/example-pass@1>", "  nodeLabels:", '    team: ""', "  token: <redacted:schema>",
   ].join("\n");
-  async function served(over: Partial<S["ReviewBody"]> = {}, applied: Machine["applied"] = null) {
+  async function served(over: Partial<S["ReviewBody"]> = {}, applied: Machine["applied"] = null, human = "h-viewer") {
     const at = await disposable();
     const cl = await cluster(at, "lab-a");
     const [m] = await machines(at, cl.id, 1);
@@ -773,7 +806,7 @@ describe("the rendered review of a release's machine", () => {
       id: m!, cluster: cl.id, name: null, role: null, hardware: { smbiosUuid: null, talosNodeId: "synthetic-node-0", serial: null }, platform: "metal", talosEndpoint: "192.0.2.1:50000",
       desired: s.rel.id, applied, pendingConvergence: true, formOnly: false, observed: null, frozen: false, scopeState: "normal", openDrift: null,
     };
-    expect(await fixtureSignIn("h-viewer", {}, { upstream: at, bodies: { ...s.bodies, [path]: review, [`/machines/${m}`]: machine, [`/machines/${m}/position`]: { machine, ingestion: null, draft: null, plan: null, operation: null, rolloutHeldBy: null, step: "needs-plan" } } })).toMatch(SERVER);
+    expect(await fixtureSignIn(human, {}, { upstream: at, bodies: { ...s.bodies, [path]: review, [`/machines/${m}`]: machine, [`/machines/${m}/position`]: { machine, ingestion: null, draft: null, plan: null, operation: null, rolloutHeldBy: null, step: "needs-plan" } } })).toMatch(SERVER);
     return { s, m: m! };
   }
   const reviewOf = (rel: string, machine: string) => `/releases/${rel}/machines/${machine}/review`;
@@ -786,7 +819,7 @@ describe("the rendered review of a release's machine", () => {
     await expect($("main h2")).toHaveText(`Rendered configuration of ${ADDRESS} in release ${short(rel)}`);
   }
 
-  it("T6, T7: a redaction token is a badge with its kind in words, an empty value stays empty, provenance and the next step are served", async () => {
+  it("T6, T7: a redaction token is a badge with its kind in words, an empty value stays empty, provenance and the next step are served [step publication.4]", async () => {
     const { s, m } = await served();
     await open(s.rel.id, m);
     expect(await where()).toBe(`${FIXTURE_PAGE}/releases/${s.rel.id}/machines/${m}`);
@@ -804,7 +837,17 @@ describe("the rendered review of a release's machine", () => {
     expect(await (await fetch(`${CONTROL}/writes`)).json()).toEqual([]);
   });
 
-  it("a machine with an Applied configuration is told an apply-config plan sends the release", async () => {
+  it("Plan adopt, on the Next step of a machine with no Applied configuration, opens the plan form for this release and machine and sends nothing [step publication.4]", async () => {
+    const { s, m } = await served({}, null, "h-publisher");
+    await open(s.rel.id, m);
+    await $("main").$("button=Plan adopt").click();
+    await expect($("main h2")).toHaveText("Create a plan", { wait: 20_000 });
+    expect([await param("release"), await param("machine"), await param("operation")]).toEqual([s.rel.id, m, "adopt"]);
+    // once: the case presses no submit, and the page sends a write only from a submit.
+    expect(await (await fetch(`${CONTROL}/writes`)).json()).toEqual([]);
+  });
+
+  it("a machine with an Applied configuration is told an apply-config plan sends the release [step publication.4]", async () => {
     const { s, m } = await served({}, { release: `rel_${"a".repeat(26)}`, source: "operation", importBase: null });
     await open(s.rel.id, m);
     await expect($('[data-testid="next-step"]')).toHaveText(expect.stringContaining("An apply-config plan sends this release to it"));

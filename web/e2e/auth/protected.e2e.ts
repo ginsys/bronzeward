@@ -237,7 +237,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await cacheControl(at);
   });
 
-  it("PROT-01: a protected import is paused, reviewed, marked and continued; the review leaves no storage and no cached answer", async function () {
+  it("PROT-01: a protected import is paused, reviewed, marked and continued; the review leaves no storage and no cached answer [step protected-import.1] [step protected-import.2] [step protected-import.3] [step protected-import.4]", async function () {
     this.timeout(180_000);
     const id = await pausedImport();
     await openReview();
@@ -378,7 +378,7 @@ describe("the protected import review (ginsys/bronzeward#341)", () => {
     await abandon();
   });
 
-  it("PROT-05: the staged envelope cannot be decrypted after the mark is accepted; the mark is not applied, takeover is offered once the lease lapses, and abandon at once", async function () {
+  it("PROT-05: the staged envelope cannot be decrypted after the mark is accepted; the mark is not applied, takeover is offered once the lease lapses, and abandon at once [step protected-import.4]", async function () {
     this.timeout(180_000);
     await pausedImport();
     await openReview();

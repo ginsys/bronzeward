@@ -10,6 +10,7 @@ import { $, $$, browser, expect } from "@wdio/globals";
 import { CONTROL, FIXTURE_PAGE } from "../auth.conf.ts";
 import { type Change, changesText, epochRead, failedWith } from "../focus-context.ts";
 import type { Faults } from "../injector.ts";
+import { CLOSING } from "../../src/operation.tsx";
 import { absent, answers, api, counts, disposable, faults, fixtureSignIn, fromTitle, itNarrow, measure, mint, narrow, overflows, type Seed, storageEmpty, tab } from "./helpers.ts";
 
 const LIVE = "Live: connected (resumes after a drop)";
@@ -86,7 +87,24 @@ describe("the operation page's stream (#359)", () => {
     console.log(JSON.stringify({ case: this.currentTest.title.slice(0, 8), rows: await rows(), timeline: await timeline(), streams: await streams(), cuts: await cuts(), server: events.map((e) => e.id) }));
   });
 
-  it("EVT-01: a stream cut mid-operation is opened again with Last-Event-ID, and no event is shown twice", async function () {
+  // operation-tracking.md, web step 3: closing the page leaves the operation as it was, and opened again the page reads the server's state.
+  it("closing the page does not stop the operation: the page says so, and opened again it shows the server's events [step operation-tracking.3]", async function () {
+    this.timeout(120_000);
+    const s = await start();
+    await open(s);
+    await reach(s.ids.length);
+    await expect($("main")).toHaveText(expect.stringContaining(CLOSING));
+    await browser.url(`${FIXTURE_PAGE}/`);
+    await expect($("main h2")).toHaveText("Machines", { wait: 30_000 });
+    const read = await api(s.at, "h-viewer", "GET", `/operations/${s.op}`);
+    expect([read.status, read.body!["state"]]).toEqual([200, "unresolved"]);
+    await browser.url(`${FIXTURE_PAGE}/operations/${s.op}`);
+    await $('[data-testid="events"]').waitForExist({ timeout: 30_000 });
+    await reach(s.ids.length);
+    await storageEmpty();
+  });
+
+  it("EVT-01: a stream cut mid-operation is opened again with Last-Event-ID, and no event is shown twice [step operation-tracking.1] [step operation-tracking.2]", async function () {
     this.timeout(120_000);
     const s = await start();
     const n = s.ids.length;

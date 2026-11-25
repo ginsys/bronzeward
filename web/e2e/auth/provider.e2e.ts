@@ -8,7 +8,7 @@ import { idpSignIn, param, storageEmpty, userId, where } from "./helpers.ts";
 const issuer = idpEnv()["BW_TEST_IDP_ISSUER"]!;
 
 describe("signed in through the test provider", () => {
-  it("AUTH-01: sign in and read", async () => {
+  it("AUTH-01: sign in and read [step quick-start-web.1] [step quick-start-web.2] [step quick-start-web.3] [step sign-in-and-renewal.1] [step sign-in-and-renewal.2] [step sign-in-and-renewal.3]", async () => {
     expect(await idpSignIn("h-viewer")).toMatch(/^Server .+, API revision \d+$/);
     // The provider's userinfo answer names the person (a name, else a preferred username, both built from the
     // seeded user "h-viewer"), so the header never shows the subject number and is not the fallback sentence.
@@ -16,7 +16,7 @@ describe("signed in through the test provider", () => {
     await storageEmpty();
   });
 
-  it("AUTH-08: sign out, then back navigation shows no data", async () => {
+  it("AUTH-08: sign out, then back navigation shows no data [step quick-start-web.7] [step sign-in-and-renewal.4]", async () => {
     await idpSignIn("h-viewer");
     await $("button=Sign out").click();
     // The provider's end-session answer goes to its login UI's logout page, which mise run

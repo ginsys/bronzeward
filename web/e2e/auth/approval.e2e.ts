@@ -69,7 +69,7 @@ describe("approval and revocation (#358)", () => {
   const approve = () => $('main form[aria-label="Approve plan"]').$("button=Approve");
   const posts = async () => (await writes()).filter((w) => w.startsWith("POST "));
 
-  it("a proposed plan shows its prediction and what Approve records, with no field to fill; one press approves, and a second submit sends nothing new", async function () {
+  it("a proposed plan shows its prediction and what Approve records, with no field to fill; one press approves, and a second submit sends nothing new [step plan-and-approval-1.3]", async function () {
     this.timeout(120_000);
     await open("h-all", { "/identity": await identity("h-all"), [`/plans/${PLAN}`]: plan("proposed"), [`/releases/${REL}`]: release, [`/drafts/${DRAFT}`]: draft, [approvals]: approval(["created-plan"]) });
     await expect($('[data-testid="self-approval"]')).toHaveText(

@@ -47,6 +47,8 @@ the server names no person here.
 
 **Web.** Steps:
 
+<!-- bw-web-steps: sign-in-and-renewal -->
+
 1. Open the installation's web address. With no sign-in open in another tab of this browser, the
    page sends the browser to the identity provider by itself, with no button to press.
 2. Sign in at the identity provider. The browser returns to the installation. If the sign-in

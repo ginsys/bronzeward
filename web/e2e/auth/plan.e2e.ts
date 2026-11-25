@@ -30,7 +30,7 @@ describe("the plan creation page (#357)", () => {
     machine = await syntheticMachine(at);
   });
 
-  it("a plan for a release the server does not know is refused and saved nowhere", async function () {
+  it("a plan for a release the server does not know is refused and saved nowhere [step plan-and-approval-1.1]", async function () {
     this.timeout(120_000);
     expect(await fixtureSignIn("h-publisher", {}, { upstream: at })).toMatch(SERVER);
     const unknown = `rel_${"y".repeat(26)}`;
@@ -97,7 +97,7 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     ({ at: sat, seed } = await seeded());
   });
 
-  it("a created plan says it is not approved and opens the plan; one POST is sent and the server holds it", async function () {
+  it("a created plan says it is not approved and opens the plan; one POST is sent and the server holds it [step plan-and-approval-1.1] [step plan-and-approval-1.2]", async function () {
     this.timeout(120_000);
     expect(await fixtureSignIn("h-publisher", {}, { upstream: sat })).toMatch(SERVER);
     await browser.url(`${FIXTURE_PAGE}/plans/new?${new URLSearchParams({ release: seed.release, machine: seed.machine2, operation: "apply-config" })}`);
@@ -112,7 +112,7 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     await expect($("main h2")).toHaveText(expect.stringMatching(/^Plan(: .+ \(proposed\)| \S+: proposed)$/), { wait: 20_000 });
   });
 
-  it("W3's timeline links the plan and the operation a commitment names, and the operation's link opens its page (#359)", async function () {
+  it("W3's timeline links the plan and the operation a commitment names, and the operation's link opens its page (#359) [step operation-tracking.1]", async function () {
     this.timeout(120_000);
     expect(await fixtureSignIn("h-viewer", {}, { upstream: sat })).toMatch(SERVER);
     await browser.url(`${FIXTURE_PAGE}/machines/${seed.machine}`);
@@ -138,7 +138,7 @@ describe("the plan pages on a seeded deployment (#822)", () => {
     expect(await writes()).toEqual([]);
   });
 
-  it("an approved plan: a reason is required, and [Cancel plan] sends one cancellation the server records", async function () {
+  it("an approved plan: a reason is required, and [Cancel plan] sends one cancellation the server records [step plan-and-approval-1.4]", async function () {
     this.timeout(120_000);
     const route = `/plans/${seed.plans.approved}/cancellations`;
     // The automation identity made the seeded plan, and a publisher cancels only its own plans.

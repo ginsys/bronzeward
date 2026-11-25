@@ -240,7 +240,7 @@ describe("the draft editor (#339)", () => {
     }
   });
 
-  it("Create draft, then a fragment saved: the entry is new, the footer says the draft is not rendered, and unsaved text is guarded", async () => {
+  it("Create draft, then a fragment saved: the entry is new, the footer says the draft is not rendered, and unsaved text is guarded [step editing.1] [step editing.2] [step editing.3]", async () => {
     expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);
     await $('nav[aria-label="Main"]').$("a=Drafts and releases").click();
     await $("main").$("button=Create draft").click();
@@ -408,7 +408,7 @@ describe("the draft editor (#339)", () => {
     await absent(() => notice().isExisting(), "the replayed-result notice after Dismiss");
   });
 
-  it("Revert to base on a new entry says it has no base; Remove proposes the removal; Discard asks, then discards", async () => {
+  it("Revert to base on a new entry says it has no base; Remove proposes the removal; Discard asks, then discards [step editing.2] [step editing.3] [step editing.7]", async () => {
     const name = `rm-${hex()}`;
     const { id } = await seeded(name);
     await openDraft(id);
@@ -484,7 +484,7 @@ describe("the draft editor (#339)", () => {
       await browser.waitUntil(async () => (await order()).length === pins, { timeout: 20_000, timeoutMsg: "the editor did not load the profile's pins" });
     };
 
-    it("a profile pins two revisions in order, one is moved and saved by keyboard, and the order reads back", async () => {
+    it("a profile pins two revisions in order, one is moved and saved by keyboard, and the order reads back [step editing.4]", async () => {
       const a = `pa-${hex()}`;
       const b = `pb-${hex()}`;
       const p = `prof-${hex()}`;
@@ -615,7 +615,7 @@ describe("the draft editor (#339)", () => {
       await browser.waitUntil(async () => (await names("Layer role")).length === count, { timeout: 20_000, timeoutMsg: "the editor did not load the assignment's list" });
     };
 
-    it("an assignment lists two fragments of a layer, one is moved and saved by keyboard, and the order reads back", async () => {
+    it("an assignment lists two fragments of a layer, one is moved and saved by keyboard, and the order reads back [step editing.5]", async () => {
       const a = `aa-${hex()}`;
       const b = `ab-${hex()}`;
       const m = await machine();
@@ -722,7 +722,7 @@ describe("the draft editor (#339)", () => {
       await refusedAt(seed.id, m, "profiles[0]", [seed.revision, (profile.body!["entry"] as { revision: string }).revision]);
     });
 
-    it("Show composition and references lists a profile's pin before the assignment's fragment of its layer, and no document", async () => {
+    it("Show composition and references lists a profile's pin before the assignment's fragment of its layer, and no document [step editing.6]", async () => {
       const a = `ac-${hex()}`;
       const b = `ad-${hex()}`;
       const p = `asgprof-${hex()}`;
