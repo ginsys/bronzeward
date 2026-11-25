@@ -68,7 +68,7 @@ describe("the apply page (#1096)", () => {
   const choose = (m: string) => $(`[data-testid="apply-row"][data-machine="${m}"] input[type=checkbox]`);
   const posts = async () => (await writes()).filter((w) => w.startsWith("POST "));
 
-  it("lists the release's machines with role and profiles and none chosen (check 1)", async function () {
+  it("lists the release's machines with role and profiles and none chosen (check 1) [step plan-and-approval-2.1]", async function () {
     this.timeout(120_000);
     await open("h-all", bodies());
     await browser.waitUntil(async () => (await rows().length) === 2, { timeout: 20_000, timeoutMsg: "two machine rows did not appear" });
@@ -85,7 +85,7 @@ describe("the apply page (#1096)", () => {
     expect(await posts()).toEqual([]);
   });
 
-  it("lists the plans of exactly the machines chosen, each with its own change (check 2)", async function () {
+  it("lists the plans of exactly the machines chosen, each with its own change (check 2) [step plan-and-approval-2.2]", async function () {
     this.timeout(120_000);
     await open("h-all", bodies());
     await browser.waitUntil(async () => (await rows().length) === 2, { timeout: 20_000 });
@@ -110,7 +110,7 @@ describe("the apply page (#1096)", () => {
     await expect($('[data-testid="apply-control-plane"]')).toBeExisting();
   });
 
-  it("approves the plan of the machine chosen and no other (check 3)", async function () {
+  it("approves the plan of the machine chosen and no other (check 3) [step plan-and-approval-2.3]", async function () {
     this.timeout(120_000);
     await open("h-all", bodies());
     await browser.waitUntil(async () => (await rows().length) === 2, { timeout: 20_000 });
@@ -128,7 +128,7 @@ describe("the apply page (#1096)", () => {
     expect(await posts()).toEqual([`POST /plans/${PB}/approvals`]);
   });
 
-  it("makes a plan for a machine that has none and cancels it when the choice changes", async function () {
+  it("makes a plan for a machine that has none and cancels it when the choice changes [step plan-and-approval-2.2] [step plan-and-approval-2.4]", async function () {
     this.timeout(120_000);
     const none = { [`/machines/${A}/position`]: position(mA, "needs-plan", null), "/plans": plan(PA, A, ""), [`/plans/${PA}/cancellations`]: { id: PA } };
     await open("h-all", bodies(none));
@@ -142,6 +142,20 @@ describe("the apply page (#1096)", () => {
     await browser.waitUntil(async () => (await posts()).includes(`POST /plans/${PA}/cancellations`), { timeout: 20_000, timeoutMsg: "the plan the page made was not cancelled" });
     // once: the plan was made once and cancelled once, and the case sends nothing else.
     expect(await posts()).toEqual(["POST /plans", `POST /plans/${PA}/cancellations`]);
+  });
+
+  it("a plan whose change the server withholds keeps Apply off, and the page names that plan and links to it [step plan-and-approval-2.4]", async function () {
+    this.timeout(120_000);
+    const p = plan(PA, A, "");
+    const withheld = { ...p, evidence: { ...p.evidence, diff: { from: rel("a"), to: REL, withheld: true, unified: "" } } };
+    await open("h-all", bodies({ [`/plans/${PA}`]: withheld }));
+    await browser.waitUntil(async () => (await rows().length) === 2, { timeout: 20_000 });
+    await choose(A).click();
+    await expect($('[data-testid="apply-withheld"]')).toHaveText(expect.stringContaining("Open the plan"), { wait: 20_000 });
+    expect(await $('[data-testid="apply-withheld"]').$("a=Open the plan").getAttribute("href")).toContain(`/plans/${PA}`);
+    await expect($("button=Apply")).toBeDisabled();
+    // once: the case presses nothing, and the page sends a write only from a press.
+    expect(await posts()).toEqual([]);
   });
 
   it("a viewer sees the controls disabled, each with its reason (check 7)", async function () {

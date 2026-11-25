@@ -51,7 +51,7 @@ async function announced(id: string, text: string | RegExp, role: "status" | "al
 }
 
 describe("the shell", () => {
-  it("says in words who is signed in, shows the roles GET /identity serves and no epoch, and navigates by path", async () => {
+  it("says in words who is signed in, shows the roles GET /identity serves and no epoch, and navigates by path [step quick-start-web.3] [step quick-start-web.6] [step sign-in-and-renewal.3]", async () => {
     expect(await fixtureSignIn("h-viewer")).toMatch(SERVER);
     const res = await fetch(`${FIXTURE_API}/api/v1/identity`, { headers: { Authorization: `Bearer ${mint("h-viewer")}` } });
     const served = (await res.json()) as { roles: string[] };
@@ -78,7 +78,7 @@ describe("the shell", () => {
     expect(s.slice(4).sort()).toEqual(["/clusters", "/identity", "/identity", "/machines", "/plans"]);
   });
 
-  it("the navigation is grouped and static beside the page, and its icons are decorative (ginsys/bronzeward#973)", async () => {
+  it("the navigation is grouped and static beside the page, and its icons are decorative (ginsys/bronzeward#973) [step quick-start-web.5]", async () => {
     // A desktop window, wider than the 68 rem below which the navigation stacks; put back afterwards.
     const size = await browser.getWindowSize();
     await browser.setWindowSize(1400, Math.max(size.height, 800));
@@ -126,7 +126,7 @@ describe("the shell", () => {
     expect(s.filter((p) => p === "/clusters")).toHaveLength(3);
   });
 
-  it("COMP-01: a server below the client's minimum API revision is refused before any other read, both revisions named", async () => {
+  it("COMP-01: a server below the client's minimum API revision is refused before any other read, both revisions named [step quick-start-web.6]", async () => {
     expect(await fixtureSignIn("h-viewer", {}, { revision: 1 })).toBe(incompatible(1));
     await absent(() => testid("principal").isExisting(), "the principal after the refusal");
     await absent(() => $("nav").isExisting(), "the navigation after the refusal");

@@ -99,6 +99,8 @@ which revision the server has and sends nothing.
 
 ## Web client
 
+<!-- bw-web-steps: operation-tracking -->
+
 1. Open the operation. A plan page that has committed names it ("Committed: operation
    <operation>"). The page opens with a sentence for the
    operation's kind and state, the outcome, and the next step.

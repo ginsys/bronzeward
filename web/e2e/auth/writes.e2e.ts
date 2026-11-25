@@ -355,7 +355,7 @@ describe("the write views (#338)", () => {
     await oneWrite(1);
   });
 
-  it("keyboard only: Record machine and Change endpoint are filled and sent without the pointer", async () => {
+  it("keyboard only: Record machine and Change endpoint are filled and sent without the pointer [step inventory-2.2] [step inventory-2.3]", async () => {
     const name = await add([]);
     await expect(result()).toHaveText(expect.stringContaining(`Cluster ${name} recorded as`), { wait: 20_000 });
     await $('nav[aria-label="Main"]').$("a=Machines").click();

@@ -174,7 +174,7 @@ describe("the import pages (#340)", () => {
     await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining(`revision ${imported + 1}`), { wait: 20_000 });
   });
 
-  it("encrypted staging with review: the import pauses, the page says so, and after a reload shows paused with continue or abandon; the paused filter lists it", async function () {
+  it("encrypted staging with review: the import pauses, the page says so, and after a reload shows paused with continue or abandon; the paused filter lists it [step protected-import.1]", async function () {
     this.timeout(120_000);
     const id = await draft();
     expect(await fixtureSignIn("h-author", {}, { upstream: at })).toMatch(SERVER);

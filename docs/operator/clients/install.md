@@ -48,8 +48,10 @@ every platform, so it takes a while.
 
 **What the output blocks on this page are.** A block that shows output shows its shape, read from
 the source and the checks the repository runs. This page does not claim that a run printed it.
-A block marked to run is run in a later documentation run, and this page is changed to say so
-only after that run.
+A block marked to run is run by the `doc-blocks` job of the `CI` workflow on every pull request
+(`scripts/release/run-doc-blocks.sh`): the first two on the host, the others in a clean container.
+The job fails when one of them exits with an error. It does not compare any output with the
+blocks shown on this page.
 
 ```bash {.bw-run .bw-host}
 BW_VERSION=v0.0.0-dev mise run package

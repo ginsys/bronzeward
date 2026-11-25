@@ -79,6 +79,8 @@ bronzewardctl release provenance <release> <machine>
 
 ## Web client
 
+<!-- bw-web-steps: publication -->
+
 1. Open the draft and choose **Publish this draft**. The page "Publish draft" says that
    publishing builds a release from this draft, renders every machine of the cluster whose
    imported configuration is in this draft or in the release applied to it, and makes the release

@@ -45,6 +45,8 @@ the State column when no state applies. The web page uses its own badges, listed
 
 **Web.** Steps:
 
+<!-- bw-web-steps: inventory-1 -->
+
 1. Open **Machines** in the left navigation (the first page after you sign in). The page lists
    one row for each machine: machine, endpoint, node, desired, applied (source), observed and state.
 2. Narrow the list with the **Cluster:** and **State:** menus. The state menu offers "Changed on the
@@ -97,6 +99,8 @@ Next: supply the cluster's first key (cluster first-key), then import its config
 The endpoint is an IP address, with the port 50000 unless you give one.
 
 **Web.** Steps:
+
+<!-- bw-web-steps: inventory-2 -->
 
 1. Open **Machines** and press **Add machine**. The button is absent or off for a person without
    `author`, with the reason.

@@ -25,12 +25,14 @@ describe("a token the server does not accept", () => {
     ["groups-not-array", undefined],
   ];
   for (const [defect, read] of cases) {
-    it(`AUTH-02 ${defect}: 401, one renewal attempt, the browser's own reading`, async () => {
+    it(`AUTH-02 ${defect}: 401, one renewal attempt, the browser's own reading [step quick-start-web.2] [step sign-in-and-renewal.2]`, async () => {
       expect(await fixtureSignIn("h-viewer", { defect })).toBe(NOT_ACCEPTED);
       if (read === undefined) await absent(() => reading().isExisting(), "the browser's own reading after the refusal");
       else expect(await reading().getText()).toContain(read);
       expect((await counts()).refresh).toBe(1);
       await noLoop();
+      // The page offers the button that starts the sign-in again, and starts none itself (quick-start-web step 2).
+      await expect($("button=Sign in with the identity provider")).toBeDisplayed();
     });
   }
 });

@@ -133,6 +133,8 @@ one machine of a cluster at a time, in an order it does not promise.
 Under "Next step" on that rendered page, **Plan adopt** or **Plan apply** opens the plan form and
 sends nothing.
 
+<!-- bw-web-steps: plan-and-approval-1 -->
+
 1. In the form "Create plan", choose the operation: "apply-config (send this release, mode
    no-reboot)" or "adopt (records what the machine runs; sends nothing to it)". Leave a limit
    blank to use the default.
@@ -145,6 +147,8 @@ sends nothing.
    cancelling ends the operation only while no attempt is recorded.
 
 **Several machines.** On the release page choose **Apply this release to machines**.
+
+<!-- bw-web-steps: plan-and-approval-2 -->
 
 1. Tick the machines to change. None is chosen for you. Each line shows the machine's name, its
    role and its profiles, and where it stands for this release: "Not applied yet.", "A plan is

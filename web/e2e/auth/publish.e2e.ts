@@ -60,7 +60,7 @@ describe("the publication page (#342)", () => {
     machine = m.body!["id"] as string;
   });
 
-  it("Publish sends the draft's kept ETag, follows the operation to its end, and sends nothing to any machine", async function () {
+  it("Publish sends the draft's kept ETag, follows the operation to its end, and sends nothing to any machine [step publication.1] [step publication.2]", async function () {
     this.timeout(180_000);
     const d = await api("h-author", "POST", "/drafts", { cluster, title: `synthetic ${hex()}` });
     expect(d.status).toBe(201);
@@ -121,7 +121,7 @@ describe("the publication page (#342)", () => {
     };
   };
 
-  it("a succeeded publication, served by the injector, names its release and sends nothing but the one POST", async function () {
+  it("a succeeded publication, served by the injector, names its release and sends nothing but the one POST [step publication.1] [step publication.2]", async function () {
     this.timeout(180_000);
     const id = await staged(`synthetic ${hex()}`);
     const bodies = succeeded(id);
