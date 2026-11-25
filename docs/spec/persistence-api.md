@@ -346,26 +346,21 @@ nothing of that change.
   revision or a removal from the head revision the author edited. At publication
   the library head advances (a stale base is the first form of §4.2), and the
   adoption of the draft's cluster is set to the revision written: the author's
-  cluster adopts what it publishes, and sees it in its own plan diff. It
-  records two bases when it is written: its `base`, the library head's counter,
-  and its `adoptionBase`, the adoption counter the draft's cluster then held,
-  or absent for a first adoption. Publication compares each against its own
-  head (§4.2), so two drafts of one cluster cannot both move its adoption. A
-  removal writes no revision, records no `adoptionBase` and leaves every
-  adoption as it is;
+  cluster adopts what it publishes, and sees it in its own plan diff. A removal
+  writes no revision and leaves every adoption as it is;
 - an **adoption entry**: a kind, a library name and a revision, which may be any
   existing revision of that name, an older one included. At publication the
-  draft's cluster's adoption is set to it. Like any entry it records, when it is
-  written, a `base`: the adoption counter then held, or absent for a first
-  adoption, which publication compares (§4.2). No request carries a bare
-  counter (§4.1); the draft's `If-Match` is the request's only precondition. A
-  **removal** of an adoption stops the cluster using the name (below) and
-  records the same `base`: publication sets the adoption's revision pointer to
-  none and advances its counter only where the counter still equals it, else
-  `409 stale-input` (§4.2, §6.2). The row stays, as a head does (§3.1), so a
-  counter is never reused and a later adoption continues it; the cluster's view
-  of a row with no revision is none, and a base is absent only where the
-  cluster never had a row.
+  draft's cluster's adoption is set to it. A **removal** of an adoption stops
+  the cluster using the name (below). The row stays, as a head does (§3.1): a
+  removal sets its revision to none and advances its counter, so a counter is
+  never reused and a later adoption continues it. The cluster's view of a row
+  with no revision is none.
+
+Like any entry, each records its bases when it is written, and no request
+carries a bare counter (§4.1): the draft's `If-Match` is the request's only
+precondition. **The table below is the one statement** of what each entry
+records, locks and compares at publication, and of each refusal; every other
+mention of these checks (§4.2, T1, T3, the commit SQL, the routes) points here.
 
 Only the draft's own cluster is ever moved. Any `author` may write a library
 entry in any cluster's draft, since roles are not scoped to a cluster (§10): the
@@ -382,11 +377,13 @@ its own adoption is what makes that safe.
   gives it after the draft, so a draft that adopts a new fragment revision sets
   the profiles that pin it again, as for a cluster fragment. A library profile
   pins library fragment revisions only, each the library head or proposed by the
-  draft. Those pins are part of the immutable profile revision, checked once
-  when it is written; adopting the profile revision takes them as written, with
-  no adoption of the fragments, and neither the snapshot (§6.1) nor T3 reads the
-  cluster's view for them. The cluster's view applies to a name an assignment
-  selects and to a pin in a cluster-scope profile;
+  draft. A library profile entry's pins are checked against the library heads
+  when the draft writes it and again at publication (table below). Once
+  published, the pins are part of the immutable profile revision: adopting it
+  takes them as written, with no adoption of the fragments, and neither the
+  snapshot (§6.1) nor T3 reads the cluster's view or rechecks them. The
+  cluster's view applies to a name an assignment selects and to a pin in a
+  cluster-scope profile;
 - **a library revision carries no reference rows.** A logical secret belongs to
   one cluster and a minted name is never reused (compilation §5.1, choice
   §16.12), so a reference in a shared revision resolves in at most one cluster.
@@ -397,14 +394,27 @@ its own adoption is what makes that safe.
   of the name is none and a profile pin or an assignment selection still needs
   it;
 - an adoption entry is refused, rule `library-removed`, when the name's library
-  head has no revision after the draft: a head a publication removed or this
-  draft removes, until a library entry brings the name back. The adoption
-  route refuses it whatever revision the entry names, and publication checks it
-  again.
+  head has no revision after the draft (a head a publication removed or this
+  draft removes), whatever revision the entry names.
 
 A removal of a library head sets its revision pointer to none, as in §3.1: no
 cluster can newly adopt the name from then (rule `library-removed`), and a
 cluster's existing adoption keeps compiling the revision it names.
+
+| Entry | Case | Records | T3 locks and compares | Refused |
+| --- | --- | --- | --- | --- |
+| library entry, edit | head present | `base`: the library head counter; `adoptionBase`: the draft cluster's adoption counter, or absent | the library head and the cluster's adoption row, written, in id order; each against its own base | `409 stale-input` naming the one that moved |
+| library entry, edit | draft introduces the name | `base` and `adoptionBase` absent | inserts the head and the adoption; unique (kind, scope, name) and (cluster, kind, name) | `409 stale-input`, expected "absent" |
+| library entry, edit | head removed | as "head present": the counter the removal left | as "head present"; it brings the name back | as "head present" |
+| library entry, removal | head present | `base` only, no `adoptionBase` | the library head, written; no adoption is touched | `409 stale-input`; `404` when staged on a head with no revision |
+| library entry, removal | draft introduces the name | `base` absent | nothing | none: publication creates nothing (§3.1) |
+| adoption entry | library head holds a revision | `base`: the adoption counter, or absent when the cluster never had a row | the library head `FOR SHARE` in id order, rechecked to hold a revision; the adoption row, written; the counter against `base`. An existing adoption never reads the head again | `409 stale-input` (adoption moved); `422 library-removed` (head lost its revision since the draft) |
+| adoption entry | head removed, absent or removed by this draft | none | none | `422 library-removed`, when staged and again at publication |
+| adoption removal | adoption holds a revision, any head state | `base`: the adoption counter | the adoption row, written (revision none, counter advanced); the library head is not locked | `409 stale-input`; `404` when staged on a row with no revision |
+| adoption removal | adoption introduced by this draft, no row yet | none | none | none: the adoption entry is dropped and publication writes nothing |
+| detachment | adoption holds a revision, any head state | the adoption removal's `base` and a cluster-scope entry's own | the adoption row (as an adoption removal) and the cluster-scope head | `409 stale-input`; `422 detach-pin-not-in-view` |
+| detachment | adoption introduced by this draft | the cluster-scope entry's own | the cluster-scope head; the adoption entry is dropped | as the cluster-scope entry |
+| library profile entry, pins | each pin a library fragment | none | each pinned fragment's library head, `FOR SHARE` in id order, rechecked to be the head or proposed by the draft | `422 validation-failed`, naming the body path |
 
 **Reach, before publishing.** `GET /drafts/{id}/impact` lists, for each changed
 source, the machines of the draft's cluster whose composition includes it before
@@ -1102,9 +1112,8 @@ actual revision (the fourth, a name, with the names):
 - a head the draft changes has moved since the draft's base: another
   publication changed the same fragment, profile or assignment, or introduced
   the name the draft introduces (expected "absent"); a library head and a
-  cluster's adoption are heads here, each with its own counter (§3.1.1): a
-  library entry is compared against both (its `base` and its `adoptionBase`),
-  an adoption entry or the removal of an adoption against the adoption alone;
+  cluster's adoption are heads here, each with its own counter; which entry
+  compares which is the table in §3.1.1;
 - a head the release uses unchanged has moved since compilation's snapshot
   (compilation §6 step 1); for a library name that head is the cluster's
   adoption;
@@ -1413,10 +1422,11 @@ heads the release uses without a draft entry, which T3 holds unchanged
 (§6.2): each covered machine's assignment head (one with no revision
 included), its selected profiles, and the selected and pinned fragments. A
 library name is listed by the draft's cluster's adoption of it, with its
-counter, and never by the library head (§3.1.1). The pins of a library profile
-revision are the exception: they belong to that immutable revision, so the
-recheck skips them and the snapshot lists no head or adoption for the fragments
-they name (§3.1.1). A
+counter, and not by the library head, except where the table in §3.1.1 says T3
+locks it (an adoption entry, a library profile entry's pins). The pins of an
+adopted library profile revision are the exception: they belong to that
+immutable revision, so the recheck skips them and the snapshot lists no head
+or adoption for the fragments they name (§3.1.1). A
 machine never assigned has no assignment head for T3 to hold, so an
 assignment first created for it after the snapshot is not detected as stale
 input; the release commits with the machine compiled on its base, with its own name as its hostname where the base sets none (compilation §6.1 decision 2).
@@ -1618,9 +1628,9 @@ INSERT INTO release_source ...;      -- every revision and head revision used:
 UPDATE <adoption> SET revision_id = ..., adoption_revision = adoption_revision + 1,
                       etag_token = ...
  WHERE cluster_id = $cluster AND kind = ... AND name = ...
-   AND adoption_revision = $base;    -- $base is an adoption entry's base, or a
-                                     -- library entry's adoptionBase for the
-                                     -- draft's cluster; a first adoption (no
+   AND adoption_revision = $base;    -- $base as the §3.1.1 table records it
+                                     -- (an adoption entry's base, or a
+                                     -- library entry's adoptionBase); a first adoption (no
                                      -- row ever) is an INSERT,
                                      -- adoption_revision 1, unique (cluster,
                                      -- kind, name): a violation is 409
@@ -2472,8 +2482,8 @@ idempotency and conflict behavior.
 | `POST /discoveries` (find a cluster's identity and members from a first key, as `bronzewardctl cluster discover` does from a talosconfig; API revision 11). The body is a first key's (§3.4): `kind`, `document`, `endpoint`, where `endpoint` is an IP literal or a DNS name with an optional port: the server resolves a name once, under the call's deadline, and the key read, the signing and the first reads of the cluster (identity, version and member list) all go to that address, the walk then dialling each member at an address the member list gives; the node's certificate is checked against the name for those first connections, and a typed address against itself (§3.3, **choice §17.46**); the document is never stored, logged or returned, and there is no Talos context member, because a talosconfig is read at its current context. The server extracts the CA key, signs an `os:reader` certificate valid for the deadline below plus the two seconds of the signer's rounding slack (never above `talos.maxCertLifetime` less two seconds: a deployment whose maximum is shorter answers `503 dependency-unavailable`), reads the cluster with it, and drops the key, the certificate and the document with the request. It reads and writes no provider path, so it works with no signer identity configured. **It records no act, no idempotency record and no first-key row, and has no replay**: it is the one `POST` that only reads, so it takes no `Idempotency-Key`, no `Bronzeward-Expected-Epoch` and no query (a query is `400 invalid-request`), because a stored act or record would keep what the route promises not to and would replay a stale member list. The server's request log line (request identifier, method, path, principal, outcome, member count) is the only trace of a call and holds no key, document, endpoint or member address. **Bounds:** the whole call has a deadline of 60 s from the start of its handler, so reading the request body and, for a talosconfig, reading its endpoint for the key are inside it, and a cluster that lists more than 128 members is refused before any member is dialled; the server already dials the endpoints an author supplies (§3.4, ingestion), and whether it should restrict the addresses it dials is open at [ginsys/bronzeward#1009](https://github.com/ginsys/bronzeward/issues/1009) | 200, `Cache-Control: no-store`, `clusterId`, `version`, `contract`, `supported`, `endpoint` (the address dialled), `kubernetesEndpoint` (the cluster's own control-plane endpoint: `https://` and the first entry of each control-plane member's `KubePrismEndpoints` resource, when at least one control-plane member answered, every one that answered has a value and all the values are equal; a member's value is an entry whose host is an IP literal with no zone that is not the unspecified address, or a DNS name of letters, digits and hyphens with no trailing dot and a last label that is not all digits (a subset of the host grammar `POST /clusters` takes for its `endpoint`, which also takes such a label), not `localhost`, with a port from 1 to 65535, and anything else is no value, a read that fails leaving the member answered; in every other case a proposal from the first control-plane member, at the address that answered or the first one listed, for the operator to replace; empty when the cluster lists no control-plane member), `members` (`nodeId`, `hostname`, `address`, `role`, `smbiosUuid`, `platform`, `answered`, the last three empty or false for a member that did not answer) and `complete`. At the deadline the members read so far are answered and the rest listed `answered: false`, with `complete: false`, so a client does not read an unread member as down; only a cluster identity that was not read fails the call. `422 validation-failed` with the signer's `rule` for an unusable document, no CA key in it, or a talosconfig whose role cannot read the machine configuration (§3.4), and with `rule: too-many-members` and `limit: 128`; `503 talos-access-unavailable` for an endpoint that did not resolve (a name with no address a node can have), did not answer, did not accept the key or, for a name, did not hold the name among its certificate names, or gave no cluster identity (a refused key or name is not told apart from an unreachable endpoint) | `author`, human only (§10.3) |
 | `POST /drafts` | 201, ETag | `author` |
 | `PUT` or `DELETE /drafts/{id}/fragments/{name}`, `/profiles/{name}`, `/assignments/{machine}`. The body of a fragment or profile entry may carry `scope`: `cluster` (the default) or `library` (a library entry, §3.1.1; API revision 19); a `DELETE` of a fragment or profile takes no body and selects its scope by the query parameter `scope` (`cluster`, the default, or `library`, a removal of the library head; any other value is `400 invalid-request`), `404 not-found` where that scope holds no such name | 200, ETag | `author`; `If-Match` |
-| `PUT` or `DELETE /drafts/{id}/adoptions/{kind}/{name}`, `kind` `fragments` or `profiles` (an adoption entry, §3.1.1; API revision 19): the `PUT` body names `revision`, any existing revision of that library name, and nothing else (the entry's `base` is recorded by the server, §3.1.1); `DELETE` removes the adoption (revision none, counter advanced, recording the entry's `base`), `404 not-found` where it holds no revision, refused `422` when the cluster's view of the name is then none and a pin or selection needs it; a library revision with reference rows, or an entry that makes the name both adopted and cluster-scope, is `422 validation-failed` with rule `library-reference` or `name-in-two-scopes`, and a name whose library head has no revision after the draft is refused, whatever revision the entry names, with rule `library-removed`; publication checks the rule again | 200, ETag | `author`; `If-Match` |
-| `POST /drafts/{id}/adoptions/{kind}/{name}/detachments` (stop following a library name, §3.1.1; API revision 19; no body): in one draft transaction writes a cluster-scope entry of that name from the adopted revision's text and the removal of the adoption; `404 not-found` where the cluster has no adoption of the name (a removed one is none); `422 validation-failed` with rule `detach-pin-not-in-view` for a profile whose pins the cluster's view does not hold | 200, ETag | `author`; `If-Match` |
+| `PUT` or `DELETE /drafts/{id}/adoptions/{kind}/{name}`, `kind` `fragments` or `profiles` (an adoption entry, §3.1.1; API revision 19): the `PUT` body names `revision`, any existing revision of that library name, and nothing else (the entry's `base` is recorded by the server, §3.1.1); `DELETE` removes the adoption (revision none, counter advanced, recording the entry's `base`), `404 not-found` where it holds no revision, an adoption this draft introduced is dropped (the checks of each case are the table in §3.1.1), refused `422` when the cluster's view of the name is then none and a pin or selection needs it; a library revision with reference rows, or an entry that makes the name both adopted and cluster-scope, is `422 validation-failed` with rule `library-reference` or `name-in-two-scopes`, and a name whose library head has no revision after the draft is refused, whatever revision the entry names, with rule `library-removed`; publication checks the rule again | 200, ETag | `author`; `If-Match` |
+| `POST /drafts/{id}/adoptions/{kind}/{name}/detachments` (stop following a library name, §3.1.1; API revision 19; no body): in one draft transaction writes a cluster-scope entry of that name from the adopted revision's text and the removal of the adoption; `404 not-found` where the cluster has no adoption of the name (a removed one is none; an adoption this draft introduced is dropped, §3.1.1 table); `422 validation-failed` with rule `detach-pin-not-in-view` for a profile whose pins the cluster's view does not hold | 200, ETag | `author`; `If-Match` |
 | `POST /drafts/{id}/discard` | 200 | `author`; `If-Match` |
 | `POST /drafts/{id}/publications` | 202, `publish`, created `queued` (§5.1), or the one already queued or running for the draft revision (§7.3); the body is the operation resource, with its `Location`. `503 dependency-unavailable` from a process without a provider | `publisher`; `If-Match` |
 | `POST /plans` with `operation: apply-config` | 201 | `publisher` (EaR) |
