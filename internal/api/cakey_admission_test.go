@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/ginsys/bronzeward/internal/id"
@@ -89,16 +90,17 @@ func TestImportDocumentWithTheCAKeyTag(t *testing.T) {
 	ie.noReferenceWritten(t, 0)
 }
 
-// Guard: and from a node's configuration, for an import and a drift adoption.
+// Guard: and from a node's configuration, for an import and a drift adoption. A node cannot serve a
+// tagged value (the machinery does not load one), so the text arrives as a string.
 func TestNodeConfigurationWithTheCAKeyTag(t *testing.T) {
 	for _, kind := range []string{"import", "drift-adoption"} {
 		t.Run(kind, func(t *testing.T) {
 			me := newMachineEnv(t)
-			me.node.SetMachineConfig(t, []byte(taggedNodeConfig+"cluster:\n  controlPlane:\n    endpoint: https://cp.example.test:6443\n"))
+			me.node.SetMachineConfig(t, []byte(strings.Replace(standInConfig, runToken, `"!bwref talos/ca-key"`, 1)))
 			op, j := me.startJob(t, map[string]any{"kind": kind, "source": "machine", "document": nil})
 			me.runWith(t, options{}, j)
 			r := readOp(t, me.db, op)
-			if r.state != "failed" || r.error["rule"] != string(ingest.RuleUndeclaredName) {
+			if r.state != "failed" || r.error["rule"] != string(ingest.RuleReservedText) {
 				t.Fatalf("operation %+v", r)
 			}
 			me.noReferenceWritten(t, 0)
