@@ -44,7 +44,7 @@ extract() {
 		awk -v out="$out" -v name="$(basename "$page" .md)" -v page="$page" -v seen="$seen" '
 			function die(msg) { printf "run-doc-blocks: %s:%d: %s\n", page, NR, msg > "/dev/stderr"; failed = 1; exit 1 }
 			skip { if ($0 ~ /^```$/) skip = 0; next }
-			/^```[a-z]* [{][^}]*[.]bw-db[^}]*[}]$/ && !open { skip = 1; next }
+			/^```[a-z]* [{][^}]*[.]bw-db([ \t][^}]*)?[}]$/ && !open { skip = 1; next }
 			/^```[a-z]* [{][^}]*[.]bw-run[^}]*[}]$/ && !open {
 				n++; open = 1; lines = 0
 				phase = ($0 ~ /[.]bw-host/) ? "host" : "container"
@@ -124,9 +124,11 @@ run() {
 		echo "host $(uname -sm)"
 		echo "substitution $page_server -> $fixture_web (container blocks)"
 	} >"$rec/doc-blocks.log"
+	# The address as a literal, and only where it ends: not a longer host name, and not one with a port.
+	local literal=${page_server//./\\.}
 	while read -r id phase; do
 		[ "$phase" = container ] || continue
-		sed -i "s#$page_server#$fixture_web#g" "$rec/blocks/$id.sh"
+		sed -E -i "s#$literal([^A-Za-z0-9.:-]|\$)#$fixture_web\\1#g" "$rec/blocks/$id.sh"
 	done <"$rec/blocks/blocks.list"
 	export BW_DOC_WEB_URL=$fixture_web
 	: >"$rec/ran.list"
