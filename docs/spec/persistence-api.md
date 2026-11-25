@@ -1375,8 +1375,8 @@ publication reaches those later reads.
 After the snapshot and before reading pinned values or compiling, the worker
 obtains one fresh `publication` observation per covered machine, in machine-id
 order. It uses the **executor** identity's normal latest Talos access read and
-read-only node client (§3.3). The compiler identity cannot read access or dial
-nodes. This also applies to the first import -> publish -> adoption sequence;
+read-only node client (§3.3). The compiler identity makes no access read and
+dials no node; its one read on the access path is the CA key at render (§3.3). This also applies to the first import -> publish -> adoption sequence;
 no Applied baseline or prior observation is required.
 
 The start names the publish operation, its owner generation, controller, epoch
@@ -4424,8 +4424,8 @@ each (design §7.7 consequences):
   configuration then failing and its publication refused with nothing
   published, with the control that adds the grant and must then publish; the
   signer refused
-  list and delete on the access path, with a control that grants it `delete`
-  and must then succeed; the ingestion identity refused every
+  list and delete on the access path, each with a control that grants it the
+  capability named and must then succeed; the ingestion identity refused every
   `secret/data/gen/*` read; a
   `source: machine` ingestion failing `machine-identity-mismatch` with nothing
   kept against a node whose SMBIOS UUID differs, reports none for a machine
@@ -5382,7 +5382,7 @@ design and evidence do not settle the question. Each is marked in place as
     rejected because accepting a disclosure in a specification is the owner's
     decision to make and not an editor's.
 51. **The compiler reads the Talos CA key at the signer's path, and an import
-    keeps no copy of it** (§3.3, "The compiler's read, and the signer's match
+    creates no generation of it** (§3.3, "The compiler's read, and the signer's match
     check"; compilation §1, §2.3 step 3a, §5.1 and choice §16.40;
     ginsys/bronzeward#889). Owner decision, 2026-11-25 11:54 CET, typed "B'".
     The compiler's grant is `read` on `secret/data/access/talos-ca/*`, beside

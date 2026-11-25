@@ -421,7 +421,7 @@ Controls to continue, take over or abandon belong to W5 and to the pages that fo
 | doc[0]                                                                                    |
 |   machine.install.disk: /dev/sda                                                          |
 |   machine.files[0].content: "token = BWSYNTH-example"           [Mark as secret]          |
-|   machine.ca.key: !bwref example/ca-key (extracted)                                       |
+|   machine.ca.key: !bwref talos/ca-key (matches the cluster's stored key)                  |
 +-------------------------------------------------------------------------------------------+
 | Marked in this session: doc[0]/machine/files/0/content                                    |
 | [Send marks]   [Continue import]   [Abandon import]                                       |
