@@ -18,19 +18,21 @@ import (
 
 // Publication of an import base that holds the typed CA-key reference (compilation.md §6,
 // persistence-api.md §16). Ingestion does not create the reference yet, so the rows are written
-// directly; the key is the one the test's own generated configuration holds.
+// directly; the key is the one the test's own generated configuration holds. The cluster's first-key
+// act is the one the publication environment's signer seeded.
 
 // caKeyEnv is a buildEnv whose machine's import base names the CA key by the typed reference.
 type caKeyEnv struct {
 	*buildEnv
 	path    string // the signer's path of the cluster
 	encoded string // the key as machine.ca.key holds it
+	act     provider.CAKeyVersion
 }
 
 func newCAKeyEnv(t *testing.T) *caKeyEnv {
 	t.Helper()
 	b := newBuildEnv(t)
-	c := &caKeyEnv{buildEnv: b, path: "access/talos-ca/" + b.cluster}
+	c := &caKeyEnv{buildEnv: b, path: "access/talos-ca/" + b.cluster, act: latestActVersion(t, b.db, b.cluster)}
 	src := b.ingested(generatedConfig(t, constants.DefaultKubernetesVersion))
 	var doc struct {
 		Machine struct {
@@ -56,6 +58,7 @@ func newCAKeyEnv(t *testing.T) *caKeyEnv {
 	}
 	delete(b.held.values, src.gens[name])
 	b.held.values[c.path] = pem
+	b.held.caCreated = []time.Time{c.act.CreatedTime}
 	src.document = strings.Replace(src.document, "!bwref "+name, "!bwref "+ingest.CAKeyName, 1)
 	delete(src.refs, name)
 	delete(src.gens, name)
@@ -83,41 +86,36 @@ func newCAKeyEnv(t *testing.T) *caKeyEnv {
 	return c
 }
 
-// firstKey records a first-key act naming version of the cluster's CA key, created at created.
-func (c *caKeyEnv) firstKey(version int, created time.Time) {
+// publish builds and commits the release and answers its CA-key dependencies.
+func (c *caKeyEnv) publish() (releaseUnit, string, string) {
 	c.t.Helper()
-	act := id.New(id.Act)
-	mustExec(c.t, c.db, `INSERT INTO act (id, principal, principal_kind, via, action, subjects, epoch, at)
-		SELECT $1, p.id, p.kind, 'tool', 'test', '{}', i.epoch, now() FROM principal p, installation_state i ORDER BY p.id LIMIT 1`, act)
-	mustExec(c.t, c.db, `INSERT INTO first_key_act (act, cluster, kind, replaced, ca_fingerprint, key_path, key_version, key_created_time)
-		VALUES ($1, $2, 'machine-config', $3, repeat('a', 64), $4, $5, $6)`, act, c.cluster, version > 1, c.path, version, created)
-}
-
-func (c *caKeyEnv) keyRecords(rel string) string {
-	c.t.Helper()
+	u, ref := c.build()
+	if ref != nil {
+		c.t.Fatalf("buildRelease refused: %v %v", ref, ref.extra)
+	}
+	c.unit = u
+	rel, ref := c.commit()
+	if ref != nil {
+		c.t.Fatalf("commit refused: %v %v", ref, ref.extra)
+	}
 	var rows sql.NullString
 	if err := c.db.QueryRow(`SELECT string_agg(kind || ' ' || object || ' ' || version, ',' ORDER BY kind) FROM dependency
 		WHERE release = $1 AND reference = $2`, rel, ingest.CAKeyName).Scan(&rows); err != nil {
 		c.t.Fatal(err)
 	}
-	return rows.String
+	return u, rel, rows.String
+}
+
+func (c *caKeyEnv) records(version int) string {
+	return fmt.Sprintf("effective %s %d,reproduction %s %d", c.path, version, c.path, version)
 }
 
 // The release records the signer's path at the act's version, as an effective and a reproduction
 // dependency, and holds no form of the key.
 func TestPublishRendersTheCAKey(t *testing.T) {
 	c := newCAKeyEnv(t)
-	c.firstKey(1, kvCreated)
-	u, ref := c.build()
-	if ref != nil {
-		t.Fatalf("buildRelease refused: %v %v", ref, ref.extra)
-	}
-	c.unit = u
-	rel, ref := c.commit()
-	if ref != nil {
-		t.Fatalf("commit refused: %v %v", ref, ref.extra)
-	}
-	if got, want := c.keyRecords(rel), fmt.Sprintf("effective %s 1,reproduction %s 1", c.path, c.path); got != want {
+	u, rel, got := c.publish()
+	if want := c.records(c.act.Version); got != want {
 		t.Fatalf("CA-key dependencies %q, want %q", got, want)
 	}
 	var rows string
@@ -132,10 +130,12 @@ func TestPublishRendersTheCAKey(t *testing.T) {
 	c.noSecretIn(rows + fmt.Sprint(u.machines[0].redacted))
 }
 
-func TestPublishRefusesWithoutFirstKeyAct(t *testing.T) {
+func TestPublishRefusesTheCAKeyWithoutFirstKeyAct(t *testing.T) {
 	c := newCAKeyEnv(t)
+	c.noSeed = true
+	dropFirstKeyActs(t, c.db, c.cluster)
 	_, ref := c.build()
-	if ref == nil || ref.status != 503 || ref.code != "dependency-unavailable" || !strings.Contains(ref.detail, "first-keys") {
+	if ref == nil || ref.status != 503 || ref.code != "dependency-unavailable" || !strings.Contains(ref.detail, "no first-key act names") {
 		t.Fatalf("got %v", ref)
 	}
 }
@@ -143,7 +143,7 @@ func TestPublishRefusesWithoutFirstKeyAct(t *testing.T) {
 // The path was written again since the act: the version's created_time is not the act's.
 func TestPublishRefusesARewrittenCAKey(t *testing.T) {
 	c := newCAKeyEnv(t)
-	c.firstKey(1, kvCreated.Add(time.Second))
+	c.held.caCreated = []time.Time{c.act.CreatedTime.Add(time.Second)}
 	_, ref := c.build()
 	if ref == nil || ref.status != 422 || ref.code != "validation-failed" {
 		t.Fatalf("got %v", ref)
@@ -158,12 +158,13 @@ func TestPublishRefusesARewrittenCAKey(t *testing.T) {
 // new version and publishes.
 func TestPublishRefusesAFirstKeyBetweenPinAndRead(t *testing.T) {
 	c := newCAKeyEnv(t)
-	c.firstKey(1, kvCreated)
+	later := c.act.CreatedTime.Add(time.Second)
+	c.held.caCreated = append(c.held.caCreated, later)
 	supplied := false
 	c.a.o.stopAt = func(step string) bool {
 		if step == "publish-observations" && !supplied { // after the snapshot's pin, before the reads
 			supplied = true
-			c.firstKey(2, kvCreated)
+			c.env.keys.seedCreated(t, c.db, c.cluster, later)
 		}
 		return false
 	}
@@ -172,18 +173,9 @@ func TestPublishRefusesAFirstKeyBetweenPinAndRead(t *testing.T) {
 		t.Fatal("the first key was not supplied")
 	}
 	if ref == nil || ref.status != 409 || ref.code != "conflict" {
-		t.Fatalf("got %v", ref)
+		t.Fatalf("got %v %v", ref, ref)
 	}
-	u, ref := c.build()
-	if ref != nil {
-		t.Fatalf("the next publication refused: %v %v", ref, ref.extra)
-	}
-	c.unit = u
-	rel, ref := c.commit()
-	if ref != nil {
-		t.Fatalf("commit refused: %v %v", ref, ref.extra)
-	}
-	if got := c.keyRecords(rel); !strings.HasSuffix(got, c.path+" 2") {
-		t.Fatalf("CA-key dependencies %q, want version 2", got)
+	if _, _, got := c.publish(); got != c.records(c.act.Version+1) {
+		t.Fatalf("CA-key dependencies %q, want %q", got, c.records(c.act.Version+1))
 	}
 }

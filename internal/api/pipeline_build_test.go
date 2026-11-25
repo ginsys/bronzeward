@@ -45,6 +45,7 @@ func buildFragment(extra string) string {
 // (1 when unset) to a digest of it, never to the plaintext (or fails with encryptErr), after slow.
 type heldValues struct {
 	values     map[string]provider.Value
+	caCreated  []time.Time // the CA key path's versions, oldest first
 	keyVersion int
 	readErr    error
 	encryptErr error
@@ -57,7 +58,7 @@ func (h heldValues) KV(_ context.Context, p provider.KVPath) (classify.Answer, e
 		return classify.Answer{}, errors.New("stand-in: no such generation")
 	}
 	if _, ca := p.(provider.CAPath); ca {
-		return kvAnswer(nil, kvCreated, kvCreated), nil // two versions, for a replaced key
+		return kvAnswer(nil, h.caCreated...), nil
 	}
 	return kvAnswer(nil, kvCreated), nil
 }
@@ -74,8 +75,12 @@ func (h heldValues) Transit(context.Context, string) (classify.Answer, error) {
 	return a, nil
 }
 
-func (h heldValues) ReadCAKey(_ context.Context, p provider.CAPath, _ int64) (provider.Value, time.Time, error) {
-	return h.read(p)
+func (h heldValues) ReadCAKey(_ context.Context, p provider.CAPath, version int64) (provider.Value, time.Time, error) {
+	v, _, err := h.read(p)
+	if err != nil || version < 1 || int(version) > len(h.caCreated) {
+		return provider.Value{}, time.Time{}, errors.Join(err, errors.New("stand-in: no such CA key version"))
+	}
+	return v, h.caCreated[version-1], nil
 }
 
 func (h heldValues) ReadGeneration(_ context.Context, p provider.GenerationPath, _ int64) (provider.Value, time.Time, error) {
