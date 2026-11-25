@@ -129,6 +129,14 @@ chmod +x "$work/fake-docker" "$work/fake-fixture"
 export BW_DOC_STATE=$work/state BW_DOC_DOCKER=$work/fake-docker BW_DOC_FIXTURE=$work/fake-fixture BW_FAKE_BLOCKS=$work/state/record/blocks
 export BW_DOC_EXEC=$work/stub-ok
 expect 0 "the real pages, every block exits 0" "" "$runner" run
+# The real container blocks name the fixture's web host where the pages name theirs, both --from forms included.
+if [ "$(grep -h -c -- '--from https://localhost:8443 ' "$work"/state/record/blocks/contexts-[23].sh | tr '\n' ',')" = "1,1," ] &&
+	! grep -q 'bronzeward\.example\.com' "$work"/state/record/blocks/*.sh; then
+	pass=$((pass + 1))
+else
+	fail=$((fail + 1))
+	echo "FAIL: a real page's server address was not substituted" >&2
+fi
 if grep -q 'sign-in-and-renewal-1.container.exit 0' "$work/state/record/doc-blocks.log"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: the record does not list the last block" >&2; fi
 page bad "${fence}bash {.bw-run .bw-host}" "echo built" "$fence" "${fence}bash {.bw-run}" "echo ok" "$fence" "${fence}bash {.bw-run}" "echo planted" "$fence" "${fence}bash {.bw-run}" "echo after" "$fence"
 export BW_DOC_EXEC=$work/stub-planted
