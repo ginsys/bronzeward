@@ -28,7 +28,7 @@ up() {
 		kill -0 "$(cat "$state/$1.pid")" 2>/dev/null; then
 		return 0
 	fi
-	echo "doc-blocks-fixture: the $1 did not come up at $2 (see $state/$1.log)" >&2
+	echo "doc-blocks-fixture: the $1 did not come up at $2 (see $state/record/$1.log)" >&2
 	return 1
 }
 
@@ -37,16 +37,20 @@ start)
 	dist=$(cd "${3:?dist directory}" && pwd)
 	free 8080
 	free 5556
-	mkdir -p "$state/server"
+	# The logs go under record/, which CI uploads, so a fixture that fails to start leaves them behind.
+	mkdir -p "$state/server" "$state/record"
 	mise run dev-db >/dev/null
 	tar -xzf "$dist/bronzeward_${BW_VERSION#v}_linux_amd64.tar.gz" -C "$state/server" bronzeward
 	go build -o "$state/oidc-fixture" ./fixtures/oidc
 	"$state/oidc-fixture" keygen -out "$state/oidc.key"
-	"$state/oidc-fixture" serve -key "$state/oidc.key" -issuer "$issuer" >"$state/issuer.log" 2>&1 &
+	"$state/oidc-fixture" serve -key "$state/oidc.key" -issuer "$issuer" >"$state/record/issuer.log" 2>&1 &
 	echo $! >"$state/issuer.pid"
 	up issuer "$issuer/.well-known/openid-configuration"
-	"$state/server/bronzeward" migrate -config examples/bronzeward.yaml >"$state/migrate.log" 2>&1
-	"$state/server/bronzeward" serve -config examples/bronzeward.yaml >"$state/server.log" 2>&1 &
+	if ! "$state/server/bronzeward" migrate -config examples/bronzeward.yaml >"$state/record/migrate.log" 2>&1; then
+		echo "doc-blocks-fixture: migrate failed (see $state/record/migrate.log)" >&2
+		exit 1
+	fi
+	"$state/server/bronzeward" serve -config examples/bronzeward.yaml >"$state/record/server.log" 2>&1 &
 	echo $! >"$state/server.pid"
 	up server http://127.0.0.1:8080/livez
 	# The client's own file: one JSON object holding the access token, owner-only.
