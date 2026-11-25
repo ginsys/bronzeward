@@ -27,20 +27,25 @@ type List = { id: string; steps: number };
 
 // The marked lists of a page, and what is wrong with its lists. A list is the numbered items after its marker: an item's
 // indented lines, a blank line and a lazy continuation belong to it, and it ends at the first blank-separated line that
-// is neither indented nor the next number. Fenced text is skipped.
+// is neither indented nor the next number. Fenced text outside a list is skipped, a fence inside one is refused, and a fence
+// that is never closed is a problem.
 export const lists = (page: string, markdown: string): { lists: List[]; problems: string[] } => {
   const lines = markdown.split("\n");
   const found: List[] = [];
   const problems: string[] = [];
   const marked = new Set<number>();
-  let fence = false;
+  let open = ""; // the fence that is open, as its opener's run of backticks or tildes
   let web = false;
   let webLevel = 0;
   let steps = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
-    if (fence) continue;
+    // A fence closes only by a run of its own character, at least as long as its opener's, with nothing after it.
+    const run = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    const was = open !== "";
+    if (!was && run !== undefined) open = run;
+    else if (was && run !== undefined && run[0] === open[0] && run.length >= open.length && /^ {0,3}(`+|~+)\s*$/.test(line)) open = "";
+    if (was || open !== "") continue;
     const heading = /^(#{1,6}) (.*)$/.exec(line);
     if (heading !== null) {
       steps = false;
@@ -68,18 +73,14 @@ export const lists = (page: string, markdown: string): { lists: List[]; problems
     marked.add(j);
     let n = 1;
     let blank = false;
-    let inFence = false;
     let k = j + 1;
     for (; k < lines.length; k++) {
       const next = lines[k]!;
       if (/^\s*(```|~~~)/.test(next)) {
-        // An unindented fence after a blank line is a block of its own: the list ended. Any other fence is the text of an item.
-        if (!inFence && blank && !/^\s/.test(next)) break;
-        inFence = !inFence;
-        blank = false;
-        continue;
+        // The check reads no fenced text, so a fence inside a list is refused where it could hide a step: put it outside.
+        problems.push(`${page}:${k + 1}: the list ${id} holds a fenced block, which this check does not read; put it outside the list`);
+        break;
       }
-      if (inFence) continue;
       if (next.trim() === "") { blank = true; continue; }
       const item = SIBLING.exec(next);
       if (item !== null) {
@@ -95,6 +96,7 @@ export const lists = (page: string, markdown: string): { lists: List[]; problems
     found.push({ id, steps: n });
     i = k - 1;
   }
+  if (open !== "") problems.push(`${page}: a fenced block is never closed`);
   if (found.length === 0) problems.push(`${page}: no <!-- bw-web-steps: ... --> line`);
   return { lists: found, problems };
 };
@@ -216,7 +218,7 @@ test("the positive control: a tag in a template title counts, and one in a subst
 });
 
 test("the positive control: a list is found with its indented lines, images, blank lines and lazy lines, and a fence is no list", () => {
-  const body = ["", "<!-- bw-web-steps: a -->", "", "1. One,", "lazy line.", "", "   ![image](x.png)", "", "2. Two:", "", "   ```bash", "   1. not a step", "   ```", "3. Three.", "", "Next paragraph.", "", "1. Another list, not web."];
+  const body = ["", "<!-- bw-web-steps: a -->", "", "1. One,", "lazy line.", "", "   ![image](x.png)", "", "2. Two:", "", "   1. not a step", "", "3. Three.", "", "Next paragraph.", "", "1. Another list, not web."];
   expect(lists("a", page("# A", ...body))).toEqual({ lists: [{ id: "a", steps: 3 }], problems: [] });
   expect(lists("a", page("# A", "```", "1. in a fence", "```", ...list("a", 1)))).toEqual({ lists: [{ id: "a", steps: 1 }], problems: [] });
 });
@@ -236,11 +238,25 @@ test("the positive control: an item with the wrong number is named with no blank
   expect(marked("1. One.", " 2. Two.", "  3. Three.")).toEqual({ lists: [{ id: "a", steps: 3 }], problems: [] });
 });
 
-test("the positive control: numbered text inside a fence in a marked list is code and no step, and an unindented fence after a blank line ends the list", () => {
-  const marked = (...body: string[]) => lists("a", page("# A", "", "<!-- bw-web-steps: a -->", "", ...body));
-  expect(marked("1. One.", "```text", "  2. code only", "9. code", "```")).toEqual({ lists: [{ id: "a", steps: 1 }], problems: [] });
-  expect(marked("1. One.", "   ```text", "   2. code only", "   ```", "2. Two.")).toEqual({ lists: [{ id: "a", steps: 2 }], problems: [] });
-  expect(marked("1. One.", "", "```text", "2. code", "```")).toEqual({ lists: [{ id: "a", steps: 1 }], problems: [] });
+const FENCE_REFUSED = (line: number) => `a:${line}: the list a-1 holds a fenced block, which this check does not read; put it outside the list`;
+
+test("the positive control: a fence inside a marked list is refused wherever it stands, and the next marked list is still read", () => {
+  const two = (...first: string[]) => lists("a", page("# A", "", "<!-- bw-web-steps: a-1 -->", "", ...first, "", "<!-- bw-web-steps: a-2 -->", "", "1. Other.", "2. Other."));
+  // Right after an item, indented inside one, and after a blank line: each ends list a-1 with the same named problem.
+  expect(two("1. One.", "```text", "  2. code only", "```")).toEqual({ lists: [{ id: "a-1", steps: 1 }, { id: "a-2", steps: 2 }], problems: [FENCE_REFUSED(6)] });
+  expect(two("1. One.", "   ```text", "   2. code only", "   ```")).toEqual({ lists: [{ id: "a-1", steps: 1 }, { id: "a-2", steps: 2 }], problems: [FENCE_REFUSED(6)] });
+  expect(two("1. One.", "", "~~~text", "2. code", "~~~")).toEqual({ lists: [{ id: "a-1", steps: 1 }, { id: "a-2", steps: 2 }], problems: [FENCE_REFUSED(7)] });
+});
+
+test("the positive control: a fence is closed only by its own kind and length, and one never closed is a problem", () => {
+  const after = (...fenced: string[]) => lists("a", page("# A", ...fenced, ...list("a", 2)));
+  const found = { lists: [{ id: "a", steps: 2 }], problems: [] };
+  expect(after("```text", "~~~", "```")).toEqual(found);
+  expect(after("````text", "```", "````")).toEqual(found);
+  expect(after("~~~text", "```", "~~~")).toEqual(found);
+  // Never closed: the rest of the page is fenced text, so the problem is named and the list after it is not found.
+  expect(after("```text", "~~~")).toEqual({ lists: [], problems: ["a: a fenced block is never closed", "a: no <!-- bw-web-steps: ... --> line"] });
+  expect(after("````text", "```")).toEqual({ lists: [], problems: ["a: a fenced block is never closed", "a: no <!-- bw-web-steps: ... --> line"] });
 });
 
 test("the negative control: an item nested under a step, indented to its text, is that step's content and no step", () => {
