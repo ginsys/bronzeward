@@ -87,8 +87,37 @@ cat >"$work/stub-planted" <<'EOF'
 if grep -q planted "$1"; then exit 3; fi
 exit 0
 EOF
-chmod +x "$work/stub-ok" "$work/stub-planted"
-export BW_DOC_STATE=$work/state
+cat >"$work/stub-sh" <<'EOF'
+#!/bin/sh
+exec sh -e "$1"
+EOF
+chmod +x "$work/stub-ok" "$work/stub-planted" "$work/stub-sh"
+# Stand-ins for docker and the fixture script. The fake docker maps /blocks to the record directory, as the
+# bind mount does, hands a container block to the host stub with its stdin untouched, and insists on the
+# `exec <container> sh -e /blocks/<id>.sh` shape; each verb's exit status can be forced by an environment variable.
+cat >"$work/fake-docker" <<'EOF'
+#!/bin/sh
+case $1 in
+run | rm) exit 0 ;;
+inspect) exit "${BW_FAKE_INSPECT_RC:-1}" ;;
+exec)
+	case $3 in
+	sh) [ "$4" = -e ] || exit 99; exec "$BW_DOC_EXEC" "$BW_FAKE_BLOCKS/${5#/blocks/}" ;;
+	bronzewardctl) case $4 in context) exit 0 ;; version) exit "${BW_FAKE_VERSION_RC:-0}" ;; esac ;;
+	esac ;;
+esac
+exit 99
+EOF
+cat >"$work/fake-fixture" <<'EOF'
+#!/bin/sh
+case $1 in
+start) exit "${BW_FAKE_START_RC:-0}" ;;
+stop) exit "${BW_FAKE_STOP_RC:-0}" ;;
+esac
+exit 99
+EOF
+chmod +x "$work/fake-docker" "$work/fake-fixture"
+export BW_DOC_STATE=$work/state BW_DOC_DOCKER=$work/fake-docker BW_DOC_FIXTURE=$work/fake-fixture BW_FAKE_BLOCKS=$work/state/record/blocks
 export BW_DOC_EXEC=$work/stub-ok
 expect 0 "the real pages, every block exits 0" "" "$runner" run
 if grep -q 'sign-in-and-renewal-1.container.exit 0' "$work/state/record/doc-blocks.log"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: the record does not list the last block" >&2; fi
@@ -105,20 +134,24 @@ page onlyhost "${fence}bash {.bw-run .bw-host}" "echo host" "$fence"
 expect 1 "no container block" "no marked container block" "$runner" run "$work/onlyhost.md"
 
 # A container block runs as a file with stdin from /dev/null: this block reads stdin and fails when it
-# gets anything. The fake docker only maps /blocks to the record directory, as the bind mount does, and
-# insists on the `exec <container> sh -e /blocks/<id>.sh` shape.
-cat >"$work/fake-docker" <<'EOF'
-#!/bin/sh
-[ "$1" = exec ] && [ "$3" = sh ] && [ "$4" = -e ] || exit 99
-exec sh -e "$BW_FAKE_BLOCKS/${5#/blocks/}"
-EOF
-chmod +x "$work/fake-docker"
+# gets anything, and the run is fed "poison" on stdin.
 # shellcheck disable=SC2016 # the block's text is literal: its own shell expands $line
 page stdin "${fence}bash {.bw-run .bw-host}" "echo built" "$fence" "${fence}bash {.bw-run}" 'read -r line || line=' '[ -z "$line" ]' "$fence"
-export BW_DOC_DOCKER=$work/fake-docker BW_FAKE_BLOCKS=$work/state/record/blocks
-stdin_run() { printf 'poison\n' | "$runner" run "$work/stdin.md"; }
+stdin_run() { printf 'poison\n' | BW_DOC_EXEC=$work/stub-sh "$runner" run "$work/stdin.md"; }
 expect 0 "a container block that reads stdin gets none" "" stdin_run
-unset BW_DOC_DOCKER BW_FAKE_BLOCKS
+
+# A marked block with no command (blank lines, comments) is an empty block.
+page blank "${fence}bash {.bw-run}" "" "# only a note" "  " "$fence"
+expect 1 "a block of blank lines and a comment" "an empty marked block" "$runner" extract "$work/o6" "$work/blank.md"
+
+# The version command after the context add reaches the server: its failure stops the run.
+BW_FAKE_VERSION_RC=1 expect 1 "bronzewardctl version fails" "bronzewardctl version failed" "$runner" run
+# A fixture that does not start fails the run.
+BW_FAKE_START_RC=1 expect 1 "the fixture does not start" "" "$runner" run
+# Cleanup failures turn a pass into a failure, and never hide an earlier failure.
+BW_FAKE_STOP_RC=1 expect 1 "the fixture does not stop" "stopping the fixture failed" "$runner" run
+BW_FAKE_INSPECT_RC=0 expect 1 "the container is still there" "is still there" "$runner" run
+BW_DOC_EXEC=$work/stub-planted BW_FAKE_STOP_RC=1 expect 1 "a failing block and a failing stop" "bad-3 (container) exited 3" "$runner" run "$work/bad.md"
 
 # The fixture's stop waits for each process: one that ends is gone and loses its pid file, one that
 # ignores SIGTERM fails the stop and keeps its pid file.
