@@ -572,7 +572,8 @@ They are held apart **(choice §17.29)**.
   and CA certificate, and dials only the request's `endpoint`: its own endpoints
   are ignored. It is never a credential Bronzeward keeps.
 - **What is kept.** The CA key lives only in the signer's memory while it
-  signs. The signed certificate and key live only in the memory of the process
+  signs, and in the compiler's memory while it renders a control plane
+  configuration (§3.3). The signed certificate and key live only in the memory of the process
   that obtained them, for the use they were signed for: an ingestion; one observation outside a
   dispatch's evidence-and-attempt pair (`drift`, `restoration`, `recovery`
   or `completion`, which may follow the last attempt); or an evidence
@@ -820,9 +821,11 @@ there.
   subject the cluster) holds who, role, epoch and time; the `FirstKeyAct` row
   beside it holds the cluster, the kind, `replaced`, the CA certificate's
   SHA-256 fingerprint, and the key's path, version and `created_time`.
-- **The signer.** One component identity, the signer, reads and writes
-  `secret/data/access/talos-ca/*` and nothing else (create, read and update; no
-  list or delete). It signs in process memory and hands the ingestion and the
+- **The signer.** One component identity, the signer, writes
+  `secret/data/access/talos-ca/*` and reads it to sign, and holds nothing else
+  (create, read and update; no list or delete). The compiler also holds `read`
+  on that path, to render the key (§3.3, "The compiler's read, and the signer's
+  match check"). It signs in process memory and hands the ingestion and the
   executor only a certificate and its key, and an ingestion that offers it a
   `machine.ca.key` only a verdict on the match (§3.3, "The compiler's read, and
   the signer's match check"). The key is stored per cluster under a
