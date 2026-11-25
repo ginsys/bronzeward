@@ -36,7 +36,8 @@ permissions:
 # required checks (ginsys/bronzeward#612). The previous major of each browser is not here either:
 # previous-majors.yml runs it the same way. packaged-darwin is the one macOS job here, and the same
 # capacity limit applies to it: it is not in `checks`, and the `changes` job starts it only on a pull
-# request or a push to main that changes what it proves, as keychain.yml does for its paths.
+# request or a push to main that changes what it proves, as keychain.yml does for its paths: the client, its
+# build, the job's two scripts, and this file, since the job's own definition is part of what it proves.
 # A job that no runner picks up leaves a pull request UNSTABLE, so most pull requests never start it.
 
 env:
@@ -574,7 +575,7 @@ jobs:
           # The compare answer holds at most 300 files and its later pages carry none, so a full answer may be cut short.
           [ "$(printf '%s\n' "$files" | grep -c .)" -lt 300 ] || files=
           echo "changed files read: $(printf '%s' "$files" | grep -c .)"
-          if [ -z "$files" ] || grep -E -q '^((cmd/bronzewardctl|internal/client)/|(\.goreleaser\.yaml|go\.mod|go\.sum|scripts/release/(run-packaged-darwin\.sh|stub-idp\.py))$)' <<<"$files"; then
+          if [ -z "$files" ] || grep -E -q '^((cmd/bronzewardctl|internal/client)/|(\.goreleaser\.yaml|\.github/workflows/ci\.yml|go\.mod|go\.sum|scripts/release/(run-packaged-darwin\.sh|stub-idp\.py))$)' <<<"$files"; then
             echo "darwin=true" >>"$GITHUB_OUTPUT"
           else
             echo "darwin=false" >>"$GITHUB_OUTPUT"

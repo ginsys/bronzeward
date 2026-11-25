@@ -10,10 +10,13 @@
 
 ## 1. What was read, and how to read the states
 
-Every state below was read from `origin/main` at `ff53ecf1` on 25 November 2026, and from the jobs of CI
-run 45704290548 at that head, read at 22:41 CET (the run was still going: the `go` job and the four
-`browser-auth` jobs had not finished, every job this assessment cites had). A file, job or test named in
-an evidence cell was opened for this assessment; a statement with no such cell is not claimed.
+Every state below was read from `origin/main` at `ff53ecf1` on 25 November 2026. Except the `darwin` row,
+the job results come from the jobs of CI run 45704290548 at that head, read at 22:41 CET (the run was
+still going: the `go` job and the four `browser-auth` jobs had not finished, every job this assessment
+cites had). The `darwin` row comes from the log of job 139539603782 in CI run 45708951483, the run of the
+pull request that added the job, read at 23:00 CET; the next push of that pull request cancelled that run
+as a whole, and the job had already finished green. A file, job or test named in an evidence cell was
+opened for this assessment; a statement with no such cell is not claimed.
 
 The states: **met** (the criterion is shown by a check that ran); **met with a limit** (shown, and a
 limit is named); **not met**; **written, not yet run** (the check exists and has never run). Nothing is
@@ -86,7 +89,7 @@ The agreed matrix is `linux/amd64` (CI, disposable fixture) and `darwin/arm64` (
 | Part of the row | State | Evidence |
 | --- | --- | --- |
 | Clean install on `linux/amd64` | met with a limit | Job `doc-blocks` (success): `scripts/release/run-doc-blocks.sh` builds at `v0.0.0-dev`, installs the archives in a clean container (curl, tar, CA certificates only) and runs the marked blocks against a disposable server, failing when a marked block did not run or another one did. Limit: the build there is not the `package` job's archive (its version carries the commit) |
-| Clean install and Keychain on `darwin/arm64` | met with limits | Job `packaged-darwin` and `scripts/release/run-packaged-darwin.sh`, added by this change. First and only run: CI run 45708951483, job 139539603782, on a `macos-26-arm64` runner, 22:00:44 to 22:01:37 UTC on 25 November, at the head of the pull request that added it. Its log shows the archive `OK` against `SHA256SUMS`, then "login stored the sign-in in the Keychain, logout read it back, revoked it and removed it", then the archive "is a Mach-O 64-bit executable arm64, and prints" the build's version "with the server gone". Limits: one run, on a pull request head, not on main; install, `version` and the Keychain only, with no live-server workflow (no Docker, the server is Linux only); a keychain made unlocked for the run; the archive is unpacked from a file the job downloaded. A run cancelled for want of a macOS runner would read "not run" |
+| Clean install and Keychain on `darwin/arm64` | met with limits | Job `packaged-darwin` and `scripts/release/run-packaged-darwin.sh`, added by this change. First run: CI run 45708951483, job 139539603782, on a `macos-26-arm64` runner, 22:00:44 to 22:01:37 UTC on 25 November, at the first head of the pull request that added it (that run was later cancelled as a whole by the next push; this job had finished green). Its log shows the archive `OK` against `SHA256SUMS`, then "login stored the sign-in in the Keychain, logout read it back, revoked it and removed it", then the archive "is a Mach-O 64-bit executable arm64, and prints" the build's version "with the server gone". Limits: one run, on a pull request head, not on main; install, `version` and the Keychain only, with no live-server workflow (no Docker, the server is Linux only); a keychain made unlocked for the run; the archive is unpacked from a file the job downloaded. A run cancelled for want of a macOS runner would read "not run" |
 | Inaccessible and incompatible servers | met with limits | `packaged-cli` (success): TLS-01, TLS-02, COMP-01, COMP-02 and `TestPackagedVersion` on the packaged linux/amd64 binaries, with a wrong version planted to fail. `packaged-web` (success): TLS-02 and TLS-03's read case and the footer case in Chrome and Firefox on the Caddy-served bundle. Limits, from `CONTRIBUTING.md`: the web footer's server version, COMP and TLS-03's write case are not run on the bundle |
 | Version reporting | met with the same limits | CLI prints its own and the server's version on the packaged binaries; the web footer shows the bundle's version and `Server unknown` when the server cannot be read (`web/e2e/packaged.e2e.ts:15`) |
 | Reproducible artifacts, no local-only scripts | met | Rows above run in CI jobs from repository scripts; no check here needs a developer machine |
@@ -135,7 +138,7 @@ CI; they ran for the first time in the pull request's CI (§2 row 3).
 | Signing and attestation read from workflow text | not in the issue | `docs/operator/clients/install.md` says so itself ("no real signature or attestation shows the signer's name"). No release has run, so `cosign verify-blob` and `gh attestation verify` as an operator would run them are unobserved |
 | First real release run | owner row | The `release` environment, `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY` and the App `ginsys-release-bot` are the owner's to create; only a real run shows whether environment secrets reach the called workflow (issue comment of 24 November, 08:32 UTC; `CONTRIBUTING.md`) |
 | Locked-keychain behaviour on macOS | not in the issue | [ginsys/bronzeward#661](https://github.com/ginsys/bronzeward/issues/661), open, carries the owner's deferral. Not exercised: the job uses an unlocked keychain made for the run |
-| macOS capacity | platform | GitHub's macOS arm64 pool sometimes has no capacity ([ginsys/bronzeward#612](https://github.com/ginsys/bronzeward/issues/612)). The job is outside `checks` and starts only when the change touches the client, its build or its own scripts; a cancelled run is "not run" |
+| macOS capacity | platform | GitHub's macOS arm64 pool sometimes has no capacity ([ginsys/bronzeward#612](https://github.com/ginsys/bronzeward/issues/612)). The job is outside `checks` and starts only when the change touches the client, its build, its own scripts or `ci.yml`; a cancelled run is "not run" |
 | Gatekeeper, quarantine, notarisation | not covered | The archive is unpacked from a file the job downloaded, not from a browser download |
 | `darwin/amd64` | not covered | Built and checked statically by `check-build.sh`; never run |
 | Participant sessions and automated validation | other issues | [ginsys/bronzeward#263](https://github.com/ginsys/bronzeward/issues/263), [ginsys/bronzeward#369](https://github.com/ginsys/bronzeward/issues/369) and [ginsys/bronzeward#368](https://github.com/ginsys/bronzeward/issues/368) are open and wait on this issue |
