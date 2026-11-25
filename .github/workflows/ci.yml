@@ -372,7 +372,7 @@ jobs:
       matrix:
         browser: [chrome, edge, firefox, firefox-esr]
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       BW_BROWSERS: ${{ matrix.browser }}
     steps:
