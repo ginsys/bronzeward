@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Negative controls for scripts/release/run-doc-blocks.sh (ginsys/bronzeward#405): the real pages give
-# their seven marked blocks in order, and each planted defect fails with its own message. No Docker:
+# their thirteen marked blocks in order, and each planted defect fails with its own message. No Docker:
 # BW_DOC_EXEC stands in for the host shell, the container and the fixture.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -33,17 +33,26 @@ page() {
 	printf '%s\n' "$@" >"$f"
 }
 
-# The real pages: seven blocks, the first two on the host.
-real=("$pages/install.md" "$pages/contexts.md" "$pages/inventory.md" "$pages/sign-in-and-renewal.md")
+# The real pages: thirteen blocks, the first two on the host.
+real=("$pages/install.md" "$pages/contexts.md" "$pages/inventory.md" "$pages/sign-in-and-renewal.md"
+	"$pages/quick-start-cli.md" "$pages/client-troubleshooting.md")
 "$runner" extract "$work/real" "${real[@]}"
 got=$(tr '\n' ',' <"$work/real/blocks.list")
-want="install-1 host,install-2 host,install-3 container,install-4 container,contexts-1 container,inventory-1 container,sign-in-and-renewal-1 container,"
+want="install-1 host,install-2 host,install-3 container,install-4 container,contexts-1 container,contexts-2 container,contexts-3 container,inventory-1 container,sign-in-and-renewal-1 container,quick-start-cli-1 container,quick-start-cli-2 container,quick-start-cli-3 container,client-troubleshooting-1 container,"
 if [ "$got" = "$want" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); printf 'FAIL: real pages\n got %s\nwant %s\n' "$got" "$want" >&2; fi
 
 fence='```'
 page ok "text" "${fence}bash {.bw-run .bw-host}" "echo host" "$fence" "${fence}bash {.bw-run}" "echo box" "$fence" "${fence}bash" "echo not marked" "$fence"
 expect 0 "a host block, a container block and an unmarked block" "" "$runner" extract "$work/o1" "$work/ok.md"
 if [ "$(wc -l <"$work/o1/blocks.list")" -eq 2 ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: the unmarked block was taken" >&2; fi
+
+# A .bw-db block belongs to the Go test that runs the journey pages: it is not this run's.
+page db "${fence}bash {.bw-run}" "echo box" "$fence" "${fence}bash {.bw-run .bw-db}" "echo db" "$fence" "${fence}bash {.bw-run}" "echo box again" "$fence"
+expect 0 "a .bw-db block between two container blocks" "" "$runner" extract "$work/o1b" "$work/db.md"
+got=$(tr '\n' ',' <"$work/o1b/blocks.list")
+if [ "$got" = "db-1 container,db-2 container," ] && ! grep -rq 'echo db' "$work/o1b"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: the .bw-db block was taken: $got" >&2; fi
+page dbopen "${fence}bash {.bw-run}" "echo box" "$fence" "${fence}bash {.bw-run .bw-db}" "echo never closed"
+expect 1 "an unterminated .bw-db fence" "unterminated fence" "$runner" extract "$work/o1c" "$work/dbopen.md"
 
 page indented "  ${fence}bash {.bw-run}" "  echo hidden" "  $fence"
 expect 1 "a marked fence the reader cannot see" "bw-run outside a fence opener at the start of a line" "$runner" extract "$work/o2" "$work/indented.md"
@@ -140,6 +149,17 @@ page stdin "${fence}bash {.bw-run .bw-host}" "echo built" "$fence" "${fence}bash
 stdin_run() { printf 'poison\n' | BW_DOC_EXEC=$work/stub-sh "$runner" run "$work/stdin.md"; }
 expect 0 "a container block that reads stdin gets none" "" stdin_run
 
+# A container block's one declared value, the pages' server address, is the fixture's; a host block is left as written.
+page address "${fence}bash {.bw-run .bw-host}" "echo host https://bronzeward.example.com" "$fence" "${fence}bash {.bw-run}" "echo box https://bronzeward.example.com" "$fence"
+BW_DOC_EXEC=$work/stub-sh expect 0 "a page that names the server" "" "$runner" run "$work/address.md"
+if grep -qx 'box https://localhost:8443' "$work/state/record/address-2.out" && grep -qx 'host https://bronzeward.example.com' "$work/state/record/address-1.out" &&
+	grep -qx 'substitution https://bronzeward.example.com -> https://localhost:8443 (container blocks)' "$work/state/record/doc-blocks.log"; then
+	pass=$((pass + 1))
+else
+	fail=$((fail + 1))
+	echo "FAIL: the server address was not substituted in the container block alone, or the record does not say so" >&2
+fi
+
 # A marked block with no command (blank lines, comments) is an empty block.
 page blank "${fence}bash {.bw-run}" "" "# only a note" "  " "$fence"
 expect 1 "a block of blank lines and a comment" "an empty marked block" "$runner" extract "$work/o6" "$work/blank.md"
@@ -169,6 +189,24 @@ if [ ! -f "$work/fx/server.pid" ] && [ -f "$work/fx/issuer.pid" ]; then pass=$((
 kill -KILL "$stubborn" 2>/dev/null || true
 wait "$stubborn" 2>/dev/null || true
 expect 0 "a stop with the process gone" "" "$fixture" stop "$work/fx"
+
+# The web container: stop removes it, and fails when the listing still shows it or cannot be read.
+cat >"$work/fake-web-docker" <<'EOF'
+#!/bin/sh
+case $1 in
+logs | rm) exit 0 ;;
+ps) [ "$2 $3 $4" = '-aq --filter name=^bw-doc-blocks-web$' ] || exit 99; printf '%s' "${BW_FAKE_PS_OUT:-}"; exit "${BW_FAKE_PS_RC:-0}" ;;
+esac
+exit 99
+EOF
+chmod +x "$work/fake-web-docker"
+mkdir -p "$work/web/record"
+export BW_DOC_DOCKER=$work/fake-web-docker
+echo bw-doc-blocks-web >"$work/web/web.container"
+BW_FAKE_PS_OUT=3f9a1c expect 1 "the web container is still there" "could not confirm that the container bw-doc-blocks-web is gone" "$fixture" stop "$work/web"
+BW_FAKE_PS_RC=1 expect 1 "docker cannot list the web container" "could not confirm that the container bw-doc-blocks-web is gone" "$fixture" stop "$work/web"
+expect 0 "the web container is gone" "" "$fixture" stop "$work/web"
+if [ ! -f "$work/web/web.container" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: stop kept the web container's marker" >&2; fi
 
 echo "run-doc-blocks-test: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

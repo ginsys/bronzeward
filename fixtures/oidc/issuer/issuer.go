@@ -2,7 +2,8 @@
 // discovery document and a JWKS for one synthetic ES256 key, and it mints access tokens for the
 // synthetic humans, valid or carrying one named defect (persistence-api.md §10.1). Defect tokens
 // are built here with go-jose, never through the server's verifier. It is not an identity
-// provider: no login, no clients, no refresh. The verifier's tests and the defect tokens use it;
+// provider: no login, no clients, no refresh. The one exception is a device sign-in that approves
+// at once, off unless DeviceHuman is set. The verifier's tests and the defect tokens use it;
 // only the sign-in self-test uses a real provider, and claims interoperability with that pinned
 // release only (fixtures/README.md).
 package issuer
@@ -54,7 +55,10 @@ const Lifetime = 5 * time.Minute
 type Issuer struct {
 	URL      string // the iss claim and the discovery document's issuer
 	Audience string
-	key      jose.JSONWebKey
+	// DeviceHuman, when set, makes Handler offer the device-authorization grant and approve every
+	// request at once with a token for this human; "" offers no sign-in.
+	DeviceHuman string
+	key         jose.JSONWebKey
 }
 
 // NewKey returns a fresh P-256 signing key with a random key ID.
@@ -109,7 +113,8 @@ func New(issuerURL, audience string, key jose.JSONWebKey) (*Issuer, error) {
 	return &Issuer{URL: issuerURL, Audience: audience, key: key}, nil
 }
 
-// Handler serves the discovery document and the public key set.
+// Handler serves the discovery document and the public key set, and with DeviceHuman set the
+// device sign-in.
 func (i *Issuer) Handler() http.Handler {
 	discovery := map[string]any{
 		"issuer":                                i.URL,
@@ -120,9 +125,39 @@ func (i *Issuer) Handler() http.Handler {
 	}
 	jwks := jose.JSONWebKeySet{Keys: []jose.JSONWebKey{i.key.Public()}}
 	mux := http.NewServeMux()
+	if i.DeviceHuman != "" {
+		discovery["device_authorization_endpoint"] = i.URL + "/device"
+		discovery["token_endpoint"] = i.URL + "/token"
+		i.device(mux)
+	}
 	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, discovery) })
 	mux.HandleFunc("GET /jwks", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, jwks) })
 	return mux
+}
+
+// device adds the device-authorization grant (RFC 8628) with nobody to ask: the first token request
+// that carries this handler's device code gets an access token for DeviceHuman. Client IDs are not
+// checked, and no refresh token is issued. Test use only (the clean-install run).
+func (i *Issuer) device(mux *http.ServeMux) {
+	code := JTI()
+	mux.HandleFunc("POST /device", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"device_code": code, "user_code": "BWSYNTH-CODE", "verification_uri": i.URL + "/device",
+			"expires_in": int(Lifetime.Seconds()), "interval": 1})
+	})
+	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
+		if r.PostFormValue("grant_type") != "urn:ietf:params:oauth:grant-type:device_code" || r.PostFormValue("device_code") != code {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+			return
+		}
+		token, err := i.Mint(i.DeviceHuman, "", time.Now())
+		if err != nil {
+			http.Error(w, "mint failed", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"access_token": token, "token_type": "Bearer", "expires_in": int(Lifetime.Seconds())})
+	})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

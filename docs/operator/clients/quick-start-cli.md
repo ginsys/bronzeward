@@ -29,9 +29,10 @@ credential and the current context. The first context you add becomes the curren
 already have another, or the `BRONZEWARD_CONTEXT` environment variable is set (it wins over the
 current context), add `--context office` to every command below.
 
-This page is written from the client's source and its specification. No command on it was run for
-this page, and the `text` blocks of the other client pages show the shape of the output, not a
-recorded run.
+This page is written from the client's source and its specification. CI runs the commands of steps
+3 to 5 against a disposable server with no machine recorded; it does not run steps 1 and 2 from
+this page. The `text` blocks of the other client pages show the shape of the output, not a recorded
+run.
 
 ## 2. Sign in
 
@@ -44,7 +45,7 @@ Your browser opens at the identity provider. Sign in there. On a computer with n
 
 ## 3. Check who you are
 
-```bash
+```bash {.bw-run}
 bronzewardctl whoami
 ```
 
@@ -57,7 +58,7 @@ that a command you run later is allowed.
 
 ## 4. Check the server
 
-```bash
+```bash {.bw-run}
 bronzewardctl version
 bronzewardctl status
 ```
@@ -70,7 +71,7 @@ recorded none, and "not checked" means nobody asked the machines.
 
 ## 5. Read what the installation manages
 
-```bash
+```bash {.bw-run}
 bronzewardctl cluster list
 bronzewardctl machine list
 ```

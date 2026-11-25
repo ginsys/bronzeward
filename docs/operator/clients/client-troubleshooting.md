@@ -19,7 +19,7 @@ request is repeated.
 
 Run any read, for example:
 
-```bash
+```bash {.bw-run}
 bronzewardctl status
 ```
 

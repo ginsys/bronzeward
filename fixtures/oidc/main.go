@@ -23,7 +23,7 @@ import (
 )
 
 const usage = `usage: oidc keygen  -out <key file>
-       oidc serve   -key <key file> -issuer <url> [-listen 127.0.0.1:5556]
+       oidc serve   -key <key file> -issuer <url> [-listen 127.0.0.1:5556] [-device-human <name>]
        oidc mint    -key <key file> -issuer <url> [-audience bronzeward] -human <name> [-defect <name> | -without-group <group>] [-age <duration>]
        oidc defects
        oidc groups  -signing-key <file> -project <id> [-listen 127.0.0.1:5556]`
@@ -50,6 +50,7 @@ func run(args []string, stdout io.Writer) error {
 	human := fs.String("human", "", "synthetic human (mint): "+strings.Join(slices.Sorted(maps.Keys(issuer.Humans)), ", "))
 	defect := fs.String("defect", "", "defect to put in the token (mint): see oidc defects")
 	withoutGroup := fs.String("without-group", "", "group of the human's left out of a valid token (mint)")
+	deviceHuman := fs.String("device-human", "", "synthetic human a device sign-in gets at once (serve); without it none is offered")
 	age := fs.Duration("age", 0, "issue the token this long ago, so it expires sooner (mint)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -88,6 +89,10 @@ func run(args []string, stdout io.Writer) error {
 			return err
 		}
 		if args[0] == "serve" {
+			if _, ok := issuer.Humans[*deviceHuman]; *deviceHuman != "" && !ok {
+				return fmt.Errorf("-device-human: unknown human %q", *deviceHuman)
+			}
+			iss.DeviceHuman = *deviceHuman
 			return serve(iss.Handler(), *listen)
 		}
 		var tok string
