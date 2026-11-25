@@ -4783,7 +4783,13 @@ each (design §7.7 consequences):
   them; a cluster with no stored key, a soft-deleted latest version and a
   sealed provider each failing `503 talos-access-unavailable`; a worker
   configuration offering nothing; a copy of the key elsewhere in the document
-  refused by the guard (compilation §4.2); and neither the offered value nor a
+  refused by the guard (compilation §4.2); a copy of the key inside a field the
+  operator marks (`machine.files[0].content`), inside a Talos-marked secret
+  field and inside a marked mapping, each refused by the guard before any
+  provider write, with no generation created, and with the mutation control
+  that skips the payload comparison and must then create a generation holding
+  the key (the control's own run is what shows the refusal is the payload
+  check's); and neither the offered value nor a
   digest of it in the database, the events, the logs and the responses of
   compilation §15's scan, with a positive control. Publication: the rendered
   control plane configuration carrying the key and accepted by the pinned
