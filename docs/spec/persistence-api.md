@@ -239,7 +239,7 @@ statement.
 | ImportBaseRevision | immutable | a machine's sanitized imported document with references and the embedded documents the import identified (publication rebuilds the base with them, §6.1), baseline ciphertext, its keyed digest and its configuration digest, and where step 2a removed a `HostnameConfig` or a legacy hostname key, the machine name it compared and whether that document was exactly the fill's own (a removed key never is) | compilation §2.3, §6 |
 | Draft | mutable, revisioned | change set: entries and their base head revisions | this contract |
 | Release, ReleaseMachine | immutable | the compilation §11 unit, with each machine's configuration digest (§1.1) and the name of the Transit key its artifact was encrypted under; the release covers one cluster and a set of its machines | compilation §11; this contract |
-| Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity: the machine's key at its ciphertext's key version. Each effective dependency has a reproduction dependency of its machine at the same version and creation time, whose source is in the machine's composition and declares it at that version and generation; indexed by its DependencyStatus identity (dependency monitor §6.1) | compilation §9 |
+| Dependency record | immutable | effective and reproduction dependencies, encryption dependency with the key identity: the machine's key at its ciphertext's key version. Each effective dependency has a reproduction dependency of its machine at the same version and creation time, whose source is in the machine's composition and declares it at that version and generation (the `talos-ca-key` reference declares neither, compilation §5.1); indexed by its DependencyStatus identity (dependency monitor §6.1) | compilation §9 |
 | DependencyStatus | mutable | last classification per provider object version and creation time, and when first seen `retained` | design §7.6, §7.8; [dependency monitor §5](dependency-monitor.md#5-state) |
 | DependencyAlert | immutable | every alert the dependency monitor raises | [dependency monitor §6.2](dependency-monitor.md#62-alert-kinds) |
 | DependencyMonitor | mutable singleton | the monitor's progress, last completed pass, last stall alert and last logged alert | [dependency monitor §5.1](dependency-monitor.md#51-records) |
@@ -1749,7 +1749,10 @@ UPDATE <adoption> SET revision_id = NULL, adoption_revision = adoption_revision 
   --   against the sources its composition names (import base, its profiles'
   --   pins, its selected fragments): each record's source among them with
   --   that source's text digest, its reference declared there at the same
-  --   version, generation, encoding and kind; every declaration with a
+  --   version, generation, encoding and kind (the one `talos-ca-key`
+  --   reference of the import base declares no version, generation or
+  --   encoding: it is checked for its kind, its path and the version its
+  --   dependency record names, compilation §5.1, §9); every declaration with a
   --   reproduction dependency and a provenance record, both naming the same
   --   occurrences, each provenance record with exactly one outcome and
   --   stored paths (§9.3 review read), every member of each occurrence (a
@@ -1766,7 +1769,11 @@ INSERT INTO dependency ...;          -- both records, each reproduction source
                                      -- version and creation time, whose source
                                      -- is in the machine's composition and
                                      -- declares it at that version and
-                                     -- generation; and one encryption
+                                     -- generation (the `talos-ca-key`
+                                     -- reference declares neither: its
+                                     -- dependency names the signer's path
+                                     -- and the version its record names);
+                                     -- and one encryption
                                      -- dependency per machine, naming the
                                      -- machine's key at its ciphertext's key
                                      -- version (checked at commit)
@@ -2949,7 +2956,9 @@ declarations of the `!bwref` tags the document already carries, as
 [{"path", "format"}]}`. A marked value is extracted to a new generation under
 this update's claim; a carried reference resolves to the generation of a
 reference row of the draft's cluster, a fragment revision's or an import
-base's, with the same name, kind and version. A carried name that matches no
+base's, with the same name, kind and version. The import base's one
+`talos-ca-key` reference has no version and no generation, so a carried
+`talos/ca-key` matches its row by name and kind alone (compilation §5.2). A carried name that matches no
 such row, or rows with different generations, is `422 validation-failed` with
 `"rule": "unknown-reference"` and the `"reference"` name. The update ingests
 under a claim of kind `draft-update` that names the draft and stages
@@ -3019,7 +3028,8 @@ its ETag (§4.1). Its `revisions` are every revision of its name, or its
 machine, published or not, in identifier order. A revision answers its
 content: a fragment revision its sanitized `document`, `layer` and
 `declarations` (each reference row's name with its kind, version and encoding,
-never its generation path, and its `embedded` documents), a profile
+never its generation path, and its `embedded` documents; the `talos-ca-key`
+row has its kind only), a profile
 revision its `fragments` pins in order, an assignment revision its `profiles`
 and `fragments` per layer. The discarded draft moved no head, so `registries`
 still answers head revision 3, the base the draft edited from, while the

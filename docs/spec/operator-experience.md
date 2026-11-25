@@ -176,7 +176,7 @@ labels:
 
 | Step | Who | What changes | What it does not do |
 | --- | --- | --- | --- |
-| Import (ingestion) | human `author` | Reads the node's configuration, stores its secrets as provider generations and a sanitized import base in a draft ([compilation §2](compilation.md#2-ingestion-extraction-before-persistence)) | Writes nothing to the node (`docs/operator/walkthrough.md:120-121`) |
+| Import (ingestion) | human `author` | Reads the node's configuration, stores its secrets as provider generations, except the cluster's CA key, which stays in the signer's path behind a typed reference, and a sanitized import base in a draft ([compilation §2](compilation.md#2-ingestion-extraction-before-persistence)) | Writes nothing to the node (`docs/operator/walkthrough.md:120-121`) |
 | Edit | `author` | Draft entries: fragments, profiles, assignments | Renders nothing until publication ([§11](#11-api-gap-audit), G5) |
 | Publish | `publisher` | Compiles every covered machine, encrypts the artifacts, creates an immutable release that becomes each machine's `Desired` ([design §12.6](../design/Talos_Configuration_and_Machine_Management_Design.md#126-offline-semantics)) | Sends nothing to a machine; authorizes nothing ([design §7.4](../design/Talos_Configuration_and_Machine_Management_Design.md#74-publication-without-distributed-transactions)) |
 | Plan | `publisher` | An immutable plan binding release, machine, operation, mode, assignment revision, deadlines, expiry, epoch and evidence (`internal/api/plans.go:172-201`) | Approves or dispatches nothing |
@@ -887,7 +887,7 @@ assignment stores names, so a later save of a profile or fragment changes what t
 composes. A profile stores revision IDs instead, and the editor shows that difference.
 "Show composition and references" reads the revisions that the lists name and shows the
 composition order above, with the profile pins of a layer first. For each fragment it shows each
-reference with its declared kind and version, and whether the reference is declared, carried and
+reference with its declared kind and version (the CA key's typed reference has a kind only), and whether the reference is declared, carried and
 not declared, or declared and not in the document. It reads on request and shows no document or
 value.
 

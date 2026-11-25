@@ -199,7 +199,9 @@ The adoption that follows the import, publishing the import draft and adopting e
 **Pass criteria.** Neither node's digest nor resource version changed, and no Talos mutation
 request appears in any log. The scan finds no synthetic secret outside OpenBao, the marked value
 included, here and in every negative control below. Each draft holds `!bwref` references where the
-schema list and the mark identified values, each value a create-only generation. The baseline
+schema list and the mark identified values, each value a create-only generation, except the
+cluster's CA key, whose reference is the typed `talos-ca-key` one with no generation
+([compilation §2.3](compilation.md#23-pipeline) step 3a). The baseline
 ciphertext, decrypted by the OpenBao administrator outside Bronzeward, has the recorded
 configuration digest, equal to the pre-state; the executor identity's decryption of it is refused.
 
