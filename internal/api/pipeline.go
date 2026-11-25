@@ -487,8 +487,7 @@ func (r *snapshotReader) pinCAKey(sources map[string]storedSource) (*firstKeyAct
 				a, err := latestFirstKey(r.ctx, r.tx, r.j.cluster)
 				if errors.Is(err, sql.ErrNoRows) {
 					return nil, refuse(http.StatusServiceUnavailable, "dependency-unavailable",
-						"Publication refused: no first-key act names the cluster's CA key; supply a first key with "+
-							"POST /clusters/{id}/first-keys; "+noRelease+".").
+						"Publication refused: "+noFirstKeyDetail+"; "+noRelease+".").
 						with("cluster", r.j.cluster), nil
 				}
 				if err != nil {

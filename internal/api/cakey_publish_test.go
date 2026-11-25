@@ -135,7 +135,9 @@ func TestPublishRefusesTheCAKeyWithoutFirstKeyAct(t *testing.T) {
 	c.noSeed = true
 	dropFirstKeyActs(t, c.db, c.cluster)
 	_, ref := c.build()
-	if ref == nil || ref.status != 503 || ref.code != "dependency-unavailable" || !strings.Contains(ref.detail, "no first-key act names") {
+	// The snapshot refuses it, before any node is observed.
+	if ref == nil || ref.status != 503 || ref.code != "dependency-unavailable" || !strings.Contains(ref.detail, noFirstKeyDetail) ||
+		ref.extra["observation"] != nil || ref.extra["cluster"] != c.cluster {
 		t.Fatalf("got %v", ref)
 	}
 }
