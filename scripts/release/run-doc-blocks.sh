@@ -7,8 +7,8 @@
 # build's dist/ copied in, against the disposable server of doc-blocks-fixture.sh. In a container
 # block one value is replaced and the record says so: the pages' server address,
 # https://bronzeward.example.com, becomes the fixture's https://localhost:8443, whose private CA
-# certificate is the pages' ./office-ca.pem. A block that also carries .bw-db is not this run's: it
-# needs a secret provider and a machine. Fences are read by text, as scripts/verify-docs.py does,
+# certificate is the pages' ./office-ca.pem. A block opened by exactly "```bash {.bw-run .bw-db}" is
+# not this run's: it needs a secret provider and a machine. Fences are read by text, as scripts/verify-docs.py does,
 # with no Markdown parser. The run fails when a block fails, when a marked block did not run, or when
 # anything else ran.
 #
@@ -44,7 +44,7 @@ extract() {
 		awk -v out="$out" -v name="$(basename "$page" .md)" -v page="$page" -v seen="$seen" '
 			function die(msg) { printf "run-doc-blocks: %s:%d: %s\n", page, NR, msg > "/dev/stderr"; failed = 1; exit 1 }
 			skip { if ($0 ~ /^```$/) skip = 0; next }
-			/^```[a-z]* [{][^}]*[.]bw-db([ \t][^}]*)?[}]$/ && !open { skip = 1; next }
+			$0 == "```bash {.bw-run .bw-db}" && !open { skip = 1; next }
 			/^```[a-z]* [{][^}]*[.]bw-run[^}]*[}]$/ && !open {
 				n++; open = 1; lines = 0
 				phase = ($0 ~ /[.]bw-host/) ? "host" : "container"
@@ -124,11 +124,12 @@ run() {
 		echo "host $(uname -sm)"
 		echo "substitution $page_server -> $fixture_web (container blocks)"
 	} >"$rec/doc-blocks.log"
-	# The address as a literal, and only where it ends: not a longer host name, and not one with a port.
+	# The address as a literal, and only standing alone as a word. Any other form is left as written, so
+	# that its block reaches no server and fails.
 	local literal=${page_server//./\\.}
 	while read -r id phase; do
 		[ "$phase" = container ] || continue
-		sed -E -i "s#$literal([^A-Za-z0-9.:-]|\$)#$fixture_web\\1#g" "$rec/blocks/$id.sh"
+		sed -E -i "s#(^| )$literal( |\$)#\\1$fixture_web\\2#g" "$rec/blocks/$id.sh"
 	done <"$rec/blocks/blocks.list"
 	export BW_DOC_WEB_URL=$fixture_web
 	: >"$rec/ran.list"

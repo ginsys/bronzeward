@@ -160,21 +160,23 @@ else
 	echo "FAIL: the server address was not substituted in the container block alone, or the record does not say so" >&2
 fi
 
-# Only that address: another host that differs from it in a dot, or goes on after it, is left as written.
+# Only that address, standing alone as a word: anything attached to it, before or after, leaves it as written.
+kept="https://bronzeward-example.com https://bronzeward.example.community https://bronzeward.example.com:9 https://bronzeward.example.com/x https://bronzeward.example.com@other.example/x x=https://bronzeward.example.com"
 page lookalike "${fence}bash {.bw-run .bw-host}" "echo built" "$fence" "${fence}bash {.bw-run}" \
-	"echo https://bronzeward-example.com https://bronzeward.example.community https://bronzeward.example.com:9 https://bronzeward.example.com/x 'https://bronzeward.example.com'" "$fence"
+	"echo $kept https://bronzeward.example.com" "$fence"
 BW_DOC_EXEC=$work/stub-sh expect 0 "a page with look-alike addresses" "" "$runner" run "$work/lookalike.md"
-if grep -qx 'https://bronzeward-example.com https://bronzeward.example.community https://bronzeward.example.com:9 https://localhost:8443/x https://localhost:8443' "$work/state/record/lookalike-2.out"; then
+if grep -qxF "$kept https://localhost:8443" "$work/state/record/lookalike-2.out"; then
 	pass=$((pass + 1))
 else
 	fail=$((fail + 1))
 	echo "FAIL: a look-alike address was substituted, or the address itself was not: $(cat "$work/state/record/lookalike-2.out")" >&2
 fi
 
-# Only the class .bw-db itself is skipped: a longer name keeps its .bw-run block in this run.
-page dbname "${fence}bash {.bw-run}" "echo box" "$fence" "${fence}bash {.bw-run .bw-db-extra}" "echo extra" "$fence"
-expect 0 "a class that only starts with .bw-db" "" "$runner" extract "$work/o1d" "$work/dbname.md"
-if [ "$(wc -l <"$work/o1d/blocks.list")" -eq 2 ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: the .bw-db-extra block was skipped" >&2; fi
+# Only the opener written exactly "{.bw-run .bw-db}" is skipped: any other keeps its block in this run.
+page dbname "${fence}bash {.bw-run}" "echo box" "$fence" "${fence}bash {.bw-run .bw-db-extra}" "echo extra" "$fence" \
+	"${fence}bash {.bw-run .other.bw-db}" "echo other" "$fence"
+expect 0 "classes that only resemble .bw-db" "" "$runner" extract "$work/o1d" "$work/dbname.md"
+if [ "$(wc -l <"$work/o1d/blocks.list")" -eq 3 ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: a block that only resembles .bw-db was skipped" >&2; fi
 
 # A marked block with no command (blank lines, comments) is an empty block.
 page blank "${fence}bash {.bw-run}" "" "# only a note" "  " "$fence"
