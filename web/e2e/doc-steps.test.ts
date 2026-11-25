@@ -17,7 +17,10 @@ import { expect, test } from "vitest";
 export const PAGES = ["quick-start-web", "sign-in-and-renewal", "inventory", "editing", "protected-import", "plan-and-approval", "publication", "operation-tracking"];
 
 const MARKER = /^<!-- bw-web-steps: (\S+) -->\s*$/;
-const ITEM = /^(\d+)\. /;
+// A list item of the list itself: up to two spaces before the number (an item's own text starts at the third column, so a
+// line indented further is that item's content, a nested list included).
+const SIBLING = /^ {0,2}(\d+)\. /;
+const FIRST = /^ {0,2}1\. /;
 const TAG = /\[step ([a-z0-9-]+)\.(\d+)\]/g;
 
 type List = { id: string; steps: number };
@@ -48,7 +51,7 @@ export const lists = (page: string, markdown: string): { lists: List[]; problems
     if (line.startsWith("**Web.** Steps:")) steps = true;
     const marker = MARKER.exec(line);
     if (marker === null) {
-      if (ITEM.test(line) && line.startsWith("1. ") && !marked.has(i) && (page === "quick-start-web" || web || steps)) {
+      if (FIRST.test(line) && !marked.has(i) && (page === "quick-start-web" || web || steps)) {
         problems.push(`${page}:${i + 1}: a numbered list in a web section has no <!-- bw-web-steps: ... --> line above it`);
       }
       continue;
@@ -58,7 +61,7 @@ export const lists = (page: string, markdown: string): { lists: List[]; problems
     if (found.some((l) => l.id === id)) problems.push(`${page}:${i + 1}: the list name ${id} is used twice`);
     let j = i + 1;
     while (j < lines.length && lines[j]!.trim() === "") j++;
-    if (!(lines[j] ?? "").startsWith("1. ")) {
+    if (!FIRST.test(lines[j] ?? "")) {
       problems.push(`${page}:${i + 1}: the marker ${id} is not followed by a numbered list that starts at 1`);
       continue;
     }
@@ -69,12 +72,17 @@ export const lists = (page: string, markdown: string): { lists: List[]; problems
     for (; k < lines.length; k++) {
       const next = lines[k]!;
       if (next.trim() === "") { blank = true; continue; }
+      const item = SIBLING.exec(next);
+      if (item !== null) {
+        // An item with another number is a step the pages would show and no tag can name: refuse it, blank line or not.
+        if (Number(item[1]) === n + 1) n++;
+        else problems.push(`${page}:${k + 1}: the list ${id} has item ${item[1]} where ${n + 1} is next`);
+        blank = false;
+        continue;
+      }
       if (/^\s/.test(next)) { blank = false; continue; }
-      if (ITEM.exec(next)?.[1] === String(n + 1)) { n++; blank = false; continue; }
       if (blank) break;
     }
-    const after = lines.slice(k).find((l) => l.trim() !== "");
-    if (after !== undefined && ITEM.test(after)) problems.push(`${page}:${k + 1}: the list ${id} continues with an item out of order after step ${n}`);
     found.push({ id, steps: n });
     i = k - 1;
   }
@@ -91,12 +99,13 @@ const kind = (call: ts.CallExpression): { base: string; modifier: string } | und
   return undefined;
 };
 
-// The text of a title: a string, or a template's fixed parts.
-const title = (node: ts.Expression | undefined): string => {
-  if (node === undefined) return "";
-  if (ts.isStringLiteralLike(node)) return node.text;
-  if (ts.isTemplateExpression(node)) return node.head.text + node.templateSpans.map((s) => s.literal.text).join("");
-  return "";
+// The fixed parts of a title: one string, or a template's literal segments. A tag is read inside one segment: text joined
+// across a substitution (`[step a.${n}1]`) is no tag.
+const title = (node: ts.Expression | undefined): string[] => {
+  if (node === undefined) return [];
+  if (ts.isStringLiteralLike(node)) return [node.text];
+  if (ts.isTemplateExpression(node)) return [node.head.text, ...node.templateSpans.map((s) => s.literal.text)];
+  return [];
 };
 
 // The tags in the titles of a spec's cases, with whether the case is not run normally: `xit`, `.skip`, `.todo` or `.only`
@@ -114,7 +123,7 @@ export const tags = (source: string, name: string): Tag[] => {
         if (outer !== undefined && ["describe", "xdescribe", "context"].includes(outer.base) && unrun(outer)) skipped = true;
       }
       const at = `${name}:${file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1}`;
-      for (const m of title(node.arguments[0]).matchAll(TAG)) found.push({ id: m[1]!, step: Number(m[2]), at, unrun: skipped });
+      for (const segment of title(node.arguments[0])) for (const m of segment.matchAll(TAG)) found.push({ id: m[1]!, step: Number(m[2]), at, unrun: skipped });
     }
     ts.forEachChild(node, visit);
   };
@@ -192,6 +201,9 @@ test("the positive control: a tag in a describe title, or in a comment or a stri
 test("the positive control: a tag in a template title counts, and one in a substituted part does not", () => {
   expect(check({ a: page("# A", ...list("a", 1)) }, { "s.ts": "it(`c ${defect} [step a.1]`, f);" })).toEqual([]);
   expect(check({ a: page("# A", ...list("a", 1)) }, { "s.ts": "it(`c ${'[step a.1]'}`, f);" })).toEqual(["a: step a.1 has no browser case tagged [step a.1]"]);
+  // Text on both sides of a substitution is two segments, never one tag: `[step a.${2}1]` is not `[step a.21]` and not `[step a.1]`.
+  expect(check({ a: page("# A", ...list("a", 1)) }, { "s.ts": "it(`c [step a.${2}1]`, f);" })).toEqual(["a: step a.1 has no browser case tagged [step a.1]"]);
+  expect(check({ a: page("# A", ...list("a", 1)) }, { "s.ts": "it(`c [step a.1${2}]`, f);" })).toEqual(["a: step a.1 has no browser case tagged [step a.1]"]);
 });
 
 test("the positive control: a list is found with its indented lines, images, blank lines and lazy lines, and a fence is no list", () => {
@@ -205,7 +217,19 @@ test("the positive control: a marker with no list, a repeated name, a name from 
   expect(lists("a", page("# A", ...list("a", 1), ...list("a", 1))).problems).toEqual(["a:7: the list name a is used twice"]);
   expect(lists("a", page("# A", ...list("b", 1))).problems).toEqual(["a:3: the list name b is neither a nor a-<n>"]);
   expect(lists("a", page("# A", ...list("a-1", 2), ...list("a-2", 1))).problems).toEqual([]);
-  expect(lists("a", page("# A", "", "<!-- bw-web-steps: a -->", "", "1. One.", "2. Two.", "", "4. Four.")).problems).toEqual(["a:8: the list a continues with an item out of order after step 2"]);
+  expect(lists("a", page("# A", "", "<!-- bw-web-steps: a -->", "", "1. One.", "2. Two.", "", "4. Four.")).problems).toEqual(["a:8: the list a has item 4 where 3 is next"]);
+});
+
+test("the positive control: an item with the wrong number is named with no blank line before it, and at any sibling indent", () => {
+  const marked = (...body: string[]) => lists("a", page("# A", "", "<!-- bw-web-steps: a -->", "", ...body));
+  expect(marked("1. One.", "3. Three.").problems).toEqual(["a:6: the list a has item 3 where 2 is next"]);
+  expect(marked("1. One.", "  3. Three.").problems).toEqual(["a:6: the list a has item 3 where 2 is next"]);
+  expect(marked("1. One.", " 2. Two.", "  3. Three.")).toEqual({ lists: [{ id: "a", steps: 3 }], problems: [] });
+});
+
+test("the negative control: an item nested under a step, indented to its text, is that step's content and no step", () => {
+  const marked = (...body: string[]) => lists("a", page("# A", "", "<!-- bw-web-steps: a -->", "", ...body));
+  expect(marked("1. One:", "   1. nested", "   2. nested", "2. Two.")).toEqual({ lists: [{ id: "a", steps: 2 }], problems: [] });
 });
 
 test("the positive control: a numbered list in a web section with no marker is named, in each of the three ways a section is found", () => {
@@ -214,6 +238,9 @@ test("the positive control: a numbered list in a web section with no marker is n
   expect(unmarked("a", "# A", "## Web client", "", "### Several", "", "1. One.")).toHaveLength(1);
   expect(unmarked("a", "# A", "", "**Web.** Steps:", "", "1. One.")).toHaveLength(1);
   expect(unmarked("quick-start-web", "# Q", "", "1. One.")).toHaveLength(1);
+  // Up to two spaces before the number is still a list that starts there.
+  expect(unmarked("a", "# A", "## Web", "", "  1. One.")).toHaveLength(1);
+  expect(unmarked("a", "# A", "## Web", "", " 1. One.")).toHaveLength(1);
 });
 
 test("the negative control: a numbered list outside a web section needs no marker, and a web section ends at the next heading of its level", () => {
