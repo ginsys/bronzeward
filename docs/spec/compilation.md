@@ -286,7 +286,8 @@ give a node a path that reads as an embedded document's.
    secret. The verdict is one of `match`, `mismatch`, `no key` (the cluster has
    no stored key or no readable version) and `unreadable`. The value stays among
    those the guard checks (§4.2), so a copy of the key anywhere else in the
-   document refuses the input, and the match check never logs, returns or
+   document, or inside any value step 4 extracts, refuses the input, and the
+   match check never logs, returns or
    stores the offered value, nor a digest of it (invariant 8, §14). The
    baseline of step 8 still holds the exact input, encrypted.
    - `match`: step 4 substitutes the typed reference of §5.1 for the node, and
@@ -306,7 +307,9 @@ give a node a path that reads as an embedded document's.
    nothing to verify. A node that already carries the typed reference is
    excluded from identification (step 3), so a draft update or a further mark
    on a sanitized document does not offer the key again; a new import of the
-   machine does.
+   machine does. A run that does not offer it does not hold it, so the guard
+   cannot search for the key there: a copy an operator types into a draft
+   update is outside the guard, which finds exact copies of what the run holds.
 4. **Substitute** each identified value by a reference (§5) under a newly
    minted logical name at version 1, with its declaration (§5.2), producing the
    candidate sanitized document; the CA key of step 3a takes the typed
@@ -315,8 +318,9 @@ give a node a path that reads as an embedded document's.
    until it no longer changes: the encoder moves a blank line inside a run of
    comments, as talosctl writes them, and a later mark (§3.6 item 3) refuses
    any text its re-encoding changes. The guard searches that final text.
-5. **Guard** (§4.2). A guard hit refuses the input; no provider object has been
-   created yet.
+5. **Guard** (§4.2): the candidate document, and every payload step 6 would
+   write, against the CA key. A guard hit refuses the input; no provider object
+   has been created yet.
 6. **Create** one provider generation per extracted value, the CA key of step 3a
    excepted, create-only (`cas=0`) at a path of its own. This takes the first branch of design §7.8 item 1
    (a path of its own, rather than an overwritten path with an explicit
@@ -754,7 +758,8 @@ plans, dispatches or observes can compute them.
 
 Before a sanitized value is constructed, the candidate document is parsed back
 and checked twice against every value extracted in this run, the CA key of §2.3
-step 3a included although no generation is created for it. An extracted
+step 3a included although no generation is created for it. A third check reads
+the extracted payloads themselves against the CA key. An extracted
 mapping contributes its keys as well as its members, since the provider stores
 both:
 
@@ -771,6 +776,19 @@ both:
    common words, and contained in a longer one they are no copy: a marked
    registry `auth` mapping's key `username` sits inside the `usernames` key every
    Talos base holds. §6 step 7 matches keys the same way.
+
+3. **Payloads against the CA key.** Checks 1 and 2 read the candidate
+   document, where step 4 has already replaced every extracted value by a
+   reference, so a copy of the CA key inside a value that is extracted (a
+   Talos-marked secret field, an operator-marked path such as
+   `machine.files[0].content`, or a scalar or key beneath a marked mapping)
+   is no longer in what they read, and step 6 would write it as a generation.
+   Before step 6, every payload it would write is therefore compared with the
+   CA key of step 3a by value and as a substring, as checks 1 and 2 do. A hit
+   refuses the input as any guard hit does, before any provider write, so no
+   generation holds the CA key. The `machine.ca.key` node itself is no payload
+   (step 4), and a node already under a `!bwref` tag is excluded at step 3, so
+   it contributes none.
 
 The substring search skips the scalar content of this run's `!bwref` nodes,
 which is a reference name, as E1's substring search skipped the references it
