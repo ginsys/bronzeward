@@ -372,8 +372,10 @@ bronzewardctl
   machine freeze | unfreeze           --reason required
 
   draft create | list | show | discard
-  fragment set | rm | show | history  set reads the document from a file or stdin, never argv
-  profile set | rm | show | history
+  fragment set | rm | show | history  set reads the document from a file or stdin, never argv; --library writes a shared one
+  fragment adopt | detach | adoptions  a shared fragment in this cluster's draft; adoptions lists the clusters on each revision (--behind)
+  profile set | rm | show | history   (the same --library, adopt, detach and adoptions for a shared profile)
+  draft impact                        what the draft changes and reaches, before publishing (API revision 19)
   assignment set | rm | show | history
 
   import start                        --machine --draft [--review]
@@ -889,6 +891,44 @@ reference with its declared kind and version, and whether the reference is decla
 not declared, or declared and not in the document. It reads on request and shows no document or
 value.
 
+#### Shared fragments and profiles
+
+A fragment or profile that several clusters use is **shared** ([persistence and API §3.1.1](persistence-api.md#311-shared-fragments-and-profiles-the-library-scope), choice §17.28). A
+change to it reaches no cluster by itself: this cluster takes it in its own draft, and reads it in its own plan.
+
+```text
+$ bronzewardctl fragment set ntp-servers --library --draft drf_8kdq…z6pa --layer global --file ntp.yaml
+Shared fragment ntp-servers saved in draft drf_8kdq…z6pa (revision frv_6tn…2qba). Publishing this draft
+moves cluster cl_9fd… (lab-a) to it. No other cluster changes.
+$ bronzewardctl draft impact drf_8kdq…z6pa
+ntp-servers  shared   reaches in lab-a: 4 machines (mch_b3c…aa2q and 3 more; assignment)
+                      stays unchanged: lab-b on frv_1ab… , prod on frv_1ab…
+$ bronzewardctl fragment adoptions ntp-servers --behind
+CLUSTER  ADOPTED    HEAD       RELEASE      MACHINES
+lab-b    frv_1ab…   frv_6tn…   rel_c2d…     6
+prod     frv_1ab…   frv_6tn…   rel_e5f…     12
+```
+
+In another cluster's draft the same revision is taken with `fragment adopt`, which names it
+(`--revision`, the head when none is given) and prints the machines it reaches there:
+
+```text
+$ bronzewardctl fragment adopt ntp-servers --draft drf_p4cx…7mda --revision frv_6tn…2qba
+Cluster prod adopts ntp-servers frv_6tn…2qba, was frv_1ab… (draft revision 3). Reaches 12 machines.
+A profile of this cluster that pins ntp-servers must be set again to use it.
+```
+
+`fragment detach <name>` copies the adopted revision into this cluster's own fragment of that name and drops
+the adoption in the same draft, so the cluster stops following it. A shared revision holds no secret
+reference ([persistence and API §3.1.1](persistence-api.md#311-shared-fragments-and-profiles-the-library-scope)): a document
+that does is refused, and a fragment with a secret stays in one cluster. `draft impact` reads the source graph and
+renders nothing (G5): the configuration still appears only after publication.
+
+The web editor shows the same: a fragment or profile list marks the shared ones, a draft page lists each adoption
+and each shared entry with the machines it reaches here and the other clusters it leaves unchanged, and a shared
+fragment's page lists every cluster with the revision it is on and which are behind. A cluster is never moved from
+that page: adopting is a draft entry of that cluster.
+
 ### 5.5 Publication, rendered review and provenance
 
 ```text
@@ -988,6 +1028,10 @@ when its machine is no longer chosen and when the page is left, including a plan
 after that; the choice cannot change while the page works, and a plan Apply was pressed for is never
 cancelled. One the page loses (the tab is closed) expires with the plan default; a creation whose outcome is
 unknown leaves a plan the page has no ID for (`web/src/apply.ts:104`, `web/src/apply.ts:128-132`).
+Above the machines, the page lists each shared fragment or profile whose adoption this release moved, with the
+revision before and after (`previous` and `revision` of the release's `sources`, API revision 19) and the machines of
+this cluster it reaches. The other clusters that stay on the old revision are named as information. They are not
+chosen, planned or approved here: one apply stays one cluster, and each cluster reads the change in its own plan.
 The machine's page shows the plan its position names, which is the newest plan of the machine that the position
 counts (one that has expired, was cancelled or was committed, or an adopt plan a refusal names, is not named), with who prepared it and
 when, read from the plan (`web/src/nextstep.tsx:114-122`, `web/src/machine.tsx:465`); any other plan stays reachable
@@ -1926,7 +1970,11 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `import mark` / `continue` / `takeover` / `abandon` | `POST /ingestions/{id}/marks` / `continuations` / `takeovers` / `abandonments` | author | yes | no |
 | `import status` | `GET /ingestions/{id}` | any | no | no |
 | `draft create` | `POST /drafts` | author | no | no |
-| `fragment set` / `rm`, `profile set` / `rm` | `PUT` / `DELETE /drafts/{id}/fragments/{name}`, `/drafts/{id}/profiles/{name}` | author | no | yes |
+| `fragment set` / `rm`, `profile set` / `rm` (`--library`: a shared entry, API revision 19) | `PUT` / `DELETE /drafts/{id}/fragments/{name}`, `/drafts/{id}/profiles/{name}` | author | no | yes |
+| `fragment adopt`, `profile adopt` (and the removal of an adoption) | `PUT` / `DELETE /drafts/{id}/adoptions/{kind}/{name}` | author | no | yes |
+| `fragment detach`, `profile detach` | composite: `GET` of the adopted revision, `PUT /drafts/{id}/fragments/{name}` (or profiles) with its text, `DELETE /drafts/{id}/adoptions/{kind}/{name}` | author | no | yes |
+| `fragment adoptions`, `profile adoptions` | `GET /fragments/{id}/adoptions`, `GET /profiles/{id}/adoptions` | any | no | no |
+| `draft impact` | `GET /drafts/{id}/impact` | any | no | no |
 | `assignment set` / `rm` | `PUT` / `DELETE /drafts/{id}/assignments/{machine}` | author | no | yes |
 | `draft discard` | `POST /drafts/{id}/discard` | author | no | yes |
 | `publish` | `POST /drafts/{id}/publications` | publisher | no | yes |
@@ -2003,6 +2051,7 @@ general secret browser (milestone exclusion).
 | C7 | The cluster page | the page that exists (cluster fields, its machines with counts, its open drafts); add plans and releases; add Talos credential state | The page that exists, and no more: the plan list has no cluster filter (G20), releases are filtered in the browser (G9 of the client contracts), and credential state is [#856](https://github.com/ginsys/bronzeward/issues/856)'s. A page that read every machine's plans to show a count would cost one read per machine on every visit | accepted; usability unmeasured |
 | C8 | The fragment revision view | none (reads only through the draft editor and the composition views); a read-only page with display rules; a page for authors only | A read-only page with display rules that the web view alone applies (§9 item 9): text node in a `pre`, a notice that the server cannot promise the text holds no unmarked value, no copy or download, memory only. The access rule stays every role, the limit recorded (§9 item 9); an authors-only read would break the release source rows, the draft editor and the composition views for the other roles | accepted; the access rule is the owner's, 2026-11-20 ([ginsys/bronzeward#974](https://github.com/ginsys/bronzeward/issues/974)); the notice is built on the fragment revision view and on the profile pages ([ginsys/bronzeward#988](https://github.com/ginsys/bronzeward/issues/988)) |
 | C9 | A machine's name (G8) | an optional stored name in the API; labels kept by each client; a name composed from the cluster name, endpoint and node ID; the hostname read from the rendered configuration | A stored name: one fact that every operator and both clients share and that a restore keeps. Labels per client split it between devices; the composed name repeats what the tables already show beside the identifier and is no name an operator chose; the hostname has no value before a first publish and costs a read for each machine. The grammar (dot-separated labels of lowercase letters, digits and hyphen, widened from one label on 2026-11-21) keeps it a valid hostname, and a client still treats the received name as remote text (client contracts A9); it is unique within a cluster; an `author` sets it at inventory and replaces it (client contracts A9, [persistence and API §3.5](persistence-api.md#35-a-machines-name), choice §17.43) | decided by the owner, Serge, typed 2026-11-20 11:33 CET: "A. Stored name in the API"; the name and the Talos hostname were independent, and filling the hostname from the name was left to ginsys/bronzeward#976, which compilation §6.1 has since decided: the name is the hostname where the configuration sets none |
+| C10 | How a change to a shared fragment reaches a cluster (ginsys/bronzeward#1095) | a cluster picking it up at its next publication with no draft of its own naming it; one publication covering several clusters; each cluster adopting the revision in a draft of its own | Each cluster adopts in a draft of its own (owner decision, 2026-11-25 13:44 CET): the change is read in that cluster's plan before anything is applied, and one apply stays one cluster. The other two apply a change nobody in a cluster read, or widen one confirmation across clusters ([persistence and API choice §17.28](persistence-api.md#17-choices-for-owner-review)) | decided |
 
 ## 13. Usability and accessibility acceptance
 
