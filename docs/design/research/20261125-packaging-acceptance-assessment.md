@@ -77,14 +77,16 @@ sentence of it. Screen-reader coverage is the limit the owner accepted for
 
 ### Row 3: clean install and the documented workflows on the agreed matrix
 
-State: **not met.** Two parts are open, and neither is a rounding.
+State: **not met.** One part is open, and it is not a rounding: the documented workflows are not run from
+the pages (last row of the table). The `darwin` part, which was open when this document was first
+written, has since run once (second row).
 
 The agreed matrix is `linux/amd64` (CI, disposable fixture) and `darwin/arm64` (the macOS runner, Keychain).
 
 | Part of the row | State | Evidence |
 | --- | --- | --- |
 | Clean install on `linux/amd64` | met with a limit | Job `doc-blocks` (success): `scripts/release/run-doc-blocks.sh` builds at `v0.0.0-dev`, installs the archives in a clean container (curl, tar, CA certificates only) and runs the marked blocks against a disposable server, failing when a marked block did not run or another one did. Limit: the build there is not the `package` job's archive (its version carries the commit) |
-| Clean install and Keychain on `darwin/arm64` | **written, not yet run** | Job `packaged-darwin` and `scripts/release/run-packaged-darwin.sh`, added by this change. At the head this document was written the job had not run. The pull request's own CI is its first run; a run cancelled for want of a macOS runner is not a pass. Limit: install, `version` and the Keychain only; no live-server workflow (no Docker, the server is Linux only) |
+| Clean install and Keychain on `darwin/arm64` | met with limits | Job `packaged-darwin` and `scripts/release/run-packaged-darwin.sh`, added by this change. First and only run: CI run 45708951483, job 139539603782, on a `macos-26-arm64` runner, 22:00:44 to 22:01:37 UTC on 25 November, at the head of the pull request that added it. Its log shows the archive `OK` against `SHA256SUMS`, then "login stored the sign-in in the Keychain, logout read it back, revoked it and removed it", then the archive "is a Mach-O 64-bit executable arm64, and prints" the build's version "with the server gone". Limits: one run, on a pull request head, not on main; install, `version` and the Keychain only, with no live-server workflow (no Docker, the server is Linux only); a keychain made unlocked for the run; the archive is unpacked from a file the job downloaded. A run cancelled for want of a macOS runner would read "not run" |
 | Inaccessible and incompatible servers | met with limits | `packaged-cli` (success): TLS-01, TLS-02, COMP-01, COMP-02 and `TestPackagedVersion` on the packaged linux/amd64 binaries, with a wrong version planted to fail. `packaged-web` (success): TLS-02 and TLS-03's read case and the footer case in Chrome and Firefox on the Caddy-served bundle. Limits, from `CONTRIBUTING.md`: the web footer's server version, COMP and TLS-03's write case are not run on the bundle |
 | Version reporting | met with the same limits | CLI prints its own and the server's version on the packaged binaries; the web footer shows the bundle's version and `Server unknown` when the server cannot be read (`web/e2e/packaged.e2e.ts:15`) |
 | Reproducible artifacts, no local-only scripts | met | Rows above run in CI jobs from repository scripts; no check here needs a developer machine |
@@ -101,7 +103,7 @@ the owner's to say; this assessment does not decide it.
 | Packaging: two builds equal, binaries report the tag and commit, rendered Caddy configuration serves exactly `web/headers.json` | met | `package`, `package-check`, `hosting` (all success) |
 | Clean install `linux/amd64` in a container with only curl, tar and CA certificates | met with a limit | `doc-blocks`; the signature steps are not run (§5) |
 | Workflow pages: each CLI page's marked blocks run; each web page has a browser case per numbered step | met for what is marked; not met for pages with no marked block | §2 row 3 |
-| `darwin/arm64`: install, `version` with the server unreachable, Keychain store and read, the inaccessible-server case | written, not yet run | `packaged-darwin`. The inaccessible-server case is the `version` check with the server gone; no other message on `darwin` is checked |
+| `darwin/arm64`: install, `version` with the server unreachable, Keychain store and read, the inaccessible-server case | met with limits | `packaged-darwin`, run once (§2 row 3). The inaccessible-server case is the `version` check with the server gone; no other message on `darwin` is checked |
 | Negative cases on the packaged artifacts | met with limits | `packaged-cli`, `packaged-web`, §2 row 3 |
 | Scan, with planted sentinels | met | `mise run docs`, job `docs` |
 
@@ -121,7 +123,7 @@ Before the first macOS run the script was rehearsed on Linux against the `packag
 run above: the `linux_amd64` archive passed the install and version part, the planted wrong version
 failed it, and the stub completed `login --device` and `logout` with the real client using a token file
 as the store. The Keychain half, the temporary keychain and the Mach-O check were not run anywhere before
-CI.
+CI; they ran for the first time in the pull request's CI (§2 row 3).
 
 ## 5. Limits and owner rows
 
@@ -175,13 +177,14 @@ whose clause was not read.
 
 - The sentences of the deployment pages were not re-read; only their existence and headings were.
 - The remaining main CI jobs (`go`, `browser-auth`) had not finished when read.
-- Nothing here was run on a Mac. The `darwin` rows stay "written, not yet run" until the pull request's
-  macOS job has run, and this document is to be updated with its result if that happens before merge.
+- The result cited is the macOS job's first run, at the first head of the pull request. The job starts
+  again at each later head of that pull request (the pull request as a whole touches the paths that start
+  it) and at the push to main; those runs are not read here. Nothing was run on a Mac by hand.
 - No participant has used the pages (ginsys/bronzeward#263).
 
 ## 8. Recommendation
 
-Do not close ginsys/bronzeward#262 on this assessment alone. Row 3 is not met: the `darwin` job has not
-run, and ten of the fourteen client pages that hold commands have none of them run from the page. The
-second is a decision for the owner (accept the reading, or ask for marked blocks on more pages), and the
-first is an event the pull request's CI supplies.
+Do not close ginsys/bronzeward#262 on this assessment alone. Row 3 is not met: ten of the fourteen client
+pages that hold commands have none of them run from the page. That is a decision for the owner: accept
+the reading, or ask for marked blocks on more pages. The `darwin` part of the row has run once and passed
+(§2 row 3); rows 1 and 2 are met with limits; the owner rows of §5 are open.
