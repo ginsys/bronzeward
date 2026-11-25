@@ -119,22 +119,38 @@ const title = (node: ts.Expression | undefined): string[] => {
   return [];
 };
 
-// The tags in the titles of a spec's cases, with whether the case is not run normally: `xit`, `.skip`, `.todo` or `.only`
-// on the case or on a describe around it. A tag in a describe title is no tag: it would cover every case under it.
+// The tags in the titles of a spec's cases, with whether the case is not run: `xit`, `.skip` or `.todo` on the case or on a
+// describe around it, or no callback (a pending case runs nothing). A tag in a describe title is no tag: it would cover
+// every case under it. `.only` is refused wherever it stands, by `exclusive`.
 export const tags = (source: string, name: string): Tag[] => {
   const file = ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true);
   const found: Tag[] = [];
-  const unrun = (c: { base: string; modifier: string }) => ["xit", "xtest", "xdescribe"].includes(c.base) || ["skip", "todo", "only"].includes(c.modifier);
+  const unrun = (c: { base: string; modifier: string }) => ["xit", "xtest", "xdescribe"].includes(c.base) || ["skip", "todo"].includes(c.modifier);
   const visit = (node: ts.Node): void => {
     const k = ts.isCallExpression(node) ? kind(node) : undefined;
     if (ts.isCallExpression(node) && k !== undefined && ["it", "test", "xit", "xtest", "specify"].includes(k.base)) {
-      let skipped = unrun(k);
+      let skipped = unrun(k) || node.arguments.length < 2;
       for (let p: ts.Node | undefined = node.parent; p !== undefined && !skipped; p = p.parent) {
         const outer = ts.isCallExpression(p) ? kind(p) : undefined;
         if (outer !== undefined && ["describe", "xdescribe", "context"].includes(outer.base) && unrun(outer)) skipped = true;
       }
       const at = `${name}:${file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1}`;
       for (const segment of title(node.arguments[0])) for (const m of segment.matchAll(TAG)) found.push({ id: m[1]!, step: Number(m[2]), at, unrun: skipped });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+};
+
+// Where a spec declares a case or a describe `.only`, tagged or not: Mocha then runs that alone and no other case of the run.
+export const exclusive = (source: string, name: string): string[] => {
+  const file = ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true);
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    const k = ts.isCallExpression(node) ? kind(node) : undefined;
+    if (ts.isCallExpression(node) && k !== undefined && k.modifier === "only" && ["it", "test", "specify", "describe", "context"].includes(k.base)) {
+      found.push(`${name}:${file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1}`);
     }
     ts.forEachChild(node, visit);
   };
@@ -154,10 +170,11 @@ export const check = (pages: Record<string, string>, specs: Record<string, strin
   }
   const covered = new Set<string>();
   for (const [name, text] of Object.entries(specs)) {
+    for (const at of exclusive(text, name)) problems.push(`${at}: .only here runs no other case of this run`);
     for (const t of tags(text, name)) {
       const id = `${t.id}.${t.step}`;
       if (!want.has(id)) problems.push(`${t.at}: [step ${id}] names a step no page has`);
-      else if (t.unrun) problems.push(`${t.at}: [step ${id}] is on a case that is skipped, todo or only`);
+      else if (t.unrun) problems.push(`${t.at}: [step ${id}] is on a case that is skipped, pending or todo`);
       else covered.add(id);
     }
   }
@@ -196,12 +213,23 @@ test("the positive control: a step with no case, a tag with no step, and a case 
     "s.ts:1: [step a.2] names a step no page has",
     "s.ts:1: [step b.1] names a step no page has",
   ]);
-  for (const skipped of ['it.skip("c [step a.1]", f)', 'xit("c [step a.1]", f)', 'it.only("c [step a.1]", f)', 'it.todo("c [step a.1]")', 'describe.skip("d", () => { it("c [step a.1]", f); })', 'xdescribe("d", () => { it("c [step a.1]", f); })']) {
+  // A callback-less case is pending: it runs nothing.
+  for (const skipped of ['it.skip("c [step a.1]", f)', 'xit("c [step a.1]", f)', 'it("c [step a.1]")', 'it.todo("c [step a.1]")', 'describe.skip("d", () => { it("c [step a.1]", f); })', 'xdescribe("d", () => { it("c [step a.1]", f); })']) {
     expect(check({ a: page("# A", ...list("a", 1)) }, { "s.ts": skipped }), skipped).toEqual([
-      "s.ts:1: [step a.1] is on a case that is skipped, todo or only",
+      "s.ts:1: [step a.1] is on a case that is skipped, pending or todo",
       "a: step a.1 has no browser case tagged [step a.1]",
     ]);
   }
+});
+
+test("the positive control: .only anywhere in a spec is named, tagged or not, on a case or a describe", () => {
+  const only = "s.ts:1: .only here runs no other case of this run";
+  const one = (source: string) => check({ a: page("# A", ...list("a", 1)) }, { "s.ts": source });
+  expect(one('it("covered [step a.1]", f); it.only("unrelated", f);')).toEqual([only]);
+  expect(one('it("covered [step a.1]", f); describe.only("d", () => { it("c", f); });')).toEqual([only]);
+  expect(one('it.only("c [step a.1]", f);')).toEqual([only]);
+  // Not a declaration that excludes the others: `only` as a word in a title, a comment, or a method of something else.
+  expect(one('it("only [step a.1]", f); // it.only("x", f)\nthis.only("y"); other.only(1);')).toEqual([]);
 });
 
 test("the positive control: a tag in a describe title, or in a comment or a string that is no title, covers nothing", () => {
