@@ -30,8 +30,8 @@ permissions:
 # skips forks and merge groups outright (the proxy is in-cluster only). The exceptions to this
 # rule always run GitHub-hosted: go-db and idp, whose containers need a Docker daemon, browser,
 # which needs browsers, and browser-auth, which needs both; the in-cluster runners have neither.
-# package, package-check, hosting and doc-blocks run GitHub-hosted too: two separate machines build
-# the archives, and hosting and doc-blocks need Docker. The Safari run is not here: it needs a macOS runner that
+# package, package-check, hosting, doc-blocks and packaged-cli run GitHub-hosted too: two separate machines build
+# the archives, and hosting, doc-blocks and packaged-cli need Docker. The Safari run is not here: it needs a macOS runner that
 # GitHub sometimes cannot give, so safari.yml runs it on main and on a schedule, outside the
 # required checks (ginsys/bronzeward#612). The previous major of each browser is not here either:
 # previous-majors.yml runs it the same way.
@@ -491,12 +491,38 @@ jobs:
         if: always()
         run: mise run dev-down
 
+  packaged-cli:
+    # The CLI conformance cases TLS-01, TLS-02, COMP-01 and COMP-02 and the version cases of internal/clitest, run on the
+    # linux/amd64 bronzewardctl and bronzeward of the `package` job's archives (ginsys/bronzeward#405), against a disposable
+    # PostgreSQL (mise run dev-db). A wrong version must fail the version case; the script plants that.
+    # GitHub-hosted for the Docker daemon, as hosting.
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BW_EXPECT_VERSION: v0.0.0-ci.g${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: go
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: package-a
+          path: package
+      - run: mise run dev-db
+      - run: scripts/release/run-packaged-cli.sh package
+      - name: dev-down leaves nothing behind
+        if: always()
+        run: mise run dev-down
+
   checks:
     # Aggregator: passes only when every needed job succeeded. `commit-lint` is skipped by design
     # outside pull requests, so `skipped` counts as success only for that job there. Any other
     # result fails, including `abandoned` (a job that never got a runner).
     if: always()
-    needs: [docs, site, actionlint, test, go, web, browser, go-db, idp, browser-auth, commit-lint, action-pins, package-check, hosting, doc-blocks]
+    needs: [docs, site, actionlint, test, go, web, browser, go-db, idp, browser-auth, commit-lint, action-pins, package-check, hosting, doc-blocks, packaged-cli]
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 2
     steps:
