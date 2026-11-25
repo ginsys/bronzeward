@@ -901,9 +901,10 @@ $ bronzewardctl fragment set ntp-servers --library --draft drf_8kdq…z6pa --lay
 Shared fragment ntp-servers saved in draft drf_8kdq…z6pa (revision frv_6tn…2qba). Publishing this draft
 moves cluster cl_9fd… (lab-a) to it. No other cluster changes.
 $ bronzewardctl draft impact drf_8kdq…z6pa
-ntp-servers  shared   reaches in lab-a: 4 machines (mch_b3c…aa2q and 3 more; assignment)
+ntp-servers  shared   gains in lab-a: 4 machines (mch_b3c…aa2q and 3 more; assignment)
                       stays unchanged: lab-b on frv_1ab… , prod on frv_1ab…
-$ bronzewardctl fragment adoptions ntp-servers --behind
+$ bronzewardctl publish drf_8kdq…z6pa
+$ bronzewardctl fragment adoptions ntp-servers --behind      # read against the published head
 CLUSTER  ADOPTED    HEAD       RELEASE      MACHINES
 lab-b    frv_1ab…   frv_6tn…   rel_c2d…     6
 prod     frv_1ab…   frv_6tn…   rel_e5f…     12
@@ -918,8 +919,8 @@ Cluster prod adopts ntp-servers frv_6tn…2qba, was frv_1ab… (draft revision 3
 A profile of this cluster that pins ntp-servers must be set again to use it.
 ```
 
-`fragment detach <name>` copies the adopted revision into this cluster's own fragment of that name and drops
-the adoption in the same draft, so the cluster stops following it. A shared revision holds no secret
+`fragment detach <name>` asks the server to copy the adopted revision into this cluster's own fragment of that name
+and drop the adoption in one step of the draft, so the cluster stops following it. A shared revision holds no secret
 reference ([persistence and API §3.1.1](persistence-api.md#311-shared-fragments-and-profiles-the-library-scope)): a document
 that does is refused, and a fragment with a secret stays in one cluster. `draft impact` reads the source graph and
 renders nothing (G5): the configuration still appears only after publication.
@@ -1972,7 +1973,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `draft create` | `POST /drafts` | author | no | no |
 | `fragment set` / `rm`, `profile set` / `rm` (`--library`: a shared entry, API revision 19) | `PUT` / `DELETE /drafts/{id}/fragments/{name}`, `/drafts/{id}/profiles/{name}` | author | no | yes |
 | `fragment adopt`, `profile adopt` (and the removal of an adoption) | `PUT` / `DELETE /drafts/{id}/adoptions/{kind}/{name}` | author | no | yes |
-| `fragment detach`, `profile detach` | composite: `GET` of the adopted revision, `PUT /drafts/{id}/fragments/{name}` (or profiles) with its text, `DELETE /drafts/{id}/adoptions/{kind}/{name}` | author | no | yes |
+| `fragment detach`, `profile detach` | `POST /drafts/{id}/adoptions/{kind}/{name}/detachments` | author | no | yes |
 | `fragment adoptions`, `profile adoptions` | `GET /fragments/{id}/adoptions`, `GET /profiles/{id}/adoptions` | any | no | no |
 | `draft impact` | `GET /drafts/{id}/impact` | any | no | no |
 | `assignment set` / `rm` | `PUT` / `DELETE /drafts/{id}/assignments/{machine}` | author | no | yes |
