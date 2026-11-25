@@ -55,12 +55,25 @@ start)
 	  printf '{"accessToken":"%s"}\n' "$jwt" >"$state/token.json" )
 	;;
 stop)
+	# Each process is waited for (BW_DOC_STOP_TRIES half-seconds, default 30, so 15 s; the test sets
+	# fewer) before its pid file goes; one still alive fails the stop and keeps its pid file.
+	rc=0
 	for name in server issuer; do
-		if [ -f "$state/$name.pid" ]; then
-			kill "$(cat "$state/$name.pid")" 2>/dev/null || true
+		[ -f "$state/$name.pid" ] || continue
+		pid=$(cat "$state/$name.pid")
+		kill "$pid" 2>/dev/null || true
+		for _ in $(seq 1 "${BW_DOC_STOP_TRIES:-30}"); do
+			kill -0 "$pid" 2>/dev/null || break
+			sleep 0.5
+		done
+		if kill -0 "$pid" 2>/dev/null; then
+			echo "doc-blocks-fixture: the $name (pid $pid) is still running after SIGTERM" >&2
+			rc=1
+		else
 			rm -f "$state/$name.pid"
 		fi
 	done
+	exit "$rc"
 	;;
 *)
 	echo "usage: doc-blocks-fixture.sh start <state directory> <dist directory> | stop <state directory>" >&2
