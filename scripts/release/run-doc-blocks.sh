@@ -12,9 +12,9 @@
 #   run-doc-blocks.sh extract <dir> <page>...  write each marked block to <dir>, and <dir>/blocks.list
 #   run-doc-blocks.sh account <blocks.list> <ran.list>
 #
-# BW_DOC_EXEC, set only by scripts/test/run-doc-blocks-test.sh, is a command that runs each block
-# file in place of the host shell, the container and the fixture. BW_DOC_STATE is the state
-# directory (default .dev/doc-blocks); its record/ holds doc-blocks.log and each block's output.
+# BW_DOC_EXEC, BW_DOC_DOCKER and BW_DOC_FIXTURE, set only by scripts/test/run-doc-blocks-test.sh,
+# stand in for the host shell, docker and the fixture script. BW_DOC_STATE is the state directory
+# (default .dev/doc-blocks); its record/ holds doc-blocks.log, each block's output and the fixture's logs.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -46,7 +46,7 @@ extract() {
 				next
 			}
 			open && /^```$/ { if (!lines) die("an empty marked block"); open = 0; close(file); next }
-			open { print > file; lines++; next }
+			open { print > file; if ($0 !~ /^[ \t]*(#.*)?$/) lines++; next }
 			/bw-run/ { die("bw-run outside a fence opener at the start of a line") }
 			END { if (failed) exit 1; if (open) die("unterminated fence"); if (!n) die("no marked block on this page") }
 		' "$page" || return 1
@@ -65,10 +65,26 @@ account() {
 	return 1
 }
 
+# cleanup, the EXIT trap of run: remove the container and stop the fixture. A failure of either turns a
+# successful run into a failed one (a process left behind is not a pass) and never hides an earlier failure.
+cleanup() {
+	local rc=$?
+	"$dk" rm -f "$ctr" >/dev/null 2>&1 || true
+	if "$dk" inspect "$ctr" >/dev/null 2>&1; then
+		echo "run-doc-blocks: the container $ctr is still there after its removal" >&2
+		rc=1
+	fi
+	"$fx" stop "$state" || { echo "run-doc-blocks: stopping the fixture failed" >&2; rc=1; }
+	exit "$rc"
+}
+
 run() {
-	# state and ctr are not local: the EXIT trap reads them after this function returned.
+	# These are not local: the EXIT trap (cleanup) reads them after this function returned. dk, fx and
+	# BW_DOC_EXEC are test seams: scripts/test/run-doc-blocks-test.sh stands in for Docker, the fixture and the host shell.
 	state=${BW_DOC_STATE:-$root/.dev/doc-blocks}
 	ctr=bw-doc-blocks
+	dk=${BW_DOC_DOCKER:-docker}
+	fx=${BW_DOC_FIXTURE:-$root/scripts/release/doc-blocks-fixture.sh}
 	local rec image id phase file rc=0
 	local -a pages=("$@")
 	[ "${#pages[@]}" -gt 0 ] || pages=("${default_pages[@]}")
@@ -92,17 +108,15 @@ run() {
 		echo "host $(uname -sm)"
 	} >"$rec/doc-blocks.log"
 	: >"$rec/ran.list"
-	if [ -z "${BW_DOC_EXEC:-}" ]; then
-		trap 'docker rm -f "$ctr" >/dev/null 2>&1 || true; "$root/scripts/release/doc-blocks-fixture.sh" stop "$state" || true' EXIT
-	fi
+	trap cleanup EXIT
 
 	# exec_block <id> <phase> <file>: run it, keep its output, note that it ran, stop on a failure.
 	exec_block() {
 		local started=$SECONDS status=0
 		# A container block runs as a file, with stdin from /dev/null: a block that read stdin would
 		# otherwise eat the rest of its own script and still exit 0.
-		if [ "$2" = container ] && { [ -z "${BW_DOC_EXEC:-}" ] || [ -n "${BW_DOC_DOCKER:-}" ]; }; then
-			"${BW_DOC_DOCKER:-docker}" exec "$ctr" sh -e "/blocks/$1.sh" >"$rec/$1.out" 2>&1 </dev/null || status=$?
+		if [ "$2" = container ]; then
+			"$dk" exec "$ctr" sh -e "/blocks/$1.sh" >"$rec/$1.out" 2>&1 </dev/null || status=$?
 		elif [ -n "${BW_DOC_EXEC:-}" ]; then
 			"$BW_DOC_EXEC" "$3" >"$rec/$1.out" 2>&1 </dev/null || status=$?
 		else
@@ -119,12 +133,12 @@ run() {
 	# The container phase starts once the host phase left a build in dist/.
 	while read -r id phase <&3; do
 		file=$rec/blocks/$id.sh
-		if [ "$phase" = container ] && [ -z "${container_up:-}" ] && [ -z "${BW_DOC_EXEC:-}" ]; then
-			"$root/scripts/release/doc-blocks-fixture.sh" start "$state" "$root/dist"
-			cp -a "$root/dist" "$state/dist-copy"
-			# dist/ is a copy: install.md unpacks into it. HOME is a tmpfs, as the install block writes
-		# ~/.local/bin; "exec" because Docker mounts a tmpfs noexec and the client must run from it.
-			docker run -d --rm --name "$ctr" --network host --user "$(id -u):$(id -g)" \
+		if [ "$phase" = container ] && [ -z "${container_up:-}" ]; then
+			"$fx" start "$state" "$root/dist"
+			# dist-copy, made by the fixture, is a copy because install.md unpacks into dist/. HOME is a
+			# tmpfs, as the install block writes ~/.local/bin; "exec" because Docker mounts a tmpfs
+			# noexec and the client must run from it.
+			"$dk" run -d --rm --name "$ctr" --network host --user "$(id -u):$(id -g)" \
 				--tmpfs "/home/bw:rw,exec,mode=0700,uid=$(id -u),gid=$(id -g)" -e HOME=/home/bw \
 				-e PATH=/home/bw/.local/bin:/usr/local/bin:/usr/bin:/bin \
 				-v "$state/dist-copy:/work/dist" -v "$rec/blocks:/blocks:ro" -v "$state/token.json:/run/bw-token.json:ro" \
@@ -132,12 +146,14 @@ run() {
 			container_up=1
 		fi
 		# The pages after install.md assume a context that works: the sample outputs name one called dev.
-		if [ "$id" = contexts-1 ] && [ -z "${BW_DOC_EXEC:-}" ]; then
-			docker exec "$ctr" bronzewardctl context add dev --server http://127.0.0.1:8080 \
+		# bronzewardctl version reaches the server, so it also shows the context works; a failure stops the run.
+		if [ "$id" = contexts-1 ]; then
+			"$dk" exec "$ctr" bronzewardctl context add dev --server http://127.0.0.1:8080 \
 				--issuer http://127.0.0.1:5556 --client-id bw-docs --audience bronzeward \
 				--oidc-token-file /run/bw-token.json >"$rec/setup.out" 2>&1 || { cat "$rec/setup.out" >&2; return 1; }
-			{ echo "-- bronzewardctl version, after the context add"; docker exec "$ctr" bronzewardctl version 2>&1 || echo "(exit $?)"; } >>"$rec/doc-blocks.log"
-			echo "-- bronzeward version: $("$state/server/bronzeward" version 2>&1)" >>"$rec/doc-blocks.log"
+			echo "-- bronzewardctl version, after the context add" >>"$rec/doc-blocks.log"
+			"$dk" exec "$ctr" bronzewardctl version >>"$rec/doc-blocks.log" 2>&1 || {
+				echo "run-doc-blocks: bronzewardctl version failed after the context add; see doc-blocks.log" >&2; return 1; }
 		fi
 		exec_block "$id" "$phase" "$file" || rc=1
 		[ "$rc" -eq 0 ] || break

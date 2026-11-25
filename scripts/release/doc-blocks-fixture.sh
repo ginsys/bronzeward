@@ -41,6 +41,9 @@ start)
 	mkdir -p "$state/server" "$state/record"
 	mise run dev-db >/dev/null
 	tar -xzf "$dist/bronzeward_${BW_VERSION#v}_linux_amd64.tar.gz" -C "$state/server" bronzeward
+	# The container gets a copy of dist/, because install.md unpacks into it; the server's version goes in the record.
+	cp -a "$dist" "$state/dist-copy"
+	"$state/server/bronzeward" version >>"$state/record/doc-blocks.log" 2>&1
 	go build -o "$state/oidc-fixture" ./fixtures/oidc
 	"$state/oidc-fixture" keygen -out "$state/oidc.key"
 	"$state/oidc-fixture" serve -key "$state/oidc.key" -issuer "$issuer" >"$state/record/issuer.log" 2>&1 &
