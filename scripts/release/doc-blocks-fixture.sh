@@ -75,7 +75,7 @@ start)
 	printf '{"issuer":"%s","audience":"bronzeward","cliClientId":"bw-docs","webClientId":"bw-docs-web"}\n' "$issuer" \
 		>"$state/web/$name/dist/bronzeward-client.json"
 	# default_bind keeps the site on loopback, which the host network would otherwise publish.
-	{ printf '{\n\tadmin off\n\tauto_https disable_redirects\n\tdefault_bind 127.0.0.1 [::1]\n}\n'; cat "$state/web/$name/Caddyfile"; } >"$state/web/$name/Caddyfile.doc-blocks"
+	{ printf '{\n\tadmin off\n\tauto_https disable_redirects\n\tdefault_bind 127.0.0.1\n}\n'; cat "$state/web/$name/Caddyfile"; } >"$state/web/$name/Caddyfile.doc-blocks"
 	image=$(sed -n 's/^CADDY_IMAGE=//p' packaging/versions.env)
 	case $image in *@sha256:*) ;; *) echo "doc-blocks-fixture: CADDY_IMAGE in packaging/versions.env has no digest" >&2; exit 1 ;; esac
 	# The marker comes first, so that `stop` removes a container whose start failed halfway.
