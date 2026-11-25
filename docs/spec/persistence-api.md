@@ -4772,7 +4772,8 @@ each (design §7.7 consequences):
   created for it, the sanitized document holding the typed reference and no
   key, and the `ingest` operation's event holding the verdict and the key's
   path, version and `created_time`; the same key written as PEM with other line
-  wrapping, another PEM type or other spacing, a key of another cluster, and the
+  wrapping, another PEM type, other spacing or another trailing newline, a key
+  of another cluster, and the
   stored key altered by one byte, each failing `422 validation-failed` with the rule
   `ca-key-mismatch`, the claim abandoned and nothing kept, with a control that
   replaces the comparison by an always-true one and must then fail by accepting

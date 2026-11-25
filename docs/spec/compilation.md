@@ -278,9 +278,9 @@ give a node a path that reads as an embedded document's.
    reads the key version the cluster's latest first-key act names
    ([persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)),
    decodes the configuration's base64 to the PEM text and compares it with the
-   stored PEM text, byte for byte and in constant time, ignoring one trailing
-   newline. The same key written with other line wrapping, another PEM type or
-   other spacing is a `mismatch`: the rendered configuration carries the stored
+   stored PEM text, byte for byte and in constant time, with no byte ignored. The
+   same key written with other line wrapping, another PEM type, other spacing or
+   another trailing newline is a `mismatch`: the rendered configuration carries the stored
    text, so a re-wrapped key would render differently from the import and show
    as permanent drift. It compares the key alone: the CA certificate is no schema
    secret. The verdict is one of `match`, `mismatch`, `no key` (the cluster has
