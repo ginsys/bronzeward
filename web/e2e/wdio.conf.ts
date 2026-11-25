@@ -115,6 +115,8 @@ function startPackagedHost(bundle: string, clientConfig: string): ChildProcess {
   if (!existsSync(`${bundle}/Caddyfile`) || !existsSync(`${bundle}/dist/index.html`)) {
     throw new SevereServiceError(`BW_PACKAGED_WEB ${bundle} is no web bundle: it needs a Caddyfile and dist/index.html`);
   }
+  // Registered before anything is started: a launcher stopped by a signal after onPrepare never reaches onComplete.
+  process.once("exit", stopPackagedHost);
   bundleDir = mkdtempSync(`${tmpdir()}/bw-bundle-`);
   cpSync(bundle, bundleDir, { recursive: true });
   chmodSync(bundleDir, 0o755);
@@ -131,6 +133,15 @@ function startPackagedHost(bundle: string, clientConfig: string): ChildProcess {
     "-e", `BW_ISSUER_ORIGIN=${FAKE_ISSUER}`, "-e", `BW_PROVIDER_ORIGINS=${TARGET_ORIGIN}`,
     pin, "caddy", "run", "--config", "/srv/Caddyfile", "--adapter", "caddyfile",
   ], { stdio: "inherit" });
+}
+
+// Synchronous and idempotent, so that onComplete and the exit handler can both run it. The container outlives the launcher
+// (killing the docker client does not always stop it) and holds the page's port, so it is removed by name; nothing to
+// remove is no error.
+function stopPackagedHost() {
+  api?.kill();
+  if (process.env["BW_PACKAGED_WEB"] !== undefined) spawnSync("docker", ["rm", "-f", caddyName], { stdio: "ignore" });
+  if (bundleDir !== undefined) rmSync(bundleDir, { recursive: true, force: true });
 }
 
 export const config: WebdriverIO.Config = {
@@ -293,13 +304,10 @@ export const config: WebdriverIO.Config = {
   },
   onComplete: () => printFailure(() => {
     host?.kill();
-    api?.kill();
-    // Killing the docker client does not always stop the container it started: remove it by name; nothing to remove is no error.
-    if (process.env["BW_PACKAGED_WEB"] !== undefined) spawnSync("docker", ["rm", "-f", caddyName], { stdio: "ignore" });
+    stopPackagedHost();
     target?.close();
     provider?.close();
     if (clientDir !== undefined) rmSync(clientDir, { recursive: true, force: true });
-    if (bundleDir !== undefined) rmSync(bundleDir, { recursive: true, force: true });
     removeProfiles();
   }),
 };
