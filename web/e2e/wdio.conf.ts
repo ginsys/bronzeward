@@ -2,9 +2,9 @@
 // own, the synthetic provider (provider.ts), and the test static host, which answers every API
 // request with a redirect to that target (fixtures/webhost -redirect-api), then runs the specs
 // once per browser in BW_BROWSERS.
-import type { ChildProcess } from "node:child_process";
+import { type ChildProcess, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,7 @@ import { edgeCapability, edgeDriver, legHas } from "./edge-driver.ts";
 import { acceptLeave, firefoxCapability, geckoDriver } from "./gecko-driver.ts";
 import { safariKeys } from "./safari-keys.ts";
 import { settled } from "./safari-navigation.ts";
-import { FAKE_ISSUER, PAGE_LISTEN, PAGE_ORIGIN, TARGET_ORIGIN } from "./ports.ts";
+import { FAKE_ISSUER, PACKAGED_API, PAGE_LISTEN, PAGE_ORIGIN, TARGET_ORIGIN } from "./ports.ts";
 import { printFailure } from "./print-failure.ts";
 import { startProvider } from "./provider.ts";
 
@@ -101,12 +101,42 @@ export async function secondSession(requested: WebdriverIO.Capabilities): Promis
 let target: Server | undefined;
 let provider: Server | undefined;
 let host: ChildProcess | undefined;
+let api: ChildProcess | undefined;
+let bundleDir: string | undefined;
 let clientDir: string | undefined;
 let hits = 0;
+const caddyName = `bw-packaged-web-${process.pid}`;
+
+// BW_PACKAGED_WEB names an unpacked release web bundle (bronzeward-web_<version>/): the page is then served by the
+// pinned Caddy image from the bundle's own Caddyfile and dist/, as an operator runs it, and the API stand-in is
+// bin/webhost -redirect-api behind it. The copy holds this run's client configuration; the bundle is never written.
+// Caddy runs on the host network so that it reaches the stand-in and the browser reaches it on the page's port.
+function startPackagedHost(bundle: string, clientConfig: string): ChildProcess {
+  if (!existsSync(`${bundle}/Caddyfile`) || !existsSync(`${bundle}/dist/index.html`)) {
+    throw new SevereServiceError(`BW_PACKAGED_WEB ${bundle} is no web bundle: it needs a Caddyfile and dist/index.html`);
+  }
+  bundleDir = mkdtempSync(`${tmpdir()}/bw-bundle-`);
+  cpSync(bundle, bundleDir, { recursive: true });
+  chmodSync(bundleDir, 0o755);
+  cpSync(clientConfig, `${bundleDir}/dist/bronzeward-client.json`);
+  const pin = /^CADDY_IMAGE=(\S+)$/m.exec(readFileSync(`${root}packaging/versions.env`, "utf8"))?.[1];
+  if (pin === undefined || !pin.includes("@sha256:")) throw new SevereServiceError("packaging/versions.env has no digest-pinned CADDY_IMAGE");
+  api = spawnChild(binPath(root, "webhost"), [
+    "-listen", PACKAGED_API, "-dist", `${web}dist`, "-headers", `${web}headers.json`, "-client-config", clientConfig,
+    "-issuer", FAKE_ISSUER, "-provider-origins", TARGET_ORIGIN, "-redirect-api", TARGET_ORIGIN,
+  ], { stdio: "inherit" });
+  return spawnChild("docker", [
+    "run", "--rm", "--name", caddyName, "--network", "host", "-v", `${bundleDir}:/srv:ro`,
+    "-e", `BW_SITE_ADDRESS=${PAGE_ORIGIN}, ${PAGE_ORIGIN.replace("localhost", "127.0.0.1")}`, "-e", `BW_SERVER=${PACKAGED_API}`, "-e", "BW_WEB_ROOT=/srv/dist",
+    "-e", `BW_ISSUER_ORIGIN=${FAKE_ISSUER}`, "-e", `BW_PROVIDER_ORIGINS=${TARGET_ORIGIN}`,
+    pin, "caddy", "run", "--config", "/srv/Caddyfile", "--adapter", "caddyfile",
+  ], { stdio: "inherit" });
+}
 
 export const config: WebdriverIO.Config = {
   runner: "local",
-  specs: ["./*.e2e.ts"],
+  // BW_SPECS (comma-separated names, as auth.conf.ts has) picks specs for a local rerun and for the packaged run.
+  specs: process.env["BW_SPECS"] ? process.env["BW_SPECS"].split(",").map((s) => `./${s}.e2e.ts`) : ["./*.e2e.ts"],
   maxInstances: 1, // the target's request count is shared
   capabilities: browsers.map((b) => capabilities[b]!),
   baseUrl: PAGE_ORIGIN,
@@ -243,10 +273,13 @@ export const config: WebdriverIO.Config = {
     clientDir = mkdtempSync(`${tmpdir()}/bw-client-`);
     const clientConfig = `${clientDir}/bronzeward-client.json`;
     writeFileSync(clientConfig, JSON.stringify({ issuer: FAKE_ISSUER, audience: "bronzeward", cliClientId: "synthetic-cli-client", webClientId: "synthetic-web-client" }));
-    host = spawnChild(binPath(root, "webhost"), [
-      "-listen", PAGE_LISTEN, "-dist", `${web}dist`, "-headers", `${web}headers.json`, "-client-config", clientConfig,
-      "-issuer", FAKE_ISSUER, "-provider-origins", TARGET_ORIGIN, "-redirect-api", TARGET_ORIGIN,
-    ], { stdio: "inherit" });
+    const packaged = process.env["BW_PACKAGED_WEB"];
+    host = packaged !== undefined
+      ? startPackagedHost(packaged, clientConfig)
+      : spawnChild(binPath(root, "webhost"), [
+        "-listen", PAGE_LISTEN, "-dist", `${web}dist`, "-headers", `${web}headers.json`, "-client-config", clientConfig,
+        "-issuer", FAKE_ISSUER, "-provider-origins", TARGET_ORIGIN, "-redirect-api", TARGET_ORIGIN,
+      ], { stdio: "inherit" });
     for (let i = 0; ; i++) {
       const answered = await fetch(hostUrl).then((r) => r.ok, () => false);
       // Read after the request settles: a failed spawn is reported while the request is in flight, and
@@ -260,9 +293,13 @@ export const config: WebdriverIO.Config = {
   },
   onComplete: () => printFailure(() => {
     host?.kill();
+    api?.kill();
+    // Killing the docker client does not always stop the container it started: remove it by name; nothing to remove is no error.
+    if (process.env["BW_PACKAGED_WEB"] !== undefined) spawnSync("docker", ["rm", "-f", caddyName], { stdio: "ignore" });
     target?.close();
     provider?.close();
     if (clientDir !== undefined) rmSync(clientDir, { recursive: true, force: true });
+    if (bundleDir !== undefined) rmSync(bundleDir, { recursive: true, force: true });
     removeProfiles();
   }),
 };

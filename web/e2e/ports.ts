@@ -33,3 +33,5 @@ export const INJECTOR = `http://127.0.0.1:${at(9)}`;
 export const DISPOSABLE_API = `http://127.0.0.1:${at(10)}`;
 // The proxy in front of OpenBao that the disposable deployment uses as its provider (bao.ts).
 export const BAO_PROXY = `127.0.0.1:${at(11)}`;
+// BW_PACKAGED_WEB (wdio.conf.ts): the API stand-in behind the Caddy that serves the release's web bundle.
+export const PACKAGED_API = `127.0.0.1:${at(12)}`;
