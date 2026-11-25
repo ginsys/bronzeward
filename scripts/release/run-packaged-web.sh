@@ -28,14 +28,16 @@ export BW_PACKAGED_WEB=$work/$name
 BW_SPECS=tls,packaged mise run browser
 
 # The planted defect: a version the bundle was not built at must fail the footer case.
-if BW_SPECS=packaged BW_EXPECT_VERSION=v0.0.0-planted mise run browser >"$work/planted" 2>&1; then
+# NO_COLOR keeps the assertion's diff plain; the escapes are stripped below as well, for a runner that colours anyway.
+if env -u FORCE_COLOR NO_COLOR=1 BW_SPECS=packaged BW_EXPECT_VERSION=v0.0.0-planted mise run browser >"$work/planted" 2>&1; then
 	echo "run-packaged-web: a wrong BW_EXPECT_VERSION passed the footer case" >&2
 	cat "$work/planted" >&2
 	exit 1
 fi
 # It failed at the footer assertion, not for another cause: the runner prints the version in the case's title on any failure,
 # so the evidence is the assertion's own two footers, the one expected and the one the bundle's page showed.
+sed 's/\x1b\[[0-9;]*m//g' "$work/planted" >"$work/planted.plain"
 for footer in "Client v0.0.0-planted. Server unknown" "Client $BW_EXPECT_VERSION. Server unknown"; do
-	grep -qF -e "$footer" "$work/planted" || { echo "run-packaged-web: the planted run's output lacks the footer '$footer': it did not fail at the assertion:" >&2; cat "$work/planted" >&2; exit 1; }
+	grep -qF -e "$footer" "$work/planted.plain" || { echo "run-packaged-web: the planted run's output lacks the footer '$footer': it did not fail at the assertion:" >&2; cat "$work/planted" >&2; exit 1; }
 done
 echo "run-packaged-web: the cases passed on the packaged bundle, and a wrong version failed the footer case"
