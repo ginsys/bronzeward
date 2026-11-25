@@ -156,6 +156,41 @@ func TestPublishRefusesARewrittenCAKey(t *testing.T) {
 	}
 }
 
+// The path is written again after an earlier publication recorded its version: the recorded identity
+// refuses it, with the reason of a rewrite since the act.
+func TestPublishRefusesACAKeyRewrittenSinceItsRecord(t *testing.T) {
+	c := newCAKeyEnv(t)
+	mustExec(t, c.db, `INSERT INTO dependency_status (id, provider, object, version, created, class, first_retained_at, observed_from, recorded_at)
+		VALUES ($1, 'kv', $2, $3, $4, 'retained', now(), now(), now())`,
+		id.New(id.Dependency), c.path, c.act.Version, c.act.CreatedTime.UTC().Format(time.RFC3339Nano))
+	c.held.caCreated = []time.Time{c.act.CreatedTime.Add(time.Second)}
+	_, ref := c.build()
+	if ref == nil || ref.status != 422 {
+		t.Fatalf("got %v", ref)
+	}
+	if dep, _ := ref.extra["dependency"].(map[string]any); dep["reason"] != "version-changed" {
+		t.Fatalf("dependency %v", dep)
+	}
+}
+
+// A first key supplied while the key is being read refuses the publication too: the act is read
+// again after the read.
+func TestPublishRefusesAFirstKeyDuringTheRead(t *testing.T) {
+	c := newCAKeyEnv(t)
+	supplied := false
+	c.held.onCARead = func() {
+		supplied = true
+		c.env.keys.seed(t, c.db, c.cluster)
+	}
+	_, ref := c.build()
+	if !supplied {
+		t.Fatal("the key was not read")
+	}
+	if ref == nil || ref.status != 409 || ref.code != "conflict" {
+		t.Fatalf("got %v", ref)
+	}
+}
+
 // A first key supplied between the pin and the read refuses the publication; the next one pins the
 // new version and publishes.
 func TestPublishRefusesAFirstKeyBetweenPinAndRead(t *testing.T) {

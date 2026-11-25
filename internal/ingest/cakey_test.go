@@ -62,6 +62,10 @@ func TestCAKeyReferenceShape(t *testing.T) {
 		"an encoding":  {caKeyDoc, caKeyDecl(CAKeyName, Reference{Kind: provider.KindCAKey, Encoding: "base64"}), RuleBadDeclaration},
 		"another path": {"machine:\n  token: !bwref talos/ca-key\n", caKeyDecl(CAKeyName, ok), RuleTagPlacement},
 		"aliased":      {"machine:\n  ca:\n    key: &k !bwref talos/ca-key\n  token: *k\n", caKeyDecl(CAKeyName, ok), RuleTagPlacement},
+		// An alias of a mapping that holds the reference places the key a second time.
+		"mapping aliased": {"machine:\n  ca: &c\n    key: !bwref talos/ca-key\ncluster:\n  ca: *c\n", caKeyDecl(CAKeyName, ok), RuleTagPlacement},
+		"machine aliased": {"machine: &m\n  ca:\n    key: !bwref talos/ca-key\ncopy: *m\n", caKeyDecl(CAKeyName, ok), RuleTagPlacement},
+		"mapping merged":  {"machine:\n  ca: &c\n    key: !bwref talos/ca-key\ncluster:\n  ca:\n    <<: *c\n", caKeyDecl(CAKeyName, ok), RuleTagPlacement},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Stored(c.doc, c.decl); err == nil {

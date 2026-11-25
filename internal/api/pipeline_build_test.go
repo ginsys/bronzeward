@@ -46,6 +46,7 @@ func buildFragment(extra string) string {
 type heldValues struct {
 	values     map[string]provider.Value
 	caCreated  []time.Time // the CA key path's versions, oldest first
+	onCARead   func()      // run while the compiler reads the CA key
 	keyVersion int
 	readErr    error
 	encryptErr error
@@ -79,6 +80,9 @@ func (h heldValues) ReadCAKey(_ context.Context, p provider.CAPath, version int6
 	v, _, err := h.read(p)
 	if err != nil || version < 1 || int(version) > len(h.caCreated) {
 		return provider.Value{}, time.Time{}, errors.Join(err, errors.New("stand-in: no such CA key version"))
+	}
+	if h.onCARead != nil {
+		h.onCARead()
 	}
 	return v, h.caCreated[version-1], nil
 }
