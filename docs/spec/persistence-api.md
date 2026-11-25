@@ -760,9 +760,13 @@ They are held apart **(choice §17.29)**.
   a first key may arrive as (§3.4) is read once, for its own client certificate
   and CA certificate, and dials only the request's `endpoint`: its own endpoints
   are ignored. It is never a credential Bronzeward keeps.
-- **What is kept.** The CA key lives only in the signer's memory while it
-  signs, and in the compiler's memory while it renders a control plane
-  configuration (§3.3). The signed certificate and key live only in the memory of the process
+- **What is kept.** A Bronzeward identity holds the CA key in process memory
+  only: the signer while it signs, and the compiler while it renders a control
+  plane configuration (§3.3). The key is stored elsewhere in three places the
+  application does not hold in clear: the signer's path in the provider, the
+  encrypted baseline of an imported configuration (compilation §2.3 step 8) and
+  the rendered configuration and its encrypted artifact (compilation §11). The
+  signed certificate and key live only in the memory of the process
   that obtained them, for the use they were signed for: an ingestion; one observation outside a
   dispatch's evidence-and-attempt pair (`drift`, `restoration`, `recovery`
   or `completion`, which may follow the last attempt); or an evidence
@@ -998,8 +1002,7 @@ there.
   replay, or `422 idempotency-key-reused` where its document differed. That
   second stored version has no act and is inert, and the first request's act is
   the one recorded. A key reused for another document by one principal is a
-  client error, and the stray version costs nothing but the next supply's
-  version number. A latest version that was soft-deleted makes the supply's
+  client error, and the stray version takes the next supply's version number. A latest version that was soft-deleted makes the supply's
   read refuse, so a supply on top of it is `503`.
 - **Authority.** An `author` supplies and replaces a first key, human only, with
   no approval step (owner decision BW-874-first-key-authority-1, 2026-11-18
@@ -1056,7 +1059,14 @@ there.
   not measured.
 - **Replacing a first key** is another `POST` to the same route. The old CA key
   version stays in the provider as history; a dispatch in flight keeps the
-  version its evidence read (§3.3).
+  version its evidence read (§3.3). The provider keeps a bounded number of
+  versions of a path, and this specification adds no write guard or retention
+  setting for it **(choice §17.51)**. **The residual, defined here once:** any
+  write to the signer's path (a first-key supply, a retry or a concurrent
+  duplicate) stores a version, and as many writes as the provider's version
+  limit (an operator setting, ten by default in OpenBao) prune the oldest,
+  including one a release records; publication then refuses and a regeneration
+  fails visibly, and this specification states no recovery procedure.
 
 ### 3.5 A machine's name
 
@@ -4783,7 +4793,8 @@ each (design §7.7 consequences):
   them; a cluster with no stored key, a soft-deleted latest version and a
   sealed provider each failing `503 talos-access-unavailable`; a worker
   configuration offering nothing; a copy of the key elsewhere in the document
-  refused by the guard (compilation §4.2); a copy of the key inside a field the
+  refused by the guard (compilation §4.2), in each of its two forms (the PEM
+  text and its base64 encoding, compilation §5.2); a copy of the key inside a field the
   operator marks (`machine.files[0].content`), inside a Talos-marked secret
   field and inside a marked mapping, each refused by the guard before any
   provider write, with no generation created, and with the mutation control
@@ -4798,8 +4809,14 @@ each (design §7.7 consequences):
   pin and the read refusing the publication with nothing published, with the
   control that pins afresh and must then publish; a regeneration of an earlier
   release after a later first key reading its recorded version and publishing,
-  with the control that reads the latest act's and must then fail; and an ordinary fragment that declares
-  `talos-ca-key`, or overrides or deletes the reference, refused;
+  with the control that reads the latest act's and must then fail; an ordinary
+  fragment that declares `talos-ca-key`, or overrides or deletes the reference,
+  refused; and an ordinary fragment that holds an unmarked literal copy of the
+  key (draft updates never hold the key, compilation §2.3 step 3a), in each of
+  its two forms, refused at compilation §6 step 7 with the path only, replaced
+  in a message and in the redacted configuration (compilation §8.3), and absent
+  from the persisted redacted configuration, with the control that leaves the
+  CA-key forms out of the value matching and must then show the copy;
 - the presence read (§3.3, "Presence"), in two parts. Against the fixture's
   OpenBao, on one disposable cluster path (`TestLivePresenceIdentity`): a path
   never written answers 404 with an empty `errors` list; a stored key with two
@@ -5660,7 +5677,14 @@ design and evidence do not settle the question. Each is marked in place as
     reproduce the imported configuration. Cost: the compiler's grant reaches
     every cluster's path under `talos-ca/*`, bounded by the application only.
     The encrypted baseline still holds the imported value (compilation §2.3
-    step 8).
+    step 8). The version limit of the signer's path is a residual, accepted and
+    defined in §3.4 ("Replacing a first key"). The old create-only generation
+    never had it, and design §7.8 item 1 says Bronzeward never writes a
+    referenced path past its limit, so it is a stated exception to that item;
+    no retention setting, write guard or grant is added, because a rare and
+    visible failure does not justify a provider-setup prerequisite, a signer
+    behaviour change or a new grant (lead's decision, 2026-11-25 15:59 CET,
+    reversible by the owner).
 
 ## 18. Traceability
 
