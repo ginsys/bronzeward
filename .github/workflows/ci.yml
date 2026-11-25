@@ -34,7 +34,10 @@ permissions:
 # the archives, hosting, doc-blocks and packaged-cli need Docker, and packaged-web needs Docker and browsers. The Safari run is not here: it needs a macOS runner that
 # GitHub sometimes cannot give, so safari.yml runs it on main and on a schedule, outside the
 # required checks (ginsys/bronzeward#612). The previous major of each browser is not here either:
-# previous-majors.yml runs it the same way.
+# previous-majors.yml runs it the same way. packaged-darwin is the one macOS job here, and the same
+# capacity limit applies to it: it is not in `checks`, and the `changes` job starts it only on a pull
+# request or a push to main that changes what it proves, as keychain.yml does for its paths.
+# A job that no runner picks up leaves a pull request UNSTABLE, so most pull requests never start it.
 
 env:
   # The setting `mise run` honours (`mise help run`, --skip-tools); MISE_EXEC_AUTO_INSTALL does
@@ -539,6 +542,62 @@ jobs:
           name: package-a
           path: package
       - run: scripts/release/run-packaged-web.sh package
+
+  changes:
+    # Whether this change touches what packaged-darwin proves. The job needs no checkout: it reads the
+    # changed file names from the forge. A merge-queue candidate skips it (and so packaged-darwin), as
+    # keychain.yml has no merge_group trigger; a manual run always starts packaged-darwin. If the forge
+    # cannot say, the answer is "run it".
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      darwin: ${{ steps.paths.outputs.darwin }}
+    steps:
+      - id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          files=
+          case "$EVENT" in
+            pull_request) files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename') || files= ;;
+            push) files=$(gh api "repos/$REPO/compare/$BEFORE...$SHA" --jq '.files[].filename') || files= ;;
+          esac
+          echo "changed files read: $(printf '%s' "$files" | grep -c .)"
+          if [ -z "$files" ] || grep -E -q '^((cmd/bronzewardctl|internal/client)/|(\.goreleaser\.yaml|go\.mod|go\.sum|scripts/release/(run-packaged-darwin\.sh|stub-idp\.py))$)' <<<"$files"; then
+            echo "darwin=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "darwin=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  packaged-darwin:
+    # The darwin/arm64 archive of the `package` job on a macOS runner (ginsys/bronzeward#405): its checksum, install,
+    # the version report with the server gone, and the macOS Keychain store, read and removal through a sign-in to a
+    # loopback test double (scripts/release/run-packaged-darwin.sh). It proves install and Keychain only, not a workflow
+    # against a live server: the server is Linux only and the runner has no Docker. Not in `checks`: GitHub's macOS arm64
+    # pool sometimes has no capacity (ginsys/bronzeward#612), and a cancelled job that is not required leaves a pull
+    # request UNSTABLE, so a job that never starts reads as not run. Its first real run is the pull request that added it.
+    needs: [package, changes]
+    if: needs.changes.outputs.darwin == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 15
+    env:
+      BW_EXPECT_VERSION: v0.0.0-ci.g${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: package-a
+          path: package
+      - run: scripts/release/run-packaged-darwin.sh package
 
   checks:
     # Aggregator: passes only when every needed job succeeded. `commit-lint` is skipped by design
