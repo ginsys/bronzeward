@@ -1974,7 +1974,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `fragment set` / `rm`, `profile set` / `rm` (`--library`: a shared entry, API revision 19) | `PUT` / `DELETE /drafts/{id}/fragments/{name}`, `/drafts/{id}/profiles/{name}` | author | no | yes |
 | `fragment adopt`, `profile adopt` (and the removal of an adoption) | `PUT` / `DELETE /drafts/{id}/adoptions/{kind}/{name}` | author | no | yes |
 | `fragment detach`, `profile detach` | `POST /drafts/{id}/adoptions/{kind}/{name}/detachments` | author | no | yes |
-| `fragment adoptions`, `profile adoptions` | `GET /fragments/{id}/adoptions`, `GET /profiles/{id}/adoptions` | any | no | no |
+| `fragment adoptions`, `profile adoptions` (a name: the CLI finds the library entry's id in the `GET /fragments` or `GET /profiles` list, then calls the id-keyed route) | `GET /fragments/{id}/adoptions`, `GET /profiles/{id}/adoptions` | any | no | no |
 | `draft impact` | `GET /drafts/{id}/impact` | any | no | no |
 | `assignment set` / `rm` | `PUT` / `DELETE /drafts/{id}/assignments/{machine}` | author | no | yes |
 | `draft discard` | `POST /drafts/{id}/discard` | author | no | yes |
