@@ -30,8 +30,8 @@ env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/dev-idp fixtures/b
 """
 
 [tasks.test]
-description = "Fixture tests for scripts/ci/commit-lint.sh, scripts/ci/needs-check.sh, scripts/ci/report-browser-run.sh, scripts/ci/report-pin-drift.sh, scripts/ci/previous-major-pins.py, scripts/ci/browser-tmp.sh, scripts/ci/browser-artifact.sh (with a planted value, and with a find that has no -printf), scripts/dev/instance.sh, scripts/dev/native-services.sh's host guard, fixtures/dev-idp's web-origin check and its native down's wait for the processes, the participant session and its t5 leak scan, the web watch comparison of fixtures/participants/compare.mjs, scenarios/s5 cli's unseen-overwrite and unfreeze-refusal checks, and scripts/release/compare-sums.sh, render-caddy.py, stop.sh and fixtures/lib.sh's isolated_run and leak_shape"
-run = ["bash scripts/test/commit-lint-test.sh", "bash scripts/test/needs-check-test.sh", "bash scripts/test/report-browser-run-test.sh", "bash scripts/test/report-pin-drift-test.sh", "python3 scripts/test/previous-major-pins-test.py","bash scripts/test/browser-tmp-test.sh", "bash scripts/test/browser-artifact-test.sh","bash scripts/test/dev-instance-test.sh", "bash scripts/test/dev-idp-origin-test.sh", "bash scripts/test/dev-idp-native-down-test.sh", "bash scripts/test/native-services-test.sh","bash scripts/test/participant-session-test.sh", "bash scripts/test/scenario-ctl-env-test.sh", "bash scripts/test/s5-cli-test.sh", "node --test scripts/test/collide-scan-test.mjs", "node --test scripts/test/watch-compare-test.mjs","bash scripts/test/compare-sums-test.sh", "python3 scripts/test/render-caddy-test.py", "bash scripts/test/stop-test.sh", "bash scripts/test/isolated-run-test.sh", "bash scripts/test/leak-shape-test.sh"]
+description = "Fixture tests for scripts/ci/commit-lint.sh, scripts/ci/needs-check.sh, scripts/ci/report-browser-run.sh, scripts/ci/report-pin-drift.sh, scripts/ci/previous-major-pins.py, scripts/ci/browser-tmp.sh, scripts/ci/browser-artifact.sh (with a planted value, and with a find that has no -printf), scripts/dev/instance.sh, scripts/dev/native-services.sh's host guard, fixtures/dev-idp's web-origin check and its native down's wait for the processes, the participant session and its t5 leak scan, the web watch comparison of fixtures/participants/compare.mjs, scenarios/s5 cli's unseen-overwrite and unfreeze-refusal checks, and scripts/release/compare-sums.sh, render-caddy.py, stop.sh and run-doc-blocks.sh (with planted blocks, and no Docker) and fixtures/lib.sh's isolated_run and leak_shape"
+run = ["bash scripts/test/commit-lint-test.sh", "bash scripts/test/needs-check-test.sh", "bash scripts/test/report-browser-run-test.sh", "bash scripts/test/report-pin-drift-test.sh", "python3 scripts/test/previous-major-pins-test.py","bash scripts/test/browser-tmp-test.sh", "bash scripts/test/browser-artifact-test.sh","bash scripts/test/dev-instance-test.sh", "bash scripts/test/dev-idp-origin-test.sh", "bash scripts/test/dev-idp-native-down-test.sh", "bash scripts/test/native-services-test.sh","bash scripts/test/participant-session-test.sh", "bash scripts/test/scenario-ctl-env-test.sh", "bash scripts/test/s5-cli-test.sh", "node --test scripts/test/collide-scan-test.mjs", "node --test scripts/test/watch-compare-test.mjs","bash scripts/test/compare-sums-test.sh", "python3 scripts/test/render-caddy-test.py", "bash scripts/test/stop-test.sh", "bash scripts/test/run-doc-blocks-test.sh", "bash scripts/test/isolated-run-test.sh", "bash scripts/test/leak-shape-test.sh"]
 
 [tasks."completion-shells"]
 description = "Load bronzewardctl's completion script in bash, zsh and fish, each in a container, and complete a command, a verb and a flag (needs docker, and the network once to build the image; not part of mise run test)"
@@ -58,6 +58,10 @@ run = [
 [tasks.hosting]
 description = "Serve dist/'s web tarball through its rendered Caddyfile in the pinned Caddy image and compare the served headers and routes (needs Docker)"
 run = "python3 scripts/test/hosting-test.py dist"
+
+[tasks.doc-blocks]
+description = "Run the operator pages' blocks marked {.bw-run}: build at v0.0.0-dev, install the archives in a clean container (fixtures/versions.env CURL_IMAGE) and run the pages' commands against a disposable server (needs Docker; state in .dev/doc-blocks/, record in its record/; scripts/release/run-doc-blocks.sh)"
+run = "bash scripts/release/run-doc-blocks.sh run"
 
 [tasks.docs]
 description = "Documentation checks and the planted-sentinel test of their example scan (needs Python 3.9+ with PyYAML 6)"
@@ -532,5 +536,5 @@ FIRST_PARTY_WORKFLOW_RE='^(go-kure|ginsys)/[^/]+/\\.github/workflows/[^@]+@main$
 """
 
 [tasks.verify]
-description = "Everything ci.yml runs except go-db, idp, the browser jobs and the packaging jobs (they need running services, browsers, Docker or two builds; mise run go-db, mise run go-idp, mise run browser, mise run package, package:check, hosting): lint, tests, docs, site, whitespace, commit subjects, go, web, action pins"
+description = "Everything ci.yml runs except go-db, idp, the browser jobs and the packaging jobs (they need running services, browsers, Docker or two builds; mise run go-db, mise run go-idp, mise run browser, mise run package, package:check, hosting, doc-blocks): lint, tests, docs, site, whitespace, commit subjects, go, web, action pins"
 depends = ["lint", "test", "docs", "site", "whitespace", "commit-lint", "go", "web", "action-pins"]
