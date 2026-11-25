@@ -268,7 +268,7 @@ give a node a path that reads as an embedded document's.
    unknown kind loads as a selector too), so the pair is fixed here and no
    free text is stored. A selector with any other member, a `name` included,
    another kind or apiVersion, or one that is not a document root stays refused.
-3a. **Verify the cluster's CA key, and keep no copy of it** (**choice §16.40**).
+3a. **Verify the cluster's CA key, and mint no generation of it** (**choice §16.40**).
    The field `machine.ca.key` of a control plane configuration's `v1alpha1`
    document is identified at step 3 like any schema secret, and then set apart:
    it is not minted a name and no generation is created for it at step 6. The
@@ -283,8 +283,9 @@ give a node a path that reads as an embedded document's.
    secret. The verdict is one of `match`, `mismatch`, `no key` (the cluster has
    no stored key or no readable version) and `unreadable`. The value stays among
    those the guard checks (§4.2), so a copy of the key anywhere else in the
-   document refuses the input, and the offered value is never logged, returned
-   or persisted, nor is a digest of it (invariant 8, §14).
+   document refuses the input, and the match check never logs, returns or
+   stores the offered value, nor a digest of it (invariant 8, §14). The
+   baseline of step 8 still holds the exact input, encrypted.
    - `match`: step 4 substitutes the typed reference of §5.1 for the node, and
      step 6 creates no generation for it.
    - `mismatch`: the input is refused, `422 validation-failed` with the `rule`
@@ -2614,7 +2615,7 @@ in place as
     (§1, §2.3 step 3a, §5.1; persistence and API choice §17.51;
     ginsys/bronzeward#889). Owner decision, 2026-11-25 11:54 CET, typed "B'".
     Importing a control plane configuration recognises `machine.ca.key` as the
-    cluster's CA key. The signer, which alone reads its stored key, vouches that
+    cluster's CA key. The signer, which holds the stored key, vouches that
     the imported value matches, and the sanitized document carries a typed
     reference to the signer's path, so Bronzeward stores one source of the key.
     The cost is a written read grant for the compiler on the signer's path:
