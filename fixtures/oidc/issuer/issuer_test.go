@@ -2,6 +2,7 @@ package issuer
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
+	"github.com/ginsys/bronzeward/internal/client"
 	"github.com/ginsys/bronzeward/internal/config"
 )
 
@@ -191,6 +193,28 @@ func TestDeviceSignIn(t *testing.T) {
 	var claims jwt.Claims
 	if err := tok.Claims(key.Public(), &claims); err != nil || claims.Subject != "h-viewer" || !claims.Audience.Contains("bronzeward") {
 		t.Fatalf("claims: %+v, %v", claims, err)
+	}
+}
+
+// The client's own device sign-in completes against the issuer: the two sides agree on the protocol.
+func TestDeviceSignInWithClient(t *testing.T) {
+	var h http.Handler
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.ServeHTTP(w, r) }))
+	defer srv.Close()
+	key, err := NewKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss, err := New(srv.URL, "bronzeward", key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss.DeviceHuman = "h-viewer"
+	h = iss.Handler()
+	got, err := client.Login(&client.Context{Name: "docs", Server: srv.URL, Credential: "oidc",
+		OIDC: &client.OIDC{Issuer: srv.URL, ClientID: "bw-docs", Scopes: client.DefaultScopes(), Audience: "bronzeward"}}, true, io.Discard)
+	if err != nil || got.AccessToken == "" || got.RefreshToken != "" {
+		t.Fatalf("login: %v", err)
 	}
 }
 
