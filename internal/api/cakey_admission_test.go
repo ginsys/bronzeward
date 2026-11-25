@@ -97,6 +97,9 @@ func TestNodeConfigurationWithTheCAKeyTag(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			me := newMachineEnv(t)
 			me.node.SetMachineConfig(t, []byte(strings.Replace(standInConfig, runToken, `"!bwref talos/ca-key"`, 1)))
+			if kind == "drift-adoption" {
+				openDriftOn(t, me.db, me.machine)
+			}
 			op, j := me.startJob(t, map[string]any{"kind": kind, "source": "machine", "document": nil})
 			me.runWith(t, options{}, j)
 			r := readOp(t, me.db, op)
