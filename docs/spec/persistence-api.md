@@ -457,24 +457,24 @@ They are held apart **(choice §17.29)**.
   Its path is derived from the cluster's id and no request names it, so no
   request can point a read at another secret. No operator writes it with the
   provider's tooling: a first key is the only way in. No
-  Bronzeward identity but the signer reads, lists or deletes the key at this
-  path. That is a claim about the path and the signer's copy, not that the value
-  reaches no other process: an `os:admin` machine configuration read, which the
-  ingestion and the executor make with certificates the signer signs for them
-  (§3.4, "What it signs"), carries
-  `machine.ca.key` in its answer. The ingestion extracts it as a
-  schema secret into an ordinary generation (compilation §1), the executor's
-  observations and dispatches are held to the scan of compilation §15 for the
-  key and the client key (§16), the compiler's own copy is open in
-  [#889](https://github.com/ginsys/bronzeward/issues/889), and a leaked
-  `os:admin` certificate can read the key (§3.4, "Expiry is the only
-  revocation"). The normal API never carries a secret value (compilation §1)
+  Bronzeward identity lists or deletes the key at this path, and none but the
+  signer and the compiler (below) reads it. That is a claim about
+  the path and the signer's copy, not that the value reaches no other process:
+  an `os:admin` machine configuration
+  read, which the ingestion and the executor make with certificates the signer
+  signs for them (§3.4, "What it signs"), carries
+  `machine.ca.key` in its answer. The ingestion does not extract it into a
+  generation: it offers it to the signer for a match check and stores a typed
+  reference to the path (compilation §2.3 step 3a, choice §17.51), the
+  executor's observations and dispatches are held to the scan of compilation §15
+  for the key and the client key (§16), and a leaked `os:admin` certificate can
+  read the key (§3.4, "Expiry is the only revocation"). The normal API never carries a secret value (compilation §1)
   except the first-key route of §3.4, which extracts the key before anything is
   persisted (design §7.1). `internal/talos/discover` stays a read-only package with its
   own dial and source guard, and the reader of the machine configuration and the
   apply path stay out of the CLI (client contracts, "Excluded").
-- **Who uses it.** The signer identity alone reads the CA key, its latest
-  version, at use. The ingestion identity, for a `source: machine` ingestion,
+- **Who uses it.** The signer identity alone reads the CA key to sign, its latest
+  version, at use (the compiler's read, to render the key, is the next bullet). The ingestion identity, for a `source: machine` ingestion,
   and the executor identity, for its observations and dispatch (execution and
   recovery §3.1 item 2), each ask the signer for a certificate and record the
   access's identity, never a value: the CA key's path, version and
@@ -504,11 +504,47 @@ They are held apart **(choice §17.29)**.
   none, and the terminal event carries its cause. The executor records it on
   each observation and use-time check (execution and recovery §4.1). The path is disjoint from the secret generations
   under `secret/data/gen/*`, so the ingestion identity still never reads what
-  it creates (compilation §1, choice §16.1 there). The compiler, the
-  dependency monitor and the normal API cannot read it. The presence answer
+  it creates (compilation §1, choice §16.1 there). The dependency monitor and
+  the normal API cannot read it, and the compiler reads it only as the next
+  bullet says. The presence answer
   below reads only its metadata, with the access-presence identity alone; the
   metadata identity's `secret/metadata/*` grant (dependency monitor §4) reaches
-  the same metadata, though the monitor never requests it (choice §17.42).
+  the same metadata, and the monitor requests it for the version a
+  `talos-ca-key` reference pinned (compilation §6 step 3), and for no other
+  version of the path (choice §17.42, choice §17.51).
+- **The compiler's read, and the signer's match check** (**choice §17.51**).
+  Two uses besides signing, neither of which gives an application identity a
+  key at rest.
+  - *The compiler* holds `read` on `secret/data/access/talos-ca/*` and no other
+    capability on it: no `list`, no metadata, no write, no delete. A
+    publication reads the exact version its pin recorded (compilation §6
+    steps 2 and 4), only for a `talos-ca-key` reference, to place the key in
+    the rendered control plane configuration, which Talos refuses without it.
+    The path is built from the cluster of the machine being compiled and no
+    request names it. A grant on `talos-ca/*` still reaches every cluster's
+    path, so holding the compiler to its own cluster's is the application's
+    bound, as it is for the signer (§3.4); tenancy stays excluded. A compiler
+    without the grant, or a sealed or silent provider, fails the read and the
+    publication is refused (compilation §13), with nothing published. The
+    publication records the path, version and `created_time`, never a value.
+  - *The signer* compares a value an ingestion offers with the key version the
+    cluster's latest first-key act names, and answers `match`, `mismatch`, `no
+    key` or `unreadable`: it returns, stores and logs no value and no digest of
+    one (compilation §2.3 step 3a). It needs no further grant, since it reads
+    the path already. The ingestion identity still never reads it: it hands the
+    signer a value and receives a verdict.
+
+  Which identity writes and reads each location:
+
+  | Location | Writes | Reads |
+  | --- | --- | --- |
+  | `secret/data/access/talos-ca/<cluster id>` | signer (`create`, `update`; a first key) | signer (signing, match check), compiler (the render) |
+  | `secret/metadata/access/talos-ca/*` | none | access-presence (presence), metadata (the version a `talos-ca-key` reference pinned) |
+  | `secret/data/gen/*` | ingestion (`create`, never replace) | compiler |
+  | `secret/metadata/gen/*` | none | orphan-report (`list`, `read`), metadata |
+
+  The ingestion, executor and normal API identities read none of the four, and
+  no identity lists or deletes the first (the signer has neither, §3.4).
 - **What it can do.** Reading a node's machine configuration needs the
   `os:admin` Talos role, as observed on the fixture (`internal/talos`
   `TestLiveRoleProbe`, Talos v1.14.5, recorded in the fixture README and the same as on v1.13.6:
@@ -786,7 +822,9 @@ there.
 - **The signer.** One component identity, the signer, reads and writes
   `secret/data/access/talos-ca/*` and nothing else (create, read and update; no
   list or delete). It signs in process memory and hands the ingestion and the
-  executor only a certificate and its key. The key is stored per cluster under a
+  executor only a certificate and its key, and an ingestion that offers it a
+  `machine.ca.key` only a verdict on the match (§3.3, "The compiler's read, and
+  the signer's match check"). The key is stored per cluster under a
   path derived from the cluster's id, and the audit records are keyed by cluster,
   so that a later split by tenant selects paths without rewriting this contract.
   The PoC uses shared identities (owner decision BW-870-tenancy-identity-model-1,
@@ -3280,7 +3318,7 @@ counter, not the ETag token, so the token is not named.
 | 409 | `recovery-mode-active` | an act refused on a scope still pre-restore unaccounted, a publication changing the assignment of a scope not released in the current epoch, or any request but liveness and entry under the recovery-start flag before entry, and plan creation, approval or unfreezing under it after entry (§12.2); only a scope refusal's body carries a `scope` member; a refusal by the recovery-start flag concerns no scope and carries none |
 | 412 | `precondition-failed` | `If-Match` does not match |
 | 412 | `epoch-mismatch` | `Bronzeward-Expected-Epoch` names an epoch other than the current one and the key has no record (§7.2); the body's `epoch` names the current one; nothing of the request's own transaction was committed, while a draft entry's staging claim, a scope mark's observation or a principal row taken before the refusing lookup stays (§7.2, §9.2, §14) |
-| 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13). A known publication identity or running-minor mismatch names the machine, observation, rule and safe cause (§6.1.1). Also a publication refused by T3's re-check: a version's status recorded not before publication began classifying it is not `retained` (dependency monitor §5.2); the body names its `dependency` by provider, object and version |
+| 422 | `validation-failed` | compilation refused the input; paths and rule, never values (compilation §13). An ingestion whose `machine.ca.key` the signer says does not match the cluster's stored key has the rule `ca-key-mismatch` and names no key (compilation §2.3 step 3a). A known publication identity or running-minor mismatch names the machine, observation, rule and safe cause (§6.1.1). Also a publication refused by T3's re-check: a version's status recorded not before publication began classifying it is not `retained` (dependency monitor §5.2); the body names its `dependency` by provider, object and version |
 | 422 | `idempotency-key-reused` | same key, other request (§7.2) |
 | 428 | `precondition-required`, `idempotency-key-required` | `If-Match` or `Idempotency-Key` missing |
 | 500 | `internal-error` | an unexpected server failure; the body says whether anything was committed or the outcome is unknown, in which case a retry under the same `Idempotency-Key` answers it (§5 rule 6) |
@@ -4376,10 +4414,16 @@ each (design §7.7 consequences):
   a `paused` claim abandoned by the operator, by the sweep at its absolute
   expiry and by recovery-mode entry, and kept `paused` across a server
   restart;
-- Talos access (§3.3): the signer identity alone reading
+- Talos access (§3.3): the signer and the compiler alone reading
   `secret/data/access/talos-ca/<cluster id>`, and the ingestion, executor,
-  compiler, metadata and normal API identities each refused it, with a control
-  that grants the compiler the read and must then succeed; the signer refused
+  metadata and normal API identities each refused it, each with a control that
+  grants it the read and must then succeed; the compiler refused `list`, a
+  metadata read, a write and a delete on the access path, each paired with a
+  control that grants it the capability named and must then succeed; the
+  compiler without its grant refused the read, a compile of a control plane
+  configuration then failing and its publication refused with nothing
+  published, with the control that adds the grant and must then publish; the
+  signer refused
   list and delete on the access path, with a control that grants it `delete`
   and must then succeed; the ingestion identity refused every
   `secret/data/gen/*` read; a
@@ -4484,6 +4528,31 @@ each (design §7.7 consequences):
   the answer saying that it may be stored without its act and never that nothing
   was stored, and the next supply storing the following version as `replaced`
   with its act recorded;
+- the cluster's CA key in an import (compilation §2.3 step 3a, §5.1; §3.3, "The
+  compiler's read, and the signer's match check"), on the fixture, synthetic
+  inputs only. Ingestion: a control plane configuration whose `machine.ca.key`
+  is the cluster's stored key accepted with a `match` verdict, no generation
+  created for it, the sanitized document holding the typed reference and no
+  key, and the `ingest` operation's event holding the verdict and the key's
+  path, version and `created_time`; the same key written as PEM with other line
+  wrapping accepted too; a key of another cluster, and the stored key altered by
+  one byte, each failing `422 validation-failed` with the rule
+  `ca-key-mismatch`, the claim abandoned and nothing kept, with a control that
+  replaces the comparison by an always-true one and must then fail by accepting
+  them; a cluster with no stored key, a soft-deleted latest version and a
+  sealed provider each failing `503 talos-access-unavailable`; a worker
+  configuration offering nothing; a copy of the key elsewhere in the document
+  refused by the guard (compilation §4.2); and neither the offered value nor a
+  digest of it in the database, the events, the logs and the responses of
+  compilation §15's scan, with a positive control. Publication: the rendered
+  control plane configuration carrying the key and accepted by the pinned
+  Talos machinery's validation, with the control that leaves the reference
+  unresolved and must then fail validation; a first key supplied between the
+  pin and the read refusing the publication with nothing published, with the
+  control that pins afresh and must then publish; a regeneration of an earlier
+  release reading its recorded version, with the control that reads the
+  latest act's and must then fail; and an ordinary fragment that declares
+  `talos-ca-key`, or overrides or deletes the reference, refused;
 - the presence read (§3.3, "Presence"), in two parts. Against the fixture's
   OpenBao, on one disposable cluster path (`TestLivePresenceIdentity`): a path
   never written answers 404 with an empty `errors` list; a stored key with two
@@ -5312,6 +5381,23 @@ design and evidence do not settle the question. Each is marked in place as
     Alternative: accept the leak as a residual of a single-operator PoC,
     rejected because accepting a disclosure in a specification is the owner's
     decision to make and not an editor's.
+51. **The compiler reads the Talos CA key at the signer's path, and an import
+    keeps no copy of it** (§3.3, "The compiler's read, and the signer's match
+    check"; compilation §1, §2.3 step 3a, §5.1 and choice §16.40;
+    ginsys/bronzeward#889). Owner decision, 2026-11-25 11:54 CET, typed "B'".
+    The compiler's grant is `read` on `secret/data/access/talos-ca/*`, beside
+    its grant on `secret/data/gen/*`, because a control plane configuration
+    must carry the key. The table in §3.3 states which identity writes and
+    reads each location. Alternatives: keeping a second copy as a generation the compiler reads, rejected because
+    the compiler's grant on `secret/data/gen/*` would then silently be a grant
+    on the CA key beside the signer's own copy; resolving the reference in a
+    component other than the compiler at apply time, rejected because it moves
+    the copy and widens the grant on this path to that component; not
+    extracting the key, rejected because adoption needs the import base to
+    reproduce the imported configuration. Cost: the compiler's grant reaches
+    every cluster's path under `talos-ca/*`, bounded by the application only.
+    The encrypted baseline still holds the imported value (compilation §2.3
+    step 8).
 
 ## 18. Traceability
 

@@ -69,10 +69,10 @@ to that work:
 
 | Identity | Needs | Must not have | What PC measured |
 | --- | --- | --- | --- |
-| Ingestion | create-only secret generations; HMAC with the digest key (§4.1); encrypt and decrypt with the staging key (§3); encrypt with the baseline key (§2.3); obtain a certificate from the signer, for a `source: machine` ingestion (below) | every other secret read; artifact and baseline decryption; machine operation | `publisher`: `create` on `secret/data/gen/*` only, and a refused replace ([PC §2](../design/research/20260924-provider-capability-comparison.md#2-candidates-and-identities), [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) rows 001, 002). Staging-key, baseline-key and HMAC use were not measured. |
-| Compiler | read the pinned secret versions; encrypt with the artifact key | artifact, baseline or staging decryption; secret creation; the signer's path `secret/data/access/talos-ca/*`; machine operation | `compiler`: `read` on `secret/data/*`, encrypt on the artifact key, decrypt refused (PC §4.1 rows 004, 038, 040) |
+| Ingestion | create-only secret generations; HMAC with the digest key (§4.1); encrypt and decrypt with the staging key (§3); encrypt with the baseline key (§2.3); obtain a certificate from the signer, for a `source: machine` ingestion (below); offer the imported `machine.ca.key` to the signer for its match check (§2.3 step 3a) | every other secret read, the signer's path included; artifact and baseline decryption; machine operation | `publisher`: `create` on `secret/data/gen/*` only, and a refused replace ([PC §2](../design/research/20260924-provider-capability-comparison.md#2-candidates-and-identities), [PC §4.1](../design/research/20260924-provider-capability-comparison.md#41-permissions) rows 001, 002). Staging-key, baseline-key and HMAC use were not measured. |
+| Compiler | read the pinned secret versions; read the cluster's CA key at the signer's path, `read` on `secret/data/access/talos-ca/*`, to render the typed reference of §5.1 (choice §16.40); encrypt with the artifact key | artifact, baseline or staging decryption; secret creation; `list`, metadata, write or delete on the signer's path; machine operation | `compiler`: `read` on `secret/data/*`, encrypt on the artifact key, decrypt refused (PC §4.1 rows 004, 038, 040); no grant on the signer's path measured |
 | Executor | decrypt artifacts, gated by approval; obtain a certificate from the signer (below) | every other secret read; staging and baseline decryption | `executor`: decrypt only, secret read refused (PC §4.1 rows 039, 005); [execution and recovery §3.1](execution-recovery.md#31-execution-time-evidence-gathered-before-the-transaction) |
-| Signer | `create`, `read` and `update` on `secret/data/access/talos-ca/*`, for [persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer) | `list`, `delete`, any other path, any decryption; machine operation | not measured; [persistence and API §16](persistence-api.md#16-verification-and-evidence-limits) requires the grants |
+| Signer | `create`, `read` and `update` on `secret/data/access/talos-ca/*`, for [persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer); compare a value an ingestion offers with the stored key and answer with a verdict only (§2.3 step 3a) | `list`, `delete`, any other path, any decryption; machine operation | not measured; [persistence and API §16](persistence-api.md#16-verification-and-evidence-limits) requires the grants |
 | Metadata | [design §7.6](../design/Talos_Configuration_and_Machine_Management_Design.md#76-metadata-only-dependency-checks) classification | any value | `metadata`: KV metadata and Transit key state, no data (PC §4.1) |
 | Orphan report | `list` and `read` on `secret/metadata/gen/*`, for [persistence and API §6.4](persistence-api.md#64-orphans)'s report | any value; any other path; Transit | `metadata` listed under one generation path (PC §4 row 065); this identity's grants and refusals measured by [persistence and API §16](persistence-api.md#16-verification-and-evidence-limits)'s check, on the pinned OpenBao only |
 | Access presence | `read` on `secret/metadata/access/talos-ca/*`, for [persistence and API §3.3](persistence-api.md#33-talos-access)'s presence read (choice §17.42 there) | any value; any other path, `list`; Transit | not measured; its grants and refusals are specified in persistence and API §16 |
@@ -84,24 +84,36 @@ signer identity and supplied by an author through a first key, never written by
 the operator with the provider's tooling ([persistence and API
 §3.3](persistence-api.md#33-talos-access), [§3.4](persistence-api.md#34-first-keys-and-the-talos-signer))
 **(choice §16.29)**. The ingestion and executor identities never read it: each
-obtains a short-lived certificate from the signer. The signer's path holds the
-only copy Bronzeward uses to sign; a control plane configuration imported from a
-machine carries the same `machine.ca.key` as a schema secret, so §2.3 extracts it
-into an ordinary secret generation like every other secret, and the compiler
-reads that generation to render the configuration. This contract does not change
-that copy and does not claim the compiler never sees the key's value; it claims
-only that the compiler cannot read the signer's path and signs nothing
-(whether the compiler needs its own copy is open in ginsys/bronzeward#889). Its path
-is disjoint from `secret/data/gen/*`, so the ingestion identity still never reads
-a secret it creates (choice §16.1). The access-presence identity reads only
-the path's metadata, for the presence answer (persistence and API §3.3). The compiler's grant PC measured, `read` on
-`secret/data/*`, would cover it; the compiler's grant is `read` on
-`secret/data/gen/*`, as the fixture's compiler policy already has it
-(`fixtures/openbao/policies/bw-compiler.hcl`). No grant on the path was
-measured; persistence and API §16 requires each. A certificate it signs for a
-configuration read carries `os:admin`, the only role that reads a machine
-configuration, so the "no machine operation" above is the application's own
-bound, a read-only Talos client, not one the provider or Talos enforces.
+obtains a short-lived certificate from the signer. The signer's path is the one
+stored source of the key. A control plane configuration imported from a machine carries the
+same key as `machine.ca.key`, a schema secret, and §2.3 does not extract it into
+a generation: ingestion offers the value to the signer, which says whether it
+matches the key it stores, and the sanitized document carries a typed reference
+to the signer's path instead (§2.3 step 3a, §5.1, **choice §16.40**). The
+compiler reads the path to render the key, because a control plane
+configuration must carry it and the pinned Talos machinery refuses one without
+(`machine.ca.key` is required for a control plane node). That read is the
+compiler's written grant on the signer's path: `read` on
+`secret/data/access/talos-ca/*`, with no `list`, no metadata, no write and no
+delete (persistence and API §3.3). The path is disjoint from `secret/data/gen/*`,
+so the ingestion identity still never reads a secret it creates (choice §16.1).
+The access-presence identity reads only the path's metadata, for the presence
+answer (persistence and API §3.3). The compiler's grant PC measured, `read` on
+`secret/data/*`, would cover both paths; the compiler's grant is `read` on
+`secret/data/gen/*` and on `secret/data/access/talos-ca/*`. The fixture's
+compiler policy (`fixtures/openbao/policies/bw-compiler.hcl`) holds only the
+first until the change that implements this choice lands. No grant on the path
+was measured; persistence and API §16 requires each.
+
+This contract does not claim that no other copy exists. The encrypted baseline
+of §2.3 step 8 holds the imported value, and no identity decrypts it (choice
+§16.4); the node's own configuration holds it, and an `os:admin` read returns
+it; and the rendered artifact carries it, encrypted under the artifact key for
+the executor, which decrypts it to apply it. It claims one thing: Bronzeward
+stores no secret generation of the key, so the signer's path is the one stored
+source the compiler reads. A certificate the signer signs for a configuration read carries `os:admin`, the only role that reads a
+machine configuration, so the "no machine operation" above is the application's
+own bound, a read-only Talos client, not one the provider or Talos enforces.
 
 Ingestion and compilation run in protected processing: a process that holds
 plaintext only in memory, writes no temporary file, and does not log input,
@@ -256,17 +268,53 @@ give a node a path that reads as an embedded document's.
    unknown kind loads as a selector too), so the pair is fixed here and no
    free text is stored. A selector with any other member, a `name` included,
    another kind or apiVersion, or one that is not a document root stays refused.
+3a. **Verify the cluster's CA key, and keep no copy of it** (**choice §16.40**).
+   The field `machine.ca.key` of a control plane configuration's `v1alpha1`
+   document is identified at step 3 like any schema secret, and then set apart:
+   it is not minted a name and no generation is created for it at step 6. The
+   ingestion offers its value, in memory, to the signer, and the signer
+   compares it with the cluster's stored key and answers with a verdict only,
+   because the ingestion identity cannot read the signer's path (§1). The signer
+   reads the key version the cluster's latest first-key act names
+   ([persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)),
+   reduces both keys to the private key's DER (the configuration holds the PEM
+   base64-encoded, the store holds it as PEM text) and compares them in
+   constant time. It compares the key alone: the CA certificate is no schema
+   secret. The verdict is one of `match`, `mismatch`, `no key` (the cluster has
+   no stored key or no readable version) and `unreadable`. The value stays among
+   those the guard checks (§4.2), so a copy of the key anywhere else in the
+   document refuses the input, and the offered value is never logged, returned
+   or persisted, nor is a digest of it (invariant 8, §14).
+   - `match`: step 4 substitutes the typed reference of §5.1 for the node, and
+     step 6 creates no generation for it.
+   - `mismatch`: the input is refused, `422 validation-failed` with the `rule`
+     `ca-key-mismatch`, before any provider write; the claim is abandoned and
+     nothing is kept. Neither key, nor a digest of either, is in the answer,
+     an event or a log line.
+   - `no key` and `unreadable`: `503 talos-access-unavailable`, the failure
+     [persistence and API §3.3](persistence-api.md#33-talos-access) already
+     lists; the claim is abandoned and nothing is kept. An import into a cluster
+     with no stored key waits for a first key.
+   The verdict and the key version it was given against (path, version and
+   `created_time`, never a value) are recorded as an event of the `ingest`
+   operation, as the certificate access is (persistence and API §3.3), whatever
+   the verdict. A worker configuration has no `machine.ca.key`, so there is
+   nothing to verify. A node that already carries the typed reference is
+   excluded from identification (step 3), so a draft update or a further mark
+   on a sanitized document does not offer the key again; a new import of the
+   machine does.
 4. **Substitute** each identified value by a reference (§5) under a newly
    minted logical name at version 1, with its declaration (§5.2), producing the
-   candidate sanitized document. Names are minted as §5.1 states. The
+   candidate sanitized document; the CA key of step 3a takes the typed
+   reference of §5.1 instead, with no minted name. Names are minted as §5.1 states. The
    candidate is the pinned encoder's output written again from its own parse
    until it no longer changes: the encoder moves a blank line inside a run of
    comments, as talosctl writes them, and a later mark (§3.6 item 3) refuses
    any text its re-encoding changes. The guard searches that final text.
 5. **Guard** (§4.2). A guard hit refuses the input; no provider object has been
    created yet.
-6. **Create** one provider generation per extracted value, create-only (`cas=0`)
-   at a path of its own. This takes the first branch of design §7.8 item 1
+6. **Create** one provider generation per extracted value, the CA key of step 3a
+   excepted, create-only (`cas=0`) at a path of its own. This takes the first branch of design §7.8 item 1
    (a path of its own, rather than an overwritten path with an explicit
    `max_versions`) **(choice §16.3)**. The path includes a component that the
    database does not issue: the staging claim's identifier followed by a random
@@ -701,7 +749,8 @@ plans, dispatches or observes can compute them.
 ### 4.2 The guard (E1 decision 4)
 
 Before a sanitized value is constructed, the candidate document is parsed back
-and checked twice against every value extracted in this run. An extracted
+and checked twice against every value extracted in this run, the CA key of §2.3
+step 3a included although no generation is created for it. An extracted
 mapping contributes its keys as well as its members, since the provider stores
 both:
 
@@ -783,6 +832,29 @@ logical secret" and resolves "to an exact version"):
   secret ingestion creates is at version 1 (§2.3 step 4); a later version is
   created only by rotation tooling (design §13.2), which this contract does not
   specify.
+- **The cluster's CA key** (**choice §16.40**) is the one reference with no
+  generation behind it, and the exception to the three rules above. Its logical
+  name is the fixed `talos/ca-key`, minted by nobody, so the naming churn does
+  not reach it. Its declaration kind is `talos-ca-key` (§5.2), it belongs to the
+  scope of the machine's cluster, and it stands only at `machine.ca.key` of the
+  import base. It resolves to the key at the signer's path
+  (`secret/data/access/talos-ca/<cluster id>`), never to a generation, and it
+  names no version: a compile resolves it to the version the cluster's latest
+  first-key act names, which is the one version signing uses
+  ([persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)).
+  **Why that departure from choice §16.14 is safe:** the release's dependency
+  record names that version by path, version and `created_time` (§9), so a
+  release is reproduced from its recorded inputs. A regeneration reads the
+  recorded version and never the latest act's, and a version that no longer
+  classifies `retained` refuses it as any lost dependency does (§6 step 3). A
+  first key supplied between two compiles changes only what the next
+  publication pins: the earlier release keeps its record, and the new one
+  records the new version, so the plan shows the key as a changed dependency.
+  A first key supplied between one publication's pin (§6 step 2) and its read
+  (§6 step 4) refuses that publication, and the next one pins afresh. An
+  ordinary fragment cannot declare or place this reference (an authoring
+  refusal, §7 stage 1), and one that overrides or deletes it is refused as any
+  import-base reference is (§6, choice §16.20).
 
 The tag is chosen over the opted-in marked string and the external path binding
 **(choice §16.15)**.
@@ -827,8 +899,13 @@ embedded:
 - `kind` is one of `string`, `integer`, `boolean` or `mapping` (a mapping of
   those scalar kinds) **(choice §16.16)**. It must equal the kind stored in the
   pinned secret version (its `kind`, **choice §16.28**); a mismatch refuses
-  compilation and nothing is coerced.
-- `version` is the exact version the reference resolves to (§5.1).
+  compilation and nothing is coerced. The one other kind is `talos-ca-key`
+  (§5.1, **choice §16.40**): the import base's declaration of the cluster's CA
+  key, written `talos/ca-key: {kind: talos-ca-key}`, with no `version` and no
+  `encoding`. It places the standard base64 encoding of the stored key's PEM
+  text, the form `machine.ca.key` holds, and has no stored `kind` to compare.
+- `version` is the exact version the reference resolves to (§5.1); a
+  `talos-ca-key` declaration has none.
 - `encoding` is optional and comes from a closed enum **(choice §16.17)**. The
   PoC enum has one member, `base64`, which places the standard base64 encoding of a `string`
   secret's UTF-8 bytes. It is the only modifier the evidence defined (SP's
@@ -951,7 +1028,10 @@ For each machine:
    [persistence-api §6.1](persistence-api.md#61-steps)'s.
 2. **Pin** every declared reference in the import base and in every selected
    fragment, including references a later fragment will override: record the
-   declared version (§5.1) together with the provider object it names. This is
+   declared version (§5.1) together with the provider object it names. A
+   `talos-ca-key` reference (choice §16.40) declares none: it records the version
+   the cluster's latest first-key act names, read with the snapshot of step 1,
+   at the signer's path. This is
    the source superset; resolving early necessarily reads all of it (SR §6.2,
    §6.4).
 3. **Check dependencies**: every pinned secret version must classify `retained`
@@ -968,7 +1048,12 @@ For each machine:
    typed decode, and each identified embedded document as in §5.4. Every tag
    must resolve; there is no partial result. A KV value read whose
    `created_time` differs from the one step 3 took refuses publication: the
-   path was deleted and written again between the two reads.
+   path was deleted and written again between the two reads. The compiler reads
+   the signer's path only here and only for a `talos-ca-key` reference, at the
+   exact version step 2 recorded, and it reads the cluster's latest first-key
+   act again. A first key supplied since step 2 leaves that act naming another
+   version, and the publication is refused for it, with nothing published; the
+   next publication pins afresh.
 5. **Compose** the reference-free fragments onto the resolved import base with
    the selected renderer (§10) in the order of step 1, using native
    strategic-merge semantics: last writer wins, and `$patch: delete` removes.
@@ -1695,7 +1780,11 @@ supported topology, one node whose clock does not step back; the residual risk
 of a backwards clock step or several provider nodes is accepted for the PoC in
 [design §7.7](../design/Talos_Configuration_and_Machine_Management_Design.md#77-poc-deployment-profile). Each pinned KV version is recorded the same way, with the
 `created_time` §6 steps 3 and 4 agreed on: KV metadata deletion restarts a
-path's version numbers, so path and version alone can name a replacement. It
+path's version numbers, so path and version alone can name a replacement. The
+`talos-ca-key` reference is recorded the same way, as an effective and a
+reproduction dependency, at the signer's path and the version step 2 took
+(choice §16.40); that record, never the cluster's latest act, is what a
+regeneration of the release reads. It
 also carries the renderer and contract record of §10.2.
 
 ## 10. Renderer selection and compatibility limits
@@ -2019,6 +2108,8 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | --- | --- | --- | --- |
 | Ingestion | Parse failure, or a mark addressing no node | Refused before any provider write; claim abandoned | Claim row, no payload |
 | Ingestion | Guard hit (§4.2) | Refused, naming paths and rule; claim abandoned | Claim row, no payload |
+| Ingestion | The CA key offered at §2.3 step 3a does not match the signer's | Refused before any provider write, `422 validation-failed`, rule `ca-key-mismatch`; claim abandoned | Claim row, no payload; the verdict and key version identity as an event of the `ingest` operation |
+| Ingestion | The signer holds no key for the cluster, or cannot read it, at §2.3 step 3a | Refused, `503 talos-access-unavailable`; claim abandoned | Claim row, no payload; the verdict as an event of the `ingest` operation |
 | Ingestion | Provider write fails part-way | Refused; claim abandoned | Claim row, no payload; unused provider generations |
 | Ingestion | Crash before the payload is written (end of §2.3 step 8) | Transient: abandoned at lease lapse; encrypted: a takeover finds nothing to decrypt and abandons it | Claim row, no payload; unused generations if past step 6 |
 | Ingestion | Crash after the payload is written, before the draft transaction | Transient: abandoned at lease lapse; encrypted: takeover (§3.4) | Claim row with ciphertext (encrypted); unused generations until the draft commits |
@@ -2029,7 +2120,8 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Ingestion | Stale owner heartbeat, commit or release, or one after the claim paused | Refused by owner generation or state | Nothing |
 | Ingestion | Absolute expiry, the operator's abandonment, or recovery-mode entry, a paused claim included | Claim abandoned; re-ingest | Claim row, payload cleared |
 | Authoring | Undeclared or unused name, other local tag, tag on a key or sequence, reserved text, bad path | Draft update refused | Nothing |
-| Compilation | Dependency not `retained`, or unreadable by the compiler | Publication refused | Nothing |
+| Compilation | Dependency not `retained`, or unreadable by the compiler (the signer's path included, when the compiler's grant on it is absent) | Publication refused | Nothing |
+| Compilation | The cluster's latest first-key act names another version than the one step 2 pinned for the `talos-ca-key` reference (§5.1) | Publication refused; the next publication pins afresh | Nothing |
 | Compilation | Kind mismatch, or `base64` on a non-string | Publication refused | Nothing |
 | Compilation | A reference to a secret of another cluster (§5.1) | Publication refused | Nothing |
 | Compilation | An ordinary fragment overrides or deletes an import-base reference (§6) | Publication refused, naming the fragment and path | Nothing |
@@ -2311,7 +2403,8 @@ in place as
 13. **A new name for every extracted value, even an unchanged one** (§5.1).
     Alternative: deduplicate by keyed digest; avoids churn, but rests on
     digest comparison, which is undesigned across a rotation of the digest key
-    (§4.1).
+    (§4.1). The cluster's CA key is no longer one of these values: it is
+    verified and referenced, never minted (choice §16.40).
 14. **Declarations name the exact version; no latest-version selection**
     (§5.1, §5.2). Alternative: pin the latest `retained` version at
     publication.
@@ -2381,7 +2474,7 @@ in place as
     leaves §5.2's comparison nothing to compare. Owner decision, 2026-10-01
     (ginsys/bronzeward#22).
 29. **A signer identity alone reads each cluster's Talos CA key from the
-    provider, at a path disjoint from the secret generations, and the ingestion
+    provider to sign, at a path disjoint from the secret generations, and the ingestion
     and executor identities obtain a short-lived certificate from it** (§1;
     [persistence and API choice §17.29](persistence-api.md#17-choices-for-owner-review)).
     Replaces the choice of 2026-10-02 (ginsys/bronzeward#22), by the owner
@@ -2390,7 +2483,8 @@ in place as
     talosconfig file in the server's configuration, outside the provider. A
     separate identity handing a credential to both adds a process boundary
     without narrowing what the credential can do; the signer's reason is the
-    owner's decision to hold the signing key, not that boundary.
+    owner's decision to hold the signing key, not that boundary. The compiler
+    holds a written read grant on the path too (choice §16.40).
 30. **A draft transaction's release is checked against the claim's deadlines
     once, under the claim's row lock, not again at `COMMIT`** (§3.5). The
     lock orders the release before any abandonment. Alternative: a deferred
@@ -2515,6 +2609,32 @@ in place as
     added, which one later fragment defeats and which drops a normalisation the
     compilation states on purpose; a normalised form in every comparison, which
     makes Applied and drift stop meaning the bytes on the node.
+40. **The cluster's Talos CA key is verified against the signer and referenced,
+    never copied into a generation; the compiler reads the signer's path**
+    (§1, §2.3 step 3a, §5.1; persistence and API choice §17.51;
+    ginsys/bronzeward#889). Owner decision, 2026-11-25 11:54 CET, typed "B'".
+    Importing a control plane configuration recognises `machine.ca.key` as the
+    cluster's CA key. The signer, which alone reads its stored key, vouches that
+    the imported value matches, and the sanitized document carries a typed
+    reference to the signer's path, so Bronzeward stores one source of the key.
+    The cost is a written read grant for the compiler on the signer's path:
+    the rendered configuration must carry the key, and Talos v1.14.5 refuses a
+    control plane configuration without it (`v1alpha1_validation.go`, "issuing
+    CA key is required for controlplane nodes (.machine.ca.key)"), which the
+    release validation calls (`internal/compile/compile.go`). The reference
+    names no version, an exception to choice §16.14, which §5.1 justifies by the
+    dependency record. Alternatives: (A) accept a second copy as a secret
+    generation read by the compiler and say so, with no code and no grant
+    change, rejected because the signer's path then holds one of two copies and
+    the compiler's grant on `secret/data/gen/*` is in fact a grant on the CA
+    key; (B) render the key from a reference resolved by a new component at
+    apply time, which moves the copy and widens the grant on the most sensitive
+    path to that component without removing the compiler's need for the value;
+    (C) do not extract `machine.ca.key` from the import, rejected because the
+    import base could then not reproduce the imported control plane
+    configuration, which adoption needs as its exact baseline. Not removed by
+    this choice: the encrypted baseline of §2.3 step 8 still holds the imported
+    value, decryptable by no identity (choice §16.4).
 
 ## 17. Traceability
 
@@ -2533,6 +2653,7 @@ in place as
 | §2.3 step 8, §4.1, §11 whole-configuration digests | §7.1, §12.1 | none: choice §16.26; [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values) |
 | §4.2 guard | §7.1, §6.9 | [E1 5.18](../design/research/20260922-secret-ingress-extraction-before-persistence.md#518-the-fourth-review-and-the-fixes-made-after-the-evidence), [E1 5.19](../design/research/20260922-secret-ingress-extraction-before-persistence.md#519-advisory-rounds-five-to-eighteen-the-prototype-hardened-the-evidence-unchanged) |
 | §5.1 scope, naming, versions | §6.9, §13.2 | none: choices §16.12 to §16.14 |
+| §2.3 step 3a, §5.1 the cluster's CA key | §7.1, §13.2 | none: choice §16.40 (owner decision of 2026-11-25); Talos machinery v1.14.5 `config/types/v1alpha1/v1alpha1_validation.go` (a control plane configuration needs `machine.ca.key`); the grants are not measured, [persistence and API §16](persistence-api.md#16-verification-and-evidence-limits) |
 | §5.1 tag syntax | §6.9 | [SR §5](../design/research/20260924-structural-reference-composition.md#5-what-each-late-failure-is), [SR §6.4](../design/research/20260924-structural-reference-composition.md#64-criterion-4-candidate-failures-and-renderer-implications), [SR §9](../design/research/20260924-structural-reference-composition.md#9-alternatives-and-decision-enabled); [SP §7.1](../design/research/20260925-sensitivity-provenance.md#71-the-binding-form-cannot-hold-a-list-element-reference); [E3 §6.2](../design/research/20260925-talos-compatibility.md#62-criterion-2-subprocess-against-machinery-and-the-structural-reference-evidence) |
 | §5.2 declarations, enum | §6.9 | [SP §2](../design/research/20260925-sensitivity-provenance.md#2-candidates); SR §3.1 |
 | §5.3, §5.4 targets, aliases, embedded | §6.3, §6.9 | [SR §4](../design/research/20260924-structural-reference-composition.md#4-the-matrix), SR §6.2, §6.4, [SR §8](../design/research/20260924-structural-reference-composition.md#8-limits); [SP §3.1](../design/research/20260925-sensitivity-provenance.md#31-cases), [SP §4.2](../design/research/20260925-sensitivity-provenance.md#42-provenance-per-case) |
