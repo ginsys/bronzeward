@@ -51,7 +51,7 @@ the source and the checks the repository runs. This page does not claim that a r
 A block marked to run is run in a later documentation run, and this page is changed to say so
 only after that run.
 
-```bash {.bw-run}
+```bash {.bw-run .bw-host}
 BW_VERSION=v0.0.0-dev mise run package
 ```
 
@@ -59,7 +59,7 @@ The command ends with the list of archives in `dist/`. Next, check each archive 
 checksum. `sha256sum --check` reads `SHA256SUMS` and says `OK` or `FAILED` for every file. The
 parentheses keep your shell in the directory you started in.
 
-```bash {.bw-run}
+```bash {.bw-run .bw-host}
 ( cd dist && sha256sum --check --strict SHA256SUMS )
 ```
 

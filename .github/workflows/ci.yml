@@ -30,8 +30,8 @@ permissions:
 # skips forks and merge groups outright (the proxy is in-cluster only). The exceptions to this
 # rule always run GitHub-hosted: go-db and idp, whose containers need a Docker daemon, browser,
 # which needs browsers, and browser-auth, which needs both; the in-cluster runners have neither.
-# package, package-check and hosting run GitHub-hosted too: two separate machines build the
-# archives, and hosting needs Docker. The Safari run is not here: it needs a macOS runner that
+# package, package-check, hosting and doc-blocks run GitHub-hosted too: two separate machines build
+# the archives, and hosting and doc-blocks need Docker. The Safari run is not here: it needs a macOS runner that
 # GitHub sometimes cannot give, so safari.yml runs it on main and on a schedule, outside the
 # required checks (ginsys/bronzeward#612). The previous major of each browser is not here either:
 # previous-majors.yml runs it the same way.
@@ -466,12 +466,37 @@ jobs:
           path: package
       - run: python3 scripts/test/hosting-test.py package
 
+  doc-blocks:
+    # The operator pages' blocks marked {.bw-run} (ginsys/bronzeward#405): a fresh build at the
+    # version the pages name (v0.0.0-dev), its archives installed in a clean container, and the
+    # pages' read commands run there against a disposable server (mise run doc-blocks). Not a
+    # reuse of the `package` job's archives: those carry the commit in their version.
+    # GitHub-hosted for the Docker daemon, as hosting.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+          install_args: go node goreleaser
+      - run: mise run doc-blocks
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: doc-blocks
+          path: .dev/doc-blocks/record
+          retention-days: 14
+      - name: dev-down leaves nothing behind
+        if: always()
+        run: mise run dev-down
+
   checks:
     # Aggregator: passes only when every needed job succeeded. `commit-lint` is skipped by design
     # outside pull requests, so `skipped` counts as success only for that job there. Any other
     # result fails, including `abandoned` (a job that never got a runner).
     if: always()
-    needs: [docs, site, actionlint, test, go, web, browser, go-db, idp, browser-auth, commit-lint, action-pins, package-check, hosting]
+    needs: [docs, site, actionlint, test, go, web, browser, go-db, idp, browser-auth, commit-lint, action-pins, package-check, hosting, doc-blocks]
     runs-on: ${{ (github.event_name == 'merge_group' || github.event.pull_request.head.repo.fork) && 'ubuntu-latest' || 'autops-kube-ginsys' }}
     timeout-minutes: 2
     steps:
