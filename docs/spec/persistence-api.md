@@ -527,8 +527,9 @@ They are held apart **(choice §17.29)**.
     without the grant, or a sealed or silent provider, fails the read and the
     publication is refused (compilation §13), with nothing published. The
     publication records the path, version and `created_time`, never a value.
-  - *The signer* compares a value an ingestion offers with the key version the
-    cluster's latest first-key act names, and answers `match`, `mismatch`, `no
+  - *The signer* compares a value an ingestion offers, as PEM text byte for
+    byte, with the key version the cluster's latest first-key act names, and
+    answers `match`, `mismatch`, `no
     key` or `unreadable`: it returns, stores and logs no value and no digest of
     one (compilation §2.3 step 3a). It needs no further grant, since it reads
     the path already. The ingestion identity still never reads it: it hands the
@@ -4535,8 +4536,8 @@ each (design §7.7 consequences):
   created for it, the sanitized document holding the typed reference and no
   key, and the `ingest` operation's event holding the verdict and the key's
   path, version and `created_time`; the same key written as PEM with other line
-  wrapping accepted too; a key of another cluster, and the stored key altered by
-  one byte, each failing `422 validation-failed` with the rule
+  wrapping, another PEM type or other spacing, a key of another cluster, and the
+  stored key altered by one byte, each failing `422 validation-failed` with the rule
   `ca-key-mismatch`, the claim abandoned and nothing kept, with a control that
   replaces the comparison by an always-true one and must then fail by accepting
   them; a cluster with no stored key, a soft-deleted latest version and a
@@ -4550,8 +4551,8 @@ each (design §7.7 consequences):
   unresolved and must then fail validation; a first key supplied between the
   pin and the read refusing the publication with nothing published, with the
   control that pins afresh and must then publish; a regeneration of an earlier
-  release reading its recorded version, with the control that reads the
-  latest act's and must then fail; and an ordinary fragment that declares
+  release after a later first key reading its recorded version and publishing,
+  with the control that reads the latest act's and must then fail; and an ordinary fragment that declares
   `talos-ca-key`, or overrides or deletes the reference, refused;
 - the presence read (§3.3, "Presence"), in two parts. Against the fixture's
   OpenBao, on one disposable cluster path (`TestLivePresenceIdentity`): a path

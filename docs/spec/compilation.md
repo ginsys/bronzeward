@@ -277,9 +277,12 @@ give a node a path that reads as an embedded document's.
    because the ingestion identity cannot read the signer's path (§1). The signer
    reads the key version the cluster's latest first-key act names
    ([persistence and API §3.4](persistence-api.md#34-first-keys-and-the-talos-signer)),
-   reduces both keys to the private key's DER (the configuration holds the PEM
-   base64-encoded, the store holds it as PEM text) and compares them in
-   constant time. It compares the key alone: the CA certificate is no schema
+   decodes the configuration's base64 to the PEM text and compares it with the
+   stored PEM text, byte for byte and in constant time, ignoring one trailing
+   newline. The same key written with other line wrapping, another PEM type or
+   other spacing is a `mismatch`: the rendered configuration carries the stored
+   text, so a re-wrapped key would render differently from the import and show
+   as permanent drift. It compares the key alone: the CA certificate is no schema
    secret. The verdict is one of `match`, `mismatch`, `no key` (the cluster has
    no stored key or no readable version) and `unreadable`. The value stays among
    those the guard checks (§4.2), so a copy of the key anywhere else in the
@@ -1032,7 +1035,8 @@ For each machine:
    declared version (§5.1) together with the provider object it names. A
    `talos-ca-key` reference (choice §16.40) declares none: it records the version
    the cluster's latest first-key act names, read with the snapshot of step 1,
-   at the signer's path. This is
+   at the signer's path (a regeneration takes the version its release
+   recorded). This is
    the source superset; resolving early necessarily reads all of it (SR §6.2,
    §6.4).
 3. **Check dependencies**: every pinned secret version must classify `retained`
@@ -1051,10 +1055,11 @@ For each machine:
    `created_time` differs from the one step 3 took refuses publication: the
    path was deleted and written again between the two reads. The compiler reads
    the signer's path only here and only for a `talos-ca-key` reference, at the
-   exact version step 2 recorded, and it reads the cluster's latest first-key
-   act again. A first key supplied since step 2 leaves that act naming another
-   version, and the publication is refused for it, with nothing published; the
-   next publication pins afresh.
+   exact version step 2 recorded. For a new publication it also reads the
+   cluster's latest first-key act again: a first key supplied since step 2
+   leaves that act naming another version, and the publication is refused for
+   it, with nothing published; the next publication pins afresh. A
+   regeneration reads only the recorded version and no act (§5.1, §9).
 5. **Compose** the reference-free fragments onto the resolved import base with
    the selected renderer (§10) in the order of step 1, using native
    strategic-merge semantics: last writer wins, and `$patch: delete` removes.
@@ -2122,7 +2127,7 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 | Ingestion | Absolute expiry, the operator's abandonment, or recovery-mode entry, a paused claim included | Claim abandoned; re-ingest | Claim row, payload cleared |
 | Authoring | Undeclared or unused name, other local tag, tag on a key or sequence, reserved text, bad path | Draft update refused | Nothing |
 | Compilation | Dependency not `retained`, or unreadable by the compiler (the signer's path included, when the compiler's grant on it is absent) | Publication refused | Nothing |
-| Compilation | The cluster's latest first-key act names another version than the one step 2 pinned for the `talos-ca-key` reference (§5.1) | Publication refused; the next publication pins afresh | Nothing |
+| Compilation | A new publication whose cluster's latest first-key act names another version than the one step 2 pinned for the `talos-ca-key` reference (§5.1); a regeneration is not refused for it | Publication refused; the next publication pins afresh | Nothing |
 | Compilation | Kind mismatch, or `base64` on a non-string | Publication refused | Nothing |
 | Compilation | A reference to a secret of another cluster (§5.1) | Publication refused | Nothing |
 | Compilation | An ordinary fragment overrides or deletes an import-base reference (§6) | Publication refused, naming the fragment and path | Nothing |
