@@ -19,6 +19,8 @@ type route struct {
 	query           []string    // a list's query parameters, limit and cursor first (§9.1), which page refuses any other; a batch read's one
 	requiredQuery   []string    // the query parameters a request must carry, among query: a batch read's
 	action          string      // the act's action (§10.5)
+	// scoped marks a mutating route that takes the scope query (§9.2), which query lists.
+	scoped bool
 	// keyed names the body member that carries unextracted input: the request is fingerprinted
 	// with the digest key (§7.1), its input implements keyedInput, and that member is left out
 	// of the canonical body the rest of the fingerprint covers. Empty for SHA-256.

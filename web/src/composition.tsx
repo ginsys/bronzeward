@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { change, declaredOf, doneOnce, editor, EMPTY, FRESH, type Held, holdsUnsaved, inUse, keptETag, NO_ETAG, rows, sendRefusal, settledFragment, staleRead, unread, WriteResult } from "./drafts.tsx";
+import { change, declaredOf, doneOnce, editor, EMPTY, FRESH, type Held, holdsUnsaved, inUse, isShared, keptETag, NO_ETAG, rows, sendRefusal, settledFragment, staleRead, unread, WriteResult } from "./drafts.tsx";
 import { startsNew, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { LAYERS } from "./layers.ts";
 import { short, useList, usePending, useSettled } from "./list.tsx";
@@ -60,7 +60,7 @@ export const profileBody = (pins: string[]) => ({ fragments: pins });
 // has none, and a fragment of another cluster is not offered.
 export interface Choice { name: string; revision: string; from: "draft" | "base" }
 export function choices(draft: { cluster: string; entries: Draft["entries"] }, fragments: Fragment[]): Choice[] {
-  const held = draft.entries.filter((e): e is Source => e.kind === "fragment");
+  const held = draft.entries.filter((e): e is Source => e.kind === "fragment" && !isShared(e as Source));
   const names = new Set(held.map((e) => e.name));
   const own = held.flatMap((e) => (e.revision == null || e.name === undefined ? [] : [{ name: e.name, revision: e.revision, from: "draft" as const }]));
   const base = fragments.flatMap((f) => (f.cluster !== draft.cluster || f.revision === null || names.has(f.name) ? [] : [{ name: f.name, revision: f.revision, from: "base" as const }]));
@@ -361,7 +361,7 @@ export function assignmentRefusal(l: Lists): string | undefined {
 // The profiles an assignment can name: the draft's own, and the cluster's with a head revision. A
 // profile the draft removes is not offered.
 export function profileOffers(draft: Pick<Draft, "cluster" | "entries">, profiles: Profile[]): string[] {
-  const held = draft.entries.filter((e): e is Source => e.kind === "profile");
+  const held = draft.entries.filter((e): e is Source => e.kind === "profile" && !isShared(e as Source));
   const names = new Set(held.map((e) => e.name));
   const own = held.flatMap((e) => (e.revision == null || e.name === undefined ? [] : [e.name]));
   const base = profiles.flatMap((p) => (p.cluster !== draft.cluster || p.revision === null || names.has(p.name) ? [] : [p.name]));
@@ -372,7 +372,7 @@ export function profileOffers(draft: Pick<Draft, "cluster" | "entries">, profile
 // layer of its revision, `layers` by revision id; one whose layer is not read yet is left out.
 export function fragmentOffers(draft: Pick<Draft, "cluster" | "entries">, fragments: Fragment[], layers: Record<string, string>): Record<Layer, string[]> {
   const out: Record<Layer, string[]> = { global: [], site: [], cluster: [], role: [], workload: [], override: [] };
-  const held = draft.entries.filter((e): e is Source => e.kind === "fragment");
+  const held = draft.entries.filter((e): e is Source => e.kind === "fragment" && !isShared(e as Source));
   const names = new Set(held.map((e) => e.name));
   for (const e of held) {
     const layer = e.revision == null || !Object.hasOwn(layers, e.revision) ? "" : layers[e.revision]!;
@@ -401,7 +401,7 @@ export function compose(profiles: { name: string; pins: { name: string; revision
 
 // The draft's own revision of a name, else the head of the cluster's: what a composition reads.
 export function revisionOf(draft: Pick<Draft, "cluster" | "entries">, profiles: Profile[], fragments: Fragment[], kind: "profile" | "fragment", name: string) {
-  const own = draft.entries.find((e): e is Source => e.kind === kind && e.name === name);
+  const own = draft.entries.find((e): e is Source => e.kind === kind && !isShared(e as Source) && e.name === name);
   return own !== undefined ? own.revision : (kind === "profile" ? profiles : fragments).find((x) => x.cluster === draft.cluster && x.name === name)?.revision;
 }
 // What a composition read depends on: the lists and the revisions their names resolve to now. A

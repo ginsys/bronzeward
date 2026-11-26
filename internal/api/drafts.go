@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ginsys/bronzeward/internal/id"
@@ -30,12 +32,28 @@ func draftDiscard() effectRoute {
 	return effectRoute{action: "draft.discard", input: func() input { return &discardInput{} }, effect: discardDraft}
 }
 
+// scopeCluster and scopeLibrary are the two scopes of a fragment or profile (§3.1, §3.1.1).
+const (
+	scopeCluster = "cluster"
+	scopeLibrary = "library"
+	// scopeQuery is a scoped DELETE's query parameter (§9.2).
+	scopeQuery = "scope"
+)
+
+// checkScope is a body's scope member: absent is the cluster's.
+func checkScope(scope string) error {
+	if scope != "" && scope != scopeCluster && scope != scopeLibrary {
+		return errors.New("scope must be cluster or library")
+	}
+	return nil
+}
+
 func fragmentRemoval() effectRoute   { return removal("fragment") }
 func profileRemoval() effectRoute    { return removal("profile") }
 func assignmentRemoval() effectRoute { return removal("assignment") }
 
 func removal(kind string) effectRoute {
-	return effectRoute{action: "draft." + kind + ".remove", input: func() input { return &noBody{} },
+	return effectRoute{action: "draft." + kind + ".remove", input: func() input { return &noBody{} }, scoped: kind != "assignment",
 		effect: func(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
 			return removeSource(ctx, tx, q, kind)
 		}}
@@ -53,7 +71,9 @@ func validName(s string) bool { return len(s) <= 63 && sourceName.MatchString(s)
 
 // sourceEntry is a draft's fragment, profile or assignment entry (§3.1, §9.3). Head is the head of
 // its name or machine, if one exists; Base the head revision it was edited from (null: absent);
-// Revision the proposed revision (null: a removal).
+// Revision the proposed revision (null: a removal). A shared entry (§3.1.1) has Scope library,
+// absent otherwise, its head the shared one; a shared edit also has AdoptionBase, the counter of
+// the cluster's adoption it was edited from (null: none).
 type sourceEntry struct {
 	Kind     string  `json:"kind"`
 	Name     string  `json:"name,omitempty"`
@@ -62,6 +82,17 @@ type sourceEntry struct {
 	Base     *int    `json:"base"`
 	Revision *string `json:"revision"`
 	Document *string `json:"document,omitempty"` // a fragment update's sanitized document
+	Scope    string  `json:"scope,omitempty"`
+	// AdoptionBase is a number or null on a shared edit, and absent on every other entry.
+	AdoptionBase json.RawMessage `json:"adoptionBase,omitempty"`
+}
+
+// adoptionBase is a shared edit's adoption base as an entry answers it.
+func adoptionBase(counter sql.NullInt64) json.RawMessage {
+	if !counter.Valid {
+		return json.RawMessage("null")
+	}
+	return json.RawMessage(strconv.FormatInt(counter.Int64, 10))
 }
 
 // sourceUpdate is a draft update's answer (§9.3); a fragment update names its ingestion.
@@ -179,8 +210,18 @@ func (d lockedDraft) advance(ctx context.Context, tx *sql.Tx) (string, error) {
 	return etag(d.revision+1, token), nil
 }
 
-// sourceKey names an entry: a fragment or profile by name, an assignment by machine.
-type sourceKey struct{ kind, name, machine string }
+// sourceKey names an entry: a fragment or profile by name and scope, an assignment by machine.
+type sourceKey struct {
+	kind, name, machine string
+	shared              bool
+}
+
+func (k sourceKey) scope() string {
+	if k.shared {
+		return scopeLibrary
+	}
+	return scopeCluster
+}
 
 // keyOf reads the entry's name or machine from the path. A machine must be in the draft's cluster.
 func keyOf(ctx context.Context, tx *sql.Tx, q *request, d lockedDraft, kind string) (sourceKey, error) {
@@ -207,15 +248,18 @@ func keyOf(ctx context.Context, tx *sql.Tx, q *request, d lockedDraft, kind stri
 	return k, nil
 }
 
-// headOf reads the head of k in the draft's cluster: its id, head revision and current revision
-// (nil once removed). No head is all nil.
+// headOf reads the head of k, in the draft's cluster or, for a shared key, the shared one: its id,
+// head revision and current revision (nil once removed). No head is all nil.
 func headOf(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey) (head *string, base *int, current *string, err error) {
 	var q string
 	args := []any{d.cluster, k.name}
-	switch k.kind {
-	case "fragment":
+	switch {
+	case k.shared:
+		q, args = `SELECT id, head_revision, head_revision_id FROM `+headKinds[k.kind].table+
+			` WHERE owner = 'library' AND name = $1`, []any{k.name}
+	case k.kind == "fragment":
 		q = `SELECT id, head_revision, head_revision_id FROM fragment WHERE cluster = $1 AND name = $2`
-	case "profile":
+	case k.kind == "profile":
 		q = `SELECT id, head_revision, head_revision_id FROM profile WHERE cluster = $1 AND name = $2`
 	default:
 		q, args = `SELECT id, head_revision, head_revision_id FROM assignment WHERE cluster = $1 AND machine = $2`, []any{d.cluster, k.machine}
@@ -240,8 +284,9 @@ func entryOf(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey) (found
 	var b sql.NullInt64
 	var r sql.NullString
 	err = tx.QueryRowContext(ctx, `SELECT base, COALESCE(fragment_revision, profile_revision, assignment_revision)
-		FROM draft_source_entry WHERE draft = $1 AND kind = $2 AND name IS NOT DISTINCT FROM $3 AND machine IS NOT DISTINCT FROM $4`,
-		d.id, k.kind, nullable(k.name), nullable(k.machine)).Scan(&b, &r)
+		FROM draft_source_entry WHERE draft = $1 AND kind = $2 AND name IS NOT DISTINCT FROM $3 AND machine IS NOT DISTINCT FROM $4
+			AND scope = $5`,
+		d.id, k.kind, nullable(k.name), nullable(k.machine), k.scope()).Scan(&b, &r)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil, nil, nil
@@ -263,7 +308,7 @@ func nullable(s string) sql.NullString { return sql.NullString{String: s, Valid:
 // setEntry records the draft's entry for k with revision rev (empty: a removal) and answers it. A
 // new entry takes the head's revision as its base (absent with no head); an existing one keeps the
 // base it was first edited from, so a head published since is caught as stale at publication
-// (§4.2) instead of being overwritten.
+// (§4.2) instead of being overwritten. A shared entry is setShared's.
 func setEntry(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey, rev string) (sourceEntry, error) {
 	e := sourceEntry{Kind: k.kind, Name: k.name, Machine: k.machine}
 	if rev != "" {
@@ -274,6 +319,9 @@ func setEntry(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey, rev s
 		return e, err
 	}
 	e.Head = head
+	if k.shared {
+		return setShared(ctx, tx, d, k, e, headRev)
+	}
 	found, base, _, err := entryOf(ctx, tx, d, k)
 	if err != nil {
 		return e, err
@@ -283,7 +331,7 @@ func setEntry(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey, rev s
 	if found {
 		e.Base = base
 		_, err = tx.ExecContext(ctx, `UPDATE draft_source_entry SET fragment_revision = $5, profile_revision = $6, assignment_revision = $7
-			WHERE draft = $1 AND kind = $2 AND name IS NOT DISTINCT FROM $3 AND machine IS NOT DISTINCT FROM $4`,
+			WHERE draft = $1 AND kind = $2 AND name IS NOT DISTINCT FROM $3 AND machine IS NOT DISTINCT FROM $4 AND scope = 'cluster'`,
 			d.id, k.kind, nullable(k.name), nullable(k.machine), cols["fragment"], cols["profile"], cols["assignment"])
 		return e, err
 	}
@@ -291,6 +339,29 @@ func setEntry(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey, rev s
 	_, err = tx.ExecContext(ctx, `INSERT INTO draft_source_entry (draft, cluster, kind, name, machine, fragment_revision,
 		profile_revision, assignment_revision, base) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		d.id, d.cluster, k.kind, nullable(k.name), nullable(k.machine), cols["fragment"], cols["profile"], cols["assignment"], headRev)
+	return e, err
+}
+
+// setShared records the draft's shared entry e, replacing any other of its name, with the bases
+// this write reads (§3.1.1): the shared head's counter and, for an edit, the cluster's adoption
+// counter. It takes no lock on the cluster's view: publication compares both.
+func setShared(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey, e sourceEntry, head *int) (sourceEntry, error) {
+	e.Scope, e.Base = scopeLibrary, head
+	var adopted sql.NullInt64
+	if e.Revision != nil {
+		err := tx.QueryRowContext(ctx, `SELECT adoption_revision FROM library_adoption WHERE cluster = $1 AND kind = $2 AND name = $3`,
+			d.cluster, k.kind, k.name).Scan(&adopted)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return e, err
+		}
+		e.AdoptionBase = adoptionBase(adopted)
+	}
+	column := headKinds[k.kind].revision
+	_, err := tx.ExecContext(ctx, `INSERT INTO draft_source_entry (draft, cluster, kind, name, scope, `+column+`, base, adoption_base)
+		VALUES ($1, $2, $3, $4, 'library', $5, $6, $7)
+		ON CONFLICT (draft, kind, name, scope) WHERE kind <> 'assignment'
+		DO UPDATE SET `+column+` = excluded.`+column+`, base = excluded.base, adoption_base = excluded.adoption_base`,
+		d.id, d.cluster, k.kind, k.name, e.Revision, head, adopted)
 	return e, err
 }
 
@@ -315,22 +386,27 @@ func removeSource(ctx context.Context, tx *sql.Tx, q *request, kind string) (res
 	if err != nil {
 		return result{}, err
 	}
+	k.shared = q.r.URL.Query().Get("scope") == scopeLibrary // mutate admitted the query
 	found, _, _, err := entryOf(ctx, tx, d, k)
 	if err != nil {
 		return result{}, err
 	}
-	if !found {
-		head, _, _, err := headOf(ctx, tx, d, k)
-		if err != nil {
-			return result{}, err
+	head, _, current, err := headOf(ctx, tx, d, k)
+	if err != nil {
+		return result{}, err
+	}
+	// A shared head an earlier publication removed is no such name, whatever the draft holds
+	// (§3.1.1).
+	if head == nil && !found || k.shared && head != nil && current == nil {
+		where := "the draft or its cluster"
+		if k.shared {
+			where = "the draft or the library"
 		}
-		if head == nil {
-			r := refuse(http.StatusNotFound, "not-found", "no such "+kind+" in the draft or its cluster")
-			if kind == "assignment" {
-				return result{}, r.with("machine", k.machine)
-			}
-			return result{}, r.with("name", k.name)
+		r := refuse(http.StatusNotFound, "not-found", "no such "+kind+" in "+where)
+		if kind == "assignment" {
+			return result{}, r.with("machine", k.machine)
 		}
+		return result{}, r.with("name", k.name)
 	}
 	e, err := setEntry(ctx, tx, d, k, "")
 	if err != nil {
@@ -339,12 +415,16 @@ func removeSource(ctx context.Context, tx *sql.Tx, q *request, kind string) (res
 	return d.answer(ctx, tx, e)
 }
 
-// profileInput is a profile revision's body: fragment revisions in order (§9.3).
+// profileInput is a profile revision's body: fragment revisions in order (§9.3), at a scope.
 type profileInput struct {
 	Fragments []string `json:"fragments"`
+	Scope     string   `json:"scope,omitempty"`
 }
 
 func (in *profileInput) check(*API) error {
+	if err := checkScope(in.Scope); err != nil {
+		return err
+	}
 	if len(in.Fragments) == 0 || len(in.Fragments) > 256 {
 		return errors.New("fragments must list 1 to 256 fragment revisions")
 	}
@@ -382,11 +462,33 @@ func pinnable(ctx context.Context, tx *sql.Tx, d lockedDraft, held map[string]bo
 	return current != nil && *current == frv, err
 }
 
+// sharedRevision reports whether frv is a shared fragment revision.
+func sharedRevision(ctx context.Context, tx *sql.Tx, frv string) (bool, error) {
+	var ok bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM fragment_revision WHERE id = $1 AND cluster IS NULL)`, frv).Scan(&ok)
+	return ok, err
+}
+
+// sharedName reports whether name is a shared name of kind: it has a shared head, a removed one
+// included (adopting clusters keep compiling it), or the draft has a shared entry of it. A pin or
+// selection of one is judged at publication, over the whole draft (§3.1.1).
+func sharedName(ctx context.Context, tx *sql.Tx, d lockedDraft, kind, name string) (bool, error) {
+	var ok bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM `+headKinds[kind].table+` WHERE owner = 'library' AND name = $1)
+		OR EXISTS (SELECT 1 FROM draft_source_entry WHERE draft = $2 AND kind = $3 AND name = $1 AND scope = 'library')`,
+		name, d.id, kind).Scan(&ok)
+	return ok, err
+}
+
 func updateProfile(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, error) {
 	in := q.input.(*profileInput)
-	held, err := lockHeads(ctx, tx, q, in.Fragments, nil, nil)
-	if err != nil {
-		return result{}, err
+	library := in.Scope == scopeLibrary
+	var held map[string]bool
+	if !library { // T1 takes no lock on a shared name's view (§3.1.1)
+		var err error
+		if held, err = lockHeads(ctx, tx, q, in.Fragments, nil, nil); err != nil {
+			return result{}, err
+		}
 	}
 	d, err := lockDraft(ctx, tx, q)
 	if err != nil {
@@ -396,25 +498,39 @@ func updateProfile(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result,
 	if err != nil {
 		return result{}, err
 	}
+	k.shared = library
+	// A shared pin of a cluster profile is judged at publication; a shared profile pins shared
+	// revisions only, and whether each is the head or proposed is publication's too.
+	marked := make([]bool, len(in.Fragments))
 	for i, f := range in.Fragments {
-		ok, err := pinnable(ctx, tx, d, held, f)
+		shared, err := sharedRevision(ctx, tx, f)
 		if err != nil {
 			return result{}, err
 		}
+		marked[i] = shared && !library
+		ok, detail := shared, "a shared profile's pin must be a revision of a shared fragment"
+		if !library && !shared {
+			if ok, err = pinnable(ctx, tx, d, held, f); err != nil {
+				return result{}, err
+			}
+			detail = "a pin must be the revision this draft proposes for its fragment or, with no entry for it, the fragment's head revision"
+		}
 		if !ok {
-			return result{}, refuse(http.StatusUnprocessableEntity, "validation-failed",
-				"a pin must be the revision this draft proposes for its fragment or, with no entry for it, the fragment's head revision").
+			return result{}, refuse(http.StatusUnprocessableEntity, "validation-failed", detail).
 				with("path", fmt.Sprintf("fragments[%d]", i)).with("revision", f)
 		}
 	}
-	prv := id.New(id.ProfileRevision)
+	prv, cluster := id.New(id.ProfileRevision), nullable(d.cluster)
+	if library {
+		cluster = sql.NullString{}
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO profile_revision (id, cluster, name, author, created_at) VALUES ($1, $2, $3, $4, now())`,
-		prv, d.cluster, k.name, q.principal.ID); err != nil {
+		prv, cluster, k.name, q.principal.ID); err != nil {
 		return result{}, err
 	}
 	for i, f := range in.Fragments {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO profile_revision_fragment (revision, cluster, position, fragment_revision)
-			VALUES ($1, $2, $3, $4)`, prv, d.cluster, i, f); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO profile_revision_fragment (revision, cluster, position, fragment_revision, library)
+			VALUES ($1, $2, $3, $4, $5)`, prv, cluster, i, f, marked[i]); err != nil {
 			return result{}, err
 		}
 	}
@@ -536,24 +652,34 @@ func updateAssignment(ctx context.Context, _ *API, tx *sql.Tx, q *request) (resu
 	if err != nil {
 		return result{}, err
 	}
-	invalid := func(path string, i int) error {
+	// A selection that fails the cluster's rules stands when its name is a shared one: the cluster's
+	// view of it, and its layer, are judged at publication (§3.1.1).
+	deferred := func(kind, name, path string, i int) error {
+		shared, err := sharedName(ctx, tx, d, kind, name)
+		if err != nil || shared {
+			return err
+		}
 		return refuse(http.StatusUnprocessableEntity, "validation-failed",
 			"a name must have a head or be proposed by this draft, not removed by it, and a fragment must carry its layer").
 			with("path", fmt.Sprintf("%s[%d]", path, i))
 	}
 	for i, p := range in.Profiles {
-		if ok, _, err := selectable(ctx, tx, d, held, "profile", p); err != nil {
+		ok, _, err := selectable(ctx, tx, d, held, "profile", p)
+		if err == nil && !ok {
+			err = deferred("profile", p, "profiles", i)
+		}
+		if err != nil {
 			return result{}, err
-		} else if !ok {
-			return result{}, invalid("profiles", i)
 		}
 	}
 	for _, layer := range fragmentLayers {
 		for i, f := range in.Fragments[layer] {
-			if ok, l, err := selectable(ctx, tx, d, held, "fragment", f); err != nil {
+			ok, l, err := selectable(ctx, tx, d, held, "fragment", f)
+			if err == nil && (!ok || l != layer) {
+				err = deferred("fragment", f, "fragments."+layer, i)
+			}
+			if err != nil {
 				return result{}, err
-			} else if !ok || l != layer {
-				return result{}, invalid("fragments."+layer, i)
 			}
 		}
 	}

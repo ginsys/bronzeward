@@ -433,12 +433,19 @@ func TestLibraryNameInTwoScopes(t *testing.T) {
 // carries no other entry; its artifact key is key, so two of them meet at no dependency status.
 func bare(d *draftEnv, cluster, machine, draftKey, key string) *publishEnv {
 	d.t.Helper()
+	rec := d.do(d.api, call{method: "POST", path: prefix + "/drafts", token: d.human("h-author"), key: draftKey,
+		body: `{"cluster":"` + cluster + `","title":"bare"}`})
+	return publicationOf(d, cluster, machine, decode[draftBody](d.t, rec, http.StatusCreated).ID, 1, key)
+}
+
+// publicationOf is a publication of draft at revision rev, covering machine of cluster on a base of
+// its own beside the entries the draft holds; its artifact key is key.
+func publicationOf(d *draftEnv, cluster, machine, draft string, rev int, key string) *publishEnv {
+	d.t.Helper()
 	c := *d
 	c.cluster, c.machine = cluster, machine
 	p := &publishEnv{draftEnv: &c}
-	rec := d.do(d.api, call{method: "POST", path: prefix + "/drafts", token: d.human("h-author"), key: draftKey,
-		body: `{"cluster":"` + cluster + `","title":"bare"}`})
-	p.draft = decode[draftBody](d.t, rec, http.StatusCreated).ID
+	p.draft = draft
 	var epoch string
 	if err := d.db.QueryRow(`SELECT epoch FROM installation_state`).Scan(&epoch); err != nil {
 		d.t.Fatal(err)
@@ -452,9 +459,9 @@ func bare(d *draftEnv, cluster, machine, draftKey, key string) *publishEnv {
 	op := id.New(id.Operation)
 	mustExec(d.t, d.db, `INSERT INTO operation (id, kind, state, owner, owner_gen, owner_epoch, lease_until, draft, draft_revision,
 			created_by, created_by_kind, created_role, epoch, created_at)
-		VALUES ($1, 'publish', 'running', $2, 1, $3, now() + interval '1 minute', $4, 1, $5, 'human', 'publisher', $3, now())`,
-		op, p.owner.ID, epoch, p.draft, d.seed)
-	p.job = publishJob{op: op, draft: p.draft, cluster: cluster, draftRev: 1, gen: 1}
+		VALUES ($1, 'publish', 'running', $2, 1, $3, now() + interval '1 minute', $4, $6, $5, 'human', 'publisher', $3, now())`,
+		op, p.owner.ID, epoch, p.draft, d.seed, rev)
+	p.job = publishJob{op: op, draft: p.draft, cluster: cluster, draftRev: rev, gen: 1}
 	redacted := "machine:\n  type: worker\n"
 	p.unit = releaseUnit{
 		renderer: rendererBody{Contract: "v1.14", MachineryVersion: "v1.14.5",

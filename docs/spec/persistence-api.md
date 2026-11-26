@@ -430,7 +430,8 @@ order would work):
   §16.12), so a reference in a shared revision resolves in at most one cluster.
   The rule is `library-reference`; **a fragment that holds a secret stays at
   cluster scope**. This is a consequence of that choice and changes no
-  credential rule;
+  credential rule. A library fragment update that carries a reference, or whose
+  marks would mint one, is refused before any provider generation is created;
 - *publication-only:* **a release composes one revision of each fragment
   name**, rule `library-pin-conflict`. What a release composes is each covered
   machine's selected fragments and the pins of the profiles its assignment
@@ -2013,7 +2014,7 @@ key independently. The record stores:
 | Field | Content |
 | --- | --- |
 | `principal_id`, `key` | unique together |
-| `fingerprint` | method, route template, path parameters, `If-Match` and the canonical JSON body (RFC 8785), hashed |
+| `fingerprint` | method, route template, path parameters, `If-Match` and the canonical JSON body (RFC 8785), hashed. The one mutating request with a query, the `DELETE` of a fragment or profile entry, adds its `scope` when it is `library`; `scope=cluster` and no query are one request (§9.2) |
 | `fingerprint_key` | for a keyed fingerprint, the digest key's identity and version (compilation §4.1); otherwise empty |
 | `epoch` | the epoch identity at commit; for an entry (T9), the epoch it minted |
 | `status`, `location`, `etag`, `body` | the response to replay; never a secret value (design §11.1) |
@@ -2586,7 +2587,7 @@ idempotency and conflict behavior.
 | --- | --- | --- |
 | `GET /clusters`, `/clusters/{id}`, `/machines`, `/machines/{id}`, `/machines/{id}/observations`, `/machines/{id}/timeline` | 200 | any role |
 | `GET /machines/{id}/position` (where one machine stands in import, publish, plan, approve and apply, read in one snapshot; no query, no ETag, not paged; API revision 6, §9.3) | 200 | any role |
-| `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments. A fragment or profile body carries `scope`, `cluster` for a cluster scope and `null` for the library (API revision 19) | 200 | any role |
+| `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments. A fragment or profile body carries `scope`, `cluster` for a cluster scope and `null` for the library (API revision 19); a library revision answers `cluster: null` too, and a release's library source answers `headRevision: null` | 200 | any role |
 | `GET /fragments/{id}/adoptions`, `GET /profiles/{id}/adoptions` (the clusters whose adoption of a library name holds a revision, §3.1.1, so a removed adoption is not listed; API revision 19; `behind=true` keeps those whose adopted revision is not the head's; paged like the list reads): `items`, each `cluster`, `revision` (adopted), `adoptionRevision` (the counter), `behind`, `release` (the release that set it, `null` before one is published), `via` (`null`, or for a fragment a library profile revision pins, that profile's name: the cluster has no adoption of the fragment, `revision` is the pinned one, `adoptionRevision` and `release` are `null`, `behind` compares the pin with the head), `machines` (the machines of that cluster whose composition uses the name, read from the cluster's current assignment and profile heads). `404 not-found` for a cluster-scope source | 200 | any role |
 | `GET /drafts/{id}/impact` (what the draft changes and reaches, before publication, §3.1.1; no ETag; API revision 19): `items`, one per changed source, each `kind`, `name`, `scope`, `machines` (those of the draft's cluster whose composition includes it before or after the draft, with an assignment selection, a profile pin or an adoption as the reason and `gains` or `loses`, so a removal lists the machines that lose it) and `otherClusters` (each cluster that has adopted the name, or pins the fragment through an adopted library profile, with its revision, `via` as in the adoptions read, and `unchanged: true`). It reads sources only and renders nothing | 200 | any role |
 | `GET /drafts[/{id}]`, `/ingestions[/{id}]`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
@@ -2985,6 +2986,13 @@ update is never taken over, and its retry ingests afresh. The answer's
 `document` is the sanitized text, and `ingestion` names the claim; a refusal
 after the claim exists names it too. The ingestion resource of that claim has
 `kind` `draft-update`, its `draft`, and `machine` and `operation` `null`.
+
+A library entry (§3.1.1) is answered, here and by `GET /drafts/{id}`, with
+`"scope": "library"`, `head` the library head or `null`, and `base` its
+counter or `null`; a library edit also with `adoptionBase`, the counter of the
+cluster's adoption it was written from, or `null`. A library removal has no
+`adoptionBase`, and a cluster entry has neither `scope` nor `adoptionBase`. A
+draft may hold a cluster entry and a library entry of one name.
 
 A profile pins fragment revisions in order; an assignment selects profiles,
 then fragments per layer, by name (§3.1). Neither body can hold a secret

@@ -140,6 +140,24 @@ func (e FragmentInputLayer) Valid() bool {
 	}
 }
 
+// Defines values for FragmentInputScope.
+const (
+	FragmentInputScopeCluster FragmentInputScope = "cluster"
+	FragmentInputScopeLibrary FragmentInputScope = "library"
+)
+
+// Valid indicates whether the value is a known member of the FragmentInputScope enum.
+func (e FragmentInputScope) Valid() bool {
+	switch e {
+	case FragmentInputScopeCluster:
+		return true
+	case FragmentInputScopeLibrary:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HostnameBodySource.
 const (
 	HostnameBodySourceConfiguration HostnameBodySource = "configuration"
@@ -554,6 +572,24 @@ func (e ProblemType) Valid() bool {
 	}
 }
 
+// Defines values for ProfileInputScope.
+const (
+	ProfileInputScopeCluster ProfileInputScope = "cluster"
+	ProfileInputScopeLibrary ProfileInputScope = "library"
+)
+
+// Valid indicates whether the value is a known member of the ProfileInputScope enum.
+func (e ProfileInputScope) Valid() bool {
+	switch e {
+	case ProfileInputScopeCluster:
+		return true
+	case ProfileInputScopeLibrary:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ReferenceEncoding.
 const (
 	ReferenceEncodingBase64 ReferenceEncoding = "base64"
@@ -788,6 +824,21 @@ func (e SourceEntryKind) Valid() bool {
 	}
 }
 
+// Defines values for SourceEntryScope.
+const (
+	SourceEntryScopeLibrary SourceEntryScope = "library"
+)
+
+// Valid indicates whether the value is a known member of the SourceEntryScope enum.
+func (e SourceEntryScope) Valid() bool {
+	switch e {
+	case SourceEntryScopeLibrary:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TalosAccessBodyReason.
 const (
 	TalosAccessBodyReasonLatestVersionDeleted  TalosAccessBodyReason = "latest-version-deleted"
@@ -824,6 +875,42 @@ func (e GetDependenciesParamsClass) Valid() bool {
 	case GetDependenciesParamsClassRetained:
 		return true
 	case GetDependenciesParamsClassUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeleteDraftsIdFragmentsNameParamsScope.
+const (
+	DeleteDraftsIdFragmentsNameParamsScopeCluster DeleteDraftsIdFragmentsNameParamsScope = "cluster"
+	DeleteDraftsIdFragmentsNameParamsScopeLibrary DeleteDraftsIdFragmentsNameParamsScope = "library"
+)
+
+// Valid indicates whether the value is a known member of the DeleteDraftsIdFragmentsNameParamsScope enum.
+func (e DeleteDraftsIdFragmentsNameParamsScope) Valid() bool {
+	switch e {
+	case DeleteDraftsIdFragmentsNameParamsScopeCluster:
+		return true
+	case DeleteDraftsIdFragmentsNameParamsScopeLibrary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeleteDraftsIdProfilesNameParamsScope.
+const (
+	DeleteDraftsIdProfilesNameParamsScopeCluster DeleteDraftsIdProfilesNameParamsScope = "cluster"
+	DeleteDraftsIdProfilesNameParamsScopeLibrary DeleteDraftsIdProfilesNameParamsScope = "library"
+)
+
+// Valid indicates whether the value is a known member of the DeleteDraftsIdProfilesNameParamsScope enum.
+func (e DeleteDraftsIdProfilesNameParamsScope) Valid() bool {
+	switch e {
+	case DeleteDraftsIdProfilesNameParamsScopeCluster:
+		return true
+	case DeleteDraftsIdProfilesNameParamsScopeLibrary:
 		return true
 	default:
 		return false
@@ -1487,7 +1574,8 @@ type FirstKeyInputKind string
 
 // FragmentBody defines model for FragmentBody.
 type FragmentBody struct {
-	Cluster      string    `json:"cluster"`
+	// Cluster Null for a shared (library) record.
+	Cluster      *string   `json:"cluster"`
 	CreatedAt    time.Time `json:"createdAt"`
 	HeadRevision int       `json:"headRevision"`
 	Id           string    `json:"id"`
@@ -1511,15 +1599,23 @@ type FragmentInput struct {
 	Document string             `json:"document"`
 	Layer    FragmentInputLayer `json:"layer"`
 	Marks    *[]string          `json:"marks,omitempty"`
+
+	// Scope Absent is cluster.
+	Scope *FragmentInputScope `json:"scope,omitempty"`
 }
 
 // FragmentInputLayer defines model for FragmentInput.Layer.
 type FragmentInputLayer string
 
+// FragmentInputScope Absent is cluster.
+type FragmentInputScope string
+
 // FragmentRevisionBody defines model for FragmentRevisionBody.
 type FragmentRevisionBody struct {
-	Author       string               `json:"author"`
-	Cluster      string               `json:"cluster"`
+	Author string `json:"author"`
+
+	// Cluster Null for a shared (library) record.
+	Cluster      *string              `json:"cluster"`
 	CreatedAt    time.Time            `json:"createdAt"`
 	Declarations FragmentDeclarations `json:"declarations"`
 	Document     string               `json:"document"`
@@ -2062,7 +2158,8 @@ type ProblemType string
 
 // ProfileBody defines model for ProfileBody.
 type ProfileBody struct {
-	Cluster      string    `json:"cluster"`
+	// Cluster Null for a shared (library) record.
+	Cluster      *string   `json:"cluster"`
 	CreatedAt    time.Time `json:"createdAt"`
 	HeadRevision int       `json:"headRevision"`
 	Id           string    `json:"id"`
@@ -2074,12 +2171,20 @@ type ProfileBody struct {
 // ProfileInput defines model for ProfileInput.
 type ProfileInput struct {
 	Fragments []string `json:"fragments"`
+
+	// Scope Absent is cluster.
+	Scope *ProfileInputScope `json:"scope,omitempty"`
 }
+
+// ProfileInputScope Absent is cluster.
+type ProfileInputScope string
 
 // ProfileRevisionBody defines model for ProfileRevisionBody.
 type ProfileRevisionBody struct {
-	Author    string    `json:"author"`
-	Cluster   string    `json:"cluster"`
+	Author string `json:"author"`
+
+	// Cluster Null for a shared (library) record.
+	Cluster   *string   `json:"cluster"`
 	CreatedAt time.Time `json:"createdAt"`
 	Fragments []string  `json:"fragments"`
 	Id        string    `json:"id"`
@@ -2226,8 +2331,10 @@ type ReleaseMachineBody struct {
 
 // ReleaseSourceBody defines model for ReleaseSourceBody.
 type ReleaseSourceBody struct {
-	Head         string  `json:"head"`
-	HeadRevision int     `json:"headRevision"`
+	Head string `json:"head"`
+
+	// HeadRevision Null for a shared (library) source.
+	HeadRevision *int    `json:"headRevision"`
 	Kind         string  `json:"kind"`
 	Revision     *string `json:"revision"`
 }
@@ -2436,17 +2543,25 @@ type ServerBodyStartMode string
 
 // SourceEntry defines model for SourceEntry.
 type SourceEntry struct {
-	Base     *int            `json:"base"`
-	Document *string         `json:"document,omitempty"`
-	Head     *string         `json:"head"`
-	Kind     SourceEntryKind `json:"kind"`
-	Machine  *string         `json:"machine,omitempty"`
-	Name     *string         `json:"name,omitempty"`
-	Revision *string         `json:"revision"`
+	// AdoptionBase A shared edit only.
+	AdoptionBase *int            `json:"adoptionBase,omitempty"`
+	Base         *int            `json:"base"`
+	Document     *string         `json:"document,omitempty"`
+	Head         *string         `json:"head"`
+	Kind         SourceEntryKind `json:"kind"`
+	Machine      *string         `json:"machine,omitempty"`
+	Name         *string         `json:"name,omitempty"`
+	Revision     *string         `json:"revision"`
+
+	// Scope Present on a shared entry only.
+	Scope *SourceEntryScope `json:"scope,omitempty"`
 }
 
 // SourceEntryKind defines model for SourceEntry.Kind.
 type SourceEntryKind string
+
+// SourceEntryScope Present on a shared entry only.
+type SourceEntryScope string
 
 // SourceName A fragment or profile name, 1 to 63 lowercase letters, digits and inner hyphens.
 type SourceName = string
@@ -2694,6 +2809,8 @@ type PostDraftsIdDiscardParams struct {
 
 // DeleteDraftsIdFragmentsNameParams defines parameters for DeleteDraftsIdFragmentsName.
 type DeleteDraftsIdFragmentsNameParams struct {
+	Scope *DeleteDraftsIdFragmentsNameParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+
 	// IdempotencyKey 16 to 128 characters of [A-Za-z0-9_-] (persistence and API §7.1).
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
@@ -2703,6 +2820,9 @@ type DeleteDraftsIdFragmentsNameParams struct {
 	// IfMatch The ETag last read (persistence and API §4.1).
 	IfMatch IfMatch `json:"If-Match"`
 }
+
+// DeleteDraftsIdFragmentsNameParamsScope defines parameters for DeleteDraftsIdFragmentsName.
+type DeleteDraftsIdFragmentsNameParamsScope string
 
 // PutDraftsIdFragmentsNameParams defines parameters for PutDraftsIdFragmentsName.
 type PutDraftsIdFragmentsNameParams struct {
@@ -2718,6 +2838,8 @@ type PutDraftsIdFragmentsNameParams struct {
 
 // DeleteDraftsIdProfilesNameParams defines parameters for DeleteDraftsIdProfilesName.
 type DeleteDraftsIdProfilesNameParams struct {
+	Scope *DeleteDraftsIdProfilesNameParamsScope `form:"scope,omitempty" json:"scope,omitempty"`
+
 	// IdempotencyKey 16 to 128 characters of [A-Za-z0-9_-] (persistence and API §7.1).
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
 
@@ -2727,6 +2849,9 @@ type DeleteDraftsIdProfilesNameParams struct {
 	// IfMatch The ETag last read (persistence and API §4.1).
 	IfMatch IfMatch `json:"If-Match"`
 }
+
+// DeleteDraftsIdProfilesNameParamsScope defines parameters for DeleteDraftsIdProfilesName.
+type DeleteDraftsIdProfilesNameParamsScope string
 
 // PutDraftsIdProfilesNameParams defines parameters for PutDraftsIdProfilesName.
 type PutDraftsIdProfilesNameParams struct {

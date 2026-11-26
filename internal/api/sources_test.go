@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -47,7 +48,7 @@ func TestSourceReads(t *testing.T) {
 
 	rec := d.get("/fragments/" + frg)
 	h := decode[fragmentBody](t, rec, http.StatusOK)
-	if h.ID != frg || h.Cluster != d.cluster || h.Scope != "cluster" || h.Name != "registries" || h.Layer != "override" ||
+	if h.ID != frg || !reflect.DeepEqual(h.Cluster, &d.cluster) || h.Scope != "cluster" || h.Name != "registries" || h.Layer != "override" ||
 		h.Revision == nil || *h.Revision != frv || h.HeadRevision != 2 || h.CreatedAt.IsZero() ||
 		rec.Header().Get("ETag") != `"2-m3oxmlfh6phr7aigshdydcb4ji"` {
 		t.Fatalf("fragment %+v, ETag %q", h, rec.Header().Get("ETag"))
@@ -70,7 +71,7 @@ func TestSourceReads(t *testing.T) {
 		t.Fatalf("first page %+v", page1)
 	}
 	r := decode[fragmentRevisionBody](t, d.get("/fragment-revisions/"+frv), http.StatusOK)
-	if r.ID != frv || r.Cluster != d.cluster || r.Name != "registries" || r.Layer != "override" || r.Document != "machine: {}" ||
+	if r.ID != frv || !reflect.DeepEqual(r.Cluster, &d.cluster) || r.Name != "registries" || r.Layer != "override" || r.Document != "machine: {}" ||
 		r.Author != d.seed || r.CreatedAt.IsZero() {
 		t.Fatalf("fragment revision %+v", r)
 	}

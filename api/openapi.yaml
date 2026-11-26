@@ -757,6 +757,10 @@ paths:
         in: path
         required: true
         schema: {type: string}
+      - name: scope
+        in: query
+        required: false
+        schema: {type: string, enum: [cluster, library]}
       - {$ref: '#/components/parameters/IdempotencyKey'}
       - {$ref: '#/components/parameters/ExpectedEpoch'}
       - {$ref: '#/components/parameters/IfMatch'}
@@ -825,6 +829,10 @@ paths:
         in: path
         required: true
         schema: {type: string}
+      - name: scope
+        in: query
+        required: false
+        schema: {type: string, enum: [cluster, library]}
       - {$ref: '#/components/parameters/IdempotencyKey'}
       - {$ref: '#/components/parameters/ExpectedEpoch'}
       - {$ref: '#/components/parameters/IfMatch'}
@@ -3249,7 +3257,7 @@ components:
       required: [id, cluster, scope, name, layer, revision, headRevision, createdAt]
       properties:
         id: {type: string}
-        cluster: {type: string}
+        cluster: {type: [string, 'null'], description: 'Null for a shared (library) record.'}
         scope: {type: string}
         name: {type: string}
         layer: {type: string}
@@ -3272,6 +3280,7 @@ components:
       type: object
       required: [layer, document]
       properties:
+        scope: {type: string, enum: [cluster, library], description: 'Absent is cluster.'}
         layer: {type: string, enum: [global, site, cluster, role, workload, override]}
         document: {type: string, minLength: 1, description: 'The YAML document, at most 512 KiB.'}
         marks:
@@ -3288,7 +3297,7 @@ components:
       required: [id, cluster, name, layer, document, declarations, author, createdAt]
       properties:
         id: {type: string}
-        cluster: {type: string}
+        cluster: {type: [string, 'null'], description: 'Null for a shared (library) record.'}
         name: {type: string}
         layer: {type: string}
         document: {type: string}
@@ -3908,7 +3917,7 @@ components:
       required: [id, cluster, scope, name, revision, headRevision, createdAt]
       properties:
         id: {type: string}
-        cluster: {type: string}
+        cluster: {type: [string, 'null'], description: 'Null for a shared (library) record.'}
         scope: {type: string}
         name: {type: string}
         revision: {type: [string, 'null']}
@@ -3919,6 +3928,7 @@ components:
       type: object
       required: [fragments]
       properties:
+        scope: {type: string, enum: [cluster, library], description: 'Absent is cluster.'}
         fragments:
           type: array
           items: {type: string}
@@ -3930,7 +3940,7 @@ components:
       required: [id, cluster, name, fragments, author, createdAt]
       properties:
         id: {type: string}
-        cluster: {type: string}
+        cluster: {type: [string, 'null'], description: 'Null for a shared (library) record.'}
         name: {type: string}
         fragments:
           type: array
@@ -4100,7 +4110,7 @@ components:
         kind: {type: string}
         head: {type: string}
         revision: {type: [string, 'null']}
-        headRevision: {type: integer}
+        headRevision: {type: [integer, 'null'], description: 'Null for a shared (library) source.'}
       additionalProperties: false
     RendererBody:
       type: object
@@ -4372,6 +4382,8 @@ components:
         base: {type: [integer, 'null']}
         revision: {type: [string, 'null']}
         document: {type: [string, 'null']}
+        scope: {type: string, enum: [library], description: 'Present on a shared entry only.'}
+        adoptionBase: {type: [integer, 'null'], description: 'A shared edit only.'}
       additionalProperties: false
     SourceUpdate:
       type: object

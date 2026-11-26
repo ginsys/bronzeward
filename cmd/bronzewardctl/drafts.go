@@ -149,7 +149,8 @@ func pins(c *client.Client, w *client.Write, draft string, names []string) ([]st
 		if err != nil {
 			return nil, ef("GET /api/v1/drafts/%s: an entry cannot be read: %w; nothing was sent", url.PathEscape(draft), err)
 		}
-		if x.Kind == apitypes.SourceEntryKindFragment && x.Name != nil {
+		// A shared entry is none of the cluster's: a name resolves to the cluster's own revision.
+		if x.Kind == apitypes.SourceEntryKindFragment && x.Name != nil && x.Scope == nil {
 			proposed[*x.Name] = x.Revision
 		}
 	}
@@ -200,7 +201,7 @@ func fragmentHeads(c *client.Client, cluster string) (map[string]*string, string
 		if err := json.Unmarshal(raw, &f); err != nil {
 			return nil, "", ef("GET /api/v1/fragments: item %d cannot be read: %w", i, err)
 		}
-		if f.Cluster == cluster {
+		if f.Cluster != nil && *f.Cluster == cluster {
 			heads[f.Name] = f.Revision
 		}
 	}
@@ -321,7 +322,8 @@ func entryRead(draft string, kind apitypes.SourceEntryKind, name string) func(*c
 			if err != nil {
 				return "", ef("GET /api/v1/drafts/%s: an entry cannot be read: %w", url.PathEscape(draft), err)
 			}
-			if x.Kind == kind && (x.Name != nil && *x.Name == name || x.Machine != nil && *x.Machine == name) {
+			// The CLI writes cluster entries alone, so a shared one of the name is another's.
+			if x.Kind == kind && x.Scope == nil && (x.Name != nil && *x.Name == name || x.Machine != nil && *x.Machine == name) {
 				return sf("%s, with %s %s at %s", shows, kind, name, or(x.Revision, "removed")), nil
 			}
 		}
