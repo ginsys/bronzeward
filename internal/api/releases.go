@@ -258,7 +258,7 @@ func withReleaseParts(ctx context.Context, tx *sql.Tx, rs []*releaseBody) error 
 	}
 	err := eachRow(ctx, tx, `SELECT release, kind, COALESCE(fragment, profile, assignment) AS head,
 			COALESCE(fragment_revision, profile_revision, assignment_revision), head_revision
-		FROM release_source WHERE release = ANY (string_to_array($1, ',')) ORDER BY release, head`,
+		FROM release_source WHERE release = ANY (string_to_array($1, ',')) ORDER BY release, head, 4`,
 		strings.Join(ids, ","), func(row *sql.Rows) error {
 			var rel string
 			var s releaseSourceBody

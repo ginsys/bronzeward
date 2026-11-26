@@ -489,7 +489,7 @@ export function ReleaseItem({ id }: { id: string }) {
             ["Draft", <><Named id={r.draft} />, built from its revision {r.draftRevision}</>], ["Publication", <Named id={r.operation} />],
           ]} />
           <h3>Source revisions this release was built from (these are not configuration)</h3>
-          <Rows label="Source revisions" cols={BUILT} items={r.sources} keyOf={(s) => `${s.kind}:${s.head}`} />
+          <Rows label="Source revisions" cols={BUILT} items={r.sources} keyOf={(s) => `${s.kind}:${s.head}:${s.revision}`} />
           <h3>Machines covered ({r.machines.length})</h3>
           <Rows label="Machines covered" cols={covered(r.id)} items={r.machines} keyOf={(m) => m.machine} />
         </>

@@ -227,43 +227,31 @@ func TestLibraryViewClusterPin(t *testing.T) {
 	})
 }
 
-// An adopted shared profile is held and recorded as an adoption too. Its pins are still held to
-// the cluster's view, so one the cluster has not adopted refuses the publication.
+// An adopted shared profile is held and recorded as an adoption too. Its pins are taken as
+// written: neither the cluster's adoption of the pinned fragment nor its shared head is read, so
+// the pin is a source of its own unless the release already uses that revision.
 func TestLibraryViewAdoptedProfile(t *testing.T) {
 	for name, adopted := range map[string]bool{"with its fragment adopted": true, "with its fragment not adopted": false} {
 		t.Run(name, func(t *testing.T) {
 			p := newPublishEnv(t)
 			f := p.sharedFragment("ntp")
-			prv, prf := id.New(id.ProfileRevision), id.New(id.Profile)
-			tx, err := p.db.Begin()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = tx.Rollback() }()
-			mustExec(t, tx, `INSERT INTO profile_revision (id, cluster, name, author, created_at) VALUES ($1, NULL, 'shared-set', $2, now())`,
-				prv, p.seed)
-			mustExec(t, tx, `INSERT INTO profile_revision_fragment (revision, cluster, position, fragment_revision) VALUES ($1, NULL, 0, $2)`,
-				prv, f.older)
-			if err := tx.Commit(); err != nil {
-				t.Fatal(err)
-			}
-			mustExec(t, p.db, `INSERT INTO profile (id, cluster, scope, name, head_revision_id, head_revision, etag_token, created_at)
-				VALUES ($1, NULL, 'library', 'shared-set', $2, 1, 'm3oxmlfh6phr7aigshdydcb4ji', now())`, prf, prv)
-			p.adopt("profile", "shared-set", prf, prv, 3)
+			prf, prv := p.adoptedSharedProfile("shared-set", f.older)
 			if adopted {
-				p.adopt("fragment", "ntp", f.head, f.older, 1)
+				// Another revision, which nothing of the release reaches.
+				p.adopt("fragment", "ntp", f.head, f.newer, 1)
 			}
 			p.selectToo([]string{"shared-set"})
-			if !adopted {
-				if _, ref := p.snapshot(); ref == nil || ref.status != http.StatusUnprocessableEntity {
-					t.Fatalf("snapshot %v; want 422", ref)
-				}
-				return
+			s := p.compiled()
+			if got := s.machines[0].fragments; !slices.Contains(got, f.older) || slices.Contains(got, f.newer) {
+				t.Fatalf("fragments %v; want the pinned %s", got, f.older)
 			}
-			p.compiled()
-			if got, want := p.sourceRow(p.published(), "profile", prf), adoptedRow(prv, 3); got != want {
+			mustExec(t, p.db, `UPDATE fragment SET head_revision = 3 WHERE id = $1`, f.head)
+			rel := p.published()
+			if got, want := p.sourceRow(rel, "profile", prf), adoptedRow(prv, 3); got != want {
 				t.Fatalf("source %+v; want %+v", got, want)
 			}
+			p.wantSources(rel, "fragment", "ntp", sharedRow(f.older, "", 0))
+			p.wantDigest(rel)
 		})
 	}
 }

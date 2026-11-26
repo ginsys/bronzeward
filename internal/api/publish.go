@@ -46,10 +46,13 @@ type releaseUnit struct {
 // usedHead is a head the release uses unchanged, at the revision and head revision the snapshot
 // read (compilation §6 step 1). A shared name is held as the cluster's adoption of it
 // (persistence-api.md §3.1.1): adopted, head its shared head, headRevision the adoption counter.
+// A fragment revision only a shared profile pins is pinned: its shared head and name, held by no
+// lock, since the pin belongs to the immutable profile revision.
 type usedHead struct {
 	kind, head, revision string
 	headRevision         int
-	adopted              bool
+	adopted, pinned      bool
+	name                 string // a pinned one's
 }
 
 // unitMachine is one covered machine's artifact: its import base and assignment revisions, the
@@ -110,12 +113,28 @@ var headKinds = map[string]headKind{
 // sourceHead is one head a release names: a draft entry's (changed) or one the compilation used
 // unchanged. key is its name, or its machine for an assignment; revision "" is a removal; base is
 // the head revision the author edited from, 0 when the draft introduces the name. For an adopted
-// one (usedHead) base and actual are the cluster's adoption counter.
+// one (usedHead) base and actual are the cluster's adoption counter. A draft's shared entry is
+// shared: head its shared head; a shared edit also moves the cluster's adoption, from counter
+// adoptionBase (0: none), and previous is the revision adopted before.
 type sourceHead struct {
-	kind, key, head, revision string
-	base, actual              int // actual: the head revision read under its lock
-	changed, adopted          bool
+	kind, key, head, revision    string
+	base, actual                 int // actual: the head revision read under its lock
+	changed, adopted, pinned     bool
+	shared                       bool
+	adoptionBase, adoptionActual int
+	previous                     string
 }
+
+// adopts reports whether h sets the cluster's adoption: a shared edit.
+func (h sourceHead) adopts() bool { return h.shared && h.revision != "" }
+
+// moves reports whether the publication writes h's head: a changed head, except a removal of a
+// name the draft introduces, which creates nothing (§3.1).
+func (h sourceHead) moves() bool { return h.changed && (h.head != "" || h.revision != "") }
+
+// sourced reports whether the release names h among its sources. A shared removal is none: the
+// release records the cluster's adoption, never a shared head's move (§3.1.1).
+func (h sourceHead) sourced() bool { return h.revision != "" || h.moves() && !h.shared }
 
 // noRelease ends the detail of a publication refusal, which T3 rolled back or which came before
 // it: the operation, its act and events, and the observations already recorded stay (§9.4, §14).
@@ -182,8 +201,8 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		return "", nil, err
 	}
 	for _, h := range u.unchanged {
-		heads = append(heads, sourceHead{kind: h.kind, head: h.head, revision: h.revision, base: h.headRevision,
-			adopted: h.adopted})
+		heads = append(heads, sourceHead{kind: h.kind, key: h.name, head: h.head, revision: h.revision, base: h.headRevision,
+			adopted: h.adopted, pinned: h.pinned})
 	}
 
 	var epoch string
@@ -245,44 +264,17 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	if len(scopes) != len(covered) || slices.ContainsFunc(covered, func(m string) bool { _, ok := bases[m]; return !ok }) {
 		return "", nil, errors.New("a covered machine has no record or no state of the cluster")
 	}
-	// One pass over every existing head in id order, changed ones FOR UPDATE (§6.2).
-	locked := slices.Clone(heads)
-	slices.SortFunc(locked, func(x, y sourceHead) int { return strings.Compare(x.head, y.head) })
-	for i := range locked {
-		h := &locked[i]
-		if h.head == "" {
-			continue
-		}
-		k, ok := headKinds[h.kind]
-		if !ok {
-			return "", nil, fmt.Errorf("head %s of an unknown kind", h.head)
-		}
-		mode := "SHARE"
-		if h.changed {
-			mode = "UPDATE"
-		}
-		query, args := `SELECT `+k.key+`, head_revision FROM `+k.table+` WHERE id = $1 FOR `+mode, []any{h.head}
-		if h.adopted {
-			// The cluster's adoption, in its shared head's place; the shared head is not read (§6.2).
-			query = `SELECT name, adoption_revision FROM library_adoption WHERE cluster = $1 AND ` + k.table + ` = $2 FOR SHARE`
-			args = []any{j.cluster, h.head}
-		}
-		if err := tx.QueryRowContext(ctx, query, args...).Scan(&h.key, &h.actual); err != nil {
-			return "", nil, err
-		}
+	pins, err := sharedPins(ctx, tx, j.draft)
+	if err != nil {
+		return "", nil, err
 	}
-	read := map[string]sourceHead{}
-	for _, h := range locked {
-		if _, twice := read[h.head]; twice && h.head != "" {
-			return "", nil, fmt.Errorf("head %s used twice", h.head)
-		}
-		read[h.head] = h
+	headRows, err := lockSources(ctx, tx, j.cluster, heads, pins)
+	if err != nil {
+		return "", nil, err
 	}
-	for i := range heads {
-		if heads[i].head != "" {
-			heads[i].key, heads[i].actual = read[heads[i].head].key, read[heads[i].head].actual
-		}
-	}
+	// The sources whose heads are compared, in id order.
+	locked := slices.DeleteFunc(slices.Clone(heads), func(h sourceHead) bool { return h.pinned })
+	slices.SortStableFunc(locked, func(x, y sourceHead) int { return strings.Compare(x.head, y.head) })
 	// The operations holding a covered machine's scope, read after the machine and head locks: a
 	// commitment holds the machine FOR UPDATE and the assignment head FOR SHARE, so one that held
 	// either has committed by now and its operation is visible to this statement (§1.2 item 2).
@@ -316,7 +308,9 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 
 	content := releaseContent{cluster: j.cluster, draft: j.draft, draftRev: j.draftRev, renderer: u.renderer}
 	for _, h := range heads {
-		content.sources = append(content.sources, contentSource{kind: h.kind, key: h.key, revision: h.revision})
+		if h.sourced() {
+			content.sources = append(content.sources, contentSource{kind: h.kind, key: h.key, revision: h.revision})
+		}
 	}
 	for _, m := range u.machines {
 		content.machines = append(content.machines, contentMachine{machine: m.machine, importBase: m.importBase,
@@ -346,6 +340,9 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	}
 	if ref, err := checkInputs(j, u, draftState, draftRev, heads, locked, bases, scopes, names, held, recovery); ref != nil || err != nil {
 		return "", ref, err
+	}
+	if ref := checkSharedPins(pins, headRows, heads); ref != nil {
+		return "", ref, nil
 	}
 	if ref, err := checkHostnameSwap(ctx, tx, j.cluster, u); ref != nil || err != nil {
 		return "", ref, err
@@ -381,16 +378,37 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	// revision the release left its head at (ruling R10).
 	for i := range heads {
 		h := &heads[i]
-		if !h.changed {
+		if !h.moves() {
 			continue
 		}
 		if ref, err := moveHead(ctx, tx, j.cluster, h); err != nil || ref != nil {
 			return "", ref, err
 		}
+		if h.adopts() {
+			if err := adopt(ctx, tx, j.cluster, h); err != nil {
+				return "", nil, err
+			}
+		}
+	}
+	if ref, err := checkOneScope(ctx, tx, j.draft); ref != nil || err != nil {
+		return "", ref, err
 	}
 	for _, h := range heads {
+		if !h.sourced() {
+			continue
+		}
 		k := headKinds[h.kind]
 		name, machine := sql.NullString{String: h.key, Valid: h.kind != "assignment"}, sql.NullString{String: h.key, Valid: h.kind == "assignment"}
+		if h.pinned || h.adopts() {
+			// A pin-only source has no adoption; a shared edit's records the one it set.
+			counter := sql.NullInt64{Int64: int64(h.adoptionActual), Valid: h.adopts()}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO release_source (release, cluster, kind, `+h.kind+`, name, `+
+				k.revision+`, previous_`+k.revision+`, scope, adoption_revision) VALUES ($1, $2, $3, $4, $5, $6, $7, 'library', $8)`,
+				rel, j.cluster, h.kind, h.head, name, h.revision, nullable(h.previous), counter); err != nil {
+				return "", nil, err
+			}
+			continue
+		}
 		if h.adopted {
 			// The adoption the release compiled, unchanged: its counter, the same revision before it.
 			if _, err := tx.ExecContext(ctx, `INSERT INTO release_source (release, cluster, kind, `+h.kind+`, name, `+
@@ -471,6 +489,10 @@ func checkInputs(j publishJob, u releaseUnit, draftState string, draftRev int, h
 				c["scope"] = "adoption"
 			}
 			conflicts = append(conflicts, c)
+		}
+		if h.head != "" && h.adopts() && h.adoptionActual != h.adoptionBase {
+			conflicts = append(conflicts, map[string]any{"head": h.head, "scope": "adoption",
+				"expected": counterOrAbsent(h.adoptionBase), "actual": counterOrAbsent(h.adoptionActual)})
 		}
 	}
 	machines := slices.Clone(u.machines)
@@ -601,25 +623,221 @@ func recheckStatuses(ctx context.Context, tx *sql.Tx, u releaseUnit) (*refusal, 
 	return ref, rows.Err()
 }
 
-// draftHeads reads the draft's source entries with the head each names, if one exists yet.
+// draftHeads reads the draft's source entries with the head each names, if one exists yet: a
+// cluster entry's is its cluster's, a shared one's the shared head of its name.
 func draftHeads(ctx context.Context, tx *sql.Tx, draft string) ([]sourceHead, error) {
 	var out []sourceHead
 	err := eachRow(ctx, tx, `SELECT e.kind, coalesce(e.name, e.machine),
 			coalesce(e.fragment_revision, e.profile_revision, e.assignment_revision, ''), coalesce(e.base, 0),
-			coalesce(f.id, p.id, a.id, '')
+			coalesce(f.id, p.id, a.id, ''), e.scope = 'library', coalesce(e.adoption_base, 0)
 		FROM draft_source_entry e
-		LEFT JOIN fragment f ON e.kind = 'fragment' AND f.cluster = e.cluster AND f.name = e.name
-		LEFT JOIN profile p ON e.kind = 'profile' AND p.cluster = e.cluster AND p.name = e.name
+		LEFT JOIN fragment f ON e.kind = 'fragment' AND f.owner = e.owner AND f.name = e.name
+		LEFT JOIN profile p ON e.kind = 'profile' AND p.owner = e.owner AND p.name = e.name
 		LEFT JOIN assignment a ON e.kind = 'assignment' AND a.machine = e.machine
 		WHERE e.draft = $1`, draft, func(row *sql.Rows) error {
 		h := sourceHead{changed: true}
-		if err := row.Scan(&h.kind, &h.key, &h.revision, &h.base, &h.head); err != nil {
+		if err := row.Scan(&h.kind, &h.key, &h.revision, &h.base, &h.head, &h.shared, &h.adoptionBase); err != nil {
 			return err
 		}
 		out = append(out, h)
 		return nil
 	})
 	return out, err
+}
+
+// sharedPin is one pin of a shared profile revision the draft proposes: the profile, the pin's
+// position, the fragment revision, its name and the name's shared head ("" with none).
+type sharedPin struct {
+	profile              string
+	position             int
+	revision, name, head string
+}
+
+func sharedPins(ctx context.Context, tx *sql.Tx, draft string) ([]sharedPin, error) {
+	var out []sharedPin
+	err := eachRow(ctx, tx, `SELECT e.name, p.position, p.fragment_revision, f.name, coalesce(h.id, '')
+		FROM draft_source_entry e
+		JOIN profile_revision_fragment p ON p.revision = e.profile_revision
+		JOIN fragment_revision f ON f.id = p.fragment_revision
+		LEFT JOIN fragment h ON h.owner = 'library' AND h.name = f.name
+		WHERE e.draft = $1 AND e.scope = 'library' ORDER BY e.name, p.position`, draft, func(row *sql.Rows) error {
+		var p sharedPin
+		if err := row.Scan(&p.profile, &p.position, &p.revision, &p.name, &p.head); err != nil {
+			return err
+		}
+		out = append(out, p)
+		return nil
+	})
+	return out, err
+}
+
+// lockTarget is one row of T3's pass over heads: a head, or the cluster's adoption of a shared
+// one, which takes that head's place in the id order, after it (§6.2).
+type lockTarget struct {
+	head     string
+	adoption bool
+}
+
+// lockedRow is what that lock read: the name or machine, the head revision or adoption counter (0:
+// no adoption yet) and the revision it is at ("" removed).
+type lockedRow struct {
+	key, revision string
+	counter       int
+}
+
+// lockSources takes, in one pass in id order, one row at a time, every existing head the release
+// changes or uses and every adoption it uses or sets, FOR UPDATE where it writes and FOR SHARE
+// where it holds, with FOR SHARE too the shared head each pin of a proposed shared profile is
+// checked against (persistence-api.md §3.1.1). It gives each source its name and the counters
+// read, and answers every row read.
+func lockSources(ctx context.Context, tx *sql.Tx, cluster string, heads []sourceHead, pins []sharedPin) (map[lockTarget]lockedRow, error) {
+	type want struct {
+		kind   string
+		update bool
+	}
+	wanted := map[lockTarget]want{}
+	add := func(t lockTarget, kind string, update bool) {
+		wanted[t] = want{kind, update || wanted[t].update}
+	}
+	used := map[lockTarget]bool{}
+	for _, h := range heads {
+		if h.pinned || h.head == "" {
+			continue
+		}
+		t := lockTarget{h.head, h.adopted}
+		if used[t] {
+			return nil, fmt.Errorf("head %s used twice", h.head)
+		}
+		used[t] = true
+		add(t, h.kind, h.changed)
+		if h.adopts() {
+			add(lockTarget{h.head, true}, h.kind, true)
+		}
+	}
+	for _, p := range pins {
+		if p.head != "" {
+			add(lockTarget{p.head, false}, "fragment", false)
+		}
+	}
+	order := slices.SortedFunc(maps.Keys(wanted), func(x, y lockTarget) int {
+		after := func(t lockTarget) int {
+			if t.adoption {
+				return 1
+			}
+			return 0
+		}
+		return cmp.Or(strings.Compare(x.head, y.head), cmp.Compare(after(x), after(y)))
+	})
+	rows := map[lockTarget]lockedRow{}
+	for _, t := range order {
+		w := wanted[t]
+		k, ok := headKinds[w.kind]
+		if !ok {
+			return nil, fmt.Errorf("head %s of an unknown kind", t.head)
+		}
+		mode := "SHARE"
+		if w.update {
+			mode = "UPDATE"
+		}
+		query, args := `SELECT `+k.key+`, head_revision, coalesce(head_revision_id, '') FROM `+k.table+` WHERE id = $1 FOR `+mode,
+			[]any{t.head}
+		if t.adoption {
+			// The cluster's adoption, in its shared head's place; an unchanged one reads no head (§6.2).
+			query = `SELECT name, adoption_revision, coalesce(` + k.revision + `, '') FROM library_adoption
+				WHERE cluster = $1 AND ` + k.table + ` = $2 FOR ` + mode
+			args = []any{cluster, t.head}
+		}
+		var r lockedRow
+		// Only the adoption a shared edit writes may not exist yet.
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&r.key, &r.counter, &r.revision); err != nil &&
+			!(errors.Is(err, sql.ErrNoRows) && t.adoption && w.update) {
+			return nil, err
+		}
+		rows[t] = r
+	}
+	for i := range heads {
+		h := &heads[i]
+		if h.pinned || h.head == "" {
+			continue
+		}
+		r := rows[lockTarget{h.head, h.adopted}]
+		h.key, h.actual = r.key, r.counter
+		if h.adopts() {
+			a := rows[lockTarget{h.head, true}]
+			h.adoptionActual, h.previous = a.counter, a.revision
+		}
+	}
+	return rows, nil
+}
+
+// checkSharedPins holds each pin of a proposed shared profile to its fragment's shared head, as
+// locked, or the draft's shared proposal (§3.1.1).
+func checkSharedPins(pins []sharedPin, rows map[lockTarget]lockedRow, heads []sourceHead) *refusal {
+	proposed := map[string]string{}
+	for _, h := range heads {
+		if h.shared && h.kind == "fragment" {
+			proposed[h.key] = h.revision
+		}
+	}
+	for _, p := range pins {
+		if rows[lockTarget{head: p.head}].revision != p.revision && proposed[p.name] != p.revision {
+			return pinRefusal(sharedPinDetail, p.profile, p.position, p.revision)
+		}
+	}
+	return nil
+}
+
+// adopt sets the cluster's adoption of the shared head h wrote to h's revision, from the counter
+// the draft was edited at, or inserts its first one; h.adoptionActual becomes the counter the
+// release leaves it at. The commit holds every machine state of the cluster, so no other
+// publication of the cluster writes its adoptions meanwhile.
+func adopt(ctx context.Context, tx *sql.Tx, cluster string, h *sourceHead) error {
+	k := headKinds[h.kind]
+	if h.adoptionBase == 0 {
+		h.adoptionActual = 1
+		_, err := tx.ExecContext(ctx, `INSERT INTO library_adoption (cluster, kind, name, `+k.table+`, `+k.revision+`,
+			adoption_revision, etag_token) VALUES ($1, $2, $3, $4, $5, 1, $6)`,
+			cluster, h.kind, h.key, h.head, h.revision, etagToken())
+		return err
+	}
+	return tx.QueryRowContext(ctx, `UPDATE library_adoption SET `+k.revision+` = $4, adoption_revision = adoption_revision + 1,
+		etag_token = $5 WHERE cluster = $1 AND kind = $2 AND name = $3 AND adoption_revision = $6 RETURNING adoption_revision`,
+		cluster, h.kind, h.key, h.revision, etagToken(), h.adoptionBase).Scan(&h.adoptionActual)
+}
+
+// checkOneScope refuses a publication after which the cluster would hold a name the draft has an
+// entry for both as its own and by adoption (persistence-api.md §3.1.1, rule name-in-two-scopes).
+// It runs once the commit's heads and adoptions are written. Only a publication writes a
+// cluster's heads and adoptions, and each holds every machine state of its cluster until COMMIT,
+// so this statement sees what an earlier one of the cluster committed.
+func checkOneScope(ctx context.Context, tx *sql.Tx, draft string) (*refusal, error) {
+	var kind, name string
+	err := tx.QueryRowContext(ctx, `SELECT e.kind, e.name FROM draft_source_entry e
+		JOIN library_adoption a ON a.cluster = e.cluster AND a.kind = e.kind AND a.name = e.name
+			AND coalesce(a.fragment_revision, a.profile_revision) IS NOT NULL
+		WHERE e.draft = $1 AND (
+			e.kind = 'fragment' AND EXISTS (SELECT FROM fragment h WHERE h.cluster = e.cluster AND h.name = e.name
+				AND h.head_revision_id IS NOT NULL)
+			OR e.kind = 'profile' AND EXISTS (SELECT FROM profile h WHERE h.cluster = e.cluster AND h.name = e.name
+				AND h.head_revision_id IS NOT NULL))
+		ORDER BY e.kind, e.name LIMIT 1`, draft).Scan(&kind, &name)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	}
+	return refuse(http.StatusUnprocessableEntity, "validation-failed",
+		"Publication refused: the cluster would hold a name both as its own and as shared.").
+		with("rule", "name-in-two-scopes").with("kind", kind).with("name", name), nil
+}
+
+// counterOrAbsent is an adoption counter as a conflict answers it.
+func counterOrAbsent(n int) any {
+	if n == 0 {
+		return "absent"
+	}
+	return n
 }
 
 // moveHead points a changed head at its revision, from the base the author edited, or inserts
@@ -649,9 +867,13 @@ func moveHead(ctx context.Context, tx *sql.Tx, cluster string, h *sourceHead) (*
 	if _, err := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT introduce`); err != nil {
 		return nil, err
 	}
+	// The winner's head: a shared one belongs to no cluster, and two clusters meet at its name.
 	key := `machine = $1`
 	args := []any{h.key}
-	if h.kind != "assignment" {
+	switch {
+	case h.shared:
+		key = `owner = 'library' AND name = $1`
+	case h.kind != "assignment":
 		key, args = `cluster = $1 AND name = $2`, []any{cluster, h.key}
 	}
 	var other string
@@ -663,7 +885,8 @@ func moveHead(ctx context.Context, tx *sql.Tx, cluster string, h *sourceHead) (*
 		with("conflicts", []map[string]any{{"head": other, "expected": "absent", "actual": actual}}), nil
 }
 
-// insertHead inserts the head of a name the draft introduces at head revision 1.
+// insertHead inserts the head of a name the draft introduces at head revision 1, at its
+// revision's scope: the cluster's, or shared for a revision of no cluster.
 func insertHead(ctx context.Context, tx *sql.Tx, h *sourceHead, rev sql.NullString) error {
 	k := headKinds[h.kind]
 	h.head = id.New(k.prefix)
@@ -672,10 +895,12 @@ func insertHead(ctx context.Context, tx *sql.Tx, h *sourceHead, rev sql.NullStri
 	switch h.kind {
 	case "fragment":
 		q = `INSERT INTO fragment (id, cluster, scope, name, layer, head_revision_id, head_revision, etag_token, created_at)
-			SELECT $1, cluster, 'cluster', name, layer, id, 1, $3, now() FROM fragment_revision WHERE id = $2`
+			SELECT $1, cluster, CASE WHEN cluster IS NULL THEN 'library' ELSE 'cluster' END, name, layer, id, 1, $3, now()
+			FROM fragment_revision WHERE id = $2`
 	case "profile":
 		q = `INSERT INTO profile (id, cluster, scope, name, head_revision_id, head_revision, etag_token, created_at)
-			SELECT $1, cluster, 'cluster', name, id, 1, $3, now() FROM profile_revision WHERE id = $2`
+			SELECT $1, cluster, CASE WHEN cluster IS NULL THEN 'library' ELSE 'cluster' END, name, id, 1, $3, now()
+			FROM profile_revision WHERE id = $2`
 	default:
 		q = `INSERT INTO assignment (id, cluster, machine, head_revision_id, head_revision, etag_token, created_at)
 			SELECT $1, cluster, machine, id, 1, $3, now() FROM assignment_revision WHERE id = $2`
