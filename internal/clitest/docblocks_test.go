@@ -32,11 +32,16 @@ const (
 	commandLimit = 2 * time.Minute
 )
 
+// markedCommand is the only form a command of a marked block may have: one call of bronzewardctl whose
+// arguments are plain characters, <placeholders> and quoted text with nothing in it that a shell
+// expands. Anything else is refused, since with it a shell could run something else, leave part
+// unrun, or hide an exit status, and the block would still count as run.
+var markedCommand = regexp.MustCompile("^bronzewardctl(?:[ \t]+(?:[A-Za-z0-9_.,:=/-]|<[^<>]*>|\"[^\"$`\\\\]*\")+)+$")
+
 // docBlocks reads dir's pages and answers the marked blocks by id, "<page name>-db-<n>", the ids
 // run-doc-blocks.sh account-db computes. A line that mentions the mark in any other form is refused,
-// since the block it was meant to mark would be run by nothing. So is a "#" or an "&" in a marked
-// block, since the block is run a command at a time: a comment could hide a command a shell would
-// run, and a command put in the background would count as run before it ended.
+// since the block it was meant to mark would be run by nothing. So is a marked block with no command,
+// or with a command that is not a markedCommand.
 func docBlocks(dir string) (map[string]string, error) {
 	pages, err := filepath.Glob(filepath.Join(dir, "*.md"))
 	if err != nil {
@@ -55,11 +60,15 @@ func docBlocks(dir string) (map[string]string, error) {
 				n++
 				id = fmt.Sprintf("%s-db-%d", name, n)
 				blocks[id] = ""
-			case id != "" && strings.ContainsAny(line, "#&"):
-				return nil, fmt.Errorf("%s:%d: %s holds a # or an &; a marked block takes no comment and no background command", page, i+1, id)
 			case id != "" && line == "```":
-				if strings.TrimSpace(blocks[id]) == "" {
-					return nil, fmt.Errorf("%s: %s is empty", page, id)
+				run := commands(blocks[id])
+				if len(run) == 0 {
+					return nil, fmt.Errorf("%s: %s has no command", page, id)
+				}
+				for _, c := range run {
+					if !markedCommand.MatchString(c) {
+						return nil, fmt.Errorf("%s:%d: %s: %q is not one bronzewardctl call of plain words, placeholders and quoted text", page, i+1, id, c)
+					}
 				}
 				id = ""
 			case id != "":
@@ -151,11 +160,7 @@ func (p *pageRun) block(id, stdin string, captures ...capture) (string, error) {
 		return "", fmt.Errorf("%s: no page marks this block", id)
 	}
 	var transcript strings.Builder
-	lines := commands(text)
-	if len(lines) == 0 {
-		return "", fmt.Errorf("%s: the block has no command", id)
-	}
-	for _, written := range lines {
+	for _, written := range commands(text) {
 		command, err := p.fill(written)
 		if err != nil {
 			return transcript.String(), fmt.Errorf("%s: %q: %w", id, written, err)
@@ -311,38 +316,62 @@ func TestDocBlocksControls(t *testing.T) {
 		t.Errorf("unrun = %v, want %v", got, want)
 	}
 
-	// A command that never ends is stopped, the processes it started included, and fails by name; a
-	// block with nothing to run counts as nothing.
-	write("page.md", block("sleep 40; true")+block(`\`))
+	// A command that never ends is stopped, the processes it started included, and fails by name. The
+	// client here is a stand-in script that starts a child and waits for it.
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "bronzewardctl"), []byte("#!/bin/sh\nsleep 40\n:\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write("page.md", block("bronzewardctl version"))
 	hang, err := docBlocks(dir)
-	if err != nil || len(hang) != 2 {
-		t.Fatalf("docBlocks: %d blocks, %v; want 2", len(hang), err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	p.blocks, p.limit = hang, 2*time.Second
-	for name, c := range map[string]struct{ id, want string }{
-		"a command that does not end": {"page-db-1", "did not end within 2s"},
-		"a block with no command":     {"page-db-2", "has no command"},
-	} {
-		p.ran = map[string]bool{}
-		start := time.Now()
-		if _, err := p.block(c.id, ""); err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: %v; want %q", name, err, c.want)
-		}
-		if d := time.Since(start); d > 20*time.Second {
-			t.Errorf("%s: it took %s", name, d)
-		}
-		if p.ran[c.id] {
-			t.Errorf("%s: counted as run", name)
-		}
+	real := p.f.bin
+	p.f.bin, p.blocks, p.limit, p.ran = bin, hang, 2*time.Second, map[string]bool{}
+	start := time.Now()
+	if _, err := p.block("page-db-1", ""); err == nil || !strings.Contains(err.Error(), "did not end within 2s") {
+		t.Errorf("a command that does not end: %v", err)
 	}
+	if d := time.Since(start); d > 20*time.Second {
+		t.Errorf("a command that does not end: it took %s", d)
+	}
+	if p.ran["page-db-1"] {
+		t.Error("a command that does not end: counted as run")
+	}
+	p.f.bin = real
 
+	// A marked command is one call of the client: anything with which a shell could run something
+	// else, skip it, or hide its exit status is refused. So are the real pages' commands, if one of them
+	// stopped fitting.
+	if _, err := docBlocks(pagesDir); err != nil {
+		t.Errorf("the real pages: %v", err)
+	}
+	write("page.md", block(`bronzewardctl a --b <c d> e=<f>,g=<h> "i <j> k" ./l \
+  --m=127.0.0.1:1`))
+	if _, err := docBlocks(dir); err != nil {
+		t.Errorf("plain words, placeholders and quoted text: %v", err)
+	}
 	for name, body := range map[string]string{
-		"a comment that would hide a command": dbOpener + "\n# example \\\nbronzewardctl context list --bogus\n```\n",
-		"a command left in the background":    dbOpener + "\nsh -c 'sleep 300; exit 7' >/dev/null 2>&1 &\n```\n",
-		"a block that is only a comment":      dbOpener + "\n# disabled for now\n```\n",
+		"a pipe":                              block("bronzewardctl context list | cat"),
+		"a command that fails into a pipe":    block("false | cat"),
+		"two commands on a line":              block("bronzewardctl a; bronzewardctl b"),
+		"an alternative":                      block("bronzewardctl a || true"),
+		"a negation":                          block("! bronzewardctl a"),
+		"a substitution":                      block("bronzewardctl a $(false)"),
+		"a substitution in quotes":            block(`bronzewardctl a "$(false)"`),
+		"backquotes":                          block("bronzewardctl a `false`"),
+		"a redirection":                       block("bronzewardctl a > out"),
+		"another program":                     block("true"),
+		"a program that starts with the name": block("bronzewardctlx a"),
+		"a lone backslash":                    block(`\`),
+		"a comment that would hide a command": block("# example \\\nbronzewardctl context list --bogus"),
+		"a comment after a command":           block("bronzewardctl a # b"),
+		"a command left in the background":    block("bronzewardctl a &"),
+		"a block that is only a comment":      block("# disabled for now"),
 		"another spelling of the mark":        "```bash {.bw-db .bw-run}\ntrue\n```\n",
-		"an indented mark":                    "  " + dbOpener + "\n  true\n  ```\n",
-		"an unclosed block":                   dbOpener + "\ntrue\n",
+		"an indented mark":                    "  " + dbOpener + "\n  bronzewardctl a\n  ```\n",
+		"an unclosed block":                   dbOpener + "\nbronzewardctl a\n",
 		"an empty block":                      dbOpener + "\n\n```\n",
 	} {
 		write("page.md", body)
