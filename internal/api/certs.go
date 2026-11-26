@@ -72,7 +72,8 @@ func (a *API) certFor(ctx context.Context, cluster string, r role.Role, life tim
 
 // actKey is cluster's CA key at the version its latest first-key act names, never the latest the
 // provider holds: path, version and created_time must be the act's. A failure carries certFor's
-// cause for it; a database failure and a cancelled ctx carry none.
+// cause for it; a database failure and a cancelled ctx carry none. With version-changed the key
+// read is returned for its version identity alone: no caller may use it.
 func (a *API) actKey(ctx context.Context, cluster string) (provider.CAKey, string, error) {
 	var none provider.CAKey
 	if a.d.sg == nil {
@@ -98,7 +99,7 @@ func (a *API) actKey(ctx context.Context, cluster string) (provider.CAKey, strin
 	// The database keeps microseconds and the provider nanoseconds: a version is the act's when the
 	// two times agree to the microsecond.
 	if got := k.Version(); got.Path != act.path || got.Version != act.version || !actsTime(got.CreatedTime, act.created) {
-		return none, "version-changed", errKeyChanged
+		return k, "version-changed", errKeyChanged
 	}
 	return k, "", nil
 }

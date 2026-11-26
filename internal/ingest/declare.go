@@ -175,8 +175,8 @@ func validateRefs(docs []*yaml.Node, d Declarations, misplaced map[string]bool) 
 			if !ok {
 				return refuse(RuleUndeclaredName, p.String())
 			}
-			// An alias would put the key at a second place.
-			if r.Kind == provider.KindCAKey && (!atCAKey(p) || n.Anchor != "") {
+			// An alias or a second document would put the key at a second place.
+			if r.Kind == provider.KindCAKey && (!atCAKey(p) || n.Anchor != "" || used[n.Value]) {
 				return place(n.Value, p)
 			}
 			used[n.Value] = true

@@ -165,6 +165,23 @@ func TestImportRefusesAMappingHoldingTheCAKey(t *testing.T) {
 	}
 }
 
+// The reference stands once in a stream: a second key could not be matched on its own.
+func TestImportRefusesASecondCAKey(t *testing.T) {
+	other := base64.StdEncoding.EncodeToString([]byte("another synthetic key\n"))
+	first := strings.Replace(importDoc(""), offeredCAKey, other, 1)
+	for name, doc := range map[string]string{
+		"another key first":  first + "---\n" + importDoc(""),
+		"the same key twice": importDoc("") + "---\n" + importDoc(""),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Extract(importRequest(t, doc))
+			if got := ruleOf(t, err); got != RuleTagPlacement {
+				t.Fatalf("rule %s", got)
+			}
+		})
+	}
+}
+
 // The staged document of an import holds the reference: a later mark and the envelope accept it.
 func TestImportReferenceSurvivesTheEnvelopeAndAMark(t *testing.T) {
 	c, err := Extract(importRequest(t, importDoc("  nodeLabels:\n    note: plain-label\n")))

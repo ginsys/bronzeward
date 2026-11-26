@@ -48,8 +48,8 @@ func (a *API) verifyCAKey(ctx context.Context, j job, c *ingest.Candidate) (*ref
 		verdict = verdictUnreadable
 	}
 	entry := map[string]any{"type": "ca-key-match", "verdict": verdict}
-	if err == nil {
-		v := k.Version()
+	// A key written again since its act was read too: its identity describes what is stored.
+	if v := k.Version(); v.Version != 0 {
 		entry["path"], entry["version"] = v.Path, v.Version
 		entry["createdTime"] = v.CreatedTime.UTC().Format(time.RFC3339Nano)
 	}
