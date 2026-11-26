@@ -113,6 +113,8 @@ func TestRefusalSweep(t *testing.T) {
 			marks: []string{"doc[0]/machine/features/stableHostname"}},
 		{rule: RuleEmbedded, text: "machine:\n  nodeLabels:\n    k: " + s + "\n",
 			decl: Declarations{Embedded: []Embedded{{Path: "doc[0]/machine/nodeLabels", Format: "yaml"}}}},
+		// The one rule Extract does not raise itself: the signer's verdict refuses the offered key.
+		{rule: RuleCAKeyMismatch, text: "version: v1alpha1\nmachine:\n  type: controlplane\n  ca:\n    key: " + b64Secret + "\n", secret: b64Secret},
 	}
 	covered := map[Rule]bool{}
 	for _, tc := range cases {
@@ -129,7 +131,12 @@ func TestRefusalSweep(t *testing.T) {
 			req.Declarations = tc.decl
 			var c *Candidate
 			var err error
-			if tc.remark == "" {
+			if tc.rule == RuleCAKeyMismatch {
+				req.Import = true
+				if c, err = Extract(req); err == nil {
+					c, err = nil, c.MatchCAKey(func(string) bool { return false })
+				}
+			} else if tc.remark == "" {
 				c, err = Extract(req)
 			} else {
 				st := stagedFrom(t, Request{Input: req.Input, Declarations: tc.decl, Name: tc.name})

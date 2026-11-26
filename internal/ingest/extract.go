@@ -23,6 +23,11 @@ type Request struct {
 	// Name is the machine's stored name as the API read it for this request, or empty. A HostnameConfig
 	// document whose hostname equals it is removed from the stored stream (compilation.md §2.3 step 2a).
 	Name string
+	// Import marks an import's input, whose machine.ca.key is set apart and offered to the signer
+	// (step 3a).
+	Import bool
+	// staged marks a remark's input, the one whose declarations may hold the CA key's typed reference.
+	staged bool
 }
 
 // Candidate is a sanitized stream whose extracted values are not yet written (compilation.md
@@ -34,6 +39,11 @@ type Candidate struct {
 	values    []namedValue
 	committed bool
 	filled    Filled
+	// caKey is the value of machine.ca.key set apart at step 3a, in its base64 form, behind a pointer
+	// so that no fmt verb prints it; caAt is its path.
+	caKey     *string
+	caAt      Path
+	caMatched bool
 }
 
 type namedValue struct {
@@ -78,7 +88,7 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	// No request declares the CA key's typed reference (compilation.md §5.1): this is the one entry of
 	// every request, and only stored data may hold the kind.
 	for name, r := range req.Declarations.References {
-		if r.Kind == provider.KindCAKey {
+		if r.Kind == provider.KindCAKey && !req.staged {
 			return nil, refuse(RuleBadDeclaration, name)
 		}
 	}
@@ -124,7 +134,14 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	if err != nil {
 		return nil, err
 	}
-	all, err := coalesce(append(targets, inner...))
+	found := append(targets, inner...)
+	var caNodes map[*yaml.Node]bool
+	if req.Import {
+		if caNodes, err = caKeyNodes(docs, found); err != nil {
+			return nil, err
+		}
+	}
+	all, err := coalesce(found)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +150,16 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	exs, err := substitute(all, req.Declarations.References)
 	if err != nil {
 		return nil, err
+	}
+	// Step 3a: the CA key takes its fixed name and typed reference, and no generation.
+	for i, t := range all {
+		if !caNodes[t.node] {
+			continue
+		}
+		if _, ok := exs[i].plain.(string); !ok {
+			return nil, refuseAt(RuleMarkKind, t.paths, t.paths[0].String())
+		}
+		exs[i].name, exs[i].kind, t.node.Value = CAKeyName, provider.KindCAKey, CAKeyName
 	}
 	for _, e := range embedded {
 		plainStyle(e.doc)
@@ -150,7 +177,11 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 		decl.References = map[string]Reference{}
 	}
 	for _, ex := range exs {
-		decl.References[ex.name] = Reference{Kind: ex.kind, Version: 1}
+		r := Reference{Kind: ex.kind, Version: 1}
+		if ex.kind == provider.KindCAKey {
+			r.Version = 0
+		}
+		decl.References[ex.name] = r
 	}
 	// The filled document leaves the stream here: the guard and the validation read the stored stream, so
 	// the declarations and the holders move with their documents, and a refusal is given the input's
@@ -169,6 +200,10 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 		if err := guard(back, exs, declared); err != nil {
 			return nil, inInput(from(err, guardSources(back, exs, declared, err)), dropAt)
 		}
+		// Check 3 reads the payloads, whose paths are the input's own.
+		if err := checkPayloads(exs); err != nil {
+			return nil, err
+		}
 	}
 	misplaced := map[string]bool{}
 	if err := validateRefs(back, decl, misplaced); err != nil {
@@ -176,6 +211,11 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 	}
 	c := &Candidate{docs: out, decl: decl, filled: filled}
 	for _, ex := range exs {
+		if ex.kind == provider.KindCAKey {
+			offered := ex.plain.(string)
+			c.caKey, c.caAt = &offered, ex.paths[0]
+			continue
+		}
 		v, err := provider.NewValue(ex.kind, ex.plain)
 		if err != nil {
 			return nil, refuseAt(RuleMarkKind, ex.paths, ex.paths[0].String())
@@ -183,6 +223,40 @@ func extract(req Request, guarded bool) (_ *Candidate, err error) {
 		c.values = append(c.values, namedValue{ex.name, v})
 	}
 	return c, nil
+}
+
+// caKeyNodes is the identified machine.ca.key nodes of an import. A target that holds one as a
+// member would carry the key into a generation, so it is refused mark-kind.
+func caKeyNodes(docs []*yaml.Node, ts []*target) (map[*yaml.Node]bool, error) {
+	out := map[*yaml.Node]bool{}
+	for i := range docs {
+		n, ok := resolve(docs, i, []string{"machine", "ca", "key"})
+		if ok && slices.ContainsFunc(ts, func(t *target) bool { return t.node == n }) {
+			out[n] = true
+		}
+	}
+	for _, t := range ts {
+		if slices.ContainsFunc(t.node.Content, func(c *yaml.Node) bool { return out[deref(c)] }) {
+			return nil, refuseAt(RuleMarkKind, t.paths, t.paths[0].String())
+		}
+	}
+	return out, nil
+}
+
+// OffersCAKey reports whether step 3a set a CA key apart, which MatchCAKey must accept before Commit.
+func (c *Candidate) OffersCAKey() bool { return c.caKey != nil }
+
+// MatchCAKey offers the CA key, in its base64 form, to same: the signer's comparison with the stored
+// key. A false answer is the ca-key-mismatch refusal, which names the path and no value.
+func (c *Candidate) MatchCAKey(same func(offered string) bool) error {
+	if c.caKey == nil {
+		return errors.New("ingest: no CA key to match")
+	}
+	if !same(*c.caKey) {
+		return refuse(RuleCAKeyMismatch, c.caAt.String())
+	}
+	c.caMatched = true
+	return nil
 }
 
 // guardSources is the paths of every extraction whose value alone the guard refuses by refused's
@@ -276,6 +350,9 @@ func knownSecrets(docs []*yaml.Node, marks []Path) (texts []string, complete boo
 				continue // already a reference: it loads as a null and holds no secret
 			}
 			values = append(values, sp.value)
+			if atCAKey(Path{Doc: i, Pointer: sp.pointer}) {
+				values = append(values, forms(extraction{kind: provider.KindCAKey, plain: sp.value})...)
+			}
 			if !ok || n.Kind != yaml.ScalarNode || n.Value != scalarText(sp.value) {
 				complete = false
 			}
@@ -613,6 +690,9 @@ func (c *Candidate) Commit(ctx context.Context, create func(ctx context.Context,
 	}
 	if c.committed {
 		return Sanitized{}, errors.New("ingest: the candidate was already committed")
+	}
+	if c.caKey != nil && !c.caMatched {
+		return Sanitized{}, errors.New("ingest: the candidate's CA key was not matched")
 	}
 	c.committed = true
 	for i, v := range c.values {

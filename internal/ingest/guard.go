@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"encoding/base64"
 	"errors"
 	"maps"
 	"slices"
@@ -8,6 +9,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/ginsys/bronzeward/internal/provider"
 )
 
 // redacted stands for a path token that holds an extracted value.
@@ -44,7 +47,7 @@ func guardValues(docs []*yaml.Node, exs, run []extraction, embedded map[string]s
 	for _, ex := range exs {
 		m, ok := ex.plain.(map[string]any)
 		if !ok {
-			members = append(members, ex.plain)
+			members = append(members, forms(ex)...)
 			continue
 		}
 		for _, k := range sortedKeys(m) {
@@ -128,9 +131,68 @@ func extractedScalars(exs []extraction) []any {
 			}
 			continue
 		}
-		out = append(out, ex.plain)
+		out = append(out, forms(ex)...)
 	}
 	return out
+}
+
+// forms is an extraction's value in each form a copy of it is searched in: the CA key in its base64
+// form and its PEM text (compilation.md §5.2), any other value as it is.
+func forms(ex extraction) []any {
+	if s, ok := ex.plain.(string); ok && ex.kind == provider.KindCAKey {
+		if pem, err := base64.StdEncoding.DecodeString(s); err == nil {
+			return []any{s, string(pem)}
+		}
+	}
+	return []any{ex.plain}
+}
+
+// checkPayloads is guardPayloads, a variable so that a test can run its mutation control.
+var checkPayloads = guardPayloads
+
+// guardPayloads is the third check (compilation.md §4.2): checks 1 and 2 read the candidate
+// document, where an extracted value is already a reference, so each payload step 6 would write is
+// compared with each form of the CA key, by value and as a substring.
+func guardPayloads(exs []extraction) error {
+	var keys []any
+	for _, ex := range exs {
+		if ex.kind == provider.KindCAKey {
+			keys = append(keys, forms(ex)...)
+		}
+	}
+	texts := searchTexts(keys)
+	if len(texts) == 0 {
+		return nil
+	}
+	var equal, within []Path
+	for _, ex := range exs {
+		if ex.kind == provider.KindCAKey {
+			continue
+		}
+		for _, v := range extractedScalars([]extraction{ex}) {
+			switch s := scalarText(v); {
+			case slices.Contains(texts, s):
+				equal = append(equal, ex.paths...)
+			case containsAny(s, texts):
+				within = append(within, ex.paths...)
+			}
+		}
+	}
+	rule, hits := RuleGuardValue, equal
+	if len(hits) == 0 {
+		rule, hits = RuleGuardSubstring, within
+	}
+	if len(hits) == 0 {
+		return nil
+	}
+	secrets := searchTexts(extractedScalars(exs))
+	var paths []string
+	for _, p := range hits {
+		if s := redactPath(p, secrets); !slices.Contains(paths, s) {
+			paths = append(paths, s)
+		}
+	}
+	return from(refuse(rule, paths...), hits)
 }
 
 func sortedKeys(m map[string]any) []string {

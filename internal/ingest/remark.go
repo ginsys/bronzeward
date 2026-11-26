@@ -55,7 +55,7 @@ func Remark(st Staged, marks []Path) (_ *Candidate, err error) {
 		}
 	}
 	text := string(staged)
-	c, err := Extract(Request{Input: Unresolved{s: &text}, Marks: marks, Declarations: st.Sanitized.Declarations()})
+	c, err := Extract(Request{Input: Unresolved{s: &text}, Marks: marks, Declarations: st.Sanitized.Declarations(), staged: true})
 	if err != nil {
 		return nil, err
 	}
