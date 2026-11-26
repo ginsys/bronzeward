@@ -43,7 +43,7 @@ machine:
   token: <redacted:s-…@1>
   ca:
     crt: <base64>
-    key: <redacted:s-…@1>
+    key: <redacted:talos/ca-key@1>
   certSANs: []
   features:
     diskQuotaSupport: true

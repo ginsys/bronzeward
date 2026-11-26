@@ -77,6 +77,7 @@ Choose: freeze while you decide; adopt it into a release; or revert to Desired (
 $ bronzewardctl --context human drift adopt mch_… --draft drf_…
   started
   talos-access
+  ca-key-match
   staged
   succeeded
   queued

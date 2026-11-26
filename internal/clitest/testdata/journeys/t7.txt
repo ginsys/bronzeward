@@ -9,7 +9,7 @@ machine:
   token: <redacted:s-…@1>
   ca:
     crt: <base64>
-    key: <redacted:s-…@1>
+    key: <redacted:talos/ca-key@1>
   certSANs: []
   features:
     diskQuotaSupport: true
@@ -211,7 +211,7 @@ enabled: true
 $ bronzewardctl --context human release provenance {release} {machine}
 REFERENCE                     VERSION  FROM (REVISION, PATH)                                                                           RENDERED AT
 s-…  1        ibr_…, doc[0]/machine/token                                            doc[0]/machine/token
-s-…  1        ibr_…, doc[0]/machine/ca/key                                           doc[0]/machine/ca/key
+talos/ca-key                  1        ibr_…, doc[0]/machine/ca/key                                           doc[0]/machine/ca/key
 s-…  1        ibr_…, doc[0]/cluster/token                                            doc[0]/cluster/token
 s-…  1        ibr_…, doc[0]/cluster/etcd/ca/key                                      doc[0]/cluster/etcd/ca/key
 s-…  1        ibr_…, doc[2]/clusterSecret                                            doc[2]/clusterSecret

@@ -11,6 +11,7 @@ Review it, then continue it, or abandon it:
   bronzewardctl import abandon ing_…
   started
   talos-access
+  ca-key-match
   staged
   paused (generation 1)
 [exit 0]
@@ -24,6 +25,7 @@ Continued import ing_… (operation op_…).
 Import ing_… released into draft drf_… (revision 2), import base ibr_….
   started
   talos-access
+  ca-key-match
   staged
   paused (generation 1)
   marked (generation 2)
@@ -54,7 +56,7 @@ Review a machine's rendered configuration: bronzewardctl release review rel_… 
 $ bronzewardctl --context human release provenance {release} {machine}
 REFERENCE                     VERSION  FROM (REVISION, PATH)                                                                           RENDERED AT
 s-…  1        ibr_…, doc[0]/machine/token                                            doc[0]/machine/token
-s-…  1        ibr_…, doc[0]/machine/ca/key                                           doc[0]/machine/ca/key
+talos/ca-key                  1        ibr_…, doc[0]/machine/ca/key                                           doc[0]/machine/ca/key
 s-…  1        ibr_…, doc[0]/machine/files/0/content                                  doc[0]/machine/files/0/content
 s-…  1        ibr_…, doc[0]/cluster/token                                            doc[0]/cluster/token
 s-…  1        ibr_…, doc[0]/cluster/etcd/ca/key                                      doc[0]/cluster/etcd/ca/key
