@@ -1780,7 +1780,7 @@ paths:
         beginning with its commitment, for example commitment, attempt, refusal, response, accounting, classification, ownership-transition,
         operation-state, adoption and applied-change; an adopt operation, created completed, has no commitment and begins
         with its adoption; a publish or ingest operation''s are its own events (queued, claimed, started, staged, paused,
-        marked, mark-refused, continued, taken-over, resume-failed, talos-access, succeeded, failed). The stream ends when
+        marked, mark-refused, continued, taken-over, resume-failed, talos-access, ca-key-match, succeeded, failed). The stream ends when
         the operation is terminal and its events are written, or at the expiry of the token that opened it.'
       responses:
         '200':
@@ -4029,10 +4029,11 @@ components:
         state: {type: string}
       additionalProperties: false
     Reference:
+      description: 'A declared reference. `talos-ca-key` is the typed reference to the cluster''s CA key that an import stores at machine.ca.key: it has no version.'
       type: object
-      required: [kind, version]
+      required: [kind]
       properties:
-        kind: {type: string, enum: [string, integer, boolean, mapping]}
+        kind: {type: string, enum: [string, integer, boolean, mapping, talos-ca-key]}
         version: {type: integer}
         encoding: {type: string, enum: [base64]}
       additionalProperties: false

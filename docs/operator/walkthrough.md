@@ -106,6 +106,9 @@ carry no marks, so the worker's planted file secret would stay in the draft: ste
 
 **4. Import each machine into a draft.** An import reads the node's configuration, stores every
 secret in it as a create-only OpenBao generation, and leaves a `!bwref` reference in its place.
+The control plane's `machine.ca.key` is the exception: it must be the CA key of the cluster's first
+key (step 3), and the draft holds the reference `talos/ca-key` to that stored key. Another key is
+refused `ca-key-mismatch`, and a cluster with no readable first key `talos-access-unavailable`.
 `marks` names values that are secret but that Talos's schema does not mark as such; here the
 worker's planted file content:
 

@@ -290,7 +290,7 @@ func (e *env) fragmentCmd(args []string) error {
 		tf(w, "Cluster\t%s\n", r.Cluster)
 		var refs []string
 		for name, ref := range r.Declarations.References {
-			refs = append(refs, fmt.Sprintf("%s (%s, version %d)", name, ref.Kind, ref.Version))
+			refs = append(refs, fmt.Sprintf("%s (%s%s)", name, ref.Kind, versionWords(", ", ref.Version)))
 		}
 		slices.Sort(refs)
 		tf(w, "References\t%s\n", map[bool]string{true: "none"}[len(refs) == 0]+strings.Join(refs, ", "))
@@ -585,4 +585,13 @@ func (e *env) actCmd(args []string) error {
 			tf(w, "%s\t%s\t%s\t%s (%s)\t%s\t%s\t%s\n", a.Id, when(a.At), a.Action, e.who(a.Principal), a.PrincipalKind, or(a.Role, "-"),
 				a.Via, e.refSubjects(a.Subjects))
 		})
+}
+
+// versionWords is a declared reference's version after sep, or nothing for the CA key's typed
+// reference, which has none.
+func versionWords(sep string, v *int) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%sversion %d", sep, *v)
 }

@@ -224,7 +224,7 @@ func reviewText(rv apitypes.IngestionReviewBody) []string {
 	lines = append(lines, "", fmt.Sprintf("# declared references: %d", len(paths)))
 	for _, p := range paths {
 		ref := rv.Declarations.References[p]
-		lines = append(lines, fmt.Sprintf("#   %s: %s version %d", p, ref.Kind, ref.Version))
+		lines = append(lines, fmt.Sprintf("#   %s: %s%s", p, ref.Kind, versionWords(" ", ref.Version)))
 	}
 	lines = append(lines, fmt.Sprintf("# declared embedded documents: %d", len(rv.Declarations.Embedded)))
 	for _, d := range rv.Declarations.Embedded {
