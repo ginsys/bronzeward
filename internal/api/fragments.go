@@ -253,9 +253,18 @@ func updateFragment(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 		return result{}, err
 	}
 	k.shared = in.Scope == scopeLibrary
-	cluster := nullable(d.cluster)
+	cluster, owner := nullable(d.cluster), d.cluster
 	if k.shared {
-		cluster = sql.NullString{}
+		cluster, owner = sql.NullString{}, scopeLibrary
+	}
+	// A published head keeps its layer, a removed one too: publication could not move it.
+	var kept string
+	switch err := tx.QueryRowContext(ctx, `SELECT layer FROM fragment WHERE owner = $1 AND name = $2`, owner, k.name).Scan(&kept); {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return result{}, err
+	case kept != in.Layer:
+		return g.refused(ctx, a, tx, q, layerRefusal("The fragment's name keeps the layer it was published in.", k.name))
 	}
 	decl := g.sanitized.Declarations()
 	gens, ref, err := resolveReferences(ctx, tx, d, decl, g.gens)
@@ -300,6 +309,11 @@ func updateFragment(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	}
 	res.body = sourceUpdate{Draft: d.id, Entry: e, Ingestion: g.claim.ID}
 	return res, nil
+}
+
+// layerRefusal refuses a fragment revision in another layer than its name's published head.
+func layerRefusal(detail, name string) *refusal {
+	return refuse(http.StatusUnprocessableEntity, "validation-failed", detail).with("path", "layer").with("name", name)
 }
 
 // refused is a refusal after the claim exists (§7.2): the claim abandoned, and the refusal the

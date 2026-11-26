@@ -304,7 +304,9 @@ must be proposed by this draft or, with no entry for it, have a head with a
 revision; a name this draft removes can be neither pinned nor selected; and a
 fragment selected under a layer must carry that layer. Otherwise the update is
 refused `422 validation-failed`, naming the body path (compilation §7, stage
-1). Publication checks the same again. For a library name, "head" in these
+1). A fragment's name keeps its layer: once its head exists, a removed one
+included, an update in another layer is refused the same way, naming `layer`.
+Publication checks the same again. For a library name, "head" in these
 rules is the cluster's view of it, and a pin or selection of it is checked at
 publication only, over the whole draft, because the view depends on the
 adoption entry and the entries that pin or select the name can be staged in

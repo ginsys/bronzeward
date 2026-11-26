@@ -848,6 +848,18 @@ func counterOrAbsent(n int) any {
 func moveHead(ctx context.Context, tx *sql.Tx, cluster string, h *sourceHead) (*refusal, error) {
 	k := headKinds[h.kind]
 	rev := sql.NullString{String: h.revision, Valid: h.revision != ""}
+	// The update refuses another layer than the head's; a draft staged before that check still can
+	// hold one, which the head's foreign key would refuse.
+	if h.kind == "fragment" && h.head != "" && h.revision != "" {
+		var other bool
+		if err := tx.QueryRowContext(ctx, `SELECT h.layer <> r.layer FROM fragment h, fragment_revision r
+			WHERE h.id = $1 AND r.id = $2`, h.head, h.revision).Scan(&other); err != nil {
+			return nil, err
+		}
+		if other {
+			return layerRefusal("Publication refused: a fragment's name keeps the layer it was published in.", h.key), nil
+		}
+	}
 	if h.head != "" {
 		return nil, tx.QueryRowContext(ctx, `UPDATE `+k.table+` SET head_revision_id = $2, head_revision = head_revision + 1,
 			etag_token = $3 WHERE id = $1 AND head_revision = $4 RETURNING head_revision`,
