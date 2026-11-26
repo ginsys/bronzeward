@@ -227,7 +227,13 @@ func (b *buildEnv) fragment(name, layer, text string) string {
 
 func newBuildEnv(t *testing.T) *buildEnv {
 	t.Helper()
-	b := &buildEnv{publishEnv: publishFixture(t, newDraftEnv(t)), held: heldValues{values: map[string]provider.Value{}}}
+	return buildOn(t, newDraftEnv(t))
+}
+
+// buildOn is newBuildEnv on d's cluster, machine and draft, the draft at revision 1.
+func buildOn(t *testing.T, d *draftEnv) *buildEnv {
+	t.Helper()
+	b := &buildEnv{publishEnv: publishFixture(t, d), held: heldValues{values: map[string]provider.Value{}}}
 	b.ibr = b.importBase(b.machine, generatedConfig(t, constants.DefaultKubernetesVersion))
 	b.defaultPublicationReader(b.a)
 	// The alias places the one reference at two outputs: one effective dependency, not two.

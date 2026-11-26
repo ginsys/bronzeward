@@ -32,7 +32,7 @@ func fragmentUpdate() effectRoute {
 }
 
 type fragmentInput struct {
-	Scope        string              `json:"scope,omitempty"`
+	Scope        scopeMember         `json:"scope,omitempty"`
 	Layer        string              `json:"layer"`
 	Document     ingest.Unresolved   `json:"document"`
 	Marks        []string            `json:"marks"`
@@ -41,7 +41,7 @@ type fragmentInput struct {
 }
 
 func (in *fragmentInput) check(*API) error {
-	if err := checkScope(in.Scope); err != nil {
+	if err := in.Scope.check(); err != nil {
 		return err
 	}
 	switch {
