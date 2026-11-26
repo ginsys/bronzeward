@@ -910,8 +910,10 @@ CREATE TABLE assignment (
 -- none for a removal, and the base, the head revision the author edited from (NULL: absent). One
 -- entry per machine, and per name one at cluster scope and one at shared (library) scope
 -- (§3.1.1), whose revision belongs to no cluster; a shared edit's adoption_base is the counter of
--- the cluster's adoption it was edited from (NULL: no adoption). Import base entries stay in
--- draft_entry.
+-- the cluster's adoption it was edited from (NULL: no adoption). The shared slot of a name holds a
+-- shared edit or, with adoption, an adoption entry (a revision) or removal (none), whose base is
+-- the cluster's adoption counter. detached marks the cluster entry a detachment wrote, whose pins
+-- publication refuses under its own rule. Import base entries stay in draft_entry.
 CREATE TABLE draft_source_entry (
   draft               text NOT NULL,
   cluster             text NOT NULL,
@@ -924,10 +926,17 @@ CREATE TABLE draft_source_entry (
   base                integer CHECK (base >= 1),
   scope               text NOT NULL DEFAULT 'cluster' CHECK (scope IN ('cluster', 'library')),
   adoption_base       integer CHECK (adoption_base >= 1),
+  adoption            boolean NOT NULL DEFAULT false,
+  detached            boolean NOT NULL DEFAULT false,
   owner               text NOT NULL GENERATED ALWAYS AS (CASE scope WHEN 'library' THEN 'library' ELSE cluster END) STORED,
   CONSTRAINT draft_source_entry_library CHECK (
     (scope <> 'library' OR kind <> 'assignment') AND
     (adoption_base IS NULL OR (scope = 'library' AND coalesce(fragment_revision, profile_revision) IS NOT NULL))),
+  -- A removal of an adoption always has the counter it was staged from.
+  CONSTRAINT draft_source_entry_adoption CHECK (NOT adoption OR (scope = 'library' AND adoption_base IS NULL
+    AND (base IS NOT NULL OR coalesce(fragment_revision, profile_revision) IS NOT NULL))),
+  CONSTRAINT draft_source_entry_detached CHECK (NOT detached OR
+    (scope = 'cluster' AND coalesce(fragment_revision, profile_revision) IS NOT NULL)),
   CONSTRAINT draft_source_entry_shape CHECK (
     (kind = 'fragment' AND name IS NOT NULL AND machine IS NULL
       AND profile_revision IS NULL AND assignment_revision IS NULL) OR

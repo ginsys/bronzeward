@@ -68,10 +68,22 @@ func TestLibraryLayerKeptAtUpdate(t *testing.T) {
 			}
 			return `{"scope":"` + scope + `","layer":"` + layer + `","document":"machine:\n  env:\n    BW_LAYER: edge\n","marks":[]}`
 		}
-		p := wantProblem(t, ie.putFragment("layered", body("role"), ie.etag, "k-fragment-layer-0001"),
-			http.StatusUnprocessableEntity, "validation-failed")
-		if p["path"] != "layer" {
-			t.Fatalf("problem %v; want the path layer", p)
+		first := ie.putFragment("layered", body("role"), ie.etag, "k-fragment-layer-0001")
+		p := wantProblem(t, first, http.StatusUnprocessableEntity, "validation-failed")
+		claim, _ := p["ingestion"].(string)
+		if p["path"] != "layer" || p["name"] != "layered" || claim == "" {
+			t.Fatalf("problem %v; want the path layer of layered and its ingestion", p)
+		}
+		// PA §7.2: recorded with the claim abandoned, and replayed with nothing ingested again.
+		again := ie.putFragment("layered", body("role"), ie.etag, "k-fragment-layer-0001")
+		if again.Header().Get("Idempotent-Replayed") != "true" || again.Body.String() != first.Body.String() {
+			t.Fatalf("replay %d %v %s", again.Code, again.Header(), again.Body)
+		}
+		if n := count(t, ie.db, `SELECT count(*) FROM staging_claim WHERE state = 'abandoned' AND id = $1`, claim); n != 1 {
+			t.Fatalf("claim %s not abandoned", claim)
+		}
+		if n := count(t, ie.db, `SELECT count(*) FROM staging_claim`); n != 1 {
+			t.Fatalf("%d claims after the replay", n)
 		}
 		if n := count(t, ie.db, `SELECT count(*) FROM draft_source_entry WHERE draft = $1`, ie.draft); n != 0 {
 			t.Fatalf("%d entries after the refusal", n)

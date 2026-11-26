@@ -581,10 +581,14 @@ func TestLibraryConcurrentTwoScopes(t *testing.T) {
 		own := using.fragmentRevision(d.cluster, "ntp", "cluster")
 		using.fragmentHead("ntp", "cluster", nil, 2)
 		using.adopt("fragment", "ntp", f.head, f.older, 1)
+		// The machine's assignment is published already and both compile it unchanged, so no head
+		// either holds moves: only the two-scopes check can refuse the second.
 		asr := using.assignmentRevision(nil, "cluster/ntp")
-		using.entry("assignment", "", asr)
+		mustExec(t, d.db, `INSERT INTO assignment (id, cluster, machine, head_revision_id, head_revision, etag_token, created_at)
+			VALUES ($1, $2, $3, $4, 1, 'm3oxmlfh6phr7aigshdydcb4ji', now())`, id.New(id.Assignment), d.cluster, d.machine, asr)
 		using.unit.machines[0].assignment = asr
 		restoring := bare(d, d.cluster, d.machine, "k-draft-restore-01234", "bw-artifact-b")
+		restoring.unit.machines[0].assignment = asr
 		restoring.entry("fragment", "ntp", own)
 		mustExec(t, d.db, `UPDATE draft_source_entry SET base = 2 WHERE draft = $1 AND name = 'ntp'`, restoring.draft)
 		using.compiled()
