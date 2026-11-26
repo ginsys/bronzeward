@@ -213,6 +213,37 @@ func TestLibraryKeys(t *testing.T) {
 	mustExec(t, tx, insertFragment, frg(), nil, "library", "site-dns", "site", l.frvSite, 1)
 }
 
+// A name an assignment selects needs a counted source: a pin-only one, a revision only a shared
+// profile pins, does not stand for it.
+func TestLibraryPinOnlySelection(t *testing.T) {
+	db, _ := installed(t)
+	l := libraryRows(t, db)
+	op2, rel2, asr := id.New(id.Operation), id.New(id.Release), id.New(id.AssignmentRevision)
+	mustExec(t, db, insertOperation, op2, "publish", "running", "run-1/4242/publish-2", 1, l.draft2, 1, nil, l.human, nil, nil)
+	for name, c := range map[string]struct {
+		counter any
+		want    string
+	}{"a pin-only source": {nil, "23514"}, "the adopted source": {1, ""}} {
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, tx, insertAssignmentRevision, asr, l.cluster, l.machine, l.human)
+		mustExec(t, tx, insertAssignmentFragment, asr, "site", 0, "ntp")
+		mustExec(t, tx, insertRelease, rel2, l.cluster, l.draft2, 1, digest(3), "v1.13", machinery, checksum, "v1.36.0", op2,
+			l.human, "publisher")
+		mustExec(t, tx, insertScopedSource, rel2, l.cluster, "assignment", "cluster", nil, nil, l.asg, nil, l.machine, nil, nil,
+			asr, 2, nil, nil, nil)
+		mustExec(t, tx, insertScopedSource, rel2, l.cluster, "fragment", "library", l.lfrg, nil, nil, "ntp", nil, l.lfrv, nil,
+			nil, nil, c.counter, nil, nil)
+		_, err = tx.Exec(`SET CONSTRAINTS ALL IMMEDIATE`)
+		if got := sqlState(err); got != c.want {
+			t.Errorf("a selection met by %s: %v; want SQLSTATE %q", name, err, c.want)
+		}
+		_ = tx.Rollback()
+	}
+}
+
 // A fragment a shared profile revision pins is a release source with no adoption counter (PA §6.2).
 func TestLibraryPinnedSource(t *testing.T) {
 	db, _ := installed(t)

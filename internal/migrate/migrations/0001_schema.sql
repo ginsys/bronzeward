@@ -1092,7 +1092,8 @@ BEGIN
      OR EXISTS (
        SELECT FROM assignment_revision_fragment a WHERE a.revision = NEW.assignment_revision AND NOT EXISTS (
          SELECT FROM release_source s JOIN fragment_revision f ON f.id = s.fragment_revision
-         WHERE s.release = NEW.release AND s.name = a.fragment AND f.layer = a.layer))) THEN
+         WHERE s.release = NEW.release AND s.name = a.fragment AND f.layer = a.layer
+           AND (s.scope = 'cluster' OR s.adoption_revision IS NOT NULL)))) THEN
     RAISE EXCEPTION 'release_source: an assignment selecting a name the release does not name is refused'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'release_source_selection', TABLE = 'release_source';
   END IF;
@@ -2057,6 +2058,7 @@ BEGIN
                               OR EXISTS (SELECT FROM assignment_revision_fragment a
                                            JOIN release_source s ON s.release = m.release AND s.kind = 'fragment'
                                              AND s.name = a.fragment
+                                             AND (s.scope = 'cluster' OR s.adoption_revision IS NOT NULL)
                                           WHERE a.revision = m.assignment_revision
                                             AND s.fragment_revision = o.source_fragment_revision))))) THEN
     RAISE EXCEPTION 'dependency: an effective dependency without a declared occurrence is refused'

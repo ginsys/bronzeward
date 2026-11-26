@@ -48,7 +48,8 @@ func checkDeclarations(ctx context.Context, tx *sql.Tx, rel string, u releaseUni
 		UNION SELECT m.machine, s.fragment_revision, false FROM release_machine m
 			JOIN assignment_revision_fragment a ON a.revision = m.assignment_revision
 			JOIN release_source s ON s.release = m.release AND s.kind = 'fragment' AND s.name = a.fragment
-			WHERE m.release = $1 AND s.fragment_revision IS NOT NULL`, rel, func(row *sql.Rows) error {
+			WHERE m.release = $1 AND s.fragment_revision IS NOT NULL
+				AND (s.scope = 'cluster' OR s.adoption_revision IS NOT NULL)`, rel, func(row *sql.Rows) error {
 		var machine, revision string
 		var base bool
 		if err := row.Scan(&machine, &revision, &base); err != nil {
