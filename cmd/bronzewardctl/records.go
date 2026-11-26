@@ -233,14 +233,25 @@ func (e *env) machineObservations(args []string) error {
 
 // head prints a source head: what its revision is now, or that it was removed (persistence-api.md
 // §3.1).
-func head(w *tabwriter.Writer, kind, id, what, cluster string, rev *string, n int, created time.Time) {
-	tf(w, "%s %s\t%s\tcluster %s\n", kind, id, what, cluster)
+func head(w *tabwriter.Writer, kind, id, what, owner string, rev *string, n int, created time.Time) {
+	tf(w, "%s %s\t%s\t%s\n", kind, id, what, owner)
 	if rev == nil {
 		tf(w, "Revision\tnone: removed at head revision %d\n", n)
 	} else {
 		tf(w, "Revision\t%s, head revision %d\tbronzewardctl %s show %s\n", *rev, n, strings.ToLower(kind), *rev)
 	}
 	tf(w, "Created\t%s\n", when(created))
+}
+
+// sharedLibrary is what a record of no cluster, a shared fragment or profile, belongs to.
+const sharedLibrary = "shared library"
+
+// ownerWords is a head's owner: its cluster, or the shared library.
+func ownerWords(cluster *string) string {
+	if cluster == nil {
+		return sharedLibrary
+	}
+	return "cluster " + *cluster
 }
 
 // sourceShow reads a head, or a revision when id has the revision prefix, or a head's revisions:
@@ -283,11 +294,11 @@ func (e *env) fragmentCmd(args []string) error {
 		return e.sourceRm(apitypes.SourceEntryKindFragment, rest)
 	}
 	return sourceShow(e, "fragment", "frv", args, func(w *tabwriter.Writer, f *apitypes.FragmentBody) {
-		head(w, "Fragment", f.Id, f.Name+", layer "+f.Layer+", scope "+f.Scope, f.Cluster, f.Revision, f.HeadRevision, f.CreatedAt)
+		head(w, "Fragment", f.Id, f.Name+", layer "+f.Layer+", scope "+f.Scope, ownerWords(f.Cluster), f.Revision, f.HeadRevision, f.CreatedAt)
 	}, func(r *apitypes.FragmentRevisionBody) string { return r.Author }, func(w *tabwriter.Writer, r *apitypes.FragmentRevisionBody) {
 		tf(w, "%s\t%s\t%s\tfragment %s, layer %s\n", r.Id, e.who(r.Author), when(r.CreatedAt), r.Name, r.Layer)
 	}, func(w *tabwriter.Writer, r *apitypes.FragmentRevisionBody) {
-		tf(w, "Cluster\t%s\n", r.Cluster)
+		tf(w, "Cluster\t%s\n", or(r.Cluster, "none: "+sharedLibrary))
 		var refs []string
 		for name, ref := range r.Declarations.References {
 			refs = append(refs, fmt.Sprintf("%s (%s%s)", name, ref.Kind, versionWords(", ", ref.Version)))
@@ -308,11 +319,11 @@ func (e *env) profileCmd(args []string) error {
 		return e.sourceRm(apitypes.SourceEntryKindProfile, rest)
 	}
 	return sourceShow(e, "profile", "prv", args, func(w *tabwriter.Writer, p *apitypes.ProfileBody) {
-		head(w, "Profile", p.Id, p.Name+", scope "+p.Scope, p.Cluster, p.Revision, p.HeadRevision, p.CreatedAt)
+		head(w, "Profile", p.Id, p.Name+", scope "+p.Scope, ownerWords(p.Cluster), p.Revision, p.HeadRevision, p.CreatedAt)
 	}, func(r *apitypes.ProfileRevisionBody) string { return r.Author }, func(w *tabwriter.Writer, r *apitypes.ProfileRevisionBody) {
 		tf(w, "%s\t%s\t%s\tprofile %s pins %s\n", r.Id, e.who(r.Author), when(r.CreatedAt), r.Name, strings.Join(r.Fragments, ", "))
 	}, func(w *tabwriter.Writer, r *apitypes.ProfileRevisionBody) {
-		tf(w, "Cluster\t%s\n", r.Cluster)
+		tf(w, "Cluster\t%s\n", or(r.Cluster, "none: "+sharedLibrary))
 	})
 }
 
@@ -325,7 +336,7 @@ func (e *env) assignmentCmd(args []string) error {
 		return e.sourceRm(apitypes.SourceEntryKindAssignment, rest)
 	}
 	return sourceShow(e, "assignment", "asr", args, func(w *tabwriter.Writer, a *apitypes.AssignmentBody) {
-		head(w, "Assignment", a.Id, "machine "+a.Machine, a.Cluster, a.Revision, a.HeadRevision, a.CreatedAt)
+		head(w, "Assignment", a.Id, "machine "+a.Machine, ownerWords(&a.Cluster), a.Revision, a.HeadRevision, a.CreatedAt)
 	}, func(r *apitypes.AssignmentRevisionBody) string { return r.Author }, func(w *tabwriter.Writer, r *apitypes.AssignmentRevisionBody) {
 		parts := []string{"profiles: " + map[bool]string{true: "none"}[len(r.Profiles) == 0] + strings.Join(r.Profiles, ", ")}
 		for _, layer := range []string{"global", "site", "cluster", "role", "workload", "override"} {
@@ -385,6 +396,9 @@ func (e *env) draftCmd(args []string) error {
 			default:
 				change = "changed (based on head revision " + orInt(x.Base, "none") + ")"
 			}
+			if x.Scope != nil {
+				change = sharedLibrary + ": " + change
+			}
 			tf(w, "  %s\t%s\t%s\t%s\n", x.Kind, name, or(x.Revision, "-"), change)
 		}
 		fmt.Fprintln(w, "Not rendered: publish to see each machine's configuration.")
@@ -433,7 +447,11 @@ func (e *env) releaseCmd(args []string) error {
 		tf(w, "Renderer\tcontract %s, machinery %s, Kubernetes %s\n", r.Renderer.Contract, r.Renderer.MachineryVersion, r.Renderer.KubernetesVersion)
 		fmt.Fprintln(w, "Built from (source revisions, not configuration):")
 		for _, s := range r.Sources {
-			tf(w, "  %s\t%s\t%s\thead revision %d\n", s.Kind, s.Head, or(s.Revision, "removed"), s.HeadRevision)
+			at := sharedLibrary
+			if s.HeadRevision != nil {
+				at = sf("head revision %d", *s.HeadRevision)
+			}
+			tf(w, "  %s\t%s\t%s\t%s\n", s.Kind, s.Head, or(s.Revision, "removed"), at)
 		}
 		tf(w, "Rendered configuration per machine (%d):\n", len(r.Machines))
 		for _, m := range r.Machines {

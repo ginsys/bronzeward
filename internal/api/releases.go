@@ -25,12 +25,13 @@ type rendererBody struct {
 }
 
 // releaseSourceBody is one head a release used: the revision it left the head at (null: removed)
-// and the head revision (PA §6.2).
+// and the head revision (PA §6.2), null for a shared head, which the release leaves where it was
+// or whose counter is not the cluster's (§3.1.1).
 type releaseSourceBody struct {
 	Kind         string  `json:"kind"`
 	Head         string  `json:"head"`
 	Revision     *string `json:"revision"`
-	HeadRevision int     `json:"headRevision"`
+	HeadRevision *int    `json:"headRevision"`
 }
 
 // releaseMachineBody is one machine a release covers, with the mode it was validated in and the

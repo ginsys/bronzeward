@@ -152,7 +152,9 @@ function nextControl(from: HTMLElement | null): HTMLElement | null {
 }
 
 const CREATED: Col<{ createdAt: string }> = ["Created", (t) => when(t.createdAt)];
-const CLUSTER: Col<{ cluster: string }> = ["Cluster", (t) => <ClusterLink id={t.cluster} />];
+// A record's cluster; a shared fragment or profile has none (null).
+const Owner = ({ cluster }: { cluster: string | null }) => (cluster === null ? <>shared library</> : <ClusterLink id={cluster} />);
+const CLUSTER: Col<{ cluster: string | null }> = ["Cluster", (t) => <Owner cluster={t.cluster} />];
 // A head's current revision, null once the head is removed.
 const CURRENT: Col<{ revision: string | null }> = ["Current revision", (t) => <Id id={t.revision} none="removed" />];
 const named = (kind: string): Col<{ id: string; name: string }> => [cap(kind), (t) => <Ref to={`/${kind}s/${t.id}`} id={t.id}>{t.name}</Ref>];
@@ -240,7 +242,7 @@ export function SourceItem({ kind, id }: { kind: Kind; id: string }) {
         <>
           <PageNote parts={[sourceNote(kind)]} />
           <Fields rows={[
-            ["Identifier", s.id], ["Cluster", <ClusterLink id={s.cluster} />],
+            ["Identifier", s.id], ["Cluster", <Owner cluster={s.cluster} />],
             ...("scope" in s ? [["Scope", s.scope] as const] : []), ...("layer" in s ? [["Layer", s.layer] as const] : []),
             ...("machine" in s ? [["Machine", <MachineById id={s.machine} />] as const] : []),
             ["Current revision", <Id id={s.revision} none="removed" />], ["Head revision", s.headRevision], ["Created", when(s.createdAt)],
@@ -329,7 +331,7 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
           <PageNote parts={[revisionNote(kind)]} />
           <Detail id={r.id} />
           <Fields rows={[
-            ["Cluster", <ClusterLink id={r.cluster} />], ...("layer" in r ? [["Layer", r.layer] as const] : []),
+            ["Cluster", <Owner cluster={r.cluster} />], ...("layer" in r ? [["Layer", r.layer] as const] : []),
             ...("machine" in r ? [["Machine", <MachineById id={r.machine} />] as const] : []),
             ...("profiles" in r ? [["Profiles", r.profiles.join(", ") || "none"] as const] : []),
             ...("fragments" in r && !Array.isArray(r.fragments)

@@ -110,14 +110,18 @@ export function doneOnce(w: Write | undefined): Done | undefined {
 
 const enc = encodeURIComponent;
 export const isSource = (e: Draft["entries"][number]): e is Source => e.kind !== "import-base";
+// A shared (library) entry is shown and never edited here: the console's saves and removals write
+// the cluster's own entry, which has a slot of its own.
+export const isShared = (e: Source) => e.scope !== undefined;
+export const SHARED_LIBRARY = "shared library";
 const nameOf = (e: Source) => e.name ?? e.machine ?? "";
-const keyOf = (e: Source) => `${e.kind}:${nameOf(e)}`;
+export const keyOf = (e: Source) => `${e.kind}:${nameOf(e)}${isShared(e) ? ":library" : ""}`;
 // An entry as the list names it: a fragment's or a profile's own name, and an assignment's machine as a machine is
 // named everywhere (the shortened identifier until it is read).
 export function EntryName({ e }: { e: Source }) {
   const machine = useMachineText(e.kind === "assignment" && nameOf(e) !== "" ? nameOf(e) : undefined);
   const name = nameOf(e);
-  return <>{e.kind} {e.kind === "assignment" ? machine ?? short(name) : safeText(name) ?? NAME_NOT_SHOWN}</>;
+  return <>{e.kind} {e.kind === "assignment" ? machine ?? short(name) : safeText(name) ?? NAME_NOT_SHOWN}{isShared(e) && ` (${SHARED_LIBRARY})`}</>;
 }
 
 // What an entry changes against its base (journeys §5.4's draft show).
@@ -137,7 +141,7 @@ export function paneEntry(sources: Source[], selected: string | undefined, claim
 
 // Whether the draft already holds an entry of this kind and name, a removed one included: a PUT to
 // it would replace that entry unread (ginsys/bronzeward#517 H4).
-export const inUse = (draft: Pick<Draft, "entries">, name: string, kind: "fragment" | "profile" | "assignment" = "fragment") => draft.entries.some((e) => isSource(e) && e.kind === kind && nameOf(e) === name);
+export const inUse = (draft: Pick<Draft, "entries">, name: string, kind: "fragment" | "profile" | "assignment" = "fragment") => draft.entries.some((e) => isSource(e) && !isShared(e) && e.kind === kind && nameOf(e) === name);
 
 // The Drafts and releases page's drafts, every page read, filtered by cluster in the browser (#339 scope).
 export function Drafts() {
@@ -274,7 +278,7 @@ export function DraftItem({ id }: { id: string }) {
           <ul aria-label="Entries">
             {d.entries.map((e) => isSource(e) ? (
               <li key={keyOf(e)}>
-                <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}><EntryName e={e} /></button>
+                {isShared(e) ? <EntryName e={e} /> : <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}><EntryName e={e} /></button>}
                 {" "}{change(e)}
               </li>
             ) : <li key={`import-base:${e.machine}`}><ImportedConfigurationRef machine={e.machine} revision={e.revision} /><BaseDocument id={e.revision} machine={e.machine} /></li>)}

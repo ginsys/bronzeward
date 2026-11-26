@@ -32,6 +32,7 @@ func fragmentUpdate() effectRoute {
 }
 
 type fragmentInput struct {
+	Scope        string              `json:"scope,omitempty"`
 	Layer        string              `json:"layer"`
 	Document     ingest.Unresolved   `json:"document"`
 	Marks        []string            `json:"marks"`
@@ -40,6 +41,9 @@ type fragmentInput struct {
 }
 
 func (in *fragmentInput) check(*API) error {
+	if err := checkScope(in.Scope); err != nil {
+		return err
+	}
 	switch {
 	case !slices.Contains(fragmentLayers, in.Layer):
 		return errors.New("layer must be one of global, site, cluster, role, workload, override")
@@ -174,6 +178,13 @@ func (a *API) extractDraft(ctx context.Context, j job, in *fragmentInput, g *dra
 	if err != nil {
 		return a.failure(j, "extraction", err), nil
 	}
+	// A shared revision carries no reference rows (§3.1.1): refused before Commit, the only writer
+	// of generations.
+	if in.Scope == scopeLibrary && cand.HasReferences() {
+		return refuse(http.StatusUnprocessableEntity, "validation-failed",
+			"a shared fragment holds no secret reference: a fragment that holds one stays at cluster scope").
+			with("rule", "library-reference"), nil
+	}
 	if err := a.step("guard"); err != nil {
 		return nil, err
 	}
@@ -241,6 +252,11 @@ func updateFragment(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	} else if err != nil {
 		return result{}, err
 	}
+	k.shared = in.Scope == scopeLibrary
+	cluster := nullable(d.cluster)
+	if k.shared {
+		cluster = sql.NullString{}
+	}
 	decl := g.sanitized.Declarations()
 	gens, ref, err := resolveReferences(ctx, tx, d, decl, g.gens)
 	switch {
@@ -260,7 +276,7 @@ func updateFragment(ctx context.Context, a *API, tx *sql.Tx, q *request) (result
 	doc := string(g.sanitized.Documents())
 	frv := id.New(id.FragmentRevision)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO fragment_revision (id, cluster, name, layer, document, author, created_at, embedded)
-		VALUES ($1, $2, $3, $4, $5, $6, now(), $7::jsonb)`, frv, d.cluster, k.name, in.Layer, doc, q.principal.ID, string(emb)); err != nil {
+		VALUES ($1, $2, $3, $4, $5, $6, now(), $7::jsonb)`, frv, cluster, k.name, in.Layer, doc, q.principal.ID, string(emb)); err != nil {
 		return result{}, err
 	}
 	for _, name := range slices.Sorted(maps.Keys(decl.References)) {

@@ -13,13 +13,14 @@ import (
 )
 
 // The source reads (PA §9.2, §9.3): heads, a head's revisions and one revision, for fragments,
-// profiles and assignments. Every one is readable by any role; a fragment revision's document is
+// profiles and assignments. A shared (library) fragment or profile and its revisions belong to no
+// cluster, which they answer as null (§3.1.1). Every one is readable by any role; a fragment revision's document is
 // sanitized (compilation §2), so none carries a secret value.
 
 // fragmentBody is a fragment head; Revision is null once removed (§3.1).
 type fragmentBody struct {
 	ID           string    `json:"id"`
-	Cluster      string    `json:"cluster"`
+	Cluster      *string   `json:"cluster"`
 	Scope        string    `json:"scope"`
 	Name         string    `json:"name"`
 	Layer        string    `json:"layer"`
@@ -31,7 +32,7 @@ type fragmentBody struct {
 
 type profileBody struct {
 	ID           string    `json:"id"`
-	Cluster      string    `json:"cluster"`
+	Cluster      *string   `json:"cluster"`
 	Scope        string    `json:"scope"`
 	Name         string    `json:"name"`
 	Revision     *string   `json:"revision"`
@@ -52,7 +53,7 @@ type assignmentBody struct {
 
 type fragmentRevisionBody struct {
 	ID           string               `json:"id"`
-	Cluster      string               `json:"cluster"`
+	Cluster      *string              `json:"cluster"`
 	Name         string               `json:"name"`
 	Layer        string               `json:"layer"`
 	Document     string               `json:"document"`
@@ -71,7 +72,7 @@ type fragmentDeclarations struct {
 
 type profileRevisionBody struct {
 	ID        string    `json:"id"`
-	Cluster   string    `json:"cluster"`
+	Cluster   *string   `json:"cluster"`
 	Name      string    `json:"name"`
 	Fragments []string  `json:"fragments"`
 	Author    string    `json:"author"`
@@ -309,7 +310,7 @@ var sourceReads = map[string]readFunc{
 	"/fragments/{id}": headItem(id.Fragment, selectFragment, scanFragment,
 		func(b *fragmentBody) string { return etag(b.HeadRevision, b.token) }),
 	"/fragments/{id}/revisions": revisionsOf(id.Fragment, id.FragmentRevision, "fragment", selectFragmentRevision+
-		` JOIN fragment h ON h.cluster = r.cluster AND h.name = r.name WHERE h.id = $3 AND r.id > $1 ORDER BY r.id LIMIT $2`,
+		` JOIN fragment h ON h.owner = r.owner AND h.name = r.name WHERE h.id = $3 AND r.id > $1 ORDER BY r.id LIMIT $2`,
 		scanFragmentRevision, withReferences),
 	"/fragment-revisions/{id}": revisionItem(id.FragmentRevision, selectFragmentRevision, scanFragmentRevision, withReferences),
 
@@ -317,7 +318,7 @@ var sourceReads = map[string]readFunc{
 	"/profiles/{id}": headItem(id.Profile, selectProfile, scanProfile,
 		func(b *profileBody) string { return etag(b.HeadRevision, b.token) }),
 	"/profiles/{id}/revisions": revisionsOf(id.Profile, id.ProfileRevision, "profile", selectProfileRevision+
-		` JOIN profile h ON h.cluster = r.cluster AND h.name = r.name WHERE h.id = $3 AND r.id > $1 ORDER BY r.id LIMIT $2`,
+		` JOIN profile h ON h.owner = r.owner AND h.name = r.name WHERE h.id = $3 AND r.id > $1 ORDER BY r.id LIMIT $2`,
 		scanProfileRevision, withPins),
 	"/profile-revisions/{id}": revisionItem(id.ProfileRevision, selectProfileRevision, scanProfileRevision, withPins),
 

@@ -44,10 +44,14 @@ type effectRoute struct {
 	prepare func(ctx context.Context, a *API, q *request) error // route.prepare
 	effect  effectFunc
 	keyed   string // route.keyed
+	scoped  bool   // route.scoped
 }
 
 func (er effectRoute) on(rt *route) *route {
 	rt.action, rt.input, rt.prepare, rt.effect, rt.keyed = er.action, er.input, er.prepare, er.effect, er.keyed
+	if rt.scoped = er.scoped; rt.scoped {
+		rt.query = []string{scopeQuery}
+	}
 	return rt
 }
 

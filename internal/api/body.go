@@ -290,5 +290,11 @@ func material(q *request, canon []byte) []byte {
 	}
 	put(q.ifMatch)
 	put(string(canon))
+	// A scoped DELETE's shared scope (§7.1). The cluster's, named or not, adds nothing, so the two
+	// are one request.
+	if q.route.scoped && q.r.URL.Query().Get(scopeQuery) == scopeLibrary {
+		put(scopeQuery)
+		put(scopeLibrary)
+	}
 	return b
 }

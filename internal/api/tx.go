@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -36,10 +37,11 @@ var (
 // mutate runs a mutating request past the checks that need no transaction, then in one.
 func (a *API) mutate(w http.ResponseWriter, q *request) {
 	ctx := q.r.Context()
-	// No mutating route takes a query (§9.1: unknown fields are refused), and the fingerprint
-	// does not cover one, so a query is refused before anything else.
-	if q.r.URL.RawQuery != "" {
-		a.problem(w, q, refuse(http.StatusBadRequest, "invalid-request", "a mutating request takes no query"))
+	// No mutating route takes a query (§9.1: unknown fields are refused), save the DELETE of a
+	// fragment or profile entry, whose one query is its scope (§9.2) and which the fingerprint
+	// covers; any other is refused before anything else.
+	if ref := mutationQuery(q); ref != nil {
+		a.problem(w, q, ref)
 		return
 	}
 	q.input = q.route.input()
@@ -114,6 +116,22 @@ func (a *API) mutate(w http.ResponseWriter, q *request) {
 	if fresh && rec.afterCommit != nil {
 		rec.afterCommit()
 	}
+}
+
+// mutationQuery refuses a mutating request's query, unless its route is scoped and the query is
+// scope, once, cluster or library.
+func mutationQuery(q *request) *refusal {
+	switch {
+	case q.r.URL.RawQuery == "":
+		return nil
+	case !q.route.scoped:
+		return refuse(http.StatusBadRequest, "invalid-request", "a mutating request takes no query")
+	}
+	v, err := url.ParseQuery(q.r.URL.RawQuery)
+	if s := v[scopeQuery]; err != nil || len(v) != 1 || len(s) != 1 || s[0] != scopeCluster && s[0] != scopeLibrary {
+		return refuse(http.StatusBadRequest, "invalid-request", "the one query is scope, once: cluster or library")
+	}
+	return nil
 }
 
 // keyedFingerprint sets q's fingerprint and its key reference from the provider's HMAC (§7.1),

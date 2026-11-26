@@ -6,7 +6,7 @@
 
 import { Fragment, type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { EntryName, forgetETag, isSource, keepETag, keptETag, lastGood, NO_ETAG, WriteResult } from "./drafts.tsx";
+import { EntryName, forgetETag, isSource, keepETag, keptETag, keyOf, lastGood, NO_ETAG, WriteResult } from "./drafts.tsx";
 import { startsNew, useSend, useWrites } from "./forms.tsx";
 import { settledReads, watchView } from "./imports.tsx";
 import { Ref, short, useItem, usePending, useReads, useSettled } from "./list.tsx";
@@ -102,7 +102,7 @@ export function DraftChanges({ d, revision }: { d: Draft | undefined; revision: 
   const more = sources.length - MAX_CHANGES;
   return (
     <>
-      {" "}This draft changes: {sources.slice(0, MAX_CHANGES).map((e, i) => <Fragment key={`${e.kind}:${e.name ?? e.machine}`}>{i > 0 && ", "}<EntryName e={e} /> ({changeWord(e)})</Fragment>)}
+      {" "}This draft changes: {sources.slice(0, MAX_CHANGES).map((e, i) => <Fragment key={keyOf(e)}>{i > 0 && ", "}<EntryName e={e} /> ({changeWord(e)})</Fragment>)}
       {more > 0 && ` and ${more} more`}. The conflict may also be with a fragment this draft does not change, one selected for the machine.
     </>
   );

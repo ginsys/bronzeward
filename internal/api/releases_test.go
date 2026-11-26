@@ -170,15 +170,15 @@ func TestReleaseReads(t *testing.T) {
 			MachineryChecksum: "h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=", KubernetesVersion: "v1.36.0"}) {
 		t.Fatalf("release %+v", r)
 	}
-	wantSources := []releaseSourceBody{{Kind: "fragment", Head: s.frg, Revision: &s.frv, HeadRevision: 1},
-		{Kind: "fragment", Head: s.gone, HeadRevision: 2}}
+	wantSources := []releaseSourceBody{{Kind: "fragment", Head: s.frg, Revision: &s.frv, HeadRevision: ptr(1)},
+		{Kind: "fragment", Head: s.gone, HeadRevision: ptr(2)}}
 	slices.SortFunc(wantSources, func(a, b releaseSourceBody) int { return strings.Compare(a.Head, b.Head) })
 	if len(r.Sources) != 2 {
 		t.Fatalf("sources %+v", r.Sources)
 	}
 	for i, w := range wantSources {
 		g := r.Sources[i]
-		if g.Kind != w.Kind || g.Head != w.Head || g.HeadRevision != w.HeadRevision || (g.Revision == nil) != (w.Revision == nil) ||
+		if g.Kind != w.Kind || g.Head != w.Head || !reflect.DeepEqual(g.HeadRevision, w.HeadRevision) || (g.Revision == nil) != (w.Revision == nil) ||
 			(g.Revision != nil && *g.Revision != *w.Revision) {
 			t.Fatalf("source %d %+v; want %+v", i, g, w)
 		}
@@ -371,7 +371,7 @@ func TestReleaseReviewProvenanceProjected(t *testing.T) {
 // sameSources compares two source lists member by member, since Revision is a pointer.
 func sameSources(a, b []releaseSourceBody) bool {
 	return slices.EqualFunc(a, b, func(x, y releaseSourceBody) bool {
-		return x.Kind == y.Kind && x.Head == y.Head && x.HeadRevision == y.HeadRevision && (x.Revision == nil) == (y.Revision == nil) &&
+		return x.Kind == y.Kind && x.Head == y.Head && reflect.DeepEqual(x.HeadRevision, y.HeadRevision) && (x.Revision == nil) == (y.Revision == nil) &&
 			(x.Revision == nil || *x.Revision == *y.Revision)
 	})
 }

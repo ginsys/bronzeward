@@ -243,6 +243,9 @@ func caKeyNodes(docs []*yaml.Node, ts []*target) (map[*yaml.Node]bool, error) {
 	return out, nil
 }
 
+// HasReferences reports whether the candidate's document carries or would mint any reference.
+func (c *Candidate) HasReferences() bool { return len(c.decl.References) > 0 || c.caKey != nil }
+
 // OffersCAKey reports whether step 3a set a CA key apart, which MatchCAKey must accept before Commit.
 func (c *Candidate) OffersCAKey() bool { return c.caKey != nil }
 
