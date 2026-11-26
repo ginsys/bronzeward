@@ -1,6 +1,7 @@
 // Where the Firefox legs get their driver. A hosted runner's image holds a geckodriver (GECKOWEBDRIVER names its
 // directory); without a binary in the capability WebdriverIO asks the network for the latest release at job time, and
-// a 503 there failed a merge-group leg (ginsys/bronzeward#1121). The Firefox itself is still downloaded at its channel.
+// a 503 there failed a merge-group leg (ginsys/bronzeward#1121). The Firefox itself is still downloaded at its channel,
+// by the launcher (firefox-browser.ts).
 // Functions of their input alone, so that gecko-driver.test.ts runs them without a browser. `line` is printed by the
 // launcher hooks so that a CI log shows which of the two a run took.
 import { imageDriver } from "./edge-driver.ts";
