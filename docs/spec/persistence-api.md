@@ -444,7 +444,10 @@ order would work):
   machine selects composes nothing, so its pins refuse nothing under this rule;
 - *publication-only:* a removal of an adoption is refused when, after the draft, the cluster's view
   of the name is none and a profile pin or an assignment selection still needs
-  it;
+  it. The pins and selections that need a name are those of what the release
+  names: the draft's own profiles, and each covered machine's assignment with the
+  profiles it selects. A published profile that is none of these needs nothing,
+  and a later draft that selects it is refused;
 - *update-time:* an adoption entry is refused, rule `library-removed`, when the
   name's library head has no revision as published (removed by an earlier
   publication, or absent), whatever revision the entry names; publication checks
@@ -1227,7 +1230,12 @@ actual revision (the fourth, a name, with the names):
   compares which is the table in §3.1.1;
 - a head the release uses unchanged has moved since compilation's snapshot
   (compilation §6 step 1); for a library name that head is the cluster's
-  adoption;
+  adoption. An assignment that appeared counts as such a move: a covered machine
+  has an assignment head with a revision that the release neither changes nor
+  used, because another publication introduced it since the snapshot (expected
+  "absent"). The check holds whatever that assignment selects: the release would
+  otherwise replace the machine's desired configuration without it, and could
+  remove a name it selects;
 - a covered machine's import base (§3.2), where the draft carries none for it,
   is no longer the import base revision the snapshot read: an adoption record
   or a completed operation changed its `Applied` in between;
@@ -1686,6 +1694,10 @@ SELECT id, digest FROM release
   -- draft open, revision equals the bound draft revision
   -- $changed head revisions equal the draft's base
   -- $unchanged head revisions equal the snapshot
+  -- no covered machine has an assignment head with a revision that is in
+  --   neither $changed nor $unchanged: one introduced since the snapshot is
+  --   409 stale-input naming the head, expected "absent" (§4.2), read under
+  --   the MachineState lock
   -- each covered machine's import base, where the draft carries none,
   --   equals the snapshot's (§4.2), read under the MachineState lock
   -- each covered machine's name equals the one the snapshot read (§4.2,

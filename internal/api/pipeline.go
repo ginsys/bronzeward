@@ -57,9 +57,10 @@ type pinKey struct {
 // sourceState is one fragment, profile or assignment as the draft leaves it, the cluster's view
 // (persistence-api.md §3.1.1): its own head, with the draft's cluster entry over it, else its
 // adoption of the shared name, with the draft's shared edit over that (a publication adopts what it
-// writes; a shared removal moves no adoption). For an adoption head and headRevision are the shared
-// head and the adoption counter. revision "" is none (removed, or never published); head is ""
-// when no head exists; entry says the draft's entry gives the revision.
+// writes; a shared removal moves no adoption) or its adoption entry or removal. For an adoption
+// head and headRevision are the shared head and the adoption counter. revision "" is none
+// (removed, or never published); head is "" when no head exists; entry says the draft's entry
+// gives the revision.
 type sourceState struct {
 	revision, head string
 	headRevision   int
@@ -91,8 +92,11 @@ type snapshotReader struct {
 	j   publishJob
 	// states by kind, then by name (by machine for an assignment)
 	states map[string]map[string]sourceState
-	// proposed is the revision each shared edit of the draft proposes, by kind then name.
-	proposed map[string]map[string]string
+	// proposed is the revision each shared edit of the draft proposes, by kind then name; adopting
+	// the revision each of its adoption entries names.
+	proposed, adopting map[string]map[string]string
+	// detached is the profile revision a detachment wrote, by the name of its cluster entry.
+	detached map[string]string
 }
 
 func (r *snapshotReader) query(query string, fn func(*sql.Rows) error, args ...any) error {
@@ -222,18 +226,31 @@ func (r *snapshotReader) readStates() error {
 		return err
 	}
 	r.proposed = map[string]map[string]string{"fragment": {}, "profile": {}}
-	err = r.query(`SELECT kind, coalesce(name, machine), coalesce(fragment_revision, profile_revision, assignment_revision, ''), scope
+	r.adopting = map[string]map[string]string{"fragment": {}, "profile": {}}
+	r.detached = map[string]string{}
+	err = r.query(`SELECT kind, coalesce(name, machine), coalesce(fragment_revision, profile_revision, assignment_revision, ''), scope,
+			adoption, detached
 		FROM draft_source_entry WHERE draft = $1`, func(row *sql.Rows) error {
 		var kind, key, revision, scope string
-		if err := row.Scan(&kind, &key, &revision, &scope); err != nil {
+		var adoption, detached bool
+		if err := row.Scan(&kind, &key, &revision, &scope, &adoption, &detached); err != nil {
 			return err
 		}
 		if scope == "library" {
-			if revision != "" {
+			switch {
+			case adoption && revision == "":
+				delete(shared, [2]string{kind, key})
+			case adoption:
+				r.adopting[kind][key] = revision
+				shared[[2]string{kind, key}] = sourceState{revision: revision, entry: true, adopted: true}
+			case revision != "":
 				r.proposed[kind][key] = revision
 				shared[[2]string{kind, key}] = sourceState{revision: revision, entry: true}
 			}
 			return nil
+		}
+		if detached && kind == "profile" {
+			r.detached[key] = revision
 		}
 		st := r.states[kind][key]
 		st.revision, st.entry = revision, true
@@ -395,8 +412,13 @@ func (r *snapshotReader) readSelections(machines []snapshotMachine) (selections,
 			switch {
 			case !sel.shared[prv]:
 				if r.states["fragment"][name].revision != frv {
-					return sel, pinRefusal("Publication refused: a pin is not its fragment's revision after the draft.",
-						sel.named[prv], i, frv), nil
+					ref := pinRefusal("Publication refused: a pin is not its fragment's revision after the draft.",
+						sel.named[prv], i, frv)
+					if r.detached[sel.named[prv]] == prv {
+						ref = pinRefusal("Publication refused: a detached profile pins a revision the cluster's view does not hold.",
+							sel.named[prv], i, frv).with("rule", "detach-pin-not-in-view").with("fragment", name)
+					}
+					return sel, ref, nil
 				}
 			case proposed && sel.heads[frv].revision != frv && r.proposed["fragment"][name] != frv:
 				return sel, pinRefusal(sharedPinDetail, sel.named[prv], i, frv), nil
@@ -510,8 +532,8 @@ func (sel selections) compose(r *snapshotReader, asr string) []string {
 // unchanged is every source the release names without a draft entry: each covered machine's
 // assignment, each profile its assignments select, and each fragment they select or a named
 // cluster profile pins, at the revision and head revision read. Then each revision a named shared
-// profile pins that none of these and no shared edit of the draft is: a pin-only source, whose
-// shared head T3 does not hold for it.
+// profile pins that none of these and no shared edit or adoption entry of the draft is: a
+// pin-only source, whose shared head T3 does not hold for it.
 func (r *snapshotReader) unchanged(machines []snapshotMachine, sel selections) []usedHead {
 	used := map[[2]string]bool{}
 	for _, m := range machines {
@@ -549,7 +571,8 @@ func (r *snapshotReader) unchanged(machines []snapshotMachine, sel selections) [
 		for _, frv := range pins {
 			name := sel.revisions[frv][0]
 			held := used[[2]string{"fragment", name}] && r.states["fragment"][name].revision == frv
-			if !held && r.proposed["fragment"][name] != frv && !pinned[frv] {
+			named := r.proposed["fragment"][name] == frv || r.adopting["fragment"][name] == frv
+			if !held && !named && !pinned[frv] {
 				pinned[frv] = true
 				out = append(out, usedHead{kind: "fragment", head: sel.heads[frv].id, revision: frv, pinned: true, name: name})
 			}

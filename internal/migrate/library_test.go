@@ -17,6 +17,10 @@ const (
 	// base and adoption base.
 	insertScopedEntry = `INSERT INTO draft_source_entry (draft, cluster, kind, scope, name, machine, fragment_revision,
 		profile_revision, assignment_revision, base, adoption_base) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+	// A fragment entry with its marks: draft, cluster, scope, name, revision, base, adoption base,
+	// adoption and detached.
+	insertMarkedEntry = `INSERT INTO draft_source_entry (draft, cluster, kind, scope, name, fragment_revision, base,
+		adoption_base, adoption, detached) VALUES ($1, $2, 'fragment', $3, $4, $5, $6, $7, $8, $9)`
 	insertScopedSource = `INSERT INTO release_source (release, cluster, kind, scope, fragment, profile, assignment, name, machine,
 		fragment_revision, profile_revision, assignment_revision, head_revision, adoption_revision, previous_fragment_revision,
 		previous_profile_revision) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
@@ -157,6 +161,17 @@ func TestLibraryKeys(t *testing.T) {
 		{"second shared entry of one name", []stmt{{insertScopedEntry,
 			[]any{l.draft2, l.cluster, "fragment", "library", "ntp", nil, l.lfrv, nil, nil, 1, 1}}}, insertScopedEntry,
 			[]any{l.draft2, l.cluster, "fragment", "library", "ntp", nil, l.lfrv2, nil, nil, 1, 1}, "23505"},
+
+		{"cluster entry marked as an adoption", nil, insertMarkedEntry,
+			[]any{l.draft2, l.cluster, "cluster", "ntp", l.cfrv, nil, nil, true, false}, "23514"},
+		{"adoption with an adoption base", nil, insertMarkedEntry,
+			[]any{l.draft2, l.cluster, "library", "ntp", l.lfrv, 1, 1, true, false}, "23514"},
+		{"adoption removal with no base", nil, insertMarkedEntry,
+			[]any{l.draft2, l.cluster, "library", "ntp", nil, nil, nil, true, false}, "23514"},
+		{"shared entry marked as detached", nil, insertMarkedEntry,
+			[]any{l.draft2, l.cluster, "library", "ntp", l.lfrv, nil, nil, false, true}, "23514"},
+		{"detached removal", nil, insertMarkedEntry,
+			[]any{l.draft2, l.cluster, "cluster", "ntp", nil, 1, nil, false, true}, "23514"},
 	} {
 		func() {
 			tx, err := db.Begin()
@@ -209,6 +224,10 @@ func TestLibraryKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Controls of the marked entries: an adoption entry and removal, and a detached copy.
+	mustExec(t, tx, insertMarkedEntry, l.draft, l.cluster, "library", "ntp", l.lfrv, nil, nil, true, false)
+	mustExec(t, tx, insertMarkedEntry, l.draft, l.cluster, "library", "registries", nil, 1, nil, true, false)
+	mustExec(t, tx, insertMarkedEntry, l.draft, l.cluster, "cluster", "ntp", l.cfrv, nil, nil, false, true)
 	mustExec(t, tx, `ALTER TABLE fragment DROP CONSTRAINT fragment_head_revision`)
 	mustExec(t, tx, insertFragment, frg(), nil, "library", "site-dns", "site", l.frvSite, 1)
 }
