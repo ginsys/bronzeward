@@ -517,8 +517,9 @@ func TestLibraryImpact(t *testing.T) {
 		},
 		"a detachment": {
 			func(f *impactFleet, p *publishEnv) {
-				p.adoptionEntry("fragment", "ntp", nil, 1)
+				// detachedEntry clears every entry of the name, so the removal is staged after it.
 				p.detachedEntry("fragment", "ntp", p.fragmentRevision(p.cluster, "ntp", "cluster"))
+				p.adoptionEntry("fragment", "ntp", nil, 1)
 			},
 			func(f *impactFleet) []reachedItem {
 				return []reachedItem{
