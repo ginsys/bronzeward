@@ -1,0 +1,293 @@
+#!/usr/bin/env bash
+# Usage: run/live <talosctl directory> <new work directory on disk, outside the checkout>
+# Test 3: disposable Talos clusters in the host's Docker, one at a time, each destroyed before the
+# next:
+#   t114    talosctl v1.14.5, node image v1.14.5          cluster bw-w22-t114
+#   t115c14 talosctl v1.14.5, node image v1.15.0-beta.1   cluster bw-w22-t115 (a v1.14-contract node)
+#   t115    talosctl v1.15.0-beta.1, node v1.15.0-beta.1  cluster bw-w22-t115
+# The talosctl directory holds talosctl-v1.14.5 and talosctl-v1.15.0-beta.1, which are checked
+# against versions.env before use.
+#
+# What it writes and removes, and how that is bounded:
+# - It refuses to start if a container, network or state of either cluster name exists, or the
+#   subnet is taken. It destroys only a cluster it went on to create, by name and by its own
+#   --state directory, from a trap that also runs on failure and on the time bound.
+# - Every talosctl call to a node uses the talosconfig that cluster's create wrote in the work
+#   directory; talosconfig, kubeconfig and cluster state are all in the work directory. The
+#   operator's ~/.talos/config and ~/.kube/config must hash the same before and after.
+# - It sends only to the worker of the cluster it created: an endpoint outside 10.56.0.0/24, or
+#   not the address of one of that cluster's containers, is refused, and both refusals are shown
+#   with planted addresses before the first write.
+# - Every real apply (through Bronzeward's applier) follows a successful no-reboot dry run of the
+#   same bytes. All other applies are dry runs.
+# - It removes an image only if this run pulled it and no container uses it, never forced.
+# - It removes no file. Node configurations hold the disposable cluster's own secrets and stay in
+#   the work directory, mode 600, until whoever ran it deletes that directory.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=/dev/null
+. "$here/versions.env"
+: "${KUBERNETES_VERSION:?}" "${TALOS_IMAGE_v1_14_5:?}" "${TALOS_IMAGE_v1_15_0_beta_1:?}"
+if [ -z "${W22_BOUNDED:-}" ]; then
+	[ $# -eq 2 ] || { echo "usage: $0 <talosctl directory> <new work directory>" >&2; exit 2; }
+	# GNU timeout signals the whole process group, so the running command ends and the trap runs;
+	# the kill-after leaves the trap time to destroy the cluster. Both fit inside 60 minutes.
+	W22_BOUNDED=1 exec timeout --signal=TERM --kill-after=300 3000 "$0" "$@"
+fi
+
+tools=$(cd "$1" && pwd)
+mkdir -- "$2"
+work=$(cd -- "$2" && pwd)
+umask 077
+export KUBECONFIG=$work/kubeconfig TALOSCONFIG=$work/talosconfig-unused
+
+names=(bw-w22-t114 bw-w22-t115)
+subnet=10.56.0.0/24
+created='' created_ctl='' run_label=''
+pulled=()
+
+say() { printf '== %s\n' "$*"; }
+die() { printf 'run/live: %s\n' "$*" >&2; exit 1; }
+
+home_hashes() {
+	local f
+	for f in "$HOME/.talos/config" "$HOME/.kube/config"; do
+		if [ -e "$f" ]; then sha256sum -- "$f"; else printf 'absent  %s\n' "$f"; fi
+	done
+}
+
+cluster_things() { # cluster_things <name>: every container, network and volume carrying the name
+	docker ps --all --quiet --filter "label=talos.cluster.name=$1"
+	docker ps --all --quiet --filter "name=^$1-"
+	docker network ls --quiet --filter "label=talos.cluster.name=$1"
+	docker network ls --quiet --filter "name=^$1\$"
+}
+
+ctl_for() { # ctl_for <version>
+	printf '%s/talosctl-%s' "$tools" "$1"
+}
+
+destroy_created() {
+	local rc=0
+	[ -n "$created" ] || return 0
+	say "destroy $created"
+	"$(ctl_for "$created_ctl")" cluster destroy --name "$created" --state "$work/state-$run_label" >"$work/destroy-$run_label.log" 2>&1 || rc=$?
+	local left
+	left=$(cluster_things "$created") || rc=1
+	if [ "$rc" -ne 0 ] || [ -n "$left" ]; then
+		say "DESTROY INCOMPLETE for $created (rc=$rc): left=$(tr '\n' ' ' <<<"$left"); see destroy-$run_label.log"
+		return 1
+	fi
+	say "destroyed $created; nothing carries its name"
+	created=''
+}
+
+finish() {
+	local rc=$?
+	trap - EXIT INT TERM
+	destroy_created || rc=1
+	local img
+	for img in "${pulled[@]}"; do
+		if [ -z "$(docker ps --all --quiet --filter "ancestor=$img")" ]; then
+			if docker image rm "$img" >/dev/null; then
+				say "removed image this run pulled: $img"
+			else
+				say "image not removed: $img"
+			fi
+		else
+			say "image left, a container uses it: $img"
+		fi
+	done
+	home_hashes >"$work/home-after"
+	if cmp -s "$work/home-before" "$work/home-after"; then
+		say "operator talosconfig and kubeconfig unchanged (hashes or absence equal)"
+	else
+		say "OPERATOR CONFIG CHANGED: compare $work/home-before and home-after"
+		rc=1
+	fi
+	say "docker containers now: $(docker ps --all --format '{{.Names}}' | tr '\n' ' ')"
+	say "end rc=$rc"
+	exit "$rc"
+}
+
+# --- checks before anything is created ---
+for v in v1.14.5 v1.15.0-beta.1; do
+	var=TALOSCTL_SHA256_${v//[.-]/_}
+	[ "$(sha256sum "$(ctl_for "$v")" | cut -d' ' -f1)" = "${!var}" ] || die "talosctl $v is not the pinned binary"
+done
+for n in "${names[@]}"; do
+	existing=$(cluster_things "$n")
+	[ -z "$existing" ] || die "something named $n already exists; nothing was created"
+done
+subnets=$(docker network ls --quiet | xargs docker network inspect --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}')
+case " $(tr '\n' ' ' <<<"$subnets") " in *" $subnet "*) die "$subnet is taken by a Docker network" ;; esac
+home_hashes >"$work/home-before"
+trap finish EXIT
+trap 'exit 143' INT TERM
+
+image() { # image <reference>: pull if absent, remember what this run pulled, print repo@digest
+	if ! docker image inspect "$1" >/dev/null 2>&1; then
+		docker pull --quiet "$1" >&2
+		pulled+=("$1")
+	fi
+}
+image "$TALOS_IMAGE_v1_14_5"
+image "$TALOS_IMAGE_v1_15_0_beta_1"
+for ref in "$TALOS_IMAGE_v1_14_5" "$TALOS_IMAGE_v1_15_0_beta_1"; do
+	say "image $ref digests: $(docker image inspect --format '{{join .RepoDigests " "}}' "$ref")"
+done
+
+say "build A and B"
+# An operator's own GOPRIVATE would take modules out of checksum verification, which run/build
+# refuses: build with Go's defaults.
+env -u GOROOT -u GOPRIVATE -u GONOSUMDB GOENV=off "$here/run/build" a "$work/src-a"
+env -u GOROOT -u GOPRIVATE -u GONOSUMDB GOENV=off "$here/run/build" b-raw "$work/src-b"
+for b in a b; do
+	for p in compile live; do
+		cp "$here/probe/${p}_probe_test.go.in" "$work/src-$b/internal/compile/zz_talos115_${p}_test.go"
+	done
+	# Compile both probes now, so that a build failure stops the run before any cluster exists.
+	(cd "$work/src-$b" && env -u GOROOT go test -count=1 -run '^$' ./internal/compile)
+done
+
+probe() { # probe <a|b> <step> [VAR=value...]
+	local b=$1 step=$2
+	shift 2
+	(cd "$work/src-$b" && env -u GOROOT "TALOS115_STEP=$step" "$@" \
+		go test -count=1 -v -run '^TestTalos115Live$' ./internal/compile) |
+		grep -E '^(live |--- FAIL|FAIL|panic:|    .*zz_talos115)'
+}
+
+own_endpoint() { # own_endpoint <cluster> <address>: refuse all but that cluster's containers
+	case $2 in 10.56.0.*) ;; *) return 1 ;; esac
+	local ids
+	ids=$(docker ps --quiet --filter "label=talos.cluster.name=$1")
+	[ -n "$ids" ] || return 1
+	local addresses
+	# shellcheck disable=SC2086  # one ID per word
+	addresses=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' $ids) || return 1
+	grep --quiet --line-regexp --fixed-strings -- "$2" <<<"$addresses"
+}
+
+address_of() { # address_of <container>
+	docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1"
+}
+
+# dry_run <file> <case>: a no-reboot dry run on the worker through this cluster's talosctl. The
+# output can hold the configuration and a diff of it (E3 5.4), so it stays in a file; printed are the
+# exit status and, for a refusal, the error's first line cut before any diff.
+dry_run() {
+	own_endpoint "$cluster" "$worker" || die "refusing to send to $worker: not a container of $cluster"
+	local rc=0 log=$work/$run_label/dry-$2.log
+	timeout 60 "$(ctl_for "$cluster_ctl")" --talosconfig "$tc" --endpoints "$worker" --nodes "$worker" \
+		apply-config --mode no-reboot --dry-run --file "$1" >"$log" 2>&1 || rc=$?
+	if [ "$rc" -eq 0 ]; then
+		say "dry-run $2 accepted (exit 0)"
+	else
+		say "dry-run $2 refused (exit $rc): $(sed -n '/[Ee]rror/{s/[Cc]onfig diff:.*//;s/diff:.*//;p;q}' "$log" | cut -c1-400)"
+	fi
+	return "$rc"
+}
+
+# apply_checked <file> <case>: the dry run, then only if it passed the same bytes through
+# Bronzeward's applier (build B).
+apply_checked() {
+	local sum
+	sum=$(sha256sum "$1" | cut -d' ' -f1)
+	dry_run "$1" "$2" || return 1
+	own_endpoint "$cluster" "$worker" || die "refusing to send to $worker: not a container of $cluster"
+	probe b apply "TALOS115_ENDPOINT=$worker" "TALOS115_TALOSCONFIG=$tc" "TALOS115_FILE=$1" "TALOS115_SHA256=$sum"
+}
+
+observe() { # observe <expected file>
+	probe b observe "TALOS115_ENDPOINT=$worker" "TALOS115_TALOSCONFIG=$tc" "TALOS115_FILE=$1"
+}
+
+# Called with "||", which turns errexit off inside it: every step a later write depends on is
+# checked where it stands.
+scenario() { # scenario <label> <cluster> <talosctl version> <image> <cases: yes|no>
+	run_label=$1 cluster=$2 cluster_ctl=$3
+	local img=$4 cases=$5 dir=$work/$1
+	mkdir "$dir" "$dir/out-a" "$dir/out-b"
+	say "scenario $run_label: cluster $cluster, talosctl $cluster_ctl, image $img"
+	local existing
+	existing=$(cluster_things "$cluster")
+	[ -z "$existing" ] || die "something named $cluster exists before its create"
+	tc=$work/talosconfig-$run_label
+	# Recorded before the create, which can fail part way: nothing of the name existed above.
+	created=$cluster created_ctl=$cluster_ctl
+	timeout 900 "$(ctl_for "$cluster_ctl")" cluster create docker --name "$cluster" --state "$work/state-$run_label" \
+		--image "$img" --kubernetes-version "$KUBERNETES_VERSION" --subnet "$subnet" --workers 1 \
+		--host-ip 127.0.0.1 --talosconfig-destination "$tc" >"$dir/create.log" 2>&1 || {
+		say "scenario $run_label: cluster create failed; last lines:"
+		tail -n 8 "$dir/create.log" | cut -c1-300
+		destroy_created
+		return 1
+	}
+	worker=$(address_of "$cluster-worker-1")
+	own_endpoint "$cluster" "$worker" || die "the worker's address $worker is not accepted"
+	local planted
+	for planted in 192.0.2.1 10.56.0.250; do
+		if own_endpoint "$cluster" "$planted"; then die "control failed: planted endpoint $planted accepted"; fi
+		say "control: planted endpoint $planted refused"
+	done
+	say "worker $worker"
+	local node=$dir/node.yaml
+	probe b read "TALOS115_ENDPOINT=$worker" "TALOS115_TALOSCONFIG=$tc" "TALOS115_FILE=$node" && [ -s "$node" ] || {
+		say "scenario $run_label: the node's configuration could not be read"
+		destroy_created
+		return 1
+	}
+
+	say "control: dry run of the node's own configuration"
+	dry_run "$node" control-unchanged || true
+	say "control: dry run of an invalid configuration (must be refused)"
+	sed '0,/^\( *\)type: worker$/s//\1type: bogus/' "$node" >"$dir/invalid.yaml"
+	if cmp -s "$node" "$dir/invalid.yaml"; then die "control not planted: no machine type line"; fi
+	if dry_run "$dir/invalid.yaml" control-invalid; then say "CONTROL FAILED: the node accepted a bogus machine type"; fi
+
+	local b want=''
+	[ "$cases" = yes ] && want=1
+	for b in a b; do
+		say "compile the node's configuration in build $b"
+		probe "$b" compile "TALOS115_FILE=$node" "TALOS115_OUT=$dir/out-$b" "TALOS115_CASES=$want" || say "compile in $b failed"
+	done
+
+	if [ -f "$dir/out-b/mat-label.yaml" ]; then
+		say "apply the label compile (build B)"
+		if apply_checked "$dir/out-b/mat-label.yaml" label; then
+			say "read back"
+			observe "$dir/out-b/mat-label.yaml"
+			sleep 60
+			say "drift read after 60 s"
+			observe "$dir/out-b/mat-label.yaml"
+			say "control: plant a change, the drift read must say same=false"
+			if [ -f "$dir/out-b/mat-label-other.yaml" ] && apply_checked "$dir/out-b/mat-label-other.yaml" label-other; then
+				observe "$dir/out-b/mat-label.yaml"
+			fi
+		else
+			say "scenario $run_label: label apply not completed"
+		fi
+	fi
+
+	if [ "$cases" = yes ]; then
+		say "dry runs of every new kind and field build B accepted"
+		local f id
+		probe b read "TALOS115_ENDPOINT=$worker" "TALOS115_TALOSCONFIG=$tc" "TALOS115_FILE=$dir/before-cases.yaml"
+		for f in "$dir"/out-b/mat-kind-*.yaml "$dir"/out-b/mat-field-*.yaml; do
+			[ -f "$f" ] || continue
+			id=${f##*/mat-}
+			dry_run "$f" "${id%.yaml}" || true
+		done
+		say "the node is unchanged by the dry runs"
+		observe "$dir/before-cases.yaml"
+	fi
+	destroy_created
+}
+
+scenario t114 bw-w22-t114 v1.14.5 "$TALOS_IMAGE_v1_14_5" yes || say "scenario t114 did not complete"
+destroy_created
+scenario t115c14 bw-w22-t115 v1.14.5 "$TALOS_IMAGE_v1_15_0_beta_1" no || say "scenario t115c14 did not complete"
+destroy_created
+scenario t115 bw-w22-t115 v1.15.0-beta.1 "$TALOS_IMAGE_v1_15_0_beta_1" no || say "scenario t115 did not complete"

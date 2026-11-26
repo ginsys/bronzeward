@@ -1,0 +1,182 @@
+// Live half of the ginsys/bronzeward#1212 probe (test 3). run/live copies it, with
+// compile_probe_test.go.in, into an export's internal/compile. It reads and applies through
+// Bronzeward's own Talos reader and applier, to a disposable node run/live created, and compiles
+// that node's own configuration through Bronzeward's compiler. It prints verdicts, digests and
+// document kinds, never configuration bytes or key material.
+package compile
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"testing"
+	"testing/cryptotest"
+	"time"
+
+	"github.com/ginsys/bronzeward/internal/ingest"
+	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/talos"
+)
+
+// liveSubnet is the only network the live probe dials: run/live's disposable clusters.
+const liveSubnet = "10.56.0.0/24"
+
+func liveEnv(t *testing.T, name string) string {
+	t.Helper()
+	v := os.Getenv(name)
+	if v == "" {
+		t.Fatalf("%s is not set", name)
+	}
+	return v
+}
+
+func liveEndpoint(t *testing.T) (endpoint string, talosconfig []byte) {
+	t.Helper()
+	endpoint = liveEnv(t, "TALOS115_ENDPOINT")
+	addr, err := netip.ParseAddr(endpoint)
+	if err != nil || !netip.MustParsePrefix(liveSubnet).Contains(addr) {
+		t.Fatalf("the endpoint is not an address in %s", liveSubnet)
+	}
+	talosconfig, err = os.ReadFile(liveEnv(t, "TALOS115_TALOSCONFIG"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return endpoint, talosconfig
+}
+
+// TestTalos115Live runs the one step TALOS115_STEP names.
+func TestTalos115Live(t *testing.T) {
+	step := os.Getenv("TALOS115_STEP")
+	if step == "" {
+		t.Skip("set by experiments/talos-115-beta/run/live")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	say := func(format string, a ...any) { fmt.Printf("live "+format+"\n", a...) }
+	switch step {
+	case "read", "observe":
+		endpoint, tc := liveEndpoint(t)
+		r, err := talos.Dial(ctx, tc, endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		version, err := r.Version(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := r.MachineConfig(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest := cfg.Digest()
+		if step == "read" {
+			if err := os.WriteFile(liveEnv(t, "TALOS115_FILE"), cfg.Bytes(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			say("read version=%s resourceVersion=%s digest=%x kinds=%s", version, cfg.ResourceVersion(), digest, kinds(cfg.Bytes()))
+			return
+		}
+		want, err := os.ReadFile(liveEnv(t, "TALOS115_FILE"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		say("observe version=%s resourceVersion=%s digest=%x expected=%x same=%v", version, cfg.ResourceVersion(), digest,
+			talos.ConfigurationDigest(want), digest == talos.ConfigurationDigest(want))
+	case "apply":
+		endpoint, tc := liveEndpoint(t)
+		b, err := os.ReadFile(liveEnv(t, "TALOS115_FILE"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The bytes sent must be the bytes run/live's dry run passed.
+		if got := digestOf(b); got != liveEnv(t, "TALOS115_SHA256") {
+			t.Fatalf("the file is not the one the dry run saw")
+		}
+		a, err := talos.DialApplier(ctx, tc, endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer a.Close()
+		resp, err := a.ApplyNoReboot(ctx, b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		say("apply class=%s code=%s text=%q", resp.Class, resp.Code, resp.Text)
+		if resp.Class != talos.ClassAccepted {
+			t.Fatal("the node did not accept the configuration")
+		}
+	case "compile":
+		liveCompile(t, say)
+	default:
+		t.Fatalf("unknown step %q", step)
+	}
+}
+
+// liveCompile takes the node's own configuration as the import base and compiles it, plain, with a
+// label fragment holding a synthetic reference, with a second label value, and, when
+// TALOS115_CASES is set, with each new kind and new field.
+func liveCompile(t *testing.T, say func(string, ...any)) {
+	base, err := os.ReadFile(liveEnv(t, "TALOS115_FILE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := liveEnv(t, "TALOS115_OUT")
+	label := func(v string) []probeFrag {
+		return []probeFrag{{text: "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  node.example.test/probe: !bwref probe\n",
+			decl: strRef("probe"), values: map[string]provider.Value{"probe": value(t, provider.KindString, v)}}}
+	}
+	cases := []probeCase{{id: "none"}, {id: "label", frags: label("synthetic-one")}, {id: "label-other", frags: label("synthetic-two")}}
+	if os.Getenv("TALOS115_CASES") != "" {
+		for _, k := range newKinds {
+			cases = append(cases, probeCase{id: "kind-" + k.id, frags: []probeFrag{lit("apiVersion: v1alpha1\nkind: " + k.id + "\n" + k.doc)}})
+		}
+		for _, f := range newFields {
+			cases = append(cases, probeCase{id: "field-" + f.id, frags: []probeFrag{lit(f.frag)}})
+		}
+	}
+	for _, c := range cases {
+		cryptotest.SetGlobalRandom(t, 2)
+		source, err := ingestProbe(probeFrag{text: string(base), decl: ingest.Declarations{}})
+		if err != nil {
+			say("case %s refused stage=ingest-base error=%q", c.id, err.Error())
+			continue
+		}
+		in := Input{Base: source, Mode: ModeContainer}
+		refused := false
+		for _, f := range c.frags {
+			s, err := ingestProbe(f)
+			if err != nil {
+				say("case %s refused stage=ingest-fragment error=%q", c.id, err.Error())
+				refused = true
+				break
+			}
+			in.Fragments = append(in.Fragments, s)
+		}
+		if refused {
+			continue
+		}
+		got, err := Compile(in)
+		if err != nil {
+			var e *Error
+			if errors.As(err, &e) {
+				say("case %s refused stage=compile rule=%s message=%q", c.id, e.Rule, e.Message)
+			} else {
+				say("case %s refused stage=compile error=%q", c.id, err.Error())
+			}
+			continue
+		}
+		mat := got.Materialized().bytes()
+		if err := os.WriteFile(filepath.Join(out, "mat-"+c.id+".yaml"), mat, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		digest, err := got.Materialized().Digest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		say("case %s ok sha256=%s configurationDigest=%x", c.id, digestOf(mat), digest)
+	}
+}
