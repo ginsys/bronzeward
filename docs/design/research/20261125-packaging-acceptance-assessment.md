@@ -37,6 +37,13 @@ that belong to this work are not in the issue, and §5 records them: signing and
 workflow text, and the locked-keychain behaviour of
 [ginsys/bronzeward#661](https://github.com/ginsys/bronzeward/issues/661).
 
+**Update, 26 November 2026.** Row 3, §3 and §8 were assessed again after
+[ginsys/bronzeward#1198](https://github.com/ginsys/bronzeward/pull/1198) (the clean-install steps, merged as
+`d55e7828`) and [ginsys/bronzeward#1200](https://github.com/ginsys/bronzeward/pull/1200) (the journey pages'
+blocks, merged as `b36aae78`). Both results come from CI run 45744289310, the merge queue's run of `b36aae78`,
+the commit main then held: job `doc-blocks` 139656481708 and job `go-db` 139656481795, both successful, with
+the records they uploaded (13 and 25 blocks run). The other rows were not read again.
+
 ## 2. The three acceptance rows
 
 The four other sub-issues are closed and their files are on main (`gh issue view`, 25 November):
@@ -80,33 +87,65 @@ sentence of it. Screen-reader coverage is the limit the owner accepted for
 
 ### Row 3: clean install and the documented workflows on the agreed matrix
 
-State: **not met.** Two parts are open, and neither is a rounding: the Linux clean-install check lacks the
-steps the issue names after the install (first row), and the documented workflows are not run from the
-pages (last row). The `darwin` part, which was open when this document was first written, has since run
-once (second row).
+State: **met with limits**, which is not the owner's acceptance. The clean install now adds a context from the
+client configuration file and signs in, and every client page with commands has blocks that CI runs from the
+page. Two kinds of run stand behind it, and the second is not the fixture the criterion names: see the table
+of pages below. Scripted T1 and T2 were dropped from this work by the campaign lead on 25 November
+(operator journeys §13 says an agent walkthrough does not count); that narrows the criterion and is not the
+owner's decision.
 
 The agreed matrix is `linux/amd64` (CI, disposable fixture) and `darwin/arm64` (the macOS runner, Keychain).
 
 | Part of the row | State | Evidence |
 | --- | --- | --- |
-| Clean install on `linux/amd64` | met in part; **not met** for the steps after the install | Job `doc-blocks` (success): `scripts/release/run-doc-blocks.sh` builds at `v0.0.0-dev`, installs the archives in a clean container (curl, tar, CA certificates only) and runs the marked blocks against a disposable server, failing when a marked block did not run or another one did. What ran: the build, the checksum check, the unpack and install, `context list`, `cluster list` and `machine list` (empty: the fixture starts no secret provider), and `whoami` as a synthetic viewer, in a context that `run-doc-blocks.sh` adds with explicit flags and a pre-minted token file (`--oidc-token-file`). Not run, though the issue's check names them: `context add --from` the fixture's `bronzeward-client.json` with its CA, a sign-in through the test provider, T1 and T2 in scripted form (T2 needs a drifted machine, which the empty inventory cannot show), and the signature steps (no release exists). Limit: the build there is not the `package` job's archive (its version carries the commit) |
+| Clean install on `linux/amd64` | met with limits | Job `doc-blocks`: `scripts/release/run-doc-blocks.sh` builds at `v0.0.0-dev`, installs the archives in a clean container (curl, tar and CA certificates only) and runs 13 marked blocks, all of which ran and exited 0. They include `context add --from` the build's web host, which serves `bronzeward-client.json` over TLS under a throwaway certificate authority, with `--certificate-authority`; `login --device`; and `whoami` in that context, which printed the role `viewer`. Limits: the identity provider is the fixture issuer, which approves the device sign-in by itself, not Zitadel and not a browser; the container has no credential store, so the sign-in is kept in a token file; the server's address the pages write is replaced by the web host's; the build is not the `package` job's archive; the signature steps cannot run (no release exists); T1 and T2 scripted: dropped, see above |
 | Clean install and Keychain on `darwin/arm64` | met with limits | Job `packaged-darwin` and `scripts/release/run-packaged-darwin.sh`, added by this change. First run: CI run 45708951483, job 139539603782, on a `macos-26-arm64` runner, 22:00:44 to 22:01:37 UTC on 25 November, at the first head of the pull request that added it (that run was later cancelled as a whole by the next push; this job had finished green). Its log shows the archive `OK` against `SHA256SUMS`, then "login stored the sign-in in the Keychain, logout read it back, revoked it and removed it", then the archive "is a Mach-O 64-bit executable arm64, and prints" the build's version "with the server gone". Limits: one run, on a pull request head, not on main; install, `version` and the Keychain only, with no live-server workflow (no Docker, the server is Linux only); a keychain made unlocked for the run; the archive is unpacked from a file the job downloaded. A run cancelled for want of a macOS runner would read "not run" |
 | Inaccessible and incompatible servers | met with limits | `packaged-cli` (success): TLS-01, TLS-02, COMP-01, COMP-02 and `TestPackagedVersion` on the packaged linux/amd64 binaries, with a wrong version planted to fail. `packaged-web` (success): TLS-02 and TLS-03's read case and the footer case in Chrome and Firefox on the Caddy-served bundle. Limits, from `CONTRIBUTING.md`: the web footer's server version, COMP and TLS-03's write case are not run on the bundle |
 | Version reporting | met with the same limits | CLI prints its own and the server's version on the packaged binaries; the web footer shows the bundle's version and `Server unknown` when the server cannot be read (`web/e2e/packaged.e2e.ts:15`) |
 | Reproducible artifacts, no local-only scripts | met | Rows above run in CI jobs from repository scripts; no check here needs a developer machine |
 | Synthetic credentials | met | The scan of row 1; the fixtures and the stub identity provider use `BWSYNTH-` values |
-| **Documented workflows run from the pages** | **not met** | Of 46 unindented `bash` or `sh` fences in the 14 client pages that hold any, 7 are marked `{.bw-run}`, on four pages (`install.md` 4, `contexts.md` 1, `inventory.md` 1, `sign-in-and-renewal.md` 1). No marked block exists on the other ten pages, so no check runs their commands from the page. Their behaviour is covered by cases in `internal/clitest` and `web/e2e` against a source-built fixture, and the web steps by the tag check of row 2. Count: lines opening a fence with `bash` or `sh`, at the margin, per page with `rg -c`; a fence indented in a list item is not counted, and the 7 equals the runner's own list in `scripts/release/run-doc-blocks.sh` (`default_pages`, four pages) |
+| Documented workflows run from the pages | met with limits | Of 51 `bash` fences in the 14 client pages that hold any, 38 are marked and run: 13 in the clean install above, 25 by `TestDocBlocks` (`internal/clitest`) in job `go-db`. All 14 pages have at least one block that runs. The 13 fences not run are listed with their reason below |
 
-Whether this last part is a gap in the criterion or an acceptable reading of "documented workflows" is
-the owner's to say; this assessment does not decide it.
+**What ran where.** No page is reported above "met with a limit". The first kind of run is the packaged client
+installed in a clean container, against a disposable server with no secret provider and no machine. The second
+is the test harness: the client there is built from source, the server is the test server with a PostgreSQL and
+an OpenBao, and the node is a stand-in that answers for what the commands read and apply. The second kind is not
+the fixture and not a Talos machine, so it can never show a page as "met".
+
+| Page | State | Packaged client, clean container | Source-built client, test harness with a stand-in node | Not run, and why |
+| --- | --- | --- | --- | --- |
+| `install.md` | met with a limit | 2 blocks, and 2 on the host (build, checksum) | none | `version` before any context: its expected exit status is 1 |
+| `contexts.md` | met with a limit | 3 | none | `--from` without a CA (needs a publicly trusted certificate), by hand (placeholder provider values), automation token context and `--token-stdin` (no token is issued to the container), `login` (browser), `login --device` alone (run in the token-file block) |
+| `sign-in-and-renewal.md` | met with a limit | 1 | none | `login` (browser) |
+| `quick-start-cli.md` | met with a limit | 3 | none | step 1 (needs a publicly trusted certificate; the same command with `--certificate-authority` runs from `contexts.md`), step 2 `login` (browser) |
+| `client-troubleshooting.md` | met with a limit | 1 | none | none |
+| `inventory.md` | met with a limit | 1 (lists, empty) | 1 (`machine add`) | none |
+| `connect-a-cluster.md` | met with a limit | none | 1 (`cluster discover`; the stand-in's one member does not answer, and the command says so) | none |
+| `editing.md` | met with a limit | none | 1 | none; the fragments its commands name are saved first, and the commands after `draft create` run in that prepared draft, not in the one it creates |
+| `protected-import.md` | met with a limit | none | 3 | the interactive review (not a fence) |
+| `publication.md` | met with a limit | none | 2 | none |
+| `plan-and-approval.md` | met with a limit | none | 4 | none |
+| `operation-tracking.md` | met with a limit | none | 2 | `machine timeline --follow` (never ends by itself) |
+| `drift.md` | met with a limit | none | 5 | none |
+| `recovery-after-restore.md` | met with a limit | none | 6 | the two indented alternatives `recovery resolve` and `recovery takeover` (the runner reads fences at the margin); `status` runs after the entry, since a server started for recovery refuses it before; the two observations of the accounting are seeded |
+
+In the harness the pages' `<placeholders>` are filled by the test, so a block shows that its commands and
+flags work, not that a person can find the identifiers. `go-db` fails when a marked block has no record of
+having run (`run-doc-blocks.sh account-db`). Two pages changed shape so that their commands can run:
+`plan-and-approval.md` held the two alternative forms of `apply` in one block, and the second failed after
+the first had approved the plan, so they are now two blocks; `operation-tracking.md`'s `--follow` command,
+which never ends by itself, now stands in a block of its own.
+
+Whether the harness runs are an acceptable reading of "documented workflows" on "the fixture" is the owner's
+to say; this assessment does not decide it.
 
 ## 3. The issue's six executable checks
 
 | Check in the issue | State | Where |
 | --- | --- | --- |
 | Packaging: two builds equal, binaries report the tag and commit, rendered Caddy configuration serves exactly `web/headers.json` | met | `package`, `package-check`, `hosting` (all success) |
-| Clean install `linux/amd64` in a container with only curl, tar and CA certificates | met in part; not met after the install | `doc-blocks`; not run: `context add --from` with the fixture CA, the sign-in through the test provider, T1 and T2 scripted, and the signature steps (§2 row 3, §5) |
-| Workflow pages: each CLI page's marked blocks run; each web page has a browser case per numbered step | met for what is marked; not met for pages with no marked block | §2 row 3 |
+| Clean install `linux/amd64` in a container with only curl, tar and CA certificates | met with limits | `doc-blocks`, with `context add --from` under a private CA and the device sign-in; not run: T1 and T2 scripted (dropped) and the signature steps (§2 row 3, §5) |
+| Workflow pages: each CLI page's marked blocks run; each web page has a browser case per numbered step | met with limits: every CLI page with commands has blocks that run, 25 of them against a stand-in node, not the fixture | §2 row 3 |
 | `darwin/arm64`: install, `version` with the server unreachable, Keychain store and read, the inaccessible-server case | met with limits | `packaged-darwin`, run once (§2 row 3). The inaccessible-server case is the `version` check with the server gone; no other message on `darwin` is checked |
 | Negative cases on the packaged artifacts | met with limits | `packaged-cli`, `packaged-web`, §2 row 3 |
 | Scan, with planted sentinels | met | `mise run docs`, job `docs` |
@@ -188,9 +227,8 @@ whose clause was not read.
 
 ## 8. Recommendation
 
-Do not close ginsys/bronzeward#262 on this assessment alone. Row 3 is not met, for two reasons. The Linux
-clean-install check stops at the install and the reads: no `context add --from` with the fixture CA, no
-sign-in through the test provider, no scripted T1 and T2. And ten of the fourteen client pages that hold
-commands have none of them run from the page. Both are for the owner: accept the reading, or ask for the
-missing steps and for marked blocks on more pages. The `darwin` part of the row has run once and passed
-(§2 row 3); rows 1 and 2 are met with limits; the owner rows of §5 are open.
+Do not close ginsys/bronzeward#262 on this assessment alone. Row 3 is met with limits that only the owner can
+accept: the journey pages' commands ran on the test harness with a stand-in node and a source-built client,
+not on the fixture; the sign-in was approved by a test issuer; scripted T1 and T2 were dropped by the campaign
+lead. The `darwin` part of the row has run once and passed (§2 row 3); rows 1 and 2 are met with limits; the
+owner rows of §5 are open.
