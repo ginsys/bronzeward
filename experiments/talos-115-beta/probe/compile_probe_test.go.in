@@ -1,0 +1,583 @@
+// Measurement probe for ginsys/bronzeward#1212, not part of the implementation. run/probe copies
+// it into an export's internal/compile as zz_talos115_probe_test.go, so that it compiles with
+// that build's machinery module and goes through Bronzeward's own ingestion and compiler.
+//
+// It prints verdicts, digests, document kinds and Bronzeward's redacted messages. It never prints
+// configuration bytes or key material: those stay in TALOS115_OUT and TALOS115_IN.
+package compile
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"testing/cryptotest"
+	"time"
+
+	talosconfig "github.com/siderolabs/talos/pkg/machinery/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/container"
+	"github.com/siderolabs/talos/pkg/machinery/config/encoder"
+	"github.com/siderolabs/talos/pkg/machinery/config/generate"
+	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
+	"github.com/siderolabs/talos/pkg/machinery/config/machine"
+	"go.yaml.in/yaml/v3"
+
+	"github.com/ginsys/bronzeward/internal/ingest"
+	"github.com/ginsys/bronzeward/internal/provider"
+)
+
+const (
+	probeKubernetes = "1.36.2"
+	// 24 bytes, so its base64 form carries no "=", which a node label value may not hold.
+	probeSecret = "probe-synth-value-004f1d"
+)
+
+func digestOf(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}
+
+type probeRun struct {
+	t       *testing.T
+	out, in string
+	lines   []string
+}
+
+func (p *probeRun) say(format string, a ...any) {
+	l := fmt.Sprintf(format, a...)
+	p.lines = append(p.lines, l)
+	fmt.Println("probe " + l)
+}
+
+func (p *probeRun) write(dir, name string, b []byte) {
+	if err := os.WriteFile(filepath.Join(dir, name), b, 0o600); err != nil {
+		p.t.Fatal(err)
+	}
+}
+
+func (p *probeRun) read(name string) []byte {
+	b, err := os.ReadFile(filepath.Join(p.in, name))
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	return b
+}
+
+// kinds is every document of a stream, as its kind, or v1alpha1 for the machine document.
+func kinds(b []byte) string {
+	var out []string
+	dec := yaml.NewDecoder(strings.NewReader(string(b)))
+	for {
+		var d struct {
+			Kind string `yaml:"kind"`
+		}
+		if err := dec.Decode(&d); err != nil {
+			if !errors.Is(err, io.EOF) {
+				out = append(out, "undecodable")
+			}
+			return strings.Join(out, ",")
+		}
+		if d.Kind == "" {
+			d.Kind = "v1alpha1"
+		}
+		out = append(out, d.Kind)
+	}
+}
+
+// generated is the library's own configuration for one contract and machine type, from a fixed
+// seed and clock. contract "" sets none, which is the library's default.
+func probeGenerate(t *testing.T, contract string, mt machine.Type) (talosconfig.Provider, *secrets.Bundle) {
+	t.Helper()
+	cryptotest.SetGlobalRandom(t, 1)
+	var vc *talosconfig.VersionContract
+	if contract != "" {
+		var err error
+		if vc, err = talosconfig.ParseContractFromVersion(contract); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bundle, err := secrets.NewBundle(secrets.NewFixedClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), vc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := []generate.Option{generate.WithInstallDisk("/dev/sda"), generate.WithSecretsBundle(bundle)}
+	if vc != nil {
+		opts = append(opts, generate.WithVersionContract(vc))
+	}
+	in, err := generate.NewInput("compile-test", "https://192.0.2.20:6443", probeKubernetes, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := in.Config(mt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg, bundle
+}
+
+func encoded(t *testing.T, cfg talosconfig.Provider, c encoder.CommentsFlags) []byte {
+	t.Helper()
+	b, err := cfg.EncodeBytes(encoder.WithComments(c))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func (p *probeRun) generation(writeInputs bool) {
+	for _, g := range []struct{ id, contract string }{{"v114", "v1.14"}, {"default", ""}} {
+		for _, mt := range []machine.Type{machine.TypeControlPlane, machine.TypeWorker} {
+			id := g.id + "-" + mt.String()
+			p.t.Run("gen-"+id, func(t *testing.T) {
+				cfg, bundle := probeGenerate(t, g.contract, mt)
+				full := encoded(t, cfg, encoder.CommentsAll)
+				bare := encoded(t, cfg, encoder.CommentsDisabled)
+				p.write(p.out, "gen-"+id+".yaml", bare)
+				p.say("gen %s commented=%s bare=%s", id, digestOf(full), digestOf(bare))
+				p.say("gen %s kinds=%s", id, kinds(bare))
+				if !writeInputs || g.id != "v114" {
+					return
+				}
+				p.write(p.in, "base-"+mt.String()+".yaml", full)
+				if mt != machine.TypeControlPlane {
+					return
+				}
+				// The base the compiler's tests use (compile_test.go generatedBase).
+				var keep []config.Document
+				for _, d := range cfg.Documents() {
+					switch d.Kind() {
+					case "KubeNodeConfig", "KubePrismConfig", "KubeNetworkConfig", "KubeFlannelCNIConfig", "ResolverConfig":
+					default:
+						keep = append(keep, d)
+					}
+				}
+				trimmed, err := container.New(keep...)
+				if err != nil {
+					t.Fatal(err)
+				}
+				b, err := trimmed.EncodeBytes(encoder.WithComments(encoder.CommentsAll))
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.write(p.in, "base-trim.yaml", b)
+				// An EtcdCAConfig fragment from this bundle's own synthetic etcd CA, kept with the
+				// other inputs and never printed.
+				ca := bundle.Certs.Etcd
+				doc, err := yaml.Marshal(map[string]any{"apiVersion": "v1alpha1", "kind": "EtcdCAConfig",
+					"issuingCA": map[string]string{"cert": string(ca.Crt), "key": string(ca.Key)}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				p.write(p.in, "frag-etcdca.yaml", doc)
+			})
+		}
+	}
+}
+
+type probeFrag struct {
+	text   string
+	decl   ingest.Declarations
+	values map[string]provider.Value
+	marks  []string
+}
+
+type probeCase struct {
+	id    string
+	base  string // "controlplane", "worker" or "trim"
+	edit  func(string) string
+	decl  ingest.Declarations
+	vals  map[string]provider.Value
+	frags []probeFrag
+	mode  Mode
+	name  string
+}
+
+// ingestProbe is the compiler tests' source, returning ingestion's refusal instead of failing.
+func ingestProbe(f probeFrag) (Source, error) {
+	u, err := ingest.Read(strings.NewReader(f.text), 1<<20)
+	if err != nil {
+		return Source{}, err
+	}
+	req := ingest.Request{Input: u, Declarations: f.decl}
+	for _, m := range f.marks {
+		path, err := ingest.ParsePath(m)
+		if err != nil {
+			return Source{}, err
+		}
+		req.Marks = append(req.Marks, path)
+	}
+	c, err := ingest.Extract(req)
+	if err != nil {
+		return Source{}, err
+	}
+	all := maps.Clone(f.values)
+	if all == nil {
+		all = map[string]provider.Value{}
+	}
+	s, err := c.Commit(context.Background(), func(_ context.Context, name string, v provider.Value) error {
+		all[name] = v
+		return nil
+	})
+	if err != nil {
+		return Source{}, err
+	}
+	sum := sha256.Sum256([]byte(f.text))
+	return Source{Revision: "rev-" + hex.EncodeToString(sum[:4]), Digest: hex.EncodeToString(sum[:]), Text: s, Values: all}, nil
+}
+
+func (p *probeRun) refused(id, stage string, err error) {
+	var e *Error
+	if errors.As(err, &e) {
+		p.say("case %s refused stage=%s rule=%s input=%q paths=%q message=%q", id, stage, e.Rule, e.Input, e.Paths, e.Message)
+		return
+	}
+	p.say("case %s refused stage=%s error=%q", id, stage, err.Error())
+}
+
+func (p *probeRun) compileCase(c probeCase, ownVersion string) {
+	text := string(p.read("base-" + c.base + ".yaml"))
+	if c.edit != nil {
+		edited := c.edit(text)
+		if edited == text {
+			p.t.Fatalf("%s: the base edit changed nothing", c.id)
+		}
+		text = edited
+	}
+	base, err := ingestProbe(probeFrag{text: text, decl: c.decl, values: c.vals})
+	if err != nil {
+		p.refused(c.id, "ingest-base", err)
+		return
+	}
+	in := Input{Base: base, Mode: c.mode, Name: c.name}
+	for i, f := range c.frags {
+		s, err := ingestProbe(f)
+		if err != nil {
+			p.refused(c.id, fmt.Sprintf("ingest-fragment[%d]", i), err)
+			return
+		}
+		in.Fragments = append(in.Fragments, s)
+	}
+	got, err := Compile(in)
+	if err != nil {
+		p.refused(c.id, "compile", err)
+		return
+	}
+	mat := got.Materialized().bytes()
+	p.write(p.out, "mat-"+c.id+".yaml", mat)
+	red, err := got.Redacted()
+	if err != nil {
+		red = "error: " + err.Error()
+	}
+	p.write(p.out, "red-"+c.id+".yaml", []byte(red))
+	k8s := func(v string) string {
+		tag, err := got.KubernetesVersion(v)
+		if err != nil {
+			return err.Error()
+		}
+		return tag
+	}
+	h := got.Hostname()
+	p.say("case %s ok materialized=%s redacted=%s formonly=%v hostname=%v:%q", c.id, digestOf(mat), digestOf([]byte(red)), got.FormOnly(), h.Source, h.Name)
+	p.say("case %s records provenance=%s effective=%s reproduction=%s", c.id,
+		digestOf(fmt.Appendf(nil, "%+v", got.Provenance())), digestOf(fmt.Appendf(nil, "%+v", got.Effective())),
+		digestOf(fmt.Appendf(nil, "%+v", got.Reproduction())))
+	p.say("case %s kubernetes[v1.14.5]=%q", c.id, k8s("v1.14.5"))
+	// The build's own machinery version differs by build, so this line is not compared.
+	fmt.Printf("probe own %s kubernetes[%s]=%q\n", c.id, ownVersion, k8s(ownVersion))
+}
+
+func lit(text string) probeFrag { return probeFrag{text: text} }
+
+func strVal(t *testing.T, v any, k provider.Kind) provider.Value {
+	t.Helper()
+	return value(t, k, v)
+}
+
+// compositionCases are the compiler tests' synthetic inputs (compile_test.go, compiler_test.go,
+// checks_test.go, restored_test.go).
+func compositionCases(t *testing.T) []probeCase {
+	str := func(v string) provider.Value { return strVal(t, v, provider.KindString) }
+	tagged := "machine:\n  nodeLabels:\n    team: !bwref team\n"
+	kindDecl := refs(map[string]ingest.Reference{
+		"app/str": ref(provider.KindString), "app/int": ref(provider.KindInteger), "app/bool": ref(provider.KindBoolean),
+		"app/map": ref(provider.KindMapping), "app/enc": {Kind: provider.KindString, Version: 1, Encoding: "base64"},
+	})
+	kindVals := map[string]provider.Value{
+		"app/str": str(probeSecret), "app/int": value(t, provider.KindInteger, 7445),
+		"app/bool": value(t, provider.KindBoolean, false),
+		"app/map":  value(t, provider.KindMapping, map[string]any{"one": "first-" + probeSecret, "two": "second-" + probeSecret}),
+		"app/enc":  str(probeSecret),
+	}
+	kindFrag := probeFrag{text: "machine:\n  nodeLabels:\n    s: &a !bwref app/str\n    t: *a\n    e: !bwref app/enc\n" +
+		"  nodeAnnotations: !bwref app/map\n  features:\n    rbac: !bwref app/bool\n    kubePrism:\n      port: !bwref app/int\n",
+		decl: kindDecl, values: kindVals}
+	twoEmbedded := []ingest.Embedded{
+		{Path: "doc[0]/cluster/inlineManifests/0/contents", Format: "json"},
+		{Path: "doc[0]/cluster/inlineManifests/1/contents", Format: "yaml"},
+	}
+	embedded := probeFrag{text: "cluster:\n  inlineManifests:\n    - name: j\n      contents: |\n        {\"user\": \"admin\", \"password\": !bwref app/json}\n" +
+		"    - name: y\n      contents: |\n        user: admin\n        password: !bwref app/yaml\n",
+		decl:   ingest.Declarations{References: map[string]ingest.Reference{"app/json": ref(provider.KindString), "app/yaml": ref(provider.KindString)}, Embedded: twoEmbedded},
+		values: map[string]provider.Value{"app/json": str("json-" + probeSecret + "&<>\""), "app/yaml": str("yaml-" + probeSecret)}}
+	equalHosts := probeFrag{text: "cluster:\n  inlineManifests:\n    - name: j\n      contents: |\n        [!bwref app/fj]\n    - name: y\n      contents: |\n        [!bwref app/fy]\n",
+		decl:   ingest.Declarations{References: map[string]ingest.Reference{"app/fj": ref(provider.KindBoolean), "app/fy": ref(provider.KindBoolean)}, Embedded: twoEmbedded},
+		values: map[string]provider.Value{"app/fj": value(t, provider.KindBoolean, true), "app/fy": value(t, provider.KindBoolean, true)}}
+	copyRef := probeFrag{text: "machine:\n  nodeLabels:\n    q: !bwref app/q\n", decl: strRef("app/q"),
+		values: map[string]provider.Value{"app/q": str("secret\"word")}}
+	copyManifest := probeFrag{text: "cluster:\n  inlineManifests:\n    - name: j\n      contents: |\n        {\"copy\": \"secret\\\"word\"}\n",
+		decl: ingest.Declarations{Embedded: twoEmbedded[:1]}}
+	nodeLabels := "machine:\n  nodeLabels:\n    node.example.test/pool: workers\n"
+	kubeNode := "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  node.example.test/pool: workers\n"
+	unforwarded := "machine:\n  features:\n    hostDNS:\n      enabled: true\n      forwardKubeDNSToHost: false\n"
+	secretLine := func(with string) func(string) string {
+		return func(s string) string {
+			lines := strings.Split(s, "\n")
+			for i, l := range lines {
+				if before, _, ok := strings.Cut(l, "clusterSecret: "); ok {
+					lines[i] = before + "clusterSecret: " + with
+					break
+				}
+			}
+			return strings.Join(lines, "\n")
+		}
+	}
+	cases := []probeCase{
+		{id: "full-nofrag", base: "controlplane"},
+		{id: "trim-nofrag", base: "trim"},
+		{id: "worker-nofrag", base: "worker"},
+		{id: "full-kubenode-labels", base: "controlplane", frags: []probeFrag{lit(kubeNode)}},
+		{id: "control-kubenode-other", base: "controlplane", frags: []probeFrag{lit(strings.Replace(kubeNode, "workers", "others", 1))}},
+		{id: "full-v1alpha1-nodelabels", base: "controlplane", frags: []probeFrag{lit(nodeLabels)}},
+		{id: "full-kubenode-ref", base: "controlplane", frags: []probeFrag{{text: "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  node.example.test/team: !bwref team\n",
+			decl: strRef("team"), values: map[string]provider.Value{"team": str(probeSecret)}}}},
+		{id: "trim-ref-string", base: "trim", frags: []probeFrag{{text: tagged, decl: strRef("team"), values: map[string]provider.Value{"team": str(probeSecret)}}}},
+		{id: "trim-each-kind-embedded", base: "trim", frags: []probeFrag{kindFrag, embedded}},
+		{id: "trim-equal-hosts", base: "trim", frags: []probeFrag{equalHosts}},
+		{id: "trim-embedded-copy", base: "trim", frags: []probeFrag{copyRef, copyManifest}},
+		{id: "trim-mark", base: "trim", frags: []probeFrag{{text: "machine:\n  nodeAnnotations:\n    note: marked-synthetic-value-91\n",
+			marks: []string{"doc[0]/machine/nodeAnnotations/note"}}}},
+		{id: "full-mark", base: "controlplane", frags: []probeFrag{{text: kubeNode, marks: []string{"doc[0]/labels/node.example.test~1pool"}}}},
+		{id: "trim-subnet-literal", base: "trim", frags: []probeFrag{lit("cluster:\n  etcd:\n    advertisedSubnets:\n      - 10.0.0.0/8\n")}},
+		{id: "trim-subnet-marked", base: "trim", frags: []probeFrag{{text: "cluster:\n  etcd:\n    advertisedSubnets:\n      - !bwref app/subnet\n",
+			decl: strRef("app/subnet"), values: map[string]provider.Value{"app/subnet": str("10.0.0.0/8")}}}},
+		{id: "trim-reserved-text", base: "trim", frags: []probeFrag{{text: tagged, decl: strRef("team"), values: map[string]provider.Value{"team": str("x-!bwref-y")}}}},
+		{id: "trim-type-mismatch", base: "trim", frags: []probeFrag{lit("machine:\n  nodeLabels:\n    a: b\n"), {text: "machine:\n  features:\n    kubePrism:\n      port: !bwref port\n",
+			decl: strRef("port"), values: map[string]provider.Value{"port": str(probeSecret)}}}},
+		{id: "trim-invalid-domain", base: "trim", frags: []probeFrag{{text: "cluster:\n  network:\n    dnsDomain: !bwref domain\n",
+			decl: strRef("domain"), values: map[string]provider.Value{"domain": str("compile not a domain 7a3c")}}}},
+		{id: "trim-deprecated-files", base: "trim", frags: []probeFrag{lit("machine:\n  files:\n    - content: compile test file\n      permissions: 0o644\n      path: /var/etc/compile-test.conf\n      op: create\n")}},
+		{id: "trim-hostdns-metal", base: "trim", frags: []probeFrag{lit(unforwarded)}},
+		{id: "trim-hostdns-container", base: "trim", mode: ModeContainer, frags: []probeFrag{lit(unforwarded)}},
+		{id: "trim-hostdns-cloud", base: "trim", mode: ModeCloud, frags: []probeFrag{lit(unforwarded)}},
+		{id: "full-hostname-fill", base: "controlplane", name: "node-a"},
+		{id: "trim-short-secret", base: "trim", edit: secretLine("qz9!")},
+		{id: "trim-bad-secret", base: "trim", edit: secretLine(probeSecret)},
+	}
+	return cases
+}
+
+// newKinds is one minimal synthetic document of each kind the v1.15.0-beta.1 module registers
+// and v1.14.5 does not, after the module's own test data and examples.
+var newKinds = []struct{ id, doc string }{
+	{"ContentLibraryConfig", "name: my-vm-images-1\nbacking:\n  volume: vm-images\n---\napiVersion: v1alpha1\nkind: UserVolumeConfig\nname: vm-images\nvolumeType: directory\n"},
+	{"CPUPartitionConfig", "system:\n  cpus: 0-1\n"},
+	{"CPUScalingConfig", "name: performance-cores\nselector:\n  match: cpu.core_type == \"performance\"\ngovernor: performance\n"},
+	{"DiskSMARTConfig", ""},
+	{"EtcdMemberConfig", "image: registry.k8s.io/etcd:v3.6.0\n"},
+	{"InlineDataVolumeConfig", "name: app-config\nfiles:\n  app.yaml:\n    contents: |\n      listen: :8080\n"},
+	{"KubeAuthenticationWebhookConfig", "kubeconfig: |\n  apiVersion: v1\n  kind: Config\n  clusters:\n    - name: webhook\n      cluster:\n        server: https://127.0.0.1:21362/authenticate\n        certificate-authority-data: Y2EK\n  users:\n    - name: apiserver\n      user:\n        token: " + probeSecret + "\n  contexts:\n    - name: webhook\n      context:\n        cluster: webhook\n        user: apiserver\n  current-context: webhook\nversion: v1\ncacheTTL: 5m0s\n"},
+	{"NetworkLinkIngressConfig", "name: eth0\ndestinationAddresses:\n  - 192.0.2.4/32\n"},
+	{"MacVLANConfig", "name: eth0.macvlan\nmode: bridge\nparent: eth0\n"},
+	{"SeccompProfileConfig", "name: no-ns.json\nprofile:\n  defaultAction: SCMP_ACT_ALLOW\n"},
+	{"StaticEndpointsConfig", "addresses:\n  - 192.0.2.11\n"},
+	{"StoragePoolConfig", "name: vm-images\nvolume:\n  name: vm-data\n---\napiVersion: v1alpha1\nkind: UserVolumeConfig\nname: vm-data\nvolumeType: directory\n"},
+	{"VirtualMachineConfig", "name: vm2\npowerState: running\ncpu:\n  count: 1\nmemory:\n  size: 512MiB\nfirmware:\n  type: bios\n"},
+	{"VirtualMachineProfileConfig", "name: rack-a-compat\nmachine: pc-q35-9.2\ncpu:\n  mode: custom\n  model: Haswell-noTSX-IBRS\n"},
+	{"VXLANConfig", "name: vxlan900\nid: 100\nlocal: 192.0.2.1\nparent: eth0\nport: 4789\n"},
+	{"WorkloadResourceConfig", "reserved:\n  memory: 2GiB\n"},
+}
+
+// newFields sets, in a document both versions know, a field only the beta module declares
+// (evidence/new-fields.txt).
+var newFields = []struct{ id, frag string }{
+	{"KubePrismConfig.readinessCheck", "apiVersion: v1alpha1\nkind: KubePrismConfig\nreadinessCheck: true\n"},
+	{"KubeFlannelCNIConfig.kubeNetworkPoliciesArgs", "apiVersion: v1alpha1\nkind: KubeFlannelCNIConfig\nkubeNetworkPoliciesArgs:\n  - --v=2\n"},
+	{"KubeCredentialProviderConfig.configFiles", "apiVersion: v1alpha1\nkind: KubeCredentialProviderConfig\nconfiguration:\n  apiVersion: kubelet.config.k8s.io/v1\n  kind: CredentialProviderConfig\n  providers:\n    - name: probe-provider\n      apiVersion: credentialprovider.kubelet.k8s.io/v1\n      matchImages:\n        - registry.example.test\n      defaultCacheDuration: 5m\nconfigFiles:\n  - name: probe.yaml\n    content: zzq-credential-body-7731\n"},
+	{"FilesystemTrimConfig.minLength", "apiVersion: v1alpha1\nkind: FilesystemTrimConfig\ninterval: 24h\nminLength: 1MiB\n"},
+	{"UserVolumeConfig.mount.owner", "apiVersion: v1alpha1\nkind: UserVolumeConfig\nname: probe-data\nvolumeType: directory\nmount:\n  owner: 1000\n  group: 1000\n"},
+	{"ResolverConfig.hostDNS.logLevel", "apiVersion: v1alpha1\nkind: ResolverConfig\nhostDNS:\n  logLevel: debug\n"},
+	{"SecurityProfileConfig.ignoreCtrlAltDelete", "apiVersion: v1alpha1\nkind: SecurityProfileConfig\nignoreCtrlAltDelete: true\n"},
+	{"SecurityProfileConfig.selinuxCategories", "apiVersion: v1alpha1\nkind: SecurityProfileConfig\nselinuxCategories: true\n"},
+	{"KmsgLogConfig.extraTags", "apiVersion: v1alpha1\nkind: KmsgLogConfig\nname: probe\nurl: tcp://192.0.2.9:3000\nextraTags:\n  probe: synthetic\n"},
+	{"KubeSpanConfig.filters.peerEndpoints", "apiVersion: v1alpha1\nkind: KubeSpanConfig\nfilters:\n  peerEndpoints:\n    - 0.0.0.0/0\n"},
+	{"BondConfig.primary", "apiVersion: v1alpha1\nkind: BondConfig\nname: bond0\nlinks:\n  - eth8\n  - eth9\nbondMode: active-backup\nprimary: eth8\n"},
+	{"EthernetConfig.flowControl", "apiVersion: v1alpha1\nkind: EthernetConfig\nname: eth0\nflowControl:\n  rx: true\n"},
+	{"LinkConfig.addresses.scope", "apiVersion: v1alpha1\nkind: LinkConfig\nname: eth9\naddresses:\n  - address: 192.0.2.30/24\n    scope: link\n"},
+	{"v1alpha1.features.trustdCheckExtKeyUsage", "machine:\n  features:\n    trustdCheckExtKeyUsage: true\n"},
+}
+
+func TestTalos115Probe(t *testing.T) {
+	out, in, version := os.Getenv("TALOS115_OUT"), os.Getenv("TALOS115_IN"), os.Getenv("TALOS115_MACHINERY")
+	if out == "" || in == "" || version == "" {
+		t.Skip("set by experiments/talos-115-beta/run/probe")
+	}
+	p := &probeRun{t: t, out: out, in: in}
+	_, err := os.Stat(filepath.Join(in, "base-trim.yaml"))
+	first := errors.Is(err, os.ErrNotExist)
+	p.generation(first)
+	for _, n := range []string{"base-controlplane.yaml", "base-worker.yaml", "base-trim.yaml", "frag-etcdca.yaml"} {
+		p.say("input %s=%s", n, digestOf(p.read(n)))
+	}
+	cases := compositionCases(t)
+	for _, k := range newKinds {
+		doc := "apiVersion: v1alpha1\nkind: " + k.id + "\n" + k.doc
+		cases = append(cases, probeCase{id: "kind-" + k.id, base: "controlplane", frags: []probeFrag{lit(doc)}})
+	}
+	cases = append(cases, probeCase{id: "kind-EtcdCAConfig", base: "controlplane", frags: []probeFrag{lit(string(p.read("frag-etcdca.yaml")))}})
+	for _, f := range newFields {
+		cases = append(cases, probeCase{id: "field-" + f.id, base: "controlplane", frags: []probeFrag{lit(f.frag)}})
+	}
+	for i := range cases {
+		if cases[i].mode == "" {
+			cases[i].mode = ModeMetal
+		}
+	}
+	ids := map[string]bool{}
+	for _, c := range cases {
+		if ids[c.id] {
+			t.Fatalf("case %s listed twice", c.id)
+		}
+		ids[c.id] = true
+		t.Run("case-"+c.id, func(t *testing.T) {
+			cryptotest.SetGlobalRandom(t, 2)
+			q := *p
+			q.t = t
+			q.compileCase(c, version)
+			p.lines = q.lines
+		})
+	}
+	p.say("cases=%d", len(cases))
+	p.write(out, "results.txt", []byte(strings.Join(slices.Clone(p.lines), "\n")+"\n"))
+}
+
+// TestTalos115KeyDiff names the paths at which two builds' outputs differ, never a value.
+func TestTalos115KeyDiff(t *testing.T) {
+	a, b := os.Getenv("TALOS115_A"), os.Getenv("TALOS115_B")
+	if a == "" || b == "" {
+		t.Skip("set by experiments/talos-115-beta/run/probe")
+	}
+	flat := func(path string) map[string]string {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		dec := yaml.NewDecoder(strings.NewReader(string(raw)))
+		seen := map[string]int{}
+		for {
+			var doc map[string]any
+			if err := dec.Decode(&doc); err != nil {
+				if errors.Is(err, io.EOF) {
+					return out
+				}
+				t.Fatal("a document does not decode")
+			}
+			kind, _ := doc["kind"].(string)
+			if kind == "" {
+				kind = "v1alpha1"
+			}
+			if name, ok := doc["name"].(string); ok {
+				kind += "[" + name + "]"
+			}
+			seen[kind]++
+			var walk func(prefix string, v any)
+			walk = func(prefix string, v any) {
+				switch x := v.(type) {
+				case map[string]any:
+					if len(x) == 0 {
+						out[prefix] = "{}"
+					}
+					for k, c := range x {
+						walk(prefix+"/"+k, c)
+					}
+				case []any:
+					if len(x) == 0 {
+						out[prefix] = "[]"
+					}
+					for i, c := range x {
+						walk(fmt.Sprintf("%s/%d", prefix, i), c)
+					}
+				default:
+					out[prefix] = fmt.Sprintf("%T:%v", x, x)
+				}
+			}
+			walk(fmt.Sprintf("%s#%d", kind, seen[kind]), doc)
+		}
+	}
+	files, err := filepath.Glob(filepath.Join(a, "*.yaml"))
+	if err != nil || len(files) == 0 {
+		t.Fatal("no outputs to compare")
+	}
+	compared, differing := 0, 0
+	for _, fa := range files {
+		name := filepath.Base(fa)
+		fb := filepath.Join(b, name)
+		rb, err := os.ReadFile(fb)
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Printf("keydiff %s only-in-first\n", name)
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		ra, err := os.ReadFile(fa)
+		if err != nil {
+			t.Fatal(err)
+		}
+		compared++
+		if string(ra) == string(rb) {
+			continue
+		}
+		differing++
+		x, y := flat(fa), flat(fb)
+		var lines []string
+		for k, v := range x {
+			if w, ok := y[k]; !ok {
+				lines = append(lines, "- "+k)
+			} else if w != v {
+				lines = append(lines, "~ "+k)
+			}
+		}
+		for k := range y {
+			if _, ok := x[k]; !ok {
+				lines = append(lines, "+ "+k)
+			}
+		}
+		slices.Sort(lines)
+		if len(lines) == 0 {
+			lines = []string{"(same paths and values; the bytes differ in order or form)"}
+		}
+		for _, l := range lines {
+			fmt.Printf("keydiff %s %s\n", name, l)
+		}
+	}
+	only, err := filepath.Glob(filepath.Join(b, "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fb := range only {
+		if _, err := os.Stat(filepath.Join(a, filepath.Base(fb))); errors.Is(err, os.ErrNotExist) {
+			fmt.Printf("keydiff %s only-in-second\n", filepath.Base(fb))
+		}
+	}
+	fmt.Printf("keydiff compared=%d differing=%d\n", compared, differing)
+}
