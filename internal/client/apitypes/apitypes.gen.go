@@ -571,10 +571,11 @@ func (e ReferenceEncoding) Valid() bool {
 
 // Defines values for ReferenceKind.
 const (
-	ReferenceKindBoolean ReferenceKind = "boolean"
-	ReferenceKindInteger ReferenceKind = "integer"
-	ReferenceKindMapping ReferenceKind = "mapping"
-	ReferenceKindString  ReferenceKind = "string"
+	ReferenceKindBoolean    ReferenceKind = "boolean"
+	ReferenceKindInteger    ReferenceKind = "integer"
+	ReferenceKindMapping    ReferenceKind = "mapping"
+	ReferenceKindString     ReferenceKind = "string"
+	ReferenceKindTalosCaKey ReferenceKind = "talos-ca-key"
 )
 
 // Valid indicates whether the value is a known member of the ReferenceKind enum.
@@ -587,6 +588,8 @@ func (e ReferenceKind) Valid() bool {
 	case ReferenceKindMapping:
 		return true
 	case ReferenceKindString:
+		return true
+	case ReferenceKindTalosCaKey:
 		return true
 	default:
 		return false
@@ -2153,11 +2156,11 @@ type RecoveryScope struct {
 	State   string `json:"state"`
 }
 
-// Reference defines model for Reference.
+// Reference A declared reference. `talos-ca-key` is the typed reference to the cluster's CA key that an import stores at machine.ca.key: it has no version.
 type Reference struct {
 	Encoding *ReferenceEncoding `json:"encoding,omitempty"`
 	Kind     ReferenceKind      `json:"kind"`
-	Version  int                `json:"version"`
+	Version  *int               `json:"version,omitempty"`
 }
 
 // ReferenceEncoding defines model for Reference.Encoding.

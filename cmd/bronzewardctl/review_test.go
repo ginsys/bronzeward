@@ -229,7 +229,7 @@ func TestReviewText(t *testing.T) {
 	}
 	// At 20 columns the escape of the path's line feed does not fit after the 19 columns before it,
 	// so it starts the next screen line whole.
-	rv.Declarations.References = map[string]apitypes.Reference{"doc[0]/aaaaaaaa\nb": {Kind: "secret", Version: 1}}
+	rv.Declarations.References = map[string]apitypes.Reference{"doc[0]/aaaaaaaa\nb": {Kind: "secret", Version: new(1)}}
 	rv.Declarations.Embedded = nil
 	want = []string{"a: 1", "b: 2", "", "# declared reference", "s: 1", "#   doc[0]/aaaaaaaa", `\x0ab: secret versio`, "n 1", "# declared embedded ", "documents: 0"}
 	if got := wrap(reviewText(rv), 20); !slices.Equal(got, want) {

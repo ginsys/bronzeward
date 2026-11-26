@@ -234,7 +234,8 @@ func serveContext(ctx context.Context, args []string, out io.Writer) error {
 // providerClients builds the server's provider identities, each with its own token (compilation.md
 // §1): ingestion's, publication's metadata and compiler identities, and the executor's, which
 // observations read the Talos access under (persistence-api.md §3.3), and the signer's, which stores
-// each cluster's CA key (§3.4) and is nil when no signerTokenFile is configured, and the access
+// each cluster's CA key (§3.4) and is nil when no signerTokenFile is configured (no control plane
+// configuration can then be imported, compilation.md §2.3 step 3a), and the access
 // presence identity's, which reads the metadata of that key (§3.3) and is nil when no
 // presenceTokenFile is configured. An unreadable token file is named by its field.
 func providerClients(p *config.Provider) (api.Ingester, *api.Publishers, api.Executor, api.Signer, api.Presence, error) {

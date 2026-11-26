@@ -308,7 +308,11 @@ give a node a path that reads as an embedded document's.
    read one (path, version and `created_time`, never a value; `no key` for a
    cluster with no stored key has none), are recorded as an event of the
    `ingest` operation, as the certificate access is (persistence and API
-   §3.3), whatever the verdict. A worker configuration has no `machine.ca.key`, so there is
+   §3.3), whatever the verdict. The event is `ca-key-match` with `verdict` and, for `match` and
+   `mismatch`, the `path`, `version` and `createdTime` of the stored key it was compared with. `no
+   key` is a cluster with no first-key act, or whose act names a version that is gone; `unreadable`
+   is a version the signer cannot read (denied, sealed or unreachable, malformed) or one written
+   again since its act. A worker configuration has no `machine.ca.key`, so there is
    nothing to verify. A node that already carries the typed reference is
    excluded from identification (step 3), so a draft update or a further mark
    on a sanitized document does not offer the key again; a new import of the
