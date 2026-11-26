@@ -736,7 +736,6 @@ CREATE TABLE fragment_revision (
   created_at timestamptz NOT NULL,
   writer     xid8 NOT NULL,
   embedded   jsonb NOT NULL CHECK (jsonb_typeof(embedded) = 'array'),
-  UNIQUE (id, cluster, name),
   UNIQUE (id, owner),
   UNIQUE (id, owner, name),
   UNIQUE (id, owner, name, layer)
@@ -770,7 +769,6 @@ CREATE TABLE profile_revision (
   author     text NOT NULL REFERENCES principal (id),
   created_at timestamptz NOT NULL,
   writer     xid8 NOT NULL,
-  UNIQUE (id, cluster, name),
   UNIQUE (id, owner),
   UNIQUE (id, owner, name)
 );
@@ -910,7 +908,10 @@ CREATE TABLE assignment (
 
 -- A draft's fragment, profile and assignment entries (§3.1), set by T1: the proposed revision, or
 -- none for a removal, and the base, the head revision the author edited from (NULL: absent). One
--- entry per name or machine; import base entries stay in draft_entry.
+-- entry per machine, and per name one at cluster scope and one at shared (library) scope
+-- (§3.1.1), whose revision belongs to no cluster; a shared edit's adoption_base is the counter of
+-- the cluster's adoption it was edited from (NULL: no adoption). Import base entries stay in
+-- draft_entry.
 CREATE TABLE draft_source_entry (
   draft               text NOT NULL,
   cluster             text NOT NULL,
@@ -921,6 +922,12 @@ CREATE TABLE draft_source_entry (
   profile_revision    text,
   assignment_revision text,
   base                integer CHECK (base >= 1),
+  scope               text NOT NULL DEFAULT 'cluster' CHECK (scope IN ('cluster', 'library')),
+  adoption_base       integer CHECK (adoption_base >= 1),
+  owner               text NOT NULL GENERATED ALWAYS AS (CASE scope WHEN 'library' THEN 'library' ELSE cluster END) STORED,
+  CONSTRAINT draft_source_entry_library CHECK (
+    (scope <> 'library' OR kind <> 'assignment') AND
+    (adoption_base IS NULL OR (scope = 'library' AND coalesce(fragment_revision, profile_revision) IS NOT NULL))),
   CONSTRAINT draft_source_entry_shape CHECK (
     (kind = 'fragment' AND name IS NOT NULL AND machine IS NULL
       AND profile_revision IS NULL AND assignment_revision IS NULL) OR
@@ -930,11 +937,11 @@ CREATE TABLE draft_source_entry (
       AND fragment_revision IS NULL AND profile_revision IS NULL)),
   FOREIGN KEY (draft, cluster) REFERENCES draft (id, cluster),
   FOREIGN KEY (machine, cluster) REFERENCES machine (id, cluster),
-  FOREIGN KEY (fragment_revision, cluster, name) REFERENCES fragment_revision (id, cluster, name),
-  FOREIGN KEY (profile_revision, cluster, name) REFERENCES profile_revision (id, cluster, name),
+  FOREIGN KEY (fragment_revision, owner, name) REFERENCES fragment_revision (id, owner, name),
+  FOREIGN KEY (profile_revision, owner, name) REFERENCES profile_revision (id, owner, name),
   FOREIGN KEY (assignment_revision, cluster, machine) REFERENCES assignment_revision (id, cluster, machine)
 );
-CREATE UNIQUE INDEX draft_source_entry_name ON draft_source_entry (draft, kind, name) WHERE kind <> 'assignment';
+CREATE UNIQUE INDEX draft_source_entry_name ON draft_source_entry (draft, kind, name, scope) WHERE kind <> 'assignment';
 CREATE UNIQUE INDEX draft_source_entry_machine ON draft_source_entry (draft, machine) WHERE kind = 'assignment';
 
 -- Releases (§3, §6.2, §7.3; compilation.md §9, §10.2, §11; dependency monitor §5.1) -------------
@@ -1043,7 +1050,6 @@ CREATE TABLE release_source (
       AND machine IS NULL AND fragment_revision IS NULL AND assignment_revision IS NULL)) AND
     (kind <> 'assignment' OR (assignment IS NOT NULL AND machine IS NOT NULL AND fragment IS NULL AND profile IS NULL
       AND name IS NULL AND fragment_revision IS NULL AND profile_revision IS NULL))),
-  UNIQUE (release, fragment),
   UNIQUE (release, profile),
   UNIQUE (release, assignment),
   UNIQUE (release, fragment_revision),
@@ -1058,6 +1064,11 @@ CREATE TABLE release_source (
   FOREIGN KEY (previous_profile_revision, owner, name) REFERENCES profile_revision (id, owner, name),
   FOREIGN KEY (assignment_revision, cluster, machine) REFERENCES assignment_revision (id, cluster, machine)
 );
+-- A release names each fragment head once, except that a shared head may also carry pin-only rows
+-- (scope library, no adoption counter): the other revisions its shared profile revisions pin
+-- (§3.1.1), which need not be the one the release composes.
+CREATE UNIQUE INDEX release_source_fragment ON release_source (release, fragment)
+  WHERE scope = 'cluster' OR adoption_revision IS NOT NULL;
 CALL make_immutable('release_source');
 CREATE TRIGGER with_release BEFORE INSERT ON release_source
   FOR EACH ROW EXECUTE FUNCTION refuse_late_release_row();

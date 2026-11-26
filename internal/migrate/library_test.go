@@ -13,6 +13,10 @@ const (
 		VALUES ($1, $2, $3, $4, true)`
 	insertLibraryAdoption = `INSERT INTO library_adoption (cluster, kind, name, fragment, profile, fragment_revision,
 		profile_revision, adoption_revision, etag_token) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'm3oxmlfh6phr7aigshdydcb4ji')`
+	// A draft entry of a scope: draft, cluster, kind, scope, name, machine, the three revisions,
+	// base and adoption base.
+	insertScopedEntry = `INSERT INTO draft_source_entry (draft, cluster, kind, scope, name, machine, fragment_revision,
+		profile_revision, assignment_revision, base, adoption_base) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 	insertScopedSource = `INSERT INTO release_source (release, cluster, kind, scope, fragment, profile, assignment, name, machine,
 		fragment_revision, profile_revision, assignment_revision, head_revision, adoption_revision, previous_fragment_revision,
 		previous_profile_revision) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
@@ -133,6 +137,26 @@ func TestLibraryKeys(t *testing.T) {
 		{"shared assignment source", withRelease, insertScopedSource,
 			[]any{rel2, l.cluster, "assignment", "library", nil, nil, l.asg, nil, l.machine, nil, nil, l.asr, nil, 1, nil, nil}, "23514"},
 		{"source of an unknown scope", withRelease, insertScopedSource, source("tenant", l.lfrg, l.lfrv, 1, nil, nil), "23514"},
+		{"second counted shared source of one head", append(withRelease,
+			stmt{insertScopedSource, source("library", l.lfrg, l.lfrv, nil, 1, nil)}), insertScopedSource,
+			source("library", l.lfrg, l.lfrv2, nil, 2, nil), "23505"},
+		{"second pin-only source of one revision", append(withRelease,
+			stmt{insertScopedSource, source("library", l.lfrg, l.lfrv, nil, nil, nil)}), insertScopedSource,
+			source("library", l.lfrg, l.lfrv, nil, nil, nil), "23505"},
+
+		{"shared draft entry at a cluster's revision", nil, insertScopedEntry,
+			[]any{l.draft2, l.cluster, "fragment", "library", "ntp", nil, l.cfrv, nil, nil, nil, nil}, "23503"},
+		{"shared assignment entry", nil, insertScopedEntry,
+			[]any{l.draft2, l.cluster, "assignment", "library", nil, l.machine, nil, nil, nil, nil, nil}, "23514"},
+		{"cluster entry with an adoption base", nil, insertScopedEntry,
+			[]any{l.draft2, l.cluster, "fragment", "cluster", "ntp", nil, l.cfrv, nil, nil, nil, 1}, "23514"},
+		{"shared removal with an adoption base", nil, insertScopedEntry,
+			[]any{l.draft2, l.cluster, "fragment", "library", "ntp", nil, nil, nil, nil, 1, 1}, "23514"},
+		{"draft entry of an unknown scope", nil, insertScopedEntry,
+			[]any{l.draft2, l.cluster, "fragment", "tenant", "ntp", nil, nil, nil, nil, nil, nil}, "23514"},
+		{"second shared entry of one name", []stmt{{insertScopedEntry,
+			[]any{l.draft2, l.cluster, "fragment", "library", "ntp", nil, l.lfrv, nil, nil, 1, 1}}}, insertScopedEntry,
+			[]any{l.draft2, l.cluster, "fragment", "library", "ntp", nil, l.lfrv2, nil, nil, 1, 1}, "23505"},
 	} {
 		func() {
 			tx, err := db.Begin()
@@ -160,8 +184,13 @@ func TestLibraryKeys(t *testing.T) {
 		append(withClusterProfile, stmt{insertLibraryPin, []any{prvNew, l.cluster, 0, l.lfrv}},
 			stmt{insertProfilePin, []any{prvNew, l.cluster, 1, l.frv1}}),
 		append(withRelease[:1:1], stmt{insertScopedSource, source("library", l.lfrg, l.lfrv, nil, 3, l.lfrv2)},
+			// A shared profile's pin of another revision of that head is a source beside it.
+			stmt{insertScopedSource, source("library", l.lfrg, l.lfrv2, nil, nil, nil)},
 			stmt{insertScopedSource, []any{rel2, l.cluster, "profile", "library", nil, l.lprf, nil, "shared-set", nil, nil,
 				l.lprv, nil, nil, 1, nil, l.lprv}}),
+		// A draft holds a cluster entry and a shared entry of one name.
+		{{insertScopedEntry, []any{l.draft2, l.cluster, "fragment", "cluster", "ntp", nil, l.cfrv, nil, nil, nil, nil}},
+			{insertScopedEntry, []any{l.draft2, l.cluster, "fragment", "library", "ntp", nil, l.lfrv, nil, nil, 1, 1}}},
 	} {
 		tx, err := db.Begin()
 		if err != nil {

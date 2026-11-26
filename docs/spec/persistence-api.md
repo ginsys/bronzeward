@@ -431,6 +431,14 @@ order would work):
   The rule is `library-reference`; **a fragment that holds a secret stays at
   cluster scope**. This is a consequence of that choice and changes no
   credential rule;
+- *publication-only:* **a release composes one revision of each fragment
+  name**, rule `library-pin-conflict`. What a release composes is each covered
+  machine's selected fragments and the pins of the profiles its assignment
+  selects. Two revisions of one name there, through a library profile's pin
+  beside an adoption, a cluster fragment or another library profile's pin, are
+  refused, naming the fragment and both sources. One revision reached twice
+  composes once and is one release source, the adoption's. A profile no covered
+  machine selects composes nothing, so its pins refuse nothing under this rule;
 - *publication-only:* a removal of an adoption is refused when, after the draft, the cluster's view
   of the name is none and a profile pin or an assignment selection still needs
   it;
@@ -1727,7 +1735,14 @@ INSERT INTO release_source ...;      -- every revision and head revision used:
                                      -- one after a removal; a
                                      -- fragment a library profile revision pins
                                      -- is recorded with scope library, no
-                                     -- adoption counter and `previous` null
+                                     -- adoption counter and `previous` null,
+                                     -- unless the release already names that
+                                     -- revision. A release names a head once,
+                                     -- except that a library fragment head may
+                                     -- have one more such source for each other
+                                     -- revision a profile source pins (a
+                                     -- profile no covered machine selects can
+                                     -- pin another than the composed one)
 UPDATE <adoption> SET revision_id = ..., adoption_revision = adoption_revision + 1,
                       etag_token = ...
  WHERE cluster_id = $cluster AND kind = ... AND name = ...

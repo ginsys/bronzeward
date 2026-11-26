@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -53,10 +54,12 @@ type pinKey struct {
 	version int64
 }
 
-// sourceState is one fragment, profile or assignment as the draft leaves it: the draft's entry
-// when it has one, else the cluster's view (persistence-api.md §3.1.1): its own head, else its
-// adoption of the shared name, whose head and adoption counter these then are. revision "" is none
-// (removed, or never published); head is "" when no head exists.
+// sourceState is one fragment, profile or assignment as the draft leaves it, the cluster's view
+// (persistence-api.md §3.1.1): its own head, with the draft's cluster entry over it, else its
+// adoption of the shared name, with the draft's shared edit over that (a publication adopts what it
+// writes; a shared removal moves no adoption). For an adoption head and headRevision are the shared
+// head and the adoption counter. revision "" is none (removed, or never published); head is ""
+// when no head exists; entry says the draft's entry gives the revision.
 type sourceState struct {
 	revision, head string
 	headRevision   int
@@ -88,6 +91,8 @@ type snapshotReader struct {
 	j   publishJob
 	// states by kind, then by name (by machine for an assignment)
 	states map[string]map[string]sourceState
+	// proposed is the revision each shared edit of the draft proposes, by kind then name.
+	proposed map[string]map[string]string
 }
 
 func (r *snapshotReader) query(query string, fn func(*sql.Rows) error, args ...any) error {
@@ -162,6 +167,9 @@ func (r *snapshotReader) read() (snapshot, *refusal, error) {
 	if err != nil || ref != nil {
 		return s, ref, err
 	}
+	if ref := sel.pinConflict(r, s.machines); ref != nil {
+		return s, ref, nil
+	}
 	for i := range s.machines {
 		s.machines[i].fragments = sel.compose(r, s.machines[i].assignment)
 	}
@@ -198,6 +206,7 @@ func (r *snapshotReader) readStates() error {
 	if err != nil {
 		return err
 	}
+	shared := map[[2]string]sourceState{}
 	err = r.query(`SELECT kind, name, coalesce(fragment, profile), coalesce(fragment_revision, profile_revision), adoption_revision
 		FROM library_adoption WHERE cluster = $1 AND coalesce(fragment_revision, profile_revision) IS NOT NULL`,
 		func(row *sql.Rows) error {
@@ -206,26 +215,41 @@ func (r *snapshotReader) readStates() error {
 			if err := row.Scan(&kind, &name, &st.head, &st.revision, &st.headRevision); err != nil {
 				return err
 			}
-			// The cluster's own head wins, unless a publication removed its revision.
-			if r.states[kind][name].revision == "" {
-				r.states[kind][name] = st
-			}
+			shared[[2]string{kind, name}] = st
 			return nil
 		}, r.j.cluster)
 	if err != nil {
 		return err
 	}
-	return r.query(`SELECT kind, coalesce(name, machine), coalesce(fragment_revision, profile_revision, assignment_revision, '')
+	r.proposed = map[string]map[string]string{"fragment": {}, "profile": {}}
+	err = r.query(`SELECT kind, coalesce(name, machine), coalesce(fragment_revision, profile_revision, assignment_revision, ''), scope
 		FROM draft_source_entry WHERE draft = $1`, func(row *sql.Rows) error {
-		var kind, key, revision string
-		if err := row.Scan(&kind, &key, &revision); err != nil {
+		var kind, key, revision, scope string
+		if err := row.Scan(&kind, &key, &revision, &scope); err != nil {
 			return err
+		}
+		if scope == "library" {
+			if revision != "" {
+				r.proposed[kind][key] = revision
+				shared[[2]string{kind, key}] = sourceState{revision: revision, entry: true}
+			}
+			return nil
 		}
 		st := r.states[kind][key]
 		st.revision, st.entry = revision, true
 		r.states[kind][key] = st
 		return nil
 	}, r.j.draft)
+	if err != nil {
+		return err
+	}
+	// The cluster's own revision wins, unless a publication or the draft removes it.
+	for k, st := range shared {
+		if r.states[k[0]][k[1]].revision == "" {
+			r.states[k[0]][k[1]] = st
+		}
+	}
+	return nil
 }
 
 // selections is what the release's assignment and profile revisions select: each assignment's
@@ -237,14 +261,20 @@ type selections struct {
 	pins      map[string][]string            // profile revision -> fragment revisions
 	named     map[string]string              // profile revision -> its name
 	revisions map[string][2]string           // fragment revision -> name, layer
+	shared    map[string]bool                // the shared profile revisions
+	heads     map[string]sharedHead          // shared fragment revision -> its name's shared head, if one exists
 }
+
+// sharedHead is a shared fragment head: its id and the revision it is at ("" once removed).
+type sharedHead struct{ id, revision string }
 
 // readSelections reads the selections of the covered machines' assignments and of every profile
 // revision the release names (the draft's own and those the assignments select), and holds each to
 // §3.1's rules as the draft leaves the heads (ruling R30).
 func (r *snapshotReader) readSelections(machines []snapshotMachine) (selections, *refusal, error) {
 	sel := selections{profiles: map[string][]string{}, fragments: map[string]map[string][]string{},
-		pins: map[string][]string{}, named: map[string]string{}, revisions: map[string][2]string{}}
+		pins: map[string][]string{}, named: map[string]string{}, revisions: map[string][2]string{},
+		shared: map[string]bool{}, heads: map[string]sharedHead{}}
 	var assignments []string
 	for _, m := range machines {
 		if m.assignment != "" {
@@ -277,23 +307,36 @@ func (r *snapshotReader) readSelections(machines []snapshotMachine) (selections,
 		return sel, nil, err
 	}
 
-	// The release's profile revisions: the draft's, and each one a covered assignment selects.
+	// The release's profile revisions: the draft's, at either scope, and each one a covered
+	// assignment selects.
 	var profiles []string
-	addProfile := func(name string) {
-		if prv := r.states["profile"][name].revision; prv != "" && sel.named[prv] == "" {
+	addProfile := func(name, prv string) {
+		if prv != "" && sel.named[prv] == "" {
 			sel.named[prv] = name
 			profiles = append(profiles, prv)
 		}
 	}
 	for name, st := range r.states["profile"] {
 		if st.entry {
-			addProfile(name)
+			addProfile(name, st.revision)
 		}
+	}
+	for name, prv := range r.proposed["profile"] {
+		addProfile(name, prv)
 	}
 	for _, asr := range assignments {
 		for _, name := range sel.profiles[asr] {
-			addProfile(name)
+			addProfile(name, r.states["profile"][name].revision)
 		}
+	}
+	err = r.query(`SELECT id FROM profile_revision WHERE id = ANY ($1) AND cluster IS NULL`, func(row *sql.Rows) error {
+		var prv string
+		err := row.Scan(&prv)
+		sel.shared[prv] = true
+		return err
+	}, profiles)
+	if err != nil {
+		return sel, nil, err
 	}
 	err = r.query(`SELECT revision, fragment_revision FROM profile_revision_fragment WHERE revision = ANY ($1)
 		ORDER BY revision, position`, func(row *sql.Rows) error {
@@ -322,27 +365,41 @@ func (r *snapshotReader) readSelections(machines []snapshotMachine) (selections,
 			}
 		}
 	}
-	err = r.query(`SELECT id, name, layer FROM fragment_revision WHERE id = ANY ($1)`, func(row *sql.Rows) error {
+	err = r.query(`SELECT f.id, f.name, f.layer, coalesce(h.id, ''), coalesce(h.head_revision_id, '') FROM fragment_revision f
+		LEFT JOIN fragment h ON f.cluster IS NULL AND h.owner = 'library' AND h.name = f.name
+		WHERE f.id = ANY ($1)`, func(row *sql.Rows) error {
 		var frv, name, layer string
-		if err := row.Scan(&frv, &name, &layer); err != nil {
+		var head sharedHead
+		if err := row.Scan(&frv, &name, &layer, &head.id, &head.revision); err != nil {
 			return err
 		}
-		sel.revisions[frv] = [2]string{name, layer}
+		sel.revisions[frv], sel.heads[frv] = [2]string{name, layer}, head
 		return nil
 	}, frvs)
 	if err != nil {
 		return sel, nil, err
 	}
 
-	// §3.1 again (ruling R30): every pin is its fragment's revision after the draft; every selected
-	// name has a revision after the draft, a fragment one in the layer it is listed under.
-	slices.SortFunc(profiles, func(x, y string) int { return strings.Compare(sel.named[x], sel.named[y]) })
+	// §3.1 again (ruling R30): every pin of a cluster profile is its fragment's revision after the
+	// draft; every selected name has a revision after the draft, a fragment one in the layer it is
+	// listed under. A shared profile the draft proposes pins each name's shared head or the draft's
+	// proposal (§3.1.1; T3 checks it again under the head's lock); a published one's pins are taken
+	// as written.
+	slices.SortFunc(profiles, func(x, y string) int {
+		return cmp.Or(strings.Compare(sel.named[x], sel.named[y]), strings.Compare(x, y))
+	})
 	for _, prv := range profiles {
+		proposed := r.proposed["profile"][sel.named[prv]] == prv
 		for i, frv := range sel.pins[prv] {
-			if r.states["fragment"][sel.revisions[frv][0]].revision != frv {
-				return sel, refuse(http.StatusUnprocessableEntity, "validation-failed",
-					"Publication refused: a pin is not its fragment's revision after the draft.").
-					with("profile", sel.named[prv]).with("path", fmt.Sprintf("fragments[%d]", i)).with("revision", frv), nil
+			name := sel.revisions[frv][0]
+			switch {
+			case !sel.shared[prv]:
+				if r.states["fragment"][name].revision != frv {
+					return sel, pinRefusal("Publication refused: a pin is not its fragment's revision after the draft.",
+						sel.named[prv], i, frv), nil
+				}
+			case proposed && sel.heads[frv].revision != frv && r.proposed["fragment"][name] != frv:
+				return sel, pinRefusal(sharedPinDetail, sel.named[prv], i, frv), nil
 			}
 		}
 	}
@@ -370,6 +427,53 @@ func (r *snapshotReader) readSelections(machines []snapshotMachine) (selections,
 		}
 	}
 	return sel, nil, nil
+}
+
+const sharedPinDetail = "Publication refused: a shared profile's pin is neither its fragment's shared head nor proposed by the draft."
+
+// pinRefusal is the 422 of a profile's pin i, revision frv.
+func pinRefusal(detail, profile string, i int, frv string) *refusal {
+	return refuse(http.StatusUnprocessableEntity, "validation-failed", detail).
+		with("profile", profile).with("path", fmt.Sprintf("fragments[%d]", i)).with("revision", frv)
+}
+
+// pinConflict holds the release to one revision of each fragment name among those the covered
+// machines compose (persistence-api.md §3.1.1, rule library-pin-conflict): their selected
+// fragments and the pins of the profiles they select. A profile no covered machine selects
+// composes nothing. It names the two sources of the first conflict, in machine and composition
+// order.
+func (sel selections) pinConflict(r *snapshotReader, machines []snapshotMachine) *refusal {
+	seen := map[string]map[string]any{}
+	var ref *refusal
+	reach := func(frv string, source map[string]any) {
+		name := sel.revisions[frv][0]
+		source["revision"] = frv
+		if first, ok := seen[name]; !ok {
+			seen[name] = source
+		} else if first["revision"] != frv && ref == nil {
+			ref = refuse(http.StatusUnprocessableEntity, "validation-failed",
+				"Publication refused: the release would compose two revisions of one fragment name.").
+				with("rule", "library-pin-conflict").with("fragment", name).with("sources", []map[string]any{first, source})
+		}
+	}
+	for _, m := range machines {
+		for _, name := range sel.profiles[m.assignment] {
+			for _, frv := range sel.pins[r.states["profile"][name].revision] {
+				reach(frv, map[string]any{"profile": name})
+			}
+		}
+		for _, layer := range fragmentLayers {
+			for _, name := range sel.fragments[m.assignment][layer] {
+				st := r.states["fragment"][name]
+				kind := "fragment"
+				if st.adopted {
+					kind = "adoption"
+				}
+				reach(st.revision, map[string]any{kind: name})
+			}
+		}
+	}
+	return ref
 }
 
 // compose is an assignment's fragment revisions in composition order (ruling R23): per layer, the
@@ -403,9 +507,11 @@ func (sel selections) compose(r *snapshotReader, asr string) []string {
 	return out
 }
 
-// unchanged is every head the release names without a draft entry: each covered machine's
+// unchanged is every source the release names without a draft entry: each covered machine's
 // assignment, each profile its assignments select, and each fragment they select or a named
-// profile pins, at the revision and head revision read.
+// cluster profile pins, at the revision and head revision read. Then each revision a named shared
+// profile pins that none of these and no shared edit of the draft is: a pin-only source, whose
+// shared head T3 does not hold for it.
 func (r *snapshotReader) unchanged(machines []snapshotMachine, sel selections) []usedHead {
 	used := map[[2]string]bool{}
 	for _, m := range machines {
@@ -419,7 +525,10 @@ func (r *snapshotReader) unchanged(machines []snapshotMachine, sel selections) [
 			}
 		}
 	}
-	for _, pins := range sel.pins {
+	for prv, pins := range sel.pins {
+		if sel.shared[prv] {
+			continue
+		}
 		for _, frv := range pins {
 			used[[2]string{"fragment", sel.revisions[frv][0]}] = true
 		}
@@ -432,7 +541,23 @@ func (r *snapshotReader) unchanged(machines []snapshotMachine, sel selections) [
 				adopted: st.adopted})
 		}
 	}
-	slices.SortFunc(out, func(x, y usedHead) int { return strings.Compare(x.head, y.head) })
+	pinned := map[string]bool{}
+	for prv, pins := range sel.pins {
+		if !sel.shared[prv] {
+			continue
+		}
+		for _, frv := range pins {
+			name := sel.revisions[frv][0]
+			held := used[[2]string{"fragment", name}] && r.states["fragment"][name].revision == frv
+			if !held && r.proposed["fragment"][name] != frv && !pinned[frv] {
+				pinned[frv] = true
+				out = append(out, usedHead{kind: "fragment", head: sel.heads[frv].id, revision: frv, pinned: true, name: name})
+			}
+		}
+	}
+	slices.SortFunc(out, func(x, y usedHead) int {
+		return cmp.Or(strings.Compare(x.head, y.head), strings.Compare(x.revision, y.revision))
+	})
 	return out
 }
 
