@@ -44,10 +44,12 @@ type releaseUnit struct {
 }
 
 // usedHead is a head the release uses unchanged, at the revision and head revision the snapshot
-// read (compilation §6 step 1).
+// read (compilation §6 step 1). A shared name is held as the cluster's adoption of it
+// (persistence-api.md §3.1.1): adopted, head its shared head, headRevision the adoption counter.
 type usedHead struct {
 	kind, head, revision string
 	headRevision         int
+	adopted              bool
 }
 
 // unitMachine is one covered machine's artifact: its import base and assignment revisions, the
@@ -107,11 +109,12 @@ var headKinds = map[string]headKind{
 
 // sourceHead is one head a release names: a draft entry's (changed) or one the compilation used
 // unchanged. key is its name, or its machine for an assignment; revision "" is a removal; base is
-// the head revision the author edited from, 0 when the draft introduces the name.
+// the head revision the author edited from, 0 when the draft introduces the name. For an adopted
+// one (usedHead) base and actual are the cluster's adoption counter.
 type sourceHead struct {
 	kind, key, head, revision string
 	base, actual              int // actual: the head revision read under its lock
-	changed                   bool
+	changed, adopted          bool
 }
 
 // noRelease ends the detail of a publication refusal, which T3 rolled back or which came before
@@ -179,7 +182,8 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		return "", nil, err
 	}
 	for _, h := range u.unchanged {
-		heads = append(heads, sourceHead{kind: h.kind, head: h.head, revision: h.revision, base: h.headRevision})
+		heads = append(heads, sourceHead{kind: h.kind, head: h.head, revision: h.revision, base: h.headRevision,
+			adopted: h.adopted})
 	}
 
 	var epoch string
@@ -257,8 +261,13 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 		if h.changed {
 			mode = "UPDATE"
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT `+k.key+`, head_revision FROM `+k.table+` WHERE id = $1 FOR `+mode, h.head).
-			Scan(&h.key, &h.actual); err != nil {
+		query, args := `SELECT `+k.key+`, head_revision FROM `+k.table+` WHERE id = $1 FOR `+mode, []any{h.head}
+		if h.adopted {
+			// The cluster's adoption, in its shared head's place; the shared head is not read (§6.2).
+			query = `SELECT name, adoption_revision FROM library_adoption WHERE cluster = $1 AND ` + k.table + ` = $2 FOR SHARE`
+			args = []any{j.cluster, h.head}
+		}
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&h.key, &h.actual); err != nil {
 			return "", nil, err
 		}
 	}
@@ -382,6 +391,15 @@ func (a *API) commitRelease(ctx context.Context, tx *sql.Tx, j publishJob, u rel
 	for _, h := range heads {
 		k := headKinds[h.kind]
 		name, machine := sql.NullString{String: h.key, Valid: h.kind != "assignment"}, sql.NullString{String: h.key, Valid: h.kind == "assignment"}
+		if h.adopted {
+			// The adoption the release compiled, unchanged: its counter, the same revision before it.
+			if _, err := tx.ExecContext(ctx, `INSERT INTO release_source (release, cluster, kind, `+h.kind+`, name, `+
+				k.revision+`, previous_`+k.revision+`, scope, adoption_revision) VALUES ($1, $2, $3, $4, $5, $6, $6, 'library', $7)`,
+				rel, j.cluster, h.kind, h.head, name, h.revision, h.base); err != nil {
+				return "", nil, err
+			}
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO release_source (release, cluster, kind, `+h.kind+`, name, machine, `+
 			k.revision+`, head_revision) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, rel, j.cluster, h.kind, h.head, name, machine,
 			sql.NullString{String: h.revision, Valid: h.revision != ""}, h.base); err != nil {
@@ -448,7 +466,11 @@ func checkInputs(j publishJob, u releaseUnit, draftState string, draftRev int, h
 		case h.changed && h.base == 0:
 			conflicts = append(conflicts, map[string]any{"head": h.head, "expected": "absent", "actual": h.actual})
 		case h.actual != h.base:
-			conflicts = append(conflicts, map[string]any{"head": h.head, "expected": h.base, "actual": h.actual})
+			c := map[string]any{"head": h.head, "expected": h.base, "actual": h.actual}
+			if h.adopted {
+				c["scope"] = "adoption"
+			}
+			conflicts = append(conflicts, c)
 		}
 	}
 	machines := slices.Clone(u.machines)
@@ -829,7 +851,8 @@ type contentMachine struct {
 }
 
 // digest is SHA-256 over a versioned encoding of c in which every string is length-prefixed and
-// sources and machines are sorted, so no two contents share an encoding.
+// sources and machines are sorted, so no two contents share an encoding. A release that moves a
+// name between scopes has two sources of one kind and name, so the revision orders them.
 func (c releaseContent) digest() [32]byte {
 	h := sha256.New()
 	put := func(s string) {
@@ -839,7 +862,7 @@ func (c releaseContent) digest() [32]byte {
 	count := func(n int) { _ = binary.Write(h, binary.BigEndian, uint64(n)) }
 	sources := slices.Clone(c.sources)
 	slices.SortFunc(sources, func(x, y contentSource) int {
-		return cmp.Or(strings.Compare(x.kind, y.kind), strings.Compare(x.key, y.key))
+		return cmp.Or(strings.Compare(x.kind, y.kind), strings.Compare(x.key, y.key), strings.Compare(x.revision, y.revision))
 	})
 	machines := slices.Clone(c.machines)
 	slices.SortFunc(machines, func(x, y contentMachine) int { return strings.Compare(x.machine, y.machine) })
