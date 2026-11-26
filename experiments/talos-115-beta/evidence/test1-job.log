@@ -1,7 +1,7 @@
-BUNDLE: head 7a83326ca8d0d5a9ca020883243ebf0aa583c825 on base cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a, 24749 bytes
-JOB_CREATED: verify-bronzeward-7a83326-1795731477-77944a47 in heavy-runs for head 7a83326ca8d0d5a9ca020883243ebf0aa583c825
+BUNDLE: head 783ca3b4aad9fb7db642ce5329fc905be33d8857 on base cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a, 38954 bytes
+JOB_CREATED: verify-bronzeward-783ca3b-1795731706-24d1dfd7 in heavy-runs for head 783ca3b4aad9fb7db642ce5329fc905be33d8857
 POD_NODE=horos
-POD_HEAD=7a83326ca8d0d5a9ca020883243ebf0aa583c825
+POD_HEAD=783ca3b4aad9fb7db642ce5329fc905be33d8857
 TOOLCHAIN mise=2026.10.17 linux-x64 (2026-10-21)
 TOOLCHAIN tools=actionlint  1.7.12   /tmp/lvj/work/src/mise.toml  1.7.12|go          1.27.1   /tmp/lvj/work/src/mise.toml  1.27.1|goreleaser  2.19.0   /tmp/lvj/work/src/mise.toml  2.19.0|jq          1.8.2    ~/.config/mise/config.toml   1.8.2|node        24.22.1  /tmp/lvj/work/src/mise.toml  24.22.1|python      3.12.16  ~/.config/mise/config.toml   3.12|shellcheck  0.11.0   /tmp/lvj/work/src/mise.toml  0.11.0
 TOOLCHAIN github_token=MISE_GITHUB_TOKEN
@@ -125,7 +125,7 @@ probe case field-EthernetConfig.flowControl refused stage=ingest-fragment[0] err
 probe case field-LinkConfig.addresses.scope refused stage=ingest-fragment[0] error="ingest: refused (schema-unloadable) at doc[0]"
 probe case field-v1alpha1.features.trustdCheckExtKeyUsage refused stage=ingest-fragment[0] error="ingest: refused (schema-unloadable) at doc[0]"
 probe cases=56
-ok  	github.com/ginsys/bronzeward/internal/compile	6.001s
+ok  	github.com/ginsys/bronzeward/internal/compile	5.983s
 == run out-a2: machinery v1.14.5
 probe gen v114-controlplane commented=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
 probe gen v114-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig,KubeAggregatorCAConfig,KubeAdmissionControlConfig,KubeAuditPolicyConfig,KubeAuthenticationConfig,KubeAuthorizerConfig,KubeAuthorizerConfig,KubeEtcdEncryptionConfig,KubeServiceAccountConfig,KubeAPIServerConfig,KubeControllerManagerConfig,KubeSchedulerConfig,KubeProxyConfig,KubeFlannelCNIConfig,KubeCoreDNSConfig
@@ -241,7 +241,7 @@ probe case field-EthernetConfig.flowControl refused stage=ingest-fragment[0] err
 probe case field-LinkConfig.addresses.scope refused stage=ingest-fragment[0] error="ingest: refused (schema-unloadable) at doc[0]"
 probe case field-v1alpha1.features.trustdCheckExtKeyUsage refused stage=ingest-fragment[0] error="ingest: refused (schema-unloadable) at doc[0]"
 probe cases=56
-ok  	github.com/ginsys/bronzeward/internal/compile	6.154s
+ok  	github.com/ginsys/bronzeward/internal/compile	5.856s
 == run out-c: machinery v1.14.7
 probe gen v114-controlplane commented=95cfec5c2f23f5af90d1be78993deb0bc7b30a8f1708f9bed39201c7d5822002 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
 probe gen v114-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig,KubeAggregatorCAConfig,KubeAdmissionControlConfig,KubeAuditPolicyConfig,KubeAuthenticationConfig,KubeAuthorizerConfig,KubeAuthorizerConfig,KubeEtcdEncryptionConfig,KubeServiceAccountConfig,KubeAPIServerConfig,KubeControllerManagerConfig,KubeSchedulerConfig,KubeProxyConfig,KubeFlannelCNIConfig,KubeCoreDNSConfig
@@ -357,7 +357,7 @@ probe case field-EthernetConfig.flowControl refused stage=ingest-fragment[0] err
 probe case field-LinkConfig.addresses.scope refused stage=ingest-fragment[0] error="ingest: refused (schema-unloadable) at doc[0]"
 probe case field-v1alpha1.features.trustdCheckExtKeyUsage refused stage=ingest-fragment[0] error="ingest: refused (schema-unloadable) at doc[0]"
 probe cases=56
-ok  	github.com/ginsys/bronzeward/internal/compile	5.907s
+ok  	github.com/ginsys/bronzeward/internal/compile	5.921s
 == run out-b: machinery v1.15.0-beta.1
 probe gen v114-controlplane commented=a9587762ebed867f604f7afe05a4dc4184889b05609d5f00fbacf7e1bed070fb bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
 probe gen v114-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig,KubeAggregatorCAConfig,KubeAdmissionControlConfig,KubeAuditPolicyConfig,KubeAuthenticationConfig,KubeAuthorizerConfig,KubeAuthorizerConfig,KubeEtcdEncryptionConfig,KubeServiceAccountConfig,KubeAPIServerConfig,KubeControllerManagerConfig,KubeSchedulerConfig,KubeProxyConfig,KubeFlannelCNIConfig,KubeCoreDNSConfig
@@ -560,11 +560,11 @@ probe case field-v1alpha1.features.trustdCheckExtKeyUsage records provenance=d4c
 probe case field-v1alpha1.features.trustdCheckExtKeyUsage kubernetes[v1.14.5]="v1.36.2"
 probe own field-v1alpha1.features.trustdCheckExtKeyUsage kubernetes[v1.15.0-beta.1]="compile: refused (kubernetes): the renderer's version is not known"
 probe cases=56
-ok  	github.com/ginsys/bronzeward/internal/compile	6.547s
+ok  	github.com/ginsys/bronzeward/internal/compile	6.978s
 == results out-a vs out-a2 (no lines below means equal)
 == key paths out-a vs out-a2
 keydiff compared=34 differing=0
-ok  	github.com/ginsys/bronzeward/internal/compile	0.010s
+ok  	github.com/ginsys/bronzeward/internal/compile	0.011s
 == results out-a vs out-c (no lines below means equal)
 1c1
 < gen v114-controlplane commented=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
@@ -584,7 +584,7 @@ ok  	github.com/ginsys/bronzeward/internal/compile	0.010s
 > gen default-worker commented=63c69d1e128465d210703dfb61833084ddb7f5803241e0e739b7dea12ccbcaa8 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
 == key paths out-a vs out-c
 keydiff compared=34 differing=0
-ok  	github.com/ginsys/bronzeward/internal/compile	0.009s
+ok  	github.com/ginsys/bronzeward/internal/compile	0.011s
 == results out-a vs out-b (no lines below means equal)
 1c1
 < gen v114-controlplane commented=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
@@ -759,9 +759,13 @@ keydiff gen-default-worker.yaml + WorkloadResourceConfig#1/kind
 keydiff gen-default-worker.yaml + WorkloadResourceConfig#1/reserved/memory
 keydiff gen-default-worker.yaml + v1alpha1#1/machine/features/trustdCheckExtKeyUsage
 keydiff mat-full-hostname-fill.yaml (same paths and values; the bytes differ in order or form)
+keydiff mat-full-hostname-fill.yaml style doc[8]/auto: single-quoted -> double-quoted
 keydiff mat-trim-each-kind-embedded.yaml (same paths and values; the bytes differ in order or form)
+keydiff mat-trim-each-kind-embedded.yaml style doc[0]/cluster/inlineManifests/1/name: single-quoted -> double-quoted
 keydiff red-full-hostname-fill.yaml (same paths and values; the bytes differ in order or form)
+keydiff red-full-hostname-fill.yaml style doc[8]/auto: single-quoted -> double-quoted
 keydiff red-trim-each-kind-embedded.yaml (same paths and values; the bytes differ in order or form)
+keydiff red-trim-each-kind-embedded.yaml style doc[0]/cluster/inlineManifests/1/name: single-quoted -> double-quoted
 keydiff mat-field-BondConfig.primary.yaml only-in-second
 keydiff mat-field-EthernetConfig.flowControl.yaml only-in-second
 keydiff mat-field-FilesystemTrimConfig.minLength.yaml only-in-second
@@ -821,7 +825,7 @@ keydiff red-kind-VirtualMachineConfig.yaml only-in-second
 keydiff red-kind-VirtualMachineProfileConfig.yaml only-in-second
 keydiff red-kind-WorkloadResourceConfig.yaml only-in-second
 keydiff compared=34 differing=6
-ok  	github.com/ginsys/bronzeward/internal/compile	0.021s
+ok  	github.com/ginsys/bronzeward/internal/compile	0.023s
 == done
-VERIFY_SECONDS=74
+VERIFY_SECONDS=73
 VERIFY_DONE rc=0
