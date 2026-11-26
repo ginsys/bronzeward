@@ -19,7 +19,7 @@ moves on its own. Reading it never changes it.
 
 ## Command line
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl operation list --machine <machine>
 bronzewardctl operation show <operation>
 bronzewardctl operation watch <operation>
@@ -81,8 +81,11 @@ could not be read) and 6 (a line could not be written), are in the
 
 ## A machine's history
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl machine timeline <machine>
+```
+
+```bash
 bronzewardctl machine timeline <machine> --follow
 ```
 

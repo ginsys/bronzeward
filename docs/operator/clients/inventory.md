@@ -87,7 +87,7 @@ that reports a UUID and is recorded by node ID is refused later).
 
 **Command line:**
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl machine add --cluster <cluster> --talos-node-id <node id> --platform metal --talos-endpoint 10.55.0.3
 ```
 

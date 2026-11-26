@@ -23,7 +23,7 @@ a machine. Each machine goes through the states `pre-restore-unaccounted`, then 
 
 Read where you stand, at any point:
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl recovery status
 ```
 
@@ -60,7 +60,7 @@ Run this on the server that was started for recovery, once the restores are done
 restored backup (`database`, `provider` or `credential-store`, one to three times) and the time the
 restore stopped writes.
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl recovery enter --stopped-at <RFC3339 time> --reason "<why>" \
   --restored family=<family>,backup=<backup id>,taken-at=<RFC3339 time>
 ```
@@ -83,7 +83,7 @@ An attempt is recorded before its request is sent. After a restore the journal c
 and nothing shows whether a request landed. You decide, from two observations of the machine, that
 no request sent before the restore can still land.
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl recovery scope-account <machine> --start <observation> --end <observation>
 ```
 
@@ -146,7 +146,7 @@ the deadline, any takeover and the start. It changes no state: the operation sta
 
 ### 4. Mark the machine
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl recovery mark <machine>
 ```
 
@@ -168,7 +168,7 @@ A mark can open a drift record; decide on it after the release, in [the drift jo
 
 ### 5. Release the machine
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl recovery release <machine>
 ```
 
@@ -179,7 +179,7 @@ is refused. The command names `recovery mark` as the next step, except for a sco
 
 ### 6. Exit recovery mode
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl recovery exit
 ```
 

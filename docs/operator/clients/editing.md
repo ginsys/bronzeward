@@ -25,7 +25,7 @@ Three kinds of thing make up a machine's configuration, and a name for each help
 show` reads it. Flags are in the [reference](cli-reference.md#fragment-set); this page shows the
 shape.
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl draft create --cluster <cluster> --title "worker labels"
 bronzewardctl fragment set worker-labels --draft <draft> --layer role --file worker-labels.yaml
 bronzewardctl profile set workers --draft <draft> --fragments worker-labels,worker-sysctls

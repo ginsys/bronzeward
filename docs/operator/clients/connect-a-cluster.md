@@ -23,7 +23,7 @@ The installation reads the cluster's members through one endpoint of that file. 
 
 **Command line:**
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl cluster discover --talosconfig ./talosconfig --talos-context <name> --endpoint <host|ip[:port]>
 ```
 
