@@ -60,8 +60,8 @@ func (s Staged) Seal() (plaintext []byte, sum [32]byte, err error) {
 	decl := s.Sanitized.Declarations()
 	gens := map[string]string{}
 	for name, path := range s.Generations {
-		if _, ok := decl.References[name]; !ok {
-			return nil, sum, fmt.Errorf("ingest: generation %q is for an undeclared name", name)
+		if r, ok := decl.References[name]; !ok || r.Kind == provider.KindCAKey {
+			return nil, sum, fmt.Errorf("ingest: generation %q is for no declared value", name)
 		}
 		if path == "" {
 			return nil, sum, fmt.Errorf("ingest: generation %q has no path", name)
@@ -128,11 +128,18 @@ func Open(plaintext []byte, sum [32]byte) (Staged, error) {
 	if err := validate(docs, e.Declarations); err != nil {
 		return Staged{}, errEnvelope
 	}
-	if len(e.Generations) != len(e.Declarations.References) {
+	// Every declared name has a generation but the CA key's typed reference, which has none.
+	valued := 0
+	for _, r := range e.Declarations.References {
+		if r.Kind != provider.KindCAKey {
+			valued++
+		}
+	}
+	if len(e.Generations) != valued {
 		return Staged{}, errEnvelope
 	}
 	for name, path := range e.Generations {
-		if _, ok := e.Declarations.References[name]; !ok || path == "" {
+		if r, ok := e.Declarations.References[name]; !ok || r.Kind == provider.KindCAKey || path == "" {
 			return Staged{}, errEnvelope
 		}
 	}

@@ -43,6 +43,7 @@ const (
 	RuleBadDeclaration   Rule = "bad-declaration"    // a kind, version or encoding outside §5.2
 	RuleEmbedded         Rule = "embedded"           // an identified embedded document is not a string or does not parse
 	RuleMarkRewritesText Rule = "mark-rewrites-text" // a mark on a paused claim would change text other than the nodes it replaces
+	RuleCAKeyMismatch    Rule = "ca-key-mismatch"    // an import's machine.ca.key is not the cluster's stored key
 
 	// RuleMarkOnReleasedHostname: step 2a removed a legacy hostname key, and a mark on a paused claim targets
 	// machine.features.stableHostname or a mapping that holds it, which would suppress the fill and lose the hostname.
