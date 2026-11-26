@@ -284,7 +284,7 @@ type selections struct {
 	pins      map[string][]string            // profile revision -> fragment revisions
 	named     map[string]string              // profile revision -> its name
 	revisions map[string][2]string           // fragment revision -> name, layer
-	shared    map[string]bool                // the shared profile revisions
+	shared    map[string]bool                // the shared profile and fragment revisions
 	heads     map[string]sharedHead          // shared fragment revision -> its name's shared head, if one exists
 }
 
@@ -399,15 +399,20 @@ func (r *snapshotReader) loadSelections(machines []snapshotMachine) (selections,
 			}
 		}
 	}
-	err = r.query(`SELECT f.id, f.name, f.layer, coalesce(h.id, ''), coalesce(h.head_revision_id, '') FROM fragment_revision f
+	err = r.query(`SELECT f.id, f.name, f.layer, f.cluster IS NULL, coalesce(h.id, ''), coalesce(h.head_revision_id, '')
+		FROM fragment_revision f
 		LEFT JOIN fragment h ON f.cluster IS NULL AND h.owner = 'library' AND h.name = f.name
 		WHERE f.id = ANY ($1)`, func(row *sql.Rows) error {
 		var frv, name, layer string
+		var shared bool
 		var head sharedHead
-		if err := row.Scan(&frv, &name, &layer, &head.id, &head.revision); err != nil {
+		if err := row.Scan(&frv, &name, &layer, &shared, &head.id, &head.revision); err != nil {
 			return err
 		}
 		sel.revisions[frv], sel.heads[frv] = [2]string{name, layer}, head
+		if shared {
+			sel.shared[frv] = true
+		}
 		return nil
 	}, frvs)
 	return sel, profiles, err

@@ -263,6 +263,84 @@ func (e IdentityBodyRoles) Valid() bool {
 	}
 }
 
+// Defines values for ImpactItemKind.
+const (
+	ImpactItemKindFragment ImpactItemKind = "fragment"
+	ImpactItemKindProfile  ImpactItemKind = "profile"
+)
+
+// Valid indicates whether the value is a known member of the ImpactItemKind enum.
+func (e ImpactItemKind) Valid() bool {
+	switch e {
+	case ImpactItemKindFragment:
+		return true
+	case ImpactItemKindProfile:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ImpactItemScope.
+const (
+	ImpactItemScopeCluster ImpactItemScope = "cluster"
+	ImpactItemScopeLibrary ImpactItemScope = "library"
+)
+
+// Valid indicates whether the value is a known member of the ImpactItemScope enum.
+func (e ImpactItemScope) Valid() bool {
+	switch e {
+	case ImpactItemScopeCluster:
+		return true
+	case ImpactItemScopeLibrary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ImpactMachineChange.
+const (
+	ImpactMachineChangeGains ImpactMachineChange = "gains"
+	ImpactMachineChangeKeeps ImpactMachineChange = "keeps"
+	ImpactMachineChangeLoses ImpactMachineChange = "loses"
+)
+
+// Valid indicates whether the value is a known member of the ImpactMachineChange enum.
+func (e ImpactMachineChange) Valid() bool {
+	switch e {
+	case ImpactMachineChangeGains:
+		return true
+	case ImpactMachineChangeKeeps:
+		return true
+	case ImpactMachineChangeLoses:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ImpactMachineReason.
+const (
+	ImpactMachineReasonAdoption   ImpactMachineReason = "adoption"
+	ImpactMachineReasonAssignment ImpactMachineReason = "assignment"
+	ImpactMachineReasonProfile    ImpactMachineReason = "profile"
+)
+
+// Valid indicates whether the value is a known member of the ImpactMachineReason enum.
+func (e ImpactMachineReason) Valid() bool {
+	switch e {
+	case ImpactMachineReasonAdoption:
+		return true
+	case ImpactMachineReasonAssignment:
+		return true
+	case ImpactMachineReasonProfile:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for IngestionInputKind.
 const (
 	IngestionInputKindDriftAdoption IngestionInputKind = "drift-adoption"
@@ -1883,6 +1961,54 @@ type IdentityBodyKind string
 
 // IdentityBodyRoles defines model for IdentityBody.Roles.
 type IdentityBodyRoles string
+
+// ImpactBody defines model for ImpactBody.
+type ImpactBody struct {
+	Items []ImpactItem `json:"items"`
+}
+
+// ImpactCluster Another cluster that uses the shared name; the draft leaves it unchanged.
+type ImpactCluster struct {
+	Cluster string `json:"cluster"`
+
+	// Revision The adopted revision, or the one the via profile pins.
+	Revision  string `json:"revision"`
+	Unchanged bool   `json:"unchanged"`
+
+	// Via The adopted shared profile whose pin brings this fragment revision.
+	Via *string `json:"via"`
+}
+
+// ImpactItem One fragment or profile entry of the draft.
+type ImpactItem struct {
+	Kind          ImpactItemKind  `json:"kind"`
+	Machines      []ImpactMachine `json:"machines"`
+	Name          string          `json:"name"`
+	OtherClusters []ImpactCluster `json:"otherClusters"`
+	Scope         ImpactItemScope `json:"scope"`
+}
+
+// ImpactItemKind defines model for ImpactItem.Kind.
+type ImpactItemKind string
+
+// ImpactItemScope defines model for ImpactItem.Scope.
+type ImpactItemScope string
+
+// ImpactMachine defines model for ImpactMachine.
+type ImpactMachine struct {
+	// Change gains a revision it did not compose before, loses the name at this scope, or keeps the same revision.
+	Change  ImpactMachineChange `json:"change"`
+	Machine string              `json:"machine"`
+
+	// Reason Its assignment selects the name, else a cluster profile pins it, else only a shared profile pin brings it.
+	Reason ImpactMachineReason `json:"reason"`
+}
+
+// ImpactMachineChange gains a revision it did not compose before, loses the name at this scope, or keeps the same revision.
+type ImpactMachineChange string
+
+// ImpactMachineReason Its assignment selects the name, else a cluster profile pins it, else only a shared profile pin brings it.
+type ImpactMachineReason string
 
 // ImportBaseDocument The stored sanitized document of an import base revision, the review's document form (persistence and API §9.2). It can still hold a value nobody marked, and carries no declarations, digest, baseline or generation path.
 type ImportBaseDocument struct {
