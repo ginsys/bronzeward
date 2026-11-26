@@ -97,11 +97,11 @@ beforeAll(async () => {
   diagnostics([]);
 });
 
-test("all 112 nullable fields are found, each named", () => {
+test("all 117 nullable fields are found, each named", () => {
   const textCount = readFileSync(spec, "utf8").match(/type: \[[a-z]+, 'null'\]/g)?.length;
   expect(unnamed).toBe(0);
   expect(fields.length).toBe(textCount);
-  expect(fields.length).toBe(112);
+  expect(fields.length).toBe(117);
   expect(fields.every((f) => f.schema.startsWith("#/components/schemas/"))).toBe(true);
 });
 
