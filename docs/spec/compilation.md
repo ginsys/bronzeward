@@ -308,8 +308,9 @@ give a node a path that reads as an embedded document's.
    read one (path, version and `created_time`, never a value; `no key` for a
    cluster with no stored key has none), are recorded as an event of the
    `ingest` operation, as the certificate access is (persistence and API
-   §3.3), whatever the verdict. The event is `ca-key-match` with `verdict` and, for `match` and
-   `mismatch`, the `path`, `version` and `createdTime` of the stored key it was compared with. `no
+   §3.3), whatever the verdict. The event is `ca-key-match` with `verdict` and, where a stored version
+   was read (`match`, `mismatch`, and a version written again since its act), the `path`,
+   `version` and `createdTime` of that stored key. `no
    key` is a cluster with no first-key act, or whose act names a version that is gone; `unreadable`
    is a version the signer cannot read (denied, sealed or unreachable, malformed) or one written
    again since its act. A worker configuration has no `machine.ca.key`, so there is

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
@@ -182,25 +183,34 @@ func TestImportNeedsAReadableStoredCAKey(t *testing.T) {
 		broken  func(t *testing.T, ce *caImportEnv)
 		verdict string
 		cause   string
+		read    bool // the event names the version that was read
 	}{
-		"no first-key act": {func(t *testing.T, ce *caImportEnv) { dropFirstKeyActs(t, ce.db, ce.cluster) }, "no key", "absent"},
+		"no first-key act": {func(t *testing.T, ce *caImportEnv) { dropFirstKeyActs(t, ce.db, ce.cluster) }, "no key", "absent", false},
 		"the version soft-deleted": {func(t *testing.T, ce *caImportEnv) {
 			v := latestActVersion(t, ce.db, ce.cluster)
 			ce.keys.kv.destroy(v.Path, v.Version)
-		}, "no key", "version-gone"},
+		}, "no key", "version-gone", false},
 		"the provider sealed": {func(_ *testing.T, ce *caImportEnv) {
 			ce.keys.kv.mu.Lock()
 			ce.keys.kv.status[http.MethodGet] = http.StatusServiceUnavailable
 			ce.keys.kv.mu.Unlock()
-		}, "unreadable", "provider-unavailable"},
+		}, "unreadable", "provider-unavailable", false},
+		// The same path and version number, written at another time than the act records.
+		"the version written again since the act": {func(t *testing.T, ce *caImportEnv) {
+			path := latestActVersion(t, ce.db, ce.cluster).Path
+			ce.keys.kv.mu.Lock()
+			defer ce.keys.kv.mu.Unlock()
+			vs := ce.keys.kv.versions[path]
+			vs[len(vs)-1].created = vs[len(vs)-1].created.Add(time.Hour)
+		}, "unreadable", "version-changed", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ce := newCAImportEnv(t)
 			c.broken(t, ce)
 			op, j := ce.importKey(t, ce.ca)
 			ce.refusedImport(t, op, j.claim.ID, http.StatusServiceUnavailable, "talos-access-unavailable", c.verdict)
-			if e := verdictEvent(t, ce, op); e["path"] != nil || e["version"] != nil {
-				t.Fatalf("a verdict that read no version names one: %v", e)
+			if e := verdictEvent(t, ce, op); (e["path"] != nil) != c.read || (e["version"] != nil) != c.read || (e["createdTime"] != nil) != c.read {
+				t.Fatalf("the verdict's version, wanted %v: %v", c.read, e)
 			}
 			if got := events(t, ce.db, op)[2]["cause"]; got != c.cause {
 				t.Fatalf("cause %v, want %s", got, c.cause)
