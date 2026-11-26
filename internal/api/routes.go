@@ -111,6 +111,7 @@ func routes() []*route {
 	rs = append(rs,
 		list("/fragments/{id}/adoptions", adoptionsRead("fragment"), "behind"),
 		list("/profiles/{id}/adoptions", adoptionsRead("profile"), "behind"),
+		read(g("/drafts/{id}/impact"), getImpact),
 		list("/drafts", listDrafts), read(g("/drafts/{id}"), getDraft),
 		list("/ingestions", listIngestions, "state", "machine"), read(g("/ingestions/{id}"), getIngestion), list("/releases", listReleases),
 		read(g("/releases/{id}"), getRelease), read(g("/releases/{id}/machines/{m}/review"), getReview),

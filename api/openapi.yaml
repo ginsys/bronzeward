@@ -890,6 +890,28 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/SourceUpdate'}
         default: {$ref: '#/components/responses/Problem'}
+  /drafts/{id}/impact:
+    get:
+      operationId: getDraftsIdImpact
+      tags: [drafts]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ImpactBody'}
+        default: {$ref: '#/components/responses/Problem'}
   /drafts/{id}/profiles/{name}:
     put:
       operationId: putDraftsIdProfilesName
@@ -3586,6 +3608,47 @@ components:
         draft: {type: string}
         draftRevision: {type: integer}
         importBaseRevision: {type: string}
+      additionalProperties: false
+    ImpactBody:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ImpactItem'}
+      additionalProperties: false
+    ImpactCluster:
+      type: object
+      description: Another cluster that uses the shared name; the draft leaves it unchanged.
+      required: [cluster, revision, via, unchanged]
+      properties:
+        cluster: {type: string}
+        revision: {type: string, description: 'The adopted revision, or the one the via profile pins.'}
+        via: {type: [string, 'null'], description: 'The adopted shared profile whose pin brings this fragment revision.'}
+        unchanged: {type: boolean}
+      additionalProperties: false
+    ImpactItem:
+      type: object
+      description: One fragment or profile entry of the draft.
+      required: [kind, name, scope, machines, otherClusters]
+      properties:
+        kind: {type: string, enum: [fragment, profile]}
+        name: {type: string}
+        scope: {type: string, enum: [cluster, library]}
+        machines:
+          type: array
+          items: {$ref: '#/components/schemas/ImpactMachine'}
+        otherClusters:
+          type: array
+          items: {$ref: '#/components/schemas/ImpactCluster'}
+      additionalProperties: false
+    ImpactMachine:
+      type: object
+      required: [machine, reason, change]
+      properties:
+        machine: {type: string}
+        reason: {type: string, enum: [assignment, profile, adoption], description: 'Its assignment selects the name, else a cluster profile pins it, else only a shared profile pin brings it.'}
+        change: {type: string, enum: [gains, loses, keeps], description: 'gains a revision it did not compose before, loses the name at this scope, or keeps the same revision.'}
       additionalProperties: false
     IdentityBody:
       description: A member that does not apply to the caller's kind is null. Nothing else of the credential is served.

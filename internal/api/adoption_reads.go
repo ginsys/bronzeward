@@ -148,14 +148,30 @@ func readComposition(ctx context.Context, tx *sql.Tx, j publishJob) (composition
 	if err != nil {
 		return c, err
 	}
-	for _, m := range all {
-		if m.importBase != "" {
-			m.assignment = c.reader.states["assignment"][m.machine].revision
-			c.machines = append(c.machines, m)
-		}
+	covered := slices.DeleteFunc(all, func(m snapshotMachine) bool { return m.importBase == "" })
+	return c, c.load(covered)
+}
+
+// publishedComposition is the cluster's published composition of the machines given, whether or
+// not their published state covers them.
+func publishedComposition(ctx context.Context, tx *sql.Tx, cluster string, machines []snapshotMachine) (composition, error) {
+	c := composition{reader: &snapshotReader{ctx: ctx, tx: tx, j: publishJob{cluster: cluster}}}
+	if err := c.reader.readStates(); err != nil {
+		return c, err
 	}
-	c.sel, _, err = c.reader.loadSelections(c.machines)
-	return c, err
+	return c, c.load(slices.Clone(machines))
+}
+
+// load makes machines the composition's, each with the assignment its view gives it, and reads
+// their selections.
+func (c *composition) load(machines []snapshotMachine) error {
+	for i := range machines {
+		machines[i].assignment = c.reader.states["assignment"][machines[i].machine].revision
+	}
+	c.machines = machines
+	var err error
+	c.sel, _, err = c.reader.loadSelections(machines)
+	return err
 }
 
 // holds reports whether m composes revision of the kind's name: for a profile, whether its

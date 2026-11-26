@@ -489,8 +489,24 @@ cluster's existing adoption keeps compiling the revision it names.
 
 **Reach, before publishing.** `GET /drafts/{id}/impact` lists, for each changed
 source, the machines of the draft's cluster whose composition includes it before
-or after the draft (a removal reaches the machines that lose it), and the other
-clusters that use the name, each with its adopted revision and marked unchanged.
+or after the draft (an adoption removal reaches the machines that lose it), and
+the other clusters that use the name, each with its adopted revision and marked
+unchanged. A changed source is a fragment or profile entry of the draft, one item
+per kind, name and scope, so a detachment gives two: the library item, which
+loses, and the cluster item, which gains. An assignment or import base entry gets
+no item: it names no fragment or profile and reaches no other cluster, so a
+machine whose composition changes only through one is listed under no item unless
+that fragment or profile has an entry of its own. The machines are those the
+draft's publication would cover (§17.33), and the published composition it is
+compared with is read for the same machines. Each is marked `gains` where it
+composes a revision of the name at the item's scope that it did not compose
+before, an edit included, `loses` where it composes the name at that scope no
+more, and `keeps` where it composes what it composed, as after the removal of a
+library head, which moves no adoption. Its `reason` is the first of these that
+holds, in the composition after the draft, or before it for `loses`:
+`assignment`, its assignment selects the name; `profile`, a cluster profile it
+selects pins it; `adoption`, only the pin of a shared profile it selects brings
+it. A draft that is not open is `409 conflict`.
 `GET /fragments/{id}/adoptions` and `GET /profiles/{id}/adoptions` list every
 cluster whose adoption of a library name holds a revision (a removed adoption
 is not listed, and is not behind), with its revision, whether it is behind
@@ -2608,8 +2624,7 @@ API revisions:
 | 16 | the `hostname` rule of `422 validation-failed` on publication, with a release compiling a machine's name as its hostname where nothing sets one (§9.2, §3.5, compilation §6.1 item 6) |
 | 17 | the name form of `409 stale-input` from the `ingest` draft transaction, with `expected` and `actual` as machine names, each a string or `null`, and `formOnly` true for a machine whose import removed the fill's own `HostnameConfig` while its name is unchanged (§4.2, choice §17.45, compilation §2.3 step 2a, §6.1 item 5) |
 | 18 | `nodeName` on the `hostname` member of each machine of a release and its review, the `hostnameHeldBy` member of `GET /machines/{id}/position` and the publication comparison reading `nodeName`, together (§9.3, compilation §6.1 item 6, execution and recovery choice §10.39) |
-
-Revision 19 is specified and not yet served. It adds `scope` on a fragment, a profile and a draft's fragment and profile entries (the `scope` query on their `DELETE`), the adoption entry and detachment routes of a draft, `GET /fragments/{id}/adoptions`, `GET /profiles/{id}/adoptions` (each item's `via`), `GET /drafts/{id}/impact`, and `scope`, `previous` and `adoptionRevision` on a release's `sources`, the last two `null` for a fragment a library profile revision pins (§3.1.1, §9.2, choice §17.28). Its row joins this table in the change that serves it, which also bumps the served revision, because the table's last row is the revision the server serves and a test holds the two equal.
+| 19 | `scope` on a fragment, a profile and a draft's fragment and profile entries (the `scope` query on their `DELETE`), the adoption entry and detachment routes of a draft, `GET /fragments/{id}/adoptions`, `GET /profiles/{id}/adoptions` (each item's `via`), `GET /drafts/{id}/impact`, and `scope`, `previous` and `adoptionRevision` on a release's `sources`, the last two `null` for a cluster source and for a fragment a library profile revision pins (§3.1.1, §9.2, choice §17.28) |
 
 ### 9.2 Resources and routes
 
@@ -2626,7 +2641,7 @@ idempotency and conflict behavior.
 | `GET /machines/{id}/position` (where one machine stands in import, publish, plan, approve and apply, read in one snapshot; no query, no ETag, not paged; API revision 6, §9.3) | 200 | any role |
 | `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments. A fragment or profile body carries `scope`, `cluster` for a cluster scope and `null` for the library (API revision 19); a library revision answers `cluster: null` too, and a release's library source answers `headRevision: null` | 200 | any role |
 | `GET /fragments/{id}/adoptions`, `GET /profiles/{id}/adoptions` (the clusters whose adoption of a library name holds a revision, §3.1.1, so a removed adoption is not listed; API revision 19; `behind=true` keeps those whose revision is not the head's, every one once the head is removed, and any other value of `behind` is `400 invalid-request`; paged like the list reads, in the order of cluster, `via` and revision): `items`, each `cluster`, `revision` (adopted), `adoptionRevision` (the counter), `behind`, `release` (the release that set the adoption at that counter, not a later one that holds it unchanged; `null` before one is published), `via` (`null`, or for a fragment a library profile revision pins, that profile's name: the cluster has no adoption of the fragment at that revision, and one it holds at another is an item of its own, `revision` is the pinned one, `adoptionRevision` and `release` are `null`, `behind` compares the pin with the head), `machines` (the machines of that cluster with an import base, choice §17.33, whose composition holds the item's revision, through the `via` profile where it is set; the composition is read from the cluster's current assignment and profile heads, and a machine published and not yet adopted or applied has no import base there, §3.2). `404 not-found` for a cluster-scope source | 200 | any role |
-| `GET /drafts/{id}/impact` (what the draft changes and reaches, before publication, §3.1.1; no ETag; API revision 19): `items`, one per changed source, each `kind`, `name`, `scope`, `machines` (those of the draft's cluster whose composition includes it before or after the draft, with an assignment selection, a profile pin or an adoption as the reason and `gains` or `loses`, so a removal lists the machines that lose it) and `otherClusters` (each cluster that has adopted the name, or pins the fragment through an adopted library profile, with its revision, `via` as in the adoptions read, and `unchanged: true`). It reads sources only and renders nothing | 200 | any role |
+| `GET /drafts/{id}/impact` (what the draft changes and reaches, before publication, §3.1.1; no ETag; API revision 19): `items`, one per fragment or profile entry of the draft, in the order of kind, name and scope, each `kind`, `name`, `scope`, `machines` (those the draft's publication would cover whose composition includes the name at that scope before or after the draft, each `machine`, `reason`, `assignment`, `profile` or `adoption`, and `change`, `gains`, `loses` or `keeps`, §3.1.1) and `otherClusters` (empty for a cluster-scope item; each other cluster that has adopted the name, or pins the fragment through an adopted library profile, with its `revision`, `via` as in the adoptions read, and `unchanged: true`). It reads sources only and renders nothing. `404 not-found` for no such draft; `409 conflict` for a draft that is not open | 200 | any role |
 | `GET /drafts[/{id}]`, `/ingestions[/{id}]`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
 | `GET /dependencies[/{id}[/releases\|/alerts]]`, `/dependency-alerts` ([dependency monitor §7.2](dependency-monitor.md#72-read-routes)) | 200 | any role |
