@@ -207,7 +207,7 @@ func TestLibraryAdoptionRoute(t *testing.T) {
 // fragment's head, so such a revision is refused when adopted. A head that was removed is still
 // one: its pin publishes as written.
 func TestLibraryAdoptionOfAProfilePin(t *testing.T) {
-	published := func(d *draftEnv) *publishEnv {
+	published := func(t *testing.T, d *draftEnv) *publishEnv {
 		t.Helper()
 		var rev int
 		if err := d.db.QueryRow(`SELECT revision FROM draft WHERE id = $1`, d.draft).Scan(&rev); err != nil {
@@ -224,7 +224,7 @@ func TestLibraryAdoptionOfAProfilePin(t *testing.T) {
 		rec := d.adopts("profiles", "shared-set", unpublished, d.etag, d.key())
 		if rec.Code == http.StatusOK {
 			// Where it is accepted, say what publication makes of it.
-			next := published(d)
+			next := published(t, d)
 			next.compiled()
 			rel, ref := next.commit()
 			t.Fatalf("the adoption was accepted; its publication: release %q, refusal %v", rel, ref)
@@ -243,7 +243,7 @@ func TestLibraryAdoptionOfAProfilePin(t *testing.T) {
 		prv := p.sharedProfileRevision("shared-set", f.older)
 		p.sharedProfileHead("shared-set", prv)
 		updated(t, &d.etag, d.adopts("profiles", "shared-set", prv, d.etag, d.key()))
-		next := published(d)
+		next := published(t, d)
 		rel := next.publishedEntries()
 		next.wantAdoption(d.cluster, "profile", "shared-set", prv, 1)
 		next.wantSources(rel, "fragment", "ntp", sharedRow(f.older, "", 0))
