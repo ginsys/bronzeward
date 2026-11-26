@@ -238,7 +238,13 @@ run = '''
 : "${BW_TEST_BAO_ADDR:=$BW_DEV_BAO_ADDR}"
 : "${BW_TEST_BAO_TOKEN:=bw-dev-root-token}"
 export BW_TEST_PG_DSN BW_TEST_BAO_ADDR BW_TEST_BAO_TOKEN
-BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 go test -count=1 -timeout 25m ./...
+# TestDocBlocks (internal/clitest) runs the client pages' blocks marked {.bw-run .bw-db} and records
+# each one that ran. The last line compares that record with the pages' marks, from outside the test,
+# so a test that was skipped, filtered out or removed fails this task.
+export BW_DOC_RECORD="$PWD/.dev/doc-journeys"
+rm -rf "$BW_DOC_RECORD"
+BW_REQUIRE_PG=1 BW_REQUIRE_BAO=1 go test -count=1 -timeout 25m ./... || exit 1
+bash scripts/release/run-doc-blocks.sh account-db "$BW_DOC_RECORD/ran.list"
 '''
 
 [tasks.dev-db]
