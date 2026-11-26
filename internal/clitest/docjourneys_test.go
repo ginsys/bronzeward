@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ginsys/bronzeward/internal/baotest"
+	"github.com/ginsys/bronzeward/internal/dbtest"
 	"github.com/ginsys/bronzeward/internal/talos/talostest"
 )
 
@@ -81,8 +83,9 @@ func adopted(t *testing.T, e *planEnv, plan string) string {
 }
 
 // TestDocBlocks runs every journey page block marked {.bw-run .bw-db} and fails when one of them
-// failed or was not run by a scenario. mise run go-db checks the record against the pages from
-// outside the test.
+// failed or was not run by a scenario. Without a database or an OpenBao it is skipped whole, as the
+// harness is; mise run go-db requires both, and checks the record against the pages from outside the
+// test, so that a skip there fails the task.
 func TestDocBlocks(t *testing.T) {
 	blocks, err := docBlocks(pagesDir)
 	if err != nil {
@@ -91,6 +94,9 @@ func TestDocBlocks(t *testing.T) {
 	if len(blocks) == 0 {
 		t.Fatal("no page marks a block")
 	}
+	// Skips here, not only in the scenarios: skipped scenarios would read as blocks that did not run.
+	baotest.New(t)
+	dbtest.New(t)
 	if err := recordHeader(); err != nil {
 		t.Fatal(err)
 	}
