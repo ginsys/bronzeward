@@ -585,7 +585,7 @@ function synthetic(cl: string, machine: string) {
   const rel: S["ReleaseBody"] = {
     id: sid("rel", "h"), cluster: cl, draft: sid("drf", "d"), draftRevision: 2, operation: sid("op", "p"), publishedBy: { principal: author, role: "publisher" }, publishedAt: T0,
     renderer: { contract: "v1.13", machineryVersion: "v1.13.6", machineryChecksum: "sha256:synthetic", kubernetesVersion: "v1.34.1" },
-    sources: [{ kind: "fragment", head: frg.id, revision: frv.id, headRevision: 3 }],
+    sources: [{ kind: "fragment", scope: "cluster", head: frg.id, revision: frv.id, headRevision: 3, previous: null, adoptionRevision: null }],
     machines: [{ machine, mode: "metal", review: "redacted", publicationObservation: sid("obs", "o"), hostname: { source: "none" } }],
   };
   const plan: S["PlanBody"] = {
