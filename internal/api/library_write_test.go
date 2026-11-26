@@ -1,12 +1,16 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ginsys/bronzeward/internal/id"
+	"github.com/ginsys/bronzeward/internal/staging"
 )
 
 // The writes of a draft's shared (library) entries (persistence-api.md §3.1.1, §9.2). The cases
@@ -155,6 +159,50 @@ func TestLibraryWriteBases(t *testing.T) {
 	}
 }
 
+// PA §3.1.1: a shared edit records the cluster's adoption counter, read again at each write, and
+// an update of the cluster's entry of the same name leaves the shared entry as it was.
+func TestLibraryWriteAdoptionBaseAndSlots(t *testing.T) {
+	d := newDraftEnv(t)
+	shared, _ := d.sharedRows("ntp", true, 1)
+	head, _ := (&publishEnv{draftEnv: d}).adoptedSharedProfile("shared-set", shared)
+	body := `{"scope":"library","fragments":["` + shared + `"]}`
+	stored := func(scope string) (revision string, base, adoption sql.NullInt64) {
+		t.Helper()
+		if err := d.db.QueryRow(`SELECT profile_revision, base, adoption_base FROM draft_source_entry
+			WHERE draft = $1 AND kind = 'profile' AND name = 'shared-set' AND scope = $2`, d.draft, scope).
+			Scan(&revision, &base, &adoption); err != nil {
+			t.Fatal(err)
+		}
+		return revision, base, adoption
+	}
+	for i, counter := range []int{3, 4} {
+		mustExec(t, d.db, `UPDATE library_adoption SET adoption_revision = $1 WHERE cluster = $2 AND name = 'shared-set'`,
+			counter, d.cluster)
+		e := updated(t, &d.etag, d.put("/profiles/shared-set", body, d.etag, d.key()))
+		wantMember(t, e, "head", head)
+		wantMember(t, e, "base", 1)
+		wantMember(t, e, "adoptionBase", counter)
+		if rev, base, adoption := stored("library"); rev != e["revision"] || base.Int64 != 1 || adoption.Int64 != int64(counter) {
+			t.Fatalf("write %d stored %s %v %v", i, rev, base, adoption)
+		}
+	}
+	kept, _, _ := stored("library")
+
+	own := d.fragmentRevision(d.cluster, "own", "cluster")
+	d.fragmentHead("own", "cluster", own, 1)
+	var written []any
+	for range 2 { // an insert of the cluster's entry, then its update
+		e := updated(t, &d.etag, d.put("/profiles/shared-set", `{"fragments":["`+own+`"]}`, d.etag, d.key()))
+		written = append(written, e["revision"])
+	}
+	if rev, _, _ := stored("cluster"); rev != written[1] || written[0] == written[1] {
+		t.Fatalf("cluster entry %s after %v", rev, written)
+	}
+	if rev, base, adoption := stored("library"); rev != kept || base.Int64 != 1 || adoption.Int64 != 4 {
+		t.Fatalf("shared entry %s %v %v after the cluster's writes; want %s", rev, base, adoption, kept)
+	}
+}
+
 // Contract 5: the DELETE of a fragment or profile entry takes the one query scope, once, and its
 // idempotency fingerprint covers it. Every other mutation refuses any query.
 func TestLibraryWriteScopeQuery(t *testing.T) {
@@ -220,8 +268,12 @@ func TestLibraryWritePinsAndSelections(t *testing.T) {
 			t.Fatalf("pin %d: problem %v", i, p)
 		}
 	}
-	wantProblem(t, d.put("/profiles/bad", `{"scope":"tenant","fragments":["`+shared+`"]}`, d.etag, d.key()),
-		http.StatusBadRequest, "invalid-request")
+	for _, scope := range []string{`"tenant"`, `""`, `null`, `1`} {
+		wantProblem(t, d.put("/profiles/bad", `{"scope":`+scope+`,"fragments":["`+own+`"]}`, d.etag, d.key()),
+			http.StatusBadRequest, "invalid-request")
+		wantProblem(t, d.put("/fragments/bad", `{"scope":`+scope+`,"layer":"cluster","document":"machine: {}","marks":[]}`, d.etag, d.key()),
+			http.StatusBadRequest, "invalid-request")
+	}
 	updated(t, &d.etag, d.put("/profiles/shared-set", `{"scope":"library","fragments":["`+shared+`","`+introduced+`"]}`, d.etag, d.key()))
 	updated(t, &d.etag, d.put("/profiles/workers", `{"fragments":["`+introduced+`"]}`, d.etag, d.key()))
 	if n := count(t, d.db, `SELECT count(*) FROM profile_revision_fragment WHERE fragment_revision = $1 AND library`, introduced); n != 1 {
@@ -317,58 +369,53 @@ func TestLibraryWriteDraftChecks(t *testing.T) {
 	}
 }
 
-// The whole of part 2 by API: a person writes a shared fragment and selects it, the publication
-// adopts it for that cluster, which compiles it, and another cluster that selects it is refused
-// at publication.
+// The whole of part 2 by API: a person writes a shared fragment; the publication of a draft that
+// selects it compiles it into the machine's configuration and adopts it for that cluster; another
+// cluster that selects it is refused at publication.
 func TestLibraryWritePublishAndUse(t *testing.T) {
-	ie := newFragmentEnv(t, options{})
-	d := &draftEnv{env: ie.env, cluster: ie.cluster, machine: ie.machine, draft: ie.draft, seed: id.New(id.Principal)}
-	mustExec(t, ie.db, `INSERT INTO principal (id, kind, iss, sub, created_at) VALUES ($1, 'human', 'https://idp.test', 'seed', now())`, d.seed)
-	put := `{"scope":"library","layer":"cluster","document":"machine:\n  nodeLabels:\n    tier: edge\n","marks":[]}`
-	entry := updated(t, &ie.etag, ie.putFragment("ntp", put, ie.etag, "k-fragment-shared-use1"))
+	d := newDraftEnv(t)
+	runs := &sync.WaitGroup{}
+	t.Cleanup(runs.Wait)
+	owner := staging.Owner{ID: "a/1/library-write", Epoch: epoch(t, d.db)}
+	api := d.buildWith(deps{ing: &fakeIngester{latest: 1}, owner: owner, timers: testTimers, runs: runs}, options{})
+	author := d.human("h-author")
+	etag := d.etag
+	entry := updated(t, &etag, d.do(api, call{method: "PUT", path: prefix + "/drafts/" + d.draft + "/fragments/edge", token: author,
+		key: "k-fragment-shared-use1", ifMatch: etag,
+		body: `{"scope":"library","layer":"cluster","document":"machine:\n  env:\n    BW_SHARED_TIER: edge\n","marks":[]}`}))
 	frv, _ := entry["revision"].(string)
-	selects := func(draft, etag, machine, key string) string {
-		t.Helper()
-		rec := ie.do(ie.api, call{method: "PUT", path: prefix + "/drafts/" + draft + "/assignments/" + machine,
-			token: ie.human("h-author"), key: key, ifMatch: etag, body: `{"profiles":[],"fragments":{"cluster":["ntp"]}}`})
-		updated(t, &etag, rec)
-		return etag
-	}
-	selects(ie.draft, ie.etag, ie.machine, "k-assignment-shared-1")
+	// The fixture's publish operation binds draft revision 1; the write above is part of it. The
+	// assignment is seeded: once that operation exists the draft takes no more writes.
+	mustExec(t, d.db, `UPDATE draft SET revision = 1 WHERE id = $1`, d.draft)
+	b := buildOn(t, d)
+	b.selectToo(nil, "cluster/edge")
 
-	publication := func(cluster, machine, draft, key string) (*publishEnv, *refusal) {
-		t.Helper()
-		var rev int
-		if err := ie.db.QueryRow(`SELECT revision FROM draft WHERE id = $1`, draft).Scan(&rev); err != nil {
-			t.Fatal(err)
-		}
-		p := publicationOf(d, cluster, machine, draft, rev, key)
-		s, ref := p.snapshot()
-		if ref == nil {
-			p.unit.unchanged, p.unit.machines[0].assignment = s.unchanged, s.machines[0].assignment
-			if got := s.machines[0].fragments; len(got) != 1 || got[0] != frv {
-				t.Fatalf("fragments %v; want the written %s", got, frv)
-			}
-		}
-		return p, ref
-	}
-	p, ref := publication(ie.cluster, ie.machine, ie.draft, "bw-artifact")
+	u, ref := b.build()
 	if ref != nil {
-		t.Fatalf("snapshot refused: %v %v", ref, ref.extra)
+		t.Fatalf("buildRelease refused: %v %v", ref, ref.extra)
 	}
-	rel := p.published()
-	p.wantAdoption(ie.cluster, "fragment", "ntp", frv, 1)
-	p.wantSources(rel, "fragment", "ntp", sharedRow(frv, "", 1))
+	if r := u.machines[0].redacted; r == nil || !strings.Contains(*r, "BW_SHARED_TIER: edge") {
+		t.Fatal("the compiled configuration lacks the shared fragment's setting")
+	}
+	b.unit = u
+	rel := b.publishEnv.published()
+	b.wantDigest(rel)
+	b.wantAdoption(b.cluster, "fragment", "edge", frv, 1)
+	b.wantSources(rel, "fragment", "edge", sharedRow(frv, "", 1))
 
-	var other string
-	if err := ie.db.QueryRow(`SELECT cluster FROM machine WHERE id = $1`, ie.otherMachine).Scan(&other); err != nil {
+	other := b.createCluster(b.api, author, "k-cluster-other-012345")
+	machine := decode[machineBody](t, b.do(b.api, machineCall(author, "k-machine-other-012345", other,
+		"1b5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5b")), http.StatusCreated).ID
+	rec := b.do(b.api, call{method: "POST", path: prefix + "/drafts", token: author, key: "k-draft-other-0123456",
+		body: `{"cluster":"` + other + `","title":"lab"}`})
+	draft, tag := decode[draftBody](t, rec, http.StatusCreated).ID, rec.Header().Get("ETag")
+	updated(t, &tag, b.do(b.api, call{method: "PUT", path: prefix + "/drafts/" + draft + "/assignments/" + machine, token: author,
+		key: "k-assignment-shared-2", ifMatch: tag, body: `{"profiles":[],"fragments":{"cluster":["edge"]}}`}))
+	var rev int
+	if err := b.db.QueryRow(`SELECT revision FROM draft WHERE id = $1`, draft).Scan(&rev); err != nil {
 		t.Fatal(err)
 	}
-	rec := ie.do(ie.api, call{method: "POST", path: prefix + "/drafts", token: ie.human("h-author"), key: "k-draft-other-0123456",
-		body: `{"cluster":"` + other + `","title":"lab"}`})
-	draft := decode[draftBody](t, rec, http.StatusCreated).ID
-	selects(draft, rec.Header().Get("ETag"), ie.otherMachine, "k-assignment-shared-2")
-	if _, ref := publication(other, ie.otherMachine, draft, "bw-artifact-b"); ref == nil ||
+	if _, ref := publicationOf(b.draftEnv, other, machine, draft, rev, "bw-artifact-b").snapshot(); ref == nil ||
 		ref.status != http.StatusUnprocessableEntity || ref.extra["path"] != "fragments.cluster[0]" {
 		t.Fatalf("snapshot of the other cluster %v; want 422 at fragments.cluster[0]", ref)
 	}

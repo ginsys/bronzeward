@@ -40,9 +40,27 @@ const (
 	scopeQuery = "scope"
 )
 
-// checkScope is a body's scope member: absent is the cluster's.
-func checkScope(scope string) error {
-	if scope != "" && scope != scopeCluster && scope != scopeLibrary {
+// scopeMember is a body's scope member, "" when absent, which is the cluster's. A null or empty
+// value is none of the two and is kept apart from absent, so check refuses it.
+type scopeMember string
+
+const scopeInvalid scopeMember = "invalid"
+
+func (s *scopeMember) UnmarshalJSON(b []byte) error {
+	var v *string
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	if v == nil || *v == "" {
+		*s = scopeInvalid
+	} else {
+		*s = scopeMember(*v)
+	}
+	return nil
+}
+
+func (s scopeMember) check() error {
+	if s != "" && s != scopeCluster && s != scopeLibrary {
 		return errors.New("scope must be cluster or library")
 	}
 	return nil
@@ -391,7 +409,7 @@ func removeSource(ctx context.Context, tx *sql.Tx, q *request, kind string) (res
 	if err != nil {
 		return result{}, err
 	}
-	head, _, current, err := headOf(ctx, tx, d, k)
+	head, base, current, err := headOf(ctx, tx, d, k)
 	if err != nil {
 		return result{}, err
 	}
@@ -408,7 +426,14 @@ func removeSource(ctx context.Context, tx *sql.Tx, q *request, kind string) (res
 		}
 		return result{}, r.with("name", k.name)
 	}
-	e, err := setEntry(ctx, tx, d, k, "")
+	var e sourceEntry
+	if k.shared {
+		// The base recorded is the one the admission above read: a second read could take the
+		// counter of a publication that removed the head meanwhile.
+		e, err = setShared(ctx, tx, d, k, sourceEntry{Kind: k.kind, Name: k.name, Head: head}, base)
+	} else {
+		e, err = setEntry(ctx, tx, d, k, "")
+	}
 	if err != nil {
 		return result{}, err
 	}
@@ -417,12 +442,12 @@ func removeSource(ctx context.Context, tx *sql.Tx, q *request, kind string) (res
 
 // profileInput is a profile revision's body: fragment revisions in order (§9.3), at a scope.
 type profileInput struct {
-	Fragments []string `json:"fragments"`
-	Scope     string   `json:"scope,omitempty"`
+	Fragments []string    `json:"fragments"`
+	Scope     scopeMember `json:"scope,omitempty"`
 }
 
 func (in *profileInput) check(*API) error {
-	if err := checkScope(in.Scope); err != nil {
+	if err := in.Scope.check(); err != nil {
 		return err
 	}
 	if len(in.Fragments) == 0 || len(in.Fragments) > 256 {
