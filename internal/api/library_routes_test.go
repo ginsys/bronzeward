@@ -202,6 +202,54 @@ func TestLibraryAdoptionRoute(t *testing.T) {
 	})
 }
 
+// A shared profile revision no publication wrote was never held to its pins, so it can pin a
+// fragment name the library has no head for. Publication records each pin as a source of its
+// fragment's head, so such a revision is refused when adopted. A head that was removed is still
+// one: its pin publishes as written.
+func TestLibraryAdoptionOfAProfilePin(t *testing.T) {
+	published := func(d *draftEnv) *publishEnv {
+		t.Helper()
+		var rev int
+		if err := d.db.QueryRow(`SELECT revision FROM draft WHERE id = $1`, d.draft).Scan(&rev); err != nil {
+			t.Fatal(err)
+		}
+		return publicationOf(d, d.cluster, d.machine, d.draft, rev, "bw-artifact")
+	}
+	t.Run("a fragment name with no library head", func(t *testing.T) {
+		d := newDraftEnv(t)
+		p := &publishEnv{draftEnv: d}
+		f := p.sharedFragment("ntp")
+		p.sharedProfileHead("shared-set", p.sharedProfileRevision("shared-set", f.newer))
+		unpublished := p.sharedProfileRevision("shared-set", f.older, p.sharedRevision("never"))
+		rec := d.adopts("profiles", "shared-set", unpublished, d.etag, d.key())
+		if rec.Code == http.StatusOK {
+			// Where it is accepted, say what publication makes of it.
+			next := published(d)
+			next.compiled()
+			rel, ref := next.commit()
+			t.Fatalf("the adoption was accepted; its publication: release %q, refusal %v", rel, ref)
+		}
+		if problem := wantProblem(t, rec, http.StatusUnprocessableEntity, "validation-failed"); problem["path"] != "revision" ||
+			problem["revision"] != unpublished || problem["fragment"] != "never" {
+			t.Fatalf("problem %v; want the revision and the fragment never", problem)
+		}
+		d.wantNothing("shared-set")
+	})
+	t.Run("a removed fragment head", func(t *testing.T) {
+		d := newDraftEnv(t)
+		p := &publishEnv{draftEnv: d}
+		f := p.sharedFragment("ntp")
+		mustExec(t, d.db, `UPDATE fragment SET head_revision_id = NULL, head_revision = 3 WHERE id = $1`, f.head)
+		prv := p.sharedProfileRevision("shared-set", f.older)
+		p.sharedProfileHead("shared-set", prv)
+		updated(t, &d.etag, d.adopts("profiles", "shared-set", prv, d.etag, d.key()))
+		next := published(d)
+		rel := next.publishedEntries()
+		next.wantAdoption(d.cluster, "profile", "shared-set", prv, 1)
+		next.wantSources(rel, "fragment", "ntp", sharedRow(f.older, "", 0))
+	})
+}
+
 // PA §3.1.1 table, the adoption removal rows.
 func TestLibraryAdoptionRemovalRoute(t *testing.T) {
 	notFound := func(t *testing.T, d *draftEnv) {
@@ -301,8 +349,11 @@ func TestLibraryDetachmentRoute(t *testing.T) {
 		p := &publishEnv{draftEnv: d}
 		f := p.sharedFragment("ntp")
 		p.adopt("fragment", "ntp", f.head, f.older, 4)
-		// A newer re-adoption is staged: the copy is of the published adoption.
-		updated(t, &d.etag, d.adopts("fragments", "ntp", f.newer, d.etag, d.key()))
+		// A re-adoption of another text is staged: the copy is of the published adoption's.
+		staged := id.New(id.FragmentRevision)
+		mustExec(t, d.db, `INSERT INTO fragment_revision (id, cluster, name, layer, document, author, embedded, created_at)
+			VALUES ($1, NULL, 'ntp', 'cluster', 'machine: {env: {BW_STAGED: "1"}}', $2, '[]', now())`, staged, d.seed)
+		updated(t, &d.etag, d.adopts("fragments", "ntp", staged, d.etag, d.key()))
 		removal, own := copyOf(t, d, d.detaches("fragments", "ntp", d.etag, d.key()))
 		wantAdoptionEntry(t, removal, "fragment", "ntp", f.head, 4, nil)
 		frv, _ := own["revision"].(string)
@@ -310,7 +361,7 @@ func TestLibraryDetachmentRoute(t *testing.T) {
 			"document": "machine: {}"} {
 			wantMember(t, own, member, want)
 		}
-		if _, scoped := own["scope"]; scoped || frv == f.older || frv == f.newer {
+		if _, scoped := own["scope"]; scoped || frv == f.older || frv == staged {
 			t.Fatalf("copy %v; want a new cluster revision", own)
 		}
 		if n := count(t, d.db, `SELECT count(*) FROM fragment_revision r, fragment_revision s, principal a WHERE r.id = $1
