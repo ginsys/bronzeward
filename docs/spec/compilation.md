@@ -1951,6 +1951,14 @@ outcomes through both implementations (E3 §4.3); the choice belongs to
   the compiling build's own record of the module, as `go version -m` prints it
   **(choice §16.34)**; the contract is refused unless it is the machinery's
   minor **(choice §16.33)**.
+- **The machinery minor sets the supported contract**, because the contract
+  must equal it (above). A minor or major bump of the module is therefore
+  deliberate work and not dependency upkeep: by itself it makes publication
+  refuse every cluster on the earlier contract. Until a test in CI compares
+  rendered configuration, no ordinary update of the module merges
+  automatically, patch and digest included **(choice §16.41)**. A security fix
+  still merges automatically, because only a repository-wide setting of the
+  dependency bot stops that.
 - **Paths are versioned with the contract.** The v1.14 layout moves many
   v1alpha1 paths into separate documents (E3 §4.1), so marks, declarations and
   embedded identifications hold for the contract their fragment revision was
@@ -2696,6 +2704,23 @@ in place as
     configuration, which adoption needs as its exact baseline. Not removed by
     this choice: the encrypted baseline of §2.3 step 8 still holds the imported
     value, decryptable by no identity (choice §16.4).
+41. **No ordinary update of the machinery module merges automatically until a
+    CI test compares rendered configuration** (§10.2; ginsys/bronzeward#1212).
+    Owner decision, 2026-11-26 23:35 CET, answer "A" to stopping patch
+    automerge until that test exists. The repository's `renovate.json` holds
+    the module in a group of its own with automerge off for every update type,
+    and opens a minor or major only when ticked on the dependency bot's
+    dashboard. A person reads each update; reading it may still miss a change
+    in rendered output. Not the most conservative option, because a security
+    fix of the module, minor and major included, still merges automatically
+    and opens without that tick: Renovate applies its `vulnerabilityAlerts`
+    settings after every package rule, so only a change of those settings,
+    which holds for every package of the repository, stops it. This choice
+    does not change them. The rules match the module by name, so a bump of
+    another module that raises the machinery as its own requirement is outside
+    them. Alternative: keep patch automerge, so that patches and their
+    security fixes arrive without anyone's time and a change in rendered
+    configuration could merge unseen.
 
 ## 17. Traceability
 
@@ -2730,6 +2755,7 @@ in place as
 | §9 dependency records | §6.9, §7.5, §7.8 | SR §6.2; SP §6.3; FR §8 C2; [KL §5.2](../design/research/20260924-key-loss-restoration.md#52-criterion-2-applying-is-not-regenerating-and-ciphertext-is-not-executability), [KL §7](../design/research/20260924-key-loss-restoration.md#7-recommendation) item 1 |
 | §10.1 renderer selection | §6.5 | E3 §6.2, E3 §7, [E3 §8](../design/research/20260925-talos-compatibility.md#8-recommendation); FR §8 C4; [E1 §3](../design/research/20260922-secret-ingress-extraction-before-persistence.md#3-what-was-built) |
 | §10.2 pinning, refusals | §6.5 | [E3 §4.1](../design/research/20260925-talos-compatibility.md#41-generation-capability), [E3 §4.2](../design/research/20260925-talos-compatibility.md#42-validation), [E3 §4.3](../design/research/20260925-talos-compatibility.md#43-operationrpc-compatibility-against-v1136), [E3 §4.4](../design/research/20260925-talos-compatibility.md#44-upstream-support-policy), E3 §8 |
+| §10.2 updates of the machinery module | §6.5 | none: choice §16.41 (owner decision of 2026-11-26) |
 | §10.3 limits, deferral | §6.5, §18.1 E3 | [E3 §6.3](../design/research/20260925-talos-compatibility.md#63-criterion-3-unsupported-combinations-and-the-deferred-lifecycle-tests), E3 §7; [FR §2](../design/research/20260925-feasibility-evidence-review.md#2-what-binds-every-conclusion-here) |
 | §11 publication hand-off | §6.6, §7.4 | PC §2; [DB §4.2](../design/research/20260924-database-semantics.md#42-s2-all-or-nothing-publication) |
 | §15 gaps | §18.1, §18.2 | [FR §9](../design/research/20260925-feasibility-evidence-review.md#9-gaps), [FR §10](../design/research/20260925-feasibility-evidence-review.md#10-recommendations) |

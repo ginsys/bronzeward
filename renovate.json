@@ -13,6 +13,21 @@
       "matchManagers": ["npm"],
       "matchPackageNames": ["typescript"],
       "allowedVersions": "<6"
+    },
+    {
+      "description": "The Talos machinery module sets the rendered configuration and the supported contract: no ordinary update merges automatically until a CI test compares rendered output (docs/spec/compilation.md §10.2, ginsys/bronzeward#1212). Its own group, so it does not stop automerge for the rest of go-patch. This does not reach a security fix: Renovate applies the vulnerabilityAlerts settings after every package rule, so a security fix still merges automatically unless those are changed for the whole repository.",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/siderolabs/talos/pkg/machinery"],
+      "groupName": "talos-machinery",
+      "automerge": false,
+      "labels": ["dependencies", "needs-human"]
+    },
+    {
+      "description": "A machinery minor or major is deliberate work (compilation.md §10.2): opened only when ticked on the Dependency Dashboard.",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/siderolabs/talos/pkg/machinery"],
+      "matchUpdateTypes": ["minor", "major"],
+      "dependencyDashboardApproval": true
     }
   ]
 }
