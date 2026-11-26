@@ -734,6 +734,24 @@ func (e ReferenceInput1Kind) Valid() bool {
 	}
 }
 
+// Defines values for ReleaseSourceBodyScope.
+const (
+	ReleaseSourceBodyScopeCluster ReleaseSourceBodyScope = "cluster"
+	ReleaseSourceBodyScopeLibrary ReleaseSourceBodyScope = "library"
+)
+
+// Valid indicates whether the value is a known member of the ReleaseSourceBodyScope enum.
+func (e ReleaseSourceBodyScope) Valid() bool {
+	switch e {
+	case ReleaseSourceBodyScopeCluster:
+		return true
+	case ReleaseSourceBodyScopeLibrary:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ResolutionRequestTo.
 const (
 	ResolutionRequestToCancelled ResolutionRequestTo = "cancelled"
@@ -1004,6 +1022,21 @@ func (e DeleteDraftsIdProfilesNameParamsScope) Valid() bool {
 	}
 }
 
+// Defines values for GetFragmentsIdAdoptionsParamsBehind.
+const (
+	GetFragmentsIdAdoptionsParamsBehindTrue GetFragmentsIdAdoptionsParamsBehind = "true"
+)
+
+// Valid indicates whether the value is a known member of the GetFragmentsIdAdoptionsParamsBehind enum.
+func (e GetFragmentsIdAdoptionsParamsBehind) Valid() bool {
+	switch e {
+	case GetFragmentsIdAdoptionsParamsBehindTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetIngestionsParamsState.
 const (
 	GetIngestionsParamsStateAbandoned GetIngestionsParamsState = "abandoned"
@@ -1154,6 +1187,21 @@ func (e GetPlansParamsState) Valid() bool {
 	case GetPlansParamsStateProposed:
 		return true
 	case GetPlansParamsStateRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetProfilesIdAdoptionsParamsBehind.
+const (
+	GetProfilesIdAdoptionsParamsBehindTrue GetProfilesIdAdoptionsParamsBehind = "true"
+)
+
+// Valid indicates whether the value is a known member of the GetProfilesIdAdoptionsParamsBehind enum.
+func (e GetProfilesIdAdoptionsParamsBehind) Valid() bool {
+	switch e {
+	case GetProfilesIdAdoptionsParamsBehindTrue:
 		return true
 	default:
 		return false
@@ -1418,6 +1466,28 @@ type CancellationBody struct {
 	Plan        string    `json:"plan"`
 	Reason      string    `json:"reason"`
 	Role        string    `json:"role"`
+}
+
+// ClusterAdoptionBody One cluster's use of a shared fragment or profile name.
+type ClusterAdoptionBody struct {
+	// AdoptionRevision The adoption counter; null for via.
+	AdoptionRevision *int `json:"adoptionRevision"`
+
+	// Behind The revision is not the one the shared head is at.
+	Behind  bool   `json:"behind"`
+	Cluster string `json:"cluster"`
+
+	// Machines The machines with an import base whose composition holds this revision, through the profile for via.
+	Machines []string `json:"machines"`
+
+	// Release The release that set the adoption; null for via and before one is published.
+	Release *string `json:"release"`
+
+	// Revision The adopted revision, or the one the via profile pins.
+	Revision string `json:"revision"`
+
+	// Via The adopted shared profile whose pin brings this fragment revision.
+	Via *string `json:"via"`
 }
 
 // ClusterBody defines model for ClusterBody.
@@ -2459,13 +2529,22 @@ type ReleaseMachineBody struct {
 
 // ReleaseSourceBody defines model for ReleaseSourceBody.
 type ReleaseSourceBody struct {
-	Head string `json:"head"`
+	// AdoptionRevision The adoption counter of a shared source; null for a cluster source and a fragment only a shared profile pins.
+	AdoptionRevision *int   `json:"adoptionRevision"`
+	Head             string `json:"head"`
 
 	// HeadRevision Null for a shared (library) source.
-	HeadRevision *int    `json:"headRevision"`
-	Kind         string  `json:"kind"`
-	Revision     *string `json:"revision"`
+	HeadRevision *int   `json:"headRevision"`
+	Kind         string `json:"kind"`
+
+	// Previous The revision of a shared source the cluster had adopted before this release; null for a first adoption, one after a removal, a cluster source and a fragment only a shared profile pins.
+	Previous *string                `json:"previous"`
+	Revision *string                `json:"revision"`
+	Scope    ReleaseSourceBodyScope `json:"scope"`
 }
+
+// ReleaseSourceBodyScope defines model for ReleaseSourceBody.Scope.
+type ReleaseSourceBodyScope string
 
 // RendererBody defines model for RendererBody.
 type RendererBody struct {
@@ -3059,6 +3138,19 @@ type GetFragmentsParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// GetFragmentsIdAdoptionsParams defines parameters for GetFragmentsIdAdoptions.
+type GetFragmentsIdAdoptionsParams struct {
+	// Limit 1 to 500; 50 when absent.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor The next member of the previous page, opaque, valid in the epoch that issued it.
+	Cursor *Cursor                              `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Behind *GetFragmentsIdAdoptionsParamsBehind `form:"behind,omitempty" json:"behind,omitempty"`
+}
+
+// GetFragmentsIdAdoptionsParamsBehind defines parameters for GetFragmentsIdAdoptions.
+type GetFragmentsIdAdoptionsParamsBehind string
+
 // GetFragmentsIdRevisionsParams defines parameters for GetFragmentsIdRevisions.
 type GetFragmentsIdRevisionsParams struct {
 	// Limit 1 to 500; 50 when absent.
@@ -3332,6 +3424,19 @@ type GetProfilesParams struct {
 	// Cursor The next member of the previous page, opaque, valid in the epoch that issued it.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
+
+// GetProfilesIdAdoptionsParams defines parameters for GetProfilesIdAdoptions.
+type GetProfilesIdAdoptionsParams struct {
+	// Limit 1 to 500; 50 when absent.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor The next member of the previous page, opaque, valid in the epoch that issued it.
+	Cursor *Cursor                             `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Behind *GetProfilesIdAdoptionsParamsBehind `form:"behind,omitempty" json:"behind,omitempty"`
+}
+
+// GetProfilesIdAdoptionsParamsBehind defines parameters for GetProfilesIdAdoptions.
+type GetProfilesIdAdoptionsParamsBehind string
 
 // GetProfilesIdRevisionsParams defines parameters for GetProfilesIdRevisions.
 type GetProfilesIdRevisionsParams struct {

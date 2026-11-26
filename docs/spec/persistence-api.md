@@ -499,10 +499,16 @@ filter by `behind=true` (§9.2). A cluster that adopted a library profile
 revision pinning a fragment holds no adoption of that fragment (above) yet
 compiles the pinned revision, so both reads list it for the fragment as well:
 its revision is the pinned one, `adoptionRevision` is `null` and `via` names
-the profile. They compare with the published head, so a draft
+the profile. A cluster that also holds an adoption of that fragment is listed
+via the profile only where the pinned revision is not the adopted one, as a
+second item, since it compiles the pin where no machine selects the name itself.
+They compare with the published head, so a draft
 that proposes a revision changes their answer only once it is published. Both
 read the source graph: a draft has no rendered configuration before publication
-(operator experience, G5).
+(operator experience, G5). Both count only the machines a publication would
+cover, those with an import base (choice §17.33). In the published state that is
+the Applied release's (§3.2), so a machine published and not yet adopted or
+applied is counted by no adoptions item.
 
 **Stopping.** A cluster stops following a library name by **detaching** it:
 `POST /drafts/{id}/adoptions/{kind}/{name}/detachments` (§9.2) writes, in one
@@ -2619,7 +2625,7 @@ idempotency and conflict behavior.
 | `GET /clusters`, `/clusters/{id}`, `/machines`, `/machines/{id}`, `/machines/{id}/observations`, `/machines/{id}/timeline` | 200 | any role |
 | `GET /machines/{id}/position` (where one machine stands in import, publish, plan, approve and apply, read in one snapshot; no query, no ETag, not paged; API revision 6, §9.3) | 200 | any role |
 | `GET /fragments[/{id}]`, `/fragments/{id}/revisions`, `/fragment-revisions/{id}`; the same for profiles and assignments. A fragment or profile body carries `scope`, `cluster` for a cluster scope and `null` for the library (API revision 19); a library revision answers `cluster: null` too, and a release's library source answers `headRevision: null` | 200 | any role |
-| `GET /fragments/{id}/adoptions`, `GET /profiles/{id}/adoptions` (the clusters whose adoption of a library name holds a revision, §3.1.1, so a removed adoption is not listed; API revision 19; `behind=true` keeps those whose adopted revision is not the head's; paged like the list reads): `items`, each `cluster`, `revision` (adopted), `adoptionRevision` (the counter), `behind`, `release` (the release that set it, `null` before one is published), `via` (`null`, or for a fragment a library profile revision pins, that profile's name: the cluster has no adoption of the fragment, `revision` is the pinned one, `adoptionRevision` and `release` are `null`, `behind` compares the pin with the head), `machines` (the machines of that cluster whose composition uses the name, read from the cluster's current assignment and profile heads). `404 not-found` for a cluster-scope source | 200 | any role |
+| `GET /fragments/{id}/adoptions`, `GET /profiles/{id}/adoptions` (the clusters whose adoption of a library name holds a revision, §3.1.1, so a removed adoption is not listed; API revision 19; `behind=true` keeps those whose revision is not the head's, every one once the head is removed, and any other value of `behind` is `400 invalid-request`; paged like the list reads, in the order of cluster, `via` and revision): `items`, each `cluster`, `revision` (adopted), `adoptionRevision` (the counter), `behind`, `release` (the release that set the adoption at that counter, not a later one that holds it unchanged; `null` before one is published), `via` (`null`, or for a fragment a library profile revision pins, that profile's name: the cluster has no adoption of the fragment at that revision, and one it holds at another is an item of its own, `revision` is the pinned one, `adoptionRevision` and `release` are `null`, `behind` compares the pin with the head), `machines` (the machines of that cluster with an import base, choice §17.33, whose composition holds the item's revision, through the `via` profile where it is set; the composition is read from the cluster's current assignment and profile heads, and a machine published and not yet adopted or applied has no import base there, §3.2). `404 not-found` for a cluster-scope source | 200 | any role |
 | `GET /drafts/{id}/impact` (what the draft changes and reaches, before publication, §3.1.1; no ETag; API revision 19): `items`, one per changed source, each `kind`, `name`, `scope`, `machines` (those of the draft's cluster whose composition includes it before or after the draft, with an assignment selection, a profile pin or an adoption as the reason and `gains` or `loses`, so a removal lists the machines that lose it) and `otherClusters` (each cluster that has adopted the name, or pins the fragment through an adopted library profile, with its revision, `via` as in the adoptions read, and `unchanged: true`). It reads sources only and renders nothing | 200 | any role |
 | `GET /drafts[/{id}]`, `/ingestions[/{id}]`, `/releases[/{id}]`, `/releases/{id}/machines/{m}/review` | 200 | any role |
 | `GET /plans[/{id}]`, `/approvals/{id}`, `/operations[/{id}]`, `/operations/{id}/events`, `/acts`, `/recovery` | 200 | any role |
@@ -3172,7 +3178,8 @@ HTTP/1.1 200 OK
               "machineryChecksum": "h1:2rBcdYQ4m1u3oPmvbMQw3F9dZb8i0EwQnJ6y5Kx8sJ0=",
               "kubernetesVersion": "v1.36.0"},
  "sources": [{"kind": "fragment", "scope": "cluster", "head": "frg_rgkebwvneg6mxhid62gec5difi",
-              "revision": "frv_sqb745zrpl2xltek22ai7sbdue", "headRevision": 4}],
+              "revision": "frv_sqb745zrpl2xltek22ai7sbdue", "headRevision": 4,
+              "previous": null, "adoptionRevision": null}],
  "machines": [{"machine": "mch_tqhcznunhyle4hnxru5hkt35uq", "mode": "metal",
                "publicationObservation": "obs_aycy4h7xaoj2dvqjnyzjck2oka",
                "review": "/api/v1/releases/rel_fgqvcvz3ck7h7234ljgdbzsj6m/machines/mch_tqhcznunhyle4hnxru5hkt35uq/review"}]}

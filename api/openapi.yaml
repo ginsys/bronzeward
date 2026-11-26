@@ -1068,6 +1068,42 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/FragmentBody'}
         default: {$ref: '#/components/responses/Problem'}
+  /fragments/{id}/adoptions:
+    get:
+      operationId: getFragmentsIdAdoptions
+      tags: [fragments]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - name: behind
+        in: query
+        required: false
+        schema: {type: string, enum: ['true']}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ClusterAdoptionBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
   /fragments/{id}/revisions:
     get:
       operationId: getFragmentsIdRevisions
@@ -2250,6 +2286,42 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ProfileBody'}
         default: {$ref: '#/components/responses/Problem'}
+  /profiles/{id}/adoptions:
+    get:
+      operationId: getProfilesIdAdoptions
+      tags: [profiles]
+      x-bronzeward-roles: [viewer, author, publisher, approver, recovery-admin]
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/Limit'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - name: behind
+        in: query
+        required: false
+        schema: {type: string, enum: ['true']}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ClusterAdoptionBody'}
+                  next: {type: string, description: The cursor of the next page; absent on the last.}
+                additionalProperties: false
+        default: {$ref: '#/components/responses/Problem'}
   /profiles/{id}/revisions:
     get:
       operationId: getProfilesIdRevisions
@@ -3038,6 +3110,22 @@ components:
         act: {type: string}
         epoch: {type: string}
         at: {type: string, format: date-time}
+      additionalProperties: false
+    ClusterAdoptionBody:
+      type: object
+      description: One cluster's use of a shared fragment or profile name.
+      required: [cluster, revision, adoptionRevision, behind, release, via, machines]
+      properties:
+        cluster: {type: string}
+        revision: {type: string, description: 'The adopted revision, or the one the via profile pins.'}
+        adoptionRevision: {type: [integer, 'null'], description: 'The adoption counter; null for via.'}
+        behind: {type: boolean, description: 'The revision is not the one the shared head is at.'}
+        release: {type: [string, 'null'], description: 'The release that set the adoption; null for via and before one is published.'}
+        via: {type: [string, 'null'], description: 'The adopted shared profile whose pin brings this fragment revision.'}
+        machines:
+          type: array
+          items: {type: string}
+          description: The machines with an import base whose composition holds this revision, through the profile for via.
       additionalProperties: false
     ClusterBody:
       type: object
@@ -4251,12 +4339,15 @@ components:
       additionalProperties: false
     ReleaseSourceBody:
       type: object
-      required: [kind, head, revision, headRevision]
+      required: [kind, scope, head, revision, headRevision, previous, adoptionRevision]
       properties:
         kind: {type: string}
+        scope: {type: string, enum: [cluster, library]}
         head: {type: string}
         revision: {type: [string, 'null']}
         headRevision: {type: [integer, 'null'], description: 'Null for a shared (library) source.'}
+        previous: {type: [string, 'null'], description: 'The revision of a shared source the cluster had adopted before this release; null for a first adoption, one after a removal, a cluster source and a fragment only a shared profile pins.'}
+        adoptionRevision: {type: [integer, 'null'], description: 'The adoption counter of a shared source; null for a cluster source and a fragment only a shared profile pins.'}
       additionalProperties: false
     RendererBody:
       type: object
