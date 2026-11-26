@@ -181,8 +181,12 @@ func docPublication(t *testing.T, blocks map[string]string, ran map[string]bool)
 	p.must("plan-and-approval-db-1", "", capture{"plan create", "<plan>", planID})
 	p.must("plan-and-approval-db-2", "y\n")
 	adopted(t, e, p.values["<plan>"][0])
+	// The two forms of apply are alternatives, each for a release that is not applied yet.
 	release("--none")
-	p.must("plan-and-approval-db-3", "y\n")
+	p.must("plan-and-approval-db-3", "y\n", capture{"apply ", "<plan>", planID})
+	adopted(t, e, p.values["<plan>"][0])
+	release("--profiles", "workers")
+	p.must("plan-and-approval-db-4", "y\n")
 }
 
 func docDrift(t *testing.T, blocks map[string]string, ran map[string]bool) {

@@ -86,8 +86,15 @@ prediction never shows you as clear of it.
 `--diff` (without it, only the number of lines of each change), and asks one question for all of
 them.
 
+Name the machines:
+
 ```bash {.bw-run .bw-db}
 bronzewardctl apply <release> --machine <machine>,<machine> --diff
+```
+
+Or choose every machine of the release:
+
+```bash {.bw-run .bw-db}
 bronzewardctl apply <release> --all --diff
 ```
 
