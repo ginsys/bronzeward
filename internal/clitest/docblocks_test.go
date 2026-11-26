@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -33,7 +34,8 @@ const (
 
 // docBlocks reads dir's pages and answers the marked blocks by id, "<page name>-db-<n>", the ids
 // run-doc-blocks.sh account-db computes. A line that mentions the mark in any other form is refused,
-// since the block it was meant to mark would be run by nothing.
+// since the block it was meant to mark would be run by nothing. So is a "#" in a marked block: the
+// block is run a command at a time, and a comment could then hide a command a shell would run.
 func docBlocks(dir string) (map[string]string, error) {
 	pages, err := filepath.Glob(filepath.Join(dir, "*.md"))
 	if err != nil {
@@ -52,6 +54,8 @@ func docBlocks(dir string) (map[string]string, error) {
 				n++
 				id = fmt.Sprintf("%s-db-%d", name, n)
 				blocks[id] = ""
+			case id != "" && strings.Contains(line, "#"):
+				return nil, fmt.Errorf("%s:%d: %s holds a #; a marked block takes no comment", page, i+1, id)
 			case id != "" && line == "```":
 				if strings.TrimSpace(blocks[id]) == "" {
 					return nil, fmt.Errorf("%s: %s is empty", page, id)
@@ -70,7 +74,8 @@ func docBlocks(dir string) (map[string]string, error) {
 	return blocks, nil
 }
 
-// commands are a block's command lines, a line ending in a backslash joined to the next.
+// commands are a block's command lines, a line ending in a backslash joined to the next and a blank
+// line left out.
 func commands(block string) []string {
 	var out []string
 	var joined string
@@ -80,7 +85,7 @@ func commands(block string) []string {
 			continue
 		}
 		line, joined = joined+line, ""
-		if t := strings.TrimSpace(line); t != "" && !strings.HasPrefix(t, "#") {
+		if t := strings.TrimSpace(line); t != "" {
 			out = append(out, t)
 		}
 	}
@@ -107,10 +112,11 @@ type pageRun struct {
 	// goes on repeating.
 	values map[string][]string
 	secret func(string) []string // names the secrets an output holds, or nil
+	limit  time.Duration         // bounds one command
 }
 
 func newPageRun(f *fixture, blocks map[string]string, ran map[string]bool) *pageRun {
-	return &pageRun{f: f, blocks: blocks, ran: ran, dir: f.t.TempDir(), values: map[string][]string{}}
+	return &pageRun{f: f, blocks: blocks, ran: ran, dir: f.t.TempDir(), values: map[string][]string{}, limit: commandLimit}
 }
 
 func (p *pageRun) set(name string, values ...string) { p.values[name] = values }
@@ -144,18 +150,27 @@ func (p *pageRun) block(id, stdin string, captures ...capture) (string, error) {
 		return "", fmt.Errorf("%s: no page marks this block", id)
 	}
 	var transcript strings.Builder
-	for _, written := range commands(text) {
+	lines := commands(text)
+	if len(lines) == 0 {
+		return "", fmt.Errorf("%s: the block has no command", id)
+	}
+	for _, written := range lines {
 		command, err := p.fill(written)
 		if err != nil {
 			return transcript.String(), fmt.Errorf("%s: %q: %w", id, written, err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), commandLimit)
+		ctx, cancel := context.WithTimeout(context.Background(), p.limit)
 		cmd := exec.CommandContext(ctx, "sh", "-ec", command)
 		cmd.Dir = p.dir
 		cmd.Env = []string{"HOME=" + p.f.home, "XDG_CONFIG_HOME=" + p.f.home, "PATH=" + p.f.bin + ":" + os.Getenv("PATH")}
 		cmd.Stdin = strings.NewReader(stdin)
 		var out, errb strings.Builder
 		cmd.Stdout, cmd.Stderr = &out, &errb
+		// The limit ends the shell's whole process group, and the wait for its output is bounded too: a
+		// process left holding the pipes would otherwise keep the command from ever returning.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+		cmd.WaitDelay = 5 * time.Second
 		err = cmd.Run()
 		timedOut := ctx.Err() != nil
 		cancel()
@@ -171,7 +186,7 @@ func (p *pageRun) block(id, stdin string, captures ...capture) (string, error) {
 		var exit *exec.ExitError
 		switch {
 		case timedOut:
-			return transcript.String(), fmt.Errorf("%s: %q did not end within %s", id, command, commandLimit)
+			return transcript.String(), fmt.Errorf("%s: %q did not end within %s", id, command, p.limit)
 		case errors.As(err, &exit):
 			return transcript.String(), fmt.Errorf("%s: %q exited %d:\n%s%s", id, command, exit.ExitCode(), errb.String(), out.String())
 		case err != nil:
@@ -295,11 +310,38 @@ func TestDocBlocksControls(t *testing.T) {
 		t.Errorf("unrun = %v, want %v", got, want)
 	}
 
+	// A command that never ends is stopped, the processes it started included, and fails by name; a
+	// block with nothing to run counts as nothing.
+	write("page.md", block("sleep 40; true")+block(`\`))
+	hang, err := docBlocks(dir)
+	if err != nil || len(hang) != 2 {
+		t.Fatalf("docBlocks: %d blocks, %v; want 2", len(hang), err)
+	}
+	p.blocks, p.limit = hang, 2*time.Second
+	for name, c := range map[string]struct{ id, want string }{
+		"a command that does not end": {"page-db-1", "did not end within 2s"},
+		"a block with no command":     {"page-db-2", "has no command"},
+	} {
+		p.ran = map[string]bool{}
+		start := time.Now()
+		if _, err := p.block(c.id, ""); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v; want %q", name, err, c.want)
+		}
+		if d := time.Since(start); d > 20*time.Second {
+			t.Errorf("%s: it took %s", name, d)
+		}
+		if p.ran[c.id] {
+			t.Errorf("%s: counted as run", name)
+		}
+	}
+
 	for name, body := range map[string]string{
-		"another spelling of the mark": "```bash {.bw-db .bw-run}\ntrue\n```\n",
-		"an indented mark":             "  " + dbOpener + "\n  true\n  ```\n",
-		"an unclosed block":            dbOpener + "\ntrue\n",
-		"an empty block":               dbOpener + "\n\n```\n",
+		"a comment that would hide a command": dbOpener + "\n# example \\\nbronzewardctl context list --bogus\n```\n",
+		"a block that is only a comment":      dbOpener + "\n# disabled for now\n```\n",
+		"another spelling of the mark":        "```bash {.bw-db .bw-run}\ntrue\n```\n",
+		"an indented mark":                    "  " + dbOpener + "\n  true\n  ```\n",
+		"an unclosed block":                   dbOpener + "\ntrue\n",
+		"an empty block":                      dbOpener + "\n\n```\n",
 	} {
 		write("page.md", body)
 		if _, err := docBlocks(dir); err == nil {
