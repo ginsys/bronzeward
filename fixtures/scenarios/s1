@@ -80,11 +80,28 @@ has_references() {
   }
 }
 
+# ca_key_referenced <machine id>: the import base's machine.ca.key is the typed reference to the
+# cluster's stored key, its one reference row with no version or generation, and its ingestion
+# recorded the signer's match verdict.
+ca_key_referenced() {
+  local m=$1
+  [ "$(sql "SELECT count(*) FROM import_base_reference r JOIN import_base_revision b ON b.id = r.revision
+    WHERE b.machine = '$m' AND r.name = 'talos/ca-key' AND r.kind = 'talos-ca-key' AND r.version IS NULL AND r.generation IS NULL
+    AND b.document ~ '\\ykey: !bwref talos/ca-key'")" = 1 ] || {
+    say "s1: $m: machine.ca.key is not the typed reference with its one row"
+    return 1
+  }
+  [ "$(sql "SELECT count(*) FROM operation_event WHERE entry->>'type' = 'ca-key-match' AND entry->>'verdict' = 'match'")" -ge 1 ] || {
+    say "s1: no match verdict is recorded"
+    return 1
+  }
+}
+
 # generations_listed: every generation a reference row names is listed under its claim's path by
 # the metadata identity, at version 1 (create-only), and those paths list nothing else.
 generations_listed() {
   local rows path dir value listing names want got
-  rows=$(sql "SELECT generation FROM import_base_reference ORDER BY generation") || return 1
+  rows=$(sql "SELECT generation FROM import_base_reference WHERE generation IS NOT NULL ORDER BY generation") || return 1
   [ -n "$rows" ] || return 1
   want=$(printf '%s\n' "$rows" | sort -u)
   got=
@@ -1096,6 +1113,7 @@ run() {
   # Pass criteria the database and OpenBao answer.
   check 'S1 pass' 'control plane: !bwref references where the schema list identified values' has_references "$machine_cp"
   check 'S1 pass' 'worker: !bwref references, the marked file content among them' has_references "$machine_w" marked
+  check 'S1 pass' "control plane: machine.ca.key matched the stored key and is the typed reference, with no generation" ca_key_referenced "$machine_cp"
   check 'S1 pass' 'each reference a create-only generation, listed under its claim by the metadata identity, nothing else there' \
     generations_listed
   check 'S1 pass' 'control plane: the baseline, decrypted by the administrator, has the recorded configuration digest, the pre-state' \
