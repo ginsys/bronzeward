@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { SevereServiceError } from "webdriverio";
 import { type Binary, binPath, died, missingBinaries, spawnChild } from "./children.ts";
 import { printFailure } from "./print-failure.ts";
+import { fetchFirefox } from "./firefox-browser.ts";
 import { announceDrivers, config as base, removeProfiles } from "./wdio.conf.ts";
 import { type Faults, type Injector, startInjector } from "./injector.ts";
 import {
@@ -585,8 +586,10 @@ export const config: WebdriverIO.Config = {
   // take (Safari, ginsys/bronzeward#892) fails the run on its own name before the cases that use it.
   specs: process.env["BW_SPECS"] ? process.env["BW_SPECS"].split(",").map((s) => `./auth/${s}.e2e.ts`) : ["./driver-controls.e2e.ts", "./auth/*.e2e.ts"],
   baseUrl: IDP_PAGE,
-  async onPrepare() {
+  async onPrepare(config, capabilities) {
     announceDrivers();
+    // Before anything starts, so that a fetch that fails leaves nothing to clean up.
+    await fetchFirefox(capabilities as WebdriverIO.Capabilities[], config.cacheDir);
     try {
       await prepare();
     } catch (e) {

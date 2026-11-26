@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { remote, SevereServiceError } from "webdriverio";
 import { binPath, died, missingBinaries, spawnChild } from "./children.ts";
 import { edgeCapability, edgeDriver, legHas } from "./edge-driver.ts";
+import { fetchFirefox } from "./firefox-browser.ts";
 import { acceptLeave, firefoxCapability, geckoDriver } from "./gecko-driver.ts";
 import { safariKeys } from "./safari-keys.ts";
 import { settled } from "./safari-navigation.ts";
@@ -43,8 +44,9 @@ const capabilities: Record<string, WebdriverIO.Capabilities> = {
   chrome: { browserName: "chrome", "goog:chromeOptions": { args: headless ? ["--headless=new"] : [] } },
   // The runner image's own driver where it has one, so that no download is on the leg's path (edge-driver.ts).
   edge: edgeCapability(headless, edgeChoice),
-  // Both Firefoxes are downloaded at their current release, not taken from the host; the driver is the runner image's
-  // where it has one, so that no "latest driver" lookup is on the leg's path (gecko-driver.ts). A case that
+  // Both Firefoxes are downloaded at their current release, not taken from the host, once, by the launcher
+  // (firefox-browser.ts); the driver is the runner image's where it has one, so that no "latest driver" lookup is on
+  // the leg's path (gecko-driver.ts). A case that
   // leaves a page with a write still open meets its leave guard: Firefox shows that dialog and
   // holds the navigation until it times out, where Chrome and Edge never show it without a user
   // gesture. Firefox accepts it, so each case's own navigation proceeds as in the other browsers.
@@ -259,10 +261,11 @@ export const config: WebdriverIO.Config = {
 
   // The target counts every request but its own two control routes, and answers with the canary
   // (readable by the page, so the positive control delivers it into the page's memory).
-  async onPrepare() {
+  async onPrepare(config, capabilities) {
     // First, before anything starts: a binary that is not there fails the run by name.
     if (missingBinaries(root, ["webhost"]).length > 0) throw new SevereServiceError(`not an executable file: bin/webhost (mise run browser builds it)`);
     announceDrivers();
+    await fetchFirefox(capabilities as WebdriverIO.Capabilities[], config.cacheDir);
     target = createServer((req, res) => {
       if (req.url === "/__hits") return res.end(JSON.stringify({ hits }));
       if (req.url === "/__reset") return (hits = 0), res.end();
