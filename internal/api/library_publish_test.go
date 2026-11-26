@@ -370,6 +370,34 @@ func TestLibraryPinConflict(t *testing.T) {
 	})
 }
 
+// A pin-only source is no part of what a machine selects by name: the commit's declaration check
+// takes an override only from a revision the machine composes.
+func TestLibraryPinOnlySourceIsNotComposed(t *testing.T) {
+	for name, composed := range map[string]bool{"the adopted revision": true, "the pin-only revision": false} {
+		t.Run("an override by "+name, func(t *testing.T) {
+			p := newPublishEnv(t)
+			f := p.sharedFragment("ntp")
+			p.adopt("fragment", "ntp", f.head, f.older, 2)
+			p.share("profile", "shared-set", p.sharedProfileRevision("shared-set", f.newer), nil, nil)
+			p.selectToo(nil, "cluster/ntp")
+			p.compiled()
+			by := f.older
+			if !composed {
+				by = f.newer
+			}
+			m := &p.unit.machines[0]
+			m.effective = nil // an overridden occurrence reaches no artifact
+			m.provenance[0].Output = ""
+			m.provenance[0].OverriddenBy = &compile.Origin{Fragment: 0, Revision: by, Digest: textDigest("machine: {}")}
+			if composed {
+				p.published()
+				return
+			}
+			p.refused(500, "internal-error")
+		})
+	}
+}
+
 // PA §3.1.1: a cluster holds a name at cluster scope or by adoption, never both, after the draft.
 func TestLibraryNameInTwoScopes(t *testing.T) {
 	t.Run("a shared edit beside the cluster's own head", func(t *testing.T) {
