@@ -142,9 +142,15 @@ func (a *API) heartbeat(ctx context.Context, stop context.CancelFunc, j job) {
 // event. A claim whose review is pending pauses in the same transaction (compilation §3.6) and the
 // run ends with errPaused. A refusal is the operation's outcome; an error stops the run.
 func (a *API) stage(ctx context.Context, j job) (imported, *refusal, error) {
-	c, err := ingest.Extract(ingest.Request{Input: j.input, Marks: j.marks, Declarations: j.decl, Name: j.name})
+	c, err := ingest.Extract(ingest.Request{Input: j.input, Marks: j.marks, Declarations: j.decl, Name: j.name, Import: true})
 	if err != nil {
 		return imported{}, a.failure(j, "extraction", err), nil
+	}
+	// Step 3a: the CA key is matched before any provider write.
+	if c.OffersCAKey() {
+		if ref, err := a.verifyCAKey(ctx, j, c); ref != nil || err != nil {
+			return imported{}, ref, err
+		}
 	}
 	seam.At("guard")
 	gens := map[string]string{}
@@ -442,13 +448,18 @@ func (a *API) commitImport(ctx context.Context, j job, imp imported) (*refusal, 
 			return fmt.Errorf("import base revision of operation %s: %d rows written: %v", j.op, n, err)
 		}
 		for name, r := range imp.sanitized.Declarations().References {
-			gen, ok := imp.gens[name]
-			if !ok { // T11 refuses declared references; every name was minted by this run
-				return fmt.Errorf("reference %s has no generation of this ingestion", name)
+			// The CA key's typed reference has no version and no generation of its own.
+			var version, generation any
+			if r.Kind != provider.KindCAKey {
+				gen, ok := imp.gens[name]
+				if !ok { // T11 refuses declared references; every name was minted by this run
+					return fmt.Errorf("reference %s has no generation of this ingestion", name)
+				}
+				version, generation = r.Version, gen
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO import_base_reference (revision, name, kind, version, encoding, generation)
-				VALUES ($1, $2, $3, $4, $5, $6)`, ibr, name, string(r.Kind), r.Version,
-				sql.NullString{String: r.Encoding, Valid: r.Encoding != ""}, gen); err != nil {
+				VALUES ($1, $2, $3, $4, $5, $6)`, ibr, name, string(r.Kind), version,
+				sql.NullString{String: r.Encoding, Valid: r.Encoding != ""}, generation); err != nil {
 				return err
 			}
 		}
