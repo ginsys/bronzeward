@@ -6,7 +6,7 @@
 
 import { Fragment, type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { EntryName, forgetETag, isSource, keepETag, keptETag, keyOf, lastGood, NO_ETAG, WriteResult } from "./drafts.tsx";
+import { EntryName, forgetETag, isAdoption, isChange, keepETag, keptETag, keyOf, lastGood, NO_ETAG, WriteResult } from "./drafts.tsx";
 import { startsNew, useSend, useWrites } from "./forms.tsx";
 import { settledReads, watchView } from "./imports.tsx";
 import { Ref, short, useItem, usePending, useReads, useSettled } from "./list.tsx";
@@ -24,6 +24,7 @@ type S = components["schemas"];
 type Draft = S["DraftBody"];
 type Operation = S["OperationBody"];
 type Source = S["SourceEntry"];
+type Adoption = S["AdoptionEntry"];
 
 const enc = encodeURIComponent;
 
@@ -89,14 +90,15 @@ export function changesRevision(o: Operation): number | undefined {
   const rule = (o.error as Record<string, unknown> | null)?.["rule"];
   return rule === "invalid" ? o.subject?.draftRevision : undefined;
 }
-const changeWord = (e: Source) => (e.revision === null ? "removed" : e.head === null ? "new" : "changed");
+const changeWord = (e: Source | Adoption) =>
+  isAdoption(e) ? (e.revision === null ? "no longer followed" : "adopted") : e.revision === null ? "removed" : e.head === null ? "new" : "changed";
 
 // After a publication refused with the rule invalid (`changesRevision`): what the draft this page holds changes, because a
 // refusal of the machine's whole configuration names no fragment and the cause may be one the draft changed. The draft must be the one the refused
 // publication was made from (its revision); a draft saved since says it cannot be listed.
 export function DraftChanges({ d, revision }: { d: Draft | undefined; revision: number | undefined }) {
   if (d === undefined || revision === undefined) return null;
-  const sources = d.entries.filter(isSource);
+  const sources = d.entries.filter(isChange);
   if (sources.length === 0) return null;
   if (d.revision !== revision) return <> This draft has changed since this publication was refused, so the changes it made are not listed.</>;
   const more = sources.length - MAX_CHANGES;

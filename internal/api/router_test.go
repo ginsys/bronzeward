@@ -46,6 +46,8 @@ var specRoutes = []string{
 	"PUT /drafts/{id}/fragments/{name} author if-match", "DELETE /drafts/{id}/fragments/{name} author if-match",
 	"PUT /drafts/{id}/profiles/{name} author if-match", "DELETE /drafts/{id}/profiles/{name} author if-match",
 	"PUT /drafts/{id}/assignments/{machine} author if-match", "DELETE /drafts/{id}/assignments/{machine} author if-match",
+	"PUT /drafts/{id}/adoptions/{kind}/{name} author if-match", "DELETE /drafts/{id}/adoptions/{kind}/{name} author if-match",
+	"POST /drafts/{id}/adoptions/{kind}/{name}/detachments author if-match",
 	"POST /drafts/{id}/discard author if-match",
 	"POST /drafts/{id}/publications publisher if-match",
 	"POST /plans publisher",

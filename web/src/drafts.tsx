@@ -29,6 +29,8 @@ import type { Outcome, Write } from "./write.ts";
 type S = components["schemas"];
 type Draft = S["DraftBody"];
 type Source = S["SourceEntry"];
+type Adoption = S["AdoptionEntry"];
+type Changed = Source | Adoption;
 type Revision = S["FragmentRevisionBody"];
 type Fragment = S["FragmentBody"];
 type Declared = S["FragmentDeclarations"]["references"];
@@ -109,23 +111,30 @@ export function doneOnce(w: Write | undefined): Done | undefined {
 }
 
 const enc = encodeURIComponent;
-export const isSource = (e: Draft["entries"][number]): e is Source => e.kind !== "import-base";
+// A source entry: a fragment, profile or assignment the draft proposes, at the cluster's scope or
+// the library's. An adoption entry or removal is none; Changed is either.
+export const isSource = (e: Draft["entries"][number]): e is Source => e.kind !== "import-base" && e.kind !== "adoption";
+export const isAdoption = (e: Draft["entries"][number]): e is Adoption => e.kind === "adoption";
+export const isChange = (e: Draft["entries"][number]): e is Changed => e.kind !== "import-base";
 // A shared (library) entry is shown and never edited here: the console's saves and removals write
 // the cluster's own entry, which has a slot of its own.
 export const isShared = (e: Source) => e.scope !== undefined;
 export const SHARED_LIBRARY = "shared library";
 const nameOf = (e: Source) => e.name ?? e.machine ?? "";
-export const keyOf = (e: Source) => `${e.kind}:${nameOf(e)}${isShared(e) ? ":library" : ""}`;
+export const keyOf = (e: Changed) => (isAdoption(e) ? `adoption:${e.of}:${e.name}` : `${e.kind}:${nameOf(e)}${isShared(e) ? ":library" : ""}`);
 // An entry as the list names it: a fragment's or a profile's own name, and an assignment's machine as a machine is
 // named everywhere (the shortened identifier until it is read).
-export function EntryName({ e }: { e: Source }) {
-  const machine = useMachineText(e.kind === "assignment" && nameOf(e) !== "" ? nameOf(e) : undefined);
-  const name = nameOf(e);
-  return <>{e.kind} {e.kind === "assignment" ? machine ?? short(name) : safeText(name) ?? NAME_NOT_SHOWN}{isShared(e) && ` (${SHARED_LIBRARY})`}</>;
+export function EntryName({ e }: { e: Changed }) {
+  const kind = isAdoption(e) ? e.of : e.kind;
+  const name = isAdoption(e) ? e.name : nameOf(e);
+  const machine = useMachineText(kind === "assignment" && name !== "" ? name : undefined);
+  return <>{kind} {kind === "assignment" ? machine ?? short(name) : safeText(name) ?? NAME_NOT_SHOWN}{(isAdoption(e) || isShared(e)) && ` (${SHARED_LIBRARY})`}</>;
 }
 
-// What an entry changes against its base (journeys §5.4's draft show).
-export function change(e: Source): string {
+// What an entry changes against its base (journeys §5.4's draft show). An adoption entry or removal moves what this
+// cluster follows, never the library, and its base is the cluster's adoption counter.
+export function change(e: Changed): string {
+  if (isAdoption(e)) return `this cluster ${e.revision === null ? "stops following it" : "adopts it"} (base adoption ${e.base ?? "none"})`;
   if (e.revision === null) return "removed";
   if (e.head === null) return "new";
   return `changed (base revision ${e.base ?? "none"})`;
@@ -250,7 +259,7 @@ export function DraftItem({ id }: { id: string }) {
   useEffect(() => watchWrites(id, written), [id, written]);
   const sources = d?.entries.filter(isSource) ?? [];
   // The machines this draft holds an import of: the handover button takes them under management.
-  const handedOver = d?.entries.flatMap((e) => (isSource(e) ? [] : [e.machine])) ?? [];
+  const handedOver = d?.entries.flatMap((e) => (isChange(e) ? [] : [e.machine])) ?? [];
   const entry = paneEntry(sources, selected, claimed);
   const current = entry === undefined ? selected : keyOf(entry);
   // A switch to another entry, or to a new one, asks first while the editor holds unsaved text.
@@ -276,9 +285,9 @@ export function DraftItem({ id }: { id: string }) {
         <>
           <h3>Entries</h3>
           <ul aria-label="Entries">
-            {d.entries.map((e) => isSource(e) ? (
+            {d.entries.map((e) => isChange(e) ? (
               <li key={keyOf(e)}>
-                {isShared(e) ? <EntryName e={e} /> : <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}><EntryName e={e} /></button>}
+                {isAdoption(e) || isShared(e) ? <EntryName e={e} /> : <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}><EntryName e={e} /></button>}
                 {" "}{change(e)}
               </li>
             ) : <li key={`import-base:${e.machine}`}><ImportedConfigurationRef machine={e.machine} revision={e.revision} /><BaseDocument id={e.revision} machine={e.machine} /></li>)}

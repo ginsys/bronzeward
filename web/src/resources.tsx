@@ -443,10 +443,12 @@ function SourceName({ kind, head }: { kind: string; head: string }) {
 }
 // The revision a release was built from, by when it was saved; its identifier is the title. "removed" and a revision not read
 // yet or not readable keep the shortened identifier.
-function SourceRevision({ kind, revision }: { kind: string; revision: string | null }) {
+// A shared source with no revision is the cluster's adoption removed: the shared name may well remain.
+export const NO_LONGER_FOLLOWED = "no longer followed by this cluster (shared library)";
+function SourceRevision({ kind, revision, shared }: { kind: string; revision: string | null; shared: boolean }) {
   const known = kind === "assignment" || kind === "fragment" || kind === "profile";
   const body = useBody<{ createdAt?: string }>(known && revision !== null ? `/${kind}-revisions/${encodeURIComponent(revision)}` : undefined);
-  return <Id id={revision} none="removed" text={body?.createdAt === undefined ? undefined : `Saved ${when(body.createdAt)}`} />;
+  return <Id id={revision} none={shared ? NO_LONGER_FOLLOWED : "removed"} text={body?.createdAt === undefined ? undefined : `Saved ${when(body.createdAt)}`} />;
 }
 // The observation a release was published with, by when it was read and why; its identifier is the title. The machine's list is
 // read once (its first page) for each covered machine, and an observation it does not hold keeps the shortened identifier.
@@ -457,7 +459,7 @@ function PublicationObservation({ machine, id }: { machine: string; id: string }
   return o === undefined || purpose === undefined ? <Id id={id} /> : <span title={id}>Read {when(o.at)} ({purpose})</span>;
 }
 const BUILT: readonly Col<S["ReleaseSourceBody"]>[] = [
-  ["Kind", (s) => safeWord(s.kind)], ["Source", (s) => <SourceName kind={s.kind} head={s.head} />], ["Revision", (s) => <SourceRevision kind={s.kind} revision={s.revision} />],
+  ["Kind", (s) => safeWord(s.kind)], ["Source", (s) => <SourceName kind={s.kind} head={s.head} />], ["Revision", (s) => <SourceRevision kind={s.kind} revision={s.revision} shared={s.headRevision === null} />],
 ];
 const RenderedLink = ({ to, machine }: { to: string; machine: string }) => (
   <Ref to={to} id={machine}>Rendered configuration of {useMachineText(machine) ?? short(machine)}</Ref>

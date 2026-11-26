@@ -11,6 +11,39 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for AdoptionEntryKind.
+const (
+	AdoptionEntryKindAdoption AdoptionEntryKind = "adoption"
+)
+
+// Valid indicates whether the value is a known member of the AdoptionEntryKind enum.
+func (e AdoptionEntryKind) Valid() bool {
+	switch e {
+	case AdoptionEntryKindAdoption:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdoptionEntryOf.
+const (
+	AdoptionEntryOfFragment AdoptionEntryOf = "fragment"
+	AdoptionEntryOfProfile  AdoptionEntryOf = "profile"
+)
+
+// Valid indicates whether the value is a known member of the AdoptionEntryOf enum.
+func (e AdoptionEntryOf) Valid() bool {
+	switch e {
+	case AdoptionEntryOfFragment:
+		return true
+	case AdoptionEntryOfProfile:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DiscoveryInputKind.
 const (
 	DiscoveryInputKindMachineConfig DiscoveryInputKind = "machine-config"
@@ -881,6 +914,60 @@ func (e GetDependenciesParamsClass) Valid() bool {
 	}
 }
 
+// Defines values for DeleteDraftsIdAdoptionsKindNameParamsKind.
+const (
+	DeleteDraftsIdAdoptionsKindNameParamsKindFragments DeleteDraftsIdAdoptionsKindNameParamsKind = "fragments"
+	DeleteDraftsIdAdoptionsKindNameParamsKindProfiles  DeleteDraftsIdAdoptionsKindNameParamsKind = "profiles"
+)
+
+// Valid indicates whether the value is a known member of the DeleteDraftsIdAdoptionsKindNameParamsKind enum.
+func (e DeleteDraftsIdAdoptionsKindNameParamsKind) Valid() bool {
+	switch e {
+	case DeleteDraftsIdAdoptionsKindNameParamsKindFragments:
+		return true
+	case DeleteDraftsIdAdoptionsKindNameParamsKindProfiles:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PutDraftsIdAdoptionsKindNameParamsKind.
+const (
+	PutDraftsIdAdoptionsKindNameParamsKindFragments PutDraftsIdAdoptionsKindNameParamsKind = "fragments"
+	PutDraftsIdAdoptionsKindNameParamsKindProfiles  PutDraftsIdAdoptionsKindNameParamsKind = "profiles"
+)
+
+// Valid indicates whether the value is a known member of the PutDraftsIdAdoptionsKindNameParamsKind enum.
+func (e PutDraftsIdAdoptionsKindNameParamsKind) Valid() bool {
+	switch e {
+	case PutDraftsIdAdoptionsKindNameParamsKindFragments:
+		return true
+	case PutDraftsIdAdoptionsKindNameParamsKindProfiles:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostDraftsIdAdoptionsKindNameDetachmentsParamsKind.
+const (
+	PostDraftsIdAdoptionsKindNameDetachmentsParamsKindFragments PostDraftsIdAdoptionsKindNameDetachmentsParamsKind = "fragments"
+	PostDraftsIdAdoptionsKindNameDetachmentsParamsKindProfiles  PostDraftsIdAdoptionsKindNameDetachmentsParamsKind = "profiles"
+)
+
+// Valid indicates whether the value is a known member of the PostDraftsIdAdoptionsKindNameDetachmentsParamsKind enum.
+func (e PostDraftsIdAdoptionsKindNameDetachmentsParamsKind) Valid() bool {
+	switch e {
+	case PostDraftsIdAdoptionsKindNameDetachmentsParamsKindFragments:
+		return true
+	case PostDraftsIdAdoptionsKindNameDetachmentsParamsKindProfiles:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeleteDraftsIdFragmentsNameParamsScope.
 const (
 	DeleteDraftsIdFragmentsNameParamsScopeCluster DeleteDraftsIdFragmentsNameParamsScope = "cluster"
@@ -1132,6 +1219,38 @@ type AdoptResult struct {
 	AdoptionRecord string `json:"adoptionRecord"`
 }
 
+// AdoptionEntry An adoption entry of a shared fragment or profile name, or its removal (revision null).
+type AdoptionEntry struct {
+	// Base The adoption counter of the cluster the entry was written from.
+	Base *int `json:"base"`
+
+	// Head The shared head of the name, if one exists.
+	Head     *string           `json:"head"`
+	Kind     AdoptionEntryKind `json:"kind"`
+	Name     string            `json:"name"`
+	Of       AdoptionEntryOf   `json:"of"`
+	Revision *string           `json:"revision"`
+}
+
+// AdoptionEntryKind defines model for AdoptionEntry.Kind.
+type AdoptionEntryKind string
+
+// AdoptionEntryOf defines model for AdoptionEntry.Of.
+type AdoptionEntryOf string
+
+// AdoptionInput defines model for AdoptionInput.
+type AdoptionInput struct {
+	Revision string `json:"revision"`
+}
+
+// AdoptionUpdate defines model for AdoptionUpdate.
+type AdoptionUpdate struct {
+	Draft string `json:"draft"`
+
+	// Entry An adoption entry of a shared fragment or profile name, or its removal (revision null).
+	Entry AdoptionEntry `json:"entry"`
+}
+
 // AlertBody defines model for AlertBody.
 type AlertBody struct {
 	AnswerDate   *time.Time `json:"answerDate"`
@@ -1375,6 +1494,15 @@ type DependencyReleaseBody struct {
 	PublishedAt time.Time              `json:"publishedAt"`
 	Records     []DependencyRecordBody `json:"records"`
 	Release     string                 `json:"release"`
+}
+
+// DetachmentUpdate defines model for DetachmentUpdate.
+type DetachmentUpdate struct {
+	Copy  SourceEntry `json:"copy"`
+	Draft string      `json:"draft"`
+
+	// Entry An adoption entry of a shared fragment or profile name, or its removal (revision null).
+	Entry AdoptionEntry `json:"entry"`
 }
 
 // DiscardInput defines model for DiscardInput.
@@ -2771,6 +2899,51 @@ type PostDraftsParams struct {
 	BronzewardExpectedEpoch *ExpectedEpoch `json:"Bronzeward-Expected-Epoch,omitempty"`
 }
 
+// DeleteDraftsIdAdoptionsKindNameParams defines parameters for DeleteDraftsIdAdoptionsKindName.
+type DeleteDraftsIdAdoptionsKindNameParams struct {
+	// IdempotencyKey 16 to 128 characters of [A-Za-z0-9_-] (persistence and API §7.1).
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// BronzewardExpectedEpoch Optional; the epoch identity the client expects. When the key has no record and this names another epoch, the request is refused 412 epoch-mismatch and its own transaction commits nothing. An empty one or two of them are 400 invalid-request (API revision 2; persistence and API §7.2, §9.1).
+	BronzewardExpectedEpoch *ExpectedEpoch `json:"Bronzeward-Expected-Epoch,omitempty"`
+
+	// IfMatch The ETag last read (persistence and API §4.1).
+	IfMatch IfMatch `json:"If-Match"`
+}
+
+// DeleteDraftsIdAdoptionsKindNameParamsKind defines parameters for DeleteDraftsIdAdoptionsKindName.
+type DeleteDraftsIdAdoptionsKindNameParamsKind string
+
+// PutDraftsIdAdoptionsKindNameParams defines parameters for PutDraftsIdAdoptionsKindName.
+type PutDraftsIdAdoptionsKindNameParams struct {
+	// IdempotencyKey 16 to 128 characters of [A-Za-z0-9_-] (persistence and API §7.1).
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// BronzewardExpectedEpoch Optional; the epoch identity the client expects. When the key has no record and this names another epoch, the request is refused 412 epoch-mismatch and its own transaction commits nothing. An empty one or two of them are 400 invalid-request (API revision 2; persistence and API §7.2, §9.1).
+	BronzewardExpectedEpoch *ExpectedEpoch `json:"Bronzeward-Expected-Epoch,omitempty"`
+
+	// IfMatch The ETag last read (persistence and API §4.1).
+	IfMatch IfMatch `json:"If-Match"`
+}
+
+// PutDraftsIdAdoptionsKindNameParamsKind defines parameters for PutDraftsIdAdoptionsKindName.
+type PutDraftsIdAdoptionsKindNameParamsKind string
+
+// PostDraftsIdAdoptionsKindNameDetachmentsParams defines parameters for PostDraftsIdAdoptionsKindNameDetachments.
+type PostDraftsIdAdoptionsKindNameDetachmentsParams struct {
+	// IdempotencyKey 16 to 128 characters of [A-Za-z0-9_-] (persistence and API §7.1).
+	IdempotencyKey IdempotencyKey `json:"Idempotency-Key"`
+
+	// BronzewardExpectedEpoch Optional; the epoch identity the client expects. When the key has no record and this names another epoch, the request is refused 412 epoch-mismatch and its own transaction commits nothing. An empty one or two of them are 400 invalid-request (API revision 2; persistence and API §7.2, §9.1).
+	BronzewardExpectedEpoch *ExpectedEpoch `json:"Bronzeward-Expected-Epoch,omitempty"`
+
+	// IfMatch The ETag last read (persistence and API §4.1).
+	IfMatch IfMatch `json:"If-Match"`
+}
+
+// PostDraftsIdAdoptionsKindNameDetachmentsParamsKind defines parameters for PostDraftsIdAdoptionsKindNameDetachments.
+type PostDraftsIdAdoptionsKindNameDetachmentsParamsKind string
+
 // DeleteDraftsIdAssignmentsMachineParams defines parameters for DeleteDraftsIdAssignmentsMachine.
 type DeleteDraftsIdAssignmentsMachineParams struct {
 	// IdempotencyKey 16 to 128 characters of [A-Za-z0-9_-] (persistence and API §7.1).
@@ -3238,6 +3411,9 @@ type PostDiscoveriesJSONRequestBody = DiscoveryInput
 // PostDraftsJSONRequestBody defines body for PostDrafts for application/json ContentType.
 type PostDraftsJSONRequestBody = DraftInput
 
+// PutDraftsIdAdoptionsKindNameJSONRequestBody defines body for PutDraftsIdAdoptionsKindName for application/json ContentType.
+type PutDraftsIdAdoptionsKindNameJSONRequestBody = AdoptionInput
+
 // PutDraftsIdAssignmentsMachineJSONRequestBody defines body for PutDraftsIdAssignmentsMachine for application/json ContentType.
 type PutDraftsIdAssignmentsMachineJSONRequestBody = AssignmentInput
 
@@ -3481,6 +3657,32 @@ func (t *DraftBody_Entries_Item) FromSourceEntry(v SourceEntry) error {
 
 // MergeSourceEntry performs a merge with any union data inside the DraftBody_Entries_Item, using the provided SourceEntry
 func (t *DraftBody_Entries_Item) MergeSourceEntry(v SourceEntry) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAdoptionEntry returns the union data inside the DraftBody_Entries_Item as a AdoptionEntry
+func (t DraftBody_Entries_Item) AsAdoptionEntry() (AdoptionEntry, error) {
+	var body AdoptionEntry
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAdoptionEntry overwrites any union data inside the DraftBody_Entries_Item as the provided AdoptionEntry
+func (t *DraftBody_Entries_Item) FromAdoptionEntry(v AdoptionEntry) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAdoptionEntry performs a merge with any union data inside the DraftBody_Entries_Item, using the provided AdoptionEntry
+func (t *DraftBody_Entries_Item) MergeAdoptionEntry(v AdoptionEntry) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err

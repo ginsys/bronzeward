@@ -144,6 +144,9 @@ func routes() []*route {
 		profileRemoval().on(ifm(m(del, "/drafts/{id}/profiles/{name}", author))),
 		assignmentUpdate().on(ifm(m(put, "/drafts/{id}/assignments/{machine}", author))),
 		assignmentRemoval().on(ifm(m(del, "/drafts/{id}/assignments/{machine}", author))),
+		adoptionUpdateRoute().on(ifm(m(put, "/drafts/{id}/adoptions/{kind}/{name}", author))),
+		adoptionRemovalRoute().on(ifm(m(del, "/drafts/{id}/adoptions/{kind}/{name}", author))),
+		detachmentRoute().on(ifm(m(post, "/drafts/{id}/adoptions/{kind}/{name}/detachments", author))),
 	)
 	rs = append(rs,
 		draftDiscard().on(ifm(m(post, "/drafts/{id}/discard", author))),

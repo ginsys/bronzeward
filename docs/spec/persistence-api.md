@@ -392,13 +392,17 @@ a revision, is retained with none, or has no row because the draft introduces
 the name); and the copy, the cluster-scope entry a detachment stages.
 
 The earlier entry matters where it introduced something the published state
-lacks: an adoption entry that introduced the adoption (no row yet) or a library
-edit that introduced the name (no head row). A later adoption removal or
-detachment then drops that adoption entry (no removal is staged, and a detachment
-stages the copy alone), and a later library removal of that name is accepted and
-publishes nothing. After a detachment that dropped such an entry, a later
-adoption removal or detachment finds no row (`404`, nothing replaced). A
-detachment's copy, an entry of its own slot (§3.1), stays staged when another
+lacks: an adoption the cluster has no row for yet, which an adoption entry
+introduces and so does a library edit, whether or not the name is new, or a name
+with no head row, which a library edit introduces. A later adoption removal or
+detachment then drops the entry that introduced the adoption (no removal is
+staged, a detachment stages the copy alone, and a dropped library edit is not
+published), and a later library removal of a name the draft introduced is
+accepted and publishes nothing. After a detachment that dropped such an entry, a
+later adoption removal or detachment finds no row (`404`, nothing replaced).
+Over a removed adoption, a row with no revision, a staged re-adoption introduces
+none: a later adoption removal is `404` and the re-adoption stays, until another
+entry replaces it or the draft is discarded. A detachment's copy, an entry of its own slot (§3.1), stays staged when another
 entry replaces the detachment and meets `name-in-two-scopes` while the cluster
 still adopts the name after the draft.
 
@@ -452,6 +456,11 @@ order would work):
   name's library head has no revision as published (removed by an earlier
   publication, or absent), whatever revision the entry names; publication checks
   it again against the head it then reads;
+- *update-time:* an adoption entry names a library revision of its kind and
+  name, in the layer the name keeps, else it is refused naming `revision`. Any
+  such revision may be named, one no publication wrote included; two drafts that
+  introduced one name can leave such a revision in another layer than the head's,
+  and that one is refused;
 
 A removal of a library head sets its revision pointer to none, as in §3.1: no
 cluster can newly adopt the name from then (rule `library-removed`), and a
@@ -496,7 +505,12 @@ read the source graph: a draft has no rendered configuration before publication
 `POST /drafts/{id}/adoptions/{kind}/{name}/detachments` (§9.2) writes, in one
 draft transaction and under one `If-Match`, a cluster-scope fragment or profile
 of that name from the adopted revision's text and the removal of the adoption,
-so no intermediate draft state breaks a rule above. Publication refuses a
+so no intermediate draft state breaks a rule above. The text is that of the
+revision the cluster's published adoption holds, whatever the draft's slot
+held, or, where the draft only introduced the adoption, that of the entry it
+drops. A cluster fragment of that name, a removed one included, keeps its layer
+(§3.1): a detachment in another layer is refused at once, `422
+validation-failed` naming `layer`. Publication refuses a
 detached profile `422 validation-failed` with rule `detach-pin-not-in-view`,
 naming the fragment, unless the cluster's view holds each fragment the adopted profile
 revision pins at the pinned revision (the cluster-scope copy is held to the
@@ -3007,6 +3021,19 @@ counter or `null`; a library edit also with `adoptionBase`, the counter of the
 cluster's adoption it was written from, or `null`. A library removal has no
 `adoptionBase`, and a cluster entry has neither `scope` nor `adoptionBase`. A
 draft may hold a cluster entry and a library entry of one name.
+
+An adoption entry or removal (§3.1.1) is answered, by `GET /drafts/{id}` and by
+its routes, as `{"kind": "adoption", "of", "name", "head", "base",
+"revision"}`: `of` is `fragment` or `profile`, `head` the library head or
+`null`, `base` the cluster's adoption counter the entry was written from or
+`null`, and `revision` the adopted revision, `null` for a removal. It has no
+`scope` and no `adoptionBase`. `PUT` and `DELETE` answer `{"draft", "entry"}`.
+A detachment answers `{"draft", "entry", "copy"}`: `entry` is the adoption's
+removal and `copy` the cluster entry it wrote, as a cluster entry is answered,
+with its `document` for a fragment; `GET /drafts/{id}` shows the two as those
+two entries. Where the draft had only introduced the adoption, nothing is
+removed: a removal or a detachment then answers `entry` as a removal with
+`base` `null`, and `GET /drafts/{id}` shows no adoption entry.
 
 A profile pins fragment revisions in order; an assignment selects profiles,
 then fragments per layer, by name (§3.1). Neither body can hold a secret
