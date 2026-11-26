@@ -1,0 +1,5 @@
+--- a/internal/talos/talostest/talostest.go
++++ b/internal/talos/talostest/talostest.go
+@@ -233 +233 @@
+-	n := &Node{Endpoint: l.Addr().String(), st: namespaced.NewState(inmem.Build), failures: map[resource.Type]codes.Code{}, stalls: map[resource.Type]bool{}}
++	n := &Node{Endpoint: l.Addr().String(), st: namespaced.NewState(func(resource.Namespace) state.CoreState { return inmem.NewState() }), failures: map[resource.Type]codes.Code{}, stalls: map[resource.Type]bool{}}

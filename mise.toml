@@ -26,7 +26,9 @@ env -u SHELLCHECK_OPTS shellcheck -x fixtures/lib.sh fixtures/dev-idp fixtures/b
   experiments/e3-talos-compatibility/run/* \
   experiments/e4-database-semantics/run/* \
   experiments/e2-sensitivity-provenance/run/* \
-  experiments/scanner-cross-line/run/*
+  experiments/scanner-cross-line/run/* \
+  experiments/talos-115-beta/run/build \
+  experiments/talos-115-beta/run/probe
 """
 
 [tasks.test]

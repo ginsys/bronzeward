@@ -1,0 +1,17 @@
+--- a/go.mod
++++ b/go.mod
+@@ -21 +21 @@
+-	github.com/siderolabs/talos/pkg/machinery v1.14.5
++	github.com/siderolabs/talos/pkg/machinery v1.14.7
+@@ -25 +25 @@
+-	golang.org/x/net v0.58.0
++	golang.org/x/net v0.62.0
+@@ -29 +29 @@
+-	golang.org/x/text v0.41.0
++	golang.org/x/text v0.43.0
+@@ -79 +79 @@
+-	golang.org/x/crypto v0.55.0 // indirect
++	golang.org/x/crypto v0.58.0 // indirect
+@@ -81 +81 @@
+-	golang.org/x/sync v0.22.0 // indirect
++	golang.org/x/sync v0.24.0 // indirect

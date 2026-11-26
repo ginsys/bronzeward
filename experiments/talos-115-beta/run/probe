@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Test 1: build A (v1.14.5), C (v1.14.7) and B (v1.15.0-beta.1), run the compile probe in each over
+# the same input bytes (A generates them; A runs twice), and compare. Everything is written under a
+# new temporary directory, which this script leaves in place. The output holds verdicts, digests,
+# document kinds, key paths and Bronzeward's redacted messages, never configuration bytes or keys.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+work=$(mktemp -d "${TMPDIR:-/tmp}/talos115.XXXXXX")
+mkdir "$work/inputs"
+echo "work directory: $work"
+
+prepare() { # prepare <name> <build>
+	"$here/run/build" "$2" "$work/src-$1"
+	cp "$here/probe/compile_probe_test.go.in" "$work/src-$1/internal/compile/zz_talos115_probe_test.go"
+	local unformatted
+	unformatted=$(gofmt -l "$work/src-$1/internal/compile/zz_talos115_probe_test.go")
+	[ -z "$unformatted" ] || { echo "probe is not gofmt-formatted" >&2; return 1; }
+}
+
+run_probe() { # run_probe <source name> <output name>
+	local src=$work/src-$1 version
+	version=$(cd "$src" && go list -m -f '{{.Version}}' github.com/siderolabs/talos/pkg/machinery)
+	mkdir "$work/$2"
+	echo "== run $2: machinery $version"
+	(cd "$src" && TALOS115_OUT=$work/$2 TALOS115_IN=$work/inputs TALOS115_MACHINERY=$version \
+		go test -count=1 -v -run '^TestTalos115Probe$' ./internal/compile) |
+		grep -E '^(probe |--- FAIL|FAIL|ok |panic:|    .*zz_talos115)'
+}
+
+prepare a a
+prepare c c
+prepare b b-raw
+run_probe a out-a
+run_probe a out-a2
+run_probe c out-c
+run_probe b out-b
+
+compare() { # compare <first> <second>
+	echo "== results $1 vs $2 (no lines below means equal)"
+	local rc=0
+	diff "$work/$1/results.txt" "$work/$2/results.txt" || rc=$?
+	[ "$rc" -le 1 ] || return "$rc"
+	echo "== key paths $1 vs $2"
+	(cd "$work/src-a" && TALOS115_A=$work/$1 TALOS115_B=$work/$2 \
+		go test -count=1 -v -run '^TestTalos115KeyDiff$' ./internal/compile) |
+		grep -E '^(keydiff |--- FAIL|FAIL|ok |panic:|    .*zz_talos115)'
+}
+
+compare out-a out-a2
+compare out-a out-c
+compare out-a out-b
+echo "== done"
