@@ -24,7 +24,7 @@ anything to the machine until a plan is approved and applied.
 Read the open drift of one machine. `<machine>` is its name or its ID; a name that two clusters hold
 needs `--cluster`.
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl drift show <machine>
 ```
 
@@ -47,7 +47,7 @@ none. There is no command to ignore a drift record.
 
 ### Freeze while you decide
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl machine freeze <machine> --reason "<why>"
 ```
 
@@ -61,7 +61,7 @@ The reason is 1 to 1024 bytes. A freeze stops new commitments and attempts. It d
 attempt that is already recorded, and an adoption can still be recorded. It stays after the drift is
 resolved. Only an `approver` lifts it:
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl machine unfreeze <machine> --reason "<why>"
 ```
 
@@ -73,7 +73,7 @@ Adoption reads the machine's own configuration into a draft, so you can review i
 draft and makes an adopt plan. `drift adopt` runs the steps in order for as long as your roles hold,
 and prints the rest.
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl drift adopt <machine> --draft <draft> --review
 ```
 
@@ -101,7 +101,7 @@ refuses publication: stop selecting that fragment.
 
 ### Revert the machine to Desired
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl drift revert <machine>
 ```
 

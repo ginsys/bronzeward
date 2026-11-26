@@ -23,7 +23,7 @@ applied. Both clients say so after every publication: "Nothing has been sent to 
 Run the publication against the draft's ID. The client sends the ETag of the draft it last read, so
 a draft that somebody else changed since is refused (see the table).
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl publish <draft>
 ```
 
@@ -49,7 +49,7 @@ one.
 Read the result with `release list`, `release show`, `release review` and `release provenance`.
 Each needs any one role.
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl release list
 bronzewardctl release show <release>
 bronzewardctl release review <release> <machine>

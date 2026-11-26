@@ -17,7 +17,7 @@ claim that a run printed them.
 
 ## Command line
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl import start --machine <machine> --draft <draft> --review
 ```
 
@@ -39,7 +39,7 @@ block. At the prompt "Mark a value as secret by its path, one per line; empty li
 each path; an empty line ends it. A mark is refused with the rule and its position, never its path.
 The import then pauses again with a new generation. Review again, or continue.
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl import continue <import>
 ```
 
@@ -85,7 +85,7 @@ A machine recorded from an existing cluster has no applied release. A plan to ap
 refused until the machine is adopted. Adoption gives it an assignment in the draft, publishes the
 draft, and applies nothing to the machine: an adopt plan records what the machine already runs.
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl assignment set <machine> --draft <draft> --none
 bronzewardctl publish <draft>
 bronzewardctl plan create --release <release> --machine <machine> --operation adopt

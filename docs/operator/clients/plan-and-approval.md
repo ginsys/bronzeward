@@ -24,7 +24,7 @@ to send it and applies it only if every check passes.
 Create the plan for one release, one machine and one operation. Publishing already printed the
 command for each machine (see [publication](publication.md)).
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl plan create --release <release> --machine <machine> --operation apply-config
 ```
 
@@ -51,7 +51,7 @@ The plan stays approved and nothing was sent. Where the page cannot show the nod
 "The plan could not start yet: the last release applied to machine <a> records the Kubernetes node
 name <n>."
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl plan show <plan>
 bronzewardctl approve <plan>
 ```
@@ -86,7 +86,7 @@ prediction never shows you as clear of it.
 `--diff` (without it, only the number of lines of each change), and asks one question for all of
 them.
 
-```bash
+```bash {.bw-run .bw-db}
 bronzewardctl apply <release> --machine <machine>,<machine> --diff
 bronzewardctl apply <release> --all --diff
 ```
