@@ -108,10 +108,11 @@ func drop(exec func() error, within time.Duration) error {
 		if !errors.As(err, &pe) || pe.Code != "55006" {
 			return err
 		}
-		if !time.Now().Before(deadline) {
+		const pause = 100 * time.Millisecond
+		if time.Until(deadline) <= pause { // no repeat starts past the bound
 			return fmt.Errorf("%w: %s", err, pe.Detail)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(pause)
 	}
 }
 
