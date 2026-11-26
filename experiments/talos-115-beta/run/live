@@ -246,7 +246,8 @@ scenario() { # scenario <label> <cluster> <talosctl version> <image> <cases: yes
 	say "control: dry run of the node's own configuration"
 	dry_run "$node" control-unchanged || true
 	say "control: dry run of an invalid configuration (must be refused)"
-	sed '0,/^\( *\)type: worker$/s//\1type: bogus/' "$node" >"$dir/invalid.yaml"
+	# A node's configuration keeps its comments, so the line can go on after the value.
+	sed '0,/^\( *\)type: worker\>/s//\1type: bogus/' "$node" >"$dir/invalid.yaml"
 	if cmp -s "$node" "$dir/invalid.yaml"; then die "control not planted: no machine type line"; fi
 	if dry_run "$dir/invalid.yaml" control-invalid; then say "CONTROL FAILED: the node accepted a bogus machine type"; fi
 
