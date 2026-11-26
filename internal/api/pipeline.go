@@ -133,22 +133,7 @@ func (r *snapshotReader) read() (snapshot, *refusal, error) {
 		return s, nil, err
 	}
 
-	// The covered machines (ruling R21'): an import base after the draft, its entry's or its
-	// Applied release's (§3.2).
-	var machines []snapshotMachine
-	err := r.query(`SELECT m.id, m.platform, coalesce(e.import_base_revision, rm.import_base_revision, ''), coalesce(m.name, '')
-		FROM machine m
-		LEFT JOIN draft_entry e ON e.draft = $1 AND e.machine = m.id
-		LEFT JOIN machine_state st ON st.machine = m.id
-		LEFT JOIN release_machine rm ON rm.release = st.applied_release AND rm.machine = m.id
-		WHERE m.cluster = $2 ORDER BY m.id`, func(row *sql.Rows) error {
-		var m snapshotMachine
-		if err := row.Scan(&m.machine, &m.mode, &m.importBase, &m.name); err != nil {
-			return err
-		}
-		machines = append(machines, m)
-		return nil
-	}, r.j.draft, r.j.cluster)
+	machines, err := r.clusterMachines()
 	if err != nil {
 		return s, nil, err
 	}
@@ -188,6 +173,27 @@ func (r *snapshotReader) read() (snapshot, *refusal, error) {
 		return s, nil, err
 	}
 	return s, nil, nil
+}
+
+// clusterMachines reads the cluster's machines in machine order, each with its import base after
+// the draft, its entry's or its Applied release's (§3.2), "" for none: a release covers each
+// machine that has one (ruling R21').
+func (r *snapshotReader) clusterMachines() ([]snapshotMachine, error) {
+	var machines []snapshotMachine
+	err := r.query(`SELECT m.id, m.platform, coalesce(e.import_base_revision, rm.import_base_revision, ''), coalesce(m.name, '')
+		FROM machine m
+		LEFT JOIN draft_entry e ON e.draft = $1 AND e.machine = m.id
+		LEFT JOIN machine_state st ON st.machine = m.id
+		LEFT JOIN release_machine rm ON rm.release = st.applied_release AND rm.machine = m.id
+		WHERE m.cluster = $2 ORDER BY m.id`, func(row *sql.Rows) error {
+		var m snapshotMachine
+		if err := row.Scan(&m.machine, &m.mode, &m.importBase, &m.name); err != nil {
+			return err
+		}
+		machines = append(machines, m)
+		return nil
+	}, r.j.draft, r.j.cluster)
+	return machines, err
 }
 
 // readStates reads every fragment, profile and assignment of the cluster's view as the draft leaves
@@ -286,9 +292,20 @@ type selections struct {
 type sharedHead struct{ id, revision string }
 
 // readSelections reads the selections of the covered machines' assignments and of every profile
-// revision the release names (the draft's own and those the assignments select), and holds each to
-// §3.1's rules as the draft leaves the heads (ruling R30).
+// revision the release names (loadSelections), and holds each to §3.1's rules as the draft leaves
+// the heads (ruling R30).
 func (r *snapshotReader) readSelections(machines []snapshotMachine) (selections, *refusal, error) {
+	sel, profiles, err := r.loadSelections(machines)
+	if err != nil {
+		return sel, nil, err
+	}
+	return sel, r.checkSelections(sel, profiles, machines), nil
+}
+
+// loadSelections reads the selections of the machines' assignments and of every profile revision
+// the release names (the draft's own and those the assignments select), which it also returns. It
+// checks nothing, so a read of what composes where answers a state a publication would refuse.
+func (r *snapshotReader) loadSelections(machines []snapshotMachine) (selections, []string, error) {
 	sel := selections{profiles: map[string][]string{}, fragments: map[string]map[string][]string{},
 		pins: map[string][]string{}, named: map[string]string{}, revisions: map[string][2]string{},
 		shared: map[string]bool{}, heads: map[string]sharedHead{}}
@@ -393,15 +410,15 @@ func (r *snapshotReader) readSelections(machines []snapshotMachine) (selections,
 		sel.revisions[frv], sel.heads[frv] = [2]string{name, layer}, head
 		return nil
 	}, frvs)
-	if err != nil {
-		return sel, nil, err
-	}
+	return sel, profiles, err
+}
 
-	// §3.1 again (ruling R30): every pin of a cluster profile is its fragment's revision after the
-	// draft; every selected name has a revision after the draft, a fragment one in the layer it is
-	// listed under. A shared profile the draft proposes pins each name's shared head or the draft's
-	// proposal (§3.1.1; T3 checks it again under the head's lock); a published one's pins are taken
-	// as written.
+// checkSelections is §3.1 again (ruling R30): every pin of a cluster profile is its fragment's
+// revision after the draft; every selected name has a revision after the draft, a fragment one in
+// the layer it is listed under. A shared profile the draft proposes pins each name's shared head or
+// the draft's proposal (§3.1.1; T3 checks it again under the head's lock); a published one's pins
+// are taken as written.
+func (r *snapshotReader) checkSelections(sel selections, profiles []string, machines []snapshotMachine) *refusal {
 	slices.SortFunc(profiles, func(x, y string) int {
 		return cmp.Or(strings.Compare(sel.named[x], sel.named[y]), strings.Compare(x, y))
 	})
@@ -418,10 +435,10 @@ func (r *snapshotReader) readSelections(machines []snapshotMachine) (selections,
 						ref = pinRefusal("Publication refused: a detached profile pins a revision the cluster's view does not hold.",
 							sel.named[prv], i, frv).with("rule", "detach-pin-not-in-view").with("fragment", name)
 					}
-					return sel, ref, nil
+					return ref
 				}
 			case proposed && sel.heads[frv].revision != frv && r.proposed["fragment"][name] != frv:
-				return sel, pinRefusal(sharedPinDetail, sel.named[prv], i, frv), nil
+				return pinRefusal(sharedPinDetail, sel.named[prv], i, frv)
 			}
 		}
 	}
@@ -436,19 +453,19 @@ func (r *snapshotReader) readSelections(machines []snapshotMachine) (selections,
 		}
 		for i, name := range sel.profiles[m.assignment] {
 			if r.states["profile"][name].revision == "" {
-				return sel, invalid("profiles", i), nil
+				return invalid("profiles", i)
 			}
 		}
 		for _, layer := range fragmentLayers {
 			for i, name := range sel.fragments[m.assignment][layer] {
 				frv := r.states["fragment"][name].revision
 				if frv == "" || sel.revisions[frv][1] != layer {
-					return sel, invalid("fragments."+layer, i), nil
+					return invalid("fragments."+layer, i)
 				}
 			}
 		}
 	}
-	return sel, nil, nil
+	return nil
 }
 
 const sharedPinDetail = "Publication refused: a shared profile's pin is neither its fragment's shared head nor proposed by the draft."
@@ -479,23 +496,34 @@ func (sel selections) pinConflict(r *snapshotReader, machines []snapshotMachine)
 		}
 	}
 	for _, m := range machines {
-		for _, name := range sel.profiles[m.assignment] {
-			for _, frv := range sel.pins[r.states["profile"][name].revision] {
-				reach(frv, map[string]any{"profile": name})
+		sel.walk(r, m.assignment, func(frv, profile, selected string) {
+			switch {
+			case profile != "":
+				reach(frv, map[string]any{"profile": profile})
+			case r.states["fragment"][selected].adopted:
+				reach(frv, map[string]any{"adoption": selected})
+			default:
+				reach(frv, map[string]any{"fragment": selected})
 			}
-		}
-		for _, layer := range fragmentLayers {
-			for _, name := range sel.fragments[m.assignment][layer] {
-				st := r.states["fragment"][name]
-				kind := "fragment"
-				if st.adopted {
-					kind = "adoption"
-				}
-				reach(st.revision, map[string]any{kind: name})
-			}
-		}
+		})
 	}
 	return ref
+}
+
+// walk calls fn for each fragment revision the assignment asr composes, once per route to it: first
+// each pin of each profile it selects, with that profile's name, then each fragment name it selects
+// by layer, with that name and the revision the view gives it ("" for none).
+func (sel selections) walk(r *snapshotReader, asr string, fn func(frv, profile, selected string)) {
+	for _, name := range sel.profiles[asr] {
+		for _, frv := range sel.pins[r.states["profile"][name].revision] {
+			fn(frv, name, "")
+		}
+	}
+	for _, layer := range fragmentLayers {
+		for _, name := range sel.fragments[asr][layer] {
+			fn(r.states["fragment"][name].revision, "", name)
+		}
+	}
 }
 
 // compose is an assignment's fragment revisions in composition order (ruling R23): per layer, the

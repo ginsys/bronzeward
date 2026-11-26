@@ -26,12 +26,18 @@ type rendererBody struct {
 
 // releaseSourceBody is one head a release used: the revision it left the head at (null: removed)
 // and the head revision (PA §6.2), null for a shared head, which the release leaves where it was
-// or whose counter is not the cluster's (§3.1.1).
+// or whose counter is not the cluster's (§3.1.1). A shared source records the cluster's adoption
+// instead: its counter and the revision adopted before this release (null: none). Both are null on
+// a cluster source and on a fragment only a shared profile revision pins, which the cluster has no
+// adoption of.
 type releaseSourceBody struct {
-	Kind         string  `json:"kind"`
-	Head         string  `json:"head"`
-	Revision     *string `json:"revision"`
-	HeadRevision *int    `json:"headRevision"`
+	Kind             string  `json:"kind"`
+	Scope            string  `json:"scope"`
+	Head             string  `json:"head"`
+	Revision         *string `json:"revision"`
+	HeadRevision     *int    `json:"headRevision"`
+	Previous         *string `json:"previous"`
+	AdoptionRevision *int    `json:"adoptionRevision"`
 }
 
 // releaseMachineBody is one machine a release covers, with the mode it was validated in and the
@@ -258,12 +264,14 @@ func withReleaseParts(ctx context.Context, tx *sql.Tx, rs []*releaseBody) error 
 		ids = append(ids, r.ID)
 	}
 	err := eachRow(ctx, tx, `SELECT release, kind, COALESCE(fragment, profile, assignment) AS head,
-			COALESCE(fragment_revision, profile_revision, assignment_revision), head_revision
+			COALESCE(fragment_revision, profile_revision, assignment_revision), head_revision, scope,
+			COALESCE(previous_fragment_revision, previous_profile_revision), adoption_revision
 		FROM release_source WHERE release = ANY (string_to_array($1, ',')) ORDER BY release, head, 4`,
 		strings.Join(ids, ","), func(row *sql.Rows) error {
 			var rel string
 			var s releaseSourceBody
-			if err := row.Scan(&rel, &s.Kind, &s.Head, &s.Revision, &s.HeadRevision); err != nil {
+			if err := row.Scan(&rel, &s.Kind, &s.Head, &s.Revision, &s.HeadRevision, &s.Scope, &s.Previous,
+				&s.AdoptionRevision); err != nil {
 				return err
 			}
 			byID[rel].Sources = append(byID[rel].Sources, s)
