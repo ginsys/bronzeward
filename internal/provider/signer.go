@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,6 +66,13 @@ func (k CAKey) Key() []byte {
 		return nil
 	}
 	return []byte(*k.key)
+}
+
+// Holds reports whether offered, in the base64 form machine.ca.key holds, is k's PEM text byte for
+// byte, compared in constant time (compilation.md §2.3 step 3a).
+func (k CAKey) Holds(offered string) bool {
+	pem, err := base64.StdEncoding.Strict().DecodeString(offered)
+	return err == nil && len(pem) > 0 && subtle.ConstantTimeCompare(pem, k.Key()) == 1
 }
 
 const caKeyText = "[talos ca key]"

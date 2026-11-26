@@ -56,32 +56,9 @@ func actsTime(provider, act time.Time) bool { return provider.Sub(act).Abs() < t
 // malformed, provider-unavailable, lifetime-exceeds-maximum (life is above the configured maximum,
 // which is never shortened to fit) or sign. A cancelled ctx answers its own error and no cause.
 func (a *API) certFor(ctx context.Context, cluster string, r role.Role, life time.Duration) (signer.Cert, string, error) {
-	if a.d.sg == nil {
-		return signer.Cert{}, "provider-unavailable", errors.New("the process has no signer")
-	}
-	act, err := latestFirstKey(ctx, a.db, cluster)
-	path, version, created := act.path, act.version, act.created
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return signer.Cert{}, "absent", errNoKeyAct
-	case err != nil:
-		return signer.Cert{}, "", err
-	}
-	k, err := a.d.sg.ReadCAKeyVersion(ctx, cluster, version)
+	k, cause, err := a.actKey(ctx, cluster)
 	if err != nil {
-		if ctx.Err() != nil {
-			return signer.Cert{}, "", ctx.Err()
-		}
-		if errors.Is(err, provider.ErrAbsent) {
-			return signer.Cert{}, "version-gone", err
-		}
-		return signer.Cert{}, accessCause(err), err
-	}
-	// The database keeps microseconds and the provider nanoseconds: a version is the act's when the
-	// two times agree to the microsecond.
-	got := k.Version()
-	if got.Path != path || got.Version != version || !actsTime(got.CreatedTime, created) {
-		return signer.Cert{}, "version-changed", errKeyChanged
+		return signer.Cert{}, cause, err
 	}
 	c, err := signer.Sign(k, r, time.Now(), life, a.d.maxCert)
 	if err != nil {
@@ -91,4 +68,37 @@ func (a *API) certFor(ctx context.Context, cluster string, r role.Role, life tim
 		return signer.Cert{}, "sign", err
 	}
 	return c, "", nil
+}
+
+// actKey is cluster's CA key at the version its latest first-key act names, never the latest the
+// provider holds: path, version and created_time must be the act's. A failure carries certFor's
+// cause for it; a database failure and a cancelled ctx carry none.
+func (a *API) actKey(ctx context.Context, cluster string) (provider.CAKey, string, error) {
+	var none provider.CAKey
+	if a.d.sg == nil {
+		return none, "provider-unavailable", errors.New("the process has no signer")
+	}
+	act, err := latestFirstKey(ctx, a.db, cluster)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return none, "absent", errNoKeyAct
+	case err != nil:
+		return none, "", err
+	}
+	k, err := a.d.sg.ReadCAKeyVersion(ctx, cluster, act.version)
+	if err != nil {
+		if ctx.Err() != nil {
+			return none, "", ctx.Err()
+		}
+		if errors.Is(err, provider.ErrAbsent) {
+			return none, "version-gone", err
+		}
+		return none, accessCause(err), err
+	}
+	// The database keeps microseconds and the provider nanoseconds: a version is the act's when the
+	// two times agree to the microsecond.
+	if got := k.Version(); got.Path != act.path || got.Version != act.version || !actsTime(got.CreatedTime, act.created) {
+		return none, "version-changed", errKeyChanged
+	}
+	return k, "", nil
 }
