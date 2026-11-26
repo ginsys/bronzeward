@@ -178,9 +178,10 @@ address_of() { # address_of <container>
 # output can hold the configuration and a diff of it (E3 5.4), so it stays in a file; printed are the
 # exit status and, for a refusal, the error's first line cut before any diff.
 dry_run() {
+	own_endpoint "$cluster" "$controlplane" || die "refusing to send through $controlplane: not a container of $cluster"
 	own_endpoint "$cluster" "$worker" || die "refusing to send to $worker: not a container of $cluster"
 	local rc=0 log=$work/$run_label/dry-$2.log
-	timeout 60 "$(ctl_for "$cluster_ctl")" --talosconfig "$tc" --endpoints "$worker" --nodes "$worker" \
+	timeout 60 "$(ctl_for "$cluster_ctl")" --talosconfig "$tc" --endpoints "$controlplane" --nodes "$worker" \
 		apply-config --mode no-reboot --dry-run --file "$1" >"$log" 2>&1 || rc=$?
 	if [ "$rc" -eq 0 ]; then
 		say "dry-run $2 accepted (exit 0)"
@@ -225,7 +226,9 @@ scenario() { # scenario <label> <cluster> <talosctl version> <image> <cases: yes
 		destroy_created
 		return 1
 	}
+	controlplane=$(address_of "$cluster-controlplane-1")
 	worker=$(address_of "$cluster-worker-1")
+	own_endpoint "$cluster" "$controlplane" || die "the control plane's address $controlplane is not accepted"
 	own_endpoint "$cluster" "$worker" || die "the worker's address $worker is not accepted"
 	local planted
 	for planted in 192.0.2.1 10.56.0.250; do
