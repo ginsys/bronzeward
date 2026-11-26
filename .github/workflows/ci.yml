@@ -306,6 +306,13 @@ jobs:
           cache_save: ${{ github.ref == 'refs/heads/main' }}
           install_args: go
       - run: mise run go-db
+      # What the client journey pages' blocks printed, with the revision (TestDocBlocks).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: doc-journeys
+          path: .dev/doc-journeys
+          retention-days: 14
 
   idp:
     # The sign-in self-test against the test identity provider (fixtures/dev-idp). In `checks`'
