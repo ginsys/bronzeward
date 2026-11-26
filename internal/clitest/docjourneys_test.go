@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,11 +140,15 @@ func docConnect(t *testing.T, blocks map[string]string, ran map[string]bool) {
 	node.SetSMBIOSUUID(t, "0B5A6C1E-2F3D-4E5F-8A9B-0C1D2E3F4A5B", true)
 	node.SetNodeID(t, standInNodeID)
 	node.SetClusterID(t, seedClusterID)
+	node.SetMembers(t, talostest.Member{NodeID: standInNodeID, Hostname: "bwsynth-cp-1", Addresses: []string{"127.0.0.1"}, ControlPlanePort: 6443})
 	p := newPageRun(f, blocks, ran)
 	p.file("talosconfig", string(pki.Talosconfig(node.Endpoint, "", "")))
 	p.set("<name>", "a")
 	p.set("<host|ip[:port]>", node.Endpoint)
-	p.must("connect-a-cluster-db-1", "")
+	// The command also exits 0 for a node that lists nobody, which would show nothing of the page.
+	if out := p.must("connect-a-cluster-db-1", ""); !strings.Contains(out, "bwsynth-cp-1") {
+		t.Errorf("cluster discover listed no member:\n%s", out)
+	}
 }
 
 func docPublication(t *testing.T, blocks map[string]string, ran map[string]bool) {
