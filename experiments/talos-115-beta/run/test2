@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Usage: run/test2 <a|b-raw|2a|2b> <build|api|rest>
+# Test 2: build one variant under a new temporary directory, which is left in place, and run there
+#   build  go build ./... and go vet ./..., both even when the first fails
+#   api    the tests of internal/api
+#   rest   the tests of every other package
+# The tests need the PostgreSQL and OpenBao the go-db job profile starts. The export is not a git
+# checkout, so a failure counts against the beta only when variant a, the base in the same form,
+# does not show it too.
+set -euo pipefail
+
+[ $# -eq 2 ] || { echo "usage: $0 <a|b-raw|2a|2b> <build|api|rest>" >&2; exit 2; }
+here=$(cd "$(dirname "$0")/.." && pwd)
+work=$(mktemp -d "${TMPDIR:-/tmp}/talos115-test.XXXXXX")
+"$here/run/build" "$1" "$work/src"
+cd "$work/src"
+echo "== variant $1, set $2: $(go list -m github.com/siderolabs/talos/pkg/machinery)"
+
+case $2 in
+build)
+	built=0 vetted=0
+	go build ./... || built=$?
+	echo "== go build rc=$built"
+	go vet ./... || vetted=$?
+	echo "== go vet rc=$vetted"
+	[ "$built" -eq 0 ] && [ "$vetted" -eq 0 ]
+	;;
+api)
+	go test -p 1 -timeout 40m ./internal/api/...
+	;;
+rest)
+	all=$(go list -e ./...)
+	mapfile -t packages < <(grep -v '/internal/api\(/\|$\)' <<<"$all")
+	echo "== packages: ${#packages[@]}"
+	go test -p 1 -timeout 40m "${packages[@]}"
+	;;
+*)
+	echo "$0: unknown set $2" >&2
+	exit 2
+	;;
+esac
