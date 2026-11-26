@@ -98,7 +98,7 @@ const notShown = "AccessVersionBody.Created AccessVersionBody.NotAfter AccessVer
 	"ObservationBody.SmbiosUuid ObservationBody.TalosClusterId ObservationBody.TalosNodeId " +
 	"ObservedBody.Observation OpenDriftBody.LastObservation OpenDriftBody.LateLanding " +
 	"RecoveryEntryRef.EnteredBy RecoveryEntryRef.Reason RecoveryExitRef.Act RecoveryExitRef.ExitedBy " +
-	"Reference.Encoding ReleaseMachineBody.Review RendererBody.MachineryChecksum " +
+	"Reference.Encoding ReleaseMachineBody.Review ReleaseSourceBody.Previous ReleaseSourceBody.Scope RendererBody.MachineryChecksum " +
 	"RestoredBackup.Backup RestoredBackup.Family ServerBody.Features ServerBody.StartMode SourceEntry.Head TimelineEntry.Epoch UnreadValue.Code"
 
 // markersShown is, for each command of the sweep, how many marked values it shows in each of the
