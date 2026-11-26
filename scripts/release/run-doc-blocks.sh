@@ -8,13 +8,16 @@
 # block one value is replaced and the record says so: the pages' server address,
 # https://bronzeward.example.com, becomes the fixture's https://localhost:8443, whose private CA
 # certificate is the pages' ./office-ca.pem. A block opened by exactly "```bash {.bw-run .bw-db}" is
-# not this run's: it needs a secret provider and a machine. Fences are read by text, as scripts/verify-docs.py does,
-# with no Markdown parser. The run fails when a block fails, when a marked block did not run, or when
-# anything else ran.
+# not this run's: it needs a secret provider and a machine, and internal/clitest's TestDocBlocks
+# runs it (mise run go-db). Fences are read by text, as scripts/verify-docs.py does, with no Markdown
+# parser. The run fails when a block fails, when a marked block did not run, or when anything else ran.
 #
 #   run-doc-blocks.sh run [page...]            the whole run (CI: mise run doc-blocks)
 #   run-doc-blocks.sh extract <dir> <page>...  write each marked block to <dir>, and <dir>/blocks.list
 #   run-doc-blocks.sh account <blocks.list> <ran.list>
+#   run-doc-blocks.sh account-db <ran.list> [page...]
+#                                              the .bw-db blocks of the pages (default: every client
+#                                              page) are the ones TestDocBlocks recorded in <ran.list>
 #
 # BW_DOC_EXEC, BW_DOC_DOCKER and BW_DOC_FIXTURE, set only by scripts/test/run-doc-blocks-test.sh,
 # stand in for the host shell, docker and the fixture script. BW_DOC_STATE is the state directory
@@ -75,6 +78,23 @@ account() {
 	return 1
 }
 
+# account_db <ran.list> [page...]: a check from outside the Go test, so that a test that was skipped,
+# filtered out, renamed or removed cannot pass for one that ran. The ids are TestDocBlocks': the page's
+# name and the number of its .bw-db block.
+account_db() {
+	local ran=$1 want page rc=0
+	shift
+	[ "$#" -gt 0 ] || set -- "$root"/docs/operator/clients/*.md
+	[ -f "$ran" ] || { echo "run-doc-blocks: no record of a run: $ran" >&2; return 1; }
+	want=$(mktemp)
+	for page in "$@"; do
+		awk -v name="$(basename "$page" .md)" '$0 == "```bash {.bw-run .bw-db}" { printf "%s-db-%d db\n", name, ++n }' "$page" >>"$want" || rc=1
+	done
+	account "$want" "$ran" || rc=1
+	rm -f "$want"
+	return "$rc"
+}
+
 # cleanup, the EXIT trap of run: remove the container and stop the fixture. A failure of either turns a
 # successful run into a failed one (a process left behind is not a pass) and never hides an earlier failure.
 cleanup() {
@@ -129,7 +149,8 @@ run() {
 	local literal=${page_server//./\\.}
 	while read -r id phase; do
 		[ "$phase" = container ] || continue
-		sed -E -i "s#(^| )$literal( |\$)#\\1$fixture_web\\2#g" "$rec/blocks/$id.sh"
+		# Repeated until nothing changes: two addresses side by side share the space between them.
+		sed -E -i -e ':again' -e "s#(^| )$literal( |\$)#\\1$fixture_web\\2#" -e 't again' "$rec/blocks/$id.sh"
 	done <"$rec/blocks/blocks.list"
 	export BW_DOC_WEB_URL=$fixture_web
 	: >"$rec/ran.list"
@@ -193,5 +214,6 @@ case ${1:-} in
 run) shift; run "$@" ;;
 extract) shift; extract "$@" ;;
 account) shift; account "$@" ;;
-*) echo "usage: run-doc-blocks.sh run [page...] | extract <dir> <page>... | account <blocks.list> <ran.list>" >&2; exit 64 ;;
+account-db) shift; account_db "$@" ;;
+*) echo "usage: run-doc-blocks.sh run [page...] | extract <dir> <page>... | account <blocks.list> <ran.list> | account-db <ran.list> [page...]" >&2; exit 64 ;;
 esac
