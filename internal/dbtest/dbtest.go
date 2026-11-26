@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"testing"
@@ -81,7 +82,10 @@ func create(t testing.TB, admin, template string) (*sql.DB, string) {
 		if db != nil {
 			db.Close()
 		}
-		if _, err := adb.ExecContext(context.Background(), "DROP DATABASE "+name+" WITH (FORCE)"); err != nil {
+		if err := drop(func() error {
+			_, err := adb.ExecContext(context.Background(), "DROP DATABASE "+name+" WITH (FORCE)")
+			return err
+		}, time.Minute); err != nil {
 			t.Errorf("drop %s: %v", name, err)
 		}
 		adb.Close()
@@ -90,6 +94,25 @@ func create(t testing.TB, admin, template string) (*sql.DB, string) {
 		t.Fatal(err)
 	}
 	return db, dsn
+}
+
+// drop runs exec, a DROP DATABASE ... WITH (FORCE). PostgreSQL signals the database's sessions,
+// waits about 5 s for them to leave and then refuses with SQLSTATE 55006 (object_in_use); a
+// session on a slow runner can take longer, so a drop refused so is repeated until within has
+// passed. The last refusal carries the server's detail, which says what still used the database.
+func drop(exec func() error, within time.Duration) error {
+	deadline := time.Now().Add(within)
+	for {
+		err := exec()
+		var pe *pgconn.PgError
+		if !errors.As(err, &pe) || pe.Code != "55006" {
+			return err
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("%w: %s", err, pe.Detail)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // WaitForLockWait polls until some session of this database waits on a lock.

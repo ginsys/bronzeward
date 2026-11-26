@@ -704,8 +704,9 @@ func TestPlanReadAfterLockWait(t *testing.T) {
 	}
 }
 
-// A creation whose transaction waited on the machine's row longer than its expiry still creates a
-// plan that reads proposed: its creation time and expiry are read after the locks (PA §5 rule 4).
+// A creation whose transaction waited on the machine's row creates a plan that reads proposed, its
+// expiry counted from after the wait: its creation time and expiry are read after the locks (PA §5
+// rule 4).
 func TestPlanCreationAfterLockWait(t *testing.T) {
 	t.Parallel()
 	p := newPlanEnv(t)
@@ -719,19 +720,16 @@ func TestPlanCreationAfterLockWait(t *testing.T) {
 	}
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
-		// The one second expiry is the behavior here, and no setup step can race it: the creation
-		// reads its times after the lock wait, so the expiry starts when the lock is released.
-		done <- p.plan(p.robot, "k-plan-wait-create-01", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`))
+		done <- p.plan(p.robot, "k-plan-wait-create-01", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":3600`))
 	}()
 	dbtest.WaitForLockWait(t, p.db)
-	time.Sleep(1200 * time.Millisecond)
-	released := time.Now()
+	held := clockWhileHeld(t, lock)
 	if err := lock.Rollback(); err != nil {
 		t.Fatal(err)
 	}
 	b := decode[planBody](t, <-done, http.StatusCreated)
-	if !b.ExpiresAt.After(released) || b.ExpiresAt.Sub(b.CreatedAt) != time.Second {
-		t.Fatalf("created %s, expires %s, lock released %s", b.CreatedAt, b.ExpiresAt, released)
+	if !b.CreatedAt.After(held) || b.ExpiresAt.Sub(b.CreatedAt) != time.Hour {
+		t.Fatalf("created %s, expires %s, lock still held at %s", b.CreatedAt, b.ExpiresAt, held)
 	}
 	var at time.Time
 	if err := p.db.QueryRow(`SELECT e.at FROM machine_event e JOIN plan p ON p.machine = e.machine
@@ -746,6 +744,16 @@ func TestPlanCreationAfterLockWait(t *testing.T) {
 	if got.State != "proposed" {
 		t.Fatalf("read at once: state %q, want proposed", got.State)
 	}
+}
+
+// clockWhileHeld reads the database's clock in the transaction that holds the lock a request waits
+// on: a time the request read before its wait is not after it, however slow the runner is.
+func clockWhileHeld(t *testing.T, lock *sql.Tx) (at time.Time) {
+	t.Helper()
+	if err := lock.QueryRow(`SELECT clock_timestamp()`).Scan(&at); err != nil {
+		t.Fatal(err)
+	}
+	return at
 }
 
 // holdActOrder takes the act-order lock (auth.actOrderKey) in a transaction of its own, so a
@@ -808,27 +816,24 @@ func TestPlanCreationRevocationOfCreatorNoDeadlock(t *testing.T) {
 	}
 }
 
-// The act-order wait is a lock wait too: a creation that waited on it past its expiry still reads
-// proposed, its times read after that lock (PA §5 rule 4).
+// The act-order wait is a lock wait too: a creation that waited on it reads proposed, its times read
+// after that lock and its expiry counted from them (PA §5 rule 4).
 func TestPlanCreationAfterActOrderWait(t *testing.T) {
 	t.Parallel()
 	p := newPlanEnv(t)
 	lock := holdActOrder(t, p.db)
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
-		// The one second expiry is the behavior here, and no setup step can race it: the creation
-		// reads its times after the lock wait, so the expiry starts when the lock is released.
-		done <- p.plan(p.robot, "k-plan-wait-order-01", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":1`))
+		done <- p.plan(p.robot, "k-plan-wait-order-01", applyBody(p.target.rel, p.machine, `,"expiresInSeconds":3600`))
 	}()
 	dbtest.WaitForLockWait(t, p.db)
-	time.Sleep(1200 * time.Millisecond)
-	released := time.Now()
+	held := clockWhileHeld(t, lock)
 	if err := lock.Rollback(); err != nil {
 		t.Fatal(err)
 	}
 	b := decode[planBody](t, <-done, http.StatusCreated)
-	if !b.ExpiresAt.After(released) || b.ExpiresAt.Sub(b.CreatedAt) != time.Second {
-		t.Fatalf("created %s, expires %s, lock released %s", b.CreatedAt, b.ExpiresAt, released)
+	if !b.CreatedAt.After(held) || b.ExpiresAt.Sub(b.CreatedAt) != time.Hour {
+		t.Fatalf("created %s, expires %s, lock still held at %s", b.CreatedAt, b.ExpiresAt, held)
 	}
 	var at, updated time.Time
 	if err := p.db.QueryRow(`SELECT e.at, s.updated_at FROM machine_event e JOIN plan p ON p.machine = e.machine
