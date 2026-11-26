@@ -168,6 +168,31 @@ else
 	echo "FAIL: the server address was not substituted in the container block alone, or the record does not say so" >&2
 fi
 
+# Two addresses side by side share the space between them, and both are replaced.
+page adjacent "${fence}bash {.bw-run .bw-host}" "echo built" "$fence" "${fence}bash {.bw-run}" \
+	"echo https://bronzeward.example.com https://bronzeward.example.com https://bronzeward.example.com" "$fence"
+BW_DOC_EXEC=$work/stub-sh expect 0 "a page with addresses side by side" "" "$runner" run "$work/adjacent.md"
+if grep -qx 'https://localhost:8443 https://localhost:8443 https://localhost:8443' "$work/state/record/adjacent-2.out"; then
+	pass=$((pass + 1))
+else
+	fail=$((fail + 1))
+	echo "FAIL: an adjacent address was left as written: $(cat "$work/state/record/adjacent-2.out")" >&2
+fi
+
+# account-db: the .bw-db blocks of the pages are what the Go test's record says ran. No record, a block
+# missing from it, one too many and no mark at all each fail.
+page dbone "${fence}bash {.bw-run .bw-db}" "echo a" "$fence" "text" "${fence}bash {.bw-run .bw-db}" "echo b" "$fence"
+page dbtwo "${fence}bash {.bw-run .bw-db}" "echo c" "$fence"
+expect 1 "no record of a run" "no record of a run" "$runner" account-db "$work/absent" "$work/dbone.md"
+printf 'dbone-db-1\ndbone-db-2\ndbtwo-db-1\n' >"$work/ran"
+expect 0 "every .bw-db block ran once" "" "$runner" account-db "$work/ran" "$work/dbone.md" "$work/dbtwo.md"
+printf 'dbone-db-1\ndbtwo-db-1\n' >"$work/ran"
+expect 1 "a .bw-db block that did not run" "are not the marked blocks" "$runner" account-db "$work/ran" "$work/dbone.md" "$work/dbtwo.md"
+printf 'dbone-db-1\ndbone-db-2\ndbone-db-3\n' >"$work/ran"
+expect 1 "a block in the record that no page marks" "are not the marked blocks" "$runner" account-db "$work/ran" "$work/dbone.md"
+: >"$work/ran"
+expect 1 "no .bw-db mark at all" "no marked block found" "$runner" account-db "$work/ran" "$work/ok.md"
+
 # Only that address, standing alone as a word: anything attached to it, before or after, leaves it as written.
 kept="https://bronzeward-example.com https://bronzeward.example.community https://bronzeward.example.com:9 https://bronzeward.example.com/x https://bronzeward.example.com@other.example/x x=https://bronzeward.example.com"
 page lookalike "${fence}bash {.bw-run .bw-host}" "echo built" "$fence" "${fence}bash {.bw-run}" \
