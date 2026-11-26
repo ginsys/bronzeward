@@ -201,13 +201,19 @@ func TestLiveSignerIdentity(t *testing.T) {
 		return err
 	})
 
-	// Every other identity is refused the CA key path, each beside the same request with a read
-	// grant added. The compiler read of a generation is the control that the token is live.
-	for _, who := range []string{"bw-ingestion", "bw-compiler", "bw-executor", "bw-metadata", "bw-orphan-report"} {
+	// Every identity but the signer and the compiler is refused a read of the CA key path, each beside
+	// the same request with a read grant added; the compiler reads it to render (compilation.md §1,
+	// choice §16.40). Every identity but the signer is refused a write.
+	for _, who := range []string{"bw-ingestion", "bw-executor", "bw-metadata", "bw-orphan-report"} {
 		deniedWithout(t, b, who+" reading the CA key", []string{who}, "ca-key-read", func(tok string) error {
 			_, err := raw(t, b, tok, http.MethodGet, dataPath, nil)
 			return err
 		})
+	}
+	if _, err := raw(t, b, b.Token("bw-compiler"), http.MethodGet, dataPath, nil); err != nil {
+		t.Fatalf("the compiler reading the CA key: %v", err)
+	}
+	for _, who := range []string{"bw-ingestion", "bw-compiler", "bw-executor", "bw-metadata", "bw-orphan-report"} {
 		_, err := raw(t, b, b.Token(who), http.MethodPost, dataPath, map[string]any{"data": map[string]string{"ca": "x", "key": "y"}})
 		mustDeny(t, who+" writing the CA key", err)
 	}

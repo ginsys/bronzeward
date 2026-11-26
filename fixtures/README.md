@@ -315,7 +315,9 @@ the files in [`openbao/policies`](openbao/policies):
 - `bw-ingestion`: creates generations under `secret/data/gen/`, without read or update; encrypts
   under the baseline key; encrypts and decrypts under the staging key; computes an HMAC on the
   digest key's exact path; reads no cluster credential: its Talos certificates come from the signer.
-- `bw-compiler`: reads generations; encrypts under the artifact key.
+- `bw-compiler`: reads generations; reads `secret/data/access/talos-ca/<cluster>`, a cluster's CA
+  key, to render it, with no list, metadata read, write or delete there; encrypts under the artifact
+  key.
 - `bw-executor`: decrypts under the artifact key and reads no secret.
 - `bw-metadata`: the server's metadata identity (dependency-monitor §4, choice §11.9): reads KV
   metadata under `secret/metadata/` and Transit key state under `transit/keys/` by name, without
