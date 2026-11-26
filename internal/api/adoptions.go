@@ -189,6 +189,22 @@ func putAdoption(ctx context.Context, _ *API, tx *sql.Tx, q *request) (result, e
 	case referencing:
 		return result{}, invalid("a shared revision with a secret reference cannot be adopted").with("rule", "library-reference")
 	}
+	if s.kind == "profile" {
+		// A revision no publication wrote was never held to its pins. Publication records each pin
+		// under its fragment's shared head, a removed one included, so each name needs one. A head
+		// is never deleted (§3.1), so this need not be checked again.
+		var headless string
+		switch err := tx.QueryRowContext(ctx, `SELECT f.name FROM profile_revision_fragment p
+			JOIN fragment_revision f ON f.id = p.fragment_revision
+			WHERE p.revision = $1 AND NOT EXISTS (SELECT FROM fragment h WHERE h.owner = 'library' AND h.name = f.name)
+			ORDER BY p.position LIMIT 1`, in.Revision).Scan(&headless); {
+		case err == nil:
+			return result{}, invalid("the profile pins a fragment the library has never published").
+				with("revision", in.Revision).with("fragment", headless)
+		case !errors.Is(err, sql.ErrNoRows):
+			return result{}, err
+		}
+	}
 	e := s.entry(&in.Revision)
 	if err := s.set(ctx, tx, e); err != nil {
 		return result{}, err

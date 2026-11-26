@@ -460,7 +460,10 @@ order would work):
   name, in the layer the name keeps, else it is refused naming `revision`. Any
   such revision may be named, one no publication wrote included; two drafts that
   introduced one name can leave such a revision in another layer than the head's,
-  and that one is refused;
+  and that one is refused. So is a profile revision that pins a fragment name the
+  library has no head for, naming the fragment, which only a revision no
+  publication wrote can: publication records each pin under its fragment's head.
+  A removed head is still a head, and its pin is accepted;
 
 A removal of a library head sets its revision pointer to none, as in §3.1: no
 cluster can newly adopt the name from then (rule `library-removed`), and a
