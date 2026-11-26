@@ -60,8 +60,9 @@ execution:
 # named here. reportTokenFile, optional, holds the
 # orphan-report identity's token for `bronzeward orphans` (persistence-api.md §6.4), under the
 # same rules; the server never reads it. signerTokenFile, optional, holds the signer identity's
-# token (persistence-api.md §3.4), under the same rules; without it the server starts and answers
-# a first key with 503 dependency-unavailable. presenceTokenFile, optional, holds the access-presence
+# token (persistence-api.md §3.4), under the same rules; without it the server starts, answers
+# a first key with 503 dependency-unavailable and refuses every import of a control plane
+# configuration with 503 talos-access-unavailable (compilation.md §2.3 step 3a). presenceTokenFile, optional, holds the access-presence
 # identity's token (persistence-api.md §3.3): one `read` on the metadata of each cluster's CA key,
 # never its data, under the same rules; without it the server starts and answers
 # GET /clusters/{id}/talos-access with 503 dependency-unavailable.

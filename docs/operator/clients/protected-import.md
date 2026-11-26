@@ -12,6 +12,11 @@ You also need a recorded machine and an open draft for its cluster: see
 [the inventory](inventory.md) and [editing](editing.md). Words such as import base, plan and
 approval are in [the word list](terms.md).
 
+An import of a control plane also needs the cluster's first key
+([connect a cluster](connect-a-cluster.md)) and a server with `signerTokenFile` configured. Its
+`machine.ca.key` is compared with the stored key and is not copied: the draft holds the reference
+`talos/ca-key` in its place.
+
 The `text` blocks and quoted messages on this page are read from the source. This page does not
 claim that a run printed them.
 
@@ -75,6 +80,8 @@ Steps:
 | "This client did not start import `<id>`, so it keeps no ETag of draft `<draft>`. Read the draft before writing to it:" | The client has no version of the draft to send, because it did not start the import. | Run the `draft show` the message prints, then write. |
 | "…its staged input could not be decrypted (resume-failed …)" | The import was not applied. Its claim stays held until its lease lapses. | Read its lease with `import status`. Once it lapsed, `import takeover` it, or `import abandon` it. |
 | Command line: "…its claim is … and its lease lapsed … ago, while operation … still runs: the outcome is unknown." (exit 3) | The claim's lease lapsed while its operation is recorded as running. The client cannot say that the runner stopped, and the outcome is unknown. | Read it again later with `import status`. A lapsed lease allows `bronzewardctl import takeover <import>` to resume it, or `import abandon`; an import with transient staging cannot be taken over. |
+| A control plane's import fails `talos-access-unavailable` | No readable first key is recorded for the cluster, or the server has no `signerTokenFile`. Nothing of the import is kept. | Supply the cluster's first key ([connect a cluster](connect-a-cluster.md)), or ask whoever runs the server, then import again. |
+| A control plane's import fails `validation-failed` with the rule `ca-key-mismatch` | The machine's `machine.ca.key` is not, byte for byte, the key of the cluster's latest first key. Nothing of the import is kept. | Check that the machine belongs to this cluster, and which first key was supplied last, then import again. |
 | Web: the buttons **Continue import**, **Take over import** and **Abandon import** | The page offers only the ones the claim's state allows now. | Press the one that fits; the page reads the claim again after it. |
 
 Abandoning says "its staged input is cleared, and nothing of it reaches draft `<draft>`".
