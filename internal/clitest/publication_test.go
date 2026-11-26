@@ -76,6 +76,8 @@ func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(..
 	if err != nil {
 		t.Fatal(err)
 	}
+	// An import compares machine.ca.key with the cluster's stored key, so the node serves that one.
+	cfg.RawV1Alpha1().MachineConfig.MachineCA = ca
 	for i, v := range unmarked {
 		mc := cfg.RawV1Alpha1().MachineConfig
 		mc.MachineFiles = append(mc.MachineFiles, &v1alpha1.MachineFile{FileContent: "token = " + v, FilePermissions: 0o644,
