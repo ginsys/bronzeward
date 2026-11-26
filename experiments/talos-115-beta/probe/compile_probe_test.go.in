@@ -469,6 +469,53 @@ func TestTalos115Probe(t *testing.T) {
 	p.write(out, "results.txt", []byte(strings.Join(slices.Clone(p.lines), "\n")+"\n"))
 }
 
+// styles is how each key and scalar of a stream is written (plain, quoted or block), by document
+// number and path. It holds no value.
+func styles(t *testing.T, raw []byte) map[string]string {
+	t.Helper()
+	names := map[yaml.Style]string{0: "plain", yaml.SingleQuotedStyle: "single-quoted", yaml.DoubleQuotedStyle: "double-quoted",
+		yaml.LiteralStyle: "literal-block", yaml.FoldedStyle: "folded-block", yaml.FlowStyle: "flow"}
+	name := func(s yaml.Style) string {
+		if n, ok := names[s]; ok {
+			return n
+		}
+		return fmt.Sprintf("style-%d", s)
+	}
+	out := map[string]string{}
+	var walk func(prefix string, n *yaml.Node)
+	walk = func(prefix string, n *yaml.Node) {
+		switch n.Kind {
+		case yaml.DocumentNode:
+			for _, c := range n.Content {
+				walk(prefix, c)
+			}
+		case yaml.MappingNode:
+			for i := 0; i+1 < len(n.Content); i += 2 {
+				key := prefix + "/" + n.Content[i].Value
+				out[key+" (key)"] = name(n.Content[i].Style)
+				walk(key, n.Content[i+1])
+			}
+		case yaml.SequenceNode:
+			for i, c := range n.Content {
+				walk(fmt.Sprintf("%s/%d", prefix, i), c)
+			}
+		case yaml.ScalarNode:
+			out[prefix] = name(n.Style)
+		}
+	}
+	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
+	for doc := 0; ; doc++ {
+		var n yaml.Node
+		if err := dec.Decode(&n); err != nil {
+			if errors.Is(err, io.EOF) {
+				return out
+			}
+			t.Fatal("a document does not decode")
+		}
+		walk(fmt.Sprintf("doc[%d]", doc), &n)
+	}
+}
+
 // TestTalos115KeyDiff names the paths at which two builds' outputs differ, never a value.
 func TestTalos115KeyDiff(t *testing.T) {
 	a, b := os.Getenv("TALOS115_A"), os.Getenv("TALOS115_B")
@@ -565,6 +612,12 @@ func TestTalos115KeyDiff(t *testing.T) {
 		slices.Sort(lines)
 		if len(lines) == 0 {
 			lines = []string{"(same paths and values; the bytes differ in order or form)"}
+			s, u := styles(t, ra), styles(t, rb)
+			for _, k := range slices.Sorted(maps.Keys(s)) {
+				if u[k] != s[k] {
+					lines = append(lines, fmt.Sprintf("style %s: %s -> %s", k, s[k], u[k]))
+				}
+			}
 		}
 		for _, l := range lines {
 			fmt.Printf("keydiff %s %s\n", name, l)
