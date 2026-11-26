@@ -41,9 +41,11 @@ if [ ${#patches[@]} -gt 0 ]; then
 	(
 		cd "$dir"
 		sumdb=$(go env GOSUMDB)
-		skipped=$(go env GONOSUMDB)$(go env GOPRIVATE)$(go env GOINSECURE)$(go env GOFLAGS)
-		if [ "$sumdb" != sum.golang.org ] || [ -n "$skipped" ]; then
-			echo "build: checksum database verification may be off: GOSUMDB='$sumdb', GONOSUMDB, GOPRIVATE, GOINSECURE and GOFLAGS together='$skipped'" >&2
+		skipped=$(go env GONOSUMDB)$(go env GOPRIVATE)$(go env GOINSECURE)
+		flags=$(go env GOFLAGS)
+		# -v only makes go print more (the cluster pod sets it); any other flag refuses.
+		if [ "$sumdb" != sum.golang.org ] || [ -n "$skipped" ] || { [ -n "$flags" ] && [ "$flags" != -v ]; }; then
+			echo "build: checksum database verification may be off: GOSUMDB='$sumdb', GONOSUMDB, GOPRIVATE and GOINSECURE together='$skipped', GOFLAGS='$flags'" >&2
 			exit 1
 		fi
 		cp go.mod go.mod.pinned
