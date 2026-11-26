@@ -34,8 +34,9 @@ const (
 
 // docBlocks reads dir's pages and answers the marked blocks by id, "<page name>-db-<n>", the ids
 // run-doc-blocks.sh account-db computes. A line that mentions the mark in any other form is refused,
-// since the block it was meant to mark would be run by nothing. So is a "#" in a marked block: the
-// block is run a command at a time, and a comment could then hide a command a shell would run.
+// since the block it was meant to mark would be run by nothing. So is a "#" or an "&" in a marked
+// block, since the block is run a command at a time: a comment could hide a command a shell would
+// run, and a command put in the background would count as run before it ended.
 func docBlocks(dir string) (map[string]string, error) {
 	pages, err := filepath.Glob(filepath.Join(dir, "*.md"))
 	if err != nil {
@@ -54,8 +55,8 @@ func docBlocks(dir string) (map[string]string, error) {
 				n++
 				id = fmt.Sprintf("%s-db-%d", name, n)
 				blocks[id] = ""
-			case id != "" && strings.Contains(line, "#"):
-				return nil, fmt.Errorf("%s:%d: %s holds a #; a marked block takes no comment", page, i+1, id)
+			case id != "" && strings.ContainsAny(line, "#&"):
+				return nil, fmt.Errorf("%s:%d: %s holds a # or an &; a marked block takes no comment and no background command", page, i+1, id)
 			case id != "" && line == "```":
 				if strings.TrimSpace(blocks[id]) == "" {
 					return nil, fmt.Errorf("%s: %s is empty", page, id)
@@ -337,6 +338,7 @@ func TestDocBlocksControls(t *testing.T) {
 
 	for name, body := range map[string]string{
 		"a comment that would hide a command": dbOpener + "\n# example \\\nbronzewardctl context list --bogus\n```\n",
+		"a command left in the background":    dbOpener + "\nsh -c 'sleep 300; exit 7' >/dev/null 2>&1 &\n```\n",
 		"a block that is only a comment":      dbOpener + "\n# disabled for now\n```\n",
 		"another spelling of the mark":        "```bash {.bw-db .bw-run}\ntrue\n```\n",
 		"an indented mark":                    "  " + dbOpener + "\n  true\n  ```\n",
