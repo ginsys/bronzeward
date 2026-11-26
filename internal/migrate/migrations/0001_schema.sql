@@ -721,9 +721,14 @@ CREATE DOMAIN fragment_layer AS text
 -- and the embedded documents it identifies, as compilation §5.2 declares them: a JSON array of
 -- {"path", "format"}, which its reference rows do not hold. It names its fragment by cluster and
 -- name, since the head may not exist until publication.
+--
+-- A shared (library) fragment or profile, its heads and revisions, belongs to no cluster
+-- (persistence-api.md §3.1.1). A composite key over a null column is not checked, so every key
+-- that must hold for them too is over `owner`: the cluster, or 'library', which no cluster id is.
 CREATE TABLE fragment_revision (
   id         text PRIMARY KEY CHECK (id ~ '^frv_[a-z2-7]{26}$'),
-  cluster    text NOT NULL REFERENCES cluster (id),
+  cluster    text REFERENCES cluster (id),
+  owner      text NOT NULL GENERATED ALWAYS AS (coalesce(cluster, 'library')) STORED,
   name       source_name NOT NULL,
   layer      fragment_layer NOT NULL,
   document   text NOT NULL CHECK (document <> ''),
@@ -731,9 +736,10 @@ CREATE TABLE fragment_revision (
   created_at timestamptz NOT NULL,
   writer     xid8 NOT NULL,
   embedded   jsonb NOT NULL CHECK (jsonb_typeof(embedded) = 'array'),
-  UNIQUE (id, cluster),
   UNIQUE (id, cluster, name),
-  UNIQUE (id, cluster, name, layer)
+  UNIQUE (id, owner),
+  UNIQUE (id, owner, name),
+  UNIQUE (id, owner, name, layer)
 );
 CALL make_immutable('fragment_revision');
 CREATE TRIGGER writer BEFORE INSERT ON fragment_revision FOR EACH ROW EXECUTE FUNCTION stamp_revision_writer();
@@ -754,29 +760,36 @@ CALL make_immutable('fragment_reference');
 CREATE TRIGGER with_revision BEFORE INSERT ON fragment_reference
   FOR EACH ROW EXECUTE FUNCTION refuse_late_revision_row('fragment_revision');
 
--- A profile revision: fragment revisions in order (§3.1). A pin stays in its profile's cluster.
+-- A profile revision: fragment revisions in order (§3.1). A pin stays in its profile's cluster, or
+-- is a shared revision, which a cluster's profile says (`library`) and a shared profile can only.
 CREATE TABLE profile_revision (
   id         text PRIMARY KEY CHECK (id ~ '^prv_[a-z2-7]{26}$'),
-  cluster    text NOT NULL REFERENCES cluster (id),
+  cluster    text REFERENCES cluster (id),
+  owner      text NOT NULL GENERATED ALWAYS AS (coalesce(cluster, 'library')) STORED,
   name       source_name NOT NULL,
   author     text NOT NULL REFERENCES principal (id),
   created_at timestamptz NOT NULL,
   writer     xid8 NOT NULL,
-  UNIQUE (id, cluster),
-  UNIQUE (id, cluster, name)
+  UNIQUE (id, cluster, name),
+  UNIQUE (id, owner),
+  UNIQUE (id, owner, name)
 );
 CALL make_immutable('profile_revision');
 CREATE TRIGGER writer BEFORE INSERT ON profile_revision FOR EACH ROW EXECUTE FUNCTION stamp_revision_writer();
 
 CREATE TABLE profile_revision_fragment (
   revision          text NOT NULL,
-  cluster           text NOT NULL,
+  cluster           text,
+  library           boolean NOT NULL DEFAULT false,
   position          integer NOT NULL CHECK (position >= 0),
   fragment_revision text NOT NULL,
+  owner             text NOT NULL GENERATED ALWAYS AS (coalesce(cluster, 'library')) STORED,
+  fragment_owner    text NOT NULL
+    GENERATED ALWAYS AS (CASE WHEN library OR cluster IS NULL THEN 'library' ELSE cluster END) STORED,
   PRIMARY KEY (revision, position),
   UNIQUE (revision, fragment_revision),
-  FOREIGN KEY (revision, cluster) REFERENCES profile_revision (id, cluster),
-  FOREIGN KEY (fragment_revision, cluster) REFERENCES fragment_revision (id, cluster)
+  FOREIGN KEY (revision, owner) REFERENCES profile_revision (id, owner),
+  FOREIGN KEY (fragment_revision, fragment_owner) REFERENCES fragment_revision (id, owner)
 );
 CALL make_immutable('profile_revision_fragment');
 CREATE TRIGGER with_revision BEFORE INSERT ON profile_revision_fragment
@@ -820,37 +833,66 @@ CALL make_immutable('assignment_revision_fragment');
 CREATE TRIGGER with_revision BEFORE INSERT ON assignment_revision_fragment
   FOR EACH ROW EXECUTE FUNCTION refuse_late_revision_row('assignment_revision');
 
--- Heads (§3.1, §4.1): one per name in a cluster, or per machine, pointing at a revision of that
--- name (and, for a fragment, layer); a removal sets the pointer to NULL and keeps the head. The
--- (id, cluster, name) and (id, cluster, machine) keys are the ones a release's sources name.
+-- Heads (§3.1, §4.1): one per name in a cluster or in the library, or per machine, pointing at a
+-- revision of that name (and, for a fragment, layer) in that scope; a removal sets the pointer to
+-- NULL and keeps the head. The (id, owner, name) and (id, cluster, machine) keys are the ones a
+-- release's sources name.
 CREATE TABLE fragment (
   id               text PRIMARY KEY CHECK (id ~ '^frg_[a-z2-7]{26}$'),
-  cluster          text NOT NULL REFERENCES cluster (id),
-  scope            text NOT NULL CONSTRAINT fragment_cluster_scope CHECK (scope = 'cluster'),
+  cluster          text REFERENCES cluster (id),
+  scope            text NOT NULL CONSTRAINT fragment_cluster_scope
+                     CHECK (scope IN ('cluster', 'library') AND (scope = 'cluster') = (cluster IS NOT NULL)),
   name             source_name NOT NULL,
   layer            fragment_layer NOT NULL,
   head_revision_id text,
   head_revision    integer NOT NULL CHECK (head_revision >= 1),
   etag_token       text NOT NULL CHECK (etag_token ~ '^[a-z2-7]{26}$'),
   created_at       timestamptz NOT NULL,
-  UNIQUE (cluster, name),
-  UNIQUE (id, cluster, name),
-  CONSTRAINT fragment_head_revision FOREIGN KEY (head_revision_id, cluster, name, layer)
-    REFERENCES fragment_revision (id, cluster, name, layer)
+  owner            text NOT NULL GENERATED ALWAYS AS (coalesce(cluster, 'library')) STORED,
+  UNIQUE (owner, name),
+  UNIQUE (id, owner, name),
+  CONSTRAINT fragment_head_revision FOREIGN KEY (head_revision_id, owner, name, layer)
+    REFERENCES fragment_revision (id, owner, name, layer)
 );
 
 CREATE TABLE profile (
   id               text PRIMARY KEY CHECK (id ~ '^prf_[a-z2-7]{26}$'),
-  cluster          text NOT NULL REFERENCES cluster (id),
-  scope            text NOT NULL CONSTRAINT profile_cluster_scope CHECK (scope = 'cluster'),
+  cluster          text REFERENCES cluster (id),
+  scope            text NOT NULL CONSTRAINT profile_cluster_scope
+                     CHECK (scope IN ('cluster', 'library') AND (scope = 'cluster') = (cluster IS NOT NULL)),
   name             source_name NOT NULL,
   head_revision_id text,
   head_revision    integer NOT NULL CHECK (head_revision >= 1),
   etag_token       text NOT NULL CHECK (etag_token ~ '^[a-z2-7]{26}$'),
   created_at       timestamptz NOT NULL,
-  UNIQUE (cluster, name),
-  UNIQUE (id, cluster, name),
-  FOREIGN KEY (head_revision_id, cluster, name) REFERENCES profile_revision (id, cluster, name)
+  owner            text NOT NULL GENERATED ALWAYS AS (coalesce(cluster, 'library')) STORED,
+  UNIQUE (owner, name),
+  UNIQUE (id, owner, name),
+  FOREIGN KEY (head_revision_id, owner, name) REFERENCES profile_revision (id, owner, name)
+);
+
+-- A cluster's adoption of a shared fragment or profile (§3, §3.1.1): the shared revision the cluster
+-- compiles under that name, and its own counter and token (§4.1). A removal sets the revision to
+-- NULL and keeps the row. Its head and revision are shared ones of that name.
+CREATE TABLE library_adoption (
+  cluster           text NOT NULL REFERENCES cluster (id),
+  kind              text NOT NULL CHECK (kind IN ('fragment', 'profile')),
+  name              source_name NOT NULL,
+  fragment          text,
+  profile           text,
+  fragment_revision text,
+  profile_revision  text,
+  adoption_revision integer NOT NULL CHECK (adoption_revision >= 1),
+  etag_token        text NOT NULL CHECK (etag_token ~ '^[a-z2-7]{26}$'),
+  owner             text NOT NULL GENERATED ALWAYS AS ('library') STORED,
+  PRIMARY KEY (cluster, kind, name),
+  CONSTRAINT library_adoption_shape CHECK (
+    (kind <> 'fragment' OR (fragment IS NOT NULL AND profile IS NULL AND profile_revision IS NULL)) AND
+    (kind <> 'profile' OR (profile IS NOT NULL AND fragment IS NULL AND fragment_revision IS NULL))),
+  FOREIGN KEY (fragment, owner, name) REFERENCES fragment (id, owner, name),
+  FOREIGN KEY (profile, owner, name) REFERENCES profile (id, owner, name),
+  FOREIGN KEY (fragment_revision, owner, name) REFERENCES fragment_revision (id, owner, name),
+  FOREIGN KEY (profile_revision, owner, name) REFERENCES profile_revision (id, owner, name)
 );
 
 CREATE TABLE assignment (
@@ -961,6 +1003,10 @@ ALTER TABLE draft ADD FOREIGN KEY (release, id) REFERENCES release (id, draft);
 -- A release names each head it used once, as its sources (§6.2): the revision (NULL: removed) and
 -- the head revision the release left it at. A head the release introduces is inserted later in the
 -- same transaction, so the head keys are checked at commit.
+--
+-- A shared name's source (scope library, §3.1.1) has no head revision: it records the cluster's
+-- adoption, as its counter and the revision adopted before the release (`previous_*`). A fragment
+-- that only a shared profile revision pins has no adoption, so neither.
 CREATE TABLE release_source (
   release             text NOT NULL,
   cluster             text NOT NULL,
@@ -973,7 +1019,21 @@ CREATE TABLE release_source (
   fragment_revision   text,
   profile_revision    text,
   assignment_revision text,
-  head_revision       integer NOT NULL CHECK (head_revision >= 1),
+  head_revision       integer CHECK (head_revision >= 1),
+  scope               text NOT NULL DEFAULT 'cluster' CHECK (scope IN ('cluster', 'library')),
+  adoption_revision   integer CHECK (adoption_revision >= 1),
+  previous_fragment_revision text,
+  previous_profile_revision  text,
+  owner               text NOT NULL GENERATED ALWAYS AS (CASE scope WHEN 'library' THEN 'library' ELSE cluster END) STORED,
+  CONSTRAINT release_source_scope CHECK (
+    (scope <> 'cluster' OR (head_revision IS NOT NULL AND adoption_revision IS NULL
+      AND previous_fragment_revision IS NULL AND previous_profile_revision IS NULL)) AND
+    (scope <> 'library' OR (head_revision IS NULL AND kind <> 'assignment'
+      AND (adoption_revision IS NOT NULL
+        OR (kind = 'fragment' AND fragment_revision IS NOT NULL AND previous_fragment_revision IS NULL))))),
+  CONSTRAINT release_source_previous CHECK (
+    (previous_fragment_revision IS NULL OR kind = 'fragment') AND
+    (previous_profile_revision IS NULL OR kind = 'profile')),
   -- Each kind's shape is an implication, so a row of an unknown kind is refused by the kind check
   -- alone.
   CONSTRAINT release_source_shape CHECK (
@@ -989,11 +1049,13 @@ CREATE TABLE release_source (
   UNIQUE (release, fragment_revision),
   UNIQUE (release, machine, assignment_revision),
   FOREIGN KEY (release, cluster) REFERENCES release (id, cluster),
-  FOREIGN KEY (fragment, cluster, name) REFERENCES fragment (id, cluster, name) DEFERRABLE INITIALLY DEFERRED,
-  FOREIGN KEY (profile, cluster, name) REFERENCES profile (id, cluster, name) DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY (fragment, owner, name) REFERENCES fragment (id, owner, name) DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY (profile, owner, name) REFERENCES profile (id, owner, name) DEFERRABLE INITIALLY DEFERRED,
   FOREIGN KEY (assignment, cluster, machine) REFERENCES assignment (id, cluster, machine) DEFERRABLE INITIALLY DEFERRED,
-  FOREIGN KEY (fragment_revision, cluster, name) REFERENCES fragment_revision (id, cluster, name),
-  FOREIGN KEY (profile_revision, cluster, name) REFERENCES profile_revision (id, cluster, name),
+  FOREIGN KEY (fragment_revision, owner, name) REFERENCES fragment_revision (id, owner, name),
+  FOREIGN KEY (profile_revision, owner, name) REFERENCES profile_revision (id, owner, name),
+  FOREIGN KEY (previous_fragment_revision, owner, name) REFERENCES fragment_revision (id, owner, name),
+  FOREIGN KEY (previous_profile_revision, owner, name) REFERENCES profile_revision (id, owner, name),
   FOREIGN KEY (assignment_revision, cluster, machine) REFERENCES assignment_revision (id, cluster, machine)
 );
 CALL make_immutable('release_source');

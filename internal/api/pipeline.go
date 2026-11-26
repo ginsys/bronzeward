@@ -54,12 +54,13 @@ type pinKey struct {
 }
 
 // sourceState is one fragment, profile or assignment as the draft leaves it: the draft's entry
-// when it has one, else the head. revision "" is none (removed, or never published); head is ""
-// when no head exists.
+// when it has one, else the cluster's view (persistence-api.md §3.1.1): its own head, else its
+// adoption of the shared name, whose head and adoption counter these then are. revision "" is none
+// (removed, or never published); head is "" when no head exists.
 type sourceState struct {
 	revision, head string
 	headRevision   int
-	entry          bool
+	entry, adopted bool
 }
 
 // readSnapshot reads j's snapshot. The draft must be open at the revision the operation bound,
@@ -177,7 +178,9 @@ func (r *snapshotReader) read() (snapshot, *refusal, error) {
 	return s, nil, nil
 }
 
-// readStates reads every fragment, profile and assignment of the cluster as the draft leaves it.
+// readStates reads every fragment, profile and assignment of the cluster's view as the draft leaves
+// it. A shared head is read only through an adoption of the cluster's: a shared head that moves
+// moves nothing here.
 func (r *snapshotReader) readStates() error {
 	r.states = map[string]map[string]sourceState{"fragment": {}, "profile": {}, "assignment": {}}
 	err := r.query(`SELECT 'fragment', name, id, coalesce(head_revision_id, ''), head_revision FROM fragment WHERE cluster = $1
@@ -190,6 +193,23 @@ func (r *snapshotReader) readStates() error {
 				return err
 			}
 			r.states[kind][key] = st
+			return nil
+		}, r.j.cluster)
+	if err != nil {
+		return err
+	}
+	err = r.query(`SELECT kind, name, coalesce(fragment, profile), coalesce(fragment_revision, profile_revision), adoption_revision
+		FROM library_adoption WHERE cluster = $1 AND coalesce(fragment_revision, profile_revision) IS NOT NULL`,
+		func(row *sql.Rows) error {
+			var kind, name string
+			st := sourceState{adopted: true}
+			if err := row.Scan(&kind, &name, &st.head, &st.revision, &st.headRevision); err != nil {
+				return err
+			}
+			// The cluster's own head wins, unless a publication removed its revision.
+			if r.states[kind][name].revision == "" {
+				r.states[kind][name] = st
+			}
 			return nil
 		}, r.j.cluster)
 	if err != nil {
@@ -408,7 +428,8 @@ func (r *snapshotReader) unchanged(machines []snapshotMachine, sel selections) [
 	for k := range used {
 		st := r.states[k[0]][k[1]]
 		if !st.entry && st.head != "" {
-			out = append(out, usedHead{kind: k[0], head: st.head, revision: st.revision, headRevision: st.headRevision})
+			out = append(out, usedHead{kind: k[0], head: st.head, revision: st.revision, headRevision: st.headRevision,
+				adopted: st.adopted})
 		}
 	}
 	slices.SortFunc(out, func(x, y usedHead) int { return strings.Compare(x.head, y.head) })
