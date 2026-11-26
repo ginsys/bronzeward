@@ -803,7 +803,7 @@ func TestOperationWatchOutage(t *testing.T) {
 		default:
 			t.Fatal("no interrupt was sent")
 		}
-		if code != 130 || !strings.Contains(out, "is still running, as the server last read it") {
+		if code != 130 || !strings.Contains(out, "Stopped watching at your request. Operation op_BWSYNTH is still running, as the server last read it") {
 			t.Errorf("exit %d, stdout %q, stderr %q; want 130 and the stop line with the state as last read, not a watch given up after the grace", code, out, errOut)
 		}
 	})
