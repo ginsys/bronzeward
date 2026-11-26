@@ -1,6 +1,37 @@
 package dbtest
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+// A drop refused because a session has not left yet is repeated until it succeeds or the bound
+// passes, the last refusal with the server's detail; any other error ends it at once.
+func TestDrop(t *testing.T) {
+	busy := &pgconn.PgError{Code: "55006", Detail: "There is 1 other session using the database."}
+	other := &pgconn.PgError{Code: "42501"}
+	for _, c := range []struct {
+		name    string
+		answers []error
+		within  time.Duration
+		calls   int
+		want    error
+	}{
+		{"busy twice, then dropped", []error{busy, busy, nil}, time.Minute, 3, nil},
+		{"another error", []error{other, nil}, time.Minute, 1, other},
+		{"busy past the bound", []error{busy, nil}, 0, 1, busy},
+	} {
+		calls := 0
+		err := drop(func() error { calls++; return c.answers[calls-1] }, c.within)
+		if calls != c.calls || !errors.Is(err, c.want) || c.want == busy && !strings.HasSuffix(err.Error(), busy.Detail) {
+			t.Errorf("%s: %d calls, error %v; want %d calls, %v", c.name, calls, err, c.calls, c.want)
+		}
+	}
+}
 
 func TestDecide(t *testing.T) {
 	for _, c := range []struct {

@@ -777,17 +777,20 @@ func TestOperationWatchOutage(t *testing.T) {
 	})
 	t.Run("Ctrl-C during a wait: exit 130 at once", func(t *testing.T) {
 		f := newOutage(t)
+		// The Ctrl-C meets a wait of 4 s with a grace of 3 s, the shipped one. A watch that stops within a step
+		// of that wait returns the operation it last read inside the grace. One that waits out the delay first
+		// outlasts the grace, and the client then says that the state was not read.
 		grace := interruptGrace
-		interruptGrace = 5 * time.Second
+		interruptGrace = 3 * time.Second
 		defer func() { interruptGrace = grace }()
-		sentAt := make(chan time.Time, 1)
+		sent := make(chan struct{}, 1)
 		go func() {
-			for { // the second failed read is the one whose retry waits 2 s
+			for { // the third failed read is the one whose retry waits 4 s
 				f.mu.Lock()
 				n := f.reads
 				f.mu.Unlock()
-				if n >= 3 {
-					sentAt <- time.Now()
+				if n >= 4 {
+					sent <- struct{}{}
 					_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
 					return
 				}
@@ -795,14 +798,13 @@ func TestOperationWatchOutage(t *testing.T) {
 			}
 		}()
 		code, out, errOut := runCtl(t, "operation", "watch", "op_BWSYNTH", "--timeout", "30s")
-		var sent time.Time
 		select {
-		case sent = <-sentAt:
+		case <-sent:
 		default:
 			t.Fatal("no interrupt was sent")
 		}
-		if took := time.Since(sent); code != 130 || took > time.Second || !strings.Contains(out, "Stopped watching at your request") {
-			t.Errorf("exit %d %v after the interrupt, stdout %q, stderr %q; want 130 within a second (the retry waits 2 s) and the stop line", code, took, out, errOut)
+		if code != 130 || !strings.Contains(out, "is still running, as the server last read it") {
+			t.Errorf("exit %d, stdout %q, stderr %q; want 130 and the stop line with the state as last read, not a watch given up after the grace", code, out, errOut)
 		}
 	})
 }
