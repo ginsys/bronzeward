@@ -224,7 +224,7 @@ go -C experiments/scanner-cross-line/serverprobe test ./...
 """
 
 [tasks.go-db]
-description = "Test the root module against PostgreSQL and OpenBao (default: mise run dev-db's and dev-bao's, those of BW_DEV_INSTANCE when set); a missing service fails instead of skipping"
+description = "Test the root module against PostgreSQL and OpenBao (default: mise run dev-db's and dev-bao's, those of BW_DEV_INSTANCE when set); a missing service fails instead of skipping, and so does a client page block marked {.bw-run .bw-db} that did not run"
 # CI's go-db job points BW_TEST_PG_DSN and BW_TEST_BAO_* at its service containers. Locally they
 # default to mise run dev-db and mise run dev-bao, the instance BW_DEV_INSTANCE names
 # (scripts/dev/instance.sh); any PostgreSQL 17 role that may create databases, and any OpenBao root
