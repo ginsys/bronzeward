@@ -246,6 +246,10 @@ func head(w *tabwriter.Writer, kind, id, what, owner string, rev *string, n int,
 // sharedLibrary is what a record of no cluster, a shared fragment or profile, belongs to.
 const sharedLibrary = "shared library"
 
+// adoptionEntryKind is the kind of a draft's adoption entry or removal, as a source entry decodes
+// it.
+const adoptionEntryKind = apitypes.SourceEntryKind(apitypes.AdoptionEntryKindAdoption)
+
 // ownerWords is a head's owner: its cluster, or the shared library.
 func ownerWords(cluster *string) string {
 	if cluster == nil {
@@ -385,6 +389,21 @@ func (e *env) draftCmd(args []string) error {
 				tf(w, "  unreadable entry\t%v\n", err)
 				continue
 			}
+			if x.Kind == adoptionEntryKind {
+				a, err := item.AsAdoptionEntry()
+				if err != nil {
+					tf(w, "  unreadable entry\t%v\n", err)
+					continue
+				}
+				// An adoption entry or removal moves what this cluster follows, never the library.
+				change := "adopts it"
+				if a.Revision == nil {
+					change = "stops following it"
+				}
+				tf(w, "  %s\t%s\t%s\t%s: this cluster %s (based on adoption %s)\n", a.Of, a.Name, or(a.Revision, "-"), sharedLibrary,
+					change, orInt(a.Base, "none"))
+				continue
+			}
 			name, change := or(x.Name, or(x.Machine, "")), ""
 			switch {
 			case x.Kind == "import-base":
@@ -447,11 +466,16 @@ func (e *env) releaseCmd(args []string) error {
 		tf(w, "Renderer\tcontract %s, machinery %s, Kubernetes %s\n", r.Renderer.Contract, r.Renderer.MachineryVersion, r.Renderer.KubernetesVersion)
 		fmt.Fprintln(w, "Built from (source revisions, not configuration):")
 		for _, s := range r.Sources {
-			at := sharedLibrary
-			if s.HeadRevision != nil {
+			at, none := sharedLibrary, "removed"
+			switch {
+			case s.HeadRevision != nil:
 				at = sf("head revision %d", *s.HeadRevision)
+			case s.Revision == nil:
+				// A shared source with no revision is the cluster's adoption removed; the shared
+				// name itself may well remain.
+				at, none = sharedLibrary+": this cluster no longer follows it", "-"
 			}
-			tf(w, "  %s\t%s\t%s\t%s\n", s.Kind, s.Head, or(s.Revision, "removed"), at)
+			tf(w, "  %s\t%s\t%s\t%s\n", s.Kind, s.Head, or(s.Revision, none), at)
 		}
 		tf(w, "Rendered configuration per machine (%d):\n", len(r.Machines))
 		for _, m := range r.Machines {

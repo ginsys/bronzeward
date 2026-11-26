@@ -606,6 +606,118 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/DraftBody'}
         default: {$ref: '#/components/responses/Problem'}
+  /drafts/{id}/adoptions/{kind}/{name}:
+    put:
+      operationId: putDraftsIdAdoptionsKindName
+      tags: [drafts]
+      x-bronzeward-roles: [author]
+      x-bronzeward-if-match: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: kind
+        in: path
+        required: true
+        schema: {type: string, enum: [fragments, profiles]}
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ExpectedEpoch'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdoptionInput'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdoptionUpdate'}
+        default: {$ref: '#/components/responses/Problem'}
+    delete:
+      operationId: deleteDraftsIdAdoptionsKindName
+      tags: [drafts]
+      x-bronzeward-roles: [author]
+      x-bronzeward-if-match: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: kind
+        in: path
+        required: true
+        schema: {type: string, enum: [fragments, profiles]}
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ExpectedEpoch'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdoptionUpdate'}
+        default: {$ref: '#/components/responses/Problem'}
+  /drafts/{id}/adoptions/{kind}/{name}/detachments:
+    post:
+      operationId: postDraftsIdAdoptionsKindNameDetachments
+      tags: [drafts]
+      x-bronzeward-roles: [author]
+      x-bronzeward-if-match: true
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: kind
+        in: path
+        required: true
+        schema: {type: string, enum: [fragments, profiles]}
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      - {$ref: '#/components/parameters/ExpectedEpoch'}
+      - {$ref: '#/components/parameters/IfMatch'}
+      responses:
+        '200':
+          description: OK.
+          headers:
+            Cache-Control: {$ref: '#/components/headers/NoStore'}
+            Bronzeward-Request-ID: {$ref: '#/components/headers/RequestID'}
+            Bronzeward-Epoch: {$ref: '#/components/headers/Epoch'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Bronzeward-Recovery-Mode: {$ref: '#/components/headers/RecoveryMode'}
+            Idempotent-Replayed: {$ref: '#/components/headers/IdempotentReplayed'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DetachmentUpdate'}
+        default: {$ref: '#/components/responses/Problem'}
   /drafts/{id}/assignments/{machine}:
     put:
       operationId: putDraftsIdAssignmentsMachine
@@ -2583,6 +2695,39 @@ components:
           description: The end of that certificate's validity; null when serial is.
           type: [string, 'null']
       additionalProperties: false
+    AdoptionEntry:
+      type: object
+      description: An adoption entry of a shared fragment or profile name, or its removal (revision null).
+      required: [kind, of, name, head, base, revision]
+      properties:
+        kind: {type: string, enum: [adoption]}
+        of: {type: string, enum: [fragment, profile]}
+        name: {type: string}
+        head: {type: [string, 'null'], description: 'The shared head of the name, if one exists.'}
+        base: {type: [integer, 'null'], description: 'The adoption counter of the cluster the entry was written from.'}
+        revision: {type: [string, 'null']}
+      additionalProperties: false
+    AdoptionInput:
+      type: object
+      required: [revision]
+      properties:
+        revision: {type: string}
+      additionalProperties: false
+    AdoptionUpdate:
+      type: object
+      required: [draft, entry]
+      properties:
+        draft: {type: string}
+        entry: {$ref: '#/components/schemas/AdoptionEntry'}
+      additionalProperties: false
+    DetachmentUpdate:
+      type: object
+      required: [draft, entry, copy]
+      properties:
+        draft: {type: string}
+        entry: {$ref: '#/components/schemas/AdoptionEntry'}
+        copy: {$ref: '#/components/schemas/SourceEntry'}
+      additionalProperties: false
     AccountingBody:
       type: object
       required:
@@ -3041,6 +3186,7 @@ components:
             oneOf:
             - {$ref: '#/components/schemas/DraftEntry'}
             - {$ref: '#/components/schemas/SourceEntry'}
+            - {$ref: '#/components/schemas/AdoptionEntry'}
       additionalProperties: false
     DraftEntry:
       type: object

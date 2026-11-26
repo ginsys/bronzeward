@@ -348,7 +348,9 @@ func setEntry(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey, rev s
 	cols[k.kind] = nullable(rev)
 	if found {
 		e.Base = base
-		_, err = tx.ExecContext(ctx, `UPDATE draft_source_entry SET fragment_revision = $5, profile_revision = $6, assignment_revision = $7
+		// A later write is the author's own entry, no longer a detachment's copy.
+		_, err = tx.ExecContext(ctx, `UPDATE draft_source_entry SET fragment_revision = $5, profile_revision = $6, assignment_revision = $7,
+				detached = false
 			WHERE draft = $1 AND kind = $2 AND name IS NOT DISTINCT FROM $3 AND machine IS NOT DISTINCT FROM $4 AND scope = 'cluster'`,
 			d.id, k.kind, nullable(k.name), nullable(k.machine), cols["fragment"], cols["profile"], cols["assignment"])
 		return e, err
@@ -378,18 +380,24 @@ func setShared(ctx context.Context, tx *sql.Tx, d lockedDraft, k sourceKey, e so
 	_, err := tx.ExecContext(ctx, `INSERT INTO draft_source_entry (draft, cluster, kind, name, scope, `+column+`, base, adoption_base)
 		VALUES ($1, $2, $3, $4, 'library', $5, $6, $7)
 		ON CONFLICT (draft, kind, name, scope) WHERE kind <> 'assignment'
-		DO UPDATE SET `+column+` = excluded.`+column+`, base = excluded.base, adoption_base = excluded.adoption_base`,
+		DO UPDATE SET `+column+` = excluded.`+column+`, base = excluded.base, adoption_base = excluded.adoption_base,
+			adoption = false`,
 		d.id, d.cluster, k.kind, k.name, e.Revision, head, adopted)
 	return e, err
 }
 
 // answer advances the draft and builds the 200 a draft update answers (§9.2).
 func (d lockedDraft) answer(ctx context.Context, tx *sql.Tx, e sourceEntry, subjects ...string) (result, error) {
+	return d.respond(ctx, tx, sourceUpdate{Draft: d.id, Entry: e}, subjects...)
+}
+
+// respond is answer with the body of another draft update's shape.
+func (d lockedDraft) respond(ctx context.Context, tx *sql.Tx, body any, subjects ...string) (result, error) {
 	tag, err := d.advance(ctx, tx)
 	if err != nil {
 		return result{}, err
 	}
-	return result{status: http.StatusOK, etag: tag, body: sourceUpdate{Draft: d.id, Entry: e}, subjects: append([]string{d.id}, subjects...)}, nil
+	return result{status: http.StatusOK, etag: tag, body: body, subjects: append([]string{d.id}, subjects...)}, nil
 }
 
 // removeSource proposes the removal of a fragment, profile or assignment (§3.1, choice §17.31): an

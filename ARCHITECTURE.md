@@ -50,7 +50,7 @@ A file named without a directory is in `internal/api`.
 
 **Edit and publish a release.**
 
-1. Fragments, profiles and assignments are changed in a draft (`drafts.go`, `fragments.go`).
+1. Fragments, profiles and assignments are changed in a draft (`drafts.go`, `fragments.go`), and a cluster's adoption of a shared fragment or profile (`adoptions.go`).
 2. `POST /drafts/{id}/publications` queues a publish operation.
 3. The publish worker (`worker.go`) claims it under the server's owner generation.
 4. `buildRelease` (`pipeline_build.go`) compiles each machine with `internal/compile` and encrypts the artifacts. Where an import base names the cluster's Talos CA key by the typed reference, the compiler identity reads that key at the signer's path, at the version the latest first-key act names (`pipeline_deps.go`); no import creates the reference yet. It also refuses a release in which two machines would get one Kubernetes node name (`hostname_clash.go`), and `publishCommit` refuses a machine that would take the name another machine's last applied release still records (`hostname_swap.go`).

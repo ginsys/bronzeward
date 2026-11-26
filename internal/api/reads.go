@@ -307,8 +307,8 @@ func scanDraft(r interface{ Scan(...any) error }) (draftRow, error) {
 }
 
 // withEntries reads the entries of ds into them: import base entries in machine order, then
-// source entries (§3.1) as the update routes answer them, fragments, profiles and assignments,
-// each by name or machine.
+// source entries (§3.1) and adoption entries and removals (§3.1.1) as the update routes answer
+// them, fragments, profiles and assignments, each by name or machine.
 func withEntries(ctx context.Context, tx *sql.Tx, ds []*draftBody) error {
 	if len(ds) == 0 {
 		return nil
@@ -334,7 +334,7 @@ func withEntries(ctx context.Context, tx *sql.Tx, ds []*draftBody) error {
 	}
 	return eachRow(ctx, tx, `SELECT e.draft, e.kind, COALESCE(e.name, ''), COALESCE(e.machine, ''), COALESCE(f.id, p.id, a.id), e.base,
 			COALESCE(e.fragment_revision, e.profile_revision, e.assignment_revision), fr.document, e.scope = 'library',
-			e.adoption_base
+			e.adoption_base, e.adoption
 		FROM draft_source_entry e
 		LEFT JOIN fragment_revision fr ON fr.id = e.fragment_revision
 		LEFT JOIN fragment f ON e.kind = 'fragment' AND f.owner = e.owner AND f.name = e.name
@@ -345,11 +345,16 @@ func withEntries(ctx context.Context, tx *sql.Tx, ds []*draftBody) error {
 		strings.Join(ids, ","), func(r *sql.Rows) error {
 			var d string
 			var e sourceEntry
-			var shared bool
+			var shared, adoption bool
 			var adopted sql.NullInt64
 			if err := r.Scan(&d, &e.Kind, &e.Name, &e.Machine, &e.Head, &e.Base, &e.Revision, &e.Document, &shared,
-				&adopted); err != nil {
+				&adopted, &adoption); err != nil {
 				return err
+			}
+			if adoption {
+				byID[d].Entries = append(byID[d].Entries, adoptionEntry{Kind: adoptionKind, Of: e.Kind, Name: e.Name,
+					Head: e.Head, Base: e.Base, Revision: e.Revision})
+				return nil
 			}
 			if shared {
 				e.Scope = scopeLibrary
