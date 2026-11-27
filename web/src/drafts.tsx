@@ -336,7 +336,7 @@ export const DiscardRefused = ({ onShow }: { onShow: () => void }) => (
   <Status testid="write-result" role="alert" actions={<button type="button" onClick={onShow}>Show their change</button>}>{NOT_DISCARDED}</Status>
 );
 
-function DiscardDraft({ draft, written, seeChange }: { draft: Draft; written: () => void; seeChange: () => void }) {
+export function DiscardDraft({ draft, written, seeChange }: { draft: Draft; written: () => void; seeChange: () => void }) {
   const [w, send] = useSend();
   const writes = useWrites();
   const [note, setNote] = useState<string | undefined>();
