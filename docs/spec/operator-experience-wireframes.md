@@ -190,7 +190,7 @@ beside it.
 Drafts and releases › Draft drf_8kdq…z6pa "worker labels"   open, revision 6   cluster cl_9fd… (lab-a)
 +------------------------------+------------------------------------------------------------+
 | Entries                      | Fragment worker-labels   layer: role ▾                      |
-|  import base  mch_b3c… ibr_… |  changed: base frv_1ab… -> unsaved                           |
+|  import base  mch_b3c… ibr_… |  changed: base frv_1ab… (unsaved)                            |
 |  fragment worker-labels  *   | +--------------------------------------------------------+ |
 |  fragment cluster-base       | | machine:                                               | |
 |  profile  workers            | |   registries: …                                        | |

@@ -988,7 +988,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
             {LAYERS.map((l) => <option key={l}>{l}</option>)}
           </select>
         </label>{" "}
-        {entry === undefined ? "new" : change(entry)}{!same(held, saved) && " -> unsaved"}
+        {entry === undefined ? "new" : change(entry)}{!same(held, saved) && " (unsaved)"}
       </p>
       {entry?.revision === null && <Status>Removed in this draft.</Status>}
       {waits && (failed

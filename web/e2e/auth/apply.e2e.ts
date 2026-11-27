@@ -158,6 +158,34 @@ describe("the apply page (#1096)", () => {
     expect(await posts()).toEqual([]);
   });
 
+  // Criterion 3 of ginsys/bronzeward#1193 (one apply, one cluster; alternative C10): a release that moved a shared fragment lists it
+  // with the machines of this cluster it reaches, and names the other cluster behind it as information. The page offers that
+  // cluster no choice, plan or approval, and sends nothing for it.
+  it("a release that moved a shared name names the other clusters as information and offers them no choice, plan or approval (criterion 3)", async function () {
+    this.timeout(120_000);
+    const FRG = id("frg", "f");
+    const OTHER = id("cl", "o");
+    const moved = { kind: "fragment", scope: "library", head: FRG, revision: id("frv", "n"), headRevision: null, previous: id("frv", "o"), adoptionRevision: 3 };
+    const behind = (cluster: string) => ({ cluster, revision: id("frv", "o"), adoptionRevision: 2, behind: true, release: null, via: null, machines: [] });
+    await open("h-all", bodies({
+      [`/releases/${REL}`]: { ...release, sources: [...release.sources, moved] },
+      [`/assignment-revisions/${id("asr", "a")}`]: { ...assignment(A, ["cp-base"]), fragments: { role: ["ntp"] } },
+      [`/fragments/${FRG}`]: { id: FRG, cluster: null, scope: "library", name: "ntp", layer: "global", revision: moved.revision, headRevision: 4, createdAt: T0 },
+      [`/fragments/${FRG}/adoptions`]: { items: [behind(CL), behind(OTHER)] },
+      [`/clusters/${OTHER}`]: { id: OTHER, name: "lab-b" },
+    }));
+    const shared = () => $('[data-testid="apply-shared"]');
+    await expect(shared()).toHaveText(expect.stringContaining("fragment ntp"), { wait: 20_000 });
+    await expect($('[data-testid="apply-shared-reach"]')).toHaveText(expect.stringContaining("Reaches 1 machine here: alpha"), { wait: 20_000 });
+    await expect($('[data-testid="apply-shared-others"]')).toHaveText(expect.stringContaining("lab-b"), { wait: 20_000 });
+    // once: the block lists the other cluster and not this release's own, and the case presses nothing.
+    expect(await shared().$$('[data-testid="apply-shared-other"]').length).toBe(1);
+    expect(await shared().$$("input, button, select").length).toBe(0);
+    await browser.waitUntil(async () => (await rows().length) === 2, { timeout: 20_000 });
+    expect(await $$('[data-testid="apply-row"] input[type=checkbox]').length).toBe(2);
+    expect(await posts()).toEqual([]);
+  });
+
   it("a viewer sees the controls disabled, each with its reason (check 7)", async function () {
     this.timeout(120_000);
     await open("h-viewer", bodies());

@@ -5,16 +5,24 @@
 import { useEffect, useState } from "react";
 import type { components } from "./api/v1";
 import { type Assignment, movedSources, reach, type Source } from "./apply-shared.ts";
-import { More, useItem, useList, usePending, useSettled } from "./list.tsx";
+import { More, Ref, short, useItem, useList, usePending, useSettled } from "./list.tsx";
 import { NO_LONGER_FOLLOWED } from "./resources.tsx";
 import { safeText, safeWord } from "./safe.ts";
-import { AdoptionRows, Machines, SavedRevision } from "./shared.tsx";
+import { Machines, SavedRevision, useOf } from "./shared.tsx";
+import { useClusterText } from "./titles.tsx";
 import { NAME_NOT_SHOWN, APPLY_SHARED_NONE_BEHIND, APPLY_SHARED_NOTE, APPLY_SHARED_UNKNOWN } from "./words.ts";
 
 type S = components["schemas"];
 const enc = encodeURIComponent;
 
 const machines = (n: number) => (n === 1 ? "1 machine" : `${n} machines`);
+
+// Another cluster by its name once read, else by its shortened identifier: never "This cluster", which is what a cluster link
+// says of a cluster it has not read and is wrong for a cluster that is not this one.
+function OtherCluster({ id }: { id: string }) {
+  const text = useClusterText(id);
+  return <Ref to={`/clusters/${enc(id)}`} id={id}>{text ?? short(id)}</Ref>;
+}
 
 // A moved source of a kind this page knows: its name, where it came from and went to, what it reaches here, and the
 // other clusters still behind it.
@@ -39,7 +47,11 @@ function Moved({ s, cluster, ids, assignments, pins }: { s: Source; cluster: str
         </li>
         <li data-testid="apply-shared-others">
           {list.kind !== "ok" ? pending : others.length === 0 && more === undefined ? APPLY_SHARED_NONE_BEHIND : (
-            <>Other clusters behind it, for information: <AdoptionRows rows={others} kind={kind} /><More list={list.data} shown={list.data.items.length} more={more} busy={busy} /></>
+            <>
+              Other clusters behind it, for information:
+              <ul>{others.map((a) => <li key={`${a.cluster}:${a.via ?? ""}`} data-testid="apply-shared-other"><OtherCluster id={a.cluster} /> on <SavedRevision kind={kind} id={a.revision} />, {useOf(a)}</li>)}</ul>
+              <More list={{ ...list.data, items: others }} shown={others.length} more={more} busy={busy} />
+            </>
           )}
         </li>
       </ul>

@@ -177,6 +177,12 @@ sends nothing.
    Cancel it on its own page with **Cancel plan** if you do not want it. A plan you pressed Apply
    for is never cancelled.
 
+**A release that moved a shared name.** Above the machines, the page lists each shared fragment or
+profile whose adoption the release moved, from the revision before to the one after, and the
+machines of this cluster it reaches. It also names the other clusters still on an older revision,
+for information only: this page chooses, plans and approves nothing for them, because one apply is
+for one cluster. Each of those clusters reads the change in its own plan.
+
 **Adopting a draft's machines.** An open draft page that holds a machine's import has a section
 "Adopt these machines" with one button of the same name. The sentence above it reads: "Adopting
 records what each machine runs as its starting point. This adds an assignment that selects nothing

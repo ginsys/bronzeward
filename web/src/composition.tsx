@@ -278,9 +278,9 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const pending = usePending(fragments, "fragments");
   return (
     <section aria-label={`Profile ${called || "(new)"}`}>
-      <h3>Profile {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : called}{shared && ` (${SHARED_LIBRARY})`}</h3>
+      <h3>Profile{entry === undefined && shared && ` (${SHARED_LIBRARY})`} {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : <>{called}{shared && ` (${SHARED_LIBRARY})`}</>}</h3>
       {entry === undefined && <p><label><input type="checkbox" checked={sharedNew} onChange={(e) => { setSharedNew(e.target.checked); hold([]); }} /> {SHARED_CHOICE}</label></p>}
-      <p>{entry === undefined ? "new" : change(entry)}{unsavedList && " -> unsaved"}</p>
+      <p>{entry === undefined ? "new" : change(entry)}{unsavedList && " (unsaved)"}</p>
       <p>{shared ? SHARED_PROFILE_PINS : PINS_STATEMENT}</p>
       {entry?.revision === null && <Status>Removed in this draft.</Status>}
       {waits && (failed
@@ -760,7 +760,7 @@ export function AssignmentPane({ draft, entry, seeChange, claim = () => {}, show
           </label>
         ) : called}
       </h3>
-      <p>{entry === undefined ? "new" : change(entry)}{unsavedList && " -> unsaved"}</p>
+      <p>{entry === undefined ? "new" : change(entry)}{unsavedList && " (unsaved)"}</p>
       <p>{ASSIGNMENT_STATEMENT}</p>
       {editable && entry?.revision !== null && total(lists) === 0 && <p>{EMPTY_ASSIGNMENT}</p>}
       {entry?.revision === null && <Status>Removed in this draft.</Status>}
