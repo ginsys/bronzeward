@@ -176,5 +176,13 @@ export const SHARED_PAGE_NOTE = "A change to a shared fragment or profile reache
 export const SHARED_NAMES_NOTE = "A shared fragment or profile is followed by the clusters that adopt it. Adopting or stopping to follow records an entry in this draft: nothing changes for this cluster until the draft is published, and no other cluster changes.";
 export const adoptSentence = (kind: string, name: string) => `Adopt records in this draft that this cluster follows the shared ${kind} ${name} at its current revision.`;
 export const stopSentence = (kind: string, name: string) => `Stop following records in this draft that this cluster no longer follows the shared ${kind} ${name}. The cluster loses the name unless it holds its own.`;
+/** An entry staged before this cluster's adoption changed (another draft changed it first): publication would refuse it, and pressing again records the current one. */
+export const AGAIN_ADOPT = "The cluster's adoption may have changed since this was staged: Adopt again to record the current one.";
+export const AGAIN_STOP = "The cluster's adoption changed since this was staged: Stop following again to record the current one.";
+/** The shared choice of the fragment and profile editors: what Save and Remove record for a shared entry, in this draft only. */
+export const SHARED_CHOICE = "Shared (library)";
+export const SHARED_SAVE_SENTENCE = "Save records a shared revision in this draft. Publishing the draft moves this cluster to it; no other cluster changes.";
+export const SHARED_REMOVE_SENTENCE = "Remove records, in this draft, that the shared name leaves the library. Clusters that adopted it keep their revision.";
+export const SHARED_PROFILE_PINS = "A shared profile pins shared fragment revisions: the ones this draft saves as shared first, else each shared fragment's current revision.";
 export const ADOPT_PIN_NOTE = "A profile of this cluster that pins the name keeps its pin: set it again to use the new revision.";
 export const APPLY_NEEDS_PUBLISHER = "Show apply makes the plans, which needs the publisher role. A publisher can prepare them and an approver can then apply them from this page.";
