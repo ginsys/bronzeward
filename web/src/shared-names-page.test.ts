@@ -107,6 +107,35 @@ describe("the Shared names block on a draft's page", () => {
     expect(button("Stop following motd")).toBeDefined();
   });
 
+  // The carried finding G1: another draft changed the cluster's adoption after this entry was staged.
+  test("an adoption staged before the cluster's adoption changed offers Adopt again and says why, though it is at the head", async () => {
+    // ntp: the row is at counter 2, the entry was staged on counter 1, and it adopts the head's revision.
+    await mount([{ kind: "adoption", of: "fragment", name: "ntp", head: "frg_1", base: 1, revision: "frv_head" }]);
+    await open();
+    await settled();
+    expect(box.textContent).toContain("Adopt again to record the current one.");
+    expect(button("Adopt ntp")).toBeDefined();
+    expect(button("Stop following ntp")).toBeDefined();
+    // motd: staged over a row that is gone: Adopt again, and no Stop following.
+    await act(async () => root.unmount());
+    root = createRoot(box);
+    await mount([{ kind: "adoption", of: "fragment", name: "motd", head: "frg_3", base: 3, revision: "frv_motd" }]);
+    await open();
+    await settled();
+    expect(button("Adopt motd")).toBeDefined();
+    expect(button("Stop following motd")).toBeUndefined();
+  });
+
+  test("a removal staged before the cluster's adoption changed offers Stop following again", async () => {
+    // dns: the row is at counter 2 and the removal was staged on counter 1.
+    await mount([{ kind: "adoption", of: "fragment", name: "dns", head: "frg_2", base: 1, revision: null }]);
+    await open();
+    await settled();
+    expect(box.textContent).toContain("Stop following again to record the current one.");
+    expect(button("Stop following dns")).toBeDefined();
+    expect(button("Adopt dns")).toBeDefined();
+  });
+
   test("Adopt sends the head's revision under the draft's last ETag, and Stop following deletes the adoption", async () => {
     keepETag(DRF, '"5-t"', undefined);
     await mount();

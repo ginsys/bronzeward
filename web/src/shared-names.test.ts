@@ -21,7 +21,8 @@ describe("what the draft says of a shared name", () => {
   test("an adoption, its removal, a shared edit and a shared removal; the cluster's own entry and other names say nothing", () => {
     expect(slotOf([adoption()], "fragment", "ntp")).toEqual({ kind: "adopts", revision: "frv_a", base: null });
     expect(slotOf([adoption({ base: 3 })], "fragment", "ntp")).toEqual({ kind: "adopts", revision: "frv_a", base: 3 });
-    expect(slotOf([adoption({ revision: null })], "fragment", "ntp")).toEqual({ kind: "stops" });
+    expect(slotOf([adoption({ revision: null })], "fragment", "ntp")).toEqual({ kind: "stops", base: null });
+    expect(slotOf([adoption({ revision: null, base: 4 })], "fragment", "ntp")).toEqual({ kind: "stops", base: 4 });
     expect(slotOf([shared()], "fragment", "ntp")).toEqual({ kind: "edits" });
     expect(slotOf([shared({ revision: null })], "fragment", "ntp")).toEqual({ kind: "removed" });
     expect(slotOf([own], "fragment", "ntp")).toBeUndefined();
@@ -33,9 +34,47 @@ describe("what the draft says of a shared name", () => {
 describe("this cluster's view of a shared name and what a press may do", () => {
   const head = "frv_head";
   test("the draft's entry decides first", () => {
-    expect(stateOf({ kind: "adopts", revision: head, base: 2 }, [row({ behind: true })], "cl_1", head)).toEqual({ kind: "adopts", revision: head, behind: false, removable: true });
-    expect(stateOf({ kind: "adopts", revision: "frv_old", base: null }, [], "cl_1", head)).toEqual({ kind: "adopts", revision: "frv_old", behind: true, removable: true });
-    for (const kind of ["stops", "edits", "removed"] as const) expect(stateOf({ kind }, [row()], "cl_1", head)).toEqual({ kind });
+    expect(stateOf({ kind: "adopts", revision: head, base: 2 }, [row({ behind: true })], "cl_1", head)).toEqual({ kind: "adopts", revision: head, behind: false, removable: true, again: false });
+    expect(stateOf({ kind: "adopts", revision: "frv_old", base: null }, [], "cl_1", head)).toEqual({ kind: "adopts", revision: "frv_old", behind: true, removable: true, again: false });
+    for (const kind of ["edits", "removed"] as const) expect(stateOf({ kind }, [row()], "cl_1", head)).toEqual({ kind });
+    expect(stateOf({ kind: "stops", base: 2 }, [row()], "cl_1", head)).toEqual({ kind: "stops", again: false });
+  });
+
+  // Another draft changed the cluster's adoption after this entry was staged: publication would refuse it as stale, and a press
+  // records the current counter (the carried finding G1 of ginsys/bronzeward#1227 and its twin for a staged removal).
+  describe("an entry staged before the cluster's adoption changed offers its press again", () => {
+    test("an adoption of the head whose base is not the row's counter, or whose row is gone, offers Adopt again though it is not behind", () => {
+      const head = "frv_a";
+      const adopts = (base: number | null) => ({ kind: "adopts", revision: head, base }) as const;
+      // Staged on counter 2, the row is at 3 (another draft re-adopted): stale, and still removable (the row holds a revision).
+      const moved = stateOf(adopts(2), [row({ adoptionRevision: 3, revision: head })], "cl_1", head);
+      expect(moved).toMatchObject({ behind: false, again: true, removable: true });
+      expect([canAdopt(moved), canStop(moved)]).toEqual([true, true]);
+      // Staged on counter 2, the row is gone (another draft stopped following): Adopt again, no Stop (404 over a removed row).
+      const gone = stateOf(adopts(2), [], "cl_1", head);
+      expect(gone).toMatchObject({ behind: false, again: true, removable: false });
+      expect([canAdopt(gone), canStop(gone)]).toEqual([true, false]);
+      // Still on the counter it was staged on, or introduced with no row before: nothing to press again.
+      const same = stateOf(adopts(2), [row({ adoptionRevision: 2, revision: head })], "cl_1", head);
+      expect([canAdopt(same), canStop(same)]).toEqual([false, true]);
+      const fresh = stateOf(adopts(null), [], "cl_1", head);
+      expect(fresh).toMatchObject({ again: false });
+      expect(canAdopt(fresh)).toBe(false);
+    });
+
+    test("a removal whose row holds another counter offers Stop following again; a removal whose row is gone cannot be pressed again", () => {
+      const stops = { kind: "stops", base: 2 } as const;
+      const moved = stateOf(stops, [row({ adoptionRevision: 3 })], "cl_1", "frv_h");
+      expect(moved).toEqual({ kind: "stops", again: true });
+      expect([canAdopt(moved), canStop(moved)]).toEqual([true, true]);
+      const same = stateOf(stops, [row({ adoptionRevision: 2 })], "cl_1", "frv_h");
+      expect([canAdopt(same), canStop(same)]).toEqual([true, false]);
+      const gone = stateOf(stops, [], "cl_1", "frv_h");
+      expect(gone).toEqual({ kind: "stops", again: false });
+      expect(canStop(gone)).toBe(false);
+      // Another cluster's row and a pin say nothing of this cluster's adoption.
+      expect(stateOf(stops, [row({ cluster: "cl_2", adoptionRevision: 9 }), row({ via: "edge" })], "cl_1", "frv_h")).toEqual({ kind: "stops", again: false });
+    });
   });
 
   // Persistence-api §3.1.1: over a removed adoption (a base, and no row that holds a revision) a removal is 404 and the
@@ -60,13 +99,14 @@ describe("this cluster's view of a shared name and what a press may do", () => {
 
   test("Adopt where the cluster is not on the head, Stop following where a name is followed", () => {
     const states = [
-      { kind: "none" }, { kind: "stops" }, { kind: "via", via: "e" }, { kind: "edits" }, { kind: "removed" },
-      { kind: "adopts", revision: "r", behind: false, removable: true }, { kind: "adopts", revision: "r", behind: true, removable: true },
+      { kind: "none" }, { kind: "stops", again: false }, { kind: "via", via: "e" }, { kind: "edits" }, { kind: "removed" },
+      { kind: "adopts", revision: "r", behind: false, removable: true, again: false }, { kind: "adopts", revision: "r", behind: true, removable: true, again: false },
       { kind: "follows", revision: "r", behind: false }, { kind: "follows", revision: "r", behind: true },
-      { kind: "adopts", revision: "r", behind: true, removable: false },
+      { kind: "adopts", revision: "r", behind: true, removable: false, again: false },
+      { kind: "stops", again: true }, { kind: "adopts", revision: "r", behind: false, removable: false, again: true },
     ] as const;
-    expect(states.map(canAdopt)).toEqual([true, true, true, false, false, false, true, false, true, true]);
-    expect(states.map(canStop)).toEqual([false, false, false, false, false, true, true, true, true, false]);
+    expect(states.map(canAdopt)).toEqual([true, true, true, false, false, false, true, false, true, true, true, true]);
+    expect(states.map(canStop)).toEqual([false, false, false, false, false, true, true, true, true, false, true, false]);
   });
 });
 

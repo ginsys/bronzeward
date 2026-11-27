@@ -25,7 +25,8 @@ import { ClusterLink, ClusterOption, ClusterRef, DraftHead, ImportedConfiguratio
 import { safeText, safeWord } from "./safe.ts";
 import { draftCalled, draftName, draftText } from "./titles.ts";
 import { PageNote } from "./page-note.tsx";
-import { CREATE_DRAFT_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, NAME_NOT_SHOWN } from "./words.ts";
+import { claimedName, scopeMember, scopeQuery } from "./shared-writes.ts";
+import { CREATE_DRAFT_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, NAME_NOT_SHOWN, SHARED_CHOICE, SHARED_REMOVE_SENTENCE, SHARED_SAVE_SENTENCE } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
 
 type S = components["schemas"];
@@ -118,8 +119,8 @@ const enc = encodeURIComponent;
 export const isSource = (e: Draft["entries"][number]): e is Source => e.kind !== "import-base" && e.kind !== "adoption";
 export const isAdoption = (e: Draft["entries"][number]): e is Adoption => e.kind === "adoption";
 export const isChange = (e: Draft["entries"][number]): e is Changed => e.kind !== "import-base";
-// A shared (library) entry is shown and never edited here: the console's saves and removals write
-// the cluster's own entry, which has a slot of its own.
+// A shared (library) entry has a slot of its own, apart from the cluster's entry of the name: its pane saves and removes
+// the shared entry (scope library), and the cluster's pane the cluster's own.
 export const isShared = (e: Source) => e.scope !== undefined;
 export const SHARED_LIBRARY = "shared library";
 // Whether the draft's page reads what its shared entries reach: the draft is open (the route refuses any other draft with
@@ -156,6 +157,9 @@ export function paneEntry(sources: Source[], selected: string | undefined, claim
 // Whether the draft already holds an entry of this kind and name, a removed one included: a PUT to
 // it would replace that entry unread (ginsys/bronzeward#517 H4).
 export const inUse = (draft: Pick<Draft, "entries">, name: string, kind: "fragment" | "profile" | "assignment" = "fragment") => draft.entries.some((e) => isSource(e) && !isShared(e) && e.kind === kind && nameOf(e) === name);
+
+// Whether the draft already holds a shared entry of this kind and name, a removed one included.
+export const inUseShared = (draft: Pick<Draft, "entries">, name: string, kind: "fragment" | "profile") => draft.entries.some((e) => isSource(e) && isShared(e) && e.kind === kind && nameOf(e) === name);
 
 // The Drafts and releases page's drafts, every page read, filtered by cluster in the browser (#339 scope).
 export function Drafts() {
@@ -292,7 +296,7 @@ export function DraftItem({ id }: { id: string }) {
           <ul aria-label="Entries">
             {d.entries.map((e) => isChange(e) ? (
               <li key={keyOf(e)}>
-                {isAdoption(e) || isShared(e) ? <EntryName e={e} /> : <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}><EntryName e={e} /></button>}
+                {isAdoption(e) ? <EntryName e={e} /> : <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}><EntryName e={e} /></button>}
                 {" "}{change(e)}
               </li>
             ) : <li key={`import-base:${e.machine}`}><ImportedConfigurationRef machine={e.machine} revision={e.revision} /><BaseDocument id={e.revision} machine={e.machine} /></li>)}
@@ -782,6 +786,9 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   // A new fragment's typed name, until the pane edits the entry its Save created (H1).
   const [typed, setName] = useState("");
   const name = entry === undefined ? typed : nameOf(entry);
+  // Whether the entry is the shared (library) one: chosen for a new entry, fixed by the entry it opens (never changed by a save).
+  const [sharedNew, setSharedNew] = useState(false);
+  const shared = entry === undefined ? sharedNew : isShared(entry);
   // Show their change while their revision read is awaited reads it again: a failed read retries.
   const [attempt, retry] = useState(0);
   // The saved text is EMPTY for a new entry or a removal.
@@ -892,7 +899,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
     if (name === "") return setNote("Not sent: name the fragment first.");
     const refusal = sendRefusal(waits, conflict, shown);
     if (refusal !== undefined) return setNote(refusal);
-    if (entry === undefined && inUse(draft, name)) return setNote(`Not sent: this draft already holds fragment ${name}. Open it from Entries to change it.`);
+    if (entry === undefined && (shared ? inUseShared(draft, name, "fragment") : inUse(draft, name))) return setNote(`Not sent: this draft already holds ${shared ? "shared " : ""}fragment ${name}. Open it from Entries to change it.`);
     if (m === undefined) return setNote(NO_ETAG);
     const lines = held.marks.split("\n").filter((l) => l !== "");
     const declarations = Object.keys(held.declared).length === 0 && held.embedded.length === 0 ? null : { references: held.declared, embedded: held.embedded };
@@ -900,9 +907,9 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
     // A Save while the last write is still open sends nothing new, so its text is not the one sent.
     if (startsNew(writes!, w)) {
       act({ kind: "send" });
-      if (entry === undefined) claim(name);
+      if (entry === undefined) claim(claimedName(name, shared));
     }
-    send({ method: "PUT", path, ifMatch: m, ingests: true, resource: `/drafts/${draft.id}`, body: { layer: held.layer, document: held.document, marks: lines.length === 0 ? null : lines, declarations }, settled });
+    send({ method: "PUT", path, ifMatch: m, ingests: true, resource: `/drafts/${draft.id}`, body: { ...scopeMember(shared), layer: held.layer, document: held.document, marks: lines.length === 0 ? null : lines, declarations }, settled });
   };
   const remove = () => {
     const m = ifMatch();
@@ -911,7 +918,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
     if (m === undefined) return setNote(NO_ETAG);
     // Once done, the removal is saved: the text still shown is unsaved until a Save stores it (H8).
     if (startsNew(writes!, w)) act({ kind: "send", removes: true });
-    send({ method: "DELETE", path, ifMatch: m, resource: `/drafts/${draft.id}`, body: undefined, settled });
+    send({ method: "DELETE", path: `${path}${scopeQuery(shared)}`, ifMatch: m, resource: `/drafts/${draft.id}`, body: undefined, settled });
   };
   // The reducer applies the base text only if nothing changed the text or the conflict since the
   // click (sweep).
@@ -971,7 +978,8 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   };
   return (
     <section aria-label={`Fragment ${name || "(new)"}`}>
-      <h3>Fragment {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : name}</h3>
+      <h3>Fragment {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : name}{shared && ` (${SHARED_LIBRARY})`}</h3>
+      {entry === undefined && <p><label><input type="checkbox" checked={sharedNew} onChange={(e) => setSharedNew(e.target.checked)} /> {SHARED_CHOICE}</label></p>}
       <p>
         <label>Layer:{" "}
           <select value={held.layer} onChange={(e) => hold({ ...held, layer: e.target.value })} disabled={!editable}>
@@ -994,6 +1002,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
         </Scroll>
       )}
       <EmbeddedList embedded={held.embedded} set={(embedded) => hold({ ...held, embedded })} open={editable} />
+      {open && shared && <p data-testid="shared-sentence">{SHARED_SAVE_SENTENCE}{entry !== undefined && entry.revision !== null && ` ${SHARED_REMOVE_SENTENCE}`}</p>}
       {open && (
         <p>
           <Action label="Save" needs={["author"]} onClick={save} busy={w !== undefined && w.outcome === undefined} />{" "}

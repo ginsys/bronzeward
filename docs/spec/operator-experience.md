@@ -947,8 +947,20 @@ show before the press what they record, in the draft only and for this cluster o
 puts the head's revision, Stop following removes the adoption. Nothing is typed back. A fragment's adoption adds that a
 profile of this cluster that pins the name keeps its pin. The refusals a publication or an entry meets are worded with
 the command line's causes and next steps (`library-reference`, `library-removed`, `name-in-two-scopes`,
-`library-pin-conflict`, `detach-pin-not-in-view`), and a stale adoption names the shared head that moved. The web offers
+`library-pin-conflict`, `detach-pin-not-in-view`), and a stale adoption names the shared head that moved. An entry staged
+before another draft changed this cluster's adoption would be refused at publication, so the block offers the press again
+(Adopt or Stop following) where the entry's base is not the adoption's counter now, and says why. The web offers
 no detach; `fragment detach` stays in the command line.
+
+The fragment and profile editors carry a **Shared (library)** choice for a new entry, and an existing shared entry in the
+draft's list opens its editor with the scope fixed. Save sends the shared entry (`scope: library` in the body) and Remove
+sends it as the removal's `scope` query; both say before the press what they record, in this draft and for this cluster
+only (the cluster takes the new revision when the draft is published, no other cluster changes, and clusters that adopted a
+removed name keep their revision). The cluster's own entry and the shared entry of one name are two entries with their own
+editors, and the draft refuses a second shared entry of the name as it does a second cluster entry. A shared profile pins
+shared fragment revisions (the ones the draft saves as shared first, else each shared fragment's current revision) and a
+cluster's profile pins the cluster's; a document that holds a secret reference is refused by the server (`library-reference`),
+which the editor words with its next step.
 
 ### 5.5 Publication, rendered review and provenance
 

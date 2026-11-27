@@ -9,13 +9,14 @@
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { change, declaredOf, doneOnce, editor, EMPTY, FRESH, type Held, holdsUnsaved, inUse, isShared, keptETag, NO_ETAG, rows, sendRefusal, settledFragment, staleRead, unread, WriteResult } from "./drafts.tsx";
+import { change, declaredOf, doneOnce, editor, EMPTY, FRESH, type Held, holdsUnsaved, inUse, inUseShared, isShared, keptETag, NO_ETAG, rows, sendRefusal, SHARED_LIBRARY, settledFragment, staleRead, unread, WriteResult } from "./drafts.tsx";
 import { startsNew, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { LAYERS } from "./layers.ts";
 import { short, useList, usePending, useSettled } from "./list.tsx";
 import { machineOption, machineText, sharedAddresses } from "./machines.tsx";
 import { draftCalled } from "./titles.ts";
-import { THE_MACHINE } from "./words.ts";
+import { claimedName, scopeMember, scopeQuery } from "./shared-writes.ts";
+import { SHARED_CHOICE, SHARED_PROFILE_PINS, SHARED_REMOVE_SENTENCE, SHARED_SAVE_SENTENCE, THE_MACHINE } from "./words.ts";
 import { type EmbeddedPath, references } from "./position.ts";
 import { Action } from "./shell.tsx";
 import { Conflict, Status } from "./states.tsx";
@@ -66,6 +67,16 @@ export function choices(draft: { cluster: string; entries: Draft["entries"] }, f
   const base = fragments.flatMap((f) => (f.cluster !== draft.cluster || f.revision === null || names.has(f.name) ? [] : [{ name: f.name, revision: f.revision, from: "base" as const }]));
   return [...own, ...base].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
+// What a shared profile can pin (`profile set --library`): the revision the draft saves as shared for a fragment, else the
+// shared fragment's head revision (api: updateProfile). A shared fragment the draft removes has none; a cluster's fragment
+// is not offered to a shared profile, as a shared one is not offered to a cluster's.
+export function libraryChoices(draft: { entries: Draft["entries"] }, fragments: Fragment[]): Choice[] {
+  const held = draft.entries.filter((e): e is Source => e.kind === "fragment" && isShared(e as Source));
+  const names = new Set(held.map((e) => e.name));
+  const own = held.flatMap((e) => (e.revision == null || e.name === undefined ? [] : [{ name: e.name, revision: e.revision, from: "draft" as const }]));
+  const base = fragments.flatMap((f) => (f.cluster !== null || f.revision === null || names.has(f.name) ? [] : [{ name: f.name, revision: f.revision, from: "base" as const }]));
+  return [...own, ...base].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
 export const isCurrent = (pin: string, options: Choice[]) => options.some((c) => c.revision === pin);
 
 // The pins whose name a read must still give. Nothing is asked until the cluster's fragment list
@@ -93,6 +104,9 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const read = useSettled();
   const [typed, setName] = useState("");
   const name = entry === undefined ? typed : (entry.name ?? "");
+  // Whether the entry is the shared (library) one: chosen for a new entry, fixed by the entry it opens.
+  const [sharedNew, setSharedNew] = useState(false);
+  const shared = entry === undefined ? sharedNew : isShared(entry);
   const [attempt, retry] = useState(0);
   const [{ held, saved, conflict, writes: done = 0, note }, act] = useReducer(editor, FRESH);
   const hold = (pins: string[]) => act({ kind: "type", held: pinned(held, pins) });
@@ -113,7 +127,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   // The pins the draft can name, and the names of the pins it cannot.
   const [fragments] = useList<Fragment>("/fragments", "", true);
   const listed = fragments.kind === "ok";
-  const options = choices(draft, listed ? fragments.data.items : []);
+  const options = (shared ? libraryChoices : choices)(draft, listed ? fragments.data.items : []);
   const [names, setNames] = useState<Record<string, string>>({});
   const pins = pinsOf(held);
   const known = new Map(options.map((c) => [c.revision, c.name]));
@@ -196,16 +210,16 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
     if (name === "") return setNote("Not sent: name the profile first.");
     const refusal = sendRefusal(waits, conflict, shown);
     if (refusal !== undefined) return setNote(refusal);
-    if (entry === undefined && inUse(draft, name, "profile")) return setNote(`Not sent: this draft already holds profile ${name}. Open it from Entries to change it.`);
+    if (entry === undefined && (shared ? inUseShared(draft, name, "profile") : inUse(draft, name, "profile"))) return setNote(`Not sent: this draft already holds ${shared ? "shared " : ""}profile ${name}. Open it from Entries to change it.`);
     const bad = pinRefusal(pins);
     if (bad !== undefined) return setNote(bad);
     if (m === undefined) return setNote(NO_ETAG);
     setNote(undefined);
     if (startsNew(writes!, w)) {
       act({ kind: "send" });
-      if (entry === undefined) claim(name);
+      if (entry === undefined) claim(claimedName(name, shared));
     }
-    send({ method: "PUT", path, ifMatch: m, resource: `/drafts/${draft.id}`, body: profileBody(pins), settled });
+    send({ method: "PUT", path, ifMatch: m, resource: `/drafts/${draft.id}`, body: { ...scopeMember(shared), ...profileBody(pins) }, settled });
   };
   const remove = () => {
     const m = ifMatch();
@@ -213,7 +227,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
     if (refusal !== undefined) return setNote(refusal);
     if (m === undefined) return setNote(NO_ETAG);
     if (startsNew(writes!, w)) act({ kind: "send", removes: true });
-    send({ method: "DELETE", path, ifMatch: m, resource: `/drafts/${draft.id}`, body: undefined, settled });
+    send({ method: "DELETE", path: `${path}${scopeQuery(shared)}`, ifMatch: m, resource: `/drafts/${draft.id}`, body: undefined, settled });
   };
 
   // After a move the focus stays on the moved row's button, or on the other one at the end of the list.
@@ -261,9 +275,10 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const pending = usePending(fragments, "fragments");
   return (
     <section aria-label={`Profile ${name || "(new)"}`}>
-      <h3>Profile {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : name}</h3>
+      <h3>Profile {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : name}{shared && ` (${SHARED_LIBRARY})`}</h3>
+      {entry === undefined && <p><label><input type="checkbox" checked={sharedNew} onChange={(e) => { setSharedNew(e.target.checked); hold([]); }} /> {SHARED_CHOICE}</label></p>}
       <p>{entry === undefined ? "new" : change(entry)}{unsavedList && " -> unsaved"}</p>
-      <p>{PINS_STATEMENT}</p>
+      <p>{shared ? SHARED_PROFILE_PINS : PINS_STATEMENT}</p>
       {entry?.revision === null && <Status>Removed in this draft.</Status>}
       {waits && (failed
         ? <p><button type="button" onClick={() => retry((x) => x + 1)}>Read the entry again</button></p>
@@ -293,6 +308,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
         </p>
       )}
       {open && pending}
+      {open && shared && <p data-testid="shared-sentence">{SHARED_SAVE_SENTENCE}{entry !== undefined && entry.revision !== null && ` ${SHARED_REMOVE_SENTENCE}`}</p>}
       {open && (
         <p>
           <Action label="Save" needs={["author"]} onClick={save} busy={w !== undefined && w.outcome === undefined} />{" "}

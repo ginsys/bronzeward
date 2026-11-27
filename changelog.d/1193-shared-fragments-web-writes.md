@@ -1,0 +1,2 @@
+Added
+- The web console's fragment and profile editors can now save and remove shared entries: a Shared (library) choice for a new entry, shared entries in the draft's list open their own editor, and Save and Remove say what they record before the press. A shared profile pins shared fragment revisions. The Shared names block also offers Adopt or Stop following again where another draft changed the cluster's adoption after the entry was staged. Refs ginsys/bronzeward#1193.
