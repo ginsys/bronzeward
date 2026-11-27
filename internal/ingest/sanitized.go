@@ -7,8 +7,9 @@ import (
 
 // Sanitized is a document stream with every identified value replaced by a `!bwref` reference,
 // and its declarations (compilation.md §2.1, §5.2). It is the only form of input ordinary
-// persistence accepts. Its fields are unexported and only newSanitized fills them; every
-// persistence function calls Check first, which refuses the zero value.
+// persistence accepts. Its fields are unexported and only newSanitized fills them. Check
+// refuses the zero value; not every persistence function calls it, and the schema's check
+// that a document is not empty keeps the zero value out of the stored text (§2.1).
 type Sanitized struct {
 	docs []byte
 	decl Declarations

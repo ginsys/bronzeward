@@ -2,10 +2,12 @@
 // with exactly the operations compilation.md §1 gives that identity, whatever a token's policy
 // would allow (the method-set tests). Ingestion holds create-only secret generations, encryption
 // under the baseline key, encryption and decryption under the staging key, HMAC under the digest
-// key, and a read of a cluster's Talos access credential (persistence-api.md §3.3); it reads no
-// other secret and has no baseline or artifact decryption. Compiler reads a pinned generation
-// version and encrypts under the artifact key. Metadata asks for one object's metadata by name
-// (dependency-monitor.md §4). Report lists the generation tree (persistence-api.md §6.4).
+// key; it reads no secret and has no baseline or artifact decryption. A cluster's Talos access
+// credential is read by the Signer alone (persistence-api.md §3.3), which also answers the
+// match check of an imported CA key (compilation.md §2.3 step 3a). Compiler reads a pinned
+// generation version and encrypts under the artifact key. Metadata asks for one object's
+// metadata by name (dependency-monitor.md §4). Report lists the generation tree
+// (persistence-api.md §6.4).
 //
 // No error from this package carries a request or response body, server error text or a
 // transport error's text; see requestError. A provider error on CreateGeneration, typed or not,
