@@ -11,7 +11,7 @@ import { safeText } from "./safe.ts";
 import { SavedRevision } from "./shared.tsx";
 import { Action } from "./shell.tsx";
 import { Status } from "./states.tsx";
-import { ADOPT_PIN_NOTE, adoptSentence, AGAIN_ADOPT, AGAIN_STOP, NAME_NOT_SHOWN, SHARED_NAMES_NOTE, stopSentence } from "./words.ts";
+import { ADOPT_PIN_NOTE, adoptSentence, AGAIN_ADOPT, AGAIN_STOP, NAME_NOT_SHOWN, REMOVED_NAME_NOTE, SHARED_NAMES_NOTE, stopSentence } from "./words.ts";
 
 type S = components["schemas"];
 type Draft = S["DraftBody"];
@@ -91,7 +91,7 @@ function Press({ draft, kind, name, revision, label, seeChange }: { draft: Draft
   );
 }
 
-function Words({ kind, state }: { kind: Kind; state: State }) {
+function Words({ kind, state, gone }: { kind: Kind; state: State; gone: boolean }) {
   switch (state.kind) {
     case "edits": return <>This draft changes the shared name: publishing it makes this cluster follow the new revision.</>;
     case "removed": return <>This draft removes the shared name from the library.</>;
@@ -99,7 +99,7 @@ function Words({ kind, state }: { kind: Kind; state: State }) {
     case "none": return <>Not followed by this cluster.</>;
     case "via": return <>Reached through the shared profile {safeText(state.via) ?? NAME_NOT_SHOWN}, which is not an adoption.</>;
     default:
-      return <>{state.kind === "adopts" ? "This draft adopts" : "Followed at"} the revision <SavedRevision kind={kind} id={state.revision} />{state.behind && ", behind the shared head"}.{state.kind === "adopts" && state.again && ` ${AGAIN_ADOPT}`}</>;
+      return <>{state.kind === "adopts" ? "This draft adopts" : "Followed at"} the revision <SavedRevision kind={kind} id={state.revision} />{state.behind && !gone && ", behind the shared head"}.{gone && ` ${REMOVED_NAME_NOTE}`}{state.kind === "adopts" && state.again && ` ${AGAIN_ADOPT}`}</>;
   }
 }
 
@@ -110,9 +110,12 @@ function NameRow({ kind, head, draft, seeChange }: { kind: Kind; head: Head; dra
   const shown = safeText(head.name) ?? NAME_NOT_SHOWN;
   // A name that is not read yet offers nothing: its view decides what a press does.
   const ready = list.kind === "ok";
+  // A removed name this cluster does not follow has nothing to adopt and nothing to stop.
+  const gone = head.revision === null;
+  if (ready && gone && (state.kind === "none" || state.kind === "via" || state.kind === "removed")) return null;
   return (
     <li>
-      {kind} {shown}: {pending ?? <Words kind={kind} state={state} />}
+      {kind} {shown}: {pending ?? <Words kind={kind} state={state} gone={gone} />}
       {ready && head.revision !== null && canAdopt(state) && (
         <div>{adoptSentence(kind, shown)}{" "}<Press draft={draft} kind={kind} name={head.name} revision={head.revision} label={`Adopt ${shown}`} seeChange={seeChange} /></div>
       )}
@@ -127,8 +130,14 @@ function Names({ kind, draft, seeChange }: { kind: Kind; draft: Draft; seeChange
   const [list] = useList<Head>(`/${kind}s`, "", true);
   const pending = usePending(list, `the shared ${kind}s`);
   if (list.kind !== "ok") return <>{pending}</>;
-  const heads = list.data.items.filter((h) => h.cluster === null && h.revision !== null);
-  return heads.length === 0 ? <p>No shared {kind} has a revision to adopt.</p> : <ul aria-label={`Shared ${kind}s`}>{heads.map((h) => <NameRow key={h.id} kind={kind} head={h} draft={draft} seeChange={seeChange} />)}</ul>;
+  // A removed head is still a head (persistence-api §3.1.1): a cluster that follows its name keeps the revision, so the row stays to say so and to stop following.
+  const heads = list.data.items.filter((h) => h.cluster === null);
+  return (
+    <>
+      {!heads.some((h) => h.revision !== null) && <p>No shared {kind} has a revision to adopt.</p>}
+      {heads.length > 0 && <ul aria-label={`Shared ${kind}s`}>{heads.map((h) => <NameRow key={h.id} kind={kind} head={h} draft={draft} seeChange={seeChange} />)}</ul>}
+    </>
+  );
 }
 
 /** The block of an open draft's page. Its reads start when it is opened, so a draft page that never uses it reads nothing more. */
