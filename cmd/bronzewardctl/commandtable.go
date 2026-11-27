@@ -131,21 +131,36 @@ var cmdTable = []cmdEntry{
 	{path: "fragment history", line: "a fragment's revisions", synopsis: "fragment history <head ID>", roles: "any"},
 	{path: "fragment set", line: "set a fragment in a draft", roles: "author",
 		synopsis: "fragment set <name> --draft <draft> --layer <layer> --file <path or -> [--declarations <path>]\n" +
-			"             [--marks] [--ingest-wait <duration>]",
+			"             [--marks] [--library] [--ingest-wait <duration>]",
 		ifMatch: true,
 		notes: "the document comes from a file, or - for standard input; --marks reads one mark per line from a prompt or standard input\n" +
 			"until an empty line. fragment set runs on Linux only. A repeat waits while the first request still ingests, for\n" +
-			"--ingest-wait (2m) or the server's claim lease, whichever is longer.\n" + draftWrite},
-	{path: "fragment rm", line: "remove a fragment from a draft", synopsis: "fragment rm <name> --draft <draft>", roles: "author", ifMatch: true, notes: draftWrite},
+			"--ingest-wait (2m) or the server's claim lease, whichever is longer.\n" + libraryNote + draftWrite},
+	{path: "fragment rm", line: "remove a fragment from a draft", synopsis: "fragment rm <name> --draft <draft> [--library]", roles: "author", ifMatch: true,
+		notes: "--library removes the shared fragment's head; no cluster loses it by that, each keeps its adoption.\n" + draftWrite},
+	{path: "fragment adopt", line: "adopt a shared fragment in a draft", roles: "author", ifMatch: true,
+		synopsis: "fragment adopt <name> --draft <draft> [--revision <frv_ ID>]\nfragment adopt <name> --draft <draft> --remove",
+		notes: "the draft's cluster takes the shared fragment at --revision, the head's revision when none is given, and prints the machines it\n" +
+			"reaches. --remove stops following it, and the cluster loses the name unless it holds its own. " + adoptNote + "\n" + draftWrite},
+	{path: "fragment detach", line: "copy an adopted fragment into the cluster and stop following it", synopsis: "fragment detach <name> --draft <draft>",
+		roles: "author", ifMatch: true, notes: "one step of the draft: the adopted revision becomes the cluster's own fragment of that name.\n" + draftWrite},
 
 	{path: "profile", line: "profiles of fragments"},
 	{path: "profile show", line: "show a profile head or revision", synopsis: "profile show <head or revision ID>", roles: "any", not: "limit cursor all"},
 	{path: "profile history", line: "a profile's revisions", synopsis: "profile history <head ID>", roles: "any"},
 	{path: "profile set", line: "set a profile in a draft", roles: "author",
-		synopsis: "profile set <name> --draft <draft> --fragments <name or frv_ ID>[,...]",
+		synopsis: "profile set <name> --draft <draft> --fragments <name or frv_ ID>[,...] [--library]",
 		ifMatch:  true,
-		notes:    "a fragment name pins the revision the draft proposes, else the fragment's head revision.\n" + draftWrite},
-	{path: "profile rm", line: "remove a profile from a draft", synopsis: "profile rm <name> --draft <draft>", roles: "author", ifMatch: true, notes: draftWrite},
+		notes: "a fragment name pins the revision this cluster composes for it: the draft's own or adopted entry, else the cluster's own\n" +
+			"head revision, else the revision the cluster adopted. With --library a name pins the shared fragment's revision instead.\n" + libraryNote + draftWrite},
+	{path: "profile rm", line: "remove a profile from a draft", synopsis: "profile rm <name> --draft <draft> [--library]", roles: "author", ifMatch: true,
+		notes: "--library removes the shared profile's head; no cluster loses it by that, each keeps its adoption.\n" + draftWrite},
+	{path: "profile adopt", line: "adopt a shared profile in a draft", roles: "author", ifMatch: true,
+		synopsis: "profile adopt <name> --draft <draft> [--revision <prv_ ID>]\nprofile adopt <name> --draft <draft> --remove",
+		notes: "the draft's cluster takes the shared profile at --revision, the head's revision when none is given, and prints the machines it\n" +
+			"reaches. --remove stops following it. " + adoptNote + "\n" + draftWrite},
+	{path: "profile detach", line: "copy an adopted profile into the cluster and stop following it", synopsis: "profile detach <name> --draft <draft>",
+		roles: "author", ifMatch: true, notes: "one step of the draft: the adopted revision becomes the cluster's own profile of that name.\n" + draftWrite},
 
 	{path: "assignment", line: "what configuration each machine is assigned"},
 	{path: "assignment show", line: "show an assignment head or revision", synopsis: "assignment show <head or revision ID>", roles: "any", not: "limit cursor all"},
@@ -163,7 +178,6 @@ var cmdTable = []cmdEntry{
 	{path: "draft show", line: "show a draft", synopsis: "draft show <draft>", roles: "any"},
 	{path: "draft create", line: "start a draft", synopsis: "draft create --cluster <cluster> --title <title>", roles: "author"},
 	{path: "draft discard", line: "discard a draft", synopsis: "draft discard <draft>", roles: "author", ifMatch: true, notes: draftWrite},
-
 	{path: "import", line: "imports of a machine's configuration into a draft"},
 	{path: "import start", line: "import a machine's configuration into a draft", roles: "author", person: true, ifMatch: true,
 		synopsis: "import start --machine <machine> --draft <draft> [--cluster <cluster>] [--file <path or ->] [--staging encrypted|transient]\n" +
@@ -272,6 +286,13 @@ var cmdTable = []cmdEntry{
 		synopsis: "identity revoke (--identity <id> | --iss <iss> --sub <sub>) --reason <text>",
 		notes:    "permanent; names the identity (or the subject and its issuer), then sends only after a y."},
 }
+
+// libraryNote is the note of the leaves that take --library.
+const libraryNote = "--library writes a shared entry instead of the cluster's own: publishing the draft moves this cluster to it and no other cluster.\n" +
+	"A shared document holds no secret reference, so a fragment with a secret stays in one cluster.\n"
+
+// adoptNote is the note of the adopt leaves on what an adoption does not move.
+const adoptNote = "A profile of this cluster that pins the name keeps its pin: set it again to use the new revision."
 
 // draftWrite is the note of every leaf that writes to a draft.
 const draftWrite = "A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft\n" +

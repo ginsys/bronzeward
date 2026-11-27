@@ -77,10 +77,12 @@ func (e *env) draftDiscard(args []string) error {
 // --fragments names them by fragment name or frv_ ID (T17).
 func (e *env) profileSet(args []string) error {
 	var draft, fragments string
+	var library bool
 	var rf repeatFlags
 	pos, err := e.parse("profile set", args, 1, func(fs *flag.FlagSet) {
 		fs.StringVar(&draft, "draft", "", "")
 		fs.StringVar(&fragments, "fragments", "", "")
+		fs.BoolVar(&library, "library", false, "")
 		rf.flags(fs)
 	})
 	if err != nil {
@@ -106,17 +108,21 @@ func (e *env) profileSet(args []string) error {
 	var pinned []string
 	w := &client.Write{Method: http.MethodPut, Path: "/drafts/" + url.PathEscape(draft) + "/profiles/" + url.PathEscape(pos[0]),
 		Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, Check: "draft show " + client.ShellWord(draft),
-		Read: entryRead(draft, apitypes.SourceEntryKindProfile, pos[0])}
+		Read: entryReadScoped(draft, apitypes.SourceEntryKindProfile, pos[0], library)}
 	return e.writeAfter(func(c *client.Client) (err error) {
 		if rp != nil {
 			pinned = names
-		} else if pinned, err = pins(c, w, draft, names); err != nil {
+		} else if pinned, err = pins(c, w, draft, names, library); err != nil {
 			return err
 		}
+		in := apitypes.ProfileInput{Fragments: pinned}
+		if library {
+			in.Scope = ptr(apitypes.ProfileInputScopeLibrary)
+		}
 		w.Input = "--fragments " + client.ShellWord(strings.Join(pinned, ","))
-		w.Body, err = json.Marshal(apitypes.ProfileInput{Fragments: pinned})
+		w.Body, err = json.Marshal(in)
 		return err
-	}, w, func(_ *client.Client, r *client.Response) ([]string, error) {
+	}, w, func(c *client.Client, r *client.Response) ([]string, error) {
 		var pairs []string
 		for i, n := range names {
 			if n != pinned[i] {
@@ -124,88 +130,51 @@ func (e *env) profileSet(args []string) error {
 			}
 			pairs = append(pairs, n)
 		}
-		return []string{sf("Profile %s saved: pins %s (draft revision %s).", pos[0], strings.Join(pairs, ", "), client.DraftRevision(r.Header.Get("ETag"))),
-			"A profile pins revisions: after changing a fragment, set the profile again to use it."}, nil
+		saved := sf("%s %s saved: pins %s (draft revision %s).", map[bool]string{true: "Shared profile", false: "Profile"}[library], pos[0], strings.Join(pairs, ", "),
+			client.DraftRevision(r.Header.Get("ETag")))
+		if library {
+			saved += sf(" Publishing this draft moves cluster %s to it. No other cluster changes.", clusterWords(c, draftCluster(c, draft)))
+		}
+		return []string{saved, "A profile pins revisions: after changing a fragment, set the profile again to use it."}, nil
 	})
 }
 
-// pins resolves --fragments (T17): an frv_ ID is used as given; a name is the revision the draft
-// proposes for that fragment, refused when the draft removes it, or else the fragment head's
-// revision in the draft's cluster. The server stays authoritative and refuses a pin it does not
-// accept. It binds w to the epoch of the draft answer and to the count of moves as that answer left
-// it (not the count after Get's own GET /server), which the write checks before it sends: a change
-// that a later answer set back is still seen.
-func pins(c *client.Client, w *client.Write, draft string, names []string) ([]string, error) {
-	d, first, moves, err := readDraft(c, draft)
+// pins resolves --fragments (T17): an frv_ ID is used as given; a name is the revision the draft's
+// cluster composes for that fragment (draftView.revision, contract 12 of ginsys/bronzeward#1193), and
+// with library the shared revision a shared profile can pin. The server stays authoritative and
+// refuses a pin it does not accept. It binds w to the epoch of the draft answer and to the count of
+// moves as that answer left it (not the count after Get's own GET /server), which the write checks
+// before it sends: a change that a later answer set back is still seen.
+func pins(c *client.Client, w *client.Write, draft string, names []string, library bool) ([]string, error) {
+	v, err := readView(c, w, draft)
 	if err != nil {
 		return nil, err
 	}
-	w.ReadsAt(first, moves)
-	proposed := map[string]*string{}
-	for _, item := range d.Entries {
-		// An entry that cannot be read may be the draft's fragment proposal or removal, so a pin
-		// chosen without it could be the wrong one: refuse, as entryRead does.
-		x, err := item.AsSourceEntry()
-		if err != nil {
-			return nil, ef("GET /api/v1/drafts/%s: an entry cannot be read: %w; nothing was sent", url.PathEscape(draft), err)
-		}
-		// A shared entry is none of the cluster's: a name resolves to the cluster's own revision.
-		if x.Kind == apitypes.SourceEntryKindFragment && x.Name != nil && x.Scope == nil {
-			proposed[*x.Name] = x.Revision
-		}
-	}
-	var heads map[string]*string
 	out := make([]string, len(names))
 	for i, n := range names {
-		rev, inDraft := proposed[n]
-		switch {
-		case strings.HasPrefix(n, "frv_"):
+		if strings.HasPrefix(n, "frv_") {
 			out[i] = n
 			continue
-		case inDraft && rev == nil:
-			return nil, ef("draft %s removes the fragment %s, so a profile cannot pin it; nothing was sent", d.Id, client.ShellWord(n))
-		case inDraft:
-			out[i] = *rev
-			continue
-		case heads == nil:
-			var listed string
-			if heads, listed, err = fragmentHeads(c, d.Cluster); err != nil {
-				return nil, err
-			}
-			// The list answer is compared with the draft answer itself: the write checks the client's
-			// last epoch, which a later read can set back (client-contracts.md section 8.5).
-			if first != "" && listed != "" && listed != first {
-				return nil, ef("the epoch changed from %s to %s while the pins were read, so nothing was sent; read the draft again with: bronzewardctl draft show %s",
-					client.ShellWord(first), client.ShellWord(listed), client.ShellWord(draft))
-			}
 		}
-		if heads[n] == nil {
-			return nil, ef("cluster %s has no fragment %s with a revision, and draft %s proposes none; nothing was sent", d.Cluster, client.ShellWord(n), d.Id)
+		var removed bool
+		if library {
+			out[i], err = v.sharedRevision(fragmentKind, n)
+		} else {
+			out[i], removed, err = v.revision(fragmentKind, n)
 		}
-		out[i] = *heads[n]
+		switch {
+		case err != nil:
+			return nil, err
+		case out[i] != "":
+		case removed:
+			return nil, ef("draft %s removes the fragment %s, so a profile cannot pin it; nothing was sent", v.d.Id, client.ShellWord(n))
+		case library:
+			return nil, ef("there is no shared fragment %s with a revision, and draft %s proposes none; nothing was sent", client.ShellWord(n), v.d.Id)
+		default:
+			return nil, ef("cluster %s has no fragment %s with a revision, adopts none and draft %s proposes none; nothing was sent", v.d.Cluster, client.ShellWord(n), v.d.Id)
+		}
 	}
 	return out, nil
-}
-
-// fragmentHeads maps the names of cluster's fragments to their head revisions, read from every
-// page of GET /fragments, which serves no name filter (api/openapi.yaml).
-// It also returns the epoch of the list answer.
-func fragmentHeads(c *client.Client, cluster string) (map[string]*string, string, error) {
-	items, epoch, err := c.ListAt("/fragments")
-	if err != nil {
-		return nil, "", err
-	}
-	heads := map[string]*string{}
-	for i, raw := range items {
-		var f apitypes.FragmentBody
-		if err := json.Unmarshal(raw, &f); err != nil {
-			return nil, "", ef("GET /api/v1/fragments: item %d cannot be read: %w", i, err)
-		}
-		if f.Cluster != nil && *f.Cluster == cluster {
-			heads[f.Name] = f.Revision
-		}
-	}
-	return heads, epoch, nil
 }
 
 // layerFragments is assignment set's repeated --fragment <layer>=<name>[,<name>].
@@ -268,11 +237,14 @@ func (e *env) assignmentSet(args []string) error {
 // sourceRm removes a profile or an assignment from a draft (DELETE /drafts/{id}/<kind>s/<name>).
 func (e *env) sourceRm(kind apitypes.SourceEntryKind, args []string) error {
 	var draft, cluster string
+	var library bool
 	var rf repeatFlags
 	pos, err := e.parse(string(kind)+" rm", args, 1, func(fs *flag.FlagSet) {
 		fs.StringVar(&draft, "draft", "", "")
 		if kind == apitypes.SourceEntryKindAssignment { // an assignment is a machine's; a profile is named
 			fs.StringVar(&cluster, "cluster", "", "")
+		} else { // a fragment or a profile can be shared
+			fs.BoolVar(&library, "library", false, "")
 		}
 		rf.flags(fs)
 	})
@@ -287,13 +259,21 @@ func (e *env) sourceRm(kind apitypes.SourceEntryKind, args []string) error {
 		return err
 	}
 	removal := func(id string) *client.Write {
-		return &client.Write{Method: http.MethodDelete, Path: "/drafts/" + url.PathEscape(draft) + "/" + string(kind) + "s/" + url.PathEscape(id),
+		path := "/drafts/" + url.PathEscape(draft) + "/" + string(kind) + "s/" + url.PathEscape(id)
+		if library { // the one mutation that takes a query, which the key's fingerprint covers (contract 5)
+			path += "?scope=library"
+		}
+		return &client.Write{Method: http.MethodDelete, Path: path,
 			Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, Check: "draft show " + client.ShellWord(draft),
-			Read: entryRead(draft, kind, id)}
+			Read: entryReadScoped(draft, kind, id, library)}
 	}
 	label := pos[0]
 	say := func(_ *client.Client, r *client.Response) ([]string, error) {
-		return []string{sf("%s %s removed from draft %s (draft revision %s).", strings.ToUpper(string(kind[:1]))+string(kind[1:]), label, draft,
+		what := strings.ToUpper(string(kind[:1])) + string(kind[1:])
+		if library {
+			what = "Shared " + string(kind)
+		}
+		return []string{sf("%s %s removed from draft %s (draft revision %s).", what, label, draft,
 			client.DraftRevision(r.Header.Get("ETag")))}, nil
 	}
 	if kind != apitypes.SourceEntryKindAssignment { // a profile is named in the draft, never resolved
@@ -308,6 +288,12 @@ func (e *env) sourceRm(kind apitypes.SourceEntryKind, args []string) error {
 // entryRead reads the draft after an unknown outcome and says what it shows of the entry kind and
 // name, or of the draft itself when kind is "".
 func entryRead(draft string, kind apitypes.SourceEntryKind, name string) func(*client.Client) (string, error) {
+	return entryReadScoped(draft, kind, name, false)
+}
+
+// entryReadScoped is entryRead for the draft's shared entry of the name when library is set, else for
+// the cluster's own: the two are different slots of the draft.
+func entryReadScoped(draft string, kind apitypes.SourceEntryKind, name string, library bool) func(*client.Client) (string, error) {
 	return func(c *client.Client) (string, error) {
 		d, _, _, err := readDraft(c, draft)
 		if err != nil {
@@ -322,12 +308,12 @@ func entryRead(draft string, kind apitypes.SourceEntryKind, name string) func(*c
 			if err != nil {
 				return "", ef("GET /api/v1/drafts/%s: an entry cannot be read: %w", url.PathEscape(draft), err)
 			}
-			// The CLI writes cluster entries alone, so a shared one of the name is another's.
-			if x.Kind == kind && x.Scope == nil && (x.Name != nil && *x.Name == name || x.Machine != nil && *x.Machine == name) {
-				return sf("%s, with %s %s at %s", shows, kind, name, or(x.Revision, "removed")), nil
+			// A write without --library is the cluster's own entry, and a shared one of the name is another slot.
+			if x.Kind == kind && (x.Scope != nil) == library && (x.Name != nil && *x.Name == name || x.Machine != nil && *x.Machine == name) {
+				return sf("%s, with %s %s at %s", shows, scopeWords(library, kind), name, or(x.Revision, "removed")), nil
 			}
 		}
-		return sf("%s, with no %s %s entry", shows, kind, name), nil
+		return sf("%s, with no %s %s entry", shows, scopeWords(library, kind), name), nil
 	}
 }
 

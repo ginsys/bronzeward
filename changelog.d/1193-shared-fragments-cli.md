@@ -1,0 +1,2 @@
+Added
+- `bronzewardctl` now writes shared fragments and profiles: `fragment set` and `profile set` take `--library`, `fragment rm` and `profile rm` remove a shared entry with it, and `fragment adopt` and `fragment detach` and the same two for `profile` move one cluster onto a shared revision, stop it following the name or copy the revision into the cluster. A profile's fragment names resolve through the cluster's own view of a shared name, and a refusal about a shared name says the next step. Refs ginsys/bronzeward#1193.

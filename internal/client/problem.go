@@ -72,7 +72,7 @@ func (p *Problem) Error() string {
 		// (client-contracts.md §8.2; #347). The input and the server's message are what the page gives too
 		// (compilation §8.3); a run of tabs and line breaks in the message reads as one space.
 		var at []string
-		for _, k := range []string{"rule", "input", "path", "paths", "position", "reference", "revision", "machine", "message"} {
+		for _, k := range []string{"rule", "input", "path", "paths", "position", "reference", "revision", "machine", "kind", "name", "fragment", "message"} {
 			if v, ok := p.Doc[k]; ok {
 				s := fmt.Sprint(v)
 				if k == "message" {
@@ -80,6 +80,20 @@ func (p *Problem) Error() string {
 				}
 				at = append(at, k+" "+printable(s))
 			}
+		}
+		// The two sources of a library-pin-conflict: each names the profile, adoption or fragment that
+		// pins the revision.
+		if srcs, ok := p.Doc["sources"].([]any); ok {
+			var named []string
+			for _, x := range srcs {
+				m, _ := x.(map[string]any)
+				for _, k := range []string{"profile", "adoption", "fragment"} {
+					if v, ok := m[k]; ok {
+						named = append(named, fmt.Sprintf("%s %v at %v", k, v, m["revision"]))
+					}
+				}
+			}
+			at = append(at, "sources "+printable(strings.Join(named, " and ")))
 		}
 		if len(at) > 0 {
 			s += "\nRefused: " + strings.Join(at, ", ") + "."
@@ -94,6 +108,9 @@ func (p *Problem) Error() string {
 			s += "\nRecovery mode: the server was started for recovery: it refuses plan creation, approval and unfreeze, and before its recovery entry " +
 				"every request but the entry. A restriction of the process, not of one scope: record the recovery entry first, then restart the server without the flag to end it."
 		}
+	}
+	if next := SharedNext(p.Code(), p.Doc); next != "" {
+		s += "\nNext: " + next
 	}
 	return s
 }
