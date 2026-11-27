@@ -158,7 +158,7 @@ func pins(c *client.Client, w *client.Write, draft string, names []string, libra
 		}
 		var removed bool
 		if library {
-			out[i], err = v.sharedRevision(fragmentKind, n)
+			out[i], removed, err = v.sharedRevision(fragmentKind, n)
 		} else {
 			out[i], removed, err = v.revision(fragmentKind, n)
 		}

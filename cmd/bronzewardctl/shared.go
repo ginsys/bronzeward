@@ -178,21 +178,24 @@ func (v *draftView) revision(k sharedKind, name string) (rev string, ownRemoved 
 }
 
 // sharedRevision is the revision a shared profile pins for a name: the draft's shared edit of it, else
-// the shared head's revision; "" for none.
-func (v *draftView) sharedRevision(k sharedKind, name string) (string, error) {
+// the shared head's revision; "" for none, and removed when the draft removes the shared head.
+func (v *draftView) sharedRevision(k sharedKind, name string) (rev string, removed bool, err error) {
 	if _, shared, err := v.slots(k, name); err != nil {
-		return "", err
-	} else if shared != nil && shared.library && shared.revision != nil {
-		return *shared.revision, nil
+		return "", false, err
+	} else if shared != nil && shared.library {
+		if shared.revision == nil {
+			return "", true, nil
+		}
+		return *shared.revision, false, nil
 	}
 	heads, err := v.headsOf(k)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if h := libraryHead(heads, name); h != nil && h.Revision != nil {
-		return *h.Revision, nil
+		return *h.Revision, false, nil
 	}
-	return "", nil
+	return "", false, nil
 }
 
 // adoptionRows reads the adoptions of a shared head: every page, or the page l asks for.

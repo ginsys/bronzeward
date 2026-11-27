@@ -222,6 +222,12 @@ func TestPinsThroughTheView(t *testing.T) {
 	if code != 1 || !strings.Contains(errText, "there is no shared fragment 'own' with a revision, and draft drf_BWSYNTH proposes none; nothing was sent") {
 		t.Errorf("library, a cluster's own name: exit %d, stderr %s", code, errText)
 	}
+	// A shared profile cannot pin a shared fragment the same draft removes.
+	f.entries = `{"kind":"fragment","name":"ntp","scope":"library","head":"frg_ntp","base":3,"adoptionBase":null,"revision":null}`
+	code, _, errText = sharedRun(t, f, "profile", "set", "p", "--library", "--draft", "drf_BWSYNTH", "--fragments", "ntp", ifMatch)
+	if got := f.took(); code != 1 || len(got) != 0 || !strings.Contains(errText, "draft drf_BWSYNTH removes the fragment 'ntp', so a profile cannot pin it; nothing was sent") {
+		t.Errorf("library, a shared head the draft removes: exit %d, sent %q, stderr %s", code, got, errText)
+	}
 }
 
 // adopt and detach: the requests, and the words a person reads.

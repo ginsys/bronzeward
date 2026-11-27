@@ -43,6 +43,18 @@ func TestSharedRefusalWords(t *testing.T) {
 			t.Errorf("%s: SharedNext %q is not the line of the problem", c.name, next)
 		}
 	}
+	// Sources of another shape name nothing: no empty "sources" entry and no revision of <nil>.
+	for _, srcs := range []any{[]any{}, []any{map[string]any{"other": "x"}}} {
+		p := &Problem{Status: 422, Where: "lab", Doc: map[string]any{"type": "urn:bronzeward:problem:validation-failed", "rule": "library-pin-conflict", "sources": srcs}}
+		if got := p.Error(); strings.Contains(got, ", sources") {
+			t.Errorf("sources %v: the refusal names sources it cannot read:\n%s", srcs, got)
+		}
+	}
+	p := &Problem{Status: 422, Where: "lab", Doc: map[string]any{"type": "urn:bronzeward:problem:validation-failed", "rule": "library-pin-conflict",
+		"sources": []any{map[string]any{"profile": "base-set"}}}}
+	if got := p.Error(); !strings.Contains(got, "sources profile base-set.") || strings.Contains(got, "<nil>") {
+		t.Errorf("a source with no revision:\n%s", got)
+	}
 	for _, other := range []map[string]any{{"type": "urn:bronzeward:problem:validation-failed", "rule": "other"},
 		{"type": "urn:bronzeward:problem:stale-input", "conflicts": []any{map[string]any{"head": "h", "expected": 1, "actual": 2}}}} {
 		if next := SharedNext(strings.TrimPrefix(other["type"].(string), problemPrefix), other); next != "" {

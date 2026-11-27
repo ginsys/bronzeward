@@ -89,11 +89,17 @@ func (p *Problem) Error() string {
 				m, _ := x.(map[string]any)
 				for _, k := range []string{"profile", "adoption", "fragment"} {
 					if v, ok := m[k]; ok {
-						named = append(named, fmt.Sprintf("%s %v at %v", k, v, m["revision"]))
+						text := fmt.Sprintf("%s %v", k, v)
+						if rev, ok := m["revision"]; ok {
+							text += fmt.Sprintf(" at %v", rev)
+						}
+						named = append(named, text)
 					}
 				}
 			}
-			at = append(at, "sources "+printable(strings.Join(named, " and ")))
+			if len(named) > 0 {
+				at = append(at, "sources "+printable(strings.Join(named, " and ")))
+			}
 		}
 		if len(at) > 0 {
 			s += "\nRefused: " + strings.Join(at, ", ") + "."
