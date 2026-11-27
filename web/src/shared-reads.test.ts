@@ -2,7 +2,7 @@ import { createElement as h, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
-import { hasShared } from "./drafts.tsx";
+import { readsReach } from "./drafts.tsx";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { FRAGMENTS, PROFILES, Rows } from "./resources.tsx";
 import { AdoptionRows, changesOf, Reach, ReachItems, scopeWords, SharedClusters, useOf } from "./shared.tsx";
@@ -128,12 +128,14 @@ describe("what a draft's shared entries reach here", () => {
     expect(out).toContain("renders no configuration");
   });
 
-  test("a draft is read for reach only when it holds an adoption, its removal or a shared entry", () => {
+  test("a draft is read for reach only when it is open and holds an adoption, its removal or a shared entry", () => {
     const own = { kind: "fragment", name: "ntp", head: "frg_1", base: 1, revision: "frv_own" };
     const shared = { ...own, scope: "library", adoptionBase: null };
     const adoption = { kind: "adoption", of: "fragment", name: "ntp", head: "frg_2", base: null, revision: "frv_a" };
     const dropped = { ...adoption, revision: null };
-    expect([own, shared, adoption, dropped].map((e) => hasShared({ entries: [e] } as never))).toEqual([false, true, true, true]);
-    expect(hasShared({ entries: [] })).toBe(false);
+    expect([own, shared, adoption, dropped].map((e) => readsReach({ state: "open", entries: [e] } as never))).toEqual([false, true, true, true]);
+    expect(readsReach({ state: "open", entries: [] })).toBe(false);
+    // The route answers 409 for a draft that is not open, so a published or discarded one is never read.
+    for (const state of ["published", "discarded", "publishing"]) expect(readsReach({ state, entries: [shared, adoption] } as never), state).toBe(false);
   });
 });
