@@ -188,3 +188,4 @@ other    internal/ingest TestIdentifySchemaSetOfGeneratedConfig
 --- failing leaves: internal/compile other=5
 --- failing leaves: internal/ingest other=1
 --- failing leaves in all: 17
+--- package lines: ok=15 FAIL=3

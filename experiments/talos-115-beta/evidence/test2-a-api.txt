@@ -13,3 +13,5 @@ VERIFY_DONE rc=1
 # classifier: run/failures.py
 --- result lines (tests and subtests): PASS=991 FAIL=0 SKIP=9
 --- failing leaves in all: 0
+--- package lines: ok=0 FAIL=1
+--- NO VERDICT: the test run hit its own time limit. The counts above are only what was read before it; zero failing leaves is not a pass.

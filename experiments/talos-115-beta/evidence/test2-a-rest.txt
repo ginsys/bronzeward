@@ -68,3 +68,4 @@ other    internal/clitest TestProtected/T3
 --- result lines (tests and subtests): PASS=2884 FAIL=3 SKIP=17
 --- failing leaves: internal/clitest other=2
 --- failing leaves in all: 2
+--- package lines: ok=28 FAIL=1

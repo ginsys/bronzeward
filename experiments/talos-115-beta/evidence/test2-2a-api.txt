@@ -1170,3 +1170,4 @@ contract internal/api TestTimelineOrderAndTail
 --- result lines (tests and subtests): PASS=287 FAIL=1302 SKIP=9
 --- failing leaves: internal/api contract=1157
 --- failing leaves in all: 1157
+--- package lines: ok=0 FAIL=1

@@ -10,3 +10,4 @@ VERIFY_DONE rc=0
 # classifier: run/failures.py
 --- result lines (tests and subtests): PASS=71 FAIL=0 SKIP=0
 --- failing leaves in all: 0
+--- package lines: ok=1 FAIL=0

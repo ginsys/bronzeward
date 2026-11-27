@@ -201,6 +201,15 @@ apply_checked() {
 	probe b apply "TALOS115_ENDPOINT=$worker" "TALOS115_TALOSCONFIG=$tc" "TALOS115_FILE=$1" "TALOS115_SHA256=$sum"
 }
 
+# expect_same <true|false> <expected file>: observe, print what it said, and succeed only if the
+# read says same=<value>.
+expect_same() {
+	local said
+	said=$(observe "$2") || return 1
+	printf '%s\n' "$said"
+	grep --quiet --fixed-strings "same=$1" <<<"$said"
+}
+
 observe() { # observe <expected file>
 	probe b observe "TALOS115_ENDPOINT=$worker" "TALOS115_TALOSCONFIG=$tc" "TALOS115_FILE=$1"
 }
@@ -267,14 +276,14 @@ scenario() { # scenario <label> <cluster> <talosctl version> <image> <cases: yes
 		say "apply the label compile (build B)"
 		if apply_checked "$dir/out-b/mat-label.yaml" label; then
 			say "read back"
-			observe "$dir/out-b/mat-label.yaml"
+			expect_same true "$dir/out-b/mat-label.yaml" || die "the read back did not equal the applied configuration"
 			sleep 60
 			say "drift read after 60 s"
-			observe "$dir/out-b/mat-label.yaml"
+			expect_same true "$dir/out-b/mat-label.yaml" || die "the drift read after 60 s did not equal the applied configuration"
 			say "control: plant a change, the drift read must say same=false"
-			if [ -f "$dir/out-b/mat-label-other.yaml" ] && apply_checked "$dir/out-b/mat-label-other.yaml" label-other; then
-				observe "$dir/out-b/mat-label.yaml"
-			fi
+			[ -f "$dir/out-b/mat-label-other.yaml" ] || die "control not planted: no second configuration to apply"
+			apply_checked "$dir/out-b/mat-label-other.yaml" label-other || die "control not planted: the second apply did not complete"
+			expect_same false "$dir/out-b/mat-label.yaml" || die "control failed: the drift read did not report the planted change"
 		else
 			say "scenario $run_label: label apply not completed"
 		fi

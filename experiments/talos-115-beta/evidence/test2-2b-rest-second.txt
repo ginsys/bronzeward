@@ -51,3 +51,4 @@ other    internal/talos/signer TestSignBoundIsTheMaximumLessTheRoundingSlack
 --- failing leaves: internal/talos other=1
 --- failing leaves: internal/talos/signer other=3
 --- failing leaves in all: 4
+--- package lines: ok=9 FAIL=2
