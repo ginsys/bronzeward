@@ -7,8 +7,9 @@ same as any other change. Editing a draft is [another journey](editing.md), publ
 [a third](publication.md), and applying is [a fourth](plan-and-approval.md). Other words of the guide
 are in [the word list](terms.md).
 
-**You need** the `author` role for every write on this page. Reading needs at least one role. A
-fragment that holds a secret cannot be shared: it stays in one cluster.
+**You need** the `author` role to edit and adopt in a draft, and the `publisher` role to publish
+it. Reading needs at least one role. A fragment that holds a secret cannot be shared: it stays in
+one cluster.
 
 The rules this page rests on:
 

@@ -187,6 +187,34 @@ describe("the apply page (#1096)", () => {
     expect(await posts()).toEqual([]);
   });
 
+  // Criterion 1 of ginsys/bronzeward#1193 (never unseen), read in the browser: the plan of the machine B shows the first revision
+  // of a shared name while B's release holds no move of it, and the newer revision, with the block naming the move, once B's
+  // release does. The bodies are recorded answers: that the server's plan holds nothing of a newer revision before B adopts it is
+  // the client journey's and the server cases' check, and this case reads the plan diff as the person does.
+  it("the plan of a cluster shows the first revision of a shared name until its release moves the cluster to the newer one (criterion 1)", async function () {
+    this.timeout(120_000);
+    const FRG = id("frg", "f");
+    const moved = { kind: "fragment", scope: "library", head: FRG, revision: id("frv", "n"), headRevision: null, previous: id("frv", "o"), adoptionRevision: 3 };
+    const read = async (unified: string, r: unknown, more: Record<string, unknown> = {}) => {
+      await open("h-all", bodies({ [`/releases/${REL}`]: r, [`/plans/${PA}`]: plan(PA, A, unified), ...more }));
+      await browser.waitUntil(async () => (await rows().length) === 2, { timeout: 20_000 });
+      await choose(A).click();
+      await expect($('[data-testid="apply-plan"]')).toBeExisting({ wait: 20_000 });
+      await $('[data-testid="apply-plan"] summary').click();
+      return $('[data-testid="diff"]');
+    };
+    await expect(await read("@@ machine.nodeLabels @@\n+  node.example.test/shared: one", release)).toHaveText(expect.stringContaining("node.example.test/shared: one"), { wait: 20_000 });
+    // once: this release's sources hold no shared move, so the block is not drawn, and the diff was read above.
+    expect(await $('[data-testid="apply-shared"]').isExisting()).toBe(false);
+    await expect(await read("@@ machine.nodeLabels @@\n+  node.example.test/shared: two", { ...release, sources: [...release.sources, moved] }, {
+      [`/fragments/${FRG}`]: { id: FRG, cluster: null, scope: "library", name: "ntp", layer: "global", revision: moved.revision, headRevision: 4, createdAt: T0 },
+      [`/fragments/${FRG}/adoptions`]: { items: [] },
+    })).toHaveText(expect.stringContaining("node.example.test/shared: two"), { wait: 20_000 });
+    await expect($('[data-testid="apply-shared"]')).toHaveText(expect.stringContaining("fragment ntp"), { wait: 20_000 });
+    // once: the page sends a write only from a press, and the case presses nothing.
+    expect(await posts()).toEqual([]);
+  });
+
   it("a viewer sees the controls disabled, each with its reason (check 7)", async function () {
     this.timeout(120_000);
     await open("h-viewer", bodies());

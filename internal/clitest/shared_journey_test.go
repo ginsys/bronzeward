@@ -3,12 +3,32 @@
 package clitest
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+// adoptionRow is one row of fragment adoptions as the API serves it: a cluster, whether it is behind the shared head,
+// and its machines that hold the name.
+type adoptionRow struct {
+	Cluster  string
+	Behind   bool
+	Machines []string
+}
+
+// impactItem is one entry of draft impact as the API serves it: the machines of the draft's cluster that gain, lose or
+// keep a revision, and the other clusters that use the name.
+type impactItem struct {
+	Name, Scope   string
+	Machines      []struct{ Machine, Change string }
+	OtherClusters []struct {
+		Cluster   string
+		Unchanged bool
+	}
+}
 
 // addCluster adds a second cluster to e's server: its machine with a Talos stand-in of its own, imported,
 // published with no assignment, and adopted, so that a later release of it can be planned with apply-config.
@@ -101,35 +121,71 @@ func TestSharedJourney(t *testing.T) {
 	a.publishDraft(t, dA1)
 
 	holds := func(out, what string) bool { return strings.Contains(out, what) }
-	adoptions := func(behind bool) string {
-		args := []string{"--context", "human", "fragment", "adoptions", "ntp"}
+	// The reads as the API's own resources (-o json): clusters by identifier, machines by identifier.
+	adoptions := func(behind bool) []adoptionRow {
+		args := []string{"--context", "human", "-o", "json", "fragment", "adoptions", "ntp"}
 		if behind {
 			args = append(args, "--behind")
 		}
 		r := b.ctl(args...)
 		f.want(r, 0)
-		return r.out
+		var page struct{ Items []adoptionRow }
+		if err := json.Unmarshal([]byte(r.out), &page); err != nil {
+			t.Fatalf("fragment adoptions: %v\n%s", err, r.out)
+		}
+		return page.Items
+	}
+	impact := func(e *planEnv, draft string) impactItem {
+		r := e.ctl("--context", "human", "-o", "json", "draft", "impact", draft)
+		f.want(r, 0)
+		var body struct{ Items []impactItem }
+		if err := json.Unmarshal([]byte(r.out), &body); err != nil {
+			t.Fatalf("draft impact: %v\n%s", err, r.out)
+		}
+		for _, it := range body.Items {
+			if it.Name == "ntp" && it.Scope == "library" {
+				return it
+			}
+		}
+		t.Fatalf("draft impact of %s lists no shared ntp:\n%s", draft, r.out)
+		return impactItem{}
+	}
+	row := func(rows []adoptionRow, cluster string) (adoptionRow, bool) {
+		for _, r := range rows {
+			if r.Cluster == cluster {
+				return r, true
+			}
+		}
+		return adoptionRow{}, false
 	}
 
 	// B adopts it in a draft of its own: the first revision is in B's plan, and the draft listed the machine it reaches.
 	dB1 := b.draftWith(t, "adopt ntp", []string{"fragment", "adopt", "ntp", "--draft", "<draft>"},
 		[]string{"assignment", "set", b.s.machine, "--draft", "<draft>", "--fragment", "global=ntp"})
-	f.want(b.ctl("--context", "human", "draft", "impact", dB1), 0, b.s.machine)
+	if m := impact(b, dB1).Machines; len(m) != 1 || m[0].Machine != b.s.machine || m[0].Change != "gains" {
+		t.Fatalf("B's draft adopting ntp reaches %+v; want its machine, gaining it", m)
+	}
 	b.publishDraft(t, dB1)
 	if got := plan(b); !holds(got, "shared: one") {
 		t.Fatalf("B's plan after adopting holds no shared change:\n%s", got)
 	}
-	if got := adoptions(false); !holds(got, firstCluster.name) || !holds(got, secondCluster.name) {
-		t.Fatalf("the clusters using ntp do not list both:\n%s", got)
+	// Both clusters use the name on the head; B's machine is the one that selects it.
+	all := adoptions(false)
+	ra, okA := row(all, a.s.cluster)
+	rb, okB := row(all, b.s.cluster)
+	if !okA || !okB || ra.Behind || rb.Behind || len(ra.Machines) != 0 || len(rb.Machines) != 1 || rb.Machines[0] != b.s.machine {
+		t.Fatalf("the clusters using ntp are not A (no machine) and B (its machine), both on the head: %+v", all)
 	}
 
 	// A changes it. Before publishing, A's draft lists the other cluster as unchanged; afterwards B is behind, and listed.
 	dA2 := a.draftWith(t, "shared two", []string{"fragment", "set", "ntp", "--draft", "<draft>", "--layer", "global", "--file", doc("two"), "--library"})
-	f.want(a.ctl("--context", "human", "draft", "impact", dA2), 0, secondCluster.name)
+	if oc := impact(a, dA2).OtherClusters; len(oc) != 1 || oc[0].Cluster != b.s.cluster || !oc[0].Unchanged {
+		t.Fatalf("A's draft changing ntp lists the other clusters as %+v; want B, unchanged", oc)
+	}
 	a.publishDraft(t, dA2)
 	behind := adoptions(true)
-	if !holds(behind, secondCluster.name) || holds(behind, firstCluster.name) {
-		t.Fatalf("the clusters behind ntp are not B alone:\n%s", behind)
+	if len(behind) != 1 || behind[0].Cluster != b.s.cluster || !behind[0].Behind || len(behind[0].Machines) != 1 || behind[0].Machines[0] != b.s.machine {
+		t.Fatalf("the clusters behind ntp are not B alone, with its machine: %+v", behind)
 	}
 
 	// B publishes something else: its plan holds nothing of A's new revision (criterion 1).
@@ -142,12 +198,14 @@ func TestSharedJourney(t *testing.T) {
 
 	// B adopts the new revision: the change is in its plan before any approval, and B is no longer behind.
 	dB3 := b.draftWith(t, "adopt ntp again", []string{"fragment", "adopt", "ntp", "--draft", "<draft>"})
-	f.want(b.ctl("--context", "human", "draft", "impact", dB3), 0, b.s.machine)
+	if m := impact(b, dB3).Machines; len(m) != 1 || m[0].Machine != b.s.machine {
+		t.Fatalf("B's draft adopting the new revision reaches %+v; want its machine", m)
+	}
 	b.publishDraft(t, dB3)
 	if got := plan(b); !holds(got, "shared: two") {
 		t.Fatalf("B's plan after adopting the new revision holds no change of it:\n%s", got)
 	}
-	if got := adoptions(true); holds(got, secondCluster.name) {
-		t.Fatalf("B is listed behind ntp after adopting its head:\n%s", got)
+	if got := adoptions(true); len(got) != 0 {
+		t.Fatalf("clusters are listed behind ntp after B adopted its head: %+v", got)
 	}
 }
