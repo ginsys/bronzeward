@@ -116,7 +116,7 @@ The facts every later section relies on, read from the code and the contracts.
 | Anonymous surface | `GET` and `HEAD /livez` answer `204` with no body and no authentication; every other request authenticates first, an unknown path and `OPTIONS` included | `internal/server/server.go:10-24`, `internal/api/api.go:260-272` |
 | Transport | The server listens on plain http; TLS terminates in front of it | `internal/server/server.go:34-42`; [persistence and API §9.1](persistence-api.md#91-conventions) |
 | Timeouts | Reading a request, body included, 30 s; headers 10 s; idle 2 min; no write timeout (the event stream outlives any fixed bound) | `internal/server/server.go:27-42` |
-| Request body | Every `POST` and `PUT` sends one JSON object (`{}` when the route takes no member) with `Content-Type: application/json`, at most 1 MiB, unknown members refused, each violation `400 invalid-request`; a `DELETE` with a body is `400`, while its `Content-Type` is not checked (clients send none) | `internal/api/body.go:36-72`, `internal/api/drafts.go:44`; [persistence and API §9.1](persistence-api.md#91-conventions) |
+| Request body | Every `POST` and `PUT` sends one JSON object (`{}` when the route takes no member) with `Content-Type: application/json`, at most 1 MiB, unknown members refused, each violation `400 invalid-request`; a `DELETE` with a body is `400`, while its `Content-Type` is not checked (clients send none). The one `POST` that takes no body at all is the detachment, `POST /drafts/{id}/adoptions/{kind}/{name}/detachments`: any byte is `400 invalid-request` ("this route takes no body"), so a client sends neither a body nor a `Content-Type` | `internal/api/body.go:36-72`, `internal/api/drafts.go:44`; [persistence and API §9.1](persistence-api.md#91-conventions) |
 | Success body | `application/json` | `internal/api/reads.go:35`, `internal/api/idempotency.go:85` |
 | Errors | `application/problem+json` with `type` `urn:bronzeward:problem:<code>`, `title`, `status`, `instance` (the request ID, also logged), optional `detail` and extension members; `detail` never names a value | `internal/api/problem.go:76-98`; [persistence and API §9.4](persistence-api.md#94-errors) |
 | Request ID | Every API answer, authenticated or not, carries `Bronzeward-Request-ID`, equal to the `instance` of a problem the request answers; a replayed stored problem keeps the `instance` of the request that stored it, while the header names the replaying request; liveness carries none | [persistence and API §9.1](persistence-api.md#91-conventions) |
@@ -124,7 +124,7 @@ The facts every later section relies on, read from the code and the contracts.
 | Epoch headers | A response to an authenticated request carries `Bronzeward-Epoch`, and `Bronzeward-Recovery-Mode: true` while recovery mode was in effect, as the request read them: in the read that decided the answer where one did, otherwise in the installation-state read made once it authenticated; a committed recovery entry or exit names the epoch and mode it leaves in place, and an entry committing after the read can make a refusal name the epoch it replaced; `401`, `403 identity-revoked`, liveness and a `503` from authentication or from that installation-state read carry neither | `internal/api/api.go:267-283`, `internal/api/api.go:325-333`, `internal/api/problem.go:68-71`; [persistence and API §9.1](persistence-api.md#91-conventions) |
 | Pagination | `limit` 1-500, default 50; opaque `cursor`; answer `{"items": [...], "next": "..."}` with `next` omitted on the last page; a cursor carries its epoch; one from another epoch, or one that does not parse, is `400 cursor-invalid`; any other query key is `400` | `internal/api/acts.go:33`, `internal/api/acts.go:135-160`, `internal/api/reads.go:59-63`, `internal/api/reads.go:92-112` |
 | ETags | Strong `"<revision>-<token>"`, token replaced on every write; served on drafts and source heads; `If-Match` required on draft-scoped writes, publication and ingestion start; missing `428 precondition-required`, mismatch `412 precondition-failed`; no `If-None-Match` | `internal/api/routes.go:98-119`, `internal/api/api.go:407-416`; [persistence and API §4.1](persistence-api.md#41-etags) |
-| Idempotency | Every `POST`, `PUT`, `DELETE` needs one `Idempotency-Key` of 16-128 `[A-Za-z0-9_-]` (`428 idempotency-key-required` if absent); scoped per principal; same request replays with `Idempotent-Replayed: true`; another request under the key is `422 idempotency-key-reused`; a record from an earlier epoch is `409 conflict`; with no record, a `Bronzeward-Expected-Epoch` naming another epoch is `412 epoch-mismatch` ([§8.4](#84-idempotency-and-ambiguous-responses) item 3, A6) | `internal/api/api.go:394-405`, `internal/api/idempotency.go:41-43`, `internal/api/idempotency.go:60-92`, `internal/api/idempotency.go:98-106`; [persistence and API §7.2](persistence-api.md#72-behavior) |
+| Idempotency | Every `POST`, `PUT`, `DELETE` but `POST /discoveries`, which only reads and takes none ([§3.1](#31-reads)), needs one `Idempotency-Key` of 16-128 `[A-Za-z0-9_-]` (`428 idempotency-key-required` if absent); scoped per principal; same request replays with `Idempotent-Replayed: true`; another request under the key is `422 idempotency-key-reused`; a record from an earlier epoch is `409 conflict`; with no record, a `Bronzeward-Expected-Epoch` naming another epoch is `412 epoch-mismatch` ([§8.4](#84-idempotency-and-ambiguous-responses) item 3, A6) | `internal/api/api.go:394-405`, `internal/api/idempotency.go:41-43`, `internal/api/idempotency.go:60-92`, `internal/api/idempotency.go:98-106`; [persistence and API §7.2](persistence-api.md#72-behavior) |
 | Unknown commit | A commit whose outcome the server could not learn is `500 internal-error`, "retrying with the same Idempotency-Key answers it" | `internal/api/tx.go:312`; [persistence and API §9.4](persistence-api.md#94-errors) |
 | Asynchronous work | Ingestion start, mark, continuation, takeover and publication answer `202` with an operation; plans and approvals `201` | [persistence and API §8](persistence-api.md#8-asynchronous-operations), [§9.2](persistence-api.md#92-resources-and-routes) |
 | Events | `GET /operations/{id}/events` is a cursor-paged JSON list, or Server-Sent Events when `Accept` contains `text/event-stream`; event ID `<epoch>:<number>`; resume with `Last-Event-ID`; an ID from another epoch gets `event: reset` and a replay from the start; after 15 s with nothing sent the stream sends the comment line `: keep-alive`, with no ID and no event ([persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress)); the stream ends when the operation is terminal or at the opening token's expiry; `unresolved` is not terminal | `internal/api/operations.go:183-353`; [persistence and API §8.3](persistence-api.md#83-the-resource-and-its-progress) |
@@ -135,7 +135,7 @@ The facts every later section relies on, read from the code and the contracts.
 
 ## 3. Action, endpoint and role matrix
 
-Every route of `internal/api/routes.go:78-136` with the client action that uses it. No route
+Every route of `internal/api/routes.go:100-173` with the client action that uses it. No route
 answers `501` today: each sets a read or an effect (`internal/api/api.go:366-374`). "Human"
 means the route refuses automation with `403 forbidden` and `humanOnly: true`
 (`internal/api/api.go:382-383`). "Keyed" means the body carries unextracted input, fingerprinted
@@ -147,7 +147,8 @@ its entry (`internal/api/api.go:350-353`), and "recovery" means a normal start r
 ### 3.1 Reads
 
 Every read takes any role (`internal/api/routes.go:60`, `internal/api/routes.go:65`) except the
-protected review and the identity read, which serves any authenticated credential, one that holds
+reads whose notes name `author` (the protected reviews and import bases, the Talos access read and
+`POST /discoveries`) and the identity read, which serves any authenticated credential, one that holds
 no role included (`internal/api/api.go:339`).
 
 | Client action | Route | Paged | ETag served | Notes |
@@ -172,6 +173,11 @@ no role included (`internal/api/api.go:339`).
 | act list | `GET /acts` | yes | no | |
 | recovery status | `GET /recovery` | no | no | |
 | dependency list / show / releases / alerts | `GET /dependencies` (`class` filter), `/dependencies/{id}`, `/dependencies/{id}/releases`, `/dependencies/{id}/alerts`, `/dependency-alerts` | lists | no | |
+| fragment, profile adoptions (the clusters on each revision) | `GET /fragments/{id}/adoptions`, `/profiles/{id}/adoptions` | list | no | filter `behind`, any other value `400 invalid-request`; `404 not-found` for a cluster-scope source (API revision 19, [persistence and API §9.2](persistence-api.md#92-resources-and-routes)) |
+| draft impact | `GET /drafts/{id}/impact` | no | no | what an open draft changes and reaches, before publication; `409 conflict` for a draft that is not open (API revision 19) |
+| principal names | `GET /principals?id=…` | no, one batch | no | what identifiers name, for display; takes no pagination (A7) |
+| Talos access held | `GET /clusters/{id}/talos-access` | no | no | `author`, human; `Cache-Control: no-store`; whether the cluster's CA key is held, never the key (API revision 12) |
+| find a cluster from a first key | `POST /discoveries` | no | no | `author`, human; the one `POST` that only reads: it takes no `Idempotency-Key`, no `Bronzeward-Expected-Epoch` and no query, records nothing and has no replay; the body is a first key's `kind`, `document` and `endpoint`; `200`, `no-store` (API revision 11, [persistence and API §9.2](persistence-api.md#92-resources-and-routes)) |
 | `whoami`, roles in the web header | `GET /identity` | no | no | the caller's kind, issuer and subject or service, principal, roles, expiry and epoch; takes no query (`internal/api/identity.go:22-59`). The web header shows the roles and says who is signed in by name from the provider's userinfo, not from this answer ([§9.3](#93-browser-sign-in) item 6), and shows no epoch |
 | version check, server settings, start mode | `GET /server` | no | no | the answering process's version, API revision, features, start mode and read-only settings ([persistence and API §9.2](persistence-api.md#92-resources-and-routes)); refused before a recovery start's entry |
 
@@ -192,6 +198,8 @@ no role included (`internal/api/api.go:339`).
 | `fragment set` / `rm` | `PUT` / `DELETE /drafts/{id}/fragments/{name}` | author | | yes | 200, ETag | `document` (PUT) | |
 | `profile set` / `rm` | `PUT` / `DELETE /drafts/{id}/profiles/{name}` | author | | yes | 200, ETag | | |
 | `assignment set` / `rm` | `PUT` / `DELETE /drafts/{id}/assignments/{machine}` | author | | yes | 200, ETag | | |
+| `fragment adopt`, `profile adopt`; `adopt --remove` | `PUT` / `DELETE /drafts/{id}/adoptions/{kind}/{name}`, `kind` `fragments` or `profiles` | author | | yes | 200, ETag | | |
+| `fragment detach`, `profile detach` | `POST /drafts/{id}/adoptions/{kind}/{name}/detachments` | author | | yes | 200, ETag | | |
 | `draft discard` | `POST /drafts/{id}/discard` | author | | yes | 200 | | |
 | `publish` | `POST /drafts/{id}/publications` | publisher | | yes | 202 | | |
 | `plan create`, `drift revert` | `POST /plans` | publisher | | | 201 | | normal |
@@ -208,7 +216,7 @@ no role included (`internal/api/api.go:339`).
 | `recovery takeover` / `resolve` | `POST /operations/{id}/takeovers` / `resolutions` | recovery-admin | yes | | 201 | | |
 | `identity revoke` | `POST /identity-revocations` | recovery-admin | yes | | 201 | | |
 
-Sources: `internal/api/routes.go:98-135`; the success status each handler returns (for example
+Sources: `internal/api/routes.go:100-173`; the success status each handler returns (for example
 `internal/api/inventory.go:172`, `internal/api/drafts.go:303`, `internal/api/ingestions.go:436`,
 `internal/api/cancellations.go:144`, `internal/api/publications.go:76`); and
 [persistence and API §9.2](persistence-api.md#92-resources-and-routes). The publisher's
@@ -686,7 +694,8 @@ Built in both clients; item 2's rule over every other enumeration was not traced
 
 Every request sends `Authorization` and `Accept: application/json` (or
 `text/event-stream` for a stream). Every `POST` and `PUT` sends a JSON object, `{}` when the route
-takes no member, with `Content-Type: application/json`; a `DELETE` sends neither
+takes no member, with `Content-Type: application/json`, except the detachment `POST`, which takes
+no body and sends neither; a `DELETE` sends neither
 ([§2](#2-the-api-a-client-meets) request body row). Every write
 sends exactly one `Idempotency-Key` ([§8.4](#84-idempotency-and-ambiguous-responses)) and, where
 [§3.2](#32-writes) lists it, exactly one `If-Match`; every write but the recovery entry also sends
@@ -1159,8 +1168,10 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    holds ETags and the started ingestions only); the block printed on standard error,
    `internal/client/write.go:143-166`, `cmd/bronzewardctl/main.go:258-260`; the repeat flags,
    `cmd/bronzewardctl/writes.go:33-37`, `cmd/bronzewardctl/writes.go:58-79`; the entry's block without
-   an epoch, `internal/client/write.go:151-153`, `cmd/bronzewardctl/recovery.go:243-260`. **Proposed:**
-   the refusals when a flag is missing or the principal or epoch differs; those were not read.
+   an epoch, `internal/client/write.go:151-153`, `cmd/bronzewardctl/recovery.go:243-260`. The
+   refusals are built too: the missing or empty flag, before any send
+   (`cmd/bronzewardctl/writes.go:58-79`), and the principal, then the epoch, after only item 3's
+   reads (`Client.CheckRepeat`, `internal/client/write.go:85-108`).
 5. **Browser.** The page holds pending writes in memory only. Leaving or reloading the page drops
    them; the outcome-unknown notice shows the key and the resource to read, and no repeat is
    offered afterwards. (Built in the web client, the only client the item names: the page's writes
@@ -1226,8 +1237,8 @@ Items 1 to 8 are built in the clients they name, except where marked **Proposed*
    body read ([#487](https://github.com/ginsys/bronzeward/issues/487)). The alternatives are D12
    in [§13](#13-alternatives-and-open-choices). (Built in both clients: the CLI's values,
    `internal/client/transport.go:91-95`; the web client's two bounds and their one signal per
-   attempt, `web/src/request.ts:97-110`, `web/src/request.ts:347-352`, with the event stream
-   exempt, `web/src/request.ts:263-271`; the web refusal whose answer was cut off,
+   attempt, `web/src/request.ts:117-124`, `web/src/request.ts:377-384`, `web/src/request.ts:393`, with the event stream
+   exempt, `web/src/request.ts:291-303`; the web refusal whose answer was cut off,
    `web/src/write.ts:439`, `web/src/states.tsx:21`, `web/src/states.tsx:143`.)
 
 ### 8.5 Epoch changes
@@ -2042,7 +2053,7 @@ abort signal, `web/src/auth.ts:445-461`; the redirect and its thresholds, `web/s
 `web/src/renewer.ts:155`, `web/src/renewer.ts:215`, `web/src/renewer.ts:289-292`; no rotation,
 `web/src/auth.ts:232`, `web/src/auth.ts:276`, `web/src/auth.ts:370-371`. Item 4: neither `iframe` nor
 `prompt=none` appears in `web/src` outside tests. Item 5: `web/src/request.ts:4`,
-`web/src/request.ts:356`, with the other fetches at `web/src/auth.ts:430`, `web/src/auth.ts:448`,
+`web/src/request.ts:386`, with the other fetches at `web/src/auth.ts:430`, `web/src/auth.ts:448`,
 `web/src/userinfo.ts:31` and `web/src/config.ts:30`. **Proposed** for item 5's list of provider
 endpoints: it adds the discovery document, which the page fetches (`web/src/auth.ts:60`) and the
 sentence does not list. Item 6: `profile`,
@@ -2284,7 +2295,7 @@ any script running in the page can call the API as the operator. (Built in the w
 tests for `https?://` finds a documentation link (`web/src/recovery.tsx:95`), the icon attribution comment
 (`web/src/icons.tsx:1`) and URL-shape strings,
 and a search for `sentry|analytics|telemetry|onerror|unhandledrejection|sendBeacon|EventSource|WebSocket`
-finds nothing; the network calls are `web/src/request.ts:356`, `web/src/auth.ts:60` (discovery),
+finds nothing; the network calls are `web/src/request.ts:386`, `web/src/auth.ts:60` (discovery),
 `web/src/auth.ts:430` (revocation), `web/src/auth.ts:448` (token), `web/src/config.ts:30` and
 `web/src/userinfo.ts:31`. No `dangerouslySetInnerHTML`, `innerHTML`,
 `outerHTML`, `insertAdjacentHTML` or `document.write` appears in `web/src` outside tests. There is no
@@ -2295,7 +2306,7 @@ syntax highlighting: `yaml` parses (`web/src/position.ts:7`, `web/src/marks.tsx:
 **CSRF.** The API authenticates only by the `Authorization` header and never by a cookie, so a
 cross-site request carries no credential. This holds only while no cookie authentication is
 added; any future cookie needs its own CSRF design. (The server's part is a server fact. Built in
-both clients: the web client sends `credentials: "omit"`, `web/src/request.ts:362`,
+both clients: the web client sends `credentials: "omit"`, `web/src/request.ts:392`,
 `web/src/auth.ts:25`, `web/src/userinfo.ts:31`; the CLI's `http.Client` has no cookie jar,
 `internal/client/transport.go:89-96`, and `Jar` and `CookieJar` appear nowhere in `internal/client`.)
 
@@ -2307,7 +2318,7 @@ which stays **Proposed**; item 1's server half is a server fact. Sources follow 
 1. Every API read from the web client uses `fetch` with `cache: 'no-store'`. The server sends
    `Cache-Control: no-store` on every API answer ([§2](#2-the-api-a-client-meets) caching row,
    served by A3 for G13), so a browser or an intermediary keeps nothing even from another client.
-   (Built: `web/src/request.ts:356-363`, `cache: "no-store"` at `:360`, the one call for reads,
+   (Built: `web/src/request.ts:386-394`, `cache: "no-store"` at `:390`, the one call for reads,
    writes and streams; `web/src/claim.tsx:141-142` and `:207-208` go through it.)
 2. The application uses no service worker. (Built: `serviceWorker` appears nowhere in `web/src` or
    `web/index.html`.)
@@ -2698,7 +2709,7 @@ Sources follow each item.
    Beside the opened text the page says that a value found there that should be hidden cannot be
    marked on this import, links the page where the machine is imported again (where Marks is
    filled in), and says the copy read stays stored as it is. (Built: `web/src/claim.tsx:141-142`,
-   `:207-208` through `web/src/request.ts:360`; the read-only element, `web/src/claim.tsx:257`; the
+   `:207-208` through `web/src/request.ts:390`; the read-only element, `web/src/claim.tsx:257`; the
    discard, `web/src/claim.tsx:116-122`, `:172`, `:222`; the action for any `author` and the refusal in
    words, `web/src/claim.tsx:190`, `:195`, `:235`, `:240`; the note and the link, `web/src/claim.tsx:258-259`,
    shown on the import base view and not on the review view, where the marks panel stands.)
@@ -2831,7 +2842,7 @@ AMB-10, AMB-11, AMB-13, TLS-01) and the web-only rows (AUTH-08, AUTH-11, TLS-03)
 one client by nature. Whether a case passes is a CI fact this change did not read.
 
 **Proposed**, where today differs: (a) AMB-14 has no case record in either client: its
-behaviour exists in both (web `web/src/request.ts:103-104`, CLI `internal/client/transport.go:93-95`,
+behaviour exists in both (web `web/src/request.ts:117-118`, CLI `internal/client/transport.go:93-95`,
 with unit tests only) and `AMB-14` appears in `conformance/` only inside the text of `PROT-06.yaml`.
 (b) PROT-07 has a web record in `web/e2e/auth/protected.e2e.ts:265` and no `conformance/cases/PROT-07.yaml`;
 the CLI's behaviour exists (`cmd/bronzewardctl/importbase.go:27-76`) and is tested only by pty unit
