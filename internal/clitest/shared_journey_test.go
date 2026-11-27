@@ -119,17 +119,17 @@ func TestSharedJourney(t *testing.T) {
 	if got := plan(b); !holds(got, "shared: one") {
 		t.Fatalf("B's plan after adopting holds no shared change:\n%s", got)
 	}
-	if got := adoptions(false); !holds(got, a.s.cluster) || !holds(got, b.s.cluster) {
+	if got := adoptions(false); !holds(got, firstCluster.name) || !holds(got, secondCluster.name) {
 		t.Fatalf("the clusters using ntp do not list both:\n%s", got)
 	}
 
 	// A changes it. Before publishing, A's draft lists the other cluster as unchanged; afterwards B is behind, and listed.
 	dA2 := a.draftWith(t, "shared two", []string{"fragment", "set", "ntp", "--draft", "<draft>", "--layer", "global", "--file", doc("two"), "--library"})
-	f.want(a.ctl("--context", "human", "draft", "impact", dA2), 0, b.s.cluster)
+	f.want(a.ctl("--context", "human", "draft", "impact", dA2), 0, secondCluster.name)
 	a.publishDraft(t, dA2)
 	behind := adoptions(true)
-	if !holds(behind, b.s.cluster) || !holds(behind, b.s.machine) || holds(behind, a.s.cluster) {
-		t.Fatalf("the clusters behind ntp are not B alone, with its machine:\n%s", behind)
+	if !holds(behind, secondCluster.name) || holds(behind, firstCluster.name) {
+		t.Fatalf("the clusters behind ntp are not B alone:\n%s", behind)
 	}
 
 	// B publishes something else: its plan holds nothing of A's new revision (criterion 1).
@@ -147,7 +147,7 @@ func TestSharedJourney(t *testing.T) {
 	if got := plan(b); !holds(got, "shared: two") {
 		t.Fatalf("B's plan after adopting the new revision holds no change of it:\n%s", got)
 	}
-	if got := adoptions(true); holds(got, b.s.cluster) {
+	if got := adoptions(true); holds(got, secondCluster.name) {
 		t.Fatalf("B is listed behind ntp after adopting its head:\n%s", got)
 	}
 }

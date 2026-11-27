@@ -216,8 +216,8 @@ func docShared(t *testing.T, blocks map[string]string, ran map[string]bool) {
 	p.file("ntp.yaml", "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  node.example.test/shared: two\n")
 	p.set("<draft>", a.draftWith(t, "shared ntp, newer"))
 	p.must("shared-fragments-db-3", "")
-	if out := p.must("shared-fragments-db-4", ""); !strings.Contains(out, b.s.cluster) {
-		t.Errorf("fragment adoptions --behind did not list the second cluster %s:\n%s", b.s.cluster, out)
+	if out := p.must("shared-fragments-db-4", ""); !strings.Contains(out, secondCluster.name) {
+		t.Errorf("fragment adoptions --behind did not list the second cluster %s:\n%s", secondCluster.name, out)
 	}
 }
 
