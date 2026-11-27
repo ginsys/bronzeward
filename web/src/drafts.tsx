@@ -786,6 +786,8 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   // A new fragment's typed name, until the pane edits the entry its Save created (H1).
   const [typed, setName] = useState("");
   const name = entry === undefined ? typed : nameOf(entry);
+  // The name as a person reads it, a server's name only where it is safe text; `name` stays raw for the request and the identity.
+  const called = name === "" ? "" : (safeText(name) ?? NAME_NOT_SHOWN);
   // Whether the entry is the shared (library) one: chosen for a new entry, fixed by the entry it opens (never changed by a save).
   const [sharedNew, setSharedNew] = useState(false);
   const shared = entry === undefined ? sharedNew : isShared(entry);
@@ -815,7 +817,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
   const editable = open && !waits;
   // Guarded also once the draft no longer takes writes (discarded by another author): the text is
   // still shown, and leaving drops it.
-  useUnsaved(`fragment ${name || "(new)"} of draft ${draftCalled(draft)}`, holdsUnsaved(held, saved, conflict?.mine));
+  useUnsaved(`fragment ${called || "(new)"} of draft ${draftCalled(draft)}`, holdsUnsaved(held, saved, conflict?.mine));
   // The draft revision the page shows now, for a revision read that answers later.
   const drafted = useRef(draft.revision);
   // The done writes now, for a revision read that answers after one finished.
@@ -977,8 +979,8 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
     hold({ ...held, declared: next });
   };
   return (
-    <section aria-label={`Fragment ${name || "(new)"}`}>
-      <h3>Fragment {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : name}{shared && ` (${SHARED_LIBRARY})`}</h3>
+    <section aria-label={`Fragment ${called || "(new)"}`}>
+      <h3>Fragment {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : called}{shared && ` (${SHARED_LIBRARY})`}</h3>
       {entry === undefined && <p><label><input type="checkbox" checked={sharedNew} onChange={(e) => setSharedNew(e.target.checked)} /> {SHARED_CHOICE}</label></p>}
       <p>
         <label>Layer:{" "}

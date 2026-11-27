@@ -35,10 +35,10 @@ export type State = { kind: "edits" | "removed" | "none" } | { kind: "stops"; ag
 export function stateOf(slot: Slot, rows: readonly Adoption[], cluster: string, head: string): State {
   const mine = rows.filter((r) => r.cluster === cluster);
   const own = mine.find((r) => r.via === null);
-  // `again`: the entry's base (the counter it was staged on) is not the row's now, so publication would refuse it; a press records the
-  // current counter. A removal whose row is gone cannot be pressed again (404), and over a removed row neither can a removal of a
+  // `again`: the entry's base (the counter it was staged on, none when the cluster had no row) is not the row's now, so publication
+  // would refuse it; a press records the current counter. A removal whose row is gone cannot be pressed again (404), and over a removed row neither can a removal of a
   // re-adoption (`removable`, persistence-api §3.1.1).
-  if (slot?.kind === "adopts") return { kind: "adopts", revision: slot.revision, behind: slot.revision !== head, removable: slot.base === null || own !== undefined, again: slot.base !== null && own?.adoptionRevision !== slot.base };
+  if (slot?.kind === "adopts") return { kind: "adopts", revision: slot.revision, behind: slot.revision !== head, removable: slot.base === null || own !== undefined, again: (own?.adoptionRevision ?? null) !== slot.base };
   if (slot?.kind === "stops") return { kind: "stops", again: own !== undefined && own.adoptionRevision !== slot.base };
   if (slot !== undefined) return { kind: slot.kind };
   if (own !== undefined) return { kind: "follows", revision: own.revision, behind: own.behind };

@@ -15,8 +15,9 @@ import { LAYERS } from "./layers.ts";
 import { short, useList, usePending, useSettled } from "./list.tsx";
 import { machineOption, machineText, sharedAddresses } from "./machines.tsx";
 import { draftCalled } from "./titles.ts";
+import { safeText } from "./safe.ts";
 import { claimedName, scopeMember, scopeQuery } from "./shared-writes.ts";
-import { SHARED_CHOICE, SHARED_PROFILE_PINS, SHARED_REMOVE_SENTENCE, SHARED_SAVE_SENTENCE, THE_MACHINE } from "./words.ts";
+import { NAME_NOT_SHOWN, SHARED_CHOICE, SHARED_PROFILE_PINS, SHARED_REMOVE_SENTENCE, SHARED_SAVE_SENTENCE, THE_MACHINE } from "./words.ts";
 import { type EmbeddedPath, references } from "./position.ts";
 import { Action } from "./shell.tsx";
 import { Conflict, Status } from "./states.tsx";
@@ -104,6 +105,8 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const read = useSettled();
   const [typed, setName] = useState("");
   const name = entry === undefined ? typed : (entry.name ?? "");
+  // The name as a person reads it, a server's name only where it is safe text; `name` stays raw for the request and the identity.
+  const called = name === "" ? "" : (safeText(name) ?? NAME_NOT_SHOWN);
   // Whether the entry is the shared (library) one: chosen for a new entry, fixed by the entry it opens.
   const [sharedNew, setSharedNew] = useState(false);
   const shared = entry === undefined ? sharedNew : isShared(entry);
@@ -118,7 +121,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const open = draft.state === "open";
   const editable = open && !waits;
   const unsavedList = holdsUnsaved(held, saved, conflict?.mine);
-  useUnsaved(`profile ${name || "(new)"} of draft ${draftCalled(draft)}`, unsavedList);
+  useUnsaved(`profile ${called || "(new)"} of draft ${draftCalled(draft)}`, unsavedList);
   const drafted = useRef(draft.revision);
   // The done writes now, for a revision read that answers after one finished (as in the fragment pane).
   const finished = useRef(done);
@@ -131,7 +134,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   const [names, setNames] = useState<Record<string, string>>({});
   const pins = pinsOf(held);
   const known = new Map(options.map((c) => [c.revision, c.name]));
-  const label = (revision: string) => known.get(revision) ?? (names[revision] || short(revision));
+  const label = (revision: string) => safeText(known.get(revision) ?? (names[revision] || short(revision))) ?? NAME_NOT_SHOWN;
   const lookup = unknownPins(pins, known, names, !listed).join(",");
   // Each uncached pin is asked for once, on its own: an answer changes `lookup` and restarts this
   // effect, which must not ask again for a pin whose read is still in flight.
@@ -274,8 +277,8 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
   );
   const pending = usePending(fragments, "fragments");
   return (
-    <section aria-label={`Profile ${name || "(new)"}`}>
-      <h3>Profile {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : name}{shared && ` (${SHARED_LIBRARY})`}</h3>
+    <section aria-label={`Profile ${called || "(new)"}`}>
+      <h3>Profile {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : called}{shared && ` (${SHARED_LIBRARY})`}</h3>
       {entry === undefined && <p><label><input type="checkbox" checked={sharedNew} onChange={(e) => { setSharedNew(e.target.checked); hold([]); }} /> {SHARED_CHOICE}</label></p>}
       <p>{entry === undefined ? "new" : change(entry)}{unsavedList && " -> unsaved"}</p>
       <p>{shared ? SHARED_PROFILE_PINS : PINS_STATEMENT}</p>
@@ -301,7 +304,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
           <label>Fragment:{" "}
             <select value={pick} onChange={(e) => setPick(e.target.value)} disabled={!editable}>
               <option value="">choose</option>
-              {free.map((c) => <option key={c.revision} value={c.revision}>{c.name} ({c.from === "draft" ? "this draft" : "base"}, {short(c.revision)})</option>)}
+              {free.map((c) => <option key={c.revision} value={c.revision}>{safeText(c.name) ?? NAME_NOT_SHOWN} ({c.from === "draft" ? "this draft" : "base"}, {short(c.revision)})</option>)}
             </select>
           </label>{" "}
           <button type="button" onClick={add} disabled={!editable || pick === ""}>Add to profile</button>
