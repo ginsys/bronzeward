@@ -3977,13 +3977,14 @@ issue a token to an identity or revoke one.
   valid token at a time, the same roles and permissions and never more. A token
   that authentication refuses (revoked, or from an earlier epoch, §12.3) cannot
   renew. Issuing a token to another identity and revoking one stay with the tool.
-- **Standing approval rules (choice §17.55).** A person writes a rule in
-  advance, and Bronzeward approves a plan that fits it. A rule may require
+- **Standing approval rules (choice §17.55).** A person with the `approver`
+  role writes a rule in advance, and Bronzeward approves a plan that fits it. A rule may require
   approved content (profile or template revisions), and where it does, anything
   else waits for a person. An approval by rule is not an approval by a service
-  identity: automation is still never `approver`. The database requires an
-  approval's approver to be a human today, so an approval by rule needs a record
-  that names the rule and its author. A rule may approve adoption plans and a
+  identity: automation is still never `approver`. An approval by rule records
+  the rule and its author, which is part of the option the owner chose. The
+  database requires an approval's approver to be a human today, so this needs
+  a record of a new kind. A rule may approve adoption plans and a
   no-reboot apply to a worker, the latter only with approved content. **It cannot
   be enabled for a send until a worker restriction is built and tested:** a plan
   whose machine is not a worker is refused where it is created or sent. A text
@@ -3995,8 +3996,8 @@ issue a token to an identity or revoke one.
   maintenance mode until it has an authenticated channel or hardware attestation,
   and approves its first configuration. No route is specified for either; the
   Phase 2 contract (design §18.3) starts from these decisions.
-- **Not decided.** A rule's fields, expiry, revocation, effect on a restore and
-  what it records; which machine-specific parts of a composed configuration may
+- **Not decided.** A rule's fields, expiry, revocation and effect on a restore,
+  and what an approval by rule records beyond the rule and its author; which machine-specific parts of a composed configuration may
   differ from approved content; the permission names; whether a renewed token's
   lifetime is bounded beyond §10.2's limits; whether automation reads whether a
   cluster's key is held (`GET /clusters/{id}/talos-access`); per-cluster limits;
