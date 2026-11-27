@@ -4025,7 +4025,8 @@ makes none. "Automation" is a service identity with a Bronzeward-issued token
 covers. The server's refusal is the authority, whatever a client shows. Today an
 automation holding `author` and `publisher` can do the steps below that name
 those roles, except the imports (steps 6 and 16 of run 1), which stay with a
-person; every other step of run 1 needs a person or the controller.
+person; step 14 is a read open to any role; every other step of run 1 needs a
+person or the controller.
 
 **Run 1: bring an existing cluster under management and keep it current.**
 
