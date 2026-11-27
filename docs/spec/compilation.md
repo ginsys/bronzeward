@@ -488,9 +488,10 @@ and its instance. In both modes the owner string is
 `<instance>/<process id>/<start token>`, its instance named by the deployment's
 configuration. An owner's own transition (lease extension, storing the
 payload, the pause, the draft transaction's release) checks owner and owner
-generation, and requires the state `held` or `resumed`, and a takeover, a mark
-or a continuation (§3.6) checks the generation it read, each in the same
-conditional `UPDATE` that makes the change. That is the shape DB §4.4 measured: a check followed by a separate
+generation, and requires the state `held` or `resumed`. A takeover (§3.4) checks
+its own conditions and raises the generation, and a mark or a continuation
+(§3.6) checks the generation it read. Each is made in the same conditional
+`UPDATE` that makes the change. That is the shape DB §4.4 measured: a check followed by a separate
 write recorded a stale attempt in its control row 018
 ([DB §4.4](../design/research/20260924-database-semantics.md#44-s4-ownership-transitions)).
 
@@ -2249,10 +2250,10 @@ check.
 6. **Superset recorded, effective recorded.** Every release carries both
    dependency records.
 7. **One owner per claim generation.** An owner's own transition is
-   conditional on the owner and its generation, and a takeover, mark or
-   continuation on the generation it read (§3.2); the sweep (§3.5) and an
-   operator's abandonment take none, and only end a claim. No transition
-   revives a lapsed lease for its old owner.
+   conditional on the owner and its generation, a takeover on its own
+   conditions (§3.4) and a mark or continuation on the generation it read
+   (§3.2); the sweep (§3.5) and an operator's abandonment take no generation and
+   only end a claim. No transition revives a lapsed lease for its old owner.
 8. **No unkeyed secret digest is persisted.** The only unkeyed digests over
    plaintext are the whole-configuration digests of §4.1; an artifact's
    ciphertext digest (§11) is over ciphertext.
