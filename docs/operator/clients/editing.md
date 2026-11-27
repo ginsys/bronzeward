@@ -114,5 +114,7 @@ lists them.
 This page has no screenshot: an editor page shows configuration text, and no screenshot of one is
 kept in this documentation.
 
+To use one fragment in several clusters, see [sharing a fragment between clusters](shared-fragments.md).
+
 Next: [import a machine's configuration under review](protected-import.md), or, when the draft is
 finished, [publish it](publication.md).

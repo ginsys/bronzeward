@@ -108,6 +108,7 @@ func TestDocBlocks(t *testing.T) {
 		{"editing and recording a machine", docEditing},
 		{"connect a cluster", docConnect},
 		{"publication, import, adoption, tracking and plans", docPublication},
+		{"shared fragments", docShared},
 		{"drift", docDrift},
 		{"recovery", docRecovery},
 	} {
@@ -198,6 +199,26 @@ func docPublication(t *testing.T, blocks map[string]string, ran map[string]bool)
 	adopted(t, e, p.values["<plan>"][0])
 	release("--profiles", "workers")
 	p.must("plan-and-approval-db-4", "y\n")
+}
+
+// docShared runs the shared fragments page on two clusters of one server, as TestSharedJourney does: cluster A
+// publishes the shared fragment, cluster B adopts it, A publishes a newer revision, and B is listed behind.
+func docShared(t *testing.T, blocks map[string]string, ran map[string]bool) {
+	a := newPlanEnv(t)
+	b := a.addCluster(t, secondCluster)
+	p := onPlanEnv(t, a, blocks, ran)
+	p.file("ntp.yaml", "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  node.example.test/shared: one\n")
+	p.set("<draft>", a.draftWith(t, "shared ntp"))
+	p.must("shared-fragments-db-1", "")
+	p.set("<machine>", b.s.machine)
+	p.set("<draft>", b.draftWith(t, "adopt ntp"))
+	p.must("shared-fragments-db-2", "")
+	p.file("ntp.yaml", "apiVersion: v1alpha1\nkind: KubeNodeConfig\nlabels:\n  node.example.test/shared: two\n")
+	p.set("<draft>", a.draftWith(t, "shared ntp, newer"))
+	p.must("shared-fragments-db-3", "")
+	if out := p.must("shared-fragments-db-4", ""); !strings.Contains(out, b.s.cluster) {
+		t.Errorf("fragment adoptions --behind did not list the second cluster %s:\n%s", b.s.cluster, out)
+	}
 }
 
 func docDrift(t *testing.T, blocks map[string]string, ran map[string]bool) {
