@@ -42,7 +42,8 @@ type Member struct {
 }
 
 // Result is what a cluster reports. Contract is the minor of Version; Supported is whether it is
-// the minor of the machinery this binary links, the one the server renders. KubernetesEndpoint is
+// on the list of supported contracts and the machinery this binary links is not older than it, the
+// rule the server renders by. KubernetesEndpoint is
 // a proposal for the operator to replace: the endpoint the control-plane members that answered all
 // report as the cluster's own (clusterEndpoint), else the first control-plane member's address.
 type Result struct {

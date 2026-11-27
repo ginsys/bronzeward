@@ -1934,12 +1934,13 @@ content.
 
 The release's renderer and contract record (compilation §10.2) is taken
 before T3, by the compiler: the contract is the cluster's, refused unless it is
-the minor of the machinery module the server was built with; the machinery
+on the list of supported contracts and not newer than the minor of the machinery
+module the server was built with; the machinery
 version and checksum are that build's own record of the module, and a build
 that does not record them, or holds a replaced module, cannot publish (a server
 fault, `500`); the Kubernetes version is the kubelet image tag of every covered
 machine's validated configuration, which must agree across them and lie in the
-machinery's `SupportedWith` window. A refused contract or Kubernetes version is
+`SupportedWith` window of the cluster's contract. A refused contract or Kubernetes version is
 `422 validation-failed`, naming the rule and the check, never the image or a path
 (compilation choices §16.32 to §16.34).
 

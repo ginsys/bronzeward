@@ -565,7 +565,7 @@ A member does not answer when none of its listed addresses answers in full: an a
 answers as another node (a reused address), or whose platform or SMBIOS read fails with anything
 but a missing resource, is no answer, and the next address is tried. Each address has its own
 10-second deadline, and the first reads from the endpoint have one of 15 seconds, so a node that
-accepts a connection and says nothing does not hold the command. A cluster whose contract is not the one this client's machinery supports gets none for the
+accepts a connection and says nothing does not hold the command. A cluster whose contract is not on the list of supported contracts that this client's machinery is not older than gets none for the
 cluster either, because the server refuses it. The proposed contract is the minor of the Talos
 version and the proposed Kubernetes endpoint is a guess for the operator to replace.
 

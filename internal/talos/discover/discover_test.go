@@ -346,6 +346,7 @@ func TestDiscoverSupportedContract(t *testing.T) {
 	}{
 		"the linked machinery's own minor": {"v1.14.5", true},
 		"a newer machinery":                {"v1.15.0", true},
+		"a newer prerelease machinery":     {"v1.15.0-beta.1", true},
 		"an older machinery":               {"v1.13.6", false},
 		"no recorded machinery":            {"", false},
 	} {
