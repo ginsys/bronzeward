@@ -83,12 +83,14 @@ describe("the Shared names block on a draft's page", () => {
     expect(text).toContain("Adopt records in this draft that this cluster follows the shared fragment ntp");
   });
 
-  test("the draft's own entry decides the view: an adoption at the head offers only Stop following", async () => {
+  test("the draft's own entry decides the view: an adoption at the head says so, and offers Stop following and Adopt again", async () => {
     await mount([{ kind: "adoption", of: "fragment", name: "ntp", head: "frg_1", base: 2, revision: "frv_head" }]);
     await open();
     await settled();
     expect(box.textContent).toContain("This draft adopts");
-    expect(button("Adopt ntp")).toBeUndefined();
+    // The row is on the counter the entry was staged on, so nothing says it is stale; Adopt stays for a row another draft removed.
+    expect(box.textContent).not.toContain("Adopt again to record the current one.");
+    expect(button("Adopt ntp")).toBeDefined();
     expect(button("Stop following ntp")).toBeDefined();
   });
 

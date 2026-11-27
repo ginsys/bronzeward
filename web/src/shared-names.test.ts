@@ -54,12 +54,15 @@ describe("this cluster's view of a shared name and what a press may do", () => {
       const gone = stateOf(adopts(2), [], "cl_1", head);
       expect(gone).toMatchObject({ behind: false, again: true, removable: false });
       expect([canAdopt(gone), canStop(gone)]).toEqual([true, false]);
-      // Still on the counter it was staged on, or introduced with no row before: nothing to press again.
+      // Still on the counter it was staged on, or introduced with no row before: nothing is known to be stale (`again` false), yet
+      // Adopt stays offered, because a row another draft added and removed again is not in the list (no state shows it) and
+      // pressing only records the current counter.
       const same = stateOf(adopts(2), [row({ adoptionRevision: 2, revision: head })], "cl_1", head);
-      expect([canAdopt(same), canStop(same)]).toEqual([false, true]);
+      expect(same).toMatchObject({ again: false });
+      expect([canAdopt(same), canStop(same)]).toEqual([true, true]);
       const fresh = stateOf(adopts(null), [], "cl_1", head);
       expect(fresh).toMatchObject({ again: false });
-      expect(canAdopt(fresh)).toBe(false);
+      expect([canAdopt(fresh), canStop(fresh)]).toEqual([true, true]);
       // Staged with no row (base none), then another draft adopted the name for this cluster: the row now holds a counter the
       // entry's absent base is not, so publication refuses it, though the revision is the head's and the cluster is not behind.
       const adoptedFirst = stateOf(adopts(null), [row({ adoptionRevision: 1, revision: head })], "cl_1", head);
@@ -110,7 +113,7 @@ describe("this cluster's view of a shared name and what a press may do", () => {
       { kind: "adopts", revision: "r", behind: true, removable: false, again: false },
       { kind: "stops", again: true }, { kind: "adopts", revision: "r", behind: false, removable: false, again: true },
     ] as const;
-    expect(states.map(canAdopt)).toEqual([true, true, true, false, false, false, true, false, true, true, true, true]);
+    expect(states.map(canAdopt)).toEqual([true, true, true, false, false, true, true, false, true, true, true, true]);
     expect(states.map(canStop)).toEqual([false, false, false, false, false, true, true, true, true, false, true, false]);
   });
 });

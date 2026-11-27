@@ -45,8 +45,10 @@ export function stateOf(slot: Slot, rows: readonly Adoption[], cluster: string, 
   const through = mine.find((r) => r.via !== null)?.via;
   return through == null ? { kind: "none" } : { kind: "via", via: through };
 }
-// Adopt where the cluster is not on the head's revision and the name has a head; Stop following where something is followed.
-export const canAdopt = (s: State) => s.kind === "none" || s.kind === "stops" || s.kind === "via" || (s.kind === "adopts" && (s.behind || s.again)) || (s.kind === "follows" && s.behind);
+// Adopt where the cluster is not on the head's revision and the name has a head, and for any adoption the draft staged: a row another
+// draft removed is not in the list, so a staged entry gone stale cannot always be seen, and pressing again only records the
+// current counter. Stop following where something is followed.
+export const canAdopt = (s: State) => s.kind === "none" || s.kind === "stops" || s.kind === "via" || s.kind === "adopts" || (s.kind === "follows" && s.behind);
 export const canStop = (s: State) => s.kind === "follows" || (s.kind === "adopts" && s.removable) || (s.kind === "stops" && s.again);
 
 /** A name as a person reads it: the server's name where it is safe text. */

@@ -107,8 +107,17 @@ describe("the shared choice of the editors", () => {
     expect(box.querySelector("h3")!.textContent).toContain("(name not shown)");
     expect(box.textContent).not.toContain("‮");
     expect(box.querySelector("section")!.getAttribute("aria-label")).toBe("Fragment (name not shown)");
+    // The write answers done: the message says it by the same safe name, though the request kept the raw one.
+    submit.mockImplementation(async (w: unknown) => {
+      (w as { outcome: unknown }).outcome = { kind: "done", status: 200, data: {}, replayed: false, etag: '"6-t"' };
+      return (w as { outcome: never }).outcome;
+    });
     await act(async () => void button("Remove")!.click());
     expect(sent(0)["path"]).toBe(`/drafts/${DRF}/fragments/${encodeURIComponent("a‮b")}?scope=library`);
+    // Any render after the answer reads it; a keystroke is one.
+    await type(field("textarea"), "x");
+    expect(box.querySelector('[data-testid="fragment-write"]')!.textContent).toContain("Fragment (name not shown) removed from draft");
+    expect(box.textContent).not.toContain("‮");
   });
 
   test("a cluster entry's Remove sends no query", async () => {
