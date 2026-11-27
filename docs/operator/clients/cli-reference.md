@@ -21,8 +21,8 @@ commands:
   cluster      list, show, add, discover, first-key, onboard
   machine      list, show, timeline, observations, add, set-endpoint, rename, freeze, unfreeze
   drift        show, adopt, revert
-  fragment     show, history, set, rm
-  profile      show, history, set, rm
+  fragment     show, history, set, rm, adopt, detach
+  profile      show, history, set, rm, adopt, detach
   assignment   show, history, set, rm
   draft        list, show, create, discard
   import       start, status, review, mark, continue, takeover, abandon
@@ -609,6 +609,8 @@ configuration fragments
   fragment history            a fragment's revisions
   fragment set                set a fragment in a draft
   fragment rm                 remove a fragment from a draft
+  fragment adopt              adopt a shared fragment in a draft
+  fragment detach             copy an adopted fragment into the cluster and stop following it
 
 Run bronzewardctl help fragment <command> for a command's flags, notes and roles.
 ```
@@ -643,20 +645,22 @@ Global flags and exit codes: bronzewardctl help global.
 
 ```text
 usage: bronzewardctl fragment set <name> --draft <draft> --layer <layer> --file <path or -> [--declarations <path>]
-                     [--marks] [--ingest-wait <duration>]
+                     [--marks] [--library] [--ingest-wait <duration>]
 
 set a fragment in a draft.
 
 the document comes from a file, or - for standard input; --marks reads one mark per line from a prompt or standard input
 until an empty line. fragment set runs on Linux only. A repeat waits while the first request still ingests, for
 --ingest-wait (2m) or the server's claim lease, whichever is longer.
+--library writes a shared entry instead of the cluster's own: publishing the draft moves this cluster to it and no other cluster.
+A shared document holds no secret reference, so a fragment with a secret stays in one cluster.
 A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
 changed since, it saves nothing and says so. Draft writes take author; repeat one with the outcome-unknown block's flags,
 --if-match included.
 
 Roles: author.
 
-Flags: --declarations, --draft, --expect-epoch, --expect-principal, --file, --idempotency-key, --if-match, --ingest-wait, --layer, --marks
+Flags: --declarations, --draft, --expect-epoch, --expect-principal, --file, --idempotency-key, --if-match, --ingest-wait, --layer, --library, --marks
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -664,10 +668,51 @@ Global flags and exit codes: bronzewardctl help global.
 ### fragment rm
 
 ```text
-usage: bronzewardctl fragment rm <name> --draft <draft>
+usage: bronzewardctl fragment rm <name> --draft <draft> [--library]
 
 remove a fragment from a draft.
 
+--library removes the shared fragment's head; no cluster loses it by that, each keeps its adoption.
+A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
+changed since, it saves nothing and says so. Draft writes take author; repeat one with the outcome-unknown block's flags,
+--if-match included.
+
+Roles: author.
+
+Flags: --draft, --expect-epoch, --expect-principal, --idempotency-key, --if-match, --library
+
+Global flags and exit codes: bronzewardctl help global.
+```
+
+### fragment adopt
+
+```text
+usage: bronzewardctl fragment adopt <name> --draft <draft> [--revision <frv_ ID>]
+       bronzewardctl fragment adopt <name> --draft <draft> --remove
+
+adopt a shared fragment in a draft.
+
+the draft's cluster takes the shared fragment at --revision, the head's revision when none is given, and prints the machines it
+reaches. --remove stops following it, and the cluster loses the name unless it holds its own. A profile of this cluster that pins the name keeps its pin: set it again to use the new revision.
+A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
+changed since, it saves nothing and says so. Draft writes take author; repeat one with the outcome-unknown block's flags,
+--if-match included.
+
+Roles: author.
+
+Flags: --draft, --expect-epoch, --expect-principal, --idempotency-key, --if-match, --remove, --revision
+
+Global flags and exit codes: bronzewardctl help global.
+```
+
+### fragment detach
+
+```text
+usage: bronzewardctl fragment detach <name> --draft <draft>
+
+copy an adopted fragment into the cluster and stop following it.
+
+one step of the draft: the adopted revision becomes the cluster's own fragment of that name.
 A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
 changed since, it saves nothing and says so. Draft writes take author; repeat one with the outcome-unknown block's flags,
 --if-match included.
@@ -690,6 +735,8 @@ profiles of fragments
   profile history             a profile's revisions
   profile set                 set a profile in a draft
   profile rm                  remove a profile from a draft
+  profile adopt               adopt a shared profile in a draft
+  profile detach              copy an adopted profile into the cluster and stop following it
 
 Run bronzewardctl help profile <command> for a command's flags, notes and roles.
 ```
@@ -723,18 +770,21 @@ Global flags and exit codes: bronzewardctl help global.
 ### profile set
 
 ```text
-usage: bronzewardctl profile set <name> --draft <draft> --fragments <name or frv_ ID>[,...]
+usage: bronzewardctl profile set <name> --draft <draft> --fragments <name or frv_ ID>[,...] [--library]
 
 set a profile in a draft.
 
-a fragment name pins the revision the draft proposes, else the fragment's head revision.
+a fragment name pins the revision this cluster composes for it: the draft's own or adopted entry, else the cluster's own
+head revision, else the revision the cluster adopted. With --library a name pins the shared fragment's revision instead.
+--library writes a shared entry instead of the cluster's own: publishing the draft moves this cluster to it and no other cluster.
+A shared document holds no secret reference, so a fragment with a secret stays in one cluster.
 A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
 changed since, it saves nothing and says so. Draft writes take author; repeat one with the outcome-unknown block's flags,
 --if-match included.
 
 Roles: author.
 
-Flags: --draft, --expect-epoch, --expect-principal, --fragments, --idempotency-key, --if-match
+Flags: --draft, --expect-epoch, --expect-principal, --fragments, --idempotency-key, --if-match, --library
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -742,10 +792,51 @@ Global flags and exit codes: bronzewardctl help global.
 ### profile rm
 
 ```text
-usage: bronzewardctl profile rm <name> --draft <draft>
+usage: bronzewardctl profile rm <name> --draft <draft> [--library]
 
 remove a profile from a draft.
 
+--library removes the shared profile's head; no cluster loses it by that, each keeps its adoption.
+A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
+changed since, it saves nothing and says so. Draft writes take author; repeat one with the outcome-unknown block's flags,
+--if-match included.
+
+Roles: author.
+
+Flags: --draft, --expect-epoch, --expect-principal, --idempotency-key, --if-match, --library
+
+Global flags and exit codes: bronzewardctl help global.
+```
+
+### profile adopt
+
+```text
+usage: bronzewardctl profile adopt <name> --draft <draft> [--revision <prv_ ID>]
+       bronzewardctl profile adopt <name> --draft <draft> --remove
+
+adopt a shared profile in a draft.
+
+the draft's cluster takes the shared profile at --revision, the head's revision when none is given, and prints the machines it
+reaches. --remove stops following it. A profile of this cluster that pins the name keeps its pin: set it again to use the new revision.
+A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
+changed since, it saves nothing and says so. Draft writes take author; repeat one with the outcome-unknown block's flags,
+--if-match included.
+
+Roles: author.
+
+Flags: --draft, --expect-epoch, --expect-principal, --idempotency-key, --if-match, --remove, --revision
+
+Global flags and exit codes: bronzewardctl help global.
+```
+
+### profile detach
+
+```text
+usage: bronzewardctl profile detach <name> --draft <draft>
+
+copy an adopted profile into the cluster and stop following it.
+
+one step of the draft: the adopted revision becomes the cluster's own profile of that name.
 A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
 changed since, it saves nothing and says so. Draft writes take author; repeat one with the outcome-unknown block's flags,
 --if-match included.

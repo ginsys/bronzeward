@@ -373,7 +373,7 @@ bronzewardctl
 
   draft create | list | show | discard
   fragment set | rm | show | history  set reads the document from a file or stdin, never argv; --library writes a shared one
-  fragment adopt | detach | adoptions  a shared fragment in this cluster's draft; adoptions lists the clusters on each revision (--behind)
+  fragment adopt | detach | adoptions  a shared fragment in this cluster's draft (adopt --remove stops following it); adoptions lists the clusters on each revision (--behind)
   profile set | rm | show | history   (the same --library, adopt, detach and adoptions for a shared profile)
   draft impact                        what the draft changes and reaches, before publishing (API revision 19)
   assignment set | rm | show | history
@@ -919,11 +919,14 @@ Cluster prod adopts ntp-servers frv_6tn…2qba, was frv_1ab… (draft revision 3
 A profile of this cluster that pins ntp-servers must be set again to use it.
 ```
 
-`fragment detach <name>` asks the server to copy the adopted revision into this cluster's own fragment of that name
+`fragment adopt <name> --remove` stops this cluster following the name (the removal of its adoption; it takes no `--revision`),
+and the cluster loses the name unless it holds its own. `fragment detach <name>` asks the server to copy the adopted revision into this cluster's own fragment of that name
 and drop the adoption in one step of the draft, so the cluster stops following it. A shared revision holds no secret
 reference ([persistence and API §3.1.1](persistence-api.md#311-shared-fragments-and-profiles-the-library-scope)): a document
 that does is refused, and a fragment with a secret stays in one cluster. `draft impact` reads the source graph and
-renders nothing (G5): the configuration still appears only after publication.
+renders nothing (G5): the configuration still appears only after publication. In `profile set`, a fragment name pins
+the revision this cluster composes for it (the draft's own entry, its adoption or shared edit, the cluster's own head,
+then the revision it adopted); with `--library` it pins the shared fragment's revision, the draft's shared edit first.
 
 The web editor shows the same: a fragment or profile list marks the shared ones, a draft page lists each adoption
 and each shared entry with the machines it reaches here and the other clusters it leaves unchanged, and a shared
@@ -1972,7 +1975,7 @@ Routes are under `/api/v1` (`internal/api/routes.go:62-136`).
 | `import status` | `GET /ingestions/{id}` | any | no | no |
 | `draft create` | `POST /drafts` | author | no | no |
 | `fragment set` / `rm`, `profile set` / `rm` (`--library`: a shared entry, API revision 19) | `PUT` / `DELETE /drafts/{id}/fragments/{name}`, `/drafts/{id}/profiles/{name}` | author | no | yes |
-| `fragment adopt`, `profile adopt` (and the removal of an adoption) | `PUT` / `DELETE /drafts/{id}/adoptions/{kind}/{name}` | author | no | yes |
+| `fragment adopt`, `profile adopt` (`--remove`: the removal of an adoption) | `PUT` / `DELETE /drafts/{id}/adoptions/{kind}/{name}` | author | no | yes |
 | `fragment detach`, `profile detach` | `POST /drafts/{id}/adoptions/{kind}/{name}/detachments` | author | no | yes |
 | `fragment adoptions`, `profile adoptions` (a name: the CLI finds the library entry's id in the `GET /fragments` or `GET /profiles` list, then calls the id-keyed route) | `GET /fragments/{id}/adoptions`, `GET /profiles/{id}/adoptions` | any | no | no |
 | `draft impact` | `GET /drafts/{id}/impact` | any | no | no |

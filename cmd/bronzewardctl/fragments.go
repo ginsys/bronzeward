@@ -46,7 +46,7 @@ var ttyPath = "/dev/tty"
 // §8.4 item 2).
 func (e *env) fragmentSet(args []string) error {
 	var draft, layer, file, decl string
-	var marks bool
+	var marks, library bool
 	wait := 2 * time.Minute
 	var rf repeatFlags
 	pos, err := e.parse("fragment set", args, 1, func(fs *flag.FlagSet) {
@@ -55,6 +55,7 @@ func (e *env) fragmentSet(args []string) error {
 		fs.StringVar(&file, "file", "", "")
 		fs.StringVar(&decl, "declarations", "", "")
 		fs.BoolVar(&marks, "marks", false, "")
+		fs.BoolVar(&library, "library", false, "")
 		fs.DurationVar(&wait, "ingest-wait", wait, "")
 		rf.flags(fs)
 	})
@@ -76,15 +77,23 @@ func (e *env) fragmentSet(args []string) error {
 	}
 	w := &client.Write{Method: http.MethodPut, Path: "/drafts/" + url.PathEscape(draft) + "/fragments/" + url.PathEscape(pos[0]),
 		Draft: draft, IfMatch: rf.ifMatch.v, Repeat: rp, Ingests: true, Wait: wait, Check: "draft show " + client.ShellWord(draft),
-		Read: entryRead(draft, apitypes.SourceEntryKindFragment, pos[0])}
+		Read: entryReadScoped(draft, apitypes.SourceEntryKindFragment, pos[0], library)}
+	in := apitypes.FragmentInput{Layer: apitypes.FragmentInputLayer(layer)}
+	if library {
+		in.Scope = ptr(apitypes.FragmentInputScopeLibrary)
+	}
 	return e.writeAfter(func(*client.Client) (err error) {
-		w.Body, err = e.fragmentBody(apitypes.FragmentInput{Layer: apitypes.FragmentInputLayer(layer)}, file, decl, marks)
+		w.Body, err = e.fragmentBody(in, file, decl, marks)
 		return err
-	}, w, func(_ *client.Client, r *client.Response) ([]string, error) {
+	}, w, func(c *client.Client, r *client.Response) ([]string, error) {
 		var x apitypes.SourceUpdate
 		err := json.Unmarshal(r.Body, &x)
-		return []string{sf("Fragment %s saved in draft %s (revision %s; draft revision %s).", pos[0], x.Draft, or(x.Entry.Revision, "none"),
-			client.DraftRevision(r.Header.Get("ETag")))}, err
+		saved := sf("%s %s saved in draft %s (revision %s; draft revision %s).", map[bool]string{true: "Shared fragment", false: "Fragment"}[library], pos[0], x.Draft,
+			or(x.Entry.Revision, "none"), client.DraftRevision(r.Header.Get("ETag")))
+		if library {
+			saved += sf(" Publishing this draft moves cluster %s to it. No other cluster changes.", clusterWords(c, draftCluster(c, x.Draft)))
+		}
+		return []string{saved}, err
 	})
 }
 

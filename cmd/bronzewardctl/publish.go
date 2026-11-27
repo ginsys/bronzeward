@@ -128,15 +128,18 @@ func (e *env) publishDraftOn(c *client.Client, bind *epochBind, d string, rp *cl
 }
 
 // publishNext is the table row's next step for the code a failed publication carries
-// (client-contracts.md §8.2): only recovery-mode-entered, which entering recovery mode gives a
-// publish job, has one the CLI words; another code has none.
+// (client-contracts.md §8.2): recovery-mode-entered, which entering recovery mode gives a publish job,
+// and the refusals about a shared fragment or profile have one the CLI words; another code has none.
 func publishNext(opErr any) string {
-	var p struct {
-		Type string `json:"type"`
-	}
-	_ = json.Unmarshal([]byte(compact(opErr)), &p)
-	if strings.TrimPrefix(p.Type, "urn:bronzeward:problem:") == "recovery-mode-entered" {
+	var doc map[string]any
+	_ = json.Unmarshal([]byte(compact(opErr)), &doc)
+	typ, _ := doc["type"].(string)
+	code := strings.TrimPrefix(typ, "urn:bronzeward:problem:")
+	if code == "recovery-mode-entered" {
 		return ". Wait for the recovery to finish, then publish again."
+	}
+	if next := client.SharedNext(code, doc); next != "" {
+		return ". Next: " + next
 	}
 	return ""
 }

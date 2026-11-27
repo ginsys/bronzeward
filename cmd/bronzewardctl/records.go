@@ -296,6 +296,10 @@ func (e *env) fragmentCmd(args []string) error {
 		return e.fragmentSet(rest)
 	} else if v == "rm" {
 		return e.sourceRm(apitypes.SourceEntryKindFragment, rest)
+	} else if v == "adopt" {
+		return e.sharedAdopt(fragmentKind, rest)
+	} else if v == "detach" {
+		return e.sharedDetach(fragmentKind, rest)
 	}
 	return sourceShow(e, "fragment", "frv", args, func(w *tabwriter.Writer, f *apitypes.FragmentBody) {
 		head(w, "Fragment", f.Id, f.Name+", layer "+f.Layer+", scope "+f.Scope, ownerWords(f.Cluster), f.Revision, f.HeadRevision, f.CreatedAt)
@@ -321,6 +325,10 @@ func (e *env) profileCmd(args []string) error {
 		return e.profileSet(rest)
 	} else if v == "rm" {
 		return e.sourceRm(apitypes.SourceEntryKindProfile, rest)
+	} else if v == "adopt" {
+		return e.sharedAdopt(profileKind, rest)
+	} else if v == "detach" {
+		return e.sharedDetach(profileKind, rest)
 	}
 	return sourceShow(e, "profile", "prv", args, func(w *tabwriter.Writer, p *apitypes.ProfileBody) {
 		head(w, "Profile", p.Id, p.Name+", scope "+p.Scope, ownerWords(p.Cluster), p.Revision, p.HeadRevision, p.CreatedAt)
