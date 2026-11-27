@@ -79,7 +79,7 @@ export function wordsOfCode(code: string, rule?: string): Words | undefined {
 
 // A conflict that names a shared head (scope adoption): the adoption or the head the draft was based on moved. The head is
 // named as the server gave it; a conflict of another scope is not in this sentence.
-export function staleAdoption(p: Problem): Words | undefined {
+export function staleAdoption(p: { readonly [member: string]: unknown }): Words | undefined {
   const cs = p["conflicts"];
   const moved = (Array.isArray(cs) ? cs : []).flatMap((c: unknown) => {
     const m = typeof c === "object" && c !== null ? (c as Record<string, unknown>) : {};

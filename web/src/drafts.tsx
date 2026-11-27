@@ -298,7 +298,7 @@ export function DraftItem({ id }: { id: string }) {
             ) : <li key={`import-base:${e.machine}`}><ImportedConfigurationRef machine={e.machine} revision={e.revision} /><BaseDocument id={e.revision} machine={e.machine} /></li>)}
           </ul>
           {readsReach(d) && <Reach draft={d.id} n={n} />}
-          {d.state === "open" && <SharedNames draft={d} written={written} seeChange={seeChange} />}
+          {d.state === "open" && <SharedNames draft={d} seeChange={seeChange} />}
           {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} />{" "}<Action label="Add profile" needs={["author"]} onClick={() => pick("profile:")} />{" "}<Action label="Add assignment" needs={["author"]} onClick={() => pick("assignment:")} /></p>}
           {selected !== undefined && selected.startsWith("fragment:") && (
             <FragmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />

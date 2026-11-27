@@ -63,7 +63,7 @@ export function ReachItem({ it }: { it: Item }) {
     rows.push(
       <li key={label}>
         {label}: {cs.map((c, i) => (
-          <span key={c.cluster}>{i > 0 && ", "}<ClusterLink id={c.cluster} /> on <SavedRevision kind={it.kind === "profile" ? "profile" : "fragment"} id={c.revision} />{c.via !== null && ` through the shared profile ${safeText(c.via) ?? NAME_NOT_SHOWN}`}</span>
+          <span key={c.cluster}>{i > 0 && ", "}<ClusterLink id={c.cluster} /> on the revision <SavedRevision kind={it.kind === "profile" ? "profile" : "fragment"} id={c.revision} />{c.via !== null && ` through the shared profile ${safeText(c.via) ?? NAME_NOT_SHOWN}`}</span>
         ))}
       </li>,
     );
@@ -125,7 +125,7 @@ export function AdoptionRows({ rows, kind = "fragment" }: { rows: readonly Adopt
 /** A revision as a person reads it: when it was saved, once read, with the identifier as the link's title (the shortened one until then). */
 export function SavedRevision({ kind, id }: { kind: "fragment" | "profile"; id: string }) {
   const body = useBody<{ createdAt?: string }>(`/${kind}-revisions/${encodeURIComponent(id)}`);
-  return <Id id={id} text={body?.createdAt === undefined ? undefined : `Saved ${when(body.createdAt)}`} />;
+  return <Id id={id} text={body?.createdAt === undefined ? undefined : `saved ${when(body.createdAt)}`} />;
 }
 
 /** A shared fragment's or profile's page: every cluster that uses the name, with the revision it is on. */

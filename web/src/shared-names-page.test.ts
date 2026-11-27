@@ -5,13 +5,13 @@
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { forgetETag, keepETag } from "./drafts.tsx";
+import { forgetETag, keepETag, watchWrites } from "./drafts.tsx";
 import { unsaved, WritesProvider } from "./forms.tsx";
 import { NO_ETAG } from "./handover.ts";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { SharedNames } from "./shared-names.tsx";
 import { ShellContext } from "./shell.tsx";
-import { Writes } from "./write.ts";
+import { Write, Writes } from "./write.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -52,7 +52,7 @@ describe("the Shared names block on a draft's page", () => {
   });
   const mount = (entries: unknown[] = []) =>
     act(async () =>
-      root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author"], offline: false } }, h(ReadsProvider, { value: reads }, h(SharedNames, { draft: { id: DRF, cluster: "cl_a", state: "open", entries } as never, written: () => {}, seeChange: () => {} }))))),
+      root.render(h(WritesProvider, { value: writes }, h(ShellContext, { value: { roles: ["author"], offline: false } }, h(ReadsProvider, { value: reads }, h(SharedNames, { draft: { id: DRF, cluster: "cl_a", state: "open", entries } as never, seeChange: () => {} }))))),
     );
   const button = (label: string) => [...box.querySelectorAll("button")].find((b) => b.textContent === label);
   const open = () => act(async () => void button("Show shared names")!.click());
@@ -120,6 +120,27 @@ describe("the Shared names block on a draft's page", () => {
     const stop = (submit.mock.calls[1]![0] as { spec: Record<string, unknown> }).spec;
     expect(stop).toMatchObject({ method: "DELETE", path: `/drafts/${DRF}/adoptions/fragments/dns`, ifMatch: '"5-t"' });
     expect(stop["body"]).toBeUndefined();
+  });
+
+  // The press's page may be left before its write settles (ginsys/bronzeward#517 H3): the hook, not the press, reads the draft
+  // again on whichever page shows it then, so a page opened again is never left with old entries under the newer ETag.
+  test("a write that settles after the press was left refreshes the draft page now shown, and a refusal refreshes none", async () => {
+    keepETag(DRF, '"5-t"', undefined);
+    await mount();
+    await open();
+    await settled();
+    await act(async () => void button("Adopt ntp")!.click());
+    const spec = (submit.mock.calls[0]![0] as { spec: { settled: (o: unknown, w: unknown) => void } }).spec;
+    // The press goes away; another page of the same draft is shown.
+    await act(async () => root.unmount());
+    const shown = vi.fn();
+    const stop = watchWrites(DRF, shown);
+    spec.settled({ kind: "refused", status: 412, problem: null, replayed: false }, new Write({ method: "PUT", path: "/x", body: null, resource: "/x" }));
+    expect(shown).not.toHaveBeenCalled();
+    spec.settled({ kind: "done", status: 200, data: null, replayed: false, etag: '"6-t"' }, new Write({ method: "PUT", path: "/x", body: null, resource: "/x" }));
+    expect(shown).toHaveBeenCalledTimes(1);
+    stop();
+    root = createRoot(box);
   });
 
   test("a press with no ETag read for the draft sends nothing and says so", async () => {

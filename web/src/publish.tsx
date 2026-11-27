@@ -15,7 +15,7 @@ import { eventLine, refusalOf, terminal, watch } from "./progress.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status } from "./states.tsx";
 import { safeWord } from "./safe.ts";
-import { operationNext, whyRefused, wordsOfCode } from "./problems.tsx";
+import { operationNext, staleAdoption, whyRefused, wordsOfCode } from "./problems.tsx";
 import { DraftHead, MachineById, Named } from "./titles.tsx";
 import { PUBLISH_NOTE } from "./words.ts";
 import type { Outcome } from "./write.ts";
@@ -44,8 +44,10 @@ export function publishEnd(o: Operation): Ended {
   }
   const { code, rule } = refusalOf({ problem: o.error });
   const why = whyRefused(o.error as Record<string, unknown> | null);
-  // The table row's next step (§8.2, Failed operations), where this text can carry it.
-  const next = operationNext(code === undefined ? undefined : wordsOfCode(code, rule));
+  // The table row's next step (§8.2, Failed operations), where this text can carry it. A stale input that names a shared head
+  // (an adoption another publication moved) says which head moved and what to do (persistence and API §3.1.1).
+  const moved = code === "stale-input" && o.error !== null && typeof o.error === "object" ? staleAdoption(o.error as Record<string, unknown>) : undefined;
+  const next = moved !== undefined ? ` ${moved.what} ${moved.next}` : operationNext(code === undefined ? undefined : wordsOfCode(code, rule));
   return { text: `The publication ${safeWord(o.state)}${code === undefined ? "" : `: ${code}`}. ${why.facts === "" ? "" : `${why.facts} `}${SENT_NOTHING}${next}`, ...(why.machine !== undefined && { machine: why.machine }) };
 }
 

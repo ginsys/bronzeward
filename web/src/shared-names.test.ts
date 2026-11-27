@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 import type { components } from "./api/v1";
 import { type Reads, ReadsProvider } from "./list.tsx";
 import { sentence, staleAdoption, wordsFor } from "./problems.tsx";
+import { publishEnd, SENT_NOTHING } from "./publish.tsx";
 import type { Problem } from "./request.ts";
 import { adoptionWrite, canAdopt, canStop, recorded, SharedNames, shownName, slotOf, stateOf } from "./shared-names.tsx";
 
@@ -76,6 +77,21 @@ describe("the request of a press", () => {
   });
 });
 
+describe("a publication that failed on a moved adoption", () => {
+  const failed = (conflicts: unknown) => ({ state: "failed", result: null, error: { type: "urn:bronzeward:problem:stale-input", status: 409, conflicts } }) as never;
+  test("it names the shared head that moved and says to adopt again, where the failed publication's text is worded", () => {
+    expect(publishEnd(failed([{ scope: "adoption", head: "frg_9", expected: 2, actual: "absent" }]))).toEqual({
+      text: `The publication failed: stale-input. ${SENT_NOTHING} The shared name moved after this draft was read (frg_9 was at adoption 2 and is at absent). Read the draft again, adopt the name again in this draft and publish that.`,
+    });
+  });
+
+  test("a conflict of another kind, none, or a malformed one keeps the general step", () => {
+    const general = `The publication failed: stale-input. ${SENT_NOTHING} Reload, read the current state, then decide whether to make the change again.`;
+    for (const conflicts of [[{ head: "frg_9", expected: 1, actual: 2 }], [], undefined, "not a list", [null, 3]]) expect(publishEnd(failed(conflicts)), JSON.stringify(conflicts)).toEqual({ text: general });
+    expect(publishEnd({ state: "failed", result: null, error: null } as never)).toEqual({ text: `The publication failed. ${SENT_NOTHING}` });
+  });
+});
+
 describe("what a done press says", () => {
   test("it names the kind and the name, adds the pin note for a fragment's adoption only, and never shows an unsafe name", () => {
     expect(recorded("fragment", "ntp", false)).toBe("Recorded: this cluster adopts fragment ntp. A profile of this cluster that pins the name keeps its pin: set it again to use the new revision.");
@@ -92,7 +108,7 @@ describe("what a done press says", () => {
 describe("the block on the draft page", () => {
   test("it says what adopting records and reads nothing until it is opened", () => {
     const draft = { id: "drf_1", cluster: "cl_1", entries: [] } as never;
-    const out = text(h(SharedNames, { draft, written: () => {}, seeChange: () => {} }));
+    const out = text(h(SharedNames, { draft, seeChange: () => {} }));
     expect(out).toContain("Shared names");
     expect(out).toContain("nothing changes for this cluster until the draft is published, and no other cluster changes");
     expect(out).toContain("Show shared names");

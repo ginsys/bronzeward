@@ -2,9 +2,9 @@
 // profile with this cluster's view of it, and Adopt and Stop following, which record an entry in this draft and
 // nothing else. A cluster is never moved from a shared page; adopting is an entry of the cluster's own draft.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { components } from "./api/v1";
-import { doneOnce, isAdoption, isShared, isSource, keepOnDone, keptETag, NO_ETAG, showTheirChange, WriteResult } from "./drafts.tsx";
+import { isAdoption, isShared, isSource, keptETag, NO_ETAG, settledFragment, showTheirChange, WriteResult } from "./drafts.tsx";
 import { useSend, useWrites } from "./forms.tsx";
 import { useList, usePending } from "./list.tsx";
 import { safeText } from "./safe.ts";
@@ -62,19 +62,17 @@ export const adoptionWrite = (draft: string, kind: Kind, name: string, revision:
 
 export const NOT_RECORDED = "Not recorded: someone changed this draft since this page read it.";
 
-function Press({ draft, kind, name, revision, label, written, seeChange }: { draft: Draft; kind: Kind; name: string; revision: string | null; label: string; written: () => void; seeChange: () => void }) {
+function Press({ draft, kind, name, revision, label, seeChange }: { draft: Draft; kind: Kind; name: string; revision: string | null; label: string; seeChange: () => void }) {
   const [w, send] = useSend();
   const writes = useWrites();
   const [note, setNote] = useState<string | undefined>();
-  const o = w?.outcome;
-  useEffect(() => {
-    if (doneOnce(w) !== undefined) written();
-  }, [o, w, written]);
   const press = () => {
     const epoch = writes?.client?.currentEpoch;
     const ifMatch = keptETag(draft.id, epoch);
     setNote(ifMatch === undefined ? NO_ETAG : undefined);
-    if (ifMatch !== undefined) send({ ...adoptionWrite(draft.id, kind, name, revision), ifMatch, resource: `/drafts/${draft.id}`, settled: keepOnDone(draft.id, () => writes?.client?.currentEpoch) });
+    // The settled hook keeps the answer's ETag and reads the draft again on whichever page shows it when the write settles, so a
+    // page opened again after this one was left is not shown old entries under the newer ETag (ginsys/bronzeward#517 H3).
+    if (ifMatch !== undefined) send({ ...adoptionWrite(draft.id, kind, name, revision), ifMatch, resource: `/drafts/${draft.id}`, settled: settledFragment(draft.id, () => writes?.client?.currentEpoch) });
   };
   const refused = (
     <Status testid="write-result" role="alert" actions={<button type="button" onClick={() => setNote(showTheirChange(seeChange))}>Show their change</button>}>{NOT_RECORDED}</Status>
@@ -97,11 +95,11 @@ function Words({ kind, state }: { kind: Kind; state: State }) {
     case "none": return <>Not followed by this cluster.</>;
     case "via": return <>Reached through the shared profile {safeText(state.via) ?? NAME_NOT_SHOWN}, which is not an adoption.</>;
     default:
-      return <>{state.kind === "adopts" ? "This draft adopts" : "Followed at"} <SavedRevision kind={kind} id={state.revision} />{state.behind && ", behind the shared head"}.</>;
+      return <>{state.kind === "adopts" ? "This draft adopts" : "Followed at"} the revision <SavedRevision kind={kind} id={state.revision} />{state.behind && ", behind the shared head"}.</>;
   }
 }
 
-function NameRow({ kind, head, draft, written, seeChange }: { kind: Kind; head: Head; draft: Draft; written: () => void; seeChange: () => void }) {
+function NameRow({ kind, head, draft, seeChange }: { kind: Kind; head: Head; draft: Draft; seeChange: () => void }) {
   const [list] = useList<Adoption>(`/${kind}s/${encodeURIComponent(head.id)}/adoptions`, "", true);
   const pending = usePending(list, "who follows this name");
   const state = stateOf(slotOf(draft.entries, kind, head.name), list.kind === "ok" ? list.data.items : [], draft.cluster, head.revision ?? "");
@@ -112,25 +110,25 @@ function NameRow({ kind, head, draft, written, seeChange }: { kind: Kind; head: 
     <li>
       {kind} {shown}: {pending ?? <Words kind={kind} state={state} />}
       {ready && head.revision !== null && canAdopt(state) && (
-        <p>{adoptSentence(kind, shown)}{" "}<Press draft={draft} kind={kind} name={head.name} revision={head.revision} label={`Adopt ${shown}`} written={written} seeChange={seeChange} /></p>
+        <p>{adoptSentence(kind, shown)}{" "}<Press draft={draft} kind={kind} name={head.name} revision={head.revision} label={`Adopt ${shown}`} seeChange={seeChange} /></p>
       )}
       {ready && canStop(state) && (
-        <p>{stopSentence(kind, shown)}{" "}<Press draft={draft} kind={kind} name={head.name} revision={null} label={`Stop following ${shown}`} written={written} seeChange={seeChange} /></p>
+        <p>{stopSentence(kind, shown)}{" "}<Press draft={draft} kind={kind} name={head.name} revision={null} label={`Stop following ${shown}`} seeChange={seeChange} /></p>
       )}
     </li>
   );
 }
 
-function Names({ kind, draft, written, seeChange }: { kind: Kind; draft: Draft; written: () => void; seeChange: () => void }) {
+function Names({ kind, draft, seeChange }: { kind: Kind; draft: Draft; seeChange: () => void }) {
   const [list] = useList<Head>(`/${kind}s`, "", true);
   const pending = usePending(list, `the shared ${kind}s`);
   if (list.kind !== "ok") return <>{pending}</>;
   const heads = list.data.items.filter((h) => h.cluster === null && h.revision !== null);
-  return heads.length === 0 ? <p>No shared {kind} has a revision to adopt.</p> : <ul aria-label={`Shared ${kind}s`}>{heads.map((h) => <NameRow key={h.id} kind={kind} head={h} draft={draft} written={written} seeChange={seeChange} />)}</ul>;
+  return heads.length === 0 ? <p>No shared {kind} has a revision to adopt.</p> : <ul aria-label={`Shared ${kind}s`}>{heads.map((h) => <NameRow key={h.id} kind={kind} head={h} draft={draft} seeChange={seeChange} />)}</ul>;
 }
 
 /** The block of an open draft's page. Its reads start when it is opened, so a draft page that never uses it reads nothing more. */
-export function SharedNames({ draft, written, seeChange }: { draft: Draft; written: () => void; seeChange: () => void }) {
+export function SharedNames({ draft, seeChange }: { draft: Draft; seeChange: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <section aria-label="Shared names">
@@ -139,9 +137,9 @@ export function SharedNames({ draft, written, seeChange }: { draft: Draft; writt
       {!open ? <p><button type="button" onClick={() => setOpen(true)}>Show shared names</button></p> : (
         <>
           <h4>Shared fragments</h4>
-          <Names kind="fragment" draft={draft} written={written} seeChange={seeChange} />
+          <Names kind="fragment" draft={draft} seeChange={seeChange} />
           <h4>Shared profiles</h4>
-          <Names kind="profile" draft={draft} written={written} seeChange={seeChange} />
+          <Names kind="profile" draft={draft} seeChange={seeChange} />
         </>
       )}
     </section>
