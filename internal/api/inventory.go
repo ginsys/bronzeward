@@ -100,7 +100,7 @@ func (in *clusterInput) check(*API) error {
 		return fmt.Errorf("the supported contracts are not known: %w", err)
 	}
 	if !slices.Contains(supported, in.Contract) {
-		return fmt.Errorf("contract %s is not supported: this server renders %s", in.Contract, strings.Join(supported, ", "))
+		return fmt.Errorf("contract %s is not supported: this server renders only %s", in.Contract, strings.Join(supported, ", "))
 	}
 	if _, ok := clusterid.Canonical(in.TalosClusterID); !ok {
 		return errors.New("talosClusterId must be the cluster ID `talosctl get info` prints: 32 bytes in padded base64, in the standard or the URL-safe alphabet (persistence-api.md §7.3)")

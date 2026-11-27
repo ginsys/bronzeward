@@ -442,7 +442,7 @@ func TestNamingFragment(t *testing.T) {
 // A refused compilation fails the publication 422 naming the machine and rule (ruling R33), and
 // names no value.
 func TestBuildReleaseRefuses(t *testing.T) {
-	// The lowest Kubernetes version of the window of the machinery this build holds (talos114). The
+	// The lowest Kubernetes version of the window of the cluster's contract, v1.14 (talos114). The
 	// second machine of "machines disagree" runs it, so the case fails for the disagreement with the
 	// first machine, which runs the default version. A version below the window fails for the
 	// window, with the same rule.

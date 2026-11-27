@@ -367,10 +367,10 @@ func TestInventoryIdentityKeys(t *testing.T) {
 
 // §9.1, §9.4: inventory bodies are checked before any transaction, and neither the answer nor the
 // log repeats a submitted value.
-// A cluster is registered only with the contract this build renders, the minor of its machinery
-// (compilation.md §10.2): v1.13 and v1.15 are refused, v1.14 is accepted, and the message names the
-// supported minor. It needs no database.
-func TestClusterContractIsTheMachinerys(t *testing.T) {
+// A cluster is registered only with a contract on the list of supported contracts that this build's
+// machinery is not older than (compilation.md §10.2): v1.13 and v1.15 are refused, v1.14 is
+// accepted, and the message names the supported contracts. It needs no database.
+func TestClusterContractIsOnTheList(t *testing.T) {
 	check := func(contract string) error {
 		in := &clusterInput{Name: "x", Endpoint: "https://a.test", Contract: contract, TalosClusterID: talosClusterID("contract")}
 		return in.check(nil)
