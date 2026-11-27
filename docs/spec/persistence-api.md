@@ -4008,7 +4008,9 @@ issue a token to an identity or revoke one.
   ([ginsys/bronzeward#1193](https://github.com/ginsys/bronzeward/issues/1193))
   counts as approved content for a rule; whether a rule that requires approved
   content applies to an adoption, whose content is an import base and not a
-  profile revision. The run-by-run reading is §10.3.2.
+  profile revision; whether a rule may also approve the first configuration of
+  a machine that comes from maintenance mode; the route that renews a token
+  and its name; who may revoke a rule. The run-by-run reading is §10.3.2.
 
 ### 10.3.2 An automated run, step by step
 
@@ -4040,7 +4042,8 @@ those roles; every other step of run 1 needs a person or the controller.
 | 10 | Approve the adoption plan: `POST /plans/{id}/approvals` | Today an `approver`, human only. Decided: a standing rule an `approver` wrote in advance | Today the approver. Decided: the rule | Today yes. Decided: not at this step (a person wrote the rule) | Decided, not built. Rule item: an approval record of a new kind (the database requires a human approver today); a rule's fields, expiry, revocation and effect of a restore are not decided; automation is still never `approver`. Whether a rule that requires approved content applies to an adoption is not decided |
 | 11 | The controller records the adoption (an `adopt` operation, created `completed`, nothing sent) | The controller | The approved plan and the controller's own checks | No | Built. No client route and no client command |
 | 12 | A routine change to a worker | See run 2 | | | |
-| 13 | A change to a control plane machine, any apply that is not a no-reboot apply to a worker, or a revert to an earlier release: `POST /plans`, approval `POST /plans/{id}/approvals` | `publisher` creates; an `approver` approves | The approver's own approval | **Yes** | Built. Stays a person's: no rule covers it (owner decision, 27 November 2026, 08:44 CET) |
+| 13 | A no-reboot apply to a control plane machine, or a revert to an earlier release (a plan made on a drifted machine): `POST /plans`, approval `POST /plans/{id}/approvals` | `publisher` creates; an `approver` approves | The approver's own approval | **Yes** | Built. Stays a person's: no rule covers it (owner decision, 27 November 2026, 08:44 CET) |
+| 13a | Any other apply, such as one that reboots | No plan accepts it today: an `apply-config` plan takes only `mode: no-reboot` | Not applicable | Would be a person's | Not built. Design §12.3 asks for approval of reboots, and no rule covers them |
 | 14 | See drift: `GET /machines/{id}/observations`, `/machines/{id}/position`, `GET /operations` | Any role | The role | No | Built |
 | 15 | Hold a machine while someone decides: `POST /machines/{id}/freezes`; lift it: `POST /machines/{id}/unfreezes` | Freeze: `author`, `publisher`, `approver`, `recovery-admin`. Unfreeze: `approver` | The role | Freeze no; unfreeze **yes** | Built |
 | 16 | Accept a drifted configuration: import it as a drift adoption, `POST /ingestions` into a draft | A person with `author` | The role | **Yes** | Built, and stays (drift keeps today's path because imports stay with people) |
@@ -4059,11 +4062,12 @@ those roles; every other step of run 1 needs a person or the controller.
 | 4 | Refuse a plan whose machine is not a worker, where the plan is created or sent | The server | The restriction | No | Decided, not built. A text search found no machine-role check in either place and no test was run. A rule cannot be enabled for a send before this is built and tested |
 | 5 | Approve: `POST /plans/{id}/approvals` | Today an `approver`, human only. Decided: a standing rule that requires approved content (profile or template revisions) | Today the approver. Decided: the rule, for a no-reboot apply to a worker only | Today yes. Decided: no, while the content is approved content | Decided, not built. Rule item; a plan that is not approved content waits for a person. Which machine-specific parts of a composed configuration may differ from approved content is not decided. Whether an adopted shared revision counts as approved content is not decided |
 | 6 | The controller commits and sends, then verifies; follow `GET /operations?plan={id}` and `GET /operations/{id}/events` | The controller | The approved plan and its own checks | No | Built. Dispatch is no role's and no client's |
-| 7 | Withdraw a plan or its approval: `POST /plans/{id}/cancellations`; `POST /approvals/{id}/revocations` | The plan's creator may cancel; revoking an approval needs `approver` or `recovery-admin` | The role | Cancel no; revoke **yes** | Built |
+| 7 | Withdraw a plan or its approval: `POST /plans/{id}/cancellations`; `POST /approvals/{id}/revocations` | Cancel: a `publisher` for a plan it created, or an `approver` or `recovery-admin` for any plan. Revoke an approval: `approver` or `recovery-admin` | The role; authorship of the plan alone authorizes nothing | Cancel by the creator no; every other act **yes** | Built |
 
 What stays with a person in run 2: every control plane change, every apply that
 is not a no-reboot apply to a worker, every revert, every plan whose content is
-not approved content, writing and revoking a rule, and lifting a freeze.
+not approved content, writing a rule, and lifting a freeze. Who may revoke a
+rule is not decided.
 
 **Run 3: a machine in maintenance mode (not built; Phase 2, design §18.3).**
 
