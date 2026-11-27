@@ -454,7 +454,8 @@ without a display name is shown by subject and issuer.
 ### 5.1 Sign-in and context
 
 ```text
-$ bronzewardctl context add lab --server https://bronzeward.lab.example.invalid
+$ bronzewardctl context add lab --server https://bronzeward.lab.example.invalid \
+    --issuer https://idp.lab.example.invalid --client-id bronzewardctl --audience bronzeward
 Context "lab" added. TLS: system trust store.
 $ bronzewardctl login --context lab
 Opening the identity provider sign-in for lab ...        # mechanism decided in #253
@@ -466,6 +467,10 @@ Roles     author, publisher           # GET /identity (G1)
 Epoch     ep_bqek…ekgi   recovery mode: off
 Token     expires in 14m                                      # renewal: #253
 ```
+
+`--issuer`, `--client-id` and `--audience` make an identity-provider context, and `--from <url>` reads them
+from the server's client configuration instead ([client contracts §5](client-contracts.md#5-endpoint-discovery-and-context-selection)).
+With none of them the context is an automation context, and `login` refuses it: "an automation context has no sign-in".
 
 By default the server refuses a human token whose lifetime exceeds 15 minutes
 (`internal/auth/auth.go:175`, `internal/config/config.go:125`, `internal/config/config.go:359-360`),
@@ -949,7 +954,11 @@ profile of this cluster that pins the name keeps its pin. The refusals a publica
 the command line's causes and next steps (`library-reference`, `library-removed`, `name-in-two-scopes`,
 `library-pin-conflict`, `detach-pin-not-in-view`), and a stale adoption names the shared head that moved. An entry staged
 before another draft changed this cluster's adoption would be refused at publication, so the block offers the press again
-(Adopt or Stop following) where the entry's base is not the adoption's counter now, and says why. The web offers
+(Adopt or Stop following) where the entry's base is not the adoption's counter now, and says why. A removed adoption
+is not listed ([persistence and API §3.1.1](persistence-api.md#311-shared-fragments-and-profiles-the-library-scope)),
+so the block cannot read its counter and reads it as none: an Adopt staged on a counter is then offered again whatever
+happened to the adoption since, and the press records the counter it finds, while a Stop following is not offered
+again, since the removal of an adoption that is gone is refused `404`. The web offers
 no detach; `fragment detach` stays in the command line.
 
 The fragment and profile editors carry a **Shared (library)** choice for a new entry, and an existing shared entry in the
@@ -1878,7 +1887,7 @@ sending with "approval is for humans", and the server refuses it `403` with `hum
 | Offline | no connection | retry reads with backoff; never queue writes | banner; actions disabled; last-read time shown |
 | Authentication refused | `401 unauthenticated`: not accepted, possibly but not necessarily because it expired | renew and repeat reads; repeat a pending write with the same key only if the renewed token is the same principal and the epoch is unchanged | same |
 | Principal or epoch changed with a write pending | renewal returned another principal, a context switch, or a new `Bronzeward-Epoch` | the pending write is set aside: not repeated and not sent under a new key; the client reads the current resource and the operator decides afresh | same, with the pending write shown as "outcome unknown: it may already have been committed", and its repeat disabled |
-| Recovery mode | `Bronzeward-Recovery-Mode: true`, `409 recovery-mode-active` naming the scope | banner line on every command with the scope summary | persistent banner; an action is disabled only where its scope's state or the recovery-start process refuses it, with that reason ([§5.9](#59-recovery-after-a-restore)); the start mode is read from `GET /server` (G14), whose refusal before a recovery start's entry, a `409 recovery-mode-active` without a `scope` member, itself shows a recovery start; until that read answers, the mode is also known from the last answer of plan creation, approval or unfreeze, which a recovery start refuses without a `scope` member, or of recovery entry, which a normal start refuses with a `409 conflict` carrying neither `epoch` nor `request`; the entry's `201` and its other `409 conflict` answers carry `epoch` and show a recovery start ([client contracts §8.5](client-contracts.md#85-epoch-changes)) |
+| Recovery mode | `Bronzeward-Recovery-Mode: true`, `409 recovery-mode-active` naming the scope | banner line on every command with the scope summary | persistent banner, which disables nothing: an action stays offered, and the server's refusal of it, by its scope's state or by the recovery-start process, is shown with its reason ([§5.9](#59-recovery-after-a-restore), [client contracts §8.5](client-contracts.md#85-epoch-changes) item 3); only the recovery page's own actions are disabled beforehand, with their reason, where the page itself knows the refusal (offline, a send of its own open, or for Exit recovery a scope not yet released); the start mode is read from `GET /server` (G14), whose refusal before a recovery start's entry, a `409 recovery-mode-active` without a `scope` member, itself shows a recovery start; until that read answers, the mode is also known from the last answer of plan creation, approval or unfreeze, which a recovery start refuses without a `scope` member, or of recovery entry, which a normal start refuses with a `409 conflict` carrying neither `epoch` nor `request`; the entry's `201` and its other `409 conflict` answers carry `epoch` and show a recovery start ([client contracts §8.5](client-contracts.md#85-epoch-changes)) |
 | Epoch changed | new `Bronzeward-Epoch`, `400 cursor-invalid`, SSE `reset` | discard cached pages and cursors, say why | same |
 | Unresolved operation | `state: unresolved` | exit 5; who must act | the operation and machine both show it; no retry button |
 | Human-only refusal | `403 forbidden`, `humanOnly: true` | "This needs a person signed in, not an automation token" | same |
