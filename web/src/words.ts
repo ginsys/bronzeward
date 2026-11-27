@@ -175,6 +175,7 @@ export const SHARED_PAGE_NOTE = "A change to a shared fragment or profile reache
 /** The apply page's shared block (ginsys/bronzeward#1193): what the release moved, here, and the other clusters as information. */
 export const APPLY_SHARED_NOTE = "This release moved the shared names below for this cluster. Other clusters are named for information only: nothing here chooses, plans or approves anything for them, because one apply is for one cluster. Each cluster takes a shared change in its own draft and reads it in its own plan.";
 export const APPLY_SHARED_UNKNOWN = "Some machines could not be read, so the list may be short.";
+export const APPLY_SHARED_UNREAD = "Which machines it reaches could not be read.";
 export const APPLY_SHARED_NONE_BEHIND = "No other cluster is behind it.";
 /** Shared names on the draft page (ginsys/bronzeward#1193): adopting one and stopping to follow it, in this draft only. */
 export const SHARED_NAMES_NOTE = "A shared fragment or profile is followed by the clusters that adopt it. Adopting or stopping to follow records an entry in this draft: nothing changes for this cluster until the draft is published, and no other cluster changes.";
