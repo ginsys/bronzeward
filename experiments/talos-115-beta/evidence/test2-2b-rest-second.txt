@@ -24,14 +24,29 @@ VERIFY_DONE rc=1
 # classifier: run/failures.py
 other    internal/talos TestTalosAPIMethods
            methods_test.go:209: apiServices:
+           service not listed: machine.ContentLibraryService
+           service not listed: machine.HypervisorService
+           service not listed: machine.StorageService
 other    internal/talos/signer TestCertAcceptedByANodeBehindItsClock
            cert_test.go:153: a node 310s behind accepted the certificate: the node does not check NotBefore, so the test proves nothing
 other    internal/talos/signer TestSignBacksNotBeforeUp
            cert_test.go:107: start +0s: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
            cert_test.go:107: start +1ns: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
+           cert_test.go:107: start +250ms: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
+           cert_test.go:107: start +999.999999ms: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
 other    internal/talos/signer TestSignBoundIsTheMaximumLessTheRoundingSlack
            cert_test.go:207: whole maximum, start +0s: NotBefore is 6m0s before the signing instant, want 300s and the dropped fraction
            cert_test.go:207: whole maximum, start +1ns: NotBefore is 6m0.000000001s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: whole maximum, start +100ms: NotBefore is 6m0.1s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: whole maximum, start +500ms: NotBefore is 6m0.5s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: whole maximum, start +900ms: NotBefore is 6m0.9s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: whole maximum, start +999.999999ms: NotBefore is 6m0.999999999s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +0s: NotBefore is 6m0s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +1ns: NotBefore is 6m0.000000001s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +100ms: NotBefore is 6m0.1s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +500ms: NotBefore is 6m0.5s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +900ms: NotBefore is 6m0.9s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +999.999999ms: NotBefore is 6m0.999999999s before the signing instant, want 300s and the dropped fraction
 --- result lines (tests and subtests): PASS=656 FAIL=4 SKIP=5
 --- failing leaves: internal/talos other=1
 --- failing leaves: internal/talos/signer other=3

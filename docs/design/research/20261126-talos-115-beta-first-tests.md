@@ -28,7 +28,7 @@ live against v1.13.6 only. It did not compose through Bronzeward's compiler.
 | Build | Machinery | How it is made |
 |---|---|---|
 | A | v1.14.5 | the product code at `cf597ab9` |
-| C | v1.14.7, the latest v1.14 patch on the day | A and `patches/c-machinery-1147.patch` |
+| C | v1.14.7, the latest v1.14 patch on the day ([`versions-read.txt`](../../../experiments/talos-115-beta/evidence/versions-read.txt)) | A and `patches/c-machinery-1147.patch` |
 | B | v1.15.0-beta.1 | A and `patches/b-machinery-beta1.patch` |
 | 2a | v1.15.0-beta.1 | B and `patches/2a-talostest-cosi.patch` (one call in a test helper, §4) |
 | 2b | v1.15.0-beta.1 | 2a and `patches/2b-contract-v114.patch` (measurement only, §4) |
@@ -97,7 +97,8 @@ Neither case was applied to a node.
 Asked with B's own machinery version, `KubernetesVersion` refuses every case ("the renderer's
 version is not known"): Bronzeward holds a Kubernetes window for minor 1.14 only. The machinery's
 windows are 1.32.0 to 1.37.99 for 1.14 and 1.33.0 to 1.38.99 for 1.15 (`talos114`, `talos115`
-constants of the two modules).
+constants of the two modules, quoted in
+[`versions-read.txt`](../../../experiments/talos-115-beta/evidence/versions-read.txt)).
 
 ### 3.3 What B accepts and A does not
 
@@ -162,7 +163,7 @@ The first 2b run for the other packages ended on `LVJ_TIMEOUT` with no verdict
 - **With the contract kept at v1.14 (2b), other failures remain, and the base passes them.**
   - `internal/api`: 55 leaves in 27 top-level tests; the base passes all 27. Most show `refused
     (kubernetes): the kubelet image names no Kubernetes version`: the beta's
-    `constants.DefaultKubernetesVersion` is `1.38.0-beta.0` (v1.14.5: `1.37.1`), a prerelease, which
+    `constants.DefaultKubernetesVersion` is `1.38.0-beta.0` (v1.14.5: `1.37.1`; `versions-read.txt`), a prerelease, which
     Bronzeward's release-tag pattern does not take. Worker and publisher tests (`TestNewStartsPublisher`,
     `TestPublishWorker`, `TestPublishRunStopped` and others) show only `operation failed`; their own
     cause was not read. The 63 FAIL results include the subtests of those leaves. **Only these 27
@@ -211,7 +212,11 @@ secret scan that runs before a commit is sent to a cluster Job flagged one line;
 
 A first run stopped on its own invalid-configuration control, before any apply: the node's
 configuration keeps comments, and the pattern that planted the defect expected the line to end
-after the value. The log is of the second run, with that one pattern corrected.
+after the value. The log is of the second run, with that one pattern corrected. That run used the
+script as it was then (SHA-256 `447bf419…`, cut to eight characters here). The committed script
+differs in one way: a control that fails now stops the run, where the run's script only printed a
+note for one control and ignored the other's failure. Both controls passed in all three scenarios,
+so the stop never came into play, and the committed script has not been run.
 
 **Controls, in all three scenarios:** a dry run of the node's unchanged configuration is accepted;
 a configuration with machine type `bogus` is refused (the node's reason, `unknown machine type

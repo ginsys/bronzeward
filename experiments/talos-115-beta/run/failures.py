@@ -2,7 +2,7 @@
 """List the failing leaf tests of a `go test -v` log with the cause each one's own output shows.
 Usage: failures.py <log>. A leaf is a failed test with no failed subtest. The output of a test is
 every line printed while it was the running test. "contract" means that output holds the
-contract rule's refusal; everything else is "other", shown with its first test messages."""
+contract rule's refusal; everything else is "other", shown with the first 12 lines of its output."""
 
 import pathlib
 import re
@@ -11,7 +11,6 @@ import sys
 RUN = re.compile(r"^=== (?:RUN|CONT|NAME)\s+(\S+)")
 END = re.compile(r"^\s*--- (PASS|FAIL|SKIP): (\S+)")
 PACKAGE = re.compile(r"^(ok|FAIL)\s+(github\.com/\S+)")
-MESSAGE = re.compile(r"^\s+\S+_test\.go:\d+: ")
 CONTRACT = re.compile(
     r"is not supported: this server renders only v1\.15|refused \(contract\)"
     r"|not the renderer.s minor"
@@ -43,9 +42,10 @@ def main():
         tally[(package, cause)] = tally.get((package, cause), 0) + 1
         print(f"{cause:8} {package} {name}")
         if cause == "other":
-            messages = [x.strip() for x in lines if MESSAGE.match(x)] or [x.strip() for x in lines if x.strip()]
-            for x in messages[:2]:
-                print(f"           {x[:300]}")
+            # The first lines of the test's own output, each cut at 400 characters.
+            shown = [x.strip() for x in lines if x.strip()]
+            for x in shown[:12]:
+                print(f"           {x[:400].rstrip()}")
     print("--- result lines (tests and subtests):", " ".join(f"{k}={v}" for k, v in counts.items()))
     for (package, cause), n in sorted(tally.items()):
         print(f"--- failing leaves: {package} {cause}={n}")
