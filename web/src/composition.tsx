@@ -320,7 +320,7 @@ export function ProfilePane({ draft, entry, seeChange, claim = () => {}, shown =
       )}
       {note !== undefined && <Status testid="editor-note">{note}</Status>}
       {!(o?.kind === "refused" && o.status === 412) && conflictView()}
-      <WriteResult w={w} conflict={conflictView("alert") || undefined} done={() => `Profile ${name} ${w?.spec.method === "DELETE" ? "removed from" : "saved in"} draft ${draftCalled(draft)}.`} />
+      <WriteResult w={w} conflict={conflictView("alert") || undefined} done={() => `Profile ${called} ${w?.spec.method === "DELETE" ? "removed from" : "saved in"} draft ${draftCalled(draft)}.`} />
     </section>
   );
 }

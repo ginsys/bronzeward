@@ -1016,7 +1016,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
       {/* A conflict a done write kept stays shown, with its Copy my text. */}
       {!(o?.kind === "refused" && o.status === 412) && conflictView()}
       <div ref={answer} tabIndex={-1} data-testid="fragment-write">
-        <WriteResult w={w} conflict={conflictView("alert") || undefined} goTo={() => void goTo()} marks={sent?.text.marks ?? ""} done={() => `Fragment ${name} ${w?.spec.method === "DELETE" ? "removed from" : "saved in"} draft ${draftCalled(draft)}.`} />
+        <WriteResult w={w} conflict={conflictView("alert") || undefined} goTo={() => void goTo()} marks={sent?.text.marks ?? ""} done={() => `Fragment ${called} ${w?.spec.method === "DELETE" ? "removed from" : "saved in"} draft ${draftCalled(draft)}.`} />
       </div>
     </section>
   );
