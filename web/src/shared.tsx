@@ -36,7 +36,7 @@ export const changesOf = (ms: readonly ImpactMachine[]): string[] => {
 };
 const SHOWN = 10;
 
-function Machines({ ids }: { ids: readonly string[] }) {
+export function Machines({ ids }: { ids: readonly string[] }) {
   return (
     <>
       {ids.slice(0, SHOWN).map((id, i) => <span key={id}>{i > 0 && ", "}<MachineById id={id} /></span>)}

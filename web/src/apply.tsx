@@ -5,6 +5,8 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { type ApplyIo, applyPlans, cancelPlans, type Line, LINES, rowOf, showApply } from "./apply.ts";
+import type { Assignment } from "./apply-shared.ts";
+import { SharedBlock } from "./apply-shared.tsx";
 import { Change } from "./change.tsx";
 import { Result, startsNew, useWrites } from "./forms.tsx";
 import { Ref, useItem, useReads, useSettled } from "./list.tsx";
@@ -87,7 +89,9 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
   const [lines, setLines] = useState<Readonly<Record<string, Line>>>({});
   const [seen, setSeen] = useState<Readonly<Record<string, Seen>>>({});
-  const [profiles, setProfiles] = useState<Readonly<Record<string, readonly string[]>>>({});
+  // What each machine's assignment revision selects, undefined until read: its profiles label the rows and, with the
+  // fragments, say which machines a shared name the release moved reaches.
+  const [assignments, setAssignments] = useState<Readonly<Record<string, Assignment>> | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [n, setN] = useState(0);
   // The plans this page made, each with its machine, and those Apply was pressed for, which the page never cancels.
@@ -146,13 +150,13 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
   useEffect(() => {
     let on = true;
     void (async () => {
-      const out: Record<string, readonly string[]> = {};
+      const out: Record<string, Assignment> = {};
       for (const s of r.sources) {
         if (s.kind !== "assignment" || s.revision === null) continue;
         const a = await read<S["AssignmentRevisionBody"]>(`/assignment-revisions/${enc(s.revision)}`, () => on);
-        if (a?.kind === "ok") out[a.data.machine] = a.data.profiles;
+        if (a?.kind === "ok") out[a.data.machine] = { profiles: a.data.profiles, fragments: a.data.fragments };
       }
-      if (on) setProfiles(out);
+      if (on) setAssignments(out);
     })();
     return () => void (on = false);
   }, [r.sources, read]);
@@ -237,8 +241,9 @@ export function ApplyForm({ release, r }: { release: string; r: S["ReleaseBody"]
     <>
       <PageNote parts={[APPLY_NOTE]} />
       <p><Ref to={`/releases/${enc(release)}`} id={release}>Back to the release</Ref></p>
+      <SharedBlock r={r} assignments={assignments} />
       <ul aria-label="Machines of this release">
-        {machines.map((m) => <Row key={m} release={release} machine={m} chosen={chosen.has(m)} choose={(on) => choose(m, on)} locked={busy} line={lines[m]} n={n} profiles={profiles[m]} seen={see} settled={rowSettled} />)}
+        {machines.map((m) => <Row key={m} release={release} machine={m} chosen={chosen.has(m)} choose={(on) => choose(m, on)} locked={busy} line={lines[m]} n={n} profiles={assignments?.[m]?.profiles} seen={see} settled={rowSettled} />)}
       </ul>
       {picked.some((m) => seen[m]?.role === "controlplane") && <p data-testid="apply-control-plane">{CONTROL_PLANE_NOTE}</p>}
       {roles.some((x) => x === null) && <p data-testid="apply-no-role">{NO_ROLE_NOTE}</p>}
