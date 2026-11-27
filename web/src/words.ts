@@ -30,6 +30,8 @@ export const FRAGMENTS_AND_PROFILES = "Fragments and profiles";
 export const DRAFT_NOTE = "A draft collects changes to one cluster; its entries are below. Click a fragment, profile or assignment entry to open it.";
 export const DRAFT_NOTE_OPEN = "While the draft is open you can add a fragment, a profile or an assignment, publish it, or discard it. Publishing builds a release and sends nothing to any machine.";
 export const DRAFT_NOTE_START = "To adopt the machines imported into this draft, use Adopt these machines below.";
+/** What the one press of Discard draft records (operator experience §5.9: read what it records, one press, no dialog). */
+export const DISCARD_SENTENCE = "Discard draft records that this draft is discarded. A discarded draft can no longer be published.";
 export const PUBLISH_NOTE = "Publishing builds a release from this draft: it renders the configuration of every machine of the cluster whose imported configuration is in this draft or in the release applied to it, and makes the release the Desired release of those machines.";
 export const MACHINE_NOTE = "This page shows where this machine stands: its status, the next step where there is one, what Bronzeward has Desired and Applied for it, what was Observed on it, and its timeline. To change its configuration,";
 export const CREATE_A_DRAFT = "create a draft";

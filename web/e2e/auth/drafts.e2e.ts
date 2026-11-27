@@ -408,7 +408,7 @@ describe("the draft editor (#339)", () => {
     await absent(() => notice().isExisting(), "the replayed-result notice after Dismiss");
   });
 
-  it("Revert to base on a new entry says it has no base; Remove proposes the removal; Discard asks, then discards [step editing.2] [step editing.3] [step editing.7]", async () => {
+  it("Revert to base on a new entry says it has no base; Remove proposes the removal; Discard says what it records, then discards on one press [step editing.2] [step editing.3] [step editing.7]", async () => {
     const name = `rm-${hex()}`;
     const { id } = await seeded(name);
     await openDraft(id);
@@ -421,12 +421,11 @@ describe("the draft editor (#339)", () => {
     await expect($('main ul[aria-label="Entries"]')).toHaveText(expect.stringContaining(`fragment ${name} removed`));
     // ginsys/bronzeward#517 H8: the draft stores the removal, so the text still shown is unsaved.
     await expect(pane().$("p*=Layer:")).toHaveText(expect.stringContaining("(unsaved)"));
-    // Dismissed, nothing is sent; accepted, the draft is discarded.
+    // The page says what the press records, and one press discards the draft: no dialog (ginsys/bronzeward#1241).
     const before = (await writes()).length;
-    expect((await dialogs(false, () => $("main").$("button=Discard draft").click()))[0]).toContain(`Discard draft "synthetic ${name}"? It cannot be published afterwards.`);
-    await browser.pause(500);
-    expect(await writes()).toHaveLength(before);
-    await dialogs(true, () => $("main").$("button=Discard draft").click());
+    await expect($('[data-testid="discard-sentence"]')).toHaveText(expect.stringContaining("can no longer be published"));
+    // A dialog would be dismissed by the driver (gecko-driver.ts), so nothing would be sent and the checks below would fail.
+    await $("main").$("button=Discard draft").click();
     await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining("discarded"), { wait: 20_000 });
     expect((await writes()).map(([m, r]) => `${m} ${r}`).slice(before)).toEqual([`POST /drafts/${id}/discard`]);
   });

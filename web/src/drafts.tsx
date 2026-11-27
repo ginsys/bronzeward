@@ -26,7 +26,7 @@ import { safeText, safeWord } from "./safe.ts";
 import { draftCalled, draftName, draftText } from "./titles.ts";
 import { PageNote } from "./page-note.tsx";
 import { claimedName, scopeMember, scopeQuery } from "./shared-writes.ts";
-import { CREATE_DRAFT_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, NAME_NOT_SHOWN, SHARED_CHOICE, SHARED_REMOVE_SENTENCE, SHARED_SAVE_SENTENCE } from "./words.ts";
+import { CREATE_DRAFT_NOTE, DISCARD_SENTENCE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, NAME_NOT_SHOWN, SHARED_CHOICE, SHARED_REMOVE_SENTENCE, SHARED_SAVE_SENTENCE } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
 
 type S = components["schemas"];
@@ -347,13 +347,13 @@ export function DiscardDraft({ draft, written, seeChange }: { draft: Draft; writ
   // A discarded draft takes no write: its ETag is forgotten as the discard settles.
   const settled = (s: Outcome) => void (s.kind === "done" && forgetETag(draft.id));
   const discard = () => {
-    if (!confirm(`Discard draft ${draftCalled(draft)}? It cannot be published afterwards.`)) return;
     const ifMatch = keptETag(draft.id, writes?.client?.currentEpoch);
     setNote(ifMatch === undefined ? NO_ETAG : undefined);
     if (ifMatch !== undefined) send({ method: "POST", path: `/drafts/${enc(draft.id)}/discard`, body: {}, ifMatch, resource: `/drafts/${draft.id}`, settled });
   };
   return (
     <>
+      <p data-testid="discard-sentence">{DISCARD_SENTENCE}</p>
       <p><Action label="Discard draft" needs={["author"]} onClick={discard} busy={w !== undefined && w.outcome === undefined} /></p>
       {note !== undefined && <Status>{note}</Status>}
       <WriteResult w={w} conflict={<DiscardRefused onShow={() => setNote(showTheirChange(seeChange))} />} done={() => `Draft ${draftCalled(draft)} discarded.`} />
