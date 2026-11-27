@@ -251,6 +251,10 @@ scenario() { # scenario <label> <cluster> <talosctl version> <image> <cases: yes
 	sed '0,/^\( *\)type: worker\>/s//\1type: bogus/' "$node" >"$dir/invalid.yaml"
 	if cmp -s "$node" "$dir/invalid.yaml"; then die "control not planted: no machine type line"; fi
 	if dry_run "$dir/invalid.yaml" control-invalid; then die "control failed: the node accepted a bogus machine type"; fi
+	# Any nonzero exit is not the control: a timeout or a transport failure ends the run too. The
+	# node's own reason for the planted defect must be in the saved output.
+	grep --quiet --fixed-strings 'unknown machine type "bogus"' "$dir/dry-control-invalid.log" ||
+		die "control failed: the refusal was not the planted machine type (a timeout, a transport failure or another reason)"
 
 	local b want=''
 	[ "$cases" = yes ] && want=1

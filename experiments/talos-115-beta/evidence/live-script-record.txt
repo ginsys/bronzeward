@@ -1,0 +1,19 @@
+# The run/live of the second live run (test3-live.log).
+# It is the version at the commit of this branch titled "test: plant the invalid control on a commented machine type line": sha256 prefix 447bf419 (cut to 8 here).
+# The lead approved that digest before the run and the worker re-read it before starting; those
+# messages are not committed, so the link between that digest and the run rests on them and cannot
+# be checked from this repository. The run log itself holds no digest of the script.
+# Difference between that version and the committed one (diff, lines starting < are the run's):
+247c247,248
+< 	dry_run "$node" control-unchanged || true
+---
+> 	# A failed control ends the run (die): the exit trap destroys the cluster before anything is applied.
+> 	dry_run "$node" control-unchanged || die "control failed: the node refused its own unchanged configuration"
+252c253,257
+< 	if dry_run "$dir/invalid.yaml" control-invalid; then say "CONTROL FAILED: the node accepted a bogus machine type"; fi
+---
+> 	if dry_run "$dir/invalid.yaml" control-invalid; then die "control failed: the node accepted a bogus machine type"; fi
+> 	# Any nonzero exit is not the control: a timeout or a transport failure ends the run too. The
+> 	# node's own reason for the planted defect must be in the saved output.
+> 	grep --quiet --fixed-strings 'unknown machine type "bogus"' "$dir/dry-control-invalid.log" ||
+> 		die "control failed: the refusal was not the planted machine type (a timeout, a transport failure or another reason)"

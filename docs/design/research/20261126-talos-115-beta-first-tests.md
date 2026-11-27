@@ -213,10 +213,15 @@ secret scan that runs before a commit is sent to a cluster Job flagged one line;
 A first run stopped on its own invalid-configuration control, before any apply: the node's
 configuration keeps comments, and the pattern that planted the defect expected the line to end
 after the value. The log is of the second run, with that one pattern corrected. That run used the
-script as it was then (SHA-256 `447bf419…`, cut to eight characters here). The committed script
-differs in one way: a control that fails now stops the run, where the run's script only printed a
-note for one control and ignored the other's failure. Both controls passed in all three scenarios,
-so the stop never came into play, and the committed script has not been run.
+script as it was then (SHA-256 `447bf419…`, cut to eight characters here), which is the version
+at an earlier commit of this branch; the difference is in
+[`live-script-record.txt`](../../../experiments/talos-115-beta/evidence/live-script-record.txt).
+The link between that digest and the run rests on the lead's approval of the digest and a re-read
+before the run, neither of them a committed file. The committed script differs: a control that
+fails now stops the run, where the run's script ignored the failure of one control and only printed
+a note for the other, and the invalid-configuration control must see the node's own reason for the
+planted defect. Both controls passed in all three scenarios, so the stop never came into play,
+and the committed script has not been run.
 
 **Controls, in all three scenarios:** a dry run of the node's unchanged configuration is accepted;
 a configuration with machine type `bogus` is refused (the node's reason, `unknown machine type
