@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { expect, test } from "vitest";
 
-export const PAGES = ["quick-start-web", "sign-in-and-renewal", "inventory", "editing", "protected-import", "plan-and-approval", "publication", "operation-tracking"];
+export const PAGES = ["quick-start-web", "sign-in-and-renewal", "inventory", "editing", "shared-fragments", "protected-import", "plan-and-approval", "publication", "operation-tracking"];
 
 const MARKER = /^<!-- bw-web-steps: (\S+) -->\s*$/;
 // A list item of the list itself: up to two spaces before the number (an item's own text starts at the third column, so a

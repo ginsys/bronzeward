@@ -20,7 +20,9 @@ func (e *planEnv) addCluster(t *testing.T, id clusterIdent) *planEnv {
 	h := []string{"--context", "human"}
 	b.f.importMachine(t, b.s.machine, b.s.draft)
 	b.f.want(b.ctl(append(h, "draft", "show", b.s.draft)...), 0)
-	b.rel = regexp.MustCompile(`rel_[a-z2-7]{26}`).FindString(b.ctl(append(h, "publish", b.s.draft)...).out)
+	b.f.want(b.ctl(append(h, "publish", b.s.draft)...), 0)
+	// A release is adopted only once the machine has an assignment, and one that selects nothing is enough.
+	b.publishDraft(t, b.draftWith(t, "assignment", []string{"assignment", "set", b.s.machine, "--draft", "<draft>", "--none"}))
 	plan := planID.FindString(b.ctl(b.create("adopt")...).out)
 	if b.rel == "" || plan == "" {
 		t.Fatalf("the second cluster's publication named release %q and plan %q", b.rel, plan)

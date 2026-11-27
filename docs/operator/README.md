@@ -18,6 +18,7 @@ The guide has three parts:
   The journeys follow: [sign in and renewal](clients/sign-in-and-renewal.md),
   [connect a cluster](clients/connect-a-cluster.md),
   [the inventory](clients/inventory.md), [editing](clients/editing.md),
+  [sharing a fragment between clusters](clients/shared-fragments.md),
   [protected import](clients/protected-import.md), [publication](clients/publication.md),
   [plans and approval](clients/plan-and-approval.md),
   [operation tracking](clients/operation-tracking.md),
