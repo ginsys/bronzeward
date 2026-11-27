@@ -335,17 +335,33 @@ func TestDiscoverLimitedDialsWhileTheDeadlineIsNear(t *testing.T) {
 	}
 }
 
-func TestDiscoverUnsupportedContract(t *testing.T) {
-	c := newCluster(t)
-	old := supportedMinor
-	supportedMinor = func() string { return "v1.15" }
-	t.Cleanup(func() { supportedMinor = old })
-	got, err := c.discover(t)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Contract != "v1.14" || got.Supported {
-		t.Fatalf("contract %q supported %v against a server on v1.14 and a renderer for v1.15", got.Contract, got.Supported)
+// A cluster is supported when its contract is on the list of supported contracts and the linked
+// machinery is not older than it (compilation.md §10.2). The server here is on v1.14, the one
+// listed contract: an older machinery cannot render it, a newer one is a stand-in for the library
+// after a bump and still renders it, and a machinery that records no version supports nothing.
+func TestDiscoverSupportedContract(t *testing.T) {
+	for name, tc := range map[string]struct {
+		linked string
+		want   bool
+	}{
+		"the linked machinery's own minor": {"v1.14.5", true},
+		"a newer machinery":                {"v1.15.0", true},
+		"an older machinery":               {"v1.13.6", false},
+		"no recorded machinery":            {"", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := newCluster(t)
+			old := linkedMachinery
+			linkedMachinery = func() string { return tc.linked }
+			t.Cleanup(func() { linkedMachinery = old })
+			got, err := c.discover(t)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Contract != "v1.14" || got.Supported != tc.want {
+				t.Fatalf("contract %q supported %v against a server on v1.14 and machinery %q, want %v", got.Contract, got.Supported, tc.linked, tc.want)
+			}
+		})
 	}
 }
 
@@ -697,25 +713,25 @@ func TestLeakCheckSeesTheEncodedKey(t *testing.T) {
 	}
 }
 
-// TestMachineryContract: the supported contract is the linked machinery module's minor. A module
-// replacement hides the linked version in Replace, so nothing is supported then (the server's
-// renderer refuses a replacement the same way).
-func TestMachineryContract(t *testing.T) {
+// TestMachineryVersion: the library the supported contracts are measured against is the linked
+// machinery module's version. A module replacement hides the linked version in Replace, so nothing is
+// supported then (the server's renderer refuses a replacement the same way).
+func TestMachineryVersion(t *testing.T) {
 	const path = "github.com/siderolabs/talos/pkg/machinery"
 	for name, tc := range map[string]struct {
 		deps []*debug.Module
 		want string
 	}{
-		"plain":       {[]*debug.Module{{Path: path, Version: "v1.13.6"}}, "v1.13"},
+		"plain":       {[]*debug.Module{{Path: path, Version: "v1.13.6"}}, "v1.13.6"},
 		"replaced":    {[]*debug.Module{{Path: path, Version: "v1.13.6", Replace: &debug.Module{Path: "../machinery", Version: "v1.14.2"}}}, ""},
 		"absent":      {[]*debug.Module{{Path: "example.org/other", Version: "v1.13.6"}}, ""},
 		"no build id": {nil, ""},
 	} {
-		if got := machineryContract(&debug.BuildInfo{Deps: tc.deps}); got != tc.want {
-			t.Errorf("%s: machineryContract = %q, want %q", name, got, tc.want)
+		if got := machineryVersion(&debug.BuildInfo{Deps: tc.deps}); got != tc.want {
+			t.Errorf("%s: machineryVersion = %q, want %q", name, got, tc.want)
 		}
 	}
-	if got := machineryContract(nil); got != "" {
+	if got := machineryVersion(nil); got != "" {
 		t.Errorf("no build information: %q", got)
 	}
 }
