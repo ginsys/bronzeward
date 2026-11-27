@@ -4024,7 +4024,8 @@ makes none. "Automation" is a service identity with a Bronzeward-issued token
 (§10.2). The permission names are not decided, so a right is named by what it
 covers. The server's refusal is the authority, whatever a client shows. Today an
 automation holding `author` and `publisher` can do the steps below that name
-those roles; every other step of run 1 needs a person or the controller.
+those roles, except the imports (steps 6 and 16 of run 1), which stay with a
+person; every other step of run 1 needs a person or the controller.
 
 **Run 1: bring an existing cluster under management and keep it current.**
 
@@ -4075,7 +4076,7 @@ rule is not decided.
 | --- | --- | --- | --- | --- | --- |
 | 1 | An external caller brings the machine up and reports it, and may say which machines are control plane and which are workers | Not specified | Not specified | Not specified | No route, no pending-candidate record and no call-home contract exist |
 | 2 | Admit the machine | A person | The person's decision | **Yes, each machine** | Decided: no unattended admission until a machine has an authenticated channel or hardware attestation (owner decision, 27 November 2026, 08:47 CET). Admission by allowed address ranges is not decided |
-| 3 | Select which admitted machines are configured, using the caller's roles and profiles as input to a draft | Whoever may edit drafts, a service identity included | The `author` role | No | Decided. The draft routes of run 1 exist, but an admitted machine has no record until admission is specified |
+| 3 | Select which admitted machines are configured, using the caller's roles and profiles as input to a draft | Whoever may edit drafts, a service identity included | The `author` role | No | Decided, not built. The draft routes of run 1 exist, but an admitted machine has no record until admission is specified |
 | 4 | Publish and ask for the plan | `publisher` | The role | No | Built for a machine that has a record. Whether it covers a first configuration from maintenance mode is not specified |
 | 5 | Approve the first configuration | An `approver`, a person | The approver | **Yes** | Decided: a rule covers only adoption and a no-reboot apply to a worker, so no rule covers this. Adding it to a rule is not decided |
 | 6 | Apply it through the maintenance transport | Not specified | Not specified | Not specified | No contract; design §18.3 |
