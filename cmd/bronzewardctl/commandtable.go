@@ -144,6 +144,10 @@ var cmdTable = []cmdEntry{
 			"reaches. --remove stops following it, and the cluster loses the name unless it holds its own. " + adoptNote + "\n" + draftWrite},
 	{path: "fragment detach", line: "copy an adopted fragment into the cluster and stop following it", synopsis: "fragment detach <name> --draft <draft>",
 		roles: "author", ifMatch: true, notes: "one step of the draft: the adopted revision becomes the cluster's own fragment of that name.\n" + draftWrite},
+	{path: "fragment adoptions", line: "the clusters that use a shared fragment", synopsis: "fragment adoptions <name> [--behind]", roles: "any",
+		notes: "lists each cluster with the revision it is on, the shared head's revision, the release that set it and its machines. --behind\n" +
+			"lists only the clusters on an older revision than the head. A cluster that reaches the name only through an adopted shared\n" +
+			"profile is listed with that profile under VIA. A page is --limit, --cursor or --all."},
 
 	{path: "profile", line: "profiles of fragments"},
 	{path: "profile show", line: "show a profile head or revision", synopsis: "profile show <head or revision ID>", roles: "any", not: "limit cursor all"},
@@ -158,9 +162,12 @@ var cmdTable = []cmdEntry{
 	{path: "profile adopt", line: "adopt a shared profile in a draft", roles: "author", ifMatch: true,
 		synopsis: "profile adopt <name> --draft <draft> [--revision <prv_ ID>]\nprofile adopt <name> --draft <draft> --remove",
 		notes: "the draft's cluster takes the shared profile at --revision, the head's revision when none is given, and prints the machines it\n" +
-			"reaches. --remove stops following it. " + adoptNote + "\n" + draftWrite},
+			"reaches. --remove stops following it.\n" + draftWrite},
 	{path: "profile detach", line: "copy an adopted profile into the cluster and stop following it", synopsis: "profile detach <name> --draft <draft>",
 		roles: "author", ifMatch: true, notes: "one step of the draft: the adopted revision becomes the cluster's own profile of that name.\n" + draftWrite},
+	{path: "profile adoptions", line: "the clusters that use a shared profile", synopsis: "profile adoptions <name> [--behind]", roles: "any",
+		notes: "lists each cluster with the revision it is on, the shared head's revision, the release that set it and its machines. --behind\n" +
+			"lists only the clusters on an older revision than the head. A page is --limit, --cursor or --all."},
 
 	{path: "assignment", line: "what configuration each machine is assigned"},
 	{path: "assignment show", line: "show an assignment head or revision", synopsis: "assignment show <head or revision ID>", roles: "any", not: "limit cursor all"},
@@ -178,6 +185,9 @@ var cmdTable = []cmdEntry{
 	{path: "draft show", line: "show a draft", synopsis: "draft show <draft>", roles: "any"},
 	{path: "draft create", line: "start a draft", synopsis: "draft create --cluster <cluster> --title <title>", roles: "author"},
 	{path: "draft discard", line: "discard a draft", synopsis: "draft discard <draft>", roles: "author", ifMatch: true, notes: draftWrite},
+	{path: "draft impact", line: "what a draft changes and reaches before it is published", synopsis: "draft impact <draft>", roles: "any",
+		notes: "lists, for each fragment or profile entry of the draft, the machines of the draft's cluster that gain, lose or keep a revision,\n" +
+			"and the other clusters that stay unchanged. It renders nothing: the configuration appears only after publication."},
 	{path: "import", line: "imports of a machine's configuration into a draft"},
 	{path: "import start", line: "import a machine's configuration into a draft", roles: "author", person: true, ifMatch: true,
 		synopsis: "import start --machine <machine> --draft <draft> [--cluster <cluster>] [--file <path or ->] [--staging encrypted|transient]\n" +

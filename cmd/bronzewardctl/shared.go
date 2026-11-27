@@ -20,11 +20,12 @@ import (
 type sharedKind struct {
 	name, plural, revision string
 	entry                  apitypes.SourceEntryKind
+	adoptNote              string // what an adoption of the kind does not move, "" for none
 }
 
 var (
-	fragmentKind = sharedKind{"fragment", "fragments", "frv_", apitypes.SourceEntryKindFragment}
-	profileKind  = sharedKind{"profile", "profiles", "prv_", apitypes.SourceEntryKindProfile}
+	fragmentKind = sharedKind{"fragment", "fragments", "frv_", apitypes.SourceEntryKindFragment, adoptNote}
+	profileKind  = sharedKind{"profile", "profiles", "prv_", apitypes.SourceEntryKindProfile, ""}
 )
 
 // adoptionPath is the route of a name's adoption in a draft, with suffix after it.
@@ -291,7 +292,10 @@ func (e *env) sharedAdopt(k sharedKind, args []string) error {
 		if n, err := reached(c, draft, k, name); err == nil {
 			line += " Reaches " + machineCount(n) + "."
 		}
-		return []string{line, adoptNote}, nil
+		if k.adoptNote == "" {
+			return []string{line}, nil
+		}
+		return []string{line, k.adoptNote}, nil
 	})
 }
 
