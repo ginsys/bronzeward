@@ -1252,8 +1252,8 @@ unmeasured.
    with `auto: off` and `hostname` set to the machine's name, composed as one
    patch by the renderer's native merge, in `metal`, `container` and `cloud`
    alike: the document's validation reads no mode (line 115). Only the
-   contract the PoC compiles is concerned (§10.2: the node's running minor,
-   v1.12 or above for this document); the legacy `machine.network.hostname` is
+   contracts the PoC compiles are concerned (§10.2: the supported contracts,
+   v1.14 only, all v1.12 or above for this document); the legacy `machine.network.hostname` is
    never written. Alternatives: `metal` only, which leaves a named container
    or cloud node with a name and no effect and needs a second rule for no
    measured reason; the legacy field, which v1.14 refuses beside the document.
@@ -1925,40 +1925,58 @@ outcomes through both implementations (E3 §4.3); the choice belongs to
 
 ### 10.2 Pinning and refusals
 
-- **Pin to the node's minor.** The machinery module's minor equals the target
-  node's running Talos minor. In E3, a v1.13 renderer's output was accepted by
-  the v1.13.6 node and a v1.14 renderer's was refused (E3 §8).
-- **The PoC compiles only the node's running contract minor**
-  **(choice §16.25)**. A v1.12 contract was also accepted, but v1.10 and v1.11
-  contracts were refused in immediate mode (E3 §4.3), and the PoC applies in
-  `no-reboot` mode only.
-- **Refuse, in Bronzeward, a target contract whose minor exceeds the
-  renderer's.** The renderer silently renders its own contract instead
-  (E3 §4.1, §6.3 item 1).
-- **Refuse a Kubernetes version outside the pinned machinery's `SupportedWith`
-  window** for the target. Neither generation nor validation refuses it
+- **Pin to the node's minor.** The cluster's contract is the target node's
+  running Talos minor, and a node's running minor must match it at
+  publication. A renderer is no stand-in for the node's contract: in E3, a
+  v1.13 renderer's output was accepted by the v1.13.6 node and a v1.14
+  renderer's was refused (E3 §8).
+- **The PoC compiles only the contracts on the list of supported contracts
+  (choices §16.25 and §16.33), and the list holds v1.14 only.** A v1.12
+  contract was also accepted, but v1.10 and v1.11 contracts were refused in
+  immediate mode (E3 §4.3), and the PoC applies in `no-reboot` mode only.
+  Adding a cluster, publication and discovery read the same list.
+- **Refuse, in Bronzeward, a target contract that is not on the list, and a
+  listed one whose minor exceeds the renderer's.** The renderer silently
+  renders its own contract instead (E3 §4.1, §6.3 item 1).
+- **Refuse a Kubernetes version outside the `SupportedWith` window of the
+  cluster's contract.** Neither generation nor validation refuses it
   (E3 §4.2). For Talos 1.14 the machinery accepts Kubernetes 1.32 to 1.37, while the
   documented range is 1.33 to 1.37 (E3 §4.4); the machinery's windows are wider than
   the documented tested path, and a stricter support policy is a
   separate decision (E3 §8). The version is the kubelet image tag of the
   validated configuration, the machinery's default image when none is set, and
   every machine a release covers must name the same one **(choice §16.32)**.
-  The window is that of the Talos minor of the machinery version itself.
+  The window is the contract's, held with its entry on the list from the
+  machinery's own constants for that minor, and not that of the machinery's
+  minor. A kubelet image the configuration does not set takes the machinery's
+  default Kubernetes version, which follows the library: under a newer library
+  it can lie outside the window of a v1.14 contract, and publication then
+  refuses. That fails closed, and the library bump decides how defaults are
+  pinned.
 - **Record the contract, not only the renderer.** The release records the
   target contract, the machinery module version and its checksum, the Kubernetes
   version and the validation mode. A renderer version alone does not say whether
   a node can decode the output (E3 §8). The machinery version and checksum are
   the compiling build's own record of the module, as `go version -m` prints it
-  **(choice §16.34)**; the contract is refused unless it is the machinery's
-  minor **(choice §16.33)**.
-- **The machinery minor sets the supported contract**, because the contract
-  must equal it (above). A minor or major bump of the module is therefore
-  deliberate work and not dependency upkeep: by itself it makes publication
-  refuse every cluster on the earlier contract. Until a test in CI compares
-  rendered configuration, no ordinary update of the module merges
-  automatically, patch and digest included **(choice §16.41)**. A security fix
-  still merges automatically, because only a repository-wide setting of the
-  dependency bot stops that.
+  **(choice §16.34)**; the contract is refused unless it is on the list and
+  not newer than the machinery's minor **(choice §16.33)**.
+- **The list of supported contracts is separate from the machinery's
+  version** **(choice §16.33)**. The library can move first: a contract on the
+  list stays supported, rendered as itself and held to its own Kubernetes
+  window, while the library is newer. A contract joins the list only with
+  all three of: evidence from a live node of that minor, as E3 gives for
+  v1.13; its Kubernetes window; and a check that refuses a document the
+  contract's nodes cannot decode. The check is needed because a newer
+  validator accepts what an older node refuses (E3 §4.2), and it is not
+  built while the list holds the library's own contract, whose validator is
+  the contract's. It must exist before the library moves past a listed
+  contract, so the module bump of ginsys/bronzeward#1212 does not merge
+  without it. A minor or major bump of the module is deliberate work and
+  not dependency upkeep: it changes what the validator accepts. Until a test
+  in CI compares rendered configuration, no ordinary update of the module
+  merges automatically, patch and digest included **(choice §16.41)**. A
+  security fix still merges automatically, because only a repository-wide
+  setting of the dependency bot stops that.
 - **Paths are versioned with the contract.** The v1.14 layout moves many
   v1alpha1 paths into separate documents (E3 §4.1), so marks, declarations and
   embedded identifications hold for the contract their fragment revision was
@@ -2230,8 +2248,9 @@ check.
 8. **No unkeyed secret digest is persisted.** The only unkeyed digests over
    plaintext are the whole-configuration digests of §4.1; an artifact's
    ciphertext digest (§11) is over ciphertext.
-9. **Renderer minor equals the node's minor and is at least the target
-   contract's**; Kubernetes is inside the window.
+9. **The target contract is on the list of supported contracts and not newer
+   than the renderer's minor, and equals the node's running minor**;
+   Kubernetes is inside the contract's window.
 
 ## 15. Verification and evidence limits
 
@@ -2510,7 +2529,8 @@ in place as
     the owner.
 25. **Compile only the node's running contract minor** (§10.2). v1.12 would
     also be accepted by a v1.13 node (not tested on v1.14); one contract keeps
-    paths and validation single.
+    paths and validation single. The list of supported contracts of choice
+    §16.33 holds that one contract today.
 26. **Record the unkeyed configuration digest of each baseline and each
     artifact's plaintext** (§2.3 step 8, §4.1, §11). Added for
     [execution and recovery §1](execution-recovery.md#1-supported-operation-and-state-values),
@@ -2585,12 +2605,22 @@ in place as
     Alternatives: a Kubernetes version on the cluster record, which the
     operator would keep in step with every configuration by hand; or the
     API server image, which worker configurations do not carry.
-33. **The contract must equal the machinery's minor** (§10.2). Choice §16.25
-    compiles only the node's running contract, and the machinery renders a
-    newer contract silently as its own, so a cluster contract other than the
-    renderer's minor is refused at publication. Alternative: accept an older
-    contract the machinery can still render (E3 §4.3 accepted v1.12), which
-    the PoC does not test.
+33. **Supported contracts are an explicit list, apart from the machinery's
+    version** (§10.2). Choice §16.25 compiles only the node's running contract.
+    Until ginsys/bronzeward#1213 the contract had to equal the machinery's
+    minor, so moving the module would have refused every cluster on the
+    earlier contract and the library could not move first. Now one list,
+    which holds v1.14 only, is read by adding a cluster, by publication and
+    by discovery. An entry newer than the machinery is refused, because the
+    machinery renders a newer contract silently as its own (E3 §4.1). The
+    Kubernetes window belongs to the entry. A contract joins the list with a
+    live node's evidence, its window, and the check that refuses a document
+    its nodes cannot decode (§10.2). Owner decision, 2026-11-26
+    (ginsys/bronzeward#1213). Alternatives: keep the equality, which ties
+    support to the library; accept every older contract the machinery can
+    still render (E3 §4.3 accepted v1.12), which the PoC does not test and
+    whose documents the newer validator would not hold to the node's
+    decoding.
 34. **The machinery version and checksum come from the build** (§10.2):
     the module's version and go.sum `h1:` checksum as the server binary's build
     information records them. A build that records neither, or holds a replaced

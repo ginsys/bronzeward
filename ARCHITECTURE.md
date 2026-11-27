@@ -33,6 +33,7 @@ Bronzeward is a server and a command-line client that keep the configuration of 
 | `internal/talos/discover` | Reading a cluster's identity from a talosconfig | Write to a node |
 | `internal/talos/signer` | Turning a first key (a document that holds the cluster's Talos CA key, or lets the server fetch it) into that key | Import beyond its allowlist |
 | `internal/client`, `internal/client/apitypes` | The command line's request core; types generated from `openapi.yaml` | Link a server package |
+| `internal/contract` | The list of supported Talos contracts and each one's Kubernetes window; adding a cluster, publication and discovery all read it | Import another internal package |
 | `internal/id`, `internal/machinename`, `internal/clusterid`, `internal/textdiff` | Identifier format; the machine-name grammar; the standard spelling of a cluster ID; the plan's text diff | Import another internal package |
 | `internal/seam`, `internal/baotest`, `internal/dbtest`, `internal/clitest`, `internal/talos/talostest` | Test support: an interruption point, a real OpenBao, a database per test, the command line against a server (tests only), a stand-in node | |
 
