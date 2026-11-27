@@ -733,8 +733,8 @@ usage: bronzewardctl fragment adoptions <name> [--behind]
 the clusters that use a shared fragment.
 
 lists each cluster with the revision it is on, the shared head's revision, the release that set it and its machines. --behind
-lists only the clusters on an older revision than the head. A cluster that reaches the name only through an adopted shared
-profile is listed with that profile under VIA. A page is --limit, --cursor or --all.
+lists only the clusters whose revision is not the head's, every cluster once the head is removed. A cluster that reaches the
+name only through an adopted shared profile is listed with that profile under VIA. A page is --limit, --cursor or --all.
 
 Roles: any.
 
@@ -876,7 +876,7 @@ usage: bronzewardctl profile adoptions <name> [--behind]
 the clusters that use a shared profile.
 
 lists each cluster with the revision it is on, the shared head's revision, the release that set it and its machines. --behind
-lists only the clusters on an older revision than the head. A page is --limit, --cursor or --all.
+lists only the clusters whose revision is not the head's, every cluster once the head is removed. A page is --limit, --cursor or --all.
 
 Roles: any.
 
