@@ -18,6 +18,7 @@ import { type EmbeddedPath, references, type Spot, spotOfLine, spotOfPath, spotO
 import type { Problem } from "./request.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Reach } from "./shared.tsx";
+import { SharedNames } from "./shared-names.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
 import { DraftLink } from "./draft-link.tsx";
 import { ClusterLink, ClusterOption, ClusterRef, DraftHead, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
@@ -297,6 +298,7 @@ export function DraftItem({ id }: { id: string }) {
             ) : <li key={`import-base:${e.machine}`}><ImportedConfigurationRef machine={e.machine} revision={e.revision} /><BaseDocument id={e.revision} machine={e.machine} /></li>)}
           </ul>
           {readsReach(d) && <Reach draft={d.id} n={n} />}
+          {d.state === "open" && <SharedNames draft={d} written={written} seeChange={seeChange} />}
           {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} />{" "}<Action label="Add profile" needs={["author"]} onClick={() => pick("profile:")} />{" "}<Action label="Add assignment" needs={["author"]} onClick={() => pick("assignment:")} /></p>}
           {selected !== undefined && selected.startsWith("fragment:") && (
             <FragmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />

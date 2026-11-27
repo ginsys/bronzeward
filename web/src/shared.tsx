@@ -6,7 +6,8 @@ import type { ReactNode } from "react";
 import type { components } from "./api/v1";
 import { EmptyList, Head, Id, More, Scroll, useItem, useList, usePending } from "./list.tsx";
 import { safeText, safeWord } from "./safe.ts";
-import { ClusterLink, MachineById } from "./titles.tsx";
+import { when } from "./states.tsx";
+import { ClusterLink, MachineById, useBody } from "./titles.tsx";
 import { NAME_NOT_SHOWN, SHARED_PAGE_NOTE, SHARED_REACH_NOTE } from "./words.ts";
 
 type S = components["schemas"];
@@ -62,7 +63,7 @@ export function ReachItem({ it }: { it: Item }) {
     rows.push(
       <li key={label}>
         {label}: {cs.map((c, i) => (
-          <span key={c.cluster}>{i > 0 && ", "}<ClusterLink id={c.cluster} /> on <Id id={c.revision} />{c.via !== null && ` through the shared profile ${safeText(c.via) ?? NAME_NOT_SHOWN}`}</span>
+          <span key={c.cluster}>{i > 0 && ", "}<ClusterLink id={c.cluster} /> on <SavedRevision kind={it.kind === "profile" ? "profile" : "fragment"} id={c.revision} />{c.via !== null && ` through the shared profile ${safeText(c.via) ?? NAME_NOT_SHOWN}`}</span>
         ))}
       </li>,
     );
@@ -102,7 +103,7 @@ export const useOf = (a: Pick<Adoption, "behind" | "via">): string => {
   return a.via !== null ? `through the shared profile ${safeText(a.via) ?? NAME_NOT_SHOWN} (not an adoption), ${head}` : head;
 };
 
-export function AdoptionRows({ rows }: { rows: readonly Adoption[] }) {
+export function AdoptionRows({ rows, kind = "fragment" }: { rows: readonly Adoption[]; kind?: "fragment" | "profile" }) {
   return (
     <Scroll label="Clusters using this name">
       <Head cols={["Cluster", "Revision", "Use", "Release", "Machines"]} />
@@ -110,7 +111,7 @@ export function AdoptionRows({ rows }: { rows: readonly Adoption[] }) {
         {rows.map((a) => (
           <tr key={`${a.cluster}:${a.via ?? ""}`}>
             <th scope="row"><ClusterLink id={a.cluster} /></th>
-            <td><Id id={a.revision} /></td>
+            <td><SavedRevision kind={kind} id={a.revision} /></td>
             <td>{useOf(a)}</td>
             <td><Id id={a.release} none="none yet" /></td>
             <td>{a.machines.length}</td>
@@ -119,6 +120,12 @@ export function AdoptionRows({ rows }: { rows: readonly Adoption[] }) {
       </tbody>
     </Scroll>
   );
+}
+
+/** A revision as a person reads it: when it was saved, once read, with the identifier as the link's title (the shortened one until then). */
+export function SavedRevision({ kind, id }: { kind: "fragment" | "profile"; id: string }) {
+  const body = useBody<{ createdAt?: string }>(`/${kind}-revisions/${encodeURIComponent(id)}`);
+  return <Id id={id} text={body?.createdAt === undefined ? undefined : `Saved ${when(body.createdAt)}`} />;
 }
 
 /** A shared fragment's or profile's page: every cluster that uses the name, with the revision it is on. */
@@ -130,7 +137,7 @@ export function SharedClusters({ kind, head }: { kind: "fragment" | "profile"; h
       <h3>Clusters using this {kind}</h3>
       <p>{SHARED_PAGE_NOTE}</p>
       {list.kind !== "ok" ? pending : list.data.items.length === 0 && more === undefined ? <EmptyList list={list.data} text="No cluster uses this name yet." /> : (
-        <><AdoptionRows rows={list.data.items} /><More list={list.data} shown={list.data.items.length} more={more} busy={busy} /></>
+        <><AdoptionRows rows={list.data.items} kind={kind} /><More list={list.data} shown={list.data.items.length} more={more} busy={busy} /></>
       )}
     </>
   );
