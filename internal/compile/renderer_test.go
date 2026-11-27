@@ -10,6 +10,7 @@ import (
 
 	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
+	"github.com/ginsys/bronzeward/internal/talos/contract"
 )
 
 // moduleLine is the machinery's line of the named module file, split into fields; in go.sum, the
@@ -80,15 +81,20 @@ func TestMachineryRefuses(t *testing.T) {
 	}
 }
 
-// The PoC compiles only the machinery's own contract minor (compilation.md §10.2, choice §16.25):
-// a newer contract would be rendered silently as the machinery's, an older one is not the node's.
+// A cluster's contract is supported when the list of supported contracts holds it and the machinery
+// is not older than it (compilation.md §10.2, choices §16.25 and §16.33): a newer contract would be
+// rendered silently as the machinery's. A machinery newer than the listed contract is a stand-in for
+// the library after a bump: v1.14 is still accepted, as itself.
 func TestCheckContract(t *testing.T) {
-	if err := CheckContract("v1.14.5", "v1.14"); err != nil {
-		t.Fatal(err)
+	for _, library := range []string{"v1.14.5", "v1.15.0", "v1.15.0-beta.1"} {
+		if err := CheckContract(library, "v1.14"); err != nil {
+			t.Errorf("machinery %s, contract v1.14: %v", library, err)
+		}
 	}
 	for _, c := range [][2]string{
-		{"v1.14.5", "v1.15"}, {"v1.14.5", "v1.13"}, {"v1.14.5", "v2.14"}, {"v1.14.5", "1.14"},
-		{"v1.14.5", "v1.14.5"}, {"v1.14.5", ""}, {"v1.14", "v1.14"}, {"", "v1.14"},
+		{"v1.14.5", "v1.15"}, {"v1.14.5", "v1.13"}, {"v1.15.0", "v1.15"}, {"v1.15.0", "v1.13"}, {"v1.14.5", "v2.14"},
+		{"v1.14.5", "1.14"}, {"v1.14.5", "v1.14.5"}, {"v1.14.5", ""}, {"v1.14", "v1.14"}, {"", "v1.14"},
+		{"v1.13.6", "v1.14"},
 	} {
 		err := CheckContract(c[0], c[1])
 		var e *Error
@@ -106,8 +112,9 @@ func kubelet(t *testing.T, image string) Source {
 }
 
 // The release's Kubernetes version is the kubelet image tag of the validated configuration, the
-// machinery's default when none is set, and must lie in the machinery's SupportedWith window for
-// its own Talos minor, which validation does not check (compilation.md §10.2).
+// machinery's default when none is set, and must lie in the SupportedWith window of the cluster's
+// contract, which validation does not check (compilation.md §10.2). The window is the contract's,
+// not the library's: it is asked for the contract and for nothing else.
 func TestKubernetesVersion(t *testing.T) {
 	base := source(t, string(generatedBase(t)), ingest.Declarations{}, nil)
 	for name, c := range map[string]struct {
@@ -122,7 +129,7 @@ func TestKubernetesVersion(t *testing.T) {
 		"an explicitly empty one": {[]Source{kubelet(t, `""`)}, "v1.37.1"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := compiled(t, Input{Base: base, Fragments: c.frags, Mode: ModeMetal}).KubernetesVersion("v1.14.5")
+			got, err := compiled(t, Input{Base: base, Fragments: c.frags, Mode: ModeMetal}).KubernetesVersion("v1.14")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -131,14 +138,21 @@ func TestKubernetesVersion(t *testing.T) {
 			}
 		})
 	}
-	// The machinery this build holds has a window: an upgrade to a minor without one fails here,
-	// not at the first publication.
+	// The machinery's default Kubernetes version, which the generated base and an unset kubelet image
+	// take, lies in the window of every contract this build can render: a library bump whose default
+	// leaves it fails here, not at the first publication.
 	version, _, err := Machinery()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := compiled(t, Input{Base: base, Mode: ModeMetal}).KubernetesVersion(version); err != nil {
-		t.Errorf("the build's machinery %s: %v", version, err)
+	listed := contract.Supported.Contracts(version)
+	if len(listed) == 0 {
+		t.Fatalf("the build's machinery %s renders no listed contract", version)
+	}
+	for _, c := range listed {
+		if _, err := compiled(t, Input{Base: base, Mode: ModeMetal}).KubernetesVersion(c); err != nil {
+			t.Errorf("contract %s with the build's machinery %s: %v", c, version, err)
+		}
 	}
 }
 
@@ -148,22 +162,23 @@ func TestKubernetesVersionRefuses(t *testing.T) {
 		refs(map[string]ingest.Reference{"app/image": ref(provider.KindString)}),
 		map[string]provider.Value{"app/image": value(t, provider.KindString, "ghcr.io/siderolabs/kubelet:v1.36.2")})
 	for name, c := range map[string]struct {
-		frag      Source
-		machinery string
+		frag     Source
+		contract string
 	}{
-		"Kubernetes 1.38":                {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.38.0"), "v1.14.5"},
-		"Kubernetes 1.31":                {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.31.9"), "v1.14.5"},
-		"the window's exclusive end":     {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.37.99"), "v1.14.5"},
-		"Kubernetes 2.32":                {kubelet(t, "ghcr.io/siderolabs/kubelet:v2.32.0"), "v1.14.5"},
-		"a tag that is not a version":    {kubelet(t, "ghcr.io/siderolabs/kubelet:latest"), "v1.14.5"},
-		"a v tag that is not a version":  {kubelet(t, "ghcr.io/siderolabs/kubelet:vnext"), "v1.14.5"},
-		"a prerelease":                   {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.36.0-rc.1"), "v1.14.5"},
-		"an image a reference placed":    {placed, "v1.14.5"},
-		"a machinery with no window":     {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.36.2"), "v1.99.0"},
-		"a machinery version of no form": {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.36.2"), "devel"},
+		"Kubernetes 1.38":               {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.38.0"), "v1.14"},
+		"Kubernetes 1.31":               {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.31.9"), "v1.14"},
+		"the window's exclusive end":    {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.37.99"), "v1.14"},
+		"Kubernetes 2.32":               {kubelet(t, "ghcr.io/siderolabs/kubelet:v2.32.0"), "v1.14"},
+		"a tag that is not a version":   {kubelet(t, "ghcr.io/siderolabs/kubelet:latest"), "v1.14"},
+		"a v tag that is not a version": {kubelet(t, "ghcr.io/siderolabs/kubelet:vnext"), "v1.14"},
+		"a prerelease":                  {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.36.0-rc.1"), "v1.14"},
+		"an image a reference placed":   {placed, "v1.14"},
+		"a contract with no window":     {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.36.2"), "v1.15"},
+		"a contract of no form":         {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.36.2"), "devel"},
+		"a library version":             {kubelet(t, "ghcr.io/siderolabs/kubelet:v1.36.2"), "v1.14.5"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := compiled(t, Input{Base: base, Fragments: []Source{c.frag}, Mode: ModeMetal}).KubernetesVersion(c.machinery)
+			got, err := compiled(t, Input{Base: base, Fragments: []Source{c.frag}, Mode: ModeMetal}).KubernetesVersion(c.contract)
 			var e *Error
 			if !errors.As(err, &e) || e.Rule != RuleKubernetes {
 				t.Fatalf("got %q, %v; want a %s refusal", got, err, RuleKubernetes)
@@ -178,7 +193,7 @@ func TestKubernetesVersionRefuses(t *testing.T) {
 			}
 		})
 	}
-	if _, err := (Compiled{}).KubernetesVersion("v1.14.5"); err == nil {
+	if _, err := (Compiled{}).KubernetesVersion("v1.14"); err == nil {
 		t.Error("an empty compilation gave a version")
 	}
 }

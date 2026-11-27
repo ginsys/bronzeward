@@ -49,7 +49,7 @@ func TestCompileTheFullGeneratedStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the full generated stream: %v", err)
 	}
-	if v, err := c.KubernetesVersion("v1.14.5"); err != nil || v == "" {
+	if v, err := c.KubernetesVersion("v1.14"); err != nil || v == "" {
 		t.Fatalf("its Kubernetes version: %q, %v", v, err)
 	}
 }
