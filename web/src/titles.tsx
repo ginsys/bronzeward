@@ -60,7 +60,7 @@ export function DraftHead({ id, d, lead }: { id: string; d: S["DraftBody"] | und
       {d !== undefined && (
         <>
           <p data-testid="draft-line">{safeWord(d.state)}, revision {d.revision}{built}, <ClusterRef id={d.cluster} />.</p>
-          <Detail id={d.id} />
+          <Detail id={d.id} quiet />
         </>
       )}
     </>

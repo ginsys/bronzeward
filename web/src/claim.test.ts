@@ -8,6 +8,7 @@ import { type Reads, ReadsProvider } from "./list.tsx";
 import { ShellContext } from "./shell.tsx";
 import { Client } from "./request.ts";
 import { type Outcome, Write, Writes } from "./write.ts";
+import { CA_KEY_WORKER_NOTE } from "./words.ts";
 
 type Ingestion = components["schemas"]["IngestionBody"];
 
@@ -219,7 +220,10 @@ describe("the import base document view (ginsys/bronzeward#858)", () => {
       const out = shell(value, h(Shown, { id: ibr, text: "machine:\n  token: BWSYNTH-base", close: () => {}, kind: "document" }));
       expect(out).toContain("PROTECTED DOCUMENT.");
       expect(out).not.toContain("PROTECTED REVIEW");
-      expect(out).toContain("Imported configuration ibr_2xxa…qa4m");
+      // Named, not numbered: the identifier is the label's title, and the note says why a worker's CA key is empty (ginsys/bronzeward#1233).
+      expect(out).toContain(`<span title="${ibr}">Imported configuration</span>`);
+      expect(out).not.toContain("ibr_2xxa…qa4m");
+      expect(out).toContain(CA_KEY_WORKER_NOTE);
       expect(out).toContain("Close imported configuration");
       expect(out).not.toMatch(/<button[^>]*disabled[^>]*>Close imported configuration/);
       expect(out).toContain("readOnly");
@@ -231,6 +235,7 @@ describe("the import base document view (ginsys/bronzeward#858)", () => {
     const out = shell(asAuthor, h(Shown, { id: "ing_6fdq2la", text: "x = 1", close: () => {} }));
     expect(out).toContain("PROTECTED REVIEW.");
     expect(out).toContain("Review of import ing_6fdq2la");
+    expect(out).not.toContain(CA_KEY_WORKER_NOTE);
     expect(out).toContain("Close review");
   });
 

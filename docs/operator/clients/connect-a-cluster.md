@@ -47,8 +47,9 @@ A context with no endpoint gives a usage error, "the talosconfig names no endpoi
 
 1. Press **Connect a cluster** on the Machines or the Clusters page. For a person without `author`
    the button is absent or off, with the reason.
-2. Choose the talosconfig file. **Talos context:** is the current one when empty. **Talos endpoint:**
-   is the context's endpoints, tried in order, when empty.
+2. The page has two screens, headed "Step 1 of 2" and "Step 2 of 2". On the first, choose the
+   talosconfig file and give the cluster the name it will have in Bronzeward. **Talos context:** is the
+   current one when empty. **Talos endpoint:** is the context's endpoints, tried in order, when empty.
 3. Before you press anything else, the page says which endpoint it will use. For a list: "The page
    will try the 3 endpoints in order, starting with 10.55.0.2:50000." For one endpoint: "The page will
    try the cluster at 10.55.0.2:50000." For a context with none: "The talosconfig's context names no
@@ -61,9 +62,10 @@ A context with no endpoint gives a usage error, "the talosconfig names no endpoi
    then each endpoint with its own answer. After a Stop it says "Stopped before trying the other
    endpoints." first. A list entry that cannot be an endpoint is not sent: its line says "it is not an
    endpoint, so it was not tried."
-6. When one gives the cluster, the page shows the Talos version, the contract and the members, and
-   asks for the cluster's name and its Kubernetes endpoint. The button **Connect a cluster** records
-   the cluster, supplies its first key and imports each machine into one draft.
+6. When one gives the cluster, the second screen ("Step 2 of 2") shows the Talos version, the contract
+   and the members, repeats the name you gave, and asks for the cluster's Kubernetes endpoint. The
+   button **Connect this cluster** records the cluster, supplies its first key and imports each machine
+   into one draft.
 
 **When the list moves on, and when it stops.** An endpoint that does not answer, or whose node is no
 control plane, moves on to the next. An answer that every endpoint would give the same way stops the

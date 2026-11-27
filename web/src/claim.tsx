@@ -10,7 +10,10 @@ import { markSent, MarksPanel, markSpec } from "./marks.tsx";
 import { importPath } from "./router.ts";
 import { Action, useFocusOn } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
+import { importedConfiguration } from "./titles.ts";
+import { useMachineText } from "./titles.tsx";
 import type { Outcome, Write, WriteSpec } from "./write.ts";
+import { CA_KEY_WORKER_NOTE } from "./words.ts";
 
 type Ingestion = components["schemas"]["IngestionBody"];
 type Verb = "continue" | "takeover" | "abandon";
@@ -210,6 +213,8 @@ export const readBaseDocument = (read: <T>(path: string, live?: () => boolean) =
 export function BaseDocument({ id, machine }: { id: string; machine?: string | null }) {
   const read = useSettled();
   const { failure } = useReads();
+  // The document is named by its machine, with the identifier as the label's title: "Imported configuration of cp1".
+  const named = importedConfiguration(useMachineText(machine));
   const [text, setText] = useState<string>();
   const [why, setWhy] = useState<ReactNode>();
   const [reading, setReading] = useState(false);
@@ -237,7 +242,7 @@ export function BaseDocument({ id, machine }: { id: string; machine?: string | n
   const { section, close } = useCloser(drop);
   return (
     <section ref={section} tabIndex={-1} aria-label="Protected document">
-      {text === undefined ? <Action label="Show imported configuration" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={id} text={text} close={close} kind="document" again={importPath({ machine })} />}
+      {text === undefined ? <Action label="Show imported configuration" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={id} text={text} close={close} kind="document" named={named} again={importPath({ machine })} />}
       {why}
     </section>
   );
@@ -246,7 +251,7 @@ export function BaseDocument({ id, machine }: { id: string; machine?: string | n
 // The open review or document: the notice, the read-only text and the close button. Closing is a plain
 // button, not a gated action: it only drops what the page holds, so no role, connection or epoch state
 // may disable it.
-export function Shown({ id, text, close, marking, kind = "review", again }: { id: string; text: string; close: () => void; marking?: { send: (marks: string[]) => void; busy: boolean }; kind?: "review" | "document"; again?: string }) {
+export function Shown({ id, text, close, marking, kind = "review", again, named = importedConfiguration(undefined) }: { id: string; text: string; close: () => void; marking?: { send: (marks: string[]) => void; busy: boolean }; kind?: "review" | "document"; again?: string; named?: string }) {
   const doc = kind === "document";
   // The button that opened it is gone: focus is on the text, with the marks and Close after it.
   const area = useRef<HTMLTextAreaElement>(null);
@@ -254,7 +259,8 @@ export function Shown({ id, text, close, marking, kind = "review", again }: { id
   return (
     <>
       <Status testid="review-notice">{doc ? "PROTECTED DOCUMENT" : "PROTECTED REVIEW"}. This may contain secrets nothing has recognised yet. This page stores none of it. Screen capture and copying by hand are outside its control, and browser extensions can read this page.</Status>
-      <p><label>{doc ? "Imported configuration" : "Review of import"} {short(id)}<br /><textarea ref={area} readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
+      <p><label>{doc ? <span title={id}>{named}</span> : <>Review of import {short(id)}</>}<br /><textarea ref={area} readOnly data-testid="review-text" value={text} rows={24} cols={100} {...NO_ASSIST} /></label></p>
+      {doc && <p data-testid="ca-key-note">{CA_KEY_WORKER_NOTE}</p>}
       {marking && <MarksPanel text={text} send={marking.send} busy={marking.busy} />}
       {again !== undefined && <p data-testid="hide-note">A value found here that should be hidden cannot be marked on this import. <Ref to={again} id={again}>Import this machine again</Ref>, and put the value's path in Marks. This copy stays stored and readable as it is.</p>}
       <p><button type="button" onClick={close}>{doc ? "Close imported configuration" : "Close review"}</button></p>

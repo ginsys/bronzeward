@@ -8,7 +8,7 @@ import { follow } from "./router.ts";
 import { Empty, Loading, Status } from "./states.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
 import { CopyButton } from "./copy.tsx";
-import { COPY_BY_HAND, IDENTIFIER } from "./words.ts";
+import { COPY_BY_HAND, copyFailedWith, IDENTIFIER } from "./words.ts";
 
 export type Load<T> = { kind: "loading" } | ReadResult<T>;
 export type Failed = Exclude<ReadResult<unknown>, { kind: "ok" | "discarded" }>;
@@ -246,11 +246,13 @@ export function Id({ id, none = "none", text }: { id: string | null | undefined;
 }
 
 // The detail line under a heading: the machine-made identifier, in small type, with a control that copies it. The
-// identifier is shown here, in the address bar and in a copy, and never in a heading or a link's text.
-export function Detail({ id }: { id: string }) {
+// identifier is shown here, in the address bar and in a copy, and never in a heading or a link's text. `quiet`
+// keeps it out of the text altogether: the word is the identifier's title, Copy copies it, and the sentence
+// a failed Copy says carries the identifier.
+export function Detail({ id, quiet = false }: { id: string; quiet?: boolean }) {
   return (
     <p>
-      <small>{IDENTIFIER} <code>{id}</code>{" "}<CopyButton text={id} byHand={COPY_BY_HAND} /></small>
+      <small>{quiet ? <span title={id}>{IDENTIFIER}</span> : <>{IDENTIFIER} <code>{id}</code></>}{" "}<CopyButton text={id} byHand={quiet ? copyFailedWith(id) : COPY_BY_HAND} /></small>
     </p>
   );
 }
@@ -264,7 +266,7 @@ export const Scroll = ({ label, testid, children }: { label: string; testid?: st
 );
 
 // A list with nothing in it, which still says when it was read again from its start (PAGE-02).
-export const EmptyList = ({ list, text }: { list: Listed<unknown>; text: string }) => (
+export const EmptyList = ({ list, text }: { list: Listed<unknown>; text: ReactNode }) => (
   <>{list.restarted && <Status testid="restarted">{RESTARTED}</Status>}<Empty text={text} /></>
 );
 

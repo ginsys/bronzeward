@@ -36,7 +36,7 @@ import { ClusterLink, type Held, MachineById, Named, OperationHeading, Operation
 import { PageNote } from "./page-note.tsx";
 import {
   AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DIFFERS_IN_FORM_ONLY, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
-  NAME_NOT_SHOWN, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
+  NAME_NOT_SHOWN, noSourcesEnd, noSourcesStart, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
 } from "./words.ts";
 
 type S = components["schemas"];
@@ -67,7 +67,7 @@ const byId = (t: unknown) => (t as { id: string }).id;
 
 // A list read a page at a time, with its empty text and, above the table, what the last page adds.
 function ListOf<T>({ label, path, query = "", cols, empty, keyOf = byId, head }: {
-  label: string; path: string; query?: string; cols: readonly Col<T>[]; empty: string; keyOf?: (t: T) => string; head?: (l: Listed<T>) => ReactNode;
+  label: string; path: string; query?: string; cols: readonly Col<T>[]; empty: ReactNode; keyOf?: (t: T) => string; head?: (l: Listed<T>) => ReactNode;
 }) {
   const [list, more, busy] = useList<T>(path, query, false);
   const pending = usePending(list, label.toLowerCase());
@@ -207,6 +207,12 @@ const lastPass = (l: Listed<unknown>) => {
   return <p data-testid="last-pass">{typeof at === "string" ? `Last completed monitor pass: ${when(at)}.` : "No monitor pass has completed yet."}</p>;
 };
 
+// An empty list of fragments or profiles says why, and where one is added: an import makes an imported configuration
+// per machine, never a fragment or a profile.
+const NoSources = ({ kind }: { kind: "fragment" | "profile" }) => (
+  <>{noSourcesStart(kind)} <Ref to="/changes" id="/changes">{DRAFTS_AND_RELEASES}</Ref> {noSourcesEnd(kind)}</>
+);
+
 export function Sources({ query, go }: { query: string; go: (to: string) => void }) {
   const { q, set, sent } = useFilters("/sources", query, go);
   const cls = q.get("class") ?? "";
@@ -215,9 +221,9 @@ export function Sources({ query, go }: { query: string; go: (to: string) => void
       <h2>{FRAGMENTS_AND_PROFILES}</h2>
       <PageNote parts={[SOURCES_NOTE]} />
       <h3>Fragments</h3>
-      <ListOf label="Fragments" path="/fragments" cols={FRAGMENTS} empty="No fragments recorded yet." />
+      <ListOf label="Fragments" path="/fragments" cols={FRAGMENTS} empty={<NoSources kind="fragment" />} />
       <h3>Profiles</h3>
-      <ListOf label="Profiles" path="/profiles" cols={PROFILES} empty="No profiles recorded yet." />
+      <ListOf label="Profiles" path="/profiles" cols={PROFILES} empty={<NoSources kind="profile" />} />
       <h3>Assignments</h3>
       <ListOf label="Assignments" path="/assignments" cols={ASSIGNMENTS} empty="No assignments recorded yet." />
       <h3>Dependencies</h3>
@@ -368,7 +374,7 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
 // wrote it is not recorded on the revision, so none is shown.
 export const ImportBaseRows = ({ r }: { r: S["ImportBaseSummary"] }) => (
   <>
-    <Detail id={r.id} />
+    <Detail id={r.id} quiet />
     <Fields rows={[
       ["Machine", <MachineById id={r.machine} />], ["Author", <Who id={r.author} />], ["Imported", when(r.createdAt)],
       ["Document size", `${r.documentBytes} bytes`], ["References", r.references], ["Embedded documents", r.embedded],
