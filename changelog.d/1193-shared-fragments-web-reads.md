@@ -1,0 +1,2 @@
+Added
+- The web console now shows shared fragments and profiles: the fragment and profile lists say which are shared, a shared fragment's or profile's page lists every cluster that uses it with the revision it is on and whether it is behind the shared head (a cluster that only reaches it through a shared profile is labelled as not an adoption), and a draft that holds a shared entry or an adoption lists what each reaches here: the machines that gain, lose or keep it and the other clusters it leaves unchanged. The page changes no cluster. Refs ginsys/bronzeward#1193.

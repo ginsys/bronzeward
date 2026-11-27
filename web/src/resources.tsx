@@ -26,6 +26,7 @@ import { ClusterItem, Clusters, Filter, Machines } from "./machines.tsx";
 import { OperationTimeline } from "./operation.tsx";
 import { RecoveryConsole } from "./recovery.tsx";
 import { ReviewItem, reviewIds, reviewPath } from "./review.tsx";
+import { scopeWords, SharedClusters } from "./shared.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { startedBy } from "./operation-words.ts";
@@ -49,7 +50,7 @@ export const INGESTION_STATES = ["held", "paused", "resumed", "released", "aband
 export const DEPENDENCY_CLASSES = ["retained", "unknown", "blocked", "lost"];
 const choices = (values: string[]) => values.map((v) => [v, v] as const);
 
-function Rows<T>({ label, cols, items, keyOf }: { label: string; cols: readonly Col<T>[]; items: readonly T[]; keyOf: (t: T) => string }) {
+export function Rows<T>({ label, cols, items, keyOf }: { label: string; cols: readonly Col<T>[]; items: readonly T[]; keyOf: (t: T) => string }) {
   return (
     <Scroll label={label}>
       <Head cols={cols.map(([h]) => h)} />
@@ -159,8 +160,8 @@ const CLUSTER: Col<{ cluster: string | null }> = ["Cluster", (t) => <Owner clust
 const CURRENT: Col<{ revision: string | null }> = ["Current revision", (t) => <Id id={t.revision} none="removed" />];
 const named = (kind: string): Col<{ id: string; name: string }> => [cap(kind), (t) => <Ref to={`/${kind}s/${t.id}`} id={t.id}>{t.name}</Ref>];
 
-const FRAGMENTS: readonly Col<S["FragmentBody"]>[] = [named("fragment"), CLUSTER, ["Scope", (f) => f.scope], ["Layer", (f) => f.layer], CURRENT, CREATED];
-const PROFILES: readonly Col<S["ProfileBody"]>[] = [named("profile"), CLUSTER, ["Scope", (p) => p.scope], CURRENT, CREATED];
+export const FRAGMENTS: readonly Col<S["FragmentBody"]>[] = [named("fragment"), CLUSTER, ["Scope", (f) => scopeWords(f.scope)], ["Layer", (f) => f.layer], CURRENT, CREATED];
+export const PROFILES: readonly Col<S["ProfileBody"]>[] = [named("profile"), CLUSTER, ["Scope", (p) => scopeWords(p.scope)], CURRENT, CREATED];
 // A row's first column names the thing, "Assignment of cp1", and keeps the identifier as the link's title; the
 // shortened identifier stands in until the machine is read.
 function AssignmentName({ a }: { a: S["AssignmentBody"] }) {
@@ -243,10 +244,11 @@ export function SourceItem({ kind, id }: { kind: Kind; id: string }) {
           <PageNote parts={[sourceNote(kind)]} />
           <Fields rows={[
             ["Identifier", s.id], ["Cluster", <Owner cluster={s.cluster} />],
-            ...("scope" in s ? [["Scope", s.scope] as const] : []), ...("layer" in s ? [["Layer", s.layer] as const] : []),
+            ...("scope" in s ? [["Scope", scopeWords(s.scope)] as const] : []), ...("layer" in s ? [["Layer", s.layer] as const] : []),
             ...("machine" in s ? [["Machine", <MachineById id={s.machine} />] as const] : []),
             ["Current revision", <Id id={s.revision} none="removed" />], ["Head revision", s.headRevision], ["Created", when(s.createdAt)],
           ]} />
+          {s.cluster === null && (kind === "fragment" || kind === "profile") && <SharedClusters kind={kind} head={s.id} />}
           {kind === "profile" && (
             <>
               <h3>Documents of the current revision</h3>
