@@ -40,11 +40,31 @@ VERIFY_SECONDS=2021
 VERIFY_DONE rc=1
 # classifier: run/failures.py
 other    internal/clitest TestProtected/PROT-06,_a_mark_and_the_serving_process_killed
+           2026/11/26 23:01:08 httputil: ReverseProxy read error during body copy: unexpected EOF
+           2026/11/26 23:01:23 http: proxy error: context canceled
            protected_test.go:486: exit 3, want 0
-           protected_test.go:486: output lacks "Paused for review (generation 3"
+           stdout:
+           stderr:   started
+           talos-access
+           ca-key-match
+           staged
+           paused (generation 1)
+           marked (generation 2)
+           taken-over (generation 3)
+           bronzewardctl: human (https://127.0.0.1:39065): import ing_limxdz2sko5o7np3px5ok24rwm: its claim is resumed and its lease lapsed 15s ago, while operation op_fihlbkzzhr4jwaprxudxdrtkv4 still runs: the outcome is unknown. Read it again later, take it over, or abandon it:
 other    internal/clitest TestProtected/T3
            protected_test.go:608: bronzewardctl [import start --machine mch_ml7yqryyqipoy3fzowah5unmla --draft drf_neuom6v2ylanjhbbil64mluo2e --review]: exit 3
+           started
+           talos-access
+           bronzewardctl: human (https://127.0.0.1:39065): import ing_ispytglj4khqco3nkfdxjphs2m: its claim is held and its lease lapsed 15s ago, while operation op_76dbiz62kiwev7ro5yaeki33fq still runs: the outcome is unknown. Read it again later, take it over, or abandon it:
+           bronzewardctl import status ing_ispytglj4khqco3nkfdxjphs2m
+           bronzewardctl import takeover ing_ispytglj4khqco3nkfdxjphs2m
+           bronzewardctl import abandon ing_ispytglj4khqco3nkfdxjphs2m
            protected_test.go:581: the terminal closed before it showed the notice
+           protected_test.go:608: bronzewardctl [import continue ]: exit 1
+           bronzewardctl: human (https://127.0.0.1:39065): POST /api/v1/ingestions//continuations answered 404 No such resource or route (not-found): the path is not in clean form (instance req_zubnxxbj3jugicvkqef6wfy2ke)
+           protected_test.go:608: bronzewardctl [publish drf_neuom6v2ylanjhbbil64mluo2e]: exit 4
+           Publishing draft drf_neuom6v2ylanjhbbil64mluo2e revision 3 (operation op_sitwy42vegweud5gqcjr6i46o4).
 --- result lines (tests and subtests): PASS=2884 FAIL=3 SKIP=17
 --- failing leaves: internal/clitest other=2
 --- failing leaves in all: 2

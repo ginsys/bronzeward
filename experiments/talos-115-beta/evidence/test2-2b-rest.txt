@@ -31,39 +31,135 @@ LVJ_TIMEOUT: the log stream ran out of time (job verify-bronzeward-57fb395-17957
 # classifier: run/failures.py
 other    internal/clitest TestApprovals
            plans_test.go:268: exit 4, want 0
+           stdout: Publishing draft drf_gktdnh2rkeujfnhpll2jvxisci revision 5 (operation op_afl6pqt42ue3lwdww2qjrmtsua).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:32997): publication operation op_afl6pqt42ue3lwdww2qjrmtsua failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_vbvclyr3row4o3yy23ngqcvbpe","message":"the kubelet image names no Kubernetes
            plans_test.go:268: output lacks "mch_vbvclyr3row4o3yy23ngqcvbpe has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+           stdout: Publishing draft drf_gktdnh2rkeujfnhpll2jvxisci revision 5 (operation op_afl6pqt42ue3lwdww2qjrmtsua).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:32997): publication operation op_afl6pqt42ue3lwdww2qjrmtsua failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_vbvclyr3row4o3yy23ngqcvbpe","message":"the kubelet image names no Kubernetes
 other    internal/clitest TestDocBlocks/drift
            plans_test.go:268: exit 4, want 0
+           stdout: Publishing draft drf_eaunmcdqkytfseklodlad6gfgu revision 5 (operation op_ypuyxpesmwivpz25k2tfuw6m74).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:33447): publication operation op_ypuyxpesmwivpz25k2tfuw6m74 failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_e34tu3tmqsghyndahns6v3gj7a","message":"the kubelet image names no Kubernetes
            plans_test.go:268: output lacks "mch_e34tu3tmqsghyndahns6v3gj7a has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+           stdout: Publishing draft drf_eaunmcdqkytfseklodlad6gfgu revision 5 (operation op_ypuyxpesmwivpz25k2tfuw6m74).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:33447): publication operation op_ypuyxpesmwivpz25k2tfuw6m74 failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_e34tu3tmqsghyndahns6v3gj7a","message":"the kubelet image names no Kubernetes
 other    internal/clitest TestDocBlocks/publication,_import,_adoption,_tracking_and_plans
            plans_test.go:268: exit 4, want 0
+           stdout: Publishing draft drf_qlanzjiojq3wwzhp57aoaugiki revision 5 (operation op_eekzjzet3nnsvqatyjvchtfsce).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:39207): publication operation op_eekzjzet3nnsvqatyjvchtfsce failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_zalaqsig26jeszpwdlor4ga5ca","message":"the kubelet image names no Kubernetes
            plans_test.go:268: output lacks "mch_zalaqsig26jeszpwdlor4ga5ca has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+           stdout: Publishing draft drf_qlanzjiojq3wwzhp57aoaugiki revision 5 (operation op_eekzjzet3nnsvqatyjvchtfsce).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:39207): publication operation op_eekzjzet3nnsvqatyjvchtfsce failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_zalaqsig26jeszpwdlor4ga5ca","message":"the kubelet image names no Kubernetes
 other    internal/clitest TestDrift
            plans_test.go:268: exit 4, want 0
+           stdout: Publishing draft drf_ymlyhwky4pvprb5p3gexmimfwi revision 5 (operation op_j6olkdah4hvljp3ygbckmxuxiu).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:45175): publication operation op_j6olkdah4hvljp3ygbckmxuxiu failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_3wj74kwyt2pnqjrspfihflirha","message":"the kubelet image names no Kubernetes
            plans_test.go:268: output lacks "mch_3wj74kwyt2pnqjrspfihflirha has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+           stdout: Publishing draft drf_ymlyhwky4pvprb5p3gexmimfwi revision 5 (operation op_j6olkdah4hvljp3ygbckmxuxiu).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:45175): publication operation op_j6olkdah4hvljp3ygbckmxuxiu failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_3wj74kwyt2pnqjrspfihflirha","message":"the kubelet image names no Kubernetes
 other    internal/clitest TestDriftFreeze
            plans_test.go:268: exit 4, want 0
+           stdout: Publishing draft drf_45soejcjffq2zmzggac47rxcgi revision 5 (operation op_yyb4s3tb5xdx6kvjxgsqaa3s4i).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:33115): publication operation op_yyb4s3tb5xdx6kvjxgsqaa3s4i failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_ud4zqs5vfysupxlttmcvtt4jse","message":"the kubelet image names no Kubernetes
            plans_test.go:268: output lacks "mch_ud4zqs5vfysupxlttmcvtt4jse has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+           stdout: Publishing draft drf_45soejcjffq2zmzggac47rxcgi revision 5 (operation op_yyb4s3tb5xdx6kvjxgsqaa3s4i).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:33115): publication operation op_yyb4s3tb5xdx6kvjxgsqaa3s4i failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_ud4zqs5vfysupxlttmcvtt4jse","message":"the kubelet image names no Kubernetes
 other    internal/clitest TestOperations
            plans_test.go:268: exit 4, want 0
+           stdout: Publishing draft drf_rtjmugzvf2ystjy7mojdvbblua revision 5 (operation op_nav3hmw4nfjyz2ipca63nqk3dy).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:37805): publication operation op_nav3hmw4nfjyz2ipca63nqk3dy failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_lu5xhpxagf662gjxqgwpztssie","message":"the kubelet image names no Kubernetes
            plans_test.go:268: output lacks "mch_lu5xhpxagf662gjxqgwpztssie has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+           stdout: Publishing draft drf_rtjmugzvf2ystjy7mojdvbblua revision 5 (operation op_nav3hmw4nfjyz2ipca63nqk3dy).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:37805): publication operation op_nav3hmw4nfjyz2ipca63nqk3dy failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_lu5xhpxagf662gjxqgwpztssie","message":"the kubelet image names no Kubernetes
 other    internal/clitest TestPlans
            plans_test.go:268: exit 4, want 0
+           stdout: Publishing draft drf_cveb76kttiswxdyuku6vhce6ou revision 5 (operation op_imtodt52d4ahdlg7gmairtba5q).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:43831): publication operation op_imtodt52d4ahdlg7gmairtba5q failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_ocp3ctq5ygldpsuk2ilwwrqq6m","message":"the kubelet image names no Kubernetes
            plans_test.go:268: output lacks "mch_ocp3ctq5ygldpsuk2ilwwrqq6m has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+           stdout: Publishing draft drf_cveb76kttiswxdyuku6vhce6ou revision 5 (operation op_imtodt52d4ahdlg7gmairtba5q).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:43831): publication operation op_imtodt52d4ahdlg7gmairtba5q failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_ocp3ctq5ygldpsuk2ilwwrqq6m","message":"the kubelet image names no Kubernetes
 other    internal/clitest TestProtected/T3
            protected_test.go:608: bronzewardctl [publish drf_v4gmohl5hpb3lfwrgc332jk3vu]: exit 4
+           Publishing draft drf_v4gmohl5hpb3lfwrgc332jk3vu revision 4 (operation op_xrmigct6z5ebgmdpwrj76x4gnu).
+           queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:44491): publication operation op_xrmigct6z5ebgmdpwrj76x4gnu failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_sefzj5ssdqwokf6xkkq4kpjm3y","message":"the kubelet image names no Kubernetes
            protected_test.go:608: bronzewardctl [release provenance  mch_sefzj5ssdqwokf6xkkq4kpjm3y]: exit 1
+           bronzewardctl: human (https://127.0.0.1:44491): GET /api/v1/releases//machines/mch_sefzj5ssdqwokf6xkkq4kpjm3y/review answered 404 No such resource or route (not-found): the path is not in clean form (instance req_nxjzcgy4eahdtwppkivwi7arru)
+           protected_test.go:608: bronzewardctl [plan create --release  --machine mch_sefzj5ssdqwokf6xkkq4kpjm3y --operation adopt]: exit 2
+           bronzewardctl: plan create needs --release and --machine
+           usage: bronzewardctl plan create --release <release> --machine <machine> [--cluster <cluster>] --operation apply-config|adopt [--mode no-reboot]
+           [--expires-in <d>] [--max-observation-age <d>] [--check-validity <d>]
 other    internal/clitest TestPublication/EVT-04
-           publication_test.go:308: standard error ["  queued" "  claimed" "  failed" "bronzewardctl: human (https://127.0.0.1:37589): publication operation op_pwq7dwzfn7stlvkhx2ljxhw3oa failed: {\"rule\":\"kubernetes\",\"type\":\"urn:bronzeward:problem:validation-failed\",\"title\":\"Compilation refused the i
+           publication_test.go:308: standard error ["  queued" "  claimed" "  failed" "bronzewardctl: human (https://127.0.0.1:37589): publication operation op_pwq7dwzfn7stlvkhx2ljxhw3oa failed: {\"rule\":\"kubernetes\",\"type\":\"urn:bronzeward:problem:validation-failed\",\"title\":\"Compilation refused the input\",\"detail\":\"Publication refused: the configuration was refused (kubernetes).\",\"status\":42
            publication_test.go:317: sql: no rows in result set
 other    internal/clitest TestTimeline
            plans_test.go:268: exit 4, want 0
+           stdout: Publishing draft drf_qqfekntm5grtydllptigijlolu revision 5 (operation op_dgvjo6g53o3cwk6o76nny4vgva).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:43851): publication operation op_dgvjo6g53o3cwk6o76nny4vgva failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_gagzjen5auwowmhrxcvwodiolu","message":"the kubelet image names no Kubernetes
            plans_test.go:268: output lacks "mch_gagzjen5auwowmhrxcvwodiolu has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+           stdout: Publishing draft drf_qqfekntm5grtydllptigijlolu revision 5 (operation op_dgvjo6g53o3cwk6o76nny4vgva).
+           stderr:   queued
+           claimed
+           failed
+           bronzewardctl: human (https://127.0.0.1:43851): publication operation op_dgvjo6g53o3cwk6o76nny4vgva failed: {"rule":"kubernetes","type":"urn:bronzeward:problem:validation-failed","title":"Compilation refused the input","detail":"Publication refused: the configuration was refused (kubernetes).","status":422,"machine":"mch_gagzjen5auwowmhrxcvwodiolu","message":"the kubelet image names no Kubernetes
 other    internal/compile TestCompileAttributesTheGeneratedBase
-           compiler_test.go:63: doc[0]/cluster/etcd/ca/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey do
-           compiler_test.go:63: doc[10]/issuingCA/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]
+           compiler_test.go:63: doc[0]/cluster/etcd/ca/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]/issuingCA/key]
+           compiler_test.go:63: doc[10]/issuingCA/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]/issuingCA/key]
+           compiler_test.go:63: doc[11]/issuingCA/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]/issuingCA/key]
+           compiler_test.go:63: doc[18]/issuer/privateKey is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]/issuingCA/key]
 other    internal/compile TestCompileStillRefusesAMarkedLeafWhoseStandInIsInvalid
            restored_test.go:85: control: the unmarked subnet: compile: refused (invalid): 3 errors occurred:
+           * v1alpha1.Config: 1 error occurred:
+           * key/cert combination should not be empty
+           * etcd config is already set in v1alpha1 config (.cluster.etcd)
+           * etcd config is already set in v1alpha1 config (.cluster.etcd)
 other    internal/compile TestCompileTheFullGeneratedStream
            restored_test.go:53: its Kubernetes version: "", compile: refused (kubernetes): the kubelet image names no Kubernetes version
 other    internal/compile TestKubernetesVersion/an_explicitly_empty_one
@@ -73,6 +169,8 @@ other    internal/compile TestKubernetesVersion/the_generated_image
 other    internal/ingest TestIdentifySchemaSetOfGeneratedConfig
            identify_test.go:150: control: the machinery does not redact doc[20]/config/resources/0/providers/0/secretbox/keys/0/secret
            identify_test.go:150: control: the machinery does not redact doc[21]/issuer/privateKey
+           identify_test.go:150: control: the machinery does not redact doc[28]/privateKey
+           identify_test.go:150: control: the machinery does not redact doc[28]/peers/0/presharedKey
 --- result lines (tests and subtests): PASS=2234 FAIL=20 SKIP=12
 --- failing leaves: internal/clitest other=10
 --- failing leaves: internal/compile other=5

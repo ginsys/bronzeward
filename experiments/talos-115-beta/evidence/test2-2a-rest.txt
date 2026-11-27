@@ -75,17 +75,33 @@ contract internal/clitest TestWriteCases/AMB-01
 contract internal/clitest TestWriteCases/AMB-03
 other    internal/clitest TestWriteCases/AMB-05
            write_test.go:209: output lacks "GET /api/v1/clusters shows the cluster cl_"
-           write_test.go:209: output lacks "(amb-05) with this Talos cluster ID"
+           stdout:
+           stderr: human (https://127.0.0.1:39303): human (https://127.0.0.1:39303): POST /api/v1/clusters: Post "https://127.0.0.1:39303/api/v1/clusters": EOF; repeat 1 of 3 with the same key in 1s
+           human (https://127.0.0.1:39303): The installation entered recovery mode or was restored; what was read before may no longer hold.
+           bronzewardctl: human (https://127.0.0.1:39303): POST /api/v1/clusters: set aside, not repeated: the epoch is now ep_dyg2qg7xxmj2eixuwbmvyfdqu4, not the reference epoch. Its outcome is unknown: it may already have been committed.
+           key:       rER5sojzKOXKhb8e4Kksng
+           request:   POST /api/v1/clusters
+           context:   human (https://127.0.0.1:39303)
+           principal: http://127.0.0.1:34239|h-all
+           epoch:     ep_qg3r4zkoyxdkaqnjissg46rxku
+           read:      GET /api/v1/clusters shows no cluster with this Talos cluster ID; read it again with: bronzewardctl --context 'human' cluster list
+           To repeat exactly this request, give the same input and: --idempotency-key rER5sojzKOXKhb8e4Kksng --expect-epoch 'ep_qg3r4zkoyxdkaqnjissg46rxku' --expect-principal 'http://127.0.0.1:34239|h-all'
 contract internal/clitest TestWriteCases/AMB-07
 contract internal/clitest TestWriteCases/AMB-09
 contract internal/clitest TestWriteCases/AMB-12
 contract internal/clitest TestWriteCases/ETAG-01
 contract internal/clitest TestWrites
 other    internal/compile TestCompileAttributesTheGeneratedBase
-           compiler_test.go:63: doc[0]/cluster/etcd/ca/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey do
-           compiler_test.go:63: doc[10]/issuingCA/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]
+           compiler_test.go:63: doc[0]/cluster/etcd/ca/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]/issuingCA/key]
+           compiler_test.go:63: doc[10]/issuingCA/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]/issuingCA/key]
+           compiler_test.go:63: doc[11]/issuingCA/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]/issuingCA/key]
+           compiler_test.go:63: doc[18]/issuer/privateKey is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]/issuingCA/key]
 other    internal/compile TestCompileStillRefusesAMarkedLeafWhoseStandInIsInvalid
            restored_test.go:85: control: the unmarked subnet: compile: refused (invalid): 3 errors occurred:
+           * v1alpha1.Config: 1 error occurred:
+           * key/cert combination should not be empty
+           * etcd config is already set in v1alpha1 config (.cluster.etcd)
+           * etcd config is already set in v1alpha1 config (.cluster.etcd)
 other    internal/compile TestCompileTheFullGeneratedStream
            restored_test.go:53: its Kubernetes version: "", compile: refused (kubernetes): the kubelet image names no Kubernetes version
 other    internal/compile TestKubernetesVersion/an_explicitly_empty_one
@@ -95,18 +111,36 @@ other    internal/compile TestKubernetesVersion/the_generated_image
 other    internal/ingest TestIdentifySchemaSetOfGeneratedConfig
            identify_test.go:150: control: the machinery does not redact doc[20]/config/resources/0/providers/0/secretbox/keys/0/secret
            identify_test.go:150: control: the machinery does not redact doc[21]/issuer/privateKey
+           identify_test.go:150: control: the machinery does not redact doc[28]/privateKey
+           identify_test.go:150: control: the machinery does not redact doc[28]/peers/0/presharedKey
 other    internal/talos TestTalosAPIMethods
            methods_test.go:209: apiServices:
+           service not listed: machine.ContentLibraryService
+           service not listed: machine.HypervisorService
+           service not listed: machine.StorageService
 other    internal/talos/discover TestDiscoverTwoMembers
-           discover_test.go:90: got  {ClusterID:c-1 Version:v1.14.5 Contract:v1.14 KubernetesEndpoint:https://10.0.0.1:6443 Endpoint:127.0.0.1:38225 ResolvedFrom: Supported:false Members:[{NodeID:n1 Hostname:cp-1 Address:10.0.0.1 Role:controlplane SMBIOSUUID:11111111-2222-3333-4444-555555555555 Platform:metal
+           discover_test.go:90: got  {ClusterID:c-1 Version:v1.14.5 Contract:v1.14 KubernetesEndpoint:https://10.0.0.1:6443 Endpoint:127.0.0.1:38225 ResolvedFrom: Supported:false Members:[{NodeID:n1 Hostname:cp-1 Address:10.0.0.1 Role:controlplane SMBIOSUUID:11111111-2222-3333-4444-555555555555 Platform:metal Answered:true} {NodeID:n2 Hostname:w-1 Address:10.0.0.2 Role:worker SMBIOSUUID: Platform:container A
+           want {ClusterID:c-1 Version:v1.14.5 Contract:v1.14 KubernetesEndpoint:https://10.0.0.1:6443 Endpoint: ResolvedFrom: Supported:true Members:[{NodeID:n1 Hostname:cp-1 Address:10.0.0.1 Role:controlplane SMBIOSUUID:11111111-2222-3333-4444-555555555555 Platform:metal Answered:true} {NodeID:n2 Hostname:w-1 Address:10.0.0.2 Role:worker SMBIOSUUID: Platform:container Answered:true}] Cut:false}
 other    internal/talos/signer TestCertAcceptedByANodeBehindItsClock
            cert_test.go:153: a node 310s behind accepted the certificate: the node does not check NotBefore, so the test proves nothing
 other    internal/talos/signer TestSignBacksNotBeforeUp
            cert_test.go:107: start +0s: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
            cert_test.go:107: start +1ns: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
+           cert_test.go:107: start +250ms: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
+           cert_test.go:107: start +999.999999ms: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
 other    internal/talos/signer TestSignBoundIsTheMaximumLessTheRoundingSlack
            cert_test.go:207: whole maximum, start +0s: NotBefore is 6m0s before the signing instant, want 300s and the dropped fraction
            cert_test.go:207: whole maximum, start +1ns: NotBefore is 6m0.000000001s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: whole maximum, start +100ms: NotBefore is 6m0.1s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: whole maximum, start +500ms: NotBefore is 6m0.5s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: whole maximum, start +900ms: NotBefore is 6m0.9s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: whole maximum, start +999.999999ms: NotBefore is 6m0.999999999s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +0s: NotBefore is 6m0s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +1ns: NotBefore is 6m0.000000001s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +100ms: NotBefore is 6m0.1s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +500ms: NotBefore is 6m0.5s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +900ms: NotBefore is 6m0.9s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: fractional maximum, start +999.999999ms: NotBefore is 6m0.999999999s before the signing instant, want 300s and the dropped fraction
 --- result lines (tests and subtests): PASS=2770 FAIL=51 SKIP=17
 --- failing leaves: internal/clitest contract=34
 --- failing leaves: internal/clitest other=1

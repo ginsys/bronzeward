@@ -1,0 +1,38 @@
+# Read 2026-11-27T01:08:37+01:00, from module source in the Go module cache and from the Talos releases list.
+# Kubernetes windows: compatibility/talos114 in machinery v1.14.5, compatibility/talos115 in v1.15.0-beta.1
+v1.14.5 var MinimumKubernetesVersion = semver.MustParse("1.32.0")
+v1.14.5 var MaximumKubernetesVersion = semver.MustParse("1.37.99")
+v1.15.0-beta.1 var MinimumKubernetesVersion = semver.MustParse("1.33.0")
+v1.15.0-beta.1 var MaximumKubernetesVersion = semver.MustParse("1.38.99")
+# Default Kubernetes version: constants.DefaultKubernetesVersion
+v1.14.5 	DefaultKubernetesVersion = "1.37.1"
+v1.15.0-beta.1 	DefaultKubernetesVersion = "1.38.0-beta.0"
+# Talos releases newest first (tag, published, prerelease): github.com/siderolabs/talos
+v1.15.0-beta.1	2026-11-26T17:29:27Z	true
+v1.13.13	2026-11-26T10:47:36Z	false
+v1.14.7	2026-11-24T11:59:52Z	false
+v1.14.6	2026-11-11T19:51:33Z	false
+v1.15.0-beta.0	2026-11-10T18:01:18Z	true
+v1.15.0-alpha.2	2026-10-27T15:45:22Z	true
+v1.14.5	2026-10-26T15:31:11Z	false
+v1.13.12	2026-10-21T19:35:16Z	false
+v1.14.4	2026-10-16T15:25:45Z	false
+v1.14.3	2026-10-15T21:57:38Z	false
+v1.15.0-alpha.1	2026-10-13T08:39:34Z	true
+v1.13.11	2026-10-01T17:54:50Z	false
+v1.14.2	2026-09-29T20:44:07Z	false
+v1.14.1	2026-09-15T16:41:45Z	false
+# Machinery module tags of the v1.14 minor and the v1.15 prereleases
+v1.14.0
+v1.14.1
+v1.14.2
+v1.14.3
+v1.14.4
+v1.14.5
+v1.14.6
+v1.14.7
+v1.15.0-alpha.0
+v1.15.0-alpha.1
+v1.15.0-alpha.2
+v1.15.0-beta.0
+v1.15.0-beta.1
