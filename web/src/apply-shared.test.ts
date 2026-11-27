@@ -114,7 +114,6 @@ describe("the apply page's shared block, mounted", () => {
     expect(others).toHaveLength(1);
     expect(others[0]!.textContent).toContain("lab-b on frv_old, behind the shared head");
     expect(text).not.toContain("This cluster");
-    expect(text).toContain("Showing 1 of 1.");
     // One apply is one cluster: the block offers nothing to press or choose, and pressing nothing sent nothing.
     expect(block()!.querySelector("input, button, select")).toBeNull();
     expect(submit).not.toHaveBeenCalled();
@@ -142,6 +141,26 @@ describe("the apply page's shared block, mounted", () => {
     expect(text).toContain("Reaches 2 machines here");
     expect(text).not.toContain("No other cluster is behind it.");
     expect(text).not.toContain("This cluster");
+  });
+
+  test("every page of the clusters behind it is read, with no button to press for more", async () => {
+    await mount(release(moved), served({
+      "/fragments/frg_1/adoptions?behind=true": { items: [row("cl_here")], next: "c1" },
+      "/fragments/frg_1/adoptions?behind=true&cursor=c1": { items: [row("cl_other")] },
+    }));
+    expect(block()!.querySelectorAll('[data-testid="apply-shared-other"]')).toHaveLength(1);
+    expect(block()!.textContent).toContain("lab-b");
+    expect(block()!.querySelector("input, button, select")).toBeNull();
+  });
+
+  test("a reach that could not be read at all is not reported as none", async () => {
+    const a = served();
+    delete a["/assignment-revisions/asr_a"];
+    delete a["/assignment-revisions/asr_b"];
+    await mount(release(moved), a);
+    const text = block()!.textContent!;
+    expect(text).toContain("Which machines it reaches could not be read.");
+    expect(text).not.toContain("Reaches no machine");
   });
 
   test("another cluster whose name cannot be read is shown by its identifier, never as this cluster", async () => {

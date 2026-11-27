@@ -5,12 +5,12 @@
 import { useEffect, useState } from "react";
 import type { components } from "./api/v1";
 import { type Assignment, movedSources, reach, type Source } from "./apply-shared.ts";
-import { More, Ref, short, useItem, useList, usePending, useSettled } from "./list.tsx";
+import { Ref, short, useItem, useList, usePending, useSettled } from "./list.tsx";
 import { NO_LONGER_FOLLOWED } from "./resources.tsx";
 import { safeText, safeWord } from "./safe.ts";
 import { Machines, SavedRevision, useOf } from "./shared.tsx";
 import { useClusterText } from "./titles.tsx";
-import { NAME_NOT_SHOWN, APPLY_SHARED_NONE_BEHIND, APPLY_SHARED_NOTE, APPLY_SHARED_UNKNOWN } from "./words.ts";
+import { NAME_NOT_SHOWN, APPLY_SHARED_NONE_BEHIND, APPLY_SHARED_NOTE, APPLY_SHARED_UNKNOWN, APPLY_SHARED_UNREAD } from "./words.ts";
 
 type S = components["schemas"];
 const enc = encodeURIComponent;
@@ -29,7 +29,8 @@ function OtherCluster({ id }: { id: string }) {
 function Moved({ s, cluster, ids, assignments, pins }: { s: Source; cluster: string; ids: readonly string[]; assignments: Readonly<Record<string, Assignment>> | undefined; pins: ReadonlyMap<string, readonly string[]> | undefined }) {
   const kind = s.kind === "profile" ? "profile" : "fragment";
   const head = useItem<S["FragmentBody"] | S["ProfileBody"]>(`/${kind}s/${enc(s.head)}`);
-  const [list, more, busy] = useList<S["ClusterAdoptionBody"]>(`/${kind}s/${enc(s.head)}/adoptions`, "behind=true", false);
+  // Every page is read: the block holds no control, so no page waits for a press.
+  const [list] = useList<S["ClusterAdoptionBody"]>(`/${kind}s/${enc(s.head)}/adoptions`, "behind=true", true);
   const pending = usePending(list, "the clusters behind it");
   const name = head.kind === "ok" ? safeText(head.data.name) ?? NAME_NOT_SHOWN : undefined;
   const there = assignments === undefined || head.kind !== "ok" ? undefined : reach(s, head.data.name, ids, assignments, pins);
@@ -42,15 +43,15 @@ function Moved({ s, cluster, ids, assignments, pins }: { s: Source; cluster: str
         : <>{s.previous === null ? "adopted, with no revision before it, at " : <>from <SavedRevision kind={kind} id={s.previous} /> to </>}<SavedRevision kind={kind} id={s.revision} /></>}
       <ul>
         <li data-testid="apply-shared-reach">
-          {there === undefined ? "Reading which machines it reaches." : there.machines.length === 0 ? "Reaches no machine of this release." : <>Reaches {machines(there.machines.length)} here: <Machines ids={there.machines} />.</>}
-          {there?.unknown === true && <> {APPLY_SHARED_UNKNOWN}</>}
+          {there === undefined ? "Reading which machines it reaches."
+            : there.machines.length === 0 ? (there.unknown ? APPLY_SHARED_UNREAD : "Reaches no machine of this release.")
+            : <>Reaches {machines(there.machines.length)} here: <Machines ids={there.machines} />.{there.unknown && ` ${APPLY_SHARED_UNKNOWN}`}</>}
         </li>
         <li data-testid="apply-shared-others">
-          {list.kind !== "ok" ? pending : others.length === 0 && more === undefined ? APPLY_SHARED_NONE_BEHIND : (
+          {list.kind !== "ok" ? pending : others.length === 0 ? APPLY_SHARED_NONE_BEHIND : (
             <>
               Other clusters behind it, for information:
               <ul>{others.map((a) => <li key={`${a.cluster}:${a.via ?? ""}`} data-testid="apply-shared-other"><OtherCluster id={a.cluster} /> on <SavedRevision kind={kind} id={a.revision} />, {useOf(a)}</li>)}</ul>
-              <More list={{ ...list.data, items: others }} shown={others.length} more={more} busy={busy} />
             </>
           )}
         </li>
