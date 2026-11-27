@@ -126,8 +126,9 @@ one minimal document.
 
 ## 4. Test 2: the existing tests
 
-Each variant is built inside a cluster Job from the committed patches (`run/test2`, at the changeset
-head `57fb3956`), and run with the `go-db` profile (PostgreSQL and OpenBao). The export is not a git
+Each variant is built inside a cluster Job from the committed patches (`run/test2`, from a local
+commit of this branch that holds these scripts and patches; the product code it exports is
+`cf597ab9`'s), and run with the `go-db` profile (PostgreSQL and OpenBao). The export is not a git
 checkout, so the base, variant `a` in the same form, is the reference: a failure counts against
 the beta only if `a` does not show it. Per-Job files are
 [`evidence/test2-*.txt`](../../../experiments/talos-115-beta/evidence/): the Job's status lines,
