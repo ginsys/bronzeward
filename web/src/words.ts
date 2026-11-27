@@ -172,4 +172,9 @@ export const NO_ROLE_NOTE = "A machine imported before its role was stored shows
 /** Shared fragments and profiles (ginsys/bronzeward#1193): the draft page's reach block and the shared page. */
 export const SHARED_REACH_NOTE = "A shared entry reaches no other cluster by itself: each cluster takes it in its own draft and reads it in its own plan. This shows what the draft's entries change for the machines of this cluster, and which other clusters stay as they are. It renders no configuration.";
 export const SHARED_PAGE_NOTE = "A change to a shared fragment or profile reaches no cluster by itself. This page changes no cluster: a cluster takes a revision when it adopts it in its own draft. A cluster marked behind is on an older revision than the shared head.";
+/** Shared names on the draft page (ginsys/bronzeward#1193): adopting one and stopping to follow it, in this draft only. */
+export const SHARED_NAMES_NOTE = "A shared fragment or profile is followed by the clusters that adopt it. Adopting or stopping to follow records an entry in this draft: nothing changes for this cluster until the draft is published, and no other cluster changes.";
+export const adoptSentence = (kind: string, name: string) => `Adopt records in this draft that this cluster follows the shared ${kind} ${name} at its current revision.`;
+export const stopSentence = (kind: string, name: string) => `Stop following records in this draft that this cluster no longer follows the shared ${kind} ${name}. The cluster loses the name unless it holds its own.`;
+export const ADOPT_PIN_NOTE = "A profile of this cluster that pins the name keeps its pin: set it again to use the new revision.";
 export const APPLY_NEEDS_PUBLISHER = "Show apply makes the plans, which needs the publisher role. A publisher can prepare them and an approver can then apply them from this page.";

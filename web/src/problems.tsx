@@ -56,6 +56,13 @@ export const RULE_WORDS: Readonly<Record<string, Words>> = {
   // A client cannot tell from GET /server whether the server shows an import read from a machine (the API revision is the same
   // before and after that change), so both sentences stay true for a server that still refuses one.
   "conflict/import-not-reviewed": { what: "The server did not show you this import's text. It shows a file import only to the person who continued it after its review, and an import read from a machine only if the server is new enough to show it.", next: "Nothing needs doing: the import itself is not affected. If this import was read from a machine, ask whoever runs the server whether it is up to date." },
+  // Shared fragments and profiles (persistence and API §3.1.1, ginsys/bronzeward#1193): the same causes and next steps as the
+  // command line's, with the controls of this page for its flags.
+  "validation-failed/library-reference": { what: "A shared document holds no secret reference, and this one does.", next: "A fragment that holds a secret stays in one cluster: save it there, without the Shared choice." },
+  "validation-failed/library-removed": { what: "The shared name has no head to adopt.", next: "Bring it back with a shared edit (a fragment or profile saved as shared) and publish that, then adopt it. A cluster that adopted it keeps its revision." },
+  "validation-failed/name-in-two-scopes": { what: "This cluster holds the name as its own and as a shared one.", next: "In the same draft remove one of them (the cluster's own, or Stop following the shared one), or copy the shared one into the cluster with the command line's detach, then publish again." },
+  "validation-failed/library-pin-conflict": { what: "Two sources of this release pin different revisions of one fragment.", next: "Make them agree, by setting the profile that pins the older one again or by adopting the revision the other source pins, then publish again." },
+  "validation-failed/detach-pin-not-in-view": { what: "A profile of this cluster pins a fragment at a revision the cluster does not hold.", next: "Adopt that fragment at the pinned revision, or set the profile again, then publish again." },
   "forbidden/not-the-importer": { what: "The server did not show you this import's text. It shows a file import only to the person who imported it, and an import read from a machine only if the server is new enough to show it.", next: "Ask that person. If this import was read from a machine, ask whoever runs the server whether it is up to date." },
 };
 
@@ -70,9 +77,21 @@ export function wordsOfCode(code: string, rule?: string): Words | undefined {
   return narrowed ?? (Object.hasOwn(PROBLEM_WORDS, code) ? PROBLEM_WORDS[code] : undefined);
 }
 
+// A conflict that names a shared head (scope adoption): the adoption or the head the draft was based on moved. The head is
+// named as the server gave it; a conflict of another scope is not in this sentence.
+export function staleAdoption(p: Problem): Words | undefined {
+  const cs = p["conflicts"];
+  const moved = (Array.isArray(cs) ? cs : []).flatMap((c: unknown) => {
+    const m = typeof c === "object" && c !== null ? (c as Record<string, unknown>) : {};
+    return m["scope"] === "adoption" ? [`${safeWord(String(m["head"]))} was at adoption ${safeWord(String(m["expected"]))} and is at ${safeWord(String(m["actual"]))}`] : [];
+  });
+  return moved.length === 0 ? undefined : { what: `The shared name moved after this draft was read (${moved.join("; ")}).`, next: "Read the draft again, adopt the name again in this draft and publish that." };
+}
+
 export function wordsFor(p: Problem): Words | undefined {
   const code = codeOf(p);
   if (code === "forbidden" && p["plan"] !== undefined) return PLAN_FORBIDDEN;
+  if (code === "stale-input") return staleAdoption(p) ?? wordsOfCode(code);
   const rule = p["rule"];
   return wordsOfCode(code, typeof rule === "string" ? rule : undefined);
 }

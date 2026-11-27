@@ -937,6 +937,19 @@ and each shared entry with the machines it reaches here and the other clusters i
 fragment's page lists every cluster with the revision it is on and which are behind. A cluster is never moved from
 that page: adopting is a draft entry of that cluster.
 
+An open draft's page carries a **Shared names** block, which reads when it is opened. It lists each shared fragment and
+profile that has a head, with this cluster's view of it in words: the draft's own entry first (it adopts a revision, it
+stops following, it changes the shared name, it removes it), else the revision the cluster is on and whether that is
+behind the shared head, else that the name is only reached through a shared profile, which is not an adoption, else that
+it is not followed. A revision is named by when it was saved, with its identifier as the title of the link. **Adopt**
+(offered where the cluster is not on the head's revision) and **Stop following** (offered where a name is followed) each
+show before the press what they record, in the draft only and for this cluster only, and one press sends the entry: Adopt
+puts the head's revision, Stop following removes the adoption. Nothing is typed back. A fragment's adoption adds that a
+profile of this cluster that pins the name keeps its pin. The refusals a publication or an entry meets are worded with
+the command line's causes and next steps (`library-reference`, `library-removed`, `name-in-two-scopes`,
+`library-pin-conflict`, `detach-pin-not-in-view`), and a stale adoption names the shared head that moved. The web offers
+no detach; `fragment detach` stays in the command line.
+
 ### 5.5 Publication, rendered review and provenance
 
 ```text

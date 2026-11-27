@@ -1,0 +1,2 @@
+Added
+- The web console's draft page now has a Shared names block: each shared fragment and profile with this cluster's view of it (adopted and whether behind, only reached through a shared profile, or not followed), and Adopt and Stop following, which record an entry in the draft only after saying what they record. The refusals of shared names (a secret in a shared document, a name held twice, two pins of one fragment, a removed shared name) and a stale adoption are worded with their next step, and revisions read as when they were saved. Refs ginsys/bronzeward#1193.
