@@ -194,6 +194,8 @@ export const APPLY_SHARED_NONE_BEHIND = "No other cluster is behind it.";
 export const SHARED_NAMES_NOTE = "A shared fragment or profile is followed by the clusters that adopt it. Adopting or stopping to follow records an entry in this draft: nothing changes for this cluster until the draft is published, and no other cluster changes.";
 export const adoptSentence = (kind: string, name: string) => `Adopt records in this draft that this cluster follows the shared ${kind} ${name} at its current revision.`;
 export const stopSentence = (kind: string, name: string) => `Stop following records in this draft that this cluster no longer follows the shared ${kind} ${name}. The cluster loses the name unless it holds its own.`;
+/** A shared name whose head was removed (persistence-api §3.1.1): a cluster's existing adoption keeps the revision it names, and only Stop following ends it. */
+export const REMOVED_NAME_NOTE = "The shared name was removed from the library: this cluster keeps this revision until it stops following it.";
 /** An entry staged before this cluster's adoption changed (another draft changed it first): publication would refuse it, and pressing again records the current one. */
 export const AGAIN_ADOPT = "The cluster's adoption may have changed since this was staged: Adopt again to record the current one.";
 export const AGAIN_STOP = "The cluster's adoption changed since this was staged: Stop following again to record the current one.";
