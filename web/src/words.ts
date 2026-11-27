@@ -87,7 +87,7 @@ export const RESOLVE_TEXT = "Cancel an operation that has no attempt. This actio
 export const RESOLVE_NO_OUTCOME = "This records no remote outcome.";
 export const ACCOUNT_TEXT = "Account for an attempt whose response was lost, once its executor is stopped or the operation is taken over. It sends nothing to the node and changes no state: it records that the attempt is accounted for, so the controller or an operator can go on. Choose the two observations the settle runs between.";
 export const NOT_FOUND_NOTE = "Start from Machines or Clusters.";
-export const CONNECT_NOTE = "Connecting records the cluster and each machine that answers with a platform, and starts an import of each of those machines into one draft. A machine that does not answer, or reports no platform, is skipped. First you choose the talosconfig, then you confirm what the page found.";
+export const CONNECT_NOTE = "Connecting records the cluster and each machine that answers with a platform, and starts an import of each of those machines into one draft. A machine that does not answer, or reports no platform, is skipped. First you choose the talosconfig and name the cluster, then you confirm what the page found.";
 /** The column of a release that counts what it is built from. */
 export const BUILT_FROM = "Built from";
 /** The state words of a machine. */
@@ -148,6 +148,17 @@ export const CONNECT_A_CLUSTER = "Connect a cluster";
 export const COPIED = "Copied";
 /** Said beside an identifier's Copy control where the browser would not copy. */
 export const COPY_BY_HAND = "Select the identifier to copy it";
+/** Said beside the Copy control of a page that shows no identifier in its text, where the browser would not copy: the identifier is in the sentence. */
+export const copyFailedWith = (id: string) => `Copy did not work here; the identifier is ${id}.`;
+/** The two screens of Connect a cluster: each says which step it is and what it asks. The second screen's button differs from the page's own label. */
+export const CONNECT_STEP_ONE = "Step 1 of 2: choose the talosconfig and name the cluster";
+export const CONNECT_STEP_TWO = "Step 2 of 2: check what was read and connect";
+export const CONNECT_THIS_CLUSTER = "Connect this cluster";
+/** Under an imported configuration's text: why a worker's machine.ca.key is empty. */
+export const CA_KEY_WORKER_NOTE = "The configuration of a worker shows machine.ca.key as an empty value. Talos writes it empty for a worker: only a control-plane machine holds the CA key of the cluster, and that one is shown as a reference.";
+/** The empty lists of fragments and profiles say why they are empty and what adds one; the link to the Drafts and releases page stands between the two parts. */
+export const noSourcesStart = (kind: "fragment" | "profile") => `No ${kind}s recorded yet. An import records one imported configuration for each machine, not ${kind}s. To add a ${kind}, open a draft on`;
+export const noSourcesEnd = (kind: "fragment" | "profile") => `and press Add ${kind}; it is listed here once that draft is published.`;
 /** The drift page (wireframe W9): its note, the sentences it says of the change, and the three choices. */
 export const DRIFT_NOTE = "This page shows the change made on this machine, where one is open, and is where you freeze or unfreeze the machine. Nothing on this page is sent to the machine.";
 export const DRIFT_NOTE_OPEN = "To decide the change, adopt it or revert the machine; the machine can be frozen while you decide. Each step says who may take it. A plan sends nothing until it is approved.";

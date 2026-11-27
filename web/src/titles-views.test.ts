@@ -419,6 +419,20 @@ describe("ginsys/bronzeward#1055: a cluster's name and the identifier's detail l
     await click();
     expect(text()).toBe(`Identifier ${MCH} Copy Select the identifier to copy it`);
   });
+  test("a quiet line shows no identifier: it is the word's title, Copy copies it, and a failed Copy says it in the sentence (ginsys/bronzeward#1233)", async () => {
+    const copied: string[] = [];
+    clipboard({ writeText: async (s: string) => void copied.push(s) });
+    await mount(h(Detail, { id: MCH, quiet: true }));
+    expect(text()).toBe("Identifier Copy");
+    expect(box.querySelector("span[title]")?.getAttribute("title")).toBe(MCH);
+    await click();
+    expect(copied).toEqual([MCH]);
+    expect(text()).toBe("Identifier Copy Copied");
+    clipboard(undefined);
+    await mount(h(Detail, { id: MCH, quiet: true }), { ...reads, view: "quiet-failed" });
+    await click();
+    expect(text()).toBe(`Identifier Copy Copy did not work here; the identifier is ${MCH}.`);
+  });
 });
 
 describe("ginsys/bronzeward#987: the reads of a view", () => {
@@ -806,7 +820,10 @@ describe("ginsys/bronzeward#1055: the draft and publish pages", () => {
     await settled();
     expect(headings()[0]).toBe("Draft: Add the office labels");
     expect(text()).toContain("open, revision 3, Cluster office.");
-    expect(text()).toContain(`Identifier ${DRF}`);
+    // The identifier is the detail line's title, never its text (ginsys/bronzeward#1233).
+    expect(text()).toContain("Identifier Copy");
+    expect(text()).not.toContain(DRF);
+    expect(box.querySelector("small span[title]")?.getAttribute("title")).toBe(DRF);
   });
 
   test("its entries name the machine, and the imported configuration is one link titled by the import base", async () => {
@@ -841,7 +858,8 @@ describe("ginsys/bronzeward#1055: the draft and publish pages", () => {
     expect(headings()[0]).toBe("Publish draft: Add the office labels");
     expect(text()).toContain("open, revision 3, Cluster office.");
     expect(box.querySelector('[data-testid="draft-line"]')?.textContent).toBe("open, revision 3, Cluster office.");
-    expect(text()).toContain(`Identifier ${DRF}`);
+    expect(text()).toContain("Identifier Copy");
+    expect(box.querySelector("small span[title]")?.getAttribute("title")).toBe(DRF);
     expect([...box.querySelectorAll("button")].map((b) => b.textContent)).toContain("Copy");
   });
 
@@ -886,7 +904,9 @@ describe("ginsys/bronzeward#1055: the import and the import base pages", () => {
     await mount(providers(h(ImportBaseItem, { id: IBR })));
     await settled();
     expect(headings()[0]).toBe(`Imported configuration of worker-1, imported ${when(at)}`);
-    expect(text()).toContain(`Identifier ${IBR}`);
+    expect(text()).toContain("Identifier Copy");
+    expect(text()).not.toContain(IBR);
+    expect(box.querySelector("small span[title]")?.getAttribute("title")).toBe(IBR);
   });
 
   test("a fragment revision and an assignment revision are headed by what they revise and the day they were saved", async () => {
@@ -1234,5 +1254,18 @@ describe("ginsys/bronzeward#1055: a server word on a plan, operation, import, re
     expect(prediction.join(" ")).toContain(`${NOT_SHOWN} revision`);
     expect(prediction.join(" ")).not.toContain("bad");
     expect(needs(403, { roles: [BAD, "approver"] } as never)).toBe(` Needs ${NOT_SHOWN} or approver.`);
+  });
+});
+
+describe("ginsys/bronzeward#1233: the empty Fragments and Profiles lists", () => {
+  test("each says what is empty and why, what a person presses to add one, and links the drafts page", async () => {
+    for (const path of ["/fragments", "/profiles", "/assignments", "/dependencies", "/dependency-alerts"]) answers[path] = ok({ items: [], next: undefined });
+    await mount(providers(h(Sources, { query: "", go: () => {} })));
+    await settled();
+    const said = [...box.querySelectorAll('[data-testid="status"]')].map((e) => e.textContent);
+    for (const kind of ["fragment", "profile"]) {
+      expect(said).toContain(`No ${kind}s recorded yet. An import records one imported configuration for each machine, not ${kind}s. To add a ${kind}, open a draft on Drafts and releases and press Add ${kind}; it is listed here once that draft is published.`);
+    }
+    expect([...box.querySelectorAll('a[href="/changes"]')].map((a) => a.textContent)).toEqual(["Drafts and releases", "Drafts and releases"]);
   });
 });

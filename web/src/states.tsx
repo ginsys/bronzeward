@@ -98,7 +98,7 @@ const button = (label: string, onClick: () => void, disabled = false) => (
 export const Loading = ({ what }: { what: string }) => <Status>Loading {what}</Status>;
 
 // A list with no items, with the first action when there is one.
-export const Empty = ({ text, action }: { text: string; action?: ReactNode }) => <Status actions={action}>{text}</Status>;
+export const Empty = ({ text, action }: { text: ReactNode; action?: ReactNode }) => <Status actions={action}>{text}</Status>;
 
 export const Withheld = () => <Status>{WITHHELD}</Status>;
 

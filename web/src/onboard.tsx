@@ -1,5 +1,5 @@
-// The Connect a cluster page (ginsys/bronzeward#1001): choose a talosconfig, read the cluster it names,
-// confirm the cluster's name and Kubernetes endpoint, and let the steps of onboard.ts record it, supply the
+// The Connect a cluster page (ginsys/bronzeward#1001): choose a talosconfig and name the cluster, read the cluster
+// the file names, confirm its Kubernetes endpoint, and let the steps of onboard.ts record it, supply the
 // first key and import each machine. The file is read in the page, cut to one context in memory, and sent
 // only as that cut: to the discovery and to the first key. It is never stored, logged or shown, and the
 // page's copy ends with the first key's write (onboard.ts).
@@ -13,7 +13,7 @@ import { MachineById, Named } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
 import { useUnsaved, useWrites } from "./forms.tsx";
 import { PageNote } from "./page-note.tsx";
-import { CONNECT_A_CLUSTER, CONNECT_NOTE } from "./words.ts";
+import { CONNECT_A_CLUSTER, CONNECT_NOTE, CONNECT_STEP_ONE, CONNECT_STEP_TWO, CONNECT_THIS_CLUSTER } from "./words.ts";
 
 // The most a first key may be (the API's bound), so a larger file is refused before it is read.
 const MAX_FILE = 512 * 1024;
@@ -29,6 +29,28 @@ export const MemberRow = ({ m }: { m: Discovery["members"][number] }) => (
   <tr><td>{safeWord(m.hostname)}</td><td>{safeWord(m.role)}</td><td>{m.address}</td><td>{safeWord(m.platform)}</td><td>{m.answered ? "yes" : "no"}</td></tr>
 );
 
+// The second screen: what the read found, the Kubernetes endpoint, and the one press that records the cluster.
+export const ConfirmScreen = ({ p, busy, onSubmit }: { p: Plan; busy: boolean; onSubmit: (e: FormEvent<HTMLFormElement>) => void }) => (
+  <form onSubmit={onSubmit} aria-label="Record the cluster">
+    <h3>{CONNECT_STEP_TWO}</h3>
+    <p data-testid="onboard-found">
+      Talos {p.found.version}, contract {p.found.contract}, {p.found.members.length} {p.found.members.length === 1 ? "member" : "members"}, read at {p.found.endpoint}.
+      {!isAddress(p.endpoint) && ` The server resolved ${p.endpoint} to that address.`}
+      {!p.found.complete && " The read ended at its deadline: a member listed as not answering may be reachable."}
+    </p>
+    <table>
+      <thead><tr><th>Hostname</th><th>Role</th><th>Address</th><th>Platform</th><th>Answered</th></tr></thead>
+      <tbody>
+        {p.found.members.map((m) => <MemberRow key={m.nodeId} m={m} />)}
+      </tbody>
+    </table>
+    <p>The cluster will be named <strong data-testid="onboard-name">{p.name}</strong> in Bronzeward.</p>
+    <p><label>Kubernetes endpoint: <input name="kube" required defaultValue={p.kube} autoComplete="off" /></label> https://host or https://host:port, the cluster's own where its control-plane members agree on one, else the first control-plane member's address</p>
+    <p>Pressing the button records the cluster and each member that answered, supplies the cluster's first key, and imports each machine into one draft.</p>
+    <p><Action label={CONNECT_THIS_CLUSTER} needs={["author"]} submit busy={busy} /></p>
+  </form>
+);
+
 export function OnboardCluster() {
   const writes = useWrites()!;
   const settled = useSettled();
@@ -40,6 +62,8 @@ export function OnboardCluster() {
   const [phase, setPhase] = useState<"file" | "confirm" | "run">("file");
   const [lines, setLines] = useState<Line[]>([]);
   const [held, setHeld] = useState(false);
+  // The cluster's name, typed on the first screen and shown again there when the file is chosen again.
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   // The endpoint the read is on, with its place in the list, while it tries a list; Stop ends the list after the try in flight.
   const [trying, setTrying] = useState<string>();
@@ -109,6 +133,10 @@ export function OnboardCluster() {
     // A discovery only reads, so this lead is true; its reasons are whole sentences with none of their own.
     if (!r.ok) return setNote({ text: `Nothing was recorded. ${r.why}`, ...("reference" in r && r.reference !== undefined && { reference: r.reference }) });
     unsay();
+    // The name was typed beside the file; it is kept for the plan and for choosing the file again.
+    const typed = String(d.get("name") ?? "").trim();
+    setName(typed);
+    r.plan.name = typed;
     plan.current = r.plan;
     setHeld(r.plan.document !== undefined);
     setLines([]);
@@ -144,7 +172,6 @@ export function OnboardCluster() {
     const kube = String(d.get("kube") ?? "").trim();
     if (!/^https:\/\/[^/\s]+$/.test(kube)) return setNote({ text: "Give the Kubernetes endpoint as https://host or https://host:port." });
     setNote(undefined);
-    p.name = String(d.get("name") ?? "").trim();
     p.kube = kube;
     setPhase("run");
     void run();
@@ -165,11 +192,13 @@ export function OnboardCluster() {
       {note?.reference !== undefined && <RequestRef problem={note.reference.problem} status={note.reference.status} />}
       {phase === "file" && (
         <form onSubmit={(e) => void read(e)} onChange={(e) => void say(e.currentTarget)} aria-label="Read the cluster">
+          <h3>{CONNECT_STEP_ONE}</h3>
           <p>
             Choose the talosconfig of the cluster. It is read in this page and sent only as the one context it names, to the server, which uses it
             to read the cluster's nodes and to supply the cluster's first key. It is not stored here.
           </p>
           <p><label>Talosconfig file: <input type="file" name="file" required /></label></p>
+          <p><label>Name: <input name="name" required autoComplete="off" defaultValue={name} /></label> for the cluster in Bronzeward</p>
           <p><label>Talos context: <input name="context" autoComplete="off" /></label> the current one when empty</p>
           <p><label>Talos endpoint: <input name="endpoint" autoComplete="off" /></label> the context's endpoints, tried in order, when empty</p>
           {said !== undefined && <p role="status" data-testid="onboard-endpoint">{said}</p>}
@@ -178,25 +207,7 @@ export function OnboardCluster() {
           {busy && trying !== undefined && !stopping && <p><button type="button" onClick={() => { stop.current = true; setStopping(true); }}>Stop</button></p>}
         </form>
       )}
-      {phase === "confirm" && p !== undefined && (
-        <form onSubmit={confirm} aria-label="Record the cluster">
-          <p data-testid="onboard-found">
-            Talos {p.found.version}, contract {p.found.contract}, {p.found.members.length} {p.found.members.length === 1 ? "member" : "members"}, read at {p.found.endpoint}.
-            {!isAddress(p.endpoint) && ` The server resolved ${p.endpoint} to that address.`}
-            {!p.found.complete && " The read ended at its deadline: a member listed as not answering may be reachable."}
-          </p>
-          <table>
-            <thead><tr><th>Hostname</th><th>Role</th><th>Address</th><th>Platform</th><th>Answered</th></tr></thead>
-            <tbody>
-              {p.found.members.map((m) => <MemberRow key={m.nodeId} m={m} />)}
-            </tbody>
-          </table>
-          <p><label>Name: <input name="name" required autoComplete="off" /></label> for the cluster in Bronzeward</p>
-          <p><label>Kubernetes endpoint: <input name="kube" required defaultValue={p.kube} autoComplete="off" /></label> https://host or https://host:port, the cluster's own where its control-plane members agree on one, else the first control-plane member's address</p>
-          <p>Onboarding records the cluster and each member that answered, supplies the cluster's first key, and imports each machine into one draft.</p>
-          <p><Action label={CONNECT_A_CLUSTER} needs={["author"]} submit busy={busy} /></p>
-        </form>
-      )}
+      {phase === "confirm" && p !== undefined && <ConfirmScreen p={p} busy={busy} onSubmit={confirm} />}
       {phase === "run" && (
         <>
           <ul data-testid="onboard-lines">

@@ -640,7 +640,7 @@ describe("the read-only lists and items", () => {
     expect(await fixtureSignIn("h-viewer", {}, { upstream: at })).toMatch(SERVER);
     await nav("Fragments and profiles");
     await loaded();
-    expect(await texts('main [data-testid="status"]')).toEqual(expect.arrayContaining(["No fragments recorded yet.", "No profiles recorded yet.", "No assignments recorded yet.", "No dependency alerts raised."]));
+    expect(await texts('main [data-testid="status"]')).toEqual(expect.arrayContaining([expect.stringMatching(/^No fragments recorded yet\. .* Drafts and releases and press Add fragment/), expect.stringMatching(/^No profiles recorded yet\. .* Drafts and releases and press Add profile/), "No assignments recorded yet.", "No dependency alerts raised."]));
     await expect($('[data-testid="last-pass"]')).toHaveText(/^(Last completed monitor pass: .+|No monitor pass has completed yet)\.$/);
     for (const [page, empty] of [["Drafts and releases", "No releases published yet."], ["Plans", "No plans created yet."], ["Operations", "No operations recorded yet."]] as const) {
       await nav(page);

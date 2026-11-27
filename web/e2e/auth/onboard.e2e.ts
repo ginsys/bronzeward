@@ -51,9 +51,11 @@ async function start(name: string) {
   await chooseFile();
   // Before the button, the page says which endpoint it will try: the file's, an IP address.
   await expect($('[data-testid="onboard-endpoint"]')).toHaveText(expect.stringMatching(/^The page will try the cluster at \d+\.\d+\.\d+\.\d+(:\d+)?\.$/));
+  // The cluster is named beside the file, on the first screen; the second screen shows the name and asks for the endpoint.
+  await $('input[name="name"]').setValue(name);
   await $("main form").$("button=Read cluster").click();
   await expect($('[data-testid="onboard-found"]')).toHaveText(expect.stringContaining("2 members"), { wait: 60_000 });
-  await $('input[name="name"]').setValue(name);
+  await expect($('[data-testid="onboard-name"]')).toHaveText(name);
 }
 
 async function states(): Promise<string[]> {
@@ -91,7 +93,7 @@ describe("Connect a cluster (#1001)", () => {
     await open();
     const name = `synthetic-${hex()}`;
     await start(name);
-    await $("main form").$("button=Connect a cluster").click();
+    await $("main form").$("button=Connect this cluster").click();
     await expect(result()).toHaveText(expect.stringMatching(/^Onboarded\./), { wait: 180_000 });
     expect(await states()).toEqual([
       `Cluster ${name}=done`, "First key=done", "Machine cp-1=done", "Machine w-1=done", "Draft onboard " + name + "=done", "Import cp-1=done", "Import w-1=done", "Assignment cp-1=done", "Assignment w-1=done",
@@ -126,7 +128,7 @@ describe("Connect a cluster (#1001)", () => {
     const name = `synthetic-${hex()}`;
     await start(name);
     await faults({ upstream: at, steps: { path: "/drafts", take: ["scope-refused"] } });
-    await $("main form").$("button=Connect a cluster").click();
+    await $("main form").$("button=Connect this cluster").click();
     await expect(result()).toHaveText(expect.stringContaining(`Stopped at Draft onboard ${name}`), { wait: 120_000 });
     expect(await states()).toEqual([`Cluster ${name}=done`, "First key=done", "Machine cp-1=done", "Machine w-1=done", `Draft onboard ${name}=failed`]);
     await $("main").$("button=Run again").click();
@@ -141,7 +143,7 @@ describe("Connect a cluster (#1001)", () => {
     await open("h-all");
     const name = `synthetic-${hex()}`;
     await start(name);
-    await $("main form").$("button=Connect a cluster").click();
+    await $("main form").$("button=Connect this cluster").click();
     await expect(result()).toHaveText(expect.stringMatching(/^Onboarded\./), { wait: 180_000 });
     // The result has two links, the draft and the machines list: the draft's is the one this journey opens.
     await result().$('a[href^="/drafts/"]').click();
