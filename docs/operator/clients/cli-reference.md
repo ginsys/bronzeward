@@ -21,10 +21,10 @@ commands:
   cluster      list, show, add, discover, first-key, onboard
   machine      list, show, timeline, observations, add, set-endpoint, rename, freeze, unfreeze
   drift        show, adopt, revert
-  fragment     show, history, set, rm, adopt, detach
-  profile      show, history, set, rm, adopt, detach
+  fragment     show, history, set, rm, adopt, detach, adoptions
+  profile      show, history, set, rm, adopt, detach, adoptions
   assignment   show, history, set, rm
-  draft        list, show, create, discard
+  draft        list, show, create, discard, impact
   import       start, status, review, mark, continue, takeover, abandon
   import-base  document
   publish      publish a draft as a release
@@ -611,6 +611,7 @@ configuration fragments
   fragment rm                 remove a fragment from a draft
   fragment adopt              adopt a shared fragment in a draft
   fragment detach             copy an adopted fragment into the cluster and stop following it
+  fragment adoptions          the clusters that use a shared fragment
 
 Run bronzewardctl help fragment <command> for a command's flags, notes and roles.
 ```
@@ -724,6 +725,24 @@ Flags: --draft, --expect-epoch, --expect-principal, --idempotency-key, --if-matc
 Global flags and exit codes: bronzewardctl help global.
 ```
 
+### fragment adoptions
+
+```text
+usage: bronzewardctl fragment adoptions <name> [--behind]
+
+the clusters that use a shared fragment.
+
+lists each cluster with the revision it is on, the shared head's revision, the release that set it and its machines. --behind
+lists only the clusters on an older revision than the head. A cluster that reaches the name only through an adopted shared
+profile is listed with that profile under VIA. A page is --limit, --cursor or --all.
+
+Roles: any.
+
+Flags: --all, --behind, --cursor, --limit
+
+Global flags and exit codes: bronzewardctl help global.
+```
+
 ## profile
 
 ```text
@@ -737,6 +756,7 @@ profiles of fragments
   profile rm                  remove a profile from a draft
   profile adopt               adopt a shared profile in a draft
   profile detach              copy an adopted profile into the cluster and stop following it
+  profile adoptions           the clusters that use a shared profile
 
 Run bronzewardctl help profile <command> for a command's flags, notes and roles.
 ```
@@ -817,7 +837,7 @@ usage: bronzewardctl profile adopt <name> --draft <draft> [--revision <prv_ ID>]
 adopt a shared profile in a draft.
 
 the draft's cluster takes the shared profile at --revision, the head's revision when none is given, and prints the machines it
-reaches. --remove stops following it. A profile of this cluster that pins the name keeps its pin: set it again to use the new revision.
+reaches. --remove stops following it.
 A write to a draft sends the ETag of the last draft show or write of that draft, or --if-match <etag>; if the draft
 changed since, it saves nothing and says so. Draft writes take author; repeat one with the outcome-unknown block's flags,
 --if-match included.
@@ -844,6 +864,23 @@ changed since, it saves nothing and says so. Draft writes take author; repeat on
 Roles: author.
 
 Flags: --draft, --expect-epoch, --expect-principal, --idempotency-key, --if-match
+
+Global flags and exit codes: bronzewardctl help global.
+```
+
+### profile adoptions
+
+```text
+usage: bronzewardctl profile adoptions <name> [--behind]
+
+the clusters that use a shared profile.
+
+lists each cluster with the revision it is on, the shared head's revision, the release that set it and its machines. --behind
+lists only the clusters on an older revision than the head. A page is --limit, --cursor or --all.
+
+Roles: any.
+
+Flags: --all, --behind, --cursor, --limit
 
 Global flags and exit codes: bronzewardctl help global.
 ```
@@ -941,6 +978,7 @@ drafts: changes gathered before a publish
   draft show                  show a draft
   draft create                start a draft
   draft discard               discard a draft
+  draft impact                what a draft changes and reaches before it is published
 
 Run bronzewardctl help draft <command> for a command's flags, notes and roles.
 ```
@@ -999,6 +1037,21 @@ changed since, it saves nothing and says so. Draft writes take author; repeat on
 Roles: author.
 
 Flags: --expect-epoch, --expect-principal, --idempotency-key, --if-match
+
+Global flags and exit codes: bronzewardctl help global.
+```
+
+### draft impact
+
+```text
+usage: bronzewardctl draft impact <draft>
+
+what a draft changes and reaches before it is published.
+
+lists, for each fragment or profile entry of the draft, the machines of the draft's cluster that gain, lose or keep a revision,
+and the other clusters that stay unchanged. It renders nothing: the configuration appears only after publication.
+
+Roles: any.
 
 Global flags and exit codes: bronzewardctl help global.
 ```

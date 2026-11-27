@@ -300,6 +300,8 @@ func (e *env) fragmentCmd(args []string) error {
 		return e.sharedAdopt(fragmentKind, rest)
 	} else if v == "detach" {
 		return e.sharedDetach(fragmentKind, rest)
+	} else if v == "adoptions" {
+		return e.sharedAdoptions(fragmentKind, rest)
 	}
 	return sourceShow(e, "fragment", "frv", args, func(w *tabwriter.Writer, f *apitypes.FragmentBody) {
 		head(w, "Fragment", f.Id, f.Name+", layer "+f.Layer+", scope "+f.Scope, ownerWords(f.Cluster), f.Revision, f.HeadRevision, f.CreatedAt)
@@ -329,6 +331,8 @@ func (e *env) profileCmd(args []string) error {
 		return e.sharedAdopt(profileKind, rest)
 	} else if v == "detach" {
 		return e.sharedDetach(profileKind, rest)
+	} else if v == "adoptions" {
+		return e.sharedAdoptions(profileKind, rest)
 	}
 	return sourceShow(e, "profile", "prv", args, func(w *tabwriter.Writer, p *apitypes.ProfileBody) {
 		head(w, "Profile", p.Id, p.Name+", scope "+p.Scope, ownerWords(p.Cluster), p.Revision, p.HeadRevision, p.CreatedAt)
@@ -369,6 +373,8 @@ func (e *env) draftCmd(args []string) error {
 		return e.draftCreate(rest)
 	} else if v == "discard" {
 		return e.draftDiscard(rest)
+	} else if v == "impact" {
+		return e.draftImpact(rest)
 	}
 	var l listing
 	var cluster string

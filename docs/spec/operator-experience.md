@@ -901,14 +901,18 @@ $ bronzewardctl fragment set ntp-servers --library --draft drf_8kdq…z6pa --lay
 Shared fragment ntp-servers saved in draft drf_8kdq…z6pa (revision frv_6tn…2qba). Publishing this draft
 moves cluster cl_9fd… (lab-a) to it. No other cluster changes.
 $ bronzewardctl draft impact drf_8kdq…z6pa
-ntp-servers  shared   gains in lab-a: 4 machines (mch_b3c…aa2q and 3 more; assignment)
-                      stays unchanged: lab-b on frv_1ab… , prod on frv_1ab…
+fragment ntp-servers  shared  gains in lab-a: 4 machines (mch_b3c…aa2q and 3 more; assignment)
+                              stays unchanged: lab-b on frv_1ab…, prod on frv_1ab…
 $ bronzewardctl publish drf_8kdq…z6pa
 $ bronzewardctl fragment adoptions ntp-servers --behind      # read against the published head
-CLUSTER  ADOPTED    HEAD       RELEASE      MACHINES
-lab-b    frv_1ab…   frv_6tn…   rel_c2d…     6
-prod     frv_1ab…   frv_6tn…   rel_e5f…     12
+CLUSTER  ADOPTED    HEAD       RELEASE      MACHINES  VIA
+lab-b    frv_1ab…   frv_6tn…   rel_c2d…     6         -
+prod     frv_1ab…   frv_6tn…   rel_e5f…     12        -
 ```
+
+A cluster that reaches the fragment only through an adopted shared profile has a row of its own, with that profile under
+VIA and `-` as its release. That row is no adoption of the fragment, so a client that reads a cluster's view of the name
+skips it.
 
 In another cluster's draft the same revision is taken with `fragment adopt`, which names it
 (`--revision`, the head when none is given) and prints the machines it reaches there:

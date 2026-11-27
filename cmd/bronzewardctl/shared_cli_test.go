@@ -24,6 +24,7 @@ type sharedFake struct {
 	reads   []string
 	refuse  map[string]string
 	entries string
+	impact  string // the answer of the impact route, when a case needs another
 }
 
 const sharedEntries = `{"kind":"fragment","name":"own","head":"frg_own","base":1,"revision":"frv_own2"},` +
@@ -88,6 +89,10 @@ func (f *sharedFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "GET /fragments/frg_dns/adoptions":
 		fmt.Fprint(w, `{"items":[{"cluster":"cl_BWSYNTH","revision":"frv_dns1","adoptionRevision":1,"behind":false,"release":"rel_1","via":null,"machines":[]}]}`)
 	case "GET /drafts/drf_BWSYNTH/impact":
+		if f.impact != "" {
+			fmt.Fprint(w, f.impact)
+			return
+		}
 		fmt.Fprint(w, `{"items":[{"kind":"fragment","name":"ntp","scope":"library","machines":[`+
 			`{"machine":"mch_a","reason":"assignment","change":"gains"},{"machine":"mch_b","reason":"profile","change":"gains"},`+
 			`{"machine":"mch_c","reason":"adoption","change":"keeps"}],`+
@@ -276,6 +281,116 @@ func TestAdoptAndDetach(t *testing.T) {
 		t.Errorf("a repeat with no revision: exit %d, stderr %s", code, errText)
 	}
 	f.took()
+}
+
+// readRoutes are the reads the fake has answered since the last took, without clearing them.
+func (f *sharedFake) readRoutes() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return strings.Join(f.reads, "\n")
+}
+
+// adoptions lists each cluster on a shared name with its revision, the head, the release and the machines; a
+// row that reaches the name through a profile says which; --behind sends the query and nothing is written.
+func TestSharedAdoptions(t *testing.T) {
+	f := sharedServer(t)
+	code, out, errText := sharedRun(t, f, "fragment", "adoptions", "ntp")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, errText)
+	}
+	wantAll(t, "fragment adoptions", out, "CLUSTER ADOPTED HEAD RELEASE MACHINES VIA",
+		"lab-a frv_via frv_ntp3 - 1 prf_x", "lab-a frv_ntp1 frv_ntp3 rel_1 2 -", "prod frv_ntp3 frv_ntp3 rel_2 1 -")
+	if reads := f.readRoutes(); !strings.Contains(reads, "GET /fragments/frg_ntp/adoptions") || strings.Contains(reads, "behind") {
+		t.Errorf("reads %q: want the unfiltered adoptions read", reads)
+	}
+	if got := f.took(); len(got) != 0 {
+		t.Errorf("a read sent %q", got)
+	}
+
+	code, out, errText = sharedRun(t, f, "fragment", "adoptions", "ntp", "--behind")
+	if code != 0 || !strings.Contains(f.readRoutes(), "GET /fragments/frg_ntp/adoptions?behind=true") {
+		t.Errorf("--behind: exit %d, reads %q, stderr %s", code, f.readRoutes(), errText)
+	}
+	wantAll(t, "--behind", out, "lab-a frv_ntp1 frv_ntp3 rel_1 2 -")
+	if strings.Contains(out, "prod") || strings.Contains(out, "frv_via") {
+		t.Errorf("--behind lists a cluster that is not behind:\n%s", out)
+	}
+	f.took()
+
+	code, out, errText = sharedRun(t, f, "profile", "adoptions", "base-set")
+	if code != 0 {
+		t.Fatalf("profile adoptions: exit %d, stderr %s", code, errText)
+	}
+	wantAll(t, "profile adoptions", out, "CLUSTER ADOPTED HEAD RELEASE MACHINES VIA", "prod prv_base1 prv_base1 rel_2 1 -")
+
+	// A cluster's own name has no shared head: the sentence names it, and no adoptions are read.
+	f.took()
+	code, _, errText = sharedRun(t, f, "fragment", "adoptions", "own")
+	if code != 1 || !strings.Contains(errText, "there is no shared fragment 'own'") || strings.Contains(f.readRoutes(), "/adoptions") {
+		t.Errorf("a cluster's own name: exit %d, reads %q, stderr %s", code, f.readRoutes(), errText)
+	}
+	code, _, errText = sharedRun(t, f, "profile", "adoptions", "absent")
+	if code != 1 || !strings.Contains(errText, "there is no shared profile 'absent'") {
+		t.Errorf("an absent profile: exit %d, stderr %s", code, errText)
+	}
+	if got := f.took(); len(got) != 0 {
+		t.Errorf("a read sent %q", got)
+	}
+}
+
+// draft impact prints one block per entry: what this cluster's machines gain, lose or keep, and the other
+// clusters that stay unchanged; it renders nothing and writes nothing.
+func TestDraftImpact(t *testing.T) {
+	f := sharedServer(t)
+	code, out, errText := sharedRun(t, f, "draft", "impact", "drf_BWSYNTH")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, errText)
+	}
+	wantAll(t, "draft impact", out,
+		"fragment ntp shared gains in lab-a: 2 machines (mch_a and 1 more; assignment, profile)",
+		"keeps in lab-a: 1 machine (mch_c; adoption)",
+		"stays unchanged: prod on frv_ntp3",
+		"profile idle cluster reaches no machine of lab-a")
+	if got := f.took(); len(got) != 0 {
+		t.Errorf("a read sent %q", got)
+	}
+
+	// A change or a scope this client does not know is shown as the server sent it: a machine is never dropped
+	// from the answer, and an entry that reaches machines never reads as one that reaches none (contract 11).
+	f.impact = `{"items":[{"kind":"fragment","name":"ntp","scope":"tenant","machines":[` +
+		`{"machine":"mch_a","reason":"assignment","change":"moves"}],"otherClusters":[` +
+		`{"cluster":"cl_other","revision":"frv_ntp3","via":"prf_x","unchanged":false}]}]}`
+	code, out, errText = sharedRun(t, f, "draft", "impact", "drf_BWSYNTH")
+	if code != 0 {
+		t.Fatalf("unknown members: exit %d, stderr %s", code, errText)
+	}
+	wantAll(t, "unknown members", out, "fragment ntp tenant moves in lab-a: 1 machine (mch_a; assignment)",
+		"also changes: prod on frv_ntp3 via profile prf_x")
+	if strings.Contains(out, "reaches no machine") {
+		t.Errorf("a machine of an unknown change reads as none:\n%s", out)
+	}
+
+	f.impact = `{"items":[]}`
+	if _, out, _ = sharedRun(t, f, "draft", "impact", "drf_BWSYNTH"); !strings.Contains(out, "The draft holds no fragment or profile entry.") {
+		t.Errorf("an empty draft:\n%s", out)
+	}
+	f.took()
+}
+
+// The adopt answer of a profile says nothing of a pin: a profile pins fragments, and no profile pins a profile.
+func TestProfileAdoptSaysNothingOfAPin(t *testing.T) {
+	f := sharedServer(t)
+	_, out, _ := sharedRun(t, f, "profile", "adopt", "base-set", "--draft", "drf_BWSYNTH", ifMatch)
+	f.took()
+	if strings.Contains(out, "keeps its pin") {
+		t.Errorf("profile adopt answers with a sentence about a pin:\n%s", out)
+	}
+	if _, help, _ := sharedRun(t, f, "profile", "adopt", "--help"); strings.Contains(help, "keeps its pin") {
+		t.Errorf("profile adopt --help speaks of a pin:\n%s", help)
+	}
+	_, out, _ = sharedRun(t, f, "fragment", "adopt", "ntp", "--draft", "drf_BWSYNTH", ifMatch)
+	f.took()
+	wantAll(t, "fragment adopt", out, "A profile of this cluster that pins the name keeps its pin")
 }
 
 // A failed publication carries the refusal in its operation's error: publish words the next step of a

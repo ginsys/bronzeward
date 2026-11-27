@@ -1,0 +1,2 @@
+Added
+- `bronzewardctl` now reads shared fragments and profiles: `fragment adoptions` and `profile adoptions` list each cluster with the revision it is on, the shared head, the release that set it and its machines (`--behind` lists only the clusters on an older revision), and `draft impact` lists, before publishing, what each fragment or profile entry of a draft changes for this cluster's machines and which other clusters stay unchanged. `profile adopt` no longer repeats the fragment sentence about a pin. Refs ginsys/bronzeward#1193.
