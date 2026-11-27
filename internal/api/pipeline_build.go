@@ -85,7 +85,7 @@ func (a *API) buildRelease(ctx context.Context, j publishJob, c publishClients) 
 		if ref, err := compileRefusal(m.machine, err); ref != nil || err != nil {
 			return releaseUnit{}, namingFragment(ref, m, s), err
 		}
-		k, err := compiled.KubernetesVersion(version)
+		k, err := compiled.KubernetesVersion(s.contract)
 		if ref, err := compileRefusal(m.machine, err); ref != nil || err != nil {
 			return releaseUnit{}, namingFragment(ref, m, s), err
 		}

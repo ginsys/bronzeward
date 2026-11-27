@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -94,12 +95,12 @@ func (in *clusterInput) check(*API) error {
 	if !contractShape.MatchString(in.Contract) {
 		return errors.New("contract must be a Talos contract minor, as v1.14")
 	}
-	supported, err := compile.SupportedContract()
+	supported, err := compile.SupportedContracts()
 	if err != nil {
-		return fmt.Errorf("the supported contract is not known: %w", err)
+		return fmt.Errorf("the supported contracts are not known: %w", err)
 	}
-	if in.Contract != supported {
-		return fmt.Errorf("contract %s is not supported: this server renders only %s", in.Contract, supported)
+	if !slices.Contains(supported, in.Contract) {
+		return fmt.Errorf("contract %s is not supported: this server renders %s", in.Contract, strings.Join(supported, ", "))
 	}
 	if _, ok := clusterid.Canonical(in.TalosClusterID); !ok {
 		return errors.New("talosClusterId must be the cluster ID `talosctl get info` prints: 32 bytes in padded base64, in the standard or the URL-safe alphabet (persistence-api.md §7.3)")
