@@ -4022,11 +4022,8 @@ built** means §10.3.1 and design §13.9 decide it and §9.2 still reads
 otherwise. **Not decided** means no owner decision exists, and this section
 makes none. "Automation" is a service identity with a Bronzeward-issued token
 (§10.2). The permission names are not decided, so a right is named by what it
-covers. The server's refusal is the authority, whatever a client shows. Today an
-automation holding `author` and `publisher` can do the steps below that name
-those roles, except the imports (steps 6 and 16 of run 1), which stay with a
-person; step 14 is a read open to any role; every other step of run 1 needs a
-person or the controller.
+covers. The server's refusal is the authority, whatever a client shows. The
+status and "Person?" cells of each row say what an automation can do today.
 
 **Run 1: bring an existing cluster under management and keep it current.**
 
