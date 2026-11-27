@@ -83,7 +83,9 @@ export function staleAdoption(p: Problem): Words | undefined {
   const cs = p["conflicts"];
   const moved = (Array.isArray(cs) ? cs : []).flatMap((c: unknown) => {
     const m = typeof c === "object" && c !== null ? (c as Record<string, unknown>) : {};
-    return m["scope"] === "adoption" ? [`${safeWord(String(m["head"]))} was at adoption ${safeWord(String(m["expected"]))} and is at ${safeWord(String(m["actual"]))}`] : [];
+    // The members are the server's and unchecked: only a string or a number is shown, a null is none, anything else unknown.
+    const shown = (v: unknown) => (typeof v === "string" ? safeWord(v) : typeof v === "number" ? String(v) : v === null ? "none" : "unknown");
+    return m["scope"] === "adoption" ? [`${shown(m["head"])} was at adoption ${shown(m["expected"])} and is at ${shown(m["actual"])}`] : [];
   });
   return moved.length === 0 ? undefined : { what: `The shared name moved after this draft was read (${moved.join("; ")}).`, next: "Read the draft again, adopt the name again in this draft and publish that." };
 }
