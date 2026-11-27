@@ -198,8 +198,8 @@ func TestSharedJourney(t *testing.T) {
 
 	// B adopts the new revision: the change is in its plan before any approval, and B is no longer behind.
 	dB3 := b.draftWith(t, "adopt ntp again", []string{"fragment", "adopt", "ntp", "--draft", "<draft>"})
-	if m := impact(b, dB3).Machines; len(m) != 1 || m[0].Machine != b.s.machine {
-		t.Fatalf("B's draft adopting the new revision reaches %+v; want its machine", m)
+	if m := impact(b, dB3).Machines; len(m) != 1 || m[0].Machine != b.s.machine || m[0].Change != "gains" {
+		t.Fatalf("B's draft adopting the new revision reaches %+v; want its machine, gaining the revision", m)
 	}
 	b.publishDraft(t, dB3)
 	if got := plan(b); !holds(got, "shared: two") {
