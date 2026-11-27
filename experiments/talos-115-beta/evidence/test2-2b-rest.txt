@@ -1,0 +1,80 @@
+# source: job-t2-2b-rest.log (a cluster Job log kept in the worker's scratch entry)
+JOB_CREATED: verify-bronzeward-57fb395-1795733112-fe5d4d6d in heavy-runs for head 57fb39560ff42720f9d30f0ec4ef33fd918ba272
+POD_HEAD=57fb39560ff42720f9d30f0ec4ef33fd918ba272
+VERIFY_CMD=experiments/talos-115-beta/run/test2 2b rest
+built 2b from cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a with 3 patch(es)
+== variant 2b, set rest: github.com/siderolabs/talos/pkg/machinery v1.15.0-beta.1
+== packages: 32
+ok  	github.com/ginsys/bronzeward/cmd/bronzeward	33.905s
+ok  	github.com/ginsys/bronzeward/cmd/bronzewardctl	158.088s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc	0.006s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/groups	0.003s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/issuer	1.034s
+ok  	github.com/ginsys/bronzeward/fixtures/webhost	0.441s
+ok  	github.com/ginsys/bronzeward/internal/auth	58.340s
+ok  	github.com/ginsys/bronzeward/internal/baotest	0.003s
+ok  	github.com/ginsys/bronzeward/internal/classify	0.006s
+ok  	github.com/ginsys/bronzeward/internal/client	10.010s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/clitest	631.045s
+ok  	github.com/ginsys/bronzeward/internal/clusterid	0.008s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/compile	319.047s
+ok  	github.com/ginsys/bronzeward/internal/config	0.052s
+ok  	github.com/ginsys/bronzeward/internal/database	0.008s
+ok  	github.com/ginsys/bronzeward/internal/dbtest	152.348s
+ok  	github.com/ginsys/bronzeward/internal/id	0.005s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/ingest	6.556s
+ok  	github.com/ginsys/bronzeward/internal/machinename	0.005s
+LVJ_TIMEOUT: the log stream ran out of time (job verify-bronzeward-57fb395-1795733112-fe5d4d6d)
+# classifier: run/failures.py
+other    internal/clitest TestApprovals
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_vbvclyr3row4o3yy23ngqcvbpe has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestDocBlocks/drift
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_e34tu3tmqsghyndahns6v3gj7a has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestDocBlocks/publication,_import,_adoption,_tracking_and_plans
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_zalaqsig26jeszpwdlor4ga5ca has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestDrift
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_3wj74kwyt2pnqjrspfihflirha has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestDriftFreeze
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_ud4zqs5vfysupxlttmcvtt4jse has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestOperations
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_lu5xhpxagf662gjxqgwpztssie has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestPlans
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_ocp3ctq5ygldpsuk2ilwwrqq6m has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestProtected/T3
+           protected_test.go:608: bronzewardctl [publish drf_v4gmohl5hpb3lfwrgc332jk3vu]: exit 4
+           protected_test.go:608: bronzewardctl [release provenance  mch_sefzj5ssdqwokf6xkkq4kpjm3y]: exit 1
+other    internal/clitest TestPublication/EVT-04
+           publication_test.go:308: standard error ["  queued" "  claimed" "  failed" "bronzewardctl: human (https://127.0.0.1:37589): publication operation op_pwq7dwzfn7stlvkhx2ljxhw3oa failed: {\"rule\":\"kubernetes\",\"type\":\"urn:bronzeward:problem:validation-failed\",\"title\":\"Compilation refused the i
+           publication_test.go:317: sql: no rows in result set
+other    internal/clitest TestTimeline
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_gagzjen5auwowmhrxcvwodiolu has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/compile TestCompileAttributesTheGeneratedBase
+           compiler_test.go:63: doc[0]/cluster/etcd/ca/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey do
+           compiler_test.go:63: doc[10]/issuingCA/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]
+other    internal/compile TestCompileStillRefusesAMarkedLeafWhoseStandInIsInvalid
+           restored_test.go:85: control: the unmarked subnet: compile: refused (invalid): 3 errors occurred:
+other    internal/compile TestCompileTheFullGeneratedStream
+           restored_test.go:53: its Kubernetes version: "", compile: refused (kubernetes): the kubelet image names no Kubernetes version
+other    internal/compile TestKubernetesVersion/an_explicitly_empty_one
+           renderer_test.go:127: compile: refused (kubernetes): the kubelet image names no Kubernetes version
+other    internal/compile TestKubernetesVersion/the_generated_image
+           renderer_test.go:127: compile: refused (kubernetes): the kubelet image names no Kubernetes version
+other    internal/ingest TestIdentifySchemaSetOfGeneratedConfig
+           identify_test.go:150: control: the machinery does not redact doc[20]/config/resources/0/providers/0/secretbox/keys/0/secret
+           identify_test.go:150: control: the machinery does not redact doc[21]/issuer/privateKey
+--- result lines (tests and subtests): PASS=2234 FAIL=20 SKIP=12
+--- failing leaves: internal/clitest other=10
+--- failing leaves: internal/compile other=5
+--- failing leaves: internal/ingest other=1
+--- failing leaves in all: 16

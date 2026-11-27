@@ -1,0 +1,125 @@
+# source: job-t2-2b-api.log (a cluster Job log kept in the worker's scratch entry)
+JOB_CREATED: verify-bronzeward-57fb395-1795733178-acc7b323 in heavy-runs for head 57fb39560ff42720f9d30f0ec4ef33fd918ba272
+POD_HEAD=57fb39560ff42720f9d30f0ec4ef33fd918ba272
+VERIFY_CMD=experiments/talos-115-beta/run/test2 2b api
+built 2b from cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a with 3 patch(es)
+== variant 2b, set api: github.com/siderolabs/talos/pkg/machinery v1.15.0-beta.1
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/api	1080.816s
+FAIL
+VERIFY_SECONDS=1183
+VERIFY_DONE rc=1
+# classifier: run/failures.py
+other    internal/api TestBuildReleaseCommits
+           pipeline_build_test.go:293: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_bxum6nd3lhttthxoouqjfhf344 message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestBuildReleaseDependencyUnknown/artifact_key_read_without_a_Date
+           pipeline_build_test.go:624: buildRelease: validation-failed: Publication refused: the configuration was refused (kubernetes).; want 503 dependency-unavailable
+other    internal/api TestBuildReleaseDependencyUnknown/encryption_denied
+           pipeline_build_test.go:624: buildRelease: validation-failed: Publication refused: the configuration was refused (kubernetes).; want 503 dependency-unavailable
+other    internal/api TestBuildReleaseDependencyUnknown/encryption_refused_by_status
+           pipeline_build_test.go:624: buildRelease: validation-failed: Publication refused: the configuration was refused (kubernetes).; want 503 dependency-unavailable
+other    internal/api TestBuildReleaseEmptyAssignment
+           pipeline_build_test.go:556: buildRelease refused an empty assignment: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_prgrjahs7a6xj3i4lrav4z3zv4 message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestBuildReleaseEncryptionRefused
+           pipeline_build_test.go:597: refusal "Publication refused: the configuration was refused (kubernetes)." names <nil>
+other    internal/api TestBuildReleaseFillsHostname
+           hostname_record_test.go:224: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_fquxiezwc5nrp2ykixnygwpfei message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestBuildReleaseHostnameClash/an_unnamed_machine_against_an_explicit_hostname
+           hostname_clash_build_test.go:94: refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_hg3gmnqx4xevjd5rp4mk46bkku message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestBuildReleaseHostnameClash/filled_against_an_explicit_hostname_in_capitals,_with_an_underscore_and_a_domain
+           hostname_clash_build_test.go:99: got validation-failed: Publication refused: the configuration was refused (kubernetes)., want 422 validation-failed with the rule hostname
+other    internal/api TestBuildReleaseHostnameClash/filled_against_an_explicit_hostname_of_a_named_machine
+           hostname_clash_build_test.go:99: got validation-failed: Publication refused: the configuration was refused (kubernetes)., want 422 validation-failed with the rule hostname
+other    internal/api TestBuildReleaseHostnameClash/filled_against_an_explicit_hostname_of_an_unnamed_machine
+           hostname_clash_build_test.go:99: got validation-failed: Publication refused: the configuration was refused (kubernetes)., want 422 validation-failed with the rule hostname
+other    internal/api TestBuildReleaseHostnameClash/filled_against_an_explicit_hostname_with_a_character_the_node_name_drops
+           hostname_clash_build_test.go:99: got validation-failed: Publication refused: the configuration was refused (kubernetes)., want 422 validation-failed with the rule hostname
+other    internal/api TestBuildReleaseHostnameClash/filled_against_an_explicit_hostname_with_underscores_at_both_ends
+           hostname_clash_build_test.go:99: got validation-failed: Publication refused: the configuration was refused (kubernetes)., want 422 validation-failed with the rule hostname
+other    internal/api TestBuildReleaseHostnameClash/filled_against_another_name
+           hostname_clash_build_test.go:94: refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_to4v3xvfcnvgcbu65pln72s53y message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestBuildReleaseHostnameClash/names_sharing_a_first_label,_registerWithFQDN_unset
+           hostname_clash_build_test.go:99: got validation-failed: Publication refused: the configuration was refused (kubernetes)., want 422 validation-failed with the rule hostname
+other    internal/api TestBuildReleaseHostnameClash/registerWithFQDN_true_on_both
+           hostname_clash_build_test.go:94: refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_f7c7p7fnqdpprjd7hgqfwwcsqi message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestBuildReleaseHostnameClash/registerWithFQDN_true_on_one
+           hostname_clash_build_test.go:94: refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_n46qhetf6bcmlpfokbklv2zclu message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestBuildReleaseHostnameClash/two_explicit_hostnames_already_equal
+           hostname_clash_build_test.go:94: refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_5kwcgkpoazxyrkng23alan7xs4 message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestBuildReleaseMachines
+           pipeline_build_test.go:513: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_agfgbjvvy2ld33wbeiw7ml4vye message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestBuildReleaseRecordsNodeName
+           node_name_test.go:105: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_kia5sngzscz3qyii57uwl7nlmy message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestFormOnlyAdoption
+           formonly_test.go:182: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_222vetnltf5invoz7t45fexni4 message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestFormOnlyContentDiffers
+           formonly_test.go:112: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_igkuzivybpdo7u5ziunczxattq message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestFormOnlyDiff
+           formonly_test.go:129: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_6ktdvenypmohmm4wr64jiasqdq message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestFormOnlyDriftedAdoption
+           formonly_test.go:100: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_kvawlnguz5xjkthp4hosd24eoa message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestFormOnlyMachineRead
+           formonly_test.go:73: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_p4h25vjjuid43z4kwthffh2nvm message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestFormOnlyOfAnOnboardedMachineRelease/name_unchanged
+           hostname_formonly_test.go:75: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_snfwfbw73phpiavwi5jqp3ffei message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestFormOnlyOfAnOnboardedMachineRelease/renamed_after_the_import
+           hostname_formonly_test.go:75: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_cmkdwqy3loo6g5wmrk3zjlbgwa message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestFormOnlyOfAnOnboardedMachineRelease/the_removed_document_was_not_the_fill's_own
+           hostname_formonly_test.go:75: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_frgwd3zmes76zs43vvjb7n4xzu message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestHostnameKeyRenameReachesTheRelease/web-1
+           hostname_key_test.go:100: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_u6m4p4p7mhzrgrkkfajbzt4sni message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestHostnameKeyRenameReachesTheRelease/web-2
+           hostname_key_test.go:100: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_7zdvwalm4lss4bfk63wjy6trlu message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestLibraryWritePublishAndUse
+           library_write_test.go:395: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_372ikwf6mxtaan5tkgntrg4fzm message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestNewStartsPublisher
+           worker_test.go:589: operation failed
+other    internal/api TestPublicationEvidenceAtCommit/different_newer
+           publication_observation_test.go:183: validation-failed: Publication refused: the configuration was refused (kubernetes).
+other    internal/api TestPublicationEvidenceAtCommit/endpoint
+           publication_observation_test.go:183: validation-failed: Publication refused: the configuration was refused (kubernetes).
+other    internal/api TestPublicationEvidenceAtCommit/endpoint_changed_back
+           publication_observation_test.go:183: validation-failed: Publication refused: the configuration was refused (kubernetes).
+other    internal/api TestPublicationEvidenceAtCommit/matching_newer
+           publication_observation_test.go:183: validation-failed: Publication refused: the configuration was refused (kubernetes).
+other    internal/api TestPublicationEvidenceAtCommit/missing_evidence
+           publication_observation_test.go:183: validation-failed: Publication refused: the configuration was refused (kubernetes).
+other    internal/api TestPublicationEvidenceAtCommit/old_generation
+           publication_observation_test.go:183: validation-failed: Publication refused: the configuration was refused (kubernetes).
+other    internal/api TestPublicationEvidenceAtCommit/unreadable_newer
+           publication_observation_test.go:183: validation-failed: Publication refused: the configuration was refused (kubernetes).
+other    internal/api TestPublicationEvidenceAtCommit/wrong_purpose
+           publication_observation_test.go:183: validation-failed: Publication refused: the configuration was refused (kubernetes).
+other    internal/api TestPublicationMixedCoverage/false
+           publication_observation_test.go:294: validation-failed: Publication refused: the configuration was refused (kubernetes).
+other    internal/api TestPublicationOlderReadCompletingLate
+           publication_observation_test.go:325: validation-failed: Publication refused: the configuration was refused (kubernetes).
+other    internal/api TestPublicationRunningMinor/same_minor
+           publication_observation_test.go:74: matching control refused: validation-failed: Publication refused: the configuration was refused (kubernetes).
+other    internal/api TestPublishRefusesAFirstKeyBetweenPinAndRead
+           cakey_publish_test.go:215: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_r4vlfq67dbkfgrgg3ep57u5rqq message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestPublishRendersTheCAKey
+           cakey_publish_test.go:117: buildRelease refused: validation-failed: Publication refused: the configuration was refused (kubernetes). map[machine:mch_rorz56evcgfytjmun6uuoy3vhm message:the kubelet image names no Kubernetes version rule:kubernetes]
+other    internal/api TestPublishRunStopped/publish-claim
+           worker_test.go:439: operation failed at generation 2, events [queued claimed claimed failed]
+other    internal/api TestPublishRunStopped/publish-commit
+           worker_test.go:417: points reached [publish-claim publish-snapshot publish-observations publish-pins]; want [publish-claim publish-snapshot publish-observations publish-pins publish-compile publish-encrypt publish-commit]
+other    internal/api TestPublishRunStopped/publish-compile
+           worker_test.go:417: points reached [publish-claim publish-snapshot publish-observations publish-pins]; want [publish-claim publish-snapshot publish-observations publish-pins publish-compile]
+other    internal/api TestPublishRunStopped/publish-encrypt
+           worker_test.go:417: points reached [publish-claim publish-snapshot publish-observations publish-pins]; want [publish-claim publish-snapshot publish-observations publish-pins publish-compile publish-encrypt]
+other    internal/api TestPublishRunStopped/publish-observations
+           worker_test.go:439: operation failed at generation 2, events [queued claimed claimed failed]
+other    internal/api TestPublishRunStopped/publish-pins
+           worker_test.go:439: operation failed at generation 2, events [queued claimed claimed failed]
+other    internal/api TestPublishRunStopped/publish-snapshot
+           worker_test.go:439: operation failed at generation 2, events [queued claimed claimed failed]
+other    internal/api TestPublishWorker
+           worker_test.go:218: operation failed at generation 1, events [queued claimed failed]
+other    internal/api TestPublishWorkerCommittedReplyLost
+           worker_test.go:267: the worker did not receive the lost reply after a real commit
+other    internal/api TestPublishWorkerHeartbeat
+           worker_test.go:563: operation failed at generation 1, events [queued claimed failed]
+--- result lines (tests and subtests): PASS=1689 FAIL=63 SKIP=9
+--- failing leaves: internal/api other=55
+--- failing leaves in all: 55

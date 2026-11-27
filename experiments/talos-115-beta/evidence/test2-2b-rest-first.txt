@@ -1,0 +1,83 @@
+# source: job-t2-2b-rest-first.log (a cluster Job log kept in the worker's scratch entry)
+JOB_CREATED: verify-bronzeward-57fb395-1795736141-57c1b242 in heavy-runs for head 57fb39560ff42720f9d30f0ec4ef33fd918ba272
+POD_HEAD=57fb39560ff42720f9d30f0ec4ef33fd918ba272
+VERIFY_CMD=set -e; d=$(mktemp -d); experiments/talos-115-beta/run/build 2b "$d/src"; cd "$d/src"; echo "== variant 2b, rest half first: $(go list -m github.com/siderolabs/talos/pkg/machinery)"; pk=$(go list -e ./... | grep -v "/internal/api\(/\|\$\)" | sed '/internal\/ingest$/q'); echo "== packages: $(echo "$pk" | wc -l)"; go test -p 1 -timeout 40m $pk
+built 2b from cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a with 3 patch(es)
+== variant 2b, rest half first: github.com/siderolabs/talos/pkg/machinery v1.15.0-beta.1
+== packages: 19
+ok  	github.com/ginsys/bronzeward/cmd/bronzeward	20.079s
+ok  	github.com/ginsys/bronzeward/cmd/bronzewardctl	156.595s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc	0.004s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/groups	0.003s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/issuer	1.028s
+ok  	github.com/ginsys/bronzeward/fixtures/webhost	0.423s
+ok  	github.com/ginsys/bronzeward/internal/auth	20.913s
+ok  	github.com/ginsys/bronzeward/internal/baotest	0.002s
+ok  	github.com/ginsys/bronzeward/internal/classify	0.005s
+ok  	github.com/ginsys/bronzeward/internal/client	9.521s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/clitest	528.325s
+ok  	github.com/ginsys/bronzeward/internal/clusterid	0.006s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/compile	283.843s
+ok  	github.com/ginsys/bronzeward/internal/config	0.018s
+ok  	github.com/ginsys/bronzeward/internal/database	0.003s
+ok  	github.com/ginsys/bronzeward/internal/dbtest	1.190s
+ok  	github.com/ginsys/bronzeward/internal/id	0.003s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/ingest	3.454s
+FAIL
+VERIFY_SECONDS=1281
+VERIFY_DONE rc=1
+# classifier: run/failures.py
+other    internal/clitest TestApprovals
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_vvermsdvrvrwty33h4zzbg7f4y has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestDocBlocks/drift
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_zgcwbwh3heaakpoycelfhi7kmi has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestDocBlocks/publication,_import,_adoption,_tracking_and_plans
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_qtf4vuojuynatnxb7ltade5una has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestDrift
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_njhq26dd54p5ebuu7eafris2ka has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestDriftFreeze
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_j57z6sajqaepk7qrunnu4ltsqm has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestOperations
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_vhqmklfmcpzr2p3l5si3edoqgu has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestPlans
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_e2rgduluecsopha2uwr3qywx7e has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/clitest TestProtected/PROT-06,_a_mark_and_the_serving_process_killed
+           protected_test.go:456: import start named no ingestion:
+other    internal/clitest TestProtected/T3
+           protected_test.go:608: bronzewardctl [publish drf_mmwcrroa4b42ejn4cmcskbajgy]: exit 4
+           protected_test.go:608: bronzewardctl [release provenance  mch_q4yvdyd3r7iwqlsrmtiof4hbni]: exit 1
+other    internal/clitest TestPublication/EVT-04
+           publication_test.go:308: standard error ["  queued" "  claimed" "  failed" "bronzewardctl: human (https://127.0.0.1:43999): publication operation op_uqwbr5kmczbgnfe27gu6wtagom failed: {\"rule\":\"kubernetes\",\"type\":\"urn:bronzeward:problem:validation-failed\",\"title\":\"Compilation refused the i
+           publication_test.go:317: sql: no rows in result set
+other    internal/clitest TestTimeline
+           plans_test.go:268: exit 4, want 0
+           plans_test.go:268: output lacks "mch_5oh6v3l4ryw46h4pqcmy2nnsdm has no Applied release: adopt it with an adopt plan:\n    bronzewardctl plan create --release '"
+other    internal/compile TestCompileAttributesTheGeneratedBase
+           compiler_test.go:63: doc[0]/cluster/etcd/ca/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey do
+           compiler_test.go:63: doc[10]/issuingCA/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]
+other    internal/compile TestCompileStillRefusesAMarkedLeafWhoseStandInIsInvalid
+           restored_test.go:85: control: the unmarked subnet: compile: refused (invalid): 3 errors occurred:
+other    internal/compile TestCompileTheFullGeneratedStream
+           restored_test.go:53: its Kubernetes version: "", compile: refused (kubernetes): the kubelet image names no Kubernetes version
+other    internal/compile TestKubernetesVersion/an_explicitly_empty_one
+           renderer_test.go:127: compile: refused (kubernetes): the kubelet image names no Kubernetes version
+other    internal/compile TestKubernetesVersion/the_generated_image
+           renderer_test.go:127: compile: refused (kubernetes): the kubelet image names no Kubernetes version
+other    internal/ingest TestIdentifySchemaSetOfGeneratedConfig
+           identify_test.go:150: control: the machinery does not redact doc[20]/config/resources/0/providers/0/secretbox/keys/0/secret
+           identify_test.go:150: control: the machinery does not redact doc[21]/issuer/privateKey
+--- result lines (tests and subtests): PASS=2175 FAIL=21 SKIP=12
+--- failing leaves: internal/clitest other=11
+--- failing leaves: internal/compile other=5
+--- failing leaves: internal/ingest other=1
+--- failing leaves in all: 17
