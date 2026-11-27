@@ -146,8 +146,8 @@ var cmdTable = []cmdEntry{
 		roles: "author", ifMatch: true, notes: "one step of the draft: the adopted revision becomes the cluster's own fragment of that name.\n" + draftWrite},
 	{path: "fragment adoptions", line: "the clusters that use a shared fragment", synopsis: "fragment adoptions <name> [--behind]", roles: "any",
 		notes: "lists each cluster with the revision it is on, the shared head's revision, the release that set it and its machines. --behind\n" +
-			"lists only the clusters on an older revision than the head. A cluster that reaches the name only through an adopted shared\n" +
-			"profile is listed with that profile under VIA. A page is --limit, --cursor or --all."},
+			"lists only the clusters whose revision is not the head's, every cluster once the head is removed. A cluster that reaches the\n" +
+			"name only through an adopted shared profile is listed with that profile under VIA. A page is --limit, --cursor or --all."},
 
 	{path: "profile", line: "profiles of fragments"},
 	{path: "profile show", line: "show a profile head or revision", synopsis: "profile show <head or revision ID>", roles: "any", not: "limit cursor all"},
@@ -167,7 +167,7 @@ var cmdTable = []cmdEntry{
 		roles: "author", ifMatch: true, notes: "one step of the draft: the adopted revision becomes the cluster's own profile of that name.\n" + draftWrite},
 	{path: "profile adoptions", line: "the clusters that use a shared profile", synopsis: "profile adoptions <name> [--behind]", roles: "any",
 		notes: "lists each cluster with the revision it is on, the shared head's revision, the release that set it and its machines. --behind\n" +
-			"lists only the clusters on an older revision than the head. A page is --limit, --cursor or --all."},
+			"lists only the clusters whose revision is not the head's, every cluster once the head is removed. A page is --limit, --cursor or --all."},
 
 	{path: "assignment", line: "what configuration each machine is assigned"},
 	{path: "assignment show", line: "show an assignment head or revision", synopsis: "assignment show <head or revision ID>", roles: "any", not: "limit cursor all"},
