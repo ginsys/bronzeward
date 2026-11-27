@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/siderolabs/talos/pkg/machinery/compatibility/talos114"
+	"github.com/ginsys/bronzeward/internal/contract"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 	"github.com/siderolabs/talos/pkg/machinery/constants"
 	"go.yaml.in/yaml/v3"
@@ -20,16 +20,12 @@ import (
 const machineryModule = "github.com/siderolabs/talos/pkg/machinery"
 
 const (
-	RuleContract   Rule = "contract"   // the cluster's contract is not the machinery's minor
-	RuleKubernetes Rule = "kubernetes" // the configuration names no Kubernetes version the machinery supports
+	RuleContract   Rule = "contract"   // the cluster's contract is not a supported one this build renders
+	RuleKubernetes Rule = "kubernetes" // the configuration names no Kubernetes version the contract supports
 )
 
 var (
-	// moduleVersion is a canonical Go module version, as the release's column holds it.
-	moduleVersion = regexp.MustCompile(`^v(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})` +
-		`(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$`)
-	moduleSum  = regexp.MustCompile(`^h1:[A-Za-z0-9+/]{43}=$`)
-	contractRe = regexp.MustCompile(`^v(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})$`)
+	moduleSum = regexp.MustCompile(`^h1:[A-Za-z0-9+/]{43}=$`)
 	// releaseTag is a Kubernetes release, as an image tag names it and the release's column holds it.
 	releaseTag = regexp.MustCompile(`^v(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})$`)
 
@@ -51,7 +47,7 @@ func machinery(bi *debug.BuildInfo, ok bool) (string, string, error) {
 		if d.Path != machineryModule {
 			continue
 		}
-		if d.Replace != nil || len(d.Version) > 80 || !moduleVersion.MatchString(d.Version) || !moduleSum.MatchString(d.Sum) {
+		if _, ok := contract.Minor(d.Version); d.Replace != nil || len(d.Version) > 80 || !ok || !moduleSum.MatchString(d.Sum) {
 			return "", "", errMachinery
 		}
 		return d.Version, d.Sum, nil
@@ -59,51 +55,35 @@ func machinery(bi *debug.BuildInfo, ok bool) (string, string, error) {
 	return "", "", errMachinery
 }
 
-// CheckContract refuses a cluster contract other than the minor of the machinery version: the PoC
-// compiles only the node's running contract (compilation.md §10.2, choice §16.25), and the
-// machinery renders a newer contract silently as its own.
-func CheckContract(machinery, contract string) error {
-	refuse := &Error{Rule: RuleContract, Message: "the cluster's contract is not the renderer's minor"}
-	want, ok := contractOf(machinery)
-	if !ok || !contractRe.MatchString(contract) || contract != want {
-		return refuse
+// CheckContract refuses a cluster contract that is not on the list of supported contracts or is
+// newer than the machinery version (compilation.md §10.2, choices §16.25 and §16.33): the machinery
+// renders a newer contract silently as its own, and a contract nobody has evidence for stays out.
+func CheckContract(machinery, clusterContract string) error {
+	if !contract.Supported.Listed(clusterContract, machinery) {
+		return &Error{Rule: RuleContract, Message: "the cluster's contract is not one this build renders"}
 	}
 	return nil
 }
 
-// SupportedContract is the one cluster contract this build renders: the minor of the machinery
-// version it records. It reads the minor the way CheckContract does, so a cluster that is
-// registered with it is never refused at publish for its contract.
-func SupportedContract() (string, error) {
+// SupportedContracts are the contracts this build renders: the listed ones the machinery version it
+// records is not older than. It reads them the way CheckContract does, so a cluster that is
+// registered with one is never refused at publish for its contract.
+func SupportedContracts() ([]string, error) {
 	version, _, err := Machinery()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	contract, ok := contractOf(version)
-	if !ok {
-		return "", errMachinery
-	}
-	return contract, nil
-}
-
-// contractOf is the Talos contract minor of a machinery module version, as "v1.14" for "v1.14.5".
-func contractOf(machinery string) (string, bool) {
-	if !moduleVersion.MatchString(machinery) {
-		return "", false
-	}
-	major, rest, _ := strings.Cut(strings.TrimPrefix(machinery, "v"), ".")
-	minor, _, _ := strings.Cut(rest, ".")
-	return "v" + major + "." + minor, true
+	return contract.Supported.Contracts(version), nil
 }
 
 // KubernetesVersion is the Kubernetes version the compiled configuration runs (compilation.md
 // §10.2): the tag of its kubelet image, the machinery's default when none is set. It is refused
-// unless it is a release in the SupportedWith window of machinery's Talos minor, which validation
+// unless it is a release in the SupportedWith window of the cluster's contract, which validation
 // does not check, and unless the image is the one the redacted configuration shows: an image a
 // reference placed, or a copy of a value, is not recorded. The refusal names the check in fixed
 // text, never the image, and carries no path: a path is text a value could equal (§8.3), and
 // the configuration has one kubelet image.
-func (c Compiled) KubernetesVersion(machinery string) (string, error) {
+func (c Compiled) KubernetesVersion(clusterContract string) (string, error) {
 	refuse := func(msg string) error { return &Error{Rule: RuleKubernetes, Message: msg} }
 	if c.m.s == nil {
 		return "", refuse("no compiled configuration")
@@ -140,30 +120,14 @@ func (c Compiled) KubernetesVersion(machinery string) (string, error) {
 	if k == nil {
 		return "", refuse("the kubelet image names no Kubernetes version")
 	}
-	m := moduleVersion.FindStringSubmatch(machinery)
-	if m == nil {
-		return "", refuse("the renderer's version is not known")
-	}
-	w, ok := kubernetesWindows[[2]uint64{number(m[1]), number(m[2])}]
+	lo, hi, ok := contract.Supported.Window(clusterContract)
 	if !ok {
-		return "", refuse("the renderer's version is not known")
+		return "", refuse("the cluster's contract has no Kubernetes window")
 	}
-	if v := [3]uint64{number(k[1]), number(k[2]), number(k[3])}; less(v, w[0]) || !less(v, w[1]) {
-		return "", refuse("the Kubernetes version is outside the renderer's supported window")
+	if v := [3]uint64{number(k[1]), number(k[2]), number(k[3])}; less(v, lo) || !less(v, hi) {
+		return "", refuse("the Kubernetes version is outside the contract's supported window")
 	}
 	return tag, nil
-}
-
-// kubernetesWindows is the machinery's SupportedWith window for each Talos minor the PoC renders:
-// from the first version, inclusive, to the second, exclusive, compared on major, minor and patch
-// (compatibility.KubernetesVersion.SupportedWith). compatibility.ParseTalosVersion takes the
-// machine API's version message, which only internal/talos imports, so the window is read from
-// the minor's own constants; a machinery of any other minor has none and refuses.
-var kubernetesWindows = map[[2]uint64][2][3]uint64{
-	talos114.MajorMinor: {
-		{talos114.MinimumKubernetesVersion.Major, talos114.MinimumKubernetesVersion.Minor, talos114.MinimumKubernetesVersion.Patch},
-		{talos114.MaximumKubernetesVersion.Major, talos114.MaximumKubernetesVersion.Minor, talos114.MaximumKubernetesVersion.Patch},
-	},
 }
 
 // number is a numeric part the version patterns matched: at most four digits, so it parses.

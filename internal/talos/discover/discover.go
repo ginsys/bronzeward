@@ -22,6 +22,7 @@ import (
 
 	"github.com/cosi-project/runtime/pkg/safe"
 	"github.com/cosi-project/runtime/pkg/state"
+	"github.com/ginsys/bronzeward/internal/contract"
 	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
 	"github.com/siderolabs/talos/pkg/machinery/resources/cluster"
 	"github.com/siderolabs/talos/pkg/machinery/resources/hardware"
@@ -68,16 +69,18 @@ func (e *TooManyMembers) Error() string {
 // memberEndpoint is where a member is dialled; a test points it at a stand-in.
 var memberEndpoint = func(a netip.Addr) string { return netip.AddrPortFrom(a, 50000).String() }
 
-// supportedMinor is the contract minor of the linked machinery; a test replaces it.
-var supportedMinor = func() string {
+// linkedMachinery is the version of the linked machinery module; a test replaces it. A cluster is
+// supported when its contract is on the list of supported contracts and the machinery is not older
+// than it (internal/contract).
+var linkedMachinery = func() string {
 	bi, _ := debug.ReadBuildInfo()
-	return machineryContract(bi)
+	return machineryVersion(bi)
 }
 
-// machineryContract is the minor of the machinery module bi records, "" when there is none or a
+// machineryVersion is the version of the machinery module bi records, "" when there is none or a
 // replacement stands in for it: the linked version is then in Replace, and the server's renderer
 // refuses a replacement the same way.
-func machineryContract(bi *debug.BuildInfo) string {
+func machineryVersion(bi *debug.BuildInfo) string {
 	if bi == nil {
 		return ""
 	}
@@ -86,7 +89,7 @@ func machineryContract(bi *debug.BuildInfo) string {
 			if d.Replace != nil {
 				return ""
 			}
-			return contractOf(d.Version)
+			return d.Version
 		}
 	}
 	return ""
@@ -187,7 +190,7 @@ func walk(ctx context.Context, talosconfig []byte, contextName, endpoint, server
 		return Result{}, failed("reading the cluster information", err)
 	}
 	res.ClusterID, res.Contract = info.TypedSpec().ClusterID, contractOf(res.Version)
-	res.Supported = res.Contract != "" && res.Contract == supportedMinor()
+	res.Supported = contract.Supported.Listed(res.Contract, linkedMachinery())
 	list, err := safe.StateListAll[*cluster.Member](startCtx, n.api.COSI)
 	if err != nil {
 		if limited && cutBy(ctx, err) {

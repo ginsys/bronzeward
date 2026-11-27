@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ginsys/bronzeward/internal/contract"
 	"github.com/ginsys/bronzeward/internal/ingest"
 	"github.com/ginsys/bronzeward/internal/provider"
-	"github.com/ginsys/bronzeward/internal/talos/contract"
 )
 
 // moduleLine is the machinery's line of the named module file, split into fields; in go.sum, the
