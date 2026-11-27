@@ -22,7 +22,7 @@ const adoption = (over: Record<string, unknown>) => ({ cluster: "cl_a", revision
 // One shared fragment the cluster is behind on, one it follows at the head, one nobody follows, two removed (this cluster still
 // follows one, only another cluster follows the other); and a profile.
 const answers: Record<string, unknown> = {
-  "/fragments": { items: [head("frg_1", "ntp", "frv_head"), head("frg_2", "dns", "frv_dns"), head("frg_3", "motd", "frv_motd"), head("frg_4", "gone", null), head("frg_5", "own", "frv_own", "cl_a"), head("frg_6", "lost", null)] },
+  "/fragments": { items: [head("frg_1", "ntp", "frv_head"), head("frg_2", "dns", "frv_dns"), head("frg_3", "motd", "frv_motd"), head("frg_4", "gone", null), head("frg_5", "own", "frv_own", "cl_a"), head("frg_6", "lost", null), head("frg_7", "slow", null), head("frg_8", "broken", null)] },
   "/fragments/frg_4/adoptions": { items: [adoption({ revision: "frv_gone", behind: true }), adoption({ cluster: "cl_b", revision: "frv_gone", behind: true })] },
   "/fragments/frg_6/adoptions": { items: [adoption({ cluster: "cl_b", revision: "frv_lost", behind: true })] },
   "/fragments/frg_1/adoptions": { items: [adoption({}), adoption({ cluster: "cl_b", behind: false })] },
@@ -37,7 +37,8 @@ describe("the Shared names block on a draft's page", () => {
   let root: Root;
   let writes: Writes;
   let submit: ReturnType<typeof vi.spyOn>;
-  const read = vi.fn(async (path: string) => (Object.hasOwn(answers, path) ? { kind: "ok", data: answers[path] } : { kind: "refused", status: 404, problem: null }));
+  // `slow` is a removed name whose adoptions read never answers; `broken` is one whose read is refused (no answer is set for it).
+  const read = vi.fn(async (path: string) => (path === "/fragments/frg_7/adoptions" ? new Promise(() => {}) : Object.hasOwn(answers, path) ? { kind: "ok", data: answers[path] } : { kind: "refused", status: 404, problem: null }));
   const reads = { client: { read }, settle: (res: unknown, set: (r: unknown) => void, live: () => boolean) => (live() && set(res), true), undropped: () => () => true, view: "", again: 0, regained: 0, go: () => {}, failure: () => null } as unknown as Reads;
   beforeEach(() => {
     box = document.createElement("div");
@@ -99,6 +100,10 @@ describe("the Shared names block on a draft's page", () => {
     expect(button("Adopt gone")).toBeUndefined();
     // Another cluster follows `lost`, this one does not: nothing to adopt and nothing to stop.
     expect(box.textContent).not.toContain("fragment lost");
+    // While a removed name's read is pending nothing says this cluster follows it, so it is not listed; a read that failed still shows its row.
+    expect(box.textContent).not.toContain("fragment slow");
+    expect(box.textContent).toContain("fragment broken");
+    expect(button("Stop following broken")).toBeUndefined();
     keepETag(DRF, '"5-t"', undefined);
     await act(async () => void button("Stop following gone")!.click());
     const stop = (submit.mock.calls[0]![0] as { spec: Record<string, unknown> }).spec;

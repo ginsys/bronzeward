@@ -110,9 +110,10 @@ function NameRow({ kind, head, draft, seeChange }: { kind: Kind; head: Head; dra
   const shown = safeText(head.name) ?? NAME_NOT_SHOWN;
   // A name that is not read yet offers nothing: its view decides what a press does.
   const ready = list.kind === "ok";
-  // A removed name this cluster does not follow has nothing to adopt and nothing to stop.
+  // A removed name this cluster does not follow has nothing to adopt and nothing to stop, so it shows only once the read says this
+  // cluster follows it. A read that failed still shows its failure: nothing says whether the name is followed.
   const gone = head.revision === null;
-  if (ready && gone && (state.kind === "none" || state.kind === "via" || state.kind === "removed")) return null;
+  if (gone && (list.kind === "loading" || (ready && (state.kind === "none" || state.kind === "via" || state.kind === "removed")))) return null;
   return (
     <li>
       {kind} {shown}: {pending ?? <Words kind={kind} state={state} gone={gone} />}
