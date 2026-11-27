@@ -946,9 +946,9 @@ An open draft's page carries a **Shared names** block, which reads when it is op
 profile that has a head, with this cluster's view of it in words: the draft's own entry first (it adopts a revision, it
 stops following, it changes the shared name, it removes it), else the revision the cluster is on and whether that is
 behind the shared head, else that the name is only reached through a shared profile, which is not an adoption, else that
-it is not followed. A shared name whose head was removed is listed only where this cluster still follows it, says so in
-words, and offers Stop following and not Adopt. A revision is named by when it was saved, with its identifier as the
-title of the link. **Adopt**
+it is not followed. A shared name whose head was removed is listed only where this cluster still follows it (a read that
+failed shows its failure line instead), says so in words, and offers Stop following and not Adopt. A revision is named by
+when it was saved, with its identifier as the title of the link. **Adopt**
 (offered where the cluster is not on the head's revision, and for any adoption the draft has staged) and **Stop following** (offered where a name is followed) each
 show before the press what they record, in the draft only and for this cluster only, and one press sends the entry: Adopt
 puts the head's revision, Stop following removes the adoption. Nothing is typed back. A fragment's adoption adds that a
