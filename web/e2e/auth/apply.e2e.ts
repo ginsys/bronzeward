@@ -183,6 +183,7 @@ describe("the apply page (#1096)", () => {
     expect(await shared().$$("input, button, select").length).toBe(0);
     await browser.waitUntil(async () => (await rows().length) === 2, { timeout: 20_000 });
     expect(await $$('[data-testid="apply-row"] input[type=checkbox]').length).toBe(2);
+    // once: the page sends a write only from a press, and the case presses nothing.
     expect(await posts()).toEqual([]);
   });
 
