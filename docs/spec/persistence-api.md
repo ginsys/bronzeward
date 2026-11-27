@@ -4001,7 +4001,93 @@ issue a token to an identity or revoke one.
   differ from approved content; the permission names; whether a renewed token's
   lifetime is bounded beyond §10.2's limits; whether automation reads whether a
   cluster's key is held (`GET /clusters/{id}/talos-access`); per-cluster limits;
-  admission by allowed IP ranges.
+  admission by allowed IP ranges; whether a standing rule may approve the
+  adoption plan of a drifted machine (an adoption plan is one kind of plan, so
+  the text above reads as covering it, and the owner has not said); whether a
+  shared revision that a cluster has adopted
+  ([ginsys/bronzeward#1193](https://github.com/ginsys/bronzeward/issues/1193))
+  counts as approved content for a rule; whether a rule that requires approved
+  content applies to an adoption, whose content is an import base and not a
+  profile revision. The run-by-run reading is §10.3.2.
+
+### 10.3.2 An automated run, step by step
+
+The decisions of §10.3.1 as three runs in order. A row is one step: the route
+from §9.2 (a step with no route says so), the identity and right it needs, what
+authorizes it, whether a person acts, and its status. **Built** means the route
+is served today under the roles and *human only* marks of §9.2. **Decided, not
+built** means §10.3.1 and design §13.9 decide it and §9.2 still reads
+otherwise. **Not decided** means no owner decision exists, and this section
+makes none. "Automation" is a service identity with a Bronzeward-issued token
+(§10.2). The permission names are not decided, so a right is named by what it
+covers. The server's refusal is the authority, whatever a client shows. Today an
+automation holding `author` and `publisher` can do the steps below that name
+those roles; every other step of run 1 needs a person or the controller.
+
+**Run 1: bring an existing cluster under management and keep it current.**
+
+| # | Step and route | Identity and right | Authorized by | Person? | Status; what changes |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Discover the members from a first key: `POST /discoveries` (reads only, stores nothing, records no act) | Automation with the inventory permission | The permission | No | Decided, not built. Today human only (`author`). Inventory item: the row stops being human only for that permission; the address limit of [ginsys/bronzeward#1009](https://github.com/ginsys/bronzeward/issues/1009) is looked at again |
+| 2 | Record the cluster: `POST /clusters` | Automation with the inventory permission | The permission | No | Decided, not built. Today human only (`author`). Same row change |
+| 3 | Record each machine with its Talos endpoint, platform and optional name: `POST /machines`; corrections by `POST /machines/{id}/talos-endpoints` and `/names` | Automation with the inventory permission | The permission | No | Decided, not built. Today human only (`author`). The checks stay: a machine's hardware identity is fixed in its record, the node must match the record and its cluster, duplicate identities are refused (design §13.9) |
+| 4 | Supply the first key: `POST /clusters/{id}/first-keys` | Automation with the first-key right, never the replacement right | The right; it works only for a cluster that has no key, also under a retry or a duplicate send | No | Decided, not built. Today human only (`author`). Key item: a test of its own for retry and duplicate (§10.3.1); the one route tells first key and replacement apart |
+| 5 | Open a draft: `POST /drafts` | `author` | The role | No | Built |
+| 6 | Import each machine's configuration into that draft: `POST /ingestions` with `If-Match` the draft's ETag; the optional review pause is `GET /ingestions/{id}/review`, `POST /ingestions/{id}/marks` and `/continuations` | A person with `author`, signed in through the identity provider | The role; a person starts it | **Yes, each machine** | Built, and stays as now (owner decision, 27 November 2026, 08:41 CET). Automation does not ingest. Importing an already configured machine is the exception; adoption from maintenance mode (run 3) is the normal route |
+| 7 | Assign the machines and edit what they use: `PUT /drafts/{id}/assignments/{machine}`, `/fragments/{name}`, `/profiles/{name}` | `author` | The role | No | Built |
+| 8 | Publish: `POST /drafts/{id}/publications`, then follow `GET /operations/{id}` | `publisher` | The role. Publishing sends nothing and authorizes nothing | No | Built |
+| 9 | Ask for the adoption: `POST /plans` with `operation: adopt` | `publisher` | The role | No | Built |
+| 10 | Approve the adoption plan: `POST /plans/{id}/approvals` | Today an `approver`, human only. Decided: a standing rule an `approver` wrote in advance | Today the approver. Decided: the rule | Today yes. Decided: not at this step (a person wrote the rule) | Decided, not built. Rule item: an approval record of a new kind (the database requires a human approver today); a rule's fields, expiry, revocation and effect of a restore are not decided; automation is still never `approver`. Whether a rule that requires approved content applies to an adoption is not decided |
+| 11 | The controller records the adoption (an `adopt` operation, created `completed`, nothing sent) | The controller | The approved plan and the controller's own checks | No | Built. No client route and no client command |
+| 12 | A routine change to a worker | See run 2 | | | |
+| 13 | A change to a control plane machine, any apply that is not a no-reboot apply to a worker, or a revert to an earlier release: `POST /plans`, approval `POST /plans/{id}/approvals` | `publisher` creates; an `approver` approves | The approver's own approval | **Yes** | Built. Stays a person's: no rule covers it (owner decision, 27 November 2026, 08:44 CET) |
+| 14 | See drift: `GET /machines/{id}/observations`, `/machines/{id}/position`, `GET /operations` | Any role | The role | No | Built |
+| 15 | Hold a machine while someone decides: `POST /machines/{id}/freezes`; lift it: `POST /machines/{id}/unfreezes` | Freeze: `author`, `publisher`, `approver`, `recovery-admin`. Unfreeze: `approver` | The role | Freeze no; unfreeze **yes** | Built |
+| 16 | Accept a drifted configuration: import it as a drift adoption, `POST /ingestions` into a draft | A person with `author` | The role | **Yes** | Built, and stays (drift keeps today's path because imports stay with people) |
+| 17 | Publish and ask for the adoption, as steps 8 and 9 | `publisher` | The role | No | Built |
+| 18 | Approve the drift adoption plan | Today an `approver` | Today the approver | Today yes | **Not decided** whether a standing rule may approve a drift adoption plan |
+| 19 | Renew the automation's own token. No route today: the operator runs the server-side tool (§10.2) | Decided: the caller's own token, same roles and permissions, never more; a token that authentication refuses cannot renew | Holding a valid token | Today yes (the operator). Decided: no | Decided, not built. The route and its name are not decided. Token item: §10.2 and design §13.7 item 2 are changed from "decided, not built" to the route as built. Whether a renewed token's lifetime is bounded beyond 30 days by default and 90 at most is not decided |
+| 20 | Issue a token to another identity, revoke a token, enter or leave recovery mode, release a scope, account for or resolve an operation, record an identity revocation | The server-side tool, or `recovery-admin` | The role | **Yes** | Built. People only; nothing changes (owner decisions, 27 November 2026, 09:25 and 09:32 CET) |
+
+**Run 2: roll a routine change to the workers of an onboarded cluster.**
+
+| # | Step and route | Identity and right | Authorized by | Person? | Status; what changes |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Open a draft and edit it: `POST /drafts`, `PUT /drafts/{id}/profiles/{name}` and `/fragments/{name}`; optionally read `GET /drafts/{id}/impact` | `author` | The role | No | Built |
+| 2 | Publish: `POST /drafts/{id}/publications` | `publisher` | The role | No | Built |
+| 3 | One plan per worker: `POST /plans` with `operation: apply-config` and `mode: no-reboot` | `publisher` | The role | No | Built |
+| 4 | Refuse a plan whose machine is not a worker, where the plan is created or sent | The server | The restriction | No | Decided, not built. A text search found no machine-role check in either place and no test was run. A rule cannot be enabled for a send before this is built and tested |
+| 5 | Approve: `POST /plans/{id}/approvals` | Today an `approver`, human only. Decided: a standing rule that requires approved content (profile or template revisions) | Today the approver. Decided: the rule, for a no-reboot apply to a worker only | Today yes. Decided: no, while the content is approved content | Decided, not built. Rule item; a plan that is not approved content waits for a person. Which machine-specific parts of a composed configuration may differ from approved content is not decided. Whether an adopted shared revision counts as approved content is not decided |
+| 6 | The controller commits and sends, then verifies; follow `GET /operations?plan={id}` and `GET /operations/{id}/events` | The controller | The approved plan and its own checks | No | Built. Dispatch is no role's and no client's |
+| 7 | Withdraw a plan or its approval: `POST /plans/{id}/cancellations`; `POST /approvals/{id}/revocations` | The plan's creator may cancel; revoking an approval needs `approver` or `recovery-admin` | The role | Cancel no; revoke **yes** | Built |
+
+What stays with a person in run 2: every control plane change, every apply that
+is not a no-reboot apply to a worker, every revert, every plan whose content is
+not approved content, writing and revoking a rule, and lifting a freeze.
+
+**Run 3: a machine in maintenance mode (not built; Phase 2, design §18.3).**
+
+| # | Step | Identity and right | Authorized by | Person? | Status |
+| --- | --- | --- | --- | --- | --- |
+| 1 | An external caller brings the machine up and reports it, and may say which machines are control plane and which are workers | Not specified | Not specified | Not specified | No route, no pending-candidate record and no call-home contract exist |
+| 2 | Admit the machine | A person | The person's decision | **Yes, each machine** | Decided: no unattended admission until a machine has an authenticated channel or hardware attestation (owner decision, 27 November 2026, 08:47 CET). Admission by allowed address ranges is not decided |
+| 3 | Select which admitted machines are configured, using the caller's roles and profiles as input to a draft | Whoever may edit drafts, a service identity included | The `author` role | No | Decided. The draft routes of run 1 exist, but an admitted machine has no record until admission is specified |
+| 4 | Publish and ask for the plan | `publisher` | The role | No | Built for a machine that has a record. Whether it covers a first configuration from maintenance mode is not specified |
+| 5 | Approve the first configuration | An `approver`, a person | The approver | **Yes** | Decided: a rule covers only adoption and a no-reboot apply to a worker, so no rule covers this. Adding it to a rule is not decided |
+| 6 | Apply it through the maintenance transport | Not specified | Not specified | Not specified | No contract; design §18.3 |
+
+What is missing for run 3: the call-home or claim route and its record, the
+authenticated channel or attestation that would let admission run unattended,
+the route that admits a machine, the mapping from the caller's roles to profile
+names, and the apply contract. The evidence on maintenance identity is still
+owed in [ginsys/bronzeward#242](https://github.com/ginsys/bronzeward/issues/242).
+
+**Where this section changes.** The human-only list lives in three places:
+`internal/api/routes.go` (`human()`), the routes of §9.2 and the "Human" column
+of [client contracts §3.2](client-contracts.md#32-writes). The change that
+builds an item above (the inventory permission, the first-key and replacement
+rights, standing-rule approval with approved content, the worker restriction,
+token renewal) changes all three and this section in one change.
 
 ### 10.4 Revocation
 
