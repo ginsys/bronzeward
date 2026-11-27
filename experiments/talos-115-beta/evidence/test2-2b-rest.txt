@@ -176,3 +176,5 @@ other    internal/ingest TestIdentifySchemaSetOfGeneratedConfig
 --- failing leaves: internal/compile other=5
 --- failing leaves: internal/ingest other=1
 --- failing leaves in all: 16
+--- package lines: ok=16 FAIL=3
+--- NO VERDICT: the Job's log was cut by the wrapper's time limit. The counts above are only what was read before it; zero failing leaves is not a pass.

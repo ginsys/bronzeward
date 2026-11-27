@@ -123,3 +123,4 @@ other    internal/api TestPublishWorkerHeartbeat
 --- result lines (tests and subtests): PASS=1689 FAIL=63 SKIP=9
 --- failing leaves: internal/api other=55
 --- failing leaves in all: 55
+--- package lines: ok=0 FAIL=1

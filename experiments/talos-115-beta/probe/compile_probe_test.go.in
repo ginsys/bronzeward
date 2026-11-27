@@ -138,6 +138,10 @@ func (p *probeRun) generation(writeInputs bool) {
 		for _, mt := range []machine.Type{machine.TypeControlPlane, machine.TypeWorker} {
 			id := g.id + "-" + mt.String()
 			p.t.Run("gen-"+id, func(t *testing.T) {
+				// The subtest's own t: a failed write ends this subtest, never the parent.
+				outer := p
+				p := &probeRun{t: t, out: outer.out, in: outer.in, lines: outer.lines}
+				defer func() { outer.lines = p.lines }()
 				cfg, bundle := probeGenerate(t, g.contract, mt)
 				full := encoded(t, cfg, encoder.CommentsAll)
 				bare := encoded(t, cfg, encoder.CommentsDisabled)

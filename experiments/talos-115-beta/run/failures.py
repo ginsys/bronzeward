@@ -20,7 +20,18 @@ CONTRACT = re.compile(
 def main():
     current, output, failed, rows = None, {}, [], []
     counts = {"PASS": 0, "FAIL": 0, "SKIP": 0}
+    packages, no_verdict = {"ok": 0, "FAIL": 0}, []
     for line in pathlib.Path(sys.argv[1]).read_text(errors="replace").splitlines():
+        if line.startswith("panic: test timed out"):
+            no_verdict.append("the test run hit its own time limit")
+        elif "[build failed]" in line:
+            no_verdict.append("a package did not build")
+        elif re.match(r"^== go (build|vet) rc=[1-9]", line):
+            no_verdict.append("go build or go vet failed")
+        elif line.startswith("LVJ_TIMEOUT"):
+            no_verdict.append("the Job's log was cut by the wrapper's time limit")
+        if m := PACKAGE.match(line):
+            packages[m.group(1)] += 1
         if m := RUN.match(line):
             current = m.group(1)
         elif m := END.match(line):
@@ -50,6 +61,11 @@ def main():
     for (package, cause), n in sorted(tally.items()):
         print(f"--- failing leaves: {package} {cause}={n}")
     print(f"--- failing leaves in all: {len(rows)}")
+    print(f"--- package lines: ok={packages['ok']} FAIL={packages['FAIL']}")
+    for reason in sorted(set(no_verdict)):
+        print(f"--- NO VERDICT: {reason}. The counts above are only what was read before it; zero failing leaves is not a pass.")
+    if not no_verdict and packages["FAIL"] and not rows:
+        print("--- NO VERDICT: a package line FAILs and no failing leaf test explains it")
 
 
 if __name__ == "__main__":
