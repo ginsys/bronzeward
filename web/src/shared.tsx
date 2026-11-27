@@ -26,6 +26,8 @@ const REASONS: Record<string, string> = {
   profile: "a profile of this cluster pins it",
   adoption: "only a shared profile's pin brings it",
 };
+// A value the server chose is looked up by its own key only: "constructor" or "__proto__" is an unknown value, never a method.
+const known = (words: Record<string, string>, key: string): string | undefined => (Object.hasOwn(words, key) ? words[key] : undefined);
 export const changesOf = (ms: readonly ImpactMachine[]): string[] => {
   const order = ["gains", "loses", "keeps"];
   for (const m of ms) if (!order.includes(m.change)) order.push(m.change);
@@ -47,10 +49,10 @@ export function ReachItem({ it }: { it: Item }) {
   const rows: ReactNode[] = [];
   for (const change of changesOf(it.machines)) {
     const ms = it.machines.filter((m) => m.change === change);
-    const reasons = [...new Set(ms.map((m) => REASONS[m.reason] ?? safeWord(m.reason) ?? "a reason this page does not know"))];
+    const reasons = [...new Set(ms.map((m) => known(REASONS, m.reason) ?? safeWord(m.reason)))];
     rows.push(
       <li key={change}>
-        {KNOWN[change] ?? `${safeWord(change) ?? "A change this page does not know"} here`}: {machines(ms.length)} (<Machines ids={ms.map((m) => m.machine)} />; {reasons.join(", ")})
+        {known(KNOWN, change) ?? `${safeWord(change)} here`}: {machines(ms.length)} (<Machines ids={ms.map((m) => m.machine)} />; {reasons.join(", ")})
       </li>,
     );
   }
@@ -67,7 +69,7 @@ export function ReachItem({ it }: { it: Item }) {
   }
   return (
     <li>
-      {it.kind} {safeText(it.name) ?? NAME_NOT_SHOWN} (shared library)
+      {safeWord(it.kind)} {safeText(it.name) ?? NAME_NOT_SHOWN} (shared library)
       <ul>{rows.length === 0 ? <li>Reaches no machine of this cluster.</li> : rows}</ul>
     </li>
   );
@@ -95,8 +97,10 @@ export function Reach({ draft, n }: { draft: string; n: number }) {
 type Adoption = S["ClusterAdoptionBody"];
 
 /** How a cluster uses the name: adopted on the head or behind it, or only through a shared profile (never an adoption). */
-export const useOf = (a: Pick<Adoption, "behind" | "via">): string =>
-  a.via !== null ? `through the shared profile ${safeText(a.via) ?? NAME_NOT_SHOWN} (not an adoption)` : a.behind ? "behind the shared head" : "on the shared head";
+export const useOf = (a: Pick<Adoption, "behind" | "via">): string => {
+  const head = a.behind ? "behind the shared head" : "on the shared head";
+  return a.via !== null ? `through the shared profile ${safeText(a.via) ?? NAME_NOT_SHOWN} (not an adoption), ${head}` : head;
+};
 
 export function AdoptionRows({ rows }: { rows: readonly Adoption[] }) {
   return (
