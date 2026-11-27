@@ -49,7 +49,20 @@ type seeded struct{ cluster, machine, draft string }
 // Recording a cluster or a machine is human-only, so seed mints its own token and f.token stays
 // the automation token. A draft entry needs the provider's keyed digest, and this server has no
 // provider.
-func (f *fixture) seed() seeded {
+func (f *fixture) seed() seeded { return f.seedAs(firstCluster) }
+
+// clusterIdent is what two seeded clusters must not share: the cluster's name and Talos cluster ID,
+// its machine's SMBIOS UUID and node ID, and the suffix of the idempotency keys of the seeding writes.
+type clusterIdent struct{ name, clusterID, uuid, nodeID, key, serial string }
+
+// firstCluster is the cluster every test seeds; secondCluster is the one a journey of two clusters adds.
+var (
+	firstCluster  = clusterIdent{"lab-a", seedClusterID, seedUUID, standInNodeID, "0123456", "SN-1"}
+	secondCluster = clusterIdent{"lab-b", "am91cm5leS1jbHVzdGVyLWItZm9yLWNsaS10ZXN0cy4=", "1c5a6c1e-2f3d-4e5f-8a9b-0c1d2e3f4a5c", "8x1SuC8Ege5BGXdAfTEff5iQnlWZLfv9h1LGMxA2pYkC", "bbbbbbb", "SN-2"}
+)
+
+// seedAs is seed for the cluster id names.
+func (f *fixture) seedAs(id clusterIdent) seeded {
 	f.t.Helper()
 	human, err := f.iss.Mint("h-all", "", time.Now())
 	if err != nil {
@@ -70,11 +83,11 @@ func (f *fixture) seed() seeded {
 		return v.ID
 	}
 	var s seeded
-	s.cluster = create("/clusters", "k-seed-cluster-0123456",
-		`{"name":"lab-a","endpoint":"https://cp.example.test:6443","contract":"v1.14","talosClusterId":"`+seedClusterID+`"}`)
-	s.machine = create("/machines", "k-seed-machine-0123456",
-		`{"cluster":"`+s.cluster+`","smbiosUuid":"`+seedUUID+`","serial":"SN-1","platform":"container","talosEndpoint":"10.55.0.3"}`)
-	s.draft = create("/drafts", "k-seed-draft-00123456", `{"cluster":"`+s.cluster+`","title":"worker labels"}`)
+	s.cluster = create("/clusters", "k-seed-cluster-"+id.key,
+		`{"name":"`+id.name+`","endpoint":"https://cp.example.test:6443","contract":"v1.14","talosClusterId":"`+id.clusterID+`"}`)
+	s.machine = create("/machines", "k-seed-machine-"+id.key,
+		`{"cluster":"`+s.cluster+`","smbiosUuid":"`+id.uuid+`","serial":"`+id.serial+`","platform":"container","talosEndpoint":"10.55.0.3"}`)
+	s.draft = create("/drafts", "k-seed-draft-0"+id.key, `{"cluster":"`+s.cluster+`","title":"worker labels"}`)
 	return s
 }
 

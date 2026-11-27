@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/ginsys/bronzeward/internal/baotest"
 )
 
 // planID is a plan ID in the CLI's output.
@@ -25,7 +27,8 @@ type planEnv struct {
 	s         seeded
 	st        *standIn
 	rel0, rel string
-	env       []string // added to the environment of every bronzewardctl that ctl runs
+	bao       *baotest.Bao // the server's OpenBao, for a second cluster's stand-in
+	env       []string     // added to the environment of every bronzewardctl that ctl runs
 	ctl       func(...string) result
 	ctlIn     func(stdin string, args ...string) result // ctl with stdin as standard input
 }
@@ -231,7 +234,7 @@ func newPlanEnvExec(t *testing.T, execution string) *planEnv {
 	f.want(f.ctl(nil, "", "context", "add", "human", "--server", in.URL, "--certificate-authority", in.ca,
 		"--issuer", f.iss.URL, "--client-id", "BWSYNTH-cli", "--audience", "bronzeward", "--oidc-token-file", f.humanFile()), 0, "credential oidc")
 	f.store(f.humanFile(), f.mint("h-all", ""), "")
-	e := &planEnv{f: f, in: in, s: f.seed()}
+	e := &planEnv{f: f, in: in, s: f.seed(), bao: bao.b}
 	e.ctlIn = func(stdin string, args ...string) result {
 		r := f.scan(f.exec(e.env, stdin, args...), args)
 		if e.st == nil {
