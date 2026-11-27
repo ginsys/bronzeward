@@ -127,10 +127,11 @@ details.about > p { margin: var(--s2) 0 0; padding-inline-start: var(--s4); bord
 .panel .row p { margin: 0; flex: 1 1 24rem; }
 .panel .row .actions { margin-inline-start: auto; }
 
-/* Action hierarchy: Oat's .outline and data-variant="danger", each with its own opaque hover (app.css forces one green on every button) */
-button.outline { --_hov: #1c2333; border-color: var(--border); color: var(--foreground); background-color: transparent; }
-button.outline[data-variant="danger"] { --_hov: #2b1a20; border-color: var(--danger); color: var(--danger); }
-button.outline:disabled { background-color: var(--background); color: var(--muted-foreground); border: 1px dashed var(--muted-foreground); }
+/* Action hierarchy: Oat's .outline and data-variant="danger" already draw the fill, text and border. Only the hover colour is named,
+   because app.css forces one green on every button. No background is set here, so Oat's hover fill (it reads --_hov) still applies,
+   and a disabled button keeps app.css's own dashed rule. */
+button.outline { --_hov: #1c2333; }
+button.outline[data-variant="danger"] { --_hov: #2b1a20; }
 
 /* Table */
 tbody th[scope="row"] { color: var(--foreground); }
@@ -202,7 +203,7 @@ The navigation has eight pages in three groups (Inventory, Delivery, Governance)
 
 | Group | Pages | Distance |
 | --- | --- | --- |
-| A. Near | Clusters and the cluster page, the Machines list, the operation page | Panels exist on them. The cluster page needs its top cut; the others are read page by page when their pull request is written |
+| A. Near | Clusters and the cluster page, the Machines list, the operation page | The cluster page and the operation page have panels; the cluster page needs its top cut. The Clusters and Machines lists have a toolbar and a table in a plain wrapper, so they need a header and a panel. The rest is read page by page when its pull request is written |
 | B. Lists | Drafts and releases, Plans, Operations, Imports, Fragments and profiles, Audit | A heading, a note, in most a bare filter row, and a table. Each needs a page header, a toolbar and a panel around its table |
 | C. Item pages | A machine, a plan, a release and its review, a fragment or profile and its revisions, a dependency, an import and its configuration, a publication, an apply, a drift | Headings and paragraphs, no panel. Each needs a header and panels for its sections |
 | D. The draft page | The draft page and the editors of its entries | The largest. Section 3.1 |
