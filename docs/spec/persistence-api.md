@@ -1062,7 +1062,8 @@ there.
   read refuse, so a supply on top of it is `503`.
 - **Authority.** An `author` supplies and replaces a first key, human only, with
   no approval step (owner decision BW-874-first-key-authority-1, 2026-11-18
-  17:41 CET: "A"). Every supply and replacement is recorded in the audit trail
+  17:41 CET: "A"). Decided on 27 November 2026, not built: automation may
+  supply a first key and, separately, replace one (§10.3.1). Every supply and replacement is recorded in the audit trail
   as an act (§10.5) naming the author, the cluster, the kind, whether it
   replaced a key, the CA certificate's fingerprint and the key's version
   identity, never a value. The act's own row (action `cluster.first-key`,
@@ -3850,6 +3851,8 @@ comparison is constant-time.
 The server-side command-line tool, run by the operator with database access,
 is the only way to issue, rotate or list tokens, and to revoke one without
 revoking its identity; no API route does any of that (design §13.7 item 2).
+The one decided exception, not built, is an automation renewing its own token
+through the API (§10.3.1).
 An identity revocation through the API (§10.4) revokes the identity's token
 with it. It:
 
@@ -3936,6 +3939,68 @@ and the read's epoch recheck of a service token (§10.2) still apply.
 
 Drift **Ignore** is outside PoC scope (execution and recovery, supported
 values) and has no route.
+
+### 10.3.1 Automation permissions and standing rules (decided, not built)
+
+Owner decisions of 26 and 27 November 2026 on
+[ginsys/bronzeward#1209](https://github.com/ginsys/bronzeward/issues/1209),
+with their rationale and the options not chosen in design §13.9 and choices
+§17.52 to §17.55. **Nothing here is built.** The route table of §9.2 and the
+human-only list above describe what the server does today, and the change that
+builds an item below changes them in the same change. What the decisions leave
+alone: the five roles and their rows (design §13.7), automation never holding
+`approver` or `recovery-admin`, human-only import and its review, human-only
+recovery and identity revocation, and the server-side tool as the only way to
+issue a token to an identity or revoke one.
+
+- **Permissions, separate from roles (choice §17.52).** A service identity may
+  hold permissions beside its roles, none by default. A permission names one kind
+  of action. No role grants one, and holding `author` grants none. Grants stay
+  installation-wide. The token's role check constraint admits three roles today,
+  so holding permissions needs a schema change. The permission names are not
+  decided.
+- **Inventory.** An identity holding the inventory permission may create
+  clusters and machines, replace a machine's Talos endpoint and name, and
+  discover a cluster's members from a key: the routes of §9.2 marked human only
+  for those acts. The restriction of the addresses the server dials
+  ([ginsys/bronzeward#1009](https://github.com/ginsys/bronzeward/issues/1009))
+  is looked at again when this is built.
+- **Cluster key (choice §17.53).** Two rights: one supplies a first key and
+  works only for a cluster that has no key; one replaces a key and is meant for
+  a rotation job. How the one route tells the two cases is the build item's.
+  **The no-key-yet rule holds under a retried or duplicated upload:** a second
+  send of one request, or a concurrent duplicate, stores no second version and
+  replaces nothing, and a test of its own shows it (§3.4 states the residual
+  that any write stores a version, choice §17.51).
+- **Tokens (choice §17.54).** An automation may renew its own token through the
+  API. A renewal is the rotation of §10.2 for the caller's own identity: one
+  valid token at a time, the same roles and permissions and never more. A token
+  that authentication refuses (revoked, or from an earlier epoch, §12.3) cannot
+  renew. Issuing a token to another identity and revoking one stay with the tool.
+- **Standing approval rules (choice §17.55).** A person writes a rule in
+  advance, and Bronzeward approves a plan that fits it. A rule may require
+  approved content (profile or template revisions), and where it does, anything
+  else waits for a person. An approval by rule is not an approval by a service
+  identity: automation is still never `approver`. The database requires an
+  approval's approver to be a human today, so an approval by rule needs a record
+  that names the rule and its author. A rule may approve adoption plans and a
+  no-reboot apply to a worker, the latter only with approved content. **It cannot
+  be enabled for a send until a worker restriction is built and tested:** a plan
+  whose machine is not a worker is refused where it is created or sent. A text
+  search found no check of a machine's role at either place (the role is stored
+  with the import base and read for display), and no test was run. Reverts and
+  control plane changes stay a person's.
+- **Selection and admission.** Whoever may edit drafts selects which machines a
+  draft configures, a service identity included. A person admits each machine in
+  maintenance mode until it has an authenticated channel or hardware attestation,
+  and approves its first configuration. No route is specified for either; the
+  Phase 2 contract (design §18.3) starts from these decisions.
+- **Not decided.** A rule's fields, expiry, revocation, effect on a restore and
+  what it records; which machine-specific parts of a composed configuration may
+  differ from approved content; the permission names; whether a renewed token's
+  lifetime is bounded beyond §10.2's limits; whether automation reads whether a
+  cluster's key is held (`GET /clusters/{id}/talos-access`); per-cluster limits;
+  admission by allowed IP ranges.
 
 ### 10.4 Revocation
 
@@ -4591,7 +4656,8 @@ create none.
     every issuance of a fence or claim, the first included, also requires the
     issuing process's own epoch to be current (§5.1).
 12. **No automation principal holds `approver` or `recovery-admin`**, and no
-    route issues tokens or grants roles.
+    route issues tokens or grants roles. Decided, not built: a route lets an
+    automation renew its own token with the same rights (§10.3.1).
 13. **The server runs only on the schema it was built for.**
 14. **One approval per plan and epoch, and at most one operation per plan**,
     the operation created by the dispatch commitment.
@@ -5204,7 +5270,10 @@ design and evidence do not settle the question. Each is marked in place as
     every plan, and an `approver` approves them** (§9.2, §10.3). Owner
     decision, 2026-09-27 (ginsys/bronzeward#20): no longer interim; a human
     `author` ingests and automation does not. Alternatives: `publisher` for
-    ingestion; a dedicated ingestion role; automation allowed.
+    ingestion; a dedicated ingestion role; automation allowed. Owner decision,
+    2026-11-26 (ginsys/bronzeward#1209): the inventory part is reversed for
+    automation holding the inventory permission (choice §17.52); ingestion
+    stays human.
 23. **Losing a role does not invalidate approvals given under it** (§10.4),
     the question design §13.7 left to the owner. Owner decision, 2026-09-27
     (ginsys/bronzeward#20): accepted for the PoC, stated as a limit; the
@@ -5791,6 +5860,40 @@ design and evidence do not settle the question. Each is marked in place as
     visible failure does not justify a provider-setup prerequisite, a signer
     behaviour change or a new grant (lead's decision, 2026-11-25 15:59 CET,
     reversible by the owner).
+52. **Automation holds separate permissions for the actions opened to it, none
+    by default, with the same kind of token** (§10.3.1; design §13.9;
+    ginsys/bronzeward#1209). Owner decision, 2026-11-26 23:40 CET. Inventory
+    is the first: automation holding it may do all of it, discovery included
+    (owner decision, 2026-11-26 23:44 CET). Alternatives: the `author` role
+    covers the opened actions, which would give every draft-editing token
+    inventory, keys and imports at once; each permission limited to named
+    clusters, which contradicts the installation-wide grants of design §13.7
+    and cannot name a cluster that does not exist yet; stronger proof of the
+    caller, a second authentication system with no recorded need.
+53. **A first key and a replacement are two rights, and the first works only for
+    a cluster with no key** (§3.4, §10.3.1). Owner decision, 2026-11-27 08:22
+    CET, "B". Alternatives: people only; one right for both, where a retry loop
+    could drop older versions and one token could change which key Bronzeward
+    signs with silently; automation uploads and a person confirms, which still
+    needs a person per cluster.
+54. **An automation renews its own token through the API, with the same rights
+    and never more** (§10.2, §10.3.1). Owner decision, 2026-11-27 09:25 CET,
+    "B". The alternative is the previous rule, the server-side tool only, under
+    which unattended automation needs a person to run the tool each time its
+    token expires. The owner's record gives no other option.
+55. **Standing approval rules, with approved content, may approve adoption and
+    a no-reboot apply to a worker** (§10.3.1; design §12.3, §13.9). Owner
+    decisions, 2026-11-26 23:34 and 23:36 CET (one rule type that may also
+    require approved content) and 2026-11-27 08:44 CET (the send, only with
+    approved content). Alternatives: a person approves every plan; a service
+    identity may approve, which reverses the 2026-09-25 decision that automation
+    is never `approver`; one person approves many plans in one action; for
+    sends, rules approve adoption only, or also reverts (rejected because a
+    revert overwrites a configuration no reviewer has seen), or whatever a rule
+    names (rejected because it reaches operation classes with no recovery
+    evidence or that do not exist yet). Cost: a rule
+    approves many wrong plans if badly written, and the approval record gains a
+    kind that names a rule.
 
 ## 18. Traceability
 
