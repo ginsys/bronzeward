@@ -1063,8 +1063,14 @@ cancelled. One the page loses (the tab is closed) expires with the plan default;
 unknown leaves a plan the page has no ID for (`web/src/apply.ts:104`, `web/src/apply.ts:128-132`).
 Above the machines, the page lists each shared fragment or profile whose adoption this release moved, with the
 revision before and after (`previous` and `revision` of the release's `sources`, API revision 19) and the machines of
-this cluster it reaches. The other clusters that stay on the old revision are named as information. They are not
-chosen, planned or approved here: one apply stays one cluster, and each cluster reads the change in its own plan.
+this cluster it reaches (`web/src/apply-shared.tsx`). A source counts as moved when `adoptionRevision` is set and
+`previous` differs from `revision`; a removed name (no `revision`) reaches no machine. The machines are derived from the
+release's own assignment revisions (a name selected in a layer, or a profile selected by name) and profile revisions
+(a fragment revision a selected profile pins); a machine whose assignment, or a profile whose pins, cannot be read is
+said to be unread, and the list is then said to be possibly short. The other clusters that stay on the old revision are
+the rows of the name's `adoptions?behind=true` read that are not this cluster, named by their cluster names as
+information. They are not chosen, planned or approved here: one apply stays one cluster, and each cluster reads the
+change in its own plan. The block holds no checkbox, button or form of its own.
 The machine's page shows the plan its position names, which is the newest plan of the machine that the position
 counts (one that has expired, was cancelled or was committed, or an adopt plan a refusal names, is not named), with who prepared it and
 when, read from the plan (`web/src/nextstep.tsx:114-122`, `web/src/machine.tsx:465`); any other plan stays reachable

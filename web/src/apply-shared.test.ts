@@ -52,7 +52,7 @@ const REL = "rel_r";
 const A = "mch_a";
 const B = "mch_b";
 const T0 = "2026-11-22T08:00:00Z";
-const machine = (id: string) => ({ id, cluster: "cl_here", name: id, role: "worker", platform: "metal", desired: REL, applied: null, pendingConvergence: true, formOnly: false, frozen: false, openDrift: null });
+const machine = (id: string) => ({ id, cluster: "cl_here", name: id === A ? "alpha" : "beta", role: "worker", platform: "metal", desired: REL, applied: null, pendingConvergence: true, formOnly: false, frozen: false, openDrift: null });
 const needsPlan = (id: string) => ({ machine: machine(id), ingestion: null, draft: null, operation: null, rolloutHeldBy: null, step: "needs-plan", plan: null });
 const row = (cluster: string, over: Record<string, unknown> = {}) => ({ cluster, revision: "frv_old", adoptionRevision: 2, behind: true, release: "rel_old", via: null, machines: ["mch_z"], ...over });
 const sources = (...more: unknown[]) => [
@@ -68,6 +68,7 @@ const served = (over: Record<string, unknown> = {}): Record<string, unknown> => 
   "/profile-revisions/prv_edge": { id: "prv_edge", cluster: "cl_here", name: "edge", fragments: ["frv_new"] },
   "/fragments/frg_1": { id: "frg_1", cluster: null, scope: "library", name: "ntp", layer: "global", revision: "frv_new", headRevision: 4, createdAt: T0 },
   "/fragments/frg_1/adoptions?behind=true": { items: [row("cl_here"), row("cl_other")] },
+  "/clusters/cl_other": { id: "cl_other", name: "lab-b" },
   ...over,
 });
 
@@ -106,11 +107,14 @@ describe("the apply page's shared block, mounted", () => {
     const { submit } = await mount(release(moved), served());
     const text = block()!.textContent!;
     expect(text).toContain("fragment ntp");
-    expect(text).toContain("Reaches 2 machines here: mch_a, mch_b");
+    expect(text).toContain("Reaches 2 machines here: alpha, beta");
     expect(text).toContain("Other clusters behind it, for information");
-    // The release's own cluster is not "another cluster"; the other one is named.
-    expect(block()!.querySelectorAll("tbody tr")).toHaveLength(1);
-    expect(block()!.querySelector("tbody tr")!.textContent).toContain("behind the shared head");
+    // The release's own cluster is not "another cluster"; the other one is named (by its name once read), never as "This cluster".
+    const others = block()!.querySelectorAll('[data-testid="apply-shared-other"]');
+    expect(others).toHaveLength(1);
+    expect(others[0]!.textContent).toContain("lab-b on frv_old, behind the shared head");
+    expect(text).not.toContain("This cluster");
+    expect(text).toContain("Showing 1 of 1.");
     // One apply is one cluster: the block offers nothing to press or choose, and pressing nothing sent nothing.
     expect(block()!.querySelector("input, button, select")).toBeNull();
     expect(submit).not.toHaveBeenCalled();
@@ -122,7 +126,7 @@ describe("the apply page's shared block, mounted", () => {
     expect(text).toContain("no longer followed by this cluster");
     expect(text).toContain("Reaches no machine of this release.");
     expect(text).toContain("No other cluster is behind it.");
-    expect(block()!.querySelector("table")).toBeNull();
+    expect(block()!.querySelector('[data-testid="apply-shared-other"]')).toBeNull();
   });
 
   test("a release that moved no shared name shows no block, and an unmoved adoption does not count", async () => {
@@ -137,13 +141,23 @@ describe("the apply page's shared block, mounted", () => {
     const text = block()!.textContent!;
     expect(text).toContain("Reaches 2 machines here");
     expect(text).not.toContain("No other cluster is behind it.");
+    expect(text).not.toContain("This cluster");
+  });
+
+  test("another cluster whose name cannot be read is shown by its identifier, never as this cluster", async () => {
+    const a = served();
+    delete a["/clusters/cl_other"];
+    await mount(release(moved), a);
+    const other = block()!.querySelector('[data-testid="apply-shared-other"]')!;
+    expect(other.textContent).not.toContain("This cluster");
+    expect(other.querySelector("a")!.getAttribute("title")).toBe("cl_other");
   });
 
   test("a machine whose assignment cannot be read says the list may be short", async () => {
     const a = served();
     delete a["/assignment-revisions/asr_b"];
     await mount(release(moved), a);
-    expect(block()!.textContent).toContain("Reaches 1 machine here: mch_a. Some machines could not be read, so the list may be short.");
+    expect(block()!.textContent).toContain("Reaches 1 machine here: alpha. Some machines could not be read, so the list may be short.");
   });
 
   test("a shared source of a kind the page does not know is named, never dropped", async () => {
