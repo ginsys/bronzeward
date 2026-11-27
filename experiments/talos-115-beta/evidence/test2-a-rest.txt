@@ -1,0 +1,50 @@
+# source: job-t2-a-rest.log (a cluster Job log kept in the worker's scratch entry)
+JOB_CREATED: verify-bronzeward-57fb395-1795733109-ff102fb4 in heavy-runs for head 57fb39560ff42720f9d30f0ec4ef33fd918ba272
+POD_HEAD=57fb39560ff42720f9d30f0ec4ef33fd918ba272
+VERIFY_CMD=experiments/talos-115-beta/run/test2 a rest
+built a from cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a with 0 patch(es)
+== variant a, set rest: github.com/siderolabs/talos/pkg/machinery v1.14.5
+== packages: 32
+ok  	github.com/ginsys/bronzeward/cmd/bronzeward	36.626s
+ok  	github.com/ginsys/bronzeward/cmd/bronzewardctl	157.296s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc	0.008s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/groups	0.017s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/issuer	1.029s
+ok  	github.com/ginsys/bronzeward/fixtures/webhost	0.436s
+ok  	github.com/ginsys/bronzeward/internal/auth	36.071s
+ok  	github.com/ginsys/bronzeward/internal/baotest	0.005s
+ok  	github.com/ginsys/bronzeward/internal/classify	0.014s
+ok  	github.com/ginsys/bronzeward/internal/client	10.801s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/clitest	676.246s
+ok  	github.com/ginsys/bronzeward/internal/clusterid	0.011s
+ok  	github.com/ginsys/bronzeward/internal/compile	285.605s
+ok  	github.com/ginsys/bronzeward/internal/config	0.024s
+ok  	github.com/ginsys/bronzeward/internal/database	0.005s
+ok  	github.com/ginsys/bronzeward/internal/dbtest	1.236s
+ok  	github.com/ginsys/bronzeward/internal/id	0.003s
+ok  	github.com/ginsys/bronzeward/internal/ingest	4.916s
+ok  	github.com/ginsys/bronzeward/internal/machinename	0.003s
+ok  	github.com/ginsys/bronzeward/internal/migrate	53.733s
+ok  	github.com/ginsys/bronzeward/internal/monitor	98.253s
+ok  	github.com/ginsys/bronzeward/internal/orphans	184.422s
+ok  	github.com/ginsys/bronzeward/internal/provider	1.485s
+ok  	github.com/ginsys/bronzeward/internal/server	0.313s
+ok  	github.com/ginsys/bronzeward/internal/staging	252.670s
+ok  	github.com/ginsys/bronzeward/internal/talos	11.403s
+ok  	github.com/ginsys/bronzeward/internal/talos/discover	10.482s
+ok  	github.com/ginsys/bronzeward/internal/talos/signer	11.343s
+ok  	github.com/ginsys/bronzeward/internal/textdiff	0.011s
+FAIL
+VERIFY_SECONDS=2021
+VERIFY_DONE rc=1
+# classifier: run/failures.py
+other    internal/clitest TestProtected/PROT-06,_a_mark_and_the_serving_process_killed
+           protected_test.go:486: exit 3, want 0
+           protected_test.go:486: output lacks "Paused for review (generation 3"
+other    internal/clitest TestProtected/T3
+           protected_test.go:608: bronzewardctl [import start --machine mch_ml7yqryyqipoy3fzowah5unmla --draft drf_neuom6v2ylanjhbbil64mluo2e --review]: exit 3
+           protected_test.go:581: the terminal closed before it showed the notice
+--- result lines (tests and subtests): PASS=2884 FAIL=3 SKIP=17
+--- failing leaves: internal/clitest other=2
+--- failing leaves in all: 2

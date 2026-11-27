@@ -1,0 +1,12 @@
+# source: job-t2-a-api-narrow.log (a cluster Job log kept in the worker's scratch entry)
+JOB_CREATED: verify-bronzeward-57fb395-1795737147-cef9543f in heavy-runs for head 57fb39560ff42720f9d30f0ec4ef33fd918ba272
+POD_HEAD=57fb39560ff42720f9d30f0ec4ef33fd918ba272
+VERIFY_CMD=set -e; d=$(mktemp -d); experiments/talos-115-beta/run/build a "$d/src"; cd "$d/src"; echo "== variant a, narrow api set: $(go list -m github.com/siderolabs/talos/pkg/machinery)"; go test -p 1 -v -timeout 15m -run '^(TestBuildReleaseCommits|TestBuildReleaseDependencyUnknown|TestBuildReleaseEmptyAssignment|TestBuildReleaseEncryptionRefused|TestBuildReleaseFillsHostname|TestBuildReleaseHostnameClash|TestBuildReleaseMachines|TestBuildReleaseRecordsNodeName|TestFormOnlyAdoption|TestFormOnlyContentDiffers|TestFormOnlyDiff|TestFormOnlyDriftedAdoption|TestFormOnlyMachineRead|TestFormOnlyOfAnOnboardedMachineRelease|TestHostnameKeyRenameReachesTheRelease|TestLibraryWritePublishAndUse|TestNewStartsPublisher|TestPublicationEvidenceAtCommit|TestPublicationMixedCoverage|TestPublicationOlderReadCompletingLate|TestPublicationRunningMinor|TestPublishRefusesAFirstKeyBetweenPinAndRead|TestPublishRendersTheCAKey|TestPublishRunStopped|TestPublishWorker|TestPublishWorkerCommittedReplyLost|TestPublishWorkerHeartbeat)$' ./internal/api
+built a from cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a with 0 patch(es)
+== variant a, narrow api set: github.com/siderolabs/talos/pkg/machinery v1.14.5
+ok  	github.com/ginsys/bronzeward/internal/api	131.071s
+VERIFY_SECONDS=213
+VERIFY_DONE rc=0
+# classifier: run/failures.py
+--- result lines (tests and subtests): PASS=71 FAIL=0 SKIP=0
+--- failing leaves in all: 0

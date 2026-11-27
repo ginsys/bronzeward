@@ -1,0 +1,38 @@
+# source: job-t2-2b-rest-second.log (a cluster Job log kept in the worker's scratch entry)
+JOB_CREATED: verify-bronzeward-57fb395-1795736155-4d5f024a in heavy-runs for head 57fb39560ff42720f9d30f0ec4ef33fd918ba272
+POD_HEAD=57fb39560ff42720f9d30f0ec4ef33fd918ba272
+VERIFY_CMD=set -e; d=$(mktemp -d); experiments/talos-115-beta/run/build 2b "$d/src"; cd "$d/src"; echo "== variant 2b, rest half second: $(go list -m github.com/siderolabs/talos/pkg/machinery)"; pk=$(go list -e ./... | grep -v "/internal/api\(/\|\$\)" | sed '1,/internal\/ingest$/d'); echo "== packages: $(echo "$pk" | wc -l)"; go test -p 1 -timeout 40m $pk
+built 2b from cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a with 3 patch(es)
+== variant 2b, rest half second: github.com/siderolabs/talos/pkg/machinery v1.15.0-beta.1
+== packages: 13
+ok  	github.com/ginsys/bronzeward/internal/machinename	0.002s
+ok  	github.com/ginsys/bronzeward/internal/migrate	25.374s
+ok  	github.com/ginsys/bronzeward/internal/monitor	55.041s
+ok  	github.com/ginsys/bronzeward/internal/orphans	19.371s
+ok  	github.com/ginsys/bronzeward/internal/provider	1.703s
+ok  	github.com/ginsys/bronzeward/internal/server	0.306s
+ok  	github.com/ginsys/bronzeward/internal/staging	26.359s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/talos	11.020s
+ok  	github.com/ginsys/bronzeward/internal/talos/discover	10.282s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/talos/signer	11.154s
+ok  	github.com/ginsys/bronzeward/internal/textdiff	0.016s
+FAIL
+VERIFY_SECONDS=245
+VERIFY_DONE rc=1
+# classifier: run/failures.py
+other    internal/talos TestTalosAPIMethods
+           methods_test.go:209: apiServices:
+other    internal/talos/signer TestCertAcceptedByANodeBehindItsClock
+           cert_test.go:153: a node 310s behind accepted the certificate: the node does not check NotBefore, so the test proves nothing
+other    internal/talos/signer TestSignBacksNotBeforeUp
+           cert_test.go:107: start +0s: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
+           cert_test.go:107: start +1ns: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
+other    internal/talos/signer TestSignBoundIsTheMaximumLessTheRoundingSlack
+           cert_test.go:207: whole maximum, start +0s: NotBefore is 6m0s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: whole maximum, start +1ns: NotBefore is 6m0.000000001s before the signing instant, want 300s and the dropped fraction
+--- result lines (tests and subtests): PASS=656 FAIL=4 SKIP=5
+--- failing leaves: internal/talos other=1
+--- failing leaves: internal/talos/signer other=3
+--- failing leaves in all: 4

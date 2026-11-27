@@ -1,0 +1,118 @@
+# source: job-t2-2a-rest.log (a cluster Job log kept in the worker's scratch entry)
+JOB_CREATED: verify-bronzeward-57fb395-1795732211-a43ac021 in heavy-runs for head 57fb39560ff42720f9d30f0ec4ef33fd918ba272
+POD_HEAD=57fb39560ff42720f9d30f0ec4ef33fd918ba272
+VERIFY_CMD=experiments/talos-115-beta/run/test2 2a rest
+built 2a from cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a with 2 patch(es)
+== variant 2a, set rest: github.com/siderolabs/talos/pkg/machinery v1.15.0-beta.1
+== packages: 32
+ok  	github.com/ginsys/bronzeward/cmd/bronzeward	11.209s
+ok  	github.com/ginsys/bronzeward/cmd/bronzewardctl	160.489s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc	0.007s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/groups	0.006s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/issuer	1.041s
+ok  	github.com/ginsys/bronzeward/fixtures/webhost	0.459s
+ok  	github.com/ginsys/bronzeward/internal/auth	27.331s
+ok  	github.com/ginsys/bronzeward/internal/baotest	0.004s
+ok  	github.com/ginsys/bronzeward/internal/classify	0.010s
+ok  	github.com/ginsys/bronzeward/internal/client	9.575s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/clitest	66.599s
+ok  	github.com/ginsys/bronzeward/internal/clusterid	0.013s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/compile	243.864s
+ok  	github.com/ginsys/bronzeward/internal/config	0.027s
+ok  	github.com/ginsys/bronzeward/internal/database	0.005s
+ok  	github.com/ginsys/bronzeward/internal/dbtest	2.886s
+ok  	github.com/ginsys/bronzeward/internal/id	0.003s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/ingest	4.752s
+ok  	github.com/ginsys/bronzeward/internal/machinename	0.004s
+ok  	github.com/ginsys/bronzeward/internal/migrate	33.004s
+ok  	github.com/ginsys/bronzeward/internal/monitor	59.701s
+ok  	github.com/ginsys/bronzeward/internal/orphans	9.124s
+ok  	github.com/ginsys/bronzeward/internal/provider	1.774s
+ok  	github.com/ginsys/bronzeward/internal/server	0.306s
+ok  	github.com/ginsys/bronzeward/internal/staging	31.586s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/talos	9.645s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/talos/discover	10.753s
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/talos/signer	12.110s
+ok  	github.com/ginsys/bronzeward/internal/textdiff	0.016s
+FAIL
+VERIFY_SECONDS=807
+VERIFY_DONE rc=1
+# classifier: run/failures.py
+contract internal/clitest TestApprovals
+contract internal/clitest TestDocBlocks/drift
+contract internal/clitest TestDocBlocks/editing_and_recording_a_machine
+contract internal/clitest TestDocBlocks/publication,_import,_adoption,_tracking_and_plans
+contract internal/clitest TestDocBlocks/recovery
+contract internal/clitest TestDrift
+contract internal/clitest TestDriftFreeze
+contract internal/clitest TestFragments
+contract internal/clitest TestImports/AMB-08
+contract internal/clitest TestImports/PROT-06,_the_draft_commit_delayed
+contract internal/clitest TestImports/absolute_expiry
+contract internal/clitest TestOperations
+contract internal/clitest TestPlans
+contract internal/clitest TestProtected
+contract internal/clitest TestPublication
+contract internal/clitest TestReads
+contract internal/clitest TestRecordReads
+contract internal/clitest TestRecovery
+contract internal/clitest TestRecoveryJourney
+contract internal/clitest TestRecoveryLostReply
+contract internal/clitest TestRecoveryScopeAmbiguity/AMB-05
+contract internal/clitest TestRecoveryScopeAmbiguity/AMB-07
+contract internal/clitest TestRecoveryScopeAmbiguity/AMB-12
+contract internal/clitest TestRecoveryWritesRefuseWithoutTheRole
+contract internal/clitest TestSeed
+contract internal/clitest TestSharedCases
+contract internal/clitest TestTimeline
+contract internal/clitest TestWriteCases/AMB-01
+contract internal/clitest TestWriteCases/AMB-03
+other    internal/clitest TestWriteCases/AMB-05
+           write_test.go:209: output lacks "GET /api/v1/clusters shows the cluster cl_"
+           write_test.go:209: output lacks "(amb-05) with this Talos cluster ID"
+contract internal/clitest TestWriteCases/AMB-07
+contract internal/clitest TestWriteCases/AMB-09
+contract internal/clitest TestWriteCases/AMB-12
+contract internal/clitest TestWriteCases/ETAG-01
+contract internal/clitest TestWrites
+other    internal/compile TestCompileAttributesTheGeneratedBase
+           compiler_test.go:63: doc[0]/cluster/etcd/ca/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey do
+           compiler_test.go:63: doc[10]/issuingCA/key is not attributed; attributed: [doc[0]/machine/token doc[0]/machine/ca/key doc[0]/cluster/token doc[2]/clusterSecret doc[12]/issuingCA/key doc[13]/issuingCA/key doc[19]/config/resources/0/providers/0/secretbox/keys/0/secret doc[20]/issuer/privateKey doc[26]
+other    internal/compile TestCompileStillRefusesAMarkedLeafWhoseStandInIsInvalid
+           restored_test.go:85: control: the unmarked subnet: compile: refused (invalid): 3 errors occurred:
+other    internal/compile TestCompileTheFullGeneratedStream
+           restored_test.go:53: its Kubernetes version: "", compile: refused (kubernetes): the kubelet image names no Kubernetes version
+other    internal/compile TestKubernetesVersion/an_explicitly_empty_one
+           renderer_test.go:127: compile: refused (kubernetes): the kubelet image names no Kubernetes version
+other    internal/compile TestKubernetesVersion/the_generated_image
+           renderer_test.go:127: compile: refused (kubernetes): the kubelet image names no Kubernetes version
+other    internal/ingest TestIdentifySchemaSetOfGeneratedConfig
+           identify_test.go:150: control: the machinery does not redact doc[20]/config/resources/0/providers/0/secretbox/keys/0/secret
+           identify_test.go:150: control: the machinery does not redact doc[21]/issuer/privateKey
+other    internal/talos TestTalosAPIMethods
+           methods_test.go:209: apiServices:
+other    internal/talos/discover TestDiscoverTwoMembers
+           discover_test.go:90: got  {ClusterID:c-1 Version:v1.14.5 Contract:v1.14 KubernetesEndpoint:https://10.0.0.1:6443 Endpoint:127.0.0.1:38225 ResolvedFrom: Supported:false Members:[{NodeID:n1 Hostname:cp-1 Address:10.0.0.1 Role:controlplane SMBIOSUUID:11111111-2222-3333-4444-555555555555 Platform:metal
+other    internal/talos/signer TestCertAcceptedByANodeBehindItsClock
+           cert_test.go:153: a node 310s behind accepted the certificate: the node does not check NotBefore, so the test proves nothing
+other    internal/talos/signer TestSignBacksNotBeforeUp
+           cert_test.go:107: start +0s: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
+           cert_test.go:107: start +1ns: NotBefore 2026-11-19 11:54:00 +0000 UTC, want the signing second less 300s, 2026-11-19 11:55:00 +0000 UTC
+other    internal/talos/signer TestSignBoundIsTheMaximumLessTheRoundingSlack
+           cert_test.go:207: whole maximum, start +0s: NotBefore is 6m0s before the signing instant, want 300s and the dropped fraction
+           cert_test.go:207: whole maximum, start +1ns: NotBefore is 6m0.000000001s before the signing instant, want 300s and the dropped fraction
+--- result lines (tests and subtests): PASS=2770 FAIL=51 SKIP=17
+--- failing leaves: internal/clitest contract=34
+--- failing leaves: internal/clitest other=1
+--- failing leaves: internal/compile other=5
+--- failing leaves: internal/ingest other=1
+--- failing leaves: internal/talos other=1
+--- failing leaves: internal/talos/discover other=1
+--- failing leaves: internal/talos/signer other=3
+--- failing leaves in all: 46

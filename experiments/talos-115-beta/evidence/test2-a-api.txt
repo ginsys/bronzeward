@@ -1,0 +1,15 @@
+# source: job-t2-a-api.log (a cluster Job log kept in the worker's scratch entry)
+JOB_CREATED: verify-bronzeward-57fb395-1795734458-e8a26826 in heavy-runs for head 57fb39560ff42720f9d30f0ec4ef33fd918ba272
+POD_HEAD=57fb39560ff42720f9d30f0ec4ef33fd918ba272
+VERIFY_CMD=experiments/talos-115-beta/run/test2 a api
+built a from cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a with 0 patch(es)
+== variant a, set api: github.com/siderolabs/talos/pkg/machinery v1.14.5
+panic: test timed out after 40m0s
+		TestReviewRouteNotPaused (1s)
+FAIL	github.com/ginsys/bronzeward/internal/api	2400.028s
+FAIL
+VERIFY_SECONDS=2496
+VERIFY_DONE rc=1
+# classifier: run/failures.py
+--- result lines (tests and subtests): PASS=991 FAIL=0 SKIP=9
+--- failing leaves in all: 0

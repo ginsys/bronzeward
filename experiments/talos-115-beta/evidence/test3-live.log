@@ -1,0 +1,194 @@
+# The per-case sha256 and configurationDigest of the 27 accepted new kinds and fields were removed
+# after a secret-scanner hit on one such line (the field name holds "KeyUsage"; the values are
+# digests of a synthetic configuration). The full lines stay in the worker's scratch entry, in
+# job-live.log, until it is deleted at close. The case names and verdicts are as run.
+== image ghcr.io/siderolabs/talos:v1.14.5@sha256:2bd72b810f540a75d5b1c8c3739ada000fff9beec18c941790c34b9592f1a8ff digests:ghcr.io/siderolabs/talos@sha256:2bd72b810f540a75d5b1c8c3739ada000fff9beec18c941790c34b9592f1a8ff
+== image ghcr.io/siderolabs/talos:v1.15.0-beta.1@sha256:16d7aa5a26c969266c9525afc273d42f53034bddcea817c409bd1cb44ed4569c digests: ghcr.io/siderolabs/talos@sha256:16d7aa5a26c969266c9525afc273d42f53034bddcea817c409bd1cb44ed4569c
+== build A and B
+built a from cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a with 0 patch(es)
+built b-raw from cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a with 1 patch(es)
+== scenario t114: cluster bw-w22-t114, talosctl v1.14.5, image ghcr.io/siderolabs/talos:v1.14.5@sha256:2bd72b810f540a75d5b1c8c3739ada000fff9beec18c941790c34b9592f1a8ff
+== control: planted endpoint 192.0.2.1 refused
+== control: planted endpoint 10.56.0.250 refused
+== worker 10.56.0.3
+live read version=v1.14.5 resourceVersion=1 digest=13e543c9cae7d118b035ca9555c4153183bcf5d7fb0500511c4967ef64cd73dd kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig
+== control: dry run of the node's own configuration
+== dry-run control-unchanged accepted (exit 0)
+== control: dry run of an invalid configuration (must be refused)
+== dry-run control-invalid refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = 1 error occurred:
+== compile the node's configuration in build a
+live case none ok sha256=a6b54873847814af5ec88c173c40531408cda437688b8279ecd51566f2565d13 configurationDigest=a6b54873847814af5ec88c173c40531408cda437688b8279ecd51566f2565d13
+live case label ok sha256=7a8fa1a233a14d2c57a794afe04d0c2b4a68415b150b211ae7166a33d8d2a3db configurationDigest=7a8fa1a233a14d2c57a794afe04d0c2b4a68415b150b211ae7166a33d8d2a3db
+live case label-other ok sha256=87682b313b7ee757bf4758234c109dd733ddf9cdadf8037e746e034868ea1aad configurationDigest=87682b313b7ee757bf4758234c109dd733ddf9cdadf8037e746e034868ea1aad
+live case kind-ContentLibraryConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-CPUPartitionConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-CPUScalingConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-DiskSMARTConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-EtcdMemberConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-InlineDataVolumeConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-KubeAuthenticationWebhookConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-NetworkLinkIngressConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-MacVLANConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-SeccompProfileConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-StaticEndpointsConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-StoragePoolConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-VirtualMachineConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-VirtualMachineProfileConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-VXLANConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case kind-WorkloadResourceConfig refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-KubePrismConfig.readinessCheck refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-KubeFlannelCNIConfig.kubeNetworkPoliciesArgs refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-KubeCredentialProviderConfig.configFiles refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-FilesystemTrimConfig.minLength refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-UserVolumeConfig.mount.owner refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-ResolverConfig.hostDNS.logLevel refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-SecurityProfileConfig.ignoreCtrlAltDelete refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-SecurityProfileConfig.selinuxCategories refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-KmsgLogConfig.extraTags refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-KubeSpanConfig.filters.peerEndpoints refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-BondConfig.primary refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-EthernetConfig.flowControl refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-LinkConfig.addresses.scope refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+live case field-v1alpha1.features.trustdCheckExtKeyUsage refused stage=ingest-fragment error="ingest: refused (schema-unloadable) at doc[0]"
+== compile the node's configuration in build b
+live case none ok sha256=a6b54873847814af5ec88c173c40531408cda437688b8279ecd51566f2565d13 configurationDigest=a6b54873847814af5ec88c173c40531408cda437688b8279ecd51566f2565d13
+live case label ok sha256=7a8fa1a233a14d2c57a794afe04d0c2b4a68415b150b211ae7166a33d8d2a3db configurationDigest=7a8fa1a233a14d2c57a794afe04d0c2b4a68415b150b211ae7166a33d8d2a3db
+live case label-other ok sha256=87682b313b7ee757bf4758234c109dd733ddf9cdadf8037e746e034868ea1aad configurationDigest=87682b313b7ee757bf4758234c109dd733ddf9cdadf8037e746e034868ea1aad
+live case kind-ContentLibraryConfig ok
+live case kind-CPUPartitionConfig ok
+live case kind-CPUScalingConfig ok
+live case kind-DiskSMARTConfig ok
+live case kind-EtcdMemberConfig refused stage=compile rule=invalid message="2 errors occurred:\n\t* EtcdMemberConfig requires the EtcdCAConfig document to be present\n\t* the following document kinds are only allowed on control plane machines: [EtcdMemberConfig]\n\n"
+live case kind-InlineDataVolumeConfig ok
+live case kind-KubeAuthenticationWebhookConfig refused stage=compile rule=invalid message="1 error occurred:\n\t* the following document kinds are only allowed on control plane machines: [KubeAuthenticationWebhookConfig]\n\n"
+live case kind-NetworkLinkIngressConfig ok
+live case kind-MacVLANConfig ok
+live case kind-SeccompProfileConfig ok
+live case kind-StaticEndpointsConfig ok
+live case kind-StoragePoolConfig ok
+live case kind-VirtualMachineConfig ok
+live case kind-VirtualMachineProfileConfig ok
+live case kind-VXLANConfig ok
+live case kind-WorkloadResourceConfig ok
+live case field-KubePrismConfig.readinessCheck ok
+live case field-KubeFlannelCNIConfig.kubeNetworkPoliciesArgs refused stage=compile rule=invalid message="2 errors occurred:\n\t* KubeFlannelCNIConfig: flannel backend type must be specified\n\t* the following document kinds are only allowed on control plane machines: [KubeFlannelCNIConfig]\n\n"
+live case field-KubeCredentialProviderConfig.configFiles ok
+live case field-FilesystemTrimConfig.minLength ok
+live case field-UserVolumeConfig.mount.owner ok
+live case field-ResolverConfig.hostDNS.logLevel ok
+live case field-SecurityProfileConfig.ignoreCtrlAltDelete ok
+live case field-SecurityProfileConfig.selinuxCategories ok
+live case field-KmsgLogConfig.extraTags ok
+live case field-KubeSpanConfig.filters.peerEndpoints ok
+live case field-BondConfig.primary ok
+live case field-EthernetConfig.flowControl ok
+live case field-LinkConfig.addresses.scope ok
+live case field-v1alpha1.features.trustdCheckExtKeyUsage ok
+== apply the label compile (build B)
+== dry-run label accepted (exit 0)
+live apply class=accepted code=OK text="the node accepted the configuration in no-reboot mode"
+== read back
+live observe version=v1.14.5 resourceVersion=2 digest=7a8fa1a233a14d2c57a794afe04d0c2b4a68415b150b211ae7166a33d8d2a3db expected=7a8fa1a233a14d2c57a794afe04d0c2b4a68415b150b211ae7166a33d8d2a3db same=true
+== drift read after 60 s
+live observe version=v1.14.5 resourceVersion=2 digest=7a8fa1a233a14d2c57a794afe04d0c2b4a68415b150b211ae7166a33d8d2a3db expected=7a8fa1a233a14d2c57a794afe04d0c2b4a68415b150b211ae7166a33d8d2a3db same=true
+== control: plant a change, the drift read must say same=false
+== dry-run label-other accepted (exit 0)
+live apply class=accepted code=OK text="the node accepted the configuration in no-reboot mode"
+live observe version=v1.14.5 resourceVersion=3 digest=87682b313b7ee757bf4758234c109dd733ddf9cdadf8037e746e034868ea1aad expected=7a8fa1a233a14d2c57a794afe04d0c2b4a68415b150b211ae7166a33d8d2a3db same=false
+== dry runs of every new kind and field build B accepted
+live read version=v1.14.5 resourceVersion=3 digest=87682b313b7ee757bf4758234c109dd733ddf9cdadf8037e746e034868ea1aad kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig
+== dry-run kind-CPUPartitionConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/CPUPartitionConfig/ (line 94): "CPUPartitionConfig" "v1alpha1": not registered
+== dry-run kind-CPUScalingConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/CPUScalingConfig/performance-cores (line 94): "CPUScalingConfig" "v1alpha1": not registered
+== dry-run kind-ContentLibraryConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/ContentLibraryConfig/my-vm-images-1 (line 94): "ContentLibraryConfig" "v1alpha1": not registered
+== dry-run kind-DiskSMARTConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/DiskSMARTConfig/ (line 94): "DiskSMARTConfig" "v1alpha1": not registered
+== dry-run kind-InlineDataVolumeConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/InlineDataVolumeConfig/app-config (line 94): "InlineDataVolumeConfig" "v1alpha1": not registered
+== dry-run kind-MacVLANConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/MacVLANConfig/eth0.macvlan (line 94): "MacVLANConfig" "v1alpha1": not registered
+== dry-run kind-NetworkLinkIngressConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/NetworkLinkIngressConfig/eth0 (line 94): "NetworkLinkIngressConfig" "v1alpha1": not registered
+== dry-run kind-SeccompProfileConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/SeccompProfileConfig/no-ns.json (line 94): "SeccompProfileConfig" "v1alpha1": not registered
+== dry-run kind-StaticEndpointsConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/StaticEndpointsConfig/ (line 94): "StaticEndpointsConfig" "v1alpha1": not registered
+== dry-run kind-StoragePoolConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/StoragePoolConfig/vm-images (line 94): "StoragePoolConfig" "v1alpha1": not registered
+== dry-run kind-VXLANConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/VXLANConfig/vxlan900 (line 94): "VXLANConfig" "v1alpha1": not registered
+== dry-run kind-VirtualMachineConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/VirtualMachineConfig/vm2 (line 94): "VirtualMachineConfig" "v1alpha1": not registered
+== dry-run kind-VirtualMachineProfileConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/VirtualMachineProfileConfig/rack-a-compat (line 94): "VirtualMachineProfileConfig" "v1alpha1": not registered
+== dry-run kind-WorkloadResourceConfig refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/WorkloadResourceConfig/ (line 94): "WorkloadResourceConfig" "v1alpha1": not registered
+== dry-run field-BondConfig.primary refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/BondConfig/bond0 (line 94): unknown keys found during decoding:
+== dry-run field-EthernetConfig.flowControl refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/EthernetConfig/eth0 (line 94): unknown keys found during decoding:
+== dry-run field-FilesystemTrimConfig.minLength refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/FilesystemTrimConfig/ (line 39): unknown keys found during decoding:
+== dry-run field-KmsgLogConfig.extraTags refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/KmsgLogConfig/probe (line 94): unknown keys found during decoding:
+== dry-run field-KubeCredentialProviderConfig.configFiles refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/KubeCredentialProviderConfig/ (line 94): unknown keys found during decoding:
+== dry-run field-KubePrismConfig.readinessCheck refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/KubePrismConfig/ (line 90): unknown keys found during decoding:
+== dry-run field-KubeSpanConfig.filters.peerEndpoints refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/KubeSpanConfig/ (line 94): unknown keys found during decoding:
+== dry-run field-LinkConfig.addresses.scope refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/LinkConfig/eth9 (line 94): unknown keys found during decoding:
+== dry-run field-ResolverConfig.hostDNS.logLevel refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/ResolverConfig/ (line 27): unknown keys found during decoding:
+== dry-run field-SecurityProfileConfig.ignoreCtrlAltDelete refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/SecurityProfileConfig/ (line 43): unknown keys found during decoding:
+== dry-run field-SecurityProfileConfig.selinuxCategories refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/SecurityProfileConfig/ (line 43): unknown keys found during decoding:
+== dry-run field-UserVolumeConfig.mount.owner refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document v1alpha1/UserVolumeConfig/probe-data (line 94): unknown keys found during decoding:
+== dry-run field-v1alpha1.features.trustdCheckExtKeyUsage refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = error decoding document /v1alpha1/ (line 1): unknown keys found during decoding:
+== the node is unchanged by the dry runs
+live observe version=v1.14.5 resourceVersion=3 digest=87682b313b7ee757bf4758234c109dd733ddf9cdadf8037e746e034868ea1aad expected=87682b313b7ee757bf4758234c109dd733ddf9cdadf8037e746e034868ea1aad same=true
+== destroy bw-w22-t114
+== destroyed bw-w22-t114; nothing carries its name
+== scenario t115c14: cluster bw-w22-t115, talosctl v1.14.5, image ghcr.io/siderolabs/talos:v1.15.0-beta.1@sha256:16d7aa5a26c969266c9525afc273d42f53034bddcea817c409bd1cb44ed4569c
+== control: planted endpoint 192.0.2.1 refused
+== control: planted endpoint 10.56.0.250 refused
+== worker 10.56.0.3
+live read version=v1.15.0-beta.1 resourceVersion=1 digest=9e5ac384224bccb662b4ce5e7c22f176cc7d275f47eb4aaf184000043bd0c1b1 kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig
+== control: dry run of the node's own configuration
+== dry-run control-unchanged accepted (exit 0)
+== control: dry run of an invalid configuration (must be refused)
+== dry-run control-invalid refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = 1 error occurred:
+== compile the node's configuration in build a
+live case none ok sha256=0ce5d9c2ac42aa0f720d671063bf896ce42ba8f9540c838349a8ee4e792895d7 configurationDigest=0ce5d9c2ac42aa0f720d671063bf896ce42ba8f9540c838349a8ee4e792895d7
+live case label ok sha256=e08c054fc30e2f066f0df6a0d4a08ad88d8fac5f88c537946631dc8c2f7423f7 configurationDigest=e08c054fc30e2f066f0df6a0d4a08ad88d8fac5f88c537946631dc8c2f7423f7
+live case label-other ok sha256=1d03ae4668a79bace8f75ea4d65f64889da37f8bd9cfa8b6dd9a6e7d4121033c configurationDigest=1d03ae4668a79bace8f75ea4d65f64889da37f8bd9cfa8b6dd9a6e7d4121033c
+== compile the node's configuration in build b
+live case none ok sha256=0ce5d9c2ac42aa0f720d671063bf896ce42ba8f9540c838349a8ee4e792895d7 configurationDigest=0ce5d9c2ac42aa0f720d671063bf896ce42ba8f9540c838349a8ee4e792895d7
+live case label ok sha256=e08c054fc30e2f066f0df6a0d4a08ad88d8fac5f88c537946631dc8c2f7423f7 configurationDigest=e08c054fc30e2f066f0df6a0d4a08ad88d8fac5f88c537946631dc8c2f7423f7
+live case label-other ok sha256=1d03ae4668a79bace8f75ea4d65f64889da37f8bd9cfa8b6dd9a6e7d4121033c configurationDigest=1d03ae4668a79bace8f75ea4d65f64889da37f8bd9cfa8b6dd9a6e7d4121033c
+== apply the label compile (build B)
+== dry-run label accepted (exit 0)
+live apply class=accepted code=OK text="the node accepted the configuration in no-reboot mode"
+== read back
+live observe version=v1.15.0-beta.1 resourceVersion=2 digest=e08c054fc30e2f066f0df6a0d4a08ad88d8fac5f88c537946631dc8c2f7423f7 expected=e08c054fc30e2f066f0df6a0d4a08ad88d8fac5f88c537946631dc8c2f7423f7 same=true
+== drift read after 60 s
+live observe version=v1.15.0-beta.1 resourceVersion=2 digest=e08c054fc30e2f066f0df6a0d4a08ad88d8fac5f88c537946631dc8c2f7423f7 expected=e08c054fc30e2f066f0df6a0d4a08ad88d8fac5f88c537946631dc8c2f7423f7 same=true
+== control: plant a change, the drift read must say same=false
+== dry-run label-other accepted (exit 0)
+live apply class=accepted code=OK text="the node accepted the configuration in no-reboot mode"
+live observe version=v1.15.0-beta.1 resourceVersion=3 digest=1d03ae4668a79bace8f75ea4d65f64889da37f8bd9cfa8b6dd9a6e7d4121033c expected=e08c054fc30e2f066f0df6a0d4a08ad88d8fac5f88c537946631dc8c2f7423f7 same=false
+== destroy bw-w22-t115
+== destroyed bw-w22-t115; nothing carries its name
+== scenario t115: cluster bw-w22-t115, talosctl v1.15.0-beta.1, image ghcr.io/siderolabs/talos:v1.15.0-beta.1@sha256:16d7aa5a26c969266c9525afc273d42f53034bddcea817c409bd1cb44ed4569c
+== control: planted endpoint 192.0.2.1 refused
+== control: planted endpoint 10.56.0.250 refused
+== worker 10.56.0.3
+live read version=v1.15.0-beta.1 resourceVersion=1 digest=b294e184cc09ffc29ffc1091057b3aa571090ab41a96f6057f6ee91bcb1e5257 kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,DiskSMARTConfig,SecurityProfileConfig,WorkloadResourceConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig
+== control: dry run of the node's own configuration
+== dry-run control-unchanged accepted (exit 0)
+== control: dry run of an invalid configuration (must be refused)
+== dry-run control-invalid refused (exit 1): 10.56.0.3: error applying configuration: rpc error: code = InvalidArgument desc = 1 error occurred:
+== compile the node's configuration in build a
+live case none refused stage=ingest-base error="ingest: refused (schema-unloadable) at doc[0]"
+live case label refused stage=ingest-base error="ingest: refused (schema-unloadable) at doc[0]"
+live case label-other refused stage=ingest-base error="ingest: refused (schema-unloadable) at doc[0]"
+== compile the node's configuration in build b
+live case none ok sha256=4205ee45dc55165fa864a62cd026b84c3ab0f52fa183e6a5af70ce0c63d71825 configurationDigest=4205ee45dc55165fa864a62cd026b84c3ab0f52fa183e6a5af70ce0c63d71825
+live case label ok sha256=cbded54bbcb14453333419f43aff505aa09eefb0450894191db84a360dd763dd configurationDigest=cbded54bbcb14453333419f43aff505aa09eefb0450894191db84a360dd763dd
+live case label-other ok sha256=345386fc2651c4cf8e0bd4199782d78f58ac39f06bf6089305a26c6712f46cb2 configurationDigest=345386fc2651c4cf8e0bd4199782d78f58ac39f06bf6089305a26c6712f46cb2
+== apply the label compile (build B)
+== dry-run label accepted (exit 0)
+live apply class=accepted code=OK text="the node accepted the configuration in no-reboot mode"
+== read back
+live observe version=v1.15.0-beta.1 resourceVersion=2 digest=cbded54bbcb14453333419f43aff505aa09eefb0450894191db84a360dd763dd expected=cbded54bbcb14453333419f43aff505aa09eefb0450894191db84a360dd763dd same=true
+== drift read after 60 s
+live observe version=v1.15.0-beta.1 resourceVersion=2 digest=cbded54bbcb14453333419f43aff505aa09eefb0450894191db84a360dd763dd expected=cbded54bbcb14453333419f43aff505aa09eefb0450894191db84a360dd763dd same=true
+== control: plant a change, the drift read must say same=false
+== dry-run label-other accepted (exit 0)
+live apply class=accepted code=OK text="the node accepted the configuration in no-reboot mode"
+live observe version=v1.15.0-beta.1 resourceVersion=3 digest=345386fc2651c4cf8e0bd4199782d78f58ac39f06bf6089305a26c6712f46cb2 expected=cbded54bbcb14453333419f43aff505aa09eefb0450894191db84a360dd763dd same=false
+== destroy bw-w22-t115
+== destroyed bw-w22-t115; nothing carries its name
+== removed image this run pulled: ghcr.io/siderolabs/talos:v1.15.0-beta.1@sha256:16d7aa5a26c969266c9525afc273d42f53034bddcea817c409bd1cb44ed4569c
+== operator talosconfig and kubeconfig unchanged (hashes or absence equal)
+== docker containers now:
+== end rc=0

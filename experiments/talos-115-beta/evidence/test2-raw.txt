@@ -1,0 +1,17 @@
+# source: job-t2-raw.log (a cluster Job log kept in the worker's scratch entry)
+JOB_CREATED: verify-bronzeward-57fb395-1795732207-3b235082 in heavy-runs for head 57fb39560ff42720f9d30f0ec4ef33fd918ba272
+POD_HEAD=57fb39560ff42720f9d30f0ec4ef33fd918ba272
+VERIFY_CMD=experiments/talos-115-beta/run/test2 b-raw build
+built b-raw from cf597ab98bf6a2d1758af3adb7d5d213b5e21a0a with 1 patch(es)
+== variant b-raw, set build: github.com/siderolabs/talos/pkg/machinery v1.15.0-beta.1
+# github.com/ginsys/bronzeward/internal/talos/talostest
+internal/talos/talostest/talostest.go:233:72: undefined: inmem.Build
+== go build rc=1
+# github.com/ginsys/bronzeward/internal/talos/talostest
+internal/talos/talostest/talostest.go:233:72: undefined: inmem.Build
+== go vet rc=1
+VERIFY_SECONDS=26
+VERIFY_DONE rc=1
+# classifier: run/failures.py
+--- result lines (tests and subtests): PASS=0 FAIL=0 SKIP=0
+--- failing leaves in all: 0
