@@ -92,6 +92,21 @@ describe("the Shared names block on a draft's page", () => {
     expect(button("Stop following ntp")).toBeDefined();
   });
 
+  // A re-adoption over a removed adoption cannot be removed again (404, persistence-api §3.1.1); a first adoption can.
+  test("Stop following is offered for an adoption the draft introduced, and not for a re-adoption over a removed one", async () => {
+    await mount([{ kind: "adoption", of: "fragment", name: "motd", head: "frg_3", base: 3, revision: "frv_motd" }]);
+    await open();
+    await settled();
+    expect(box.textContent).toContain("This draft adopts");
+    expect(button("Stop following motd")).toBeUndefined();
+    await act(async () => root.unmount());
+    root = createRoot(box);
+    await mount([{ kind: "adoption", of: "fragment", name: "motd", head: "frg_3", base: null, revision: "frv_motd" }]);
+    await open();
+    await settled();
+    expect(button("Stop following motd")).toBeDefined();
+  });
+
   test("Adopt sends the head's revision under the draft's last ETag, and Stop following deletes the adoption", async () => {
     keepETag(DRF, '"5-t"', undefined);
     await mount();

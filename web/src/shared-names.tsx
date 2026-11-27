@@ -21,19 +21,21 @@ type Kind = "fragment" | "profile";
 interface Head { id: string; name: string; cluster: string | null; revision: string | null }
 
 /** What the draft says of a shared name: an adoption, the removal of one, a shared edit, or a shared removal. */
-export type Slot = { kind: "adopts"; revision: string } | { kind: "stops" } | { kind: "edits" } | { kind: "removed" } | undefined;
+export type Slot = { kind: "adopts"; revision: string; base: number | null } | { kind: "stops" } | { kind: "edits" } | { kind: "removed" } | undefined;
 export function slotOf(entries: Draft["entries"], kind: Kind, name: string): Slot {
   for (const e of entries) {
-    if (isAdoption(e) && e.of === kind && e.name === name) return e.revision === null ? { kind: "stops" } : { kind: "adopts", revision: e.revision };
+    if (isAdoption(e) && e.of === kind && e.name === name) return e.revision === null ? { kind: "stops" } : { kind: "adopts", revision: e.revision, base: e.base };
     if (isSource(e) && isShared(e) && e.kind === kind && e.name === name) return e.revision === null ? { kind: "removed" } : { kind: "edits" };
   }
   return undefined;
 }
 
 /** This cluster's view of a name and what a person may do: the draft's entry first, else the cluster's adoption, else a shared profile's pin (no adoption). */
-export type State = { kind: "edits" | "removed" | "stops" | "none" } | { kind: "adopts" | "follows"; revision: string; behind: boolean } | { kind: "via"; via: string };
+export type State = { kind: "edits" | "removed" | "stops" | "none" } | { kind: "follows"; revision: string; behind: boolean } | { kind: "adopts"; revision: string; behind: boolean; removable: boolean } | { kind: "via"; via: string };
 export function stateOf(slot: Slot, rows: readonly Adoption[], cluster: string, head: string): State {
-  if (slot?.kind === "adopts") return { kind: "adopts", revision: slot.revision, behind: slot.revision !== head };
+  // An adoption the draft stages can be removed again where it introduced the adoption (no row before) or replaced a row that
+  // holds a revision. Over a removed row (a base, and no row in the list) a removal is 404 and the re-adoption stays (persistence-api §3.1.1).
+  if (slot?.kind === "adopts") return { kind: "adopts", revision: slot.revision, behind: slot.revision !== head, removable: slot.base === null || rows.some((r) => r.cluster === cluster && r.via === null) };
   if (slot !== undefined) return { kind: slot.kind };
   const mine = rows.filter((r) => r.cluster === cluster);
   const own = mine.find((r) => r.via === null);
@@ -43,7 +45,13 @@ export function stateOf(slot: Slot, rows: readonly Adoption[], cluster: string, 
 }
 // Adopt where the cluster is not on the head's revision and the name has a head; Stop following where something is followed.
 export const canAdopt = (s: State) => s.kind === "none" || s.kind === "stops" || s.kind === "via" || ((s.kind === "adopts" || s.kind === "follows") && s.behind);
-export const canStop = (s: State) => s.kind === "adopts" || s.kind === "follows";
+export const canStop = (s: State) => s.kind === "follows" || (s.kind === "adopts" && s.removable);
+
+/** A name as a person reads it: the server's name where it is safe text. */
+export const shownName = (name: string) => safeText(name) ?? NAME_NOT_SHOWN;
+/** What a done press says; the name passes the safe-text rule, as everywhere on the page. */
+export const recorded = (kind: Kind, name: string, stops: boolean) =>
+  stops ? `Recorded: this cluster stops following ${kind} ${shownName(name)}.` : `Recorded: this cluster adopts ${kind} ${shownName(name)}.${kind === "fragment" ? ` ${ADOPT_PIN_NOTE}` : ""}`;
 
 /** The request of a press: Adopt puts the head's revision, Stop following removes the adoption. */
 export const adoptionWrite = (draft: string, kind: Kind, name: string, revision: string | null) => ({
@@ -71,7 +79,7 @@ function Press({ draft, kind, name, revision, label, written, seeChange }: { dra
   const refused = (
     <Status testid="write-result" role="alert" actions={<button type="button" onClick={() => setNote(showTheirChange(seeChange))}>Show their change</button>}>{NOT_RECORDED}</Status>
   );
-  const done = () => (revision === null ? `Recorded: this cluster stops following ${kind} ${name}.` : `Recorded: this cluster adopts ${kind} ${name}. ${kind === "fragment" ? ADOPT_PIN_NOTE : ""}`);
+  const done = () => recorded(kind, name, revision === null);
   return (
     <>
       <Action label={label} needs={["author"]} onClick={press} busy={w !== undefined && w.outcome === undefined} />
@@ -99,7 +107,7 @@ function NameRow({ kind, head, draft, written, seeChange }: { kind: Kind; head: 
   const state = stateOf(slotOf(draft.entries, kind, head.name), list.kind === "ok" ? list.data.items : [], draft.cluster, head.revision ?? "");
   const shown = safeText(head.name) ?? NAME_NOT_SHOWN;
   // A name that is not read yet offers nothing: its view decides what a press does.
-  const ready = list.kind === "ok" || slotOf(draft.entries, kind, head.name) !== undefined;
+  const ready = list.kind === "ok";
   return (
     <li>
       {kind} {shown}: {pending ?? <Words kind={kind} state={state} />}
