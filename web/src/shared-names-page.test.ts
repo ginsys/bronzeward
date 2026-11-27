@@ -19,9 +19,12 @@ const DRF = "drf_k2pq3rstuvwxyz234567abcdef";
 const head = (id: string, name: string, revision: string | null, cluster: string | null = null) => ({ id, name, cluster, revision, scope: cluster === null ? "library" : "cluster", layer: "global", headRevision: 1, createdAt: "2026-11-02T00:00:00Z" });
 const adoption = (over: Record<string, unknown>) => ({ cluster: "cl_a", revision: "frv_old", adoptionRevision: 2, behind: true, release: "rel_a", via: null, machines: [], ...over });
 
-// One shared fragment the cluster is behind on, one it follows at the head, one nobody follows, one removed; and a profile.
+// One shared fragment the cluster is behind on, one it follows at the head, one nobody follows, two removed (this cluster still
+// follows one, only another cluster follows the other); and a profile.
 const answers: Record<string, unknown> = {
-  "/fragments": { items: [head("frg_1", "ntp", "frv_head"), head("frg_2", "dns", "frv_dns"), head("frg_3", "motd", "frv_motd"), head("frg_4", "gone", null), head("frg_5", "own", "frv_own", "cl_a")] },
+  "/fragments": { items: [head("frg_1", "ntp", "frv_head"), head("frg_2", "dns", "frv_dns"), head("frg_3", "motd", "frv_motd"), head("frg_4", "gone", null), head("frg_5", "own", "frv_own", "cl_a"), head("frg_6", "lost", null)] },
+  "/fragments/frg_4/adoptions": { items: [adoption({ revision: "frv_gone", behind: true }), adoption({ cluster: "cl_b", revision: "frv_gone", behind: true })] },
+  "/fragments/frg_6/adoptions": { items: [adoption({ cluster: "cl_b", revision: "frv_lost", behind: true })] },
   "/fragments/frg_1/adoptions": { items: [adoption({}), adoption({ cluster: "cl_b", behind: false })] },
   "/fragments/frg_2/adoptions": { items: [adoption({ revision: "frv_dns", behind: false })] },
   "/fragments/frg_3/adoptions": { items: [] },
@@ -64,13 +67,12 @@ describe("the Shared names block on a draft's page", () => {
     await open();
     await settled();
     const text = box.textContent ?? "";
-    // The shared names with a revision are listed, the cluster's own fragment and the removed shared name are not.
+    // The shared names with a revision are listed, and the cluster's own fragment is not (the removed ones: next test).
     expect(text).toContain("fragment ntp");
     expect(text).toContain("fragment dns");
     expect(text).toContain("fragment motd");
     expect(text).toContain("profile edge");
     expect(text).not.toContain("fragment own");
-    expect(text).not.toContain("fragment gone");
     expect(text).toContain("behind the shared head");
     expect(text).toContain("Not followed by this cluster.");
     // Adopt where behind or not followed; Stop following where followed; both for a name followed and behind.
@@ -81,6 +83,26 @@ describe("the Shared names block on a draft's page", () => {
     expect(button("Adopt motd")).toBeDefined();
     expect(button("Stop following motd")).toBeUndefined();
     expect(text).toContain("Adopt records in this draft that this cluster follows the shared fragment ntp");
+  });
+
+  // ginsys/bronzeward#1242: a removed head is still a head (persistence-api §3.1.1), and a cluster's adoption keeps the revision it names.
+  test("a removed shared name this cluster still follows is listed in words with Stop following and no Adopt; one it does not follow is not listed", async () => {
+    await mount();
+    await open();
+    await settled();
+    const row = [...box.querySelectorAll("li")].find((li) => li.textContent?.startsWith("fragment gone"));
+    expect(row).toBeDefined();
+    expect(row!.textContent).toContain("Followed at the revision");
+    expect(row!.textContent).toContain("The shared name was removed from the library");
+    expect(row!.textContent).not.toContain("behind the shared head");
+    expect(button("Stop following gone")).toBeDefined();
+    expect(button("Adopt gone")).toBeUndefined();
+    // Another cluster follows `lost`, this one does not: nothing to adopt and nothing to stop.
+    expect(box.textContent).not.toContain("fragment lost");
+    keepETag(DRF, '"5-t"', undefined);
+    await act(async () => void button("Stop following gone")!.click());
+    const stop = (submit.mock.calls[0]![0] as { spec: Record<string, unknown> }).spec;
+    expect(stop).toMatchObject({ method: "DELETE", path: `/drafts/${DRF}/adoptions/fragments/gone`, ifMatch: '"5-t"' });
   });
 
   test("the draft's own entry decides the view: an adoption at the head says so, and offers Stop following and Adopt again", async () => {
