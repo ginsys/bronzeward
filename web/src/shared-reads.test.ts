@@ -48,8 +48,9 @@ describe("the clusters of a shared name", () => {
   });
 
   test("a cluster that only reaches the name through a shared profile is labelled as not an adoption", () => {
-    expect(useOf({ behind: false, via: "edge" })).toBe("through the shared profile edge (not an adoption)");
-    expect(useOf({ behind: true, via: "edge" })).toBe("through the shared profile edge (not an adoption)");
+    // The pinned revision is behind or on the head as for any row, so an outdated pin reads differently from a current one.
+    expect(useOf({ behind: false, via: "edge" })).toBe("through the shared profile edge (not an adoption), on the shared head");
+    expect(useOf({ behind: true, via: "edge" })).toBe("through the shared profile edge (not an adoption), behind the shared head");
     // A cluster that adopts the name and also reaches it through a profile has two rows, both kept.
     const out = text(h(ReadsProvider, { value: reads }, h(AdoptionRows, { rows: [row({}), row({ via: "edge", adoptionRevision: null, release: null })] })));
     expect(out).toContain("on the shared head");
@@ -92,6 +93,20 @@ describe("what a draft's shared entries reach here", () => {
     expect(out).toContain("swaps here: 1 machine");
     expect(out).toContain("elsewhere");
     expect(out).not.toContain("Reaches no machine");
+  });
+
+  // The values are the server's: a name that is an inherited property of an object is an unknown value, and a label with a
+  // bidirectional or control character is not shown.
+  test("an unknown change or reason named like an object property is shown as sent, and an unsafe kind is not shown", () => {
+    for (const word of ["__proto__", "constructor", "toString"]) {
+      const out = text(h(ReadsProvider, { value: reads }, h(ReachItems, { items: [item({ machines: [m("mch_a", word, word)] })] })));
+      expect(out, word).toContain(`${word} here: 1 machine`);
+      expect(out, word).not.toContain("[object");
+      expect(out, word).not.toContain("function");
+    }
+    const unsafe = text(h(ReadsProvider, { value: reads }, h(ReachItems, { items: [item({ kind: "fragm‮ent" as never })] })));
+    expect(unsafe).not.toContain("‮");
+    expect(unsafe).toContain("(not shown)");
   });
 
   test("an entry that reaches nothing says so, a cluster entry is not listed, and a draft with none says so", () => {
