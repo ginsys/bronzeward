@@ -56,6 +56,12 @@ var configSecret = regexp.MustCompile(`(?m)^\s*(?:token|secret|key|aescbcEncrypt
 // it; the leak scan looks for it too.
 func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(...string) result, unmarked ...string) *standIn {
 	t.Helper()
+	return f.newStandInAs(t, b, s, firstCluster, ctl, unmarked...)
+}
+
+// newStandInAs is newStandIn for the cluster id names, which reports that cluster's identity.
+func (f *fixture) newStandInAs(t *testing.T, b *baotest.Bao, s seeded, id clusterIdent, ctl func(...string) result, unmarked ...string) *standIn {
+	t.Helper()
 	// The node trusts one CA: the cluster's first key supplies it, the server signs a certificate from it
 	// for each observation, and the stored talosconfig a dispatch still sends with is issued from it too.
 	sec, err := secrets.NewTalosCA(time.Now().Add(-time.Hour))
@@ -65,9 +71,9 @@ func (f *fixture) newStandIn(t *testing.T, b *baotest.Bao, s seeded, ctl func(..
 	ca := &x509.PEMEncodedCertificateAndKey{Crt: sec.CrtPEM, Key: sec.KeyPEM}
 	pki := talostest.NewPKIFromCA(t, ca)
 	node := talostest.Serve(t, pki)
-	node.SetSMBIOSUUID(t, strings.ToUpper(seedUUID), true)
-	node.SetNodeID(t, standInNodeID)
-	node.SetClusterID(t, seedClusterID)
+	node.SetSMBIOSUUID(t, strings.ToUpper(id.uuid), true)
+	node.SetNodeID(t, id.nodeID)
+	node.SetClusterID(t, id.clusterID)
 	in, err := generate.NewInput("bwsynth", "https://cp.example.test:6443", constants.DefaultKubernetesVersion, generate.WithInstallDisk("/dev/sda"))
 	if err != nil {
 		t.Fatal(err)
