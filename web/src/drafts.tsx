@@ -121,8 +121,9 @@ export const isChange = (e: Draft["entries"][number]): e is Changed => e.kind !=
 // the cluster's own entry, which has a slot of its own.
 export const isShared = (e: Source) => e.scope !== undefined;
 export const SHARED_LIBRARY = "shared library";
-// Whether the draft holds an adoption, an adoption's removal or a shared entry: only then does its page read what they reach.
-export const hasShared = (d: Pick<Draft, "entries">) => d.entries.some((e) => isAdoption(e) || (isSource(e) && isShared(e)));
+// Whether the draft's page reads what its shared entries reach: the draft is open (the route refuses any other draft with
+// a conflict) and holds an adoption, an adoption's removal or a shared entry.
+export const readsReach = (d: Pick<Draft, "entries" | "state">) => d.state === "open" && d.entries.some((e) => isAdoption(e) || (isSource(e) && isShared(e)));
 const nameOf = (e: Source) => e.name ?? e.machine ?? "";
 export const keyOf = (e: Changed) => (isAdoption(e) ? `adoption:${e.of}:${e.name}` : `${e.kind}:${nameOf(e)}${isShared(e) ? ":library" : ""}`);
 // An entry as the list names it: a fragment's or a profile's own name, and an assignment's machine as a machine is
@@ -295,7 +296,7 @@ export function DraftItem({ id }: { id: string }) {
               </li>
             ) : <li key={`import-base:${e.machine}`}><ImportedConfigurationRef machine={e.machine} revision={e.revision} /><BaseDocument id={e.revision} machine={e.machine} /></li>)}
           </ul>
-          {hasShared(d) && <Reach draft={d.id} n={n} />}
+          {readsReach(d) && <Reach draft={d.id} n={n} />}
           {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} />{" "}<Action label="Add profile" needs={["author"]} onClick={() => pick("profile:")} />{" "}<Action label="Add assignment" needs={["author"]} onClick={() => pick("assignment:")} /></p>}
           {selected !== undefined && selected.startsWith("fragment:") && (
             <FragmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
