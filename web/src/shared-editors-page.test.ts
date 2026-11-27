@@ -24,7 +24,8 @@ const revision = (id: string) => ({ id, cluster: null, name: "ntp", layer: "glob
 const answers: Record<string, unknown> = {
   "/fragment-revisions/frv_c": revision("frv_c"),
   "/fragment-revisions/frv_s": { id: "frv_s", cluster: null, name: "ntp", layer: "global", document: "ntp: pool\n", declarations: { references: {}, embedded: [] }, author: "idn_a", createdAt: "2026-11-02T00:00:00Z" },
-  "/fragments": { items: [head("frg_L1", "ntp-servers", null, "frv_L1"), head("frg_L2", "motd", null, "frv_L2"), head("frg_C1", "dns", "cl_a", "frv_C1")] },
+  "/fragment-revisions/frv_u": { ...revision("frv_u"), name: "a‮b" },
+  "/fragments": { items: [head("frg_L1", "ntp-servers", null, "frv_L1"), head("frg_L2", "motd", null, "frv_L2"), head("frg_L3", "x‮y", null, "frv_L3"), head("frg_C1", "dns", "cl_a", "frv_C1")] },
   "/profiles": { items: [] },
 };
 
@@ -99,6 +100,17 @@ describe("the shared choice of the editors", () => {
     expect(sent(0)["body"]).toBeUndefined();
   });
 
+  test("an opened shared entry's name is shown only as safe text, in its heading and its label, while the request keeps the raw name", async () => {
+    const odd = entry({ name: "a‮b", scope: "library", head: "frg_s", adoptionBase: null, revision: "frv_u" });
+    await mount(fragmentPane(draftOf([odd]), odd));
+    await settled();
+    expect(box.querySelector("h3")!.textContent).toContain("(name not shown)");
+    expect(box.textContent).not.toContain("‮");
+    expect(box.querySelector("section")!.getAttribute("aria-label")).toBe("Fragment (name not shown)");
+    await act(async () => void button("Remove")!.click());
+    expect(sent(0)["path"]).toBe(`/drafts/${DRF}/fragments/${encodeURIComponent("a‮b")}?scope=library`);
+  });
+
   test("a cluster entry's Remove sends no query", async () => {
     const own = entry({});
     await mount(fragmentPane(draftOf([own]), own));
@@ -139,6 +151,9 @@ describe("the shared choice of the editors", () => {
     expect(options().join("|")).toContain("ntp-servers");
     expect(options().join("|")).toContain("motd");
     expect(options().join("|")).not.toContain("dns");
+    // A shared fragment named with a bidirectional control is offered as "(name not shown)", never by the raw name.
+    expect(options().join("|")).toContain("(name not shown)");
+    expect(box.textContent).not.toContain("‮");
     // Switching the choice drops pins chosen for the other scope: a cluster's revision is no pin of a shared profile.
     expect(box.textContent).toContain("None.");
     await type(field("label input[autocomplete]"), "edge");

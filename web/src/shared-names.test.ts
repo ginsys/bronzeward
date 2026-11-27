@@ -60,6 +60,11 @@ describe("this cluster's view of a shared name and what a press may do", () => {
       const fresh = stateOf(adopts(null), [], "cl_1", head);
       expect(fresh).toMatchObject({ again: false });
       expect(canAdopt(fresh)).toBe(false);
+      // Staged with no row (base none), then another draft adopted the name for this cluster: the row now holds a counter the
+      // entry's absent base is not, so publication refuses it, though the revision is the head's and the cluster is not behind.
+      const adoptedFirst = stateOf(adopts(null), [row({ adoptionRevision: 1, revision: head })], "cl_1", head);
+      expect(adoptedFirst).toMatchObject({ behind: false, again: true, removable: true });
+      expect([canAdopt(adoptedFirst), canStop(adoptedFirst)]).toEqual([true, true]);
     });
 
     test("a removal whose row holds another counter offers Stop following again; a removal whose row is gone cannot be pressed again", () => {
