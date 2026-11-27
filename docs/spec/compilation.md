@@ -293,9 +293,12 @@ give a node a path that reads as an embedded document's.
    document, or inside any value step 4 extracts, refuses the input, and the
    match check never logs, returns or
    stores the offered value, nor a digest of it (invariant 8, §14). The
-   baseline of step 8 still holds the exact input, encrypted.
-   - `match`: step 4 substitutes the typed reference of §5.1 for the node, and
-     step 6 creates no generation for it.
+   baseline of step 8 still holds the exact input, encrypted. The match is made
+   once steps 4 and 5 have built and guarded the candidate, and before step 6's
+   first provider write: an input the guard refuses is refused with the guard's
+   rule, whatever its CA key, and records no `ca-key-match` event.
+   - `match`: the candidate keeps the typed reference of §5.1 for the node
+     (step 4), and step 6 creates no generation for it.
    - `mismatch`: the input is refused, `422 validation-failed` with the `rule`
      `ca-key-mismatch`, before any provider write; the claim is abandoned and
      nothing is kept. Neither key, nor a digest of either, is in the answer,
@@ -308,18 +311,21 @@ give a node a path that reads as an embedded document's.
    read one (path, version and `created_time`, never a value; `no key` for a
    cluster with no stored key has none), are recorded as an event of the
    `ingest` operation, as the certificate access is (persistence and API
-   §3.3), whatever the verdict. The event is `ca-key-match` with `verdict` and, where a stored version
+   §3.3), whatever verdict the match reaches. The event is `ca-key-match` with `verdict` and, where a stored version
    was read (`match`, `mismatch`, and a version written again since its act), the `path`,
    `version` and `createdTime` of that stored key. `no
    key` is a cluster with no first-key act, or whose act names a version that is gone; `unreadable`
    is a version the signer cannot read (denied, sealed or unreachable, malformed) or one written
    again since its act. A worker configuration has no `machine.ca.key`, so there is
    nothing to verify. A node that already carries the typed reference is
-   excluded from identification (step 3), so a draft update or a further mark
-   on a sanitized document does not offer the key again; a new import of the
-   machine does. A run that does not offer it does not hold it, so the guard
-   cannot search for the key there: a copy an operator types into a draft
-   update is outside the guard, which finds exact copies of what the run holds.
+   excluded from identification (step 3), so a further mark on a staged
+   document does not offer the key again; a new import of the machine does. A
+   draft update cannot carry the typed reference: a request that declares the
+   kind is refused `bad-declaration`, and only stored data may hold it
+   ([persistence and API §9.3](persistence-api.md#93-examples)).
+   A run that does not offer the key does not hold it, so the guard cannot
+   search for the key there: a copy an operator types into a draft update is
+   outside the guard, which finds exact copies of what the run holds.
 4. **Substitute** each identified value by a reference (§5) under a newly
    minted logical name at version 1, with its declaration (§5.2), producing the
    candidate sanitized document; the CA key of step 3a takes the typed
@@ -2152,7 +2158,7 @@ previous release with `wipe: false` shows `-wipe: <redacted:paired>` beside
 3. Step 5: the value comparison passes, because no other scalar equals the
    token; the substring search finds it inside
    `doc[0]/machine/files/0/content`. The input is refused with that path and the
-   rule `substring`, and no value. No provider generation was created, and the
+   rule `guard-substring`, and no value. No provider generation was created, and the
    claim becomes `abandoned` with no payload.
 4. The operator marks `doc[0]/machine/files/0/content` as well and resubmits.
    Both values are extracted, the script under its own name, referenced whole
@@ -2242,9 +2248,11 @@ check.
    withheld.
 6. **Superset recorded, effective recorded.** Every release carries both
    dependency records.
-7. **One owner per claim generation.** Every claim transition is conditional on
-   the owner generation, and an owner's transitions on the owner too; no
-   transition revives a lapsed lease for its old owner.
+7. **One owner per claim generation.** An owner's own transition is
+   conditional on the owner and its generation, and a takeover, mark or
+   continuation on the generation it read (§3.2); the sweep (§3.5) and an
+   operator's abandonment take none, and only end a claim. No transition
+   revives a lapsed lease for its old owner.
 8. **No unkeyed secret digest is persisted.** The only unkeyed digests over
    plaintext are the whole-configuration digests of §4.1; an artifact's
    ciphertext digest (§11) is over ciphertext.

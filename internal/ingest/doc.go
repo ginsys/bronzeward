@@ -6,8 +6,9 @@
 // Input enters as an Unresolved, which renders nothing and is read only by this package's parser.
 // A Sanitized, the only form ordinary persistence accepts, is constructed only inside this
 // package: by Candidate.Commit, after the guard has passed and every extracted value has been
-// handed to the caller's create function (§2.3 step 6, which writes the provider generations).
-// The zero Sanitized is refused by Check.
+// handed to the caller's create function (§2.3 step 6, which writes the provider generations),
+// or by Stored, which rebuilds one from what persistence stored and cannot run the guard. The
+// zero Sanitized is refused by Check.
 //
 // Resolve is extraction's inverse, compilation's step 4 (§6): it replaces each reference of a
 // Sanitized by its value and yields a Resolved, plaintext that renders nothing and leaves the
