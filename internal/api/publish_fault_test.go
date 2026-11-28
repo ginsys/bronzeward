@@ -143,22 +143,25 @@ func TestPublishBuildFaultSeamSites(t *testing.T) {
 // lapsed lease is claimed again at the next generation, as before.
 func TestPublishBuildFaultDatabaseControl(t *testing.T) {
 	b := newBuildEnv(t)
-	var atCommit bool
+	// The commit hook also runs for the heartbeat's own transaction, so the flag is atomic.
+	var atCommit atomic.Bool
 	var resets atomic.Int32
 	op := b.runFaulted(options{
 		stopAt: func(step string) bool {
-			atCommit = step == "publish-commit"
+			atCommit.Store(step == "publish-commit")
 			return false
 		},
 		commit: func(tx *sql.Tx) error {
-			if !atCommit {
+			if !atCommit.CompareAndSwap(true, false) {
 				return tx.Commit()
 			}
-			atCommit = false
 			resets.Add(1)
 			return errors.New("connection reset (test)")
 		},
 	}, func(string) bool { return resets.Load() >= 2 })
+	if n := resets.Load(); n < 2 {
+		t.Fatalf("%d commit errors were injected; want at least 2", n)
+	}
 	state, gen, types := b.opState(op)
 	if state != "running" || gen < 2 || types[len(types)-1] != "claimed" || slices.Contains(types, "failed") {
 		t.Fatalf("operation %s at generation %d, events %v; want running and claimed again", state, gen, types)
