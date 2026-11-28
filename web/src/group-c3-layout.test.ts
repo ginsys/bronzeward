@@ -281,7 +281,8 @@ describe("the import page", () => {
     root = createRoot(box);
     serve("held", { kind: "draft-update", machine: null, operation: null });
     await shown(h(IngestionItem, { id: ING }));
-    expect(titles()).not.toContain("Progress");
+    expect(titles().filter((t) => t.startsWith("Progress"))).toEqual([]);
+    expect(box.querySelector('section.panel[aria-label="Progress"]')).toBeNull();
   });
   test("while the import is read the page still has its header and its heading, and no panel", async () => {
     held = true;
