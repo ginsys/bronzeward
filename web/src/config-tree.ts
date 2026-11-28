@@ -69,15 +69,21 @@ const spanOf = (n: unknown): readonly [number, number] | undefined => {
 };
 
 // Whole lines from the start of the line that holds `start` to the end of the line that holds the last character before `end`.
-function linesOf(text: string, start: number, end: number): string {
+// A block scalar ends where its own extent ends: the blank lines a keep-chomped one ("|+") holds are part of its value.
+function linesOf(text: string, start: number, end: number, exact = false): string {
+  const from = text.lastIndexOf("\n", start - 1) + 1;
+  if (exact) return text.slice(from, text.charAt(end - 1) === "\n" ? end - 1 : end);
   let e = end;
   while (e > start && /\s/.test(text.charAt(e - 1))) e--;
   const to = text.indexOf("\n", e);
-  return text.slice(text.lastIndexOf("\n", start - 1) + 1, to < 0 ? text.length : to);
+  return text.slice(from, to < 0 ? text.length : to);
 }
 
-// An anchor, an alias or a tag other than the reference tag: not shown as a field, shown raw.
-const marked = (n: unknown): boolean => isAlias(n) || anchorOf(n) !== undefined || (tagOf(n) !== undefined && tagOf(n) !== REF);
+const isBlockScalar = (n: unknown): boolean => isScalar(n) && (n.type === "BLOCK_LITERAL" || n.type === "BLOCK_FOLDED");
+
+// An anchor, an alias or a tag other than the reference tag: not shown as a field, shown raw. The reference tag is a scalar's
+// alone: on a map or a list it would turn the node's own content into ordinary values, so there it is shown raw too.
+const marked = (n: unknown): boolean => isAlias(n) || anchorOf(n) !== undefined || (tagOf(n) !== undefined && !(tagOf(n) === REF && isScalar(n)));
 
 const keyOf = (k: unknown): string | undefined => (isScalar(k) && typeof k.value === "string" && anchorOf(k) === undefined && tagOf(k) === undefined ? k.value : undefined);
 
@@ -136,7 +142,8 @@ function walk(ctx: Ctx, sch: unknown, node: unknown, depth: number): Node | null
       const rows: { key: string; node: Node }[] = [];
       for (const pair of node.items) {
         const key = keyOf(pair.key);
-        const got = key === undefined ? null : walk(ctx, values, pair.value, depth + 1);
+        // A `$patch` directive is never a row of the map it sits in.
+        const got = key === undefined || key === "$patch" ? null : walk(ctx, values, pair.value, depth + 1);
         if (key === undefined || got === null) return null;
         rows.push({ key, node: got });
       }
@@ -153,9 +160,13 @@ const helpOf = (prop: unknown, resolved: Sch | undefined): string | undefined =>
 // The fields of a map the schema describes with `properties`, in document order. A pair the view cannot show goes
 // to `sink` as its raw lines, with its path; an object the schema describes nests its own pairs into the same sink.
 // With no sink (a row of a list or map) the whole object cannot be shown, and the caller keeps it raw.
-function fieldsOf(ctx: Ctx, s: Sch, node: Pairs, path: string, sink: Other[] | null, depth: number): Field[] | null {
+//
+// A flow map (`{a: 1, b: 2}`) has its pairs on shared lines, so raw rows of single pairs would show their neighbours
+// twice: one pair it cannot show makes the whole flow map one raw row of its parent, and what it had added to `sink` is taken back.
+function fieldsOf(ctx: Ctx, s: Sch, node: Pairs & { readonly flow?: boolean }, path: string, sink: Other[] | null, depth: number): Field[] | null {
   const props = isObj(s["properties"]) ? s["properties"] : {};
   const fields: Field[] = [];
+  const kept = sink?.length ?? 0;
   for (const pair of node.items) {
     const key = keyOf(pair.key);
     const prop = key !== undefined && Object.hasOwn(props, key) ? props[key] : undefined;
@@ -175,9 +186,13 @@ function fieldsOf(ctx: Ctx, s: Sch, node: Pairs, path: string, sink: Other[] | n
       continue;
     }
     if (sink === null) return null;
+    if (node.flow === true) {
+      sink.length = kept;
+      return null;
+    }
     const from = spanOf(pair.key);
     const to = spanOf(pair.value) ?? from;
-    if (from !== undefined && to !== undefined) sink.push({ path: `${path}${key ?? "?"}`, lines: linesOf(ctx.text, from[0], to[1]) });
+    if (from !== undefined && to !== undefined) sink.push({ path: `${path}${key ?? "?"}`, lines: linesOf(ctx.text, from[0], to[1], isBlockScalar(pair.value)) });
   }
   return fields;
 }
@@ -195,9 +210,25 @@ function head(node: Pairs): { apiVersion?: unknown; kind?: unknown } {
 function docView(ctx: Ctx, s: FormSchema, d: Document.Parsed, n: number): DocView | undefined {
   const c = d.contents;
   if (c === null) return undefined;
+  // The document as raw lines. They start at the first line before the content that is not blank, a comment or the bare `---`
+  // marker, because an anchor or a tag of the document's own map sits before the range of the map itself.
   const whole = (): DocView => {
     const r = spanOf(c);
-    return { heading: `Document ${n}`, fields: [], other: r === undefined ? [] : [{ path: "document", lines: linesOf(ctx.text, r[0], r[1]) }] };
+    const doc = spanOf(d);
+    if (r === undefined) return { heading: `Document ${n}`, fields: [], other: [] };
+    let start = r[0];
+    if (doc !== undefined && doc[0] < r[0]) {
+      let at = doc[0];
+      for (const line of ctx.text.slice(doc[0], r[0]).split("\n")) {
+        const t = line.trim();
+        if (t !== "" && t !== "---" && !t.startsWith("#")) {
+          start = at;
+          break;
+        }
+        at += line.length + 1;
+      }
+    }
+    return { heading: `Document ${n}`, fields: [], other: [{ path: "document", lines: linesOf(ctx.text, start, r[1]) }] };
   };
   if (!isMap(c) || marked(c)) return whole();
   const h = head(c);
@@ -205,7 +236,8 @@ function docView(ctx: Ctx, s: FormSchema, d: Document.Parsed, n: number): DocVie
   const def = placed.form && Object.hasOwn(ctx.defs, placed.def) ? ctx.defs[placed.def] : undefined;
   if (!placed.form || !isObj(def)) return whole();
   const other: Other[] = [];
-  const fields = fieldsOf(ctx, def, c, "", other, 1) ?? [];
+  const fields = fieldsOf(ctx, def, c, "", other, 1);
+  if (fields === null) return whole();
   const legacy = placed.def === legacyDef && !Object.hasOwn(h, "apiVersion") && !Object.hasOwn(h, "kind");
   return { heading: legacy ? `Document ${n}: v1alpha1 configuration` : `Document ${n}: ${String(h.kind)}`, fields, other };
 }

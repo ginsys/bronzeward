@@ -129,6 +129,67 @@ describe("what the view cannot show goes to Other settings, with the raw lines o
   });
 });
 
+// The cases of the local review of the first head: each is a place where a key could be lost, doubled or shown as a value.
+describe("what stays raw stays whole", () => {
+  const first = async (text: string) => (await docs(text))[0]!;
+
+  test.each([
+    ["a reference tag on a map", "machine: !bwref\n  token: SYNTH-VALUE\n", "machine", "machine: !bwref\n  token: SYNTH-VALUE"],
+    ["a reference tag on a list", "machine:\n  certSANs: !bwref [SYNTH-VALUE]\n  type: worker\n", "machine/certSANs", "  certSANs: !bwref [SYNTH-VALUE]"],
+  ])("%s is Other settings, never an ordinary value", async (_, text, path, lines) => {
+    const d = await first(text);
+    expect(d.other).toEqual([{ path, lines }]);
+    expect(JSON.stringify(d.fields)).not.toContain("SYNTH-VALUE");
+  });
+
+  test("a reference tag on the document's own map is the whole document, raw, with the tag", async () => {
+    const d = await first("!bwref\nmachine:\n  type: worker\n");
+    expect(d.fields).toEqual([]);
+    expect(d.other).toEqual([{ path: "document", lines: "!bwref\nmachine:\n  type: worker" }]);
+  });
+
+  test("a flow map with a key the view cannot show is one raw row, and its other keys are not shown a second time", async () => {
+    const d = await first("machine: {type: worker, unknown: 1, token: x}\ncluster:\n  token: y\n");
+    expect(names(d.fields)).toEqual(["cluster"]);
+    expect(d.other).toEqual([{ path: "machine", lines: "machine: {type: worker, unknown: 1, token: x}" }]);
+  });
+
+  test("a flow map that is the whole document is raw as a whole", async () => {
+    const d = await first("{machine: {type: worker}, unknown: 1}\n");
+    expect(d.fields).toEqual([]);
+    expect(d.other).toEqual([{ path: "document", lines: "{machine: {type: worker}, unknown: 1}" }]);
+  });
+
+  test("a flow map the view can show is still fields", async () => {
+    const d = await first("machine: {type: worker, token: x}\n");
+    expect(names(objectOf(field(d.fields, "machine")))).toEqual(["type", "token"]);
+    expect(d.other).toEqual([]);
+  });
+
+  test.each([
+    ["an anchor", "&root\nmachine:\n  type: worker\n", "&root\nmachine:\n  type: worker"],
+    ["a tag", "!custom\nmachine:\n  type: worker\n", "!custom\nmachine:\n  type: worker"],
+  ])("a document with %s of its own keeps it in its raw lines", async (_, text, lines) => {
+    expect((await first(text)).other).toEqual([{ path: "document", lines }]);
+  });
+
+  test("the properties of a later document are kept without its --- marker", async () => {
+    const ds = await docs(`${LEGACY}---\n!custom\nmachine:\n  type: worker\n`);
+    expect(ds[1]!.other).toEqual([{ path: "document", lines: "!custom\nmachine:\n  type: worker" }]);
+  });
+
+  test("a $patch key in a map is Other settings, as it is in an object", async () => {
+    const d = await first("cluster:\n  etcd:\n    extraArgs:\n      $patch: delete\n");
+    expect(d.other).toEqual([{ path: "cluster/etcd/extraArgs", lines: "    extraArgs:\n      $patch: delete" }]);
+  });
+
+  test("a keep-chomped block scalar keeps its trailing blank lines in the raw rows", async () => {
+    const d = await first("machine:\n  unknown: |+\n    a\n\n\n  type: worker\n");
+    expect(d.other).toEqual([{ path: "machine/unknown", lines: "  unknown: |+\n    a\n\n" }]);
+    expect(names(objectOf(field(d.fields, "machine")))).toEqual(["type"]);
+  });
+});
+
 describe("maps", () => {
   test("a map is rows of key and value, each value read by the schema's alternatives", async () => {
     const [d] = await docs("cluster:\n  etcd:\n    extraArgs:\n      listen-metrics-urls: http://0.0.0.0:2381\n      names: [a, b]\n");
