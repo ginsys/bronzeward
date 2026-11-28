@@ -132,6 +132,11 @@ func writeRoutes() []*route {
 var injectedMembers = []string{"owner", "ownerGeneration", "generation", "controller", "epoch", "approver", "principal", "role",
 	"createdBy", "requestedBy", "actor", "approval", "provenance", "metadata"}
 
+// readsAuthorityMember names the one request member of a real route that is called like an
+// injected one: an operation takeover names the owner generation its requester read, which must
+// still be current, so it fences the takeover and sets nothing (recovery_acts.go, takeoverRequest).
+var readsAuthorityMember = map[string]string{"POST /operations/{id}/takeovers": "generation"}
+
 // injectedValues set a member to a string, replace it with an object that copies a recorded
 // approver, and clear it.
 var injectedValues = []string{`"pr_x"`, `{"principal":"pr_x","role":"approver"}`, `null`}
@@ -195,7 +200,11 @@ func TestAuthorityMemberInjection(t *testing.T) {
 			sent := 0
 			for _, name := range injectedMembers {
 				if _, ok := real[name]; ok {
-					continue // a member the route reads
+					// A route that reads a member named like authority is a decision, recorded here and nowhere else.
+					if readsAuthorityMember[rt.method+" "+rt.pattern] != name {
+						t.Errorf("%s %s reads the member %q, which is named like what the server derives", rt.method, rt.pattern, name)
+					}
+					continue
 				}
 				for _, v := range injectedValues {
 					doc := wantProblem(t, a.send(rt, call{token: tok, body: `{"` + name + `":` + v + `}`}), http.StatusBadRequest, "invalid-request")
