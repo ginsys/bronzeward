@@ -169,6 +169,8 @@ describe("the scope decisions of the recovery console (#365)", () => {
       const first = await (await row(m).$$("td"))[0]!.getText();
       return first !== "" && !first.startsWith("mch_");
     }, "the machine named in the first column", 20_000);
+    // The whole note is behind "What is this page?" (ginsys/bronzeward#1268), and a closed disclosure shows no text: open it first.
+    await $("details.about > summary").click();
     await expect($('[data-testid="page-note"]')).toHaveText(expect.stringContaining("Release"));
     await row(m).$("button=Release").click();
     await expect(row(m).$('[data-testid="write-result"]')).toHaveText(expect.stringContaining("Scope released"), { wait: 30_000 });

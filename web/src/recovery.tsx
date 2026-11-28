@@ -2,7 +2,7 @@
 // recovery banner with its scope summary and process restriction, and the state before a recovery
 // start's entry.
 
-import { type FormEvent, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type FormEvent, Fragment, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Result, useSend, useWrites } from "./forms.tsx";
 import { Head, Id, type Load, Scroll, useReads, useSettled } from "./list.tsx";
 import { Who } from "./principals.tsx";
@@ -12,7 +12,7 @@ import { useGate, useOffline, useRecoveryState, useRoles } from "./shell.tsx";
 import { ENTER_RECOVERY_NOTE, RECOVERY_NOTE, RECOVERY_ROLE_NOTE } from "./words.ts";
 import { RequestRef } from "./problems.tsx";
 import { clock, Disconnected, ProblemFields, problemFields, problemSentences, Refused, Status, when } from "./states.tsx";
-import { PageNote } from "./page-note.tsx";
+import { firstSentence, Note, PageHead, Panel } from "./layout.tsx";
 import { nextStep, ScopeDecision } from "./scope-decisions.tsx";
 import { MachineById } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
@@ -81,13 +81,13 @@ export function RecoveryRead({ res }: { res: ReadResult<Recovery> }) {
 }
 
 // The refusal's own fields stay under the restriction (§8.2): title, detail and the request ID.
+// The two alerts are the entry page's state alerts: they sit loose between its note and its panel.
 export const PreEntry = ({ res, onRead }: { res: ReadResult<unknown>; onRead: () => void }) => (
-  <>
+  <EnterRecovery onRead={onRead}>
     <Status actions={<button type="button" onClick={onRead}>Read again</button>}>{PRE_ENTRY}</Status>
     {/* The sentence above is the next step: this page is where the entry is made, so no "wait for an administrator". */}
     <ProblemFields problem={problemFields(res)} next={false} />
-    <EnterRecovery onRead={onRead} />
-  </>
+  </EnterRecovery>
 );
 
 // The administrator steps stay outside the browser (B30): the restores, the auth.deniedSubjects edit
@@ -182,13 +182,14 @@ const conflict = (o: Outcome | undefined): Problem | undefined =>
 
 // B31, on a recovery start before its entry. REC-02: a 409 conflict without `epoch` is read as a
 // normal start; one with `epoch` is a recovery start whose entry committed under another key.
-export function EnterRecovery({ onRead }: { onRead?: () => void }) {
+// `children` are the page's state alerts, drawn between its note and its panel.
+export function EnterRecovery({ onRead, children }: { onRead?: () => void; children?: ReactNode }) {
   const writes = useWrites();
   const [w, send] = useSend();
   const [bad, complain] = useState<string>();
   // Before the entry no role was read, so only the offline banner gates it: the server decides.
   const off = useOffline() ? "Offline" : undefined;
-  if (writes === undefined) return null;
+  if (writes === undefined) return <>{children}</>;
   const held = w !== undefined && writes.open.includes(w);
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -224,31 +225,36 @@ export function EnterRecovery({ onRead }: { onRead?: () => void }) {
   const o = w?.outcome;
   const p = conflict(o);
   return (
-    <form onSubmit={submit} aria-label="Enter recovery">
-      <h2>Enter recovery</h2>
-      <PageNote parts={[ENTER_RECOVERY_NOTE]} />
-      {FAMILIES.map((f) => (
-        <p key={f}>
-          <label>Restored {f} backup: <input name={`${f}-backup`} autoComplete="off" /></label>{" "}
-          <label>taken at: <input name={`${f}-taken`} autoComplete="off" placeholder="2026-11-01T08:00:00Z" /></label>
-        </p>
-      ))}
-      <p><label>Restore stopped at: <input name="stoppedAt" autoComplete="off" placeholder="2026-11-01T08:30:00Z" /></label></p>
-      <p><label>Reason: <input name="reason" autoComplete="off" /></label></p>
-      <ul>{ENTRY_EFFECTS.map((e) => <li key={e}>{e}</li>)}</ul>
-      <Steps />
-      <p>
-        <button type="submit" disabled={off !== undefined || held}>Enter recovery</button>
-        {off !== undefined && ` ${off}`}
-      </p>
-      {bad !== undefined && <p role="alert" data-testid="entry-input">{bad}</p>}
-      {p === undefined || o?.kind !== "refused" ? <Result w={w} done={() => "Recovery mode entered."} /> : (
-        <>
-          <Refused testid="write-result" problem={p} status={o.status} verb="saved" />
-          <Status testid="write-reading" role="alert">{reading(p)}</Status>
-        </>
-      )}
-    </form>
+    <>
+      <PageHead heading="Enter recovery" />
+      <Note line={firstSentence(ENTER_RECOVERY_NOTE)} parts={[ENTER_RECOVERY_NOTE]} />
+      {children}
+      <Panel title="Enter recovery">
+        <form onSubmit={submit} aria-label="Enter recovery">
+          {FAMILIES.map((f) => (
+            <Fragment key={f}>
+              <p><label>Restored {f} backup: <input name={`${f}-backup`} autoComplete="off" /></label></p>
+              <p><label>taken at: <input name={`${f}-taken`} autoComplete="off" placeholder="2026-11-01T08:00:00Z" /></label></p>
+            </Fragment>
+          ))}
+          <p><label>Restore stopped at: <input name="stoppedAt" autoComplete="off" placeholder="2026-11-01T08:30:00Z" /></label></p>
+          <p><label>Reason: <input name="reason" autoComplete="off" /></label></p>
+          <ul>{ENTRY_EFFECTS.map((e) => <li key={e}>{e}</li>)}</ul>
+          <Steps />
+          <p>
+            <button type="submit" disabled={off !== undefined || held}>Enter recovery</button>
+            {off !== undefined && ` ${off}`}
+          </p>
+          {bad !== undefined && <p role="alert" data-testid="entry-input">{bad}</p>}
+          {p === undefined || o?.kind !== "refused" ? <Result w={w} done={() => "Recovery mode entered."} /> : (
+            <>
+              <Refused testid="write-result" problem={p} status={o.status} verb="saved" />
+              <Status testid="write-reading" role="alert">{reading(p)}</Status>
+            </>
+          )}
+        </form>
+      </Panel>
+    </>
   );
 }
 
@@ -307,12 +313,12 @@ export function RecoveryConsole() {
   const held = unreleased(r.scopes);
   return (
     <>
-      <h2>Recovery</h2>
-      <PageNote parts={[RECOVERY_NOTE, !roles.includes("recovery-admin") && RECOVERY_ROLE_NOTE]} />
+      <PageHead heading="Recovery" />
+      <Note line={firstSentence(RECOVERY_NOTE)} parts={[RECOVERY_NOTE, !roles.includes("recovery-admin") && RECOVERY_ROLE_NOTE]} />
       <Status testid="recovery-state">
         Recovery mode {r.recoveryMode ? "on" : "off"}, epoch {r.epoch}{EPOCH_MEANS}. {mode === "recovery" ? RECOVERY_START : mode === "normal" ? "Server started normally." : UNKNOWN_START}
       </Status>
-      <RecoveryFacts r={r} />
+      {(r.entry != null || r.exit != null) && <Panel title="Details"><RecoveryFacts r={r} /></Panel>}
       <Scopes scopes={inRecovery(r.scopes)} stoppedAt={r.entry?.stoppedAt} />
       <ExitRecovery held={held.length} recoveryMode={r.recoveryMode} onChanged={() => again((i) => i + 1)} />
       <Revocation />
@@ -322,21 +328,23 @@ export function RecoveryConsole() {
 }
 
 function Scopes({ scopes, stoppedAt }: { scopes: readonly Scope[]; stoppedAt?: string | undefined }) {
-  if (scopes.length === 0) return <Status testid="scopes">No scope is in recovery.</Status>;
+  if (scopes.length === 0) return <Panel title="Scopes in recovery"><Status testid="scopes">No scope is in recovery.</Status></Panel>;
   return (
-    <Scroll label="Scopes in recovery" testid="scopes">
-      <Head cols={["Machine", "Scope state", "Next step", "Decision"]} />
-      <tbody>
-        {scopes.map((s) => (
-          <tr key={s.machine} data-testid={`scope-${s.machine}`}>
-            <td><MachineById id={s.machine} /></td>
-            <td data-testid="scope-state">{safeWord(s.state)}</td>
-            <td>{nextStep(s.state)}</td>
-            <td><ScopeDecision machine={s.machine} state={s.state} stoppedAt={stoppedAt} /></td>
-          </tr>
-        ))}
-      </tbody>
-    </Scroll>
+    <Panel title="Scopes in recovery">
+      <Scroll label="Scopes in recovery" testid="scopes">
+        <Head cols={["Machine", "Scope state", "Next step", "Decision"]} />
+        <tbody>
+          {scopes.map((s) => (
+            <tr key={s.machine} data-testid={`scope-${s.machine}`}>
+              <td><MachineById id={s.machine} /></td>
+              <td data-testid="scope-state">{safeWord(s.state)}</td>
+              <td>{nextStep(s.state)}</td>
+              <td><ScopeDecision machine={s.machine} state={s.state} stoppedAt={stoppedAt} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </Scroll>
+    </Panel>
   );
 }
 
@@ -357,14 +365,15 @@ export function ExitRecovery({ held, recoveryMode, onChanged }: { held: number; 
   const reason = !recoveryMode ? "Recovery mode is off" : held > 0 ? `${held} ${held === 1 ? "scope" : "scopes"} not released (ready is not released)` : undefined;
   const why = gate ?? reason;
   return (
-    <form aria-label="Exit recovery" onSubmit={(e) => (e.preventDefault(), send({ method: "POST", path: "/recovery/exits", resource: "/recovery", body: {} }))}>
-      <h3>Exit recovery</h3>
-      <p>
-        <button type="submit" disabled={why !== undefined || busy}>Exit recovery</button>
-        {why !== undefined && ` ${why}`}
-      </p>
-      <Result w={w} done={(d) => `Recovery mode left (act ${(d as components["schemas"]["ExitBody"]).act}).`} />
-    </form>
+    <Panel title="Exit recovery">
+      <form aria-label="Exit recovery" onSubmit={(e) => (e.preventDefault(), send({ method: "POST", path: "/recovery/exits", resource: "/recovery", body: {} }))}>
+        <p>
+          <button type="submit" className="outline" disabled={why !== undefined || busy}>Exit recovery</button>
+          {why !== undefined && ` ${why}`}
+        </p>
+        <Result w={w} done={(d) => `Recovery mode left (act ${(d as components["schemas"]["ExitBody"]).act}).`} />
+      </form>
+    </Panel>
   );
 }
 
@@ -419,19 +428,21 @@ export function Revocation() {
     send({ method: "POST", path: "/identity-revocations", resource: "/recovery", body: confirmation.target });
   };
   return (
-    <form aria-label="Revoke identity" onSubmit={submit}>
-      <h3>Revoke identity</h3>
-      <ul>{REVOCATION_LIMITS.map((l) => <li key={l}>{l}</li>)}</ul>
-      <p><label>Identity: <input value={identity} onChange={(e) => setIdentity(e.target.value)} autoComplete="off" /></label></p>
-      <p>or <label>Issuer: <input value={iss} onChange={(e) => setIss(e.target.value)} autoComplete="off" /></label> <label>Subject: <input value={sub} onChange={(e) => setSub(e.target.value)} autoComplete="off" /></label></p>
-      <p><label>Reason: <input value={reason} onChange={(e) => setReason(e.target.value)} autoComplete="off" /></label></p>
-      {confirmation.line !== undefined && <ConfirmationLine line={confirmation.line} />}
-      <p>
-        <button type="submit" disabled={why !== undefined || busy}>Revoke identity</button>
-        {why !== undefined && ` ${why}`}
-      </p>
-      <Result w={w} done={(d) => revoked(d as components["schemas"]["RevocationBody"])} />
-    </form>
+    <Panel title="Revoke identity">
+      <form aria-label="Revoke identity" onSubmit={submit}>
+        <ul>{REVOCATION_LIMITS.map((l) => <li key={l}>{l}</li>)}</ul>
+        <p><label>Identity: <input value={identity} onChange={(e) => setIdentity(e.target.value)} autoComplete="off" /></label></p>
+        <p>or <label>Issuer: <input value={iss} onChange={(e) => setIss(e.target.value)} autoComplete="off" /></label></p>
+        <p><label>Subject: <input value={sub} onChange={(e) => setSub(e.target.value)} autoComplete="off" /></label></p>
+        <p><label>Reason: <input value={reason} onChange={(e) => setReason(e.target.value)} autoComplete="off" /></label></p>
+        {confirmation.line !== undefined && <ConfirmationLine line={confirmation.line} />}
+        <p>
+          <button type="submit" className="outline" disabled={why !== undefined || busy}>Revoke identity</button>
+          {why !== undefined && ` ${why}`}
+        </p>
+        <Result w={w} done={(d) => revoked(d as components["schemas"]["RevocationBody"])} />
+      </form>
+    </Panel>
   );
 }
 

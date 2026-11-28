@@ -83,10 +83,10 @@ export function ScopeDecision({ machine, state, stoppedAt }: { machine: string; 
   const keep = started && (reported === undefined ? markable : state === reported);
   return (
     <>
-      {markable && <p><Action label="Mark" needs={["recovery-admin"]} onClick={send("marks")} busy={busy(mark)} /></p>}
+      {markable && <p><Action label="Mark" needs={["recovery-admin"]} onClick={send("marks")} busy={busy(mark)} variant="secondary" /></p>}
       <Result w={mark} done={marked} />
       {next(mark) !== undefined && <Status testid="write-next">{next(mark)}</Status>}
-      {state === "ready" && <p><Action label="Release" needs={["recovery-admin"]} onClick={send("releases")} busy={busy(release)} /></p>}
+      {state === "ready" && <p><Action label="Release" needs={["recovery-admin"]} onClick={send("releases")} busy={busy(release)} variant="secondary" /></p>}
       <Result w={release} done={released} />
       {next(release) !== undefined && <Status testid="write-next">{next(release)}</Status>}
       {/* The accounting's answer says what the scope "is now"; once a mark or a release has been made that sentence is stale, so the form leaves then. A refused one leaves it while the scope is still as it said, and the form leaves when a read shows the scope in another state than the answer reported (another administrator marked or released it). A mark whose outcome is `unknown` (the answer never came) keeps the form, and so keeps the sentence "is now blocked", which may then be stale: that is accepted, because the next reread of the scopes replaces it. */}

@@ -8,7 +8,7 @@ import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { Detail, Id, Ref, short, useItem, useList, usePending, viewOf } from "./list.tsx";
 import { recoveryOperationPath } from "./operation-words.ts";
-import { PageNote } from "./page-note.tsx";
+import { firstSentence, Note, PageHead, Panel } from "./layout.tsx";
 import { REASON_MAX, reasonProblem } from "./plan.tsx";
 import { Who } from "./principals.tsx";
 import { safeWord } from "./safe.ts";
@@ -118,7 +118,7 @@ function Act({ label, route, op, off, finished, body, recorded }: {
     <>
       <form onSubmit={submit} aria-label={label}>
         <p><label>Reason (at most {REASON_MAX} bytes) <input name="reason" autoComplete="off" disabled={busy} /></label></p>
-        <p><Action label={label} needs={["recovery-admin"]} submit busy={busy} /></p>
+        <p><Action label={label} needs={["recovery-admin"]} submit busy={busy} variant="secondary" /></p>
         {off !== undefined && <p data-testid={`${route}-off`}>{off}</p>}
         {note !== undefined && <p role="alert" data-testid={`${route}-input`}>{note}</p>}
       </form>
@@ -136,8 +136,7 @@ function Accounts({ op, machine, attempts }: { op: string; machine: string; atte
   const shown = attempts.filter((a) => due(a) || started.includes(a.id));
   if (shown.length === 0) return null;
   return (
-    <section aria-label="Account for an attempt">
-      <h3>Account for an attempt</h3>
+    <Panel title="Account for an attempt">
       <p>{ACCOUNT_TEXT}</p>
       {shown.map((a) => (
         <div key={a.id}>
@@ -146,7 +145,7 @@ function Accounts({ op, machine, attempts }: { op: string; machine: string; atte
             what={ATTEMPT_WHAT} done={accountedAttempt} due={due(a)} deadline={{ at: instant(a.transportDeadline) }} onStart={() => setStarted((s) => (s.includes(a.id) ? s : [...s, a.id]))} />
         </div>
       ))}
-    </section>
+    </Panel>
   );
 }
 
@@ -169,25 +168,25 @@ export function RecoveryOperation({ id }: { id: string }) {
   const generation = Math.max(ownerGeneration(events.kind === "ok" ? events.data.items : [], op.attempts ?? []), taken);
   const machine = op.subject?.machine;
   const section = (title: string, text: string, body: ReactNode) => (
-    <section aria-label={title}>
-      <h3>{title}</h3>
+    <Panel title={title}>
       <p>{text}</p>
       {body}
-    </section>
+    </Panel>
   );
   return (
     <>
-      <h2>Recovery of the operation: <OperationHeading id={id} o={op} /></h2>
-      <Detail id={id} />
-      <PageNote parts={[RECOVERY_OPERATION_NOTE, !roles.includes("recovery-admin") && RECOVERY_OPERATION_ROLE_NOTE]}>
+      <PageHead heading={<>Recovery of the operation: <OperationHeading id={id} o={op} /></>}>
+        <p className="state" data-testid="recovery-operation-state">
+          {stateLine(op.state)}{" "}
+          {machine !== undefined && <>Machine <MachineById id={machine} />. </>}
+          {(op.attempts ?? []).length === 0 ? "No attempt is recorded." : `${(op.attempts ?? []).length} attempt${(op.attempts ?? []).length === 1 ? "" : "s"} recorded.`}
+          {" "}Owner generation read: {generation}.
+        </p>
+        <Detail id={id} secondary />
+      </PageHead>
+      <Note line={firstSentence(RECOVERY_OPERATION_NOTE)} parts={[RECOVERY_OPERATION_NOTE, !roles.includes("recovery-admin") && RECOVERY_OPERATION_ROLE_NOTE]}>
         {" "}<Ref to={path} id={id}>Back to the operation</Ref>.
-      </PageNote>
-      <p data-testid="recovery-operation-state">
-        {stateLine(op.state)}{" "}
-        {machine !== undefined && <>Machine <MachineById id={machine} />. </>}
-        {(op.attempts ?? []).length === 0 ? "No attempt is recorded." : `${(op.attempts ?? []).length} attempt${(op.attempts ?? []).length === 1 ? "" : "s"} recorded.`}
-        {" "}Owner generation read: {generation}.
-      </p>
+      </Note>
       {eventsNote(events.kind) !== undefined && <Status testid="recovery-operation-events">{eventsNote(events.kind)}</Status>}
       {section("Take over", TAKE_OVER_TEXT, (
         <Act label="Take over" route="takeovers" op={id} off={takeOverWhy(op, events.kind === "loading" || rereading)} finished={tookOver} body={(reason) => ({ generation, reason })}

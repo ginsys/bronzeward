@@ -23,11 +23,12 @@ import { IngestionItem, StartImport } from "./imports.tsx";
 import { ClusterItem, Clusters, Machines } from "./machines.tsx";
 import { OnboardCluster } from "./onboard.tsx";
 import { EnterRecovery, RecoveryConsole } from "./recovery.tsx";
+import { RecoveryOperation } from "./recovery-operation.tsx";
 import {
   CREATE_A_DRAFT, CREATE_PLAN_NOTE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRIFT_NOTE, DRIFT_NOTE_OPEN, MACHINE_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
   PLAN_NOTE_APPROVE, PLANS_NOTE, PLANS_NOTE_END, PUBLISH_NOTE, RELEASE_NOTE, REVIEW_NOTE,
   ADD_MACHINE_NOTE, AUDIT_NOTE, BY_HAND_NOTE, CHANGES_NOTE, CLUSTER_NOTE, CLUSTERS_NOTE, CONNECT_NOTE, CREATE_DRAFT_NOTE, DEPENDENCY_NOTE, DRIFT_ADOPTION_NOTE, ENTER_RECOVERY_NOTE, IMPORT_NOTE, IMPORTED_NOTE, IMPORTS_NOTE,
-  MACHINES_NOTE, NOT_FOUND_NOTE, RECOVERY_NOTE, RECOVERY_ROLE_NOTE, revisionNote, SOURCES_NOTE, sourceNote, START_IMPORT_NOTE,
+  MACHINES_NOTE, NOT_FOUND_NOTE, RECOVERY_NOTE, RECOVERY_OPERATION_NOTE, RECOVERY_OPERATION_ROLE_NOTE, RECOVERY_ROLE_NOTE, revisionNote, SOURCES_NOTE, sourceNote, START_IMPORT_NOTE,
 } from "./words.ts";
 import { Writes } from "./write.ts";
 
@@ -196,8 +197,9 @@ describe("the machine page through its own reads", () => {
 // ginsys/bronzeward#1255, ginsys/bronzeward#1257, ginsys/bronzeward#1259, ginsys/bronzeward#1261, ginsys/bronzeward#1263 and
 // ginsys/bronzeward#1266, which draws the six entry forms the same way: Create draft, Start import, Plan new, Add machine, Enter a cluster by
 // hand and Connect a cluster; `group-a-layout.test.ts`, `group-b-layout.test.ts`, `group-c1-layout.test.ts`, `group-c2-layout.test.ts`,
-// `group-c3-layout.test.ts` and `group-e-layout.test.ts` pin the line of each); the recovery pages' notes are still shown whole under their title,
-// as the tests above and below assert, and so is the plan page's approval part, which stays whole inside the Approval panel. The full note's text
+// `group-c3-layout.test.ts` and `group-e-layout.test.ts` pin the line of each), and so do the recovery console, the enter-recovery page and the
+// recovery page of one operation (ginsys/bronzeward#1268, `group-f-layout.test.ts`). The plan page's approval part is the one part that
+// stays whole, inside the Approval panel. The full note's text
 // is the page-note element inside the disclosure, so its parts are asserted
 // exactly as before; what comes before it is the page header (title, state line, identifier line and the page's primary
 // action), the visible line and the disclosure's summary.
@@ -504,7 +506,6 @@ describe("the notes of the other pages", () => {
     ["Imports", () => h(Imports, { query: "", go: () => {} }), IMPORTS_NOTE],
     ["Start import", () => h(StartImport, { query: "" }), START_IMPORT_NOTE],
     ["Start drift adoption", () => h(StartImport, { query: "kind=drift-adoption&source=machine" }), DRIFT_ADOPTION_NOTE],
-    ["Enter recovery", () => h(EnterRecovery, {}), ENTER_RECOVERY_NOTE],
     ["Fragments and profiles", () => h(Sources, { query: "", go: () => {} }), SOURCES_NOTE],
     ["Audit", () => h(Audit, {}), AUDIT_NOTE],
     ["Connect a cluster", () => h(OnboardCluster, {}), CONNECT_NOTE],
@@ -704,6 +705,21 @@ describe("the notes of the other pages", () => {
     await act(async () => root.unmount());
     root = createRoot(box);
     await pageNote(h(RecoveryConsole, {}), RECOVERY_NOTE, ["author", "recovery-admin"]);
+  });
+
+  // The recovery pages (ginsys/bronzeward#1268) draw the note as a line and a disclosure, so the whole note, the role sentence included,
+  // is read inside the disclosure; `group-f-layout.test.ts` pins the line and the shape of each page.
+  test("the recovery operation page draws its note once, with its role sentence only for a person without the role", async () => {
+    served[`/operations/${OP}`] = { ...operation, state: "unresolved" };
+    const back = " Back to the operation.";
+    await pageNote(h(RecoveryOperation, { id: OP }), `${RECOVERY_OPERATION_NOTE} ${RECOVERY_OPERATION_ROLE_NOTE}${back}`, ["author"]);
+    await act(async () => root.unmount());
+    root = createRoot(box);
+    await pageNote(h(RecoveryOperation, { id: OP }), `${RECOVERY_OPERATION_NOTE}${back}`, ["author", "recovery-admin"]);
+  });
+  test("the enter-recovery page draws its note as a line and a disclosure", async () => {
+    await pageNote(h(EnterRecovery, {}), ENTER_RECOVERY_NOTE);
+    expect(box.querySelector("details.about")!.contains(note())).toBe(true);
   });
 });
 
