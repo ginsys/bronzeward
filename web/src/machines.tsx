@@ -12,7 +12,7 @@ import { Detail, EmptyList, Head, Id, IdentifierText, type Listed, More, Ref, RE
 import { SAFE, safeWord } from "./safe.ts";
 import { Status } from "./states.tsx";
 import { TalosAccessSign } from "./talosaccess.tsx";
-import { PageNote } from "./page-note.tsx";
+import { firstSentence, Note, PageHead, Panel } from "./layout.tsx";
 import { Named } from "./titles.tsx";
 import { CHANGED_ON_THE_MACHINE, CLUSTER_NOTE, DIFFERS_IN_FORM_ONLY, CLUSTERS_NOTE, LAST_READ_MATCHED, MACHINES_NOTE, NOT_MANAGED_YET, RELEASE_NOT_APPLIED_YET, UNNAMED_MACHINE, UNNAMED_MACHINE_HEADING } from "./words.ts";
 
@@ -230,20 +230,22 @@ export function Machines({ query, go }: { query: string; go: (to: string) => voi
         </>
       );
   }
+  // The console layout (docs/design/console-layout.md §4 group A): the page's one filled button is Add machine, the two ways to
+  // bring in a cluster are outlined, and the filters are the toolbar row at the top of the table's panel.
   return (
     <>
-      <h2>Machines</h2>
-      <PageNote parts={[MACHINES_NOTE]} />
-      <div className="toolbar">
-        <Filter label="Cluster:" value={cluster} options={options} onChange={(v) => filter("cluster", v)} />
-        {clusters.kind !== "loading" && unread}
-        <Filter label="State:" value={state?.[0] ?? ""} options={STATES} onChange={(v) => filter("state", v)} />
-        <RecordMachineAction cluster={cluster} />
-        <AddClusterAction />
-        <OnboardClusterAction />
-      </div>
-      {body}
-      <p>Health is not checked.</p>
+      <PageHead heading="Machines" actions={<><RecordMachineAction cluster={cluster} /><AddClusterAction variant="secondary" /><OnboardClusterAction variant="secondary" /></>} />
+      <Note line={firstSentence(MACHINES_NOTE)} parts={[MACHINES_NOTE]} />
+      {/* The panel's name differs from the table region's ("Machines"), so a screen reader never meets two regions of one name. */}
+      <Panel title="Machines" label="The machine list">
+        <div className="toolbar">
+          <Filter label="Cluster:" value={cluster} options={options} onChange={(v) => filter("cluster", v)} />
+          {clusters.kind !== "loading" && unread}
+          <Filter label="State:" value={state?.[0] ?? ""} options={STATES} onChange={(v) => filter("state", v)} />
+        </div>
+        {body}
+        <p>Health is not checked.</p>
+      </Panel>
     </>
   );
 }
@@ -271,7 +273,13 @@ export function Clusters() {
       </>
     );
   }
-  return <><h2>Clusters</h2><PageNote parts={[CLUSTERS_NOTE]} /><div className="toolbar"><AddClusterAction /><OnboardClusterAction /></div>{body}</>;
+  return (
+    <>
+      <PageHead heading="Clusters" actions={<><AddClusterAction variant="secondary" /><OnboardClusterAction /></>} />
+      <Note line={firstSentence(CLUSTERS_NOTE)} parts={[CLUSTERS_NOTE]} />
+      <Panel title="Clusters" label="The cluster list">{body}</Panel>
+    </>
+  );
 }
 
 export function ClusterItem({ id }: { id: string }) {
@@ -281,12 +289,16 @@ export function ClusterItem({ id }: { id: string }) {
   const d = c.data;
   return (
     <>
-      <h2>Cluster {d.name}</h2>
-      <PageNote parts={[CLUSTER_NOTE]} />
-      <Detail id={d.id} />
-      <p>Kubernetes endpoint {d.endpoint}, contract {d.contract}, Talos cluster ID {d.talosClusterId}.</p>
-      <p><Ref to={`/machines?cluster=${d.id}`} id={d.id}>Machines in this cluster</Ref></p>
-      <TalosAccessSign cluster={d.id} />
+      <PageHead heading={`Cluster ${d.name}`}><Detail id={d.id} secondary /></PageHead>
+      <Note line={firstSentence(CLUSTER_NOTE)} parts={[CLUSTER_NOTE]} />
+      <Panel title="Details">
+        <dl>
+          <dt>Kubernetes endpoint</dt><dd>{d.endpoint}</dd>
+          <dt>Contract</dt><dd>{d.contract}</dd>
+          <dt>Talos cluster ID</dt><dd>{d.talosClusterId}</dd>
+        </dl>
+        <TalosAccessSign cluster={d.id} />
+      </Panel>
       <ClusterMachines id={d.id} />
       <ClusterDrafts id={d.id} />
     </>
@@ -331,7 +343,11 @@ export function MachineSummary({ machines }: { machines: readonly Machine[] }) {
 function ClusterMachines({ id }: { id: string }) {
   const [list] = useList<Machine>("/machines", new URLSearchParams({ cluster: id }).toString(), true);
   const pending = usePending(list, "machines");
-  return <div className="panel"><h3>Machines</h3>{list.kind === "ok" ? <><Restarted list={list.data} /><MachineSummary machines={list.data.items} /></> : pending}</div>;
+  return (
+    <Panel title="Machines" actions={<Ref to={`/machines?cluster=${id}`} id={id}>Machines in this cluster</Ref>}>
+      {list.kind === "ok" ? <><Restarted list={list.data} /><MachineSummary machines={list.data.items} /></> : pending}
+    </Panel>
+  );
 }
 
 // GET /drafts has no cluster filter, so a cluster's open drafts are picked in the browser from every
@@ -355,5 +371,5 @@ export function OpenDraftsView({ drafts }: { drafts: readonly Draft[] }) {
 function ClusterDrafts({ id }: { id: string }) {
   const [list] = useList<Draft>("/drafts", "", true);
   const pending = usePending(list, "drafts");
-  return <div className="panel"><h3>Open drafts</h3>{list.kind === "ok" ? <><Restarted list={list.data} /><OpenDraftsView drafts={openDrafts(list.data.items, id)} /></> : pending}</div>;
+  return <Panel title="Open drafts">{list.kind === "ok" ? <><Restarted list={list.data} /><OpenDraftsView drafts={openDrafts(list.data.items, id)} /></> : pending}</Panel>;
 }

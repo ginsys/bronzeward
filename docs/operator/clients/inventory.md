@@ -53,8 +53,10 @@ the State column when no state applies. The web page uses its own badges, listed
    machine", "Frozen", "Release not applied yet", "Last read matched what was applied" and "Not
    adopted yet".
 3. Press a machine's name to open it, and **Clusters** in the navigation to see the clusters: name,
-   Kubernetes endpoint, contract and Talos cluster ID. A cluster's page shows its machines and its
-   open drafts. A person with the `author` role also sees the cluster's **Talos access** line.
+   Kubernetes endpoint, contract and Talos cluster ID. A cluster's page shows those facts under
+   **Details**, then its machines (with **Machines in this cluster**, a link to the Machines page
+   filtered to it) and its open drafts. A person with the `author` role also sees the cluster's
+   **Talos access** line under **Details**.
 4. The page ends with "Health is not checked."
 
 ## Read the columns, and what they do not establish

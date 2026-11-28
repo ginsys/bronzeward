@@ -108,7 +108,10 @@ const underTheTitle = (n: Element, ...also: (Element | null | undefined)[]) => {
   expect(h2.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // A note inside the heading follows it in document order too, so containment is refused on its own.
   expect(h2.contains(n)).toBe(false);
-  const title = [h2, ...box.querySelectorAll('[data-testid="draft-line"]'), ...[...box.querySelectorAll("small")].map((s) => s.parentElement), ...also];
+  // A page built to the console layout (the draft page, the cluster page, the Clusters and Machines lists, the operation page) has
+  // a page header (title, lines, the page's actions), and a note of more than one sentence is a visible line and the disclosure's summary.
+  const layout = [box.querySelector(".page-head"), box.querySelector('[data-testid="page-note-line"]'), box.querySelector("details.about > summary")];
+  const title = [h2, ...box.querySelectorAll('[data-testid="draft-line"]'), ...[...box.querySelectorAll("small")].map((s) => s.parentElement), ...layout, ...also];
   // Every node before the note in document order, text included (a failure line can be bare text).
   const walker = document.createTreeWalker(box, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
   const stray: string[] = [];
@@ -185,9 +188,10 @@ describe("the machine page through its own reads", () => {
   });
 });
 
-// The draft page is the one page whose note is drawn as one visible line with the full note behind "What is this page?"
-// (client contracts §10.4 item 6, ginsys/bronzeward#1255); every other page's note is still shown whole under its title, as the
-// tests above and below assert. The full note's text is the page-note element inside the disclosure, so its parts are asserted
+// The draft page, the cluster page, the Clusters and Machines lists and the operation page draw their note as one visible line
+// with the full note behind "What is this page?" (client contracts §10.4 item 6, ginsys/bronzeward#1255 and ginsys/bronzeward#1257;
+// `group-a-layout.test.ts` pins the four of group A, and that every other page shows its note whole); every other page's note is
+// still shown whole under its title, as the tests above and below assert. The full note's text is the page-note element inside the disclosure, so its parts are asserted
 // exactly as before; what comes before it is the page header (title, state line, identifier line and the page's primary
 // action), the visible line and the disclosure's summary.
 describe("the draft page's note, a part only where its control shows", () => {

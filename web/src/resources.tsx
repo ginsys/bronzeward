@@ -33,6 +33,7 @@ import { startedBy } from "./operation-words.ts";
 import { safeText, safeWord } from "./safe.ts";
 import { alertSentence, assignmentName, dependencyName, importedConfigurationTitle, operationTitle, savedTitle } from "./titles.ts";
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
+import { firstSentence, Note, PageHead } from "./layout.tsx";
 import { PageNote } from "./page-note.tsx";
 import {
   AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DIFFERS_IN_FORM_ONLY, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
@@ -84,11 +85,12 @@ function ListOf<T>({ label, path, query = "", cols, empty, keyOf = byId, head }:
 }
 
 // `n` is bumped to read the item again.
-function ItemOf<T>({ path, what, title, children, n, onSettled }: { path: string; what: string; title: (t: T | undefined) => ReactNode; children: (t: T) => ReactNode; n?: number; onSettled?: () => void }) {
+// `head` draws the title as the console layout's page header (layout.tsx); a page that is not built to the blocks yet keeps its h2.
+function ItemOf<T>({ path, what, title, children, n, onSettled, head = false }: { path: string; what: string; title: (t: T | undefined) => ReactNode; children: (t: T) => ReactNode; n?: number; onSettled?: () => void; head?: boolean }) {
   const item = useItem<T>(path, undefined, n, onSettled);
   const pending = usePending(item, what);
   const t = item.kind === "ok" ? item.data : undefined;
-  return <><h2>{title(t)}</h2>{t === undefined ? pending : children(t)}</>;
+  return <>{head ? <PageHead heading={title(t)} /> : <h2>{title(t)}</h2>}{t === undefined ? pending : children(t)}</>;
 }
 
 type Row = readonly [string, ReactNode];
@@ -630,11 +632,11 @@ export function OperationItem({ id }: { id: string }) {
   const [n, setN] = useState(0);
   const reread = useCallback(() => setN((x) => x + 1), []);
   return (
-    <ItemOf<S["OperationBody"]> path={`/operations/${encodeURIComponent(id)}`} what="the operation" n={n}
+    <ItemOf<S["OperationBody"]> path={`/operations/${encodeURIComponent(id)}`} what="the operation" n={n} head
       title={(o) => (o === undefined ? `Operation ${short(id)}` : <OperationHeading id={id} o={o} />)}>
       {(o) => (
         <>
-          <PageNote parts={[OPERATION_NOTE]} />
+          <Note line={firstSentence(OPERATION_NOTE)} parts={[OPERATION_NOTE]} />
           <OperationTimeline id={id} o={o} reread={reread} />
           <Fields rows={[
             ["Kind", safeWord(o.kind)], ["State", safeWord(o.state)], ["Subject", <Subject s={o.subject} />], ["Created", <>{when(o.createdAt)} by <StartedBy o={o} /></>],

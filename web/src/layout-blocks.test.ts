@@ -106,6 +106,13 @@ describe("Note", () => {
     const line = box.querySelector('[data-testid="page-note-line"]')!;
     expect(line.nextElementSibling!.tagName).toBe("DETAILS");
   });
+  test("a note whose line is the whole note is drawn as the plain page note: no line, no disclosure, the same sentence once", async () => {
+    await mount(h(Note, { line: "This is one run of work.", parts: ["This is one run of work."] }));
+    expect(box.querySelector("details.about")).toBeNull();
+    expect(box.querySelector('[data-testid="page-note-line"]')).toBeNull();
+    expect(box.querySelectorAll('[data-testid="page-note"]')).toHaveLength(1);
+    expect(box.querySelector('[data-testid="page-note"]')!.textContent).toBe("This is one run of work.");
+  });
   test("a part that is false or undefined is left out of the full note, as PageNote leaves it", async () => {
     await mount(h(Note, { line: "x", parts: ["one.", false, undefined, "two."] }));
     expect(box.querySelector('[data-testid="page-note"]')!.textContent).toBe("one. two.");

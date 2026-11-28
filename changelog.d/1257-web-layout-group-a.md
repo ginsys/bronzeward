@@ -1,0 +1,2 @@
+Changed
+- The web console's cluster page, Clusters list, Machines list and operation page use the console layout blocks: a page header with the page's one filled button, the note as one line with the whole note behind "What is this page?", the cluster's endpoint, contract and ID in a Details panel, and each table in a bordered panel with the list filters on top. The words stay. Refs ginsys/bronzeward#1257.
