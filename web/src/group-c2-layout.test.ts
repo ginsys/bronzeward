@@ -32,6 +32,12 @@ const release = (over: Record<string, unknown> = {}) => ({
   id: REL, cluster: "cl_a", publishedAt: AT, publishedBy: null, draft: "drf_a", draftRevision: 3, operation: "op_a",
   renderer: { contract: "v1.14", machineryVersion: "1", kubernetesVersion: "1.34" }, sources: [], machines: [{ machine: MCH, mode: "no-reboot", publicationObservation: null }], ...over,
 });
+// One observation and one timeline entry, so the machine page draws its two tables; the timeline has an older page, so it draws Load older.
+const observation = {
+  id: "obs_a", machine: MCH, basis: 4, revision: 5, purpose: "scheduled", publicationGeneration: null, plan: null, operation: null, endpoint: "10.5.0.2:50000", controller: "ctl_a",
+  startedAt: AT, at: AT, access: null, smbiosUuid: null, talosNodeId: "node-a", talosClusterId: null, assignmentEvidence: null, runningVersion: null, resourceVersion: null, health: null, unread: {},
+};
+const entry = { revision: 7, epoch: "e0", at: AT, kind: "name-change", entry: { previous: null, new: "cp-1" } };
 const review = (over: Record<string, unknown> = {}) => ({ release: REL, machine: MCH, mode: "metal", configuration: "machine:\n  token: <redacted:schema>", provenance: [], ...over });
 
 let root: Root;
@@ -142,6 +148,22 @@ describe("the machine page", () => {
     expect(panel("Machine details").querySelector('[data-testid="observed"]')).not.toBeNull();
   });
   test("Observations and the Timeline are panels with their tables in scroll regions of their own; Load older stays under the table", async () => {
+    serve();
+    served[`/machines/${MCH}/observations`] = { items: [observation], next: undefined };
+    served[`/machines/${MCH}/timeline`] = { items: [entry], next: "c1", tail: "t1" };
+    await shown(h(MachineItem, { id: MCH }));
+    const obs = panel("Observations list").querySelector('.scroll[aria-label="Observations"]')!;
+    expect(obs.querySelector("table tbody tr")).not.toBeNull();
+    expect(obs.parentElement).toBe(panel("Observations list"));
+    const timeline = panel("Machine timeline");
+    const rows = timeline.querySelector('.scroll[aria-label="Timeline"]')!;
+    expect(rows.querySelectorAll("table tbody tr")).toHaveLength(1);
+    expect(rows.parentElement).toBe(timeline);
+    const older = [...timeline.querySelectorAll("button")].find((b) => text(b) === "Load older")!;
+    expect(older).toBeDefined();
+    before(rows, older);
+  });
+  test("with nothing read the panels say so", async () => {
     serve();
     await shown(h(MachineItem, { id: MCH }));
     expect(text(panel("Observations list"))).toContain("No observation recorded.");
@@ -275,11 +297,16 @@ describe("a long unbroken value stays inside its panel", () => {
   test("a long node ID and endpoint sit in the machine's Status line and Details grid, which wrap anywhere", async () => {
     served[`/machines/${MCH}`] = machine({ talosEndpoint: LONG, hardware: { smbiosUuid: null, talosNodeId: LONG, serial: null } });
     served[`/machines/${MCH}/position`] = position(machine());
+    served[`/machines/${MCH}/observations`] = { items: [{ ...observation, endpoint: LONG, talosNodeId: LONG }], next: undefined };
+    served[`/machines/${MCH}/timeline`] = { items: [{ ...entry, entry: { previous: null, new: "cp-1", reason: LONG } }], next: undefined };
     await shown(h(MachineItem, { id: MCH }));
     const status = panel("Machine status");
     expect(text(status.querySelector(":scope > p"))).toContain(LONG);
-    expect(box.querySelector("table")?.closest(".scroll")).not.toBeNull();
-    for (const t of box.querySelectorAll("table")) expect(t.parentElement!.classList.contains("scroll")).toBe(true);
+    // Both tables are drawn (the observations' and the timeline's), each directly in a scroll region of its own.
+    const tables = [...box.querySelectorAll("table")];
+    expect(tables).toHaveLength(2);
+    for (const t of tables) expect(t.parentElement!.classList.contains("scroll")).toBe(true);
+    expect(text(panel("Machine timeline"))).toContain(LONG);
   });
   test("a long unbroken configuration line is one text node in the document's pre, which wraps, and a long provenance path stays in a scroll region", async () => {
     served[`/releases/${REL}/machines/${MCH}/review`] = review({
@@ -291,6 +318,8 @@ describe("a long unbroken value stays inside its panel", () => {
     await shown(h(ReviewItem, { release: REL, machine: MCH }));
     const pre = panel("The rendered configuration").querySelector('pre[data-testid="document"]')!;
     expect(pre.textContent).toContain(LONG);
-    for (const t of panel("Provenance (secret references only)").querySelectorAll("table")) expect(t.parentElement!.classList.contains("scroll")).toBe(true);
+    const tables = [...panel("Provenance (secret references only)").querySelectorAll("table")];
+    expect(tables).toHaveLength(1);
+    for (const t of tables) expect(t.parentElement!.classList.contains("scroll")).toBe(true);
   });
 });
