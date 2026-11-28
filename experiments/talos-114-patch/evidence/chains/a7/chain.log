@@ -1,0 +1,18 @@
+2026-11-28T16:45:06Z checkout 34e50e2493c714dd1fb9e5b8009788ee34603a93, 0 changed paths; steps: up s1p s3h s2p s3rp s4 s5p down
+2026-11-28T16:45:06Z start up: up
+2026-11-28T16:47:15Z end up: exit 0;                 issuer http://issuer:5556 on the Compose network only
+2026-11-28T16:47:15Z start s1p: s1 pass
+2026-11-28T16:49:31Z end s1p: exit 0; s1 pass: 0 failed; evidence in <scratch>/fixtures/.state/evidence/s1-pass-20261128T164715Z, bundle <scratch>/fixtures/.state/evidence/20261128T164904Z
+2026-11-28T16:49:31Z start s3h: s3 handover
+2026-11-28T16:50:49Z end s3h: exit 0; s3 handover: 0 failed; evidence in <scratch>/fixtures/.state/evidence/s3-handover-20261128T164931Z, bundle <scratch>/fixtures/.state/evidence/20261128T165028Z
+2026-11-28T16:50:49Z start s2p: s2 pass
+2026-11-28T16:53:23Z end s2p: exit 0; s2 pass: 0 failed; evidence in <scratch>/fixtures/.state/evidence/s2-pass-20261128T165049Z, bundle <scratch>/fixtures/.state/evidence/20261128T165302Z
+2026-11-28T16:53:23Z start s3rp: s3 pass
+2026-11-28T16:56:39Z end s3rp: exit 0; s3 pass: 0 failed; evidence in <scratch>/fixtures/.state/evidence/s3-pass-20261128T165324Z, bundle <scratch>/fixtures/.state/evidence/20261128T165613Z
+2026-11-28T16:56:39Z start s4: s4 run
+2026-11-28T16:58:23Z end s4: exit 0; s4 run: 0 failed; evidence in <scratch>/fixtures/.state/evidence/s4-run-20261128T165640Z, bundle <scratch>/fixtures/.state/evidence/20261128T165755Z
+2026-11-28T16:58:23Z start s5p: s5 pass
+2026-11-28T17:02:09Z end s5p: exit 0; s5 pass: 0 failed; evidence in <scratch>/fixtures/.state/evidence/s5-pass-20261128T165823Z, bundle <scratch>/fixtures/.state/evidence/20261128T170142Z
+2026-11-28T17:02:09Z start down: down
+2026-11-28T17:02:15Z end down: exit 0; fixture is down: no containers, networks, volumes or state left
+2026-11-28T17:02:15Z done

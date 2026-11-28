@@ -1,0 +1,381 @@
+commit 896eada03d9f036f92dbe7eb81331b3c81e5c717
+BUNDLE: head 896eada03d9f036f92dbe7eb81331b3c81e5c717 on base d8c4ba5289a48ff51bd96c0cc244eb279e0c2085, 11849 bytes
+JOB_CREATED: verify-bronzeward-896eada-1795876279-34f9fa66 in heavy-runs for head 896eada03d9f036f92dbe7eb81331b3c81e5c717
+POD_NODE=alcorak
+POD_HEAD=896eada03d9f036f92dbe7eb81331b3c81e5c717
+mise: installing mise...
+#=#=#                                                                                                                                                     0.2%##                                                                         3.2%###########                                                               16.5%#######################                                                   33.2%###################################                                       49.6%###############################################                           65.6%#########################################################                 80.5%####################################################################      95.6%######################################################################## 100.0%
+mise: installed successfully to mise
+mise: run `mise --help` to get started
+SETUP_SECONDS=46
+TOOLCHAIN mise=2026.10.17 linux-x64 (2026-10-21)
+TOOLCHAIN tools=actionlint  1.7.12   mise.toml  1.7.12|go          1.27.1   mise.toml  1.27.1|goreleaser  2.19.0   mise.toml  2.19.0|jq          1.8.2    the pod mise config   1.8.2|node        24.22.1  mise.toml  24.22.1|python      3.12.16  the pod mise config   3.12|shellcheck  0.11.0   mise.toml  0.11.0
+TOOLCHAIN github_token=MISE_GITHUB_TOKEN
+TOOLCHAIN go=go version go1.27.1 linux/amd64 goroot=1.27.1 sha256=30969f97169d7f43fe6a085873d75613adc21e30818a8c61d95bd27275df4624
+VERIFY_CMD=experiments/talos-114-patch/run/probe
+work directory: talos114.A7ud1F
+built a from d8c4ba5289a48ff51bd96c0cc244eb279e0c2085 with 0 patch(es)
+built c from d8c4ba5289a48ff51bd96c0cc244eb279e0c2085 with 1 patch(es)
+== run out-a: machinery v1.14.5
+probe gen v114-controlplane commented=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
+probe gen v114-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig,KubeAggregatorCAConfig,KubeAdmissionControlConfig,KubeAuditPolicyConfig,KubeAuthenticationConfig,KubeAuthorizerConfig,KubeAuthorizerConfig,KubeEtcdEncryptionConfig,KubeServiceAccountConfig,KubeAPIServerConfig,KubeControllerManagerConfig,KubeSchedulerConfig,KubeProxyConfig,KubeFlannelCNIConfig,KubeCoreDNSConfig
+probe gen v114-worker commented=75899722496c9c8165d7df2e7c5cf119d3827c7ac5c92f84b86de9e053bd20e3 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
+probe gen v114-worker kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig
+probe gen default-controlplane commented=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
+probe gen default-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig,KubeAggregatorCAConfig,KubeAdmissionControlConfig,KubeAuditPolicyConfig,KubeAuthenticationConfig,KubeAuthorizerConfig,KubeAuthorizerConfig,KubeEtcdEncryptionConfig,KubeServiceAccountConfig,KubeAPIServerConfig,KubeControllerManagerConfig,KubeSchedulerConfig,KubeProxyConfig,KubeFlannelCNIConfig,KubeCoreDNSConfig
+probe gen default-worker commented=75899722496c9c8165d7df2e7c5cf119d3827c7ac5c92f84b86de9e053bd20e3 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
+probe gen default-worker kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig
+probe enc sbox generated=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d providers=secretbox:key2
+probe case own-enc-sbox ok materialized=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d
+probe enc aescbc generated=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5 providers=secretbox:key1
+probe case own-enc-aescbc ok materialized=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5
+probe enc both generated=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230 providers=secretbox:key2,secretbox:key1
+probe case own-enc-both ok materialized=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230
+probe input base-controlplane.yaml=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5
+probe input base-worker.yaml=75899722496c9c8165d7df2e7c5cf119d3827c7ac5c92f84b86de9e053bd20e3
+probe input base-trim.yaml=1a5b8a0fff2fdec8507b9e02cb20b3136f6e840504644df0700c7dcfb5c40de4
+probe input frag-etcdca.yaml=f8c878cdbed447ed23224bbed9f728d89928b75006e442706b0020af45c1a44d
+probe case full-nofrag ok materialized=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539 redacted=3da3cca4192fefc2cb62cc7ca227f0fa354fd492682d0f6c26eb64bf42fcda30 formonly=true hostname=none:""
+probe case full-nofrag records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case full-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-nofrag ok materialized=d7058ae77659d79bfe314684103d3b59cef8d4117c93cf0f906da2974b344b92 redacted=0792301e161b0ead2fac20d6ccbad9025833fd7533038142f2ee1107600eee9f formonly=true hostname=none:""
+probe case trim-nofrag records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case worker-nofrag ok materialized=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff redacted=7b185af8ba800903acad18b21b79e287294554fcb7a9dbfafac63ad65587e062 formonly=true hostname=none:""
+probe case worker-nofrag records provenance=1a25dcca59cc762bde0c6294230e16d4fe0e27141f083044cb4d11a9cc57aa15 effective=71cc3992b0e1d7e4d42b6698dca1e60e171dd48db0d442ba9cc61ed0642b1258 reproduction=e80cddc1dacf9bcdb608ae678a7bf0d7fcd5d0eda5940f626b2e546c72bd11a5
+probe case worker-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own worker-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-kubenode-labels ok materialized=3b7a1c23d962e17754ef59879c58c833e80a87b4e17534d71eb8fce108d89995 redacted=10b23a7ad58a31af76315a89b580e7fe3174aa2ddd2d633a6d5bef1db96df8d9 formonly=false hostname=none:""
+probe case full-kubenode-labels records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case full-kubenode-labels kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-kubenode-labels kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case control-kubenode-other ok materialized=91e8b33faa3d6d4e30465887523ec53eae79967db601c4bc43f8b4e147bd6151 redacted=9e1048d7efdc19cc64fe26a2181e6b1c960b7235ddd2ee45bbb8bc316023c640 formonly=false hostname=none:""
+probe case control-kubenode-other records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case control-kubenode-other kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own control-kubenode-other kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-v1alpha1-nodelabels refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* .machine.nodeLabels is already set in v1alpha1 config\n\n"
+probe case full-kubenode-ref ok materialized=5db341668fed40f7e419de8760db395ee30df143b3d48abe5c90e4c052535c11 redacted=2320d37160268aaa7bcbb280003cc5287e626c2afdbdafba3e5d2cf95b8ada97 formonly=false hostname=none:""
+probe case full-kubenode-ref records provenance=fe507c05ddb75b7800aeafc856cace815c01e631c143bf876d8558ffc116f7d4 effective=eb1898d7bdcf9231608c81d42ac579f18c6f3dec6f6ac5cce28f5bb7f8269b73 reproduction=6083e656a242e06d552f1d695ac839d00b186dea701c48b91853c30a55c63752
+probe case full-kubenode-ref kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-kubenode-ref kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-ref-string ok materialized=eb3d0d2c95a6494a72d882b05e68802d81bc32419d934bb14442b07531e6474c redacted=658dc01bdeea89f2482948efdd4ce9b32cf006bc98aceb1cfeef790548765f6c formonly=false hostname=none:""
+probe case trim-ref-string records provenance=2d03f9f5dac7c131d3cf1b5fe06a7b833283fbcbc4b1ecb223f5d891a91758ad effective=a151bf7429e28039de09e08bfc359beff8a80852aa690250adf8917c98d25f3b reproduction=532b4dbb21725a11a878653209d32e6dbe83c17635249a6aa8e844e2826c9b66
+probe case trim-ref-string kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-ref-string kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-each-kind-embedded ok materialized=e4f1e3880706654df22e2fd4838f5b7479b60ed0fb0f00ece31c5f91d85f78d9 redacted=a8baddc7d007c638b3bdaa824a5ecd0533f4c662345c12d91730ba7f43bca5a4 formonly=false hostname=none:""
+probe case trim-each-kind-embedded records provenance=a3b5b0542a57e09f39a63c1ea71241c7f732f3b691ec765baae563be73e6f83a effective=b0748f6c734d4b0903ae4357a054ecf93098e701b136e4516c79cce5fd3682f1 reproduction=a312abb486af05cffd1378d1c77257a1a23d55a8e1ea982bb1f77a8aeb53caba
+probe case trim-each-kind-embedded kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-each-kind-embedded kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-equal-hosts refused stage=compile rule=fidelity input="" paths=[] message=""
+probe case trim-embedded-copy refused stage=compile rule=exact-copy input="" paths=["doc[0]/cluster/inlineManifests/0/contents|json/copy"] message=""
+probe case trim-mark ok materialized=def3e46ca453ae8f44504283cf28e8ee116eb6647d4c1e09a4d61b0462ce2084 redacted=43ea4de695768bbf9c1a368f7f5399942631e30738aa96570abc4822f727a0af formonly=false hostname=none:""
+probe case trim-mark records provenance=a6d0c114bcfcaeec1e1352fbf9adb88d2bfca40f584bd2eaa4fda76df58e79fd effective=f040d2983b220b1f2b42c3803437a03ad51316edbc22654e6455c1a45f948ecc reproduction=02440b9178017c11c7535d08419182438f34a2f863f721780be123ba98b9245d
+probe case trim-mark kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-mark kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-mark ok materialized=3b7a1c23d962e17754ef59879c58c833e80a87b4e17534d71eb8fce108d89995 redacted=605f5b0a396f8a62a3c3ac21208cf79d0728b6334bba4daa7f70a3135954fa25 formonly=false hostname=none:""
+probe case full-mark records provenance=aad9ec096b983a57ab16c78fbf6ff9faa8abcc1bb70c4331d4d8243c91eff04e effective=5fadc9eef411d1abbbc8cd22b525f838bff95ebfd188a4c8003065a8cbdf5838 reproduction=4c15c6cf06bfbae0ab5a5c2d6eaa5da6bd6e4259892786274272712b89dbb9f5
+probe case full-mark kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-mark kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-subnet-literal ok materialized=45835581dd4f12d0a1c577b39358545c8750f708aa64b429c41142f2a95cfc73 redacted=085f05972edcb7f0bd20908badaafe84e7ef77c899d8d7064cce36040830b399 formonly=false hostname=none:""
+probe case trim-subnet-literal records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-subnet-literal kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-subnet-literal kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-subnet-marked refused stage=compile rule=fidelity input="" paths=[] message=""
+probe case trim-reserved-text refused stage=compile rule=reserved-text input="" paths=["doc[0]"] message=""
+probe case trim-type-mismatch refused stage=compile rule=rejected input="fragment[1]" paths=[] message="error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `<redacted:port@1>...` into int"
+probe case trim-invalid-domain refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* v1alpha1.Config: 1 error occurred:\n\t* \"<redacted:domain@1>\" is not a valid DNS name\n\n\n\n"
+probe case trim-deprecated-files ok materialized=f3cbda3ab049341c45e25a66feb1559896a10bda4e4675aeb9d5a7500e9f346f redacted=d4753be1d25d9c703539982824767b05174768550a6540ddb3c56978f76f0bd4 formonly=false hostname=none:""
+probe case trim-deprecated-files records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-deprecated-files kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-deprecated-files kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-hostdns-metal ok materialized=87a276291ecb02601ebc4e0d608d4f8f13c91478904155fea2e6dd54e15ade74 redacted=9a878c9a15f6343054af414b74e5e7d2cc8cda865fc9e00a1d9df4e83959a09b formonly=false hostname=none:""
+probe case trim-hostdns-metal records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-hostdns-metal kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-hostdns-metal kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-hostdns-container refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* forwardKubeDNSToHost must be enabled in container mode\n\n"
+probe case trim-hostdns-cloud ok materialized=87a276291ecb02601ebc4e0d608d4f8f13c91478904155fea2e6dd54e15ade74 redacted=9a878c9a15f6343054af414b74e5e7d2cc8cda865fc9e00a1d9df4e83959a09b formonly=false hostname=none:""
+probe case trim-hostdns-cloud records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-hostdns-cloud kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-hostdns-cloud kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-hostname-fill ok materialized=dc3ed1a10707928fc8f96ea9831655b9ac3f01ca101bfd7c06098e01349183f3 redacted=829492cb6034cfbf1bcb289d4a1f5ed271b77df48fe7d11e50e4abe44faa3f86 formonly=false hostname=machine-name:"node-a"
+probe case full-hostname-fill records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case full-hostname-fill kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-hostname-fill kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-short-secret refused stage=compile rule=invalid input="" paths=[] message="<withheld: the validation message may quote a sensitive value>"
+probe case trim-bad-secret refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* DiscoveryIdentityConfig: invalid clusterSecret: failed to decode from base64: <redacted:s-bqlozm42y7lpusssll2ohbxi5a@1>; illegal base64 data at input byte 5\n\n"
+probe case enc-sbox ok materialized=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d redacted=3da3cca4192fefc2cb62cc7ca227f0fa354fd492682d0f6c26eb64bf42fcda30 formonly=true hostname=none:""
+probe case enc-sbox records provenance=af5a41a7e42b5e014eee9d5d8c4a15cef53d80126fa666668ef7b17851c8fbed effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=42a34784c067f1d2667c4156d73354ddcba8ac1b404abf5524e7ecc7694a95af
+probe case enc-sbox kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own enc-sbox kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case enc-aescbc ok materialized=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5 redacted=cb4bcf9f425f5374ccad85aef586c4e2522418a09c7bd6ee1bf5cb0eae0e7274 formonly=true hostname=none:""
+probe case enc-aescbc records provenance=c94a20af15bb6f228ea1deaed3ac5d63a6cbfe6778a3920be12ab9bbc37f4618 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=c209ff5865fdb227f9cceacf6e6f5eacf02a7db8d30c418cc65ec08e2fd18ae5
+probe case enc-aescbc kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own enc-aescbc kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case enc-both ok materialized=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230 redacted=58c1d597faeb6d44b8f9bf03e8fee0f1639daa04938ebad54874956950e11f9e formonly=true hostname=none:""
+probe case enc-both records provenance=4807da73ad8da0fb431b180f839f29509dafd4dd4f8fb97ab2892bb9ca896a88 effective=b04c40b506a7fad42839ee1599f908863a26d091cc6eeedaa95bde092bb60b50 reproduction=7ffa0d4578855e82e14181252ddedbe8f840a5a556feeb070b936ce604ade63e
+probe case enc-both kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own enc-both kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe cases=28
+ok  	github.com/ginsys/bronzeward/internal/compile	12.918s
+== run out-a2: machinery v1.14.5
+probe gen v114-controlplane commented=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
+probe gen v114-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig,KubeAggregatorCAConfig,KubeAdmissionControlConfig,KubeAuditPolicyConfig,KubeAuthenticationConfig,KubeAuthorizerConfig,KubeAuthorizerConfig,KubeEtcdEncryptionConfig,KubeServiceAccountConfig,KubeAPIServerConfig,KubeControllerManagerConfig,KubeSchedulerConfig,KubeProxyConfig,KubeFlannelCNIConfig,KubeCoreDNSConfig
+probe gen v114-worker commented=75899722496c9c8165d7df2e7c5cf119d3827c7ac5c92f84b86de9e053bd20e3 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
+probe gen v114-worker kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig
+probe gen default-controlplane commented=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
+probe gen default-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig,KubeAggregatorCAConfig,KubeAdmissionControlConfig,KubeAuditPolicyConfig,KubeAuthenticationConfig,KubeAuthorizerConfig,KubeAuthorizerConfig,KubeEtcdEncryptionConfig,KubeServiceAccountConfig,KubeAPIServerConfig,KubeControllerManagerConfig,KubeSchedulerConfig,KubeProxyConfig,KubeFlannelCNIConfig,KubeCoreDNSConfig
+probe gen default-worker commented=75899722496c9c8165d7df2e7c5cf119d3827c7ac5c92f84b86de9e053bd20e3 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
+probe gen default-worker kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig
+probe enc sbox generated=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d providers=secretbox:key2
+probe case own-enc-sbox ok materialized=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d
+probe enc aescbc generated=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5 providers=secretbox:key1
+probe case own-enc-aescbc ok materialized=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5
+probe enc both generated=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230 providers=secretbox:key2,secretbox:key1
+probe case own-enc-both ok materialized=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230
+probe input base-controlplane.yaml=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5
+probe input base-worker.yaml=75899722496c9c8165d7df2e7c5cf119d3827c7ac5c92f84b86de9e053bd20e3
+probe input base-trim.yaml=1a5b8a0fff2fdec8507b9e02cb20b3136f6e840504644df0700c7dcfb5c40de4
+probe input frag-etcdca.yaml=f8c878cdbed447ed23224bbed9f728d89928b75006e442706b0020af45c1a44d
+probe case full-nofrag ok materialized=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539 redacted=3da3cca4192fefc2cb62cc7ca227f0fa354fd492682d0f6c26eb64bf42fcda30 formonly=true hostname=none:""
+probe case full-nofrag records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case full-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-nofrag ok materialized=d7058ae77659d79bfe314684103d3b59cef8d4117c93cf0f906da2974b344b92 redacted=0792301e161b0ead2fac20d6ccbad9025833fd7533038142f2ee1107600eee9f formonly=true hostname=none:""
+probe case trim-nofrag records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case worker-nofrag ok materialized=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff redacted=7b185af8ba800903acad18b21b79e287294554fcb7a9dbfafac63ad65587e062 formonly=true hostname=none:""
+probe case worker-nofrag records provenance=1a25dcca59cc762bde0c6294230e16d4fe0e27141f083044cb4d11a9cc57aa15 effective=71cc3992b0e1d7e4d42b6698dca1e60e171dd48db0d442ba9cc61ed0642b1258 reproduction=e80cddc1dacf9bcdb608ae678a7bf0d7fcd5d0eda5940f626b2e546c72bd11a5
+probe case worker-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own worker-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-kubenode-labels ok materialized=3b7a1c23d962e17754ef59879c58c833e80a87b4e17534d71eb8fce108d89995 redacted=10b23a7ad58a31af76315a89b580e7fe3174aa2ddd2d633a6d5bef1db96df8d9 formonly=false hostname=none:""
+probe case full-kubenode-labels records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case full-kubenode-labels kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-kubenode-labels kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case control-kubenode-other ok materialized=91e8b33faa3d6d4e30465887523ec53eae79967db601c4bc43f8b4e147bd6151 redacted=9e1048d7efdc19cc64fe26a2181e6b1c960b7235ddd2ee45bbb8bc316023c640 formonly=false hostname=none:""
+probe case control-kubenode-other records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case control-kubenode-other kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own control-kubenode-other kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-v1alpha1-nodelabels refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* .machine.nodeLabels is already set in v1alpha1 config\n\n"
+probe case full-kubenode-ref ok materialized=5db341668fed40f7e419de8760db395ee30df143b3d48abe5c90e4c052535c11 redacted=2320d37160268aaa7bcbb280003cc5287e626c2afdbdafba3e5d2cf95b8ada97 formonly=false hostname=none:""
+probe case full-kubenode-ref records provenance=fe507c05ddb75b7800aeafc856cace815c01e631c143bf876d8558ffc116f7d4 effective=eb1898d7bdcf9231608c81d42ac579f18c6f3dec6f6ac5cce28f5bb7f8269b73 reproduction=6083e656a242e06d552f1d695ac839d00b186dea701c48b91853c30a55c63752
+probe case full-kubenode-ref kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-kubenode-ref kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-ref-string ok materialized=eb3d0d2c95a6494a72d882b05e68802d81bc32419d934bb14442b07531e6474c redacted=658dc01bdeea89f2482948efdd4ce9b32cf006bc98aceb1cfeef790548765f6c formonly=false hostname=none:""
+probe case trim-ref-string records provenance=2d03f9f5dac7c131d3cf1b5fe06a7b833283fbcbc4b1ecb223f5d891a91758ad effective=a151bf7429e28039de09e08bfc359beff8a80852aa690250adf8917c98d25f3b reproduction=532b4dbb21725a11a878653209d32e6dbe83c17635249a6aa8e844e2826c9b66
+probe case trim-ref-string kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-ref-string kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-each-kind-embedded ok materialized=e4f1e3880706654df22e2fd4838f5b7479b60ed0fb0f00ece31c5f91d85f78d9 redacted=a8baddc7d007c638b3bdaa824a5ecd0533f4c662345c12d91730ba7f43bca5a4 formonly=false hostname=none:""
+probe case trim-each-kind-embedded records provenance=a3b5b0542a57e09f39a63c1ea71241c7f732f3b691ec765baae563be73e6f83a effective=b0748f6c734d4b0903ae4357a054ecf93098e701b136e4516c79cce5fd3682f1 reproduction=a312abb486af05cffd1378d1c77257a1a23d55a8e1ea982bb1f77a8aeb53caba
+probe case trim-each-kind-embedded kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-each-kind-embedded kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-equal-hosts refused stage=compile rule=fidelity input="" paths=[] message=""
+probe case trim-embedded-copy refused stage=compile rule=exact-copy input="" paths=["doc[0]/cluster/inlineManifests/0/contents|json/copy"] message=""
+probe case trim-mark ok materialized=def3e46ca453ae8f44504283cf28e8ee116eb6647d4c1e09a4d61b0462ce2084 redacted=43ea4de695768bbf9c1a368f7f5399942631e30738aa96570abc4822f727a0af formonly=false hostname=none:""
+probe case trim-mark records provenance=a6d0c114bcfcaeec1e1352fbf9adb88d2bfca40f584bd2eaa4fda76df58e79fd effective=f040d2983b220b1f2b42c3803437a03ad51316edbc22654e6455c1a45f948ecc reproduction=02440b9178017c11c7535d08419182438f34a2f863f721780be123ba98b9245d
+probe case trim-mark kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-mark kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-mark ok materialized=3b7a1c23d962e17754ef59879c58c833e80a87b4e17534d71eb8fce108d89995 redacted=605f5b0a396f8a62a3c3ac21208cf79d0728b6334bba4daa7f70a3135954fa25 formonly=false hostname=none:""
+probe case full-mark records provenance=aad9ec096b983a57ab16c78fbf6ff9faa8abcc1bb70c4331d4d8243c91eff04e effective=5fadc9eef411d1abbbc8cd22b525f838bff95ebfd188a4c8003065a8cbdf5838 reproduction=4c15c6cf06bfbae0ab5a5c2d6eaa5da6bd6e4259892786274272712b89dbb9f5
+probe case full-mark kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-mark kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-subnet-literal ok materialized=45835581dd4f12d0a1c577b39358545c8750f708aa64b429c41142f2a95cfc73 redacted=085f05972edcb7f0bd20908badaafe84e7ef77c899d8d7064cce36040830b399 formonly=false hostname=none:""
+probe case trim-subnet-literal records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-subnet-literal kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-subnet-literal kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-subnet-marked refused stage=compile rule=fidelity input="" paths=[] message=""
+probe case trim-reserved-text refused stage=compile rule=reserved-text input="" paths=["doc[0]"] message=""
+probe case trim-type-mismatch refused stage=compile rule=rejected input="fragment[1]" paths=[] message="error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `<redacted:port@1>...` into int"
+probe case trim-invalid-domain refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* v1alpha1.Config: 1 error occurred:\n\t* \"<redacted:domain@1>\" is not a valid DNS name\n\n\n\n"
+probe case trim-deprecated-files ok materialized=f3cbda3ab049341c45e25a66feb1559896a10bda4e4675aeb9d5a7500e9f346f redacted=d4753be1d25d9c703539982824767b05174768550a6540ddb3c56978f76f0bd4 formonly=false hostname=none:""
+probe case trim-deprecated-files records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-deprecated-files kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-deprecated-files kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-hostdns-metal ok materialized=87a276291ecb02601ebc4e0d608d4f8f13c91478904155fea2e6dd54e15ade74 redacted=9a878c9a15f6343054af414b74e5e7d2cc8cda865fc9e00a1d9df4e83959a09b formonly=false hostname=none:""
+probe case trim-hostdns-metal records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-hostdns-metal kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-hostdns-metal kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-hostdns-container refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* forwardKubeDNSToHost must be enabled in container mode\n\n"
+probe case trim-hostdns-cloud ok materialized=87a276291ecb02601ebc4e0d608d4f8f13c91478904155fea2e6dd54e15ade74 redacted=9a878c9a15f6343054af414b74e5e7d2cc8cda865fc9e00a1d9df4e83959a09b formonly=false hostname=none:""
+probe case trim-hostdns-cloud records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-hostdns-cloud kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-hostdns-cloud kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-hostname-fill ok materialized=dc3ed1a10707928fc8f96ea9831655b9ac3f01ca101bfd7c06098e01349183f3 redacted=829492cb6034cfbf1bcb289d4a1f5ed271b77df48fe7d11e50e4abe44faa3f86 formonly=false hostname=machine-name:"node-a"
+probe case full-hostname-fill records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case full-hostname-fill kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-hostname-fill kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-short-secret refused stage=compile rule=invalid input="" paths=[] message="<withheld: the validation message may quote a sensitive value>"
+probe case trim-bad-secret refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* DiscoveryIdentityConfig: invalid clusterSecret: failed to decode from base64: <redacted:s-bqlozm42y7lpusssll2ohbxi5a@1>; illegal base64 data at input byte 5\n\n"
+probe case enc-sbox ok materialized=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d redacted=3da3cca4192fefc2cb62cc7ca227f0fa354fd492682d0f6c26eb64bf42fcda30 formonly=true hostname=none:""
+probe case enc-sbox records provenance=af5a41a7e42b5e014eee9d5d8c4a15cef53d80126fa666668ef7b17851c8fbed effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=42a34784c067f1d2667c4156d73354ddcba8ac1b404abf5524e7ecc7694a95af
+probe case enc-sbox kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own enc-sbox kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case enc-aescbc ok materialized=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5 redacted=cb4bcf9f425f5374ccad85aef586c4e2522418a09c7bd6ee1bf5cb0eae0e7274 formonly=true hostname=none:""
+probe case enc-aescbc records provenance=c94a20af15bb6f228ea1deaed3ac5d63a6cbfe6778a3920be12ab9bbc37f4618 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=c209ff5865fdb227f9cceacf6e6f5eacf02a7db8d30c418cc65ec08e2fd18ae5
+probe case enc-aescbc kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own enc-aescbc kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case enc-both ok materialized=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230 redacted=58c1d597faeb6d44b8f9bf03e8fee0f1639daa04938ebad54874956950e11f9e formonly=true hostname=none:""
+probe case enc-both records provenance=4807da73ad8da0fb431b180f839f29509dafd4dd4f8fb97ab2892bb9ca896a88 effective=b04c40b506a7fad42839ee1599f908863a26d091cc6eeedaa95bde092bb60b50 reproduction=7ffa0d4578855e82e14181252ddedbe8f840a5a556feeb070b936ce604ade63e
+probe case enc-both kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own enc-both kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe cases=28
+ok  	github.com/ginsys/bronzeward/internal/compile	13.751s
+== run out-c: machinery v1.14.7
+probe gen v114-controlplane commented=95cfec5c2f23f5af90d1be78993deb0bc7b30a8f1708f9bed39201c7d5822002 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
+probe gen v114-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig,KubeAggregatorCAConfig,KubeAdmissionControlConfig,KubeAuditPolicyConfig,KubeAuthenticationConfig,KubeAuthorizerConfig,KubeAuthorizerConfig,KubeEtcdEncryptionConfig,KubeServiceAccountConfig,KubeAPIServerConfig,KubeControllerManagerConfig,KubeSchedulerConfig,KubeProxyConfig,KubeFlannelCNIConfig,KubeCoreDNSConfig
+probe gen v114-worker commented=63c69d1e128465d210703dfb61833084ddb7f5803241e0e739b7dea12ccbcaa8 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
+probe gen v114-worker kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig
+probe gen default-controlplane commented=95cfec5c2f23f5af90d1be78993deb0bc7b30a8f1708f9bed39201c7d5822002 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
+probe gen default-controlplane kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig,KubeAggregatorCAConfig,KubeAdmissionControlConfig,KubeAuditPolicyConfig,KubeAuthenticationConfig,KubeAuthorizerConfig,KubeAuthorizerConfig,KubeEtcdEncryptionConfig,KubeServiceAccountConfig,KubeAPIServerConfig,KubeControllerManagerConfig,KubeSchedulerConfig,KubeProxyConfig,KubeFlannelCNIConfig,KubeCoreDNSConfig
+probe gen default-worker commented=63c69d1e128465d210703dfb61833084ddb7f5803241e0e739b7dea12ccbcaa8 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
+probe gen default-worker kinds=v1alpha1,DiscoveryServiceConfig,DiscoveryIdentityConfig,UnattendedInstallConfig,ResolverConfig,VolumeConfig,FilesystemTrimConfig,SecurityProfileConfig,HostnameConfig,KubeClusterConfig,KubeNodeConfig,KubeletConfig,KubeNetworkConfig,KubeAPIServerCAConfig,KubePrismConfig
+probe enc sbox generated=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d providers=secretbox:key2
+probe case own-enc-sbox ok materialized=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d
+probe enc aescbc generated=44173e2cf3ad66aefc8c69e7a4a5792b453edfb2df8f836c75eaf2644d0a7c87 providers=aescbc:key1
+probe case own-enc-aescbc ok materialized=44173e2cf3ad66aefc8c69e7a4a5792b453edfb2df8f836c75eaf2644d0a7c87
+probe enc both generated=56aa300525f9ea25a6c1d65d931045da9e6e3fe7b5f3f4d16cb245d4bbf6858f providers=secretbox:key2,aescbc:key1
+probe case own-enc-both ok materialized=56aa300525f9ea25a6c1d65d931045da9e6e3fe7b5f3f4d16cb245d4bbf6858f
+probe input base-controlplane.yaml=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5
+probe input base-worker.yaml=75899722496c9c8165d7df2e7c5cf119d3827c7ac5c92f84b86de9e053bd20e3
+probe input base-trim.yaml=1a5b8a0fff2fdec8507b9e02cb20b3136f6e840504644df0700c7dcfb5c40de4
+probe input frag-etcdca.yaml=f8c878cdbed447ed23224bbed9f728d89928b75006e442706b0020af45c1a44d
+probe case full-nofrag ok materialized=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539 redacted=3da3cca4192fefc2cb62cc7ca227f0fa354fd492682d0f6c26eb64bf42fcda30 formonly=true hostname=none:""
+probe case full-nofrag records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case full-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-nofrag kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-nofrag ok materialized=d7058ae77659d79bfe314684103d3b59cef8d4117c93cf0f906da2974b344b92 redacted=0792301e161b0ead2fac20d6ccbad9025833fd7533038142f2ee1107600eee9f formonly=true hostname=none:""
+probe case trim-nofrag records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-nofrag kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case worker-nofrag ok materialized=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff redacted=7b185af8ba800903acad18b21b79e287294554fcb7a9dbfafac63ad65587e062 formonly=true hostname=none:""
+probe case worker-nofrag records provenance=1a25dcca59cc762bde0c6294230e16d4fe0e27141f083044cb4d11a9cc57aa15 effective=71cc3992b0e1d7e4d42b6698dca1e60e171dd48db0d442ba9cc61ed0642b1258 reproduction=e80cddc1dacf9bcdb608ae678a7bf0d7fcd5d0eda5940f626b2e546c72bd11a5
+probe case worker-nofrag kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own worker-nofrag kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-kubenode-labels ok materialized=3b7a1c23d962e17754ef59879c58c833e80a87b4e17534d71eb8fce108d89995 redacted=10b23a7ad58a31af76315a89b580e7fe3174aa2ddd2d633a6d5bef1db96df8d9 formonly=false hostname=none:""
+probe case full-kubenode-labels records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case full-kubenode-labels kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-kubenode-labels kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case control-kubenode-other ok materialized=91e8b33faa3d6d4e30465887523ec53eae79967db601c4bc43f8b4e147bd6151 redacted=9e1048d7efdc19cc64fe26a2181e6b1c960b7235ddd2ee45bbb8bc316023c640 formonly=false hostname=none:""
+probe case control-kubenode-other records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case control-kubenode-other kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own control-kubenode-other kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-v1alpha1-nodelabels refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* .machine.nodeLabels is already set in v1alpha1 config\n\n"
+probe case full-kubenode-ref ok materialized=5db341668fed40f7e419de8760db395ee30df143b3d48abe5c90e4c052535c11 redacted=2320d37160268aaa7bcbb280003cc5287e626c2afdbdafba3e5d2cf95b8ada97 formonly=false hostname=none:""
+probe case full-kubenode-ref records provenance=fe507c05ddb75b7800aeafc856cace815c01e631c143bf876d8558ffc116f7d4 effective=eb1898d7bdcf9231608c81d42ac579f18c6f3dec6f6ac5cce28f5bb7f8269b73 reproduction=6083e656a242e06d552f1d695ac839d00b186dea701c48b91853c30a55c63752
+probe case full-kubenode-ref kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-kubenode-ref kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-ref-string ok materialized=eb3d0d2c95a6494a72d882b05e68802d81bc32419d934bb14442b07531e6474c redacted=658dc01bdeea89f2482948efdd4ce9b32cf006bc98aceb1cfeef790548765f6c formonly=false hostname=none:""
+probe case trim-ref-string records provenance=2d03f9f5dac7c131d3cf1b5fe06a7b833283fbcbc4b1ecb223f5d891a91758ad effective=a151bf7429e28039de09e08bfc359beff8a80852aa690250adf8917c98d25f3b reproduction=532b4dbb21725a11a878653209d32e6dbe83c17635249a6aa8e844e2826c9b66
+probe case trim-ref-string kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-ref-string kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-each-kind-embedded ok materialized=e4f1e3880706654df22e2fd4838f5b7479b60ed0fb0f00ece31c5f91d85f78d9 redacted=a8baddc7d007c638b3bdaa824a5ecd0533f4c662345c12d91730ba7f43bca5a4 formonly=false hostname=none:""
+probe case trim-each-kind-embedded records provenance=a3b5b0542a57e09f39a63c1ea71241c7f732f3b691ec765baae563be73e6f83a effective=b0748f6c734d4b0903ae4357a054ecf93098e701b136e4516c79cce5fd3682f1 reproduction=a312abb486af05cffd1378d1c77257a1a23d55a8e1ea982bb1f77a8aeb53caba
+probe case trim-each-kind-embedded kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-each-kind-embedded kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-equal-hosts refused stage=compile rule=fidelity input="" paths=[] message=""
+probe case trim-embedded-copy refused stage=compile rule=exact-copy input="" paths=["doc[0]/cluster/inlineManifests/0/contents|json/copy"] message=""
+probe case trim-mark ok materialized=def3e46ca453ae8f44504283cf28e8ee116eb6647d4c1e09a4d61b0462ce2084 redacted=43ea4de695768bbf9c1a368f7f5399942631e30738aa96570abc4822f727a0af formonly=false hostname=none:""
+probe case trim-mark records provenance=a6d0c114bcfcaeec1e1352fbf9adb88d2bfca40f584bd2eaa4fda76df58e79fd effective=f040d2983b220b1f2b42c3803437a03ad51316edbc22654e6455c1a45f948ecc reproduction=02440b9178017c11c7535d08419182438f34a2f863f721780be123ba98b9245d
+probe case trim-mark kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-mark kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-mark ok materialized=3b7a1c23d962e17754ef59879c58c833e80a87b4e17534d71eb8fce108d89995 redacted=605f5b0a396f8a62a3c3ac21208cf79d0728b6334bba4daa7f70a3135954fa25 formonly=false hostname=none:""
+probe case full-mark records provenance=aad9ec096b983a57ab16c78fbf6ff9faa8abcc1bb70c4331d4d8243c91eff04e effective=5fadc9eef411d1abbbc8cd22b525f838bff95ebfd188a4c8003065a8cbdf5838 reproduction=4c15c6cf06bfbae0ab5a5c2d6eaa5da6bd6e4259892786274272712b89dbb9f5
+probe case full-mark kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-mark kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-subnet-literal ok materialized=45835581dd4f12d0a1c577b39358545c8750f708aa64b429c41142f2a95cfc73 redacted=085f05972edcb7f0bd20908badaafe84e7ef77c899d8d7064cce36040830b399 formonly=false hostname=none:""
+probe case trim-subnet-literal records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-subnet-literal kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-subnet-literal kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-subnet-marked refused stage=compile rule=fidelity input="" paths=[] message=""
+probe case trim-reserved-text refused stage=compile rule=reserved-text input="" paths=["doc[0]"] message=""
+probe case trim-type-mismatch refused stage=compile rule=rejected input="fragment[1]" paths=[] message="error decoding document /v1alpha1/ (line 1): error decoding  to *v1alpha1.Config: yaml: construct errors: line 4: cannot construct !!str `<redacted:port@1>...` into int"
+probe case trim-invalid-domain refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* v1alpha1.Config: 1 error occurred:\n\t* \"<redacted:domain@1>\" is not a valid DNS name\n\n\n\n"
+probe case trim-deprecated-files ok materialized=f3cbda3ab049341c45e25a66feb1559896a10bda4e4675aeb9d5a7500e9f346f redacted=d4753be1d25d9c703539982824767b05174768550a6540ddb3c56978f76f0bd4 formonly=false hostname=none:""
+probe case trim-deprecated-files records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-deprecated-files kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-deprecated-files kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-hostdns-metal ok materialized=87a276291ecb02601ebc4e0d608d4f8f13c91478904155fea2e6dd54e15ade74 redacted=9a878c9a15f6343054af414b74e5e7d2cc8cda865fc9e00a1d9df4e83959a09b formonly=false hostname=none:""
+probe case trim-hostdns-metal records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-hostdns-metal kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-hostdns-metal kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-hostdns-container refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* forwardKubeDNSToHost must be enabled in container mode\n\n"
+probe case trim-hostdns-cloud ok materialized=87a276291ecb02601ebc4e0d608d4f8f13c91478904155fea2e6dd54e15ade74 redacted=9a878c9a15f6343054af414b74e5e7d2cc8cda865fc9e00a1d9df4e83959a09b formonly=false hostname=none:""
+probe case trim-hostdns-cloud records provenance=a1e0cca7ab36275d4e1cf9567bdc50e0d1d353a6d199e2d20cc3b70823ac3906 effective=a705fad49f8f7770490c823944e2ebc5b3b9f29eac52070e9145657ae7f2f0d0 reproduction=a290fd518073f7b244d76011f003a47d7f186dc5b519bb4732d181d69c5fc268
+probe case trim-hostdns-cloud kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own trim-hostdns-cloud kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case full-hostname-fill ok materialized=dc3ed1a10707928fc8f96ea9831655b9ac3f01ca101bfd7c06098e01349183f3 redacted=829492cb6034cfbf1bcb289d4a1f5ed271b77df48fe7d11e50e4abe44faa3f86 formonly=false hostname=machine-name:"node-a"
+probe case full-hostname-fill records provenance=d4c6a436699095153708c5e296e61c813d7cbaee01ee6737625bc79dc1909e4f effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=115887b8f907a8f48d3feb65b671b3fa591e45fdca4a548ca0f70dfcda1f7133
+probe case full-hostname-fill kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own full-hostname-fill kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case trim-short-secret refused stage=compile rule=invalid input="" paths=[] message="<withheld: the validation message may quote a sensitive value>"
+probe case trim-bad-secret refused stage=compile rule=invalid input="" paths=[] message="1 error occurred:\n\t* DiscoveryIdentityConfig: invalid clusterSecret: failed to decode from base64: <redacted:s-bqlozm42y7lpusssll2ohbxi5a@1>; illegal base64 data at input byte 5\n\n"
+probe case enc-sbox ok materialized=17b8e077d06265bceeaf626c188d7c90b10f76aa275d9626c5c9a4734e6c0e6d redacted=3da3cca4192fefc2cb62cc7ca227f0fa354fd492682d0f6c26eb64bf42fcda30 formonly=true hostname=none:""
+probe case enc-sbox records provenance=af5a41a7e42b5e014eee9d5d8c4a15cef53d80126fa666668ef7b17851c8fbed effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=42a34784c067f1d2667c4156d73354ddcba8ac1b404abf5524e7ecc7694a95af
+probe case enc-sbox kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own enc-sbox kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case enc-aescbc ok materialized=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5 redacted=cb4bcf9f425f5374ccad85aef586c4e2522418a09c7bd6ee1bf5cb0eae0e7274 formonly=true hostname=none:""
+probe case enc-aescbc records provenance=c94a20af15bb6f228ea1deaed3ac5d63a6cbfe6778a3920be12ab9bbc37f4618 effective=035681bf89a621977374377e0d010ed22f3efc7f7d6fadcff4b1a0fcd1fa89cc reproduction=c209ff5865fdb227f9cceacf6e6f5eacf02a7db8d30c418cc65ec08e2fd18ae5
+probe case enc-aescbc kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own enc-aescbc kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe case enc-both ok materialized=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230 redacted=58c1d597faeb6d44b8f9bf03e8fee0f1639daa04938ebad54874956950e11f9e formonly=true hostname=none:""
+probe case enc-both records provenance=4807da73ad8da0fb431b180f839f29509dafd4dd4f8fb97ab2892bb9ca896a88 effective=b04c40b506a7fad42839ee1599f908863a26d091cc6eeedaa95bde092bb60b50 reproduction=7ffa0d4578855e82e14181252ddedbe8f840a5a556feeb070b936ce604ade63e
+probe case enc-both kubernetes[v1.14.5]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe own enc-both kubernetes[v1.14.7]="compile: refused (kubernetes): the cluster's contract has no Kubernetes window"
+probe cases=28
+ok  	github.com/ginsys/bronzeward/internal/compile	13.426s
+== results out-a vs out-a2 (no lines below means equal)
+== key paths out-a vs out-a2
+keydiff compared=46 differing=0
+ok  	github.com/ginsys/bronzeward/internal/compile	0.010s
+== results out-a vs out-c (no lines below means equal)
+1c1
+< gen v114-controlplane commented=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
+---
+> gen v114-controlplane commented=95cfec5c2f23f5af90d1be78993deb0bc7b30a8f1708f9bed39201c7d5822002 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
+3c3
+< gen v114-worker commented=75899722496c9c8165d7df2e7c5cf119d3827c7ac5c92f84b86de9e053bd20e3 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
+---
+> gen v114-worker commented=63c69d1e128465d210703dfb61833084ddb7f5803241e0e739b7dea12ccbcaa8 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
+5c5
+< gen default-controlplane commented=1fe96e8e54628874832913faf96ebfea116b1762d8f0d812951058418dc17bb5 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
+---
+> gen default-controlplane commented=95cfec5c2f23f5af90d1be78993deb0bc7b30a8f1708f9bed39201c7d5822002 bare=86803d78b1efbdc2b94e6277b940dc4517aba173d7a47995e909d3b753f8e539
+7c7
+< gen default-worker commented=75899722496c9c8165d7df2e7c5cf119d3827c7ac5c92f84b86de9e053bd20e3 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
+---
+> gen default-worker commented=63c69d1e128465d210703dfb61833084ddb7f5803241e0e739b7dea12ccbcaa8 bare=12b826fa66263aa55516bba05ed3b5b1b0f0615238b87b6fb7859ec330b5f6ff
+11,14c11,14
+< enc aescbc generated=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5 providers=secretbox:key1
+< case own-enc-aescbc ok materialized=074896793ef80419dd92f0396bc74b80d0b48dc936b986501c0c5f5a4748eea5
+< enc both generated=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230 providers=secretbox:key2,secretbox:key1
+< case own-enc-both ok materialized=7b648be2b7f3467e455de1a28bd2303db1004225e7b0f5f71b5b5cc43f656230
+---
+> enc aescbc generated=44173e2cf3ad66aefc8c69e7a4a5792b453edfb2df8f836c75eaf2644d0a7c87 providers=aescbc:key1
+> case own-enc-aescbc ok materialized=44173e2cf3ad66aefc8c69e7a4a5792b453edfb2df8f836c75eaf2644d0a7c87
+> enc both generated=56aa300525f9ea25a6c1d65d931045da9e6e3fe7b5f3f4d16cb245d4bbf6858f providers=secretbox:key2,aescbc:key1
+> case own-enc-both ok materialized=56aa300525f9ea25a6c1d65d931045da9e6e3fe7b5f3f4d16cb245d4bbf6858f
+== key paths out-a vs out-c
+keydiff gen-enc-aescbc.yaml + KubeEtcdEncryptionConfig#1/config/resources/0/providers/0/aescbc/keys/0/name
+keydiff gen-enc-aescbc.yaml + KubeEtcdEncryptionConfig#1/config/resources/0/providers/0/aescbc/keys/0/secret
+keydiff gen-enc-aescbc.yaml - KubeEtcdEncryptionConfig#1/config/resources/0/providers/0/secretbox/keys/0/name
+keydiff gen-enc-aescbc.yaml - KubeEtcdEncryptionConfig#1/config/resources/0/providers/0/secretbox/keys/0/secret
+keydiff gen-enc-both.yaml + KubeEtcdEncryptionConfig#1/config/resources/0/providers/1/aescbc/keys/0/name
+keydiff gen-enc-both.yaml + KubeEtcdEncryptionConfig#1/config/resources/0/providers/1/aescbc/keys/0/secret
+keydiff gen-enc-both.yaml - KubeEtcdEncryptionConfig#1/config/resources/0/providers/1/secretbox/keys/0/name
+keydiff gen-enc-both.yaml - KubeEtcdEncryptionConfig#1/config/resources/0/providers/1/secretbox/keys/0/secret
+keydiff mat-own-enc-aescbc.yaml + KubeEtcdEncryptionConfig#1/config/resources/0/providers/0/aescbc/keys/0/name
+keydiff mat-own-enc-aescbc.yaml + KubeEtcdEncryptionConfig#1/config/resources/0/providers/0/aescbc/keys/0/secret
+keydiff mat-own-enc-aescbc.yaml - KubeEtcdEncryptionConfig#1/config/resources/0/providers/0/secretbox/keys/0/name
+keydiff mat-own-enc-aescbc.yaml - KubeEtcdEncryptionConfig#1/config/resources/0/providers/0/secretbox/keys/0/secret
+keydiff mat-own-enc-both.yaml + KubeEtcdEncryptionConfig#1/config/resources/0/providers/1/aescbc/keys/0/name
+keydiff mat-own-enc-both.yaml + KubeEtcdEncryptionConfig#1/config/resources/0/providers/1/aescbc/keys/0/secret
+keydiff mat-own-enc-both.yaml - KubeEtcdEncryptionConfig#1/config/resources/0/providers/1/secretbox/keys/0/name
+keydiff mat-own-enc-both.yaml - KubeEtcdEncryptionConfig#1/config/resources/0/providers/1/secretbox/keys/0/secret
+keydiff compared=46 differing=4
+ok  	github.com/ginsys/bronzeward/internal/compile	0.016s
+== done
+VERIFY_SECONDS=95
+VERIFY_DONE rc=0
+run-cluster-job exit 0

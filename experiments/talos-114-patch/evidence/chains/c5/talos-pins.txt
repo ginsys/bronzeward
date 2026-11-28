@@ -1,0 +1,4 @@
+TALOS_VERSION=v1.14.5
+TALOSCTL_URL=https://github.com/siderolabs/talos/releases/download/v1.14.5/talosctl-linux-amd64
+TALOSCTL_SHA256=ff432b68986709e6b69c563a08a2ced4232d5196b0dccd6d2e783e9d714d7d7d
+TALOS_IMAGE=ghcr.io/siderolabs/talos:v1.14.5@sha256:2bd72b810f540a75d5b1c8c3739ada000fff9beec18c941790c34b9592f1a8ff

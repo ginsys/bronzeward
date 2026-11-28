@@ -1,0 +1,21 @@
+Each scenario table of chains c5 and a7 compared with c7's by cmp (rc 0 = identical bytes); identical copies are not kept:
+cmp c5/s1-pass.tsv c7: rc=0
+cmp a7/s1-pass.tsv c7: rc=0
+cmp c5/s2-pass.tsv c7: rc=0
+cmp a7/s2-pass.tsv c7: rc=0
+cmp c5/s3-handover.tsv c7: rc=0
+cmp a7/s3-handover.tsv c7: rc=0
+cmp c5/s3-pass.tsv c7: rc=0
+cmp a7/s3-pass.tsv c7: rc=0
+cmp c5/s4-run.tsv c7: rc=0
+cmp a7/s4-run.tsv c7: rc=0
+cmp c5/s5-pass.tsv c7: rc=0
+cmp a7/s5-pass.tsv c7: rc=0
+
+Result rows per chain and scenario table (PASS, FAIL, SKIP lines of the s<n>.tsv files; empty = 0):
+s1-pass.tsv PASS=37 FAIL= SKIP=2
+s2-pass.tsv PASS=53 FAIL= SKIP=4
+s3-handover.tsv PASS=29 FAIL= SKIP=
+s3-pass.tsv PASS=77 FAIL= SKIP=1
+s4-run.tsv PASS=33 FAIL= SKIP=
+s5-pass.tsv PASS=73 FAIL= SKIP=3

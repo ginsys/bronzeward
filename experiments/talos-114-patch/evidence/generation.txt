@@ -1,0 +1,52 @@
+Base commit read: d8c4ba5289a48ff51bd96c0cc244eb279e0c2085
+
+== import closure (go list -deps -test=false) of the shipped binaries, count of config/generate and config/generate/secrets
+github.com/ginsys/bronzeward/cmd/bronzeward generate=0 generate/secrets=1
+github.com/ginsys/bronzeward/cmd/bronzewardctl generate=0 generate/secrets=0
+github.com/ginsys/bronzeward/fixtures/oidc generate=0 generate/secrets=0
+github.com/ginsys/bronzeward/fixtures/oidc/groups generate=0 generate/secrets=0
+github.com/ginsys/bronzeward/fixtures/oidc/issuer generate=0 generate/secrets=0
+github.com/ginsys/bronzeward/fixtures/webhost generate=0 generate/secrets=0
+
+== synthetic generation of the etcd encryption providers from one secrets bundle (kinds, key names and lengths only)
+-- v1.14.5
+secretbox-only: 1 provider(s)
+  provider[0] kind=secretbox key=key2 secret-length=26
+aescbc-only: 1 provider(s)
+  provider[0] kind=secretbox key=key1 secret-length=23
+both: 2 provider(s)
+  provider[0] kind=secretbox key=key2 secret-length=26
+  provider[1] kind=secretbox key=key1 secret-length=23
+neither: 0 provider(s)
+-- v1.14.6
+secretbox-only: 1 provider(s)
+  provider[0] kind=secretbox key=key2 secret-length=26
+aescbc-only: 1 provider(s)
+  provider[0] kind=aescbc key=key1 secret-length=23
+both: 2 provider(s)
+  provider[0] kind=secretbox key=key2 secret-length=26
+  provider[1] kind=aescbc key=key1 secret-length=23
+neither: 0 provider(s)
+-- v1.14.7
+secretbox-only: 1 provider(s)
+  provider[0] kind=secretbox key=key2 secret-length=26
+aescbc-only: 1 provider(s)
+  provider[0] kind=aescbc key=key1 secret-length=23
+both: 2 provider(s)
+  provider[0] kind=secretbox key=key2 secret-length=26
+  provider[1] kind=aescbc key=key1 secret-length=23
+neither: 0 provider(s)
+-- diff v1.14.5 against v1.14.7
+--- <scratch>/stepB/gen-v1.14.5.txt	2026-11-28 15:16:54.223749746 +0100
++++ <scratch>/stepB/gen-v1.14.7.txt	2026-11-28 15:17:38.900389735 +0100
+@@ -1,8 +1,8 @@
+ secretbox-only: 1 provider(s)
+   provider[0] kind=secretbox key=key2 secret-length=26
+ aescbc-only: 1 provider(s)
+-  provider[0] kind=secretbox key=key1 secret-length=23
++  provider[0] kind=aescbc key=key1 secret-length=23
+ both: 2 provider(s)
+   provider[0] kind=secretbox key=key2 secret-length=26
+-  provider[1] kind=secretbox key=key1 secret-length=23
++  provider[1] kind=aescbc key=key1 secret-length=23
+ neither: 0 provider(s)

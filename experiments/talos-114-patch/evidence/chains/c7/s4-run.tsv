@@ -1,0 +1,33 @@
+PASS	S4 precondition	S3's step 3 plan: the worker's, approved, no operation, no-reboot, unexpired for ten minutes more
+PASS	S4 precondition	its release is the worker's Desired and not its Applied
+PASS	S4 precondition	no apply-config operation exists
+PASS	S4 precondition	A's, B's and C's links to the worker are cut (S3 step 4)
+PASS	S4 precondition	A answers /livez
+PASS	S4 precondition	the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all
+PASS	S4 precondition	Desired, Applied and Observed served as three values: Desired the plan's release, Applied and Observed not
+PASS	S4 precondition	the pre-state bundle: complete, no fixture secret but the scan control
+PASS	S4 precondition	pre-state: both nodes have a configuration digest and a resource version
+PASS	S4 step 1	inject linkjoin A, B and C to the worker: the controller may dispatch S3's step 3 plan
+PASS	S4 step 1	no link to the worker is recorded cut
+PASS	S4 step 1	the plan's operation completed within four minutes
+PASS	S4 step 1	the use-time check before the commitment passed, its access and artifact each passed
+PASS	S4 step 2	the commitment names the operation and an evidence observation of the plan, read after the use-time check and before the commitment
+PASS	S4 step 3	one attempt, number 1, after the commitment, on the plan's route, on the commitment's observation, its response accepted after it
+PASS	S4 step 3	the worker's apid log records exactly one mutating request past the pre-state, ApplyConfiguration
+PASS	S4 step 4	on the timeline, in order: the commitment, the attempt (committed to sending), the response, sending to verifying, verifying to completed, the Applied change
+PASS	S4 step 4	a completion observation begun after the response read the release's digest, and the result names it
+PASS	S4 step 5	Applied the release from source operation, its digest the artifact's, the baseline revision one more, one Applied change entry
+PASS	S4 pass	the post-state bundle: complete, no fixture secret but the scan control
+PASS	S4 pass	the worker's digest is the artifact's and its resource version moved
+PASS	S4 pass	the control plane's digest and resource version are the pre-state's
+PASS	S4 pass	no Talos mutation request in the control plane's apid log past the entries read before the run (control: the dry-run apply there is found past them)
+PASS	S4 pass	Desired, Applied and Observed served as one value, the release, after completion
+PASS	S4 pass	scope and rollout slot released: no live apply-config operation for the worker or the cluster
+PASS	S4 retained evidence	the operation, its attempt and response, as served
+PASS	S4 retained evidence	the worker's timeline, as served
+PASS	S4 retained evidence	the worker's observation records, as served
+PASS	S4 backups	inject db-snapshot: a dump of the bronzeward database after the apply
+PASS	S4 evidence	bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret
+PASS	S4 evidence	the bundle is complete: bin/evidence captured every source
+PASS	S4 backups	the scanned bundle holds the database dump expanded, the attempt among its rows (control)
+PASS	S4 evidence	none of the 1 tokens this run minted is in any bundle of the run or the run directory (control found)

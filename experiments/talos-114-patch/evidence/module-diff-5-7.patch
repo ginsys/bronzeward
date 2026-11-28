@@ -1,0 +1,158 @@
+diff -rN -U0 machinery@v1.14.5/config/generate/generate_test.go machinery@v1.14.7/config/generate/generate_test.go
+--- machinery@v1.14.5/config/generate/generate_test.go
++++ machinery@v1.14.7/config/generate/generate_test.go
+@@ -391,0 +392,54 @@
++func TestGenerateEtcdEncryptionConfig(t *testing.T) {
++	t.Parallel()
++
++	secretboxProvider := map[string]any{"secretbox": map[string]any{"keys": []any{map[string]any{"name": "key2", "secret": "secretbox-secret"}}}}
++	aescbcProvider := map[string]any{"aescbc": map[string]any{"keys": []any{map[string]any{"name": "key1", "secret": "aescbc-secret"}}}}
++
++	for _, test := range []struct {
++		name            string
++		secretboxSecret string
++		aescbcSecret    string
++
++		expectedProviders []any
++	}{
++		{
++			name:              "secretbox",
++			secretboxSecret:   "secretbox-secret",
++			expectedProviders: []any{secretboxProvider},
++		},
++		{
++			name:              "aescbc",
++			aescbcSecret:      "aescbc-secret",
++			expectedProviders: []any{aescbcProvider},
++		},
++		{
++			name:              "both",
++			secretboxSecret:   "secretbox-secret",
++			aescbcSecret:      "aescbc-secret",
++			expectedProviders: []any{secretboxProvider, aescbcProvider},
++		},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			t.Parallel()
++
++			input, err := generate.NewInput("test", "https://10.0.1.5:6443", constants.DefaultKubernetesVersion, generate.WithVersionContract(config.TalosVersion1_14))
++			require.NoError(t, err)
++
++			input.Options.SecretsBundle.Secrets.SecretboxEncryptionSecret = test.secretboxSecret
++			input.Options.SecretsBundle.Secrets.AESCBCEncryptionSecret = test.aescbcSecret
++
++			cfg, err := input.Config(machine.TypeControlPlane)
++			require.NoError(t, err)
++
++			require.NotNil(t, cfg.K8sEtcdEncryptionConfig())
++
++			assert.Equal(t, []any{
++				map[string]any{
++					"providers": test.expectedProviders,
++					"resources": []any{"secrets"},
++				},
++			}, cfg.K8sEtcdEncryptionConfig().EtcdEncryptionConfig()["resources"])
++		})
++	}
++}
++
+diff -rN -U0 machinery@v1.14.5/config/generate/kubernetes.go machinery@v1.14.7/config/generate/kubernetes.go
+--- machinery@v1.14.5/config/generate/kubernetes.go
++++ machinery@v1.14.7/config/generate/kubernetes.go
+@@ -68 +68 @@
+-				"secretbox": map[string]any{
++				"aescbc": map[string]any{
+diff -rN -U0 machinery@v1.14.5/constants/constants.go machinery@v1.14.7/constants/constants.go
+--- machinery@v1.14.5/constants/constants.go
++++ machinery@v1.14.7/constants/constants.go
+@@ -23 +23 @@
+-	DefaultKernelVersion = "6.18.58-talos"
++	DefaultKernelVersion = "6.18.65-talos"
+@@ -443 +443 @@
+-	DefaultEtcdVersion = "v3.7.3"
++	DefaultEtcdVersion = "v3.7.4"
+@@ -1257 +1257 @@
+-	GoVersion = "go1.26.10"
++	GoVersion = "go1.26.11"
+@@ -1338 +1338 @@
+-	FlannelVersion = "0.28.9"
++	FlannelVersion = "v0.28.11"
+diff -rN -U0 machinery@v1.14.5/gendata/data/pkgs machinery@v1.14.7/gendata/data/pkgs
+--- machinery@v1.14.5/gendata/data/pkgs
++++ machinery@v1.14.7/gendata/data/pkgs
+@@ -1 +1 @@
+-v1.14.0-48-gf4bda77
+\ No newline at end of file
++v1.14.0-66-ga1a4897
+\ No newline at end of file
+diff -rN -U0 machinery@v1.14.5/gendata/data/tag machinery@v1.14.7/gendata/data/tag
+--- machinery@v1.14.5/gendata/data/tag
++++ machinery@v1.14.7/gendata/data/tag
+@@ -1 +1 @@
+-v1.14.5
+\ No newline at end of file
++v1.14.7
+\ No newline at end of file
+diff -rN -U0 machinery@v1.14.5/gendata/data/tools machinery@v1.14.7/gendata/data/tools
+--- machinery@v1.14.5/gendata/data/tools
++++ machinery@v1.14.7/gendata/data/tools
+@@ -1 +1 @@
+-v1.14.0-11-g8dad45e
+\ No newline at end of file
++v1.14.0-12-g5959f76
+\ No newline at end of file
+diff -rN -U0 machinery@v1.14.5/go.mod machinery@v1.14.7/go.mod
+--- machinery@v1.14.5/go.mod
++++ machinery@v1.14.7/go.mod
+@@ -35 +35 @@
+-	golang.org/x/net v0.58.0
++	golang.org/x/net v0.62.0
+@@ -64 +64 @@
+-	golang.org/x/crypto v0.55.0 // indirect
++	golang.org/x/crypto v0.58.0 // indirect
+@@ -66,3 +66,3 @@
+-	golang.org/x/sync v0.22.0 // indirect
+-	golang.org/x/sys v0.47.0 // indirect
+-	golang.org/x/text v0.41.0 // indirect
++	golang.org/x/sync v0.24.0 // indirect
++	golang.org/x/sys v0.49.0 // indirect
++	golang.org/x/text v0.43.0 // indirect
+diff -rN -U0 machinery@v1.14.5/go.sum machinery@v1.14.7/go.sum
+--- machinery@v1.14.5/go.sum
++++ machinery@v1.14.7/go.sum
+@@ -145,2 +145,2 @@
+-golang.org/x/crypto v0.55.0 h1:+KWHjbgOaAQ66dh/YlkZKHlz9ZUlq61AFirAR9ntP8M=
+-golang.org/x/crypto v0.55.0/go.mod h1:uq0V9dE/fzQuJtbnL+2EhWOE63vo164FY8xqEnV9xis=
++golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
++golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+@@ -149,4 +149,4 @@
+-golang.org/x/net v0.58.0 h1:ynWG7rqYi4ccpTEuPZ2QGWHktVEM9DMCj9yzDE0Q7To=
+-golang.org/x/net v0.58.0/go.mod h1:YwCddHnFlT7eLQqVprV19OnhLGtc5xOKgE0RyqgfWAU=
+-golang.org/x/sync v0.22.0 h1:SZjpbeLmrCk4xhRSZFNZW5gFUeCeFgjekvI/+gfScek=
+-golang.org/x/sync v0.22.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
++golang.org/x/net v0.62.0 h1:18ELalfM5+XNRwzM2nYqXsZQ9ByS1uhj2O/U7+5jqRY=
++golang.org/x/net v0.62.0/go.mod h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=
++golang.org/x/sync v0.24.0 h1:iqiDrGoDgyuvAKrhLQthUEzU/R378N78gXbBjxed7oA=
++golang.org/x/sync v0.24.0/go.mod h1:sUUOizhqBxiL6pEWpqNLUiaJn1ShEbZ6BBqskPbjZm0=
+@@ -154,4 +154,4 @@
+-golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
+-golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+-golang.org/x/text v0.41.0 h1:vz/seA0lnX87Othu2f/0L24RcgrXD9/YFTSuGjj3rH8=
+-golang.org/x/text v0.41.0/go.mod h1:jvf1O8ajNzZqhSrQBPbutR/EB83Cc0CFrezNQIwbb5M=
++golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
++golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
++golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=
++golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=
+@@ -160,2 +160,2 @@
+-golang.org/x/tools v0.48.0 h1:3+hClM1aLL5mjMKm5ovokw9epgRXPuu2tILgismM6RE=
+-golang.org/x/tools v0.48.0/go.mod h1:08xX0orndb/F7jJxGDicx061tyd5pcMto75YMAXr6lk=
++golang.org/x/tools v0.51.0 h1:k4Xc/1Om9jwkBJBo4NVLMSARBoWtK10mx+W5BnXCeAI=
++golang.org/x/tools v0.51.0/go.mod h1:9eEncMayCV6zRMGhR5eZEC2iBx98qWcF1HZ9Z7wJOoA=
+diff -rN -U0 machinery@v1.14.5/version/os-release machinery@v1.14.7/version/os-release
+--- machinery@v1.14.5/version/os-release
++++ machinery@v1.14.7/version/os-release
+@@ -3,2 +3,2 @@
+-VERSION_ID=v1.14.5
+-PRETTY_NAME="Talos (v1.14.5)"
++VERSION_ID=v1.14.7
++PRETTY_NAME="Talos (v1.14.7)"

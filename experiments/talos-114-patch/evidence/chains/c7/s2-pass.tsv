@@ -1,0 +1,57 @@
+PASS	S2 precondition	A answers /livez
+PASS	S2 precondition (S3 handover)	the worker's Applied is the release its adoption recorded: completed adopt operation, source adoption, baseline revision 1, its import base's configuration digest
+PASS	S2 precondition	C (the interruption build, no interruption named) answers /livez
+PASS	S2 precondition, C §10.1	the machinery gate, run/all against this fixture, exited 0 (c10-gate.log)
+PASS	S2 precondition, C §10.1	it ran at the image commit with no uncommitted input (c10/run.txt), the checkout that commit with no path differing or skipped, every tracked file unfiltered the same bytes
+PASS	S2 precondition, C §10.1	SR's matrix through the compiler's path: every case on both bases as expected (c10/summary.txt)
+PASS	S2 precondition, C §10.1	SR's controls: the compiler's round trip and validation of each base (c10/controls.tsv)
+PASS	S2 precondition, C §10.1	SP's matrix through the compiler's path: every case as expected, no value or base secret in any cell (c10/sp-summary.txt)
+PASS	S2 precondition, C §10.1	SP's controls: paired-diff moves and rotations, the oracle finds a planted value (c10/sp-controls.tsv)
+SKIP	S2 negative controls, C §15	the draft updates and publications on C: success, refusal and the interruption matrices: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+PASS	S2 precondition (S3 handover)	after whatever matrices ran the worker's Applied is still the release its adoption recorded (completed adopt operation, source adoption, baseline revision 1, its import base's configuration digest); its Desired in desired0
+PASS	S2 precondition (S3 handover)	the Applied release's review names one reference at the worker's marked file content
+PASS	S2 precondition (S3 handover)	the pre-state bundle: complete, no fixture secret but the scan control
+PASS	S2 precondition (S3 handover)	pre-state: the worker has a machine-configuration resource version
+PASS	S2 precondition (S3 handover)	the adopted Applied digest is the worker's configuration as the pre-state read it from the node
+PASS	S2 step 7	inject db-snapshot s2-step1
+PASS	S2 step 7	inject bao-snapshot s2-step1
+PASS	S2 step 1	POST /drafts as h-author: 201 with an ETag
+PASS	S2 step 1	PUT a worker fragment, one node label a !bwref to the worker's extracted file content: 200, ETag moved
+PASS	S2 step 2	PUT a worker profile listing the fragment revision: 200, ETag moved
+PASS	S2 step 2	PUT the worker's assignment selecting the profile: 200, ETag moved
+SKIP	S2 negative controls	a second author on each replaced ETag: 412: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+PASS	S2 step 3	POST /publications as h-publisher: 202; the publish operation succeeded with one release, the draft published
+PASS	S2 pass	the release is the worker's Desired; Applied still the adopted release
+PASS	S2 pass	no operation but publish since the precondition
+PASS	S2 step 4	GET the worker's review: the label present, its value redacted as the reference, provenance naming the fragment revision
+PASS	S2 step 5	GET the release: step 2's fragment, profile and assignment revisions, the renderer at the node's contract minor
+PASS	S2 step 5	stored: Transit ciphertext and digests; exact-version dependency records, the label reference from the fragment revision and, kept, from the import base at its mark; all retained
+PASS	S2 step 5	stored digests: the ciphertext's is its stored text's, the configuration's is the decrypted artifact's
+PASS	S2 pass	the release row refuses UPDATE and DELETE
+PASS	S2 pass	the release's machine rows refuse UPDATE and DELETE
+PASS	S2 pass	the release's source rows refuse UPDATE and DELETE
+PASS	S2 pass	the release's dependency records refuse UPDATE and DELETE
+PASS	S2 pass	no operation but publish since the precondition (after step 5)
+PASS	S2 pass	the worker's machine-configuration resource version unchanged by publication
+PASS	S2 step 5	the post-state bundle: no fixture secret but the scan control
+PASS	S2 step 6	the label reference's KV version: one dependency status for the release's reproduction records
+PASS	S2 step 6	the monitors classify every dependency retained, each observed since the release
+PASS	S2 step 6	GET /dependencies serves every one retained, none stale
+SKIP	S2 negative controls (step 6)	the version soft-deleted, destroyed, and OpenBao partitioned, sealed and paused: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+PASS	S2 step 7	inject pause A, B and C
+PASS	S2 step 7	inject db-restore s2-step1
+PASS	S2 step 7	inject bao-restore s2-step1
+PASS	S2 step 7	inject unpause A, B and C
+PASS	S2 step 7	A reads the restored database
+PASS	S2 step 7	restored: no act after the snapshot, step 3's release gone, the worker's Desired and Applied what they were at the snapshot
+PASS	S2 step 7	the automation identity repeats steps 1 and 2 as itself
+PASS	S2 step 7	the automation identity publishes: one release, the draft published
+PASS	S2 step 7	the automation identity's acts: steps 1 and 2 under author, the publication under publisher
+PASS	S2 step 7	no operation but publish since the precondition
+PASS	S2 step 7	after step7, its bundle and the run directory: no fixture secret but the scan's control
+SKIP	S2 negative controls	the Go rows: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+PASS	S2 backups, C §15	inject db-snapshot: a dump of the bronzeward database after the updates and whatever controls ran
+PASS	S2 negative controls, C §15	bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret, the canary included
+PASS	S2 negative controls, C §15	the bundle is complete: bin/evidence captured every source
+PASS	S2 backups, C §15	the scanned bundle holds the database dump expanded, step 7's release among its rows (control)
+PASS	S2 negative controls, C §15	none of the 2 tokens this run minted is in any bundle of the run or the run directory (control found)
