@@ -40,10 +40,14 @@ async function api(method, path, body) {
 }
 
 const b32 = (s) => { let bits = ""; for (const c of s.replace(/=+$/, "")) bits += "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".indexOf(c).toString(2).padStart(5, "0"); return Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2))); };
+// Every code made here is added to the values `out` hides, before it is sent anywhere, so that an
+// error message that names a command's arguments cannot print it.
 function totp(secret) {
   const t = Buffer.alloc(8); t.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
   const h = createHmac("sha1", b32(secret)).update(t).digest(), o = h[19] & 15;
-  return String(((h.readUInt32BE(o) & 0x7fffffff) % 1000000)).padStart(6, "0");
+  const code = String(((h.readUInt32BE(o) & 0x7fffffff) % 1000000)).padStart(6, "0");
+  secrets.push(code);
+  return code;
 }
 
 // A human with a password and an enrolled TOTP: its login name, password, TOTP secret and id.
@@ -84,7 +88,9 @@ async function password(browser, u) {
   await fill(browser, 'input[name="loginName"], input#loginName, input[autocomplete="username"]', u.name);
   await fill(browser, 'input[type="password"]', u.password);
   await browser.pause(2500);
-  out(`  after the password: ${new URL(await browser.getUrl()).pathname}`);
+  const at = new URL(await browser.getUrl()).pathname;
+  out(`  after the password: ${at}`);
+  return at;
 }
 // setupPage: the passkey setup page by its address; offered when its form has a submit button, and
 // refused when it shows the second-factor notice. Then the form is submitted when offered.
@@ -97,7 +103,7 @@ async function setupPage(browser, u) {
   const offered = !refused && (await submit.isExisting());
   out(`  passkey setup page ${new URL(await browser.getUrl()).pathname}: ${refused ? "refused (second factor required)" : offered ? "offers the passkey" : "neither"}`);
   if (offered) { await submit.click(); await browser.pause(4000); }
-  return offered;
+  return { refused, offered };
 }
 const added = async (u) => (await methods(u)).includes("AUTHENTICATION_METHOD_TYPE_PASSKEY");
 
@@ -110,21 +116,30 @@ try {
   out("attacker: first factor only");
   let browser = await session();
   try {
-    await password(browser, a);
-    await setupPage(browser, a);
-    attacker = (await added(a)) ? "passkey added without the second factor" : "no passkey added";
+    // The first factor must have passed: the page the password leads to is the second-factor challenge.
+    const at = await password(browser, a);
+    const page = await setupPage(browser, a);
+    const has = await added(a);
+    attacker = !at.endsWith("/otp/time-based") ? "inconclusive: the password did not lead to the second-factor challenge"
+      : page.refused && !has ? "refused, no passkey added"
+      : page.offered && has ? "passkey added without the second factor"
+      : `inconclusive: refused=${page.refused} offered=${page.offered} passkey=${has}`;
   } finally { await browser.deleteSession(); }
   out(`  result: ${attacker}`);
 
   out("legit: first factor, then TOTP");
   browser = await session();
   try {
-    await password(browser, l);
+    const first = await password(browser, l);
     await fill(browser, 'input[name="code"], input[autocomplete="one-time-code"]', totp(l.secret));
     await browser.pause(2500);
-    out(`  after the TOTP code: ${new URL(await browser.getUrl()).pathname}`);
-    await setupPage(browser, l);
-    legit = (await added(l)) ? "passkey added after the second factor" : "no passkey added";
+    const at = new URL(await browser.getUrl()).pathname;
+    out(`  after the TOTP code: ${at}`);
+    const page = await setupPage(browser, l);
+    const has = await added(l);
+    legit = !first.endsWith("/otp/time-based") || !at.endsWith("/signedin") ? "inconclusive: the second factor was not completed"
+      : page.offered && has ? "passkey added after the second factor"
+      : `inconclusive: refused=${page.refused} offered=${page.offered} passkey=${has}`;
   } finally { await browser.deleteSession(); }
   out(`  result: ${legit}`);
 } catch (e) {
@@ -132,7 +147,8 @@ try {
 } finally {
   rmSync(profile, { recursive: true, force: true });
 }
-const bypass = attacker.startsWith("passkey added");
-const ok = legit.startsWith("passkey added") && (expect === "fixed" ? attacker === "no passkey added" : bypass);
+// Anything but the two named outcomes is inconclusive and fails, whatever the expectation.
+const ok = legit === "passkey added after the second factor" &&
+  attacker === (expect === "fixed" ? "refused, no passkey added" : "passkey added without the second factor");
 out(`RESULT expect=${expect} attacker=[${attacker}] legit=[${legit}] ${ok ? "AS EXPECTED" : "NOT AS EXPECTED"}`);
 process.exit(ok ? 0 : 1);
