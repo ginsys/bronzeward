@@ -17,7 +17,6 @@ import type { Client, Phase, ReadResult } from "./request.ts";
 import { importPath } from "./router.ts";
 import { firstSentence, Note, PageHead, Panel } from "./layout.tsx";
 import { machineOptions, sharedAddresses } from "./machines.tsx";
-import { PageNote } from "./page-note.tsx";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
 import { ImportedConfigurationRef, MachineById, Named, useMachineText } from "./titles.tsx";
@@ -689,56 +688,59 @@ export function StartImport({ query }: { query: string }) {
   const choose = useRef(fileReader((t) => setTyped((x) => ({ ...x, doc: t })), setNote)).current;
   const typeDocument = typedDocument(choose, (t) => setTyped((x) => ({ ...x, doc: t })));
   const label = params.kind === "drift-adoption" ? "Start drift adoption" : "Start import";
+  const startNote = params.kind === "drift-adoption" ? DRIFT_ADOPTION_NOTE : START_IMPORT_NOTE;
   return (
     <>
-      <h2>{label}</h2>
-      <PageNote parts={[params.kind === "drift-adoption" ? DRIFT_ADOPTION_NOTE : START_IMPORT_NOTE]} />
+      <PageHead heading={label} />
+      <Note line={firstSentence(startNote)} parts={[startNote]} />
       {params.refusal !== undefined && <Status testid="start-refused">{params.refusal}</Status>}
-      <Form label={label} onSubmit={(d) => void submit(d)} w={w} done={(data) => <><Named id={(data as { ingestion: string }).ingestion} /> started.</>}>
-        <p>
-          <label>Machine:{" "}
-            <select name="machine" required value={machine} onChange={(e) => setMachine(e.target.value)}>
-              <option value="" disabled>{machines.kind === "ok" ? "choose" : "machines not read"}</option>
-              {(machines.kind === "ok" ? machines.data.items : []).map((x) => <option key={x.id} value={x.id}>{choices.get(x.id)}</option>)}
-            </select>
-          </label>
-        </p>
-        <p>
-          <label>Draft:{" "}
-            <select name="draft" required defaultValue={q.get("draft") ?? ""} key={`${machine}:${open.length}`}>
-              <option value="" disabled>{m === undefined ? "choose a machine first" : open.length === 0 ? "no open draft in this machine's cluster" : "choose"}</option>
-              {open.map((d) => <option key={d.id} value={d.id}>{draftName(d)} ({short(d.id)}, revision {d.revision})</option>)}
-            </select>
-          </label>{" "}
-          <Action label="Create draft" needs={["author"]} onClick={() => go("/drafts/new")} />
-        </p>
-        <fieldset>
-          <legend>Source</legend>
-          <label><input type="radio" name="source" value="machine" checked={source === "machine"} onChange={() => setSource("machine")} /> Read from the machine</label>{" "}
-          <label><input type="radio" name="source" value="document" checked={source === "document"} disabled={params.kind === "drift-adoption"} onChange={() => setSource("document")} /> A document, pasted or from a file</label>
-        </fieldset>
-        {source === "document" && (
-          <>
-            <p><label>Document (YAML):<br /><textarea rows={16} cols={80} value={doc} onChange={(e) => typeDocument(e.target.value)} {...NO_ASSIST} /></label></p>
-            <p><label>Or read it from a file:{" "}<input type="file" accept=".yaml,.yml" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; choose(f); }} /></label></p>
-          </>
-        )}
-        <fieldset>
-          <legend>Staging</legend>
-          <label><input type="radio" name="staging" value="encrypted" checked={staging === "encrypted"} onChange={() => setStaging("encrypted")} /> Encrypted staging</label>{" "}
-          <label><input type="radio" name="staging" value="transient" checked={staging === "transient"} onChange={() => setStaging("transient")} /> Transient staging</label>
-        </fieldset>
-        <p>
-          <label><input type="checkbox" name="review" checked={staging === "encrypted" && review} disabled={staging !== "encrypted"} onChange={(e) => setReview(e.target.checked)} /> Pause for review before the draft changes</label>
-          {staging !== "encrypted" && " A review needs encrypted staging."}
-        </p>
-        <p>
-          <label>Marks, one path per line (optional):<br /><textarea rows={4} cols={80} value={marks} onChange={(e) => setTyped((x) => ({ ...x, marks: e.target.value }))} {...NO_ASSIST} /></label><br />
-          A mark names a value to keep secret by its path, such as doc[0]/machine/files/0/content.
-        </p>
-        {note !== undefined && <Status testid="start-note">{note}</Status>}
-      </Form>
-      {reviewFirst(o, sentDraft.current)}
+      <Panel title={label}>
+        <Form label={label} onSubmit={(d) => void submit(d)} w={w} done={(data) => <><Named id={(data as { ingestion: string }).ingestion} /> started.</>}>
+          <p>
+            <label>Machine:{" "}
+              <select name="machine" required value={machine} onChange={(e) => setMachine(e.target.value)}>
+                <option value="" disabled>{machines.kind === "ok" ? "choose" : "machines not read"}</option>
+                {(machines.kind === "ok" ? machines.data.items : []).map((x) => <option key={x.id} value={x.id}>{choices.get(x.id)}</option>)}
+              </select>
+            </label>
+          </p>
+          <p>
+            <label>Draft:{" "}
+              <select name="draft" required defaultValue={q.get("draft") ?? ""} key={`${machine}:${open.length}`}>
+                <option value="" disabled>{m === undefined ? "choose a machine first" : open.length === 0 ? "no open draft in this machine's cluster" : "choose"}</option>
+                {open.map((d) => <option key={d.id} value={d.id}>{draftName(d)} ({short(d.id)}, revision {d.revision})</option>)}
+              </select>
+            </label>{" "}
+            <Action label="Create draft" needs={["author"]} onClick={() => go("/drafts/new")} variant="secondary" />
+          </p>
+          <fieldset>
+            <legend>Source</legend>
+            <label><input type="radio" name="source" value="machine" checked={source === "machine"} onChange={() => setSource("machine")} /> Read from the machine</label>{" "}
+            <label><input type="radio" name="source" value="document" checked={source === "document"} disabled={params.kind === "drift-adoption"} onChange={() => setSource("document")} /> A document, pasted or from a file</label>
+          </fieldset>
+          {source === "document" && (
+            <>
+              <p><label>Document (YAML):<br /><textarea rows={16} cols={80} value={doc} onChange={(e) => typeDocument(e.target.value)} {...NO_ASSIST} /></label></p>
+              <p><label>Or read it from a file:{" "}<input type="file" accept=".yaml,.yml" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; choose(f); }} /></label></p>
+            </>
+          )}
+          <fieldset>
+            <legend>Staging</legend>
+            <label><input type="radio" name="staging" value="encrypted" checked={staging === "encrypted"} onChange={() => setStaging("encrypted")} /> Encrypted staging</label>{" "}
+            <label><input type="radio" name="staging" value="transient" checked={staging === "transient"} onChange={() => setStaging("transient")} /> Transient staging</label>
+          </fieldset>
+          <p>
+            <label><input type="checkbox" name="review" checked={staging === "encrypted" && review} disabled={staging !== "encrypted"} onChange={(e) => setReview(e.target.checked)} /> Pause for review before the draft changes</label>
+            {staging !== "encrypted" && " A review needs encrypted staging."}
+          </p>
+          <p>
+            <label>Marks, one path per line (optional):<br /><textarea rows={4} cols={80} value={marks} onChange={(e) => setTyped((x) => ({ ...x, marks: e.target.value }))} {...NO_ASSIST} /></label><br />
+            A mark names a value to keep secret by its path, such as doc[0]/machine/files/0/content.
+          </p>
+          {note !== undefined && <Status testid="start-note">{note}</Status>}
+        </Form>
+        {reviewFirst(o, sentDraft.current)}
+      </Panel>
     </>
   );
 }

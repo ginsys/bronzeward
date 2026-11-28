@@ -11,7 +11,7 @@ import { Form, field, NO_ASSIST, Result, startsNew, Text, unsaved, useSend, useU
 import { NO_ETAG } from "./handover.ts";
 import { Handover } from "./handover.tsx";
 import { LAYERS } from "./layers.ts";
-import { firstSentence, lastSentence, Note, Panel } from "./layout.tsx";
+import { firstSentence, lastSentence, Note, PageHead, Panel } from "./layout.tsx";
 import { IdentifierText, type Load, Ref, Scroll, short, useItem, useList, usePending, useSettled } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { type EmbeddedPath, references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
@@ -24,7 +24,6 @@ import { DraftLink } from "./draft-link.tsx";
 import { ClusterLink, ClusterOption, ClusterRef, DraftHead, useMachineText } from "./titles.tsx";
 import { safeText, safeWord } from "./safe.ts";
 import { draftCalled, draftName, draftText, importedConfiguration } from "./titles.ts";
-import { PageNote } from "./page-note.tsx";
 import { claimedName, scopeMember, scopeQuery } from "./shared-writes.ts";
 import { CREATE_DRAFT_NOTE, DISCARD_SENTENCE, DISCARD_TITLE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, ENTRIES_TITLE, ENTRY_ACTION, ENTRY_COLUMNS, NAME_NOT_SHOWN, NO_EDITOR, PUBLISH_THIS_DRAFT, RENDERED_TITLE, SHARED_CHOICE, SHARED_REMOVE_SENTENCE, SHARED_SAVE_SENTENCE } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
@@ -216,19 +215,21 @@ export function CreateDraft() {
   const options = clusters.kind === "ok" ? clusters.data.items : [];
   return (
     <>
-      <h2>Create draft</h2>
-      <PageNote parts={[CREATE_DRAFT_NOTE]} />
-      <Form label="Create draft" onSubmit={submit} w={w} done={(data) => <CreatedDraft data={data} />}>
-        <p>
-          <label>Cluster:{" "}
-            <select name="cluster" required defaultValue="" key={options.length}>
-              <option value="" disabled>{clusters.kind === "ok" ? "choose" : "clusters not read"}</option>
-              {options.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </label>
-        </p>
-        <Text label="Title:" name="title" />
-      </Form>
+      <PageHead heading="Create draft" />
+      <Note line={firstSentence(CREATE_DRAFT_NOTE)} parts={[CREATE_DRAFT_NOTE]} />
+      <Panel title="Create draft">
+        <Form label="Create draft" onSubmit={submit} w={w} done={(data) => <CreatedDraft data={data} />}>
+          <p>
+            <label>Cluster:{" "}
+              <select name="cluster" required defaultValue="" key={options.length}>
+                <option value="" disabled>{clusters.kind === "ok" ? "choose" : "clusters not read"}</option>
+                {options.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+          </p>
+          <Text label="Title:" name="title" />
+        </Form>
+      </Panel>
     </>
   );
 }
