@@ -74,7 +74,7 @@ const button = (label: string) => buttons(box).find((b) => text(b) === label)!;
 const filled = (scope: ParentNode) => buttons(scope).filter((b) => !b.classList.contains("outline")).map(text);
 const before = (a: Element, b: Element) => expect(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING, `${text(a).slice(0, 30)} before ${text(b).slice(0, 30)}`).toBeTruthy();
 const press = async (label: string) => {
-  await act(async () => void button(label).click());
+  await act(async () => void (button(label) as HTMLElement).click());
   await settle();
 };
 const noteOf = (note: string) => {
