@@ -5,6 +5,7 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "./api/v1";
 import { NO_ASSIST, startsNew, useSend, useWrites, Result } from "./forms.tsx";
+import { Panel } from "./layout.tsx";
 import { type Load, Ref, short, useReads, useSettled } from "./list.tsx";
 import { markSent, MarksPanel, markSpec } from "./marks.tsx";
 import { importPath } from "./router.ts";
@@ -67,7 +68,7 @@ export function rereadOnce(w: Write | undefined, last: Write | undefined, again:
 export function ClaimView({ verb, offered, w, send }: { verb: Verb; offered: boolean; w: Write | undefined; send: () => void }) {
   return (
     <>
-      {offered && <Action label={LABEL[verb]} needs={["author"]} onClick={send} busy={w !== undefined && w.outcome === undefined} />}
+      {offered && <Action label={LABEL[verb]} needs={["author"]} variant={verb === "abandon" ? "destructive" : "secondary"} onClick={send} busy={w !== undefined && w.outcome === undefined} />}
       <Result w={w} done={(d) => WHAT[verb](d as { operation?: string })} />
     </>
   );
@@ -195,7 +196,7 @@ function Review({ b, marking }: { b: Ingestion; marking: { send: (marks: string[
   const { section, close } = useCloser(drop);
   return (
     <section ref={section} tabIndex={-1} aria-label="Protected review">
-      {text === undefined ? <Action label="Review import" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={b.id} text={text} close={close} marking={marking} />}
+      {text === undefined ? <Action label="Review import" needs={["author"]} variant="secondary" onClick={() => void open()} busy={reading} /> : <Shown id={b.id} text={text} close={close} marking={marking} />}
       {why}
     </section>
   );
@@ -241,10 +242,10 @@ export function BaseDocument({ id, machine }: { id: string; machine?: string | n
   }, [reads, read, failure, id]);
   const { section, close } = useCloser(drop);
   return (
-    <section ref={section} tabIndex={-1} aria-label="Protected document">
+    <Panel title="Protected document" focus={section}>
       {text === undefined ? <Action label="Show imported configuration" needs={["author"]} onClick={() => void open()} busy={reading} /> : <Shown id={id} text={text} close={close} kind="document" named={named} again={importPath({ machine })} />}
       {why}
-    </section>
+    </Panel>
   );
 }
 
@@ -330,11 +331,11 @@ function ClaimSection({ b, again, now }: { b: Ingestion; again: () => void; now:
   useFocusOn(ends, section);
   if (!o.review && shown.length === 0 && mw === undefined) return null;
   return (
-    <section ref={section} tabIndex={-1} aria-label="Claim">
+    <Panel title="Claim" focus={section}>
       <p>{b.state === "paused" ? expiry(b.expiresAt, now) : null}</p>
       {o.review && <Review b={b} marking={{ send: (marks) => msend(markSpec(b.id, marks)), busy: marking }} />}
       <Result w={mw} done={markSent} />
       {shown.map((v) => <ClaimAction key={v} id={b.id} verb={v} offered={o.verbs.includes(v)} again={again} sent={sentVerb} ended={ended} />)}
-    </section>
+    </Panel>
   );
 }

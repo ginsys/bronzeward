@@ -2,19 +2,21 @@
 // band, a page header with the page's actions, and a note drawn as one visible line with the whole note behind a native
 // disclosure. The action variants are Action's (shell.tsx). The draft page, the cluster page, the Clusters and Machines lists, the
 // operation page (ginsys/bronzeward#1257), the six list pages (ginsys/bronzeward#1259), the plan, apply, drift and operation item
-// pages (ginsys/bronzeward#1261) and the machine, release and review pages (ginsys/bronzeward#1263) use them so far; the stylesheet is
+// pages (ginsys/bronzeward#1261) and every item page (ginsys/bronzeward#1263) use them so far, the draft's editors and the forms not yet; the stylesheet is
 // app.css, "Console layout blocks".
 
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { PageNote } from "./page-note.tsx";
 import { ABOUT_PAGE } from "./words.ts";
 
 // A panel holds one thing. Its band has the title on the left and the panel's actions on the right, so an action sits under the
 // heading it belongs to. `label` names the section for a screen reader and a test where it differs from the title; `testid` keeps a
-// browser case's selector where the section had one before it was a panel.
-export function Panel({ title, actions, label = title, testid, children }: { title: string; actions?: ReactNode; label?: string; testid?: string; children?: ReactNode }) {
+// browser case's selector where the section had one before it was a panel. A title that is more than text (a link in it) names its
+// `label`. `focus` makes the panel the target a focus move lands on (the section it replaces took focus after an action, with tabIndex -1).
+type PanelProps = { actions?: ReactNode; testid?: string; focus?: Ref<HTMLElement>; children?: ReactNode } & ({ title: string; label?: string } | { title: ReactNode; label: string });
+export function Panel({ title, actions, label = title as string, testid, focus, children }: PanelProps) {
   return (
-    <section className="panel" aria-label={label} {...(testid !== undefined && { "data-testid": testid })}>
+    <section ref={focus} {...(focus !== undefined && { tabIndex: -1 })} className="panel" aria-label={label} {...(testid !== undefined && { "data-testid": testid })}>
       <div className="panel-head">
         <h3>{title}</h3>
         {actions !== undefined && actions !== false && <div className="actions">{actions}</div>}

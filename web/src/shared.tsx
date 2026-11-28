@@ -4,6 +4,7 @@
 
 import type { ReactNode } from "react";
 import type { components } from "./api/v1";
+import { Panel } from "./layout.tsx";
 import { EmptyList, Head, Id, More, Scroll, useItem, useList, usePending } from "./list.tsx";
 import { safeText, safeWord } from "./safe.ts";
 import { when } from "./states.tsx";
@@ -132,13 +133,13 @@ export function SavedRevision({ kind, id }: { kind: "fragment" | "profile"; id: 
 export function SharedClusters({ kind, head }: { kind: "fragment" | "profile"; head: string }) {
   const [list, more, busy] = useList<Adoption>(`/${kind}s/${encodeURIComponent(head)}/adoptions`, "", false);
   const pending = usePending(list, "the clusters using this name");
+  // The panel's name differs from its table region's ("Clusters using this name"), so a screen reader never meets two regions of one name.
   return (
-    <>
-      <h3>Clusters using this {kind}</h3>
+    <Panel title={`Clusters using this ${kind}`}>
       <p>{SHARED_PAGE_NOTE}</p>
       {list.kind !== "ok" ? pending : list.data.items.length === 0 && more === undefined ? <EmptyList list={list.data} text="No cluster uses this name yet." /> : (
         <><AdoptionRows rows={list.data.items} kind={kind} /><More list={list.data} shown={list.data.items.length} more={more} busy={busy} /></>
       )}
-    </>
+    </Panel>
   );
 }

@@ -96,12 +96,12 @@ export function MarksPanel({ text, send, busy }: { text: string; send: (marks: s
     <section aria-label="Marks">
       <h4>Mark as secret</h4>
       <ul data-testid="candidates">
-        {paths.map((p) => <li key={p}><code>{p}</code> <Action label="Mark as secret" needs={["author"]} onClick={() => setMarks((m) => withMark(m, p))} /></li>)}
+        {paths.map((p) => <li key={p}><code>{p}</code> <Action label="Mark as secret" needs={["author"]} variant="secondary" onClick={() => setMarks((m) => withMark(m, p))} /></li>)}
       </ul>
       {more > 0 && <p>{more} more values are not listed. Type their paths below.</p>}
       {unaddressable > 0 && <p data-testid="unaddressable">{`Values under a key with a line break cannot be marked here: ${unaddressable}.`}</p>}
       <p><label>Marks, one path per line:<br /><textarea rows={4} cols={80} value={marks} onChange={(e) => setMarks(e.target.value)} data-testid="marks" {...NO_ASSIST} /></label></p>
-      <Action label="Send marks" needs={["author"]} onClick={go} busy={busy} />
+      <Action label="Send marks" needs={["author"]} variant="secondary" onClick={go} busy={busy} />
       {refusal !== undefined && <p data-testid="not-sent">{refusal}</p>}
     </section>
   );

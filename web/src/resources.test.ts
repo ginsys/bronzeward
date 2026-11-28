@@ -163,8 +163,8 @@ describe("the import base summary (ginsys/bronzeward#857)", () => {
     // A read that wrongly carried the text or a digest must still not reach the page: the rows name their fields.
     const wrong = { ...summary, document: "machine:\n  hostname: bw-sentinel-text", configurationDigest: "ab".repeat(32), baselineDigest: "cd".repeat(32), names: ["registry/secret-name"] };
     const out = html(h(ImportBaseRows, { r: wrong }));
-    // The identifier is on the detail line, and the day is "Imported".
-    for (const s of ["Identifier", ibr, "Machine", "Author", "Imported", "Document size", "1234 bytes", "References", "Embedded documents"]) expect(out).toContain(s);
+    // The identifier is on the page header's detail line (group-c3-layout.test.ts), and the day is "Imported".
+    for (const s of ["Machine", "Author", "Imported", "Document size", "1234 bytes", "References", "Embedded documents"]) expect(out).toContain(s);
     for (const s of ["bw-sentinel-text", "ab".repeat(32), "cd".repeat(32), "registry/secret-name", "Digest</dt>"]) expect(out).not.toContain(s);
     expect(out).toContain("The digests and reference names are not shown.");
     expect(out).toContain("Any author may read an import read from a machine; an import of a file only the author who imported it and reviewed it may read.");
