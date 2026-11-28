@@ -231,7 +231,8 @@ type signIn struct {
 // openSignIn reads the context's stored sign-in. Without a store (D2 (a)) each command signs in
 // for itself, unless --no-input forbids it: in this host's browser on a desktop, else with the
 // device grant (decision D4 (a)). With --no-input the credential store shows no unlock prompt
-// either: a locked one is refused, and the sign-in then lasts for this process only.
+// either: a locked one is refused. A store that exists and fails, a locked one included, stops the
+// command before any sign-in starts, with or without --no-input (store.load).
 func openSignIn(x *Context, noInput bool, prompts io.Writer) (*signIn, error) {
 	s := &signIn{store: openStore(x, noInput)}
 	t, err := s.store.load()

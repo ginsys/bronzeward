@@ -58,6 +58,7 @@ type provider struct {
 	exchange     atomic.Int32                // code exchanges
 	devices      atomic.Int32                // device authorization requests
 	noRefresh    atomic.Bool                 // sign-ins are issued without a refresh token
+	requests     atomic.Int32                // every request, discovery included
 }
 
 type authorization struct{ challenge, nonce, redirect string }
@@ -308,7 +309,7 @@ func (p *provider) wrap(iss *issuer.Issuer) http.Handler {
 		}
 	})
 	mux.Handle("/", inner)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { p.requests.Add(1); mux.ServeHTTP(w, r) })
 }
 
 // issue answers a sign-in with h-viewer's access token, BWSYNTH-rt-1 and the ID token id.

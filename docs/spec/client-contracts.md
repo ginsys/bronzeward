@@ -1748,7 +1748,8 @@ by item" before it holds the code sites for each item.
    that process only and each new process runs `login`. On Linux no store is available when no
    D-Bus session bus is named, or when no program on it owns the Secret Service name
    (`org.freedesktop.secrets`) and none can be started for it; a store that answers and then
-   fails refuses `login` before the sign-in starts, so nothing is issued that cannot be kept. A
+   fails refuses `login`, and every other command that reads the sign-in, before any sign-in
+   starts, with or without `--no-input`, so nothing is issued that cannot be kept. A
    named bus that cannot be asked, for example a stale address, counts as a store that fails. On
    macOS the store is the user's default keychain, reached through the system's `security` tool: no
    store is available when that tool is missing. Every read, write and removal names the default

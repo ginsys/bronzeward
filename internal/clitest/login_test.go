@@ -757,6 +757,43 @@ func TestLogin(t *testing.T) {
 			`removing the stored sign-in of context "unreachable" from the system credential store`)
 	})
 
+	// A store that fails stops every command that needs the sign-in, not login alone, before any
+	// sign-in starts (§9.2 item 3, ginsys/bronzeward#1240): a read, a write and a watch, with and
+	// without --no-input. The identity provider is sent no request, and no sign-in is kept in memory.
+	t.Run("failing store stops commands", func(t *testing.T) {
+		add(nil, "failing")
+		defer f.ctl(nil, "", "context", "remove", "failing")
+		bus := []string{"DBUS_SESSION_BUS_ADDRESS=unix:path=" + filepath.Join(t.TempDir(), "missing")}
+		f.idp.login(nil, "")
+		for _, c := range []struct {
+			kind string
+			args []string
+		}{
+			{"read", []string{"whoami"}},
+			{"write", []string{"cluster", "add", "--name", "lab-x", "--endpoint", "https://cp.example.test:6443", "--contract", "v1.14", "--talos-cluster-id", seedClusterID}},
+			{"watch", []string{"operation", "watch", "op_BWSYNTH"}},
+		} {
+			for _, noInput := range []bool{false, true} {
+				args := []string{"--context", "failing"}
+				if noInput {
+					args = append(args, "--no-input")
+				}
+				before := f.idp.requests.Load()
+				r := f.ctl(bus, "", append(args, c.args...)...)
+				f.want(r, 1, "failing ("+f.base+"): the system credential store failed, so no sign-in was started: ")
+				f.wantMatch(r, `so no sign-in was started: \S`)
+				for _, text := range []string{"memory", "--no-input forbids", "To sign in to"} {
+					if strings.Contains(r.out+r.err, text) {
+						t.Errorf("%s (--no-input %v) printed %q:\n%s", c.kind, noInput, text, r.err)
+					}
+				}
+				if n := f.idp.requests.Load() - before; n != 0 {
+					t.Errorf("%s (--no-input %v): %d requests reached the identity provider, want none", c.kind, noInput, n)
+				}
+			}
+		}
+	})
+
 	// A session bus on which no program offers the Secret Service, or would be started for it, is
 	// no store: the sign-in is kept in memory, as with no bus.
 	t.Run("no secret service", func(t *testing.T) {
