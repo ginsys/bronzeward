@@ -5,14 +5,14 @@
 // page's copy ends with the first key's write (onboard.ts).
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { useReads, Ref, useSettled } from "./list.tsx";
+import { firstSentence, Note, PageHead, Panel } from "./layout.tsx";
+import { useReads, Ref, Scroll, useSettled } from "./list.tsx";
 import { type Discovery, type Env, endpointNote, isAddress, type Line, pressOnboarding, type Plan, discoverCluster, type Reference, sender, stoppedSentence } from "./onboard.ts";
 import { RequestRef } from "./problems.tsx";
 import { Action, KEPT_PAGE, useGate, type Variant } from "./shell.tsx";
 import { MachineById, Named } from "./titles.tsx";
 import { safeWord } from "./safe.ts";
 import { useUnsaved, useWrites } from "./forms.tsx";
-import { PageNote } from "./page-note.tsx";
 import { CONNECT_A_CLUSTER, CONNECT_NOTE, CONNECT_STEP_ONE, CONNECT_STEP_TWO, CONNECT_THIS_CLUSTER } from "./words.ts";
 
 // The most a first key may be (the API's bound), so a larger file is refused before it is read.
@@ -31,24 +31,25 @@ export const MemberRow = ({ m }: { m: Discovery["members"][number] }) => (
 
 // The second screen: what the read found, the Kubernetes endpoint, and the one press that records the cluster.
 export const ConfirmScreen = ({ p, busy, onSubmit }: { p: Plan; busy: boolean; onSubmit: (e: FormEvent<HTMLFormElement>) => void }) => (
-  <form onSubmit={onSubmit} aria-label="Record the cluster">
-    <h3>{CONNECT_STEP_TWO}</h3>
+  <Panel title={CONNECT_STEP_TWO}>
     <p data-testid="onboard-found">
       Talos {p.found.version}, contract {p.found.contract}, {p.found.members.length} {p.found.members.length === 1 ? "member" : "members"}, read at {p.found.endpoint}.
       {!isAddress(p.endpoint) && ` The server resolved ${p.endpoint} to that address.`}
       {!p.found.complete && " The read ended at its deadline: a member listed as not answering may be reachable."}
     </p>
-    <table>
+    <Scroll label="Members">
       <thead><tr><th>Hostname</th><th>Role</th><th>Address</th><th>Platform</th><th>Answered</th></tr></thead>
       <tbody>
         {p.found.members.map((m) => <MemberRow key={m.nodeId} m={m} />)}
       </tbody>
-    </table>
-    <p>The cluster will be named <strong data-testid="onboard-name">{p.name}</strong> in Bronzeward.</p>
-    <p><label>Kubernetes endpoint: <input name="kube" required defaultValue={p.kube} autoComplete="off" /></label> https://host or https://host:port, the cluster's own where its control-plane members agree on one, else the first control-plane member's address</p>
-    <p>Pressing the button records the cluster and each member that answered, supplies the cluster's first key, and imports each machine into one draft.</p>
-    <p><Action label={CONNECT_THIS_CLUSTER} needs={["author"]} submit busy={busy} /></p>
-  </form>
+    </Scroll>
+    <form onSubmit={onSubmit} aria-label="Record the cluster">
+      <p>The cluster will be named <strong data-testid="onboard-name">{p.name}</strong> in Bronzeward.</p>
+      <p><label>Kubernetes endpoint: <input name="kube" required defaultValue={p.kube} autoComplete="off" /></label> https://host or https://host:port, the cluster's own where its control-plane members agree on one, else the first control-plane member's address</p>
+      <p>Pressing the button records the cluster and each member that answered, supplies the cluster's first key, and imports each machine into one draft.</p>
+      <p><Action label={CONNECT_THIS_CLUSTER} needs={["author"]} submit busy={busy} /></p>
+    </form>
+  </Panel>
 );
 
 export function OnboardCluster() {
@@ -186,30 +187,31 @@ export function OnboardCluster() {
   const keptPage = useGate(["author"]) === KEPT_PAGE;
   return (
     <>
-      <h2>{CONNECT_A_CLUSTER}</h2>
-      <PageNote parts={[CONNECT_NOTE]} />
+      <PageHead heading={CONNECT_A_CLUSTER} />
+      <Note line={firstSentence(CONNECT_NOTE)} parts={[CONNECT_NOTE]} />
       {note !== undefined && <p role="alert" data-testid="onboard-note">{note.text}</p>}
       {note?.reference !== undefined && <RequestRef problem={note.reference.problem} status={note.reference.status} />}
       {phase === "file" && (
-        <form onSubmit={(e) => void read(e)} onChange={(e) => void say(e.currentTarget)} aria-label="Read the cluster">
-          <h3>{CONNECT_STEP_ONE}</h3>
-          <p>
-            Choose the talosconfig of the cluster. It is read in this page and sent only as the one context it names, to the server, which uses it
-            to read the cluster's nodes and to supply the cluster's first key. It is not stored here.
-          </p>
-          <p><label>Talosconfig file: <input type="file" name="file" required /></label></p>
-          <p><label>Name: <input name="name" required autoComplete="off" defaultValue={name} /></label> for the cluster in Bronzeward</p>
-          <p><label>Talos context: <input name="context" autoComplete="off" /></label> the current one when empty</p>
-          <p><label>Talos endpoint: <input name="endpoint" autoComplete="off" /></label> the context's endpoints, tried in order, when empty</p>
-          {said !== undefined && <p role="status" data-testid="onboard-endpoint">{said}</p>}
-          <p><Action label="Read cluster" needs={["author"]} submit busy={busy} /></p>
-          {busy && <p role="status" data-testid="onboard-trying">{stopping ? "Stopping: no other endpoint will be tried after this one." : (trying ?? "Reading the cluster's nodes")}</p>}
-          {busy && trying !== undefined && !stopping && <p><button type="button" onClick={() => { stop.current = true; setStopping(true); }}>Stop</button></p>}
-        </form>
+        <Panel title={CONNECT_STEP_ONE}>
+          <form onSubmit={(e) => void read(e)} onChange={(e) => void say(e.currentTarget)} aria-label="Read the cluster">
+            <p>
+              Choose the talosconfig of the cluster. It is read in this page and sent only as the one context it names, to the server, which uses it
+              to read the cluster's nodes and to supply the cluster's first key. It is not stored here.
+            </p>
+            <p><label>Talosconfig file: <input type="file" name="file" required /></label></p>
+            <p><label>Name: <input name="name" required autoComplete="off" defaultValue={name} /></label> for the cluster in Bronzeward</p>
+            <p><label>Talos context: <input name="context" autoComplete="off" /></label> the current one when empty</p>
+            <p><label>Talos endpoint: <input name="endpoint" autoComplete="off" /></label> the context's endpoints, tried in order, when empty</p>
+            {said !== undefined && <p role="status" data-testid="onboard-endpoint">{said}</p>}
+            <p><Action label="Read cluster" needs={["author"]} submit busy={busy} /></p>
+            {busy && <p role="status" data-testid="onboard-trying">{stopping ? "Stopping: no other endpoint will be tried after this one." : (trying ?? "Reading the cluster's nodes")}</p>}
+            {busy && trying !== undefined && !stopping && <p><button type="button" className="outline" onClick={() => { stop.current = true; setStopping(true); }}>Stop</button></p>}
+          </form>
+        </Panel>
       )}
       {phase === "confirm" && p !== undefined && <ConfirmScreen p={p} busy={busy} onSubmit={confirm} />}
       {phase === "run" && (
-        <>
+        <Panel title={CONNECT_THIS_CLUSTER}>
           <ul data-testid="onboard-lines">
             {lines.map((l) => (
               <li key={l.key} data-testid="onboard-line" data-state={l.state}>
@@ -238,7 +240,7 @@ export function OnboardCluster() {
                 : <Action label="Run again" needs={["author"]} onClick={() => void run()} busy={busy} />}
             </p>
           )}
-        </>
+        </Panel>
       )}
     </>
   );

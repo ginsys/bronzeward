@@ -193,10 +193,12 @@ describe("the machine page through its own reads", () => {
 // Operations, Imports, Fragments and profiles, Audit), the plan page, the apply page, the drift page, the machine page, the release page,
 // the rendered review, the fragment, profile, assignment, revision, dependency, import and imported configuration pages draw their note as
 // one visible line with the full note behind "What is this page?" (client contracts §10.4 item 6,
-// ginsys/bronzeward#1255, ginsys/bronzeward#1257, ginsys/bronzeward#1259, ginsys/bronzeward#1261 and ginsys/bronzeward#1263;
-// `group-a-layout.test.ts`, `group-b-layout.test.ts`, `group-c1-layout.test.ts`, `group-c2-layout.test.ts` and `group-c3-layout.test.ts` pin the
-// line of each); every other page's note is still shown whole under its title, as the tests above and below assert, and so is the plan page's
-// approval part, which stays whole inside the Approval panel. The full note's text is the page-note element inside the disclosure, so its parts are asserted
+// ginsys/bronzeward#1255, ginsys/bronzeward#1257, ginsys/bronzeward#1259, ginsys/bronzeward#1261, ginsys/bronzeward#1263 and
+// ginsys/bronzeward#1266, which draws the six entry forms the same way: Create draft, Start import, Plan new, Add machine, Enter a cluster by
+// hand and Connect a cluster; `group-a-layout.test.ts`, `group-b-layout.test.ts`, `group-c1-layout.test.ts`, `group-c2-layout.test.ts`,
+// `group-c3-layout.test.ts` and `group-e-layout.test.ts` pin the line of each); the recovery pages' notes are still shown whole under their title,
+// as the tests above and below assert, and so is the plan page's approval part, which stays whole inside the Approval panel. The full note's text
+// is the page-note element inside the disclosure, so its parts are asserted
 // exactly as before; what comes before it is the page header (title, state line, identifier line and the page's primary
 // action), the visible line and the disclosure's summary.
 // The machine page, the release page and the rendered review (ginsys/bronzeward#1263): the line is the first sentence of the note, and the
@@ -664,12 +666,14 @@ describe("the notes of the other pages", () => {
   // source is read for that order: a note drawn inside a phase, or below one, fails.
   test("the Connect page draws its note once, directly under the heading and before every phase", () => {
     const src = readFileSync(`${import.meta.dirname}/onboard.tsx`, "utf8");
-    const heading = src.indexOf("<h2>{CONNECT_A_CLUSTER}</h2>");
-    const noteAt = src.indexOf("<PageNote parts={[CONNECT_NOTE]} />");
+    const head = "<PageHead heading={CONNECT_A_CLUSTER} />";
+    const note = "<Note line={firstSentence(CONNECT_NOTE)} parts={[CONNECT_NOTE]} />";
+    const heading = src.indexOf(head);
+    const noteAt = src.indexOf(note);
     const firstPhase = src.indexOf("{phase ===");
-    expect(src.split("<PageNote parts={[CONNECT_NOTE]} />")).toHaveLength(2);
+    expect(src.split(note)).toHaveLength(2);
     expect(heading).toBeGreaterThan(-1);
-    expect(src.slice(heading + "<h2>{CONNECT_A_CLUSTER}</h2>".length, noteAt).trim()).toBe("");
+    expect(src.slice(heading + head.length, noteAt).trim()).toBe("");
     expect(noteAt).toBeLessThan(firstPhase);
   });
 

@@ -10,7 +10,7 @@ import { RequestRef } from "./problems.tsx";
 import { Action, useOffline, type Variant } from "./shell.tsx";
 import type { Problem } from "./request.ts";
 import { CHECK_STATE, CUT_OFF, problemSentences, Refused, Repeated, REPLAYED, SetAside, Status, unknown, Unknown } from "./states.tsx";
-import { PageNote } from "./page-note.tsx";
+import { firstSentence, Note, PageHead, Panel } from "./layout.tsx";
 import { MACHINE_NAME } from "./machine-name.ts";
 import { machineName } from "./machines.tsx";
 import { MachineById } from "./titles.tsx";
@@ -263,14 +263,16 @@ export function AddCluster() {
   };
   return (
     <>
-      <h2>{ENTER_A_CLUSTER_BY_HAND}</h2>
-      <PageNote parts={[BY_HAND_NOTE]} />
-      <Form label={ENTER_A_CLUSTER_BY_HAND} onSubmit={submit} w={w} done={done}>
-        <Text label="Name:" name="name" />
-        <Text label="Kubernetes endpoint:" name="endpoint" hint="https://host or https://host:port" />
-        <Text label="Talos contract:" name="contract" hint="a minor version, as v1.14" />
-        <Text label="Talos cluster ID:" name="talosClusterId" hint="as talosctl get info prints it" />
-      </Form>
+      <PageHead heading={ENTER_A_CLUSTER_BY_HAND} />
+      <Note line={firstSentence(BY_HAND_NOTE)} parts={[BY_HAND_NOTE]} />
+      <Panel title={ENTER_A_CLUSTER_BY_HAND}>
+        <Form label={ENTER_A_CLUSTER_BY_HAND} onSubmit={submit} w={w} done={done}>
+          <Text label="Name:" name="name" />
+          <Text label="Kubernetes endpoint:" name="endpoint" hint="https://host or https://host:port" />
+          <Text label="Talos contract:" name="contract" hint="a minor version, as v1.14" />
+          <Text label="Talos cluster ID:" name="talosClusterId" hint="as talosctl get info prints it" />
+        </Form>
+      </Panel>
     </>
   );
 }
@@ -318,20 +320,22 @@ export function RecordMachine({ query }: { query: string }) {
   };
   return (
     <>
-      <h2>{ADD_MACHINE}</h2>
-      <PageNote parts={[ADD_MACHINE_NOTE]} />
-      <Form label={ADD_MACHINE} onSubmit={submit} w={w} done={done}>
-        <ClusterField clusters={clusters} chosen={chosen} choose={choose} />
-        <Text label="Talos node ID:" name="talosNodeId" hint="as talosctl get identity prints it" />
-        <p>
-          <label>Platform:{" "}
-            <select name="platform" required defaultValue="metal">
-              {["metal", "container", "cloud"].map((p) => <option key={p}>{p}</option>)}
-            </select>
-          </label>
-        </p>
-        <Text label="Talos endpoint:" name="talosEndpoint" hint="an IP address; the port is 50000 unless given" />
-      </Form>
+      <PageHead heading={ADD_MACHINE} />
+      <Note line={firstSentence(ADD_MACHINE_NOTE)} parts={[ADD_MACHINE_NOTE]} />
+      <Panel title={ADD_MACHINE}>
+        <Form label={ADD_MACHINE} onSubmit={submit} w={w} done={done}>
+          <ClusterField clusters={clusters} chosen={chosen} choose={choose} />
+          <Text label="Talos node ID:" name="talosNodeId" hint="as talosctl get identity prints it" />
+          <p>
+            <label>Platform:{" "}
+              <select name="platform" required defaultValue="metal">
+                {["metal", "container", "cloud"].map((p) => <option key={p}>{p}</option>)}
+              </select>
+            </label>
+          </p>
+          <Text label="Talos endpoint:" name="talosEndpoint" hint="an IP address; the port is 50000 unless given" />
+        </Form>
+      </Panel>
     </>
   );
 }

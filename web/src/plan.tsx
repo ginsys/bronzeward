@@ -7,9 +7,8 @@ import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "re
 import type { components } from "./api/v1";
 import { Result, startsNew, useSend, useWrites } from "./forms.tsx";
 import { PlanHostWaits } from "./host-waits.tsx";
-import { Panel } from "./layout.tsx";
+import { firstSentence, Note, PageHead, Panel } from "./layout.tsx";
 import { type Load, Id, Ref, short, usePending, useReads, useSettled } from "./list.tsx";
-import { PageNote } from "./page-note.tsx";
 import type { Problem } from "./request.ts";
 import { Action } from "./shell.tsx";
 import { Status, when } from "./states.tsx";
@@ -155,9 +154,11 @@ export function PlanNew({ query }: { query: string }) {
   const first: Operation = q.get("operation") === "adopt" ? "adopt" : "apply-config";
   return (
     <>
-      <h2>Create a plan</h2>
-      <PageNote parts={[CREATE_PLAN_NOTE]} />
-      <Create key={`${release}/${machine}/${first}`} release={release} machine={machine} first={first} />
+      <PageHead heading="Create a plan" />
+      <Note line={firstSentence(CREATE_PLAN_NOTE)} parts={[CREATE_PLAN_NOTE]} />
+      <Panel title="Create plan">
+        <Create key={`${release}/${machine}/${first}`} release={release} machine={machine} first={first} />
+      </Panel>
     </>
   );
 }
