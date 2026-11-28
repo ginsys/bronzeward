@@ -137,12 +137,20 @@ Jobs in profile `go-db` (PostgreSQL and OpenBao), one at a time. Evidence:
 | `internal/api` | C | pass (1270 s) |
 | every other package (33) | C | 32 pass or have no tests; `internal/clitest` fails in three tests |
 | the three failing clitest tests (`TestApprovals`, `TestDrift`, `TestProtected`) | C, with the version string in the export rewritten | pass |
-| the same three tests | A | pass |
+| the same three tests | A | pass in two of three runs (below) |
 
 The three fail because their golden transcripts (`internal/clitest/testdata/journeys/t3.txt`,
 `t8.txt`, `t10.txt`) hold `machinery v1.14.5` nine times (3, 2 and 4), and the run prints
 `machinery v1.14.7`. The `goldens` set rewrites exactly that string in the export and the tests pass;
-at A they pass unchanged (both reruns check that the three tests ran and passed). The skips are 17
+at A they pass unchanged, on two of three runs. In the one that failed (the second, which was the
+first run of the final revision of `run/test2`), `TestApprovals` and `TestDrift` passed and
+`TestProtected` failed in `PROT-02` to `PROT-06`: `PROT-02`'s import start answered that its
+claim's lease had lapsed 17 s ago, and the four after it were refused because an ingestion of the
+same draft was still running. That run was slow (`TestApprovals` took 71 s there and 40 s in the
+last, passing one), the lease is a time bound, and the failure is at A, which has no v1.14.7 code; the
+third run passed. It is read as a timing failure under load of a test this change does not touch,
+and not isolated further. Both reruns check that the three tests ran and passed; the evidence
+keeps the failed run's lines. The skips are 17
 in the rest set and 9 in `internal/api`, each with the reason it printed in the summary: services the
 pod does not start (no `dbus-daemon` or `gnome-keyring-daemon`, no test identity provider, no Talos
 node, no packaged binaries); the browser harness's own steps (`TestE2E*`, three in `internal/api`);

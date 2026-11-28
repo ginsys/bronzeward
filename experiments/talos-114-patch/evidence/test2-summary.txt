@@ -76,18 +76,56 @@ failing tests:
     --- FAIL: TestProtected/T3 (2.95s)
 
 == c-goldens
-commit 16c26333baa844810d12ab864763184011fc160c variant c set goldens started 2026-11-28T18:18:17+01:00
-run-cluster-job exit 2 finished 2026-11-28T18:18:17+01:00
+commit 336b31c5234c73410217911286c90815db4ef67d variant c set goldens started 2026-11-28T18:19:17+01:00
+JOB_CREATED: verify-bronzeward-336b31c-1795886357-2d50e12b in heavy-runs for head 336b31c5234c73410217911286c90815db4ef67d
+== variant c, set goldens: github.com/siderolabs/talos/pkg/machinery v1.14.7
+ok  	github.com/ginsys/bronzeward/internal/clitest	163.005s
+VERIFY_SECONDS=368
+VERIFY_DONE rc=0
+run-cluster-job exit 0 finished 2026-11-28T18:29:13+01:00
 skipped tests: 0
 failing tests:
   none
 
 == a-goldens
-commit 16c26333baa844810d12ab864763184011fc160c variant a set goldens started 2026-11-28T18:18:17+01:00
-run-cluster-job exit 2 finished 2026-11-28T18:18:17+01:00
+commit 336b31c5234c73410217911286c90815db4ef67d variant a set goldens started 2026-11-28T19:13:01+01:00
+JOB_CREATED: verify-bronzeward-336b31c-1795889581-593df613 in heavy-runs for head 336b31c5234c73410217911286c90815db4ef67d
+== variant a, set goldens: github.com/siderolabs/talos/pkg/machinery v1.14.5
+ok  	github.com/ginsys/bronzeward/internal/clitest	98.958s
+VERIFY_SECONDS=281
+VERIFY_DONE rc=0
+run-cluster-job exit 0 finished 2026-11-28T19:21:15+01:00
 skipped tests: 0
 failing tests:
   none
+
+== a-goldens, the earlier run that failed (started 18:29, ended 18:42): variant line, failing tests, the first line of each failure
+commit 336b31c5234c73410217911286c90815db4ef67d variant a set goldens started 2026-11-28T18:29:13+01:00
+JOB_CREATED: verify-bronzeward-336b31c-1795886954-4c986894 in heavy-runs for head 336b31c5234c73410217911286c90815db4ef67d
+== variant a, set goldens: github.com/siderolabs/talos/pkg/machinery v1.14.5
+--- FAIL: TestProtected (59.17s)
+    --- FAIL: TestProtected/PROT-02 (19.62s)
+    --- FAIL: TestProtected/PROT-03 (0.89s)
+    --- FAIL: TestProtected/PROT-04 (0.66s)
+    --- FAIL: TestProtected/PROT-05 (0.36s)
+    --- FAIL: TestProtected/PROT-06,_a_mark_and_the_serving_process_killed (0.49s)
+FAIL
+FAIL	github.com/ginsys/bronzeward/internal/clitest	194.966s
+FAIL
+VERIFY_SECONDS=318
+VERIFY_DONE rc=1
+run-cluster-job exit 1 finished 2026-11-28T18:42:28+01:00
+    protected_test.go:362: import start named no ingestion:
+        stdout:
+    protected_test.go:381: import start named no ingestion:
+        stdout:
+    protected_test.go:413: import start named no ingestion:
+        stdout:
+    protected_test.go:437: import start named no ingestion:
+        stdout:
+    protected_test.go:456: import start named no ingestion:
+        stdout:
+Then the Job created at 18:42 (verify-bronzeward-336b31c-1795887772-b94c6178) printed nothing for the 1800 s bound I gave it and was ended by it; the run above in this file (19:13) is the next one.
 
 == every skipped test of c-api with the reason it printed (skip lines: test, then the line before it)
 BW_E2E_NODE_OUT names no file: this test is the browser cases' Talos target
