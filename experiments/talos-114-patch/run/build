@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Usage: run/build <a|c> <new directory outside the checkout>
+# Export the base commit's tree into the directory and apply that build's committed patch.
+#   a   the base: machinery v1.14.5, as the product pins it
+#   c   machinery v1.14.7, the latest v1.14 patch on 2026-11-28 (v1.14.6 holds the same module code)
+# The patch carries go.mod only, which pins every version. Go writes go.sum for the changed modules
+# here and checks each new entry against the checksum database, so this refuses to run with that
+# check off, and fails if writing go.sum changes go.mod. go.sum is not committed for these builds.
+# It creates the directory and removes nothing.
+set -euo pipefail
+
+BASE=d8c4ba5289a48ff51bd96c0cc244eb279e0c2085
+
+[ $# -eq 2 ] || { echo "usage: $0 <a|c> <new directory>" >&2; exit 2; }
+here=$(cd "$(dirname "$0")/.." && pwd)
+root=$(git -C "$here" rev-parse --show-toplevel)
+
+case $1 in
+a) patches=() ;;
+c) patches=(c-machinery-1147) ;;
+*) echo "$0: unknown build $1" >&2; exit 2 ;;
+esac
+
+mkdir -- "$2"
+dir=$(cd -- "$2" && pwd)
+case $dir/ in "$root"/*) echo "$0: $dir is inside the checkout" >&2; exit 2 ;; esac
+
+git -C "$root" archive "$BASE" | tar -x -C "$dir"
+for p in "${patches[@]}"; do
+	(cd "$dir" && git apply --unidiff-zero "$here/patches/$p.patch")
+done
+
+if [ ${#patches[@]} -gt 0 ]; then
+	(
+		cd "$dir"
+		sumdb=$(go env GOSUMDB)
+		skipped=$(go env GONOSUMDB)$(go env GOPRIVATE)$(go env GOINSECURE)
+		flags=$(go env GOFLAGS)
+		# -v only makes go print more (the cluster pod sets it); any other flag refuses.
+		if [ "$sumdb" != sum.golang.org ] || [ -n "$skipped" ] || { [ -n "$flags" ] && [ "$flags" != -v ]; }; then
+			echo "build: checksum database verification may be off: GOSUMDB='$sumdb', GONOSUMDB, GOPRIVATE and GOINSECURE together='$skipped', GOFLAGS='$flags'" >&2
+			exit 1
+		fi
+		cp go.mod go.mod.pinned
+		go mod tidy
+		cmp go.mod go.mod.pinned || { echo "build: go mod tidy changed the pinned go.mod" >&2; exit 1; }
+	)
+fi
+(cd "$dir" && go mod verify >/dev/null)
+echo "built $1 from $BASE with ${#patches[@]} patch(es)"
