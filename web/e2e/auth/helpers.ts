@@ -42,6 +42,18 @@ export const mirrored = () => browser.execute(() => [...document.querySelectorAl
 // This waits for `read` to hold, so a read that never holds fails with what it waited for.
 export const eventually = (read: () => Promise<boolean>, what: string, timeout = 5_000) =>
   browser.waitUntil(read, { timeout, interval: 25, timeoutMsg: `${what} was not shown within ${timeout} ms` });
+// The draft page's Entries is a table (the layout design, ginsys/bronzeward#1255): a row is read by the name in its first cell, and
+// its Open button is named by its entry. `entryRow` is the row's cells joined by " | " ("ntp | fragment | this cluster | new |
+// Open"), or "" while no row has that name; `entryNames` is the first cell of every row.
+export const ENTRIES = 'main [data-testid="entries"]';
+export const entryOpen = (kind: string, name: string) => `${ENTRIES} button[aria-label="Open ${kind} ${name}"]`;
+export const entryRow = (name: string) =>
+  browser.execute((table: string, n: string) => {
+    const row = [...document.querySelectorAll(`${table} tbody tr`)].find((r) => r.firstElementChild?.textContent === n);
+    return row === undefined ? "" : [...row.children].map((c) => c.textContent ?? "").join(" | ");
+  }, ENTRIES, name);
+export const entryNames = () =>
+  browser.execute((table: string) => [...document.querySelectorAll(`${table} tbody th`)].map((t) => t.textContent ?? ""), ENTRIES);
 // The other side of the same early read: a check that `read` is false passes when the page has not yet rendered the
 // thing it must not show. Called once the page is on the state the check is about, it reads, pauses and reads again,
 // so a thing that renders a moment later still fails it (ginsys/bronzeward#921).

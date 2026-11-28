@@ -6,6 +6,7 @@
 
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import type { components } from "./api/v1";
+import { PageHead } from "./layout.tsx";
 import { Detail, Id, Ref, short, useReads, viewOf } from "./list.tsx";
 import { machineText } from "./machines.tsx";
 import { bodiesOf, genOf } from "./bodies.ts";
@@ -50,19 +51,24 @@ export function useClusterText(id: string | null | undefined): string | undefine
 // The top of a draft's page and of its publication page: the heading "<lead>: <title>" ("Untitled draft" where its title
 // is not safe, the shortened identifier where the draft is unread), then its state, revision and cluster, then the
 // identifier with Copy.
-export function DraftHead({ id, d, lead }: { id: string; d: S["DraftBody"] | undefined; lead: string }) {
+// `layout` draws it as the layout design's page header (layout.tsx): the page's primary action, if it has one, on the right, and
+// the identifier line's Copy as a secondary button. The publication page passes none and keeps its markup.
+export function DraftHead({ id, d, lead, layout }: { id: string; d: S["DraftBody"] | undefined; lead: string; layout?: { actions: ReactNode } }) {
   // Publishing bumps the draft by one revision in the same transaction that builds the release (internal/api/publish.go), so a
   // published draft's release was built from the revision before its own: the two pages say so with the numbers a person sees.
   const built = d?.state === "published" ? ` (publishing made revision ${d.revision}; its release was built from revision ${d.revision - 1})` : "";
+  const heading = d === undefined ? `${lead} ${short(id)}` : `${lead}: ${draftName(d)}`;
+  const lines = d !== undefined && (
+    <>
+      <p data-testid="draft-line">{safeWord(d.state)}, revision {d.revision}{built}, <ClusterRef id={d.cluster} />.</p>
+      <Detail id={d.id} quiet secondary={layout !== undefined} />
+    </>
+  );
+  if (layout !== undefined) return <PageHead heading={heading} actions={d === undefined ? undefined : layout.actions}>{lines}</PageHead>;
   return (
     <>
-      <h2>{d === undefined ? `${lead} ${short(id)}` : `${lead}: ${draftName(d)}`}</h2>
-      {d !== undefined && (
-        <>
-          <p data-testid="draft-line">{safeWord(d.state)}, revision {d.revision}{built}, <ClusterRef id={d.cluster} />.</p>
-          <Detail id={d.id} quiet />
-        </>
-      )}
+      <h2>{heading}</h2>
+      {lines}
     </>
   );
 }

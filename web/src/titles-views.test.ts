@@ -826,11 +826,12 @@ describe("ginsys/bronzeward#1055: the draft and publish pages", () => {
     expect(box.querySelector("small span[title]")?.getAttribute("title")).toBe(DRF);
   });
 
-  test("its entries name the machine, and the imported configuration is one link titled by the import base", async () => {
+  test("its entries name the machine, and the imported configuration is one Open link titled by the import base", async () => {
     await mount(providers(h(DraftItem, { id: DRF })));
     await settled();
-    const entries = [...box.querySelectorAll('ul[aria-label="Entries"] li')];
-    expect(entries.map((e) => e.querySelector("button, a")?.textContent)).toEqual(["assignment worker-1", "Imported configuration of worker-1"]);
+    const entries = [...box.querySelectorAll('[data-testid="entries"] tbody tr')];
+    expect(entries.map((e) => e.firstElementChild?.textContent)).toEqual(["worker-1", "Imported configuration of worker-1"]);
+    expect(entries.map((e) => e.querySelector("button, a")?.getAttribute("aria-label"))).toEqual(["Open assignment worker-1", "Open imported configuration of worker-1"]);
     expect(entries[1]!.querySelector("a")?.getAttribute("title")).toBe(IBR);
     expect(entries[1]!.textContent).not.toContain("ibr_");
   });
@@ -848,8 +849,10 @@ describe("ginsys/bronzeward#1055: the draft and publish pages", () => {
     answers[`/drafts/${DRF}`] = ok({ ...draft, entries: [entry("a‮b"), entry("a\nb"), entry("ok-name")] });
     await mount(providers(h(DraftItem, { id: DRF })));
     await settled();
-    const names = [...box.querySelectorAll('ul[aria-label="Entries"] li button')].map((b) => b.textContent);
-    expect(names).toEqual(["fragment (name not shown)", "fragment (name not shown)", "fragment ok-name"]);
+    const names = [...box.querySelectorAll('[data-testid="entries"] tbody th')].map((b) => b.textContent);
+    expect(names).toEqual(["(name not shown)", "(name not shown)", "ok-name"]);
+    const opens = [...box.querySelectorAll('[data-testid="entries"] tbody button')].map((b) => b.getAttribute("aria-label"));
+    expect(opens).toEqual(["Open fragment (name not shown)", "Open fragment (name not shown)", "Open fragment ok-name"]);
   });
 
   test("the publish page is headed by the same title, says the same line and carries the identifier with Copy", async () => {

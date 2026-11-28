@@ -6,12 +6,12 @@
 
 import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { components } from "./api/v1";
-import { BaseDocument } from "./claim.tsx";
 import { AssignmentPane, ProfilePane } from "./composition.tsx";
 import { Form, field, NO_ASSIST, Result, startsNew, Text, unsaved, useSend, useUnsaved, useWrites } from "./forms.tsx";
 import { NO_ETAG } from "./handover.ts";
 import { Handover } from "./handover.tsx";
 import { LAYERS } from "./layers.ts";
+import { firstSentence, lastSentence, Note, Panel } from "./layout.tsx";
 import { IdentifierText, type Load, Ref, Scroll, short, useItem, useList, useReads, usePending, useSettled } from "./list.tsx";
 import type { Cluster } from "./machines.tsx";
 import { type EmbeddedPath, references, type Spot, spotOfLine, spotOfPath, spotOfReference } from "./position.ts";
@@ -21,12 +21,12 @@ import { Reach } from "./shared.tsx";
 import { SharedNames } from "./shared-names.tsx";
 import { Conflict, Refused, Status } from "./states.tsx";
 import { DraftLink } from "./draft-link.tsx";
-import { ClusterLink, ClusterOption, ClusterRef, DraftHead, ImportedConfigurationRef, useMachineText } from "./titles.tsx";
+import { ClusterLink, ClusterOption, ClusterRef, DraftHead, useMachineText } from "./titles.tsx";
 import { safeText, safeWord } from "./safe.ts";
-import { draftCalled, draftName, draftText } from "./titles.ts";
+import { draftCalled, draftName, draftText, importedConfiguration } from "./titles.ts";
 import { PageNote } from "./page-note.tsx";
 import { claimedName, scopeMember, scopeQuery } from "./shared-writes.ts";
-import { CREATE_DRAFT_NOTE, DISCARD_SENTENCE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, NAME_NOT_SHOWN, SHARED_CHOICE, SHARED_REMOVE_SENTENCE, SHARED_SAVE_SENTENCE } from "./words.ts";
+import { CREATE_DRAFT_NOTE, DISCARD_SENTENCE, DISCARD_TITLE, DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START, DRAFTS_AND_RELEASES, ENTRIES_TITLE, ENTRY_ACTION, ENTRY_COLUMNS, NAME_NOT_SHOWN, NO_EDITOR, PUBLISH_THIS_DRAFT, RENDERED_TITLE, SHARED_CHOICE, SHARED_REMOVE_SENTENCE, SHARED_SAVE_SENTENCE } from "./words.ts";
 import type { Outcome, Write } from "./write.ts";
 
 type S = components["schemas"];
@@ -123,6 +123,7 @@ export const isChange = (e: Draft["entries"][number]): e is Changed => e.kind !=
 // the shared entry (scope library), and the cluster's pane the cluster's own.
 export const isShared = (e: Source) => e.scope !== undefined;
 export const SHARED_LIBRARY = "shared library";
+const THIS_CLUSTER_WHERE = "this cluster";
 // Whether the draft's page reads what its shared entries reach: the draft is open (the route refuses any other draft with
 // a conflict) and holds an adoption, an adoption's removal or a shared entry.
 export const readsReach = (d: Pick<Draft, "entries" | "state">) => d.state === "open" && d.entries.some((e) => isAdoption(e) || (isSource(e) && isShared(e)));
@@ -130,11 +131,15 @@ const nameOf = (e: Source) => e.name ?? e.machine ?? "";
 export const keyOf = (e: Changed) => (isAdoption(e) ? `adoption:${e.of}:${e.name}` : `${e.kind}:${nameOf(e)}${isShared(e) ? ":library" : ""}`);
 // An entry as the list names it: a fragment's or a profile's own name, and an assignment's machine as a machine is
 // named everywhere (the shortened identifier until it is read).
-export function EntryName({ e }: { e: Changed }) {
+export function useEntryParts(e: Changed): { kind: string; name: string; shared: boolean } {
   const kind = isAdoption(e) ? e.of : e.kind;
   const name = isAdoption(e) ? e.name : nameOf(e);
   const machine = useMachineText(kind === "assignment" && name !== "" ? name : undefined);
-  return <>{kind} {kind === "assignment" ? machine ?? short(name) : safeText(name) ?? NAME_NOT_SHOWN}{(isAdoption(e) || isShared(e)) && ` (${SHARED_LIBRARY})`}</>;
+  return { kind, name: kind === "assignment" ? machine ?? short(name) : safeText(name) ?? NAME_NOT_SHOWN, shared: isAdoption(e) || isShared(e) };
+}
+export function EntryName({ e }: { e: Changed }) {
+  const { kind, name, shared } = useEntryParts(e);
+  return <>{kind} {name}{shared && ` (${SHARED_LIBRARY})`}</>;
 }
 
 // What an entry changes against its base (journeys §5.4's draft show). An adoption entry or removal moves what this
@@ -282,28 +287,48 @@ export function DraftItem({ id }: { id: string }) {
     keep.current = true;
     reread((x) => x + 1);
   };
+  // The layout design's order (docs/design/console-layout.md §3.1), which is also the Tab order: the header with the page's one
+  // primary action, the note, Entries with its Add actions in its band, the opened entry's editor directly under it, then Shared
+  // names, Adopt these machines, the rendered configuration and Discard this draft.
+  const open = d?.state === "open";
+  const publish = d !== undefined && open ? <Ref to={publishPath(d.id)} id={d.id} button="filled">{PUBLISH_THIS_DRAFT}</Ref> : undefined;
   return (
     <>
-      <DraftHead id={id} d={d} lead="Draft" />
-      {d !== undefined && <PageNote parts={[DRAFT_NOTE, d.state === "open" && DRAFT_NOTE_OPEN, handedOver.length > 0 && d.state !== "discarded" && DRAFT_NOTE_START]} />}
+      <DraftHead id={id} d={d} lead="Draft" layout={{ actions: publish }} />
+      {d !== undefined && (
+        <Note
+          line={open ? `${firstSentence(DRAFT_NOTE)} ${lastSentence(DRAFT_NOTE_OPEN)}` : firstSentence(DRAFT_NOTE)}
+          parts={[DRAFT_NOTE, open && DRAFT_NOTE_OPEN, handedOver.length > 0 && d.state !== "discarded" && DRAFT_NOTE_START]}
+        />
+      )}
       {pending}
       {/* That read failed, also when the page keeps the data read before (no answer): reading it
           again keeps the editor, and lets Save and Remove send again. */}
       {unshown && item.kind !== "loading" && <p><button type="button" onClick={() => reread((x) => x + 1)}>{READ_DRAFT_AGAIN}</button></p>}
       {d !== undefined && (
         <>
-          <h3>Entries</h3>
-          <ul aria-label="Entries">
-            {d.entries.map((e) => isChange(e) ? (
-              <li key={keyOf(e)}>
-                {isAdoption(e) ? <EntryName e={e} /> : <button type="button" aria-pressed={current === keyOf(e)} onClick={() => pick(keyOf(e))}><EntryName e={e} /></button>}
-                {" "}{change(e)}
-              </li>
-            ) : <li key={`import-base:${e.machine}`}><ImportedConfigurationRef machine={e.machine} revision={e.revision} /><BaseDocument id={e.revision} machine={e.machine} /></li>)}
-          </ul>
-          {readsReach(d) && <Reach draft={d.id} n={n} />}
-          {d.state === "open" && <SharedNames draft={d} seeChange={seeChange} />}
-          {d.state === "open" && <p><Action label="Add fragment" needs={["author"]} onClick={() => pick("fragment:")} />{" "}<Action label="Add profile" needs={["author"]} onClick={() => pick("profile:")} />{" "}<Action label="Add assignment" needs={["author"]} onClick={() => pick("assignment:")} /></p>}
+          <Panel
+            title={ENTRIES_TITLE}
+            actions={open ? (
+              <>
+                <Action label="Add fragment" variant="secondary" needs={["author"]} onClick={() => pick("fragment:")} />
+                <Action label="Add profile" variant="secondary" needs={["author"]} onClick={() => pick("profile:")} />
+                <Action label="Add assignment" variant="secondary" needs={["author"]} onClick={() => pick("assignment:")} />
+              </>
+            ) : undefined}
+          >
+            <Scroll label="Entries table" testid="entries">
+              <thead>
+                <tr>
+                  {ENTRY_COLUMNS.map((c) => <th key={c} scope="col">{c}</th>)}
+                  <th scope="col" className="action"><span className="sr-only">{ENTRY_ACTION}</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.entries.map((e) => isChange(e) ? <EntryRow key={keyOf(e)} e={e} pressed={current === keyOf(e)} pick={() => pick(keyOf(e))} /> : <ImportRow key={`import-base:${e.machine}`} machine={e.machine} revision={e.revision} />)}
+              </tbody>
+            </Scroll>
+          </Panel>
           {selected !== undefined && selected.startsWith("fragment:") && (
             <FragmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
@@ -313,13 +338,51 @@ export function DraftItem({ id }: { id: string }) {
           {selected !== undefined && selected.startsWith("assignment:") && (
             <AssignmentPane key={pane} draft={d} entry={entry} seeChange={seeChange} claim={claim} shown={!unshown} />
           )}
-          <Status testid="not-rendered">{NOT_RENDERED}</Status>
+          {readsReach(d) && <Reach draft={d.id} n={n} />}
+          {open && <SharedNames draft={d} seeChange={seeChange} />}
           {handedOver.length > 0 && d.state !== "discarded" && <Handover key={d.id} draft={d.id} machines={handedOver} etag={() => keptETag(d.id, epoch)} seeChange={() => showTheirChange(seeChange)} written={written} />}
-          {d.state === "open" && <p><Ref to={publishPath(d.id)} id={d.id}>Publish this draft</Ref></p>}
-          {d.state === "open" && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}
+          <Panel title={RENDERED_TITLE}>
+            <Status testid="not-rendered">{NOT_RENDERED}</Status>
+          </Panel>
+          {open && <DiscardDraft draft={d} written={written} seeChange={seeChange} />}
         </>
       )}
     </>
+  );
+}
+
+// One row of Entries (the layout design §2.5): the name, its kind, where it lives, what it changes, and one action. An adoption
+// has no editor, so its row says so. The button's name carries the entry, so a list of buttons is readable by name, and the
+// shared entry of a name is told from the cluster's own.
+function EntryRow({ e, pressed, pick }: { e: Changed; pressed: boolean; pick: () => void }) {
+  const { kind, name, shared } = useEntryParts(e);
+  return (
+    <tr>
+      <th scope="row">{name}</th>
+      <td>{kind}</td>
+      <td>{shared ? SHARED_LIBRARY : THIS_CLUSTER_WHERE}</td>
+      <td>{change(e)}</td>
+      <td className="action">
+        {isAdoption(e)
+          ? <span className="muted">{NO_EDITOR}</span>
+          : <button type="button" className="outline" aria-label={`Open ${kind} ${name}${shared ? ` (${SHARED_LIBRARY})` : ""}`} aria-pressed={pressed} onClick={pick}>Open</button>}
+      </td>
+    </tr>
+  );
+}
+
+// The row of a machine's imported configuration: one Open, a link to the page that shows its text on request. The draft page
+// mounts no protected document of its own, so it reads no text and shows no notice for it.
+function ImportRow({ machine, revision }: { machine: string; revision: string }) {
+  const named = importedConfiguration(useMachineText(machine));
+  return (
+    <tr>
+      <th scope="row">{named}</th>
+      <td>import</td>
+      <td>{THIS_CLUSTER_WHERE}</td>
+      <td>nothing</td>
+      <td className="action"><Ref to={`/import-base-revisions/${enc(revision)}`} id={revision} button="outline" label={`Open ${named.charAt(0).toLowerCase()}${named.slice(1)}`}>Open</Ref></td>
+    </tr>
   );
 }
 
@@ -351,13 +414,14 @@ export function DiscardDraft({ draft, written, seeChange }: { draft: Draft; writ
     setNote(ifMatch === undefined ? NO_ETAG : undefined);
     if (ifMatch !== undefined) send({ method: "POST", path: `/drafts/${enc(draft.id)}/discard`, body: {}, ifMatch, resource: `/drafts/${draft.id}`, settled });
   };
+  // The last panel of the page, alone: one sentence above one outlined red button, never next to the primary (layout design §2.3).
   return (
-    <>
+    <Panel title={DISCARD_TITLE}>
       <p data-testid="discard-sentence">{DISCARD_SENTENCE}</p>
-      <p><Action label="Discard draft" needs={["author"]} onClick={discard} busy={w !== undefined && w.outcome === undefined} /></p>
+      <p><Action label="Discard draft" variant="destructive" needs={["author"]} onClick={discard} busy={w !== undefined && w.outcome === undefined} /></p>
       {note !== undefined && <Status>{note}</Status>}
       <WriteResult w={w} conflict={<DiscardRefused onShow={() => setNote(showTheirChange(seeChange))} />} done={() => `Draft ${draftCalled(draft)} discarded.`} />
-    </>
+    </Panel>
   );
 }
 
@@ -979,7 +1043,7 @@ export function FragmentPane({ draft, entry, seeChange, claim = () => {}, shown 
     hold({ ...held, declared: next });
   };
   return (
-    <section aria-label={`Fragment ${called || "(new)"}`}>
+    <section className="panel" aria-label={`Fragment ${called || "(new)"}`}>
       <h3>Fragment {entry === undefined ? <label>name <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" required /></label> : called}{shared && ` (${SHARED_LIBRARY})`}</h3>
       {entry === undefined && <p><label><input type="checkbox" checked={sharedNew} onChange={(e) => setSharedNew(e.target.checked)} /> {SHARED_CHOICE}</label></p>}
       <p>

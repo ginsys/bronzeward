@@ -11,7 +11,7 @@
 // (ginsys/bronzeward#1009) may refuse loopback members once it lands.
 import { $, $$, browser, expect } from "@wdio/globals";
 import { CONTROL, FIXTURE_ISSUER } from "../auth.conf.ts";
-import { absent, api, disposable, faults, fixtureSignIn, hex, storageEmptyAfterPause } from "./helpers.ts";
+import { absent, api, disposable, ENTRIES, faults, fixtureSignIn, hex, storageEmptyAfterPause } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
@@ -107,13 +107,17 @@ describe("Connect a cluster (#1001)", () => {
       return key === undefined || key.length < 20 ? true : document.documentElement.outerHTML.includes(key);
     }, FIXTURE_ISSUER), "the file's key in the page");
     await storageEmptyAfterPause();
-    // The draft page offers each machine's imported configuration on request (ginsys/bronzeward#1070). Only a boolean
-    // crosses WebDriver: the text is there, and the page says a value found in it cannot be marked on this import.
+    // The draft page lists each machine's imported configuration as one row with one Open link, to the page that shows the text
+    // on request (ginsys/bronzeward#1070, and the layout design of ginsys/bronzeward#1255: the draft page itself holds no
+    // protected document). Only a boolean crosses WebDriver: the text is there, and the page says a value found in it cannot be
+    // marked on this import.
     await result().$('a[href^="/drafts/"]').click();
     await expect($("main h2")).toHaveText(expect.stringContaining("Draft: "));
-    const entries = $$('section[aria-label="Protected document"]');
-    await expect(entries).toBeElementsArrayOfSize(2);
-    await entries[0]!.$("button=Show imported configuration").click();
+    const opens = $$(`${ENTRIES} a.button`);
+    await expect(opens).toBeElementsArrayOfSize(2);
+    await expect($('section[aria-label="Protected document"]')).not.toBeExisting();
+    await opens[0]!.click();
+    await $('section[aria-label="Protected document"]').$("button=Show imported configuration").click();
     await $('[data-testid="review-text"]').waitForExist({ timeout: 20_000 });
     expect(await browser.execute(() => (document.querySelector<HTMLTextAreaElement>('[data-testid="review-text"]')?.value ?? "").length > 0)).toBe(true);
     await expect($('[data-testid="hide-note"]')).toHaveText(expect.stringContaining("cannot be marked on this import"));

@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | Date | 27 November 2026 |
-| Status | **Proposal.** Not accepted by the owner. Nothing in the console changes with this document |
+| Status | **Accepted.** The owner accepted the delivery report of this design on 28 November 2026 (00:38 CET). The five recommendations of section 6 are taken as decided, each reversible: the notes behind "What is this page?", Discard draft outlined red alone in its panel at the end, Publish this draft as the one filled button with Adopt these machines outlined, the present table padding, and the entry editor in its own panel under Entries. The draft page is built to it ([ginsys/bronzeward#1255](https://github.com/ginsys/bronzeward/issues/1255)); the other pages follow in the order of section 4 |
 | Work item | [Design the console's page layout, ginsys/bronzeward#1235](https://github.com/ginsys/bronzeward/issues/1235) |
 | Reads | `origin/main` at `29c5765f`, on 27 November 2026 |
 | Author | A design session, an agent. The renders are static proposals on sample data, not the running console |
@@ -232,6 +232,8 @@ Group D's editors follow [ginsys/bronzeward#1234](https://github.com/ginsys/bron
 - **Anything measured in a browser.** The contrast numbers are computed. The renders are static. Whether the blocks pass the browser cases of the client is a fact for the build pull requests, which run them.
 
 ## 6. Questions for the owner
+
+*Decided on 28 November 2026 as recommended, each reversible (see the Status line). The draft page is built to these answers. The questions and their recommendations stay as asked.*
 
 1. **Should the full page note move behind "What is this page?"** The page would show one line and a disclosure. *Recommendation: yes.* The notes are the longest text on each page and he found the cluster page's top hard to read. The note keeps every word and is one keystroke away. The cost is a contract change: §10.4 says every page shows its note, and a person who never opens the disclosure will not see the "where next" sentence. If no, the note stays visible, shortened to the 72-character width.
 2. **How should Discard draft look?** *Recommendation: outlined red, alone in a panel at the end of the page.* It stops looking like Adopt these machines and does not shout. A filled red button would draw as much attention as the primary. The word on the button still says what it does, so the colour is never the only cue.

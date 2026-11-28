@@ -65,7 +65,8 @@ Steps:
    **Cluster:**, fill in **Title:** and press the form's **Create draft** button. The form then
    says "Draft" and the draft's name as a link, "created", and its cluster. Press the draft's name
    to open it.
-2. In the draft's **Entries** list press an entry to edit it, or **Add fragment**.
+2. In the draft's **Entries** panel press **Open** on an entry's row to edit it, or press **Add fragment**
+   in the panel's title bar. The editor opens in a panel directly under **Entries**.
 3. Edit the document in the fragment editor. Press **Save** (needs `author`). **Revert to base**
    restores the base text of the entry, and **Remove** records a proposed removal of the entry in
    the draft. The entry stays in the draft, and publishing the draft clears the entry's current
@@ -79,7 +80,7 @@ Steps:
 6. Press **Show composition and references** to read the order in which the lists compose and, for
    each fragment, each reference with its declared kind and version and whether it is declared, carried
    and not declared, or declared and not in the document. It shows no document and no secret value.
-7. **Discard draft** drops the whole draft.
+7. **Discard draft**, alone in the last panel of the page, drops the whole draft. One press sends it.
 
 ## The refusal you will meet: the draft changed
 

@@ -210,6 +210,9 @@ Drafts and releases › Draft drf_8kdq…z6pa "worker labels"   open, revision 6
 +-------------------------------------------------------------------------------------------+
 ```
 
+The wireframe shows what the draft page holds. Where each part sits (Publish this draft in the page header, Add fragment in the
+Entries panel, Discard draft alone in the last panel) is drawn by the [console layout design](../design/console-layout.md).
+
 Profile entry: an ordered list of fragment revisions with [Move up], [Move down] and [Remove from
 list] buttons per row, operable by keyboard. After a move, the focus stays on the moved row. The
 pane says "A profile pins these fragment revisions. A later save of a fragment does not change the

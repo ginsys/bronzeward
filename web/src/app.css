@@ -132,3 +132,55 @@ tbody tr { transition: none; }
 tbody tr:hover { background-color: var(--muted); }
 .badge { border: 1px solid var(--primary); border-radius: 0.25rem; padding: 0 0.25rem; background-color: var(--muted); font-weight: bold; }
 pre.diff { overflow: auto; max-width: 100%; }
+
+/* Console layout blocks (docs/design/console-layout.md §2.9, ginsys/bronzeward#1255): the page header, the panel band with actions,
+   the reading width, the action hierarchy and the table helpers. Only the draft page uses them so far. */
+/* Reading width */
+main p, main dd { max-width: 72ch; }
+main .alert p, main .panel-head p { max-width: none; }
+
+/* Page header, note */
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s3) var(--s5); margin: 0 0 var(--s3); }
+.page-head .titles { flex: 1 1 24rem; min-width: 0; }
+.page-head h2 { margin: 0 0 var(--s1); }
+.page-head .state { margin: 0; color: var(--muted-foreground); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); }
+.actions button, .actions > span { margin: 0; }
+.lede { margin: 0 0 var(--s2); }
+details.about { margin: 0 0 var(--s5); }
+details.about > summary { width: fit-content; min-height: 24px; padding: var(--s1) 0; cursor: pointer; }
+details.about > p { margin: var(--s2) 0 0; padding-inline-start: var(--s4); border-inline-start: 3px solid var(--border); }
+
+/* Panel band with actions, table and detail grid flush inside the panel */
+.panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2) var(--s4); padding: var(--s3) var(--s4); background-color: var(--muted); border-bottom: 1px solid var(--border); border-radius: 0.375rem 0.375rem 0 0; }
+.panel-head h3 { margin: 0; padding: 0; border: 0; background: none; font-size: 1rem; }
+.panel > .panel-head { margin: 0; }
+.panel > .panel-head + * { margin-block-start: var(--s4); }
+.panel > .panel-head + .scroll, .panel > .panel-head + dl { margin-block-start: 0; }
+.panel > .scroll { margin-inline: 0; border: 0; border-radius: 0 0 0.375rem 0.375rem; }
+.panel > dl { margin: 0; padding: var(--s4); border: 0; border-radius: 0 0 0.375rem 0.375rem; background-color: transparent; }
+.panel > p { margin-block: 0 var(--s3); }
+.panel > .panel-head + p { margin-block-start: var(--s4); }
+.panel .row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3) var(--s5); }
+.panel .row p { margin: 0; flex: 1 1 24rem; }
+.panel .row .actions { margin-inline-start: auto; }
+
+/* Action hierarchy: Oat's .outline and data-variant="danger" already draw the fill, text and border. Only the hover colour is named,
+   because app.css forces one green on every button. No background is set here, so Oat's hover fill (it reads --_hov) still applies,
+   and a disabled button keeps app.css's own dashed rule. */
+button.outline { --_hov: #1c2333; }
+button.outline[data-variant="danger"] { --_hov: #2b1a20; }
+/* Outside the design's block: a link drawn as a button (Oat's a.button) is not underlined, keeps its own text colour on hover, and
+   takes the hover fill of the button it looks like. The draft page's Publish this draft is a link, and so is a row's Open. */
+a.button { text-decoration: none; margin-inline-end: 0.5rem; --_hov: #2fb677; }
+a.button:hover { color: var(--primary-foreground); }
+.actions a.button, td.action a.button { margin: 0; }
+a.button.outline { --_hov: #1c2333; }
+a.button.outline:hover { color: var(--foreground); }
+
+/* Table */
+tbody th[scope="row"] { color: var(--foreground); }
+tbody tr:last-child th { border-bottom: 0; }
+td.action, th.action { text-align: right; white-space: nowrap; }
+td.action button { margin: 0; }
+.muted { color: var(--muted-foreground); }

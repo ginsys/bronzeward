@@ -32,7 +32,16 @@ export const DRAFT_NOTE_OPEN = "While the draft is open you can add a fragment, 
 export const DRAFT_NOTE_START = "To adopt the machines imported into this draft, use Adopt these machines below.";
 /** What the one press of Discard draft records (operator experience §5.9: read what it records, one press, no dialog). */
 export const DISCARD_SENTENCE = "Discard draft records that this draft is discarded. A discarded draft can no longer be published.";
-export const PUBLISH_NOTE = "Publishing builds a release from this draft: it renders the configuration of every machine of the cluster whose imported configuration is in this draft or in the release applied to it, and makes the release the Desired release of those machines.";
+/** The titles of the draft page's panels, the columns of its entries table and the words of the layout blocks (docs/design/console-layout.md §2 and §3.1). */
+export const ABOUT_PAGE = "What is this page?";
+export const ENTRIES_TITLE = "Entries";
+export const ENTRY_COLUMNS = ["Name", "Kind", "Where", "What changes"] as const;
+export const ENTRY_ACTION = "Action";
+export const NO_EDITOR = "No editor";
+export const RENDERED_TITLE = "Rendered configuration";
+export const DISCARD_TITLE = "Discard this draft";
+export const PUBLISH_THIS_DRAFT = "Publish this draft";
+export const PUBLISH_NOTE ="Publishing builds a release from this draft: it renders the configuration of every machine of the cluster whose imported configuration is in this draft or in the release applied to it, and makes the release the Desired release of those machines.";
 export const MACHINE_NOTE = "This page shows where this machine stands: its status, the next step where there is one, what Bronzeward has Desired and Applied for it, what was Observed on it, and its timeline. To change its configuration,";
 export const CREATE_A_DRAFT = "create a draft";
 export const RELEASE_NOTE = "A release is the finished configuration of the machines of one cluster, built from one draft. The machines it covers are listed below; for each, open its Rendered configuration to read the configuration it would receive.";

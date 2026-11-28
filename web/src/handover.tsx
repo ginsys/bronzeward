@@ -7,6 +7,7 @@ import { Result, startsNew, unsaved, useWrites } from "./forms.tsx";
 import { DRAFT, type Followed, handOver, HANDOVER_SENTENCE, HANDOVER_TITLE, type Io, type Line, MISSING, missingRoles, NOT_PUBLISHED, UNRESOLVED, UNSAVED } from "./handover.ts";
 import { keepOnDone } from "./drafts.tsx";
 import { settledReads } from "./imports.tsx";
+import { Panel } from "./layout.tsx";
 import { Ref, useReads, useSettled } from "./list.tsx";
 import { watch } from "./progress.ts";
 import { established, notEstablished, publishEnd } from "./publish.tsx";
@@ -123,16 +124,15 @@ export function Handover({ draft, machines, etag, seeChange, written }: { draft:
   };
   const shown = Object.entries(lines).sort(([a], [b]) => (a === DRAFT ? -1 : b === DRAFT ? 1 : 0));
   return (
-    <section aria-label={HANDOVER_TITLE}>
-      <h3>{HANDOVER_TITLE}</h3>
+    <Panel title={HANDOVER_TITLE}>
       <p data-testid="handover-sentence">{HANDOVER_SENTENCE}</p>
       <p>
-        <button type="button" onClick={press} disabled={reason !== undefined || running}>{HANDOVER_TITLE}</button>
+        <button type="button" className="outline" onClick={press} disabled={reason !== undefined || running}>{HANDOVER_TITLE}</button>
         {reason !== undefined && <span data-testid="handover-reason"> {reason}</span>}
       </p>
       {held && <p role="alert" data-testid="handover-unsaved">{UNSAVED}</p>}
       {shown.length > 0 && <ul aria-label="Adoption progress" aria-live="polite">{shown.map(([k, l]) => <LineView key={k} k={k} line={l} show={() => setNote(seeChange())} />)}</ul>}
       {note !== undefined && <Status testid="handover-note">{note}</Status>}
-    </section>
+    </Panel>
   );
 }
