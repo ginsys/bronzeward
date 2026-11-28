@@ -1,0 +1,29 @@
+PASS	S3 precondition	A answers /livez
+PASS	S3 precondition	C (the interruption build, no interruption named) answers /livez
+PASS	S3 precondition	no plan and no Applied release yet: the machines are not adopted
+PASS	S3 precondition	the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all (44 mutating, talos-api-methods.tsv)
+PASS	S3 precondition	the mutation matcher gives no count, not 0, when grep fails extracting the methods or counting them
+PASS	S3 precondition	the pre-state bundle: complete, no fixture secret but the scan control
+PASS	S3 precondition	pre-state: both nodes have a configuration digest
+PASS	S3 precondition	pre-state: both nodes have a machine-configuration resource version
+PASS	S3 step 1	the S1 import draft, both machines imported, published as one release covering both: 202, the operation succeeded
+PASS	S3 handover	an adopt plan for the control plane as h-publisher: 201
+PASS	S3 handover	an adopt plan for the worker as h-publisher: 201
+PASS	S3 handover	both plans proposed, not yet adopted
+PASS	S3 handover	the control plane plan approved as h-approver: 201
+PASS	S3 handover	the worker plan approved as h-approver: 201
+PASS	S3 handover	both plans committed, each to a completed adopt operation
+PASS	S3 handover	the control plane's adoption recorded: Desired and Applied the release, source adoption, baseline revision 1, Applied's digest the import base's and the pre-state's
+PASS	S3 handover	the worker's adoption recorded: Desired and Applied the release, source adoption, baseline revision 1, Applied's digest the import base's and the pre-state's
+PASS	S3 handover	no operation but adopt since the publication
+PASS	S3 handover	an adopt plan for an adopted machine refused: 409 conflict, nothing written
+PASS	S3 handover	the post-state bundle: complete, no fixture secret but the scan control
+PASS	S3 handover	the control plane's configuration digest and machine-configuration resource version are the pre-state's
+PASS	S3 handover	the worker's configuration digest and machine-configuration resource version are the pre-state's
+PASS	S3 handover pass	no Talos mutation request in the control plane's apid log past the entries read before the run (control: the dry-run apply there is found past them)
+PASS	S3 handover pass	no Talos mutation request in the worker's apid log past the entries read before the run (control: the dry-run apply there is found past them)
+PASS	S3 backups	inject db-snapshot: a dump of the bronzeward database after the adoptions
+PASS	S3 evidence	bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret
+PASS	S3 evidence	the bundle is complete: bin/evidence captured every source
+PASS	S3 backups	the scanned bundle holds the database dump expanded, an adoption record among its rows (control)
+PASS	S3 evidence	none of the 3 tokens this run minted is in any bundle of the run or the run directory (control found)

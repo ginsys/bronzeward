@@ -1,0 +1,76 @@
+PASS	S5 precondition	S4 passed: the worker's Applied is its Desired, from source operation
+PASS	S5 precondition	no operation holds the worker's scope
+PASS	S5 precondition	no drift record is open on the worker, and it is not frozen
+PASS	S5 precondition	no link to the worker is recorded cut
+PASS	S5 precondition	the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all
+PASS	S5 precondition	each instance's driftInterval set to 5s
+PASS	S5 precondition	inject kill and start A, B and C: each reads the interval
+PASS	S5 precondition	A answers /livez
+PASS	S5 precondition	a drift observation of the worker read its configuration within a minute of the restart, and opened no record
+PASS	S5 precondition	no drift record is open on the worker
+PASS	S5 precondition	the pre-state bundle: complete, no fixture secret but the scan control
+PASS	S5 precondition	pre-state: both nodes have a configuration digest and a resource version
+PASS	S5 precondition	the worker's pre-state digest is its Applied's
+PASS	S5 step 1	the worker patched out of band with the pinned talosctl, no reboot: a registry auth password, a new synthetic secret
+PASS	S5 step 1	the worker's apid log records one mutating request past the pre-state: the patch
+PASS	S5 step 1	the patched-state bundle: complete, no fixture secret but the scan control
+PASS	S5 step 1	the worker's digest and resource version moved with the patch, the control plane's did not
+PASS	S5 step 2	within a minute a drift observation opens one record naming it, Applied's digest and the patched one; its opening entry, the alert, names the record and the observation
+PASS	S5 step 2	the scope is not frozen by detection
+PASS	S5 step 2	served: the open record, not frozen; Desired and Applied the release, Observed an observation that read the patched digest and matched neither
+PASS	S5 step 7	inject db-snapshot s5-step3, before step 3
+PASS	S5 step 7	inject bao-snapshot s5-step3, before step 3
+PASS	S5 step 3	h-author freezes the scope: 201, the freeze recorded under the author role
+SKIP	S5 negative controls	an approved revert plan on the frozen scope, passed over and cancelled: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+PASS	S5 step 4	h-author opens a new draft: 201
+PASS	S5 step 4, C §15	a drift adoption marking the file content and the password, not S2's label of it: the claim abandoned, the operation failed 422 guard-value naming the label, no secret in its problem; the draft's ETag, the revisions and gen/ unchanged, the record open
+PASS	S5 step 4, C §15	after adoption-refused, its bundle and the run directory: no fixture secret but the scan's control
+PASS	S5 step 4	h-author ingests the drifted configuration into it as a drift adoption, If-Match its ETag, marking the S1 file's content, S2's label of it and the registry password: 202, the claim released, the operation succeeded, the ETag moved
+PASS	S5 step 4	the ingestion is stored and served as a drift adoption
+PASS	S5 step 4	after adoption-ingestion, its bundle and the run directory: no fixture secret but the scan's control
+SKIP	S5 step 4, C §15	the drift adoption's interruption matrix, killed at each pipeline step, with its generation-count control: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+PASS	S5 step 4	h-author stops the worker selecting S2's label fragment, the adopted base holding that reference: out of the workers profile, or, when it is the profile's only fragment, the worker's assignment back at the handover's cluster fragment: 200, the ETag replaced
+PASS	S5 step 4	h-publisher publishes the draft under its new ETag: 202, one release, the worker's Desired
+PASS	S5 step 4	the release's import base for the worker: the registry password, S1's file content and S2's label are references to create-only generations of the drift adoption
+PASS	S5 step 4	the release's import base baseline, decrypted by the administrator, has the recorded configuration digest, the patched state's
+PASS	S5 step 4	each of those generations holds, as a string, the decrypted baseline's value at its mark's path; the password's is step 1's secret
+PASS	S5 step 4	h-publisher creates an adopt plan of the release: 201, binding the open record
+PASS	S5 step 4	h-approver approves it: 201
+PASS	S5 step 4	the adoption commits under the freeze: Applied the release from source adoption, its digest the import base's and the patched one, the baseline revision one more, the record closed adopted
+PASS	S5 step 4	the adoption rests on an observation begun after the approval that read the import base digest; the controller took an evidence observation of the plan after the approval
+PASS	S5 step 4	served: Desired and Applied the release from source adoption, Observed an observation that read the patched digest and matched it, still frozen, no open record
+PASS	S5 pass	the post-state bundle: complete, no fixture secret but the scan control
+PASS	S5 pass	the worker's digest and resource version are the patched state's: only the patch moved them
+PASS	S5 pass	the control plane's digest and resource version are the pre-state's
+PASS	S5 pass	no Talos mutation request in the worker, past the patch,'s apid log past the entries read before the run (control: the dry-run apply there is found past them)
+PASS	S5 pass	no Talos mutation request in the control plane's apid log past the entries read before the run (control: the dry-run apply there is found past them)
+PASS	S5 step 5	the artifact compiled from the import base differs the baseline digest (step5-measurement.txt)
+PASS	S5 step 6	the worker patched out of band again with the pinned talosctl, no reboot: a registry mirror
+PASS	S5 step 6	the worker's apid log records one mutating request past the adoption: the patch
+PASS	S5 step 6	the repatched-state bundle: complete, no fixture secret but the scan control
+PASS	S5 step 6	the worker's digest and resource version moved with the patch
+PASS	S5 step 6	within a minute a drift observation opens a new record naming it, Applied's digest and the repatched one; its opening entry, the alert, names the record and the observation
+PASS	S5 step 6	a plan for the drifted worker as h-publisher, a revert binding the new record: 201
+PASS	S5 step 6	the plan binds the new record
+PASS	S5 step 6	approved as h-approver: 201
+PASS	S5 step 6	the approval is recorded as approving an unseen overwrite, as answered and on the timeline
+SKIP	S5 negative controls	unfreezing by h-publisher, not an approver: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+PASS	S5 step 6	h-approver unfreezes the scope: 201, the unfreeze recorded under the approver role
+PASS	S5 step 6	the revert runs as S4: committed to a completed apply-config operation, Applied the adopted release from source operation with its artifact's digest, the new record closed reverted
+PASS	S5 step 6	served: Desired and Applied the release, not frozen, no open record
+PASS	S5 step 6	the reverted-state bundle: complete, no fixture secret but the scan control
+PASS	S5 step 6	the worker's digest is the revert artifact's and its resource version moved
+PASS	S5 pass	the worker's apid log records one mutating request past the second patch: the revert
+PASS	S5 pass	no Talos mutation request in the control plane, through step 6,'s apid log past the entries read before the run (control: the dry-run apply there is found past them)
+PASS	S5 retained evidence	the worker's timeline, every page, as served
+PASS	S5 retained evidence	the kept timeline holds the record's opening and closing entries, the freeze, the adoption and the Applied change naming the adopted release
+PASS	S5 retained evidence	the kept timeline holds step 6's record opening and closing reverted, the unseen-overwrite approval, the unfreeze and the revert's Applied change
+PASS	S5 retained evidence	the worker's observation records, every page, as served
+PASS	S5 retained evidence	the kept observations hold the drift record's and the adoption's
+PASS	S5 backups	inject db-snapshot: a dump of the bronzeward database after the adoption
+PASS	S5 handoff	each instance's driftInterval set back to 168h
+PASS	S5 handoff	inject kill and start A, B and C: each reads it
+PASS	S5 evidence	bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret
+PASS	S5 evidence	the bundle is complete: bin/evidence captured every source
+PASS	S5 backups	the scanned bundle holds the database dump expanded, the adopt operation among its rows (control)
+PASS	S5 evidence	none of the 6 tokens and secrets of this run, the registry password among them, is in any bundle of the run or the run directory (control found)

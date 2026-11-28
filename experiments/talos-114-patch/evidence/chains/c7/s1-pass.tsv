@@ -1,0 +1,39 @@
+PASS	S1 precondition	bw migrate
+PASS	S1 precondition	inject start A
+PASS	S1 precondition	inject start B
+PASS	S1 precondition	inject start C (the interruption build, no interruption named)
+PASS	S1 precondition	A answers /livez
+SKIP	S1 Go tests	the Go rows (lease, takeover, interruption, access and inventory refusals): the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+PASS	S1 precondition	the mutation matcher counts an apid line of each mutating Talos API method once and of each read method not at all (44 mutating, talos-api-methods.tsv)
+PASS	S1 precondition	the mutation matcher gives no count, not 0, when grep fails extracting the methods or counting them
+PASS	S1 precondition	pre-state: both nodes have a configuration digest
+PASS	S1 precondition	pre-state: both nodes have a machine-configuration resource version
+PASS	S1 step 1	both nodes report one cluster ID
+PASS	S1 step 1	the nodes report two node IDs
+PASS	S1 step 1	POST /clusters as h-author with the Talos cluster ID: 201
+PASS	S1 step 1	POST /machines (control plane) by Talos node ID and endpoint: 201
+PASS	S1 step 1	POST /machines (worker) by Talos node ID and endpoint: 201
+PASS	S1 step 2	POST /clusters/<cluster>/first-keys with the os:admin talosconfig: 200, version 1, one act
+PASS	S1 step 3	POST /drafts as h-author: 201 with an ETag
+PASS	S1 steps 3-4	control plane ingested (source machine, transient): claim released, operation succeeded, ETag moved
+PASS	S1 steps 3-4	after success-controlplane, its bundle and the run directory: no fixture secret but the scan's control
+PASS	S1 steps 3-4	worker ingested with its file content marked: claim released, operation succeeded, ETag moved
+PASS	S1 steps 3-4	after success-worker, its bundle and the run directory: no fixture secret but the scan's control
+PASS	S1 pass	control plane: !bwref references where the schema list identified values
+PASS	S1 pass	worker: !bwref references, the marked file content among them
+PASS	S1 pass	control plane: machine.ca.key matched the stored key and is the typed reference, with no generation
+PASS	S1 pass	each reference a create-only generation, listed under its claim by the metadata identity, nothing else there
+PASS	S1 pass	control plane: the baseline, decrypted by the administrator, has the recorded configuration digest, the pre-state
+PASS	S1 pass	worker: the baseline, decrypted by the administrator, has the recorded configuration digest, the pre-state
+PASS	S1 pass	the executor identity's decryption of the worker's baseline: refused
+PASS	S1 pass	the executor identity's read of the cluster's stored CA key: refused (the administrator's read of it answers)
+SKIP	S1 negative controls	the refusal set, the Talos access refusals, takeover, the interruption matrix, the review, expiry and orphan rows: the pass mode runs the pass paths alone; the full mode runs this, from a fresh up
+PASS	S1 backups, PA §16	inject db-snapshot: a dump of the bronzeward database after the imports and whatever controls ran
+PASS	S1 pass	neither node's configuration digest changed
+PASS	S1 pass	neither node's machine-configuration resource version changed
+PASS	S1 pass	no Talos mutation request in the control plane's apid log past the entries read before the run (control: the dry-run apply there is found past them)
+PASS	S1 pass	no Talos mutation request in the worker's apid log past the entries read before the run (control: the dry-run apply there is found past them)
+PASS	S1 step 5	bin/evidence scanned the bundle and the run directory; no file but its control holds a fixture secret, the marked value included
+PASS	S1 step 5	the bundle is complete: bin/evidence captured every source
+PASS	S1 step 5, PA §16	the scanned bundle holds the database dump expanded, the worker's machine among its rows (control)
+PASS	S1 step 5	none of the 2 tokens this run minted or created is in any bundle of the run or the run directory (control found)

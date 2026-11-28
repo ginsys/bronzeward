@@ -1,0 +1,86 @@
+Reads of the Talos machinery v1.14.5, v1.14.6 and v1.14.7 modules, 2026-11-28 15:13 to 17:04 CET.
+Environment of the module reads (only the lines the report cites; the host exclusion lists held one path unrelated to these modules and are not copied):
+GOSUMDB=sum.golang.org go=go version go1.27.1 linux/amd64
+
+== module v1.14.5
+Version v1.14.5  Time 2026-10-26T13:10:51Z
+Sum       h1:s7tKS2fe2TjD8mVfD4NG2mF6GMJn5THhsgt4/x5+eUM=
+GoModSum  h1:PEzCUOIG+87NIqBsONm/eQEQQfgoOwWL+r5ANhCrQGU=
+Origin    https://github.com/siderolabs/talos refs/tags/pkg/machinery/v1.14.5 dad8d3edfe7ca381044d7cad259fdf3030efa700
+
+== module v1.14.6
+Version v1.14.6  Time 2026-11-11T17:39:22Z
+Sum       h1:gLXBpRIsxS+Pz2fw5v/+8ZjyD5AyEZuGl96X58Hl9C8=
+GoModSum  h1:Xpqf4j02CiOuRUhUIfSAmjZncZ4qw/7JziUC6ZoiIxs=
+Origin    https://github.com/siderolabs/talos refs/tags/pkg/machinery/v1.14.6 ede45c42da9b1aee0fbc6dcfda7c028c9db43954
+
+== module v1.14.7
+Version v1.14.7  Time 2026-11-24T10:50:30Z
+Sum       h1:LHw7vZO2hUSTYW4NRQVX8gLHsg8Odw7OSUXP7t+BEdQ=
+GoModSum  h1:Xpqf4j02CiOuRUhUIfSAmjZncZ4qw/7JziUC6ZoiIxs=
+Origin    https://github.com/siderolabs/talos refs/tags/pkg/machinery/v1.14.7 55021d7c274f6bc207bf18efa2a684a31a35cd9f
+
+== files that differ, diff -ruN of the module trees (changed lines in module-diff-5-7.patch)
+-- 5-6
+machinery@v1.14.5/config/generate/generate_test.go machinery@v1.14.6/config/generate/generate_test.go
+machinery@v1.14.5/config/generate/kubernetes.go machinery@v1.14.6/config/generate/kubernetes.go
+machinery@v1.14.5/constants/constants.go machinery@v1.14.6/constants/constants.go
+machinery@v1.14.5/gendata/data/pkgs machinery@v1.14.6/gendata/data/pkgs
+machinery@v1.14.5/gendata/data/tag machinery@v1.14.6/gendata/data/tag
+machinery@v1.14.5/gendata/data/tools machinery@v1.14.6/gendata/data/tools
+machinery@v1.14.5/go.mod machinery@v1.14.6/go.mod
+machinery@v1.14.5/go.sum machinery@v1.14.6/go.sum
+machinery@v1.14.5/version/os-release machinery@v1.14.6/version/os-release
+-- 6-7
+machinery@v1.14.6/constants/constants.go machinery@v1.14.7/constants/constants.go
+machinery@v1.14.6/gendata/data/pkgs machinery@v1.14.7/gendata/data/pkgs
+machinery@v1.14.6/gendata/data/tag machinery@v1.14.7/gendata/data/tag
+machinery@v1.14.6/version/os-release machinery@v1.14.7/version/os-release
+-- 5-7
+machinery@v1.14.5/config/generate/generate_test.go machinery@v1.14.7/config/generate/generate_test.go
+machinery@v1.14.5/config/generate/kubernetes.go machinery@v1.14.7/config/generate/kubernetes.go
+machinery@v1.14.5/constants/constants.go machinery@v1.14.7/constants/constants.go
+machinery@v1.14.5/gendata/data/pkgs machinery@v1.14.7/gendata/data/pkgs
+machinery@v1.14.5/gendata/data/tag machinery@v1.14.7/gendata/data/tag
+machinery@v1.14.5/gendata/data/tools machinery@v1.14.7/gendata/data/tools
+machinery@v1.14.5/go.mod machinery@v1.14.7/go.mod
+machinery@v1.14.5/go.sum machinery@v1.14.7/go.sum
+machinery@v1.14.5/version/os-release machinery@v1.14.7/version/os-release
+
+== go.mod of the module, v1.14.5 against v1.14.7 (diff -U0)
+--- machinery@v1.14.5/go.mod
++++ machinery@v1.14.7/go.mod
+@@ -35 +35 @@
+-	golang.org/x/net v0.58.0
++	golang.org/x/net v0.62.0
+@@ -64 +64 @@
+-	golang.org/x/crypto v0.55.0 // indirect
++	golang.org/x/crypto v0.58.0 // indirect
+@@ -66,3 +66,3 @@
+-	golang.org/x/sync v0.22.0 // indirect
+-	golang.org/x/sys v0.47.0 // indirect
+-	golang.org/x/text v0.41.0 // indirect
++	golang.org/x/sync v0.24.0 // indirect
++	golang.org/x/sys v0.49.0 // indirect
++	golang.org/x/text v0.43.0 // indirect
+
+== pins
+Reads of the v1.14.7 pins, 2026-11-28 about 17:04 CET (host network, no credential).
+Command: w51-stepE-pins.sh in the worker's scratch entry; the same reads of v1.14.5 are the controls.
+
+talosctl-linux-amd64, release sha256sum.txt line, then sha256sum of the downloaded binary:
+  v1.14.5 list   ff432b68986709e6b69c563a08a2ced4232d5196b0dccd6d2e783e9d714d7d7d
+  v1.14.5 binary ff432b68986709e6b69c563a08a2ced4232d5196b0dccd6d2e783e9d714d7d7d
+  fixtures/versions.env TALOSCTL_SHA256 (v1.14.5) ff432b68986709e6b69c563a08a2ced4232d5196b0dccd6d2e783e9d714d7d7d   control: all three equal
+  v1.14.7 list   823deb86e20d79f08d000b266e63e4bffc772ee80364ce405bad5659bcacfb18
+  v1.14.7 binary 823deb86e20d79f08d000b266e63e4bffc772ee80364ce405bad5659bcacfb18   list and binary equal
+
+Node image index digest, docker buildx imagetools inspect (MediaType application/vnd.oci.image.index.v1+json):
+  ghcr.io/siderolabs/talos:v1.14.5  sha256:2bd72b810f540a75d5b1c8c3739ada000fff9beec18c941790c34b9592f1a8ff
+  fixtures/versions.env TALOS_IMAGE (v1.14.5) names sha256:2bd72b810f540a75d5b1c8c3739ada000fff9beec18c941790c34b9592f1a8ff   control: equal
+  ghcr.io/siderolabs/talos:v1.14.7  sha256:cf23135c4dc42f4031f6e68af92e312f2a1540c4071005d47ed82dbd58201cc3
+
+Web schema asset (sha256), web/src/talos-schema/v1.14.json and config/schemas/config.schema.json of each module:
+  asset in the repository                 5d83e2f743b0f3b36fcca62ffb72156684dcf0b476227971886c6f5f81c4822a
+  machinery v1.14.5 config.schema.json    5d83e2f743b0f3b36fcca62ffb72156684dcf0b476227971886c6f5f81c4822a
+  machinery v1.14.7 config.schema.json    5d83e2f743b0f3b36fcca62ffb72156684dcf0b476227971886c6f5f81c4822a

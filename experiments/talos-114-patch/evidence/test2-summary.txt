@@ -1,0 +1,108 @@
+Go tests at build A (v1.14.5, base) and build C (v1.14.7), as routed cluster Jobs in profile go-db, 2026-11-28.
+Per set: the Job's variant line, package results, failing tests, the number of skipped tests and the verdict lines.
+
+== c-build
+commit 896eada03d9f036f92dbe7eb81331b3c81e5c717 variant c set build started 2026-11-28T15:47:52+01:00
+JOB_CREATED: verify-bronzeward-896eada-1795877273-9e1e9b3f in heavy-runs for head 896eada03d9f036f92dbe7eb81331b3c81e5c717
+== variant c, set build: github.com/siderolabs/talos/pkg/machinery v1.14.7
+== go build rc=0
+== go vet rc=0
+VERIFY_SECONDS=56
+VERIFY_DONE rc=0
+run-cluster-job exit 0 finished 2026-11-28T15:50:54+01:00
+skipped tests: 0
+failing tests:
+  none
+
+== c-api
+commit 896eada03d9f036f92dbe7eb81331b3c81e5c717 variant c set api started 2026-11-28T16:31:04+01:00
+JOB_CREATED: verify-bronzeward-896eada-1795879865-9e35b93f in heavy-runs for head 896eada03d9f036f92dbe7eb81331b3c81e5c717
+== variant c, set api: github.com/siderolabs/talos/pkg/machinery v1.14.7
+ok  	github.com/ginsys/bronzeward/internal/api	1270.537s
+VERIFY_SECONDS=1343
+VERIFY_DONE rc=0
+run-cluster-job exit 0 finished 2026-11-28T16:54:14+01:00
+skipped tests: 9
+failing tests:
+  none
+
+== c-rest
+commit 896eada03d9f036f92dbe7eb81331b3c81e5c717 variant c set rest started 2026-11-28T15:50:54+01:00
+JOB_CREATED: verify-bronzeward-896eada-1795877455-b37ac13c in heavy-runs for head 896eada03d9f036f92dbe7eb81331b3c81e5c717
+== variant c, set rest: github.com/siderolabs/talos/pkg/machinery v1.14.7
+== packages: 33
+ok  	github.com/ginsys/bronzeward/cmd/bronzeward	18.224s
+ok  	github.com/ginsys/bronzeward/cmd/bronzewardctl	159.897s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc	0.004s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/groups	0.003s
+ok  	github.com/ginsys/bronzeward/fixtures/oidc/issuer	1.025s
+ok  	github.com/ginsys/bronzeward/fixtures/webhost	0.426s
+ok  	github.com/ginsys/bronzeward/internal/auth	48.943s
+ok  	github.com/ginsys/bronzeward/internal/baotest	0.009s
+ok  	github.com/ginsys/bronzeward/internal/classify	0.007s
+ok  	github.com/ginsys/bronzeward/internal/client	10.096s
+--- FAIL: TestApprovals (11.61s)
+--- FAIL: TestDrift (6.20s)
+--- FAIL: TestProtected (30.62s)
+FAIL	github.com/ginsys/bronzeward/internal/clitest	468.895s
+ok  	github.com/ginsys/bronzeward/internal/clusterid	0.006s
+ok  	github.com/ginsys/bronzeward/internal/compile	284.264s
+ok  	github.com/ginsys/bronzeward/internal/config	0.021s
+ok  	github.com/ginsys/bronzeward/internal/contract	0.003s
+ok  	github.com/ginsys/bronzeward/internal/database	0.022s
+ok  	github.com/ginsys/bronzeward/internal/dbtest	6.264s
+ok  	github.com/ginsys/bronzeward/internal/id	0.002s
+ok  	github.com/ginsys/bronzeward/internal/ingest	5.265s
+ok  	github.com/ginsys/bronzeward/internal/machinename	0.004s
+ok  	github.com/ginsys/bronzeward/internal/migrate	65.728s
+ok  	github.com/ginsys/bronzeward/internal/monitor	237.638s
+ok  	github.com/ginsys/bronzeward/internal/orphans	312.343s
+ok  	github.com/ginsys/bronzeward/internal/provider	2.788s
+ok  	github.com/ginsys/bronzeward/internal/server	0.305s
+ok  	github.com/ginsys/bronzeward/internal/staging	135.049s
+ok  	github.com/ginsys/bronzeward/internal/talos	17.266s
+ok  	github.com/ginsys/bronzeward/internal/talos/discover	10.825s
+ok  	github.com/ginsys/bronzeward/internal/talos/signer	11.493s
+ok  	github.com/ginsys/bronzeward/internal/textdiff	0.022s
+VERIFY_SECONDS=1949
+VERIFY_DONE rc=1
+run-cluster-job exit 1 finished 2026-11-28T16:31:04+01:00
+skipped tests: 17
+failing tests:
+--- FAIL: TestApprovals (11.61s)
+    --- FAIL: TestApprovals/T8_journey (2.07s)
+--- FAIL: TestDrift (6.20s)
+--- FAIL: TestProtected (30.62s)
+    --- FAIL: TestProtected/T3 (2.95s)
+
+== c-goldens
+commit 7226db02e835887271c0e846e329b9b461f8c631 variant c set goldens started 2026-11-28T16:54:34+01:00
+JOB_CREATED: verify-bronzeward-7226db0-1795881274-05a3fb01 in heavy-runs for head 7226db02e835887271c0e846e329b9b461f8c631
+== variant c, set goldens: github.com/siderolabs/talos/pkg/machinery v1.14.7
+ok  	github.com/ginsys/bronzeward/internal/clitest	104.600s
+VERIFY_SECONDS=258
+VERIFY_DONE rc=0
+run-cluster-job exit 0 finished 2026-11-28T17:03:36+01:00
+skipped tests: 0
+failing tests:
+  none
+
+== a-goldens
+commit 7226db02e835887271c0e846e329b9b461f8c631 variant a set goldens started 2026-11-28T17:03:36+01:00
+JOB_CREATED: verify-bronzeward-7226db0-1795881816-ef3e6775 in heavy-runs for head 7226db02e835887271c0e846e329b9b461f8c631
+== variant a, set goldens: github.com/siderolabs/talos/pkg/machinery v1.14.5
+ok  	github.com/ginsys/bronzeward/internal/clitest	115.944s
+VERIFY_SECONDS=191
+VERIFY_DONE rc=0
+run-cluster-job exit 0 finished 2026-11-28T17:08:24+01:00
+skipped tests: 0
+failing tests:
+  none
+
+== skip reasons seen in c-rest (unique reasons, count)
+      1 BW_BIN_DIR and BW_EXPECT_VERSION are not set
+      1 BW_TEST_IDP_ISSUER is unset (mise run dev-idp)
+      5 BW_TEST_TALOSCONFIG and BW_TEST_TALOS_ENDPOINT unset
+      7 dbus-daemon is not installed
+      1 gnome-keyring-daemon is not installed
+      2 set by experiments/c10-machinery-gate/run/all
