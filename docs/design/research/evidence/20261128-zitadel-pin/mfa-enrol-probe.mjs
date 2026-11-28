@@ -68,13 +68,19 @@ async function session() {
   mkdirSync(profile, { recursive: true });
   const browser = await remote({ logLevel: "silent", capabilities: { browserName: "chrome", "goog:chromeOptions": { args: ["--headless=new", `--user-data-dir=${profile}`] } } });
   // WebdriverIO has no command for the W3C virtual authenticator extension that ChromeDriver
-  // serves, so the request goes to the driver directly.
-  const { hostname, port, path } = browser.options;
-  const res = await fetch(`http://${hostname}:${port}${path === "/" ? "" : path}/session/${browser.sessionId}/webauthn/authenticator`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true }),
-  });
-  if (!res.ok) throw new Error(`virtual authenticator: HTTP ${res.status}`);
+  // serves, so the request goes to the driver directly. The browser is already running: when the
+  // request fails, it is closed here, because the caller never receives it.
+  try {
+    const { hostname, port, path } = browser.options;
+    const res = await fetch(`http://${hostname}:${port}${path === "/" ? "" : path}/session/${browser.sessionId}/webauthn/authenticator`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true }),
+    });
+    if (!res.ok) throw new Error(`virtual authenticator: HTTP ${res.status}`);
+  } catch (e) {
+    await browser.deleteSession();
+    throw e;
+  }
   return browser;
 }
 async function fill(browser, selector, value) {
