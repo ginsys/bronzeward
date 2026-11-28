@@ -221,9 +221,12 @@ export const short = (id: string) => {
 export const IdentifierText = ({ id }: { id: string }) => <span title={id}>{short(id)}</span>;
 
 // A resource's own path, opened in the page or, with the browser's own handling, in a new tab.
-export function Ref({ to, id, children }: { to: string; id: string; children?: ReactNode }) {
+// `button` draws the link as Oat's button (a.button), filled or, with "outline", the secondary one: the markup, the route and the
+// keyboard are the link's own.
+export function Ref({ to, id, children, button, label }: { to: string; id: string; children?: ReactNode; button?: "filled" | "outline"; label?: string }) {
   const { go } = useReads();
-  return <a href={to} title={id} onClick={(e) => follow(e, go, to)}>{children ?? short(id)}</a>;
+  const className = button === undefined ? undefined : button === "outline" ? "button outline" : "button";
+  return <a href={to} title={id} {...(className === undefined ? {} : { className })} {...(label === undefined ? {} : { "aria-label": label })} onClick={(e) => follow(e, go, to)}>{children ?? short(id)}</a>;
 }
 
 // The view each identifier prefix links to; any other identifier is shown shortened.
@@ -249,10 +252,10 @@ export function Id({ id, none = "none", text }: { id: string | null | undefined;
 // identifier is shown here, in the address bar and in a copy, and never in a heading or a link's text. `quiet`
 // keeps it out of the text altogether: the word is the identifier's title, Copy copies it, and the sentence
 // a failed Copy says carries the identifier.
-export function Detail({ id, quiet = false }: { id: string; quiet?: boolean }) {
+export function Detail({ id, quiet = false, secondary = false }: { id: string; quiet?: boolean; secondary?: boolean }) {
   return (
     <p>
-      <small>{quiet ? <span title={id}>{IDENTIFIER}</span> : <>{IDENTIFIER} <code>{id}</code></>}{" "}<CopyButton text={id} byHand={quiet ? copyFailedWith(id) : COPY_BY_HAND} /></small>
+      <small>{quiet ? <span title={id}>{IDENTIFIER}</span> : <>{IDENTIFIER} <code>{id}</code></>}{" "}<CopyButton text={id} byHand={quiet ? copyFailedWith(id) : COPY_BY_HAND} secondary={secondary} /></small>
     </p>
   );
 }

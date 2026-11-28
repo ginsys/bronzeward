@@ -6,7 +6,7 @@ import { COPIED, COPY } from "./words.ts";
 
 // The line says what happened to the text it names and is shown only beside that same text, so a reference
 // that changes under the page (an automatic retry) never shows "Copied" for text that was not copied.
-export function CopyButton({ text, byHand }: { text: string; byHand: string }) {
+export function CopyButton({ text, byHand, secondary = false }: { text: string; byHand: string; secondary?: boolean }) {
   const [said, say] = useState<{ of: string; line: string }>();
   const copy = () => {
     const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
@@ -23,7 +23,7 @@ export function CopyButton({ text, byHand }: { text: string; byHand: string }) {
   };
   return (
     <>
-      <button type="button" onClick={copy}>{COPY}</button>
+      <button type="button" {...(secondary ? { className: "outline" } : {})} onClick={copy}>{COPY}</button>
       {said?.of === text && <span role="status"> {said.line}</span>}
     </>
   );

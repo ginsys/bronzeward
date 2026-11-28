@@ -69,7 +69,7 @@ Steps:
 
 <!-- bw-web-steps: shared-fragments -->
 
-1. Open a draft and its **Shared names** section, and press **Show shared names**. Each shared
+1. Open a draft and its **Shared names** panel, and press **Show shared names** in the panel's title bar. Each shared
    fragment and profile shows what this cluster uses of it: the revision it follows and whether
    that is behind the library's.
 2. Read **What the shared entries reach** on the draft page. For each shared entry of the draft it

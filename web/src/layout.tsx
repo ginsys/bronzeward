@@ -1,0 +1,60 @@
+// The layout blocks of the console layout design (docs/design/console-layout.md §2, ginsys/bronzeward#1255): a panel with a titled
+// band, a page header with the page's actions, and a note drawn as one visible line with the whole note behind a native
+// disclosure. The action variants are Action's (shell.tsx). The draft page is the only page that uses them so far; the stylesheet
+// is app.css, "Console layout blocks".
+
+import type { ReactNode } from "react";
+import { PageNote } from "./page-note.tsx";
+import { ABOUT_PAGE } from "./words.ts";
+
+// A panel holds one thing. Its band has the title on the left and the panel's actions on the right, so an action sits under the
+// heading it belongs to. `label` names the section for a screen reader and a test where it differs from the title.
+export function Panel({ title, actions, label = title, children }: { title: string; actions?: ReactNode; label?: string; children?: ReactNode }) {
+  return (
+    <section className="panel" aria-label={label}>
+      <div className="panel-head">
+        <h3>{title}</h3>
+        {actions !== undefined && actions !== false && <div className="actions">{actions}</div>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+// The top of a page: the title and its lines on the left, the page's one primary action, if it has one, on the right. The markup
+// order is the Tab order, so the action follows the title's lines and comes before the note.
+export function PageHead({ heading, actions, children }: { heading: ReactNode; actions?: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="page-head">
+      <div className="titles">
+        <h2>{heading}</h2>
+        {children}
+      </div>
+      {actions !== undefined && actions !== false && <div className="actions">{actions}</div>}
+    </div>
+  );
+}
+
+// A page's note as one line and the whole note behind "What is this page?". The line is written from the page's own sentences
+// (`firstSentence`, `lastSentence`), never new wording; the whole note is PageNote's, with the same parts and the same test id.
+export function Note({ line, parts }: { line: string; parts: readonly (string | false | undefined)[] }) {
+  return (
+    <>
+      <p className="lede" data-testid="page-note-line">{line}</p>
+      <details className="about">
+        <summary>{ABOUT_PAGE}</summary>
+        <PageNote parts={parts} />
+      </details>
+    </>
+  );
+}
+
+// The first and the last sentence of a note, as literal slices of it. A note of one sentence gives that sentence for both.
+export const firstSentence = (note: string): string => {
+  const i = note.indexOf(". ");
+  return i < 0 ? note : note.slice(0, i + 1);
+};
+export const lastSentence = (note: string): string => {
+  const i = note.lastIndexOf(". ", note.length - 2);
+  return i < 0 ? note : note.slice(i + 2);
+};

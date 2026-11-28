@@ -183,8 +183,8 @@ machines of this cluster it reaches. It also names the other clusters still on a
 for information only: this page chooses, plans and approves nothing for them, because one apply is
 for one cluster. Each of those clusters reads the change in its own plan.
 
-**Adopting a draft's machines.** An open draft page that holds a machine's import has a section
-"Adopt these machines" with one button of the same name. The sentence above it reads: "Adopting
+**Adopting a draft's machines.** An open draft page that holds a machine's import has a panel
+"Adopt these machines" with one outlined button of the same name. The sentence above it reads: "Adopting
 records what each machine runs as its starting point. This adds an assignment that selects nothing
 for each machine that has none, publishes the draft, then creates an adopt plan for each machine
 and approves each plan as you, recorded as your own approval. It sends nothing to any machine. A

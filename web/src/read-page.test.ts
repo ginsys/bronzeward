@@ -52,7 +52,9 @@ describe("an import entry of the draft page and its imported configuration", () 
   const click = (label: string) => act(async () => void [...box.querySelectorAll("button")].find((b) => b.textContent === label)!.click());
   const textarea = () => box.querySelector<HTMLTextAreaElement>('[data-testid="review-text"]');
 
-  test("the draft page offers one control per import entry and reads nothing before it is pressed", async () => {
+  // The draft page offers one Open link per import entry, to the page that shows the text on request (the layout design, ginsys/bronzeward#1255):
+  // the draft page itself mounts no protected document, so it reads no text and shows no notice, however many imports it holds.
+  test("the draft page offers one Open link per import entry and reads no text, and shows no protected document", async () => {
     const DRF = "drf_k2pq3rstuvwxyz234567abcdef";
     forgetETag(DRF);
     const draft = { id: DRF, title: "Onboard", state: "open", revision: 3, cluster: "cl_a", entries: [
@@ -64,8 +66,9 @@ describe("an import entry of the draft page and its imported configuration", () 
     (reads.client as { read: unknown }).read = vi.fn(async (path: string) => (path === `/drafts/${DRF}` ? { kind: "ok", data: draft, etag: '"1"' } : draftRead(path)));
     await mount(reads, h(DraftItem, { id: DRF }));
     await settled();
-    expect([...box.querySelectorAll("button")].filter((b) => b.textContent === "Show imported configuration")).toHaveLength(2);
-    expect(box.querySelectorAll('section[aria-label="Protected document"]')).toHaveLength(2);
+    expect([...box.querySelectorAll("a.button")].filter((a) => a.textContent === "Open").map((a) => a.getAttribute("href"))).toEqual([`/import-base-revisions/${IBR}`, "/import-base-revisions/ibr_b2pq3rstuvwxyz234567abcdef"]);
+    expect([...box.querySelectorAll("button")].filter((b) => b.textContent === "Show imported configuration")).toHaveLength(0);
+    expect(box.querySelectorAll('section[aria-label="Protected document"]')).toHaveLength(0);
     expect(documents).not.toHaveBeenCalled();
     expect(textarea()).toBeNull();
   });

@@ -14,7 +14,7 @@
 // IndexedDB or caches, and the protected cases find no cached answer of their review.
 import { $, browser, expect } from "@wdio/globals";
 import { FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../auth.conf.ts";
-import { absent, api, cacheControl, cacheHolds, disposable, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, itNarrow, measure, narrow, newEpoch, onMain, overflows, pickByKeys, storageControl, storageEmptyAfterPause, syntheticMachine, tab, tabTo } from "./helpers.ts";
+import { absent, api, cacheControl, cacheHolds, disposable, entryOpen, eventually, fixtureSignIn, focusIn, focusKept, focusSettles, fromTitle, hex, itNarrow, measure, narrow, newEpoch, onMain, overflows, pickByKeys, storageControl, storageEmptyAfterPause, syntheticMachine, tab, tabTo } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 // The one value of the synthetic document a case marks by choosing it from the review's list.
@@ -378,7 +378,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     // saved, then a new epoch. The page stays mounted with its text, and its actions are disabled until another page opens.
     async function toUnsaved() {
       const { name } = await toStaleSave();
-      await $('main ul[aria-label="Entries"]').$(`button=fragment ${name}`).click();
+      await $(entryOpen("fragment", name)).click();
       await loaded();
       await edit();
     }
@@ -394,7 +394,7 @@ describe("the import wizard, the protected review and the conflict view, by keyb
     itNarrow("320 CSS pixels: the conflict view with their text and mine does not scroll the page sideways", async function () {
       this.timeout(180_000);
       const { id, name, etag } = await toStaleSave();
-      await $('main ul[aria-label="Entries"]').$(`button=fragment ${name}`).click();
+      await $(entryOpen("fragment", name)).click();
       await loaded();
       await edit();
       const now = await moveDraft(id, etag);

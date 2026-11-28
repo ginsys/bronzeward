@@ -2391,7 +2391,12 @@ the client's rule wins wherever the two meet.
    rendered configuration page shows its note only where the configuration is drawn, and a page that shows a record
    shows its note once the record is read. A note holds no identifier and no role word, uses the word its own page's
    control shows, and adds a link only where the page has none to that place. The one exception is the recovery page,
-   whose note adds a sentence naming the recovery role to a person who lacks it.
+   whose note adds a sentence naming the recovery role to a person who lacks it. The draft page draws its note differently
+   ([ginsys/bronzeward#1255](https://github.com/ginsys/bronzeward/issues/1255), the [console layout design](../design/console-layout.md)):
+   one visible line under its title, made only of the first sentence of the page's note and, on an open draft, the last
+   sentence of its open part, and the whole note, the same parts under the same rules, behind a native "What is this page?"
+   disclosure placed after the title, the state lines and the page's primary action. The other pages follow in their own pull requests and show
+   the whole note under the title until then.
 7. **Icons are decorative inline SVG** (Heroicons 2.2.0 outline, MIT, the paths vendored in one module
    with the notice kept). An icon is an `<svg>` element with `aria-hidden="true"`, no title and no
    style attribute, drawn with presentation attributes, so it is markup and not an image load:
@@ -2701,8 +2706,8 @@ file import only the author who made it from a file they provided and continued 
 Built in the web client, except the documentation sentence of item 4, which stays **Proposed**.
 Sources follow each item.
 
-1. The review, and an import base's text (Show imported configuration on the import base page and
-   on each import entry of the draft page), is fetched with
+1. The review, and an import base's text (Show imported configuration on the import base page, which the
+   Open of each import entry of the draft page opens), is fetched with
    `cache: 'no-store'`, rendered as text in a read-only element with no copy, download or print
    action, and discarded on leaving the page, on `pagehide` and on sign-out. Those pages
    offer the action to any `author` and show the server's refusal in words, as the table of §8.2 says it.

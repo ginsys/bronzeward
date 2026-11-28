@@ -66,12 +66,17 @@ export function useGate(needs: readonly Role[]): string | undefined {
   const { roles, offline, kept = false } = useContext(Shell);
   return offline ? "Offline" : kept ? KEPT_PAGE : needs.some((r) => roles.includes(r)) ? undefined : `Needs ${needs.join(" or ")}`;
 }
-export function Action({ label, needs, onClick, submit = false, busy = false }: { label: string; needs: readonly Role[]; onClick?: () => void; submit?: boolean; busy?: boolean }) {
+// How an action is drawn (the console layout design §2.3): primary is Oat's filled button and the page's one; secondary is the
+// outline; destructive is the outline in the danger colour. The variant changes the look only: the gate is the same for all three.
+export type Variant = "primary" | "secondary" | "destructive";
+export const variantProps = (variant: Variant): { className?: string; "data-variant"?: string } =>
+  variant === "primary" ? {} : variant === "secondary" ? { className: "outline" } : { className: "outline", "data-variant": "danger" };
+export function Action({ label, needs, onClick, submit = false, busy = false, variant = "primary" }: { label: string; needs: readonly Role[]; onClick?: () => void; submit?: boolean; busy?: boolean; variant?: Variant }) {
   const reason = useGate(needs);
   const id = useId();
   return (
     <span>
-      <button type={submit ? "submit" : "button"} onClick={onClick} disabled={reason !== undefined || busy} aria-describedby={reason !== undefined ? id : undefined}>{label}</button>
+      <button type={submit ? "submit" : "button"} {...variantProps(variant)} onClick={onClick} disabled={reason !== undefined || busy} aria-describedby={reason !== undefined ? id : undefined}>{label}</button>
       {reason !== undefined && <span id={id}> {reason}</span>}
     </span>
   );
@@ -535,7 +540,7 @@ export function SignedIn({ auth, principal, sub, onUnauthenticated, onRevoked, o
             <span data-testid="roles">{rolesLine(id.roles)}</span>.
           </p>
         )}
-        <button type="button" onClick={() => signingOut() && reads.signOut(signOut)}><Icon name="signOut" />Sign out</button>
+        <button type="button" className="outline" onClick={() => signingOut() && reads.signOut(signOut)}><Icon name="signOut" />Sign out</button>
         {recoveryMode && <RecoveryBanner recovery={recovery.kind === "ok" ? recovery.data : undefined} mode={mode} />}
         {recoveryMode && recovery.kind !== "loading" && <RecoveryRead res={recovery} />}
         <Entered />

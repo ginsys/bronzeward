@@ -21,7 +21,7 @@ import { CONTROL, FIXTURE_ISSUER, FIXTURE_PAGE, syntheticDocument } from "../aut
 import type { Step } from "../injector.ts";
 import { failedWithPane, type Sample } from "../pane-trace.ts";
 import { secondSession } from "../wdio.conf.ts";
-import { absent, dialogsDuring, eventually, faults, fixtureSignIn, inSafari, itNarrow, mint, storageEmpty } from "./helpers.ts";
+import { absent, dialogsDuring, ENTRIES, entryNames, entryOpen, entryRow, eventually, faults, fixtureSignIn, inSafari, itNarrow, mint, storageEmpty } from "./helpers.ts";
 
 const SERVER = /^Server .+, API revision \d+$/;
 let at = "";
@@ -56,7 +56,7 @@ async function paneTraceStart(entry: string) {
         // Only a text node's words, a label's UI wording: an element first (a textarea) holds a document, which never crosses WebDriver.
         which: label === null ? "" : label.firstChild?.nodeType === Node.TEXT_NODE ? (label.firstChild.textContent ?? "").slice(0, 16) : "(element)",
         remove: s !== null && [...s.querySelectorAll("button")].some((b) => b.textContent === "Remove"),
-        listed: (document.querySelector('main ul[aria-label="Entries"]')?.textContent ?? "").includes(`fragment ${entryName}`),
+        listed: [...document.querySelectorAll('main [data-testid="entries"] tbody th')].some((th) => th.textContent === entryName),
         sections: all.length,
         same: s !== null && s === first,
       };
@@ -178,7 +178,7 @@ async function edit(label: string, b: B = browser) {
 
 // Selects the fragment entry `name` and waits for its revision.
 async function select(name: string, b: B = browser) {
-  await b.$('main ul[aria-label="Entries"]').$(`button=fragment ${name}`).click();
+  await b.$(entryOpen("fragment", name)).click();
   await loaded(b);
 }
 
@@ -269,7 +269,8 @@ describe("the draft editor (#339)", () => {
     const draft = (await browser.execute(() => location.pathname)).split("/").pop()!;
     await save(draft, name);
     await expect(result()).toHaveText(expect.stringContaining(`Fragment ${name} saved in draft`), { wait: 30_000 });
-    await expect($('main ul[aria-label="Entries"]')).toHaveText(expect.stringContaining(`fragment ${name} new`));
+    // The Entries row of the new fragment (name, kind, where, what changes, action) reads new.
+    await eventually(async () => (await entryRow(name)) === `${name} | fragment | this cluster | new | Open`, `the Entries row of fragment ${name} reading new`, 20_000);
     // The guard clears after the save, so a read taken before it clears fails and one taken after it passes.
     await eventually(async () => !(await guarded()), "the leave guard cleared after the save");
     await oneWrite(1);
@@ -362,7 +363,7 @@ describe("the draft editor (#339)", () => {
     await oneWrite(1);
     await pane().$("button=Show their change").click();
     await expect($('[data-testid="draft-line"]')).toHaveText(expect.stringContaining(`revision ${now}`), { wait: 20_000 });
-    await expect($('main ul[aria-label="Entries"]')).toHaveText(expect.stringContaining("fragment other-"));
+    await eventually(async () => (await entryNames()).some((n) => n.startsWith("other-")), "the other author's fragment in Entries", 20_000);
     await pane().$("button=Copy my text into the new revision").click();
     await save(id, name);
     await expect(result()).toHaveText(expect.stringContaining(`Fragment ${name} saved in draft`), { wait: 30_000 });
@@ -418,7 +419,7 @@ describe("the draft editor (#339)", () => {
     await faults({ upstream: at });
     await pane().$("button=Remove").click();
     await expect(result()).toHaveText(expect.stringContaining(`Fragment ${name} removed from draft`), { wait: 20_000 });
-    await expect($('main ul[aria-label="Entries"]')).toHaveText(expect.stringContaining(`fragment ${name} removed`));
+    await eventually(async () => (await entryRow(name)) === `${name} | fragment | this cluster | removed | Open`, `the Entries row of fragment ${name} reading removed`, 20_000);
     // ginsys/bronzeward#517 H8: the draft stores the removal, so the text still shown is unsaved.
     await expect(pane().$("p*=Layer:")).toHaveText(expect.stringContaining("(unsaved)"));
     // The page says what the press records, and one press discards the draft: no dialog (ginsys/bronzeward#1241).
@@ -441,6 +442,9 @@ describe("the draft editor (#339)", () => {
       for (let i = 0; i < 60 && (await focused()) !== want; i++) await browser.keys("Tab");
       expect(await focused()).toBe(want);
     };
+    // The Tab order is the markup order (the layout design, ginsys/bronzeward#1255): the identifier line's Copy, Publish this draft
+    // (a link, so not a "button" for `focused`), the note's "What is this page?" disclosure, then the Add buttons in the Entries band,
+    // the first of which is Add fragment. The walk below tabs on from the page, so it reaches Add fragment in that order.
     await tabTo("button Add fragment");
     await browser.keys("Enter");
     const name = `kbd-${hex()}`;
@@ -479,7 +483,7 @@ describe("the draft editor (#339)", () => {
     };
     const openProfile = async (draft: string, name: string, pins: number) => {
       await openDraft(draft);
-      await $('main ul[aria-label="Entries"]').$(`button=profile ${name}`).click();
+      await $(entryOpen("profile", name)).click();
       await browser.waitUntil(async () => (await order()).length === pins, { timeout: 20_000, timeoutMsg: "the editor did not load the profile's pins" });
     };
 
@@ -610,7 +614,7 @@ describe("the draft editor (#339)", () => {
     const storedFragments = async (draft: string, m: string) => (await storedAssignment(draft, m)).body["fragments"] as Record<string, string[]>;
     const openAssignment = async (draft: string, count: number) => {
       await openDraft(draft);
-      await $('main ul[aria-label="Entries"]').$("button*=assignment").click();
+      await $(`${ENTRIES} button[aria-label^="Open assignment"]`).click();
       await browser.waitUntil(async () => (await names("Layer role")).length === count, { timeout: 20_000, timeoutMsg: "the editor did not load the assignment's list" });
     };
 

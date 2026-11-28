@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { components } from "./api/v1";
 import { isAdoption, isShared, isSource, keptETag, NO_ETAG, settledFragment, showTheirChange, WriteResult } from "./drafts.tsx";
 import { useSend, useWrites } from "./forms.tsx";
+import { Panel } from "./layout.tsx";
 import { useList, usePending } from "./list.tsx";
 import { safeText } from "./safe.ts";
 import { SavedRevision } from "./shared.tsx";
@@ -144,11 +145,11 @@ function Names({ kind, draft, seeChange }: { kind: Kind; draft: Draft; seeChange
 /** The block of an open draft's page. Its reads start when it is opened, so a draft page that never uses it reads nothing more. */
 export function SharedNames({ draft, seeChange }: { draft: Draft; seeChange: () => void }) {
   const [open, setOpen] = useState(false);
+  // Closed, the panel is its title and the button in its band, and nothing is read until it is pressed.
   return (
-    <section aria-label="Shared names">
-      <h3>Shared names</h3>
+    <Panel title="Shared names" actions={open ? undefined : <button type="button" className="outline" onClick={() => setOpen(true)}>Show shared names</button>}>
       <p>{SHARED_NAMES_NOTE}</p>
-      {!open ? <p><button type="button" onClick={() => setOpen(true)}>Show shared names</button></p> : (
+      {open && (
         <>
           <h4>Shared fragments</h4>
           <Names kind="fragment" draft={draft} seeChange={seeChange} />
@@ -156,6 +157,6 @@ export function SharedNames({ draft, seeChange }: { draft: Draft; seeChange: () 
           <Names kind="profile" draft={draft} seeChange={seeChange} />
         </>
       )}
-    </section>
+    </Panel>
   );
 }

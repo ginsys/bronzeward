@@ -185,14 +185,21 @@ describe("the machine page through its own reads", () => {
   });
 });
 
+// The draft page is the one page whose note is drawn as one visible line with the full note behind "What is this page?"
+// (client contracts §10.4 item 6, ginsys/bronzeward#1255); every other page's note is still shown whole under its title, as the
+// tests above and below assert. The full note's text is the page-note element inside the disclosure, so its parts are asserted
+// exactly as before; what comes before it is the page header (title, state line, identifier line and the page's primary
+// action), the visible line and the disclosure's summary.
 describe("the draft page's note, a part only where its control shows", () => {
   const parts = (...p: string[]) => p.join(" ");
+  const head = () => [box.querySelector(".page-head"), box.querySelector('[data-testid="page-note-line"]'), box.querySelector("details.about > summary")];
   test("an open draft with a machine's import: all three parts, and the Adopt these machines section they point at", async () => {
     served[`/drafts/${DRF}`] = draft("open", [imported]);
     await shown(h(DraftItem, { id: DRF }));
     const n = note();
     expect(n.textContent).toBe(parts(DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START));
-    underTheTitle(n);
+    expect(n.closest("details.about")).not.toBeNull();
+    underTheTitle(n, ...head());
     expect(DRAFT_NOTE_START).toContain(HANDOVER_TITLE);
     expect(button(HANDOVER_TITLE)).toBeDefined();
     expect(button("Add fragment")).toBeDefined();
@@ -206,7 +213,7 @@ describe("the draft page's note, a part only where its control shows", () => {
     await settled();
     expect(button("Read the draft again")).toBeDefined();
     expect(note().textContent).toBe(parts(DRAFT_NOTE, DRAFT_NOTE_OPEN, DRAFT_NOTE_START));
-    underTheTitle(note());
+    underTheTitle(note(), ...head());
   });
   test("an open draft with no import: no Start part, and no Adopt these machines section", async () => {
     served[`/drafts/${DRF}`] = draft("open", []);
@@ -237,7 +244,7 @@ describe("the draft page's note, a part only where its control shows", () => {
     expect(notes()).toHaveLength(0);
     held = false;
     await shown(h(DraftItem, { id: DRF, key: "answered" }));
-    underTheTitle(note());
+    underTheTitle(note(), ...head());
   });
 });
 
