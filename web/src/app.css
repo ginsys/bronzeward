@@ -173,6 +173,8 @@ button.outline[data-variant="danger"] { --_hov: #2b1a20; }
 /* Outside the design's block: a link drawn as a button (Oat's a.button) is not underlined, keeps its own text colour on hover, and
    takes the hover fill of the button it looks like. The draft page's Publish this draft is a link, and so is a row's Open. */
 a.button { text-decoration: none; margin-inline-end: 0.5rem; --_hov: #2fb677; }
+/* As for a button above: a press on the edge of the link must end on it, so Oat's 1 px move on press is off. */
+a.button:active { transform: none; }
 a.button:hover { color: var(--primary-foreground); }
 .actions a.button, td.action a.button { margin: 0; }
 a.button.outline { --_hov: #1c2333; }

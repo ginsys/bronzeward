@@ -327,7 +327,7 @@ export async function cacheControl(upstream: string) {
 // (drafts.e2e.ts), and a document or a review has the run's canary, which must not reach the
 // WebDriver log the artifact scan reads. So `text` is the text of an element that is no field and holds
 // none, cut at 120 characters, and "" otherwise: a focus lost to the body must not read the page.
-export type Focus = { tag: string; text: string; title: string | null; name: string | null; testid: string | null; outline: string; width: number; same: boolean };
+export type Focus = { tag: string; text: string; title: string | null; name: string | null; label: string | null; testid: string | null; outline: string; width: number; same: boolean };
 
 // The focused element after one Tab, or Shift+Tab, which must show its focus (WCAG 2.4.7). `same`:
 // it is the element that held focus after the last call, which two Tabs in a row make a trap (2.1.2).
@@ -341,7 +341,7 @@ export async function tab(back = false): Promise<Focus> {
     held.bwLastFocus = e;
     // An element that is a field or holds one (the body, when focus is lost) gives no text.
     const field = e.tagName === "TEXTAREA" || e.tagName === "INPUT" || e.querySelector("textarea, input") !== null;
-    return { tag: e.tagName, text: field ? "" : (e.textContent?.trim() ?? "").slice(0, 120), title: e.getAttribute("title"), name: e.getAttribute("name"), testid: e.getAttribute("data-testid"), outline: s.outlineStyle, width: parseFloat(s.outlineWidth), same };
+    return { tag: e.tagName, text: field ? "" : (e.textContent?.trim() ?? "").slice(0, 120), title: e.getAttribute("title"), name: e.getAttribute("name"), label: e.getAttribute("aria-label"), testid: e.getAttribute("data-testid"), outline: s.outlineStyle, width: parseFloat(s.outlineWidth), same };
   });
   if (f.outline === "none" || f.width < 2) throw new Error(`focus on ${f.tag} "${f.text}" is not visible: outline ${f.outline} ${f.width}px`);
   return f;

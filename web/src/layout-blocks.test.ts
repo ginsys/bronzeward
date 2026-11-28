@@ -130,7 +130,7 @@ describe("the sentences a page's visible line is built from", () => {
 describe("the stylesheet", () => {
   const css = readFileSync(`${import.meta.dirname}/app.css`, "utf8");
   test("carries the blocks of the layout design, section 2.9, and the one extra rule for a link drawn as a button", () => {
-    for (const rule of [".page-head {", ".panel-head {", "details.about {", "button.outline { --_hov: #1c2333; }", 'button.outline[data-variant="danger"] { --_hov: #2b1a20; }', "a.button {", "td.action, th.action {", "main p, main dd { max-width: 72ch; }"]) {
+    for (const rule of [".page-head {", ".panel-head {", "details.about {", "button.outline { --_hov: #1c2333; }", 'button.outline[data-variant="danger"] { --_hov: #2b1a20; }', "a.button {", "a.button:active { transform: none; }", "button:active:not(:disabled) { transform: none; }", "td.action, th.action {", "main p, main dd { max-width: 72ch; }"]) {
       expect(css, rule).toContain(rule);
     }
   });
