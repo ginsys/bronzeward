@@ -1,0 +1,1 @@
+The six entry forms of the web console (Create draft, Start import, Plan new, Add machine, Enter a cluster by hand and Connect a cluster) now use the console layout: a page header, the note as one line with the whole note behind "What is this page?", and the form in one panel with its one action at the end. Connect a cluster has one panel for each of its two steps.
