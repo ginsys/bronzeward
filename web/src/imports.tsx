@@ -15,6 +15,7 @@ import { eventLine, type Refusal, refusalOf, terminal, type Watch, type Watched,
 import { operationWords, refusalWords } from "./problems.tsx";
 import type { Client, Phase, ReadResult } from "./request.ts";
 import { importPath } from "./router.ts";
+import { firstSentence, Note, PageHead, Panel } from "./layout.tsx";
 import { machineOptions, sharedAddresses } from "./machines.tsx";
 import { PageNote } from "./page-note.tsx";
 import { Action } from "./shell.tsx";
@@ -181,24 +182,26 @@ export function IngestionItem({ id }: { id: string }) {
   stamp.current = stampRead(stamp.current, b, [n, shellAgain, view], now);
   return (
     <>
-      <h2>{importHeading(id, b, machine)}</h2>
+      <PageHead heading={importHeading(id, b, machine)}>{b !== undefined && <Detail id={b.id} secondary />}</PageHead>
       {b === undefined ? pending : (
         <>
-          <PageNote parts={[IMPORT_NOTE]} />
-          <Detail id={b.id} />
-          <dl>
-            <dt>State</dt><dd>{safeWord(b.state)}, {safeWord(b.kind)}, {safeWord(b.mode)} staging</dd>
-            <dt>Machine</dt><dd><MachineById id={b.machine} /></dd>
-            <dt>Draft</dt><dd><Named id={b.draft} /></dd>
-            <dt>Operation</dt><dd><Named id={b.operation} /></dd>
-            <dt>Review</dt><dd>{b.review ?? "not requested"}</dd>
-            <dt>Owner generation</dt><dd>{b.ownerGeneration}</dd>
-            <dt>Lease</dt><dd>{lease(b, now)}</dd>
-            <dt>Expires</dt><dd>{when(b.expiresAt)}</dd>
-          </dl>
+          <Note line={firstSentence(IMPORT_NOTE)} parts={[IMPORT_NOTE]} />
+          {/* The state alerts stay loose above the first panel, as on the plan page. */}
           <Status testid="allowed">{allowed(b, now)}</Status>
-          <Claim key={b.id} b={b} again={again} now={now} />
           {refreshFailed && <Status testid="refresh-failed">{REFRESH_FAILED}</Status>}
+          <Panel title="Details">
+            <dl>
+              <dt>State</dt><dd>{safeWord(b.state)}, {safeWord(b.kind)}, {safeWord(b.mode)} staging</dd>
+              <dt>Machine</dt><dd><MachineById id={b.machine} /></dd>
+              <dt>Draft</dt><dd><Named id={b.draft} /></dd>
+              <dt>Operation</dt><dd><Named id={b.operation} /></dd>
+              <dt>Review</dt><dd>{b.review ?? "not requested"}</dd>
+              <dt>Owner generation</dt><dd>{b.ownerGeneration}</dd>
+              <dt>Lease</dt><dd>{lease(b, now)}</dd>
+              <dt>Expires</dt><dd>{when(b.expiresAt)}</dd>
+            </dl>
+          </Panel>
+          <Claim key={b.id} b={b} again={again} now={now} />
           <Progress b={b} readAt={stamp.current.read?.at ?? now} again={again} />
         </>
       )}
@@ -506,12 +509,11 @@ function Progress({ b, readAt, again }: { b: Ingestion; readAt: number; again: (
   }, watchDeps(client, b, again));
   if (op === null) return null;
   return (
-    <section aria-label="Progress">
-      <h3>Progress of operation <Named id={op} /></h3>
+    <Panel title={<>Progress of operation <Named id={op} /></>} label="Progress">
       {cleared !== undefined && <Status testid="cleared">{cleared}</Status>}
       <ol aria-live="polite" data-testid="events">{lines.map((l, i) => <li key={i}>{l}</li>)}</ol>
       {end !== undefined && <Status testid="ended">{end}</Status>}
-    </section>
+    </Panel>
   );
 }
 

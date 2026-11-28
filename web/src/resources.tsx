@@ -34,7 +34,6 @@ import { safeText, safeWord } from "./safe.ts";
 import { alertSentence, assignmentName, dependencyName, importedConfigurationTitle, operationTitle, savedTitle } from "./titles.ts";
 import { ClusterLink, type Held, MachineById, Named, OperationHeading, OperationRef, PlanHeading, PlanRef, ReleaseHeading, ReleaseRef, useBody, useMachineText, usePlanTitle } from "./titles.tsx";
 import { firstSentence, ListHead, Note, PageHead, Panel } from "./layout.tsx";
-import { PageNote } from "./page-note.tsx";
 import {
   AUDIT_NOTE, BUILT_FROM, CHANGES_NOTE, DEPENDENCY_NOTE, DIFFERS_IN_FORM_ONLY, DRAFTS_AND_RELEASES, FRAGMENTS_AND_PROFILES, IMPORTED_NOTE, IMPORTS_NOTE, OPEN_A_MACHINE, OPERATION_NOTE, OPERATIONS_NOTE, PLAN_NOTE,
   NAME_NOT_SHOWN, noSourcesEnd, noSourcesStart, PLANS_NOTE, PLANS_NOTE_END, RELEASE_NOTE, revisionNote, SOURCES_NOTE, sourceNote,
@@ -87,12 +86,12 @@ function ListOf<T>({ label, path, query = "", cols, empty, keyOf = byId, head, s
 
 // `n` is bumped to read the item again.
 // `head` draws the title as the console layout's page header (layout.tsx); a page that is not built to the blocks yet keeps its h2.
-// `actions` are the page's header actions, drawn once the item is read.
-function ItemOf<T>({ path, what, title, children, n, onSettled, head = false, actions }: { path: string; what: string; title: (t: T | undefined) => ReactNode; children: (t: T) => ReactNode; n?: number; onSettled?: () => void; head?: boolean; actions?: (t: T) => ReactNode }) {
+// `actions` are the page's header actions, and `lines` the lines under its title (the identifier's detail line), drawn once the item is read.
+function ItemOf<T>({ path, what, title, children, n, onSettled, head = false, actions, lines }: { path: string; what: string; title: (t: T | undefined) => ReactNode; children: (t: T) => ReactNode; n?: number; onSettled?: () => void; head?: boolean; actions?: (t: T) => ReactNode; lines?: (t: T) => ReactNode }) {
   const item = useItem<T>(path, undefined, n, onSettled);
   const pending = usePending(item, what);
   const t = item.kind === "ok" ? item.data : undefined;
-  return <>{head ? <PageHead heading={title(t)} actions={t === undefined ? undefined : actions?.(t)} /> : <h2>{title(t)}</h2>}{t === undefined ? pending : children(t)}</>;
+  return <>{head ? <PageHead heading={title(t)} actions={t === undefined ? undefined : actions?.(t)}>{t === undefined ? undefined : lines?.(t)}</PageHead> : <h2>{title(t)}</h2>}{t === undefined ? pending : children(t)}</>;
 }
 
 type Row = readonly [string, ReactNode];
@@ -253,25 +252,28 @@ type Kind = "fragment" | "profile" | "assignment";
 export function SourceItem({ kind, id }: { kind: Kind; id: string }) {
   const path = `/${kind}s/${encodeURIComponent(id)}`;
   return (
-    <ItemOf<Source> path={path} what={`the ${kind}`} title={(s) => `${cap(kind)} ${s !== undefined && "name" in s ? s.name : short(id)}`}>
+    <ItemOf<Source> path={path} what={`the ${kind}`} head title={(s) => `${cap(kind)} ${s !== undefined && "name" in s ? s.name : short(id)}`}>
       {(s) => (
         <>
-          <PageNote parts={[sourceNote(kind)]} />
-          <Fields rows={[
-            ["Identifier", s.id], ["Cluster", <Owner cluster={s.cluster} />],
-            ...("scope" in s ? [["Scope", scopeWords(s.scope)] as const] : []), ...("layer" in s ? [["Layer", s.layer] as const] : []),
-            ...("machine" in s ? [["Machine", <MachineById id={s.machine} />] as const] : []),
-            ["Current revision", <Id id={s.revision} none="removed" />], ["Head revision", s.headRevision], ["Created", when(s.createdAt)],
-          ]} />
+          <Note line={firstSentence(sourceNote(kind))} parts={[sourceNote(kind)]} />
+          <Panel title="Details">
+            <Fields rows={[
+              ["Identifier", s.id], ["Cluster", <Owner cluster={s.cluster} />],
+              ...("scope" in s ? [["Scope", scopeWords(s.scope)] as const] : []), ...("layer" in s ? [["Layer", s.layer] as const] : []),
+              ...("machine" in s ? [["Machine", <MachineById id={s.machine} />] as const] : []),
+              ["Current revision", <Id id={s.revision} none="removed" />], ["Head revision", s.headRevision], ["Created", when(s.createdAt)],
+            ]} />
+          </Panel>
           {s.cluster === null && (kind === "fragment" || kind === "profile") && <SharedClusters kind={kind} head={s.id} />}
           {kind === "profile" && (
-            <>
-              <h3>Documents of the current revision</h3>
+            <Panel title="Documents of the current revision">
               {s.revision === null ? <p>No revision yet.</p> : <CurrentDocuments key={s.revision} id={s.revision} />}
-            </>
+            </Panel>
           )}
-          <h3>Revisions</h3>
-          <ListOf<Revision> label="Revisions" path={`${path}/revisions`} cols={REVISIONS} empty="No revisions recorded." />
+          {/* Each panel's name differs from its table region's, so a screen reader never meets two regions of one name. */}
+          <Panel title="Revisions" label="The revision list">
+            <ListOf<Revision> label="Revisions" path={`${path}/revisions`} cols={REVISIONS} empty="No revisions recorded." />
+          </Panel>
         </>
       )}
     </ItemOf>
@@ -342,34 +344,36 @@ function RevisionHeading({ kind, id, r }: { kind: Kind; id: string; r: AnyRevisi
 export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
   return (
     <ItemOf<AnyRevision> path={`/${kind}-revisions/${encodeURIComponent(id)}`} what={`the ${kind} revision`}
-      title={(r) => <RevisionHeading kind={kind} id={id} r={r} />}>
+      head title={(r) => <RevisionHeading kind={kind} id={id} r={r} />} lines={(r) => <Detail id={r.id} secondary />}>
       {(r) => (
         <>
-          <PageNote parts={[revisionNote(kind)]} />
-          <Detail id={r.id} />
-          <Fields rows={[
-            ["Cluster", <Owner cluster={r.cluster} />], ...("layer" in r ? [["Layer", r.layer] as const] : []),
-            ...("machine" in r ? [["Machine", <MachineById id={r.machine} />] as const] : []),
-            ...("profiles" in r ? [["Profiles", r.profiles.join(", ") || "none"] as const] : []),
-            ...("fragments" in r && !Array.isArray(r.fragments)
-              ? [["Fragments", Object.entries(r.fragments).map(([layer, names]) => `${layer}: ${names.join(", ")}`).join("; ") || "none"] as const] : []),
-            ["Author", <Who id={r.author} />], ["Created", when(r.createdAt)],
-          ]} />
+          <Note line={firstSentence(revisionNote(kind))} parts={[revisionNote(kind)]} />
+          <Panel title="Details">
+            <Fields rows={[
+              ["Cluster", <Owner cluster={r.cluster} />], ...("layer" in r ? [["Layer", r.layer] as const] : []),
+              ...("machine" in r ? [["Machine", <MachineById id={r.machine} />] as const] : []),
+              ...("profiles" in r ? [["Profiles", r.profiles.join(", ") || "none"] as const] : []),
+              ...("fragments" in r && !Array.isArray(r.fragments)
+                ? [["Fragments", Object.entries(r.fragments).map(([layer, names]) => `${layer}: ${names.join(", ")}`).join("; ") || "none"] as const] : []),
+              ["Author", <Who id={r.author} />], ["Created", when(r.createdAt)],
+            ]} />
+          </Panel>
           {"fragments" in r && Array.isArray(r.fragments) && (
-            <>
-              <h3>Fragments</h3>
+            <Panel title="Fragments">
               <PinnedFragments key={r.id} ids={r.fragments} />
-            </>
+            </Panel>
           )}
           {"document" in r && (
             <>
-              <h3>Document</h3>
-              <SanitizedNotice />
-              <pre data-testid="document" aria-describedby={NOTICE_ID}>{r.document}</pre>
-              <h3>Declared references</h3>
-              {Object.keys(r.declarations.references).length === 0 ? <p>No references declared.</p>
-                : <Rows label="Declared references" cols={REFERENCES} items={Object.entries(r.declarations.references)} keyOf={([n]) => n} />}
-              <p>Embedded documents: {r.declarations.embedded.map((e) => `${e.path} (${e.format})`).join(", ") || "none"}.</p>
+              <Panel title="Document">
+                <SanitizedNotice />
+                <pre data-testid="document" aria-describedby={NOTICE_ID}>{r.document}</pre>
+              </Panel>
+              <Panel title="Declared references" label="The declared reference list">
+                {Object.keys(r.declarations.references).length === 0 ? <p>No references declared.</p>
+                  : <Rows label="Declared references" cols={REFERENCES} items={Object.entries(r.declarations.references)} keyOf={([n]) => n} />}
+                <p>Embedded documents: {r.declarations.embedded.map((e) => `${e.path} (${e.format})`).join(", ") || "none"}.</p>
+              </Panel>
             </>
           )}
         </>
@@ -382,14 +386,13 @@ export function RevisionItem({ kind, id }: { kind: Kind; id: string }) {
 // counts, never its document text, digests or reference names (choice §17.38). The operation that
 // wrote it is not recorded on the revision, so none is shown.
 export const ImportBaseRows = ({ r }: { r: S["ImportBaseSummary"] }) => (
-  <>
-    <Detail id={r.id} quiet />
+  <Panel title="Details">
     <Fields rows={[
       ["Machine", <MachineById id={r.machine} />], ["Author", <Who id={r.author} />], ["Imported", when(r.createdAt)],
       ["Document size", `${r.documentBytes} bytes`], ["References", r.references], ["Embedded documents", r.embedded],
     ]} />
     <p>The digests and reference names are not shown. The text is read on request. Any author may read an import read from a machine; an import of a file only the author who imported it and reviewed it may read.</p>
-  </>
+  </Panel>
 );
 
 // "Imported configuration of cp1, imported 21 Nov 2026, 14:02": an import base has no number, so the day tells two of
@@ -401,8 +404,8 @@ function ImportBaseHeading({ id, r }: { id: string; r: S["ImportBaseSummary"] | 
 
 export const ImportBaseItem = ({ id }: { id: string }) => (
   <ItemOf<S["ImportBaseSummary"]> path={`/import-base-revisions/${encodeURIComponent(id)}`} what="the imported configuration"
-    title={(r) => <ImportBaseHeading id={id} r={r} />}>
-    {(r) => <><PageNote parts={[IMPORTED_NOTE]} /><ImportBaseRows r={r} /><BaseDocument id={r.id} machine={r.machine} /></>}
+    head title={(r) => <ImportBaseHeading id={id} r={r} />} lines={(r) => <Detail id={r.id} quiet secondary />}>
+    {(r) => <><Note line={firstSentence(IMPORTED_NOTE)} parts={[IMPORTED_NOTE]} /><ImportBaseRows r={r} /><BaseDocument id={r.id} machine={r.machine} /></>}
   </ItemOf>
 );
 
@@ -704,19 +707,24 @@ const DEPENDENT: readonly Col<S["DependencyReleaseBody"]>[] = [
 export function DependencyItem({ id }: { id: string }) {
   const path = `/dependencies/${encodeURIComponent(id)}`;
   return (
-    <ItemOf<S["DependencyBody"]> path={path} what="the dependency" title={(d) => (d === undefined ? `Dependency ${short(id)}` : dependencyName(d))}>
+    <ItemOf<S["DependencyBody"]> path={path} what="the dependency" head title={(d) => (d === undefined ? `Dependency ${short(id)}` : dependencyName(d))}>
       {(d) => (
         <>
-          <PageNote parts={[DEPENDENCY_NOTE]} />
-          <Fields rows={[
-            ["Identifier", d.id], ["Provider", safeName(d.provider)], ["Object", safeName(d.object)], ["Version", d.version], ["Created", <span title={safeWord(d.created)}>{when(d.created)}</span>],
-            ["Class", klass(d)], ["Reason", safeWord(d.reason) ?? "none"], ["First retained", when(d.firstRetainedAt)], ["Unknown since", when(d.unknownSince)],
-            ["Observed from", when(d.observedFrom)], ["Recorded", when(d.recordedAt)],
-          ]} />
-          <h3>Releases that depend on it</h3>
-          <ListOf label="Dependent releases" path={`${path}/releases`} cols={DEPENDENT} keyOf={(r) => r.release} empty="No release depends on it." />
-          <h3>Alerts</h3>
-          <ListOf label="Alerts" path={`${path}/alerts`} cols={OWN_ALERTS} empty="No alerts raised for it." />
+          <Note line={firstSentence(DEPENDENCY_NOTE)} parts={[DEPENDENCY_NOTE]} />
+          <Panel title="Details">
+            <Fields rows={[
+              ["Identifier", d.id], ["Provider", safeName(d.provider)], ["Object", safeName(d.object)], ["Version", d.version], ["Created", <span title={safeWord(d.created)}>{when(d.created)}</span>],
+              ["Class", klass(d)], ["Reason", safeWord(d.reason) ?? "none"], ["First retained", when(d.firstRetainedAt)], ["Unknown since", when(d.unknownSince)],
+              ["Observed from", when(d.observedFrom)], ["Recorded", when(d.recordedAt)],
+            ]} />
+          </Panel>
+          {/* Each panel's name differs from its table region's, so a screen reader never meets two regions of one name. */}
+          <Panel title="Releases that depend on it" label="The dependent release list">
+            <ListOf label="Dependent releases" path={`${path}/releases`} cols={DEPENDENT} keyOf={(r) => r.release} empty="No release depends on it." />
+          </Panel>
+          <Panel title="Alerts" label="The alert list">
+            <ListOf label="Alerts" path={`${path}/alerts`} cols={OWN_ALERTS} empty="No alerts raised for it." />
+          </Panel>
         </>
       )}
     </ItemOf>
